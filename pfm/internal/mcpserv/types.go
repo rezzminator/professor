@@ -15,18 +15,23 @@ type LSInput struct {
 
 // ChatRow is one structured live or resumable fleet row.
 type ChatRow struct {
-	Session        string       `json:"session"`
-	ID             string       `json:"id"`
-	Engine         pfmengine.ID `json:"engine"`
-	State          string       `json:"state"`
-	Dir            string       `json:"dir"`
-	Project        string       `json:"project"`
-	Name           string       `json:"name"`
-	Account        int          `json:"account,omitempty"`
-	Kind           string       `json:"kind"`
-	Killed         bool         `json:"killed,omitempty"`
-	Socket         string       `json:"socket,omitempty"`
-	Pane           string       `json:"pane,omitempty"`
+	Session string       `json:"session"`
+	ID      string       `json:"id"`
+	Engine  pfmengine.ID `json:"engine"`
+	State   string       `json:"state"`
+	Dir     string       `json:"dir"`
+	Project string       `json:"project"`
+	Name    string       `json:"name"`
+	Account int          `json:"account,omitempty"`
+	Kind    string       `json:"kind"`
+	Killed  bool         `json:"killed,omitempty"`
+	Socket  string       `json:"socket,omitempty"`
+	Pane    string       `json:"pane,omitempty"`
+	// Herdr is the chat's Herdr presence, the string pfm chat ls prints: "—"
+	// on a host with no Herdr, "not in herdr", the pane id, workspace, agent
+	// status and agent name ("no-agent" for a pane Herdr lists no agent on),
+	// or "herdr error: {cause}" for a failed lookup.
+	Herdr          string `json:"herdr,omitempty"`
 	transcriptPath string
 }
 

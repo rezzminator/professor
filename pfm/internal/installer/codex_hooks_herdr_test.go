@@ -15,14 +15,14 @@ import (
 )
 
 // codexHerdrRows are the handlers Codex's hooks.json carries for the Herdr
-// reporter: Codex has no SessionEnd event, so release on exit is Herdr's own
-// idle-shell net and no row ends the pane.
+// reporter: Codex's SessionEnd releases the pane when the chat exits.
 var codexHerdrRows = []struct{ event, verb string }{
 	{"SessionStart", "start"},
 	{"UserPromptSubmit", "working"},
 	{"PostToolUse", "working"},
 	{"PermissionRequest", "blocked"},
 	{"Stop", "idle"},
+	{"SessionEnd", "end"},
 }
 
 func codexHerdrCommand(home, verb string) string {

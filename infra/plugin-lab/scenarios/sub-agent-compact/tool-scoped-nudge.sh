@@ -7,10 +7,9 @@ LAB_MODEL=haiku
 LAB_CAP_USD=0.60
 LAB_EST_USD=0.25
 LAB_WALL_S=1500
-LAB_ENV=()
+LAB_ENV=(SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL=1 SUB_AGENT_COMPACT_SUBAGENT_AUTO_COMPACT_NUDGE_START=120k)
 LAB_ALLOW=(Read Task mcp__sub-agent-compact__forward_handoff)
 LAB_LOGGER=yes
-lab_options '{"forwardHandoffTool":true,"subagentAutoCompactNudgeStart":"120k"}'
 
 lab_scenario() {
   need_fixture_plugin lab-agents lab-fixtures

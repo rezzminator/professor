@@ -51,7 +51,7 @@ infra/plugin-lab/lab prune --days N       # deletes run folders older than N day
 
 - Header: run id, scenario, plugin and version, claude binary, the checkout's rev and dirty hash, start, wall time. The dirty hash is a content hash: sha256 over the path and blob of every modified or untracked file under the plugin folder (`git ls-files -m -o --exclude-standard`), leaving out the engine-written `tsconfig.json` and `.claude-plugin/types/`.
 - `## Passport`: the isolation proofs, one line each — observed env keys equal the allowlist plus `LAB_ENV` (read from outside the process), the session id is in no live store, no keychain item left behind, no undeclared hook bypass line in the debug log, rev and dirty hash equal at start and end with no hot reload of the plugin's hooks in the debug log (Claude Code reloads a `--plugin-dir` on any edit), the installed copies off, the spend metered against the cap.
-- Vitals (when `LAB_LOGGER=yes`): `vital/first-row` (at least one level or decision row since the start under `PLUGIN_LOG_DIR/{plugin}/`, the earliest named; a plugin logs on events only, so the scenario must make it write one) and `vital/no-new-errors` (no row in `errors.jsonl` since the start but those `expect_error` declared).
+- Vitals (when `LAB_LOGGER=yes`): `vital/first-row` (at least one level or decision row since the start under `PLUGIN_LOG_DIR/{plugin}/`, the earliest named; a plugin logs on events only, so the scenario must make it write one) and `vital/no-new-errors` (no row in `errors.jsonl` since the start but those `expect_error` declared), and `vital/options-ignored` (the scenario tests the options it set, never the defaults: no `options-ignored` decision row and no warning that options "are not read" in any log of the plugin or at `LAB_DECISIONS`, a `pluginConfigs` option the plugin reads nowhere; no `option-error` row naming a `LAB_ENV` variable, a value the plugin refused, unless `expect_error option-error` declares it; ERROR when it cannot look: no log, an unreadable log folder, a `LAB_DECISIONS` that is not absolute or has `{sid}` outside its file name, a settings source the plugin could not read). With `LAB_LOGGER=no` it runs only when `LAB_DECISIONS` names a decision log.
 - `## Checks`: one row per beat, `| {scenario}/{slug} | {row} | {verdict} | {evidence} |`.
 - Last line: `verdict {PASS|FAIL|ERROR|STOPPED} · ${usd} / {cap}`.
 
@@ -116,7 +116,7 @@ Header:
 | `LAB_GAP_IF_NOT_INDUCED` | the reason a fault-inducing scenario reads GAP when the fault did not happen |
 | `LAB_LOGGER` | `yes` adds the vitals; `no` skips them |
 | `LAB_DECISIONS` | the decision log the decision verbs read, when an option moves it; `{run}`, `{plugin}` and `{sid}` expand; default `{run}/logs/{plugin}/decisions/{sid}.jsonl` |
-| `lab_options` | the plugin's options JSON, written to `pluginConfigs.{plugin}@inline.options`; `{run}` expands |
+| `lab_options` | the options JSON of a plugin that declares options, written to `pluginConfigs.{plugin}@inline.options`; `{run}` expands. `sub-agent-compact` reads none: its options are `SUB_AGENT_COMPACT_*` variables in `LAB_ENV`, and `vital/options-ignored` fails a run whose settings still carry a JSON option. A `LAB_ENV` variable named in the plugin's own prefix (its name upper snake, then `_`) that no file of the plugin names stops the run before launch, `ERROR option-unknown` |
 
 Beats: `beat {slug} [--row R] [--needs slug]... -- {verb} [args]`. Slugs are unique in a scenario. The body may use only verbs plus `for`, `if`, `local`, `((` and plain assignments; `tests/scenarios_test.sh` enforces that, the header, and that the caps of all scenarios sum to at most USD 10.
 
@@ -125,7 +125,7 @@ Beats: `beat {slug} [--row R] [--needs slug]... -- {verb} [args]`. Slugs are uni
 - The first drive verb boots the session lazily; the session ends with `exit_session` after the last beat.
 - `slash {command} SessionStart` follows the new session: `LAB_SID_PREV` keeps the old id, `LAB_SID` and `LAB_TRANSCRIPT` move to the new one, so later decision verbs read the new session's log; read the old one with `jsonl_has '{run}/logs/{plugin}/decisions/'"$LAB_SID_PREV"'.jsonl' …`.
 - `LAB_AGENT_ID`, `LAB_AGENT_TRANSCRIPT` and `LAB_SID_PREV` stay empty until `wait_subagent` or `slash … SessionStart` sets them, so a beat naming them takes `--needs` on that beat.
-- `expect_error {event}` declares a level-log error row the scenario induces on purpose; `expect_bypass {plugin} {event}` declares a hook bypass line it induces.
+- `expect_error {event}` declares a level-log error row the scenario induces on purpose, and `expect_error option-error` a refused `LAB_ENV` value; `expect_bypass {plugin} {event}` declares a hook bypass line it induces.
 
 ## Verbs
 

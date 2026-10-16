@@ -181,6 +181,45 @@ _pfm_selfswitch() {
   return 0
 }
 
+# Herdr shell reporter. A plain shell or server pane in Herdr reports a command that ran at least
+# PFM_HERDR_LONG_COMMAND_SECS whole seconds (default 10, also for a non-number) when it finishes, so the pane rises in Herdr's
+# agent panel; output never reports, and the next command releases it. The shell only times the
+# command: `pfm internal herdr-shell` finds the pane running this shell and reports it (a failure is
+# a line in the Herdr reporter error log `pfm doctor` reads), in the background so the prompt never
+# waits. A pfm chat's own tmux pane ($TMUX set) reports through pfm's chat reporter instead, and
+# PFM_HERDR_SHELL_REPORT=0 turns this off.
+if [[ -o interactive && "${HERDR_ENV:-}" == 1 && -z "${TMUX:-}" ]]; then
+  zmodload zsh/datetime
+  autoload -Uz add-zsh-hook
+  typeset -g _pfm_herdr_started= _pfm_herdr_command= _pfm_herdr_reported=
+
+  _pfm_herdr_preexec() {
+    _pfm_herdr_started=$EPOCHSECONDS
+    _pfm_herdr_command=$1
+    if [[ -n $_pfm_herdr_reported ]]; then
+      _pfm_herdr_reported=
+      "$HOME/.local/bin/pfm" internal herdr-shell release --pid $$ --at $EPOCHREALTIME >/dev/null 2>&1 &!
+    fi
+  }
+
+  _pfm_herdr_precmd() {
+    local exit_status=$? ended=$EPOCHREALTIME threshold=${PFM_HERDR_LONG_COMMAND_SECS:-10}
+    [[ -n $_pfm_herdr_started ]] || return 0
+    local seconds=$(( EPOCHSECONDS - _pfm_herdr_started ))
+    _pfm_herdr_started=
+    [[ $threshold == <-> ]] || threshold=10
+    [[ "${PFM_HERDR_SHELL_REPORT:-1}" != 0 ]] && (( seconds >= threshold )) || return 0
+    _pfm_herdr_reported=1
+    "$HOME/.local/bin/pfm" internal herdr-shell done --pid $$ --at $ended --command "$_pfm_herdr_command" \
+      --exit $exit_status --seconds $seconds >/dev/null 2>&1 &!
+  }
+
+  add-zsh-hook preexec _pfm_herdr_preexec
+  add-zsh-hook precmd _pfm_herdr_precmd
+  # First, so the exit status it reads is the command's.
+  precmd_functions=(_pfm_herdr_precmd "${(@)precmd_functions:#_pfm_herdr_precmd}")
+fi
+
 # Launch once at the first prompt, after the complete shell startup. Legacy
 # terminal-profile variables are consumed without reviving retired commands.
 if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:-}" ]]; then

@@ -236,13 +236,13 @@ lab_since() { # jq: the row's ts (ISO string or epoch ms) at or after the run st
 }
 
 vital_first_row() { # L11: the plugin's earliest row since the start, a level or decision row, under PLUGIN_LOG_DIR
-  local d=$LAB_RUN/logs/$LAB_PLUGIN f files rows all=""
+  local d=$LAB_RUN/logs/$LAB_PLUGIN f l files rows all=""
   [[ -d $d ]] || { check vital/first-row R1 ERROR "LOG-ABSENT $d"; return; }
   files=$(find "$d" -type f -name '*.jsonl') || { check vital/first-row R1 ERROR "unreadable $d"; return; }
   while IFS= read -r f; do
     [[ -n $f ]] || continue
     rows=$(lab_rows "$f" "select($(lab_since)) | \"\\(.ts) \\(.event // \"?\")\"") || { check vital/first-row R1 ERROR "${rows#ERROR }"; return; }
-    [[ -z $rows ]] || all+=$(sed "s|\$| ${f#"$d"/}|" <<< "$rows")$'\n'
+    while IFS= read -r l; do [[ -z $l ]] || all+="$l ${f#"$d"/}"$'\n'; done <<< "$rows"
   done <<< "$files"
   if [[ -n $all ]]; then
     check vital/first-row R1 PASS "$(grep -c . <<< "$all") rows in $d; first $(printf %s "$all" | LC_ALL=C sort | sed -n 1p)"
@@ -260,4 +260,36 @@ vital_no_new_errors() { # L11: no error row from this run but the declared ones
   else check vital/no-new-errors R1 FAIL "$(wc -l <<< "$rows" | tr -d ' ') rows: ${rows%%$'\n'*}"; fi
 }
 
-lab_vitals() { [[ ${LAB_LOGGER:-yes} == yes ]] || return 0; vital_first_row; vital_no_new_errors; }
+vital_options_ignored() { # the plugin took the options the scenario set: none left in pluginConfigs, no LAB_ENV value refused but declared ones, every settings source read
+  local d=$LAB_RUN/logs/$LAB_PLUGIN pat dir f l found files="" hits="" blind="" out looked=0 n keys exp hit filter
+  keys=$(for e in "${LAB_ENV[@]}"; do printf '%s\n' "${e%%=*}"; done | jq -Rcn '[inputs | select(. != "")]')
+  exp=$(jq -cn '$ARGS.positional' --args "${LAB_EXPECT_ERRORS[@]}")
+  # options-ignored: a pluginConfigs option the plugin reads nowhere; option-error naming a LAB_ENV variable: a value it refused for the default
+  hit='(.key // "") == "options-ignored" or ((.event // "") == "warning" and ((.msg // "") | test("^[a-z-]+: options .* are not read; set [A-Z_]+_")))'
+  hit+=" or ((.event // \"\") == \"option-error\" and ($exp | any(.[]; . == \"option-error\") | not) and (((.line // .msg // \"\") | tostring) as \$t | $keys | any(.[]; . as \$k | \$t | contains(\$k))))"
+  filter="if ($hit) then \"hit \\(.key // .event) \\(.line // .msg)\" elif ((.line // .msg // \"\") | tostring | test(\"a leftover pluginConfigs entry there goes unnamed\")) then \"blind \\(.line // .msg)\" else empty end"
+  pat=${LAB_DECISIONS:-'{run}/logs/{plugin}/decisions/{sid}.jsonl'}
+  pat=${pat//\{run\}/$LAB_RUN}; pat=${pat//\{plugin\}/$LAB_PLUGIN}; pat=${pat//\{sid\}/\*}; dir=$(dirname "$pat")
+  [[ $pat == /* && $dir != *'*'* ]] || { check vital/options-ignored R8 ERROR "could-not-look: LAB_DECISIONS $pat is not an absolute path with {sid} only in its file name"; return; }
+  if [[ -d $d ]]; then found=$(find "$d" -type f -name '*.jsonl') || { check vital/options-ignored R8 ERROR "unreadable $d"; return; }; files+=$found$'\n'; fi
+  if [[ -d $dir ]]; then found=$(find "$dir" -maxdepth 1 -type f -name "$(basename "$pat")") || { check vital/options-ignored R8 ERROR "unreadable $dir"; return; }; files+=$found$'\n'; fi
+  files=$(LC_ALL=C sort -u <<< "$files")
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    looked=$((looked + 1))
+    out=$(lab_rows "$f" "$filter") || { check vital/options-ignored R8 ERROR "${out#ERROR }"; return; }
+    while IFS= read -r l; do
+      case $l in hit\ *) hits+="${f#"$LAB_RUN"/}: ${l#hit }"$'\n' ;; blind\ *) blind+="${f#"$LAB_RUN"/}: ${l#blind }"$'\n' ;; esac
+    done <<< "$out"
+  done <<< "$files"
+  if (( looked == 0 )); then check vital/options-ignored R8 ERROR "could-not-look: no plugin log under $d or at $pat"
+  elif [[ -n $hits ]]; then n=$(grep -c . <<< "$hits"); check vital/options-ignored R8 FAIL "$n rows, the scenario's options were not applied: ${hits%%$'\n'*}"
+  elif [[ -n $blind ]]; then check vital/options-ignored R8 ERROR "could-not-look: the plugin could not read a settings source: ${blind%%$'\n'*}"
+  else check vital/options-ignored R8 PASS "0 options-ignored rows in $looked log files"; fi
+}
+
+lab_vitals() {
+  [[ ${LAB_LOGGER:-yes} == yes || -n ${LAB_DECISIONS:-} ]] && vital_options_ignored
+  [[ ${LAB_LOGGER:-yes} == yes ]] || return 0
+  vital_first_row; vital_no_new_errors
+}

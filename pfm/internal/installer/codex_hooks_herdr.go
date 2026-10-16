@@ -15,8 +15,8 @@ import (
 const codexHerdrTimeoutSeconds = int(herdr.EngineKillTimeout / time.Second)
 
 // codexHerdrHookRows maps each Codex hook event to the reporter verb it runs.
-// Codex has no SessionEnd event, so the pane is released by Herdr's own
-// idle-shell safety net when the chat exits, never by a handler here.
+// Codex's SessionEnd releases the pane when the chat exits: Herdr's idle-shell
+// net does not release a quit Codex chat.
 var codexHerdrHookRows = []struct {
 	event string
 	verb  herdr.Event
@@ -26,6 +26,7 @@ var codexHerdrHookRows = []struct {
 	{"PostToolUse", herdr.EventWorking},
 	{"PermissionRequest", herdr.EventBlocked},
 	{"Stop", herdr.EventIdle},
+	{"SessionEnd", herdr.EventEnd},
 }
 
 // codexHerdrHooks is the Herdr reporter handler of every Codex hook event a

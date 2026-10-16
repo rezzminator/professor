@@ -71,7 +71,7 @@ var topLevelSubcommands = []string{
 var internalSubcommands = []string{
 	"agent-open", "call-cap", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-launch", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
-	"exit-close", "exit-intercept", "explore-deny", "git-guard", "herdr-state", "kill-exit", "launch",
+	"exit-close", "exit-intercept", "explore-deny", "git-guard", "herdr-shell", "herdr-state", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
 	reloadRunCommand, staleCommand, statuslineCommand, "store-guard", thenAction, "tmux-title-renudge",
 	"update-check",
@@ -439,7 +439,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "claude-version" {
 		return hookentry.ClaudeVersion(args[1:], stdout, stderr, runtime)
 	}
-	if len(args) != 0 && (args[0] == "explore-deny" || args[0] == "herdr-state") {
+	if len(args) != 0 && (args[0] == "explore-deny" || args[0] == "herdr-state" || args[0] == "herdr-shell") {
 		return hookentry.PayloadHook(args, os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && (args[0] == "cost-launch" || args[0] == "cost-sink") {
@@ -529,7 +529,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|call-cap|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|call-cap|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

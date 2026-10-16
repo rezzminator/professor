@@ -3,7 +3,7 @@
 # settings.json with the installed copy off and the lab hooks, managed settings,
 # the .claude.json seed and the launcher that hands fd 3 to claude under env -i.
 
-lab_options() { LAB_OPTIONS=$1; } # scenario header: the plugin's options JSON
+lab_options() { LAB_OPTIONS=$1; } # scenario header: the options JSON of a plugin that declares options; sub-agent-compact reads none (its SUB_AGENT_COMPACT_* variables go in LAB_ENV) and vital/options-ignored fails a run that sets any
 
 lab_env_lines() { # the D5 allowlist, the four auth keys and the scenario's LAB_ENV, one KEY=value per line
   local r=$LAB_RUN e

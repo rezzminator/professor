@@ -10,7 +10,7 @@ export ANTHROPIC_BASE_URL=http://gateway.invalid CLAUDE_CONFIG_DIR=$T/live TMUX=
 mkdir -p "$HOME" "$T/live/plugins" "$T/plugin/.claude-plugin" "$T/flight"
 printf '{"version":2,"plugins":{"fake-plugin@fake-mkt":[],"other@fake-mkt":[]}}' > "$T/live/plugins/installed_plugins.json"
 printf '{"name":"fake-plugin","version":"1.2.3"}' > "$T/plugin/.claude-plugin/plugin.json"
-printf 'fake plugin\n' > "$T/plugin/README.md"
+printf 'fake plugin\nreads FAKE_PLUGIN_FLAG\n' > "$T/plugin/README.md"
 git -C "$T/plugin" init -q && git -C "$T/plugin" add -A && git -C "$T/plugin" -c user.name=t -c user.email=t@example.invalid commit -qm fixture
 creds() { # <minutes left>
   printf '{"claudeAiOauth":{"accessToken":"lab-canary-7f3e","refreshToken":"lab-refresh-0000","expiresAt":%s,"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":"tier_x"}}' \

@@ -30,7 +30,7 @@ const (
 	// herdrStoredOption is the chat session's user option holding the last
 	// reported state, so the client-attached hook can re-report it to the pane
 	// a client just attached from.
-	herdrStoredOption = "@pfm_herdr"
+	herdrStoredOption = herdr.StoredOption
 	herdrDeadline     = herdr.ReportDeadline
 	herdrClientFlag   = "--client"
 	herdrLockPoll     = 10 * time.Millisecond
@@ -46,6 +46,9 @@ const (
 	// SessionEnd reasons on which the session swaps inside the same process.
 	herdrReasonClear  = "clear"
 	herdrReasonResume = "resume"
+	// herdrNotFound is the error code Herdr answers for a pane it does not know
+	// (socket-api: {"code":"not_found","message":"pane not found"}).
+	herdrNotFound = "not_found"
 )
 
 // herdrDeps are the reporter's seams: the process environment, one tmux call
@@ -139,27 +142,12 @@ type herdrPayload struct {
 
 // herdrClient is a tmux client attached from a Herdr pane: the pane its chat
 // reports to while that client stays attached.
-type herdrClient struct {
-	Pane string `json:"pane"`
-	// Terminal outlives a Herdr pane move, which assigns the pane a new id: it
-	// names the chat's pane, and every send resolves it to the id first.
-	Terminal string `json:"terminal,omitempty"`
-	Socket   string `json:"socket"`
-}
-
-// herdrStored is the state kept in the chat session's @pfm_herdr option. Seq
-// is the start time of the event that wrote it: a write never replaces a
-// higher one. Clients are the attached Herdr clients, keyed by client pid.
-type herdrStored struct {
-	Engine    string `json:"engine"`
-	SessionID string `json:"session_id"`
-	State     string `json:"state"`
-	Message   string `json:"message"`
-	Seq       uint64 `json:"seq"`
-	// Name is the chat name the panes were last named after.
-	Name    string                 `json:"name,omitempty"`
-	Clients map[string]herdrClient `json:"clients,omitempty"`
-}
+// herdrClient and herdrStored are the reporter's names for the stored state
+// pfm chat ls reads too (herdr.Client, herdr.Stored).
+type (
+	herdrClient = herdr.Client
+	herdrStored = herdr.Stored
+)
 
 type herdrOptions struct {
 	engine  pfmengine.ID
@@ -357,14 +345,27 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 	return nil
 }
 
+// approvalPrefix opens the blocked message of an approval request that names
+// its tool.
+const approvalPrefix = "waiting for approval: "
+
 func blockedMessage(payload herdrPayload) string {
 	switch {
 	case payload.Message != "":
 		return payload.Message
 	case payload.ToolName != "":
-		return "waiting for approval: " + payload.ToolName
+		return approvalPrefix + payload.ToolName
 	}
 	return "waiting for you"
+}
+
+// keepsToolMessage reports whether a permission_prompt Notification arrives
+// over a blocked state whose message already names the tool (Claude's
+// PermissionRequest hook carries the tool; the Notification only Claude's
+// generic text): the stored message stays and nothing is sent.
+func keepsToolMessage(event herdr.Event, payload herdrPayload, state herdrStored) bool {
+	return event == herdr.EventNotification && payload.NotificationType == "permission_prompt" &&
+		state.State == string(herdr.StateBlocked) && strings.HasPrefix(state.Message, approvalPrefix)
 }
 
 // hostHasHerdr is the gate on every tmux write: no Herdr on the host, no
@@ -671,14 +672,14 @@ func (reporter *herdrReporter) event(
 	payload herdrPayload,
 ) error {
 	action := reporter.plan(payload)
-	if action == nil || state.Seq > reporter.seq {
+	if action == nil || state.Seq > reporter.seq || keepsToolMessage(reporter.options.event, payload, state) {
 		return nil
 	}
 	gone, err := reporter.liveClients(ctx, session, &state)
 	if err != nil {
 		return err
 	}
-	clients, moved, _, resolveErr := reporter.resolveClients(ctx, &state)
+	clients, moved, _, resolveErr := reporter.resolveClients(ctx, &state, action.release)
 	next := action.stored
 	next.Seq = reporter.seq
 	next.Name = state.Name
@@ -721,7 +722,7 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 		if err != nil {
 			return err
 		}
-		return herdr.Send(ctx, target.socket, line, clearTitle)
+		return releaseSettled(herdr.Send(ctx, target.socket, line, clearTitle))
 	}
 	report := herdr.Report{
 		Pane: target.pane, Agent: label, State: herdr.State(action.stored.State),
@@ -759,12 +760,27 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 	return err
 }
 
+// releaseSettled turns Herdr's not_found for a release (the pane closed since
+// it was resolved: "pane not found") into success, as the pane has nothing left
+// to release; any other error stays one.
+func releaseSettled(err error) error {
+	var refusal *herdr.Refusal
+	if errors.As(err, &refusal) && refusal.Code == herdrNotFound {
+		return nil
+	}
+	return err
+}
+
 // PayloadHook runs the hook entries that read an engine's payload on stdin and
-// answer on stdout: explore-deny and herdr-state. One dispatch branch in
-// cmd/pfm serves both, which the dispatch line budget (arch C3) requires.
+// answer on stdout (explore-deny and herdr-state), and the shim's shell
+// reporter herdr-shell. One dispatch branch in cmd/pfm serves all three, which
+// the dispatch line budget (arch C3) requires.
 func PayloadHook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if args[0] == "herdr-state" {
+	switch args[0] {
+	case "herdr-state":
 		return HerdrState(args[1:], stdin, stderr)
+	case "herdr-shell":
+		return HerdrShell(args[1:], stderr)
 	}
 	return ExploreDeny(stdin, stdout, stderr)
 }

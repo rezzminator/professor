@@ -42,7 +42,7 @@ func (reporter *herdrReporter) name(ctx context.Context, session string, state h
 	if err != nil {
 		return err
 	}
-	clients, moved, changed, resolveErr := reporter.resolveClients(ctx, &state)
+	clients, moved, changed, resolveErr := reporter.resolveClients(ctx, &state, false)
 	errs := []error{resolveErr, reporter.releaseAll(ctx, reporter.engineLabel(state), gone)}
 	if changed || len(gone) > 0 {
 		if err := reporter.writeState(ctx, session, state); err != nil {

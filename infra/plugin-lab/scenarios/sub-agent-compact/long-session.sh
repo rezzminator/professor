@@ -8,11 +8,10 @@ LAB_MODEL=sonnet
 LAB_CAP_USD=1.80
 LAB_EST_USD=0.80
 LAB_WALL_S=1800
-LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000)
+LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000 SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL=1 SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT=90k SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT_NUDGE_START=88k SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT_NUDGE_EVERY=1k)
 LAB_ALLOW=(Read Task mcp__sub-agent-compact__look_back mcp__sub-agent-compact__forward_handoff)
 LAB_DENY=(Bash Grep Glob)
 LAB_LOGGER=yes
-lab_options '{"forwardHandoffTool":true,"mainAutoCompact":"90k","mainAutoCompactNudgeStart":"88k","mainAutoCompactNudgeEvery":"1k"}'
 
 lab_scenario() {
   local results='select(.type == "user") | .message.content[]? | objects | select(.type == "tool_result") | {err: (.is_error == true), text: (.content | if type == "array" then map(.text? // "") | join("\n") else tostring end)}'

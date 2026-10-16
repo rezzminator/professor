@@ -402,6 +402,11 @@ type herdrJail struct {
 	stateDir string
 	// sidDir holds the reload pane mutexes the end event probes.
 	sidDir string
+	// spawn records the detached watch a blocked event starts; nil leaves the
+	// watch door out of the run.
+	spawn func(argv []string) error
+	// paneEnv is each process's own environment; a pid it lacks cannot be read.
+	paneEnv map[int]map[string]string
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -447,6 +452,7 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 		lockDir:  jail.lockDir,
 		stateDir: jail.stateDir,
 		sidDir:   jail.sidDir,
+		spawn:    jail.spawn,
 		logError: func(session string, at time.Time, message string) error {
 			if jail.logFails != nil {
 				return jail.logFails
@@ -461,6 +467,13 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 			return proc.parent, proc.command, nil
 		},
 		getpid: func() int { return jail.hookPID },
+		environ: func(pid int) (map[string]string, error) {
+			environment, ok := jail.paneEnv[pid]
+			if !ok {
+				return nil, fmt.Errorf("fake process table has no environment for pid %d", pid)
+			}
+			return environment, nil
+		},
 	}
 }
 

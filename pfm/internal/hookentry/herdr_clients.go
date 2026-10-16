@@ -422,7 +422,7 @@ func (reporter *herdrReporter) blankTitle(ctx context.Context, action *herdrActi
 	if !action.release || !gather.IsChatSocketName(socketName) {
 		return nil
 	}
-	pane := reporter.deps.getenv("TMUX_PANE")
+	pane := reporter.tmuxPane
 	if pane == "" || reporter.deps.sidDir == "" {
 		return fmt.Errorf(
 			"outer terminal title left as is at session end: no pane (%q) or SID directory (%q) to probe a reload with",

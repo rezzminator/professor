@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,14 +18,21 @@ import (
 // codexHerdrRows are the handlers Codex's hooks.json carries for the Herdr
 // reporter: Codex's SessionEnd releases the pane when the chat exits, and its
 // Interrupt (an Esc denial or an aborted turn, which fires no Stop) reports idle.
-var codexHerdrRows = []struct{ event, verb string }{
-	{"SessionStart", "start"},
-	{"UserPromptSubmit", "working"},
-	{"PostToolUse", "working"},
-	{"PermissionRequest", "blocked"},
-	{"Stop", "idle"},
-	{"Interrupt", "idle"},
-	{"SessionEnd", "end"},
+// Each handler's timeout outlasts the reporter's deadline (herdr.EngineKillTimeout)
+// except where Codex caps it: SessionEnd and Interrupt at 3 s
+// (codex-rs hooks discovery.rs SESSION_END_MAX_TIMEOUT_SEC), above which Codex
+// warns at load.
+var codexHerdrRows = []struct {
+	event, verb string
+	timeout     int
+}{
+	{"SessionStart", "start", 5},
+	{"UserPromptSubmit", "working", 5},
+	{"PostToolUse", "working", 5},
+	{"PermissionRequest", "blocked", 5},
+	{"Stop", "idle", 5},
+	{"Interrupt", "idle", 3},
+	{"SessionEnd", "end", 3},
 }
 
 func codexHerdrCommand(home, verb string) string {
@@ -89,14 +97,14 @@ func TestCodexHerdrHandlersAreWrittenOnceOwnedAndKeepForeignHooks(t *testing.T) 
 					)
 				}
 				// Codex kills the handler at its timeout: the reporter's own
-				// deadline must end, and its error log land, before that.
-				if handler.Type != "command" || handler.Timeout != int(herdr.EngineKillTimeout/time.Second) ||
-					handler.Async != nil {
+				// deadline must end, and its error log land, before that, within
+				// the cap Codex puts on the event.
+				if handler.Type != "command" || handler.Timeout != row.timeout || handler.Async != nil {
 					t.Errorf(
-						"%s Herdr handler = %+v, want a synchronous command with a %v timeout",
+						"%s Herdr handler = %+v, want a synchronous command with a %d s timeout",
 						row.event,
 						handler,
-						herdr.EngineKillTimeout,
+						row.timeout,
 					)
 				}
 			}
@@ -139,6 +147,71 @@ func TestCodexHerdrHandlersAreWrittenOnceOwnedAndKeepForeignHooks(t *testing.T) 
 	}
 	if strings.Contains(second.String(), "change  ") {
 		t.Fatalf("a second run reported a change:\n%s", second.String())
+	}
+}
+
+// An install that wrote every Herdr handler at 5 s left SessionEnd and Interrupt
+// over Codex's 3 s cap, and a hand edit left Stop's a string; the next install
+// rewrites those timeouts in place as numbers,
+// adding no second handler, and leaves a personal handler's timeout alone.
+func TestCodexHerdrHandlerTimeoutsOverCodexsCapAreRewritten(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	account, _, _ := stageResumeUnkillAccount(t, home)
+	path := filepath.Join(account, "hooks.json")
+	hooks := map[string]any{
+		"Interrupt": []any{map[string]any{"hooks": []any{
+			map[string]any{"type": "command", "command": "echo personal", "timeout": 9},
+		}}},
+	}
+	for _, row := range codexHerdrRows {
+		entries, _ := hooks[row.event].([]any)
+		// A hand-edited string timeout is no number Codex reads: it is rewritten.
+		var timeout any = int(herdr.EngineKillTimeout / time.Second)
+		if row.event == "Stop" {
+			timeout = strconv.Itoa(row.timeout)
+		}
+		hooks[row.event] = append(entries, map[string]any{"hooks": []any{
+			map[string]any{
+				"type":    "command",
+				"command": codexHerdrCommand(home, row.verb),
+				"timeout": timeout,
+			},
+		}})
+	}
+	encoded, err := json.Marshal(map[string]any{"hooks": hooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, path, string(encoded))
+
+	var out bytes.Buffer
+	if err := resumeUnkillEngine(home, account, "", ModeApply, &out).wireCodexHooks(); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	raw := readFixture(t, path)
+	document := decodeCodexHooks(t, raw)
+	for _, row := range codexHerdrRows {
+		command := codexHerdrCommand(home, row.verb)
+		if got := hookCommandCount(t, raw, row.event, command); got != 1 {
+			t.Errorf("%s handler %q count=%d, want 1:\n%s", row.event, command, got, raw)
+		}
+		for _, entry := range document.Hooks[row.event] {
+			for _, handler := range entry.Hooks {
+				switch {
+				case handler.Command == command && handler.Timeout != row.timeout:
+					t.Errorf(
+						"%s Herdr handler timeout = %d, want %d:\n%s",
+						row.event,
+						handler.Timeout,
+						row.timeout,
+						raw,
+					)
+				case handler.Command == "echo personal" && handler.Timeout != 9:
+					t.Errorf("personal Interrupt handler timeout = %d, want its own 9:\n%s", handler.Timeout, raw)
+				}
+			}
+		}
 	}
 }
 

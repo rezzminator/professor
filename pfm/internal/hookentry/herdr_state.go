@@ -54,9 +54,9 @@ const (
 	herdrNotFound     = "not_found"
 )
 
-// herdrDeps are the reporter's seams: the process environment, one tmux call
-// (against an explicit socket when non-empty, else the one $TMUX names) and
-// the clock.
+// herdrDeps are the reporter's seams: the process environment, one tmux call (against an
+// explicit socket when non-empty, else the one $TMUX names), the clock and spawn, which
+// starts a detached transcript watch (nil: no watch door).
 type herdrDeps struct {
 	getenv func(string) string
 	tmux   func(ctx context.Context, socket string, args ...string) (string, error)
@@ -64,6 +64,7 @@ type herdrDeps struct {
 	// lookPath finds a program on PATH; lockDir holds the per-session lock files.
 	lookPath func(string) (string, error)
 	lockDir  string
+	spawn    func(argv []string) error
 	// logError appends one reporter error to the session's log; tmux discards
 	// the stderr of a hook it runs, so this is where the error stays visible.
 	logError func(session string, at time.Time, message string) error
@@ -71,6 +72,9 @@ type herdrDeps struct {
 	// the hook process.
 	procInfo func(pid int) (parent int, command string, err error)
 	getpid   func() int
+	// environ reads one process's environment: the pane process's own
+	// TMUX and TMUX_PANE when the hook's are stale (tmuxOrigin).
+	environ func(pid int) (map[string]string, error)
 	// stateDir is the `pfm theme` state directory: while its sync is on, the
 	// reporter marks the chat's own tmux server with the agent state the
 	// theme's colours read. Empty means no theme door.
@@ -82,10 +86,11 @@ type herdrDeps struct {
 
 func realHerdrDeps() herdrDeps {
 	env := paths.OSEnv{}
+	procfs := gather.NewProcFS(env.Get(paths.EnvProcRoot))
 	deps := herdrDeps{
 		getenv: env.Get, tmux: runTmuxForHerdr, now: clock.Real.Now, lookPath: hostdeps.RealRunner{}.LookPath,
-		procInfo: realProcInfo(gather.NewProcFS(env.Get(paths.EnvProcRoot))), getpid: os.Getpid,
-		sidDir: paths.SIDDirFrom(env),
+		procInfo: realProcInfo(procfs), getpid: os.Getpid, environ: procfs.Environ,
+		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch,
 	}
 	home, err := paths.HomeFrom(env)
 	if err == nil {
@@ -99,29 +104,6 @@ func realHerdrDeps() herdrDeps {
 		return herdr.AppendError(deps.lockDir, session, at, message)
 	}
 	return deps
-}
-
-// realProcInfo reads a process's parent and command name through the ProcFS
-// (the kernel's table on Linux, sysctl on macOS, a fixture root in a jail).
-func realProcInfo(procfs gather.ProcFS) func(int) (int, string, error) {
-	return func(pid int) (int, string, error) {
-		stat, err := procfs.Stat(pid)
-		if err != nil {
-			return 0, "", fmt.Errorf("read parent of pid %d: %w", pid, err)
-		}
-		if identity, ok := procfs.(gather.ProcIdentity); ok {
-			process, err := identity.ProcessIdentity(pid)
-			if err != nil {
-				return 0, "", fmt.Errorf("read command of pid %d: %w", pid, err)
-			}
-			return stat.ParentPID, process.Command, nil
-		}
-		argv, err := procfs.Cmdline(pid)
-		if err != nil || len(argv) == 0 {
-			return 0, "", fmt.Errorf("read command of pid %d: %w", pid, errors.Join(err, errors.New("no argv")))
-		}
-		return stat.ParentPID, argv[0], nil
-	}
 }
 
 func runTmuxForHerdr(ctx context.Context, socket string, args ...string) (string, error) {
@@ -145,12 +127,12 @@ type herdrPayload struct {
 	Message          string `json:"message"`
 	ToolName         string `json:"tool_name"`
 	Title            string `json:"title"`
+	TranscriptPath   string `json:"transcript_path"`
 }
 
-// herdrClient is a tmux client attached from a Herdr pane: the pane its chat
-// reports to while that client stays attached.
-// herdrClient and herdrStored are the reporter's names for the stored state
-// pfm chat ls reads too (herdr.Client, herdr.Stored).
+// herdrClient (a tmux client attached from a Herdr pane: the pane its chat reports
+// to while that client stays attached) and herdrStored are the reporter's names
+// for the stored state pfm chat ls reads too (herdr.Client, herdr.Stored).
 type (
 	herdrClient = herdr.Client
 	herdrStored = herdr.Stored
@@ -176,7 +158,7 @@ type herdrAction struct {
 // turn on a hook's exit 2; only a usage error exits 1, a non-blocking hook
 // error whose stderr line names the verb.
 func HerdrState(args []string, stdin io.Reader, stderr io.Writer) int {
-	return reportToHerdr(args, stdin, stderr, realHerdrDeps())
+	return routeHerdrState(args, stdin, stderr, realHerdrDeps())
 }
 
 func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrDeps) int {
@@ -205,6 +187,9 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 			reporter.warn("pfm internal herdr-state %s: decode hook payload (skipped): %v", options.event, err)
 			return 0
 		}
+		if threadWithoutRollout(options.engine, raw) {
+			return 0
+		}
 	}
 	if payload.AgentID != "" {
 		return 0
@@ -222,7 +207,7 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 	var words []string
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--engine", "--socket", "--session", herdrClientFlag:
+		case "--engine", herdrSocketFlag, "--session", herdrClientFlag:
 			if index+1 >= len(args) {
 				if args[index] == herdrClientFlag {
 					// tmux expands #{client_pid} to nothing in a client-detached hook (the
@@ -240,7 +225,7 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 					return options, err
 				}
 				options.engine = id
-			case "--socket":
+			case herdrSocketFlag:
 				options.socket = value
 			case herdrClientFlag:
 				options.client = value
@@ -274,6 +259,8 @@ type herdrReporter struct {
 	sent uint64
 	// session is the chat session once known: the name its error log carries.
 	session string
+	// tmuxPane is the engine's tmux pane (tmuxOrigin), empty outside tmux.
+	tmuxPane string
 	// panes caches one pane.list per Herdr socket for this run.
 	panes map[string]paneListing
 }
@@ -393,17 +380,16 @@ func (reporter *herdrReporter) hostHasHerdr() bool {
 // pane belongs to the tmux CLIENT that attached from a Herdr pane, never to
 // the process environment.
 func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) error {
-	// $TMUX is "socket,pid,index"; tmux.Exec always names its socket.
-	if reporter.options.socket == "" {
-		reporter.options.socket, _, _ = strings.Cut(reporter.deps.getenv("TMUX"), ",")
+	// tmux.Exec always names its socket.
+	if err := reporter.tmuxOrigin(); err != nil {
+		return err
 	}
 	if reporter.options.socket == "" {
 		return reporter.apply(ctx, payload, reporter.processTarget())
 	}
 	// Only a pfm chat server carries the theme; an engine in the user's own
 	// tmux leaves that server unmarked.
-	themeOn := reporter.deps.stateDir != "" && gather.IsChatSocketName(filepath.Base(reporter.options.socket)) &&
-		themesync.SyncOn(reporter.deps.stateDir)
+	themeOn := reporter.themeOn()
 	if !themeOn && !reporter.hostHasHerdr() {
 		return nil
 	}
@@ -476,7 +462,7 @@ func (reporter *herdrReporter) tmuxSession(ctx context.Context) (session, panePI
 	if reporter.options.session != "" && !reporter.firedByEngine() {
 		return reporter.options.session, "", nil
 	}
-	pane := reporter.deps.getenv("TMUX_PANE")
+	pane := reporter.tmuxPane
 	if pane == "" {
 		return "", "", fmt.Errorf("inside tmux with no session or pane to ask about")
 	}
@@ -694,7 +680,7 @@ func (reporter *herdrReporter) event(
 	if err := reporter.writeState(ctx, session, next); err != nil {
 		return err
 	}
-	errs := []error{resolveErr, reporter.blankTitle(ctx, action)}
+	errs := []error{resolveErr, reporter.blankTitle(ctx, action), reporter.watch(session, next, payload)}
 	errs = append(errs, reporter.releaseAll(ctx, reporter.engineLabel(state), gone))
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]

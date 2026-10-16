@@ -1,6 +1,8 @@
 package installer
 
 import (
+	"encoding/json"
+	"strconv"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -14,22 +16,29 @@ import (
 // and the entry always exits 0.
 const codexHerdrTimeoutSeconds = int(herdr.EngineKillTimeout / time.Second)
 
+// codexHerdrCappedTimeoutSeconds is the most Codex allows a SessionEnd or
+// Interrupt handler (codex-rs hooks discovery.rs SESSION_END_MAX_TIMEOUT_SEC);
+// over it Codex warns at load, which `pfm doctor` reads as an unreadable
+// hooks.json.
+const codexHerdrCappedTimeoutSeconds = 3
+
 // codexHerdrHookRows maps each Codex hook event to the reporter verb it runs.
 // Codex's SessionEnd releases the pane when the chat exits: Herdr's idle-shell
 // net does not release a quit Codex chat. Codex's Interrupt (an Esc at an
 // approval, which denies it, or an aborted turn) fires no Stop, so it reports
 // idle: the pane leaves blocked at once.
 var codexHerdrHookRows = []struct {
-	event string
-	verb  herdr.Event
+	event   string
+	verb    herdr.Event
+	timeout int
 }{
-	{"SessionStart", herdr.EventStart},
-	{"UserPromptSubmit", herdr.EventWorking},
-	{"PostToolUse", herdr.EventWorking},
-	{"PermissionRequest", herdr.EventBlocked},
-	{"Stop", herdr.EventIdle},
-	{"Interrupt", herdr.EventIdle},
-	{"SessionEnd", herdr.EventEnd},
+	{"SessionStart", herdr.EventStart, codexHerdrTimeoutSeconds},
+	{"UserPromptSubmit", herdr.EventWorking, codexHerdrTimeoutSeconds},
+	{"PostToolUse", herdr.EventWorking, codexHerdrTimeoutSeconds},
+	{"PermissionRequest", herdr.EventBlocked, codexHerdrTimeoutSeconds},
+	{"Stop", herdr.EventIdle, codexHerdrTimeoutSeconds},
+	{"Interrupt", herdr.EventIdle, codexHerdrCappedTimeoutSeconds},
+	{"SessionEnd", herdr.EventEnd, codexHerdrCappedTimeoutSeconds},
 }
 
 // codexHerdrHooks is the Herdr reporter handler of every Codex hook event a
@@ -49,13 +58,41 @@ func codexHerdrHooks(home string) []ExpectedHook {
 	return hooks
 }
 
-// ensureCodexHerdrHooks appends every missing Herdr handler to the document
-// and reports whether it wrote.
+// ensureCodexHerdrHooks appends every missing Herdr handler to the document,
+// sets each present one's timeout to its row's, and reports whether it wrote.
 func ensureCodexHerdrHooks(document map[string]any, home string) bool {
 	changed := false
-	for _, hook := range codexHerdrHooks(home) {
-		if ensureCodexHook(document, hook, codexHerdrTimeoutSeconds) {
+	for index, hook := range codexHerdrHooks(home) {
+		timeout := codexHerdrHookRows[index].timeout
+		if ensureCodexHook(document, hook, timeout) {
 			changed = true
+		}
+		if setCodexHookTimeout(document, hook, timeout) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// setCodexHookTimeout sets the timeout of every handler carrying the hook's
+// command, in an entry of the hook's event whose matcher is the hook's, to
+// timeoutSeconds, and reports whether one differed.
+func setCodexHookTimeout(document map[string]any, hook ExpectedHook, timeoutSeconds int) bool {
+	changed := false
+	for _, entry := range hookEntries(document, hook.Event, false) {
+		if matcher, _ := entry["matcher"].(string); matcher != hook.Matcher {
+			continue
+		}
+		handlers, _ := entry["hooks"].([]any)
+		for _, handlerValue := range handlers {
+			handler, _ := handlerValue.(map[string]any)
+			if command, _ := handler[configCommandKey].(string); command != hook.Command {
+				continue
+			}
+			if !codexTimeoutIs(handler["timeout"], timeoutSeconds) {
+				handler["timeout"] = timeoutSeconds
+				changed = true
+			}
 		}
 	}
 	return changed
@@ -71,6 +108,21 @@ func codexOwnedHookKey(key settingsHookKey, resumeUnkill ExpectedHook, home stri
 		if key.Event == hook.Event && key.Matcher == hook.Matcher && key.Command == hook.Command {
 			return true
 		}
+	}
+	return false
+}
+
+// codexTimeoutIs reports whether a handler's timeout is the number seconds: a
+// decoded json.Number, or the int an install just set. A string, a fraction or
+// an absent timeout is not, so it is rewritten.
+func codexTimeoutIs(value any, seconds int) bool {
+	switch value := value.(type) {
+	case json.Number:
+		return value.String() == strconv.Itoa(seconds)
+	case int:
+		return value == seconds
+	case float64:
+		return value == float64(seconds)
 	}
 	return false
 }

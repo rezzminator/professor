@@ -25,6 +25,8 @@ export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp || exit 1
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=../fence/lanes/hook-command.sh
+. "$HERE/../fence/lanes/hook-command.sh"
 CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 read -r -a LIVE <<<"$(cat "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r '[.accounts[].id] | join(" ")' "$CONFIG")"
 SEAT_A="${LIVE[0]:-}"; SEAT_B="${LIVE[1]:-$SEAT_A}"
@@ -157,6 +159,7 @@ check_express() { # five independently counted install-fidelity beats on the ado
     : >"$out"
     while IFS=$'\t' read -r event command; do
       hook_count=$((hook_count + 1))
+      command="$(hook_command_plain "$command")" # its plain form (hook-command.sh)
       if [[ ! "$command" =~ ^\$CLAUDE_PROJECT_DIR/([A-Za-z0-9._/-]+)([[:space:]].*)?$ ]]; then
         hook_bad+=" $event: malformed/unrooted command '$command';"
         continue

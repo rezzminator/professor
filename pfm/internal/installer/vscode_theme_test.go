@@ -17,7 +17,8 @@ import (
 // the real embedded extension.js, and walks the `pfm theme` contract
 // (themesync's {stateDir}/current.json) through every state the extension
 // meets: absent, set, the same generation again, a new generation dropping a
-// key, a user edit, off, a malformed file and a refused settings write. After
+// key, a user edit, off, a null and an array contract, a malformed file and a
+// refused settings write. After
 // each step it prints the user's global workbench.colorCustomizations, the
 // ack the extension wrote, how many settings writes it made so far and
 // whether its applied-keys record exists. Mode "default-dir" prints only the
@@ -101,6 +102,8 @@ const steps = [
   ['new-generation', contract(2, true, { 'terminal.background': '#333333', 'terminal.foreground': '#dddddd' })],
   ['user-edit', null],
   ['off', contract(3, false, {})],
+  ['null', 'null'],
+  ['array', '[]'],
   ['malformed', '{not json'],
   ['refused', contract(4, true, { 'terminal.background': '#444444' })],
 ];
@@ -183,6 +186,14 @@ func TestVSCodeExtensionFollowsThePfmThemeContract(t *testing.T) {
 		{step: "off", colors: map[string]string{
 			"editor.background": "#000000", "terminal.background": "#abcdef", "terminal.foreground": "#999999",
 		}, generation: gen(3), keys: []string{}, writes: 3},
+		// JSON that parses to no contract object is a broken contract, acked as
+		// one: never a crash that leaves the last ack standing, never an off.
+		{step: "null", colors: map[string]string{
+			"editor.background": "#000000", "terminal.background": "#abcdef", "terminal.foreground": "#999999",
+		}, keys: []string{}, errorPart: "current.json", writes: 3},
+		{step: "array", colors: map[string]string{
+			"editor.background": "#000000", "terminal.background": "#abcdef", "terminal.foreground": "#999999",
+		}, keys: []string{}, errorPart: "current.json", writes: 3},
 		{step: "malformed", colors: map[string]string{
 			"editor.background": "#000000", "terminal.background": "#abcdef", "terminal.foreground": "#999999",
 		}, keys: []string{}, errorPart: "current.json", writes: 3},

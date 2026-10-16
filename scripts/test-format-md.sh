@@ -124,9 +124,45 @@ STUB_CHECK_RC=1 STUB_CHECK_OUT='docs/notes.md:1:1: [MD041] x' hook "$R/docs/note
 if [[ $RC == 0 && -z $ERR ]]; then ok "a docs/ root file outside the hub is left alone"
 else bad "a docs/ root file outside the hub" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
+# The settings.json twin beside this hook runs it from the session's current directory: a worktree of the
+# project with its own hook runs that one; a plugin submodule, a foreign repository holding its own hook, or a
+# directory outside any repository runs the project's.
+SETTINGS="$(dirname "$(dirname "$HOOK")")/settings.json"
+SETTINGS_CMD=$(jq -er '[.hooks.PostToolUse[] | select(.matcher == "Edit|Write") | .hooks[] | .command | select(contains("format-md.sh"))] | first' "$SETTINGS") ||
+  { echo "test-format-md: no format-md.sh PostToolUse command in $SETTINGS" >&2; exit 2; }
+S="$(cd "$T" && pwd -P)/session"
+W="$(cd "$T" && pwd -P)/worktree"
+F="$(cd "$T" && pwd -P)/foreign"
+N="$(cd "$T" && pwd -P)/plain"
+# Only .rumdl.toml is committed: a.md stays new, so its replayed MD041 is the edit's own.
+mkdir -p "$S/.claude/scripts" "$S/docs/dev" "$S/plugins/p" "$F/.claude/scripts" "$N" && git -C "$S" init -q &&
+  printf '[global]\n' > "$S/.rumdl.toml" && git -C "$S" add .rumdl.toml &&
+  git -C "$S" -c user.name=t -c user.email=t@t commit -qm fixture && git -C "$S" worktree add -q "$W" &&
+  git -C "$S/plugins/p" init -q && git -C "$F" init -q && mkdir -p "$W/.claude/scripts" &&
+  printf '# T\n' > "$S/docs/dev/a.md" && cp "$HOOK" "$S/.claude/scripts/format-md.sh" &&
+  printf '#!/usr/bin/env bash\necho "worktree hook ran" >&2\n' > "$W/.claude/scripts/format-md.sh" &&
+  printf '#!/usr/bin/env bash\necho "foreign hook ran" >&2\n' > "$F/.claude/scripts/format-md.sh" &&
+  chmod +x "$S/.claude/scripts/format-md.sh" "$W/.claude/scripts/format-md.sh" "$F/.claude/scripts/format-md.sh" ||
+  { echo 'test-format-md: settings-command fixture setup failed' >&2; exit 2; }
+settings_hook() { # settings_hook <cwd> <file>: RC and ERR of the settings command run from <cwd>
+  ERR=$(cd "$1" && printf '{"tool_input":{"file_path":"%s"}}' "$2" | CLAUDE_PROJECT_DIR="$S" bash -c "$SETTINGS_CMD" 2>&1 >/dev/null)
+  RC=$?
+}
+settings_hook "$W" "$S/docs/dev/a.md"
+if [[ $RC == 0 && $ERR == "worktree hook ran" ]]; then ok "the settings command run inside a worktree runs that worktree's hook"
+else bad "the settings command inside a worktree" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
+for cwd in "$S/plugins/p" "$F" "$N"; do
+  where="a plugin submodule"
+  [[ $cwd == "$F" ]] && where="a foreign repository holding its own hook"
+  [[ $cwd == "$N" ]] && where="a directory outside any repository"
+  STUB_CHECK_RC=1 STUB_CHECK_OUT='docs/dev/a.md:1:1: [MD041] x' settings_hook "$cwd" "$S/docs/dev/a.md"
+  if [[ $RC == 2 && $ERR == *"UNFIXED docs/dev/a.md:1:1 MD041"* && $ERR != *"foreign hook ran"* ]]; then
+    ok "the settings command run inside $where runs the project's hook"
+  else bad "the settings command inside $where" "rc $RC (want 2)" "stderr: ${ERR:-<empty>}"; fi
+done
 fi
 
-# A committed baseline belongs to a second repo; the cases above have no HEAD.
+# A committed baseline belongs to a second repo; the cases in $R above have no HEAD.
 C="$(cd "$T" && pwd -P)/committed"
 mkdir -p "$C/docs/dev" && git -C "$C" init -q && printf '[global]\n' > "$C/.rumdl.toml" &&
   printf '# T\n' > "$C/docs/dev/a.md" && git -C "$C" add docs/dev/a.md &&

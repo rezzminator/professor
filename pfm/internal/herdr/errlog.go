@@ -2,11 +2,13 @@ package herdr
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -23,6 +25,9 @@ const ErrorLogSuffix = ".log"
 // (on a rune boundary), well under the reader's 64 KiB line limit, and a log
 // that reached ErrorLogBytes is renamed to {session}.log.1, replacing the
 // previous one, before the next line is written; a torn line goes with it.
+// Sessions without a Herdr pane share one log, so the size check, the
+// rotation and the append run under an exclusive flock on the log directory:
+// two writers never both rotate, and no line lands in a log being renamed.
 const (
 	ErrorMessageBytes = 4096
 	ErrorLogBytes     = 256 * 1024
@@ -36,12 +41,30 @@ type ErrorRecord struct {
 }
 
 // AppendError appends one error line to dir/{session}.log, creating dir.
-func AppendError(dir, session string, at time.Time, message string) error {
+func AppendError(dir, session string, at time.Time, message string) (returnErr error) {
 	if dir == "" || session == "" || strings.ContainsAny(session, "/\x00") {
 		return fmt.Errorf("herdr error log: dir %q session %q is not a plain log location", dir, session)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("herdr error log: create %s: %w", dir, err)
+	}
+	lock, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("herdr error log: open %s to lock it: %w", dir, err)
+	}
+	defer func() {
+		if closeErr := lock.Close(); closeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("herdr error log: unlock %s: %w", dir, closeErr))
+		}
+	}()
+	for {
+		err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EINTR) {
+			return fmt.Errorf("herdr error log: lock %s: %w", dir, err)
+		}
 	}
 	path := filepath.Join(dir, session+ErrorLogSuffix)
 	if info, err := os.Stat(path); err == nil && info.Size() >= ErrorLogBytes {

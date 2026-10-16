@@ -115,6 +115,11 @@ async function applyContract(dir) {
   let contract;
   try {
     contract = readJSON(contractPath);
+    // JSON that parses to no object (null, an array, a scalar) is a broken contract, never an off.
+    if (contract === null || typeof contract !== 'object' || Array.isArray(contract)) {
+      const kind = contract === null ? 'null' : Array.isArray(contract) ? 'an array' : `a ${typeof contract}`;
+      throw new Error(`holds ${kind}, not a contract object`);
+    }
   } catch (err) {
     if (err.code === 'ENOENT') return;
     writeJSONAtomic(path.join(dir, ACK), {

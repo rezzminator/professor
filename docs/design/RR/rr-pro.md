@@ -20,7 +20,7 @@
 | Tools | `WebSearch, WebFetch, Write, Agent, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` (inherited from `rr.md`) |
 | Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
-| Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |
+| Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max\|gpt-rr\|gpt-rr-pro\|gpt-rr-pro-max` |
 
 Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → here → rr-pro-max. Delegate for "rr pro", "rr-pro X", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.`
 

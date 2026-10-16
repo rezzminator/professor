@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -85,5 +86,54 @@ func TestErrorLogStaysBounded(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".1"); err != nil {
 		t.Fatalf("rotated log: %v, want the old log kept beside it", err)
+	}
+}
+
+// Sessions without a Herdr pane share one log, so writers race: every line
+// lands, a full log is rotated aside exactly once, and no rotation replaces
+// the log another writer just rotated.
+func TestErrorLogRotatesOnceUnderConcurrentWriters(t *testing.T) {
+	at := time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC)
+	for round := 0; round < 40; round++ {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "shared"+ErrorLogSuffix)
+		full := at.Format(time.RFC3339) + "\tkept\n" + strings.Repeat("x", ErrorLogBytes) + "\n"
+		if err := os.WriteFile(path, []byte(full), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		const writers = 16
+		start := make(chan struct{})
+		errs := make(chan error, writers)
+		var wg sync.WaitGroup
+		for i := 0; i < writers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				errs <- AppendError(dir, "shared", at, "line")
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: AppendError under concurrent writers: %v", round, err)
+			}
+		}
+		rotated, err := os.ReadFile(path + ".1")
+		if err != nil || !strings.HasPrefix(string(rotated), at.Format(time.RFC3339)+"\tkept\n") {
+			t.Fatalf("round %d: rotated log %d bytes, err %v, want the full log kept once", round, len(rotated), err)
+		}
+		current, err := os.ReadFile(path)
+		if err != nil || strings.Count(string(current), "\tline\n") != writers {
+			t.Fatalf(
+				"round %d: current log holds %d of %d lines, err %v",
+				round,
+				strings.Count(string(current), "\tline\n"),
+				writers,
+				err,
+			)
+		}
 	}
 }

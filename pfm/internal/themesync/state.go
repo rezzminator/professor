@@ -44,6 +44,9 @@ type themeState struct {
 	Ghostty    *ghosttySnapshot  `json:"ghostty,omitempty"`
 	VSCode     map[string]string `json:"vscode,omitempty"`
 	Due        map[string]bool   `json:"due,omitempty"`
+	// OffPending marks an off that left a surface unrestored, a tmux server or
+	// the follower among them, which keep no snapshot here to show it.
+	OffPending bool `json:"offPending,omitempty"`
 }
 
 // stateStore is the state directory: state.json, backups/ and the lock.

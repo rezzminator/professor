@@ -884,6 +884,43 @@ func TestSetAndOffWriteThroughASymlinkedUserConfig(t *testing.T) {
 	}
 }
 
+// A user config kept as a dangling symlink (its dotfiles target not written
+// yet) stays that symlink through set: the new file lands at the link's target.
+func TestSetWritesThroughADanglingSymlinkedUserConfig(t *testing.T) {
+	h := newHarness(t)
+	link, target := ".config/herdr/config.toml", "dotfiles/herdr.toml"
+	if err := os.Remove(h.path(link)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(h.path(target)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(h.path(target), h.path(link)); err != nil {
+		t.Fatal(err)
+	}
+	report := h.set("tokyo-night", ModeAuto)
+	wantVerdict(t, report, "herdr", VerdictInSync, "")
+	if info, err := os.Lstat(h.path(link)); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("set replaced the dangling link %s with a regular file (err %v)", link, err)
+	}
+	if !strings.Contains(h.read(target), "# >>> pfm theme") {
+		t.Fatal("set did not write the file the dangling herdr link points at")
+	}
+	// Off deletes the file set created, at the link's target: the link stays,
+	// dangling again, as the user had it.
+	off, err := Off(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, off, "herdr", VerdictRestored, "")
+	if info, err := os.Lstat(h.path(link)); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("off removed the dangling link %s (err %v), want it kept", link, err)
+	}
+	if h.exists(target) {
+		t.Fatalf("off left the file it created at %s, holding: %q", target, h.read(target))
+	}
+}
+
 // A surface file that exists but cannot be read is ERROR on read-back, never
 // DRIFT: drift means the sync can rewrite it, an unreadable file means it cannot look.
 func TestUnreadableSurfaceFileReadsBackAsError(t *testing.T) {

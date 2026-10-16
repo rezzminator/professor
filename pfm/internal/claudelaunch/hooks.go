@@ -69,6 +69,14 @@ func HookTemplates(home string) []Hook {
 			Async:   true,
 		},
 		{
+			// The tool a permission dialog asked about can fail once approved: its
+			// failure leaves the block as its success does (hookentry/herdr_hold.go).
+			Event:   "PostToolUseFailure",
+			Command: herdrCommand(binary, herdr.EventWorking),
+			Name:    "herdr-working-tool-failure",
+			Async:   true,
+		},
+		{
 			Event:   "PermissionRequest",
 			Command: herdrCommand(binary, herdr.EventBlocked),
 			Name:    "herdr-blocked",

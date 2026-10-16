@@ -29,10 +29,20 @@ func TestUninstallRunsThemeOffWhileTheSyncIsOn(t *testing.T) {
 			t.Fatalf("uninstall plan does not say it would run pfm theme off:\n%s", output.String())
 		}
 	})
-	for _, failing := range []bool{false, true} {
-		t.Run(fmt.Sprintf("failing=%v", failing), func(t *testing.T) {
+	// A rerun after an off that failed mid-restore finds the sync disabled but a
+	// Ghostty snapshot still held, and runs off again.
+	for _, tc := range []struct {
+		name, state string
+		failing     bool
+	}{
+		{name: "failing=false", state: `{"enabled":true}`},
+		{name: "failing=true", state: `{"enabled":true}`, failing: true},
+		{name: "rerun after a partial off", state: `{"enabled":false,"ghostty":{"config":"c","added":"a","backup":"b"}}`},
+	} {
+		failing := tc.failing
+		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			writeFixture(t, filepath.Join(home, ".local", "state", "pfm", "theme", "state.json"), `{"enabled":true}`)
+			writeFixture(t, filepath.Join(home, ".local", "state", "pfm", "theme", "state.json"), tc.state)
 			var offs []string
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{

@@ -207,7 +207,7 @@ func parseHooks(raw any) ([]Hook, error) {
 // parsedHookName is a rendered command's registry name: its last word, read
 // before a fail-open wrapper's " || { … }" tail, where the registry spells two
 // rows apart from that word. A Herdr reporter row is "herdr-" plus its state
-// word, and its two working rows share one command, so their event tells them
+// word, and its three working rows share one command, so their event tells them
 // apart.
 func parsedHookName(event, command string) string {
 	head, _, _ := strings.Cut(command, " || { ")
@@ -222,6 +222,8 @@ func parsedHookName(event, command string) string {
 			return "herdr-" + name + "-prompt"
 		case "PostToolUse":
 			return "herdr-" + name + "-tool"
+		case "PostToolUseFailure":
+			return "herdr-" + name + "-tool-failure"
 		default:
 			return "herdr-" + name
 		}

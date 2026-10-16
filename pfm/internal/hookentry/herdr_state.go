@@ -121,15 +121,17 @@ func runTmuxForHerdr(ctx context.Context, socket string, args ...string) (string
 
 // herdrPayload is the part of an engine's hook payload the reporter reads.
 type herdrPayload struct {
-	SessionID        string `json:"session_id"`
-	AgentID          string `json:"agent_id"`
-	Source           string `json:"source"`
-	Reason           string `json:"reason"`
-	NotificationType string `json:"notification_type"`
-	Message          string `json:"message"`
-	ToolName         string `json:"tool_name"`
-	Title            string `json:"title"`
-	TranscriptPath   string `json:"transcript_path"`
+	SessionID        string          `json:"session_id"`
+	AgentID          string          `json:"agent_id"`
+	Source           string          `json:"source"`
+	Reason           string          `json:"reason"`
+	NotificationType string          `json:"notification_type"`
+	Message          string          `json:"message"`
+	ToolName         string          `json:"tool_name"`
+	ToolInput        json.RawMessage `json:"tool_input"`
+	IsInterrupt      bool            `json:"is_interrupt"`
+	Title            string          `json:"title"`
+	TranscriptPath   string          `json:"transcript_path"`
 }
 
 // herdrClient (a tmux client attached from a Herdr pane: the pane its chat reports
@@ -319,9 +321,15 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 	case herdr.EventIdle:
 		return report(herdr.StateIdle, "")
 	case herdr.EventWorking:
+		// A tool the user interrupted (Esc) ends the turn, or a batch sibling's
+		// failure cancelled it mid-turn: neither says the chat works on, so the
+		// state stands and a block stays for the transcript watch to settle.
+		if payload.IsInterrupt {
+			return nil
+		}
 		return report(herdr.StateWorking, "")
 	case herdr.EventBlocked:
-		return report(herdr.StateBlocked, blockedMessage(payload))
+		return reporter.toolBlock(payload, report(herdr.StateBlocked, blockedMessage(payload)))
 	case herdr.EventNotification:
 		switch payload.NotificationType {
 		case "permission_prompt", "elicitation_dialog":
@@ -354,15 +362,6 @@ func blockedMessage(payload herdrPayload) string {
 		return approvalPrefix + payload.ToolName
 	}
 	return "waiting for you"
-}
-
-// keepsToolMessage reports whether a permission_prompt Notification arrives
-// over a blocked state whose message already names the tool (Claude's
-// PermissionRequest hook carries the tool; the Notification only Claude's
-// generic text): the stored message stays and nothing is sent.
-func keepsToolMessage(event herdr.Event, payload herdrPayload, state herdrStored) bool {
-	return event == herdr.EventNotification && payload.NotificationType == "permission_prompt" &&
-		state.State == string(herdr.StateBlocked) && strings.HasPrefix(state.Message, approvalPrefix)
 }
 
 // hostHasHerdr is the gate on every tmux write: no Herdr on the host, no
@@ -413,7 +412,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 			return err
 		}
 	}
-	if themeOn {
+	if themeOn && !reporter.hostHasHerdr() {
 		reporter.themeState(ctx, payload)
 	}
 	if !reporter.hostHasHerdr() {
@@ -424,10 +423,12 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	}
 	unlock, err := reporter.lock(ctx, session)
 	if err != nil {
+		reporter.themeUnlessHeld(ctx, themeOn, payload, herdrStored{})
 		return err
 	}
 	defer unlock()
 	state, err := reporter.readState(ctx, session)
+	reporter.themeUnlessHeld(ctx, themeOn, payload, state)
 	if err != nil {
 		return err
 	}
@@ -675,7 +676,7 @@ func (reporter *herdrReporter) event(
 	payload herdrPayload,
 ) error {
 	action := reporter.plan(payload)
-	if action == nil || state.Seq > reporter.seq || keepsToolMessage(reporter.options.event, payload, state) {
+	if action == nil || state.Seq > reporter.seq || keepsStored(reporter.options.event, payload, state) {
 		return nil
 	}
 	gone, err := reporter.liveClients(ctx, session, &state)

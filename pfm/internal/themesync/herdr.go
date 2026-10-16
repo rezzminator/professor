@@ -342,8 +342,8 @@ func (s *session) restoreHerdr(ctx context.Context) SurfaceResult {
 	case !found:
 		detail = "pfm block already gone"
 	case snapshot.Created && strings.TrimSpace(restored) == "":
-		if err := os.Remove(path); err != nil {
-			return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: remove %s: %w", path, err))
+		if err := s.removeFile(path); err != nil {
+			return s.failed(surfaceHerdr, path, err)
 		}
 	default:
 		if err := s.replaceFile(path, []byte(restored)); err != nil {

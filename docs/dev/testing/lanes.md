@@ -100,4 +100,4 @@ The harness has its own tests — plain bash, no docker, no model:
 for t in infra/fence/lanes/tests/*_test.sh; do bash "$t" || break; done
 ```
 
-They cover the beat library's verdicts and the known-gap red rows, the runner's plan/order/mode/budget verdicts, `cred-scan_test.sh`'s registered-fixture credential gate, the stdio exchange helper shared by check-map and E2, and the map gate's findings. Run these tests inside the fence through `.claude/scripts/dev.sh iso run`.
+They cover the beat library's verdicts and the known-gap red rows, the runner's plan/order/mode/budget verdicts, `cred-scan_test.sh`'s registered-fixture credential gate, the stdio exchange helper shared by check-map and E2, the hook-command reader shared by lane A.11 and the demo, and the map gate's findings. Run these tests inside the fence through `.claude/scripts/dev.sh iso run`.

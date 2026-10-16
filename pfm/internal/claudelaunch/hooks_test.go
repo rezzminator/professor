@@ -17,8 +17,8 @@ import (
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
 	hooks := HookTemplates(home)
-	if len(hooks) != 20 {
-		t.Fatalf("registrations=%d, want 20", len(hooks))
+	if len(hooks) != 21 {
+		t.Fatalf("registrations=%d, want 21", len(hooks))
 	}
 	for _, hook := range hooks {
 		if hook.Name == hookTracerIntake {
@@ -270,6 +270,7 @@ func TestHerdrReporterRowsCoverTheClaudeLifecycle(t *testing.T) {
 		{Event: "SessionStart", Command: binary + "start", Name: "herdr-start"},
 		{Event: "UserPromptSubmit", Command: binary + "working", Name: "herdr-working-prompt", Async: true},
 		{Event: "PostToolUse", Command: binary + "working", Name: "herdr-working-tool", Async: true},
+		{Event: "PostToolUseFailure", Command: binary + "working", Name: "herdr-working-tool-failure", Async: true},
 		{Event: "PermissionRequest", Command: binary + "blocked", Name: "herdr-blocked", Async: true},
 		{
 			Event: "Notification", Matcher: "permission_prompt|elicitation_dialog|idle_prompt",

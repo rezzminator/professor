@@ -95,9 +95,52 @@ func (s *session) settle(surface, path, note string, err error) SurfaceResult {
 	return s.result(surface, VerdictApplied, path, note)
 }
 
+// danglingTarget follows a chain of symlinks whose last target does not exist
+// yet to that target; a path that is no link comes back unchanged.
+func danglingTarget(path string) (string, error) {
+	for hops := 0; hops < 40; hops++ {
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("themesync: resolve %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		target, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("themesync: resolve %s: %w", path, err)
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+		path = target
+	}
+	return "", fmt.Errorf("themesync: resolve %s: too many links", path)
+}
+
+// removeFile deletes a user file the sync created; a symlinked one (a dotfiles
+// link that dangled before set wrote its target) is deleted at the file it
+// resolves to, so the link survives as the user had it.
+func (s *session) removeFile(path string) error {
+	resolved, err := filepath.EvalSymlinks(path)
+	switch {
+	case err == nil:
+		path = resolved
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("themesync: resolve %s: %w", path, err)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("themesync: remove %s: %w", path, err)
+	}
+	return nil
+}
+
 // replaceFile writes a user file atomically, keeping its mode; a symlinked
 // file (a dotfiles checkout) is written at the file it resolves to, so the
-// link survives the rename.
+// link survives the rename; a dangling link is written at its target.
 func (s *session) replaceFile(path string, content []byte) error {
 	resolved, err := filepath.EvalSymlinks(path)
 	switch {
@@ -105,6 +148,10 @@ func (s *session) replaceFile(path string, content []byte) error {
 		path = resolved
 	case !errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("themesync: resolve %s: %w", path, err)
+	default:
+		if path, err = danglingTarget(path); err != nil {
+			return err
+		}
 	}
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
@@ -390,6 +437,10 @@ func Off(ctx context.Context, env Env) (report Report, err error) {
 	}
 	rows := sess.restoreAll(ctx)
 	sess.state.Due = nil
+	sess.state.OffPending = false
+	for _, row := range rows {
+		sess.state.OffPending = sess.state.OffPending || row.Verdict == VerdictError
+	}
 	return sess.report(rows), sess.persist()
 }
 

@@ -198,3 +198,17 @@ func SyncOn(stateDir string) bool {
 	}
 	return state.Enabled
 }
+
+// RestorePending reports whether a `pfm theme off` still has work: the sync is
+// on, an earlier off marked itself pending, or a user file the sync edited
+// still holds its snapshot because that off failed to restore it (Off clears
+// Enabled before it restores).
+// Like SyncOn, a state file that cannot be read or parsed reports pending.
+func RestorePending(stateDir string) bool {
+	state, found, err := stateStore{dir: stateDir}.load()
+	if err != nil {
+		return true // the off this gates surfaces the error
+	}
+	return found && (state.Enabled || state.OffPending || len(state.Claude) > 0 || state.Herdr != nil ||
+		state.Ghostty != nil || len(state.VSCode) > 0)
+}

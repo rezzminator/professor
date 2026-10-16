@@ -61,7 +61,7 @@ A `Variant` is one side: `Background`, `Foreground`, `Cursor`, `SelectionBackgro
 
 | File | Holds |
 | --- | --- |
-| `state.json` | `enabled`, `palette`, `mode`, `appearance`, `generation`, one snapshot per edited user file (`claude`, `herdr`, `ghostty`, `vscode`), and `due` (surfaces whose live reload failed); written atomically, mode 0600 |
+| `state.json` | `enabled`, `palette`, `mode`, `appearance`, `generation`, one snapshot per edited user file (`claude`, `herdr`, `ghostty`, `vscode`), `due` (surfaces whose live reload failed), and `offPending` (an off left a surface unrestored); written atomically, mode 0600 |
 | `current.json` | the VS Code contract the extension watches (`vscodeContract`) |
 | `vscode-ack.json` | the extension's acknowledgement of a generation |
 | `vscode-applied.json` | the extension's record of each colour key it set with the value it replaced |
@@ -91,7 +91,7 @@ Reads every surface against the state's generation; no lock, no write.
 
 ### Off
 
-Bumps the generation (when it was enabled), sets `enabled` false, runs every surface's restore, clears `due`, and persists. `state.json` stays, disabled.
+Bumps the generation (when it was enabled), sets `enabled` false, runs every surface's restore, clears `due`, sets `offPending` exactly when a restore row is ERROR, and persists. `state.json` stays, disabled. `RestorePending(stateDir)`, the uninstall's gate, is `SyncOn` plus `offPending` or any file snapshot left behind, so an off that failed on a tmux server or the follower, which keep no snapshot, runs again on the rerun.
 
 ### surfaces
 
@@ -159,7 +159,7 @@ Off: puts the replaced span back (or removes the appended text; deletes a file t
 
 Render (`ghosttyRender`): two lines appended to the user's config (`# pfm theme (managed: pfm theme off removes these two lines)` and `config-file = ?{config dir}/pfm-theme.ghostty`, absolute, so a config kept as a symlink into another directory still finds the include), and three files beside it: `pfm-theme.ghostty` (`# pfm theme · {palette} · gen {N} · mode {mode}` plus `theme = light:{file},dark:{file}` for auto, or the one side's file) and `pfm-theme/{palette}-dark`, `pfm-theme/{palette}-light` (background, foreground, cursor, selection, `palette = {0-15}=…`). Files of a palette no longer in force under `pfm-theme/` are deleted. The user's config is backed up beside itself and the appended text snapshotted in `state.ghostty`.
 
-Reload: `ghostty +validate-config` runs first, with the first binary found: a running Ghostty's, `/Applications/Ghostty.app/Contents/MacOS/ghostty`, `~/Applications/Ghostty.app/Contents/MacOS/ghostty`, then `ghostty` on PATH. None found: the row stands on the file read-back alone, with the detail `not validated: Ghostty binary not found (tried …)`, never ERROR and never a re-apply. A found binary that rejects the config or will not run is an ERROR. Then `SIGUSR2` goes to each running Ghostty main process (found via `ps -axo pid=,args=`: the app binary alone, no arguments, and `ps -o comm= -p {pid}`, the executable's path, equal to that binary), after re-reading that pid's args and executable immediately before the kill; the validating binary is taken from such a process only. No process: APPLIED with `applies when Ghostty starts`.
+Reload: `ghostty +validate-config` runs first, with the first binary found: a running Ghostty's, `/Applications/Ghostty.app/Contents/MacOS/ghostty`, `~/Applications/Ghostty.app/Contents/MacOS/ghostty`, then `ghostty` on PATH. None found: the row stands on the file read-back alone, with the detail `not validated: Ghostty binary not found (tried …)`, never ERROR and never a re-apply. A found binary that rejects the config or will not run is an ERROR. Then `SIGUSR2` goes to each running Ghostty main process (found via `ps -axo pid=,args=`: the app binary alone, no arguments, and `ps -o comm= -p {pid}`, the executable's path, equal to that binary), after re-reading that pid's args and executable immediately before the kill; the binary "a running Ghostty's" names in the validation order above is that of such a process. No process: APPLIED with `applies when Ghostty starts`.
 
 Read-back: the absolute include line present, the three owned files equal to the render, and the config validates; otherwise DRIFT (or ERROR when validation cannot run). No config file: ABSENT, listing the paths looked for; a candidate that cannot be looked at (a stat failure other than not-exist) is ERROR naming it, and so is a stale `pfm-theme/` file the apply cannot list or remove.
 

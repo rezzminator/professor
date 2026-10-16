@@ -146,7 +146,7 @@ else
       grep -q -- "$verb" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $verb;"
     done
     grep -q 'usage-hook' "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template usage-hook;"
-    for row in herdr-start herdr-working-prompt herdr-working-tool herdr-notification herdr-idle herdr-end; do
+    for row in herdr-start herdr-working-prompt herdr-working-tool herdr-working-tool-failure herdr-blocked herdr-notification herdr-idle herdr-end; do
       grep -q -- "\"$row\"" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $row;"
     done
     if [ -f "$CODEX_HOME/config.toml" ]; then
@@ -538,7 +538,7 @@ else
   for palette in tokyo-night solarized catppuccin; do
     grep -qE "^[ *] $palette " <<<"$ls_out" || bad="$bad pfm theme ls does not list palette $palette: $(one_line "$ls_out");"
   done
-  for want in dark light blocked working done idle; do
+  for want in dark light blocked working "done" idle; do
     grep -qw -- "$want" <<<"$ls_out" || bad="$bad pfm theme ls names no $want swatch;"
   done
 fi

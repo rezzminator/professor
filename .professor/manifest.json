@@ -113,7 +113,7 @@
     ".claude/scripts/test-pfm.sh": "001758536b729632f51dd3bab6f3e650c164cd1127d34629c723fe8ce5690122",
     ".claude/scripts/test-templates.sh": "f7053ffe117a34e558bf5cc923ad9486b46aeb6e945d78e14786ad5d89e87a28",
     ".claude/scripts/unit-path.sh": "8215db4480427de80aa125c77d9d3f5a1cf76ef14363e81dd86b07eaf0b8ead8",
-    ".claude/settings.json": "0b34d04d0230b9b008d27c63a93db768c27e21f8969dbef6dd5549a39fa8c208",
+    ".claude/settings.json": "b6e55fe038648276e021fdbe1928a1a80831cf794276ae28d7f2f9a0063fb505",
     ".codex/config.toml": "8732c6ca8b84645e162ffaa33d910c5be538fc9d09da7988d2907a6b24a31e53",
     ".gitignore": "021b209e1e73bf71487b3f86a9d7d220146e331152e8190dae0c831b3e7cc02a",
     "CLAUDE.md": "d09bbbd75234ef5bdbca872babd6ee72aa2dcc53a2fd54f80109b57dee44ab77",

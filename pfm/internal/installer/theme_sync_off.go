@@ -14,12 +14,13 @@ import (
 )
 
 // themeSyncOff runs `pfm theme off` before an uninstall while the theme sync
-// is on: every surface goes back to its snapshot, the appearance follower is
-// booted out and the state disabled, so no surface stays themed by a pfm that
-// is gone. A failed off stops the uninstall.
+// is on or an earlier off left a surface snapshot unrestored: every surface
+// goes back to its snapshot, the appearance follower is booted out and the
+// state disabled, so no surface stays themed by a pfm that is gone. A failed
+// off stops the uninstall, and the rerun retries it.
 func (installer *engine) themeSyncOff(ctx context.Context) error {
 	home := installer.options.Home
-	if !themesync.SyncOn(themesync.DefaultStateDir(home)) {
+	if !themesync.RestorePending(themesync.DefaultStateDir(home)) {
 		return nil
 	}
 	if !installer.apply {

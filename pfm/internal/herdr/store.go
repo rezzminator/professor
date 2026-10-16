@@ -22,6 +22,9 @@ type Stored struct {
 	State     string `json:"state"`
 	Message   string `json:"message"`
 	Seq       uint64 `json:"seq"`
+	// Tool names the tool call a Claude permission request's block asks about:
+	// only that call's own working report leaves the block.
+	Tool string `json:"tool,omitempty"`
 	// Name is the chat name the panes were last named after.
 	Name    string            `json:"name,omitempty"`
 	Clients map[string]Client `json:"clients,omitempty"`

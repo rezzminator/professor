@@ -288,3 +288,27 @@ func TestGhosttyBinaryFoundOffTheProcessListStillValidates(t *testing.T) {
 		})
 	}
 }
+
+// An off that could not restore a surface keeping no file snapshot (a tmux
+// server, the follower) leaves the off pending, so the uninstall rerun runs
+// it again; the off that restores it clears the mark.
+func TestOffThatFailsASurfaceLeavesTheOffPending(t *testing.T) {
+	h := newHarness(t)
+	h.set("tokyo-night", ModeAuto)
+	h.tmux.failApply["cc-b"] = errors.New("lost connection")
+	off, err := Off(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, off, "tmux", VerdictError, "lost connection")
+	if !RestorePending(h.stateDir) {
+		t.Fatal("RestorePending = false after an off left tmux server cc-b themed, want true")
+	}
+	delete(h.tmux.failApply, "cc-b")
+	if off, err = Off(context.Background(), h.env); err != nil || !off.OK() {
+		t.Fatalf("retried Off = %+v, %v, want every surface restored", off.Surfaces, err)
+	}
+	if RestorePending(h.stateDir) {
+		t.Fatal("RestorePending = true after the retried off restored every surface, want false")
+	}
+}

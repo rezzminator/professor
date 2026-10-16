@@ -43,6 +43,8 @@ set -uo pipefail
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+# shellcheck source=hook-command.sh
+. "$LANES_DIR/hook-command.sh"
 lane_preamble
 
 EXPRESS="${A_EXPRESS:-/work/express}"
@@ -889,11 +891,13 @@ beat A.11-plugin-hook
 spends "cc:$SEAT"
 target "$CHAT"
 bad=""
-# Hooks rooted at $CLAUDE_PROJECT_DIR and present (the spec's static half).
+# Hooks rooted at $CLAUDE_PROJECT_DIR and present (the spec's static half), each read in its plain form
+# (hook-command.sh).
 hooks="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | select(.type == "command") | .command' "$EXPRESS/.claude/settings.json" 2>&1)"
 [ -n "$hooks" ] || bad="$bad $EXPRESS/.claude/settings.json enumerates no command hook;"
 while IFS= read -r cmd; do
   [ -n "$cmd" ] || continue
+  cmd="$(hook_command_plain "$cmd")"
   case "$cmd" in '$CLAUDE_PROJECT_DIR/'*) ;; *) bad="$bad hook '$cmd' is not rooted at \$CLAUDE_PROJECT_DIR;"; continue ;; esac
   script="${cmd#\$CLAUDE_PROJECT_DIR/}"
   script="${script%% *}"

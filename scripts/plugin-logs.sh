@@ -30,6 +30,7 @@ if [ -n "$archive" ]; then valid_date "$archive" || usage "invalid archive date 
 if [ -n "$today" ]; then valid_date "$today" || usage "invalid today date $today"; fi
 [ -e "$dir" ] || { printf 'no log folder: %s\n' "$dir"; exit 3; }
 [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || unreadable "$dir" 'directory is not readable/searchable'
+root=$(cd -- "$root" 2>/dev/null && pwd -P) || usage "cannot resolve project root $root"
 project=$(basename -- "$root"); project=${project#.}
 scratch_root="${TMPDIR:-/tmp}/$project/plugin-logs"
 # A private run is not private if another user can replace its ancestry.

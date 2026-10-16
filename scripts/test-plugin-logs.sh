@@ -64,6 +64,15 @@ TMPDIR="$T/temp-root" PATH="$T/scratch-bin:$PATH" REAL_MKTEMP="$REAL_MKTEMP" SCR
   bash "$SUT" report --dir "$T/logs" --root "$T/.fixture-project" > "$T/out" 2> "$T/err" || RC=$?
 allocated=$(cat "$T/scratch-record")
 expect 'scratch is project-scoped and cleaned after report' '[ "$RC" = 0 ] && [[ "$allocated" == "$T/temp-root/fixture-project/plugin-logs/run."* ]] && [ -d "${allocated%/*}" ] && [ ! -e "$allocated" ] && grep -Fxq "callmeter 1" "$T/out"'
+# Relative roots must retain the physical project's scratch scope.
+for relative in . ..; do
+  RC=0
+  : > "$T/scratch-record"
+  if [ "$relative" = . ]; then here="$T/root"; else mkdir -p "$T/root/child"; here="$T/root/child"; fi
+  (cd "$here" && TMPDIR="$T/temp-root" PATH="$T/scratch-bin:$PATH" REAL_MKTEMP="$REAL_MKTEMP" SCRATCH_RECORD="$T/scratch-record" bash "$SUT" report --dir "$T/logs" --root "$relative") > "$T/out" 2> "$T/err" || RC=$?
+  allocated=$(cat "$T/scratch-record")
+  expect "relative root $relative resolves the project scratch name" '[ "$RC" = 0 ] && [[ "$allocated" == "$T/temp-root/root/plugin-logs/run."* ]]'
+done
 # Other tools create the user's project/purpose scratch dirs under umask 002.
 mkdir -p "$T/mode775/root/plugin-logs" "$T/empty-logs"
 chmod 775 "$T/mode775/root" "$T/mode775/root/plugin-logs"

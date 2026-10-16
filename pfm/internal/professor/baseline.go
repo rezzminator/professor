@@ -154,6 +154,16 @@ func Load(root string) (Baseline, error) {
 		baseline.Files = make(map[string]FilePin)
 	}
 	baseline.Ignored = normalizeIgnored(baseline.Ignored)
+	for _, rule := range baseline.RetiredAccepted {
+		if rule.Coverage && rule.Name != "" {
+			return Baseline{}, fmt.Errorf(
+				"BASELINE-MALFORMED %s: coverage rule for %q cannot also name %q; remove name or coverage",
+				path,
+				rule.Path,
+				rule.Name,
+			)
+		}
+	}
 	baseline.RetiredAccepted = normalizeRetiredRules(baseline.RetiredAccepted)
 	return baseline, nil
 }

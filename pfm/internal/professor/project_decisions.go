@@ -310,9 +310,22 @@ func runProjectAccept(
 			}
 		}
 		if covered == 0 {
+			if !*coverage {
+				for _, partial := range incomplete {
+					if (RetiredRule{Path: path, Coverage: true}).Covers(partial.Path, "") {
+						fmt.Fprintf(
+							stderr,
+							"pfm update accept: %s has incomplete coverage, not a retired-name hit; inspect the unscanned text, then use pfm update accept %s --coverage --reason TEXT\n",
+							path,
+							shellWord(path),
+						)
+						return 1
+					}
+				}
+			}
 			fmt.Fprintf(
 				stderr,
-				"pfm update accept: %s covers no retired-name hit or incomplete coverage; nothing to accept\n",
+				"pfm update accept: %s covers no matching retired-name hit or incomplete coverage; use --coverage for reviewed INCOMPLETE rows; nothing to accept\n",
 				path,
 			)
 			return 1

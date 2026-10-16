@@ -122,6 +122,12 @@ func writeRetiredNamesHuman(stdout io.Writer, scan *RetiredNameScan) {
 	}
 	for _, partial := range scan.Incomplete {
 		fmt.Fprintf(stdout, "    %s   retired-name scan INCOMPLETE — %s\n", partial.Path, partial.Error)
+		fmt.Fprintf(
+			stdout,
+			"      inspect the unscanned text; accept reviewed coverage: pfm update accept %s --coverage --reason %s\n",
+			shellWord(partial.Path),
+			shellWord("reviewed unscanned text"),
+		)
 	}
 }
 

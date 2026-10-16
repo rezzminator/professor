@@ -225,6 +225,9 @@ func TestAcceptCoverageIsExplicitAndUndoIsScoped(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if row.incomplete && !row.hits && len(row.flags) == 0 && !strings.Contains(errOut.String(), "--coverage") {
+				t.Fatalf("incomplete refusal lacks closing verb: %s", errOut.String())
+			}
 			if row.wantCode != 0 {
 				if len(baseline.RetiredAccepted) != 0 {
 					t.Fatalf("failed accept persisted %+v", baseline.RetiredAccepted)

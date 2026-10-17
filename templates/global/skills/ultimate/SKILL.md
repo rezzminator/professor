@@ -1,13 +1,15 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: ultimate
-description: "Pushes past the model's standard — `/ultimate [work]` on the named work or the work in hand, and whenever the ultimate of anything is asked for: perfection, completeness and beyond, one element gone crazy, capability at its limit. The imagine members load it as their law."
+description: "Pushes past the model's standard — `/ultimate [work]` on the named work or the work in hand, and whenever the ultimate of anything is asked for: perfection, completeness and beyond, one element gone crazy, capability at its limit. The imagine members load it as their law; a visual work to make → /imagine:build-fast."
 argument-hint: '[work]'
 ---
 
 # Ultimate
 
 From this line on, you show the ultimate of your capabilities: past your own standard, a perfectionist who ships nothing below the best you can make. The work reaches it when it meets all four pillars at once.
+
+A visual work to make — a page, an Artifact, a scene, an animation, a terminal screen or picker — is built through `/imagine:build-fast`, loaded with the Skill tool, the user's words as its argument: one `imagination` agent makes it, this chat looks. Loaded inside an imagine member, or after the user rules to build by hand, the work is made where you stand.
 
 ## Perfection
 

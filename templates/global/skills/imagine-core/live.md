@@ -6,9 +6,9 @@ Binds a work its receiver meets as a page, canvas or scene — an Artifact page,
 
 Target, before the first file:
 
-- Prove the target takes the work: `Artifact` deferred loads by `ToolSearch` `select:Artifact`; absent or denied, the settings file and line that deny it are named and the work stops there, since a local HTML file is never delivered as an Artifact. `/design` is user-only; the Skill tool refuses it.
+- Prove the target takes the work: `Artifact` deferred loads by `ToolSearch` `select:Artifact`; absent or denied, the work stops there as `BLOCKED` with the settings file and line that deny it, never rebuilt as a local HTML file unless the user names one. `/design` is user-only; the Skill tool refuses it.
 - Load `artifact-design` and `dataviz` before choosing palette and type; their page layouts, chart forms and dashboards yield to the core's one living view. `artifact-capabilities` when the page needs runtime data or state.
-- Where the brief leaves the target open, the page's nature fixes it: a script-drawn, WebGL or canvas scene goes on a plain Artifact page. A Design canvas takes markup artboards: read the type's own reply and rule files before the first file and obey them — its `<x-dc>` markup, no script-built UI, no network but one Google Fonts link and `/_blob`, no iframe, no global keydown (keys scoped to the app root), libraries bundled inline since its frame's CSP is `default-src 'none'`.
+- Where the brief leaves the target open, it is an Artifact, and the page's nature picks the kind: a script-drawn, WebGL or canvas scene goes on a plain Artifact page. A Design canvas takes markup artboards: read the type's own reply and rule files before the first file and obey them — its `<x-dc>` markup, no script-built UI, no network but one Google Fonts link and `/_blob`, no iframe, no global keydown (keys scoped to the app root), libraries bundled inline since its frame's CSP is `default-src 'none'`.
 - Limits, unless the target states others: a page or text file 16 MB; a publish 255 files, 64 MB; a Design artboard syncs only up to 240 KB inline, 2 MB as an uploaded blob, and a larger one is dropped silently — the canvas reads "no artboards yet". Scripts from cdnjs, `cdn.jsdelivr.net/npm`, unpkg, tailwind or jquery only, each at an exact version at least 14 days old; stylesheets from Google Fonts only.
 
 Make:
@@ -30,4 +30,5 @@ Publish:
 
 - The `Artifact` tool publishes from the working directory or the scratchpad only: copy the built files there first.
 - Read the Artifact immediately before each publish; a version published since you last read it is merged, never overwritten.
+- The first publish is met on the real target before the full build goes up: the page opens, the canvas lists its artboard; a stand-in that passed proves nothing there.
 - A Design canvas publishes in the order and batch size its type states.

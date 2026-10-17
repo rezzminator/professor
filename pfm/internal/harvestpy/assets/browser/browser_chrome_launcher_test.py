@@ -170,11 +170,11 @@ def test_launcher_passes_argv_and_env_to_chrome_unchanged():
         how, status = launch(tmp, f"""
             import json, os, sys
             json.dump({{"argv": sys.argv[1:], "env": os.environ.get("PFM_LAUNCHER_PROBE")}}, open({out!r}, "w"))
-            """, ["--remote-debugging-pipe", "--user-data-dir=/tmp/a b", "--headless"],
+            """, ["--remote-debugging-pipe", "--user-data-dir=/profiles/a b", "--headless"],
                             env={"PFM_LAUNCHER_PROBE": "kept"})
         seen = json.load(open(out))
     assert how == ("exit", 0), how
-    assert seen == {"argv": ["--remote-debugging-pipe", "--user-data-dir=/tmp/a b", "--headless"],
+    assert seen == {"argv": ["--remote-debugging-pipe", "--user-data-dir=/profiles/a b", "--headless"],
                     "env": "kept"}, seen
     assert status.startswith(browser.STATUS_DISCLAIMED), status
 

@@ -2,6 +2,8 @@ package doctor
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestClaudeEnvDoctor: each claude.env key missing from, or different in, the
@@ -37,6 +40,13 @@ func TestClaudeEnvDoctor(t *testing.T) {
 			settings: `{"env":{"` + key + `":"1","OTHER":"x"}}`,
 			ledger:   `{"version":1,"files":{"{settings}":{"` + key + `":"1"}}}`,
 			lines:    []string{"doctor: claude_env ok — 1 keys in {settings}"},
+		},
+		{
+			name:     "explicit install target differs from primary",
+			env:      map[string]string{key: "1"},
+			settings: `{"env":{"` + key + `":"wrong-primary"}}`,
+			ledger:   `{"version":1,"target":"{custom}","files":{"{custom}":{"` + key + `":"1"}}}`,
+			lines:    []string{"doctor: claude_env ok — 1 keys in {custom}"},
 		},
 		{
 			name:     "a key missing",
@@ -91,6 +101,19 @@ func TestClaudeEnvDoctor(t *testing.T) {
 			failures: 1,
 		},
 		{
+			name:     "the documented shared plugin log knob is known",
+			env:      map[string]string{installer.PluginLogDirEnv: "/logs"},
+			settings: `{"env":{"PLUGIN_LOG_DIR":"/logs"}}`,
+			lines:    []string{"doctor: claude_env ok — 1 keys in {settings}"},
+		},
+		{
+			name:     "an operator log folder needs manual reconciliation, not install",
+			env:      map[string]string{installer.PluginLogDirEnv: "/configured-logs"},
+			settings: `{"env":{"PLUGIN_LOG_DIR":"/operator-logs"}}`,
+			lines:    []string{`doctor: claude_env FAIL PLUGIN_LOG_DIR in {settings} env is "/operator-logs"; claude.env sets "/configured-logs" — set env.PLUGIN_LOG_DIR in {settings} to the claude.env value; pfm preserves hand-set values`},
+			failures: 1,
+		},
+		{
 			name:     "a key no plugin's prefix names",
 			env:      map[string]string{"NOPE_X": "1"},
 			settings: `{"env":{"NOPE_X":"1"}}`,
@@ -105,7 +128,13 @@ func TestClaudeEnvDoctor(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, ".cc", "1", "settings.json")
-			expand := func(text string) string { return strings.ReplaceAll(text, "{settings}", settings) }
+			custom := filepath.Join(home, "custom", "settings.json")
+			expand := func(text string) string {
+				return strings.NewReplacer("{settings}", settings, "{custom}", custom).Replace(text)
+			}
+			if strings.Contains(test.ledger, "{custom}") {
+				writePluginLogsFile(t, custom, `{"env":{"`+key+`":"1"}}`)
+			}
 			if test.settings != "" {
 				if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
 					t.Fatal(err)
@@ -140,6 +169,45 @@ func TestClaudeEnvDoctor(t *testing.T) {
 			}
 			if test.failures > 0 && strings.Contains(out.String(), "claude_env ok") {
 				t.Fatalf("a failing check also printed ok:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// Missing plugin-log readiness has one doctor owner even when an install ledger
+// or explicit claude.env also expects it in that physical settings file.
+func TestClaudeEnvPluginLogMissingHasOneRepair(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprint("explicit=", explicit), func(t *testing.T) {
+			fixture := newPluginLogsFixture(t)
+			settings := filepath.Join(fixture.store, "settings.json")
+			writePluginLogsFile(t, settings, `{}`)
+			managed := installer.ManagedRoot(fixture.home)
+			raw, err := json.Marshal(map[string]any{
+				"version": 1, "pluginLogDir": fixture.folder,
+				"files": map[string]any{settings: map[string]string{installer.PluginLogDirEnv: fixture.folder}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writePluginLogsFile(t, filepath.Join(managed, "claude-env-ownership.json"), string(raw))
+			build := installer.ClaudePluginBuild{Version: "0.82.0-alpha", Home: fixture.home, SourceRepo: fixture.clone}
+			var env map[string]string
+			if explicit {
+				env = map[string]string{installer.PluginLogDirEnv: fixture.folder}
+			}
+			var out bytes.Buffer
+			tally := &doctorTally{}
+			printClaudeEnvDoctor(&out, managed, settings, env, build, tally)
+			printPluginLogsDoctor(&out, []string{fixture.store}, build, &paths.MapEnv{},
+				func(string, uint32) error { return nil }, tally)
+			if tally.failures+tally.warnings != 1 ||
+				strings.Count(out.String(), " — set ")+strings.Count(out.String(), " — run pfm install") != 1 {
+				t.Fatalf("one missing PLUGIN_LOG_DIR has multiple findings/repairs: failures=%d warnings=%d\n%s",
+					tally.failures, tally.warnings, out.String())
+			}
+			if !strings.Contains(out.String(), "sets no env.PLUGIN_LOG_DIR — set it to the shared log folder") {
+				t.Fatalf("missing actionable log repair: %s", out.String())
 			}
 		})
 	}

@@ -24,6 +24,27 @@ import (
 // create files in it and enter it.
 const pluginLogFolderAccess = unix.R_OK | unix.W_OK | unix.X_OK
 
+// printManagedPluginLogsDoctor includes the exact files claude_env delegates,
+// not merely their parent directories: a symlink target need not be settings.json.
+func printManagedPluginLogsDoctor(stdout io.Writer, dirs []string, build installer.ClaudePluginBuild,
+	env paths.Env, managedRoot, settingsPath string, tally *doctorTally,
+) {
+	var files []string
+	if obs.AlphaBuild(build.Version) {
+		var err error
+		files, err = installer.ClaudeEnvSettingsPaths(managedRoot, settingsPath)
+		if err != nil {
+			tally.fail()
+			fmt.Fprintf(
+				stdout,
+				"doctor: plugin_logs FAIL could not enumerate managed settings: %v — repair the ownership ledger, then rerun pfm doctor\n",
+				err,
+			)
+		}
+	}
+	printPluginLogsDoctor(stdout, dirs, build, env, unix.Access, tally, files...)
+}
+
 // printPluginLogsDoctor checks the plugin-logs system on an -alpha build, the
 // one that installs the marketplace plugins from their checkouts
 // (obs.AlphaBuild); any other build prints one untallied line saying it does
@@ -43,6 +64,7 @@ func printPluginLogsDoctor(
 	env paths.Env,
 	access func(string, uint32) error,
 	tally *doctorTally,
+	extraSettings ...string,
 ) {
 	if !obs.AlphaBuild(build.Version) {
 		fmt.Fprintf(stdout, "doctor: plugin_logs does not apply: pfm %s is not an -alpha build\n",
@@ -71,7 +93,7 @@ func printPluginLogsDoctor(
 		tally.fail()
 		note(format, args...)
 	}
-	settings := installer.ReadPluginLogEnv(dirs)
+	settings := installer.ReadPluginLogEnv(dirs, extraSettings...)
 	folders := checkPluginLogEnv(settings, warn, fail)
 	for _, folder := range folders {
 		if gap, failure := pluginLogFolderGap(folder, access); gap != "" && failure {

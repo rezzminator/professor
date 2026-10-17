@@ -502,6 +502,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 		"alpha from the default source clone", "alpha source clone moved away", "alpha copy differs",
 		"alpha unlisted plugin disabled", "alpha unlisted plugin enabled", "alpha cache behind", "alpha cache differs",
 		"alpha cache unreadable", "alpha cache unversioned", "alpha cache behind with its snapshot gone",
+		"alpha marketplace empty",
 	} {
 		t.Run(state, func(t *testing.T) {
 			home := t.TempDir()
@@ -561,6 +562,18 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					filepath.Join(build.SourceRepo, ".claude-plugin", "marketplace.json"),
 					manifest,
 					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if state == "alpha marketplace empty" {
+				build.SourceRepo = filepath.Join(home, "clone")
+				if err := os.MkdirAll(filepath.Join(build.SourceRepo, ".claude-plugin"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(
+					filepath.Join(build.SourceRepo, ".claude-plugin", "marketplace.json"),
+					[]byte(`{"plugins":[]}`), 0o600,
 				); err != nil {
 					t.Fatal(err)
 				}
@@ -676,6 +689,10 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			want, warnings, failures := "doctor: claude_plugins ok\n", 0, 0
 			twice := "plugin cache-live-control enabled twice (" + doctorPluginIDs[0] + " and " + doctorDevIDs[0] + ") in " + path
 			switch state {
+			case "alpha marketplace empty":
+				want, failures = "doctor: claude_plugins the marketplace plugin list "+
+					filepath.Join(build.SourceRepo, ".claude-plugin", "marketplace.json")+
+					" lists no plugins — repair it, then run pfm install --yes\n", 1
 			case "alpha duplicate":
 				want, failures = "doctor: claude_plugins FAIL "+twice+" — run pfm install --yes\n", 1
 			case "release duplicate":

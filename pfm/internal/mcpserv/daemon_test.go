@@ -143,3 +143,37 @@ func TestDaemonHandlerNamesADeclaredOversizedBody(t *testing.T) {
 		}
 	}
 }
+
+func TestDaemonHandlerExplainsRetiredProfessorRoutes(t *testing.T) {
+	t.Parallel()
+	handler := NewDaemonHandler(DaemonOptions{Version: "test"})
+	for _, row := range []struct {
+		path   string
+		status int
+	}{
+		{"/mcp/professor", http.StatusGone},
+		{"/mcp/professor/", http.StatusGone},
+		{"/mcp/professor/chat", http.StatusGone},
+		{"/mcp/professor/harvester", http.StatusGone},
+		{"/mcp/professor/chat/nested", http.StatusGone},
+		{"/mcp/professor-other", http.StatusNotFound},
+	} {
+		t.Run(row.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, row.path, http.NoBody))
+			if response.Code != row.status {
+				t.Fatalf(
+					"%s answered HTTP %d: %q, want HTTP %d",
+					row.path, response.Code, response.Body.String(), row.status,
+				)
+			}
+			if row.status == http.StatusGone {
+				for _, want := range []string{"retired", "/mcp/chat-professor", "/mcp/harvester-professor", "restart", "chat"} {
+					if !strings.Contains(response.Body.String(), want) {
+						t.Errorf("%s cutover response = %q, want %q", row.path, response.Body.String(), want)
+					}
+				}
+			}
+		})
+	}
+}

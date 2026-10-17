@@ -106,18 +106,7 @@ func (installer *engine) dropClaudeMCPOwnership() error {
 // cutOverClaudeMCP reconciles existing user registries; new chats use the
 // launcher's strict MCP config, so an absent registry is never created here.
 func (installer *engine) cutOverClaudeMCP() error {
-	accounts := append([]pfmconfig.Account(nil), installer.options.ClaudeAccounts...)
-	for _, dir := range installer.options.RosterConfigDirs {
-		accounts = append(accounts, pfmconfig.Account{ConfigDir: dir})
-	}
-	if installer.options.ConfigDir != "" {
-		accounts = append(accounts, pfmconfig.Account{ConfigDir: installer.options.ConfigDir})
-	}
-	env := installer.options.Env
-	if env == nil {
-		env = paths.OSEnv{}
-	}
-	ambient := env.Get("CLAUDE_CONFIG_DIR")
+	accounts, ambient := installer.claudeMCPAccounts()
 	registries := ClaudeMCPRegistries(installer.options.Home, accounts, ambient)
 	seen := map[string]bool{}
 	names := enabledMCPNames(installer.options.MCPEnabled)
@@ -210,17 +199,53 @@ func (installer *engine) cutOverClaudeMCP() error {
 		if bytes.Equal(raw, wanted) {
 			continue
 		}
-		if err := installer.changeMCPFile(
-			"cut over Claude MCP registrations in "+registry.Path,
-			registry.Path,
-			raw,
-			wanted,
-			true,
-		); err != nil {
+		locks := installer.claudeMCPLockAliases(registry.Path, physical)
+		if err := installer.change("cut over Claude MCP registrations in "+registry.Path, func() error {
+			return withClaudeMCPLocks(locks, func(check func() error) error {
+				return installer.writeMCPFileIf(registry.Path, raw, wanted, true, check)
+			})
+		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// claudeMCPAccounts includes every configured, roster-only and ambient seat.
+func (installer *engine) claudeMCPAccounts() ([]pfmconfig.Account, string) {
+	accounts := append([]pfmconfig.Account(nil), installer.options.ClaudeAccounts...)
+	for _, dir := range installer.options.RosterConfigDirs {
+		accounts = append(accounts, pfmconfig.Account{ConfigDir: dir})
+	}
+	if installer.options.ConfigDir != "" {
+		accounts = append(accounts, pfmconfig.Account{ConfigDir: installer.options.ConfigDir})
+	}
+	env := installer.options.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	ambient := env.Get("CLAUDE_CONFIG_DIR")
+	return accounts, ambient
+}
+
+// claudeMCPLockAliases recovers lexical locks lost to physical deduplication.
+// Every Claude registry writer uses this same alias set.
+func (installer *engine) claudeMCPLockAliases(path, physical string) []string {
+	accounts, ambient := installer.claudeMCPAccounts()
+	aliases := []string{path, physical, filepath.Join(installer.options.Home, ".claude.json")}
+	for _, account := range accounts {
+		aliases = append(aliases, filepath.Join(account.ConfigDir, ".claude.json"))
+	}
+	if strings.TrimSpace(ambient) != "" {
+		aliases = append(aliases, filepath.Join(ambient, ".claude.json"))
+	}
+	var locks []string
+	for _, alias := range aliases {
+		if physicalSettingsPath(alias) == physical {
+			locks = append(locks, alias)
+		}
+	}
+	return locks
 }
 
 // ClaudeMCPRegistries includes the historical default user registry alongside

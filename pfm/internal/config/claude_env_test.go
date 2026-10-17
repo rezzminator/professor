@@ -10,8 +10,7 @@ import (
 
 // TestClaudeEnvKey pins claude.env: a machine-wide map of upper-snake
 // variable names to string values, empty when unset, refused at account scope,
-// refused for a variable another party owns (pfm's launch, or pfm's own environment), and
-// written back only when the file set it (a v0.79.0 pfm refuses the key).
+// and written back only when the file set it (a v0.79.0 pfm refuses the key).
 func TestClaudeEnvKey(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(t.TempDir(), FileName)
@@ -54,6 +53,10 @@ func TestClaudeEnvKey(t *testing.T) {
 			err: `claude.env name "SUB-AGENT" must be upper snake: A-Z, 0-9 and _, starting with a letter`,
 		},
 		{
+			name: "a null value", content: `{"version":2,"claude":{"env":{"BUDDY_MODEL":null}}}`,
+			err: `claude.env.BUDDY_MODEL must be a string, got null`,
+		},
+		{
 			name: "a number value", content: `{"version":2,"claude":{"env":{"BUDDY_CHAT_TURNS_TO_READ":4}}}`,
 			err: `claude.env.BUDDY_CHAT_TURNS_TO_READ must be a string, got 4`,
 		},
@@ -69,14 +72,12 @@ func TestClaudeEnvKey(t *testing.T) {
 		{
 			name:    "a variable the launch discards as inherited state",
 			content: `{"version":2,"claude":{"env":{"CACHE_LIVE_CONTROL_AGENTS_TTL":"1h"}}}`,
-			err: `claude.env.CACHE_LIVE_CONTROL_AGENTS_TTL is discarded on every launch as inherited state: ` +
-				`set CACHE_LIVE_CONTROL_SUBAGENT_TTL instead`,
+			err:     `claude.env.CACHE_LIVE_CONTROL_AGENTS_TTL is discarded on every launch as inherited state: set CACHE_LIVE_CONTROL_SUBAGENT_TTL instead`,
 		},
 		{
 			name:    "a home pfm resolves from its own environment",
 			content: `{"version":2,"claude":{"env":{"CALLMETER_HOME":"/x"}}}`,
-			err: `claude.env.CALLMETER_HOME is read by pfm itself, which builds callmeter's binary under it: ` +
-				`export it where pfm runs instead`,
+			err:     `claude.env.CALLMETER_HOME is read by pfm itself, which builds callmeter's binary under it: export it where pfm runs instead`,
 		},
 		{
 			name:    "engine-sync's home",

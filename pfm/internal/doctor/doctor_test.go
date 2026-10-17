@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -140,6 +142,102 @@ func TestPrintDependenciesCountsAnUnknownProbeStateLikeMissing(t *testing.T) {
 			want := fmt.Sprintf("doctor: dep %s broken error=unknown probe state %q\n", testCase.entry.Name, "wedged")
 			if stdout.String() != want {
 				t.Fatalf("row = %q, want %q", stdout.String(), want)
+			}
+		})
+	}
+}
+
+func TestDoctorCallmeterUsesClaudeEnvHome(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	home := runtime.Paths.Home
+	clone := filepath.Join(home, "clone")
+	root := filepath.Join(clone, "plugins")
+	writePluginLogsFile(
+		t,
+		filepath.Join(clone, ".claude-plugin", "marketplace.json"),
+		`{"name":"professor","plugins":[{"name":"callmeter","source":"./plugins/callmeter/plugins/callmeter"}]}`,
+	)
+	writePluginLogsFile(
+		t,
+		filepath.Join(root, "callmeter", "plugins", "callmeter", ".claude-plugin", "plugin.json"),
+		`{"name":"callmeter","version":"0.4.0"}`,
+	)
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Version = "0.82.0-alpha"
+	runtime.Config.Claude.PluginCheckoutRoot = root
+	runtime.Config.Claude.Env = map[string]string{"CALLMETER_HOME": filepath.Join(home, "configured")}
+	writePluginLogsFile(
+		t,
+		filepath.Join(home, ".claude", "settings.json"),
+		fmt.Sprintf(
+			`{"enabledPlugins":{"callmeter@callmeter-dev":true},"env":{"PLUGIN_LOG_DIR":%q}}`,
+			filepath.Join(home, "shared-logs"),
+		),
+	)
+	writeDoctorInstalledPlugins(t, filepath.Join(home, ".claude"), "callmeter@callmeter-dev")
+	t.Setenv("CALLMETER_HOME", filepath.Join(home, "ambient"))
+	writePluginLogsFile(t, filepath.Join(home, "configured", "logs", "events.jsonl"), "{}\n")
+	writePluginLogsFile(t, filepath.Join(home, "ambient", "logs", "events.jsonl"), "{}\n{}\n")
+	var stdout, stderr bytes.Buffer
+	runDoctor(nil, &stdout, &stderr, runtime)
+	want := filepath.Join(home, "configured", "bin", "0.4.0", "callmeter") + " missing"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("doctor did not inspect claude.env home %s:\n%s", want, stdout.String())
+	}
+	wantFallback := "1 rows stranded in its fallback " + filepath.Join(home, "configured", "logs")
+	if !strings.Contains(stdout.String(), wantFallback) ||
+		strings.Contains(stdout.String(), filepath.Join(home, "ambient", "logs")) {
+		t.Fatalf("doctor fallback audit ignored effective claude.env home:\n%s", stdout.String())
+	}
+}
+
+func TestDoctorPluginLogsIncludesLedgerOnlyConfigDirs(t *testing.T) {
+	for _, target := range []string{"historical", "target", "physical alias"} {
+		t.Run(target, func(t *testing.T) {
+			runtime := buildCleanDoctorHome(t)
+			runtime.Version = "0.82.0-alpha"
+			home := runtime.Paths.Home
+			custom := filepath.Join(home, "outside-roster", "settings.json")
+			if target == "physical alias" {
+				custom = filepath.Join(home, "outside-roster", "shared.json")
+			}
+			logs := filepath.Join(home, "shared-logs")
+			writePluginLogsFile(t, custom, `{}`)
+			writePluginLogsFile(
+				t,
+				filepath.Join(home, ".claude", "settings.json"),
+				fmt.Sprintf(`{"env":{"PLUGIN_LOG_DIR":%q}}`, logs),
+			)
+			ledger := map[string]any{
+				"version": 1, "pluginLogDir": logs,
+				"files": map[string]any{custom: map[string]string{"PLUGIN_LOG_DIR": logs}},
+			}
+			if target == "target" {
+				ledger["target"] = custom
+			}
+			raw, err := json.Marshal(ledger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writePluginLogsFile(t, filepath.Join(installer.ManagedRoot(home), "claude-env-ownership.json"), string(raw))
+			var stdout, stderr bytes.Buffer
+			runDoctor(nil, &stdout, &stderr, runtime)
+			findings := 0
+			for _, line := range strings.Split(stdout.String(), "\n") {
+				if strings.HasPrefix(line, "doctor: plugin_logs ") && strings.Contains(line, custom) {
+					findings++
+					if strings.Count(line, " — set ") != 1 {
+						t.Errorf("want one repair: %s", line)
+					}
+				}
+				if strings.HasPrefix(line, "doctor: claude_env FAIL") && strings.Contains(line, "PLUGIN_LOG_DIR") {
+					t.Errorf("duplicate claude_env repair: %s", line)
+				}
+			}
+			if findings != 1 {
+				t.Fatalf("want one ledger-only plugin_logs finding, got %d:\n%s", findings, stdout.String())
 			}
 		})
 	}

@@ -25,14 +25,15 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - `.claude/agents/*.md`: root agents (`gitter`, `pcm`) and any `{proj}-{role}` specialist wrappers; machine-global agents live in `~/.claude/agents/`
 - `.claude/commands/{project}-testing-manual.md`: one per project, its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md`: reusable skills
-- `.claude/scripts/*.{sh,mjs}`: worktree.sh, alloc-ports.sh, dev.sh, the engine-sync plugin's hooks (`hook claude mark|stop|start`)
+- `.claude/scripts/*.{sh,mjs}`: worktree.sh, alloc-ports.sh, dev.sh
+- the engine-sync plugin's hooks (`hook claude mark|stop|start`): registered by the plugin's own `hooks.json`, no file under `.claude/scripts/`
 - `{project}/.claude/agents/*.md`, `{project}/CLAUDE.md`: child project agents and conventions. A `{project}` held as a git submodule lands its commits in the child repo; the root repo pins a pointer (gitter-owned).
 - `docs/commands/{cmd}/references/`: command-owned reference docs (`$CDOCS/$CMD/$REFS/`); `docs/_index.md`: the hub of the cross-project reference clusters; `docs/facts/`: user-ruled system facts
 
 ### Critical invariants
 
 - Path variables: agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- Pipeline flow lives in the flights commands (`/flights:spec` → `flights-foreman` → `flights-lander`, the foreman's first spawn `flights-speccer` on novel, large work; `/flights:orchestrate-cross-harness` substitutes child seats; `/flights:audit` over a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
+- Pipeline flow lives in the flights commands (`/flights:spec` → `flights-foreman` → `flights-lander`, the foreman's first spawn `flights-speccer` on novel, large work; `/flights:orchestrate-cross-harness` substitutes child seats; `/flights:doctor` over a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
 - Agent frontmatter matches behavior: `name`, `description`, `tools`.
 - Registry over tables: a command's or skill's `description:` is its routing, written to `/quality:description`; `disable-model-invocation: true` hides a command from the model and goes only on user-triggered-by-design commands.
 - No command over 35KB, no agent over 15KB. Every `general-purpose` spawn carries the full root `CLAUDE.md`, so a root line is the most expensive line; `@path` imports expand at launch, so cut content, never relocate it.
@@ -85,7 +86,7 @@ Consistency checklist:
 - Project dir names in `CLAUDE.md` match the directories
 - Agent frontmatter matches behavior and the tools needed
 - `worktree.sh` project resolution matches directory names
-- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
+- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:doctor`) match agent names and doc paths
 - Tech stack descriptions match `package.json` or `pyproject.toml` deps
 - Pipeline flow in the flights commands matches agent ordering constraints
 

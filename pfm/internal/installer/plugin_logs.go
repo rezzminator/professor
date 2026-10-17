@@ -49,8 +49,9 @@ type PluginLogEnvSetting struct {
 
 // ReadPluginLogEnv reads PluginLogDirEnv from the settings.json of every dir,
 // in order, a dir named twice once. Each physical file is read once and its
-// answer given to every dir resolving to it.
-func ReadPluginLogEnv(dirs []string) []PluginLogEnvSetting {
+// answer given to every dir resolving to it. extraSettings adds exact ledger
+// paths, whose physical filename may differ from settings.json.
+func ReadPluginLogEnv(dirs []string, extraSettings ...string) []PluginLogEnvSetting {
 	type answer struct {
 		value  string
 		absent bool
@@ -58,14 +59,19 @@ func ReadPluginLogEnv(dirs []string) []PluginLogEnvSetting {
 	}
 	read := map[string]answer{}
 	seen := map[string]bool{}
-	settings := make([]PluginLogEnvSetting, 0, len(dirs))
+	files := make([]string, 0, len(dirs)+len(extraSettings))
 	for _, dir := range dirs {
-		dir = filepath.Clean(dir)
-		if seen[dir] {
+		files = append(files, filepath.Join(dir, "settings.json"))
+	}
+	files = append(files, extraSettings...)
+	settings := make([]PluginLogEnvSetting, 0, len(files))
+	for _, path := range files {
+		path = filepath.Clean(path)
+		if seen[path] {
 			continue
 		}
-		seen[dir] = true
-		setting := PluginLogEnvSetting{Dir: dir, Settings: filepath.Join(dir, "settings.json")}
+		seen[path] = true
+		setting := PluginLogEnvSetting{Dir: filepath.Dir(path), Settings: path}
 		setting.Physical = setting.Settings
 		if _, err := os.Lstat(setting.Settings); errors.Is(err, fs.ErrNotExist) {
 			setting.Absent = true

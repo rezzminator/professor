@@ -938,6 +938,22 @@ for ga_state in missing unparseable empty invalid; do
   else bad "generated agents, $ga_state source" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 done
 rm -rf "$ga_dir"; ga_sources
+# Preserve the inventory producer's exit status and visible error class independently.
+cp "$REPO_ROOT/scripts/agent-source-inventory.py" "$T/generated-inventory.py"
+for ga_failure in \
+  '1|agent-source-inventory: REJECTED — fixture source rejection|agent sources do not parse: ' \
+  '2|agent-source-inventory: ERROR — fixture lookup failure|agent source lookup failed (exit 2): ' \
+  '3|GAP install (agent source inventory is missing: PyYAML)|' \
+  '1|agent-source-inventory: ERROR — inconsistent status|agent source lookup failed (exit 1): '; do
+  IFS='|' read -r ga_rc ga_error ga_label <<<"$ga_failure"
+  printf 'import sys\nprint(%s, file=sys.stderr)\nsys.exit(%s)\n' "\"$ga_error\"" "$ga_rc" > "$REPO_ROOT/scripts/agent-source-inventory.py"
+  es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names"
+  if grep -Fxq "FAILSTEP generated agents NOT RENDERED — $ga_label$ga_error" "$T/es.out" &&
+    grep -Fxq 'FAILURES=1' "$T/es.out"; then
+    ok "generated agent inventory status $ga_rc retains its failure class"
+  else bad "generated agent inventory status $ga_rc failure class" "$(cat "$T/es.out")"; fi
+done
+cp "$T/generated-inventory.py" "$REPO_ROOT/scripts/agent-source-inventory.py"
 ga_without_python() { need_tool() { [ "$1" != python3 ]; }; checks_templates_generated_agents; }
 es_case ga_without_python "STUB_ES_RENDER=$ga_names"
 if [ ! -s "$MIRROR_CALLS" ] && [ ! -s "$T/es-build.calls" ] &&
@@ -992,7 +1008,7 @@ if grep -Fq 'problem line(s) on stderr: engine-sync codex agents: conflict /fixt
   ok 'A.09 fails on any other stderr line beside a SKIPPED warning, naming only that line'
 else bad 'A.09 stderr problem beside a SKIPPED warning' "$(cat "$T/lane-agents.out")"; fi
 cp "$lane_agents/blueprint/scripts/agent-source-inventory.py" "$lane_agents/inventory.py"
-for lane_inventory_failure in '1|agent-source-inventory: ERROR — fixture source rejection' '3|GAP install (agent source inventory is missing: PyYAML)'; do
+for lane_inventory_failure in '1|agent-source-inventory: REJECTED — fixture source rejection' '2|agent-source-inventory: ERROR — fixture lookup failure' '3|GAP install (agent source inventory is missing: PyYAML)'; do
   IFS='|' read -r lane_rc lane_error <<<"$lane_inventory_failure"
   printf 'import sys\nprint(%s, file=sys.stderr)\nsys.exit(%s)\n' "\"$lane_error\"" "$lane_rc" > "$lane_agents/blueprint/scripts/agent-source-inventory.py"
   lane_agents_case > "$T/lane-agents.out" 2>&1

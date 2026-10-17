@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -272,6 +273,88 @@ func TestMCPFamilyRegistrationsPreserveForeignAndCutOverLegacy(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestClaudeMCPCutoverHonorsNativeLock(t *testing.T) {
+	for _, locked := range []string{"registry", "alias", "file", "none", "parent-alias", "parent-none"} {
+		t.Run(locked, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			home := t.TempDir()
+			path := filepath.Join(home, ".claude.json")
+			alias := filepath.Join(home, "account", ".claude.json")
+			original := fmt.Sprintf(
+				`{"mcpServers":{"professor":{"type":"stdio","command":%q,"args":["mcp","serve","--stdio"]}}}`,
+				filepath.Join(home, ".local", "bin", "pfm"),
+			)
+			writeFixture(t, path, original)
+			if err := os.MkdirAll(filepath.Dir(alias), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(path, alias); err != nil {
+				t.Fatal(err)
+			}
+			lock := path + ".lock"
+			if locked == "alias" || locked == "parent-alias" {
+				lock = alias + ".lock"
+			}
+			if strings.HasPrefix(locked, "parent-") {
+				parentAlias := filepath.Join(home, "account-link")
+				if err := os.Symlink(filepath.Dir(alias), parentAlias); err != nil {
+					t.Fatal(err)
+				}
+				alias = filepath.Join(parentAlias, filepath.Base(alias))
+			}
+			unlocked := strings.HasSuffix(locked, "none")
+			if locked == "file" {
+				writeFixture(t, lock, "operator")
+			} else if !unlocked {
+				if err := os.Mkdir(lock, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e := engine{options: Options{
+				Home: home, Stdout: io.Discard,
+				ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Dir(alias)}},
+				MCPEnabled:     map[string]bool{"chat": true},
+			}, apply: true, stamp: "fixture"}
+			err := e.cutOverClaudeMCP()
+			if unlocked {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := readFixture(t, path); !strings.Contains(got, "chat-professor") {
+					t.Fatalf("unlocked cutover not published: %s", got)
+				}
+				for _, p := range []string{path, alias} {
+					if _, err := os.Lstat(p + ".lock"); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("lock not released for %s: %v", p, err)
+					}
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), lock) {
+				t.Fatalf("native config lock was ignored: error=%v; want lock %s", err, lock)
+			}
+			if got := readFixture(t, path); got != original {
+				t.Fatalf("locked registry overwritten: %s", got)
+			}
+			if _, err := os.Lstat(lock); err != nil {
+				t.Fatalf("native lock removed: %v", err)
+			}
+			for _, candidate := range []string{path + ".lock", filepath.Join(home, "account", ".claude.json.lock")} {
+				if candidate == lock {
+					continue
+				}
+				if _, err := os.Lstat(candidate); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("partial acquisition leaked lock %s: %v", candidate, err)
+				}
+			}
+			backups, err := filepath.Glob(path + ".pre-professor-*")
+			if err != nil || len(backups) != 0 {
+				t.Fatalf("locked registry backed up: %v, %v", backups, err)
+			}
+		})
 	}
 }
 

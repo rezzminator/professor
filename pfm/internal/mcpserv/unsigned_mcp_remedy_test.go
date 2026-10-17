@@ -44,7 +44,7 @@ func (fakeUnsignedCaller) Call(context.Context, pfmcall.Request) (pfmcall.Result
 }
 
 // TestMCPUnsignedRefusalNamesAnMCPReachableRemedy pins the actual field
-// failure: nine call calls over the shared HTTP daemon, an explicit
+// failure: nine `call` tool calls over the shared HTTP daemon, an explicit
 // (non-self) target, every one refused because the daemon derived no sender
 // of its own. call/body.go's wording tells the reader to set an
 // environment variable or pass --allow-unsigned — neither reachable from an

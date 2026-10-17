@@ -12,12 +12,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// PrintMCPClientCutover reports the historical harvester cutover check for
-// Codex and the project-scope .mcp.json, which tells pfm's own legacy entry
-// apart from a foreign or standalone one, then each Codex account home's
-// config.toml and the OpenCode config with their "professor" state and any pfm
-// legacy "chat" / "harvester" entry. Claude has no registry row: its MCP
-// servers ride --mcp-config at launch and pfm writes no account .claude.json.
+// PrintMCPClientCutover inspects Claude's account .claude.json registries,
+// then reports the historical harvester cutover for Codex and project-scope
+// .mcp.json, distinguishing pfm's legacy entries from user-owned ones. It also
+// checks each Codex account's config.toml and the OpenCode config for family
+// registrations and legacy entries. Claude receives family registrations both
+// at install only in account registries already holding a pfm-owned entry,
+// and through --mcp-config at launch.
 func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 	warnings := printClaudeMCPRows(stdout, runtime)
 
@@ -80,7 +81,7 @@ func printOpenCodeRows(stdout io.Writer, runtime config.Runtime) int {
 			runtime.Config.MCPServers[family].Enabled,
 		)
 	}
-	warnings += printLegacyProfessorRow(
+	printLegacyProfessorRow(
 		stdout,
 		installer.InspectOpenCodeServers(installer.OpenCodeConfigPath(home), home, port, "professor"),
 	)
@@ -107,7 +108,7 @@ func printOpenCodeFamilyRow(stdout io.Writer, home string, port int, name string
 		fmt.Fprintln(stdout, base)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path, state, name))
+		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path, state, enabled, name))
 		return 1
 	}
 }
@@ -128,7 +129,7 @@ func printCodexRow(stdout io.Writer, runtime config.Runtime, path string) int {
 			runtime.Config.MCPServers[family].Enabled,
 		)
 	}
-	warnings += printLegacyProfessorRow(
+	printLegacyProfessorRow(
 		stdout,
 		installer.InspectCodexServers(path, runtime.Paths.Home, runtime.Config.MCP.HTTP.Port, "professor"),
 	)
@@ -158,7 +159,8 @@ func printCodexFamilyRow(stdout io.Writer, runtime config.Runtime, path, name st
 			name,
 			path,
 		)
-	case legacy != "" || (state == installer.MCPClientAbsent && enabled):
+	case legacy != "" || (state == installer.MCPClientAbsent && enabled) ||
+		(state == installer.MCPClientPFM && !enabled):
 		fmt.Fprintf(stdout, "%s %s\n", base, reinstall)
 	default:
 		fmt.Fprintln(stdout, base)
@@ -202,15 +204,15 @@ func professorState(reports []installer.MCPClientCutover, names ...string) (stat
 // reinstall there would be advice that can never fix what it named. A ledger
 // that could not be read says so rather than passing for "no user-owned entry
 // here".
-func openCodeRemediation(home, path, state string, names ...string) string {
+func openCodeRemediation(home, path, state string, enabled bool, names ...string) string {
 	name := "professor"
 	if len(names) > 0 {
 		name = names[0]
 	}
 	const reinstall = "remediation=run pfm install --yes"
-	if state == installer.MCPClientPFM {
-		// pfm's own professor shape needs no replacing; only the legacy
-		// entries remain, and install removes those whoever wrote them.
+	if state == installer.MCPClientPFM && enabled {
+		// An enabled family in pfm's shape needs no replacing; only the
+		// legacy entries remain, and install removes those whoever wrote them.
 		return reinstall
 	}
 	unowned, err := installer.OpenCodeUnownedEntries(home, path, name)
@@ -229,20 +231,19 @@ func openCodeRemediation(home, path, state string, names ...string) string {
 	}
 }
 
-func printLegacyProfessorRow(stdout io.Writer, reports []installer.MCPClientCutover) int {
+func printLegacyProfessorRow(stdout io.Writer, reports []installer.MCPClientCutover) {
 	for _, report := range reports {
 		if report.State == installer.MCPClientForeignRegistration {
 			fmt.Fprintf(
 				stdout,
-				"doctor: mcp client=%s config=%s professor=%s warning=user-owned entry preserved; remove or rename it if unwanted\n",
+				"doctor: mcp client=%s config=%s professor=%s info=user-owned entry preserved; remove or rename it if unwanted\n",
 				report.Client,
 				report.Path,
 				report.State,
 			)
-			return 1
+			return
 		}
 	}
-	return 0
 }
 
 func printClaudeMCPRows(stdout io.Writer, runtime config.Runtime) int {
@@ -275,12 +276,21 @@ func printClaudeMCPRows(stdout io.Writer, runtime config.Runtime) int {
 			fmt.Fprintf(stdout, "doctor: mcp client=claude config=%s %s=%s", registry.Path, report.Name, report.State)
 			switch report.State {
 			case installer.MCPClientPFM:
+				if !runtime.Config.MCPServers[strings.TrimSuffix(report.Name, "-professor")].Enabled {
+					fmt.Fprint(stdout, " remediation=run pfm install --yes")
+					warnings++
+				}
 			case installer.MCPClientLegacyPFM:
 				fmt.Fprint(stdout, " remediation=run pfm install --yes")
 				warnings++
 			default:
-				fmt.Fprint(stdout, " warning=user-owned entry preserved; remove or rename it if unwanted")
-				warnings++
+				if report.Name == config.MCPRegistrationName(config.MCPServerChat) ||
+					report.Name == config.MCPRegistrationName(config.MCPServerHarvester) {
+					fmt.Fprint(stdout, " warning=user-owned entry preserved; remove or rename it if unwanted")
+					warnings++
+				} else {
+					fmt.Fprint(stdout, " info=user-owned entry preserved; remove or rename it if unwanted")
+				}
 			}
 			fmt.Fprintln(stdout)
 		}

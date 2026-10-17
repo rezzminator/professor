@@ -275,3 +275,44 @@ func TestClearFullscreenAutoDisableHandlesEveryAccount(t *testing.T) {
 		t.Errorf("account 2 registry = %q, want %q", got, canaryCleared)
 	}
 }
+
+// Native writers lock the lexical registry, including aliases. A planned clear
+// must also reject an edit made before it acquires that lock.
+func TestClearFullscreenAutoDisableHonorsNativeWriter(t *testing.T) {
+	for _, state := range []string{"locked", "physical locked", "edited"} {
+		t.Run(state, func(t *testing.T) {
+			account := fullscreenAccount(t, `{"tui":"fullscreen"}`, canaryRegistry)
+			path := filepath.Join(account.ConfigDir, ".claude.json")
+			physical := path
+			if state == "physical locked" {
+				physical = filepath.Join(t.TempDir(), "registry.json")
+				if err := os.Rename(path, physical); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(physical, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			installer, _ := fullscreenEngine(t, true, account)
+			want := canaryRegistry
+			if state != "edited" {
+				if err := os.Mkdir(physical+".lock", 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				want = strings.Replace(canaryRegistry, `"numStartups": 12`, `"numStartups": 13`, 1)
+				installer.options.Stdout = &storeMutationWriter{match: "change  clear Claude", mutate: func() {
+					if err := os.WriteFile(path, []byte(want), 0o640); err != nil {
+						t.Fatal(err)
+					}
+				}}
+			}
+			if err := installer.clearFullscreenAutoDisable(); err == nil {
+				t.Error("clear accepted a locked or stale registry")
+			}
+			if got := readRegistry(t, account); got != want {
+				t.Fatalf("native writer's registry lost: %s", got)
+			}
+		})
+	}
+}

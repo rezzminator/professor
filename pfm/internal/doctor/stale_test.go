@@ -99,7 +99,7 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(home, ".professor", "engines", "deep-rr"), link); err != nil {
+	if err := os.Symlink(filepath.Join(home, ".professor", "workflows", "deep-rr"), link); err != nil {
 		t.Fatalf("link %s: %v", link, err)
 	}
 	seeded[link] = "dead-registry-link"

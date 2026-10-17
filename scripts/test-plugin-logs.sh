@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
+umask 002
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SHTEST_TAG=plugin-logs-test
 source "$ROOT/scripts/shtest.sh"
 shtest_isolate_host
+mkdir -m 700 "$T/tmp"
+export TMPDIR="$T/tmp"
 # The mounted worktree's .git points at a host path. Even git config --file
 # discovers it from cwd; fixture commands must start outside that repository.
 cd "$T" || exit 2
@@ -43,14 +46,97 @@ row tool-visibility-controller info started 2026-10-14T15:19:31.123Z started > "
 run_sut report --dir "$T/logs"
 expect 'report groups event and where with exact count, first/last and last message' '[ "$RC" = 0 ] && grep -Fxq "store-failed · internal/hookentry/callmeter.go#store · 2 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:21:31.123Z · still locked" "$T/out"'
 expect 'report fixed section ordering and exact info count' '[ "$(grep -E "^(ERRORS|WARNINGS|INFO)$" "$T/out" | paste -sd, -)" = ERRORS,WARNINGS,INFO ] && grep -Fxq "callmeter 1" "$T/out"'
-expect 'wrote nothing lists roster plugins with zero actual rows' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
-expect 'header states real span, no rotate and folder' 'grep -Fq "$T/logs" "$T/out" && grep -Fq "2026-10-14T15:19:31.123Z .. 2026-10-14T15:22:31.123Z" "$T/out" && grep -Fq "last rotate: none" "$T/out"'
+expect 'no valid rows lists roster plugins with zero actual rows' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'header states real span, no rotate and folder' 'grep -Fq "$T/logs" "$T/out" && grep -Fq "2026-10-14T15:19:31.123Z .. 2026-10-14T15:22:31.123Z" "$T/out" && grep -Fq "last rotate: none" "$T/out" && grep -Fq "contract-skipped: 0" "$T/out"'
+# Observe the real allocation without inventing a test-only production knob.
+mkdir -p "$T/scratch-bin" "$T/temp-root" "$T/.fixture-project"
+cp "$T/root/.gitmodules" "$T/.fixture-project/.gitmodules"
+REAL_MKTEMP=$(command -v mktemp)
+cat > "$T/scratch-bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+made=$("$REAL_MKTEMP" "$@") || exit $?
+printf '%s\n' "$made" >> "$SCRATCH_RECORD"
+printf '%s\n' "$made"
+EOF
+chmod +x "$T/scratch-bin/mktemp"
+RC=0
+TMPDIR="$T/temp-root" PATH="$T/scratch-bin:$PATH" REAL_MKTEMP="$REAL_MKTEMP" SCRATCH_RECORD="$T/scratch-record" \
+  bash "$SUT" report --dir "$T/logs" --root "$T/.fixture-project" > "$T/out" 2> "$T/err" || RC=$?
+allocated=$(cat "$T/scratch-record")
+expect 'scratch is project-scoped and cleaned after report' '[ "$RC" = 0 ] && [[ "$allocated" == "$T/temp-root/fixture-project/plugin-logs/run."* ]] && [ -d "${allocated%/*}" ] && [ ! -e "$allocated" ] && grep -Fxq "callmeter 1" "$T/out"'
+# Relative roots must retain the physical project's scratch scope.
+for relative in . ..; do
+  RC=0
+  : > "$T/scratch-record"
+  if [ "$relative" = . ]; then here="$T/root"; else mkdir -p "$T/root/child"; here="$T/root/child"; fi
+  (cd "$here" && TMPDIR="$T/temp-root" PATH="$T/scratch-bin:$PATH" REAL_MKTEMP="$REAL_MKTEMP" SCRATCH_RECORD="$T/scratch-record" bash "$SUT" report --dir "$T/logs" --root "$relative") > "$T/out" 2> "$T/err" || RC=$?
+  allocated=$(cat "$T/scratch-record")
+  expect "relative root $relative resolves the project scratch name" '[ "$RC" = 0 ] && [[ "$allocated" == "$T/temp-root/root/plugin-logs/run."* ]]'
+done
+# Other tools create the user's project/purpose scratch dirs under umask 002.
+mkdir -p "$T/mode775/root/plugin-logs" "$T/empty-logs"
+chmod 775 "$T/mode775/root" "$T/mode775/root/plugin-logs"
+for operation in report rotate; do
+  TMPDIR="$T/mode775" run_sut "$operation" --dir "$T/empty-logs"
+  expect "$operation accepts user-owned mode 775 scratch ancestry" '[ "$RC" = 0 ]'
+done
+# The losing mkdir must validate and accept a concurrently created directory.
+REAL_MKDIR=$(command -v mkdir)
+mkdir -p "$T/mkdir-bin" "$T/race-scratch-victim"
+cat > "$T/mkdir-bin/mkdir" <<'SH'
+#!/usr/bin/env bash
+if [ "${*: -1}" = "$RACE_PARENT" ] && [ ! -e "$RACE_PARENT" ] && [ ! -L "$RACE_PARENT" ]; then
+  case "$RACE_KIND" in
+    trusted) "$REAL_MKDIR" -m 700 -- "$RACE_PARENT" || exit $? ;;
+    writable) "$REAL_MKDIR" -m 777 -- "$RACE_PARENT" || exit $? ;;
+    symlink) ln -s "$RACE_VICTIM" "$RACE_PARENT" || exit $? ;;
+  esac
+  echo 'mkdir: concurrent creator won' >&2
+  exit 1
+fi
+exec "$REAL_MKDIR" "$@"
+SH
+chmod +x "$T/mkdir-bin/mkdir"
+for phase in project purpose; do
+  for kind in trusted writable symlink; do
+    base="$T/create-race-$phase-$kind"
+    mkdir -p "$base"
+    parent="$base/root"
+    if [ "$phase" = purpose ]; then mkdir "$parent"; parent="$parent/plugin-logs"; fi
+    TMPDIR="$base" PATH="$T/mkdir-bin:$PATH" REAL_MKDIR="$REAL_MKDIR" RACE_PARENT="$parent" RACE_KIND="$kind" RACE_VICTIM="$T/race-scratch-victim" run_sut report --dir "$T/logs"
+    if [ "$kind" = trusted ]; then
+      expect "accept concurrent $phase scratch creator" '[ "$RC" = 0 ]'
+    else
+      expect "reject concurrent $phase $kind scratch replacement" '[ "$RC" = 4 ] && grep -Fq "untrusted scratch folder:" "$T/out"'
+    fi
+  done
+done
+# Pre-existing scratch ancestry is a trust boundary, including when run as root.
+for hostile in project-symlink purpose-symlink project-writable purpose-writable; do
+  base="$T/hostile-$hostile"
+  mkdir -p "$base" "$T/scratch-victim"
+  case "$hostile" in
+    project-symlink) ln -s "$T/scratch-victim" "$base/root" ;;
+    purpose-symlink) mkdir "$base/root"; ln -s "$T/scratch-victim" "$base/root/plugin-logs" ;;
+    project-writable) mkdir -m 777 "$base/root" ;;
+    purpose-writable) mkdir "$base/root"; mkdir -m 777 "$base/root/plugin-logs" ;;
+  esac
+  TMPDIR="$base" run_sut report --dir "$T/logs"
+  expect "reject $hostile scratch ancestry" '[ "$RC" = 4 ] && grep -Fq "untrusted scratch folder:" "$T/out"'
+done
+expect 'untrusted scratch symlinks never allocate in the victim' '[ -z "$(find "$T/scratch-victim" -mindepth 1 -print -quit)" ]'
+printf blocked > "$T/blocked-temp"
+TMPDIR="$T/blocked-temp" run_sut report --dir "$T/logs"
+expect 'scratch parent creation failure is visible' '[ "$RC" = 4 ] && grep -Fq "cannot create scratch folder: $T/blocked-temp/root/plugin-logs" "$T/out"'
 printf '\n{bad json}\n' > "$T/logs/buddy/warnings.jsonl"
+for filter in '.level="WARN"' '.extra=true' '.ts="not-a-date"'; do
+  row buddy warning degraded 2026-10-14T15:20:31.123Z invalid | jq -c "$filter" >> "$T/logs/buddy/warnings.jsonl"
+done
 run_sut report --dir "$T/logs"
-expect 'malformed rows leave the roster plugin without valid rows' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'contract-skipped count distinguishes malformed input from silence' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out" && grep -Fq "contract-skipped: 5" "$T/out"'
 row buddy warning degraded 2026-10-14T15:20:31.123Z fallback >> "$T/logs/buddy/warnings.jsonl"
 run_sut report --dir "$T/logs"
-expect 'a valid row after malformed rows contributes to grouping and roster activity' '[ "$RC" = 0 ] && grep -Fxq "degraded · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · fallback" "$T/out" && grep -Fxq "wrote nothing: effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'a valid row after malformed rows contributes to grouping and roster activity' '[ "$RC" = 0 ] && grep -Fxq "degraded · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · fallback" "$T/out" && grep -Fxq "no valid rows: effort-live-control, engine-sync, gpt-gateway" "$T/out"'
 row callmeter warning capped 2026-10-14T15:23:31.123Z capped > "$T/logs/callmeter/warnings.jsonl.1"
 run_sut report --dir "$T/logs"
 expect 'report includes capped .1 rows' 'grep -Fq "capped · internal/hookentry/callmeter.go#store · 1" "$T/out"'
@@ -72,7 +158,7 @@ expect 'archive traversal is usage failure' '[ "$RC" = 2 ] && grep -q date "$T/e
 run_sut rotate --dir "$T/logs" --today 2026-02-30
 expect 'impossible date is usage failure' '[ "$RC" = 2 ] && grep -q date "$T/err"'
 # Exercise permission denial as nobody even though the fence itself is root.
-mkdir -p "$T/denied"; chmod 500 "$T/denied"
+mkdir -p "$T/denied"; chmod 000 "$T/denied"
 if [ "$(id -u)" != 0 ]; then
   run_sut report --dir "$T/denied"
   expect 'unreadable folder exits 4' '[ "$RC" = 4 ] && grep -q "folder unreadable:" "$T/out"'
@@ -114,12 +200,15 @@ git -C "$T/ignore" init -q
 if git -C "$T/ignore" check-ignore -q --no-index plugins/tmp/logs/x/errors.jsonl; then ok 'plugins/tmp logs are ignored'; else bad 'plugins/tmp logs are ignored'; fi
 mkdir -p "$T/report/callmeter"
 run_sut report --dir "$T/report" --archive 2026-10-01
-expect 'selected archive with no rows lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+expect 'missing selected archive is named rather than reported as empty' '[ "$RC" = 0 ] && grep -Fxq "no archive 2026-10-01" "$T/out" && grep -Fxq "no valid rows: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+mkdir -p "$T/report/callmeter/archive/2026-10-01"
+run_sut report --dir "$T/report" --archive 2026-10-01
+expect 'existing empty archive has a distinct visible state' '[ "$RC" = 0 ] && grep -Fxq "archive: 2026-10-01" "$T/out" && grep -Fq "span: none" "$T/out"'
 mkdir -p "$T/bin"; REAL_JQ=$(command -v jq)
 printf '%140000s\n' x > "$T/report/callmeter/errors.jsonl"
 row callmeter error store-failed 2026-10-14T15:20:31.123Z recovered >> "$T/report/callmeter/errors.jsonl"
 run_sut report --dir "$T/report"
-expect 'valid row after oversized input is grouped exactly once' '[ "$RC" = 0 ] && grep -Fxq "store-failed · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · recovered" "$T/out"'
+expect 'valid row after oversized input is grouped exactly once' '[ "$RC" = 0 ] && grep -Fxq "store-failed · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · recovered" "$T/out" && grep -Fq "contract-skipped: 1" "$T/out"'
 printf '#!/usr/bin/env bash\nif [ "${1:-}" = -cen ]; then echo "injected jq operational failure" >&2; exit 3; fi\nexec %q "$@"\n' "$REAL_JQ" > "$T/bin/jq"; chmod 700 "$T/bin/jq"
 row callmeter error store-failed 2026-10-14T15:20:31.123Z broken > "$T/report/callmeter/errors.jsonl"
 PATH="$T/bin:$PATH" run_sut report --dir "$T/report"
@@ -143,11 +232,40 @@ mkdir -p "$T/empty-rotation"
 run_sut rotate --dir "$T/empty-rotation" --today 2026-10-16
 expect 'empty rotation succeeds' '[ "$RC" = 0 ] && grep -Fxq "rotated: $T/empty-rotation · 2026-10-16" "$T/out"'
 run_sut report --dir "$T/empty-rotation"
-expect 'empty live period lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+expect 'empty live period lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
 for plugin in buddy callmeter effort-live-control engine-sync gpt-gateway tool-visibility-controller; do
   mkdir -p "$T/empty-rotation/$plugin"
   row "$plugin" info started 2026-10-14T15:20:31.123Z started > "$T/empty-rotation/$plugin/info.jsonl"
 done
 run_sut report --dir "$T/empty-rotation"
-expect 'a period where every roster plugin wrote prints none' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: none" "$T/out"'
+expect 'a period where every roster plugin wrote prints none' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: none" "$T/out"'
+# A writer's cap rename can happen after find or immediately before our mv.
+mkdir -p "$T/race-bin"
+REAL_MV=$(command -v mv); REAL_FIND=$(command -v find)
+cat > "$T/race-bin/mv" <<'EOF'
+#!/usr/bin/env bash
+if [ "$RACE_PHASE" = move ] && [ "${2:-}" = "$RACE_SOURCE" ]; then
+  "$REAL_MV" -- "$RACE_SOURCE" "$RACE_SOURCE.1" || exit $?
+fi
+exec "$REAL_MV" "$@"
+EOF
+cat > "$T/race-bin/find" <<'EOF'
+#!/usr/bin/env bash
+"$REAL_FIND" "$@" || exit $?
+if [ "$RACE_PHASE" = list ] && [ "${1:-}" = "${RACE_SOURCE%/*}" ]; then
+  "$REAL_MV" -- "$RACE_SOURCE" "$RACE_SOURCE.1" || exit $?
+fi
+EOF
+chmod +x "$T/race-bin/mv" "$T/race-bin/find"
+for phase in move list; do
+  race="$T/race-$phase"; mkdir -p "$race/callmeter"
+  row callmeter error store-failed 2026-10-14T15:20:31.123Z raced > "$race/callmeter/errors.jsonl"
+  row callmeter warning degraded 2026-10-14T15:20:31.123Z preserved > "$race/callmeter/warnings.jsonl"
+  PATH="$T/race-bin:$PATH" RACE_PHASE="$phase" RACE_SOURCE="$race/callmeter/errors.jsonl" REAL_MV="$REAL_MV" REAL_FIND="$REAL_FIND" run_sut rotate --dir "$race" --today 2026-10-16
+  expect "rotate names writer rename during $phase and continues other files" '[ "$RC" = 0 ] && grep -Fxq "skipped vanished level file: $race/callmeter/errors.jsonl" "$T/out" && grep -Fq preserved "$race/callmeter/archive/2026-10-16/warnings.jsonl" && grep -Fq raced "$race/callmeter/errors.jsonl.1"'
+done
+# A report-stage failure happens after read_rows has opened a real level file.
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = -rs ]; then echo "injected report jq failure" >&2; exit 3; fi\nexec %q "$@"\n' "$REAL_JQ" > "$T/bin/jq"
+PATH="$T/bin:$PATH" run_sut report --dir "$T/report"
+expect 'report-stage errors remain visible on caller stderr' '[ "$RC" = 3 ] && grep -Fxq "injected report jq failure" "$T/err"'
 shtest_end

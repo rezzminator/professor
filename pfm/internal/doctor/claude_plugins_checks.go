@@ -199,7 +199,7 @@ func printClaudePluginsDoctor(
 		}
 	}
 	gaps = append(gaps, cannotInstall...)
-	if len(gaps) == 0 && recordErr == nil && marketplaceErr == nil && cacheErr == nil {
+	if len(gaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil && cacheErr == nil {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return
 	}

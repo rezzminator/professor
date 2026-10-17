@@ -8,7 +8,7 @@ unset:
 pins:
   '(intro)': sha256:8b70b9c6cdc3f271ae1434243b733e4a2a50e9da6226f7b20c99a13305e023aa
   Phase 0 — Read the change and cut threads (≤10 calls): sha256:c8e51ae9d7466b83fe8eec38e024a28899f0e1ead4dffa3390af12122f9a2de3
-  Phase 1 — Dispatch, then hunt: sha256:1dc7a1cef204e2c1a76e231cc0444125d9bf5db7ba81a6a790d88d1cff05b4dd
+  Phase 1 — Dispatch, then hunt: sha256:92436474d8c1ac647617d60a56ef7cb16add478f839de6fff809510436cbdf9c
   Phase 2 — Judge (≤25 calls): sha256:297a82b7c22dc07dfeedb4a2771d4237613a0c10005172eafe17964f00c69c85
   Report — `SANDBOX/review.md`: sha256:be103ff040e551639ffd29837cde0a2de7e35b54d7d403bdad465d48712b755c
 retitle:

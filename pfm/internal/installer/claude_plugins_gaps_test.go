@@ -146,7 +146,8 @@ func TestEnsureClaudePluginsReleaseRetiresTheProfessorCopy(t *testing.T) {
 	if enabled["engine-sync@professor"] != false || enabled["other@market"] != true {
 		t.Fatalf("enabledPlugins=%v, want engine-sync@professor false and other@market kept\n%s", enabled, out.String())
 	}
-	if line := "disable engine-sync@professor in " + settings + ": engine-sync@engine-sync replaces it"; !strings.Contains(out.String(), line) {
+	line := "disable engine-sync@professor in " + settings + ": engine-sync@engine-sync replaces it"
+	if !strings.Contains(out.String(), line) {
 		t.Fatalf("no %q line:\n%s", line, out.String())
 	}
 }

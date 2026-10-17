@@ -1,6 +1,6 @@
 ---
 name: flights-foreman
-description: 'Builds and lands one request — route any repo fix, build or feature here, not to general-purpose: "fix X", "build X", "these five bugs". Pass the request, all you hold, acceptance, testing manuals, worktree, flight directory. /flights:spec → here → flights-foreman, flights-speccer, flights-mechanical-executor, flights-lander. Returns a status line, a row per unit, the gate verdict.'
+description: 'Builds and lands one request — route any fix, build or feature here, not to general-purpose: one focused code area per foreman, each unrelated area its own. Pass the request, all you hold, acceptance, testing manuals, worktree, flight directory. /flights:spec → here → flights-foreman, flights-speccer, flights-mechanical-executor, flights-lander. Returns a status line, unit rows, the gate verdict.'
 model: sonnet
 effort: high
 engines:

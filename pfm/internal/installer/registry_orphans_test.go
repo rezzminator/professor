@@ -9,123 +9,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
-
-func TestInspectDeadRegistryLinks(t *testing.T) {
-	t.Parallel()
-	for _, test := range []struct {
-		name, registry, source                                  string
-		live, file, absent, broken, relative, sibling, rootFile bool
-		want                                                    int
-	}{
-		{name: "dead command", registry: "commands", source: "repo", want: 1},
-		{name: "nested managed command", registry: "commands/legacy/group", source: "managed", want: 1},
-		{name: "retired skill", registry: "skills", source: "repo", want: 1},
-		{name: "dead agent", registry: "agents", source: "generated", want: 1},
-		{name: "live pfm link", registry: "commands", source: "repo", live: true},
-		{name: "foreign link", registry: "commands", source: "foreign"},
-		{name: "real file", registry: "commands", file: true},
-		{name: "agents skills", registry: "external", source: "managed", want: 1},
-		{name: "absent root", absent: true},
-		{name: "unreadable registry", broken: true},
-		{name: "registry file", registry: "commands", broken: true, rootFile: true},
-		{name: "relative target", registry: "commands", source: "repo", relative: true, want: 1},
-		{name: "root prefix sibling", registry: "skills", source: "repo", sibling: true},
-		{name: "target stat error", registry: "commands", source: "repo", broken: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			home := t.TempDir()
-			store, repo := ClaudeStore(home), filepath.Join(home, ".professor")
-			managed := managedRootForHome(home)
-			var link, target string
-			switch {
-			case test.rootFile:
-				writeFixture(t, filepath.Join(store, test.registry), "not a directory")
-			case test.broken && test.registry == "":
-				writeFixture(t, store, "not a directory")
-			case !test.absent:
-				root := filepath.Join(store, test.registry)
-				if test.registry == "external" {
-					root = filepath.Join(home, ".agents", "skills")
-				}
-				link = filepath.Join(root, "old")
-				switch test.source {
-				case "repo":
-					target = filepath.Join(repo, "workflows", "deep-rr")
-				case "managed":
-					target = filepath.Join(managed, "legacy", "group", "ls.command.md")
-				case "generated":
-					target = filepath.Join(paths.GeneratedClaudeAgentsDir(home), "old.md")
-				default:
-					target = filepath.Join(home, "foreign", "old")
-				}
-				if test.sibling {
-					target = filepath.Join(repo+"-foreign", "old")
-				}
-				if test.live {
-					writeFixture(t, target, "live")
-				}
-				if test.broken {
-					writeFixture(t, filepath.Dir(target), "not a directory")
-				}
-				if test.file {
-					writeFixture(t, link, "operator file")
-				} else {
-					if err := os.MkdirAll(root, 0o700); err != nil {
-						t.Fatal(err)
-					}
-					wire := target
-					if test.relative {
-						var err error
-						wire, err = filepath.Rel(root, target)
-						if err != nil {
-							t.Fatal(err)
-						}
-					}
-					if err := os.Symlink(wire, link); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			got, err := InspectDeadRegistryLinks(home, store, []string{repo})
-			if test.broken {
-				path := filepath.Join(store, "agents")
-				if test.rootFile {
-					path = filepath.Join(store, test.registry)
-				} else if target != "" {
-					path = target
-				}
-				if err == nil || !strings.Contains(err.Error(), path) {
-					t.Fatalf("error=%v, want error naming %s", err, path)
-				}
-				installer := &engine{options: Options{Home: home, ConfigDir: store}}
-				if stepErr := installer.retireDeadRegistryLinks(); stepErr == nil ||
-					!strings.Contains(stepErr.Error(), path) {
-					t.Fatalf("install retirement error=%v, want %s", stepErr, path)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(got) != test.want {
-				t.Fatalf("dead links=%+v, want %d", got, test.want)
-			}
-			if test.want == 1 && !reflect.DeepEqual(got, []DeadLink{{Path: link, Target: target}}) {
-				t.Fatalf("dead links=%+v, want %s -> %s", got, link, target)
-			}
-		})
-	}
-}
 
 func TestRetireDeadRegistryLinks(t *testing.T) {
 	t.Parallel()
@@ -146,7 +36,7 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 				if keep {
 					writeFixture(t, filepath.Join(group, "operator.md"), "keep")
 				}
-				live := filepath.Join(repo, "live.md")
+				live := filepath.Join(repo, "templates", "global", "commands", "live.md")
 				writeFixture(t, live, "live")
 				assertRoot := filepath.Join(store, "commands")
 				if err := os.Symlink(live, filepath.Join(assertRoot, "live.md")); err != nil {
@@ -192,54 +82,6 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 	}
 }
 
-func TestRegistryDeadLinkDoctorRows(t *testing.T) {
-	t.Parallel()
-	for _, broken := range []bool{false, true} {
-		t.Run(fmt.Sprintf("broken=%t", broken), func(t *testing.T) {
-			home := t.TempDir()
-			store := ClaudeStore(home)
-			link := filepath.Join(store, "commands", "old.md")
-			target := filepath.Join(home, ".professor", "gone.md")
-			if broken {
-				writeFixture(t, store, "not a directory")
-			} else {
-				if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(target, link); err != nil {
-					t.Fatal(err)
-				}
-			}
-			var output bytes.Buffer
-			warnings, failures := ReportGlobalRegistries(
-				&output,
-				home,
-				true,
-				&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
-				nil,
-			)
-			var rows []string
-			for _, line := range strings.Split(output.String(), "\n") {
-				if strings.HasPrefix(line, "doctor: registry ") {
-					rows = append(rows, line)
-				}
-			}
-			if broken {
-				if failures != 1 || len(rows) != 1 ||
-					!strings.HasPrefix(rows[0], "doctor: registry dead-link check failed: ") ||
-					!strings.Contains(rows[0], filepath.Join(store, "agents")) {
-					t.Fatalf("failures=%d rows=%q", failures, rows)
-				}
-			} else {
-				want := "doctor: registry dead link " + link + " -> " + target + " — run pfm install --yes"
-				if warnings != 1 || failures != 0 || !reflect.DeepEqual(rows, []string{want}) {
-					t.Fatalf("warnings=%d failures=%d rows=%q, want %q", warnings, failures, rows, want)
-				}
-			}
-		})
-	}
-}
-
 func TestRegistryDeadLinksUninstall(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -261,11 +103,47 @@ func TestRegistryDeadLinksUninstall(t *testing.T) {
 	}
 }
 
+// TestRegistryOwnershipUninstall: an uninstall plans nothing, so every owned
+// link left in a registry goes — a live legacy-workflows link and one into the
+// retired store included — while a foreign link stays.
+func TestRegistryOwnershipUninstall(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	store := ClaudeStore(home)
+	clone := filepath.Join(home, ".professor")
+	live := filepath.Join(clone, "workflows", "left.md")
+	writeFixture(t, live, "exists")
+	retiredStore := filepath.Join(RetiredGeneratedStores(home)[1], "role.md")
+	writeFixture(t, retiredStore, "rendered")
+	foreign := filepath.Join(home, "foreign", "mine.md")
+	writeFixture(t, foreign, "mine")
+	owned := []string{
+		filepath.Join(store, "commands", "left.md"), filepath.Join(store, "agents", "role.md"),
+	}
+	symlinkFixture(t, live, owned[0])
+	symlinkFixture(t, retiredStore, owned[1])
+	mine := filepath.Join(store, "commands", "mine.md")
+	symlinkFixture(t, foreign, mine)
+	if _, err := Run(
+		context.Background(),
+		Options{Mode: ModeUninstall, Home: home, Runner: &fakeRunner{}, MCPConfigPath: testConfigPath(t)},
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range owned {
+		if _, err := os.Lstat(link); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("uninstall left the owned link %s: %v", link, err)
+		}
+	}
+	assertLink(t, mine, foreign)
+}
+
 func TestRegistryDeadLinkResilience(t *testing.T) {
-	for _, scenario := range []string{"unusable marker", "busy store", "lock error"} {
+	for _, scenario := range []string{"unusable marker", "busy store", "lock error", "unreadable skill sources"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
 			managed := managedRootForHome(home)
+			mode := ModeUninstall
 			link := filepath.Join(home, ".claude", "commands", "gone.md")
 			if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
 				t.Fatal(err)
@@ -278,8 +156,8 @@ func TestRegistryDeadLinkResilience(t *testing.T) {
 			case "unusable marker":
 				writeFixture(t, paths.SourceRepoPath(home), filepath.Join(home, "moved-away")+"\n")
 				_, markerErr := paths.ReadSourceRepoMarker(home)
-				want = "  skip    registry dead-link check skipped: " +
-					"read source repository marker for registry dead-link check: " + markerErr.Error() +
+				want = "  skip    registry-ownership check skipped: " +
+					"read source repository marker for registry-ownership check: " + markerErr.Error() +
 					" — rerun pfm install --yes from inside your Professor clone\n"
 			case "busy store":
 				if err := os.MkdirAll(managed, 0o700); err != nil {
@@ -297,7 +175,7 @@ func TestRegistryDeadLinkResilience(t *testing.T) {
 				if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 					t.Fatal(err)
 				}
-				want = "  skip    registry dead-link check skipped: another pfm install holds " +
+				want = "  skip    registry-ownership check skipped: another pfm install holds " +
 					skillStoreRoot(home) + "\n"
 			case "lock error":
 				if err := os.MkdirAll(filepath.Dir(managed), 0o700); err != nil {
@@ -307,13 +185,27 @@ func TestRegistryDeadLinkResilience(t *testing.T) {
 					t.Fatal(err)
 				}
 				_, openErr := os.Open(managed)
-				want = "  skip    registry dead-link check skipped: open skill store lock " +
+				want = "  skip    registry-ownership check skipped: open skill store lock " +
 					managed + ": " + openErr.Error() + "\n"
+			case "unreadable skill sources":
+				// An install with a malformed sources.json cannot tell a fetched skill's link
+				// from an orphan: it retires nothing, the live fetched link included.
+				mode = ModeApply
+				clone := filepath.Join(home, ".professor")
+				writeFixture(t, filepath.Join(clone, "templates", "global", "skills", "sources.json"), "{not json")
+				fetched := filepath.Join(managed, "skills", "fetched")
+				writeFixture(t, filepath.Join(fetched, "SKILL.md"), "fetched")
+				agentsLink := filepath.Join(home, ".agents", "skills", "fetched")
+				symlinkFixture(t, fetched, agentsLink)
+				t.Cleanup(func() { assertLink(t, agentsLink, fetched) })
+				_, _, sourcesErr := loadSkillSources(clone, "")
+				want = "  skip    registry-ownership check skipped: " + errPlanSkillSources.Error() + ": " +
+					sourcesErr.Error() + "\n"
 			}
 			var output bytes.Buffer
 			installer := &engine{
 				options: Options{
-					Mode:      ModeUninstall,
+					Mode:      mode,
 					Home:      home,
 					ConfigDir: filepath.Join(home, ".claude"),
 					Stdout:    &output,
@@ -363,7 +255,7 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 			home := t.TempDir()
 			store := ClaudeStore(home)
 			root := filepath.Join(home, ".agents", "skills")
-			target := filepath.Join(home, ".professor", "retired-skills")
+			target := filepath.Join(home, ".professor", "workflows", "retired-skills")
 			if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
 				t.Fatal(err)
 			}

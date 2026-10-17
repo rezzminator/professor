@@ -5,9 +5,12 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
@@ -25,7 +28,7 @@ func TestAccountGuardSerializesLaunchAndChecksProcessGeneration(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			if competing, err := AcquireAccountGuard(dir, false); !errors.Is(err, syscall.EWOULDBLOCK) {
+			if competing, err := acquireAccountGuardWithin(dir, false, 0); !errors.Is(err, syscall.EWOULDBLOCK) {
 				if competing != nil {
 					if closeErr := competing.Close(); closeErr != nil {
 						t.Error(closeErr)
@@ -151,5 +154,96 @@ func TestAccountGuardRecordUsesNativeProcessBirthAndReleasesOnFailure(t *testing
 	}()
 	if live, err := again.Active(NewProcFS("")); err != nil || len(live) != 0 {
 		t.Fatalf("failed launch cleanup=%v %v", live, err)
+	}
+}
+
+// A closed guard whose open file description a forked child still holds keeps
+// the flock; the next non-blocking acquire must outlast that window and not
+// report the account busy.
+func TestAcquireAccountGuardOutlastsAHeldFileDescription(t *testing.T) {
+	dir := t.TempDir()
+	first, err := AcquireAccountGuard(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := syscall.Dup(int(first.file.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	release := func() { once.Do(func() { _ = syscall.Close(held) }) }
+	defer release()
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	timer := time.AfterFunc(100*time.Millisecond, release)
+	defer timer.Stop()
+	second, err := AcquireAccountGuard(dir, false)
+	if err != nil {
+		t.Fatalf("acquire while a forked child held the description = %v", err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An account a live owner holds is still refused, after the grace window and
+// with the busy error install reports.
+func TestAcquireAccountGuardRefusesAnAccountHeldPastTheGrace(t *testing.T) {
+	dir := t.TempDir()
+	owner, err := AcquireAccountGuard(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := owner.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	started := time.Now()
+	competing, err := acquireAccountGuardWithin(dir, false, 60*time.Millisecond)
+	if competing != nil {
+		_ = competing.Close()
+	}
+	if !errors.Is(err, syscall.EWOULDBLOCK) {
+		t.Fatalf("competing guard = %v, want EWOULDBLOCK", err)
+	}
+	if waited := time.Since(started); waited < 60*time.Millisecond {
+		t.Fatalf("refused after %s, before the 60ms grace", waited)
+	}
+}
+
+// Acquire-and-close loops running beside goroutines that start processes never
+// see a busy account: a fork between open and exec must not fail the guard.
+func TestAcquireAccountGuardSurvivesConcurrentProcessStarts(t *testing.T) {
+	dir := t.TempDir()
+	stop := make(chan struct{})
+	var starters sync.WaitGroup
+	for range 4 {
+		starters.Add(1)
+		go func() {
+			defer starters.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = exec.Command("true").Run()
+				}
+			}
+		}()
+	}
+	defer func() {
+		close(stop)
+		starters.Wait()
+	}()
+	for attempt := range 400 {
+		guard, err := AcquireAccountGuard(dir, false)
+		if err != nil {
+			t.Fatalf("acquire %d beside process starts: %v", attempt, err)
+		}
+		if err := guard.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

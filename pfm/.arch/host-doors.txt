@@ -1,6 +1,7 @@
 cmd/pfm/mcp_serve_command.go 2
 internal/agentopen/agentopen.go 2
 internal/binwatch/binwatch.go 3
+internal/call/then.go 1
 internal/codexappendix/trust.go 1
 internal/costsink/arm.go 2
 internal/costsink/launch.go 1
@@ -12,7 +13,6 @@ internal/harvest/net.go 1
 internal/harvest/net_chrome_transport.go 3
 internal/harvest/search.go 1
 internal/hostfixture/fixtures_stale.go 1
-internal/inject/then.go 1
 internal/reap/runner.go 1
 internal/reap/tmux.go 2
 internal/spawn/service_scope_darwin.go 1

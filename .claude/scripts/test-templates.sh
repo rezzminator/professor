@@ -24,13 +24,12 @@ source "$ROOT/.claude/scripts/unit-path.sh"
 
 usage() { echo 'usage: test-templates.sh ALL | <test file>[::<test id>]...' >&2; exit 2; }
 
-# Three tests take the script under test as $1; infra/fence/checks.sh runs each once per path
-# (checks_templates_format_md, _dev_report, _codex_sync). One row per test file.
+# Two tests take the script under test as $1; infra/fence/checks.sh runs each once per path
+# (checks_templates_format_md, _dev_report). One row per test file.
 sut_rows() { # sut_rows <test file>: sets SUTS, returns 1 for any other file
   case "$1" in
     scripts/test-format-md.sh) SUTS=(templates/project/scripts/format-md.sh .claude/scripts/format-md.sh) ;;
     scripts/test-dev-report.sh) SUTS=(.claude/scripts/dev.sh) ;;
-    scripts/test-codex-sync.sh) SUTS=(templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh) ;;
     *) SUTS=(); return 1 ;;
   esac
 }
@@ -120,6 +119,6 @@ CMD+="; exit \"\$rc\""
 rc=0; run_logged iso run "$CMD" || rc=$?
 if [ "$rc" = 0 ]; then
   echo 'A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.'
-  echo "Green. When your work is done, run .claude/scripts/check-templates.sh <your task's files> once, then write your return."
+  echo "Green. When your work is done, run .claude/scripts/check-templates.sh <the files you changed> once, then write your return."
 fi
 exit "$rc"

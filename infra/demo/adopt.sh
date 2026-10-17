@@ -15,8 +15,7 @@
 # once and given a second settle before the verdict.
 #
 # The install is finished only when the Codex mirror the interview said yes to
-# is real: .claude/scripts/codex-sync.sh (the Stop hook's command) present,
-# .codex compiled, `pfm codex build` + `pfm codex check` passing, and no
+# is real: .codex compiled, `engine-sync codex build` + `engine-sync codex check` passing, and no
 # registered token left in CLAUDE.md, AGENTS.md, .claude or .codex. Only then
 # is the 'professor: install' commit written — the marker a re-run skips on.
 #
@@ -94,13 +93,13 @@ resume-*)
   echo "adopt: $CHAT died mid-interview — resuming it in place"
   pfm chat open "$CHAT" </dev/null >/dev/null
   sleep 10
-  pfm chat inject --allow-unsigned "$CHAT" "You were interrupted mid-interview. Continue from where your transcript stops and finish every remaining phase; end with one line: INSTALLED plus the count of files you changed." >/dev/null
+  pfm chat call --allow-unsigned "$CHAT" "You were interrupted mid-interview. Continue from where your transcript stops and finish every remaining phase; end with one line: INSTALLED plus the count of files you changed." >/dev/null
   watch_idle || exit 1
   ;;
 *)
   rc=0
   pfm chat new --name "$CHAT" --engine cc --account "$SEAT" --cwd "$DIR" --await --settle 60 --timeout 1500 \
-    "pfm init has scaffolded Professor into this repository ($NAME). Follow /worktree/docs/SETUP.md § Install interview end to end, Phase 1 through Phase 3. Use these answers and do not ask them again: project identity: '$PITCH'; character: keep Professor; roster: single project, this repo, language from its package manifest; tech stack: as the repo shows; test command: '$TEST_CMD'; Tier B opt-ins: none; Codex dual-runtime: yes (the deck shows the compile hooks: .codex mirror, codex-sync.sh on PostToolUse and Stop, every {CODEX_*} token filled); sacred ground: none beyond the defaults; ports: none. Treat 'go' as already typed. Fill every registered token from /worktree/docs/PLACEHOLDERS.md in the scaffolded files, write .professor/manifest.json, run the smoke test, and close Phase 3 with 'pfm doctor --project-updates' reporting 'clean' — pin every interview-deployed file, ignore every declined template, as SETUP.md Phase 3 says. Finish with one line: INSTALLED plus the count of files you changed." >/dev/null || rc=$?
+    "pfm init has scaffolded Professor into this repository ($NAME). Follow /worktree/docs/SETUP.md § Install interview end to end, Phase 1 through Phase 3. Use these answers and do not ask them again: project identity: '$PITCH'; character: keep Professor; roster: single project, this repo, language from its package manifest; tech stack: as the repo shows; test command: '$TEST_CMD'; Tier B opt-ins: none; Codex dual-runtime: yes (the deck shows the compile hooks: .codex mirror, the engine-sync plugin hooks on PostToolUse and Stop, every {CODEX_*} token filled); sacred ground: none beyond the defaults; ports: none. Treat 'go' as already typed. Fill every registered token from /worktree/docs/PLACEHOLDERS.md in the scaffolded files, write .professor/manifest.json, run the smoke test, and close Phase 3 with 'pfm doctor --project-updates' reporting 'clean' — pin every interview-deployed file, ignore every declined template, as SETUP.md Phase 3 says. Finish with one line: INSTALLED plus the count of files you changed." >/dev/null || rc=$?
   settled "$rc" "chat new --await --settle 60" || exit 1
   ;;
 esac
@@ -108,7 +107,7 @@ left="$(sweep)"
 if [ -n "$left" ]; then
   # One second round: the chat gets the exact files, as a reviewer would hand them over.
   echo "adopt: $(wc -l <<<"$left" | tr -d ' ') file(s) still carry a registered token — handing the list back to $CHAT once"
-  pfm chat inject --allow-unsigned "$CHAT" "These files still carry unfilled {TOKENS} from /worktree/docs/PLACEHOLDERS.md: $(tr '\n' ' ' <<<"$left"). Fill every one now, then reply with one line: TOKENS FILLED." >/dev/null
+  pfm chat call --allow-unsigned "$CHAT" "These files still carry unfilled {TOKENS} from /worktree/docs/PLACEHOLDERS.md: $(tr '\n' ' ' <<<"$left"). Fill every one now, then reply with one line: TOKENS FILLED." >/dev/null
   sleep 20
   watch_idle || exit 1
   left="$(sweep)"
@@ -116,14 +115,11 @@ fi
 n_left="$( [ -n "$left" ] && wc -l <<<"$left" | tr -d ' ' || echo 0)"
 echo "adopt: $NAME interview settled · TOKENS-LEFT: $n_left file(s) with an unfilled token${left:+:}"
 [ -z "$left" ] || { sed 's/^/adopt:   /' <<<"$left"; exit 1; }
-# The Codex mirror the interview said yes to — the Stop hook runs
-# .claude/scripts/codex-sync.sh sync, which runs pfm codex build + check; an
-# install whose hook script is missing fails on the chat's first turn end.
-[ -x .claude/scripts/codex-sync.sh ] || { echo "adopt: .claude/scripts/codex-sync.sh missing or not executable — the Stop hook names it; the Codex mirror was not installed" >&2; exit 1; }
-grep -q 'codex-sync.sh' .claude/settings.json || { echo "adopt: .claude/settings.json wires no codex-sync.sh hook — the Codex mirror was not installed" >&2; exit 1; }
+# The Codex mirror the interview said yes to — the engine-sync plugin's hooks rebuild it
+# at a chat's turn end; the smoke here is the build and check themselves.
 log=/tmp/adopt-codex.log
-if ! { pfm codex build . && pfm codex check .; } >"$log" 2>&1; then
-  echo "adopt: pfm codex build/check failed in $DIR — $log:" >&2; tail -20 "$log" >&2; exit 1
+if ! { engine-sync codex build . && engine-sync codex check .; } >"$log" 2>&1; then
+  echo "adopt: engine-sync codex build/check failed in $DIR — $log:" >&2; tail -20 "$log" >&2; exit 1
 fi
 echo "adopt: Codex mirror compiled — $(grep -E 'CODEX (BUILD|CHECK) PASS' "$log" | tr '\n' ' ')"
 add_rc=0; add_stderr="$(git add -A 2>&1)" || add_rc=$?

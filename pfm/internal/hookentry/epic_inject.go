@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/inject"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -38,7 +38,7 @@ var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) 
 	if identity.SocketPath == "" || target == "" {
 		return "", resolve.ErrNoTmux
 	}
-	return (inject.TmuxInjector{}).WindowName(ctx, identity.SocketPath, target)
+	return (pfmcall.TmuxCaller{}).WindowName(ctx, identity.SocketPath, target)
 }
 
 // EpicInject injects an epic manifest once per session and epic name.

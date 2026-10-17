@@ -8,10 +8,19 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
+// prependConsequence is what a missing prependPlugins costs the person.
+const prependConsequence = "Claude Code 2.1.299+ seats cc-plugin-sec-default and skips your plugin hooks"
+
 func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnings, failures int) {
 	dir := runtime.Paths.ManagedSettingsDir
 	prefs := runtime.Config.Claude
 	status := installer.InspectManagedCleanup(dir, prefs.RequireManagedCleanup, prefs.CleanupPeriodDays)
+	// alsoUnset names the second gap when the repair line fixes both.
+	alsoUnset := ""
+	if status.Prepend == installer.PrependAbsent {
+		alsoUnset = "; prependPlugins is unset too — " + prependConsequence
+	}
+	fix := installer.ManagedCleanupFix(dir, status.Path, status.Want)
 	switch status.State {
 	case installer.ManagedCleanupOff:
 		fmt.Fprintln(stdout, "managed-cleanup: check off by config")
@@ -20,9 +29,10 @@ func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnin
 	case installer.ManagedCleanupMissing:
 		fmt.Fprintf(
 			stdout,
-			"managed-cleanup: %s missing — transcripts older than 30 days are deleted by any Claude launch outside pfm; run: %s\n",
+			"managed-cleanup: %s missing — transcripts older than 30 days are deleted by any Claude launch outside pfm%s; run: %s\n",
 			status.Path,
-			installer.ManagedCleanupFix(dir, status.Path, prefs.CleanupPeriodDays),
+			alsoUnset,
+			fix,
 		)
 		warnings++
 	case installer.ManagedCleanupWrong:
@@ -42,13 +52,37 @@ func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnin
 				prefs.CleanupPeriodDays,
 			)
 		}
-		fmt.Fprintf(stdout, "; run: %s\n", installer.ManagedCleanupFix(dir, status.Path, prefs.CleanupPeriodDays))
+		fmt.Fprintf(stdout, "%s; run: %s\n", alsoUnset, fix)
+		warnings++
+	case installer.ManagedCleanupNoPrepend:
+		fmt.Fprintf(
+			stdout,
+			"managed-cleanup: %s has no prependPlugins — %s; run: %s\n",
+			status.Path,
+			prependConsequence,
+			fix,
+		)
 		warnings++
 	case installer.ManagedCleanupUnreadable:
 		fmt.Fprintf(stdout, "managed-cleanup: %s UNREADABLE error=%v\n", status.Path, status.Err)
 		failures++
 	case installer.ManagedCleanupOK:
 		fmt.Fprintf(stdout, "managed-cleanup: %s ok\n", status.Path)
+	}
+	switch status.Prepend {
+	case installer.PrependOther:
+		fmt.Fprintf(stdout, "managed-cleanup: prependPlugins is set by %s — pfm leaves it\n", status.PrependSource)
+	case installer.PrependInvalid:
+		fmt.Fprintf(
+			stdout,
+			"managed-cleanup: %s prependPlugins is not a list of plugin ids, which Claude Code ignores — %s; set it to [] or a list of plugin ids\n",
+			status.PrependSource,
+			prependConsequence,
+		)
+		warnings++
+	case installer.PrependUnknown:
+		fmt.Fprintf(stdout, "managed-cleanup: %s UNREADABLE error=%v\n", status.PrependSource, status.PrependErr)
+		failures++
 	}
 	return warnings, failures
 }

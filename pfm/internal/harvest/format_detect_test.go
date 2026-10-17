@@ -236,7 +236,7 @@ func TestFormatNamedRestCarriesTheDetectedType(t *testing.T) {
 			got := page.Fetch(context.Background(), "https://203.0.113.10/"+tc.name)
 			if got.Content != "" || !strings.Contains(got.Error, tc.label) || !strings.Contains(got.Error, "download") {
 				t.Errorf(
-					"harvester_read (urls): want a named failure naming %q and `harvester_download_file`, got Error=%q Content=%q",
+					"read (urls): want a named failure naming %q and `download_file`, got Error=%q Content=%q",
 					tc.label,
 					got.Error,
 					got.Content,
@@ -245,7 +245,7 @@ func TestFormatNamedRestCarriesTheDetectedType(t *testing.T) {
 			got = local.FetchPublic(context.Background(), filepath.Join(root, tc.name), FetchOptions{Refresh: true})
 			if got.Content != "" || !strings.Contains(got.Error, tc.label) || strings.Contains(got.Error, root) {
 				t.Errorf(
-					"harvester_read (files): want a named failure naming %q, got Error=%q Content=%q",
+					"read (files): want a named failure naming %q, got Error=%q Content=%q",
 					tc.label,
 					got.Error,
 					got.Content,
@@ -379,7 +379,7 @@ func TestFormatOfficeDocumentsReachTheConverterDispatch(t *testing.T) {
 	for name, tc := range cases {
 		got := local.FetchPublic(context.Background(), filepath.Join(root, name), FetchOptions{Refresh: true})
 		if got.Error != "" || seen[name] != tc.kind || !strings.Contains(got.Content, "converted as "+tc.kind) {
-			t.Errorf("harvester_read (files) %s: want converter kind %q, got %q (Error=%q)",
+			t.Errorf("read (files) %s: want converter kind %q, got %q (Error=%q)",
 				name, tc.kind, seen[name], got.Error)
 		}
 		body := tc.body
@@ -397,7 +397,7 @@ func TestFormatOfficeDocumentsReachTheConverterDispatch(t *testing.T) {
 		got = page.Fetch(context.Background(), "https://203.0.113.10/"+name)
 		if got.Error != "" || seen[name] != tc.kind || !strings.Contains(got.Content, "converted as "+tc.kind) {
 			t.Errorf(
-				"harvester_read (urls) %s: want converter kind %q, got %q (Error=%q)",
+				"read (urls) %s: want converter kind %q, got %q (Error=%q)",
 				name,
 				tc.kind,
 				seen[name],

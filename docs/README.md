@@ -42,7 +42,7 @@ A complete `.claude/` infrastructure that turns Claude Code from "an AI that wri
 
 ```
 docs/                     ← you are here
-├── README.md, BLUEPRINT.md, ARCHITECTURE.md, SETUP.md, PLACEHOLDERS.md, RELEASE.md
+├── README.md, ARCHITECTURE.md, SETUP.md, PLACEHOLDERS.md, RELEASE.md
 └── references/
 
 templates/
@@ -59,8 +59,7 @@ Host fleet tooling has one source outside the template tree: the Go engine under
 
 ## Quick start
 
-1. **Read `BLUEPRINT.md`** — understand the three-tier framework and the five load-bearing walls.
-2. **Run install via Claude:**
+**Run install via Claude:**
 
 ```bash
 # Clone to any directory you like (use the latest release tag)

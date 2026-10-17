@@ -17,7 +17,7 @@ import (
 // daemon's own routes: the MCP transport under them reads the whole body into
 // memory, so an unbounded POST from any local process is a one-request
 // out-of-memory on the process that serves every chat on the machine. A body
-// inside the bound must still arrive whole — an inject prompt is legitimate
+// inside the bound must still arrive whole — an call prompt is legitimate
 // input and must not be clipped.
 func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 	t.Parallel()
@@ -28,12 +28,12 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 		readErr, readBytes = err, len(body)
 		writer.WriteHeader(http.StatusNoContent)
 	})
-	handler := NewDaemonHandler(DaemonOptions{Professor: mounted, Chat: mounted, Harvester: mounted})
+	handler := NewDaemonHandler(DaemonOptions{Chat: mounted, Harvester: mounted})
 
 	legitimate := bytes.Repeat([]byte("p"), maxDaemonBodyBytes/2)
 	handler.ServeHTTP(
 		httptest.NewRecorder(),
-		httptest.NewRequest(http.MethodPost, "/mcp/professor", bytes.NewReader(legitimate)),
+		httptest.NewRequest(http.MethodPost, "/mcp/chat-professor", bytes.NewReader(legitimate)),
 	)
 	if readErr != nil || readBytes != len(legitimate) {
 		t.Fatalf(
@@ -42,7 +42,7 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 		)
 	}
 
-	for _, route := range []string{"/mcp/professor", "/mcp/professor/chat", "/mcp/professor/harvester"} {
+	for _, route := range []string{"/mcp/chat-professor", "/mcp/harvester-professor"} {
 		t.Run(route, func(t *testing.T) {
 			readErr, readBytes = nil, 0
 			oversized := bytes.Repeat([]byte("x"), maxDaemonBodyBytes+4096)
@@ -73,11 +73,11 @@ func TestDaemonHandlerLeavesAnHTTPInRecordForEveryAnswerItGivesItself(t *testing
 	// obs.Test replaces the process logger, which other tests also use.
 	ctx, recorder := obs.Test(t)
 	handler := NewDaemonHandler(DaemonOptions{Version: "test"})
-	origin := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/professor", http.NoBody)
+	origin := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/chat-professor", http.NoBody)
 	origin.Header.Set("Origin", "https://attacker.example")
 	for _, request := range []*http.Request{
 		httptest.NewRequestWithContext(ctx, http.MethodGet, "/status", http.NoBody),
-		httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/professor/chat", http.NoBody),
+		httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/chat-professor", http.NoBody),
 		httptest.NewRequestWithContext(ctx, http.MethodGet, "/nothing-here", http.NoBody),
 		origin,
 	} {
@@ -125,8 +125,8 @@ func TestDaemonHandlerNamesADeclaredOversizedBody(t *testing.T) {
 	t.Parallel()
 	reached := false
 	mounted := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
-	handler := NewDaemonHandler(DaemonOptions{Professor: mounted, Chat: mounted, Harvester: mounted})
-	for _, route := range []string{"/mcp/professor", "/mcp/professor/chat", "/mcp/professor/harvester"} {
+	handler := NewDaemonHandler(DaemonOptions{Chat: mounted, Harvester: mounted})
+	for _, route := range []string{"/mcp/chat-professor", "/mcp/harvester-professor"} {
 		reached = false
 		recorder := httptest.NewRecorder()
 		oversized := bytes.Repeat([]byte("x"), maxDaemonBodyBytes+1)
@@ -141,5 +141,39 @@ func TestDaemonHandlerNamesADeclaredOversizedBody(t *testing.T) {
 		if reached {
 			t.Fatalf("%s handed a declared-oversized body to the mounted server", route)
 		}
+	}
+}
+
+func TestDaemonHandlerExplainsRetiredProfessorRoutes(t *testing.T) {
+	t.Parallel()
+	handler := NewDaemonHandler(DaemonOptions{Version: "test"})
+	for _, row := range []struct {
+		path   string
+		status int
+	}{
+		{"/mcp/professor", http.StatusGone},
+		{"/mcp/professor/", http.StatusGone},
+		{"/mcp/professor/chat", http.StatusGone},
+		{"/mcp/professor/harvester", http.StatusGone},
+		{"/mcp/professor/chat/nested", http.StatusGone},
+		{"/mcp/professor-other", http.StatusNotFound},
+	} {
+		t.Run(row.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, row.path, http.NoBody))
+			if response.Code != row.status {
+				t.Fatalf(
+					"%s answered HTTP %d: %q, want HTTP %d",
+					row.path, response.Code, response.Body.String(), row.status,
+				)
+			}
+			if row.status == http.StatusGone {
+				for _, want := range []string{"retired", "/mcp/chat-professor", "/mcp/harvester-professor", "restart", "chat"} {
+					if !strings.Contains(response.Body.String(), want) {
+						t.Errorf("%s cutover response = %q, want %q", row.path, response.Body.String(), want)
+					}
+				}
+			}
+		})
 	}
 }

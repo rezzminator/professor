@@ -65,9 +65,9 @@ func TestAskHoldsATwoWayConversation(t *testing.T) {
 	t.Cleanup(func() { askAwaitTimings = previous })
 	jail := newRunJail(t)
 	statedTestSender(t)
-	t.Setenv("CHAT_INJECT_POLL", "0.01")
-	t.Setenv("CHAT_INJECT_ENTER_SETTLE", "0.02")
-	t.Setenv("CHAT_INJECT_PROOF_SETTLE", "0.02")
+	t.Setenv("CHAT_CALL_POLL", "0.01")
+	t.Setenv("CHAT_CALL_ENTER_SETTLE", "0.02")
+	t.Setenv("CHAT_CALL_PROOF_SETTLE", "0.02")
 	defer jail.killSockets(t)
 
 	var stdout, stderr bytes.Buffer

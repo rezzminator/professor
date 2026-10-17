@@ -97,7 +97,7 @@ func isOwnRefusal(low string) bool {
 func FailureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
 	if kind == errorKindInvalid {
 		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
-			"check it for typos, or use `harvester_search_web` to find the source.",
+			"check it for typos, or use `search_web` to find the source.",
 			"check it for typos, or find the source via another URL.",
 		))
 	}
@@ -112,8 +112,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: the server did not respond in time (connection timed out). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `harvester_search_web` to find an alternative copy.",
-				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
+				"Retry later, or use `search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with search_literature or another URL.",
 			),
 		)
 	}
@@ -122,8 +122,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: DNS resolution failed (host not found). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `harvester_search_web` to find an alternative copy.",
-				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
+				"Retry later, or use `search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with search_literature or another URL.",
 			),
 		)
 	}
@@ -132,8 +132,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: the connection failed (refused or host unreachable). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `harvester_search_web` to find an alternative copy.",
-				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
+				"Retry later, or use `search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with search_literature or another URL.",
 			),
 		)
 	}
@@ -142,8 +142,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s",
 			item,
 			SearchHint(searchAvailable,
-				"Use `harvester_search_web` to find a mirror or alternative copy.",
-				"Find a mirror or alternative copy with harvester_search_literature or another URL.",
+				"Use `search_web` to find a mirror or alternative copy.",
+				"Find a mirror or alternative copy with search_literature or another URL.",
 			),
 		)
 	}
@@ -158,13 +158,13 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 		}
 		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(
 			searchAvailable,
-			"Use `harvester_search_web` to find an alternative copy, or `harvester_search_literature` if it is a scholarly title.",
-			"Use `harvester_search_literature` if it is a scholarly title, or find an alternative copy at another URL.",
+			"Use `search_web` to find an alternative copy, or `search_literature` if it is a scholarly title.",
+			"Use `search_literature` if it is a scholarly title, or find an alternative copy at another URL.",
 		))
 	}
 	return fmt.Sprintf("Could not download %s — %s", item, SearchHint(searchAvailable,
-		"try `harvester_search_web` for an alternative source.",
-		"try `harvester_search_literature` or another URL for an alternative source.",
+		"try `search_web` for an alternative source.",
+		"try `search_literature` or another URL for an alternative source.",
 	))
 }
 
@@ -324,33 +324,45 @@ func setUserAgent(client *http.Client, ua string) {
 // net_ua_transport.go — transport-internal, below the fetch gateway, like
 // net_chrome_transport.go. This file only builds and reads it.
 
-func validateFetchURL(raw string, strictDNS bool) error {
+// fetchURLHost is the host of raw that validateFetchURL resolves, once every
+// check that needs no DNS passed: "" for a public literal IP, which needs no
+// lookup. It is the startup check of a configured base URL (normalizeDOIMirrorURL),
+// which resolves nothing: the fetch itself is checked against DNS.
+func fetchURLHost(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("invalid URL: %s", raw)
+		return "", fmt.Errorf("invalid URL: %s", raw)
 	}
 	if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
-		return fmt.Errorf("unsupported URL scheme %q", u.Scheme)
+		return "", fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
 	if u.User != nil {
-		return errors.New("URL userinfo is not allowed")
+		return "", errors.New("URL userinfo is not allowed")
 	}
 	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 	if host == "" {
-		return errors.New("URL has no host")
+		return "", errors.New("URL has no host")
 	}
 	if ip := literalIP(host); ip != nil {
 		if privateIP(ip) {
-			return fmt.Errorf("refusing private/internal host %s", host)
+			return "", fmt.Errorf("refusing private/internal host %s", host)
 		}
-		return nil
+		return "", nil
 	}
 	if host == localhostName || strings.HasSuffix(host, ".localhost") || host == localLabel ||
 		strings.HasSuffix(host, ".local") ||
 		host == "metadata.google.internal" ||
 		strings.HasSuffix(host, ".internal") ||
 		strings.HasSuffix(host, ".ts.net") {
-		return fmt.Errorf("refusing private/internal host %s", host)
+		return "", fmt.Errorf("refusing private/internal host %s", host)
+	}
+	return host, nil
+}
+
+func validateFetchURL(raw string, strictDNS bool) error {
+	host, err := fetchURLHost(raw)
+	if err != nil || host == "" {
+		return err
 	}
 	// DNS rebind defense. Strict mode FAILS CLOSED: Chrome performs its own
 	// resolution with no pinning hop, so a resolver failure there must
@@ -763,38 +775,4 @@ func isChallenge(body []byte, status int) bool {
 		}
 	}
 	return false
-}
-
-// stripDefuddleEnvelope drops the YAML block defuddle.md prefixes
-// (`title:/source:/word_count:`) so it cannot masquerade as the artifact's own
-// frontmatter when the body is cached.
-func stripDefuddleEnvelope(text string) string {
-	if !strings.HasPrefix(text, "---") {
-		return text
-	}
-	if end := strings.Index(text[3:], "\n---"); end >= 0 {
-		return strings.TrimLeft(text[3+end+4:], "\r\n")
-	}
-	return text
-}
-
-func stripJinaEnvelope(text string) string {
-	if idx := strings.Index(text, "Markdown Content:"); idx >= 0 {
-		return strings.TrimLeft(text[idx+len("Markdown Content:"):], "\r\n")
-	}
-	lines := strings.Split(text, "\n")
-	i := 0
-	for i < len(lines) {
-		key, _, ok := strings.Cut(lines[i], ":")
-		if !ok {
-			break
-		}
-		switch key {
-		case "Title", "URL Source", "Published Time", "Markdown Content", "Warning":
-			i++
-		default:
-			return text
-		}
-	}
-	return strings.TrimLeft(strings.Join(lines[i:], "\n"), "\r\n")
 }

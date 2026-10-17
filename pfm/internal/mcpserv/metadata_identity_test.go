@@ -16,11 +16,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -109,14 +109,14 @@ func metadataIdentityService(t *testing.T) *Service {
 	jail := newStdioJail(t)
 	t.Setenv("HOME", jail.home)
 	t.Setenv("TMUX", "")
-	t.Setenv("CHAT_INJECT_SOCKET", "")
+	t.Setenv("CHAT_CALL_SOCKET", "")
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("TMUX_TMPDIR", jail.tmuxBase)
 	t.Setenv(resolve.ClaudeSessionEnv, "")
 	t.Setenv(resolve.CodexThreadEnv, "")
-	t.Setenv(inject.SenderSessionEnv, "")
-	t.Setenv(inject.SenderLabelEnv, "")
-	t.Setenv(inject.SenderIDEnv, "")
+	t.Setenv(pfmcall.SenderSessionEnv, "")
+	t.Setenv(pfmcall.SenderLabelEnv, "")
+	t.Setenv(pfmcall.SenderIDEnv, "")
 	t.Setenv(paths.EnvHome, jail.home)
 	t.Setenv(paths.EnvCacheDB, jail.database)
 	t.Setenv(paths.EnvSIDDir, jail.sid)
@@ -145,14 +145,14 @@ func metadataIdentityService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testInjector, err := inject.New(inject.Dependencies{
+	testCaller, err := pfmcall.New(pfmcall.Dependencies{
 		Resolver: metadataNamedResolver{
 			fallback: &service.backend.resolver,
 			name:     "Codex B",
 			socket:   filepath.Join(jail.tmuxDir, jail.busySocket),
 			pane:     "%0",
 		},
-		Tmux:           inject.TmuxInjector{},
+		Tmux:           pfmcall.TmuxCaller{},
 		Spawner:        metadataThenSpawner{},
 		ClaudeBinary:   "claude",
 		CodexBinary:    "codex",
@@ -163,13 +163,13 @@ func metadataIdentityService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.backend.injector = testInjector
+	service.backend.callEngine = testCaller
 	t.Cleanup(func() { _ = service.Close() })
 	return service
 }
 
 // TestMetadataIdentityNormalizesSelfBeforeTheChatVerbs pins that "self" on
-// chat_last and chat_status is the REQUEST's caller — resolved from the call's
+// last and status is the REQUEST's caller — resolved from the call's
 // metadata before the verb runs, while the literal self target remains intact.
 func TestMetadataIdentityNormalizesSelfBeforeTheChatVerbs(t *testing.T) {
 	service := metadataIdentityService(t)
@@ -183,19 +183,19 @@ func TestMetadataIdentityNormalizesSelfBeforeTheChatVerbs(t *testing.T) {
 	}
 	protocol := connectInMemory(t, service.Server())
 	meta := mcp.Meta{"threadId": "thread-a"}
-	last := callToolWithMeta[LastOutput](t, protocol.clientSession, "chat_last", meta, LastInput{Target: "self"})
+	last := callToolWithMeta[LastOutput](t, protocol.clientSession, "last", meta, LastInput{Target: "self"})
 	if last.Target != "self" || last.Text != "self answer" {
-		t.Fatalf("chat_last(self) = %+v", last)
+		t.Fatalf("last(self) = %+v", last)
 	}
 	status := callToolWithMeta[StatusOutput](
 		t,
 		protocol.clientSession,
-		"chat_status",
+		"status",
 		meta,
 		StatusInput{Target: "self"},
 	)
 	if status.Name != "Codex A" || status.SessionID != "thread-a" {
-		t.Fatalf("chat_status(self) = %+v", status)
+		t.Fatalf("status(self) = %+v", status)
 	}
 	if want := []chat.LastRequest{{Target: "self"}}; !reflect.DeepEqual(verbs.lasts, want) {
 		t.Fatalf("self Last calls = %+v, want %+v", verbs.lasts, want)
@@ -219,15 +219,15 @@ func TestChatNewDefaultsToRequestScopedCallerCWD(t *testing.T) {
 	}
 	protocol := connectInMemory(t, service.Server())
 	created := callToolWithMeta[ActionOutput](
-		t, protocol.clientSession, "chat_new", mcp.Meta{"threadId": "thread-a"},
+		t, protocol.clientSession, "new", mcp.Meta{"threadId": "thread-a"},
 		NewInput{Name: "child"},
 	)
 	if created.Status != "ok" || created.Code != 0 {
-		t.Fatalf("request-scoped chat_new = %+v", created)
+		t.Fatalf("request-scoped new = %+v", created)
 	}
 	want := [][]string{{"chat", "new", "--name", "child", "--engine", "cx", "--cwd", "/work/alpha"}}
 	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("chat_new dispatch calls = %q, want %q", calls, want)
+		t.Fatalf("new dispatch calls = %q, want %q", calls, want)
 	}
 }
 
@@ -237,10 +237,10 @@ func TestChatNewDefaultsToRequestScopedCallerCWD(t *testing.T) {
 // the package instead of exercising the waiter command.
 type metadataThenSpawner struct{}
 
-func (metadataThenSpawner) Spawn(context.Context, inject.SteerSpawn) error { return nil }
+func (metadataThenSpawner) Spawn(context.Context, pfmcall.SteerSpawn) error { return nil }
 
 type metadataNamedResolver struct {
-	fallback inject.Resolver
+	fallback pfmcall.Resolver
 	name     string
 	socket   string
 	pane     string
@@ -271,7 +271,7 @@ func (resolver metadataNamedResolver) Resolve(
 
 // TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats pins the real
 // protocol boundary for a long-lived MCP server: each call's _meta.threadId
-// selects its own live row for whoami, self capture, and self inject. The
+// selects its own live row for whoami, self capture, and self call. The
 // calls are repeated concurrently so a cached sender or cached caller
 // identity cannot leak seat A into seat B.
 func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
@@ -288,7 +288,7 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 
 	for index := range clients {
 		whoami := callToolWithMeta[WhoamiOutput](
-			t, clients[index].clientSession, "chat_whoami", metas[index], WhoamiInput{},
+			t, clients[index].clientSession, "whoami", metas[index], WhoamiInput{},
 		)
 		if whoami.Status != "ok" || whoami.ID != metas[index]["threadId"] ||
 			whoami.Session != wantSessions[index] || whoami.Engine != string(pfmengine.Codex) {
@@ -302,14 +302,14 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 		}
 
 		captured := callToolWithMeta[CaptureOutput](
-			t, clients[index].clientSession, "chat_capture", metas[index], CaptureInput{Target: "self"},
+			t, clients[index].clientSession, "capture", metas[index], CaptureInput{Target: "self"},
 		)
 		if captured.Status != "ok" || captured.Code != 0 || captured.SocketPath == "" {
 			t.Errorf("capture[%d] = %+v, want the caller's live seat", index, captured)
 		}
 
 		keyed := callToolWithMeta[KeysOutput](
-			t, clients[index].clientSession, "chat_keys", metas[index], KeysInput{
+			t, clients[index].clientSession, "keys", metas[index], KeysInput{
 				Target: "self", Keys: []string{"Escape"}, Capture: true,
 			},
 		)
@@ -318,23 +318,23 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 			t.Errorf("keys[%d] = %+v, want the same request-scoped live seat as capture %+v", index, keyed, captured)
 		}
 
-		injected := callToolWithMeta[InjectOutput](
-			t, clients[index].clientSession, "chat_inject", metas[index], InjectInput{
+		called := callToolWithMeta[CallOutput](
+			t, clients[index].clientSession, "call", metas[index], CallInput{
 				Target: "self", Message: "signed from " + metas[index]["threadId"].(string),
 			},
 		)
-		if injected.Code != 0 || !injected.Typed || injected.Unsigned {
-			t.Errorf("inject[%d] = %+v, want typed signed delivery", index, injected)
+		if called.Code != 0 || !called.Typed || called.Unsigned {
+			t.Errorf("call[%d] = %+v, want typed signed delivery", index, called)
 		}
 		for _, signaturePart := range []string{
 			"sid " + metas[index]["threadId"].(string),
-			`to reply: chat_inject "Codex ` + string(rune('A'+index)) + `" <message>`,
+			`to reply: call "Codex ` + string(rune('A'+index)) + `" <message>`,
 		} {
-			if !strings.Contains(injected.Proof, signaturePart) {
+			if !strings.Contains(called.Proof, signaturePart) {
 				t.Errorf(
-					"inject[%d] proof %q lacks request-scoped signature part %q",
+					"call[%d] proof %q lacks request-scoped signature part %q",
 					index,
-					injected.Proof,
+					called.Proof,
 					signaturePart,
 				)
 			}
@@ -350,7 +350,7 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 			defer wait.Done()
 			for iteration := 0; iteration < 10; iteration++ {
 				whoami := callToolWithMeta[WhoamiOutput](
-					t, clients[index].clientSession, "chat_whoami", metas[index], WhoamiInput{},
+					t, clients[index].clientSession, "whoami", metas[index], WhoamiInput{},
 				)
 				if whoami.ID != metas[index]["threadId"] || whoami.Session != wantSessions[index] {
 					errs <- "cross-talk"
@@ -367,10 +367,10 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 
 	// A metadata-free call after valid calls must not inherit either caller.
 	missing := callToolWithMeta[WhoamiOutput](
-		t, clients[0].clientSession, "chat_whoami", nil, WhoamiInput{},
+		t, clients[0].clientSession, "whoami", nil, WhoamiInput{},
 	)
 	if missing.Status != "not_found" || missing.Session != "" || missing.ID != "" {
-		t.Fatalf("metadata-free whoami inherited a prior caller: %+v", missing)
+		t.Fatalf("metadata-free whoami inherited a prior callEngine: %+v", missing)
 	}
 }
 
@@ -379,14 +379,14 @@ func TestMCPRawPaneUsesRequestCallerSocketAcrossTools(t *testing.T) {
 	client := connectInMemory(t, service.Server())
 	meta := mcp.Meta{"threadId": "thread-a"}
 	want := callToolWithMeta[WhoamiOutput](
-		t, client.clientSession, "chat_whoami", meta, WhoamiInput{},
+		t, client.clientSession, "whoami", meta, WhoamiInput{},
 	)
 	if want.SocketPath == "" || want.Pane == "" {
 		t.Fatalf("request caller identity lacks a raw tmux destination: %+v", want)
 	}
 
 	captured := callToolWithMeta[CaptureOutput](
-		t, client.clientSession, "chat_capture", meta, CaptureInput{Target: want.Pane},
+		t, client.clientSession, "capture", meta, CaptureInput{Target: want.Pane},
 	)
 	if captured.Status != "ok" || captured.Code != 0 ||
 		captured.SocketPath != want.SocketPath || captured.Pane != want.Pane {
@@ -394,7 +394,7 @@ func TestMCPRawPaneUsesRequestCallerSocketAcrossTools(t *testing.T) {
 	}
 
 	keyed := callToolWithMeta[KeysOutput](
-		t, client.clientSession, "chat_keys", meta,
+		t, client.clientSession, "keys", meta,
 		KeysInput{Target: want.Pane, Keys: []string{"Escape"}, Capture: true},
 	)
 	if keyed.Status != "ok" || keyed.Code != 0 || keyed.Count != 1 ||
@@ -402,13 +402,13 @@ func TestMCPRawPaneUsesRequestCallerSocketAcrossTools(t *testing.T) {
 		t.Fatalf("raw keys = %+v, want caller socket %q pane %q", keyed, want.SocketPath, want.Pane)
 	}
 
-	injected := callToolWithMeta[InjectOutput](
-		t, client.clientSession, "chat_inject", meta,
-		InjectInput{Target: want.Pane, Message: "raw pane request scope"},
+	called := callToolWithMeta[CallOutput](
+		t, client.clientSession, "call", meta,
+		CallInput{Target: want.Pane, Message: "raw pane request scope"},
 	)
-	if injected.Code != 0 || !injected.Typed || injected.Unsigned ||
-		injected.SocketPath != want.SocketPath || injected.Pane != want.Pane {
-		t.Fatalf("raw inject = %+v, want caller socket %q pane %q", injected, want.SocketPath, want.Pane)
+	if called.Code != 0 || !called.Typed || called.Unsigned ||
+		called.SocketPath != want.SocketPath || called.Pane != want.Pane {
+		t.Fatalf("raw call = %+v, want caller socket %q pane %q", called, want.SocketPath, want.Pane)
 	}
 }
 
@@ -422,32 +422,32 @@ func TestMCPResolveBindsRelativeTargetsToEachRequestCaller(t *testing.T) {
 
 	for index, name := range []string{"self", "me"} {
 		want := callToolWithMeta[WhoamiOutput](
-			t, clients[index].clientSession, "chat_whoami", metas[index], WhoamiInput{},
+			t, clients[index].clientSession, "whoami", metas[index], WhoamiInput{},
 		)
 		for _, kind := range []resolve.Kind{resolve.Label, resolve.Session, resolve.CxWindow} {
 			resolved := callToolWithMeta[ResolveOutput](
-				t, clients[index].clientSession, "chat_resolve", metas[index],
+				t, clients[index].clientSession, "resolve", metas[index],
 				ResolveInput{Kind: string(kind), Name: name},
 			)
 			if resolved.Status != "ok" || resolved.Code != 0 ||
 				resolved.SocketPath != want.SocketPath || resolved.Pane != want.Pane {
-				t.Fatalf("chat_resolve(%s, %s) = %+v, want caller %+v", kind, name, resolved, want)
+				t.Fatalf("resolve(%s, %s) = %+v, want caller %+v", kind, name, resolved, want)
 			}
 		}
 	}
 
 	caller := callToolWithMeta[WhoamiOutput](
-		t, clients[0].clientSession, "chat_whoami", metas[0], WhoamiInput{},
+		t, clients[0].clientSession, "whoami", metas[0], WhoamiInput{},
 	)
-	t.Setenv("CHAT_INJECT_SOCKET", filepath.Join(service.backend.paths.TmuxDir, "cx-ambient-other"))
+	t.Setenv("CHAT_CALL_SOCKET", filepath.Join(service.backend.paths.TmuxDir, "cx-ambient-other"))
 	for _, kind := range []resolve.Kind{resolve.Label, resolve.Session, resolve.CxWindow} {
 		raw := callToolWithMeta[ResolveOutput](
-			t, clients[0].clientSession, "chat_resolve", metas[0],
+			t, clients[0].clientSession, "resolve", metas[0],
 			ResolveInput{Kind: string(kind), Name: " %2 "},
 		)
 		if raw.Status != "ok" || raw.Code != 0 ||
 			raw.SocketPath != caller.SocketPath || raw.Pane != "%2" {
-			t.Fatalf("chat_resolve(%s, %%2) = %+v, want caller socket %q", kind, raw, caller.SocketPath)
+			t.Fatalf("resolve(%s, %%2) = %+v, want caller socket %q", kind, raw, caller.SocketPath)
 		}
 	}
 
@@ -463,7 +463,7 @@ func TestMCPResolveBindsRelativeTargetsToEachRequestCaller(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			results <- result{index: index, output: callToolWithMeta[ResolveOutput](
-				t, clients[index].clientSession, "chat_resolve", metas[index],
+				t, clients[index].clientSession, "resolve", metas[index],
 				ResolveInput{Kind: string(resolve.Session), Name: "self"},
 			)}
 		}()
@@ -472,7 +472,7 @@ func TestMCPResolveBindsRelativeTargetsToEachRequestCaller(t *testing.T) {
 	close(results)
 	for got := range results {
 		want := callToolWithMeta[WhoamiOutput](
-			t, clients[got.index].clientSession, "chat_whoami", metas[got.index], WhoamiInput{},
+			t, clients[got.index].clientSession, "whoami", metas[got.index], WhoamiInput{},
 		)
 		if got.output.SocketPath != want.SocketPath || got.output.Pane != want.Pane {
 			t.Errorf("overlapping resolve[%d] = %+v, want caller %+v", got.index, got.output, want)
@@ -483,29 +483,29 @@ func TestMCPResolveBindsRelativeTargetsToEachRequestCaller(t *testing.T) {
 func TestMCPResolveRefusesRelativeTargetsWithoutAValidCaller(t *testing.T) {
 	service := metadataIdentityService(t)
 	client := connectInMemory(t, service.Server())
-	t.Setenv("CHAT_INJECT_SOCKET", filepath.Join(service.backend.paths.TmuxDir, "cx-ambient-other"))
+	t.Setenv("CHAT_CALL_SOCKET", filepath.Join(service.backend.paths.TmuxDir, "cx-ambient-other"))
 	badMetas := []mcp.Meta{nil, {"threadId": "not-a-live-thread"}}
 	for _, meta := range badMetas {
 		for _, kind := range []resolve.Kind{resolve.Label, resolve.Session, resolve.CxWindow} {
 			for _, name := range []string{"self", "me", "%2", ` "self" `, ` "%2" `} {
 				resolved := callToolWithMeta[ResolveOutput](
-					t, client.clientSession, "chat_resolve", meta,
+					t, client.clientSession, "resolve", meta,
 					ResolveInput{Kind: string(kind), Name: name},
 				)
 				if resolved.Status != statusNotFound || resolved.Code != 1 ||
 					resolved.SocketPath != "" || resolved.Pane != "" {
-					t.Fatalf("chat_resolve(%s, %q, meta=%v) = %+v, want refusal", kind, name, meta, resolved)
+					t.Fatalf("resolve(%s, %q, meta=%v) = %+v, want refusal", kind, name, meta, resolved)
 				}
 			}
 		}
 
 		explicit := callToolWithMeta[ResolveOutput](
-			t, client.clientSession, "chat_resolve", meta,
+			t, client.clientSession, "resolve", meta,
 			ResolveInput{Kind: string(resolve.Label), Name: "Codex B"},
 		)
 		if explicit.Status != "ok" || explicit.Code != 0 || explicit.Pane != "%0" ||
 			!strings.HasSuffix(explicit.SocketPath, "cc-1700000002-1-3") {
-			t.Fatalf("explicit chat_resolve(meta=%v) = %+v", meta, explicit)
+			t.Fatalf("explicit resolve(meta=%v) = %+v", meta, explicit)
 		}
 	}
 }
@@ -571,12 +571,12 @@ func TestMCPReadBindsSelfToIndexedAndPrivateCallerTranscripts(t *testing.T) {
 	wantTexts := []string{"indexed caller answer", "private caller answer"}
 	for index, source := range []string{"self", "me"} {
 		read := callToolWithMeta[ReadOutput](
-			t, clients[index].clientSession, "chat_read", metas[index],
+			t, clients[index].clientSession, "read", metas[index],
 			ReadInput{Source: source, LastN: 1, MaxBytes: 1024},
 		)
 		if read.ID != rows[index].ID || read.Path != wantPaths[index] ||
 			read.Count != 1 || read.Turns[0].Text != wantTexts[index] {
-			t.Fatalf("chat_read(%s)[%d] = %+v", source, index, read)
+			t.Fatalf("read(%s)[%d] = %+v", source, index, read)
 		}
 	}
 
@@ -592,7 +592,7 @@ func TestMCPReadBindsSelfToIndexedAndPrivateCallerTranscripts(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			results <- result{index: index, output: callToolWithMeta[ReadOutput](
-				t, clients[index].clientSession, "chat_read", metas[index],
+				t, clients[index].clientSession, "read", metas[index],
 				ReadInput{Source: "self", LastN: 1, MaxBytes: 1024},
 			)}
 		}()
@@ -607,12 +607,12 @@ func TestMCPReadBindsSelfToIndexedAndPrivateCallerTranscripts(t *testing.T) {
 	}
 
 	explicit := callToolWithMeta[ReadOutput](
-		t, clients[0].clientSession, "chat_read", mcp.Meta{"threadId": "not-a-live-thread"},
+		t, clients[0].clientSession, "read", mcp.Meta{"threadId": "not-a-live-thread"},
 		ReadInput{Source: "indexed-caller", LastN: 1, MaxBytes: 1024},
 	)
 	if explicit.Path != canonicalIndexedPath || explicit.Count != 1 ||
 		explicit.Turns[0].Text != "indexed caller answer" {
-		t.Fatalf("explicit chat_read = %+v", explicit)
+		t.Fatalf("explicit read = %+v", explicit)
 	}
 }
 
@@ -629,11 +629,11 @@ func TestMCPReadRefusesSelfWithoutAValidCallerAndKeepsAmbientStdio(t *testing.T)
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			failure := callToolErrorWithMeta(
-				t, client.clientSession, "chat_read", test.meta,
+				t, client.clientSession, "read", test.meta,
 				ReadInput{Source: "self", LastN: 1},
 			)
 			if !strings.Contains(failure, test.want) {
-				t.Fatalf("chat_read self failure = %s, want %q", failure, test.want)
+				t.Fatalf("read self failure = %s, want %q", failure, test.want)
 			}
 		})
 	}
@@ -644,7 +644,7 @@ func TestMCPReadRefusesSelfWithoutAValidCallerAndKeepsAmbientStdio(t *testing.T)
 		context.Background(), nil, ReadInput{Source: "self", LastN: 1},
 	)
 	if err != nil || output.ID != "self" || !reflect.DeepEqual(verbs.reads, []string{"self/1"}) {
-		t.Fatalf("ambient stdio chat_read = %+v calls=%v err=%v", output, verbs.reads, err)
+		t.Fatalf("ambient stdio read = %+v calls=%v err=%v", output, verbs.reads, err)
 	}
 }
 
@@ -657,7 +657,7 @@ func TestMetadataFreeDaemonIdentityDoesNotInheritAmbientClaude(t *testing.T) {
 	t.Setenv(resolve.ClaudeSessionEnv, "ambient-launcher-session")
 
 	whoami := callToolWithMeta[WhoamiOutput](
-		t, client.clientSession, "chat_whoami", nil, WhoamiInput{},
+		t, client.clientSession, "whoami", nil, WhoamiInput{},
 	)
 	if whoami.Status != "not_found" || whoami.Session != "" ||
 		whoami.ID != "" || whoami.Engine != "" || whoami.Source != "" {
@@ -686,24 +686,24 @@ func TestMCPMetadataIdentityRefusesMissingUnknownAndMalformedValues(t *testing.T
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			whoami := callToolWithMeta[WhoamiOutput](
-				t, client.clientSession, "chat_whoami", test.meta, WhoamiInput{},
+				t, client.clientSession, "whoami", test.meta, WhoamiInput{},
 			)
 			if whoami.Status != "not_found" || whoami.Session != "" {
 				t.Fatalf("whoami = %+v, want honest not-found", whoami)
 			}
 			captured := callToolWithMeta[CaptureOutput](
-				t, client.clientSession, "chat_capture", test.meta, CaptureInput{Target: "self"},
+				t, client.clientSession, "capture", test.meta, CaptureInput{Target: "self"},
 			)
 			if captured.Status != "not_found" || captured.Code == 0 || captured.Text != "" {
 				t.Fatalf("capture = %+v, want honest not-found", captured)
 			}
-			injected := callToolWithMeta[InjectOutput](
-				t, client.clientSession, "chat_inject", test.meta, InjectInput{
+			called := callToolWithMeta[CallOutput](
+				t, client.clientSession, "call", test.meta, CallInput{
 					Target: "self", Message: "must not impersonate",
 				},
 			)
-			if injected.Code == 0 || injected.Typed || injected.Unsigned {
-				t.Fatalf("inject = %+v, want refusal without a signed/typed impersonation", injected)
+			if called.Code == 0 || called.Typed || called.Unsigned {
+				t.Fatalf("call = %+v, want refusal without a signed/typed impersonation", called)
 			}
 		})
 	}
@@ -761,14 +761,14 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 func TestMCPMetadataSignsExplicitTargetWithoutRedirectingIt(t *testing.T) {
 	service := metadataIdentityService(t)
 	client := connectInMemory(t, service.Server())
-	output := callToolWithMeta[InjectOutput](
-		t, client.clientSession, "chat_inject", mcp.Meta{"threadId": "thread-a"},
-		InjectInput{Target: "busy-session", Message: "explicit target provenance"},
+	output := callToolWithMeta[CallOutput](
+		t, client.clientSession, "call", mcp.Meta{"threadId": "thread-a"},
+		CallInput{Target: "busy-session", Message: "explicit target provenance"},
 	)
 	if output.Code != 0 || !output.Typed || output.Unsigned ||
 		!strings.Contains(output.SocketPath, "cc-1700000002-1-3") ||
 		!strings.Contains(output.Proof, "sid thread-a") ||
-		!strings.Contains(output.Proof, `to reply: chat_inject "Codex A" <message>`) {
-		t.Fatalf("explicit target injection lost target or caller provenance: %+v", output)
+		!strings.Contains(output.Proof, `to reply: call "Codex A" <message>`) {
+		t.Fatalf("explicit target call lost target or caller provenance: %+v", output)
 	}
 }

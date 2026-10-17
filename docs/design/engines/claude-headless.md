@@ -86,7 +86,7 @@ See [Harness-prompt drift probe](#harness-prompt-drift-probe). `pfm doctor` also
   claude -p --model <alias> x --output-format json --strict-mcp-config --mcp-config {"mcpServers":{}} --max-turns 1 --exclude-dynamic-system-prompt-sections --settings {"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}
   ```
 
-- **Probe environment** (`claudelaunch.ProbeEnv`, `harness_prompt.go:436,482`): strips the registry's hygiene names; pins `ANTHROPIC_BASE_URL=<sink>`, `ANTHROPIC_API_KEY=pfm-doctor-sink`, `ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0`, `FORCE_PROMPT_CACHING_5M=1`, `CLAUDE_CONFIG_DIR=<tmp>`.
+- **Probe environment** (`claudelaunch.ProbeEnv`, `harness_prompt.go:436,482`): strips the registry's hygiene names; pins `ANTHROPIC_BASE_URL=<sink>`, `ANTHROPIC_API_KEY=pfm-doctor-sink`, `ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0`, `FORCE_PROMPT_CACHING_5M=1`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (remote feature flags keep their shipped defaults, so identical captures never switch prompt variants), `CLAUDE_CONFIG_DIR=<tmp>`.
 - **Compare.** The captured system blocks are joined, normalized (the CLI version, model ids and names, and the environment identity and cutoff lines are masked, `:161-184`), hashed, and compared with the pinned SHA-256 (`:202-205`).
 
 | Verdict | Meaning |
@@ -103,4 +103,4 @@ The header names what stays unchecked: `unchecked=active-chat,fable,codex` (`pri
 
 ## Session identity
 
-pfm reads `CLAUDE_CODE_SESSION_ID` to know which chat is calling — the engine's `SessionEnv` (`pfm/internal/engine/builtin.go:44`), `whoami` (`pfm/internal/resolve/whoami.go:19`, `:154`), `kill`, `chat find`, inject's sender id, and the caller-engine check that consults it before `CODEX_THREAD_ID` (`pfm/cmd/pfm/chat_caller_engine.go:21`). It never sets it, and strips it with `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from every child it starts: a probe fired from inside a chat must not inherit that chat's identity or endpoint (`pfm/internal/reap/busy.go:95-98`), and a fork's session id is always explicit (`pfm/internal/action/headless.go:128-130`).
+pfm reads `CLAUDE_CODE_SESSION_ID` to know which chat is calling — the engine's `SessionEnv` (`pfm/internal/engine/builtin.go:44`), `whoami` (`pfm/internal/resolve/whoami.go:19`, `:154`), `kill`, `chat find`, call's sender id, and the caller-engine check that consults it before `CODEX_THREAD_ID` (`pfm/cmd/pfm/chat_caller_engine.go:21`). It never sets it, and strips it with `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from every child it starts: a probe fired from inside a chat must not inherit that chat's identity or endpoint (`pfm/internal/reap/busy.go:95-98`), and a fork's session id is always explicit (`pfm/internal/action/headless.go:128-130`).

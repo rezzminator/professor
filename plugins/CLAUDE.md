@@ -23,22 +23,27 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 ## Codex
 
-- `AGENTS.md` here is generated from this file by engine-sync (`pfm codex build`).
+- `AGENTS.md` here is generated from this file by engine-sync (`engine-sync codex build`).
 
 ## Host
 
 - Users install each plugin from its repository's `main`.
-- An alpha `pfm install` copies each plugin `claude.plugins` in `pfm.config.json` names bare from its installable plugin when `claude.pluginCheckoutRoot` names this directory, and disables its GitHub copy; a full `name@marketplace` id is installed as named.
-- A plugin listed by full id is never copied: callmeter (`callmeter@callmeter-dev`) has its `-dev` copy refreshed by its own `CLAUDE.md`; buddy installs from its own dev marketplace as `buddy@buddy-dev`.
+- An alpha `pfm install` installs every plugin `.claude-plugin/marketplace.json` lists as `{name}@{name}-dev`, copied from `{name}/plugins/{name}` here (or under `claude.pluginCheckoutRoot` when set) into `~/.local/share/{name}-dev`, and disables its GitHub copies.
+- On alpha, `claude.plugins` in `pfm.config.json` is the enabled set, every marketplace plugin when unset; a plugin it leaves out installs disabled; a full `name@marketplace` id there is installed as named, never copied.
+- A plugin option is also an environment variable `{PLUGIN}_{OPTION}`, both names upper snake (`EFFORT_LIVE_CONTROL_FLOOR`): variable > the plugin's own option (`pluginConfigs`, `/config`, callmeter's `config.json`) > default; each plugin's README lists its settings.
+- sub-agent-compact and buddy declare no `userConfig`: sub-agent-compact reads only its `SUB_AGENT_COMPACT_*` variables, set from `claude.env`; buddy reads no variable and keeps every setting in `${XDG_CONFIG_HOME:-$HOME/.config}/buddy/config.json`.
+- `pfm install` writes `claude.env` from `pfm.config.json` into the primary seat's `settings.json` `env`, which every seat shares, owning only the keys it wrote (ledger `~/.local/share/pfm/install/claude-env-ownership.json`); `pfm doctor` reports a key changed or dropped by hand.
+- On alpha, pfm builds callmeter's binary from its checkout into `{CALLMETER_HOME}/bin/{version}/` before refreshing its plugin copy; its `CLAUDE.md` § Dev install covers a host without pfm.
 - `pfm install` copies no engine-sync: its wrapper downloads the checksum-verified release binary on first run and links the stable path pfm execs; `ENGINE_SYNC_BIN` points pfm at a local build, and the fence builds its own from `engine-sync/`.
-- An open chat loads a refreshed copy on `/reload-plugins`.
+- Chats run Claude Code's versioned cache `{config}/plugins/cache/{name}-dev/{name}/{version}`, never the `-dev` copy: a copy refresh alone reaches no chat, and a content change reaches the cache only with a version bump.
+- `pfm install` moves each stale cache entry with `claude plugin update`: a new chat gets the new version at once, an open chat on `/reload-plugins`; a running chat keeps its old snapshot, marked `.orphaned_at`.
 
 # Rules
 
 ## Standalone
 
 - Every plugin works fully on a machine without Professor: its code and every file it writes carry no Professor path, agent, policy or wording; credit in its README and manifest is the one exception.
-- Professor-specific behavior enters through the plugin's own integration surface — a config file, flag, environment variable or extension hook — with a neutral default; Professor's install and project files supply Professor's values.
+- Professor-specific behavior enters through the plugin's own integration surface — a config file, flag, environment variable or extension hook — with a neutral default; Professor's install and project files supply Professor's values; a new option adds its `{PLUGIN}_{OPTION}` variable, read in a function-hooks plugin by a string-literal `$.env.get('NAME')`.
 
 ## Git
 

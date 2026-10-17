@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -154,7 +154,7 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) (result AskResult) 
 // the same socket-resolution and tmux-capture sequence runChatCapture uses
 // in cmd/pfm's chat_command.go (chatSocketPath, then chat.Pane else
 // chat.Session else chat.Socket as the target, then a styled
-// inject.TmuxInjector.Capture over the full scrollback). internal/headless
+// pfmcall.TmuxCaller.Capture over the full scrollback). internal/headless
 // cannot import cmd/pfm (package main) to call chatSocketPath directly, so
 // resolveChatSocketPath below mirrors its two-branch shape exactly instead of
 // inventing a different resolution rule.
@@ -170,7 +170,7 @@ func capturePane(ctx context.Context, chat Chat) (string, error) {
 	if target == "" {
 		target = chat.Socket
 	}
-	capture, err := (inject.TmuxInjector{}).Capture(ctx, socketPath, target, true, inject.FullScrollback)
+	capture, err := (pfmcall.TmuxCaller{}).Capture(ctx, socketPath, target, true, pfmcall.FullScrollback)
 	if err != nil {
 		return "", fmt.Errorf("capture pane: %w", err)
 	}

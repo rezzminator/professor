@@ -1,5 +1,5 @@
 // Exercise the roster checker against mirrors and effective config from the same compiler.
-import { lstatSync, readdirSync } from "node:fs";
+import { cpSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { before, after, test, assert, execFileSync, spawnSync, copyFileSync, existsSync, mkdirSync, mkdtempSync,
   readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, dirname, join, fileURLToPath } from "./node-test-helpers.mjs";
 
@@ -17,7 +17,6 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 function fixture(t, codex = {}, project = { version: 1 }, machine = {}, files = {}, allowBuildFinding = false) {
   const root = mkdtempSync(join(scratch, "project-"));
   const home = join(root, "home");
-  const configHome = join(home, ".config");
   const put = (path, text) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
@@ -28,14 +27,14 @@ function fixture(t, codex = {}, project = { version: 1 }, machine = {}, files = 
   put("demo-child/.claude/agents/beta.md", "---\nname: beta\ndescription: Fixture role\nmodel: smart\n---\nRead the child.\n");
   for (const [path, text] of Object.entries(files)) put(path, text);
   if (project !== null) put(".claude/engine-sync.json", JSON.stringify(project));
-  put("home/.config/engine-sync/config.json", JSON.stringify({ version: 1, codex, ...machine }));
+  put("home/.claude/engine-sync.json", JSON.stringify({ version: 1, codex, ...machine }));
   mkdirSync(join(root, "scripts"));
   copyFileSync(process.env.ROSTER_CHECK_SUT || join(ROOT, "scripts/check-agent-roster.mjs"), join(root, "scripts/check-agent-roster.mjs"));
   if (existsSync(join(ROOT, "scripts/agent-source-inventory.py")))
     copyFileSync(join(ROOT, "scripts/agent-source-inventory.py"), join(root, "scripts/agent-source-inventory.py"));
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: configHome, ENGINE_SYNC_BIN: binary };
+  const env = { ...process.env, HOME: home, ENGINE_SYNC_BIN: binary };
   for (const key of ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "ENGINE_SYNC_HOME", "ENGINE_SYNC_STATE", "ENGINE_SYNC_WORKBENCH_MARKER",
-    "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"])
+    "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"])
     delete env[key];
   const built = spawnSync(binary, ["build", "."], { cwd: root, env, encoding: "utf8" });
   if (!allowBuildFinding) assert.equal(built.status, 0, built.stdout + built.stderr);
@@ -77,9 +76,9 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
 }
 
 for (const [name, path, header, status, message] of [
-  ["project from", ".claude/agents/local.md", "from: general-purpose", 2, /machine scope only/],
-  ["project abstract", ".claude/agents/local.md", "abstract: true", 2, /machine scope only/],
-  ["abstract retired", "templates/global/agents/layer.md", "abstract: true", 2, /abstract is retired/],
+  ["project from", ".claude/agents/local.md", "from: general-purpose", 5, /SOURCE REJECTED — python3 .*machine scope only/],
+  ["project abstract", ".claude/agents/local.md", "abstract: true", 5, /SOURCE REJECTED — python3 .*machine scope only/],
+  ["abstract retired", "templates/global/agents/layer.md", "abstract: true", 5, /SOURCE REJECTED — python3 .*abstract is retired/],
   ["quoted declaration key", "templates/global/agents/derived.md", '"from": general-purpose\nmodel: "smart"', 0, /agent-roster: clean/],
 ]) {
   test(`machine declaration headers: ${name}`, (t) => {
@@ -90,6 +89,43 @@ for (const [name, path, header, status, message] of [
     assert.match(result.out, message);
   });
 }
+
+test("inventory and model failures retain their classification before mirror checks", async (t) => {
+  for (const [name, header, missingMirrors, status, message] of [
+    ["original inline comment", "model: fable # note", false, 1, /frontmatter model "fable # note" is not one bare alias/],
+    ["declaration null", "from: general-purpose\nmodel: null", false, 1, /frontmatter model "null" is not one bare alias/],
+    ["declaration number", "from: general-purpose\nmodel: 42", false, 1, /frontmatter model "42" is not one bare alias/],
+    ["declaration list", "from: general-purpose\nmodel: [smart, fable]", false, 1, /frontmatter model "smart,fable" is not one bare alias/],
+    ["model failure without mirrors", "model: fable # note", true, 3, /frontmatter model "fable # note" is not one bare alias/],
+    ["no model lines without mirrors", "", true, 3, /agent model check read no model line .* the check did not run/],
+  ]) {
+    await t.test(name, (t) => {
+      const f = fixture(t, {}, { version: 1 }, {}, {}, true);
+      const declaration = header.startsWith("from:");
+      const path = declaration ? "templates/global/agents/derived.md" : ".claude/agents/alpha.md";
+      f.put(path, `---\nname: ${declaration ? 'derived' : 'alpha'}\ndescription: Fixture role\n${header}\n---\nRead.\n`);
+      f.put("demo-child/.claude/agents/beta.md", "---\nname: beta\ndescription: Fixture role\n---\nRead.\n");
+      cleanVerdictStub(f);
+      if (missingMirrors) {
+        rmSync(join(f.root, ".codex/agents"), { recursive: true });
+        rmSync(join(f.root, ".opencode/agent"), { recursive: true });
+      }
+      const result = check(f);
+      assert.equal(result.status, status, result.out);
+      assert.match(result.out, message);
+      if (missingMirrors) assert.match(result.out, /agent-roster: NOT GENERATED/);
+    });
+  }
+  await t.test("inventory PyYAML gap", (t) => {
+    const f = fixture(t);
+    f.put("bin/python3", "#!/bin/sh\nprintf '%s\\n' 'GAP install (agent source inventory is missing: PyYAML)' >&2\nexit 3\n");
+    execFileSync("chmod", ["+x", join(f.root, "bin/python3")]);
+    f.env.PATH = `${join(f.root, "bin")}:${f.env.PATH}`;
+    const result = check(f);
+    assert.equal(result.status, 4, result.out);
+    assert.match(result.out, /agent-roster: GAP install .*PyYAML/);
+  });
+});
 
 test("unrunnable binary is a named config ERROR", (t) => {
   const f = fixture(t);
@@ -130,6 +166,23 @@ test("a check that crashes is a named ERROR, not a roster mismatch", (t) => {
   const result = check(f);
   assert.equal(result.status, 1, result.out);
   assert.match(result.out, /compiler:.*(not a directory|ENOTDIR)/);
+});
+
+test("an inventory lookup failure is a named ERROR, not a rejected source", (t) => {
+  const f = fixture(t);
+  symlinkSync("vanished-source.md", join(f.root, ".claude/agents/dangling.md"));
+  const result = check(f);
+  assert.equal(result.status, 2, result.out);
+  assert.match(result.out, /agent-roster: ERROR — python3 .*agent-source-inventory: ERROR/);
+  assert.match(result.out, /dangling\.md/);
+});
+
+test("an inventory that crashes with a traceback is a named ERROR, not a rejected source", (t) => {
+  const f = fixture(t);
+  f.put("scripts/agent-source-inventory.py", "raise RuntimeError('invented inventory crash')\n");
+  const result = check(f);
+  assert.equal(result.status, 2, result.out);
+  assert.match(result.out, /agent-roster: ERROR — python3 [^\n]*Traceback[\s\S]*invented inventory crash/);
 });
 
 for (const [name, stdout, exit, message] of [
@@ -237,7 +290,7 @@ test("a child whose CLAUDE.md lookup fails is a named failure, not an absent pro
 test("a workbench marker lookup that fails is a named failure, not an absent marker", (t) => {
   const f = fixture(t);
   mkdirSync(join(f.root, "demo-child/.bench"));
-  f.put("home/.config/engine-sync/config.json", JSON.stringify({ version: 1, workbenchMarker: `.bench/${"x".repeat(300)}` }));
+  f.put("home/.claude/engine-sync.json", JSON.stringify({ version: 1, workbenchMarker: `.bench/${"x".repeat(300)}` }));
   cleanVerdictStub(f);
   const result = check(f);
   assert.equal(result.status, 1, result.out);
@@ -289,9 +342,13 @@ const twins = [
   ['gpt-flights-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
   ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],
   ['gpt-flights-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
+  ['gpt-flights-speccer', 'gpt-6.1-sol', 'xhigh', 'flights-speccer'],
   ['gpt-flights-mechanical-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
   ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
   ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
+  ['gpt-rr', 'gpt-6.1-sol', 'low', 'rr'],
+  ['gpt-rr-pro', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro'],
+  ['gpt-rr-pro-max', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro-max'],
   ['sol', 'gpt-6.1-sol', 'high'],
   ['luna', 'gpt-6-luna', 'medium'],
   ['astra', 'gpt-6-astra', 'high'],
@@ -307,10 +364,12 @@ function renderShipped(capabilities) {
   const key = capabilities.join(',');
   if (rendered.has(key)) return rendered.get(key);
   const home = mkdtempSync(join(scratch, 'shipped-'));
+  const sourceRoot = join(home, 'source');
+  mkdirSync(sourceRoot);
+  cpSync(join(ROOT, 'templates'), join(sourceRoot, 'templates'), { recursive: true });
   mkdirSync(join(home, '.claude'), { recursive: true });
   mkdirSync(join(home, '.codex'), { recursive: true });
-  mkdirSync(join(home, '.config/engine-sync'), { recursive: true });
-  copyFileSync(join(ROOT, 'templates/global/engine-sync/config.json'), join(home, '.config/engine-sync/config.json'));
+  copyFileSync(join(sourceRoot, 'templates/global/engine-sync.json'), join(home, '.claude/engine-sync.json'));
   const env = { ...process.env, HOME: home };
   for (const name of ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'ENGINE_SYNC_HOME', 'ENGINE_SYNC_STATE', 'CODEX_HOME',
     'CLAUDE_CONFIG_DIR']) delete env[name];
@@ -319,9 +378,9 @@ function renderShipped(capabilities) {
     const result = spawnSync(binary, args, { env, encoding: 'utf8', timeout: 120000 });
     return { status: result.status, out: result.stdout + result.stderr };
   };
-  const global = run(['global', '--home', home, '--source-repo', ROOT, '--claude-config-dir', join(home, '.claude'),
+  const global = run(['global', '--home', home, '--source-repo', sourceRoot, '--claude-config-dir', join(home, '.claude'),
     '--codex-home', join(home, '.codex'), ...flags]);
-  const doctor = run(['doctor', '--machine', '--home', home, '--source-repo', ROOT, '--claude-config-dir', join(home, '.claude'),
+  const doctor = run(['doctor', '--machine', '--home', home, '--source-repo', sourceRoot, '--claude-config-dir', join(home, '.claude'),
     '--codex-home', join(home, '.codex'), ...flags]);
   const render = { home, global, doctor };
   rendered.set(key, render);
@@ -356,12 +415,18 @@ test('the shipped variants render with zero errors with and without the gpt-agen
     assert.equal(render.global.status, 0, `engine-sync global (${label}): ${render.global.out}`);
     assert.doesNotMatch(render.global.out, renderErrors, `engine-sync global (${label})`);
     assert.doesNotMatch(render.doctor.out, /SECTION-DRIFT/, `engine-sync doctor --machine (${label})`);
-    for (const name of otherVariants)
+    for (const name of otherVariants) {
       assert.ok(renderedText(render, name), `${label}: ${name} was not rendered`);
+      assert.equal(realpathSync(renderedPath(render, name)),
+        join(render.home, 'source/templates/generated/agents', `${name}.md`),
+        `${label}: ${name} must be rendered into the copied source tree`);
+    }
+    const gitter = parseFrontmatter('gitter', readFileSync(join(render.home, '.config/opencode/agents/gitter.md'), 'utf8'));
+    assert.equal(gitter.permission.bash['git *'], 'allow', `${label}: OpenCode gitter must retain Git write permission`);
   }
 });
 
-test('the gpt-agents capability decides whether the nine GPT twins are linked', () => {
+test('the gpt-agents capability decides whether the GPT twins are linked', () => {
   const on = renderShipped([CAPABILITY]);
   const off = renderShipped([]);
   for (const [name] of twins) {
@@ -374,7 +439,8 @@ test('the gpt-agents capability decides whether the nine GPT twins are linked', 
   }
 });
 
-for (const [name, model, effort, role] of twins) {
+// A fifth field names the rendered variant a twin derives from when it is not the role's own manual.
+for (const [name, model, effort, role, base] of twins) {
   test(`${name} renders its runtime and portable role contract`, () => {
     const render = renderShipped([CAPABILITY]);
     const text = renderedText(render, name);
@@ -394,42 +460,79 @@ for (const [name, model, effort, role] of twins) {
     assert.doesNotMatch(text, /\/(Users|home|root)\/|\/private\//, `${name}: carries a machine-absolute path`);
     assert.ok(!text.includes(render.home), `${name}: carries the render's home directory`);
     for (const stray of filesNamed(render.home, name).filter((path) => !path.startsWith(join(render.home, '.claude/agents'))
-      && !path.includes('/generated/claude-agents/')))
+      && !path.startsWith(`${join(render.home, 'source')}/`) && !path.includes('/generated/claude-agents/')))
       assert.fail(`${name}: ${stray} is a Codex role or an OpenCode agent; a GPT twin is Claude-only`);
     if (!role) {
       assert.equal(fm.role, undefined, `${name}: a general-purpose worker has no role`);
       return;
     }
     assert.equal(fm.role, role);
+    // engine-sync renames every standalone occurrence of a name, quoted or not.
+    const renameStandalone = (names) => original.replace(
+      new RegExp(`(^|[^A-Za-z0-9_./:-])(${names})(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`, 'g'),
+      (_, before, agent) => `${before}gpt-${agent}`);
     const renamed = role === 'flights-foreman'
-      ? original.replaceAll('"flights-foreman"', '"gpt-flights-foreman"').replaceAll('"flights-mechanical-executor"', '"gpt-flights-mechanical-executor"')
-        .replaceAll('"flights-lander"', '"gpt-flights-lander"')
+      ? renameStandalone('flights-mechanical-executor|flights-foreman|flights-lander|flights-speccer')
       : role === 'flights-lander'
-        ? original.replace(/(^|[^A-Za-z0-9_./:-])(reviewer-pro|reviewer)(?![A-Za-z0-9_/-]|\.[A-Za-z0-9])/g,
-          (_, before, agent) => `${before}gpt-${agent}`)
+        ? renameStandalone('reviewer-pro|reviewer')
         : original;
-    assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(renamed).trimEnd()), `${name}: the rendered body is not the full ${role} manual`);
+    const manual = base ? renderedText(render, base) : renamed;
+    assert.ok(manual, `${name}: its base ${base} was not rendered`);
+    assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(manual).trimEnd()), `${name}: the rendered body is not the full ${base ?? role} manual`);
     if (role.startsWith('flights-')) {
       assert.ok(text.includes('your parent hears from you only by that return'), `${name}: the return law is not prepended`);
-      assert.ok(text.includes('run.md, briefs, returns/*.md, gate.md, red/*'), `${name}: the return law lost its file list`);
+      // Each role's return law names only the files that role owns: the speccer writes its spec, never a builder's files.
+      const [owned, foreign] = role === 'flights-speccer'
+        ? ['write spec.md and the research and calibration files your manual names in the flight directory', 'run.md, briefs, returns/*.md, gate.md, red/*']
+        : ['run.md, briefs, returns/*.md, gate.md, red/*', 'write spec.md and the research'];
+      assert.ok(text.includes(owned), `${name}: the return law lost its file list`);
+      assert.ok(!text.includes(foreign), `${name}: the return law names files another role owns`);
+    } else if (role === 'rr') {
+      // The research leads keep their diggers on Claude: no rename, and sub-rr admits each twin.
+      assert.doesNotMatch(text, /gpt-sub-rr|gpt-clone-distiller/, `${name}: its diggers must remain Claude agents`);
+      assert.equal(fm.tools, parseFrontmatter(base ?? role, renderedText(render, base ?? role)).tools, `${name}: tools differ from ${base ?? role}`);
+      const digger = parseFrontmatter('sub-rr', renderedText(render, 'sub-rr'));
+      assert.ok(digger.visibility['visible-to'].include.includes(name), `${name}: sub-rr is not visible to it`);
     } else {
       assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
       assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-flights-lander']);
     }
     if (role === 'flights-lander') {
-      assert.ok(fm.tools.split(',').map((tool) => tool.trim()).includes('Agent'),
-        `${name}: lander manual requires Agent for review dispatch`);
+      assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),
+        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent',
+         'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back', 'Skill'],
+        `${name}: tools must match the GPT engine's supported role contract (Agent: the lander's review dispatch)`);
       for (const reviewer of ['gpt-reviewer', 'gpt-reviewer-pro'])
         assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
     }
     if (role === 'flights-foreman') {
-      for (const spawned of ['gpt-flights-foreman', 'gpt-flights-mechanical-executor', 'gpt-flights-lander'])
+      for (const spawned of ['gpt-flights-foreman', 'gpt-flights-mechanical-executor', 'gpt-flights-lander', 'gpt-flights-speccer'])
         assert.ok(text.includes(`subagent_type: "${spawned}"`), `${name}: rename to ${spawned} not applied`);
       assert.doesNotMatch(text, /subagent_type: "flights-/, `${name}: a flights-* spawn survived the renames`);
       const commands = (event) => fm.hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));
-      assert.deepEqual(commands('PreToolUse'), ['pfm internal orchestrator-wait',
-        `python3 -I "${configDir}/hooks/gpt-return-watch.py"`]);
+      assert.deepEqual(commands('PreToolUse'),
+        ['pfm internal orchestrator-wait', 'pfm internal call-cap', 'python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate']);
+      // the cut gate holds Bash as well as the edit tools: a pre-cut `sed -i` is a code edit
+      assert.deepEqual(fm.hooks.PreToolUse.map((entry) => entry.matcher), ['Bash', '*', 'Bash|Edit|Write|MultiEdit|NotebookEdit']);
       assert.deepEqual(commands('Stop'), [`python3 -I "${configDir}/hooks/gpt-agent-stop.py" foreman`]);
     }
   });
 }
+
+// sub-agent-compact registers `compact` only while forwardHandoffTool is off, and Professor runs it on:
+// a fixed tools list naming the plugin names forward_handoff and look_back, never the unregistered compact.
+test('every shipped agent naming sub-agent-compact holds forward_handoff and look_back, never compact', () => {
+  const dirs = ['templates/global/agents', 'templates/generated/agents', 'templates/project/agents', '.claude/agents'];
+  let handing = 0;
+  for (const dir of dirs.filter((relative) => existsSync(join(ROOT, relative)))) {
+    for (const file of readdirSync(join(ROOT, dir)).filter((entry) => entry.endsWith('.md'))) {
+      const tools = readFileSync(join(ROOT, dir, file), 'utf8').match(/^tools:(.*)$/m)?.[1] ?? '';
+      if (!tools.includes('mcp__sub-agent-compact__')) continue;
+      handing++;
+      assert.ok(!tools.includes('mcp__sub-agent-compact__compact'), `${dir}/${file}: names the unregistered compact tool`);
+      for (const tool of ['mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'])
+        assert.ok(tools.includes(tool), `${dir}/${file}: names sub-agent-compact but not ${tool}`);
+    }
+  }
+  assert.ok(handing > 0, 'no shipped agent names a sub-agent-compact tool: the scan read nothing');
+});

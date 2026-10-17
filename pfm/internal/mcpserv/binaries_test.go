@@ -7,9 +7,9 @@ import (
 )
 
 // The MCP process hands its configured engine executables to TWO consumers —
-// the shared resolver and the inject engine — and they must be the SAME map.
+// the shared resolver and the call engine — and they must be the SAME map.
 // The resolver was built from a hand-written Claude+Codex literal while
-// inject.New (internal/inject/engine.go) builds its own from all three, so an
+// pfmcall.New (internal/call/engine.go) builds its own from all three, so an
 // MCP process resolved OpenCode panes against a table that did not know the
 // engine existed. One map, every registered engine, or a fourth engine lands
 // half-configured the same way.

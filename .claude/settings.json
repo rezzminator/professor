@@ -4,7 +4,7 @@
       "Bash(.claude/scripts/dev.sh:*)",
       "Bash(scripts/leak-check.sh:*)",
       "Bash(scripts/refresh-scope.sh:*)",
-      "Bash(pfm codex:*)",
+      "Bash(engine-sync codex:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -26,22 +26,6 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/format-md.sh"
-          },
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh mark"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh sync",
-            "timeout": 60
           }
         ]
       }

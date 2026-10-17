@@ -76,7 +76,7 @@ func TestCodexDefaultsNamesYieldedMCPTables(t *testing.T) {
 	writeFixture(
 		t,
 		config,
-		codexProfessorFence(home)+"[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n",
+		codexChatFence(home)+"[mcp_servers.chat-professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n",
 	)
 	var output strings.Builder
 	if _, err := Run(context.Background(), Options{
@@ -85,7 +85,7 @@ func TestCodexDefaultsNamesYieldedMCPTables(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	want := "  change  merge Professor defaults into " + config + "; remove pfm's MCP tables: mcp_servers.professor\n"
+	want := "  change  merge Professor defaults into " + config + "; remove pfm's MCP tables: mcp_servers.chat-professor\n"
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("defaults report = %q, want %q", output.String(), want)
 	}

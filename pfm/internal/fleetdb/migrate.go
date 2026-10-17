@@ -19,12 +19,11 @@ import (
 // pfm's statements survive (they name their columns, and its default fills
 // their inserts) is added at open with no bump: addColumnAtOpen; a table
 // rename likewise: renameRemindersTable.
-const SchemaVersion = 3
+const SchemaVersion = 5
 
-// RetiredSchemaVersion is the user_version a develop build stamped when it
-// added hidden.revision as migration 4. Such a file holds version 3's tables
-// plus that column, so a read-write open stamps it 3 again and a read-only
-// open reads it as 3. The next schema version is 5.
+// RetiredSchemaVersion reserves the version stamped by a develop build that
+// added hidden.revision. The column is now added at open; migration 5 follows
+// both version 3 and those version-4 files.
 const RetiredSchemaVersion = 4
 
 //go:embed migration_v2.sql
@@ -33,9 +32,12 @@ var migrationV2 string
 //go:embed migration_v3.sql
 var migrationV3 string
 
+//go:embed migration_v5.sql
+var migrationV5 string
+
 // sharedMigrations is indexed by the version each step produces; version 1 is
 // schemaDDL itself, so the first two slots stay empty.
-var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3}
+var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3, 5: migrationV5}
 
 // hiddenRevisionDDL adds the column KillWithRevision decides rollback
 // ownership by. A version-3 pfm's inserts take its default.
@@ -46,7 +48,7 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read shared database schema version: %w", err)
 	}
-	if version < SchemaVersion || version == RetiredSchemaVersion {
+	if version < SchemaVersion {
 		unlock, err := LockMigration(ctx, path)
 		if err != nil {
 			return err
@@ -55,12 +57,6 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 		if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 			return fmt.Errorf("re-read shared database schema version: %w", err)
 		}
-	}
-	if version == RetiredSchemaVersion {
-		if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
-			return fmt.Errorf("stamp retired shared database schema version %d as %d: %w", version, SchemaVersion, err)
-		}
-		return nil
 	}
 	if version > SchemaVersion {
 		return fmt.Errorf(
@@ -74,6 +70,9 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 		return nil
 	}
 	first := max(version+1, 2)
+	if first == RetiredSchemaVersion {
+		first++
+	}
 	if err := BackupBeforeMigration(ctx, db, path, first, existed); err != nil {
 		return err
 	}
@@ -87,6 +86,9 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 		}
 	}()
 	for next := first; next <= SchemaVersion; next++ {
+		if next == RetiredSchemaVersion {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, sharedMigrations[next]); err != nil {
 			return fmt.Errorf("apply shared database migration %d: %w", next, err)
 		}

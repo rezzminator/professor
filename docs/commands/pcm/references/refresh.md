@@ -88,7 +88,7 @@ From the project repo:
 professor/            ← this repo
 ├── README.md, INSTALL.md, CHANGELOG.md, VERSION, LICENSE
 ├── docs/
-│   └── README.md, BLUEPRINT.md, SETUP.md, RELEASE.md, ARCHITECTURE.md, PLACEHOLDERS.md, references/
+│   └── README.md, SETUP.md, RELEASE.md, ARCHITECTURE.md, PLACEHOLDERS.md, references/
 └── templates/
     ├── refresh-map.json
     ├── themes/       (curated statusline themes — no live source)

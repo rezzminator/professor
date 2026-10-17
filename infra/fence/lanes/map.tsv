@@ -1,38 +1,38 @@
 name	lane	beat
-chat_capture	M	M.09-chat-tools
-chat_digest	M	M.09-chat-tools
-chat_exit	M	M.10-chat-tools-gap
-chat_find	M	M.09-chat-tools
-chat_inject	M	M.09-chat-tools
-chat_keys	M	M.09-chat-tools
-chat_kill	M	M.10-chat-tools-gap
-chat_last	M	M.09-chat-tools
-chat_ls	M	M.09-chat-tools
-chat_name	M	M.10-chat-tools-gap
-chat_new	M	M.09-chat-tools
-chat_open	M	M.10-chat-tools-gap
-chat_read	M	M.09-chat-tools
-chat_resolve	M	M.09-chat-tools
-chat_save	M	M.10-chat-tools-gap
-chat_status	M	M.09-chat-tools
-chat_unkill	M	M.10-chat-tools-gap
-chat_whoami	M	M.09-chat-tools
-harvester_download_file	M	M.11-harvester-tools
-harvester_read	M	M.11-harvester-tools
-harvester_search_literature	M	M.11-harvester-tools
-harvester_search_web	M	M.11-harvester-tools
+mcp__chat-professor__capture	M	M.09-chat-tools
+mcp__chat-professor__digest	M	M.09-chat-tools
+mcp__chat-professor__exit	M	M.10-chat-tools-gap
+mcp__chat-professor__find	M	M.09-chat-tools
+mcp__chat-professor__call	M	M.09-chat-tools
+mcp__chat-professor__keys	M	M.09-chat-tools
+mcp__chat-professor__kill	M	M.10-chat-tools-gap
+mcp__chat-professor__last	M	M.09-chat-tools
+mcp__chat-professor__ls	M	M.09-chat-tools
+mcp__chat-professor__name	M	M.10-chat-tools-gap
+mcp__chat-professor__new	M	M.09-chat-tools
+mcp__chat-professor__open	M	M.10-chat-tools-gap
+mcp__chat-professor__read	M	M.09-chat-tools
+mcp__chat-professor__resolve	M	M.09-chat-tools
+mcp__chat-professor__save	M	M.10-chat-tools-gap
+mcp__chat-professor__status	M	M.09-chat-tools
+mcp__chat-professor__unkill	M	M.10-chat-tools-gap
+mcp__chat-professor__whoami	M	M.09-chat-tools
+mcp__harvester-professor__download_file	M	M.11-harvester-tools
+mcp__harvester-professor__read	M	M.11-harvester-tools
+mcp__harvester-professor__search_literature	M	M.11-harvester-tools
+mcp__harvester-professor__search_web	M	M.11-harvester-tools
 pfm archive	O2	O2.02-archive
 pfm chat ask	E1	E1.15-ask
-pfm chat ask	E2	E2.07-inject-ask-watch
+pfm chat ask	E2	E2.07-call-ask-watch
 pfm chat branch	E1	E1.22-handoff
 pfm chat capture	E1	E1.14-capture-keys
 pfm chat end	E1	E1.25-end
 pfm chat find	F	F.15-addressing
 pfm chat history	F	F.15-addressing
-pfm chat inject	E1	E1.16-inject
-pfm chat inject	E1	E1.26-resolver-prefers-live
-pfm chat inject	E2	E2.07-inject-ask-watch
-pfm chat inject	F	F.18-e1-chat-survives-storm
+pfm chat call	E1	E1.16-call
+pfm chat call	E1	E1.26-resolver-prefers-live
+pfm chat call	E2	E2.07-call-ask-watch
+pfm chat call	F	F.18-e1-chat-survives-storm
 pfm chat keys	E1	E1.14-capture-keys
 pfm chat kill	E1	E1.19-kill-unkill
 pfm chat kill	E2	E2.08-kill-self
@@ -66,11 +66,8 @@ pfm chat status	F	F.18-e1-chat-survives-storm
 pfm chat stream	E1	E1.13-last-read-stream
 pfm chat unkill	E1	E1.19-kill-unkill
 pfm chat watch	E1	E1.17-watch
-pfm chat watch	E2	E2.07-inject-ask-watch
+pfm chat watch	E2	E2.07-call-ask-watch
 pfm chat whoami	O1	O1.13-misc-ops
-pfm codex agents	A	A.09-codex-agents
-pfm codex build	A	A.08-codex-mirror
-pfm codex check	A	A.08-codex-mirror
 pfm config init	O1	O1.13-misc-ops
 pfm config show	O1	O1.13-misc-ops
 pfm config validate	O1	O1.13-misc-ops
@@ -100,6 +97,7 @@ pfm internal exit-close	E1	E1.21-exit-close
 pfm internal exit-intercept	E1	E1.19-kill-unkill
 pfm internal explore-deny	O2	O2.05-internal-plumbing
 pfm internal git-guard	O2	O2.05-internal-plumbing
+pfm internal store-guard	O2	O2.05-internal-plumbing
 pfm internal kill-exit	O2	O2.05-internal-plumbing
 pfm internal launch	E1	E1.23-launcher
 pfm internal launcher-repair	O2	O2.05-internal-plumbing
@@ -124,7 +122,6 @@ pfm mcp serve	M	M.05-daemon-core
 pfm mcp serve	M	M.07-stdio-transports
 pfm mcp serve	M	M.08-mcp-cli
 pfm name-sync	F	F.13-name-sync
-pfm opencode	A	A.13-opencode-layer
 pfm model-cost	O1	O1.15-model-cost
 pfm tokens	O1	O1.16-tokens
 pfm transcript	O1	O1.17-transcript
@@ -143,4 +140,4 @@ pfm update pin	A	A.05-update-verbs
 pfm usage-hook	O1	O1.13-misc-ops
 pfm version	O1	O1.13-misc-ops
 pfm whoami	O1	O1.13-misc-ops
-servicedesk	M	M.10-chat-tools-gap
+mcp__chat-professor__servicedesk	M	M.10-chat-tools-gap

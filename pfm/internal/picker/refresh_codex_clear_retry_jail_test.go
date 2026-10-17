@@ -333,6 +333,7 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	// plus headroom, rather than timing this test against the presence timer.
 	bound := fleetRefreshCodexPollInterval + 15*time.Second
 	deadline := time.After(bound)
+waitForClear:
 	for {
 		select {
 		case snapshot, ok := <-updates:
@@ -347,7 +348,8 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 			for index := range snapshot.Rows {
 				row := &snapshot.Rows[index]
 				if row.ID == currentID {
-					t.Fatalf("cleared chat remained visible: %#v", row)
+					// A pre-clear snapshot may already be queued on the channel.
+					continue waitForClear
 				}
 			}
 			assertNoStaleCodexRow(t, snapshot.Rows, currentID, oldID, "parked clear")

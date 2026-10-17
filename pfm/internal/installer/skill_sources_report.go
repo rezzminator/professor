@@ -234,37 +234,56 @@ func inspectSkillSource(
 }
 
 // ReportGlobalRegistries reports store agents, Codex agents, source-fetched skills,
-// and dead pfm links using the same predicate as install.
+// and the registry-ownership scan install shares: STORE, ORPHAN, DEAD and RETIRED rows.
 func ReportGlobalRegistries(
 	w io.Writer,
 	home string,
 	claudeAbsent bool,
 	env paths.Env,
 	capabilities []string,
+	accountDirs []string,
+	retired RetiredRegistryNames,
 	codexHomes ...string,
 ) (warnings, failures int) {
-	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, capabilities, codexHomes...)
+	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, capabilities, accountDirs, codexHomes...)
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures
-	repo, err := GlobalSourceRepo(home)
+	hostWarnings, hostFailures := ReportEngineSyncHost(w, home, env)
+	warnings += hostWarnings
+	failures += hostFailures
+	result, err := ScanRegistryOwnership(home, ClaudeStore(home), retired)
 	if err != nil {
-		fmt.Fprintf(w, "doctor: registry dead-link check failed: %s\n", err)
+		fmt.Fprintf(w, "doctor: registry-ownership check failed: %s\n", err)
 		return warnings, failures + 1
 	}
-	repos := []string{repo}
-	fallback := filepath.Join(home, ".professor")
-	if repo != fallback {
-		repos = append(repos, fallback)
+	for _, finding := range result.Findings {
+		switch finding.Class {
+		case RegistryStore:
+			fmt.Fprintf(w, "doctor: registry STORE %s -> %s — retired store; run pfm install --yes\n",
+				finding.Path, finding.Target)
+			failures++
+		case RegistryOrphan:
+			fmt.Fprintf(w, "doctor: registry ORPHAN %s -> %s — Professor no longer ships it; run pfm install --yes\n",
+				finding.Path, finding.Target)
+			failures++
+		case RegistryDead:
+			fmt.Fprintf(w, "doctor: registry DEAD %s -> %s — target gone; run pfm install --yes\n",
+				finding.Path, finding.Target)
+			warnings++
+		case RegistryRetired:
+			fmt.Fprintf(w, "doctor: registry RETIRED %s — unmarked; Professor retired %q; left in place\n",
+				finding.Path, finding.Name)
+			warnings++
+		}
 	}
-	dead, err := InspectDeadRegistryLinks(home, ClaudeStore(home), repos)
-	if err != nil {
-		fmt.Fprintf(w, "doctor: registry dead-link check failed: %s\n", err)
-		return warnings, failures + 1
-	}
-	for _, link := range dead {
-		fmt.Fprintf(w, "doctor: registry dead link %s -> %s — run pfm install --yes\n", link.Path, link.Target)
-		warnings++
+	if len(result.Findings) == 0 {
+		fmt.Fprintf(
+			w,
+			"doctor: registry-ownership ok (%d entries in %d registries)\n",
+			result.Entries,
+			result.Registries,
+		)
 	}
 	return warnings, failures
 }

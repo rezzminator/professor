@@ -163,7 +163,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Error("status line missing")
 				}
 			case "mcp":
-				assertProfessorMCP(t, home, parsed.MCPConfig)
+				assertFamilyMCP(t, home, parsed.MCPConfig, true, true)
 			case "permissionMode":
 				if !parsed.Autonomy {
 					t.Error("autonomy missing")

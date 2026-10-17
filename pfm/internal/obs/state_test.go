@@ -43,7 +43,7 @@ func TestTrailWalksACoordinatorsStates(t *testing.T) {
 	trail.Reach("locked", "pane mutex held")
 	trail.Reach("exit-typed", "/exit sent")
 	trail.End(nil)
-	failing := NewTrail(ctx, "inject", "resolved")
+	failing := NewTrail(ctx, "call", "resolved")
 	failing.Reach("typed", "bearer sk-PLANTED prompt body")
 	failing.End(errors.New("pane in copy-mode"))
 	records := recorder.Records()

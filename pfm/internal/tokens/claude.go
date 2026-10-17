@@ -516,7 +516,7 @@ func (a *auditor) collectCall(
 	usage, split := block.Billed()
 	advisors := block.Advisors()
 	model := jsString(message.Model)
-	if model == "<synthetic>" || usage == (pricing.ClaudeUsage{}) && len(advisors) == 0 {
+	if transcript.NotARequest(model, block) {
 		a.scan.syntheticCalls++
 		return
 	}

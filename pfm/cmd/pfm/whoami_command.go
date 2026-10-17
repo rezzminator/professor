@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"io"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // runWhoami prints THIS chat's own tmux session name — its identity, and the
-// address another chat injects to. The stdout contract is chat.sh's whoami
+// address another chat calls to. The stdout contract is chat.sh's whoami
 // (chat.sh:482-484): one bare session name and nothing else, so an existing
 // caller can switch to this binary without reading differently. --json adds
 // the engine identity for callers that want more than the handle.
@@ -58,8 +58,8 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		if target == "" {
 			target = identity.Session
 		}
-		capture, captureErr := (inject.TmuxInjector{}).Capture(
-			ctx, identity.SocketPath, target, true, inject.FullScrollback,
+		capture, captureErr := (pfmcall.TmuxCaller{}).Capture(
+			ctx, identity.SocketPath, target, true, pfmcall.FullScrollback,
 		)
 		if captureErr == nil {
 			emojis := []string(nil)

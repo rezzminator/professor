@@ -341,8 +341,8 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 }
 
 // reloadPromptFixture is a raw-tty pane the worker can actually /exit and
-// respawn: it echoes every typed byte itself (like injectCLIUI in
-// inject_cli_jail_test.go) so capture-pane sees a live "❯ …" composer line,
+// respawn: it echoes every typed byte itself (like callCLIUI in
+// call_cli_jail_test.go) so capture-pane sees a live "❯ …" composer line,
 // and it exits 0 the moment a submitted line reads exactly "/exit" — the
 // literal string reload.Run types and submits before ever touching Respawn.
 const reloadPromptFixture = `import os, sys, tty

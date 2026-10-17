@@ -158,7 +158,18 @@ func (executor *Executor) Open(
 		); err != nil {
 			return "", err
 		}
-		launchnotice.Hold(executor.stderr, "pfm", plan.Warnings)
+		held, err := executor.watchLaunch(
+			ctx,
+			*plan.ChatServer,
+			request.Row.Name,
+			request.Config.Claude.Binary,
+			request.Config.Codex.Binary,
+			request.Config.OpenCode.Binary,
+		)
+		if err != nil {
+			return "", err
+		}
+		launchnotice.Hold(executor.stderr, "pfm", launchWarnings(plan.Warnings, held))
 	}
 	trail.Reach("opened", "pane attached")
 	return plan.Line, nil
@@ -337,6 +348,23 @@ func (executor *Executor) SelfSwitch(
 }
 
 func chooseEngineWindow(panes []ActionPane, engineCommands ...string) int {
+	engines := enginePaneCommands(engineCommands...)
+	for _, pane := range panes {
+		if engines[pane.CurrentCommand] {
+			return pane.WindowIndex
+		}
+	}
+	for _, pane := range panes {
+		if isEngineRuntime(pane.CurrentCommand) {
+			return pane.WindowIndex
+		}
+	}
+	return panes[0].WindowIndex
+}
+
+// enginePaneCommands is the set of pane commands that name an engine: every
+// registered engine's binary plus the base name of each configured command.
+func enginePaneCommands(engineCommands ...string) map[string]bool {
 	engines := make(map[string]bool, len(pfmengine.All())+len(engineCommands))
 	for _, id := range pfmengine.All() {
 		engines[pfmengine.MustLookup(id).Binary] = true
@@ -346,18 +374,19 @@ func chooseEngineWindow(panes []ActionPane, engineCommands ...string) int {
 			engines[base] = true
 		}
 	}
-	for _, pane := range panes {
-		if engines[pane.CurrentCommand] {
-			return pane.WindowIndex
-		}
-	}
-	for _, pane := range panes {
-		if pane.CurrentCommand == "node" ||
-			isNumericVersion(pane.CurrentCommand) {
-			return pane.WindowIndex
-		}
-	}
-	return panes[0].WindowIndex
+	return engines
+}
+
+// isEngineRuntime reports a pane command an engine runs under without naming
+// it: node, or a versioned binary such as 2.1.3.
+func isEngineRuntime(command string) bool {
+	return command == "node" || isNumericVersion(command)
+}
+
+// isEngineCommand reports whether a pane's command is an engine, by name or by
+// the runtime it runs under.
+func isEngineCommand(command string, engines map[string]bool) bool {
+	return engines[command] || isEngineRuntime(command)
 }
 
 func isNumericVersion(command string) bool {

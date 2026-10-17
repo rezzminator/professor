@@ -2,7 +2,7 @@
   "_comment": [
     "refresh-map.json — template → live-source map with the SHA-256 of each live source as of the last sync.",
     "Consumed by scripts/refresh-scope.sh (scan = incremental refresh scope; regen = re-baseline at release end).",
-    "Template keys are relative to templates/, every key carrying its scope prefix — project/ (per-install templates) or global/ (machine-global originals). curated: true = hand-curated, no live source (the global reviewer/tracer/rr originals are curated; other globals still refresh from their live sources). Source paths are relative to the source project root;",
+    "Template keys are relative to templates/, every key carrying its scope prefix — project/ (per-install templates) or global/ (machine-global originals). curated: true = hand-curated, no live source (the global reviewer/tracer/rr originals are curated; other globals still refresh from their live sources). Source paths are relative to the source project root: the live project `/pfm:release prepare --from` names, never this clone's same-named files; each SHA-256 is that project's file as of the last sync, and a hand-authored template edit is no sync and restamps nothing;",
     "{project:ROLE} tokens resolve via the project's .professor/manifest.json .interview.projects[ROLE]; leading ~/ resolves to $HOME (host-level sources).",
     "curated: true = hand-curated template with no live source — never auto-derived.",
     "Multi-source entries list every live file whose change forces re-derivation (representative-pattern templates).",
@@ -52,10 +52,22 @@
     "global/agents/gpt-flights-lander.md": {
       "curated": true
     },
+    "global/agents/gpt-flights-speccer.md": {
+      "curated": true
+    },
     "global/agents/gpt-reviewer-pro.md": {
       "curated": true
     },
     "global/agents/gpt-reviewer.md": {
+      "curated": true
+    },
+    "global/agents/gpt-rr.md": {
+      "curated": true
+    },
+    "global/agents/gpt-rr-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-rr-pro-max.md": {
       "curated": true
     },
     "global/agents/luna.md": {
@@ -91,13 +103,16 @@
     "global/agents/tracer.md": {
       "curated": true
     },
-    "global/agents/ultimate.md": {
+    "global/agents/imagine.md": {
+      "curated": true
+    },
+    "global/agents/imagination.md": {
       "curated": true
     },
     "global/codex/config.toml": {
       "curated": true
     },
-    "global/engine-sync/config.json": {
+    "global/engine-sync.json": {
       "curated": true
     },
     "global/commands/context-audit.md": {
@@ -113,6 +128,18 @@
       "curated": true
     },
     "global/commands/housekeeping.md": {
+      "curated": true
+    },
+    "global/commands/imagine/build-fast.md": {
+      "curated": true
+    },
+    "global/commands/imagine/build-spec.md": {
+      "curated": true
+    },
+    "global/commands/imagine/build.md": {
+      "curated": true
+    },
+    "global/commands/imagine/callmeter.md": {
       "curated": true
     },
     "global/commands/iterative-improvement.md": {
@@ -148,10 +175,13 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
-    "global/commands/ultimate-spec.md": {
+    "global/skills/imagine-core/SKILL.md": {
       "curated": true
     },
-    "global/commands/ultimate.md": {
+    "global/skills/imagine-core/live.md": {
+      "curated": true
+    },
+    "global/skills/ultimate/SKILL.md": {
       "curated": true
     },
     "global/skills/chatlog/README.md": {
@@ -287,11 +317,6 @@
     "project/scripts/checkpoint.sh": {
       "sources": {
         ".claude/scripts/checkpoint.sh": "8184d92715dd35504d17af80a5111d6ea1989047f59bd50c051f3fe65ec178dc"
-      }
-    },
-    "project/scripts/codex-sync.sh": {
-      "sources": {
-        ".claude/scripts/codex-sync.sh": "09545a041055b9ebb071188b8433aa0913c2a3d19ed7ecab799565d6db2a7abc"
       }
     },
     "project/scripts/dev.sh": {

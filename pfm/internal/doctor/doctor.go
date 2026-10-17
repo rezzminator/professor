@@ -36,6 +36,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 const emptySummary = "none"
@@ -281,12 +282,39 @@ func Run(
 	tally.warnings += depWarnings
 	tally.failures += depFailures
 	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
-	printClaudePluginsDoctor(stdout, installer.ClaudeStore(resolved.Home), installer.ClaudePluginBuild{
-		Version:      runtime.Version,
-		Home:         resolved.Home,
-		CheckoutRoot: runtime.Config.Claude.PluginCheckoutRoot,
-		Plugins:      runtime.Config.Claude.Plugins,
-	}, tally)
+	claudeStore := installer.ClaudeStore(resolved.Home)
+	pluginBuild := doctorClaudePluginBuild(
+		runtime.Version, resolved.Home, runtime.Config.Claude,
+		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
+	)
+	printClaudePluginsDoctor(
+		stdout,
+		claudeStore,
+		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
+		pluginBuild,
+		tally,
+	)
+	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
+	claudeEnvDir := primary.ConfigDir
+	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
+		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
+	}
+	printManagedPluginLogsDoctor(
+		stdout, append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...), pluginBuild,
+		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
+		installer.ManagedRoot(resolved.Home), filepath.Join(claudeEnvDir, "settings.json"), tally,
+	)
+	printClaudeEnvDoctor(
+		stdout,
+		installer.ManagedRoot(resolved.Home),
+		filepath.Join(claudeEnvDir, "settings.json"),
+		runtime.Config.Claude.Env,
+		doctorClaudePluginBuild(
+			runtime.Version, resolved.Home, runtime.Config.Claude,
+			runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
+		),
+		tally,
+	)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(
 		stdout,
@@ -294,6 +322,8 @@ func Run(
 		claudeAbsent,
 		dependencies.Env,
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
+		runtime.Config.ClaudeConfigDirs(),
+		update.RetiredRegistryNames(),
 		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings
@@ -332,7 +362,7 @@ func Run(
 		claudeAbsent,
 	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
-	printOpenProjectsDoctor(ctx, stdout, database, databaseErr, resolved.Home)
+	projectWarnings := printOpenProjectsDoctor(ctx, stdout, database, databaseErr, resolved.Home, dependencies.Env)
 	workbenchWarnings, workbenchFailures := printWorkbenchDoctor(stdout, ".", resolved.Home)
 	tally.warnings += workbenchWarnings
 	tally.failures += workbenchFailures
@@ -377,7 +407,11 @@ func Run(
 	case tally.warnings > 0:
 		return 1
 	}
-	fmt.Fprintln(stdout, "doctor: clean")
+	if projectWarnings > 0 {
+		fmt.Fprintf(stdout, "doctor: machine checks clean; project_updates warnings=%d\n", projectWarnings)
+	} else {
+		fmt.Fprintln(stdout, "doctor: clean")
+	}
 	return 0
 }
 

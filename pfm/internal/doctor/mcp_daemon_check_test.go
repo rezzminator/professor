@@ -117,7 +117,7 @@ func TestMCPDaemonDoctorReportsRunningWithNoWarnings(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(
 			`{"pfmVersion":"v1.0.0","protocolVersion":"1","pid":1234,"startTime":"now","endpoint":"http://127.0.0.1",` +
-				`"servers":{"chat":["chat_ls"]}}`,
+				`"servers":{"chat":["ls"]}}`,
 		))
 	}))
 	defer healthy.Close()
@@ -225,7 +225,7 @@ func TestMCPDaemonDoctorWarnsOnVersionSkew(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(
 			`{"pfmVersion":"v9.9.9-skewed","protocolVersion":"1","pid":1234,"startTime":"now","endpoint":"http://127.0.0.1",` +
-				`"servers":{"chat":["chat_ls"]}}`,
+				`"servers":{"chat":["ls"]}}`,
 		))
 	}))
 	defer healthy.Close()

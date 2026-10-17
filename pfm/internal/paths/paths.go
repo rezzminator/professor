@@ -142,6 +142,12 @@ var (
 	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
 )
 
+// CallCapTallyDir holds `pfm internal call-cap`'s request tallies, one per
+// transcript, so each hook run reads only what its agent appended since.
+func CallCapTallyDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "call-cap")
+}
+
 // PricesStampPath is the record of the last price check that confirmed the
 // clone's prices.json, kept outside the clone so a check never dirties it.
 func PricesStampPath(home string) string {
@@ -423,7 +429,7 @@ func LegacyStateDB(home string) string {
 
 // HarvesterCacheDir is the harvester's one default cache directory (used when
 // harvester.config.json sets no cache.dir): <home>/.professor/.harvester-cache.
-// It holds persistent harvester_read handles, so it lives under the home, never
+// It holds persistent read handles, so it lives under the home, never
 // a temp directory.
 func HarvesterCacheDir(home string) string {
 	return filepath.Join(home, ".professor", ".harvester-cache")
@@ -503,17 +509,6 @@ func Resolve() (Values, error) {
 		ManagedSettingsDir: managed,
 		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil
-}
-
-// GeneratedClaudeAgentsDir is the home store Professor's engine-sync policy
-// rendered `from:` declarations into before they moved into the clone's
-// templates/generated/agents (machine.sourceGeneratedAgentsDir). engine-sync
-// global retires what it owns there; pfm's unwire and orphan sweep still
-// recognise a `{config}/agents/<name>.md` link into it as pfm-owned, and the
-// test jail stages its declaration stand-ins here, since a test never writes
-// into the clone.
-func GeneratedClaudeAgentsDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
 }
 
 // ClaudeMCPConfigDir is the private (0700) directory holding each Claude

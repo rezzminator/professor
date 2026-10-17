@@ -152,46 +152,6 @@ func TestHostCapabilities(t *testing.T) {
 	}
 }
 
-func TestCapabilityArgs(t *testing.T) {
-	gpt := []string{"gpt-agents"}
-	flag := []string{"--capability", "gpt-agents"}
-	cases := []struct {
-		name         string
-		engine       string
-		args         []string
-		capabilities []string
-		want         []string
-	}{
-		{"codex build", EngineCodex, []string{"build", "."}, gpt, append(append([]string{"build"}, flag...), ".")},
-		{
-			"codex check before a trailing value flag",
-			EngineCodex,
-			[]string{"check", ".", "--home"},
-			gpt,
-			append(append([]string{"check"}, flag...), ".", "--home"),
-		},
-		{
-			"codex agents before a sentinel",
-			EngineCodex,
-			[]string{"agents", "--", "x"},
-			gpt,
-			append(append([]string{"agents"}, flag...), "--", "x"),
-		},
-		{"opencode doctor", EngineOpenCode, []string{"doctor"}, gpt, append([]string{"doctor"}, flag...)},
-		{"a codex verb that renders no agent", EngineCodex, []string{"generate"}, gpt, []string{"generate"}},
-		{"opencode has no agents verb", EngineOpenCode, []string{"agents"}, gpt, []string{"agents"}},
-		{"no capability", EngineCodex, []string{"build", "."}, nil, []string{"build", "."}},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			got := CapabilityArgs(testCase.engine, testCase.args, testCase.capabilities)
-			if !reflect.DeepEqual(got, testCase.want) {
-				t.Fatalf("CapabilityArgs = %q, want %q", got, testCase.want)
-			}
-		})
-	}
-}
-
 func TestGlobalArgs(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -373,8 +333,8 @@ func TestMachineDoctor(t *testing.T) {
 		{
 			name:    "a configuration error retains its file and key",
 			code:    1,
-			stdout:  `{"ok":false,"rows":[],"configSources":[],"error":"/h/.config/engine-sync/config.json: machine.modelMap is removed; use codex.modelMap"}`,
-			wantErr: "/h/.config/engine-sync/config.json: machine.modelMap is removed; use codex.modelMap",
+			stdout:  `{"ok":false,"rows":[],"configSources":[],"error":"/h/.claude/engine-sync.json: machine.modelMap is removed; use codex.modelMap"}`,
+			wantErr: "/h/.claude/engine-sync.json: machine.modelMap is removed; use codex.modelMap",
 		},
 		{
 			name: "an unknown level is an error", stdout: `{"ok":true,"rows":[{"level":"info","message":"m"}]}`,

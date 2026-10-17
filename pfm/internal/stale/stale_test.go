@@ -120,7 +120,7 @@ func (fixture *fixture) signaler(ignoreTerm, ignoreKill map[int]bool, sent *[]st
 func TestFindNamesOnlyPfmProcessesRunningAReplacedBinary(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(101, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(101, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	fixture.process(102, fixture.binary, fixture.binary, "mcp", "serve")
 	fixture.process(103, fixture.old, "/usr/bin/sleep", "60")
 	fixture.process(104, fixture.old, "pfm")
@@ -207,7 +207,7 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(301, fixture.old, fixture.binary, "ls")
-	fixture.process(302, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(302, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	fixture.process(303, fixture.binary, fixture.binary, "mcp", "serve")
 	var sent []string
 	var stdout bytes.Buffer
@@ -240,9 +240,20 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 func TestSweepKeepsMarkedProxyAndTermsUnmarkedServer(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(311, fixture.old, fixture.binary, "--config", "/tmp/pfm.json", "mcp", "serve", "--stdio")
+	fixture.process(
+		311,
+		fixture.old,
+		fixture.binary,
+		"--config",
+		"/tmp/pfm.json",
+		"mcp",
+		"serve",
+		"--stdio",
+		"--family",
+		"chat",
+	)
 	fixture.markProxy(311, 9)
-	fixture.process(312, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(312, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	var sent []string
 	var stdout bytes.Buffer
 	err := SweepStaleProcesses(
@@ -273,9 +284,9 @@ func TestSweepKeepsMarkedProxyAndTermsUnmarkedServer(t *testing.T) {
 func TestClassifyCompatibleProxies(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(313, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(313, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	fixture.markProxy(313, 9)
-	fixture.process(314, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(314, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	var sent []string
 	table := gather.NewProcFS(fixture.root)
 	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
@@ -300,15 +311,30 @@ func TestClassifyCompatibleProxyCommandForms(t *testing.T) {
 		argv       []string
 		compatible bool
 	}{
-		{name: "stdio", argv: []string{"pfm", "mcp", "serve", "--stdio"}, compatible: true},
+		{name: "chat family", argv: []string{"pfm", "mcp", "serve", "--stdio", "--family", "chat"}, compatible: true},
 		{
-			name:       "stdio split config",
-			argv:       []string{"/opt/pfm", "--config", "/tmp/pfm.json", "mcp", "serve", "--stdio"},
+			name:       "harvester family",
+			argv:       []string{"pfm", "mcp", "serve", "--stdio", "--family", "harvester"},
+			compatible: true,
+		},
+		{name: "unknown family", argv: []string{"pfm", "mcp", "serve", "--stdio", "--family", "unknown"}},
+		{
+			name: "stdio split config",
+			argv: []string{
+				"/opt/pfm",
+				"--config",
+				"/tmp/pfm.json",
+				"mcp",
+				"serve",
+				"--stdio",
+				"--family",
+				"chat",
+			},
 			compatible: true,
 		},
 		{
 			name:       "stdio joined config",
-			argv:       []string{"pfm", "--config=/tmp/pfm.json", "mcp", "serve", "--stdio"},
+			argv:       []string{"pfm", "--config=/tmp/pfm.json", "mcp", "serve", "--stdio", "--family", "chat"},
 			compatible: true,
 		},
 		{name: "daemon", argv: []string{"pfm", "mcp", "serve"}},
@@ -320,18 +346,53 @@ func TestClassifyCompatibleProxyCommandForms(t *testing.T) {
 		{name: "config after mcp", argv: []string{"pfm", "mcp", "serve", "--stdio", "--config", "/tmp/pfm.json"}},
 		{
 			name: "repeated split config",
-			argv: []string{"pfm", "--config", "/tmp/one.json", "--config", "/tmp/two.json", "mcp", "serve", "--stdio"},
+			argv: []string{
+				"pfm",
+				"--config",
+				"/tmp/one.json",
+				"--config",
+				"/tmp/two.json",
+				"mcp",
+				"serve",
+				"--stdio",
+				"--family",
+				"chat",
+			},
 		},
 		{
 			name: "repeated joined config",
-			argv: []string{"pfm", "--config=/tmp/one.json", "--config=/tmp/two.json", "mcp", "serve", "--stdio"},
+			argv: []string{
+				"pfm",
+				"--config=/tmp/one.json",
+				"--config=/tmp/two.json",
+				"mcp",
+				"serve",
+				"--stdio",
+				"--family",
+				"chat",
+			},
 		},
-		{name: "empty split config", argv: []string{"pfm", "--config", "", "mcp", "serve", "--stdio"}},
-		{name: "whitespace split config", argv: []string{"pfm", "--config", "   ", "mcp", "serve", "--stdio"}},
+		{
+			name: "empty split config",
+			argv: []string{"pfm", "--config", "", "mcp", "serve", "--stdio", "--family", "chat"},
+		},
+		{
+			name: "whitespace split config",
+			argv: []string{"pfm", "--config", "   ", "mcp", "serve", "--stdio", "--family", "chat"},
+		},
 		{name: "missing split config", argv: []string{"pfm", "--config"}},
-		{name: "empty joined config", argv: []string{"pfm", "--config=", "mcp", "serve", "--stdio"}},
-		{name: "whitespace joined config", argv: []string{"pfm", "--config=   ", "mcp", "serve", "--stdio"}},
-		{name: "unrelated leading flag", argv: []string{"pfm", "--verbose", "mcp", "serve", "--stdio"}},
+		{
+			name: "empty joined config",
+			argv: []string{"pfm", "--config=", "mcp", "serve", "--stdio", "--family", "chat"},
+		},
+		{
+			name: "whitespace joined config",
+			argv: []string{"pfm", "--config=   ", "mcp", "serve", "--stdio", "--family", "chat"},
+		},
+		{
+			name: "unrelated leading flag",
+			argv: []string{"pfm", "--verbose", "mcp", "serve", "--stdio", "--family", "chat"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -371,7 +432,7 @@ func TestClassifyCompatibleProxyCommandForms(t *testing.T) {
 func TestClassifyCompatibleProxiesFailsClosedWhenDescriptorsAreUnreadable(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(315, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(315, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	var sent []string
 	table := gather.NewProcFS(fixture.root)
 	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
@@ -397,7 +458,7 @@ func TestClassifyCompatibleProxiesFailsClosedWhenDescriptorsAreUnreadable(t *tes
 func TestClassifyCompatibleProxiesOmitsVanishedCandidate(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(316, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(316, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	var sent []string
 	table := gather.NewProcFS(fixture.root)
 	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
@@ -422,7 +483,7 @@ func TestClassifyCompatibleProxiesOmitsVanishedCandidate(t *testing.T) {
 func TestSweepDoesNotKeepMarkerFileWithoutHolder(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(321, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(321, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	marker := fixture.markerPath()
 	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
 		t.Fatal(err)
@@ -446,7 +507,7 @@ func TestSweepDoesNotKeepMarkerFileWithoutHolder(t *testing.T) {
 func TestSweepFailsBeforeSignalsWhenProxyDescriptorsAreUnreadable(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(331, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(331, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	fixture.process(332, fixture.old, fixture.binary, "ls")
 	var sent []string
 	probeErr := errors.New("descriptor probe denied")
@@ -467,7 +528,7 @@ func TestSweepFailsBeforeSignalsWhenProxyDescriptorsAreUnreadable(t *testing.T) 
 func TestSweepFailsClosedWhenOneDescriptorIsOmitted(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(336, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(336, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	if err := os.WriteFile(filepath.Join(fixture.root, "336", "fd", "8"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +548,7 @@ func TestSweepFailsClosedWhenOneDescriptorIsOmitted(t *testing.T) {
 func TestSweepOmitsProxyThatExitsDuringDescriptorProbe(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(341, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(341, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	var sent []string
 	signal := func(pid int, which syscall.Signal) error {
 		if which == 0 && pid == 341 {

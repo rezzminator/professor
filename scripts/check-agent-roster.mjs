@@ -30,6 +30,11 @@ function compilerError(error, args = checkArgs) {
   process.exit(2);
 }
 const failures = [];
+function reportFailures() {
+  for (const failure of failures) console.error(`agent-roster: ${failure}`);
+  if (failures.length)
+    console.error(`agent-roster: FAIL — ${failures.length} roster/capability problem(s)`);
+}
 // A path lookup. Only ENOENT and ENOTDIR mean the path is absent (null); any other error (permission,
 // a symlink loop) is a lookup that failed, recorded by name and never read as absence.
 const probe = (path, link = false) => {
@@ -91,13 +96,18 @@ for (const dir of agentSourceDirs) {
   const args = ["-I", join(ROOT, "scripts/agent-source-inventory.py"), directory];
   if (dir !== "templates/global/agents") args.push("--project");
   const scan = spawnSync("python3", args, { encoding: "utf8" });
-  // Exit 3 is the inventory's missing PyYAML: a toolchain gap, never a source error.
+  // The inventory's exit 3 is a toolchain gap; roster exit 3 is only absent mirrors.
   if (scan.status === 3) {
     console.error(`agent-roster: ${scan.stderr.trim()}`);
-    process.exit(3);
+    process.exit(4);
   }
-  if (scan.error || scan.status !== 0)
-    compilerError(scan.error || scan.stderr || `agent source inventory exited ${scan.status}`, args);
+  if (scan.error || scan.status !== 0) {
+    // Only the producer's validation verdict rejects a source; lookup failures and crashes are errors.
+    const rejected = !scan.error && scan.status === 1 && scan.stderr.startsWith("agent-source-inventory: REJECTED —");
+    const context = scan.error?.stack || scan.stderr.trim() || `exit ${scan.status}, signal ${scan.signal || "none"}`;
+    console.error(`agent-roster: ${rejected ? "SOURCE REJECTED" : "ERROR"} — python3 ${args.join(" ")}: ${context}`);
+    process.exit(rejected ? 5 : 2);
+  }
   for (const {name, kind, model} of JSON.parse(scan.stdout)) {
     const text = readFileSync(join(directory, `${name}.md`), "utf8");
     const front = text.startsWith("---\n") ? text.slice(4, text.indexOf("\n---", 4)) : "";
@@ -129,6 +139,7 @@ const missingDirs = [
   !existsSync(openCodeDir) && "opencode (.opencode/agent/)",
 ].filter(Boolean);
 if (missingDirs.length) {
+  reportFailures();
   console.error(
     `agent-roster: NOT GENERATED — ${missingDirs.join(", ")} absent; run: engine-sync build .`,
   );
@@ -252,10 +263,7 @@ if (openCodeExpected.includes("gitter")) {
 }
 
 if (failures.length) {
-  for (const failure of failures) console.error(`agent-roster: ${failure}`);
-  console.error(
-    `agent-roster: FAIL — ${failures.length} roster/capability problem(s)`,
-  );
+  reportFailures();
   process.exit(1);
 }
 

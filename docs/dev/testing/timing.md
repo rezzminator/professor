@@ -73,9 +73,9 @@ Event span excludes build work before the first event. The sweep records externa
 
 ## Sharded packages
 
-`pfm/scripts/test-shard.sh` pins `cmd/pfm` to four shards. In a clean plain `go test ./...` run (75.7 s), that package took 55.7 s and no other package exceeded 22 s. History-run medians were 43.8 s at three shards, 43.3 s at five, and 39.2 s then 43.7 s at four under varying host load. History only orders tests across the four shards; it never selects packages or changes shard counts. Every other package runs in one unsharded `go test` process.
+`pfm/scripts/test-shard.sh` pins `cmd/pfm` to four shards and `internal/update` to two. In a clean plain `go test ./...` run (75.7 s), `cmd/pfm` took 55.7 s and no other package exceeded 22 s. History-run medians were 43.8 s at three shards, 43.3 s at five, and 39.2 s then 43.7 s at four under varying host load. `internal/update` took 11.9 s alone against its 10 s budget, nearly all of it about 45 `Run` tests that swap the package's seam variables and so stay serial within one process. History only orders tests across a package's shards; it never selects packages or changes shard counts. Every other package runs in one unsharded `go test` process.
 
-The script compiles the `cmd/pfm` test binary once, lists its tests from that binary, and starts all four shards as `go tool test2json` runs of the same binary. It starts the unsharded process first and runs it alongside the sharded package. Sharded packages run one at a time, so at most one unsharded process plus the largest shard count are direct children of the script. With `--history` (the gate passes the newest earlier `unit.json` with test events), the unsharded process lists its packages longest first by their history `Elapsed`, packages with no history first in their given order, so the slowest packages start at once instead of last.
+The script compiles a sharded package's test binary once, lists its tests from that binary, and starts all of its shards as `go tool test2json` runs of the same binary. It starts the unsharded process first and runs it alongside the sharded package. Sharded packages run one at a time, so at most one unsharded process plus the largest shard count are direct children of the script. With `--history` (the gate passes the newest earlier `unit.json` with test events), the unsharded process lists its packages longest first by their history `Elapsed`, packages with no history first in their given order, so the slowest packages start at once instead of last.
 
 A unit run first builds pfm and mock-engine, both at once, and starts no test before both have finished; it hands them to the tests through `PFM_TEST_PFM_BINARY` and `PFM_TEST_MOCK_ENGINE_BINARY`. A failed build leaves no binary and fails the run. With `--bin-dir D` the binaries are built into `D` and kept; the gate passes `$run/bin`, and `templates.check-map` and `templates.mirrors` reuse `$run/bin/pfm` instead of building their own; each builds one when the unit run left none (a `templates` gate, a failed build). Without `--bin-dir` they go to a temporary directory that is removed.
 
@@ -148,7 +148,7 @@ Each change was measured before and after in the fence, on the quantity it targe
 
 The kept schedule's (S4) `STEPS` median is 41.9 s (n=5) against the 54.0 s median of the 17 `iso gate all` captures in `$HOME/.local/state/pfm/flights/professor/test-profiling/slowness-map.md`: −12.1 s, −22.4 %.
 
-The median S5 capture's `gate.tsv`, from `$HOME/.local/state/pfm/flights/professor/test-profiling/measure/10-b/` capture `S5-r2-3` (`run.1X6AoI`; `STEPS PASS`, `BUDGET PASS`, attribution `CODE`, `steps_heavy_jobs 3`):
+The median S5 capture's `gate.tsv`, from `$HOME/.local/state/pfm/flights/professor/test-profiling/measure/10-b/` capture `S5-r2-3` (`run.1X6AoI`; `STEPS PASS`, `BUDGET PASS`, attribution `CODE`, `steps_heavy_jobs 3`), less the two rows of the since-deleted OpenCode writer check:
 
 ```text
 step	verdict	seconds
@@ -198,9 +198,7 @@ templates.flight-index	PASS	0.5
 templates.release-check	PASS	1.6
 templates.refresh-scope	PASS	0.6
 templates.dev-report	PASS	0.3
-templates.opencode-writer-tests	PASS	0.1
 templates.skill-tests	PASS	1.3
-templates.opencode-writer-refs	PASS	0.0
 STEPS	PASS	39.8
 BUDGET	PASS	40
 ```

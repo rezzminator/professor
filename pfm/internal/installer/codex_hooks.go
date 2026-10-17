@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
@@ -238,6 +237,9 @@ func validateCodexHooks(document map[string]any) error {
 	return nil
 }
 
+// emptyCodexHooks is the body a Codex hooks.json is planned on when absent.
+const emptyCodexHooks = "{\"hooks\":{}}\n"
+
 func (installer *engine) wireCodexHooks() error {
 	ownershipPath := settingsHookOwnershipPath(installer.managedRoot)
 	ownership, ownershipRaw, err := readSettingsHookOwnership(ownershipPath)
@@ -293,7 +295,7 @@ func (installer *engine) wireCodexHooks() error {
 					return fmt.Errorf("inspect Codex hooks %s: %w", path, statErr)
 				}
 				existed = false
-				raw = []byte("{\"hooks\":{}}\n")
+				raw = []byte(emptyCodexHooks)
 				if installer.options.Mode == ModeUninstall {
 					delete(ownership, physical)
 					return nil
@@ -322,31 +324,62 @@ func (installer *engine) wireCodexHooks() error {
 				installer.skip("invalid Codex hooks JSON at " + path + ": " + updateErr.Error())
 				return nil
 			}
-			if !uninstalling {
-				final := raw
-				if changed {
-					final = updated
+			carry := func(final []byte) error {
+				if uninstalling {
+					return nil
 				}
 				carries, err := codexHooksCarryResumeUnkill(final, installer.options.Home)
 				if err != nil {
 					return fmt.Errorf("inspect Codex hooks %s: %w", path, err)
 				}
 				carriesHook[physical] = carries
+				return nil
+			}
+			final := raw
+			if changed {
+				final = updated
+			}
+			if err := carry(final); err != nil {
+				return err
 			}
 
 			backup := ""
 			if existed {
 				backup = availableBackup(path, installer.stamp)
 			}
+			// What the write must still find: a hooks.json linked to a Claude
+			// settings.json is written by that account's chats too, so bytes
+			// changed since this read re-plan the write, the ledger and the
+			// trust following the plan written.
+			var preimage []byte
+			if existed {
+				preimage = raw
+			}
 			if !changed {
 				installer.ok(path + " wiring")
 			} else if err := installer.change(changeDescription(path, existed), func() error {
 				if existed {
-					if err := copyBackup(path, backup); err != nil {
+					if err := copyBackup(path, backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
 						return fmt.Errorf("backup %s: %w", path, err)
 					}
 				}
-				return atomicfile.Write(physical, updated, 0o600)
+				return writeWhileUnchanged(physical, physical, 0o600, preimage, updated, os.ReadFile,
+					func(current []byte) ([]byte, bool, error) {
+						if current == nil {
+							current = []byte(emptyCodexHooks)
+						}
+						next, write, owned, err := updateCodexHooks(
+							current, installer.options.Home, uninstalling, ownership[physical],
+						)
+						if err != nil {
+							return nil, false, fmt.Errorf("re-plan Codex hooks %s: %w", path, err)
+						}
+						nextOwned, final = owned, current
+						if write {
+							final = next
+						}
+						return next, write, carry(final)
+					})
 			}); err != nil {
 				return err
 			}
@@ -459,6 +492,21 @@ func (installer *engine) wireResumeUnkillTrust(account string, carriesHook map[s
 	if err != nil {
 		return err
 	}
+	// A trust Codex already holds for this exact handler is no change, so a
+	// repeat install stays changed=0; a handler its operator disabled is left
+	// alone, as RegisterHookTrust leaves it. Any other state, an unreadable
+	// one included, records the trust again, and that call reports its own error.
+	trusted, stateErr := codexappendix.NativeHookTrustState(
+		context.Background(), installer.options.CodexBinary, account, hook.Command,
+	)
+	switch {
+	case stateErr == nil && trusted:
+		installer.ok("resume-unkill hook trusted in " + account)
+		return nil
+	case errors.Is(stateErr, codexappendix.ErrNativeHookDisabled):
+		installer.skip("resume-unkill hook trust in " + account + ": its operator disabled the handler, left alone")
+		return nil
+	}
 	return installer.change("trust resume-unkill hook "+account, func() error {
 		if err := codexappendix.RegisterHookTrust(
 			context.Background(), installer.options.CodexBinary, account, codexHookEvent, hook.Matcher, hook.Command,
@@ -473,26 +521,66 @@ func (installer *engine) wireResumeUnkillTrust(account string, carriesHook map[s
 // Claude settings file: remove its exact recorded handlers before forgetting
 // ownership, while preserving every unrecorded handler and setting.
 func (installer *engine) retireRecordedClaudeHooks(path string, owned settingsHookCounts) error {
+	edit, err := planRecordedClaudeHooksRetirement(path, owned, installer.stamp)
+	if err != nil || edit == nil {
+		return err
+	}
+	return installer.change("retire recorded hooks "+path, edit)
+}
+
+// errRecordedHooksGone ends a retirement whose fresh read holds none of the
+// recorded handlers: there is nothing left to write.
+var errRecordedHooksGone = errors.New("no recorded hook left to retire")
+
+// planRecordedClaudeHooksRetirement plans removing owned's exact handlers from
+// the Claude settings file at path; the edit is nil when the file is absent or
+// holds none of them. The edit backs the file up, then writes it through
+// writeSettingsDocument, which removes them again from whatever a chat wrote
+// after this read; a file a chat removed, or rewrote without them, meanwhile
+// is left as the chat left it.
+func planRecordedClaudeHooksRetirement(path string, owned settingsHookCounts, stamp string) (func() error, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("read recorded settings hooks %s: %w", path, err)
+		return nil, fmt.Errorf("read recorded settings hooks %s: %w", path, err)
 	}
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return fmt.Errorf("parse recorded settings hooks %s: %w", path, err)
+		return nil, fmt.Errorf("parse recorded settings hooks %s: %w", path, err)
 	}
 	if err := validateCodexHooks(document); err != nil {
-		return fmt.Errorf("inspect recorded settings hooks %s: %w", path, err)
+		return nil, fmt.Errorf("inspect recorded settings hooks %s: %w", path, err)
 	}
 	if !removeOwnedSettingsHooks(document, owned) {
+		return nil, nil
+	}
+	write := writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
+		if err := validateCodexHooks(fresh); err != nil {
+			return fmt.Errorf("inspect recorded settings hooks: %w", err)
+		}
+		if !removeOwnedSettingsHooks(fresh, owned) {
+			return errRecordedHooksGone
+		}
 		return nil
-	}
-	updated, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode recorded settings hooks %s: %w", path, err)
-	}
-	return installer.changeMCPFile("retire recorded hooks "+path, path, raw, append(updated, '\n'), true)
+	})
+	return func() error {
+		target, err := filepath.EvalSymlinks(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// Removed since the read: nothing to back up, and the write's
+			// re-read finds nothing to retire.
+		case err != nil:
+			return fmt.Errorf("resolve recorded settings hooks %s: %w", path, err)
+		default:
+			if err := copyBackup(target, availableBackup(target, stamp)); err != nil {
+				return fmt.Errorf("backup %s: %w", target, err)
+			}
+		}
+		if err := write(); !errors.Is(err, errRecordedHooksGone) {
+			return err
+		}
+		return nil
+	}, nil
 }

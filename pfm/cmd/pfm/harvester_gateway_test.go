@@ -9,12 +9,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
@@ -92,9 +94,9 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 	}
 	response := do(http.MethodPost, "/mcp", "example-gateway-token", initialize)
 	body, _ := io.ReadAll(response.Body)
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "harvester_read") ||
-		!strings.Contains(string(body), `"name":"harvester"`) {
-		t.Fatalf("authenticated /mcp = %d %s, want serverInfo harvester and harvester_read", response.StatusCode, body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "read") ||
+		!strings.Contains(string(body), `"name":"harvester-professor"`) {
+		t.Fatalf("authenticated /mcp = %d %s, want serverInfo harvester-professor and read", response.StatusCode, body)
 	}
 	sessionID = response.Header.Get("Mcp-Session-Id")
 	do(http.MethodPost, "/mcp", "example-gateway-token", `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
@@ -120,23 +122,24 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(payload), &tools); err != nil || len(tools.Result.Tools) == 0 {
 		t.Fatalf("external tools/list = %d %s (decode: %v)", listed.StatusCode, listBody, err)
 	}
+	registered := harvestmcp.RegisteredToolNames(harvestmcp.Runtime{})
 	sawRead := false
 	for _, tool := range tools.Result.Tools {
-		if !strings.HasPrefix(tool.Name, "harvester_") {
-			t.Fatalf("external gateway lists %q, want harvester_* only: %s", tool.Name, listBody)
+		if !slices.Contains(registered, tool.Name) {
+			t.Fatalf("external gateway lists %q, want bare harvester tools only: %s", tool.Name, listBody)
 		}
-		if tool.Name == "harvester_read" {
+		if tool.Name == "read" {
 			sawRead = true
 			if _, hasFiles := tool.InputSchema.Properties["files"]; hasFiles {
-				t.Fatalf("external harvester_read takes files: %s", listBody)
+				t.Fatalf("external read takes files: %s", listBody)
 			}
 		}
 	}
 	if !sawRead {
-		t.Fatalf("external tools/list has no harvester_read: %s", listBody)
+		t.Fatalf("external tools/list has no read: %s", listBody)
 	}
 	sessionID = ""
-	for _, path := range []string{"/mcp/professor", "/mcp/professor/chat", "/mcp/professor/harvester", "/status"} {
+	for _, path := range []string{"/mcp/chat-professor", "/mcp/harvester-professor", "/status"} {
 		if response := do(
 			http.MethodPost,
 			path,

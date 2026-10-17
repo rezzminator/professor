@@ -129,12 +129,12 @@ func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
 		t.Fatal("initialize after the discover probe failed")
 	}
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	harness.write(t, proxyTestToolCall(2, "chat_new", `{"name":"inside-window"}`))
+	harness.write(t, proxyTestToolCall(2, "new", `{"name":"inside-window"}`))
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "daemon" {
 		t.Fatalf("call inside the retry window = %v, want daemon", got)
 	}
 	<-time.After(3 * proxy.retryWindow)
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"past-window"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"past-window"}`))
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "daemon" {
 		t.Fatalf("call past the retry window = %v, want daemon", got)
 	}
@@ -187,7 +187,7 @@ func TestStdioProxyReturnsDaemonRejectionAndKeepsSession(t *testing.T) {
 			if elapsed := time.Since(started); elapsed > time.Second {
 				t.Fatalf("rejection took %v, want an immediate answer", elapsed)
 			}
-			harness.write(t, proxyTestToolCall(3, "chat_status", `{"target":"seat"}`))
+			harness.write(t, proxyTestToolCall(3, "status", `{"target":"seat"}`))
 			if _, failed := harness.read(t)["error"]; failed {
 				t.Fatal("call after a rejection failed")
 			}
@@ -212,7 +212,7 @@ func TestStdioProxyReplaysHandshakeBeforeSessionlessCall(t *testing.T) {
 	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
 	proxy.storeHandshake("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 	response, err := proxy.sendWithRetry(
-		context.Background(), []byte(proxyTestToolCall(2, "chat_status", `{"target":"seat"}`)), false,
+		context.Background(), []byte(proxyTestToolCall(2, "status", `{"target":"seat"}`)), false,
 	)
 	if err != nil {
 		t.Fatalf("session-less call: %v", err)
@@ -256,7 +256,7 @@ func TestStdioProxyReinitializesOnceOnUninitializedSession(t *testing.T) {
 				[]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`),
 			)
 			response, err := proxy.sendWithRetry(
-				context.Background(), []byte(proxyTestToolCall(2, "chat_status", `{"target":"seat"}`)), false,
+				context.Background(), []byte(proxyTestToolCall(2, "status", `{"target":"seat"}`)), false,
 			)
 			if err != nil {
 				t.Fatalf("uninitialized-session call: %v", err)
@@ -320,7 +320,7 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 		mutex.Unlock()
 		close(restored)
 	}()
-	harness.write(t, proxyTestToolCall(8, "chat_new", `{"name":"after-restart"}`))
+	harness.write(t, proxyTestToolCall(8, "new", `{"name":"after-restart"}`))
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "returned" {
 		t.Fatalf("call after retry-window recovery = %v, want returned", got)
 	}
@@ -355,7 +355,7 @@ func TestStdioProxyRetriesOnlyConnectPhaseFailures(t *testing.T) {
 
 			_, err := proxy.sendWithRetry(
 				context.Background(),
-				[]byte(proxyTestToolCall(2, "chat_new", `{"name":"child"}`)),
+				[]byte(proxyTestToolCall(2, "new", `{"name":"child"}`)),
 				false,
 			)
 			if err == nil {

@@ -1,7 +1,6 @@
 package enginesync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -121,76 +120,40 @@ func TestResolveUnavailableNamesTheOverride(t *testing.T) {
 	}
 }
 
-func TestForwardPassesArgvOutputAndExitCodeThrough(t *testing.T) {
-	cases := []struct {
-		name string
-		code int
-	}{
-		{name: "pass", code: 0},
-		{name: "finding", code: 1},
-		{name: "usage", code: 2},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			binary := filepath.Join(t.TempDir(), "engine-sync")
-			fakeBinary(t, binary, "CODEX CHECK PASS\n", "engine-sync codex: STALE x\n", testCase.code)
-			runner := Runner{Env: &paths.MapEnv{Values: map[string]string{EnvBin: binary}}, Home: t.TempDir()}
-			var stdout, stderr bytes.Buffer
-			args := []string{"codex", "check", ".", "--model", "opus=x"}
-			code := runner.Forward(context.Background(), "pfm codex", args, &stdout, &stderr)
-			if code != testCase.code {
-				t.Fatalf("Forward exit = %d, want %d", code, testCase.code)
-			}
-			if got := recordedArgv(t, binary); strings.Join(got, " ") != strings.Join(args, " ") {
-				t.Fatalf("argv = %q, want %q", got, args)
-			}
-			if stdout.String() != "CODEX CHECK PASS\n" {
-				t.Fatalf("stdout = %q", stdout.String())
-			}
-			want := "pfm codex: deprecated, runs engine-sync codex check . --model opus=x\nengine-sync codex: STALE x\n"
-			if stderr.String() != want {
-				t.Fatalf("stderr = %q, want %q", stderr.String(), want)
-			}
-		})
+func TestGlobalConfigPath(t *testing.T) {
+	if got, want := GlobalConfigPath("/h"), "/h/.claude/engine-sync.json"; got != want {
+		t.Fatalf("GlobalConfigPath = %q, want %q", got, want)
 	}
 }
 
-func TestForwardWithoutABinaryIsExitOneNamingTheCause(t *testing.T) {
-	home := t.TempDir()
-	runner := Runner{Env: &paths.MapEnv{}, Home: home}
-	var stdout, stderr bytes.Buffer
-	code := runner.Forward(context.Background(), "pfm opencode", []string{"opencode", "build"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("Forward exit = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "pfm opencode: engine-sync binary unavailable: "+
-		filepath.Join(home, ".local", "share", "engine-sync", "bin", "engine-sync")) {
-		t.Fatalf("stderr = %q does not name the unavailable binary", stderr.String())
-	}
-}
-
-func TestTargetsPath(t *testing.T) {
+func TestOldConfigDirs(t *testing.T) {
 	cases := []struct {
 		name string
 		env  map[string]string
-		want string
+		want []string
 	}{
-		{name: "under home", want: "/h/.config/engine-sync/targets.json"},
+		{name: "under home", want: []string{"/h/.config/engine-sync"}},
 		{
 			name: "XDG_CONFIG_HOME when absolute",
 			env:  map[string]string{envXDGConfigHome: "/x"},
-			want: "/x/engine-sync/targets.json",
+			want: []string{"/h/.config/engine-sync", "/x/engine-sync"},
+		},
+		{
+			name: "an XDG_CONFIG_HOME equal to the default is one directory",
+			env:  map[string]string{envXDGConfigHome: "/h/.config"},
+			want: []string{"/h/.config/engine-sync"},
 		},
 		{
 			name: "a relative XDG_CONFIG_HOME is ignored",
 			env:  map[string]string{envXDGConfigHome: "x"},
-			want: "/h/.config/engine-sync/targets.json",
+			want: []string{"/h/.config/engine-sync"},
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := TargetsPath(&paths.MapEnv{Values: testCase.env}, "/h"); got != testCase.want {
-				t.Fatalf("TargetsPath = %q, want %q", got, testCase.want)
+			got := OldConfigDirs(&paths.MapEnv{Values: testCase.env}, "/h")
+			if strings.Join(got, "\n") != strings.Join(testCase.want, "\n") {
+				t.Fatalf("OldConfigDirs = %q, want %q", got, testCase.want)
 			}
 		})
 	}
@@ -198,15 +161,12 @@ func TestTargetsPath(t *testing.T) {
 
 func TestRunnerPreservesWorkbenchMarker(t *testing.T) {
 	t.Setenv("ENGINE_SYNC_WORKBENCH_MARKER", "operator-marker")
-	for _, childEnv := range [][]string{nil, {"ENGINE_SYNC_WORKBENCH_MARKER=operator-marker", "HOME=/fixture"}} {
-		runner, binary := fakeRunner(t, "ok", "", 0)
-		runner.ChildEnv = childEnv
-		if _, err := runner.run(context.Background(), []string{"version"}); err != nil {
-			t.Fatal(err)
-		}
-		marker, err := os.ReadFile(binary + ".marker")
-		if err != nil || strings.TrimSpace(string(marker)) != "operator-marker" {
-			t.Fatalf("workbench marker = %q (%v), want %q", marker, err, "operator-marker")
-		}
+	runner, binary := fakeRunner(t, "ok", "", 0)
+	if _, err := runner.run(context.Background(), []string{"version"}); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := os.ReadFile(binary + ".marker")
+	if err != nil || strings.TrimSpace(string(marker)) != "operator-marker" {
+		t.Fatalf("workbench marker = %q (%v), want %q", marker, err, "operator-marker")
 	}
 }

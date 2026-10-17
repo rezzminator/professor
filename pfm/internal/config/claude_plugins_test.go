@@ -22,12 +22,13 @@ func TestClaudePluginsKey(t *testing.T) {
 		err           string
 	}{
 		{
-			name: "absent key keeps the four of today", content: `{"version":2}`,
+			name: "absent key keeps the defaults", content: `{"version":2}`,
 			want: []ClaudePlugin{
 				{ID: "cache-live-control"},
 				{ID: "sub-agent-compact"},
 				{ID: "effort-live-control"},
 				{ID: "tool-visibility-controller"},
+				{ID: "engine-sync"},
 			},
 			source: SourceDefault,
 		},

@@ -7,6 +7,7 @@ import (
 )
 
 func TestReleaseNotesReturnsOldestFirstExcludingPreviousAndAboveTarget(t *testing.T) {
+	t.Parallel()
 	files := []string{
 		"releases/v0.75.0.md",
 		"releases/v0.77.0.md",
@@ -25,6 +26,7 @@ func TestReleaseNotesReturnsOldestFirstExcludingPreviousAndAboveTarget(t *testin
 }
 
 func TestReleaseNotesNoneBetweenIsEmptyNotAnError(t *testing.T) {
+	t.Parallel()
 	got, err := ReleaseNotes("v0.77.0", "v0.77.1", []string{"releases/v0.77.0.md"})
 	if err != nil {
 		t.Fatalf("ReleaseNotes() error = %v, want none", err)
@@ -35,6 +37,7 @@ func TestReleaseNotesNoneBetweenIsEmptyNotAnError(t *testing.T) {
 }
 
 func TestReleaseNotesUnparseableTagIsAnError(t *testing.T) {
+	t.Parallel()
 	if _, err := ReleaseNotes("not-a-tag", "v0.77.0", []string{"releases/v0.76.0.md"}); err == nil {
 		t.Fatal("ReleaseNotes() with an unparseable previous tag: error = nil, want an error")
 	}

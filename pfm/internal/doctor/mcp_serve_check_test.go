@@ -337,12 +337,12 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			name: "compatible only",
 			table: mcpServeProcTable{
 				pids:     []int{50000211},
-				cmdlines: map[int][]string{50000211: {"pfm", "mcp", "serve", "--stdio"}},
+				cmdlines: map[int][]string{50000211: {"pfm", "mcp", "serve", "--stdio", "--family", "chat"}},
 				images:   map[int]gather.FileID{50000211: replaced},
 				fdLinks:  map[int][]gather.FDLink{50000211: {{FD: 9, Target: marker}}},
 			},
 			want: []string{
-				"doctor: mcp-serve COMPATIBLE pid=50000211 chat=UNRESOLVED command=pfm mcp serve --stdio",
+				"doctor: mcp-serve COMPATIBLE pid=50000211 chat=UNRESOLVED command=pfm mcp serve --stdio --family chat",
 			},
 			notWant: []string{"STALE", "clean"},
 		},
@@ -351,8 +351,8 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			table: mcpServeProcTable{
 				pids: []int{50000212, 50000213},
 				cmdlines: map[int][]string{
-					50000212: {"pfm", "mcp", "serve", "--stdio"},
-					50000213: {"pfm", "mcp", "serve", "--stdio"},
+					50000212: {"pfm", "mcp", "serve", "--stdio", "--family", "chat"},
+					50000213: {"pfm", "mcp", "serve", "--stdio", "--family", "chat"},
 				},
 				images:  map[int]gather.FileID{50000212: replaced, 50000213: replaced},
 				fdLinks: map[int][]gather.FDLink{50000212: {{FD: 9, Target: marker}}},
@@ -365,7 +365,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			name: "descriptor unreadable",
 			table: mcpServeProcTable{
 				pids:      []int{50000214},
-				cmdlines:  map[int][]string{50000214: {"pfm", "mcp", "serve", "--stdio"}},
+				cmdlines:  map[int][]string{50000214: {"pfm", "mcp", "serve", "--stdio", "--family", "chat"}},
 				images:    map[int]gather.FileID{50000214: replaced},
 				fdLinkErr: map[int]error{50000214: errors.New("descriptor denied")},
 			},
@@ -374,7 +374,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 				"doctor: mcp-serve UNREAD — inspect descriptors for pid=50000214",
 				marker,
 				"descriptor denied",
-				"doctor: mcp-serve STALE pid=50000214 chat=UNRESOLVED command=pfm mcp serve --stdio",
+				"doctor: mcp-serve STALE pid=50000214 chat=UNRESOLVED command=pfm mcp serve --stdio --family chat",
 			},
 			notWant: []string{"COMPATIBLE", "clean"},
 		},
@@ -383,7 +383,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			table: mcpServeProcTable{
 				pids: []int{50000216, 50000217, 50000218},
 				cmdlines: map[int][]string{
-					50000216: {"pfm", "mcp", "serve", "--stdio"},
+					50000216: {"pfm", "mcp", "serve", "--stdio", "--family", "chat"},
 					50000217: {"pfm", "mcp", "serve"},
 					50000218: {"pfm", "mcp", "chat", "serve"},
 				},
@@ -395,7 +395,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			wantWarnings: 4,
 			want: []string{
 				"doctor: mcp-serve UNREAD — inspect descriptors for pid=50000216",
-				"doctor: mcp-serve STALE pid=50000216 chat=UNRESOLVED command=pfm mcp serve --stdio",
+				"doctor: mcp-serve STALE pid=50000216 chat=UNRESOLVED command=pfm mcp serve --stdio --family chat",
 				"doctor: mcp-serve STALE pid=50000217 chat=UNRESOLVED command=pfm mcp serve",
 				"doctor: mcp-serve STALE pid=50000218 chat=UNRESOLVED command=pfm mcp chat serve",
 			},
@@ -405,7 +405,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			name: "candidate exits during classification",
 			table: mcpServeProcTable{
 				pids:      []int{50000215},
-				cmdlines:  map[int][]string{50000215: {"pfm", "mcp", "serve", "--stdio"}},
+				cmdlines:  map[int][]string{50000215: {"pfm", "mcp", "serve", "--stdio", "--family", "chat"}},
 				images:    map[int]gather.FileID{50000215: replaced},
 				fdLinkErr: map[int]error{50000215: errors.New("process vanished")},
 			},

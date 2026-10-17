@@ -6,27 +6,24 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // claudeConfigDirEnv is the variable that points a claude process at one
 // account's config directory.
 const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
+// claudePluginCommand is the claude subcommand every plugin command runs under.
+const claudePluginCommand = "plugin"
 
 // claudePluginCommandTimeout bounds each `claude plugin` command: a plugin
 // command that hangs (a network wait, a prompt) must not stall pfm install.
@@ -48,13 +45,23 @@ const ClaudePluginUnresolvedFix = `give its claude.plugins entry a "source" (wha
 	`or run claude plugin marketplace add <source>, then run pfm install --yes`
 
 // ClaudePluginBuild is what decides where each plugin comes from: pfm's own
-// stamped version, the home pfm's paths resolve from, and
-// claude.pluginCheckoutRoot.
+// stamped version, the home pfm's paths resolve from, claude.pluginCheckoutRoot,
+// and the source clone whose plugins/ is the checkout root when that key is
+// unset (SourceRepoErr when the clone could not be resolved).
 type ClaudePluginBuild struct {
-	Version      string
-	Home         string
-	CheckoutRoot string
-	Plugins      []pfmconfig.ClaudePlugin
+	Version       string
+	Home          string
+	CheckoutRoot  string
+	SourceRepo    string
+	SourceRepoErr error
+	Plugins       []pfmconfig.ClaudePlugin
+	// PluginsDefault says claude.plugins is unset: an -alpha build then plans
+	// every plugin the source clone's marketplace lists (WithMarketplacePlugins).
+	PluginsDefault bool
+	// Unlisted is every plugin the source clone's marketplace lists that
+	// claude.plugins names in no form: an -alpha build installs each from its
+	// checkout and keeps every copy disabled (WithMarketplacePlugins).
+	Unlisted []string
 }
 
 // ClaudePluginTarget is one claude.plugins entry as this build ensures it. ID
@@ -63,7 +70,10 @@ type ClaudePluginBuild struct {
 // the GitHub repository and GitHubID on a release, or on an -alpha build with
 // a checkout (Local) the pfm-owned marketplace dir Marketplace, holding a copy
 // of Checkout, and DevID. Fallback says why an -alpha build ensures the GitHub
-// copy instead; empty on a release.
+// copy instead; empty on a release. Undecided says why an -alpha build could
+// not tell whether a checkout exists (its source clone or checkout could not
+// be read): install and doctor then decide neither copy, never reading the
+// error as a missing checkout.
 type ClaudePluginTarget struct {
 	Name        string
 	ID          string
@@ -74,10 +84,18 @@ type ClaudePluginTarget struct {
 	Marketplace string
 	Checkout    string
 	Fallback    string
+	Undecided   string
 	// Own marks a bare name of ours, which has a GitHub copy and a -dev copy.
 	Own bool
 	// MarketplaceName is the marketplace a full id names; empty for a bare name.
 	MarketplaceName string
+	// ProfessorID is a bare name's id in the professor marketplace,
+	// {name}@professor: a third copy of ours, which every build retires like
+	// its other copies; empty when claude.plugins lists that id.
+	ProfessorID string
+	// InstallOnly marks an -alpha marketplace plugin claude.plugins does not
+	// name: installed from its checkout, every copy kept disabled.
+	InstallOnly bool
 }
 
 // NeedsKnownMarketplace reports whether the target installs only from a
@@ -89,10 +107,16 @@ func (target ClaudePluginTarget) NeedsKnownMarketplace() bool {
 // ClaudePluginTargets plans every claude.plugins entry for build. A bare name is
 // a plugin of ours: its GitHub repository rezzminator/{name} with the id
 // {name}@{name}, or on an -alpha build with a checkout its local -dev copy. A
-// full id is ensured as named, from the entry's source when it has one.
+// full id is ensured as named, from the entry's source when it has one. An
+// -alpha build then plans each of build.Unlisted as a bare name kept disabled
+// (InstallOnly).
 func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 	alpha := obs.AlphaBuild(build.Version)
-	targets := make([]ClaudePluginTarget, 0, len(build.Plugins))
+	targets := make([]ClaudePluginTarget, 0, len(build.Plugins)+len(build.Unlisted))
+	listed := map[string]bool{}
+	for _, plugin := range build.Plugins {
+		listed[plugin.ID] = true
+	}
 	for _, plugin := range build.Plugins {
 		if !plugin.Bare() {
 			targets = append(targets, ClaudePluginTarget{
@@ -103,21 +127,43 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 			})
 			continue
 		}
-		id := plugin.ID + "@" + plugin.ID
-		target := ClaudePluginTarget{
-			Name:     plugin.ID,
-			ID:       id,
-			GitHubID: id,
-			DevID:    plugin.ID + "@" + devMarketplaceName(plugin.ID),
-			Source:   claudePluginOwner + "/" + plugin.ID,
-			Own:      true,
+		targets = append(targets, ownClaudePluginTarget(plugin.ID, build, alpha, listed))
+	}
+	if alpha {
+		for _, name := range build.Unlisted {
+			target := ownClaudePluginTarget(name, build, alpha, listed)
+			target.InstallOnly = true
+			targets = append(targets, target)
 		}
-		if alpha {
-			target = localClaudePluginTarget(target, build)
-		}
-		targets = append(targets, target)
 	}
 	return targets
+}
+
+// ownClaudePluginTarget plans the bare name of a plugin of ours. Its
+// professor-marketplace id is a third copy, unless claude.plugins lists that
+// id itself.
+func ownClaudePluginTarget(
+	name string,
+	build ClaudePluginBuild,
+	alpha bool,
+	listed map[string]bool,
+) ClaudePluginTarget {
+	id := name + "@" + name
+	target := ClaudePluginTarget{
+		Name:     name,
+		ID:       id,
+		GitHubID: id,
+		DevID:    name + "@" + devMarketplaceName(name),
+		Source:   claudePluginOwner + "/" + name,
+		Own:      true,
+	}
+	if professor := name + "@" + professorMarketplaceName; !listed[professor] {
+		target.ProfessorID = professor
+	}
+	if !alpha {
+		return target
+	}
+	return localClaudePluginTarget(target, build)
 }
 
 // BareClaudePluginRepair is the repair install's FAIL line (and pfm doctor)
@@ -131,332 +177,45 @@ func BareClaudePluginRepair(name string) string {
 	)
 }
 
-// FallbackNote is the one line install and doctor print for a Fallback.
+// FallbackNote is the one line install and doctor print for a Fallback. An
+// install-only plugin never falls back: with no checkout it is not installed.
 func (target ClaudePluginTarget) FallbackNote() string {
+	if target.InstallOnly {
+		return target.Name + ": not installed — " + pfmconfig.KeyClaudePlugins +
+			" does not list it and this alpha build has no checkout of it: " + target.Fallback
+	}
 	return target.Name + ": alpha build falls back to the GitHub copy " + target.GitHubID + " — " + target.Fallback
 }
 
-// ClaudePluginGap is one plugin problem pfm doctor reports and its repair.
-type ClaudePluginGap struct {
-	Problem string
-	Fix     string
-}
-
-// ErrClaudeSettingsAbsent is ClaudePluginGaps' answer for a store with no
-// settings.json: a store never set up, not one missing its plugins.
-var ErrClaudeSettingsAbsent = errors.New("no settings.json")
-
-// ClaudePluginGaps reads the store's settings.json and names every target id
-// not enabled, every plugin of ours enabled from both its GitHub and its -dev
-// marketplace, every local target whose copy is missing or a symlink, and every
-// other plugin enabled under two or more keys. A
-// missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
-// parsed returns its error, never an answer, because its real state is unknown.
-func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("%w at %s", ErrClaudeSettingsAbsent, path)
-	}
-	document, err := readClaudeSettingsDocument(path)
-	if err != nil {
-		return nil, err
-	}
-	var gaps []ClaudePluginGap
-	for index := range targets {
-		target := &targets[index]
-		if !pluginEnabled(document, target.ID) {
-			gaps = append(gaps, ClaudePluginGap{"plugin " + target.ID + " not enabled in " + path, ClaudePluginRepair})
-		}
-		if pluginEnabled(document, target.GitHubID) && pluginEnabled(document, target.DevID) {
-			// Every build's install disables the copy it does not ensure.
-			gaps = append(gaps, ClaudePluginGap{
-				fmt.Sprintf(
-					"plugin %s enabled twice (%s and %s) in %s",
-					target.Name,
-					target.GitHubID,
-					target.DevID,
-					path,
-				),
+// ClaudePluginFallbackGap is a Fallback as the gap an -alpha install fails a
+// listed plugin on and doctor reports.
+func ClaudePluginFallbackGap(target ClaudePluginTarget) ClaudePluginGap {
+	if target.InstallOnly {
+		return ClaudePluginGap{
+			Problem: "plugin " + target.Name + " is not installed on this alpha build: " +
+				pfmconfig.KeyClaudePlugins + " does not list it and " + target.Fallback,
+			Fix: "check the plugin out where named, or set " + pfmconfig.KeyClaudePluginCheckoutRoot + ", then " +
 				ClaudePluginRepair,
-			})
-		}
-		if target.Local {
-			gap, err := claudePluginCopyGap(target)
-			if err != nil {
-				return nil, err
-			}
-			if gap != "" {
-				gaps = append(gaps, ClaudePluginGap{"plugin " + target.DevID + " copy " + gap, ClaudePluginRepair})
-			}
 		}
 	}
-	return append(gaps, claudePluginDuplicateGaps(document, path, targets)...), nil
-}
-
-// ClaudePluginsNotInstalled reads one account's plugins/installed_plugins.json
-// and names every target id with no install record whose installPath
-// exists. Accounts may share one settings.json, so this record — one per
-// config dir — is what says a plugin is installed in THIS account. A missing
-// file means none is installed; a file that cannot be read or parsed returns
-// its error, never an answer.
-func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) ([]string, error) {
-	path := filepath.Join(configDir, "plugins", "installed_plugins.json")
-	raw, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var record struct {
-		Plugins map[string][]struct {
-			InstallPath string `json:"installPath"`
-		} `json:"plugins"`
-	}
-	if err == nil {
-		if err := json.Unmarshal(raw, &record); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
-	}
-	var missing []string
-	for index := range targets {
-		target := &targets[index]
-		installed := false
-		for _, entry := range record.Plugins[target.ID] {
-			if info, statErr := os.Stat(entry.InstallPath); entry.InstallPath != "" && statErr == nil && info.IsDir() {
-				installed = true
-				break
-			}
-		}
-		if !installed {
-			missing = append(missing, target.ID)
-		}
-	}
-	return missing, nil
-}
-
-// ClaudePluginsUnresolved names every listed full id pfm cannot install: still
-// to be installed or enabled in configDir, its entry without a source, and its
-// marketplace not among configDir's plugins/known_marketplaces.json. Claude
-// Code resolves such an id only against a marketplace it already knows, so
-// install and doctor report it by name with the reason and the repair, keyed by
-// id. A missing known_marketplaces.json means none is known; a file that cannot
-// be read or parsed returns its error, never an answer. Nothing is read when no
-// target is a candidate.
-func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (map[string]ClaudePluginGap, error) {
-	var candidates []ClaudePluginTarget
-	for index := range targets {
-		if target := targets[index]; target.NeedsKnownMarketplace() {
-			candidates = append(candidates, target)
-		}
-	}
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-	document, err := readClaudeSettingsDocument(filepath.Join(configDir, "settings.json"))
-	if err != nil {
-		return nil, err
-	}
-	missing, err := ClaudePluginsNotInstalled(configDir, candidates)
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(configDir, "plugins", "known_marketplaces.json")
-	raw, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	known := map[string]json.RawMessage{}
-	if err == nil {
-		if err := json.Unmarshal(raw, &known); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
-	}
-	unresolved := map[string]ClaudePluginGap{}
-	for index := range candidates {
-		target := &candidates[index]
-		if pluginEnabled(document, target.ID) && !slices.Contains(missing, target.ID) {
-			continue
-		}
-		if _, ok := known[target.MarketplaceName]; ok {
-			continue
-		}
-		unresolved[target.ID] = ClaudePluginGap{
-			Problem: "marketplace " + target.MarketplaceName +
-				" is not known to Claude Code and its " + pfmconfig.KeyClaudePlugins + " entry has no source",
-			Fix: ClaudePluginUnresolvedFix,
-		}
-	}
-	return unresolved, nil
-}
-
-// ClaudePluginMarketplaceGaps reads the store's plugins/known_marketplaces.json
-// and names every target whose marketplace is registered from a source other
-// than target.Source: `plugin marketplace add` answers "already added" for a
-// same-named marketplace, so pfm install keeps installing from the wrong source
-// until it is removed. A target with no source adds no marketplace and is not
-// compared. A source compares by its form (claudeMarketplaceSourceMatches); a
-// form whose record pfm cannot rebuild is not compared, never named with a
-// repair that cannot close it. A missing file or entry names nothing — the
-// enabled and installed checks cover a plugin never added; a file that cannot
-// be read or parsed returns its error, never an answer. A string read from the
-// file prints with its control characters escaped.
-func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
-	path := filepath.Join(store, "plugins", "known_marketplaces.json")
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var known map[string]struct {
-		Source claudeMarketplaceRecord `json:"source"`
-	}
-	if err := json.Unmarshal(raw, &known); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	var gaps []ClaudePluginGap
-	for index := range targets {
-		target := &targets[index]
-		if target.Source == "" {
-			continue
-		}
-		_, marketplace, _ := strings.Cut(target.ID, "@")
-		entry, registered := known[marketplace]
-		if !registered || claudeMarketplaceSourceMatches(target.Source, entry.Source) {
-			continue
-		}
-		var got string
-		switch entry.Source.Kind {
-		case claudeMarketplaceGitHub:
-			got = entry.Source.Repo
-		case claudeMarketplaceDirectory:
-			got = entry.Source.Path
-		default:
-			got = strings.TrimSpace(entry.Source.Kind + " " + entry.Source.URL)
-		}
-		gaps = append(gaps, ClaudePluginGap{
-			fmt.Sprintf(
-				"plugin %s marketplace %s in %s points at %s, want %s",
-				target.ID,
-				marketplace,
-				path,
-				escapeControl(got),
-				target.Source,
-			),
-			"claude plugin marketplace remove " + marketplace + ", then " + ClaudePluginRepair,
-		})
-	}
-	return gaps, nil
-}
-
-// claudeMarketplaceRecord is the source Claude Code records for one marketplace
-// in known_marketplaces.json: a github repo, a git or url record's url, or a
-// directory's path.
-type claudeMarketplaceRecord struct {
-	Kind string `json:"source"`
-	Repo string `json:"repo"`
-	Path string `json:"path"`
-	URL  string `json:"url"`
-}
-
-// The record kinds pfm compares a source with.
-const (
-	claudeMarketplaceGitHub    = "github"
-	claudeMarketplaceDirectory = "directory"
-)
-
-// claudeGitHubShorthand is an owner/repo source, with an optional #ref.
-var claudeGitHubShorthand = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(#\S+)?$`)
-
-// claudeMarketplaceSourceMatches reports whether record is what `plugin
-// marketplace add source` registers, or a record pfm cannot compare with it. An
-// owner/repo[#ref] source matches a github record of the repo, the ref
-// stripped; an absolute path a directory record of the same clean path; a URL a
-// record holding that url, and a github record (one Claude Code may make from a
-// GitHub URL) is not compared. A relative or ~ path resolves where the add
-// runs, so a directory record is not compared. Every other pairing is a
-// different source.
-func claudeMarketplaceSourceMatches(source string, record claudeMarketplaceRecord) bool {
-	switch {
-	case strings.Contains(source, "://") || strings.HasPrefix(source, "git@"):
-		return record.Kind == claudeMarketplaceGitHub || (record.URL != "" && record.URL == source)
-	case filepath.IsAbs(source):
-		return record.Kind == claudeMarketplaceDirectory && filepath.Clean(record.Path) == filepath.Clean(source)
-	case claudeGitHubShorthand.MatchString(source):
-		repo, _, _ := strings.Cut(source, "#")
-		return record.Kind == claudeMarketplaceGitHub && record.Repo == repo
-	default:
-		return record.Kind == claudeMarketplaceDirectory
+	return ClaudePluginGap{
+		Problem: "plugin " + target.Name + " falls back to the GitHub copy " + target.GitHubID +
+			" on this alpha build: " + target.Fallback,
+		Fix: "check the plugin out where named, or set " + pfmconfig.KeyClaudePluginCheckoutRoot + ", then " +
+			ClaudePluginRepair,
 	}
 }
 
-// claudePluginDuplicateGaps names every plugin enabled under two or more
-// name@marketplace keys in document, managed by pfm or not, sorted by name. A
-// plugin whose every enabled key claude.plugins lists is left alone: pfm
-// install enables each listed key again. A plugin of ours enabled as exactly
-// its GitHub and -dev ids is left to ClaudePluginGaps' own duplicate gap, whose
-// repair pfm install owns. A key from the file prints with its control
-// characters escaped.
-func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
-	enabled, _ := document["enabledPlugins"].(map[string]any)
-	byName := map[string][]string{}
-	for id, value := range enabled {
-		if value != true {
-			continue
-		}
-		name, _, _ := strings.Cut(id, "@")
-		byName[name] = append(byName[name], id)
-	}
-	listed := map[string]bool{}
-	managed := map[string][]string{}
-	for index := range targets {
-		listed[targets[index].ID] = true
-		if targets[index].Own {
-			pair := []string{targets[index].GitHubID, targets[index].DevID}
-			slices.Sort(pair)
-			managed[targets[index].Name] = pair
-		}
-	}
-	var gaps []ClaudePluginGap
-	for _, name := range slices.Sorted(maps.Keys(byName)) {
-		ids := byName[name]
-		if len(ids) < 2 {
-			continue
-		}
-		slices.Sort(ids)
-		if slices.Equal(ids, managed[name]) || !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
-			continue
-		}
-		shown := make([]string, len(ids))
-		for index, id := range ids {
-			shown[index] = escapeControl(id)
-		}
-		gaps = append(gaps, ClaudePluginGap{
-			fmt.Sprintf(
-				"plugin %s enabled %s (%s) in %s",
-				escapeControl(name), timesWord(len(ids)), strings.Join(shown, " and "), path,
-			),
-			"keep one copy: claude plugin disable each other key",
-		})
-	}
-	return gaps
+// ClaudePluginGapNames reports whether problem is about the plugin name: it
+// opens "plugin {name}" followed by a space, an "@" or a colon.
+func ClaudePluginGapNames(problem, name string) bool {
+	rest, ok := strings.CutPrefix(problem, "plugin "+name)
+	return ok && rest != "" && strings.ContainsRune(" @:", rune(rest[0]))
 }
 
-// escapeControl is text read from a file as one printed line: each control
-// character escaped as Go spells it, so a newline in a key or a url cannot
-// forge a line of its own.
-func escapeControl(text string) string {
-	if !strings.ContainsFunc(text, unicode.IsControl) {
-		return text
-	}
-	quoted := strconv.Quote(text)
-	return quoted[1 : len(quoted)-1]
-}
-
-// timesWord spells how many keys enable one plugin.
-func timesWord(count int) string {
-	if count == 2 {
-		return "twice"
-	}
-	return strconv.Itoa(count) + " times"
+// UndecidedNote names an Undecided target's two copies and why neither is chosen.
+func (target ClaudePluginTarget) UndecidedNote() string {
+	return "its copy is undecided (" + target.GitHubID + " or " + target.DevID + "): " + target.Undecided
 }
 
 func readClaudeSettingsDocument(path string) (map[string]any, error) {
@@ -482,15 +241,38 @@ func pluginEnabled(document map[string]any, id string) bool {
 	return enabled[id] == true
 }
 
+// claudePluginBuild is the build the plugin step plans from: claude.plugins
+// plus, on an -alpha build, every plugin the marketplace lists.
+func (installer *engine) claudePluginBuild() (ClaudePluginBuild, error) {
+	// The clone the global links anchor on is the one whose plugins/ an
+	// -alpha build copies from when claude.pluginCheckoutRoot is unset.
+	sourceRepo, sourceRepoErr := installer.globalSourceRepoRoot()
+	return ClaudePluginBuild{
+		Version:        installer.options.Version,
+		Home:           installer.options.Home,
+		CheckoutRoot:   installer.options.ClaudePluginCheckoutRoot,
+		SourceRepo:     sourceRepo,
+		SourceRepoErr:  sourceRepoErr,
+		Plugins:        installer.options.ClaudePlugins,
+		PluginsDefault: installer.options.ClaudePluginsDefault,
+	}.WithMarketplacePlugins()
+}
+
 // ensureClaudePlugins installs the shared plugins through the primary account.
 // On a roster host its dir passes the refusal every launch applies, so the
-// Options.ConfigDir fallback (the store) never runs; a host with no roster
-// keeps Options.ConfigDir, there an ordinary config dir. A --config-dir on a
-// roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
+// Options.ConfigDir fallback (the store) never runs. A host with no roster,
+// whose Options.ConfigDir is the store, skips the step with one named line: no
+// claude subprocess runs on the store (it would write .claude.json and backups
+// there). A --config-dir on a roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
 // An -alpha build ensures each bare name with a checkout from its local copy
-// (ClaudePluginTargets); every build then disables the copy of ours it does not
-// ensure. A listed id pfm cannot install is a failure naming it; an id the list
-// does not name is never read or written.
+// (ClaudePluginTargets), plus every other plugin the source clone's
+// marketplace lists, installed and kept disabled (WithMarketplacePlugins);
+// every build then disables the copies of ours it does not ensure. A bare name
+// whose source is undecided is a failure naming the error, its copies left as
+// they are. A listed id pfm cannot install is a failure naming it; an id the
+// list does not name is never read or written. An applied -alpha install ends
+// by reading every listed plugin of ours back: one not installed from its -dev
+// copy and enabled is a failure (checkListedClaudePlugins).
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	dir := installer.options.PrimaryConfigDir
 	if dir == "" {
@@ -500,185 +282,278 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 		if err := installer.checkLaunchConfigDir(0, dir); err != nil {
 			return installer.pluginStepFailure(dir, err)
 		}
+	} else if claudelaunch.InspectConfigDir(
+		claudelaunch.ClaudeStore(installer.options.Home), dir,
+	).State == claudelaunch.ConfigDirStore {
+		installer.skip(fmt.Sprintf(
+			"claude plugins: not run — no account roster, so the only config dir is the Claude store %s, where a claude process writes account identity; add an account to pfm.config.json and rerun pfm install --yes",
+			dir,
+		))
+		return nil
 	}
-	targets := ClaudePluginTargets(ClaudePluginBuild{
-		Version:      installer.options.Version,
-		Home:         installer.options.Home,
-		CheckoutRoot: installer.options.ClaudePluginCheckoutRoot,
-		Plugins:      installer.options.ClaudePlugins,
-	})
+	run := &claudePluginRun{dir: dir, settingsPath: filepath.Join(dir, "settings.json")}
+	build, listErr := installer.claudePluginBuild()
+	if listErr != nil {
+		run.failures = append(run.failures, installer.pluginStepFailure(dir, listErr))
+	}
+	targets := ClaudePluginTargets(build)
 	for index := range targets {
 		target := &targets[index]
 		if target.Fallback != "" {
 			installer.skip("claude plugin " + target.FallbackNote())
 		}
 	}
-	settingsPath := filepath.Join(dir, "settings.json")
-	document, err := readClaudeSettingsDocument(settingsPath)
+	var err error
+	run.document, err = readClaudeSettingsDocument(run.settingsPath)
 	if err != nil {
-		return installer.pluginStepFailure(dir, fmt.Errorf("settings unreadable, state unknown: %w", err))
+		return errors.Join(append(run.failures,
+			installer.pluginStepFailure(dir, fmt.Errorf("settings unreadable, state unknown: %w", err)))...)
 	}
-	missing, err := ClaudePluginsNotInstalled(dir, targets)
+	run.missing, err = ClaudePluginsNotInstalled(dir, targets)
 	if err != nil {
-		return installer.pluginStepFailure(dir, fmt.Errorf("install record unreadable, state unknown: %w", err))
+		return errors.Join(append(run.failures,
+			installer.pluginStepFailure(dir, fmt.Errorf("install record unreadable, state unknown: %w", err)))...)
 	}
 	// An unreadable marketplace record fails only the ids that need it, below.
-	unresolved, unresolvedErr := ClaudePluginsUnresolved(dir, targets)
-	binary, resolveErr := ResolveClaudeBinary(
+	run.unresolved, run.unresolvedErr = ClaudePluginsUnresolved(dir, targets)
+	run.binary, run.resolveErr = ResolveClaudeBinary(
 		installer.options.Home,
 		installer.options.ClaudeBinary,
 		installer.env().Get("PATH"),
 	)
-	var failures []error
-	guarded, blocked := false, false
-	// blockedByLiveChats asks once, before the first command or settings edit.
-	blockedByLiveChats := func() (bool, error) {
-		if guarded {
-			return blocked, nil
-		}
-		guarded = true
-		live, liveErr := installer.pluginLiveChats(dir)
-		blocked = live
-		return live, liveErr
-	}
-	// probeFailed ends the loop at a failed live-chat probe, keeping every
-	// failure an earlier plugin already hit. A live chat itself holds back only
-	// commands and settings edits: every later plugin's copy is still refreshed.
-	probeFailed := func(id string, err error) error {
-		failures = append(failures, installer.pluginFailure(dir, id, err))
-		return errors.Join(failures...)
-	}
+	failed := map[int]bool{}
 	for index := range targets {
-		target := &targets[index]
-		if gap, ok := unresolved[target.ID]; ok {
-			failures = append(
-				failures,
-				installer.pluginFailure(dir, target.ID, fmt.Errorf("%s — %s", gap.Problem, gap.Fix)),
-			)
-			continue
-		}
-		ensured := pluginEnabled(document, target.ID) && !slices.Contains(missing, target.ID)
-		if unresolvedErr != nil && target.NeedsKnownMarketplace() && !ensured {
-			failures = append(failures, installer.pluginFailure(
-				dir, target.ID, fmt.Errorf("marketplace record unreadable, state unknown: %w", unresolvedErr),
-			))
-			continue
-		}
-		if target.Local {
-			if err := installer.ensureClaudePluginCopy(target); err != nil {
-				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-				continue
+		before := len(run.failures)
+		installer.ensureClaudePluginTarget(ctx, run, &targets[index])
+		failed[index] = len(run.failures) > before
+	}
+	if installer.apply && obs.AlphaBuild(installer.options.Version) {
+		installer.checkListedClaudePlugins(run, targets, failed)
+	}
+	return errors.Join(run.failures...)
+}
+
+// claudePluginRun is one ensureClaudePlugins pass: the account dir it runs
+// through, what it read before the first plugin, and its failures.
+type claudePluginRun struct {
+	dir           string
+	settingsPath  string
+	document      map[string]any
+	missing       []string
+	unresolved    map[string]ClaudePluginGap
+	unresolvedErr error
+	binary        string
+	resolveErr    error
+	failures      []error
+}
+
+// ensureClaudePluginTarget ensures one target, appending each failure to run.
+func (installer *engine) ensureClaudePluginTarget(
+	ctx context.Context,
+	run *claudePluginRun,
+	target *ClaudePluginTarget,
+) {
+	fail := func(err error) { run.failures = append(run.failures, installer.pluginFailure(run.dir, target.ID, err)) }
+	if target.Undecided != "" {
+		// No copy is installed, enabled or disabled on an error.
+		run.failures = append(run.failures, installer.pluginFailure(
+			run.dir, target.Name, errors.New(target.UndecidedNote()+"; both left as they are"),
+		))
+		return
+	}
+	if gap, ok := run.unresolved[target.ID]; ok {
+		fail(fmt.Errorf("%s — %s", gap.Problem, gap.Fix))
+		return
+	}
+	installed := !slices.Contains(run.missing, target.ID)
+	// An install-only plugin is ensured once installed: enabling it is no part of it.
+	ensured := installed && (target.InstallOnly || pluginEnabled(run.document, target.ID))
+	if run.unresolvedErr != nil && target.NeedsKnownMarketplace() && !ensured {
+		fail(fmt.Errorf("marketplace record unreadable, state unknown: %w", run.unresolvedErr))
+		return
+	}
+	if target.Local {
+		if target.Name == callmeterPlugin && !target.InstallOnly {
+			// The copy's hooks run the binary of its version: it goes first.
+			if err := installer.ensureCallmeterBinary(ctx, target); err != nil {
+				fail(err)
+				return
 			}
 		}
-		if ensured {
-			installer.ok("claude plugin " + target.ID + " installed and enabled in " + dir)
-		} else {
-			if resolveErr != nil {
-				installer.skip(
-					fmt.Sprintf(
-						"claude plugin %s in %s: real claude binary not resolved: %v",
-						target.ID,
-						dir,
-						resolveErr,
-					),
-				)
-				continue
-			}
-			stop, err := blockedByLiveChats()
-			if err != nil {
-				return probeFailed(target.ID, err)
-			}
-			if stop {
-				continue
-			}
-			if err := installer.installClaudePlugin(ctx, binary, dir, target); err != nil {
-				if target.Own && !target.Local {
-					err = fmt.Errorf("%w — %s", err, BareClaudePluginRepair(target.Name))
-				}
-				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-				continue
-			}
+		if err := installer.ensureClaudePluginCopy(target); err != nil {
+			fail(err)
+			return
 		}
-		if !target.Own {
-			// A listed full id is ensured as named; its settings entries are all
-			// that is touched, and no other id is its twin to retire.
-			continue
+	}
+	if target.Local && ensured {
+		// An install below runs the same add; an installed copy needs its own.
+		if err := installer.repointClaudePluginMarketplace(ctx, run, target); err != nil {
+			fail(err)
+			return
 		}
-		message, edit, err := planOtherCopyRetirement(settingsPath, target)
+	}
+	switch {
+	case ensured && target.InstallOnly:
+		line := "claude plugin " + target.ID + " installed in " + run.dir
+		// A copy found enabled is disabled below: never called kept disabled.
+		if !slices.ContainsFunc(target.copyIDs(), func(id string) bool { return pluginEnabled(run.document, id) }) {
+			line += ", kept disabled: " + pfmconfig.KeyClaudePlugins + " does not list " + target.Name
+		}
+		installer.ok(line)
+	case ensured:
+		installer.ok("claude plugin " + target.ID + " installed and enabled in " + run.dir)
+	case run.resolveErr != nil:
+		installer.skip(fmt.Sprintf(
+			"claude plugin %s in %s: real claude binary not resolved: %v", target.ID, run.dir, run.resolveErr,
+		))
+		return
+	case target.InstallOnly && !target.Local:
+		// Unlisted with no checkout: never installed from GitHub; its skip line
+		// is printed above, and a copy found enabled is still disabled below.
+	default:
+		if err := installer.installClaudePlugin(ctx, run.binary, run.dir, target); err != nil {
+			if target.Own && !target.Local {
+				err = fmt.Errorf("%w — %s", err, BareClaudePluginRepair(target.Name))
+			}
+			fail(err)
+			return
+		}
+		// An applied install snapshots the user scope; another scope may still be behind.
+		installed = installed || installer.apply
+		if target.InstallOnly && !installer.apply {
+			// The install enables it and the edit after it disables it; a preview
+			// reads settings from before the install, so it names that edit here.
+			_ = installer.change("disable "+target.ID+" in "+run.settingsPath+": "+
+				pfmconfig.KeyClaudePlugins+" does not list "+target.Name, nil)
+		}
+	}
+	if target.Local && installed {
+		// Claude runs an installed copy from its snapshot, which moves only here
+		// and at the install above.
+		if err := installer.ensureClaudePluginCache(ctx, run, target); err != nil {
+			fail(err)
+		}
+	}
+	if !target.Own {
+		// A listed full id is ensured as named; its settings entries are all
+		// that is touched, and no other id is its twin to retire.
+		return
+	}
+	for _, plan := range []func(string, *ClaudePluginTarget) (string, func() error, error){
+		planOtherCopyRetirement, planRetiredPluginDisable,
+	} {
+		message, edit, err := plan(run.settingsPath, target)
 		if err != nil {
-			failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-			continue
+			fail(err)
+			return
 		}
 		if message == "" {
 			continue
 		}
-		stop, err := blockedByLiveChats()
-		if err != nil {
-			return probeFailed(target.ID, err)
-		}
-		if stop {
-			continue
-		}
 		if err := installer.change(message, edit); err != nil {
-			failures = append(failures, installer.pluginFailure(dir, target.ID, err))
+			fail(err)
 		}
 	}
-	return errors.Join(failures...)
 }
 
-// pluginLiveChats reports whether a live chat on the chosen dir, a passed
-// account or a roster dir holds the plugin commands back, printing the skip
-// line that names them.
-func (installer *engine) pluginLiveChats(dir string) (bool, error) {
-	dirs := []string{dir}
-	for _, account := range installer.options.ClaudeAccounts {
-		dirs = append(dirs, account.ConfigDir)
+// repointClaudePluginMarketplace re-points an installed local target's
+// marketplace that Claude Code knows from another source at the target's own
+// dir: `plugin
+// marketplace add` on a known name re-points it and keeps its plugins and their
+// options, which `plugin marketplace remove` would delete. An applied re-point
+// is read back, and a marketplace still pointing elsewhere is an error.
+func (installer *engine) repointClaudePluginMarketplace(
+	ctx context.Context,
+	run *claudePluginRun,
+	target *ClaudePluginTarget,
+) error {
+	one := []ClaudePluginTarget{*target}
+	gaps, err := ClaudePluginMarketplaceGaps(run.dir, one)
+	if err != nil || len(gaps) == 0 {
+		return err
 	}
-	dirs = append(dirs, installer.options.RosterConfigDirs...)
-	seen := map[string]bool{}
-	pids := map[int]bool{}
-	liveDirs := []string{}
-	for _, accountDir := range dirs {
-		if accountDir == "" {
-			continue
+	if run.resolveErr != nil {
+		return fmt.Errorf("%s, and the real claude binary that re-points it is not resolved: %w",
+			gaps[0].Problem, run.resolveErr)
+	}
+	add := []string{run.binary, claudePluginCommand, "marketplace", "add", target.Source}
+	message := fmt.Sprintf("run %s=%s %s: %s", claudeConfigDirEnv, run.dir, shellCommandLine(add...), gaps[0].Problem)
+	return installer.change(message, func() error {
+		options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir)}
+		if err := runClaudePluginCommand(ctx, installer.processRunner(), add, options); err != nil {
+			return err
 		}
-		physical := paths.PhysicalPath(accountDir)
-		if seen[physical] {
-			continue
-		}
-		seen[physical] = true
-		live, err := liveChatPIDs(installer.options.ProcRoot, accountDir)
+		after, err := ClaudePluginMarketplaceGaps(run.dir, one)
 		if err != nil {
-			return false, fmt.Errorf("read live chats in %s: %w", accountDir, err)
+			return err
 		}
-		if len(live) > 0 {
-			liveDirs = append(liveDirs, accountDir)
+		if len(after) != 0 {
+			_, marketplace, _ := strings.Cut(target.ID, "@")
+			return fmt.Errorf("%s after the add — %s", after[0].Problem, claudeMarketplaceRemoveFix(marketplace))
 		}
-		for _, pid := range live {
-			id, _ := strconv.Atoi(pid)
-			pids[id] = true
+		return nil
+	})
+}
+
+// checkListedClaudePlugins reads back, after an applied -alpha pass, every
+// plugin of ours claude.plugins lists that the pass did not already fail: one
+// not installed from its -dev copy and enabled is a failure naming each problem
+// pfm doctor reports for it.
+func (installer *engine) checkListedClaudePlugins(
+	run *claudePluginRun,
+	targets []ClaudePluginTarget,
+	failed map[int]bool,
+) {
+	for index := range targets {
+		target := targets[index]
+		if !target.Own || target.InstallOnly || failed[index] {
+			continue
+		}
+		problems, err := listedClaudePluginProblems(run.dir, target)
+		if err != nil {
+			problems = append(problems, "state unknown: "+err.Error())
+		}
+		if len(problems) == 0 {
+			continue
+		}
+		text := "not installed from its -dev copy and enabled after this install: " + strings.Join(problems, "; ")
+		run.failures = append(run.failures, installer.pluginFailure(run.dir, target.ID, errors.New(text)))
+	}
+}
+
+// listedClaudePluginProblems is every problem of target in the account dir:
+// its fallback, and each settings, install-record and marketplace gap naming it.
+func listedClaudePluginProblems(dir string, target ClaudePluginTarget) ([]string, error) {
+	one := []ClaudePluginTarget{target}
+	var problems []string
+	if target.Fallback != "" {
+		problems = append(problems, ClaudePluginFallbackGap(target).Problem)
+	}
+	settings := filepath.Join(dir, "settings.json")
+	gaps, err := ClaudePluginGaps(settings, one)
+	if errors.Is(err, ErrClaudeSettingsAbsent) {
+		// No settings.json: nothing is enabled.
+		gaps = []ClaudePluginGap{{Problem: "plugin " + target.ID + " not enabled in " + settings + " (no such file)"}}
+	} else if err != nil {
+		return problems, err
+	}
+	marketplaceGaps, err := ClaudePluginMarketplaceGaps(dir, one)
+	if err != nil {
+		return problems, err
+	}
+	missing, err := ClaudePluginsNotInstalled(dir, one)
+	if err != nil {
+		return problems, err
+	}
+	for _, id := range missing {
+		problems = append(problems, "plugin "+id+" not installed in "+dir)
+	}
+	for _, gap := range append(gaps, marketplaceGaps...) {
+		if ClaudePluginGapNames(gap.Problem, target.Name) {
+			problems = append(problems, gap.Problem)
 		}
 	}
-	if len(pids) == 0 {
-		return false, nil
-	}
-	ordered := make([]int, 0, len(pids))
-	for pid := range pids {
-		ordered = append(ordered, pid)
-	}
-	sort.Ints(ordered)
-	names := make([]string, 0, len(ordered))
-	for _, pid := range ordered {
-		names = append(names, strconv.Itoa(pid))
-	}
-	installer.skip(
-		fmt.Sprintf(
-			"claude plugins: live chats %s on %s — close them and rerun pfm install --yes",
-			strings.Join(names, ","),
-			strings.Join(liveDirs, ","),
-		),
-	)
-	return true, nil
+	return problems, nil
 }
 
 func (installer *engine) installClaudePlugin(
@@ -686,11 +561,11 @@ func (installer *engine) installClaudePlugin(
 	binary, dir string,
 	target *ClaudePluginTarget,
 ) error {
-	install := []string{binary, "plugin", "install", target.ID, "-y"}
+	install := []string{binary, claudePluginCommand, "install", target.ID, "-y"}
 	var add []string
 	message := fmt.Sprintf("run %s=%s %s", claudeConfigDirEnv, dir, shellCommandLine(install...))
 	if target.Source != "" {
-		add = []string{binary, "plugin", "marketplace", "add", target.Source}
+		add = []string{binary, claudePluginCommand, "marketplace", "add", target.Source}
 		message = fmt.Sprintf(
 			"run %s=%s %s && %s", claudeConfigDirEnv, dir, shellCommandLine(add...), shellCommandLine(install...),
 		)
@@ -728,7 +603,19 @@ func pluginCommandEnvironment(dir string) []string {
 }
 
 func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []string, options deps.RunOptions) error {
-	cmdCtx, cancel := context.WithTimeout(ctx, claudePluginTimeout)
+	return runPluginCommandWithin(ctx, runner, argv, options, claudePluginTimeout)
+}
+
+// runPluginCommandWithin runs argv in its own process group under timeout,
+// any failure an error naming the command, its exit code and its stderr.
+func runPluginCommandWithin(
+	ctx context.Context,
+	runner deps.Runner,
+	argv []string,
+	options deps.RunOptions,
+	timeout time.Duration,
+) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	options.ProcessGroup = true
 	options.WaitDelay = claudePluginWaitDelay
@@ -738,7 +625,7 @@ func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []stri
 			return fmt.Errorf("%s: cancelled: %w", strings.Join(argv[1:], " "), ctx.Err())
 		}
 		return fmt.Errorf(
-			"%s: timed out after %s: %w", strings.Join(argv[1:], " "), claudePluginTimeout, cmdCtx.Err(),
+			"%s: timed out after %s: %w", strings.Join(argv[1:], " "), timeout, cmdCtx.Err(),
 		)
 	}
 	if err != nil {

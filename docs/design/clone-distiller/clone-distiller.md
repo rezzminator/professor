@@ -143,4 +143,3 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | The section the lane overrides | `templates/global/agents/rr.md`, § Spawning |
 | The renderer's gate | `scripts/check-agent-roster.test.mjs`, "the shipped variants render with zero errors with and without the gpt-agents capability" |
 | The family doc | `docs/design/RR/rr.md` |
-| The roster line | `docs/BLUEPRINT.md` |

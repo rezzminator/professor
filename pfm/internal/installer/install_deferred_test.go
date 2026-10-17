@@ -60,7 +60,7 @@ func TestInstallDeferredPluginFailureSurvivesLaterLedgerError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
 	store := filepath.Join(home, ".claude")
-	// Inject after the plugin refusal, before the later ledger read; launchd
+	// Call after the plugin refusal, before the later ledger read; launchd
 	// has no systemd restart-settle sleep to use as an injection point.
 	output := &storeMutationWriter{match: "  FAIL    claude plugins in " + store + ": ", mutate: func() {
 		writeFixture(t, filepath.Join(managedRootForHome(home), vscodeOwnershipName), "{")

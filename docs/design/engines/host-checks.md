@@ -49,7 +49,7 @@ The table gives one row per detector; exact problems and fixes follow under each
 | `legacy-cache-db` | BLOCK | legacy cache and siblings | old database path | move or remove |
 | `legacy-harvester-cache` | WARN | default legacy cache dir | old cache name | move or remove |
 | `pfm-settings` | BLOCK | physical user settings | duplicate pfm launch values | remove owned keys |
-| `pfm-mcp` | BLOCK | registries and ownership | pfm servers outside launch | remove owned entries |
+| `pfm-mcp` | BLOCK | registries and ownership | legacy pfm `mcpServers` entry or stale ownership state | use the printed legacy-entry fix; `pfm install` also applies the cutover |
 | `memory-helpers` | BLOCK | fingerprinted scripts | retired helper name | rename and edit hooks |
 | `staged-shim` | BLOCK | shell source lines | retired staged shim | delete old source line |
 | `staged-prompts` | WARN | managed prompt dir | retired prompt staging | remove when unused |
@@ -143,11 +143,11 @@ Fix: `remove {items} from {path} (each hook entry running that command and each 
 
 **Severity:** BLOCK
 
-Looks at every file from `installer.ClaudeUserRegistries(home, accounts, "")`, `{home}/.claude.json`, `{home}/.mcp.json`, once per physical file; plus `{managed}/mcp-ownership.json` `clients`. A ledger name counts only when the current entry equals a recorded entry under a ledger key resolving to that file, ignoring an empty `env`; pfm command shapes count independently. The names-only `clients` list never decides entry ownership.
+Looks at every existing file from `installer.ClaudeUserRegistries(home, accounts, "")`, `{home}/.claude.json`, `{home}/.mcp.json`, once per physical file; plus `{managed}/mcp-ownership.json` `clients`. The installer uses the same registry inspector to remove exact pfm-owned legacy entries and reconcile enabled family entries without creating absent registry files. Doctor reports account registry state, foreign `professor` entries and unreadable files. Modern owned `chat-professor` and `harvester-professor` registrations produce no `pfm-mcp` row; only legacy pfm state is blocking. For a legacy entry, the existing Problem is `carries pfm mcpServers.<legacy-name>` and its Fix is `remove mcpServers.<legacy-name> from <path>; pfm’s server rides --mcp-config at launch`. Rerunning `pfm install` is also a supported cutover path; it removes exact pfm-owned legacy entries and reconciles modern family entries. A ledger name counts only when the current entry equals a recorded entry under a ledger key resolving to that file, ignoring an empty `env`; pfm command shapes count independently. The names-only `clients` list never decides entry ownership.
 
-Problem: `carries pfm mcpServers.{names}`; ledger: `mcp-ownership.json still records pfm clients`.
+Problem: `carries pfm mcpServers.<legacy-name>`; ledger: `mcp-ownership.json still records pfm clients`.
 
-Fix: `remove mcpServers.{names} from {path}; pfm's server rides --mcp-config at launch`; ledger: `remove "clients" from {path}`.
+Fix: `remove mcpServers.<legacy-name> from <path>; pfm’s server rides --mcp-config at launch`; ledger: `remove "clients" from {path}`. These diagnostics apply only to legacy entries; modern owned family entries produce no `pfm-mcp` row. Rerunning `pfm install` is also a supported cutover path.
 
 ### memory-helpers
 
@@ -217,7 +217,7 @@ Fix:
 
 **Severity:** BLOCK
 
-Looks at each `AccountEntries` entry in `{store}` that is not in `RetiredStoreEntries` (those are `retired-store-entry`'s); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
+Looks at each `AccountEntries` entry in `{store}` that is not in `RetiredStoreEntries` (those are `retired-store-entry`'s) and not `cache` (`storeRebuildableEntries`: a cache is rebuilt, and other tools' hooks write under the store's `cache/`, so a store holding only that raises no row; an account's own `cache` stays an account entry); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
 
 Problem: `{entry} is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)`. pfm launches always set `CLAUDE_CONFIG_DIR` to an account dir, so identity lands in the store only through a launch that points it at the store. For `backups` the problem adds `; a Claude launched without CLAUDE_CONFIG_DIR writes backups here too`: an unscoped Claude's config dir is the store. For `.claude.json`, `.claude.json.backup` and `backups` it ends with the file's birth, `({birth})` — see [Stray state birth](#stray-state-birth).
 
@@ -280,7 +280,7 @@ Fix: `run pfm install; it removes the link, and Claude writes this account's own
 
 **Severity:** WARN
 
-Looks at top-level names in `{store}` and every `{acct}` on neither list, not ignored (Claude Code's runtime entries `debug`, `daemon.lock`, `daemon.status.json` and `tmp` included), not matched by the two leftover checks, and not named after a plugin `{store}/plugins/installed_plugins.json` lists (the `{name}` of each `{name}@{marketplace}` key: a plugin's own dir, its logs). A registry that exists but cannot be read or parsed, in a readable store, adds `WARN unclassified {registry} — UNREADABLE plugin registry: {cause} — a dir named after a plugin reports unclassified` with fix `make {registry} readable JSON, then rerun pfm doctor`, and those dirs report unclassified.
+Looks at top-level names in `{store}` and every `{acct}` on neither list, not ignored (Claude Code's runtime entries `debug`, `daemon.lock`, `daemon.status.json`, `.claude.json.lock` and `tmp` included), not matched by the two leftover checks, not a regular `*.md` file at `{store}`'s top level (the user's own instruction material, shared by construction; an `{acct}` one still reports), and not named after a plugin `{store}/plugins/installed_plugins.json` lists (the `{name}` of each `{name}@{marketplace}` key: a plugin's own dir, its logs). A registry that exists but cannot be read or parsed, in a readable store, adds `WARN unclassified {registry} — UNREADABLE plugin registry: {cause} — a dir named after a plugin reports unclassified` with fix `make {registry} readable JSON, then rerun pfm doctor`, and those dirs report unclassified.
 
 Problem: `UNCLASSIFIED — on neither the shared nor the per-account list`.
 
@@ -290,7 +290,7 @@ Fix: `keep it; pfm doctor names it until a pfm release classifies it`.
 
 **Severity:** WARN
 
-Looks at top-level `mcpServers` names in every `{acct}/.claude.json` and `{home}/.claude.json` that `pfm-mcp` does not report.
+Looks at top-level `mcpServers` names in every existing `{acct}/.claude.json` and `{home}/.claude.json`, excluding the modern owned `chat-professor` and `harvester-professor` entries, which produce no third-party row. Foreign `professor` entries are preserved by install and reported by doctor; unreadable registries are surfaced as unreadable rather than absent.
 
 Problem: `mcpServers.{name} is declared outside pfm`.
 

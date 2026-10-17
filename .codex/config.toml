@@ -19,7 +19,7 @@ network_access = true
 
 # ─── MCP servers ─────────────────────────────────────────────────────────────
 # This repo ships no .mcp.json, so the compiler's managed fence is empty. If one
-# is added, `pfm codex build` writes the [mcp_servers] block between its
+# is added, `engine-sync codex build` writes the [mcp_servers] block between its
 # own markers — everything outside them stays hand-written. PIN every version:
 # an unpinned server changes under you between sessions, and a protocol that
 # changed shape mid-task gets blamed on your own code first.

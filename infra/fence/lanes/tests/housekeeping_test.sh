@@ -379,6 +379,13 @@ else bad "compose contract" "$(cat "$T/err")"; fi
 if awk '/^FROM .* AS pfm-base/ { b = 1; next } /^FROM / { b = 0 } b && /^LABEL pfm\.fence=1$/ { f = 1 } END { exit !f }' "$FENCE/pfm-dev.Dockerfile"; then
   ok "Dockerfile: LABEL pfm.fence=1 in the base stage, so every builder's image carries it"
 else bad "Dockerfile label" "$(grep -n 'LABEL\|^FROM' "$FENCE/pfm-dev.Dockerfile")"; fi
+# The plugins' scripts/gate.sh run shellcheck pinned to one release: the base stage installs that release, checksum-verified, or every plugin gate that lints shell goes red in the fence.
+sc_image=$(sed -n 's/^ARG SHELLCHECK_VERSION=//p' "$FENCE/pfm-dev.Dockerfile")
+sc_gate="$FENCE/../../plugins/gpt-gateway/scripts/gate.sh"
+if [ -f "$sc_gate" ]; then sc_pin=$(sed -n 's/^SHELLCHECK_VERSION=//p' "$sc_gate"); sc_from="gpt-gateway's pin"; else sc_pin=$sc_image; sc_from="gpt-gateway not checked out, its pin not compared"; fi
+if [ -n "$sc_image" ] && [ "$sc_image" = "$sc_pin" ] && awk '/^FROM .* AS pfm-base/ { b = 1; next } /^FROM / { b = 0 } b && /sha256sum -c/ && /shellcheck/ { c = 1 } b && /install -m 0755 .*shellcheck/ { i = 1 } END { exit !(c && i) }' "$FENCE/pfm-dev.Dockerfile"; then
+  ok "Dockerfile: the base stage installs shellcheck $sc_image, checksum-verified ($sc_from)"
+else bad "Dockerfile shellcheck" "$(grep -n 'apt-get install\|shellcheck' "$FENCE/pfm-dev.Dockerfile")"; fi
 
 # 17 — checkouts: only sim volumes recorded by this clone can be removed.
 #      A mounted volume retains its ledger row for the next run.

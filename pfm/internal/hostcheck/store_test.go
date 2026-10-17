@@ -175,6 +175,39 @@ func TestAccountDirSymlink(t *testing.T) {
 	}
 }
 
+// A foreign hook writes cache/write-state-sync/x.json under the store: Claude
+// rebuilds a cache, so the store holding only that is no identity and no row,
+// while a real stray (.claude.json) beside it still blocks.
+func TestStoreIdentityIgnoresStoreCache(t *testing.T) {
+	env := fixtureEnv(t)
+	writeFile(t, filepath.Join(env.Store, "cache", "write-state-sync", "x.json"), "{}")
+	assertRows(t, detect(t, "store-identity", env))
+	for _, row := range RunAll(env) {
+		if strings.Contains(row.Path, "cache") {
+			t.Errorf("row names the store cache: %s", row.Render(""))
+		}
+	}
+	cache := filepath.Join(env.Store, "cache")
+	if err := os.RemoveAll(cache); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), cache); err != nil {
+		t.Fatal(err)
+	}
+	if rows := detect(t, "store-identity", env); len(rows) == 0 {
+		t.Errorf("a store cache that is a symbolic link was never inspected")
+	}
+	if err := os.Remove(cache); err != nil {
+		t.Fatal(err)
+	}
+	stray := filepath.Join(env.Store, ".claude.json")
+	writeBorn(t, stray, "data", env.Now)
+	rows := detect(t, "store-identity", env)
+	if len(rows) != 1 || rows[0].Path != stray || rows[0].Severity != Block {
+		t.Fatalf("rows=%+v", rows)
+	}
+}
+
 func TestStoreIdentity(t *testing.T) {
 	for _, present := range []bool{false, true} {
 		t.Run(fmt.Sprint(present), func(t *testing.T) {
@@ -187,6 +220,9 @@ func TestStoreIdentity(t *testing.T) {
 			for _, entry := range installer.AccountEntries {
 				if slices.Contains(installer.RetiredStoreEntries, entry) {
 					continue // retired-store-entry's, a warning
+				}
+				if entry == "cache" {
+					continue // rebuildable, never identity: TestStoreIdentityIgnoresStoreCache
 				}
 				if entry == "state" {
 					entry = "state/mcp-discover-verdicts.json"
@@ -836,7 +872,7 @@ func TestStaleStateTmpAge(t *testing.T) {
 
 func TestUnclassifiedExcludesKnownAndBackupNames(t *testing.T) {
 	env := fixtureEnv(t)
-	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture", "debug", "daemon.lock", "daemon.status.json", "tmp"} {
+	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture", "debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp"} {
 		writeFile(t, filepath.Join(env.Store, name), "{}")
 	}
 	assertRows(t, detect(t, "unclassified", env))
@@ -855,6 +891,26 @@ func TestUnclassifiedExcludesKnownAndBackupNames(t *testing.T) {
 		)
 	}
 	assertRows(t, detect(t, "beside-backup", env), want...)
+}
+
+// TestUnclassifiedSparesStoreMarkdown: a regular *.md file at the store's top
+// level is the user's own material, shared by construction; the same name in an
+// account dir, a *.md dir and an unknown non-md store entry still report.
+func TestUnclassifiedSparesStoreMarkdown(t *testing.T) {
+	env := fixtureEnv(t)
+	account := filepath.Join(env.Accounts[0].ConfigDir, "notes.md")
+	drafts, text := filepath.Join(env.Store, "drafts.md"), filepath.Join(env.Store, "notes.txt")
+	for _, path := range []string{filepath.Join(env.Store, "notes.md"), account, text} {
+		writeFile(t, path, "# notes")
+	}
+	makeDir(t, drafts)
+	var want []Row
+	for _, path := range []string{drafts, text, account} {
+		problem := "UNCLASSIFIED — on neither the shared nor the per-account list"
+		fix := "keep it; pfm doctor names it until a pfm release classifies it"
+		want = append(want, Row{Warn, "unclassified", path, problem, fix})
+	}
+	assertRows(t, detect(t, "unclassified", env), want...)
 }
 
 // TestStoreIdentityFixRunsOnAFirstMigration runs the printed fixes on the

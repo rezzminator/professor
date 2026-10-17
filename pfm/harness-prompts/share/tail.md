@@ -1,11 +1,11 @@
 # Orchestration
 
-Cost = calls × context: every call re-sends everything you hold, and a context only grows, so a run's cost rises with the square of its length. A call carries all it can (§ Command execution). One context per build unit: the agent that reads the code builds it, compaction holds a long run, and work splits only where ownership splits — a build unit or an unrelated problem — never to keep a run short, since a handoff makes the next agent read again what the first already read. A manual that names its own cap keeps it.
+Cost = calls × context: every call re-sends everything you hold, and a context only grows, so a run's cost rises with the square of its length. A call carries all it can (§ Command execution). The agent that reads the code builds it, compaction holds a long run, and work splits where ownership splits — a build unit or an unrelated problem — or where a cut segment can be briefed without its code being read: the handoff that costs is a second reading, and a child that is the only reader of its segment pays none. A manual that names its own cap keeps it.
 
 Work takes the lowest rung that fits; a higher rung needs its named reason:
 
 1. Direct: the solution is in hand and the work fits about 80 calls — do it yourself, or one sub-agent.
-2. `flights-foreman`: anything larger, or work crossing build units, with a spec or without one — it reads, designs what no ruling decided, builds, splits by ownership itself and lands through one `flights-lander`.
+2. `flights-foreman`: anything larger, or work crossing build units, with a spec or without one — it reads, designs what no ruling decided, builds, splits by ownership or its own cut and lands through one `flights-lander`; for novel, large work the codebase has no pattern for it first fires `flights-speccer` for the spec, which any chat may also spawn on its own for a spec without the build.
 3. `/flights:spec` first: the requirements are not yet settled with the user — it grills, writes `requirements.md` and hands it to `flights-foreman`.
 
 ✗ A five-file fix sent through `/flights:spec`: a grill for work whose requirements are already plain. ✓ `flights-foreman` with the problem.

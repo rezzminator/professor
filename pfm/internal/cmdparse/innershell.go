@@ -1,6 +1,7 @@
 package cmdparse
 
 import (
+	"maps"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -44,12 +45,14 @@ func shellScript(base string, rest []arg) (arg, bool) {
 
 // innerShell handles `bash -c STRING`. A literal STRING is parsed as shell
 // in place: the bash part itself stays, then the string's own parts follow.
-// The inner shell is a child process: its variables end with it, and it
-// sees no unexported variable of the outer one. A STRING the parse cannot
+// The inner shell is a child process: its variables end with it, and its
+// parse sees only the call's seeded variables. Its Part.Env is every
+// assignment in force at the outer command, exported or not, since one to an
+// already-exported name (CLAUDE_CONFIG_DIR) reaches the child. A STRING the parse cannot
 // know stays an ordinary part; one that does not parse is one error part,
 // and one nested deeper than maxShellDepth is one unparsed, Bounded part.
-func (p *callParser) innerShell(program string, rest []arg, script arg) {
-	p.emit(Part{Program: program, Args: argTexts(rest)})
+func (p *callParser) innerShell(program string, rest []arg, script arg, env map[string]string) {
+	p.emit(Part{Program: program, Args: argTexts(rest), Env: env})
 	if !script.resolved {
 		return
 	}
@@ -62,11 +65,18 @@ func (p *callParser) innerShell(program string, rest []arg, script arg) {
 		p.emit(Part{Status: StatusError})
 		return
 	}
-	vars, arrays := p.vars, p.arrays
+	vars, arrays, outer := p.vars, p.arrays, p.env
 	p.vars, p.arrays = map[string][]string{}, map[string][]string{}
+	for name, val := range p.base {
+		p.vars[name] = []string{val}
+	}
+	p.env = maps.Clone(env)
+	if p.env == nil {
+		p.env = map[string]string{}
+	}
 	p.shellDepth++
 	defer func() {
-		p.vars, p.arrays = vars, arrays
+		p.vars, p.arrays, p.env = vars, arrays, outer
 		p.shellDepth--
 	}()
 	syntax.Walk(file, p.visit)

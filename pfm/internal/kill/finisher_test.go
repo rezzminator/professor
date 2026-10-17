@@ -210,8 +210,8 @@ const (
 // it as a prompt) on the marker row or a row below it, a Claude box with no
 // closing rule, a composer not drawn, an engine whose composer pfm cannot
 // read (OpenCode), a composer whose styling cannot be read, or a pane already
-// gone gets no keystroke at all — the fallback kill-pane ends it. chat_exit
-// and chat_kill --exit share this finisher.
+// gone gets no keystroke at all — the fallback kill-pane ends it. exit
+// and kill --exit share this finisher.
 func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T) {
 	tests := []struct {
 		name       string

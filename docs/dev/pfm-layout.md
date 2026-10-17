@@ -28,7 +28,7 @@ pfm/
   e2e/                                 # opt-in installer end-to-end suite (build tag e2e); builds and drives the binary
   cmd/pfm/                             # CLI shell: one file prefix per unit
     main.go runtime_config.go engines.go   # run() dispatch, Runtime loading, engine composition root
-    chat_*.go                          # `pfm chat <verb>` adapters: dispatch, new, ask, reload, keys, satellite, caller identity, inject resume
+    chat_*.go                          # `pfm chat <verb>` adapters: dispatch, new, ask, reload, keys, satellite, caller identity, call resume
     ls_*.go                            # the picker: `pfm ls` loop, refresh pipeline, K1 action dispatch
     doctor_*.go                        # `pfm doctor` and its probe families (harness prompt, spawn audit, tmux titles, prepush, vscode, mcp client)
     internal_*.go                      # every `pfm internal <entry>` body (hook entries, launch, then, update-check, prompt block)
@@ -51,7 +51,7 @@ pfm/
     headless/ README.md                # MOVED from pfm/HEADLESS.md; run/ is the one-shot process boundary
     harvestmcp/ harvestpy/             # unchanged (harvestpy is the pinned Python sidecar)
     action agentopen agentrole archive ask binwatch codexappendix codexmeta codexprompt compose fleet gather heal
-    index inject kill mcpserv naming nudge professor reap recovery reload resolve sky spawn stale stats
+    index call kill mcpserv naming nudge professor reap recovery reload resolve sky spawn stale stats
     statusline testjail theme transcript ui update updatecheck usagehook     # unchanged
 ```
 
@@ -141,7 +141,7 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | 69 | `cmd/pfm/run_command.go` | `cmd/pfm/chat_new_command.go` | `runRun` is `pfm chat new` / its `headless run` alias; `run_command.go` collides with the `run*` entry-point prefix |
 | 70 | `cmd/pfm/ask_command.go` | `cmd/pfm/chat_ask_command.go` | `pfm chat ask` |
 | 71 | `cmd/pfm/reload_command.go` | `cmd/pfm/chat_reload_command.go` | `pfm chat reload` and its `reload-run` worker |
-| 72 | `cmd/pfm/inject_resume.go` | `cmd/pfm/chat_inject_resume.go` | the dormant half of the chat inject ladder |
+| 72 | `cmd/pfm/call_resume.go` | `cmd/pfm/chat_call_resume.go` | the dormant half of the chat call ladder |
 | 73 | `cmd/pfm/caller_engine.go` | `cmd/pfm/chat_caller_engine.go` | caller identity for chat verbs (canonical per dup audit A3) |
 | 74–78 | `cmd/pfm/reload_{args,command,engine_roster,hide,jail}_test.go` | `cmd/pfm/chat_reload_{args,command,engine_roster,hide,jail}_test.go` | follow #71 |
 | 79–81 | `cmd/pfm/run_{engine_roster,jail,role}_test.go` | `cmd/pfm/chat_new_{engine_roster,jail,role}_test.go` | follow #69 |
@@ -167,7 +167,7 @@ Layering, top to bottom; a package imports only downward. This is today's graph 
 
 1. `cmd/pfm` — imports anything under `internal/`; nothing imports it (C10 keeps `mcpserv` off argv into it).
 2. surfaces and orchestration: `mcpserv`, `harvestmcp`, `ui`, `installer`, `fleet`, `chat`, `headless`, `reload`, `reap`, `heal`, `archive`, `stats`, `statusline`, `agentopen`, `engine/{claude,codex,opencode}`.
-3. mechanisms over the fleet: `action`, `spawn`, `inject`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `harvest`, `harvestpy`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `agentrole`, `codexprompt`, `codexappendix`, `ask`, `headless/run`.
+3. mechanisms over the fleet: `action`, `spawn`, `call`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `harvest`, `harvestpy`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `agentrole`, `codexprompt`, `codexappendix`, `ask`, `headless/run`.
 4. façades and leaves: `tmux` (imports `deps` only), `sqlitedb`, `atomicfile`, `paths` (imports `engine`), `deps` (imports `engine`), `config`, `engine` (imports nothing in-module), `theme`, `sky`, `testjail`.
 
 Rules the executor and every later wave keep:
@@ -197,7 +197,7 @@ Rules the executor and every later wave keep:
 | C10 `mcp-argv-calls` | none | meaningful |
 | C11 `fleet-db-spellings` | none (`paths.go`, `installer.go` untouched; `PFM_SHARED_DB`/`SharedDB` are open decision 1) | meaningful |
 | C12 `claude-dangling` | `pfm/CLAUDE.md:31` cites `shim/` and `:65` cites `internal/tmuxfmt`; neither form is caught (the regex wants a backticked trailing-slash path and excludes the `shim` prefix), so the check stays PASS while the doc dangles — fix the two sentences through `/pcm` in the same wave (§ f step 8), and drop `shim` and `prompts` from the exclusion list at `arch-check.sh:165` so a future `shim/` citation is checked | meaningful once the exclusion shrinks |
-| C13 `untested-sources` | every renamed source without a same-stem test: `cmd/pfm/{agent_open_command,chat_keys_command,commands,harness_prompt_baselines,inject_resume,launcher_repair_command,pipeline,prepush_doctor,prompt_block,run_command,then_command}.go` → their new names; `internal/chatkeys/keys.go` → `internal/chat/keys.go`; `internal/engine/matchutil/match.go` → `internal/engine/match.go` | meaningful; #4 (`fleetdb_test.go`) keeps `fleetdb.go` mirrored |
+| C13 `untested-sources` | every renamed source without a same-stem test: `cmd/pfm/{agent_open_command,chat_keys_command,commands,harness_prompt_baselines,call_resume,launcher_repair_command,pipeline,prepush_doctor,prompt_block,run_command,then_command}.go` → their new names; `internal/chatkeys/keys.go` → `internal/chat/keys.go`; `internal/engine/matchutil/match.go` → `internal/engine/match.go` | meaningful; #4 (`fleetdb_test.go`) keeps `fleetdb.go` mirrored |
 | C14 / C15 | none (parse `main.go`, unchanged) | meaningful |
 | C16 `env-outside-paths` | `cmd/pfm/commands.go 1` → `ls_command.go`; `launch_command.go 1` → `internal_launch.go`; `update_notice_command.go 1` → `internal_update_check.go`; `run_command.go 1` → `chat_new_command.go` | meaningful |
 | C17 `dup-functions` | value strings carry paths: `command:` loses `internal/engine/matchutil/match.go` (entry becomes `command: internal/codexappendix/codexappendix.go internal/tmux/tmux.go`); `open:` → `internal/fleetdb/fleetdb.go internal/store/store.go`; `containsstring:` → `cmd/pfm/update_command.go internal/harvestmcp/remote.go` after P2b; `lastlines:` unchanged (`chat_satellite_command.go` keeps its name); `livesockets:` → `cmd/pfm/namesync_command.go internal/ui/model.go` unchanged | meaningful; the `command:` entry shrinks (P4 #8 owns the rest) |
@@ -220,7 +220,7 @@ Each step is one commit (gitter, pathspec = the step's files plus `.arch/`), lea
 5. **Tests and docs beside their subject** (#11–#17). `git mv shim internal/installer/shim`; fix the fixture path at `internal/installer/shim/shim_test.go:351` to `filepath.Join("..", "assets", "shim", "pfm.zsh")`; `git mv HARVESTER.md internal/harvest/README.md && git mv HEADLESS.md internal/headless/README.md`; re-point the `docs/demo/inventory-*.md` lines named in #14–#15; `git mv cmd/pfm/attach_e2e_test.go cmd/pfm/attach_jail_test.go && git mv cmd/pfm/lineage_e2e_test.go cmd/pfm/lineage_jail_test.go`. Re-key `test-jail-copies.txt`. `go test ./internal/installer/shim/ ./cmd/pfm/ -run 'Attach|Lineage|Shim' -count=1` must run the moved tests (a PASS with 0 tests is a failure to look — check `-v` lists them). Build, vet, arch.
 6. **`cmd/pfm` doctor and internal prefixes** (#18–#61). Pure `git mv` per row; no code changes. Re-key C4, C6, C13, C16, C18, C21 as § (e) lists. Build, vet, arch, then `go test ./cmd/pfm/ -count=1`.
 7. **`cmd/pfm` picker and chat prefixes** (#62–#83). Pure `git mv` per row. Re-key C1, C4, C13, C16, C18, C20, C21. Build, vet, arch, `go test ./cmd/pfm/ -count=1`.
-8. **Orientation truth** — through `/pcm`: `:31` "(`shim/` holds only its tests)" → "(`internal/installer/shim/` holds only its tests)"; `:65` "parse through `internal/tmuxfmt`" → "parse through `internal/tmux` (`format.go`)"; § File Structure gains one sentence: "`cmd/pfm` file names start with their unit — `chat_ ls_ doctor_ internal_ update_` — so `ls cmd/pfm/<unit>_*` lists a unit." `AGENTS.md` recompiles from it (`pfm codex build`). In the same commit (not guarded): `scripts/arch-check.sh:165` exclusion `^\`(cmd|internal|testdata|shim|e2e|prompts)` → `^\`(cmd|internal|testdata|e2e)`; `TESTPLAN.md` references to `shim/` tests, `HARVESTER.md`, `HEADLESS.md` re-pointed (`grep -n 'shim/\|HARVESTER\|HEADLESS' TESTPLAN.md`). Arch must still PASS.
+8. **Orientation truth** — through `/pcm`: `:31` "(`shim/` holds only its tests)" → "(`internal/installer/shim/` holds only its tests)"; `:65` "parse through `internal/tmuxfmt`" → "parse through `internal/tmux` (`format.go`)"; § File Structure gains one sentence: "`cmd/pfm` file names start with their unit — `chat_ ls_ doctor_ internal_ update_` — so `ls cmd/pfm/<unit>_*` lists a unit." `AGENTS.md` recompiles from it (`engine-sync codex build`). In the same commit (not guarded): `scripts/arch-check.sh:165` exclusion `^\`(cmd|internal|testdata|shim|e2e|prompts)` → `^\`(cmd|internal|testdata|e2e)`; `TESTPLAN.md` references to `shim/` tests, `HARVESTER.md`, `HEADLESS.md` re-pointed (`grep -n 'shim/\|HARVESTER\|HEADLESS' TESTPLAN.md`). Arch must still PASS.
 9. **Close.** `dev.sh iso verify pfm` and `dev.sh iso test pfm` green; `bash scripts/arch-check.sh` all PASS with **no** `run --measure` note (a "fixed — run --measure" note means a key was dropped instead of re-keyed: find it, re-key it). Report the 83-row table as executed, with any row that could not be executed named.
 
 ## (g) Open decisions

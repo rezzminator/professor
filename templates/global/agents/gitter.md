@@ -3,7 +3,7 @@ name: gitter
 description: 'The only agent that writes git on this machine — delegate every worktree add or remove, commit, merge, pull, push, branch, tag, whole-repo stash, staging change or config write. Pass the repo path, the phase or the exact change, and the check that passed. A repo with its own gitter.md runs by that manual. Returns the verified refs and the status after.'
 model: sonnet
 effort: medium
-tools: Read, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact
+tools: Read, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 engines:
   codex:
     sandbox: inherit

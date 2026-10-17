@@ -408,7 +408,7 @@ func limitsGoldenModel(width int) Model {
 
 // cosmosGoldenSnapshot builds the fixed-clock cosmos snapshot both the
 // no-sky and the sky-enabled goldens render. The inject event is pinned
-// 300ms before "now" on purpose: with cosmosCometDuration(fleetdb.KindInject)
+// 300ms before "now" on purpose: with cosmosCometDuration(fleetdb.KindCall)
 // at 1500ms, that lands the comet genuinely mid-flight for any caller that
 // renders with the sky on, rather than pinning a frame the gate could pass
 // whether the glow code ran or was never wired.
@@ -475,7 +475,7 @@ func cosmosGoldenEvents(nowNS int64, rows []compose.Row) []fleetdb.CommsEvent {
 	return []fleetdb.CommsEvent{
 		{
 			ID:   2,
-			AtNS: nowNS - int64(300*time.Millisecond), Kind: fleetdb.KindInject,
+			AtNS: nowNS - int64(300*time.Millisecond), Kind: fleetdb.KindCall,
 			SenderUUID: rows[0].ID, Target: rows[1].Name,
 			Message: "QA: cosmos goldens are pinned",
 		},

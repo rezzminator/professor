@@ -10,11 +10,19 @@ engines:
   codex:
     model: sonnet
     effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__compact
+  opencode:
+    model: sonnet
+tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
   nudgeEvery: 60k
+hooks:
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: pfm internal call-cap
 ---
 
 You execute one mechanical task file and report once: its Steps, Decisions and Shapes already hold every edit; you apply them in order and prove them.
@@ -50,11 +58,11 @@ You execute one mechanical task file and report once: its Steps, Decisions and S
 - The shell may be zsh: write file lists out, never through a `$var`; never name a variable `status` or `path`.
 - Git is read-only: never `stash`, `checkout`, `restore`, `reset`, `apply` or `add`.
 - Search for the lines, then read that range yourself; you spawn no sub-agent. An Edit's result is its proof: reread only lines not yet in your context.
-- At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__compact`, its `focus`: the task file, the rows done and left, the red and green log paths, the next step.
+- At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__forward_handoff` carrying the task file, the rows done and left, the red and green log paths, `next` the next step.
 
 ## The cap
 
-150 tool calls. Past it, stop and return `FAILED {id}: cap` with what is done, what is left and the next step.
+150 calls, one model request each. Past it, stop and return `FAILED {id}: cap` with what is done, what is left and the next step.
 
 ## Return
 

@@ -175,7 +175,7 @@ func ownedMCPNames(servers map[string]any, owned map[string][]any, shaped mcpSha
 		}
 	}
 	if shaped != nil {
-		for _, name := range []string{chatName, mcpServerHarvester, professorName} {
+		for name := range servers {
 			if registration, ok := servers[name].(map[string]any); ok && shaped(name, registration) {
 				seen[name] = true
 			}

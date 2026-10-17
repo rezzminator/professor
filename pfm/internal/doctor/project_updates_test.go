@@ -50,7 +50,8 @@ func TestDoctorProjectUpdatesUsageRejectsMixedFlags(t *testing.T) {
 		if code := runDoctor(args, &stdout, &stderr, runtime); code != 2 {
 			t.Fatalf("doctor %v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
-		want := "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 clean, 1 warnings, 3 failures) | " +
+		want := "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 machine checks clean, project_updates rows advisory; " +
+			"1 warnings, 3 failures) | " +
 			"pfm doctor --project-updates [--root DIR] [--json] (exit 0 clean, 1 review required, 3 report failure); 2 usage error\n" +
 			"       pfm doctor --stale [--purge] list the retired paths pfm once wrote; --purge moves them into one backup dir\n"
 		if stderr.String() != want {
@@ -85,7 +86,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
 		"    scripts/legacy.sh:2   /wave — retired command, now /flights:spec\n",
-		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__professor__chat_*\n",
+		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__chat-professor__*\n",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor --project-updates missing %q:\n%s", want, stdout.String())

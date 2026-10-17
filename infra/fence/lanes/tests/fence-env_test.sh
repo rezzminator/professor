@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for infra/fence/fence-env.sh's engine-sync source: the
-# fence mounts $ENGINE_SYNC_SRC, else the main checkout's plugins/engine-sync,
+# fence mounts $ENGINE_SYNC_SRC, else the worktree's own plugins/engine-sync, else the main checkout's,
 # read-only at /engine-sync; an absent source mounts the common Git directory in
 # its place and names the absence in PFM_DEV_ENGINE_SYNC_MISSING, and a relative
 # ENGINE_SYNC_SRC is refused. A real main checkout and a linked worktree, no docker.
@@ -54,6 +54,16 @@ out="$(resolve "$MAIN")"; rc=$?
 if [ "$rc" -eq 0 ] && [ "$out" = "$want" ]; then
   ok 'the main checkout mounts its own plugins/engine-sync'
 else bad 'main checkout from itself' "rc=$rc" "got: $out" "want: $want"; fi
+
+# 2b — the worktree's own plugins/engine-sync (the commit the tree pins) wins over the main checkout's.
+mkdir -p "$T/linked/plugins/engine-sync"
+printf 'module example.test/engine-sync-pinned\n' >"$T/linked/plugins/engine-sync/go.mod"
+out="$(resolve "$T/linked")"; rc=$?
+want="$(printf 'SRC=%s\nMISSING=' "$T/linked/plugins/engine-sync")"
+if [ "$rc" -eq 0 ] && [ "$out" = "$want" ]; then
+  ok "a linked worktree holding its own plugins/engine-sync mounts that one, not the main checkout's"
+else bad 'worktree engine-sync' "rc=$rc" "got: $out" "want: $want"; fi
+rm -rf "$T/linked/plugins"
 
 # 3 — an absolute ENGINE_SYNC_SRC wins over the checkout's copy.
 mkdir -p "$T/elsewhere"

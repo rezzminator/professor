@@ -1,6 +1,6 @@
 ---
 name: flights:spec
-description: 'The main chat''s front of a flight whose requirements are not settled — /flights:spec [work | file]: walks only what asking needs, grills the user until no gap is left, writes requirements.md, hands it to flights-foreman. /flights:init → /flights:spec → flights-foreman → flights-lander → /flights:audit. Returns the foreman''s return.'
+description: 'Settles requirements with the user — the main chat''s front of a flight whose requirements are open: /flights:spec [work | file] grills until no gap is left, writes requirements.md. /flights:init → /flights:spec → flights-foreman (→ flights-speccer) → flights-lander → /flights:audit. Returns the foreman''s return.'
 argument-hint: [work | file holding it]
 ---
 
@@ -10,7 +10,7 @@ One deliverable written by you: `$HOME/.local/state/pfm/flights/{project}/{fligh
 
 ## S1 — Walk only what asking needs
 
-Read the child `CLAUDE.md` of every project the work touches (the root one you already hold) and the project map `$HOME/.local/state/pfm/flights/{project}/project-map.md`: S2 must not re-ask what they settle. A fact a question needs goes to `Agent(subagent_type: "tracer")` as numbered questions, all probes in one message; end your message after spawning, the maps arrive on their own. The walk stops at what a good question needs: the foreman reads the code to build it, so a map built here for it is reading paid twice.
+Read the child `CLAUDE.md` of every project the work touches (the root one you already hold) and the project map `$HOME/.local/state/pfm/flights/{project}/project-map.md` (written by `/flights:init` alone, a scoped map in the flight directory): S2 must not re-ask what they settle. A fact a question needs goes to `Agent(subagent_type: "tracer")` as numbered questions, all probes in one message; end your message after spawning, the maps arrive on their own. The walk stops at what a good question needs: the foreman reads the code to build it, so a map built here for it is reading paid twice.
 
 A referent that does not exist, or two parts of the work that would edit one target, is a question for S2, never a silent fix.
 
@@ -47,8 +47,8 @@ Spawn one `Agent(subagent_type: "flights-foreman")` whose prompt names `requirem
 
 ## S5 — The one question
 
-A `BLOCKED` return carries a question. Put it to the user in one round holding that question alone, append the ruling to `## Rulings`, and send it to the same foreman by `SendMessage`, closing with "continue, then return once more in the return shape". At most one such round per flight; a second means S2 was skipped.
+A `BLOCKED` return carries a question. Put it to the user in one round holding that question alone; under god speed, rule it yourself, never sending it to the user. Append the ruling to `## Rulings` and send it to the same foreman by `SendMessage`, closing with "continue, then return once more in the return shape". At most one such round per flight; a second means S2 was skipped.
 
 ## Present
 
-The foreman's return as it came: its first line, the `UNITS` and `GATE` rows, `UNPROVEN`, `OUTSIDE`, and the flight directory's path for `/flights:audit`.
+The foreman's return as it came: its first line (a `PARTIAL` included), the `UNITS` and `GATE` rows, every `OPEN` item, `UNPROVEN`, `OUTSIDE`, and the flight directory's path for `/flights:audit`.

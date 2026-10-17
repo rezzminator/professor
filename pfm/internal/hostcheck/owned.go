@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -81,14 +82,56 @@ func pfmMCP(env Env) ([]Row, error) {
 			}
 			sort.Strings(names)
 		}
-		rows = appendMCPRow(rows, path, names)
+
+		current := map[string]bool{}
+		for _, family := range []string{config.MCPServerChat, config.MCPServerHarvester} {
+			name := config.MCPRegistrationName(family)
+			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, name) {
+				if report.State == installer.MCPClientPFM {
+					current["mcpServers."+name] = true
+				}
+				if report.State == installer.MCPClientUnreadable {
+					appendProbeError(&rows, checkPFMMCP, path, report.Error)
+				}
+			}
+		}
+		legacy := names[:0]
+		for _, name := range names {
+			if !current[name] {
+				legacy = append(legacy, name)
+			}
+		}
+		before := len(rows)
+		rows = appendMCPRow(rows, path, legacy)
+		canCutOver := true
+		for _, name := range legacy {
+			if name != "mcpServers.professor" && name != "mcpServers.chat" && name != "mcpServers.harvester" {
+				canCutOver = false
+				continue
+			}
+			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, strings.TrimPrefix(name, "mcpServers.")) {
+				if report.State != installer.MCPClientLegacyPFM {
+					canCutOver = false
+				}
+			}
+		}
+		if len(rows) > before && canCutOver && paths.PhysicalPath(path) != paths.PhysicalPath(homePath) {
+			rows[len(rows)-1].Severity = Warn
+			rows[len(rows)-1].Fix = "run pfm install --yes to cut over owned account registrations"
+		}
 	}
 	if len(clients) > 0 {
+		severity := Warn
+		for _, client := range clients {
+			if client != "professor" && client != "chat" && client != "harvester" {
+				severity = Block
+			}
+		}
 		ledger := filepath.Join(env.ManagedRoot, "mcp-ownership.json")
 		rows = append(
 			rows,
 			Row{
-				Block,
+				severity,
 				checkPFMMCP,
 				ledger,
 				"mcp-ownership.json still records pfm clients",

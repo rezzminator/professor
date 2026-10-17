@@ -56,7 +56,7 @@ A host that authenticates through an LLM gateway instead of a subscription login
 
 ## Claude environment for daemon-spawned chats
 
-`pfm mcp serve` runs as a service: a launchd agent on macOS (`com.professor.pfm.mcp`) and a systemd user service on Linux (`pfm-mcp.service`). A chat it starts, through `chat_new` or any other professor MCP tool, inherits the service's environment, not your login shell's. A `CLAUDE_*` or `ANTHROPIC_*` variable exported in `.zshrc` reaches the chats you open from a terminal and is missing from daemon-spawned ones, so the two diverge.
+`pfm mcp serve` runs as a service: a launchd agent on macOS (`com.professor.pfm.mcp`) and a systemd user service on Linux (`pfm-mcp.service`). A chat it starts, through `mcp__chat-professor__new` or any other chat-professor MCP tool, inherits the service's environment, not your login shell's. A `CLAUDE_*` or `ANTHROPIC_*` variable exported in `.zshrc` reaches the chats you open from a terminal and is missing from daemon-spawned ones, so the two diverge.
 
 Put every Claude variable a chat needs in the settings `env` block, never only in a shell export. `pfm doctor` names each variable exported in the login shell but missing from a settings `env` block as a `shell-claude-env` row, with the file to add it to.
 

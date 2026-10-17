@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/heal"
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -297,9 +298,7 @@ func openDetachedRow(
 			if row.Workbench != "" {
 				return action.OpenResult{}, fmt.Errorf("open: workbench directory %s is missing", row.CWD)
 			}
-			relocated = fmt.Sprintf(
-				"opened in %s: its own directory %s is gone", effective.Paths.Home, row.CWD,
-			)
+			relocated = relocation(effective.Paths.Home, row.CWD)
 			row.CWD = effective.Paths.Home
 		}
 	}
@@ -333,15 +332,21 @@ func OpenRow(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
+	relocated := ""
 	if !row.Kind.IsLiveSeat() {
 		if info, statErr := os.Stat(row.CWD); statErr != nil || !info.IsDir() {
 			if row.Workbench != "" {
 				fmt.Fprintf(stderr, "open: workbench directory %s is missing\n", row.CWD)
 				return 1
 			}
-			if currentDir, cwdErr := os.Getwd(); cwdErr == nil {
-				row.CWD = currentDir
+			currentDir, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				fmt.Fprintf(stderr, "pfm chat open: %s, and the current directory cannot be read: %v\n",
+					unusableDirectory(row.CWD), cwdErr)
+				return 1
 			}
+			relocated = relocation(currentDir, row.CWD)
+			row.CWD = currentDir
 		}
 	}
 	executor, request, claim, err := prepareOpen(ctx, row, primary, cache1H, prompt, stderr, effective)
@@ -353,6 +358,12 @@ func OpenRow(
 	if err := claim.settle(err == nil, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
+	}
+	if relocated != "" {
+		// Said only once the open succeeded, and held for Enter: the attach
+		// Dispatch execs next covers the terminal, and a notice found only
+		// after detaching is a notice missed.
+		launchnotice.Hold(stderr, "pfm chat open", []string{relocated})
 	}
 	// Dispatch execs tmux or zsh when stdout is a terminal and never returns,
 	// so the unseen flag clears before it.
@@ -451,4 +462,19 @@ func socketForKind(kind compose.Kind) (string, error) {
 		return "", err
 	}
 	return spawn.FreshSocket(id), nil
+}
+
+// relocation is the one sentence for a resumable chat opened somewhere other
+// than its own directory: where it opened, and why its own would not do.
+func relocation(opened, recorded string) string {
+	return fmt.Sprintf("opened in %s: %s", opened, unusableDirectory(recorded))
+}
+
+// unusableDirectory says why a row's recorded directory cannot be opened in:
+// it is gone, or none was ever recorded.
+func unusableDirectory(recorded string) string {
+	if recorded == "" {
+		return "no directory of its own was recorded"
+	}
+	return "its own directory " + recorded + " is gone"
 }

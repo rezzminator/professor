@@ -75,7 +75,7 @@ type fakeCodex struct {
 const fakeComposerRows = 20
 
 // fakePasteEdge is the composer's inline edge: a longer bracketed paste is
-// drawn as a placeholder (inject.CodexInlineMax sits 10% below it).
+// drawn as a placeholder (pfmcall.CodexInlineMax sits 10% below it).
 const fakePasteEdge = 1001
 
 // fakeStatusLine is the idle-composer status row, whose token meter is the

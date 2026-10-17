@@ -78,6 +78,9 @@ func TestParseBatchRejectsRelativeCwd(t *testing.T) {
 func TestLiteralVariablesResolve(t *testing.T) {
 	t.Parallel()
 	assertSteps(t, parseOne(t, `G=git; $G push origin "$B"`), []step{{"git", []string{"push", "origin", `"$B"`}}})
+	// unset changes only Part.Env: the values the git guard reads stay bound.
+	unsetThenGit := []step{{"unset", []string{"D"}}, {"git", []string{"commit"}}}
+	assertSteps(t, parseOne(t, `D=commit; unset D; git $D`), unsetThenGit)
 }
 
 // TestForLoopItemsBind: a for loop binds its variable to its items as
@@ -174,5 +177,133 @@ func TestOversizeCommandIsOneUnparsedPart(t *testing.T) {
 	over := parseOne(t, pad(maxCommandBytes+1))
 	if want := []Part{{Status: StatusUnparsed, Bounded: true}}; !reflect.DeepEqual(over, want) {
 		t.Fatalf("parts = %+v\nwant    %+v", over, want)
+	}
+}
+
+// envOf is the Env of the first part running program, and whether one ran.
+func envOf(parts []Part, program string) (map[string]string, bool) {
+	for _, p := range parts {
+		if p.Program == program {
+			return p.Env, true
+		}
+	}
+	return nil, false
+}
+
+func TestPartEnv(t *testing.T) {
+	t.Parallel()
+	home := map[string]string{"HOME": "/h"}
+	cases := []struct {
+		name    string
+		command string
+		vars    map[string]string
+		want    map[string]string
+	}{
+		{"none", `claude x`, nil, nil},
+		{"command prefix", `CLAUDE_CONFIG_DIR=/s claude x`, nil, map[string]string{"CLAUDE_CONFIG_DIR": "/s"}},
+		{"prefix does not persist", `CLAUDE_CONFIG_DIR=/s true; claude`, nil, nil},
+		{"export before", `export CLAUDE_CONFIG_DIR=/s; claude x`, nil, map[string]string{"CLAUDE_CONFIG_DIR": "/s"}},
+		{
+			"declare -x before",
+			`declare -x CLAUDE_CONFIG_DIR=/s; claude`,
+			nil,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/s"},
+		},
+		{"plain assign before", `CLAUDE_CONFIG_DIR=/s; claude`, nil, map[string]string{"CLAUDE_CONFIG_DIR": "/s"}},
+		{"env wrapper", `env CLAUDE_CONFIG_DIR=/s claude x`, nil, map[string]string{"CLAUDE_CONFIG_DIR": "/s"}},
+		{"sudo wrapper", `sudo -E CLAUDE_CONFIG_DIR=/s claude`, nil, map[string]string{"CLAUDE_CONFIG_DIR": "/s"}},
+		{"plain sudo wrapper", `sudo CLAUDE_CONFIG_DIR=/s claude`, nil, map[string]string{"CLAUDE_CONFIG_DIR": "/s"}},
+		{
+			"prefix through a wrapper",
+			`cd /tmp && CLAUDE_CONFIG_DIR=/s timeout 60 claude`,
+			nil,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/s"},
+		},
+		{
+			"seeded HOME",
+			`CLAUDE_CONFIG_DIR=$HOME/.claude claude`,
+			home,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/h/.claude"},
+		},
+		{
+			"seeded HOME quoted",
+			`CLAUDE_CONFIG_DIR="$HOME/.claude" claude`,
+			home,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/h/.claude"},
+		},
+		{
+			"seeded HOME braced",
+			`CLAUDE_CONFIG_DIR=${HOME}/.claude claude`,
+			home,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/h/.claude"},
+		},
+		{
+			"seeded HOME partly quoted",
+			`CLAUDE_CONFIG_DIR="$HOME"/.claude claude`,
+			home,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/h/.claude"},
+		},
+		{
+			"variable chain",
+			`S=$HOME/.claude; CLAUDE_CONFIG_DIR=$S claude`,
+			home,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/h/.claude", "S": "/h/.claude"},
+		},
+		{
+			"unknown variable keeps source",
+			`CLAUDE_CONFIG_DIR=$X/.claude claude`,
+			nil,
+			map[string]string{"CLAUDE_CONFIG_DIR": "$X/.claude"},
+		},
+		{"unset", `export CLAUDE_CONFIG_DIR=/s; unset CLAUDE_CONFIG_DIR; claude`, nil, nil},
+		{"env -u", `export CLAUDE_CONFIG_DIR=/s; env -u CLAUDE_CONFIG_DIR claude`, nil, nil},
+		{"env --unset=", `export CLAUDE_CONFIG_DIR=/s; env --unset=CLAUDE_CONFIG_DIR claude`, nil, nil},
+		{"env -i clears", `export A=1 CLAUDE_CONFIG_DIR=/s; env -i B=2 claude`, nil, map[string]string{"B": "2"}},
+		{
+			"bash -c inherits",
+			`CLAUDE_CONFIG_DIR=/s bash -c 'claude plugin list'`,
+			nil,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/s"},
+		},
+		{
+			"export reaches sh -c",
+			`export CLAUDE_CONFIG_DIR=/s; sh -c 'claude plugin list'`,
+			nil,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/s"},
+		},
+		{
+			"bash -c double-quoted expands outside",
+			`bash -c "CLAUDE_CONFIG_DIR=$HOME/.claude claude"`,
+			home,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/h/.claude"},
+		},
+		{
+			"bash -lc",
+			`bash -lc 'CLAUDE_CONFIG_DIR=/s claude'`,
+			nil,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/s"},
+		},
+		{
+			"bash -c keeps the seeded HOME",
+			`bash -c 'CLAUDE_CONFIG_DIR=$HOME/.claude claude'`,
+			home,
+			map[string]string{"CLAUDE_CONFIG_DIR": "/h/.claude"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Cwd: testCwd, Vars: tc.vars}})
+			if err != nil {
+				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
+			}
+			env, ran := envOf(got["c1"], "claude")
+			if !ran {
+				t.Fatalf("no claude part in %+v", got["c1"])
+			}
+			if !reflect.DeepEqual(env, tc.want) {
+				t.Fatalf("Env = %v, want %v", env, tc.want)
+			}
+		})
 	}
 }

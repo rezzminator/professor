@@ -237,13 +237,13 @@ func TestRefreshRebuildsTheCosmosFromTheRowsTheListShows(t *testing.T) {
 	events := []fleetdb.CommsEvent{
 		{
 			AtNS:       nowNS - int64(time.Minute),
-			Kind:       fleetdb.KindInject,
+			Kind:       fleetdb.KindCall,
 			SenderUUID: "alpha-id",
 			Target:     "beta-id",
 			Message:    "hi",
 		},
 		// No sender identity: BuildCosmos warns once for it.
-		{AtNS: nowNS - int64(time.Minute), Kind: fleetdb.KindInject, Target: "alpha-id", Message: "anon"},
+		{AtNS: nowNS - int64(time.Minute), Kind: fleetdb.KindCall, Target: "alpha-id", Message: "anon"},
 	}
 	rows := []compose.Row{alpha, beta}
 	snapshot := func() Snapshot {

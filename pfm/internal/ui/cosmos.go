@@ -825,7 +825,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			if edge.Kind == fleetdb.KindSpawn {
 				duration, startRadius, endRadius, blend, dotCount = 1.6, 2, 11, 0.5, 26
 			} else {
-				// Inject rings stay tighter, brighter, and shorter-lived
+				// Call rings stay tighter, brighter, and shorter-lived
 				// than a spawn ring so the two events keep reading as
 				// different things happening, not the same ring twice.
 				duration, startRadius, endRadius, blend, dotCount = 1.0, 1.5, 7, 0.8, 18

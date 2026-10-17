@@ -8,11 +8,6 @@ model: gpt-6.1-sol[1m]
 effort: high
 add:
   hooks:
-    PreToolUse:
-      - matcher: Bash
-        hooks:
-          - type: command
-            command: python3 -I "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/gpt-return-watch.py"
     Stop:
       - hooks:
           - type: command
@@ -21,4 +16,5 @@ rename:
   flights-foreman: gpt-flights-foreman
   flights-mechanical-executor: gpt-flights-mechanical-executor
   flights-lander: gpt-flights-lander
+  flights-speccer: gpt-flights-speccer
 ---

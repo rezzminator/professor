@@ -32,7 +32,7 @@ type StatusRequest struct {
 }
 
 // InspectSeat is the one inspection door `pfm chat status`, `pfm chat ls`, MCP
-// chat_status and `pfm chat watch` share: headless.Inspect's verdict from the
+// status and `pfm chat watch` share: headless.Inspect's verdict from the
 // transcript and socket, then the pane evidence only the screen holds.
 //
 // headless.Inspect stays pure — transcript and socket only. A live chat it

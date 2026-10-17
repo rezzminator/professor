@@ -100,6 +100,23 @@ type TmuxClient interface {
 	SetWindowSizeLatest(ctx context.Context, socket string) error
 	SelectWindow(ctx context.Context, socket string, windowIndex int) error
 	CreateChatServer(ctx context.Context, server ChatServer) error
+	// LaunchPane reads a freshly created server's pane for the launch watch.
+	// An error is a pane that could not be read; SocketAlive tells a gone
+	// server from an unreadable pane.
+	LaunchPane(ctx context.Context, socket string) (LaunchPaneState, error)
+	// SetRemainOnExit keeps (on) or releases (off) the pane of a server's
+	// session after its process exits.
+	SetRemainOnExit(ctx context.Context, socket string, on bool) error
+}
+
+// LaunchPaneState is a freshly created server's pane as the launch watch
+// reads it: its screen, its foreground command, its terminal (pts/N, the TTY
+// a Process on it carries), and whether its process exited.
+type LaunchPaneState struct {
+	Screen  string
+	Command string
+	TTY     string
+	Dead    bool
 }
 
 // Process is one candidate for _cc_solo's stray-Claude sweep.

@@ -1,0 +1,4 @@
+# The lab is one program sourced from many files: a global set in one file
+# (LAB_RUN, LAB_EV, LAB_FATAL, ...) is read in another, which shellcheck,
+# checking each file alone, reports as unused (SC2034).
+disable=SC2034

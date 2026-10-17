@@ -34,6 +34,7 @@ func TestProfessorUpdatePromptExplainsThenAsksBeforeUpdating(t *testing.T) {
 		"#### → Stop:", "before update", "after update", "per project",
 		"pfm doctor --project-updates", "keeping the project's own edits", "#### For:", "pfm update pin", "#### → For adopters",
 		"take it to `clean`, exit 0", "one at a time, never in parallel", "--keep", "pfm update ignore <template>", "pfm update accept <path> --reason",
+		"`INCOMPLETE`: inspect the unscanned text", "pfm update accept <path> --coverage --reason",
 		"no row waits for another question",
 	} {
 		if !strings.Contains(prompt, want) {

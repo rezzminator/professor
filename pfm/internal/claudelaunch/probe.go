@@ -3,6 +3,9 @@ package claudelaunch
 import "strings"
 
 // ProbeEnv isolates the doctor's harness-prompt capture from the live chat.
+// Nonessential traffic is switched off so remote feature flags keep their
+// shipped defaults: a fresh config dir fetches them anew each run, and the
+// fetched values switch prompt variants between otherwise identical captures.
 func ProbeEnv(environ []string, sinkURL, configDir string) []string {
 	stripped := make(map[string]bool, len(hygiene))
 	for _, name := range hygiene {
@@ -24,6 +27,7 @@ func ProbeEnv(environ []string, sinkURL, configDir string) []string {
 		"ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink",
 		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0",
 		"FORCE_PROMPT_CACHING_5M=1",
+		envDisableNonessentialTraffic+"=1",
 		configDirEnv+"="+configDir,
 	)
 }

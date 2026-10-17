@@ -15,7 +15,7 @@
 # gives a wait its needle. Beat ids are the contract in
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
-# Cost: one Claude seat for the stimuli (reap's busy turn, the queued inject and
+# Cost: one Claude seat for the stimuli (reap's busy turn, the queued call and
 # reload, the harvester's `ask`), the Codex home for one headless turn, plus —
 # solo only — the storm the prelude raises and kills to make the graveyard, one
 # Claude chat and one Codex chat standing in for E1's and E2's. Roughly 8 short
@@ -67,9 +67,9 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chats to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/status)\" != 000 ]" \
   "lane_daemon_up" ||
-  lane_abort "the professor MCP daemon never answered on :$PORT — no Codex chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no Codex chat can call a chat tool"
 
 # open_e1_main — E1's own `chat new` line (E1.sh open_main), so a solo O2 asserts
 # against the same chat E1 would have left; also the lane's ONE re-open.
@@ -92,7 +92,7 @@ make_graveyard() {
   STORM_CC_ACCOUNT="$SEAT" lane_storm_start 2 1 || return 1
   wait_for 60 'storm_ready_to_end STORM_1' ||
     { echo "storm: STORM_1 did not finish its seed turn: $LANE_WAIT_WHY" >&2; return 1; }
-  # lane_storm_start injects STORM_2's seed into STORM_1; STORM_2 finishes its initial turn.
+  # lane_storm_start calls STORM_2's seed into STORM_1; STORM_2 finishes its initial turn.
   wait_for 60 'storm_ready_to_end STORM_2' ||
     { echo "storm: STORM_2 did not finish its initial turn: $LANE_WAIT_WHY" >&2; return 1; }
   lane_storm_kill || return 1
@@ -192,7 +192,7 @@ if requires; then
   # 2. busy (L11) / active (L12): a real turn on E1's chat, the sweep run inside it.
   : >/tmp/o2-reap-hold
   stim="$(CHAT_SENDER_LABEL="$E2_MAIN" CHAT_SENDER_SESSION="$(live_field "$E2_MAIN" 11)" CHAT_SENDER_SID="$(live_field "$E2_MAIN" 2)" \
-    pfm chat inject "$E1_MAIN" "$(mock_steps '{"type":"hold","until_gone":"/tmp/o2-reap-hold"}')" 2>&1)" ||
+    pfm chat call "$E1_MAIN" "$(mock_steps '{"type":"hold","until_gone":"/tmp/o2-reap-hold"}')" 2>&1)" ||
     bad="$bad the busy stimulus was refused: $(one_line "$stim");"
   wait_prompt "$E1_MAIN" o2-reap-hold 60 || bad="$bad held turn never reached a user record: ${LANE_WAIT_WHY:-no wait reason};"
   wait_for 10 "[ \"\$(pfm chat status '$E1_MAIN' --json 2>/dev/null | jq -r '.state // empty')\" = working ]" ||
@@ -577,6 +577,16 @@ gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git worktree add x"},
 [ -z "$gg" ] || bad="$bad git-guard blocked gitter: $(one_line "$gg");"
 gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | pfm internal git-guard 2>&1)"
 [ -z "$gg" ] || bad="$bad git-guard blocked git status: $(one_line "$gg");"
+# X-store-guard: denies a claude run whose CLAUDE_CONFIG_DIR is the shared store, passes the same call without the override and with an account dir.
+sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.claude claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad store-guard exited $rc: $(one_line "$sg");"
+grep -q '"permissionDecision":"deny"' <<<"$sg" && grep -q 'Drop the CLAUDE_CONFIG_DIR override' <<<"$sg" ||
+  bad="$bad store-guard did not deny a claude run on the store naming the override: $(one_line "$sg");"
+sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
+[ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
+sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
+[ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
 # X29 explore-deny: denies a non-haiku Explore by name, lets haiku and every other agent through.
 deny="$(printf '{"tool_input":{"subagent_type":"Explore","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
 rc=$?
@@ -683,7 +693,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────
@@ -767,19 +777,19 @@ if requires; then
   sender_sock="$(live_field "$E2_MAIN" 11)"
   sender_sid="$(live_field "$E2_MAIN" 2)"
   stim="$(CHAT_SENDER_LABEL="$E2_MAIN" CHAT_SENDER_SESSION="$sender_sock" CHAT_SENDER_SID="$sender_sid" \
-    pfm chat inject "$E1_MAIN" "$(mock_steps '{"type":"hold","until_gone":"/tmp/o2-reload-hold"}')" 2>&1)"
+    pfm chat call "$E1_MAIN" "$(mock_steps '{"type":"hold","until_gone":"/tmp/o2-reload-hold"}')" 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad the busy stimulus was refused (exit $rc): $(one_line "$stim");"
   wait_prompt "$E1_MAIN" o2-reload-hold 60 || bad="$bad held reload turn never reached a user record: ${LANE_WAIT_WHY:-no wait reason};"
   wait_for 10 "[ \"\$(pfm chat status '$E1_MAIN' --json 2>/dev/null | jq -r '.state // empty')\" = working ]" ||
     bad="$bad held reload turn never read busy before OP-QUEUED: $LANE_WAIT_WHY;"
   queued="$(CHAT_SENDER_LABEL="$E2_MAIN" CHAT_SENDER_SESSION="$sender_sock" CHAT_SENDER_SID="$sender_sid" \
-    pfm chat inject "$E1_MAIN" "OP-QUEUED" 2>&1)"
+    pfm chat call "$E1_MAIN" "OP-QUEUED" 2>&1)"
   q_rc=$?
   if [ "$q_rc" -ne 0 ]; then
-    bad="$bad the inject during the busy turn was refused (exit $q_rc): $(one_line "$queued");"
+    bad="$bad the call during the busy turn was refused (exit $q_rc): $(one_line "$queued");"
   elif ! grep -q '^queued' <<<"$queued"; then
-    bad="$bad pfm's own inject report does not start with 'queued' — the turn had already ended or the guard read the pane wrong: $(one_line "$queued");"
+    bad="$bad pfm's own call report does not start with 'queued' — the turn had already ended or the guard read the pane wrong: $(one_line "$queued");"
   fi
   rl="$(pfm chat reload --sock "$sock" --then "OP-RELOADED" 2>&1)"
   rl_rc=$?
@@ -822,7 +832,7 @@ if requires; then
     bad="$bad after the reboot $E1_MAIN sits on socket $after_sock, not the one reloaded ($sock) — not a reboot IN PLACE${socket_wait_why:+: $socket_wait_why};"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "inject during the turn: '$(one_line "$queued" | cut -c1-80)' · reload scheduled (log $rl_log) held /exit until the turn ended, respawned in place on $sock, and its --then steer landed"
+    pass "call during the turn: '$(one_line "$queued" | cut -c1-80)' · reload scheduled (log $rl_log) held /exit until the turn ended, respawned in place on $sock, and its --then steer landed"
   fi
 fi
 
@@ -853,9 +863,9 @@ else
     st_rc=$?
     [ "$st_rc" -eq 0 ] || bad="$bad pfm chat status $SPARE_CHAT exited $st_rc after the drop: $(one_line "$st_out");"
     CHAT_SENDER_LABEL="$E1_MAIN" CHAT_SENDER_SESSION="$(live_field "$E1_MAIN" 11)" CHAT_SENDER_SID="$(live_field "$E1_MAIN" 2)" \
-      pfm chat inject "$SPARE_CHAT" SPARE-ALIVE >/dev/null 2>&1 ||
-      bad="$bad inject into $SPARE_CHAT was refused after the drop;"
-    wait_prompt "$SPARE_CHAT" SPARE-ALIVE 120 || bad="$bad $SPARE_CHAT did not receive the inject after its seat was dropped: ${LANE_WAIT_WHY:-no wait reason};"
+      pfm chat call "$SPARE_CHAT" SPARE-ALIVE >/dev/null 2>&1 ||
+      bad="$bad call into $SPARE_CHAT was refused after the drop;"
+    wait_prompt "$SPARE_CHAT" SPARE-ALIVE 120 || bad="$bad $SPARE_CHAT did not receive the call after its seat was dropped: ${LANE_WAIT_WHY:-no wait reason};"
     acct_dropped="$(live_field "$SPARE_CHAT" 9)"
     # The LEDGER side: doctor's roster no longer names the seat, and doctor still runs.
     doc="$(pfm doctor 2>&1)"
@@ -878,7 +888,7 @@ else
     [ "$acct_after" = "$SPARE" ] || bad="$bad after the restore $SPARE_CHAT's row reports account '$acct_after' (was $acct_before, want $SPARE);"
     pfm chat end "$SPARE_CHAT" >/dev/null 2>&1 || bad="$bad pfm chat end $SPARE_CHAT failed — the spare chat is left running;"
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "seat $SPARE dropped under $SPARE_CHAT: status and an inject reached the live chat (row account $acct_before → '$acct_dropped' while dropped → $acct_after restored), doctor's roster dropped and restored it"
+      pass "seat $SPARE dropped under $SPARE_CHAT: status and a call reached the live chat (row account $acct_before → '$acct_dropped' while dropped → $acct_after restored), doctor's roster dropped and restored it"
     fi
   fi
 fi
@@ -1046,6 +1056,22 @@ express_before=""
 for p in "$EXPRESS/CLAUDE.md" "$EXPRESS/.claude" "$EXPRESS/.professor"; do [ -e "$p" ] && express_before="$express_before $p"; done
 seat_dirs="$(jq -r '.accounts[].configDir' "$CONFIG" | sed "s|^~|$HOME|")"
 
+# Account registry state before uninstall. Missing files are not empty data.
+declare -A claude_registry_before
+while IFS= read -r dir; do
+  [ -n "$dir" ] || continue
+  registry="$dir/.claude.json"
+  if [ -e "$registry" ] || [ -L "$registry" ]; then
+    registry_data="$(claude_registry_without_family_entries "$registry" 2>&1)" ||
+      bad="$bad could not read $registry before uninstall: $(one_line "$registry_data");"
+    claude_registry_before["$registry"]="$registry_data"
+  else
+    claude_registry_before["$registry"]="ABSENT"
+  fi
+done <<EOF
+$seat_dirs
+EOF
+
 un="$( (cd "$BLUEPRINT" && pfm uninstall 2>&1) )"
 un_rc=$?
 un_summary="$(printf '%s' "$un" | grep -E '^summary changed=' | tail -1)"
@@ -1084,8 +1110,21 @@ while IFS= read -r dir; do
   if [ -f "$dir/settings.json" ]; then
     n_pfm="$(hook_commands "$dir/settings.json" | grep -c 'pfm')"
     [ "$n_pfm" -eq 0 ] || bad="$bad $dir/settings.json still carries $n_pfm pfm hook(s): $(one_line "$(hook_commands "$dir/settings.json" | grep pfm | head -1)");"
-    jq -e '.mcpServers.professor' "$dir/.claude.json" >/dev/null 2>&1 &&
-      bad="$bad $dir/.claude.json still registers pfm's MCP server(s): $(jq -c '.mcpServers | keys' "$dir/.claude.json");"
+  fi
+  registry="$dir/.claude.json"
+  before="${claude_registry_before["$registry"]-UNREAD}"
+  if [ "$before" = "ABSENT" ]; then
+    [ ! -e "$registry" ] && [ ! -L "$registry" ] || bad="$bad uninstall created the absent account registry $registry;"
+  elif [ "$before" = "UNREAD" ]; then
+    bad="$bad no before-uninstall state was recorded for $registry;"
+  elif [ ! -f "$registry" ]; then
+    bad="$bad existing account registry $registry disappeared or became unreadable;"
+  else
+    jq -e '(.mcpServers // {}) | (has("chat-professor") or has("harvester-professor")) | not' "$registry" >/dev/null 2>&1 ||
+      bad="$bad $registry still registers a family MCP server or could not be read;"
+    registry_data="$(claude_registry_without_family_entries "$registry" 2>&1)" ||
+      bad="$bad could not read $registry after uninstall: $(one_line "$registry_data");"
+    [ "$registry_data" = "$before" ] || bad="$bad uninstall changed foreign/unrelated account data in $registry;"
   fi
 done <<EOF
 $seat_dirs

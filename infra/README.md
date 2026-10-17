@@ -35,7 +35,7 @@ Every run builds the current Dockerfile first, then prints the fence proof (`fen
 
 ## demo/
 
-A REAL Professor install inside the same fence image, for live presentations — real Claude Code + Codex + pfm, real chats over the professor MCP. Entry point: `infra/demo/up.sh` (see `infra/demo/README.md`).
+A REAL Professor install inside the same fence image, for live presentations — real Claude Code + Codex + pfm, real chats over the `chat-professor` and `harvester-professor` MCP servers. Entry point: `infra/demo/up.sh` (see `infra/demo/README.md`).
 
 ## check-self-hosted-manifest.sh
 

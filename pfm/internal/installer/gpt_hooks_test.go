@@ -11,7 +11,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-var fixtureGptHooks = []string{"gpt-return-watch.py", "gpt-agent-stop.py"}
+var fixtureGptHooks = []string{"gpt-agent-stop.py"}
 
 func stageGptHookProbeAssets(t *testing.T, dir string) {
 	t.Helper()
@@ -112,16 +112,16 @@ func TestGptHookAssetsInstallRepairAndPreview(t *testing.T) {
 			if err := os.Remove(missing); err != nil {
 				t.Fatal(err)
 			}
-			writeFixture(t, filepath.Join(installer.managedRoot, fixtureGptHooks[1]), "changed owned asset")
+			writeFixture(t, filepath.Join(installer.managedRoot, fixtureGptHooks[0]), "changed owned asset")
 			if _, err := installer.stageAssets(assets); err != nil {
 				t.Fatal(err)
 			}
 			assertLink(t, missing, filepath.Join(installer.managedRoot, fixtureGptHooks[0]))
-			want, err := readAsset(fixtureGptHooks[1])
+			want, err := readAsset(fixtureGptHooks[0])
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := readFixture(t, filepath.Join(dirs[2], "hooks", fixtureGptHooks[1])); got != string(want) {
+			if got := readFixture(t, filepath.Join(dirs[2], "hooks", fixtureGptHooks[0])); got != string(want) {
 				t.Fatal("changed owned asset was not repaired")
 			}
 		})
@@ -218,7 +218,7 @@ func TestGptHookAssetsUninstallOnlyOwnedLinks(t *testing.T) {
 			}
 		}
 	}
-	foreign := filepath.Join(dirs[2], "hooks", fixtureGptHooks[1])
+	foreign := filepath.Join(dirs[2], "hooks", fixtureGptHooks[0])
 	if err := os.Remove(foreign); err != nil {
 		t.Fatal(err)
 	}
@@ -248,17 +248,17 @@ func TestReportHooksGptHookAssets(t *testing.T) {
 			installer, dirs := gptHooksEngine(t, true)
 			machine := pfmconfig.Config{Accounts: installer.options.ClaudeAccounts}
 			targetDir := filepath.Join(dirs[0], "hooks")
-			wantRows := 6
+			wantRows := 3
 			switch location {
 			case "default-no-accounts", "default-no-receipt":
 				installer.options.ClaudeAccounts = nil
 				machine.Accounts = nil
-				wantRows = 2
+				wantRows = 1
 			case "explicit-store":
 				installer.options.ConfigDir = filepath.Join(installer.options.Home, "explicit-store")
 				installer.options.ClaudeAccounts = nil // --config-dir does not populate this field.
 				targetDir = filepath.Join(installer.options.ConfigDir, "hooks")
-				wantRows = 8
+				wantRows = 4
 				for _, dir := range dirs[1:] {
 					stageGptHookProbeAssets(t, dir)
 				}

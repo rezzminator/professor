@@ -16,7 +16,7 @@ Provider URLs are absolute HTTP(S) base URLs without credentials, query, or frag
 
 Mirror availability and document coverage vary. A successful homepage response is insufficient: the selected record, download host, and conversion must all work. HTTP errors, malformed responses, challenges, and conversion failures remain failures. Interactive CAPTCHAs are not solved. A missing Unpaywall contact email disables its requests; no substitute identity is generated.
 
-For a web page, call `harvester_read` with the URL in `urls`. For an exact DOI, arXiv id, ISBN, PMID, or PMCID, call `harvester_read` with it in `publications`. For a title, call `harvester_search_literature`, choose a result, and pass its `handle` value unchanged in `harvester_read`'s `publications`. This preserves the selected work or version instead of guessing from an ambiguous title.
+For a web page, call `read` with the URL in `urls`. For an exact DOI, arXiv id, ISBN, PMID, or PMCID, call `read` with it in `publications`. For a title, call `search_literature`, choose a result, and pass its `handle` value unchanged in `read`'s `publications`. This preserves the selected work or version instead of guessing from an ambiguous title.
 
 ## Public results
 
@@ -32,7 +32,7 @@ Detailed retrieval diagnostics stay in the internal cache and process logs. Publ
 
 ## Asking over the items
 
-`harvester_read`'s optional `ask` is one question answered over every item of the call, and `pfm harvest ask -p` is the same step on the command line: both read the items, then hand them to one engine run through `internal/ask` (`harvestmcp.AskOver`), item N as the prompt's `[file N]` and a failed item as a temporary receipt of its public failure. The read tool prints the answer after the item blocks as `=== answer ({engine} {model})`, then the answer or an `error:` line; the items show their size, not their content, unless `include_content` is true. `engine` is `claude` (default) or `codex`; `model` is a Claude alias (`haiku`, `sonnet`, `opus`, `fable`, in any case, `[1m]` allowed; launched lower-cased) or a model id the price table lists for that engine, defaulting to `haiku` on Claude and the configured ask model on Codex. An unknown engine or a model its engine cannot run is refused by name before any item is read, as are `engine` or `model` without `ask`. The answer is not cached, and the remote server has no `ask`: its schema leaves the three fields out.
+`read`'s optional `ask` is one question answered over every item of the call, and `pfm harvest ask -p` is the same step on the command line: both read the items, then hand them to one engine run through `internal/ask` (`harvestmcp.AskOver`), item N as the prompt's `[file N]` and a failed item as a temporary receipt of its public failure. The read tool prints the answer after the item blocks as `=== answer ({engine} {model})`, then the answer or an `error:` line; the items show their size, not their content, unless `include_content` is true. `engine` is `claude` (default) or `codex`; `model` is a Claude alias (`haiku`, `sonnet`, `opus`, `fable`, in any case, `[1m]` allowed; launched lower-cased) or a model id the price table lists for that engine, defaulting to `haiku` on Claude and the configured ask model on Codex. An unknown engine or a model its engine cannot run is refused by name before any item is read, as are `engine` or `model` without `ask`. The answer is not cached, and the remote server has no `ask`: its schema leaves the three fields out.
 
 ## Conversion
 

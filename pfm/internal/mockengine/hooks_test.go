@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -730,7 +730,7 @@ func (fix *fixture) waitRecorded(event string, count int) []string {
 
 // hookEnvelope mirrors the keys every handler table row reads
 // (clear_kill.go:30-32,
-// epic_inject.go:21-22); the decisions themselves are judged by the handlers.
+// epic_pfmcall.go:21-22); the decisions themselves are judged by the handlers.
 type hookEnvelope struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
@@ -772,7 +772,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 
 	session.typeLine("map it")
 	session.waitFrame("the reply after the denied tool", func(frame string) bool {
-		return strings.Contains(frame, "mapped") && !inject.IsBusy(frame)
+		return strings.Contains(frame, "mapped") && !pfmcall.IsBusy(frame)
 	})
 	submit := decodeEnvelope(t, fix.waitRecorded("UserPromptSubmit", 1)[0])
 	if submit.Event != "UserPromptSubmit" || submit.Prompt != "map it" || submit.SessionID != fixtureSession ||

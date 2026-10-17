@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -17,7 +18,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
@@ -97,8 +97,8 @@ func runChatWithRuntime(
 		return runHeadlessStatus(rest, stdout, stderr, runtime)
 	case "stream":
 		return runHeadlessStream(rest, stdout, stderr, runtime)
-	case "inject":
-		return runHeadlessInject(rest, stdout, stderr, runtime)
+	case "call":
+		return runHeadlessCall(rest, stdout, stderr, runtime)
 	case askAction:
 		return runHeadlessAsk(rest, stdout, stderr, clock.Real, runtime)
 	case "watch":
@@ -155,7 +155,7 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  last        the chat's last assistant message")
 	fmt.Fprintln(w, "  read        read the chat's transcript")
 	fmt.Fprintln(w, "  stream      follow the transcript as it is written")
-	fmt.Fprintln(w, "  inject      deliver a message to the chat")
+	fmt.Fprintln(w, "  call        deliver a message to the chat")
 	fmt.Fprintln(w, "  ask         deliver a message and wait for the answer")
 	fmt.Fprintln(w, "  watch       block, reporting IDLE / EXIT / DEAD")
 	fmt.Fprintln(w, "  capture     print a live chat's tmux scrollback")
@@ -432,10 +432,10 @@ func runHeadlessStream(args []string, stdout, stderr io.Writer, runtimes ...comm
 	return 0
 }
 
-func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := cli.NewFlagSet(
-		"chat inject",
-		"usage: pfm chat inject [--force-now] [--then STEER]... [--file PATH] [--allow-unsigned] <target> <message>\n"+
+		"chat call",
+		"usage: pfm chat call [--force-now] [--then STEER]... [--file PATH] [--allow-unsigned] <target> <message>\n"+
 			"       `/compact` is refused here — pfm never types a compaction",
 		stderr,
 	)
@@ -452,7 +452,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 		return code
 	}
 	if retiredNoSig {
-		fmt.Fprintln(stderr, "pfm chat inject: --no-sig is retired; delivery signatures remain enabled")
+		fmt.Fprintln(stderr, "pfm chat call: --no-sig is retired; delivery signatures remain enabled")
 	}
 	filePath := *messageFile
 	trailingFile := flags.NArg() >= 2 && flags.Arg(1) == "--file"
@@ -480,22 +480,22 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 		}
 		content, err := os.ReadFile(filePath)
 		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat inject: read --file: %v\n", err)
+			fmt.Fprintf(stderr, "pfm chat call: read --file: %v\n", err)
 			return 2
 		}
 		message = string(content)
 	}
 	if strings.TrimSpace(message) == "" {
-		fmt.Fprintln(stderr, "pfm chat inject: refusing to inject an empty message")
+		fmt.Fprintln(stderr, "pfm chat call: refusing to call an empty message")
 		return 2
 	}
 	ctx := context.Background()
-	engine, err := pfmchat.NewInjectEngine(allowUnsigned, firstRuntime(runtimes))
+	engine, err := pfmchat.NewCallEngine(allowUnsigned, firstRuntime(runtimes))
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat inject: %v\n", err)
+		fmt.Fprintf(stderr, "pfm chat call: %v\n", err)
 		return codeUndelivered
 	}
-	result, err := engine.Inject(ctx, inject.Request{
+	result, err := engine.Call(ctx, pfmcall.Request{
 		Target:     targetName,
 		Message:    message,
 		ForceNow:   force,
@@ -503,45 +503,45 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 		Then:       steers,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat inject: %v\n", err)
+		fmt.Fprintf(stderr, "pfm chat call: %v\n", err)
 		return codeUndelivered
 	}
-	if result.Code == inject.CodeUnknown && !strings.Contains(strings.ToLower(result.Message), "ambiguous") {
+	if result.Code == pfmcall.CodeUnknown && !strings.Contains(strings.ToLower(result.Message), "ambiguous") {
 		target, found, resolveErr := resolveResumeTarget(targetName, runtimes...)
 		if resolveErr != nil {
-			fmt.Fprintf(stderr, "pfm chat inject: %v\n", resolveErr)
+			fmt.Fprintf(stderr, "pfm chat call: %v\n", resolveErr)
 			return codeUnknownChat
 		}
 		if found {
 			machine, runtimeErr := pfmconfig.OptionalRuntime(runtimes)
 			if runtimeErr != nil {
-				fmt.Fprintf(stderr, "pfm chat inject: %v\n", runtimeErr)
+				fmt.Fprintf(stderr, "pfm chat call: %v\n", runtimeErr)
 				return codeUndelivered
 			}
 			resolved := machine.Paths
 			if uuidSessionID(target.ID) {
 				live, liveErr := runningClaudeSession(resolved.ProcRoot, target.ID)
 				if liveErr != nil {
-					fmt.Fprintf(stderr, "pfm chat inject: %v\n", liveErr)
+					fmt.Fprintf(stderr, "pfm chat call: %v\n", liveErr)
 					return codeUndelivered
 				}
 				if live {
 					fmt.Fprintf(
 						stderr,
-						"pfm chat inject: %q is a LIVE session held by a running process with no resolvable tmux pane; transcript append refused\n",
+						"pfm chat call: %q is a LIVE session held by a running process with no resolvable tmux pane; transcript append refused\n",
 						targetName,
 					)
 					return codeDeadChat
 				}
 				crumb, live, crumbErr := liveCrumbSession(ctx, resolved, target.ID)
 				if crumbErr != nil {
-					fmt.Fprintf(stderr, "pfm chat inject: %v\n", crumbErr)
+					fmt.Fprintf(stderr, "pfm chat call: %v\n", crumbErr)
 					return codeUndelivered
 				}
 				if live {
 					fmt.Fprintf(
 						stderr,
-						"pfm chat inject: %q is a LIVE session at %s with no resolvable target on this path; transcript append refused\n",
+						"pfm chat call: %q is a LIVE session at %s with no resolvable target on this path; transcript append refused\n",
 						targetName,
 						crumb,
 					)
@@ -549,13 +549,13 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 				}
 				config, live, registryErr := registeredDaemonSession(ctx, resolved, machine.Config, target.ID)
 				if registryErr != nil {
-					fmt.Fprintf(stderr, "pfm chat inject: %v\n", registryErr)
+					fmt.Fprintf(stderr, "pfm chat call: %v\n", registryErr)
 					return codeUndelivered
 				}
 				if live {
 					fmt.Fprintf(
 						stderr,
-						"pfm chat inject: %q is a LIVE background agent under config %s; it reads its input stream, not transcript appends, so nothing was appended\n",
+						"pfm chat call: %q is a LIVE background agent under config %s; it reads its input stream, not transcript appends, so nothing was appended\n",
 						targetName,
 						config,
 					)
@@ -563,12 +563,12 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 				}
 			}
 			if force {
-				fmt.Fprintln(stderr, "pfm chat inject: --force-now ignored for a dormant RESUME target")
+				fmt.Fprintln(stderr, "pfm chat call: --force-now ignored for a dormant RESUME target")
 			}
 			if len(steers) > 0 {
 				fmt.Fprintf(
 					stderr,
-					"pfm chat inject: --then ignored for a dormant RESUME target (%d steer(s))\n",
+					"pfm chat call: --then ignored for a dormant RESUME target (%d steer(s))\n",
 					len(steers),
 				)
 			}
@@ -579,21 +579,21 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 				message,
 			)
 			if prepareErr != nil {
-				fmt.Fprintf(stderr, "pfm chat inject: prepare resume body: %v\n", prepareErr)
+				fmt.Fprintf(stderr, "pfm chat call: prepare resume body: %v\n", prepareErr)
 				return codeUndelivered
 			}
-			receipt, appendErr := appendResumeInjection(ctx, resolved, target, prepared.Message, clock.Real)
+			receipt, appendErr := appendResumeCall(ctx, resolved, target, prepared.Message, clock.Real)
 			if appendErr != nil {
-				fmt.Fprintf(stderr, "pfm chat inject: %v\n", appendErr)
+				fmt.Fprintf(stderr, "pfm chat call: %v\n", appendErr)
 				return codeUndelivered
 			}
 			if prepared.Unsigned {
-				writeUnsignedInjectWarning(stderr)
+				writeUnsignedCallWarning(stderr)
 			}
 			if prepared.AutoFilePath != "" {
 				fmt.Fprintf(
 					stdout,
-					"injected RESUME AUTO-FILE pointer %s (parent %s) into session %s — full body saved at %s; answered on next reopen; backup: %s\n",
+					"called RESUME AUTO-FILE pointer %s (parent %s) into session %s — full body saved at %s; answered on next reopen; backup: %s\n",
 					receipt.EventID,
 					receipt.ParentID,
 					receipt.SessionID,
@@ -603,7 +603,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 			} else {
 				fmt.Fprintf(
 					stdout,
-					"injected RESUME user turn %s (parent %s) into session %s — answered on next reopen; backup: %s\n",
+					"called RESUME user turn %s (parent %s) into session %s — answered on next reopen; backup: %s\n",
 					receipt.EventID,
 					receipt.ParentID,
 					receipt.SessionID,
@@ -611,20 +611,20 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 				)
 			}
 			for _, warning := range prepared.Warnings {
-				fmt.Fprintf(stderr, "pfm chat inject: WARNING: %s\n", warning)
+				fmt.Fprintf(stderr, "pfm chat call: WARNING: %s\n", warning)
 			}
 			return 0
 		}
 	}
 	if result.Unsigned {
 		// The sender also needs the unsigned warning because only it can act.
-		writeUnsignedInjectWarning(stderr)
+		writeUnsignedCallWarning(stderr)
 	}
-	return writeInjectResult(result, targetName, stdout, stderr)
+	return writeCallResult(result, targetName, stdout, stderr)
 }
 
-func writeInjectResult(
-	result inject.Result,
+func writeCallResult(
+	result pfmcall.Result,
 	target string,
 	stdout, stderr io.Writer,
 ) int {
@@ -632,7 +632,7 @@ func writeInjectResult(
 		fmt.Fprintln(stderr, result.ResolutionNote)
 	}
 	if result.Code != 0 {
-		if result.Code == inject.CodeUnknown {
+		if result.Code == pfmcall.CodeUnknown {
 			renderNoSuchChat(target, io.Discard, stderr, false)
 			if strings.Contains(strings.ToLower(result.Message), "ambiguous") {
 				fmt.Fprintln(stderr, result.Message)
@@ -646,11 +646,11 @@ func writeInjectResult(
 			fmt.Fprintln(stderr, "--- end delivery proof ---")
 		}
 		switch result.Code {
-		case inject.CodeUnknown:
+		case pfmcall.CodeUnknown:
 			return codeUnknownChat
-		case inject.CodeAmbiguous:
+		case pfmcall.CodeAmbiguous:
 			return 2
-		case inject.CodeDead:
+		case pfmcall.CodeDead:
 			return codeDeadChat
 		default:
 			return codeUndelivered
@@ -665,8 +665,8 @@ func writeInjectResult(
 	return 0
 }
 
-// writeUnsignedInjectWarning explains the risk of an explicit unsigned send.
-func writeUnsignedInjectWarning(stderr io.Writer) {
+// writeUnsignedCallWarning explains the risk of an explicit unsigned send.
+func writeUnsignedCallWarning(stderr io.Writer) {
 	fmt.Fprintln(
 		stderr,
 		"WARNING: sent UNSIGNED (--allow-unsigned) — this process derived no"+
@@ -675,8 +675,8 @@ func writeUnsignedInjectWarning(stderr io.Writer) {
 			" (setsid/nohup/disowned), that is why: detaching severs the"+
 			" process chain the handle is recovered from. Send from the chat"+
 			" itself, or state it: "+
-			inject.SenderSessionEnv+"=$(pfm whoami) "+
-			inject.SenderLabelEnv+"=<label> <command>.",
+			pfmcall.SenderSessionEnv+"=$(pfm whoami) "+
+			pfmcall.SenderLabelEnv+"=<label> <command>.",
 	)
 }
 

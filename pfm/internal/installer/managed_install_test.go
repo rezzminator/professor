@@ -3,7 +3,6 @@ package installer
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,10 +38,12 @@ func TestInstallManagedArgsWriteSpacedDestination(t *testing.T) {
 // TestInstallManagedCommandsQuoteSpacedPath: the macOS managed dir holds a
 // space, so the echoed sudo line and the set-it-by-hand advisory must each
 // keep the path one shell word — run through sh, the advisory writes the
-// drop-in at the path the classifier reads.
+// drop-in at the path the classifier reads, every key the drop-in already
+// held (a quote in its value included) kept.
 func TestInstallManagedCommandsQuoteSpacedPath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Application Support", "ClaudeCode", "managed-settings.d")
 	managed := filepath.Join(dir, "pfm.json")
+	writeFixture(t, managed, `{"cleanupPeriodDays":30,"companyAnnouncements":["it's pfm's"]}`)
 	var output bytes.Buffer
 	installer := &engine{
 		apply: true,
@@ -79,7 +80,7 @@ func TestInstallManagedCommandsQuoteSpacedPath(t *testing.T) {
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("advisory %q failed: %v\n%s", advisory, err, out)
 	}
-	want := fmt.Sprintf("{\"cleanupPeriodDays\":%d}\n", 36500)
+	want := `{"cleanupPeriodDays":36500,"companyAnnouncements":["it's pfm's"],"prependPlugins":[]}` + "\n"
 	if got, err := os.ReadFile(managed); err != nil || string(got) != want {
 		t.Fatalf("advisory wrote %q (err %v), want %q at %s", got, err, want, managed)
 	}

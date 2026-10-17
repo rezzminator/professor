@@ -94,14 +94,14 @@ type Knob struct {
 | cost exporters | wrapper env `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_TRACES_EXPORTER=otlp`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_METRICS_EXPORTER=none`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:{port}`, `OTEL_LOGS_EXPORT_INTERVAL=1000`, `OTEL_BSP_SCHEDULE_DELAY=1000` | constant | — |
 | cost marker | wrapper env `PFM_COST_LEDGER=on\|off\|preempted\|failed`, the decision the status lines read | constant | — |
 | cost pid | wrapper env `PFM_COST_LEDGER_PID={pid}`, the process the armed sink serves: a second pass of that same process (the wrapper exec'd pfm's `claude` shim) keeps its sink | constant | — |
-| MCP | flag `--mcp-config {file}` — a per-launch 0600 file holding `professor` and third-party entries | config | — |
+| MCP | flag `--mcp-config {file}` — a per-launch 0600 file holding enabled `chat-professor` / `harvester-professor` and third-party entries | config | — |
 | `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass` | config | `bypass` |
 | model | flag `--model` | launch | unset |
 | effort | flag `--effort` (`low\|medium\|high\|xhigh\|max`) | launch | unset |
 | session id | flag `--session-id {uuid}` on a fresh chat — pfm assigns the id so the launch record exists before Claude starts | door | — |
 | session verbs | flags `--resume`, `--fork-session`, `--name` | door | — |
 
-`--mcp-config` names a per-launch file carrying every `mcp.thirdParty` entry and, when `chat` or `harvester` is enabled, one `professor` entry: `{type: stdio, command: ~/.local/bin/pfm, args: [mcp, serve, --stdio]}`. When both families are off, third-party entries still ride the file; with no entries neither file nor flag exists. The payload never sits on argv, where `ps` and `/proc/{pid}/cmdline` would show a third-party `env` value or `Authorization` header to every local user: Render writes `{"mcpServers":{…}}` atomically (scratch file, then rename) to `~/.local/state/pfm/mcp-config/claude-mcp-{random}.json`, mode 0600 in a 0700 directory it refuses when that path is a symlink, and passes the path. Claude reads the file once at startup; each write first prunes the directory's launch files older than seven days. Account `.claude.json` files are intended to contain no MCP definitions; doctor warns on outside third-party entries. Config validation reserves the name `professor` and requires each third-party value to be a JSON object.
+`--mcp-config` names a per-launch file carrying every `mcp.thirdParty` entry and, when enabled, separate `chat-professor` and `harvester-professor` entries with family-scoped stdio commands: `{type: stdio, command: ~/.local/bin/pfm, args: [mcp, serve, --stdio, --family, chat|harvester]}`. When both families are off, third-party entries still ride the file; with no entries neither file nor flag exists. The payload never sits on argv, where `ps` and `/proc/{pid}/cmdline` would show a third-party `env` value or `Authorization` header to every local user: Render writes `{"mcpServers":{…}}` atomically (scratch file, then rename) to `~/.local/state/pfm/mcp-config/claude-mcp-{random}.json`, mode 0600 in a 0700 directory it refuses when that path is a symlink, and passes the path. Claude reads the file once at startup; each write first prunes the directory's launch files older than seven days. Separately, install inspects existing account `.claude.json` files found through configured accounts, the account roster, ambient config and default paths. It removes exact pfm-owned legacy entries, emits or reconciles enabled family entries, preserves and reports foreign `professor` entries, and leaves absent registry files uncreated. Doctor uses the same inspector and reports account state, foreign entries and unreadable files. Config validation reserves the names `chat-professor` and `harvester-professor` and requires each third-party value to be a JSON object.
 
 The interactive cache handoff stays in process environment beside `CLAUDE_CONFIG_DIR`, outside the settings `env` block. Claude re-applies that block on a settings reload; putting the handoff there would hand the plugin a value it already consumed. The cache-live-control plugin owns subsequent main and sub-agent TTL changes. pfm sets no Claude TTL variable and never `CACHE_LIVE_CONTROL_AGENTS_TTL`; hygiene clears inherited values. Headless keeps the handoff in its settings `env`.
 
@@ -159,7 +159,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `noFlicker` | off | not a config key: on when the account's `settings.json` has top-level `"tui": "fullscreen"` |
 | `costLedger` | `true` | the per-call cost ledger ([cost-ledger.md](cost-ledger.md)); machine-wide, an account-level value is refused |
 | `cleanupPeriodDays` | `36500` | transcript retention (also the managed value) |
-| `requireManagedCleanup` | `true` | `pfm doctor` warns when the managed `cleanupPeriodDays` file is absent; `false` silences it |
+| `requireManagedCleanup` | `true` | `pfm install` writes the managed drop-in and `pfm doctor` warns when it is absent or lacks `cleanupPeriodDays` or `prependPlugins`; `false` turns off both, the drop-in's `prependPlugins` included |
 
 ## The rendered launch
 
@@ -177,7 +177,7 @@ env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={
 - **Launch points at the repo.** `--system-prompt-file` is `{clone}/pfm/harness-prompts/composed/claude.md`, `{clone}` from the source-repo record. Nothing is copied at install.
 - **Workbench launches** replace the composed file with the manifest prompt; explicit `--system-prompt-file` / `--harness-prompt` win, and a role seat composes on that base (`internal/workbench/persona.go`, `internal/agentrole/base_prompt.go`).
 - **Role seats** compose the claude prompt with the role into a seat file under the SID dir and pass that instead (`agentrole.ComposeSeatPrompt`); `pfm chat reload` refreshes it before respawning.
-- **Missing file fails open, loudly:** the launch omits the flag and starts on Claude's own prompt, and the starter is told why (`claudelaunch.PromptWarning`, the one verdict) on the surface they launched from: stderr for `chat new` / `chat branch` / the picker / the launcher, the tool message for `chat_open`, the pane for agent resume, the reload worker's log plus a pane display for reload; spawn-audit reports it too. A surface that attaches next (the picker, the launcher, `chat new --attach`) holds for Enter when stdin and stderr are both a terminal, so the attach cannot cover the warning (`internal/launchnotice`); off a terminal it only prints, and Ctrl-C at the launcher's prompt kills the server it made. Agent resume prints in the pane without waiting, since a detached pane has nobody to press Enter. A caller-stated `--system-prompt` or `--system-prompt-file` is deliberate and never warned.
+- **Missing file fails open, loudly:** the launch omits the flag and starts on Claude's own prompt, and the starter is told why (`claudelaunch.PromptWarning`, the one verdict) on the surface they launched from: stderr for `chat new` / `chat branch` / the picker / the launcher, the tool message for `open`, the pane for agent resume, the reload worker's log plus a pane display for reload; spawn-audit reports it too. A surface that attaches next (the picker, the launcher, `chat new --attach`) holds for Enter when stdin and stderr are both a terminal, so the attach cannot cover the warning (`internal/launchnotice`); off a terminal it only prints, and Ctrl-C at the launcher's prompt kills the server it made. Agent resume prints in the pane without waiting, since a detached pane has nobody to press Enter. A caller-stated `--system-prompt` or `--system-prompt-file` is deliberate and never warned.
 
 ## Doors
 
@@ -185,7 +185,7 @@ Each door builds a `claudelaunch.Request` — account, purpose, door verbs, per-
 
 ### PlanClaude
 
-`pfm chat new` and MCP `chat_new`. Verbs: `--session-id`, `--name`, the prompt positional. Per-launch: `--account`, `--cache 1h|5m`, `--model`, `--effort`, role seat file.
+`pfm chat new` and MCP `new`. Verbs: `--session-id`, `--name`, the prompt positional. Per-launch: `--account`, `--cache 1h|5m`, `--model`, `--effort`, role seat file.
 
 ### HeadlessFork
 
@@ -193,7 +193,7 @@ Each door builds a `claudelaunch.Request` — account, purpose, door verbs, per-
 
 ### Synthesize
 
-The picker and `pfm chat open` / MCP `chat_open`: `NewClaude` (`--session-id`, prompt), `ResumeClaude` (`--resume {id}`), `Agent` (`pfm internal agent-open`). Per-launch: the picker's account and cache toggle, whose initial state is the config value.
+The picker and `pfm chat open` / MCP `open`: `NewClaude` (`--session-id`, prompt), `ResumeClaude` (`--resume {id}`), `Agent` (`pfm internal agent-open`). Per-launch: the picker's account and cache toggle, whose initial state is the config value.
 
 ### AgentOpen
 

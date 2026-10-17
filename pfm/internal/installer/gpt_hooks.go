@@ -7,13 +7,23 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-var gptHookAssets = []string{"gpt-return-watch.py", "gpt-agent-stop.py"}
+var gptHookAssets = []string{"gpt-agent-stop.py"}
+
+// retiredGptHookAssets are hook scripts an earlier pfm linked beside the
+// current ones. Every install and uninstall removes the links it owns, the
+// managed copy and the default log directory of each; nothing stages them.
+var retiredGptHookAssets = []string{"gpt-return-watch.py"}
+
+func isGptHookName(name string) bool {
+	return slices.Contains(gptHookAssets, name) || slices.Contains(retiredGptHookAssets, name)
+}
 
 // gptHookDirs includes the default store, an explicit install store, and every
 // account. Physical deduplication also handles account-directory aliases.
@@ -40,7 +50,7 @@ func gptHookDirs(home, store string, accounts []pfmconfig.Account) []string {
 // The exact symlink to the managed copy is the ownership receipt. Never
 // replace an operator file or foreign link, even when its bytes match ours.
 func (installer *engine) wireGptHookAssets() error {
-	targets, err := readGptHookOwnership(installer.managedRoot)
+	receipt, err := readGptHookOwnership(installer.managedRoot)
 	if err != nil {
 		return err
 	}
@@ -48,7 +58,7 @@ func (installer *engine) wireGptHookAssets() error {
 	if err != nil {
 		return err
 	}
-	var failures []error
+	targets, failures := installer.retireGptHookAssets(receipt)
 	for _, target := range current {
 		source := filepath.Join(installer.managedRoot, filepath.Base(target))
 		if err := installer.wireGptHookAsset(source, target); err != nil {
@@ -123,36 +133,100 @@ func (installer *engine) unwireGptHookAssets() error {
 	if err != nil {
 		return err
 	}
-	targets = append(targets, current...)
+	retired, err := installer.retiredGptHookTargets()
+	if err != nil {
+		return err
+	}
+	targets = append(append(targets, current...), retired...)
 	for _, target := range targets {
-		source := filepath.Join(installer.managedRoot, filepath.Base(target))
-		owned, absent, err := inspectGptHookLink(source, target)
-		if err != nil {
-			return err
-		}
-		if !owned {
-			if !absent {
-				installer.skip("preserve unowned gpt hook asset " + target)
-			}
-			continue
-		}
-		if err := installer.change("remove "+target, func() error {
-			stillOwned, _, err := inspectGptHookLink(source, target)
-			if err != nil {
-				return err
-			}
-			if !stillOwned {
-				return fmt.Errorf("gpt hook asset %s changed since inspection; kept operator entry", target)
-			}
-			if err := os.Remove(target); err != nil {
-				return fmt.Errorf("remove gpt hook asset %s: %w", target, err)
-			}
-			return nil
-		}); err != nil {
+		if err := installer.retireGptHookLink(target); err != nil {
 			return err
 		}
 	}
+	if err := installer.retireGptHookLeftovers(); err != nil {
+		return err
+	}
 	return installer.removeGptHookOwnership()
+}
+
+// retireGptHookLink removes one link the managed copy owns and keeps any
+// other entry at that path.
+func (installer *engine) retireGptHookLink(target string) error {
+	name := filepath.Base(target)
+	source := filepath.Join(installer.managedRoot, name)
+	owned, absent, err := inspectGptHookLink(source, target)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		if !absent {
+			label := "gpt hook asset "
+			if slices.Contains(retiredGptHookAssets, name) {
+				label = "retired " + label
+			}
+			installer.skip("preserve unowned " + label + target)
+		}
+		return nil
+	}
+	return installer.change("remove "+target, func() error {
+		stillOwned, _, err := inspectGptHookLink(source, target)
+		if err != nil {
+			return err
+		}
+		if !stillOwned {
+			return fmt.Errorf("gpt hook asset %s changed since inspection; kept operator entry", target)
+		}
+		if err := os.Remove(target); err != nil {
+			return fmt.Errorf("remove gpt hook asset %s: %w", target, err)
+		}
+		return nil
+	})
+}
+
+// retireGptHookAssets sweeps the retired hooks from the receipt and from every
+// current hooks directory, then returns the receipt's remaining targets: the
+// current ones, plus a retired link whose removal failed.
+func (installer *engine) retireGptHookAssets(receipt []string) (kept []string, failures []error) {
+	retired, err := installer.retiredGptHookTargets()
+	if err != nil {
+		return nil, []error{err}
+	}
+	var candidates []string
+	for _, target := range receipt {
+		if slices.Contains(retiredGptHookAssets, filepath.Base(target)) {
+			candidates = append(candidates, target)
+		} else {
+			kept = append(kept, target)
+		}
+	}
+	candidates = append(candidates, retired...)
+	slices.Sort(candidates)
+	candidates = slices.Compact(candidates)
+	for _, target := range candidates {
+		if err := installer.retireGptHookLink(target); err != nil {
+			failures = append(failures, err)
+			kept = append(kept, target)
+		}
+	}
+	if len(failures) == 0 {
+		if err := installer.retireGptHookLeftovers(); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return kept, failures
+}
+
+// retireGptHookLeftovers removes each retired hook's managed copy and its
+// default log directory, the state a retired hook wrote beside its link.
+func (installer *engine) retireGptHookLeftovers() error {
+	for _, name := range retiredGptHookAssets {
+		if err := installer.retire(filepath.Join(installer.managedRoot, name), "retired gpt hook asset"); err != nil {
+			return err
+		}
+		logDir := filepath.Join(installer.options.Home, ".local", "state", "pfm", strings.TrimSuffix(name, ".py"))
+		installer.removeStatePath(logDir, "retired gpt hook log directory", "")
+	}
+	return nil
 }
 
 func probeGptHookAssets(home string, config pfmconfig.Config) []HookProbeResult {
@@ -179,6 +253,9 @@ func probeGptHookAssets(home string, config pfmconfig.Config) []HookProbeResult 
 	seen := map[string]bool{}
 	for _, target := range targets {
 		name := filepath.Base(target)
+		if slices.Contains(retiredGptHookAssets, name) {
+			continue
+		}
 		// Never resolve the final asset link: distinct stores share its source.
 		path := filepath.Join(paths.PhysicalPath(filepath.Dir(target)), name)
 		if seen[path] {

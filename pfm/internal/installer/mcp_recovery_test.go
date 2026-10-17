@@ -4,30 +4,37 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
 func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
+	repo := t.TempDir()
+	writeFixture(t, engineSyncPolicySource(repo), engineSyncTemplate)
 	home := t.TempDir()
 	path := filepath.Join(home, ".codex", "config.toml")
-	manual := "[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n"
-	writeFixture(t, path, codexProfessorFence(home)+manual)
+	manual := "[mcp_servers.chat-professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n"
+	writeFixture(t, path, codexChatFence(home)+manual)
 	options := Options{
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{chatName: true},
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{nameSyncIdle: true},
+		SourceRepo: repo, Mode: ModeDryRun, Home: home, Runner: &fakeRunner{nameSyncIdle: true},
 	}
 	var output bytes.Buffer
 	options.Stdout = &output
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatalf("dry run: %v\n%s", err, output.String())
 	}
-	if got := readFixture(t, path); got != codexProfessorFence(home)+manual {
+	if got := readFixture(t, path); got != codexChatFence(home)+manual {
 		t.Fatalf("dry run changed config: %q", got)
 	}
 	options.Mode = ModeApply
@@ -35,7 +42,7 @@ func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "preserve conflicting manual MCP client professor in "+path) {
+	if !strings.Contains(output.String(), "preserve conflicting manual MCP client chat-professor in "+path) {
 		t.Fatalf("missing preserve report:\n%s", output.String())
 	}
 	got := readFixture(t, path)
@@ -60,7 +67,7 @@ func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
 func TestInstallRejectsUnrelatedCodexTOMLDuplicate(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".codex", "config.toml")
-	broken := "model = 'first'\nmodel = 'second'\n" + codexProfessorFence(home)
+	broken := "model = 'first'\nmodel = 'second'\n" + codexChatFence(home)
 	writeFixture(t, path, broken)
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{chatName: true},
@@ -86,7 +93,7 @@ func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 		apply:   true,
 		stamp:   "fixture",
 	}
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	var document map[string]any
@@ -142,9 +149,9 @@ func codexMCPEngine(home, account string) engine {
 	}
 }
 
-func codexProfessorFence(home string) string {
-	return mcpFenceBegin + "\n[mcp_servers.professor]\ncommand = \"" + home + "/.local/bin/pfm\"\n" +
-		"args = [\"mcp\", \"serve\", \"--stdio\"]\n" + mcpFenceEnd + "\n"
+func codexChatFence(home string) string {
+	return mcpFenceBegin + "\n[mcp_servers.chat-professor]\ncommand = \"" + home + "/.local/bin/pfm\"\n" +
+		"args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"chat\"]\n" + mcpFenceEnd + "\n"
 }
 
 // TestMCPRepairsABrokenCodexFence pins the host repair: the legacy loopback
@@ -158,16 +165,16 @@ func TestMCPRepairsABrokenCodexFence(t *testing.T) {
 	path := filepath.Join(account, "config.toml")
 	writeFixture(t, path, codexHostShape)
 	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	want := codexHostShapeKept + codexProfessorFence(home)
+	want := codexHostShapeKept + codexChatFence(home)
 	if got := readFixture(t, path); got != want {
 		t.Fatalf("repaired Codex config:\n%s\nwant:\n%s", got, want)
 	}
 	var second strings.Builder
 	e.options.Stdout = &second
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, path); got != want {
@@ -189,15 +196,15 @@ func TestMCPReclaimsAnOrphanedCodexProfessorBody(t *testing.T) {
 	path := filepath.Join(account, "config.toml")
 	head := "model = \"personal\"\n"
 	tail := "[desktop]\ndock-icon-preference = \"app-default\"\n"
-	orphan := head + strings.TrimSuffix(codexProfessorFence(home), mcpFenceEnd+"\n") + "\n" + tail
+	orphan := head + strings.TrimSuffix(codexChatFence(home), mcpFenceEnd+"\n") + "\n" + tail
 	writeFixture(t, path, orphan)
 	var out strings.Builder
 	e := codexMCPEngine(home, account)
 	e.options.Stdout = &out
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if want := head + tail + codexProfessorFence(home); readFixture(t, path) != want {
+	if want := head + tail + codexChatFence(home); readFixture(t, path) != want {
 		t.Fatalf("installed Codex config:\n%s\nwant:\n%s", readFixture(t, path), want)
 	}
 	if strings.Contains(out.String(), "preserve conflicting manual MCP client") {
@@ -222,10 +229,10 @@ func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
 	original := "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\nstartup_timeout_sec = 30\n"
 	writeFixture(t, path, original)
 	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFixture(t, path); got != original+codexProfessorFence(home) {
+	if got := readFixture(t, path); got != original+codexChatFence(home) {
 		t.Fatalf("Codex config:\n%s\nwant the extended harvester table kept and the professor fence appended", got)
 	}
 	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
@@ -248,10 +255,10 @@ func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
 		"[mcp_servers.harvester.http_headers]\nX-Team = \"research\"\n"
 	writeFixture(t, path, original)
 	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFixture(t, path); got != original+codexProfessorFence(home) {
+	if got := readFixture(t, path); got != original+codexChatFence(home) {
 		t.Fatalf("Codex config:\n%s\nwant the headed harvester table kept and the professor fence appended", got)
 	}
 	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
@@ -272,12 +279,15 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 	for name, mode := range map[string]Mode{"both disabled": ModeApply, "uninstall": ModeUninstall} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			repo := t.TempDir()
+			writeFixture(t, engineSyncPolicySource(repo), engineSyncTemplate)
 			home := t.TempDir()
 			canonical := filepath.Join(home, ".claude")
 			writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
 			openCodePath := OpenCodeConfigPath(home)
 			options := Options{
 				Mode:               ModeApply,
+				SourceRepo:         repo,
 				Home:               home,
 				ConfigDir:          canonical,
 				OpenCodeConfigPath: openCodePath,
@@ -294,7 +304,13 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 			remote := "[mcp_servers.harvester-remote]\nurl = \"https://gateway.example.invalid/mcp\"\n"
 			writeFixture(t, codexPath, readFixture(t, codexPath)+"\n[mcp_servers.chat]\n"+
 				"url = \"http://127.0.0.1:18377/mcp/chat\"\n\n"+remote+mcpFenceEnd+"\n")
-			professor, _ := json.Marshal(openCodeProfessorShape(home))
+			professor, _ := json.Marshal(
+				map[string]any{
+					"type":    "local",
+					"enabled": true,
+					"command": []any{filepath.Join(home, ".local", "bin", "pfm"), "mcp", "serve", "--stdio"},
+				},
+			)
 			writeFixture(t, openCodePath, `{"mcp":{"professor":`+string(professor)+
 				`,"chat":{"type":"remote","url":"http://127.0.0.1:18377/mcp/chat","enabled":true}}}`)
 
@@ -361,10 +377,10 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 		apply:   true,
 		stamp:   "fixture",
 	}
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(readFixture(t, target), "mcp_servers.professor") {
+	if !strings.Contains(readFixture(t, target), "mcp_servers.chat-professor") {
 		t.Fatal("physical target was not wired")
 	}
 	if err := e.removeMCPCodeConfig(); err != nil {
@@ -373,7 +389,214 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 	if got, err := os.Readlink(config); err != nil || got != target {
 		t.Fatalf("link=%q err=%v", got, err)
 	}
-	if strings.Contains(readFixture(t, target), "mcp_servers.professor") {
+	if strings.Contains(readFixture(t, target), "mcp_servers.chat-professor") {
 		t.Fatal("owned registration survived removal")
+	}
+}
+
+func TestMCPWriteReportsPreimageState(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		directory bool
+		original  string
+		wantError string
+	}{
+		{name: "unreadable", directory: true, wantError: "read MCP config"},
+		{name: "changed", original: "old", wantError: "changed while planning install"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if tc.directory {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeFixture(t, path, "client edit")
+			}
+			inst := &engine{stamp: "fixture"}
+			err := inst.writeMCPFile(path, []byte(tc.original), []byte("pfm"), true)
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) || !strings.Contains(err.Error(), path) {
+				t.Fatalf("write error=%v; want %q with path %s", err, tc.wantError, path)
+			}
+			if tc.directory {
+				var readError *os.PathError
+				if !errors.As(err, &readError) || readError.Op != "read" || readError.Path != path {
+					t.Fatalf("write error lost the underlying read failure: %v", err)
+				}
+			} else if got := readFixture(t, path); got != "client edit" {
+				t.Fatalf("changed config overwritten: %q", got)
+			}
+		})
+	}
+}
+
+// Pause backup publication at its native-lock validation boundary. This
+// controls the same lock lifetime without relying on an unsafe FIFO read.
+func TestClaudeMCPLockProtectsSlowBackup(t *testing.T) {
+	for _, state := range []string{"refresh", "missing", "replaced", "modified", "restored"} {
+		t.Run(state, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".claude.json")
+			lock := path + ".lock"
+			writeFixture(t, path, "original")
+			inst := &engine{stamp: "fixture"}
+			err := withClaudeMCPLocks([]string{path}, func(check func() error) error {
+				calls := 0
+				return inst.writeMCPFileIf(path, []byte("original"), []byte("pfm"), true, func() error {
+					calls++
+					if calls == 2 {
+						before, err := os.Stat(lock)
+						if err != nil {
+							return err
+						}
+						switch state {
+						case "refresh":
+							deadline := time.NewTimer(8 * time.Second)
+							defer deadline.Stop()
+							ticker := time.NewTicker(20 * time.Millisecond)
+							defer ticker.Stop()
+						refresh:
+							for {
+								select {
+								case <-deadline.C:
+									return fmt.Errorf("native lock mtime was not refreshed during slow backup")
+								case <-ticker.C:
+									now, err := os.Stat(lock)
+									if err != nil {
+										return err
+									}
+									if now.ModTime().After(before.ModTime()) {
+										break refresh
+									}
+								}
+							}
+							if err := os.Mkdir(lock, 0o700); !errors.Is(err, os.ErrExist) {
+								t.Fatalf("native writer acquired refreshed lock: %v", err)
+							}
+						case "missing", "replaced":
+							if err := os.Remove(lock); err != nil {
+								return err
+							}
+							if state == "replaced" {
+								writeFixture(t, filepath.Join(lock, "native-owner"), "keep")
+							}
+						case "modified", "restored":
+							if err := os.Chtimes(
+								lock,
+								before.ModTime().Add(time.Minute),
+								before.ModTime().Add(time.Minute),
+							); err != nil {
+								return err
+							}
+							if state == "restored" {
+								<-time.After(6 * time.Second)
+								if err := os.Chtimes(lock, before.ModTime(), before.ModTime()); err != nil {
+									return err
+								}
+							}
+						}
+					}
+					return check()
+				})
+			})
+			if state == "refresh" {
+				if err != nil || readFixture(t, path) != "pfm" {
+					t.Fatalf("refreshed save failed: %v", err)
+				}
+				if _, err := os.Lstat(lock); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("lock not released: %v", err)
+				}
+			} else {
+				if got := readFixture(t, path); got != "original" {
+					t.Fatalf("lost native lock still published registry: %s; error=%v", got, err)
+				}
+				if err == nil || !strings.Contains(err.Error(), lock) {
+					t.Fatalf("lock loss not reported: %v", err)
+				}
+				if state == "replaced" && readFixture(t, filepath.Join(lock, "native-owner")) != "keep" {
+					t.Fatal("replacement lock not preserved")
+				}
+			}
+		})
+	}
+}
+
+// A concurrent edit while the backup is being published must survive the save.
+func TestMCPWritePreservesAnEditDuringBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeFixture(t, path, "original")
+	inst := &engine{stamp: "fixture"}
+	calls := 0
+	err := inst.writeMCPFileIf(path, []byte("original"), []byte("pfm"), true, func() error {
+		calls++
+		if calls == 2 {
+			writeFixture(t, path, "client edit")
+		}
+		return nil
+	})
+	if got := readFixture(t, newestBackup(path)); got != "original" {
+		t.Fatalf("backup = %q", got)
+	}
+	if err == nil || !strings.Contains(err.Error(), "changed while planning install") {
+		t.Fatalf("late MCP edit was not rejected: %v", err)
+	}
+	if got := readFixture(t, path); got != "client edit" {
+		t.Fatalf("client edit overwritten: %q", got)
+	}
+}
+
+// A hostile registry must not leave an installer renewing its native lock
+// forever. Subprocesses bound the blocked-open regression without leaking it.
+func TestMCPReadsRejectFIFO(t *testing.T) {
+	if source := os.Getenv("PFM_TEST_FIFO_SOURCE"); source != "" {
+		var err error
+		switch os.Getenv("PFM_TEST_FIFO_READ") {
+		case "backup":
+			err = copyBackup(source, source+".backup")
+		case "save":
+			inst := &engine{stamp: "fixture"}
+			err = withClaudeMCPLocks([]string{source}, func(check func() error) error {
+				if err := os.Remove(source); err != nil {
+					return err
+				}
+				if err := syscall.Mkfifo(source, 0o600); err != nil {
+					return err
+				}
+				return inst.writeMCPFileIf(source, []byte("original"), []byte("pfm"), true, check)
+			})
+			if _, lockErr := os.Lstat(source + ".lock"); !errors.Is(lockErr, os.ErrNotExist) {
+				t.Fatalf("hostile registry left native lock held: %v", lockErr)
+			}
+		default:
+			_, _, err = readMCPFile(source)
+		}
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("want non-regular rejection for %s, got %v", source, err)
+		}
+		return
+	}
+	for _, reader := range []string{"registry", "backup", "save"} {
+		t.Run(reader, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "registry.json")
+			if reader == "save" {
+				writeFixture(t, path, "original")
+			} else if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, executable, "-test.run=^TestMCPReadsRejectFIFO$")
+			command.Env = append(os.Environ(), "PFM_TEST_FIFO_SOURCE="+path, "PFM_TEST_FIFO_READ="+reader)
+			output, err := command.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("%s blocked on a FIFO: %v", reader, ctx.Err())
+			}
+			if err != nil {
+				t.Fatalf("%s: %v\n%s", reader, err, output)
+			}
+		})
 	}
 }

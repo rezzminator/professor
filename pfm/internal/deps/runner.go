@@ -55,7 +55,7 @@ type Runner interface {
 	// Start launches argv and returns as soon as it is running, never
 	// waiting on it here — the shape every streaming or detached spawn
 	// (chat_dispatch.go's hook runner, chat_reload_command.go's detached
-	// self re-exec, inject.CommandThenSpawner.Spawn) needs instead of Run's
+	// self re-exec, pfmcall.CommandThenSpawner.Spawn) needs instead of Run's
 	// wait-to-completion contract.
 	Start(ctx context.Context, argv []string, opts StartOptions) (Process, error)
 }

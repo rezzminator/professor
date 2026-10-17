@@ -24,19 +24,19 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 	sum := sha256.Sum256([]byte(captured))
 	matching := hex.EncodeToString(sum[:])
 
-	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.292.md", captured, nil)
-	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.292.md") {
+	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.300.md", captured, nil)
+	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.300.md") {
 		t.Fatalf("match outcome = (%q, %v), want an ok line", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.292.md", captured, nil)
+	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.300.md", captured, nil)
 	if !warn || !strings.Contains(line, "DRIFT") {
 		t.Fatalf("drift outcome = (%q, %v), want a DRIFT warning", line, warn)
 	}
 
 	line, warn = harnessPromptVerdict(
 		matching,
-		"harness-original-v2.1.292.md",
+		"harness-original-v2.1.300.md",
 		"",
 		errors.New("no API request reached the capture sink"),
 	)
@@ -45,7 +45,7 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 		t.Fatalf("capture-failure outcome = (%q, %v), want a distinct CHECK FAILED warning", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.292.md", "", errClaudeAbsent)
+	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.300.md", "", errClaudeAbsent)
 	if warn || line != "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare" {
 		t.Fatalf("absence outcome = (%q, %v), want the named skip with no warning", line, warn)
 	}
@@ -336,9 +336,9 @@ const (
 	harnessDetailPrefix = "doctor: harness-prompt:   "
 )
 
-// harnessDetailFixture is a small opus-shaped prompt: the heading order ends
-// `# Environment`, `# Context management`, `# Delivering work`, `# Corrections`,
-// as the opus baseline harness-opus-v2.1.280 does.
+// harnessDetailFixture is a small opus-shaped prompt ending in the
+// `# Environment`, `# Context management`, `# Delivering work` and
+// `# Corrections` sections.
 const harnessDetailFixture = "x-anthropic-billing-header: cc_version=2.1.278.a1b; cc_entrypoint=sdk-cli;\n\n" +
 	"=== SYSTEM BLOCK ===\n\nYou are Claude Code, Anthropic's official CLI for Claude.\n\n" +
 	"# Doing tasks\n - Read the code before you change it.\n - Keep changes surgical.\n" +

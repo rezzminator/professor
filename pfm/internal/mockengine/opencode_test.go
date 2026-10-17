@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/index"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 const fixtureOpenCodeSession = "ses_fixture0001"
@@ -48,10 +48,10 @@ func TestOpenCodeTUIWritesTheStorePfmReads(t *testing.T) {
 			}
 			session.waitFrame(
 				"pfm busy footer",
-				func(frame string) bool { return inject.IsBusyFor(pfmengine.OpenCode, frame) },
+				func(frame string) bool { return pfmcall.IsBusyFor(pfmengine.OpenCode, frame) },
 			)
 			session.waitFrame("idle reply", func(frame string) bool {
-				return strings.Contains(frame, "⏺ first reply") && !inject.IsBusyFor(pfmengine.OpenCode, frame)
+				return strings.Contains(frame, "⏺ first reply") && !pfmcall.IsBusyFor(pfmengine.OpenCode, frame)
 			})
 			root := filepath.Join(fix.home, ".local", "share", "opencode")
 			rows, err := index.ReadOpenCodeSessions(context.Background(), root)
@@ -106,7 +106,7 @@ func TestOpenCodeInlineMCPKeepsNamedRefusal(t *testing.T) {
 	fix.write(Scenario{Pane: openCodeShapes})
 	session := fix.startTUI("opencode", []string{fix.work}, nil)
 	session.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, openCodeShapes.Composer) })
-	session.typeLine(`mock-engine: {"type":"mcp","tool":"chat_find"}`)
+	session.typeLine(`mock-engine: {"type":"mcp","tool":"find"}`)
 	if code := session.waitExit(); code != ExitUnpinned || !strings.Contains(session.stderr.String(), "opencode MCP") {
 		t.Fatalf("inline MCP exit=%d stderr=%q", code, session.stderr.String())
 	}

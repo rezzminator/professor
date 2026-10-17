@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/inject"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 // This file is reload's READER of the pane: every question the choreography
@@ -29,7 +29,7 @@ func composerDrawn(capture string) bool {
 // BE /exit, not contain it: "old draft/exit" is a prompt, and Enter on it
 // submits the old draft to the model instead of ending the chat.
 func composerShowsExit(capture string) bool {
-	return inject.ComposerDraftText(capture) == "/exit"
+	return pfmcall.ComposerDraftText(capture) == "/exit"
 }
 
 func selectorOpen(capture string) bool {
@@ -71,7 +71,7 @@ func composerText(capture string) string {
 	}
 	block := lines[start : start+1]
 	for index := start + 1; index < len(lines); index++ {
-		if inject.ComposerBoxRule(lines[index]) {
+		if pfmcall.ComposerBoxRule(lines[index]) {
 			break
 		}
 		block = lines[start : index+1]
@@ -88,5 +88,5 @@ func squashSpace(value string) string {
 }
 
 func lastReloadComposerLine(capture string) string {
-	return inject.LastComposerLine(capture)
+	return pfmcall.LastComposerLine(capture)
 }

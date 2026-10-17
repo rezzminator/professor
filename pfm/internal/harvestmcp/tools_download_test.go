@@ -77,10 +77,10 @@ func TestDownloadFileAnswersAnItemBlockPerURL(t *testing.T) {
 	})
 	if !strings.HasPrefix(
 		text,
-		"=== [1/2] /tmp/x.zip\nerror: this is a local path; harvester_download_file takes URLs — "+
-			"read a local document with `harvester_read` (files).\n\n=== [2/2] 10.1038/nature14539\nerror: ",
+		"=== [1/2] /tmp/x.zip\nerror: this is a local path; download_file takes URLs — "+
+			"read a local document with `read` (files).\n\n=== [2/2] 10.1038/nature14539\nerror: ",
 	) ||
-		!strings.Contains(text, "; read it with `harvester_read` (publications), or download the URL of its file.") {
+		!strings.Contains(text, "; read it with `read` (publications), or download the URL of its file.") {
 		t.Fatalf("download_file(local path, DOI) = %q", text)
 	}
 }
@@ -114,7 +114,7 @@ func TestDownloadFileAllFailedIsAnError(t *testing.T) {
 	result := callRaw(t, session, toolDownloadFile, map[string]any{
 		"urls": []string{"/tmp/x.zip", "10.1038/nature14539"},
 	})
-	if !result.IsError || !strings.Contains(allText(result), "harvester_read") {
+	if !result.IsError || !strings.Contains(allText(result), "read") {
 		t.Fatalf("download_file with every item failed: isError = %v, content %s", result.IsError, allText(result))
 	}
 	failed := DownloadItem{Source: "https://example.test/gone.zip", Error: "HTTP 404"}

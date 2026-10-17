@@ -46,7 +46,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 ## Local
 
 - Scratch lives in `/tmp/{project}/{purpose}/`, outside the tree: `{project}` is this repo's directory name minus any leading dot, derived, never hardcoded.
-- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/{dev}/`); a scratch path named to a human or a model is absolute.
+- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/dev/`); a scratch path named to a human or a model is absolute.
 
 # Rules
 
@@ -66,9 +66,9 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 - A sub-agent without a role of its own stops at 80 calls; at the cap, return what landed, what is left and the next step.
 - Otherwise take the lowest rung that fits; a higher rung needs its named reason.
   1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish.
-  2. Anything larger, or work crossing build units: your first tool call spawns `flights-foreman` (Agent tool, `subagent_type: flights-foreman`), handing it the work, everything you already hold, acceptance and the testing manual paths; it reads, designs, builds, splits only by ownership and lands through one lander, and returns once.
+  2. Anything larger, or work crossing build units: your first tool call spawns `flights-foreman` (Agent tool, `subagent_type: flights-foreman`), handing it the work, everything you already hold, acceptance and the testing manual paths; it reads, designs, builds, splits by ownership or its own cut and lands through one lander, and returns once.
 - ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Take the four failing test lanes to green": one `flights-foreman`, which splits only where the lanes belong to different build units. ✗ A planner writing task files for executors that read the same code again.
+- ✓ "Take the four failing test lanes to green": one `flights-foreman`, whose own cut decides any split. ✗ A planner writing task files for executors that read the same code again.
 - Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — not a no-op command, a repeated log peek or a `sleep` chain.
 
 ## Dispatch

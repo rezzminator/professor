@@ -1,7 +1,7 @@
 ---
 name: chat-investigator
 description: 'Answers a question from other chats'' transcripts — "read my chat with X", "what went wrong in that run", "did that agent really do Y". Pass the mission, any names, ids, paths or time window, and your own session id. Returns the answer, then evidence by transcript line, NOT READ.'
-tools: Read, Grep, Glob, Bash, Agent, mcp__professor__chat_ls, mcp__professor__chat_find, mcp__professor__chat_status, mcp__professor__chat_last, mcp__sub-agent-compact__compact
+tools: Read, Grep, Glob, Bash, Agent, mcp__chat-professor__ls, mcp__chat-professor__find, mcp__chat-professor__status, mcp__chat-professor__last, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: sonnet
 effort: high
 ---
@@ -15,7 +15,7 @@ Every Bash command starts with `emulate sh 2>/dev/null;`: the shell may be zsh, 
 1. LOCATE every target, then name it. Each resolves to a path, its size and span, and why it is the one:
    - An id, path, chat name or OpenCode `{store}#{session id}`: `pfm transcript locate {target}` — session, sub-agent, Codex thread and OpenCode session ids and chat names alike, across every Claude and Codex home and the OpenCode store. A name answers to the chat's latest title; `AMBIGUOUS` lists every chat sharing it with its size and last record: choose by dir, date or a user prompt the mission quotes, and name the ones left out.
    - A Codex seat's name, or whether a chat is live, resumable or killed: `pfm ls --all --tsv | grep -i '{name}'` — kind, session id, project, dir, name.
-   - An excerpt: `chat_find`, a supplement whose hits are unverified until a quoted line in the transcript matches. An error from it is retried once, then the directory listing takes over, and the failure goes in your return.
+   - An excerpt: `mcp__chat-professor__find`, a supplement whose hits are unverified until a quoted line in the transcript matches. An error from it is retried once, then the directory listing takes over, and the failure goes in your return.
    - A session's sub-agents: `pfm transcript agents {session}` — each one's id, type, description, span and calls. One is a target when its calls read what the mission asks about, never by its type alone.
    - Listing by hand: search `~/.claude/projects` itself; `~/.cc/*/projects` are links to it, so a search through them misses or triples every file.
 2. DIGEST each target once: allocate this investigator's directory with `mkdir -p /tmp/chat-investigator && mktemp -d /tmp/chat-investigator/run.XXXXXX`; use that returned absolute path as `{digest dir}` in `pfm transcript show {target} --out {digest dir}/{id}.txt` — every target's digest in one Bash call, which prints each size. A digest under 30 KB you read yourself with `grep -n` and `sed -n`; a larger one goes to a reader (step 3), and you open it only at a line a reader cited. Narrow with `--lines A-B`, `--since/--until` (clock times fall on the session's first date; a chat spanning days takes an ISO time), `--grep`, `--tool`, `--results full` on a range the digest named. Open the raw `.jsonl` only at a line the digest points to. Calls, waits, context and dollars: `pfm tokens --timeline {transcript}` (Claude only; a Codex rollout prints `NO CALLS`). A dollar figure comes from that output or a ledger, never a rate you type.
@@ -36,7 +36,7 @@ Every Bash command starts with `emulate sh 2>/dev/null;`: the shell may be zsh, 
    ```
 
    A `BAD` row is dropped; a `T{n}` row is unchecked until you read its record. An order a reader returned as `MISS` with an error, or a row you need but cannot trust, goes to the second round, or you read that slice yourself.
-4. LIVE STATE, only when the mission asks about now: `chat_status {target}` without `summary` or `ask` (those wait up to a minute), `chat_last` for its newest answer. A `chat_ls` row's state is a hint; its default scope is the caller's project, and a nonzero `elsewhere` means a partial roster.
+4. LIVE STATE, only when the mission asks about now: `mcp__chat-professor__status {target}` without `summary` or `ask` (those wait up to a minute), `mcp__chat-professor__last` for its newest answer. A `mcp__chat-professor__ls` row's state is a hint; its default scope is the caller's project, and a nonzero `elsewhere` means a partial roster.
 5. ANSWER. A chat's own progress line ("tests pass", "filed the evidence") is its claim; the fact is the artifact on disk, the command's output in the transcript, or `NOT VERIFIED`. A datum that cuts against your answer is stated beside it. A conclusion no line shows directly is marked `INFERRED` with the lines it rests on.
 
 Your final message:

@@ -31,10 +31,10 @@ func TestStdioProxyForwardsCallsThroughDaemon(t *testing.T) {
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	harness.write(t, proxyTestToolCall(2, "chat_new", `{"name":"child"}`))
+	harness.write(t, proxyTestToolCall(2, "new", `{"name":"child"}`))
 	structured := proxyTestStructured(t, harness.read(t))
 	if structured["message"] != "daemon" {
-		t.Fatalf("forwarded chat_new = %+v, want daemon marker", structured)
+		t.Fatalf("forwarded new = %+v, want daemon marker", structured)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryWindow = 2 * time.Second
 	proxy.retryDelay = time.Millisecond
@@ -106,7 +106,7 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 	go func() {
 		_, err := proxy.sendWithRetry(
 			oldContext,
-			[]byte(proxyTestToolCall(2, "chat_status", `{"target":"old"}`)),
+			[]byte(proxyTestToolCall(2, "status", `{"target":"old"}`)),
 			false,
 		)
 		oldDone <- err
@@ -114,7 +114,7 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 	<-oldStarted
 	if _, err := proxy.sendWithRetry(
 		context.Background(),
-		[]byte(proxyTestToolCall(3, "chat_status", `{"target":"recovery"}`)),
+		[]byte(proxyTestToolCall(3, "status", `{"target":"recovery"}`)),
 		false,
 	); err != nil {
 		t.Fatalf("recover current session: %v", err)
@@ -126,7 +126,7 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 	}
 	if _, err := proxy.post(
 		context.Background(),
-		[]byte(proxyTestToolCall(4, "chat_status", `{"target":"after"}`)),
+		[]byte(proxyTestToolCall(4, "status", `{"target":"after"}`)),
 	); err != nil {
 		t.Fatalf("request after late failure: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryDelay = time.Millisecond
 	proxy.sessionID = oldSession
@@ -192,7 +192,7 @@ func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
 	proxy.storeHandshake("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 	if _, err := proxy.sendWithRetry(
 		context.Background(),
-		[]byte(proxyTestToolCall(2, "chat_status", `{"target":"seat"}`)),
+		[]byte(proxyTestToolCall(2, "status", `{"target":"seat"}`)),
 		false,
 	); err != nil {
 		t.Fatalf("recover current generation: %v", err)
@@ -238,7 +238,7 @@ func TestStdioProxyStaleSuccessCannotReplaceNewSession(t *testing.T) {
 		return response, nil
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.sessionID = "session-old"
 	proxy.protocol = "protocol-old"
@@ -246,14 +246,14 @@ func TestStdioProxyStaleSuccessCannotReplaceNewSession(t *testing.T) {
 	go func() {
 		_, err := proxy.post(
 			context.Background(),
-			[]byte(proxyTestToolCall(2, "chat_status", `{"target":"old"}`)),
+			[]byte(proxyTestToolCall(2, "status", `{"target":"old"}`)),
 		)
 		oldDone <- err
 	}()
 	<-oldStarted
 	if _, err := proxy.post(
 		context.Background(),
-		[]byte(proxyTestToolCall(3, "chat_status", `{"target":"new"}`)),
+		[]byte(proxyTestToolCall(3, "status", `{"target":"new"}`)),
 	); err != nil {
 		t.Fatalf("install newer session: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestStdioProxyCloseDoesNotClearNewerSession(t *testing.T) {
 		}, nil
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.sessionID = "session-old"
 	proxy.protocol = "protocol-old"
@@ -305,7 +305,7 @@ func TestStdioProxyCloseDoesNotClearNewerSession(t *testing.T) {
 	<-closeStarted
 	if _, err := proxy.post(
 		context.Background(),
-		[]byte(proxyTestToolCall(3, "chat_status", `{"target":"new"}`)),
+		[]byte(proxyTestToolCall(3, "status", `{"target":"new"}`)),
 	); err != nil {
 		t.Fatalf("install session during close: %v", err)
 	}

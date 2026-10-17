@@ -68,11 +68,11 @@ var topLevelSubcommands = []string{
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
-	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
+	"agent-open", "call-cap", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-launch", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
-	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge",
+	reloadRunCommand, staleCommand, statuslineCommand, "store-guard", thenAction, "tmux-title-renudge",
 	"update-check",
 }
 
@@ -103,6 +103,12 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		if len(args) > 0 && (args[0] == versionCommand || args[0] == "--version") {
 			// Version needs no config while the operator applies doctor's fix.
 			return runVersion(args[1:], stdout, stderr)
+		}
+		// A retired command's answer reads no config: it names its successor
+		// whatever state the machine config is in.
+		if len(args) > 0 && (args[0] == pfmengine.MustLookup(pfmengine.Codex).LongName ||
+			args[0] == pfmengine.MustLookup(pfmengine.OpenCode).LongName) {
+			return runRetiredCommand(args[0], stderr)
 		}
 		// Stale reads no config while the operator applies doctor's fix.
 		if len(args) > 1 && args[0] == internalCommand && args[1] == staleCommand {
@@ -187,10 +193,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runIssues(args[1:], stdout, stderr, runtime)
 	case "mcp":
 		return runMCP(args[1:], stdout, stderr, runtime)
-	case pfmengine.MustLookup(pfmengine.Codex).LongName:
-		return runCodex(args[1:], stdout, stderr, runtime)
-	case pfmengine.MustLookup(pfmengine.OpenCode).LongName:
-		return runOpenCode(args[1:], stdout, stderr, runtime)
+	case pfmengine.MustLookup(pfmengine.Codex).LongName, pfmengine.MustLookup(pfmengine.OpenCode).LongName:
+		return runRetiredCommand(args[0], stderr)
 	case "internal":
 		return runInternal(args[1:], stdout, stderr, runtime)
 	case "help", "-h", "--help":
@@ -207,7 +211,7 @@ func printUsage(w io.Writer) {
 	cli.WriteLines(w, []string{
 		"usage: pfm [--config PATH] <command> [options]", "", "operator commands:",
 		"  ls        list or pick fleet chats",
-		"  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end",
+		"  chat      operate on one chat: new, open, call, ask, read, stream, name, kill, end",
 		"  headless  run Claude or OpenCode through one isolated process interface",
 		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path; download files",
 		"  index     refresh the transcript index",
@@ -231,8 +235,6 @@ func printUsage(w io.Writer) {
 		"  statusline render the native Claude status line",
 		"  usage-hook the fail-open usage-limit prompt hook",
 		"  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)",
-		"  codex     forwards to engine-sync codex (retiring: run engine-sync)",
-		"  opencode  forwards to engine-sync opencode (retiring: run engine-sync)",
 	})
 }
 
@@ -255,8 +257,8 @@ func runMCP(
 	if len(args) == 1 && args[0] == serveCommand {
 		return runMCPServe(stdout, stderr, runtime, clock.Real)
 	}
-	if len(args) == 2 && args[0] == serveCommand && args[1] == "--stdio" {
-		return runMCPStdio(stdout, stderr, runtime)
+	if len(args) == 4 && args[0] == serveCommand && args[1] == "--stdio" && args[2] == "--family" {
+		return runMCPStdio(stdout, stderr, runtime, args[3])
 	}
 	if len(args) == 1 && args[0] == "ls" {
 		for _, name := range config.RegisteredMCPServers() {
@@ -272,7 +274,10 @@ func runMCP(
 		return 0
 	}
 	if len(args) != 2 || (args[1] != "enable" && args[1] != "disable") {
-		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp serve [--stdio] | pfm mcp <server> enable|disable")
+		fmt.Fprintln(
+			stderr,
+			"usage: pfm mcp ls | pfm mcp serve [--stdio --family chat|harvester] | pfm mcp <server> enable|disable",
+		)
 		return 2
 	}
 	name, action := args[0], args[1]
@@ -438,11 +443,14 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && (args[0] == "cost-launch" || args[0] == "cost-sink") {
 		return costsink.Main(args, stderr, paths.OSEnv{})
 	}
-	if len(args) != 0 && args[0] == "git-guard" {
-		return hookentry.GitGuard(os.Stdin, stdout, stderr)
+	if len(args) != 0 && (args[0] == "git-guard" || args[0] == "store-guard") {
+		return hookentry.BashGuard(args[0], os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
+	}
+	if len(args) != 0 && args[0] == "call-cap" {
+		return hookentry.CallCapHook(args[1:], os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
@@ -519,7 +527,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|call-cap|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

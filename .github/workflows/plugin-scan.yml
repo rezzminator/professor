@@ -37,9 +37,10 @@ jobs:
       # The scanner scores `.opencode/` as its own package, including its
       # generated LICENSE/SECURITY.md/opencode.jsonc — none of which are
       # tracked (see .gitignore). Generate both mirrors before it runs, or
-      # it scores an absent, not a generated, tree. The machine policy the
-      # action stages shapes them: its opencode.mirrorFiles lists LICENSE and
-      # SECURITY.md, its opencode.permission fills opencode.jsonc.
+      # it scores an absent, not a generated, tree. The project's
+      # .claude/engine-sync.json opencode.mirrorFiles lists LICENSE and
+      # SECURITY.md; the machine policy the action stages fills
+      # opencode.jsonc from its opencode.permission.
       - name: Generate Codex and OpenCode mirrors
         shell: bash
         run: |

@@ -8,12 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +39,7 @@ const (
 )
 
 type stdioProxy struct {
+	family                  string
 	address                 string
 	endpoint                string
 	sidDir                  string
@@ -97,7 +96,8 @@ func newStdioProxy(ctx context.Context, address string, warnings io.Writer) *std
 	}
 	proxy := &stdioProxy{
 		address:      address,
-		endpoint:     "http://" + address + pfmconfig.MCPPathProfessor,
+		family:       pfmconfig.MCPServerChat,
+		endpoint:     "http://" + address + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat),
 		warnings:     warnings,
 		client:       obs.WrapClient(&http.Client{Transport: http.DefaultTransport}),
 		clock:        clock.Real,
@@ -229,19 +229,29 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 
 var stdioProbeDaemon = probeDaemonContext
 
-// runStdioTransport forwards to the daemon's config.MCPPathProfessor when it
-// mounts exactly the locally enabled families and, when chat is enabled, runs
-// the same chat runtime; otherwise it serves the combined server in process
-// and says why on the warnings writer. A daemon family this config disables
-// would reach the client through the forwarded tools/list, and a family that
-// failed to configure locally must answer its configuration error, so either
-// keeps the server in process.
-func (professor *Professor) runStdioTransport(
+// runStdioTransport forwards the selected family to its daemon route when it
+// configured locally, the daemon mounts that route and, for chat, the runtime
+// matches. Otherwise it serves the selected family in process and says why on
+// the warnings writer. Other families' configuration and daemon mounts do not
+// affect the selected family's transport.
+func (professor *FamilyServers) runStdioTransport(
 	ctx context.Context,
 	reader io.ReadCloser,
 	serialized io.WriteCloser,
 	options StdioOptions,
 ) (returnErr error) {
+	if options.Family == "" {
+		if len(professor.views) == 1 {
+			for family := range professor.views {
+				options.Family = family
+			}
+		} else {
+			return fmt.Errorf("pfm mcp stdio: choose --family chat or harvester")
+		}
+	}
+	if professor.views[options.Family] == nil {
+		return fmt.Errorf("pfm mcp stdio: family %s is disabled", options.Family)
+	}
 	warnings := options.Warnings
 	if warnings == nil {
 		warnings = os.Stderr
@@ -249,10 +259,12 @@ func (professor *Professor) runStdioTransport(
 	const consequence = "if `pfm install` replaces this binary, this chat's MCP tools fail until the chat restarts"
 	inProcess := func(reason string) error {
 		fmt.Fprintf(warnings, "pfm mcp stdio: %s; using in-process MCP; %s\n", reason, consequence)
-		return professor.combined.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
+		return professor.views[options.Family].Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
 	}
-	if len(professor.failed) > 0 {
-		return inProcess(fmt.Sprintf("family %s failed to configure locally", strings.Join(professor.failed, ", ")))
+	for _, failed := range professor.failed {
+		if failed == options.Family {
+			return inProcess(fmt.Sprintf("family %s failed to configure locally", failed))
+		}
 	}
 	address := options.DaemonAddress
 	if address == "" {
@@ -271,22 +283,18 @@ func (professor *Professor) runStdioTransport(
 	if probeErr != nil {
 		return inProcess(fmt.Sprintf("foreign service at %s (%v)", address, probeErr))
 	}
-	for _, family := range slices.Sorted(maps.Keys(professor.servers)) {
-		if _, mounted := status.Servers[family]; !mounted {
-			return inProcess(fmt.Sprintf("family %s not mounted by daemon at %s", family, address))
-		}
+	if _, mounted := status.Servers[options.Family]; !mounted {
+		return inProcess(fmt.Sprintf("family %s not mounted by daemon at %s", options.Family, address))
 	}
-	for _, family := range slices.Sorted(maps.Keys(status.Servers)) {
-		if _, enabled := professor.servers[family]; !enabled {
-			return inProcess(fmt.Sprintf("daemon at %s mounts family %s that this config disables", address, family))
-		}
-	}
-	if professor.chat != nil && (status.ChatRuntimeIdentity == "" ||
+	if options.Family == pfmconfig.MCPServerChat && professor.chat != nil && (status.ChatRuntimeIdentity == "" ||
 		status.ChatRuntimeIdentity != professor.chat.RuntimeIdentity()) {
 		return inProcess("runtime mismatch with daemon at " + address)
 	}
-	if routeErr := probeProfessorRoute(ctx, address); routeErr != nil {
-		return inProcess(fmt.Sprintf("daemon at %s serves no %s (%v)", address, pfmconfig.MCPPathProfessor, routeErr))
+	if routeErr := probeFamilyRoute(ctx, address, options.Family); routeErr != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("pfm mcp stdio: family route probe cancelled: %w", ctx.Err())
+		}
+		return inProcess(fmt.Sprintf("daemon family route unavailable (%v)", routeErr))
 	}
 	marker, markerErr := stale.HoldCompatibleProxy(options.Home)
 	if markerErr != nil {
@@ -301,37 +309,13 @@ func (professor *Professor) runStdioTransport(
 		}
 	}()
 	proxy := newStdioProxy(ctx, address, warnings)
-	if professor.chat != nil {
+	proxy.endpoint = "http://" + address + pfmconfig.MCPFamilyPath(options.Family)
+	proxy.family = options.Family
+	if options.Family == pfmconfig.MCPServerChat && professor.chat != nil {
 		proxy.expectedRuntimeIdentity = professor.chat.RuntimeIdentity()
 		proxy.sidDir = options.SIDDir
 	}
 	return proxy.run(ctx, reader, serialized)
-}
-
-// probeProfessorRoute asks the daemon whether it mounts config.MCPPathProfessor.
-// A daemon still running a build from before the professor server answers a
-// healthy /status with the same families but 404 on this route; every other
-// answer (the MCP handler refusing a bare GET included) means the route is
-// there. A probe that could not complete is an error, never "mounted".
-func probeProfessorRoute(ctx context.Context, address string) error {
-	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	endpoint := "http://" + address + pfmconfig.MCPPathProfessor
-	request, err := http.NewRequestWithContext(obs.Presence(probeCtx), http.MethodGet, endpoint, http.NoBody)
-	if err != nil {
-		return fmt.Errorf("build route probe for %s: %w", endpoint, err)
-	}
-	response, err := obs.WrapClient(&http.Client{}).Do(request)
-	if err != nil {
-		return fmt.Errorf("probe %s: %w", endpoint, err)
-	}
-	if closeErr := response.Body.Close(); closeErr != nil {
-		return fmt.Errorf("close route probe response from %s: %w", endpoint, closeErr)
-	}
-	if response.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("%s answered HTTP 404", endpoint)
-	}
-	return nil
 }
 
 func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writer) {
@@ -354,7 +338,7 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 		// Only a chat tool acts on the caller's current transcript; every
 		// other call carries the identity resolved at start.
 		engine, engineErr := pfmengine.Parse(identity.Engine)
-		if !explicitThreadID && isChatToolCall(frame) && engineErr == nil && engine == pfmengine.Claude {
+		if !explicitThreadID && proxy.isChatToolCall(frame) && engineErr == nil && engine == pfmengine.Claude {
 			if !filepath.IsAbs(proxy.sidDir) {
 				proxy.answerFailure(
 					output,
@@ -393,18 +377,10 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 	}
 }
 
-// isChatToolCall: frame is a tools/call naming a chat tool, servicedesk included.
-func isChatToolCall(frame proxyFrame) bool {
-	if frame.Method != "tools/call" {
-		return false
-	}
-	var params struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(frame.Params, &params); err != nil {
-		return false
-	}
-	return slices.Contains(chatToolNames, params.Name)
+// isChatToolCall classifies every tools/call on the chat-family proxy, even an
+// unknown tool name, for caller refresh and conservative runtime-safe replay.
+func (proxy *stdioProxy) isChatToolCall(frame proxyFrame) bool {
+	return proxy.family != pfmconfig.MCPServerHarvester && frame.Method == "tools/call"
 }
 
 func proxyCallHasThreadID(raw []byte) (bool, error) {
@@ -488,7 +464,7 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isHand
 			if probeErr != nil {
 				err = fmt.Errorf("verify daemon runtime before replay: %w", probeErr)
 			} else if (status.ChatRuntimeIdentity == "" ||
-				status.ChatRuntimeIdentity != proxy.expectedRuntimeIdentity) && replayIsChatCall(frame) {
+				status.ChatRuntimeIdentity != proxy.expectedRuntimeIdentity) && proxy.replayIsChatCall(frame) {
 				return nil, fmt.Errorf(
 					"pfm MCP daemon %s runtime mismatch during recovery; request was not replayed",
 					proxy.address,
@@ -545,12 +521,12 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isHand
 
 // replayIsChatCall decodes a frame about to be replayed; one that does not
 // decode is treated as a chat call, so it is refused rather than replayed.
-func replayIsChatCall(raw []byte) bool {
+func (proxy *stdioProxy) replayIsChatCall(raw []byte) bool {
 	var frame proxyFrame
 	if err := json.Unmarshal(raw, &frame); err != nil {
 		return true
 	}
-	return isChatToolCall(frame)
+	return proxy.isChatToolCall(frame)
 }
 
 func (proxy *stdioProxy) uncertainDelivery(cause error) error {

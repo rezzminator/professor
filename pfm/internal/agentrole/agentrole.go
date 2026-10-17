@@ -340,7 +340,7 @@ func crossEngineHint(engineID, other pfmengine.ID, kind artifactKind, role, repo
 		want := filepath.Join(repo, kind.subdir, role+kind.ext)
 		if engineID == pfmengine.Codex {
 			return fmt.Errorf(
-				"agent role %q: found %s but no compiled %s — this seat is cx (codex) and reads the compiled artifact, never the .claude source; run: pfm codex build %s",
+				"agent role %q: found %s but no compiled %s — this seat is cx (codex) and reads the compiled artifact, never the .claude source; run: engine-sync codex build %s",
 				role,
 				path,
 				want,

@@ -18,7 +18,8 @@ const DefaultHelperModel = "claude-haiku-5-5"
 
 // KeyClaudePluginCheckoutRoot names the directory holding one checkout per
 // Claude plugin pfm install ensures ({root}/{plugin}/plugins/{plugin}): an
-// -alpha build installs each plugin from a copy of its checkout there.
+// -alpha build installs each plugin from a copy of its checkout there. Unset,
+// that directory is the source clone's plugins/.
 const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
 
 // KeyClaudePlugins names the list of Claude Code plugins pfm install ensures
@@ -27,6 +28,11 @@ const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
 // {"id","source"} object whose source `claude plugin marketplace add` takes.
 // Unset, it is DefaultClaudePlugins; machine-wide, an account may not set it.
 const KeyClaudePlugins = "claude.plugins"
+
+// KeyClaudeEnv names the machine-wide map of environment variables pfm
+// install writes into the primary seat's settings.json env: each name upper
+// snake, each value a string. pfm owns only the names it wrote.
+const KeyClaudeEnv = "claude.env"
 
 // KeyClaudeCostLedger is the machine-wide switch of the per-call cost ledger:
 // false launches Claude without the OTel knobs and starts no cost sink.
@@ -66,6 +72,7 @@ func Keys() []KeyDefault {
 		{"claude.maxConcurrentSubagents", nil},
 		{KeyClaudePluginCheckoutRoot, nil},
 		{KeyClaudePlugins, defaultClaudePluginIDs()},
+		{KeyClaudeEnv, map[string]any{}},
 		{KeyClaudeCostLedger, true},
 		{KeyClaudeGptAgents, false},
 		{"codex.yolo", true},

@@ -2,13 +2,16 @@ package installer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
@@ -62,14 +65,41 @@ func availableBackup(path, stamp string) string {
 	}
 }
 
-func copyBackup(source, target string) error {
-	content, err := os.ReadFile(source)
+// readRegularFile opens without waiting on a FIFO, then checks the opened
+// descriptor rather than a racy pathname stat. Registry symlinks remain valid.
+func readRegularFile(path string) (raw []byte, info fs.FileInfo, result error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer func() { result = errors.Join(result, file.Close()) }()
+	info, err = file.Stat()
+	if err != nil {
+		return nil, nil, fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		cause := fmt.Errorf("not a regular file")
+		if info.IsDir() {
+			cause = syscall.EISDIR
+		}
+		return nil, nil, &os.PathError{Op: "read", Path: path, Err: cause}
+	}
+	raw, err = io.ReadAll(file)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return raw, info, nil
+}
+
+// copyBackup applies an optional native-lock check before publishing the backup,
+// keeping that write inside the same ownership guard as the registry save.
+func copyBackup(source, target string, check ...func() error) error {
+	content, info, err := readRegularFile(source)
 	if err != nil {
 		return err
 	}
-	info, err := os.Stat(source)
-	if err != nil {
-		return err
+	if len(check) > 0 && check[0] != nil {
+		return atomicfile.WriteIf(target, content, info.Mode().Perm(), check[0])
 	}
 	return atomicfile.Write(target, content, info.Mode().Perm())
 }

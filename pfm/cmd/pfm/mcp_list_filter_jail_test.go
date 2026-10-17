@@ -12,7 +12,7 @@ import (
 )
 
 // TestMCPListProjectFilterIsASubstringNotAQuery is the F4 regression:
-// chat_ls's "project" input used to be handed to scanRequest.Query, which
+// ls's "project" input used to be handed to scanRequest.Query, which
 // only seeds the interactive picker's search box (ui.Snapshot.InitialQuery)
 // and never filters anything — every row came back regardless of what the
 // caller asked for. The fix applies input.Project itself, case-insensitively,
@@ -22,7 +22,7 @@ func TestMCPListProjectFilterIsASubstringNotAQuery(t *testing.T) {
 	indexResumableChat(t, root, "alpha-project", "11111111-1111-4111-8111-111111111112")
 	indexResumableChat(t, root, "beta-project", "22222222-2222-4222-8222-222222222223")
 
-	output := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true, Project: "ALPHA"})
+	output := callChatTool[mcpserv.LSOutput](t, "ls", mcpserv.LSInput{All: true, Project: "ALPHA"})
 	if output.Matched != 1 || output.Count != 1 {
 		t.Fatalf("filtered list = %+v, want exactly the alpha row", output)
 	}
@@ -36,14 +36,14 @@ func TestMCPListProjectFilterIsASubstringNotAQuery(t *testing.T) {
 	// The unfiltered call is the control: both rows come back when no filter
 	// is given, proving the narrowing above came from the filter and not
 	// from some other difference between the two fixtures.
-	unfiltered := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true})
+	unfiltered := callChatTool[mcpserv.LSOutput](t, "ls", mcpserv.LSInput{All: true})
 	if unfiltered.Matched != 2 {
 		t.Fatalf("unfiltered matched = %d, want 2", unfiltered.Matched)
 	}
 }
 
 // TestMCPListLimitReportsFullMatchedCountAndTruncated is the F5 regression:
-// chat_ls had no Limit input at all, so a large killed history (hundreds of
+// ls had no Limit input at all, so a large killed history (hundreds of
 // rows) always answered in full. The fix caps Rows at Limit (default 200, max
 // 1000) while Matched keeps the full count the view and filter selected, and
 // Truncated says outright that Count < Matched.
@@ -53,7 +53,7 @@ func TestMCPListLimitReportsFullMatchedCountAndTruncated(t *testing.T) {
 	indexResumableChat(t, root, "two-project", "44444444-4444-4444-8444-444444444445")
 	indexResumableChat(t, root, "three-project", "55555555-5555-4555-8555-555555555556")
 
-	output := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true, Limit: 1})
+	output := callChatTool[mcpserv.LSOutput](t, "ls", mcpserv.LSInput{All: true, Limit: 1})
 	if output.Matched != 3 {
 		t.Fatalf("output.Matched = %d, want 3 (the full match count regardless of Limit)", output.Matched)
 	}
@@ -64,16 +64,16 @@ func TestMCPListLimitReportsFullMatchedCountAndTruncated(t *testing.T) {
 		t.Fatal("output.Truncated = false, want true when Count < Matched")
 	}
 
-	full := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true, Limit: 3})
+	full := callChatTool[mcpserv.LSOutput](t, "ls", mcpserv.LSInput{All: true, Limit: 3})
 	if full.Truncated {
 		t.Fatal("output.Truncated = true when Limit covers every matched row")
 	}
 }
 
-// TestMCPListAdmitsBootingRow is the F6 regression: the chat_ls exclusion used
+// TestMCPListAdmitsBootingRow is the F6 regression: the ls exclusion used
 // to drop compose.Booting alongside the picker's placeholder New* rows, so
-// chat_ls reported a chat that had already spawned its process and its tmux
-// pane — and already answers chat_inject by name — as flatly absent for its
+// ls reported a chat that had already spawned its process and its tmux
+// pane — and already answers call by name — as flatly absent for its
 // first minute of life. The fix lists it with state "booting" instead of
 // excluding it.
 func TestMCPListAdmitsBootingRow(t *testing.T) {
@@ -109,7 +109,7 @@ func TestMCPListAdmitsBootingRow(t *testing.T) {
 		cmdline:   []string{"/opt/claude"},
 	})
 
-	output := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true})
+	output := callChatTool[mcpserv.LSOutput](t, "ls", mcpserv.LSInput{All: true})
 	var found *mcpserv.ChatRow
 	for index := range output.Rows {
 		if output.Rows[index].Socket == socket {
@@ -118,7 +118,7 @@ func TestMCPListAdmitsBootingRow(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatalf("chat_ls omitted the booting row entirely: rows=%+v", output.Rows)
+		t.Fatalf("ls omitted the booting row entirely: rows=%+v", output.Rows)
 	}
 	if found.State != "booting" {
 		t.Fatalf("booting row state = %q, want %q", found.State, "booting")

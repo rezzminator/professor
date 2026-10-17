@@ -38,8 +38,8 @@ func collectRows[T any](
 }
 
 const (
-	KindInject = "inject"
-	KindSpawn  = "spawn"
+	KindCall  = "call"
+	KindSpawn = "spawn"
 )
 
 // CommsEvent is one durable chat-to-chat communication event.

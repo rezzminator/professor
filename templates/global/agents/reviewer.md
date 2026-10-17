@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews a diff range — proves every thread it touches safe up and downstream; "review this branch/range/merge", "is this safe to merge", the default where /code-review would be used. Modes pre-merge, post-merge; HEAD WORKTREE for uncommitted work; PATHSPECS narrow it; a merge-gating brief names REPORT_PATH, which gitter reads. Returns one line, the review file path.
-tools: Read, Write, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact
+tools: Read, Write, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 skills: [tracer:use]
 model: opus
 effort: high

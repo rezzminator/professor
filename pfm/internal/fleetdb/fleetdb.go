@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS chat_mtime ON chat(mtime);
 CREATE TABLE IF NOT EXISTS comms(
   id              INTEGER PRIMARY KEY,
   at_ns           INTEGER NOT NULL,
-  kind            TEXT NOT NULL CHECK(kind IN ('inject','group','spawn')),
+  kind            TEXT NOT NULL CHECK(kind IN ('call','group','spawn')),
   sender_session  TEXT NOT NULL DEFAULT '',
   sender_label    TEXT NOT NULL DEFAULT '',
   sender_uuid     TEXT NOT NULL DEFAULT '',

@@ -18,6 +18,7 @@ var parseErrorFrame = []byte(
 // the Claude breadcrumb directory, and where its fallback warnings go (nil:
 // stderr).
 type StdioOptions struct {
+	Family        string
 	DaemonAddress string
 	Home          string
 	SIDDir        string
@@ -25,13 +26,13 @@ type StdioOptions struct {
 }
 
 // RunStdio serves the professor server over stdio: it forwards to the daemon's
-// config.MCPPathProfessor when that daemon is compatible, and serves the
-// combined server in process otherwise. It reads through the official SDK IO
+// config.MCPFamilyPath(config.MCPServerChat) when that daemon is compatible, and serves the
+// selected family in process otherwise. It reads through the official SDK IO
 // transport while keeping a syntactically malformed newline frame from
 // terminating the whole server. MCP's stdio wire format is newline-delimited
 // JSON, so invalid lines can be answered and discarded before the SDK's
 // JSON-RPC connection sees them.
-func (professor *Professor) RunStdio(
+func (professor *FamilyServers) RunStdio(
 	ctx context.Context,
 	input io.Reader,
 	output io.Writer,

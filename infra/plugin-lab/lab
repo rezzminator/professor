@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# plugin-lab: runs a plugin checkout in an isolated, metered Claude Code session
+# and prints a pass/fail table per check. docs/dev/testing/plugin-lab.md.
+#   lab run {plugin}/{scenario} --plugin DIR [--ledger F] [--budget USD] [--auth-from DIR] [--claude PATH]
+#   lab report {run} · lab attach {run} · lab stop {run} · lab list [--gaps] · lab prune --days N
+# The header stays bash-3-safe: macOS /bin/bash re-execs under a bash >= 4.4 (mapfile -d).
+lab_bash_major=${LAB_BASH_MAJOR:-${BASH_VERSINFO[0]}} lab_bash_minor=${LAB_BASH_MINOR:-${BASH_VERSINFO[1]}}
+if [ "$lab_bash_major" -lt 4 ] || { [ "$lab_bash_major" -eq 4 ] && [ "$lab_bash_minor" -lt 4 ]; }; then
+  for b in ${LAB_BASH_CANDIDATES-/opt/homebrew/bin/bash /usr/local/bin/bash}; do
+    if [ -x "$b" ] && "$b" -c '[ "${BASH_VERSINFO[0]}" -ge 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; }' 2>/dev/null; then
+      LAB_BASH_MAJOR='' LAB_BASH_MINOR='' exec "$b" "$0" "$@"
+    fi
+  done
+  echo "ERROR bash-too-old ${BASH_VERSION}: the lab needs bash >= 4.4 (brew install bash)" >&2
+  exit 2
+fi
+set -uo pipefail
+export LC_ALL=C
+LAB_LAB=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+LAB_SELF=$0
+LAB_SCENARIOS=${LAB_SCENARIOS:-$LAB_LAB/scenarios}
+for n in run auth isolate drive observe meter verdict corpus; do
+  # shellcheck source=/dev/null
+  source "$LAB_LAB/lib/$n.sh"
+done
+
+lab_die() { printf '%s\n' "$2" >&2; exit "$1"; } # <rc> <line>
+
+lab_load_scenario() { # <file>: the header and lab_scenario, with every optional field reset first
+  LAB_ENV=() LAB_ALLOW=() LAB_DENY=() LAB_EXPECT_ERRORS=() LAB_EXPECT_BYPASS=() LAB_MANAGED='' LAB_GAP_IF_NOT_INDUCED='' LAB_OPTIONS='{}' LAB_DECISIONS=''
+  # shellcheck source=/dev/null
+  source "$1" || lab_die 2 "ERROR scenario-unloadable $1"
+}
+
+lab_resolve_claude() { # <--claude or empty>: the native versioned binary (D4), absolute
+  local c=$1 v
+  if [[ -z $c ]]; then
+    v=$(find "$HOME/.local/share/claude/versions" -mindepth 1 -maxdepth 1 -type f -perm -u+x -exec basename {} \; 2>/dev/null | sort -V | tail -n 1)
+    [[ -n $v ]] && c=$HOME/.local/share/claude/versions/$v
+  fi
+  [[ -n $c && -x $c ]] || lab_die 2 "ERROR claude-not-found ${c:-no binary under \$HOME/.local/share/claude/versions}; pass --claude PATH"
+  printf '%s/%s\n' "$(cd "$(dirname "$c")" && pwd -P)" "$(basename "$c")"
+}
+
+lab_meta() { # <jq update>: edits meta.json in place
+  jq "$@" "$LAB_RUN/meta.json" > "$LAB_RUN/meta.json.new" && mv "$LAB_RUN/meta.json.new" "$LAB_RUN/meta.json"
+}
+
+lab_cmd_run() {
+  local spec=${1:-} plugin='' ledger='' budget=10.00 budget_set='' claude='' file name authline budgetline ids=() rc
+  [[ -n $spec ]] || lab_die 2 'ERROR usage: lab run {plugin}/{scenario} --plugin DIR'
+  shift
+  LAB_AUTH_FROM=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+  while (( $# )); do
+    case $1 in
+      --plugin) plugin=${2:-}; shift 2 ;;
+      --ledger) ledger=${2:-}; shift 2 ;;
+      --budget) budget=${2:-} budget_set=1; shift 2 ;;
+      --auth-from) LAB_AUTH_FROM=${2:-}; shift 2 ;;
+      --claude) claude=${2:-}; shift 2 ;;
+      *) lab_die 2 "ERROR usage: unknown flag $1" ;;
+    esac
+  done
+  [[ -z $budget_set || -n $ledger ]] || lab_die 2 'ERROR usage: --budget needs --ledger, the record of spend across runs'
+  file=$LAB_SCENARIOS/$spec.sh
+  [[ -f $file ]] || lab_die 2 "ERROR scenario-not-found $file"
+  [[ -f $plugin/.claude-plugin/plugin.json ]] || lab_die 2 "ERROR plugin: no .claude-plugin/plugin.json in ${plugin:-(--plugin missing)}"
+  LAB_PLUGIN_DIR=$(cd "$plugin" && pwd -P)
+  name=$(jq -r '.name // empty' "$LAB_PLUGIN_DIR/.claude-plugin/plugin.json")
+  LAB_PLUGIN_VERSION=$(jq -r '.version // empty' "$LAB_PLUGIN_DIR/.claude-plugin/plugin.json")
+  lab_load_scenario "$file"
+  [[ $LAB_PLUGIN == "$name" ]] || lab_die 2 "ERROR plugin-mismatch scenario wants $LAB_PLUGIN, --plugin holds ${name:-no name}"
+  LAB_SCENARIO=${spec##*/} LAB_CAP=$LAB_CAP_USD LAB_REAL_HOME=$HOME
+  LAB_CLAUDE=$(lab_resolve_claude "$claude") || exit 2
+  LAB_JQ_DIR=$(dirname "$(command -v jq)") || lab_die 2 'ERROR jq-not-found'
+  LAB_METER=${LAB_METER:-$(command -v pfm)} || true
+  [[ -n $LAB_METER && -x $LAB_METER ]] || lab_die 2 'ERROR meter: pfm not on PATH; set LAB_METER to a meter command'
+  LAB_IDENTITY=$(lab_identity "$LAB_PLUGIN_DIR") || lab_die 2 "ERROR identity: git cannot read $LAB_PLUGIN_DIR"
+  lab_auth_read "$LAB_AUTH_FROM" || exit 2
+  authline=$(lab_auth_check "$LAB_WALL_S") || exit 2
+  budgetline=$(lab_budget_preflight "$ledger" "$LAB_CAP" "$budget") || exit 2
+  mapfile -t ids < <(lab_installed_ids "$LAB_AUTH_FROM" "$LAB_PLUGIN")
+  lab_installed_ids "$LAB_AUTH_FROM" "$LAB_PLUGIN" >/dev/null || exit 2
+  lab_run_dir "$LAB_SCENARIO" || exit 2
+  printf '%s · %s · run %s\n' "$authline" "$budgetline" "$LAB_RUN"
+  LAB_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  jq -n --arg id "$LAB_RUN_ID" --arg s "$LAB_SCENARIO" --arg p "$LAB_PLUGIN" --arg v "$LAB_PLUGIN_VERSION" \
+    --arg rev "${LAB_IDENTITY% *}" --arg dirty "${LAB_IDENTITY#* }" --arg cap "$LAB_CAP" --arg st "$LAB_STARTED" \
+    --arg c "$(basename "$LAB_CLAUDE")" --arg cp "$LAB_CLAUDE" --arg m "$LAB_MODEL" \
+    '{run_id: $id, scenario: $s, plugin: $p, version: $v, rev: $rev, dirty: $dirty, cap: $cap, started: $st,
+      claude: $c, claude_path: $cp, model: $m}' > "$LAB_RUN/meta.json"
+  : > "$LAB_RUN/checks.tsv"
+  # config/projects exists before the first transcript, so the meter reads $0 there, never a missing root
+  mkdir -p "$LAB_RUN"/{home,tmp,config/projects,work,logs,pane} "$LAB_RUN/sec" && chmod 700 "$LAB_RUN/sec"
+  lab_settings_render "$LAB_PLUGIN" "${ids[@]}" || lab_die 2 'ERROR settings: lab options are not JSON'
+  lab_managed_render "${LAB_MANAGED//\{run\}/$LAB_RUN}" || lab_die 2 'ERROR settings: LAB_MANAGED is not JSON'
+  lab_seed_config && lab_launch_render || lab_die 2 "ERROR run-dir cannot write $LAB_RUN"
+  # Before any spend: a run that never reaches its final row (interrupt, abort, kill) counts at its cap.
+  # Under the ledger lock the budget is checked again with the RUNNING row, so runs launched together never overrun it.
+  if [[ -n $ledger ]] && ! lab_ledger_reserve "$ledger" "$LAB_CAP" "$budget" >/dev/null; then rm -rf -- "$LAB_RUN"; exit 2; fi
+  trap 'lab_stop' EXIT
+  trap 'lab_stop; exit 130' INT TERM
+  LAB_AGENT_ID='' LAB_AGENT_TRANSCRIPT='' LAB_SID_PREV='' # a beat may name them before the verb that sets them passed
+  LAB_TICK=lab_meter_poll LAB_T0=$SECONDS
+  lab_scenario
+  LAB_TICK=''
+  if [[ -n ${LAB_BOOTED:-} && -z ${LAB_TORN:-} && -z ${LAB_IN_TURN:-} && -z ${LAB_DEAD:-} ]]; then exit_session >/dev/null; fi
+  lab_stop
+  trap - EXIT INT TERM
+  lab_passport
+  lab_vitals
+  lab_meta --arg u "${LAB_USD:-?}" --arg w "$(( SECONDS - LAB_T0 ))" --arg e "${LAB_IDENTITY_END:-?}" --arg sid "${LAB_SID:-}" \
+    '.usd = $u | .wall_s = $w | .identity_end = $e | .session_id = $sid'
+  printf '\n'
+  lab_render_report "$LAB_RUN"; rc=$?
+  if [[ -n $ledger ]]; then lab_ledger_record "$ledger" || rc=2; fi
+  exit "$rc"
+}
+
+lab_cmd_list() { # one line per scenario; --gaps: one line per named gap
+  local f id
+  if [[ ${1:-} == --gaps ]]; then
+    for f in "$LAB_SCENARIOS"/*/gaps.tsv; do
+      [[ -f $f ]] && awk -F '\t' 'NF >= 2 && $1 !~ /^#/ { printf "%s GAP %s\n", $1, $2 }' "$f"
+    done
+    return 0
+  fi
+  for f in "$LAB_SCENARIOS"/*/*.sh; do
+    [[ -f $f ]] || continue
+    id=${f#"$LAB_SCENARIOS"/}; id=${id%.sh}
+    ( lab_load_scenario "$f"; printf '%s %s %s est %s cap %s\n' "$id" "${LAB_ROWS[*]}" "$LAB_MODEL" "$LAB_EST_USD" "$LAB_CAP_USD" )
+  done
+}
+
+lab_cmd_stop() { # <run>: the identity-checked kill, then the run's private tmux server
+  LAB_RUN=${1:-}
+  [[ -f $LAB_RUN/meta.json ]] || lab_die 2 "ERROR no-run ${LAB_RUN:-(run folder missing)}"
+  LAB_RUN=$(cd "$LAB_RUN" && pwd -P) # the form its claude was launched with
+  LAB_CLAUDE=$(jq -r .claude_path "$LAB_RUN/meta.json")
+  LAB_PID=$(cat "$LAB_RUN/claude.pid" 2>/dev/null || true)
+  lab_stop
+  printf 'stopped %s\n' "$LAB_RUN"
+}
+
+case ${1:-} in
+  run) shift; lab_cmd_run "$@" ;;
+  report) [[ -n ${2:-} ]] || lab_die 2 'ERROR usage: lab report {run}'; lab_render_report "$2"; exit $? ;;
+  attach) [[ -S ${2:-}/t.sock ]] || lab_die 2 "ERROR no-session ${2:-}"; exec env -u TMUX tmux -S "$2/t.sock" attach -r ;;
+  stop) lab_cmd_stop "${2:-}" ;;
+  list) lab_cmd_list "${2:-}" ;;
+  prune) [[ ${2:-} == --days && -n ${3:-} ]] || lab_die 2 'ERROR usage: lab prune --days N'; lab_prune "$3" ;;
+  *) lab_die 2 'ERROR usage: lab run|report|attach|stop|list|prune (docs/dev/testing/plugin-lab.md)' ;;
+esac

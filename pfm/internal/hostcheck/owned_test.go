@@ -140,6 +140,35 @@ func mcpFixture(t *testing.T, env Env, path string) {
 }
 
 func TestPFMMCP(t *testing.T) {
+	t.Run("current-family-registrations", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
+		servers := map[string]any{}
+		for _, family := range []string{"chat", "harvester"} {
+			servers[family+"-professor"] = map[string]any{
+				"type":    "stdio",
+				"command": filepath.Join(env.Home, ".local", "bin", "pfm"),
+				"args":    []string{"mcp", "serve", "--stdio", "--family", family},
+			}
+		}
+		raw, err := json.Marshal(map[string]any{"mcpServers": servers})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, path, string(raw))
+		assertRows(t, detect(t, "pfm-mcp", env))
+		assertRows(t, detect(t, "third-party-mcp", env))
+	})
+	t.Run("legacy-account-can-reach-cutover", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
+		mcpFixture(t, env, path)
+		for _, row := range detect(t, "pfm-mcp", env) {
+			if row.Severity == Block {
+				t.Fatalf("owned legacy account blocks install migration: %+v", row)
+			}
+		}
+	})
 	env := fixtureEnv(t)
 	account := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
 	ambient := filepath.Join(env.Home, ".claude.json")
@@ -147,14 +176,19 @@ func TestPFMMCP(t *testing.T) {
 	var want []Row
 	for _, path := range []string{account, ambient, homeMCP} {
 		mcpFixture(t, env, path)
+		severity, remedy := Warn, "run pfm install --yes to cut over owned account registrations"
+		if path == homeMCP {
+			severity = Block
+			remedy = "remove mcpServers.professor from " + path + "; pfm's server rides --mcp-config at launch"
+		}
 		want = append(
 			want,
 			Row{
-				Block,
+				severity,
 				"pfm-mcp",
 				path,
 				"carries pfm mcpServers.professor",
-				"remove mcpServers.professor from " + path + "; pfm's server rides --mcp-config at launch",
+				remedy,
 			},
 		)
 	}
@@ -163,7 +197,7 @@ func TestPFMMCP(t *testing.T) {
 	want = append(
 		want,
 		Row{
-			Block,
+			Warn,
 			"pfm-mcp",
 			ledger,
 			"mcp-ownership.json still records pfm clients",

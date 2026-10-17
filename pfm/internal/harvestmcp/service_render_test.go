@@ -78,19 +78,19 @@ func TestRenderReadItemLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 
 // TestRenderReadItemThinExtractionNamesSearchOnlyWhenAvailable: the "thin
 // extraction" (JS-rendered/bot-blocked, no readable content) message
-// recommends `harvester_search_web` only when a backend is configured, and
-// falls back to harvester_search_literature/another-URL wording when it is not.
+// recommends `search_web` only when a backend is configured, and
+// falls back to search_literature/another-URL wording when it is not.
 func TestRenderReadItemThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	result := harvest.Result{HTTPStatus: 200}
 	got, _ := RenderReadItem(1, 1, "https://fixture.example/source", result, ReadView{SearchEnabled: true})
-	for _, want := range []string{"no readable content", "`harvester_search_web`", "`harvester_search_literature`"} {
+	for _, want := range []string{"no readable content", "`search_web`", "`search_literature`"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("search-on failure block missing %q: %q", want, got)
 		}
 	}
 	got, _ = RenderReadItem(1, 1, "https://fixture.example/source", result, ReadView{})
-	if strings.Contains(got, "`harvester_search_web`") || !strings.Contains(got, "`harvester_search_literature`") {
-		t.Fatalf("search-off failure block = %q, want harvester_search_literature and no harvester_search_web", got)
+	if strings.Contains(got, "`search_web`") || !strings.Contains(got, "`search_literature`") {
+		t.Fatalf("search-off failure block = %q, want search_literature and no search_web", got)
 	}
 }
 
@@ -171,10 +171,10 @@ func TestRenderReadItemSizeProbeFailsAThinErrorPageLikeTheFullRead(t *testing.T)
 }
 
 // TestRenderFindNamesTheHarvesterSearchTool: an empty candidate list points
-// at harvester_search_web.
+// at search_web.
 func TestRenderFindNamesTheHarvesterSearchTool(t *testing.T) {
 	text := RenderFind("an unknown title", FindOutput{})
-	if !strings.Contains(text, "harvester_search_web") {
-		t.Fatalf("RenderFind empty hint = %q, want harvester_search_web", text)
+	if !strings.Contains(text, "search_web") {
+		t.Fatalf("RenderFind empty hint = %q, want search_web", text)
 	}
 }

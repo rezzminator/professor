@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -212,7 +213,9 @@ func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
 
 // TestHarnessCaptureEnvStripsTheFleetHygieneList pins the capture's strip set
 // to the fleet's one list plus ANTHROPIC_API_KEY: every inherited value of a
-// listed name is dropped (the pinned sink values replace some of them), and a
+// listed name is dropped (the pinned sink values replace some of them), the
+// nonessential-traffic switch is pinned on so remote feature flags hold their
+// shipped defaults instead of switching the prompt between captures, and a
 // name the list does not carry passes through.
 func TestHarnessCaptureEnvStripsTheFleetHygieneList(t *testing.T) {
 	const inherited = "inherited-sentinel"
@@ -233,8 +236,10 @@ func TestHarnessCaptureEnvStripsTheFleetHygieneList(t *testing.T) {
 	if !present["KEEP_ME"] {
 		t.Errorf("capture env %q dropped KEEP_ME, a name outside the strip list", got)
 	}
+	if !slices.Contains(got, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1") {
+		t.Errorf("capture env %q lacks CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1: remote flags pick the prompt", got)
+	}
 	for _, name := range []string{
-		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
 		"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
 		"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
 	} {

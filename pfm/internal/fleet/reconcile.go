@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"sort"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -204,7 +204,7 @@ func ReconcileCodexPanesWith(
 				))
 				continue
 			}
-			if inject.IsFooterBusy(pfmengine.Codex, capture) {
+			if pfmcall.IsFooterBusy(pfmengine.Codex, capture) {
 				continue
 			}
 		}

@@ -11,9 +11,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
-// MinimumVersion is the first engine-sync that layers a declaration's shared
-// files by relative path and marks machine renders with engine-sync global.
-const MinimumVersion = "0.3.0-alpha.4"
+// MinimumVersion is the first engine-sync that reads its machine config from
+// one global file, {home}/.claude/engine-sync.json, and refuses the old
+// {config}/engine-sync/config.json and targets.json beside it.
+const MinimumVersion = "0.4.0-alpha"
 
 var releaseVersion = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`)
 
@@ -142,7 +143,7 @@ func (runner Runner) RequireMinimumVersion(ctx context.Context) error {
 	}
 	if order < 0 {
 		return fmt.Errorf(
-			"engine-sync %s is older than required %s — update the plugin (`claude plugin update engine-sync@professor`), "+
+			"engine-sync %s is older than required %s — update the plugin (`claude plugin update engine-sync@engine-sync`), "+
 				"then start a new Claude session so its wrapper links the newer binary",
 			version,
 			MinimumVersion,

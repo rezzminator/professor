@@ -42,7 +42,7 @@ Files: `~/.claude/commands/flights/*.md` (machine-global: init, spec, orchestrat
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
 - **Verdict tokens ↔ their writers:** every token a command cites (`CLAIMED`, `DONE`, `PARTIAL`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `COMA`) is one `flights-foreman`, `flights-mechanical-executor` or `/flights:orchestrate-cross-harness` writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** spec → `flights-foreman` → `flights-lander` → gitter; cross-harness substitutes child seats — no step references an agent from a later phase
+- **Flow integrity:** spec → `flights-foreman` (→ `flights-speccer` on novel, large work) → `flights-lander` → gitter; cross-harness substitutes child seats — no step references an agent from a later phase
 
 ## `scripts` — Walk each script
 
@@ -63,7 +63,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 - **Permanent docs:** the hub `docs/_index.md` and `docs/commands/` exist, with expected subdirs
 - **Stale names:** grep all CLAUDE.md files and agents for old/renamed project names or typos
 - **Package managers:** each roster project's lock file (`{PROJECT_PKG_MGR}` per project) present
-- **Codex mirror:** `pfm codex check` exits 0 — report its output verbatim; a non-zero exit names each generated Codex artifact (AGENTS.md, `.codex/`, `$HOME/.codex/`) that is MISSING, STALE, ORPHANed, or CONFLICTing with an unmarked file
+- **Codex mirror:** `engine-sync codex check` exits 0 — report its output verbatim; a non-zero exit names each generated Codex artifact (AGENTS.md, `.codex/`, `$HOME/.codex/`) that is MISSING, STALE, ORPHANed, or CONFLICTing with an unmarked file
 - **Baseline:** `pfm doctor --project-updates` runs (a `.professor/baseline.json` exists) — report its counts verbatim; FAILED output (exit 3) is a finding, never "current"
 
 ## `cross-refs` — The glue between domains

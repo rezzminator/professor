@@ -73,7 +73,7 @@ The test command as the only way to run the unit's tests; the check command as i
 
 ## 8 — Engine copies
 
-When `.codex/` or `.opencode/` sits at the root, regenerate that engine's copies: `pfm codex build .`, `pfm opencode build .`.
+When `.codex/` or `.opencode/` sits at the root, regenerate that engine's copies: `engine-sync codex build .`, `engine-sync opencode build .`.
 
 ## 9 — Verify
 

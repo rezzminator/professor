@@ -92,11 +92,13 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"debug",
 		"daemon.lock",
 		"daemon.status.json",
+		".claude.json.lock",
 		"tmp",
 		"chrome",
 		"dev-mods",
 		"keybindings.json",
 		"hooks",
+		"engine-sync.json",
 	}
 	if !reflect.DeepEqual(IgnoredEntries, ignored) {
 		t.Fatalf("ignored=%v", IgnoredEntries)

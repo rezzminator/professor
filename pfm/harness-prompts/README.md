@@ -52,7 +52,7 @@ newer — a clone checked out to an older revision than the binary is the binary
 
 ## The Claude drift baseline
 
-- `claude/baselines/harness-original-v2.1.292.md` and `claude/baselines/harness-opus-v2.1.280.md`
+- `claude/baselines/harness-original-v2.1.300.md` and `claude/baselines/harness-opus-v2.1.300.md`
   are reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic
   sections excluded. These are frozen captures: no test or suite re-captures or re-verifies them
   against a real Claude CLI. The only live capture is `pfm doctor` on a host; re-pinning follows
@@ -83,7 +83,10 @@ newer — a clone checked out to an older revision than the binary is the binary
   Professor replacement.
 
 Captures use a localhost sink with dummy credentials that rejects the API request with HTTP 400;
-no model inference occurs. Render system blocks with
+no model inference occurs. Each runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, so remote
+feature flags keep their shipped defaults: fetched afresh into each throwaway config dir, they
+would switch prompt variants between identical captures. A flag-gated variant a networked session
+receives is therefore outside the baseline; review the CLI's gated prompt text when re-pinning. Render system blocks with
 `jq -r '.system | map(.text) | join("\n\n=== SYSTEM BLOCK ===\n\n")'` before normalization.
 Re-pinning requires human review of instruction differences, followed by updating the prompt,
 SHA256, and model provenance together. Never automatically accept a newly captured prompt.

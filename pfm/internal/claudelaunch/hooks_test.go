@@ -17,8 +17,8 @@ import (
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
 	hooks := HookTemplates(home)
-	if len(hooks) != 12 {
-		t.Fatalf("registrations=%d, want 12", len(hooks))
+	if len(hooks) != 13 {
+		t.Fatalf("registrations=%d, want 13", len(hooks))
 	}
 	for _, hook := range hooks {
 		if hook.Name == hookTracerIntake {
@@ -237,5 +237,24 @@ func TestTracerIntakeHookIsTheRegistryRow(t *testing.T) {
 	}
 	if want := "python3 " + shellQuote(kit) + " intake || "; !strings.HasPrefix(hook.Command, want) {
 		t.Errorf("command=%q, want prefix %q (the returned kit is not the file the command runs)", hook.Command, want)
+	}
+}
+
+func TestStoreGuardRidesBesideGitGuardOnBash(t *testing.T) {
+	home := t.TempDir()
+	var got []Hook
+	for _, hook := range HookTemplates(home) {
+		if hook.Event == hookEventPreToolUse && hook.Matcher == "Bash" {
+			got = append(got, hook)
+		}
+	}
+	want := []string{home + "/.local/bin/pfm internal git-guard", home + "/.local/bin/pfm internal store-guard"}
+	if len(got) != len(want) {
+		t.Fatalf("PreToolUse Bash hooks=%+v, want git-guard and store-guard", got)
+	}
+	for i, hook := range got {
+		if hook.Command != want[i] {
+			t.Errorf("PreToolUse Bash hook %d command=%q, want %q", i, hook.Command, want[i])
+		}
 	}
 }

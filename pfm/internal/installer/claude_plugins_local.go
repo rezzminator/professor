@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
@@ -20,7 +21,8 @@ import (
 // An -alpha build installs each bare plugin name from a local marketplace pfm
 // owns, ~/.local/share/{plugin}-dev: its .claude-plugin/marketplace.json names
 // the one plugin at ./plugins/{plugin}, a copy of the checkout's
-// plugins/{plugin} refreshed on every install. A copy, never a symlink: Claude
+// plugins/{plugin} (under claude.pluginCheckoutRoot, else the source clone's
+// plugins/) refreshed on every install. A copy, never a symlink: Claude
 // Code refuses a plugin file that resolves outside its marketplace dir.
 
 // claudePluginOwner is the GitHub owner every bare plugin name's marketplace names.
@@ -33,22 +35,35 @@ func devMarketplaceName(plugin string) string { return plugin + "-dev" }
 func pluginCopySkipped(name string) bool { return name == "node_modules" || name == ".DS_Store" }
 
 // localClaudePluginTarget turns an -alpha build's target local when its
-// checkout exists under build.CheckoutRoot, and otherwise says why not.
+// checkout exists under the checkout root, and otherwise says why not. The
+// root is build.CheckoutRoot when claude.pluginCheckoutRoot is set, else the
+// source clone's plugins/; a fallback names which root it tried. A source
+// clone that cannot be resolved, or a checkout that cannot be read, leaves the
+// target Undecided rather than falling back.
 func localClaudePluginTarget(target ClaudePluginTarget, build ClaudePluginBuild) ClaudePluginTarget {
-	if build.CheckoutRoot == "" {
-		target.Fallback = pfmconfig.KeyClaudePluginCheckoutRoot + " unset"
-		return target
+	root, rootName := build.CheckoutRoot, pfmconfig.KeyClaudePluginCheckoutRoot
+	if root == "" {
+		unset := pfmconfig.KeyClaudePluginCheckoutRoot + " unset"
+		switch {
+		case build.SourceRepoErr != nil:
+			target.Undecided = fmt.Sprintf("source clone unresolved (%s): %v", unset, build.SourceRepoErr)
+			return target
+		case build.SourceRepo == "":
+			target.Fallback = unset + " and no source clone"
+			return target
+		}
+		root, rootName = filepath.Join(build.SourceRepo, "plugins"), "the source clone's plugins/; "+unset
 	}
-	checkout := filepath.Join(build.CheckoutRoot, target.Name, "plugins", target.Name)
+	checkout := filepath.Join(root, target.Name, "plugins", target.Name)
 	manifest := filepath.Join(checkout, ".claude-plugin", "plugin.json")
 	info, err := os.Stat(manifest)
 	switch {
 	case err == nil && info.Mode().IsRegular():
 	case err == nil || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR):
-		target.Fallback = "no checkout at " + manifest + " (" + pfmconfig.KeyClaudePluginCheckoutRoot + ")"
+		target.Fallback = "no checkout at " + manifest + " (" + rootName + ")"
 		return target
 	default:
-		target.Fallback = fmt.Sprintf("checkout unreadable (%s): %v", pfmconfig.KeyClaudePluginCheckoutRoot, err)
+		target.Undecided = fmt.Sprintf("checkout unreadable (%s): %v", rootName, err)
 		return target
 	}
 	marketplace := filepath.Join(build.Home, ".local", "share", devMarketplaceName(target.Name))
@@ -88,7 +103,8 @@ func inspectPluginCopy(mirror string) (pluginCopyState, error) {
 	return pluginCopyDir, nil
 }
 
-// claudePluginCopyGap names what is wrong with a local target's copy, or "".
+// claudePluginCopyGap names what is wrong with a local target's copy — absent,
+// not a plain directory, or not the checkout's content — or "".
 func claudePluginCopyGap(target *ClaudePluginTarget) (string, error) {
 	mirror := target.Mirror()
 	state, err := inspectPluginCopy(mirror)
@@ -102,7 +118,11 @@ func claudePluginCopyGap(target *ClaudePluginTarget) (string, error) {
 	case state == pluginCopyNotDir:
 		return mirror + " is not a directory", nil
 	}
-	return "", nil
+	change, err := pluginCopyChange(target.Checkout, mirror)
+	if err != nil || change == "" {
+		return "", err
+	}
+	return mirror + " differs from " + target.Checkout, nil
 }
 
 // ensureClaudePluginCopy writes the local marketplace's manifest when it does
@@ -343,70 +363,305 @@ func mirrorPluginTree(source, target string) error {
 	return os.RemoveAll(aside)
 }
 
-// otherID is the id of ours this build does not ensure: the GitHub id
-// when it ensures the -dev copy, the -dev id otherwise.
-func (target ClaudePluginTarget) otherID() string {
-	if target.ID == target.DevID {
-		return target.GitHubID
+// copyIDs are the ids of a plugin of ours: its GitHub, professor and -dev
+// copies, each one the target has.
+func (target ClaudePluginTarget) copyIDs() []string {
+	var ids []string
+	for _, id := range []string{target.GitHubID, target.ProfessorID, target.DevID} {
+		if id != "" {
+			ids = append(ids, id)
+		}
 	}
-	return target.DevID
+	return ids
+}
+
+// OtherIDs are the ids of ours this build does not ensure: every copy but ID.
+func (target ClaudePluginTarget) OtherIDs() []string {
+	var others []string
+	for _, id := range target.copyIDs() {
+		if id != target.ID {
+			others = append(others, id)
+		}
+	}
+	return others
 }
 
 // planOtherCopyRetirement plans the settings.json edit that leaves only the
-// build's copy loading: the other id (otherID) set false in enabledPlugins
-// when it is enabled (never uninstalled) and its pluginConfigs entry copied to
-// the build's id when that id has none, never overwriting. It returns "" when
-// there is nothing to do. The edit writes through a settings.json symlink and
-// keeps every number exactly.
+// build's copy loading: every other id (OtherIDs) set false in enabledPlugins
+// when it is enabled (never uninstalled), and the pluginConfigs entry of the
+// first other id that has one copied to the build's id when that id has none,
+// never overwriting. An install-only target's own id is set false too:
+// claude.plugins does not list it. It returns "" when there is nothing to do.
+// The edit writes through a settings.json symlink and keeps every number
+// exactly.
 func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, func() error, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
+	raw, document, err := readSettingsForEdit(path)
+	if err != nil || document == nil {
+		return "", nil, err
+	}
+	disabled, carried := retireOtherCopies(document, target)
+	if len(disabled) == 0 && carried == "" {
 		return "", nil, nil
 	}
+	message := "copy the pluginConfigs of " + carried + " to " + target.ID + " in " + path
+	if len(disabled) != 0 {
+		reason := target.ID + " replaces it"
+		if target.InstallOnly {
+			reason = pfmconfig.KeyClaudePlugins + " does not list " + target.Name
+		}
+		message = "disable " + strings.Join(disabled, ", ") + " in " + path + ": " + reason
+		switch {
+		case carried == "":
+		case len(disabled) == 1 && disabled[0] == carried:
+			message += "; copy its pluginConfigs to " + target.ID
+		default:
+			message += "; copy the pluginConfigs of " + carried + " to " + target.ID
+		}
+	}
+	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
+		retireOtherCopies(fresh, target)
+		return nil
+	}), nil
+}
+
+// retireOtherCopies applies planOtherCopyRetirement's edit to document and
+// names what it changed: the ids it set false and the id whose pluginConfigs
+// entry it carried to the build's id.
+func retireOtherCopies(document map[string]any, target *ClaudePluginTarget) (disabled []string, carried string) {
+	others := target.OtherIDs()
+	enabled, _ := document["enabledPlugins"].(map[string]any)
+	if target.InstallOnly && enabled[target.ID] == true {
+		disabled = append(disabled, target.ID)
+	}
+	for _, other := range others {
+		if enabled[other] == true {
+			disabled = append(disabled, other)
+		}
+	}
+	for _, id := range disabled {
+		enabled[id] = false
+	}
+	configs, _ := document["pluginConfigs"].(map[string]any)
+	if _, kept := configs[target.ID]; !kept {
+		for _, other := range others {
+			if _, ok := configs[other]; ok {
+				carried = other
+				configs[target.ID] = configs[other]
+				break
+			}
+		}
+	}
+	return disabled, carried
+}
+
+// readSettingsForEdit reads path as an edit's base: its bytes, which the edit
+// compares again before its rename, and its document; nil for both when the
+// file is absent.
+func readSettingsForEdit(path string) ([]byte, map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, nil
+	}
 	if err != nil {
-		return "", nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return "", nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	other := target.otherID()
-	enabled, _ := document["enabledPlugins"].(map[string]any)
-	disable := enabled[other] == true
-	configs, _ := document["pluginConfigs"].(map[string]any)
-	options, carried := configs[other]
-	_, kept := configs[target.ID]
-	carry := carried && !kept
-	if !disable && !carry {
+	if document == nil {
+		document = map[string]any{}
+	}
+	return raw, document, nil
+}
+
+// settingsEditRetries is how many times an edit re-applies itself to a
+// settings.json another writer changed between its read and its rename.
+const settingsEditRetries = 3
+
+// errSettingsChanged is the precondition failure of a settings.json whose
+// bytes are no longer the ones an edit was planned on.
+var errSettingsChanged = errors.New("changed since pfm read it")
+
+// writeSettingsDocument is the edit that writes document, planned on read,
+// back through a settings.json symlink, keeping the file's mode; read nil
+// plans on an absent file, which the edit creates 0600. A running chat may
+// write the file meanwhile, create or remove it: just before the rename the
+// file is read again, and when its bytes differ apply is re-run on the fresh
+// document (empty for a file now absent or blank), so the other write is
+// kept, and an apply error ends the edit; after settingsEditRetries such
+// retries the edit fails naming the file and its repair.
+func writeSettingsDocument(
+	path string,
+	read []byte,
+	document map[string]any,
+	apply func(map[string]any) error,
+) func() error {
+	return func() error { return commitSettingsDocument(path, read, document, apply, os.ReadFile) }
+}
+
+// commitSettingsDocument is writeSettingsDocument's write; reread reads the
+// file again before each rename.
+func commitSettingsDocument(
+	path string,
+	read []byte,
+	document map[string]any,
+	apply func(map[string]any) error,
+	reread func(string) ([]byte, error),
+) error {
+	resolved, mode, err := settingsEditTarget(path)
+	if err != nil {
+		return err
+	}
+	content, err := encodeSettingsDocument(document)
+	if err != nil {
+		return err
+	}
+	return writeWhileUnchanged(path, resolved, mode, read, content, reread, func(current []byte) ([]byte, bool, error) {
+		var document map[string]any
+		if len(bytes.TrimSpace(current)) > 0 {
+			if err := unmarshalKeepingNumbers(current, &document); err != nil {
+				return nil, false, fmt.Errorf("parse %s: %w", path, err)
+			}
+		}
+		if document == nil {
+			document = map[string]any{}
+		}
+		if err := apply(document); err != nil {
+			return nil, false, fmt.Errorf("%s: %w", path, err)
+		}
+		content, err := encodeSettingsDocument(document)
+		return content, true, err
+	})
+}
+
+// encodeSettingsDocument is document as a settings.json body: two-space
+// indent, HTML characters kept, a trailing newline.
+func encodeSettingsDocument(document map[string]any) ([]byte, error) {
+	var content bytes.Buffer
+	encoder := json.NewEncoder(&content)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(document); err != nil {
+		return nil, err
+	}
+	return content.Bytes(), nil
+}
+
+// writeWhileUnchanged publishes content over resolved, path's physical file,
+// only while reread finds it still holding read (nil: absent). Bytes another
+// writer wrote, created or removed since go to replan (nil for a file now
+// absent), whose content is published in turn, or nothing when it returns
+// false; after settingsEditRetries such retries it fails naming path and its
+// repair, the file left as the other writer left it.
+func writeWhileUnchanged(
+	path, resolved string,
+	mode fs.FileMode,
+	read, content []byte,
+	reread func(string) ([]byte, error),
+	replan func(current []byte) ([]byte, bool, error),
+) error {
+	for retry := 0; ; retry++ {
+		var current []byte
+		err := atomicfile.WriteIf(resolved, content, mode, func() error {
+			now, err := reread(resolved)
+			if errors.Is(err, fs.ErrNotExist) {
+				now, err = nil, nil
+			}
+			if err != nil {
+				return fmt.Errorf("read %s again: %w", path, err)
+			}
+			if !bytes.Equal(now, read) {
+				current = now
+				return errSettingsChanged
+			}
+			return nil
+		})
+		if !errors.Is(err, errSettingsChanged) {
+			return err
+		}
+		if retry == settingsEditRetries {
+			return fmt.Errorf("%s changed under pfm's edit %d times in a row — rerun pfm install", path, retry+1)
+		}
+		read = current
+		next, write, err := replan(current)
+		if err != nil || !write {
+			return err
+		}
+		content = next
+	}
+}
+
+// settingsEditTarget is the file an edit of path publishes, path's symlink
+// resolved, and the mode it keeps; a file absent now, never there or removed
+// since the edit's read, is created at path itself 0600, the re-read before
+// the rename re-applying an edit planned on bytes that are gone.
+func settingsEditTarget(path string) (string, fs.FileMode, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		info, linkErr := os.Lstat(path)
+		if linkErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", 0, fmt.Errorf(
+				"settings file %s is a dangling symlink — repair its target and rerun pfm install",
+				path,
+			)
+		}
+		if linkErr != nil && !errors.Is(linkErr, fs.ErrNotExist) {
+			return "", 0, fmt.Errorf("inspect settings file %s: %w", path, linkErr)
+		}
+		return path, 0o600, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", 0, err
+	}
+	return resolved, info.Mode().Perm(), nil
+}
+
+// retiredClaudePlugins are plugin ids once ours that a successor replaced,
+// keyed by the successor's bare name. Doctor flags each enabled one
+// (ClaudePluginGaps); install disables it, never uninstalls it, once the
+// successor is ensured.
+var retiredClaudePlugins = map[string][]string{
+	"effort-live-control": {"agent-effort@agent-effort", "agent-effort@agent-effort-dev"},
+}
+
+// planRetiredPluginDisable plans the settings.json edit that sets every
+// retired id of target's name false in enabledPlugins when it is enabled. It
+// returns "" when none is enabled or the file is absent.
+func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, func() error, error) {
+	retired := retiredClaudePlugins[target.Name]
+	if len(retired) == 0 {
 		return "", nil, nil
 	}
-	message := "copy the pluginConfigs of " + other + " to " + target.ID + " in " + path
-	if disable {
-		enabled[other] = false
-		message = "disable " + other + " in " + path + ": " + target.ID + " replaces it"
-		if carry {
-			message += "; copy its pluginConfigs to " + target.ID
+	raw, document, err := readSettingsForEdit(path)
+	if err != nil || document == nil {
+		return "", nil, err
+	}
+	disabled := disableRetiredPlugins(document, retired)
+	if len(disabled) == 0 {
+		return "", nil, nil
+	}
+	message := "disable " + strings.Join(disabled, ", ") + " in " + path + ": retired, " + target.ID + " replaces it"
+	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
+		disableRetiredPlugins(fresh, retired)
+		return nil
+	}), nil
+}
+
+// disableRetiredPlugins sets every enabled id of retired false in document's
+// enabledPlugins and names them.
+func disableRetiredPlugins(document map[string]any, retired []string) []string {
+	enabled, _ := document["enabledPlugins"].(map[string]any)
+	var disabled []string
+	for _, id := range retired {
+		if enabled[id] == true {
+			enabled[id] = false
+			disabled = append(disabled, id)
 		}
 	}
-	if carry {
-		configs[target.ID] = options
-	}
-	return message, func() error {
-		resolved, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			return err
-		}
-		info, err := os.Stat(resolved)
-		if err != nil {
-			return err
-		}
-		var content bytes.Buffer
-		encoder := json.NewEncoder(&content)
-		encoder.SetEscapeHTML(false)
-		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(document); err != nil {
-			return err
-		}
-		return atomicfile.Write(resolved, content.Bytes(), info.Mode().Perm())
-	}, nil
+	return disabled
 }

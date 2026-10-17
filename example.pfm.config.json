@@ -25,8 +25,10 @@
       "cache-live-control",
       "sub-agent-compact",
       "effort-live-control",
-      "tool-visibility-controller"
+      "tool-visibility-controller",
+      "engine-sync"
     ],
+    "env": {},
     "costLedger": true,
     "gptAgents": false
   },

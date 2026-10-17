@@ -80,9 +80,9 @@ Verified against Claude Code 2.1.295 (probe), Codex 0.161.0 (source at commit `9
 
 ## Always-on project rules
 
-**Compile point:** engine-sync's `codexgen` appends the project's always-on rules after the `CLAUDE.md` body and before the root adapter (the block cut from `pfm/internal/codexgen/compiler.go:120-128`), for the root and for every child project with its own `.claude/`. Order is path order. Each rule becomes a block opened by `<!-- rule: .claude/rules/{relpath} -->`, frontmatter stripped, body transformed like `CLAUDE.md`.
+**Compile point:** engine-sync's Codex target appends the project's always-on rules after the compiled `CLAUDE.md` body and before the root adapter, inside the per-project `AGENTS.md` loop of `plugins/engine-sync/internal/target/codex/target.go:271` (the body compiled at `:273`, the root adapter appended at `:277-284`), for the root and for every child project with its own `.claude/`. Order is path order. Each rule becomes a block opened by `<!-- rule: .claude/rules/{relpath} -->`, frontmatter stripped, body transformed like `CLAUDE.md`.
 
-**Check:** `engine-sync check` compares the compiled `AGENTS.md` byte for byte (the reconcile cut from `reconcile.go:209`), so a rule edit not rebuilt reports `STALE`. OpenCode reads the same `AGENTS.md`; the OpenCode compiler needs no change.
+**Check:** `engine-sync check` compares the compiled `AGENTS.md` byte for byte (the compare at `plugins/engine-sync/internal/reconcile/reconcile.go:228`), so a rule edit not rebuilt reports `STALE`. OpenCode reads the same `AGENTS.md`; the OpenCode compiler needs no change.
 
 **Budget:** Codex silently stops adding project docs past `project_doc_max_bytes`. The root `AGENTS.md` is 18417 bytes before any rule.
 
@@ -234,7 +234,7 @@ Claude passed 1–5 on 2.1.295 in `/tmp/professor/rules-test/`.
 - `docs/design/engines/claude-config-dir.md`: the `rules` shared entry gains its non-Claude consumers.
 - `CLAUDE.md` § Vocabulary: a `rules` entry and the engine-mirror line, through `/pcm`.
 - `.claude/commands/pfm-testing-manual.md`: the `paths:` key, through `/pcm`.
-- `README.md`, `docs/BLUEPRINT.md`, `docs/SETUP.md`: wherever they list what the engine mirrors compile.
+- `README.md`, `docs/SETUP.md`: wherever they list what the engine mirrors compile.
 
 ## Sources
 

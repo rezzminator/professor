@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -18,8 +19,7 @@ import (
 const mcpProtocolVersion = "2025-06-18"
 
 // daemonRoute labels the daemon's own door in the activity log, beside the
-// route each mounted handler logs under (professor-mcp, professor-mcp-chat,
-// professor-mcp-harvester).
+// route each mounted handler logs under (chat-professor or harvester-professor).
 const daemonRoute = "mcp-daemon"
 
 // maxDaemonBodyBytes bounds every request body the daemon accepts, on the
@@ -29,20 +29,18 @@ const daemonRoute = "mcp-daemon"
 // the process that serves every chat on the machine. 1 MiB is the bound the
 // harvester's external gateway already applies to its own POST bodies
 // (internal/harvestmcp/remote.go), and it is two orders of magnitude above
-// the largest legitimate tool input: inject's own size ladder calls an 8 KiB
-// message oversized enough to spill to a file pointer (internal/inject
+// the largest legitimate tool input: call's own size ladder calls an 8 KiB
+// message oversized enough to spill to a file pointer (internal/call
 // body.go), and no chat tool takes anything larger.
 const maxDaemonBodyBytes = 1 << 20
 
 // DaemonOptions is everything `pfm mcp serve` hands the loopback daemon's
-// front door. Professor is the combined server at config.MCPPathProfessor;
-// Chat and Harvester are the family views at config.MCPFamilyPath. A nil view
+// front door. Chat and Harvester are separate servers at config.MCPFamilyPath. A nil view
 // means that family is disabled by config and was never constructed.
 type DaemonOptions struct {
 	Version             string
 	StartedAt           time.Time
 	Endpoint            string
-	Professor           http.Handler
 	Chat                http.Handler
 	Harvester           http.Handler
 	ChatRuntimeIdentity string
@@ -69,7 +67,7 @@ type DaemonOptions struct {
 // local user that can open 127.0.0.1 can call the chat tools this mounts.
 // The Origin refusal below stops a browser, not a peer. Every engine
 // registers `pfm mcp serve --stdio`, and each stdio server forwards to this
-// daemon's config.MCPPathProfessor route, so every local client reaches the
+// daemon's config.MCPFamilyPath(config.MCPServerChat) route, so every local client reaches the
 // chat tools through this daemon; narrowing it to the owning user needs a
 // per-daemon secret in every client registration, which is an installer-side
 // change.
@@ -121,7 +119,7 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 		request.Body = http.MaxBytesReader(writer, request.Body, maxDaemonBodyBytes)
 		// Browsers attach Origin even when script code targets loopback. Local
 		// MCP clients do not. Refuse browser-capable cross-origin requests before
-		// they can reach chat_inject or any other mounted tool.
+		// they can reach call or any other mounted tool.
 		if request.Header.Get("Origin") != "" {
 			http.Error(writer, "browser-origin requests are forbidden", http.StatusForbidden)
 			return
@@ -139,21 +137,19 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 				}
 			}
 			writeDaemonJSON(writer, options.Warnings, current)
-		case pfmconfig.MCPPathProfessor:
-			if options.Professor == nil {
-				http.Error(
-					writer,
-					"pfm mcp: every family is disabled by config; enable one with: pfm mcp <server> enable",
-					http.StatusServiceUnavailable,
-				)
-				return
-			}
-			options.Professor.ServeHTTP(writer, request)
 		case pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat):
 			serveDaemonRoute(writer, request, options.Chat, pfmconfig.MCPServerChat)
 		case pfmconfig.MCPFamilyPath(pfmconfig.MCPServerHarvester):
 			serveDaemonRoute(writer, request, options.Harvester, pfmconfig.MCPServerHarvester)
 		default:
+			if request.URL.Path == "/mcp/professor" || strings.HasPrefix(request.URL.Path, "/mcp/professor/") {
+				http.Error(writer, fmt.Sprintf(
+					"pfm mcp: /mcp/professor is retired; MCP families moved to %s and %s; restart the chat to reconnect with the current MCP registrations",
+					pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat),
+					pfmconfig.MCPFamilyPath(pfmconfig.MCPServerHarvester),
+				), http.StatusGone)
+				return
+			}
 			http.NotFound(writer, request)
 		}
 	}))

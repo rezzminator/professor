@@ -325,6 +325,9 @@ func TestUpdateSourceIgnoresForeignGitSelectors(t *testing.T) {
 	for _, rollback := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "rollback"}[rollback], func(t *testing.T) {
 			repo, foreign := newUpdateGitFixture(t), newUpdateGitFixture(t)
+			// Both are copies of one template: diverge foreign so a SHA read
+			// through its GIT_DIR differs from repo's own.
+			commitUntaggedFixtureChange(t, foreign, "FOREIGN")
 			previous := updateGitRevision(t, repo, "HEAD")
 			target := updateGitRevision(t, repo, "v0.10.0")
 			foreignPrevious := updateGitRevision(t, foreign, "HEAD")
@@ -381,6 +384,39 @@ func TestUpdateSourceIgnoresForeignGitSelectors(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(repo, ".git", "pfm-update.lock")); err != nil {
 				t.Errorf("requested source ownership lock: %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateDoctorChildGetsHostOnlyMarker(t *testing.T) {
+	const marker = "PFM_UPDATE_DOCTOR_HOST_ONLY"
+	t.Setenv(marker, "inherited")
+	for _, row := range []struct{ command, want string }{{doctorCommand, "1"}, {"install", "inherited"}} {
+		t.Run(row.command, func(t *testing.T) {
+			var env []string
+			t.Cleanup(StubRunnerForTest(scriptedUpdateRunner{startEnv: &env}))
+			err := runUpdateCandidateCommand(
+				context.Background(),
+				"candidate",
+				"",
+				t.TempDir(),
+				"",
+				io.Discard,
+				io.Discard,
+				row.command,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, entry := range env {
+				if value, ok := strings.CutPrefix(entry, marker+"="); ok {
+					got = value
+				}
+			}
+			if got != row.want {
+				t.Fatalf("%s child marker=%q, want %q", row.command, got, row.want)
 			}
 		})
 	}

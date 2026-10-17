@@ -105,8 +105,11 @@ def main():
                             (row["kind"] == "declaration" or not args.declarations)))
         else:
             print(json.dumps(rows))
-    except (OSError, ValueError, yaml.YAMLError) as error:
+    except OSError as error:
         print(f"agent-source-inventory: ERROR — {error}", file=sys.stderr)
+        return 2
+    except (ValueError, yaml.YAMLError) as error:
+        print(f"agent-source-inventory: REJECTED — {error}", file=sys.stderr)
         return 1
     return 0
 

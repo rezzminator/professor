@@ -16,13 +16,10 @@ func TestMCPServerKey(t *testing.T) {
 	}
 }
 
-func TestMCPProfessorPaths(t *testing.T) {
-	if MCPServerProfessor != "professor" || MCPPathProfessor != "/mcp/professor" {
-		t.Fatalf("professor server = %q at %q", MCPServerProfessor, MCPPathProfessor)
-	}
+func TestMCPFamilyPaths(t *testing.T) {
 	for family, want := range map[string]string{
-		MCPServerChat:      "/mcp/professor/chat",
-		MCPServerHarvester: "/mcp/professor/harvester",
+		MCPServerChat:      "/mcp/chat-professor",
+		MCPServerHarvester: "/mcp/harvester-professor",
 	} {
 		if got := MCPFamilyPath(family); got != want {
 			t.Fatalf("MCPFamilyPath(%s) = %q, want %q", family, got, want)
@@ -33,7 +30,7 @@ func TestMCPProfessorPaths(t *testing.T) {
 func TestValidateThirdParty(t *testing.T) {
 	const path = "fixture.config.json"
 	objectError := "config " + path + ": mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)"
-	professorError := "config " + path + ": mcp.thirdParty.professor: the name professor is pfm's own server"
+	reservedError := "config " + path + ": mcp.thirdParty.chat-professor: the name chat-professor is pfm's own server"
 	for _, tc := range []struct {
 		name    string
 		entries map[string]json.RawMessage
@@ -42,7 +39,9 @@ func TestValidateThirdParty(t *testing.T) {
 		{"none", nil, ""},
 		{"empty", map[string]json.RawMessage{}, ""},
 		{"objects", map[string]json.RawMessage{"x": json.RawMessage(` {"type":"stdio","command":"x"} `), "http": json.RawMessage(`{"type":"http","url":"https://example.invalid/mcp"}`), "empty": json.RawMessage(`{}`)}, ""},
-		{"professor", map[string]json.RawMessage{"professor": json.RawMessage(`{}`)}, professorError},
+		{"foreign professor", map[string]json.RawMessage{"professor": json.RawMessage(`{}`)}, ""},
+		{"chat registration", map[string]json.RawMessage{"chat-professor": json.RawMessage(`{}`)}, reservedError},
+		{"harvester registration", map[string]json.RawMessage{"harvester-professor": json.RawMessage(`{}`)}, "config " + path + ": mcp.thirdParty.harvester-professor: the name harvester-professor is pfm's own server"},
 		{"string", map[string]json.RawMessage{"x": json.RawMessage(`"y"`)}, objectError},
 		{"array", map[string]json.RawMessage{"x": json.RawMessage(`[]`)}, objectError},
 		{"null", map[string]json.RawMessage{"x": json.RawMessage(`null`)}, objectError},
@@ -51,7 +50,7 @@ func TestValidateThirdParty(t *testing.T) {
 		{"missing", map[string]json.RawMessage{"x": nil}, objectError},
 		{"malformed", map[string]json.RawMessage{"x": json.RawMessage(`{`)}, objectError},
 		{"sorted before professor", map[string]json.RawMessage{"professor": json.RawMessage(`{}`), "a": json.RawMessage(`null`)}, "config " + path + ": mcp.thirdParty.a must be a JSON object (a Claude mcpServers entry)"},
-		{"sorted professor first", map[string]json.RawMessage{"professor": json.RawMessage(`{}`), "z": json.RawMessage(`null`)}, professorError},
+		{"sorted registration first", map[string]json.RawMessage{"chat-professor": json.RawMessage(`{}`), "z": json.RawMessage(`null`)}, reservedError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateThirdParty(path, tc.entries)

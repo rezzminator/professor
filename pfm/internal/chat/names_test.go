@@ -6,16 +6,16 @@ import (
 	"path/filepath"
 	"testing"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestSeatTargetKeepsACodexScopedLookupOnCodex pins the requiredEngine
-// narrowing (chat_resolve cxwin, inject --engine): two live seats share a name
+// narrowing (resolve cxwin, call --engine): two live seats share a name
 // across engines, and a Codex-scoped lookup lands on the Codex seat, addressed
 // under the jailed tmux directory.
 func TestSeatTargetKeepsACodexScopedLookupOnCodex(t *testing.T) {
@@ -38,7 +38,7 @@ func TestSeatTargetKeepsACodexScopedLookupOnCodex(t *testing.T) {
 		resolvedPaths(t),
 		liveSeats(rows, ""),
 		name,
-	); err != nil || code != inject.CodeAmbiguous ||
+	); err != nil || code != pfmcall.CodeAmbiguous ||
 		detail == "" {
 		t.Fatalf("seatTarget(any engine)=(%d,%q,%v), want the collision refused as ambiguous", code, detail, err)
 	}
@@ -83,14 +83,14 @@ func TestLiveSeatsNeverAnswerForAKilledOrResumableRow(t *testing.T) {
 		liveSeats(rows, ""),
 		"LUNA:ORCHESTRATOR (old)",
 	); err != nil ||
-		code != inject.CodeUnknown {
+		code != pfmcall.CodeUnknown {
 		t.Fatalf("killed seat by name = code %d err %v, want a roster miss", code, err)
 	}
 }
 
 // TestNameResolverReportsAScanFailureNotAMiss pins the root law at the roster
 // rung: a fleet that could not be read is an error with CodeUndelivered —
-// never CodeUnknown, which would send inject on to guess from raw panes.
+// never CodeUnknown, which would send call on to guess from raw panes.
 func TestNameResolverReportsAScanFailureNotAMiss(t *testing.T) {
 	root := testjail.Fleet(t)
 	blocker := filepath.Join(root, "blocker")
@@ -104,7 +104,7 @@ func TestNameResolverReportsAScanFailureNotAMiss(t *testing.T) {
 		"anyone",
 		"",
 	); err == nil ||
-		code != inject.CodeUndelivered {
+		code != pfmcall.CodeUndelivered {
 		t.Fatalf("ResolveName over an unreadable fleet = code %d err %v, want CodeUndelivered and the error", code, err)
 	}
 	if _, found, err := resolver.SenderName(
@@ -140,7 +140,7 @@ func TestSeatTargetAddressesTheRuntimesTmuxDirectoryOnly(t *testing.T) {
 		t.Fatalf("seatTarget = (%+v, %d, %v); want the socket under the runtime's tmux dir", target, code, err)
 	}
 	for _, socket := range []string{"../escape", "/tmp/elsewhere", "nested/name"} {
-		if _, code, _, err := seatTarget(values, seat(socket), "seat"); err == nil || code != inject.CodeUndelivered {
+		if _, code, _, err := seatTarget(values, seat(socket), "seat"); err == nil || code != pfmcall.CodeUndelivered {
 			t.Fatalf("seatTarget(socket %q) = (%d, %v); want it refused as undeliverable", socket, code, err)
 		}
 	}

@@ -28,6 +28,36 @@ checks_templates_demo_serial() {
   run "templates: demo fence self-tests" -- bash -c 'for t in "$1"/infra/demo/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
 }
 
+checks_templates_plugin_logs() {
+  run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
+}
+
+# The plugin lab's hermetic half: its shell linted at warning level
+# (infra/plugin-lab/.shellcheckrc), then every self-test it ships side by side —
+# each file owns its temp root and private tmux sockets — so the slowest suite, not
+# their sum, sets the step's wall.
+# The live half spends money and runs on the host: docs/dev/testing/plugin-lab.md.
+checks_templates_plugin_lab() {
+  local lab="$REPO_ROOT/infra/plugin-lab"
+  if ! need_tool shellcheck templates; then
+    fail_step "plugin-lab shell NOT LINTED — shellcheck is missing"
+  else
+    run "templates: plugin-lab shellcheck" -- bash -c 'cd "$1" && shellcheck -x -S warning lab lib/*.sh hooks/*.sh scenarios/*/*.sh tests/*.sh tests/*/*_test.sh tests/fakes/* tests/fixtures/scenarios/*/*.sh' _ "$lab"
+  fi
+  run "templates: plugin-lab self-tests" -- bash -c 'out=$(mktemp -d) || exit 1; trap "rm -rf \"\$out\"" EXIT; n=0
+    for t in "$1"/tests/lib/*_test.sh "$1"/tests/hooks/*_test.sh "$1"/tests/*_test.sh; do
+      [[ -f "$t" ]] || { echo "NOT RUN: no suite matches $t"; exit 1; }
+      n=$((n + 1)); printf "%s\n" "$t" > "$out/$n.name"; bash "$t" > "$out/$n.log" 2>&1 & echo $! > "$out/$n.pid"
+    done
+    red=0
+    for i in $(seq 1 "$n"); do
+      wait "$(cat "$out/$i.pid")"; rc=$?
+      echo "== $(cat "$out/$i.name") rc=$rc"; cat "$out/$i.log"
+      (( rc == 0 )) || red=$((red + 1))
+    done
+    echo "plugin-lab self-tests: $n suites, $red red"; (( red == 0 ))' _ "$lab"
+}
+
 checks_templates_leak() {
   head_ "templates — leak gate"
   run "templates: leak-check self-test" -- bash "$REPO_ROOT/scripts/test-leak-check.sh"
@@ -144,7 +174,7 @@ checks_templates_scratch_paths() {
     # records that name where a past capture actually landed — rewriting
     # those would misstate history. An exclusion that hides its own work is
     # the next bug, so the count and the list are printed on every run.
-    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|\.professor/retro\.md$|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
+    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|docs/retro/|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
     # grep needs /dev/null as a second operand: BSD xargs runs the utility
     # even on empty input, and a bare `grep PATTERN` then reads stdin and
     # hangs the gate forever instead of reporting an empty sweep.
@@ -218,88 +248,159 @@ checks_templates_descriptions() {
 
 }
 
-checks_engine_sync_policy() { # <config-home>: stage the shipped machine policy for a compiler's jail
-  local policy="$REPO_ROOT/templates/global/engine-sync/config.json" destination="$1/engine-sync"
-  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/config.json"; then
-    echo "engine-sync: machine policy could not be staged from $policy into $destination/config.json" >&2
+checks_engine_sync_policy() { # <home>: stage the shipped machine policy as the home's ~/.claude/engine-sync.json for a compiler's jail
+  local policy="$REPO_ROOT/templates/global/engine-sync.json" destination="$1/.claude"
+  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/engine-sync.json"; then
+    echo "engine-sync: machine policy could not be staged from $policy into $destination/engine-sync.json" >&2
+    return 1
+  fi
+}
+
+checks_mirror_tree() { # the scratch tree every mirror gate reads: the tree under test plus the mirrors built from it
+  echo "$TMP_BASE/engine-sync/mirror-tree"
+}
+
+checks_mirror_tree_ready() { # the generation step built the mirrors there and said so
+  [[ -f "$(checks_mirror_tree).built" ]]
+}
+
+checks_repo_git() { # git over the tree under test: the fence hands the mounted tree's git dir in the environment
+  if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" && -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
+    git -C "$REPO_ROOT" --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
+      -c safe.directory="$PFM_DEV_REPO_WORK_TREE" "$@"
+  else
+    git -C "$REPO_ROOT" "$@"
+  fi
+}
+
+checks_mirror_tree_stage() { # <dest>: the tree under test as a scratch git repo — every tracked and unignored file, no generated mirror
+  local dest="$1" list rc=0
+  rm -rf "$dest" && mkdir -p "$dest" || { echo "mirror tree: cannot create $dest" >&2; return 1; }
+  list="$(mktemp "$dest.list.XXXXXX")" || { echo "mirror tree: cannot create a file list beside $dest" >&2; return 1; }
+  if ! checks_repo_git ls-files -z --cached --others --exclude-standard >"$list"; then
+    echo "mirror tree: git could not list the tree under test at $REPO_ROOT" >&2
+    rm -f "$list"
+    return 1
+  fi
+  # A submodule is a gitlink the list names as one path: its checkout belongs to
+  # its own repository's gate, never the mirrors'. A path tracked but deleted in
+  # the tree under test has nothing to copy.
+  checks_repo_git ls-files -s -z | tr '\0' '\n' | awk -F'\t' '$1 ~ /^160000 / {print $2}' >"$list.submodules" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    # grep exits 1 when the list is empty after the filter: a tree of submodules only.
+    if grep -zvxFf "$list.submodules" "$list" >"$list.files"; then :; elif [[ $? -ne 1 ]]; then rc=2; fi
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    # Only the deleted paths drop out here; any other create- or extract-side failure fails the copy.
+    while IFS= read -r -d '' path; do
+      if [[ -e "$REPO_ROOT/$path" || -L "$REPO_ROOT/$path" ]]; then printf '%s\0' "$path"; fi
+    done <"$list.files" >"$list.present" || rc=$?
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    (set -o pipefail; tar -C "$REPO_ROOT" --null -T "$list.present" -cf - | tar -C "$dest" -xf -) || rc=$?
+  fi
+  rm -f "$list" "$list.submodules" "$list.files" "$list.present"
+  if [[ "$rc" -ne 0 ]]; then
+    echo "mirror tree: copying the tree under test into $dest failed (exit $rc)" >&2
+    return 1
+  fi
+  if ! git -C "$dest" init -q || ! git -C "$dest" add -A; then
+    echo "mirror tree: git could not index the copy at $dest" >&2
     return 1
   fi
 }
 
 checks_templates_mirrors_generate() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config"
+  local es_bin="$TMP_BASE/engine-sync/engine-sync"
+  local tree home="$TMP_BASE/engine-sync/mirror-home"
+  tree="$(checks_mirror_tree)"
   head_ "templates — generate the engine mirrors"
-  # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
-  # clone holds none, so verify generates them from the Claude sources
-  # before any gate reads them. Current mirrors are left alone (the fence
-  # mounts the tree read-only and CI generates on the host first). The writer
-  # is engine-sync built from its mounted source, never a host binary (a stale
-  # host build rewrites what it does not understand).
-  if ! need_tool go templates || ! need_tool node templates; then
+  # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked, so the tree
+  # under test holds whatever the last host build left in them, built from the
+  # host's own engine-sync and policy: a fresh worktree holds none, and one
+  # built before a rename holds the old roster. The gate never reads them.
+  # It stages a scratch copy of the tree under test and builds the mirrors
+  # there with engine-sync built from its mounted source (never a host
+  # binary) under the tree's own machine policy, in an empty home; every
+  # mirror gate below reads that copy.
+  rm -f "$tree.built"
+  if ! need_tool go templates || ! need_tool node templates || ! need_tool git templates || ! need_tool tar templates; then
     fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
   elif ! engine_sync_build "$es_bin"; then
     fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
-  elif ! checks_engine_sync_policy "$config_home"; then
+  elif ! checks_engine_sync_policy "$home"; then
     fail_step "mirror generation could not run — the machine policy could not be staged (see above); no mirror gate below is a verdict on the tree"
+  elif ! mkdir -p "$home" || ! checks_mirror_tree_stage "$tree"; then
+    fail_step "mirror generation could not run — the tree under test could not be staged (see above); no mirror gate below is a verdict on the tree"
   else
-    local report="$TMP_BASE/engine-sync/project-check.log" rc=0
-    XDG_CONFIG_HOME="$config_home" "$es_bin" check "$REPO_ROOT" >"$report" 2>&1 || rc=$?
-    if [ "$rc" -eq 0 ]; then
-      ok "engine mirrors current — nothing generated"
+    local report="$TMP_BASE/engine-sync/mirror-build.log" rc=0
+    HOME="$home" "$es_bin" build "$tree" >"$report" 2>&1 || rc=$?
+    if [ "$rc" -eq 0 ] && : >"$tree.built"; then
+      ok "engine mirrors generated from the tree under test ($(tail -n 1 "$report"))"
     else
       cat "$report"
-      fail_step "host mirrors STALE or unreadable (engine-sync check exit $rc) — the fence mount is read-only; no mirror gate below is a verdict on the tree"
-      echo 'On the host, from this worktree: make -C pfm host-install; pfm install --yes; pfm codex build . && pfm opencode build .'
+      fail_step "mirror generation FAILED (engine-sync build exit $rc) — the tree under test does not compile to mirrors (see above); no mirror gate below is a verdict on the tree"
     fi
   fi
 
 }
 
-checks_templates_global_variants() {
+checks_templates_generated_agents() {
   local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
-  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale
+  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped=""
   local tracked="$REPO_ROOT/templates/generated/agents"
-  head_ "templates — global agent variants render"
-  # Machine agent .md files with from: declare agents re-emitted from a
-  # source agent with swapped body text; shared files below a subdirectory are layers, not agents. A swap whose text drifted from its
+  head_ "templates — generated agents render"
+  # A machine agent .md file carrying from: is a declaration: engine-sync renders
+  # it as a generated agent, the source agent with swapped body text; a shared file
+  # below a subdirectory is never an agent. A swap whose text drifted from its
   # source fails only when engine-sync renders it, which an adopter's install
-  # does: this step renders every declared variant with the real binary, built
+  # does: this step renders every declaration with the real binary, built
   # from the mounted source, into a jail home and Codex home (the real $HOME is
   # never read or written). Its own broken state is a red line: a declaration
-  # that cannot be read, one that declares nothing, a render error, or a
+  # that cannot be read, no declaration at all, a render error, or a
   # rendered count that differs from the declared count (a lookup that found
   # nothing would otherwise read as clean). The jail declares the gpt-agents
-  # capability, so the opt-in variants render too; the render without it is
+  # capability, so the opt-in declarations render too; the render without it is
   # scripts/check-agent-roster.test.mjs's. The policy renders declarations into
   # the clone's templates/generated/agents, which is tracked: the render runs
   # on a copy of templates/, and any difference from the tracked directory (a
-  # stale, missing or orphan file) is a red line naming the files.
+  # stale, missing or orphan file) is a red line naming the files. The same run
+  # also renders every OpenCode twin: an `unknown MCP server` warning means an
+  # agent's tools line names a server the twin cannot grant, so the twin loses
+  # the tool, and the warning is a red line naming each server; an `unmapped
+  # OpenCode model alias` warning means a twin lost its model pin, and is a red
+  # line naming each alias.
   if ! need_tool go templates || ! need_tool python3 templates; then
-    fail_step "global agent variants NOT RENDERED — the toolchain is missing"
+    fail_step "generated agents NOT RENDERED — the toolchain is missing"
     return
   elif ! engine_sync_build "$es_bin"; then
-    fail_step "global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)"
+    fail_step "generated agents NOT RENDERED — the engine-sync binary could not be built (see above)"
     return
   elif [[ ! -d "$sources" ]]; then
-    fail_step "global agent variants NOT RENDERED — $sources is missing, so nothing was looked up"
+    fail_step "generated agents NOT RENDERED — $sources is missing, so nothing was looked up"
     return
-  elif ! names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
-    # The inventory's exit 3 is a missing PyYAML, a toolchain gap, never a parse failure.
-    if [[ "$names" == "GAP install"* ]]; then
-      fail_step "global agent variants NOT RENDERED — $names"
+  elif names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
+    : # The parsed inventory is counted below.
+  else
+    rc=$?
+    # Only the producer's exit 1 REJECTED is a source parse failure.
+    if [[ "$rc" -eq 3 && "$names" == "GAP install"* ]]; then
+      fail_step "generated agents NOT RENDERED — $names"
+    elif [[ "$rc" -eq 1 && "$names" == "agent-source-inventory: REJECTED"* ]]; then
+      fail_step "generated agents NOT RENDERED — agent sources do not parse: $names"
     else
-      fail_step "global agent variants NOT RENDERED — agent sources do not parse: $names"
+      fail_step "generated agents NOT RENDERED — agent source lookup failed (exit $rc): $names"
     fi
     return
   fi
   declared=$(grep -c . <<<"$names" || true)
   if (( declared == 0 )); then
-    fail_step "global agent variants NOT RENDERED — agent sources declare no variant, so nothing could render"
+    fail_step "generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render"
     return
   fi
   mkdir -p "$TMP_BASE/engine-sync"
-  if ! jail="$(mktemp -d "$TMP_BASE/engine-sync/global-variants.XXXXXX")"; then
-    fail_step "global agent variants NOT RENDERED — the jail home could not be created under $TMP_BASE/engine-sync"
+  if ! jail="$(mktemp -d "$TMP_BASE/engine-sync/generated-agents.XXXXXX")"; then
+    fail_step "generated agents NOT RENDERED — the jail home could not be created under $TMP_BASE/engine-sync"
     return
   fi
   home="$jail/home"
@@ -307,13 +408,13 @@ checks_templates_global_variants() {
   mkdir -p "$home/.claude" "$home/.codex" "$src"
   # The copy drops the tracked render so an orphan or a stale file shows.
   if ! cp -a "$REPO_ROOT/templates" "$src/templates" || ! rm -rf "$src/templates/generated"; then
-    fail_step "global agent variants NOT RENDERED — templates/ could not be copied into the jail"
+    fail_step "generated agents NOT RENDERED — templates/ could not be copied into the jail"
     rm -rf "$jail"
     return
   fi
   out="$jail/engine-sync-global.out"
-  if ! checks_engine_sync_policy "$home/.config"; then
-    fail_step "global agent variants NOT RENDERED — the machine policy could not be staged in the jail"
+  if ! checks_engine_sync_policy "$home"; then
+    fail_step "generated agents NOT RENDERED — the machine policy could not be staged in the jail"
     rm -rf "$jail"
     return
   fi
@@ -323,15 +424,19 @@ checks_templates_global_variants() {
   if (( rc == 0 )) && grep -Eq 'SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING' "$out"; then
     rc=1 # a section override whose original moved on is a named drift, never a clean render
   fi
+  if (( rc == 0 )); then
+    unknown="$(grep -E 'unknown MCP server' "$out" | sort | uniq -c || true)"
+    unmapped="$(grep -E 'unmapped OpenCode model alias' "$out" | sort | uniq -c || true)"
+  fi
   if (( rc != 0 )); then
     cat "$out"
     while IFS= read -r name; do
       if grep -qE "variant \"$name\"|(SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING) $name:" "$out"; then named="${named:+$named, }$name"; fi
     done <<<"$names"
-    fail_step "global agent variants FAILED to render (engine-sync global exit $rc; variant named in the error: ${named:-none — read the output above})"
+    fail_step "generated agents FAILED to render (engine-sync global exit $rc; declaration named in the error: ${named:-none — read the output above})"
   else
     while IFS= read -r name; do
-      # A variant whose rendered engines block turns Codex off (`codex: false`) has no Codex role by design.
+      # A declaration whose rendered engines block turns Codex off (`codex: false`) has no Codex role by design.
       if [[ -L "$home/.claude/agents/$name.md" && -s "$home/.claude/agents/$name.md" ]] &&
         { [[ -f "$home/.codex/agents/$name.toml" ]] || grep -Eq '^  codex: false$' "$home/.claude/agents/$name.md"; }; then
         rendered=$((rendered + 1))
@@ -348,12 +453,18 @@ checks_templates_global_variants() {
     fi
     if (( rendered != declared )); then
       cat "$out"
-      fail_step "global agent variants: $rendered of $declared declared variant(s) rendered — missing: $missing"
+      fail_step "generated agents: $rendered of $declared declaration(s) rendered — missing: $missing"
+    elif [[ -n "$unknown" ]]; then
+      printf '%s\n' "$unknown"
+      fail_step "generated agents: engine-sync dropped MCP tools from OpenCode twins ($(grep -c 'unknown MCP server' <<<"$unknown") distinct 'unknown MCP server' warning(s), above) — list the server in templates/global/engine-sync.json mcp.globalServers, or fix the engine-sync machine path that ignores it"
+    elif [[ -n "$unmapped" ]]; then
+      printf '%s\n' "$unmapped"
+      fail_step "generated agents: engine-sync omitted the model of an OpenCode twin ($(grep -c 'unmapped OpenCode model alias' <<<"$unmapped") distinct 'unmapped OpenCode model alias' warning(s), above) — add the alias to templates/global/engine-sync.json opencode.modelMap, or give the agent an engines.opencode.model alias it maps"
     elif [[ -n "$stale" ]]; then
       printf '%s\n' "$stale"
-      fail_step "global agent variants: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents"
+      fail_step "generated agents: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents"
     else
-      ok "all $declared global agent variant(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
+      ok "all $declared generated agent(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
     fi
   fi
   rm -rf "$jail"
@@ -368,24 +479,32 @@ checks_templates_mirrors_marker() {
   # target, against disk, and fails a fossil BY NAME.
   # The row carries the script's own count line: `0 marked file(s)` reads as the
   # vacuous run it is, instead of the claim that every marked file was examined.
+  # It reads the scratch tree the generation step built, never the tree under
+  # test's own mirrors.
   local marker_out marker_rc=0
-  marker_out="$(node scripts/check-codex-markers.mjs 2>&1)" || marker_rc=$?
-  printf '%s\n' "$marker_out"
-  if [ "$marker_rc" -eq 0 ]; then
-    ok "every marked file has a live source; every tracked symlink a tracked target — $(tail -n 1 <<<"$marker_out")"
+  if ! checks_mirror_tree_ready; then
+    fail_step "codex marker claim NOT CHECKED — the mirrors were not generated from the tree under test (see the generation step above)"
   else
-    fail_step "codex marker claim FAILED — a stranded marker or an orphaned generated file (see output)"
+    marker_out="$(cd "$(checks_mirror_tree)" && env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE node scripts/check-codex-markers.mjs 2>&1)" || marker_rc=$?
+    printf '%s\n' "$marker_out"
+    if [ "$marker_rc" -eq 0 ]; then
+      ok "every marked file has a live source; every tracked symlink a tracked target — $(tail -n 1 <<<"$marker_out")"
+    else
+      fail_step "codex marker claim FAILED — a stranded marker or an orphaned generated file (see output)"
+    fi
   fi
   node_test_suite "generated marker claims" "$TMP_BASE/templates/codex-markers.tap" scripts/check-codex-markers.test.mjs
 
 }
 
 checks_templates_mirrors_roster() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config" rc
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" mirror_home="$TMP_BASE/engine-sync/mirror-home" rc
   head_ "templates — generated agent rosters"
-  if ! checks_engine_sync_policy "$config_home"; then
+  if ! checks_mirror_tree_ready; then
+    fail_step "agent roster NOT GENERATED — the mirrors were not generated from the tree under test, so no roster was compared (see the generation step above)"
+  elif ! checks_engine_sync_policy "$mirror_home"; then
     fail_step "agent roster ERROR — the machine policy could not be staged (see above)"
-  elif ENGINE_SYNC_BIN="$es_bin" XDG_CONFIG_HOME="$config_home" node scripts/check-agent-roster.mjs; then
+  elif (cd "$(checks_mirror_tree)" && ENGINE_SYNC_BIN="$es_bin" HOME="$mirror_home" node scripts/check-agent-roster.mjs); then
     ok "Codex and OpenCode agent rosters match their Claude sources"
   else
     rc=$?
@@ -393,6 +512,10 @@ checks_templates_mirrors_roster() {
       fail_step "agent roster ERROR — effective configuration could not be read or the check crashed (see the error above)"
     elif [ "$rc" -eq 3 ]; then
       fail_step "agent roster NOT GENERATED — the engine mirrors are absent, so no roster was compared (see above)"
+    elif [ "$rc" -eq 4 ]; then
+      fail_step "agent roster GAP install — the inventory toolchain is missing, so sources were not scanned (see above)"
+    elif [ "$rc" -eq 5 ]; then
+      fail_step "agent roster SOURCE REJECTED — the inventory found an invalid agent source (see above)"
     else
       fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
     fi
@@ -426,19 +549,6 @@ checks_templates_worktree_script() {
   else
     fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, or provisioning failure handling broke (see output)"
   fi
-}
-
-checks_templates_codex_sync() {
-  head_ "templates — codex-sync door"
-  local cs_copy
-  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
-    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
-      ok "codex-sync ($cs_copy) forwards each stage, refuses a bad ENGINE_SYNC_BIN by name, and warns of an unavailable compiler only with a pending edit"
-    else
-      fail_step "codex-sync regression FAILED ($cs_copy) — see output"
-    fi
-  done
-
 }
 
 checks_templates_dev_report() {
@@ -478,20 +588,16 @@ checks_templates_mirrors_opencode() {
   # under a scratch home; verification never depends on or installs a host binary.
   if ! need_tool go templates || ! engine_sync_build "$es_bin"; then
     fail_step "opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)"
-  elif ! checks_engine_sync_policy "$opencode_home/.config"; then
+  elif ! checks_engine_sync_policy "$opencode_home"; then
     fail_step "opencode mirror NOT CHECKED — the machine policy could not be staged (see above)"
-  elif XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
-    && XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
-    ok "opencode mirror current and parseable"
+  elif ! checks_mirror_tree_ready; then
+    fail_step "opencode mirror NOT CHECKED — the mirrors were not generated from the tree under test (see the generation step above)"
+  elif "$es_bin" opencode check "$(checks_mirror_tree)" --home "$opencode_home" \
+    && "$es_bin" opencode doctor "$(checks_mirror_tree)" --home "$opencode_home"; then
+    ok "opencode mirror parseable and current against the tree under test"
   else
-    fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
+    fail_step "opencode mirror FAILED — the mirror generated from the tree under test does not check (see above)"
   fi
-
-}
-
-checks_templates_opencode_writer_tests() {
-  head_ "templates — OpenCode writer check tests"
-  node_test_suite "opencode-writer check" "$TMP_BASE/templates/opencode-writer.tap" scripts/check-opencode-writer.test.mjs
 
 }
 
@@ -501,6 +607,55 @@ checks_templates_engine_sync_action_tests() {
 
 }
 
+# skill_unittest_sharded <out> <test file…>: the files' test ids split round-robin over
+# SKILL_TEST_SHARDS parallel unittest processes (default: the cores, at most 8), so a skill suite's
+# serial CPU time no longer sets the step's wall. <out> holds each `SHARD {i}` block, then one
+# aggregate `Ran {n} tests` and `OK`, `OK (skipped={k})` or `FAILED (shards={red}/{all})`; the exit
+# is non-zero when a shard fails, a file cannot load, or no test exists.
+skill_unittest_sharded() {
+  local out="$1"
+  shift
+  python3 - "$@" >"$out" 2>&1 <<'PY'
+import os, re, subprocess, sys, unittest
+
+loader, ids = unittest.TestLoader(), []
+def walk(suite):
+    for test in suite:
+        walk(test) if isinstance(test, unittest.TestSuite) else ids.append(test.id())
+for path in sys.argv[1:]:
+    name = os.path.splitext(os.path.normpath(path))[0].replace(os.sep, ".")
+    try:
+        walk(loader.loadTestsFromName(name))
+    except Exception as exc:
+        print(f"LOAD FAILED {path}: {exc!r}")
+        print("Ran 0 tests\nFAILED (load)")
+        sys.exit(1)
+    if loader.errors:
+        print(f"LOAD FAILED {path}:\n" + "\n".join(loader.errors))
+        print("Ran 0 tests\nFAILED (load)")
+        sys.exit(1)
+if not ids:
+    print("Ran 0 tests")
+    sys.exit(1)
+want = os.environ.get("SKILL_TEST_SHARDS") or str(min(8, os.cpu_count() or 1))
+count = max(1, min(int(want), len(ids)))
+shards = [ids[i::count] for i in range(count)]
+procs = [subprocess.Popen([sys.executable, "-m", "unittest", *chunk], stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True) for chunk in shards]
+ran = skipped = red = 0
+for i, proc in enumerate(procs, 1):
+    text = proc.communicate()[0]
+    print(f"SHARD {i}/{count} rc={proc.returncode} tests={len(shards[i - 1])}\n{text}")
+    got = re.search(r"^Ran (\d+) tests?", text, re.M)
+    ran += int(got.group(1)) if got else 0
+    skipped += sum(int(n) for n in re.findall(r"skipped=(\d+)", text))
+    red += proc.returncode != 0 or not got
+print(f"Ran {ran} tests")
+print(f"FAILED (shards={red}/{count})" if red else f"OK (skipped={skipped})" if skipped else "OK")
+sys.exit(1 if red else 0)
+PY
+}
+
 checks_templates_skill_tests() {
   local skill cp_out
   for skill in codeprobe tracetree; do
@@ -508,7 +663,7 @@ checks_templates_skill_tests() {
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
       fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
-    elif ! python3 -m unittest "templates/global/skills/$skill/${skill}_test.py" >"$cp_out" 2>&1; then
+    elif ! skill_unittest_sharded "$cp_out" "templates/global/skills/$skill/"*_test.py; then
       cat "$cp_out"
       if grep -Eq '^Ran 0 tests?' "$cp_out"; then
         fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
@@ -522,19 +677,10 @@ checks_templates_skill_tests() {
       cat "$cp_out"
       fail_step "$skill tests SKIPPED — a skipped test is a named gap, never a pass"
     else
-      ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
+      ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out" | tail -1))"
     fi
   done
 
-}
-
-checks_templates_opencode_writer_refs() {
-  head_ "templates — OpenCode writer references"
-  if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then
-    ok "live surfaces name the native writer, none the deleted one"
-  else
-    fail_step "OpenCode writer reference FAILED — every named surface names engine-sync, the native writer, and none the deleted one (see output)"
-  fi
 }
 
 checks_templates_mirrors_manifest() {
@@ -558,13 +704,13 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
-  checks_named_template_steps "$add" clone leak placeholders scratch-paths descriptions mirrors \
-    global-variants release-check codex-sync refresh-scope worktree-script dev-report \
+  checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
+    generated-agents release-check refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name"
   done
-  checks_named_template_steps "$add" opencode-writer-tests engine-sync-action-tests skill-tests opencode-writer-refs
+  checks_named_template_steps "$add" engine-sync-action-tests skill-tests
 }
 
 checks_templates_step_serial() { shift; "$@"; }
@@ -700,6 +846,8 @@ internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
 internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
 internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
 internal/harvestmcp TestServiceChaos
+internal/installer TestClaudeMCPLockProtectsSlowBackup
+internal/installer TestMCPWritePreservesAnEditDuringBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence'
 
 # checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo

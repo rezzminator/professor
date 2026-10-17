@@ -2,6 +2,7 @@
 package professor
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -80,12 +81,12 @@ func (r projectReport) reviewRequired() int {
 	return review
 }
 
-func buildProjectReport(root, home string) (projectReport, error) {
+func buildProjectReportWithContext(ctx context.Context, root, home string) (projectReport, error) {
 	baseline, err := Load(root)
 	if err != nil {
 		return projectReport{}, err
 	}
-	store, err := ResolveStore(root, home)
+	store, err := resolveStoreWithContext(ctx, root, home)
 	if err != nil {
 		return projectReport{}, err
 	}

@@ -1,0 +1,6 @@
+{
+  "name": "lab-agents",
+  "version": "0.0.1",
+  "description": "plugin-lab fixture: ships the namespaced agent lab-agents:reader-forward",
+  "license": "MIT"
+}

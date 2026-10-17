@@ -385,7 +385,7 @@ func TestRunScrubsAmbientIdentity(t *testing.T) {
 	for _, name := range []string{
 		"TMUX",
 		"TMUX_PANE",
-		"CHAT_INJECT_SOCKET",
+		"CHAT_CALL_SOCKET",
 		"CLAUDE_CODE_SESSION_ID",
 		"CODEX_THREAD_ID",
 	} {
@@ -447,7 +447,10 @@ func TestCleanHomeStagesOneSessionStoreAndManagedCleanup(t *testing.T) {
 		}
 	}
 	managed := filepath.Join(runtime.Paths.ManagedSettingsDir, "pfm.json")
-	if raw, err := os.ReadFile(managed); err != nil || strings.TrimSpace(string(raw)) != `{"cleanupPeriodDays":36500}` {
+	if raw, err := os.ReadFile(
+		managed,
+	); err != nil ||
+		strings.TrimSpace(string(raw)) != `{"cleanupPeriodDays":36500,"prependPlugins":[]}` {
 		t.Fatalf("managed settings=%q error=%v", raw, err)
 	}
 	if raw, err := os.ReadFile(

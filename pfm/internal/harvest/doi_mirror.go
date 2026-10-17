@@ -51,9 +51,12 @@ func doiMirrorOCRTimeout(pages int) time.Duration {
 	return min(docling+doiMirrorOCRMargin, doiMirrorOCRCap)
 }
 
-// normalizeDOIMirrorURL validates the configured mirror once at startup. The
-// value is copied into settings by New, so a running Harvester never consults
-// mutable configuration or process environment while a fetch is in flight.
+// normalizeDOIMirrorURL validates the configured mirror once at startup,
+// resolving nothing: a mirror whose name no longer resolves costs a lookup and
+// a warning only when a fetch uses it, where validateFetchURL checks its
+// addresses. The value is copied into settings by New, so a running Harvester
+// never consults mutable configuration or process environment while a fetch
+// is in flight.
 func normalizeDOIMirrorURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -72,7 +75,7 @@ func normalizeDOIMirrorURL(raw string) (string, error) {
 	if parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(raw, "#") {
 		return "", fmt.Errorf("invalid doi-mirror URL %q: query and fragment are not allowed", raw)
 	}
-	if err := validateFetchURL(raw, false); err != nil {
+	if _, err := fetchURLHost(raw); err != nil {
 		return "", fmt.Errorf("invalid doi-mirror URL %q: %w", raw, err)
 	}
 	return raw, nil

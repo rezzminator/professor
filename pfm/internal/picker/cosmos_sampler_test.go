@@ -148,7 +148,7 @@ func TestCosmosSamplerSeesAnotherProcessesEventsOnTheRealLedger(t *testing.T) {
 	sampler := &cosmosSampler{reader: reader}
 	record := func(at int64) {
 		t.Helper()
-		event := fleetdb.CommsEvent{AtNS: at, Kind: fleetdb.KindInject, Target: "t", Message: "m"}
+		event := fleetdb.CommsEvent{AtNS: at, Kind: fleetdb.KindCall, Target: "t", Message: "m"}
 		if err := writer.RecordComms(ctx, event); err != nil {
 			t.Fatalf("record comms from the other connection: %v", err)
 		}

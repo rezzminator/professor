@@ -361,7 +361,7 @@ Ruled on 2026-10-09:
 
 ## Alternatives
 
-- **Cross-harness seat, available today.** `/flights:orchestrate-cross-harness {dir} engine codex` runs a task file on GPT in its native Codex harness. It is a chat seat briefed by inject, not an `Agent` call.
+- **Cross-harness seat, available today.** `/flights:orchestrate-cross-harness {dir} engine codex` runs a task file on GPT in its native Codex harness. It is a chat seat briefed by `pfm chat call`, not an `Agent` call.
 - **`codex exec` wrapper agent.** A thin Claude sub-agent runs `codex exec` and returns its output verbatim. GPT stays in its own harness and there is no traffic routing, but every GPT call is wrapped in a Claude call.
 - **Whole-session GPT.** claude-code-proxy alone. It loses the Claude main thread.
 

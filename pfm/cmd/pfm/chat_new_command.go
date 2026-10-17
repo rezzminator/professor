@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -20,7 +21,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -339,7 +339,7 @@ func runRun(
 	}
 	// result.Socket is the bare session name spawn.Run was asked to create
 	// (spawn.FreshSocket's own output), not a resolvable socket PATH — the
-	// inject recorder (internal/inject/engine.go) writes result.SocketPath,
+	// call recorder (internal/call/engine.go) writes result.SocketPath,
 	// the full tmux -S argument. Recording the bare name here left the
 	// cosmos graph's receiver-side row lookup (paneKey(socket, pane)) unable
 	// to ever match a live row, because no live row's socket is a bare name.
@@ -544,11 +544,11 @@ func awaitLaunch(
 		return watchFirstReply(ctx, name, handle, options, result, stderr, runtimes...)
 	}
 	outcome := retryLaunchPrompt(ctx, handle, stderr, clk, runtimes...)
-	if outcome == inject.RescueTrustHeld {
+	if outcome == pfmcall.RescueTrustHeld {
 		fmt.Fprintf(stderr, "pfm chat new: %s\n", result.TrustRefusal(name, ""))
 		return codeUndelivered
 	}
-	if outcome == inject.RescueKeysPressed {
+	if outcome == pfmcall.RescueKeysPressed {
 		rescued, _ := headless.Await(
 			ctx,
 			chatResolver(handle, runtimes...),
@@ -666,7 +666,7 @@ func deliveryProofOptions(options headless.AwaitOptions, timeout time.Duration) 
 }
 
 // retryLaunchPrompt retries a launch prompt sitting typed-but-unsent
-// (inject.RescueLaunchPrompt) and reports what it did, not whether the model
+// (pfmcall.RescueLaunchPrompt) and reports what it did, not whether the model
 // answered — the caller re-proves that against the engine's own transcript.
 func retryLaunchPrompt(
 	ctx context.Context,
@@ -674,17 +674,17 @@ func retryLaunchPrompt(
 	stderr io.Writer,
 	clk clock.Clock,
 	runtimes ...commandRuntime,
-) inject.RescueOutcome {
+) pfmcall.RescueOutcome {
 	chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
 	if err != nil || !found || !chat.Live {
-		return inject.RescueNotSent
+		return pfmcall.RescueNotSent
 	}
 	socketPath, err := chatSocketPath(chat.Socket)
 	if err != nil {
-		return inject.RescueNotSent
+		return pfmcall.RescueNotSent
 	}
 	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
-	outcome, err := inject.RescueLaunchPrompt(ctx, inject.TmuxInjector{}, socketPath, pane, clk, launchRescueSettle)
+	outcome, err := pfmcall.RescueLaunchPrompt(ctx, pfmcall.TmuxCaller{}, socketPath, pane, clk, launchRescueSettle)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %s: dismiss-and-Enter retry: %v\n", handle, err)
 	}

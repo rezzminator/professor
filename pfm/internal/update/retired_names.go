@@ -1,6 +1,7 @@
 package update
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -50,6 +52,24 @@ type retiredName struct {
 	kind      string
 	successor string // "" when nothing replaced it
 	match     retiredMatch
+	// probe is the root-relative file whose existence means the project defines
+	// the thing itself, for a name that is a context around the thing rather
+	// than the thing (`subagent_type: "ultimate"`); "" derives it from name.
+	probe string
+}
+
+// RetiredPfmCommand answers the dispatch of a retired `pfm {command}`: the
+// retired name and the successor the retired list gives it, read from
+// retiredNames (the one table). ok is false for a command the list does not
+// retire as a command with a successor.
+func RetiredPfmCommand(command string) (name, successor string, ok bool) {
+	name = "pfm " + command
+	for _, retired := range retiredNames {
+		if retired.kind == retiredCommand && retired.name == name && retired.successor != "" {
+			return retired.name, retired.successor, true
+		}
+	}
+	return "", "", false
 }
 
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
@@ -69,6 +89,15 @@ const chatlogSuccessor = "the chatlog skill"
 // "Global: flights replaces wave", "Project: flights cast replaces
 // per-project developer and qa"), all ordinary words, paths or routes.
 var retiredNames = []retiredName{
+	// chat-call: split family registrations and rename chat delivery.
+	{
+		name:      "mcp__professor__",
+		kind:      retiredTool,
+		successor: "mcp__chat-professor__* / mcp__harvester-professor__*",
+		match:     matchPrefix,
+	},
+	{name: "pfm chat inject", kind: retiredCommand, successor: "pfm chat call", match: matchExact},
+	{name: "chat_inject", kind: retiredTool, successor: "mcp__chat-professor__call", match: matchExact},
 	// releases/v0.78.0.md "Global: flights replaces wave": every /wave:*
 	// command and the wave-builder skill are removed; new work starts with
 	// /flights:spec. The bare /wave pair retired earlier (releases/v0.43.0.md).
@@ -105,11 +134,11 @@ var retiredNames = []retiredName{
 	// releases/v0.78.0.md "→ For: every adopter · per project · MCP tool
 	// names": mcp__chat__* and mcp__harvester__* become their
 	// mcp__professor__ forms.
-	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__professor__chat_*", match: matchPrefix},
-	{name: "mcp__harvester__", kind: retiredTool, successor: "mcp__professor__harvester_*", match: matchPrefix},
+	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__chat-professor__*", match: matchPrefix},
+	{name: "mcp__harvester__", kind: retiredTool, successor: "mcp__harvester-professor__*", match: matchPrefix},
 	// releases/v0.62.0.md "Removed: the host-level /chat:* Claude
 	// slash-command family"; "drive chat through the MCP tools instead".
-	{name: "/chat:", kind: retiredCommand, successor: "mcp__professor__chat_*", match: matchPrefix},
+	{name: "/chat:", kind: retiredCommand, successor: "mcp__chat-professor__*", match: matchPrefix},
 	// releases/v0.78.0.md "Project: retired project surface": /documenter and
 	// /documenter:archive ("Doc consolidation is the main session's work
 	// under /quality:doc"), /km, /audit:ai-output and six agents.
@@ -135,9 +164,25 @@ var retiredNames = []retiredName{
 	{name: "tracer-pro-max", kind: retiredAgent, successor: "tracer", match: matchExact},
 	// Commit f0c88ffb "tracer-rr is clone-distiller".
 	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
+	// Commit 3b401f24: the twin agents take their originals' full names; terra retires.
+	{name: "gpt-foreman", kind: retiredAgent, successor: "gpt-flights-foreman", match: matchExact},
+	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
+	{name: "gpt-executor", kind: retiredAgent, successor: "gpt-flights-mechanical-executor", match: matchExact},
+	retiredAgentRow("terra", "", `subagent_type: "terra"`),
+	retiredAgentRow("terra", "", `subagent_type:"terra"`),
+	retiredAgentRow("terra", "", `subagent_type: 'terra'`),
+	retiredAgentRow("terra", "", "subagent_type: terra"),
+	retiredAgentRow("terra", "", `subagent_type="terra"`),
+	retiredAgentRow("terra", "", `subagent_type": "terra"`),
+	retiredAgentRow("terra", "", `subagent_type":"terra"`),
+	retiredAgentRow("terra", "", "agents/terra.md"),
+	retiredAgentRow("terra", "", "`terra` agent"),
+	retiredAgentRow("terra", "", "`terra` sub-agent"),
+	retiredAgentRow("terra", "", "`terra` subagent"),
 	// Commit 73f2ae2b "/reminder becomes /pfm:schedule".
 	{name: "pfm chat reminder", kind: retiredCommand, successor: "pfm chat schedule", match: matchExact},
-	{name: "build-codex.mjs", kind: retiredPath, successor: "pfm codex build|check", match: matchExact},
+	{name: "build-codex.mjs", kind: retiredPath, successor: "engine-sync codex build|check", match: matchExact},
+	{name: "scripts/codex-sync.sh", kind: retiredPath, successor: "engine-sync codex", match: matchExact},
 	{name: "/reminder", kind: retiredCommand, successor: "/pfm:schedule", match: matchFamily},
 	// Commit b9f530c9 "/tokens and the transcript skill become one skill":
 	// chatlog, over `pfm tokens` and `pfm transcript` (both live). The
@@ -150,6 +195,11 @@ var retiredNames = []retiredName{
 	// too, the bare word "close-out" being prose.
 	{name: "/close-out", kind: retiredCommand, successor: "/done-herewith", match: matchFamily},
 	{name: "skills/close-out", kind: retiredSkill, successor: "/done-herewith", match: matchExact},
+	// `pfm codex|opencode` retire for `engine-sync codex|opencode`, which
+	// `pfm install` puts on PATH. The same rows answer the retired dispatch
+	// itself (RetiredPfmCommand).
+	{name: "pfm codex", kind: retiredCommand, successor: "engine-sync codex", match: matchFamily},
+	{name: "pfm opencode", kind: retiredCommand, successor: "engine-sync opencode", match: matchFamily},
 	// Commit abbcf405 "`pfm price` is gone": `pfm model-cost` is the one
 	// price command (a following `s` or `-` is another name, never a hit).
 	{name: "pfm price", kind: retiredCommand, successor: "pfm model-cost", match: matchExact},
@@ -164,13 +214,51 @@ var retiredNames = []retiredName{
 	// naming either one is dead wiring.
 	{name: "pfm-guard.sh", kind: retiredPath, match: matchExact},
 	{name: "guard-stamp.sh", kind: retiredPath, match: matchExact},
+	// Commit 09d16b64 "the ultimate family becomes /imagine:build, build-spec,
+	// build-fast, evolve and callmeter" retired /ultimate-spec and the ultimate
+	// agent, and callmeter commit 156f558 "remove ultimate-visualization; it
+	// moved to professor as /imagine:callmeter" its skill. /ultimate itself is
+	// live again as a standalone skill, so it is no row and no agent row below
+	// matches a reference to that skill (`/ultimate`, skills/ultimate/).
+	{name: "/ultimate-spec", kind: retiredCommand, successor: "/imagine:build", match: matchExact},
+	{
+		name: "/callmeter:ultimate-visualization", kind: retiredSkill, successor: "/imagine:callmeter",
+		match: matchExact,
+	},
+	// The agent is named by its context only — the bare word is everyday prose.
+	// One row per spelling an agent reference takes: the Agent tool's
+	// subagent_type in YAML, call, keyword and JSON form, the agent file's path,
+	// and the backticked name beside the word agent or sub-agent.
+	retiredAgentRow("ultimate", "imagine", `subagent_type: "ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type:"ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type: 'ultimate'`),
+	retiredAgentRow("ultimate", "imagine", "subagent_type: ultimate"),
+	retiredAgentRow("ultimate", "imagine", `subagent_type="ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type": "ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type":"ultimate"`),
+	retiredAgentRow("ultimate", "imagine", "agents/ultimate.md"),
+	retiredAgentRow("ultimate", "imagine", "`ultimate` agent"),
+	retiredAgentRow("ultimate", "imagine", "`ultimate` sub-agent"),
+	retiredAgentRow("ultimate", "imagine", "`ultimate` subagent"),
+}
+
+// retiredAgentRow is one contextual spelling of a retired agent reference.
+// A project keeping its own agent definition is not naming the retired one.
+func retiredAgentRow(name, successor, spelling string) retiredName {
+	return retiredName{
+		name: spelling, kind: retiredAgent, successor: successor, match: matchExact,
+		probe: ".claude/agents/" + name + ".md",
+	}
 }
 
 // definitionProbes are the root-relative paths whose existence means the
 // project itself still defines the retired name: its own command, agent or
-// skill file, or the retired path itself. A phase, an MCP tool and a command
-// spelled with a space are defined by no project file.
+// skill file. Retired paths, phases, MCP tools and commands spelled with a
+// space are defined by no project file; a legacy path cannot exempt itself.
 func (r retiredName) definitionProbes() []string {
+	if r.probe != "" {
+		return []string{r.probe}
+	}
 	switch r.kind {
 	case retiredCommand:
 		command := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(r.name, "/"), ":"), ":", "/")
@@ -182,8 +270,6 @@ func (r retiredName) definitionProbes() []string {
 		return []string{".claude/agents/" + r.name + ".md"}
 	case retiredSkill:
 		return []string{".claude/skills/" + strings.TrimSuffix(strings.TrimPrefix(r.name, "skills/"), " skill")}
-	case retiredPath:
-		return []string{r.name}
 	}
 	return nil
 }
@@ -231,8 +317,13 @@ var retiredWalkSkippedDirs = map[string]bool{
 // there marks the file binary and unscanned.
 const retiredBinaryProbe = 8000
 
-// retiredMaxRead is the most of one file the scan reads.
-const retiredMaxRead = 1 << 20
+// retiredMaxRead bounds bytes scanned per file; one extra byte detects a gap.
+const retiredMaxRead = 8 << 20
+
+// retiredMaxLine is the longest line the scan holds in memory. A file with a
+// longer line is scanned up to it and reported INCOMPLETE until accepted, so a
+// newline-free dump costs at most this much whatever its size.
+const retiredMaxLine = 4 << 20
 
 // ScanRetiredNames is the retired-name pass of `pfm doctor --project-updates`:
 // the project's own text files except the ones the caller skips (pinned files
@@ -243,7 +334,13 @@ const retiredMaxRead = 1 << 20
 // root minus the dependency, build and cache directories. A file or
 // directory it cannot read is a Failure, never a clean result.
 func ScanRetiredNames(root string, pinned map[string]bool) professor.RetiredNameScan {
-	return scanRetiredNamesWith(root, pinned, openRetiredFile)
+	return ScanRetiredNamesWithContext(context.Background(), root, pinned)
+}
+
+// ScanRetiredNamesWithContext shares the caller's deadline with git enumeration
+// and stops between regular-file reads when the context is cancelled.
+func ScanRetiredNamesWithContext(ctx context.Context, root string, pinned map[string]bool) professor.RetiredNameScan {
+	return scanRetiredNamesOpening(ctx, root, pinned, openRetiredFile)
 }
 
 func scanRetiredNamesWith(
@@ -251,7 +348,16 @@ func scanRetiredNamesWith(
 	pinned map[string]bool,
 	open func(string) (io.ReadCloser, error),
 ) professor.RetiredNameScan {
-	scan := scanRetiredNamesRaw(root, pinned, open)
+	return scanRetiredNamesOpening(context.Background(), root, pinned, open)
+}
+
+func scanRetiredNamesOpening(
+	ctx context.Context,
+	root string,
+	pinned map[string]bool,
+	open func(string) (io.ReadCloser, error),
+) professor.RetiredNameScan {
+	scan := scanRetiredNamesRaw(ctx, root, pinned, open)
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		scan.Hits = dropDefinedNames(resolved, scan.Hits)
 	}
@@ -261,6 +367,7 @@ func scanRetiredNamesWith(
 // scanRetiredNamesRaw is the scan before the project's own definitions are
 // weighed.
 func scanRetiredNamesRaw(
+	ctx context.Context,
 	root string,
 	pinned map[string]bool,
 	open func(string) (io.ReadCloser, error),
@@ -270,15 +377,9 @@ func scanRetiredNamesRaw(
 		scan.Failures = append(scan.Failures, professor.RetiredNameFailure{Path: relative, Error: err.Error()})
 	}
 	scanFile := func(current, relative string) {
-		hits, incomplete, err := scanRetiredFile(open, current, relative)
-		if incomplete {
-			scan.Incomplete = append(
-				scan.Incomplete,
-				professor.RetiredNameFailure{
-					Path:  relative,
-					Error: fmt.Sprintf("read limit of %d bytes; remaining text was not scanned", retiredMaxRead),
-				},
-			)
+		hits, incomplete, err := scanRetiredFile(ctx, open, current, relative)
+		if incomplete != "" {
+			scan.Incomplete = append(scan.Incomplete, professor.RetiredNameFailure{Path: relative, Error: incomplete})
 		}
 		if err != nil {
 			fail(relative, err)
@@ -299,13 +400,17 @@ func scanRetiredNamesRaw(
 		fail(".", statErr)
 		return scan
 	}
-	listed, inWorkTree, listErr := gitProjectFiles(resolved)
+	listed, inWorkTree, listErr := gitProjectFiles(ctx, resolved)
 	if listErr != nil {
 		fail(".", listErr)
 		return scan
 	}
 	if inWorkTree {
 		for _, relative := range listed {
+			if err := ctx.Err(); err != nil {
+				fail(".", fmt.Errorf("scan project files: %w", err))
+				break
+			}
 			current := filepath.Join(resolved, filepath.FromSlash(relative))
 			if retiredInSkippedDir(relative) || retiredSkippedFile(relative, pinned) {
 				continue
@@ -325,6 +430,9 @@ func scanRetiredNamesRaw(
 		return scan
 	}
 	walkErr := filepath.WalkDir(resolved, func(current string, entry fs.DirEntry, err error) error {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return fmt.Errorf("walk project files: %w", contextErr)
+		}
 		relative, relErr := filepath.Rel(resolved, current)
 		if relErr != nil {
 			fail(current, relErr)
@@ -361,8 +469,7 @@ func scanRetiredNamesRaw(
 // says root is not inside a work tree, where the caller walks instead; any
 // other failure of git, before or during the listing, is an error — a failed
 // enumeration of the project's own text never widens into reading everything.
-func gitProjectFiles(root string) (files []string, inWorkTree bool, err error) {
-	ctx := context.Background()
+func gitProjectFiles(ctx context.Context, root string) (files []string, inWorkTree bool, err error) {
 	// LC_ALL=C keeps git's "not a git repository" message in the one language
 	// it is matched in.
 	probe, err := updateGitCapture(ctx, root, []string{"LC_ALL=C"}, "rev-parse", "--is-inside-work-tree")
@@ -422,44 +529,85 @@ func retiredInSkippedDir(relative string) bool {
 	return false
 }
 
-// scanRetiredFile reads one file through open and returns its hits. It reads
-// the first retiredBinaryProbe bytes to decide the file is binary (a NUL) and
-// stops there; a text file reads at most retiredMaxRead plus one EOF probe, the cap cutting
-// at its last whole line. Reaching the cap is visibly incomplete; hits in the
-// readable prefix are retained, never presented as full coverage.
+// scanRetiredFile probes the first retiredBinaryProbe bytes for binary content,
+// then streams complete logical lines. Memory holds at most retiredMaxLine of
+// one line plus the actual hits; a longer line ends the scan with incomplete
+// naming where the unscanned text starts, the hits before it kept.
 func scanRetiredFile(
+	ctx context.Context,
 	open func(string) (io.ReadCloser, error),
 	current, relative string,
-) (hits []professor.RetiredNameHit, incomplete bool, err error) {
+) (hits []professor.RetiredNameHit, incomplete string, err error) {
 	file, err := open(current)
 	if err != nil {
-		return nil, false, err
+		return nil, "", fmt.Errorf("open %s: %w", relative, err)
 	}
-	defer func() { err = errors.Join(err, file.Close()) }()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close %s: %w", relative, closeErr))
+		}
+	}()
 	content := make([]byte, retiredBinaryProbe)
-	count, err := io.ReadFull(file, content)
+	limited := &io.LimitedReader{R: file, N: retiredMaxRead + 1}
+	count, err := io.ReadFull(limited, content)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return nil, false, err
+		return nil, "", fmt.Errorf("read %s: %w", relative, err)
 	}
 	content = content[:count]
 	if bytes.IndexByte(content, 0) >= 0 {
-		return nil, false, nil
+		return nil, "", nil
 	}
-	if count == retiredBinaryProbe {
-		rest, err := io.ReadAll(io.LimitReader(file, retiredMaxRead-retiredBinaryProbe+1))
-		if err != nil {
-			return nil, false, err
+	reader := bufio.NewReader(io.MultiReader(bytes.NewReader(content), limited))
+	scanned := 0
+	for lineNumber := 1; ; lineNumber++ {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return hits, "", fmt.Errorf("scan %s: %w", relative, contextErr)
 		}
-		content = append(content, rest...)
-		if len(content) > retiredMaxRead {
-			content = content[:retiredMaxRead]
-			if cut := bytes.LastIndexByte(content, '\n'); cut >= 0 {
-				content = content[:cut]
+		line, readErr := readRetiredLine(reader)
+		if errors.Is(readErr, errRetiredLineTooLong) {
+			return hits, fmt.Sprintf(
+				"line %d is longer than %d bytes; the text from there on was not scanned", lineNumber, retiredMaxLine,
+			), nil
+		}
+		if readErr == nil || errors.Is(readErr, io.EOF) {
+			scanned += len(line)
+			if scanned > retiredMaxRead {
+				return hits, fmt.Sprintf(
+					"%d-byte scan limit reached; line %d and the text from there on were not scanned",
+					retiredMaxRead,
+					lineNumber,
+				), nil
 			}
-			return retiredNameHits(relative, string(content)), true, nil
+			for _, hit := range retiredNameHits(relative, line) {
+				hit.Line = lineNumber
+				hits = append(hits, hit)
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return hits, "", nil
+		}
+		if readErr != nil {
+			return hits, "", fmt.Errorf("read %s: %w", relative, readErr)
 		}
 	}
-	return retiredNameHits(relative, string(content)), false, nil
+}
+
+var errRetiredLineTooLong = errors.New("retired-name scan: line over the read bound")
+
+// readRetiredLine reads one line, newline included, refusing one longer than
+// retiredMaxLine before it is held whole.
+func readRetiredLine(reader *bufio.Reader) (string, error) {
+	var line []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if len(line)+len(chunk) > retiredMaxLine {
+			return "", errRetiredLineTooLong
+		}
+		line = append(line, chunk...)
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return string(line), err
+		}
+	}
 }
 
 // retiredSkippedFile: a pinned file (the project-tier diff already covers
@@ -565,3 +713,39 @@ func isRetiredNameByte(b byte) bool {
 
 // openRetiredFile opens a file for the scan.
 func openRetiredFile(name string) (io.ReadCloser, error) { return os.Open(name) }
+
+// RetiredRegistryNames derives from retiredNames the names the registry
+// ownership scan matches against an unmarked entry: an agent by file stem, a
+// command by its path below the commands registry (`/qa:live` is
+// qa/live), a skill by directory name (`skills/transcript` is transcript). A
+// name that is not one registry entry (a phrase, an MCP tool, a path) is left out.
+func RetiredRegistryNames() installer.RetiredRegistryNames {
+	names := installer.RetiredRegistryNames{
+		Agents: map[string]bool{}, Commands: map[string]bool{}, Skills: map[string]bool{},
+	}
+	for _, retired := range retiredNames {
+		name := retired.name
+		if retired.kind == retiredAgent && retired.probe != "" {
+			name = strings.TrimSuffix(path.Base(retired.probe), ".md")
+		}
+		if strings.ContainsAny(name, " ") {
+			continue
+		}
+		switch retired.kind {
+		case retiredAgent:
+			if !strings.ContainsAny(name, "/:") {
+				names.Agents[name] = true
+			}
+		case retiredCommand:
+			if command, found := strings.CutPrefix(name, "/"); found && command != "" {
+				names.Commands[strings.ReplaceAll(strings.TrimSuffix(command, ":"), ":", "/")] = true
+			}
+		case retiredSkill:
+			skill := strings.TrimPrefix(name, "skills/")
+			if !strings.ContainsAny(skill, "/:") {
+				names.Skills[skill] = true
+			}
+		}
+	}
+	return names
+}

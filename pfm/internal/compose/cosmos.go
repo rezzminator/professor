@@ -198,7 +198,7 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 	for index := range events {
 		event := events[index]
 		switch event.Kind {
-		case fleetdb.KindInject:
+		case fleetdb.KindCall:
 			if event.SenderSession == "" && event.SenderUUID == "" && event.SenderLabel == "" {
 				unsigned++
 			}
@@ -441,7 +441,7 @@ func (builder *cosmosBuilder) chatNode(query resolve.Address) CosmosNode {
 }
 
 // cosmosKey is the graph's node identity, and it keys on machine addresses,
-// never on a label: chat_name renames a chat at will and a freed label is
+// never on a label: name renames a chat at will and a freed label is
 // reused by a later one, so a label-keyed node would retroactively rewrite
 // who said what in an append-only ledger.
 //

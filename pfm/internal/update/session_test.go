@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
@@ -17,6 +19,40 @@ func (f projectUpdateFixture) upstreamCommit(t *testing.T, template, content, su
 	writeProjectFixtureFile(t, f.store, "templates/"+template, content)
 	gitTemp(t, f.store, "add", "-A")
 	gitTemp(t, f.store, "commit", "-qm", subject)
+}
+
+// upstreamCommits is count upstreamCommit calls on one template written as one
+// git fast-import stream: commit index (1…count) sets template to
+// content(index) under subject(index), on the store's branch after its HEAD,
+// and the store is checked out at the last, as the calls would leave it.
+func (f projectUpdateFixture) upstreamCommits(
+	t *testing.T,
+	template string,
+	count int,
+	content, subject func(index int) string,
+) {
+	t.Helper()
+	branch := updateGitBranch(t, f.store)
+	parent := updateGitRevision(t, f.store, "HEAD")
+	when := time.Now().Unix()
+	var stream strings.Builder
+	for index := 1; index <= count; index++ {
+		message, body := subject(index)+"\n", content(index)
+		fmt.Fprintf(&stream, "commit refs/heads/%s\n", branch)
+		fmt.Fprintf(&stream, "committer fixture-identity <fixture.invalid> %d +0000\n", when)
+		fmt.Fprintf(&stream, "data %d\n%s", len(message), message)
+		if index == 1 {
+			fmt.Fprintf(&stream, "from %s\n", parent)
+		}
+		fmt.Fprintf(&stream, "M 100644 inline templates/%s\ndata %d\n%s\n", template, len(body), body)
+	}
+	command := exec.Command("git", "fast-import", "--quiet")
+	command.Dir = f.store
+	command.Stdin = strings.NewReader(stream.String())
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git fast-import: %v\n%s", err, output)
+	}
+	gitTemp(t, f.store, "reset", "-q", "--hard")
 }
 
 // sessionVerb runs one `pfm update <verb>` in the fixture project.
@@ -39,6 +75,7 @@ func (f projectUpdateFixture) sessionReport() (code int, stdout string) {
 // files, reaches exit 0 and `clean` through the verbs the report prints, and
 // every deliberate skip stays on record in the report.
 func TestSessionClosesEveryRowWithRecordedDecisions(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	fixture.upstreamCommit(t, "project/updated-one.md", "newer one\n", "second change to one")
 	fixture.upstreamCommit(t, "project/updated-one.md", "newest one\n", "third change to one")
@@ -125,6 +162,7 @@ func TestSessionClosesEveryRowWithRecordedDecisions(t *testing.T) {
 // its earlier decision and keeps the earliest untaken commit; porting the
 // file whole clears the decision; accept refuses a path no hit lives at.
 func TestKeepPinRefusalsAndLaterChanges(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	for _, refused := range []struct {
 		args []string
@@ -223,15 +261,15 @@ func (f projectUpdateFixture) baselineText(t *testing.T) string {
 // lists the oldest commits after it — never the newest with the oldest dropped —
 // and counts the newer ones it leaves out.
 func TestUpdatedRowListsTheOldestCommitsFirstPastTheCap(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
-	for index := 1; index <= 45; index++ {
-		fixture.upstreamCommit(
-			t,
-			"project/updated-one.md",
-			fmt.Sprintf("version %d\n", index),
-			fmt.Sprintf("step %02d", index),
-		)
-	}
+	fixture.upstreamCommits(
+		t,
+		"project/updated-one.md",
+		45,
+		func(index int) string { return fmt.Sprintf("version %d\n", index) },
+		func(index int) string { return fmt.Sprintf("step %02d", index) },
+	)
 	_, report := fixture.sessionReport()
 	// The fixture's own "new templates" commit is the oldest after the pin.
 	if !strings.Contains(report, " new templates\n") || !strings.Contains(report, " step 01\n") ||
@@ -249,6 +287,7 @@ func TestUpdatedRowListsTheOldestCommitsFirstPastTheCap(t *testing.T) {
 // TestRecordedReasonsRenderOnOneLine: a keep or accept reason taken from
 // baseline.json with a newline never forges report lines of its own.
 func TestRecordedReasonsRenderOnOneLine(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	if code, stdout, stderr := fixture.sessionVerb(
 		"pin", ".claude/updated-one.md", "--keep", "own tool\nclean",
@@ -270,6 +309,7 @@ func TestRecordedReasonsRenderOnOneLine(t *testing.T) {
 // path holding a space, once its hit is fixed, prints an undo line whose
 // arguments — quoted, --name kept — remove exactly that rule.
 func TestStaleAcceptRuleHintUndoesItsOwnRule(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	writeProjectFixtureFile(t, fixture.project, "docs/old notes.md", "ran /km once\n")
 	if code, stdout, stderr := fixture.sessionVerb(
@@ -292,5 +332,129 @@ func TestStaleAcceptRuleHintUndoesItsOwnRule(t *testing.T) {
 	if err != nil || len(baseline.RetiredAccepted) != 0 || baseline.Version != professor.BaselineVersion {
 		t.Fatalf("after undo: rules=%+v version=%d err=%v, want none at version 1",
 			baseline.RetiredAccepted, baseline.Version, err)
+	}
+}
+
+// Reviewed scanner limits are decisions, not permanent open rows. A name-only
+// acceptance cannot claim the unscanned text, and undo restores the warning.
+func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
+	t.Parallel()
+	for _, row := range []struct {
+		name, content string
+		hit           bool
+	}{
+		{"line limit without hits", strings.Repeat("x", retiredMaxLine+1), false},
+		{"byte limit with earlier hit", "/jc\n" + strings.Repeat(strings.Repeat("x", 1023)+"\n", retiredMaxRead/1024), true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			fixture := newProjectUpdateFixture(t)
+			for _, step := range [][]string{
+				{"pin", ".claude/updated-one.md", ".claude/updated-two.md"},
+				{"drop", ".claude/gone.md", ".claude/deleted.md"},
+				{"ignore", "project/new.md", "project/deleted.md"},
+			} {
+				if code, stdout, stderr := fixture.sessionVerb(step...); code != 0 {
+					t.Fatalf("setup %v code=%d stdout=%q stderr=%q", step, code, stdout, stderr)
+				}
+			}
+			const path = "docs/archive.txt"
+			writeProjectFixtureFile(t, fixture.project, path, row.content)
+			_, before := fixture.sessionReport()
+			if !strings.Contains(before, "INCOMPLETE") {
+				t.Fatalf("opening report lacks coverage warning:\n%s", before)
+			}
+			if code, stdout, stderr := fixture.sessionVerb(
+				"accept",
+				path,
+				"--name",
+				"/wave",
+				"--reason",
+				"reviewed",
+			); code != 1 {
+				t.Fatalf("named rule accepted unseen content: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if code, stdout, stderr := fixture.sessionVerb(
+				"accept",
+				"docs",
+				"--coverage",
+				"--reason",
+				"reviewed archive coverage",
+			); code != 0 {
+				t.Fatalf("reviewed coverage accept code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			baseline, err := professor.Load(fixture.project)
+			if err != nil || len(baseline.RetiredAccepted) != 1 || baseline.RetiredAccepted[0].Path != "docs" ||
+				baseline.RetiredAccepted[0].Reason != "reviewed archive coverage" ||
+				!baseline.RetiredAccepted[0].Coverage || baseline.Version != professor.BaselineCoverageVersion {
+				t.Fatalf("persistent coverage rule = %+v, err=%v", baseline.RetiredAccepted, err)
+			}
+			if row.hit {
+				_, report := fixture.sessionReport()
+				rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+				if err != nil || len(rows) != 1 || !strings.Contains(report, "RETIRED-NAME  1") {
+					t.Fatalf("coverage must leave earlier hit open: rows=%+v err=%v report=%s", rows, err, report)
+				}
+				if code, stdout, stderr := fixture.sessionVerb(
+					"accept", path, "--name", "/jc", "--reason", "historical mention stays",
+				); code != 0 {
+					t.Fatalf("separate hit accept code=%d stdout=%q stderr=%q", code, stdout, stderr)
+				}
+			}
+			code, report := fixture.sessionReport()
+			if code != 0 || !strings.HasSuffix(strings.TrimSpace(report), "\nclean") ||
+				!strings.Contains(report, "accepted incomplete coverage: "+path) ||
+				strings.Contains(report, "matches nothing now") {
+				t.Fatalf("accepted coverage must be explicit and close review: code=%d\n%s", code, report)
+			}
+			rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+			if err != nil || len(rows) != 0 {
+				t.Fatalf("accepted coverage remains open: rows=%+v err=%v", rows, err)
+			}
+			failure := func(string, map[string]bool) professor.RetiredNameScan {
+				return professor.RetiredNameScan{
+					Failures: []professor.RetiredNameFailure{{Path: path, Error: "read failed"}},
+				}
+			}
+			var failed bytes.Buffer
+			if code := professor.RunProjectUpdates(
+				fixture.project,
+				fixture.runtime.Paths.Home,
+				false,
+				&failed,
+				failure,
+			); code != 3 ||
+				!strings.Contains(failed.String(), "read failed") {
+				t.Fatalf("accepted path hid failure: code=%d report=%s", code, failed.String())
+			}
+			var out, errOut bytes.Buffer
+			if code := professor.RunProjectUpdate(
+				"accept",
+				[]string{"docs", "--coverage", "--reason", "reviewed", "--root", fixture.project},
+				&out,
+				&errOut,
+				fixture.runtime,
+				failure,
+			); code != 1 {
+				t.Fatalf("read failure was accepted: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if code, stdout, stderr := fixture.sessionVerb("accept", "--undo", "--coverage", "docs"); code != 0 {
+				t.Fatalf("undo code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			baseline, err = professor.Load(fixture.project)
+			wantRules, wantVersion := 0, professor.BaselineVersion
+			if row.hit {
+				wantRules, wantVersion = 1, professor.BaselineDecisionsVersion
+			}
+			if err != nil || len(baseline.RetiredAccepted) != wantRules || baseline.Version != wantVersion {
+				t.Fatalf("coverage undo removed wrong scope: baseline=%+v err=%v", baseline, err)
+			}
+			if row.hit && (baseline.RetiredAccepted[0].Coverage || baseline.RetiredAccepted[0].Name != "/jc") {
+				t.Fatalf("coverage undo lost hit decision: %+v", baseline.RetiredAccepted)
+			}
+			_, report = fixture.sessionReport()
+			if !strings.Contains(report, "INCOMPLETE") || strings.HasSuffix(strings.TrimSpace(report), "\nclean") {
+				t.Fatalf("undo did not reopen coverage:\n%s", report)
+			}
+		})
 	}
 }

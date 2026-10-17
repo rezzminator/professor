@@ -144,9 +144,11 @@ func (writer *readerWriter) rewrite() {
 // truncations, rotations and in-place rewrites, every Read answers exactly
 // what ReadMeta and Tail answer for the file as it stands.
 func TestReaderReadsWhatTheWholeReadsRead(t *testing.T) {
+	t.Parallel()
 	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
 		for seed := int64(1); seed <= 6; seed++ {
 			t.Run(fmt.Sprintf("%s/seed %d", engine, seed), func(t *testing.T) {
+				t.Parallel()
 				writer := &readerWriter{
 					t: t, path: filepath.Join(t.TempDir(), "chat.jsonl"), engine: engine,
 					random: rand.New(rand.NewSource(seed)),

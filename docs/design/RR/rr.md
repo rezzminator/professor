@@ -203,9 +203,8 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 | Surface | File | Holds |
 | --- | --- | --- |
 | The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `clone-distiller.md`, `rr-pro.md`, `rr-pro-max.md`, `shared/repo-lane.md` | The three protocols; the `rr-pro` and `rr-pro-max` overrides of `rr.md`'s § Budget and § Spawning, each hash-pinned, and their repository lane, the shared file `shared/repo-lane.md` |
-| The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro` and `rr-pro-max`, re-rendered by `pfm codex agents` after every edit of `rr.md` |
+| The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro` and `rr-pro-max`, re-rendered by `engine-sync codex agents` after every edit of `rr.md` |
 | The hook | `pfm internal rr-dir`, wired by `pfm/internal/installer/expected_hooks.go` | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
-| The roster line | `docs/BLUEPRINT.md` | The family's members and the variant mechanism |
 | This directory | `docs/design/RR/` | This file and one file per other member |
 
 ## Open items

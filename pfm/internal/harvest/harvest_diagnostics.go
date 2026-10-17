@@ -9,7 +9,7 @@ import (
 // titleDiagnosticMarker is the title diagnostic's own wording. Its kind,
 // "ambiguous", is set by its producer (titleGuessResult), never read from
 // text: the message quotes the caller's title, which may carry any marker.
-const titleDiagnosticMarker = " is a title — use the `harvester_search_literature` tool"
+const titleDiagnosticMarker = " is a title — use the `search_literature` tool"
 
 // pubMedSearchMarker names a PubMed search/results URL given as an article:
 // an invalid input, never an ambiguous title. Its producer sets the kind,
@@ -36,7 +36,7 @@ func titleGuessResult(source, echoed string) Result {
 		Source:    source,
 		ErrorKind: errorKindAmbiguous,
 		Error: fmt.Sprintf(
-			"%q"+titleDiagnosticMarker+" to list candidate works (it returns a handle for each), then read the one you pick with `harvester_read` (publications). `harvester_read` takes web pages in urls and UNAMBIGUOUS identifiers in publications (DOI, arXiv id, PMID, PMCID, ISBN), never a title.",
+			"%q"+titleDiagnosticMarker+" to list candidate works (it returns a handle for each), then read the one you pick with `read` (publications). `read` takes web pages in urls and UNAMBIGUOUS identifiers in publications (DOI, arXiv id, PMID, PMCID, ISBN), never a title.",
 			echoed,
 		),
 	}

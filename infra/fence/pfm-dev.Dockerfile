@@ -22,6 +22,21 @@ ARG GO_VERSION=1.27.1
 ARG TARGETARCH
 RUN case "${TARGETARCH}" in amd64|arm64) ;; *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; esac \
  && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
+# shellcheck is the linter the plugins' scripts/gate.sh runs over their shell
+# scripts. Pinned to the release those gates pin (gpt-gateway SHELLCHECK_VERSION):
+# apt's older release reports different findings. Each tarball is verified
+# against its recorded checksum before extracting.
+ARG SHELLCHECK_VERSION=0.11.0
+RUN case "${TARGETARCH}" in \
+      amd64) sc_arch=x86_64; sc_sum=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198 ;; \
+      arm64) sc_arch=aarch64; sc_sum=12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588 ;; \
+      *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${sc_arch}.tar.xz" \
+ && echo "${sc_sum}  /tmp/shellcheck.tar.xz" | sha256sum -c - \
+ && tar -C /tmp -xJf /tmp/shellcheck.tar.xz \
+ && install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck \
+ && rm -rf /tmp/shellcheck.tar.xz "/tmp/shellcheck-v${SHELLCHECK_VERSION}"
 # Node pinned to the mirror compilers' minimum supported release. Verify the selected
 # architecture's tarball against the release checksum before extracting it.
 ARG NODE_VERSION=22.13.1

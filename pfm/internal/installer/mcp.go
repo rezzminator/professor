@@ -28,13 +28,12 @@ const (
 	mcpServeCommand    = "serve"
 	mcpServerHarvester = "harvester"
 	httpProtocol       = "http"
-	professorName      = pfmconfig.MCPServerProfessor
+	professorName      = "professor"
 	stdioProtocol      = "stdio"
 	openCodeLocal      = "local"
 )
 
-// mcpStdioArgs is the argv every engine registers after the absolute pfm
-// path: the one stdio server, `pfm mcp serve --stdio`.
+// mcpStdioArgs identifies the legacy combined stdio registration.
 var mcpStdioArgs = []string{mcpCommand, mcpServeCommand, "--stdio"}
 
 // mcpLegacyChatArgs are the argvs pfm's own legacy stdio chat ran after the
@@ -43,7 +42,7 @@ var mcpLegacyChatArgs = [][]string{{mcpCommand, chatName, mcpServeCommand}, {mcp
 
 // mcpLegacyNames are the keys pfm registered before the one professor
 // server; install and uninstall remove pfm's own exact shapes under them.
-var mcpLegacyNames = []string{chatName, mcpServerHarvester}
+var mcpLegacyNames = []string{chatName, mcpServerHarvester, professorName}
 
 type mcpOwnership struct {
 	Pending               map[string]map[string]any `json:"pending,omitempty"`
@@ -71,6 +70,9 @@ func (installer *engine) mcpOwnershipPath() string {
 }
 
 func (installer *engine) wireMCP() error {
+	if err := installer.cutOverClaudeMCP(); err != nil {
+		return err
+	}
 	if err := installer.dropClaudeMCPOwnership(); err != nil {
 		return err
 	}
@@ -92,15 +94,6 @@ func (installer *engine) wireMCP() error {
 	}
 	if err := installer.removeLegacyMCPCredential(); err != nil {
 		return err
-	}
-	return nil
-}
-
-// enabledMCPNames is the one professor registration when either family is
-// enabled, and nothing otherwise.
-func enabledMCPNames(servers map[string]bool) []string {
-	if servers[chatName] || servers[mcpServerHarvester] {
-		return []string{professorName}
 	}
 	return nil
 }
@@ -135,6 +128,8 @@ func (installer *engine) mcpChatCommand() string {
 // `pfm install --yes` only for what it matches.
 func isPFMLegacyClaudeShape(name string, registration map[string]any, bin string, port int) bool {
 	switch name {
+	case professorName:
+		return isExactStdioShape(registration, bin, mcpStdioArgs)
 	case chatName:
 		for _, args := range mcpLegacyChatArgs {
 			if isExactStdioShape(registration, bin, args) {
@@ -166,16 +161,19 @@ func isExactStdioShape(registration map[string]any, bin string, want []string) b
 // the legacy keys: the local `pfm mcp chat serve` chat entry and the loopback
 // remote chat and harvester entries, each exactly three keys.
 func (installer *engine) isPFMLegacyOpenCodeClient(name string, registration map[string]any) bool {
-	if (name != chatName && name != mcpServerHarvester) || len(registration) != 3 || registration["enabled"] != true {
+	if len(registration) != 3 || registration["enabled"] != true {
 		return false
 	}
 	switch registration[configTypeKey] {
 	case openCodeLocal:
 		command, ok := registration["command"].([]any)
+		if name == professorName {
+			return ok && sameStrings(command, append([]string{installer.mcpChatCommand()}, mcpStdioArgs...))
+		}
 		return name == chatName && ok &&
 			sameStrings(command, []string{installer.mcpChatCommand(), mcpCommand, chatName, mcpServeCommand})
 	case "remote":
-		return registration["url"] == installer.mcpURL(name)
+		return (name == chatName || name == mcpServerHarvester) && registration["url"] == installer.mcpURL(name)
 	}
 	return false
 }
@@ -226,7 +224,7 @@ func pfmClaudeMCPShape(name string, registration map[string]any, home string, po
 	if isPFMLegacyClaudeShape(name, registration, bin, port) {
 		return true
 	}
-	return name == professorName && isExactStdioShape(registration, bin, mcpStdioArgs)
+	return isFamilyRegistration(name) && isExactStdioShape(registration, bin, mcpFamilyStdioArgs(name))
 }
 
 func (installer *engine) writeMCPCodeConfig(names []string) error {
@@ -247,12 +245,15 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	if err != nil {
 		return fmt.Errorf("read Codex MCP config %s: %w", path, err)
 	}
-	body, err := codexStdioBody(installer.mcpChatCommand())
-	if err != nil {
-		return fmt.Errorf("encode Codex MCP registration for %s: %w", path, err)
+	if _, present := foreign[professorName]; present {
+		installer.skip("preserve foreign MCP client professor in " + path)
 	}
 	var generated []string
 	for _, name := range names {
+		body, err := codexStdioBody(installer.mcpChatCommand(), name)
+		if err != nil {
+			return fmt.Errorf("encode Codex MCP registration %s: %w", name, err)
+		}
 		if _, present := foreign[name]; present {
 			installer.skip("preserve conflicting manual MCP client " + name + " in " + path)
 			continue
@@ -316,9 +317,13 @@ func (installer *engine) codexMCPYield(raw string) ([]string, map[string]any, st
 // codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
 // table — `command = "<bin>"` and `args = ["mcp", "serve", "--stdio"]` as the
 // TOML encoder renders them — so the writer and the strip agree byte for byte.
-func codexStdioBody(bin string) ([]string, error) {
+func codexStdioBody(bin string, names ...string) ([]string, error) {
+	args := mcpStdioArgs
+	if len(names) > 0 {
+		args = mcpFamilyStdioArgs(names[0])
+	}
 	body := make([]string, 0, 2)
-	for _, value := range []map[string]any{{configCommandKey: bin}, {configArgsKey: mcpStdioArgs}} {
+	for _, value := range []map[string]any{{configCommandKey: bin}, {configArgsKey: args}} {
 		encoded, err := encodeCodexValues(value)
 		if err != nil {
 			return nil, err
@@ -360,10 +365,22 @@ func stripPFMCodexLines(lines []string, port int, professorBody []string) []stri
 		}
 	}
 	for _, name := range mcpLegacyNames {
+		if name == professorName {
+			continue
+		}
 		removeExactCodexTable(lines, removed, name, []string{"url = \"" + legacyMCPURL(port, name) + "\""})
 	}
 	if len(professorBody) > 0 {
 		removeExactCodexTable(lines, removed, professorName, professorBody)
+		for _, family := range []string{chatName, mcpServerHarvester} {
+			body := append([]string(nil), professorBody...)
+			for i, line := range body {
+				if strings.HasPrefix(line, "args = ") {
+					body[i] = strings.Replace(line, `"--stdio"`, `"--stdio", "--family", "`+family+`"`, 1)
+				}
+			}
+			removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(family), body)
+		}
 	}
 	kept := make([]string, 0, len(lines))
 	cut := false
@@ -446,11 +463,15 @@ func OpenCodeConfigPath(home string) string {
 	return filepath.Join(home, ".config", pfmengine.MustLookup(pfmengine.OpenCode).LongName, "opencode.jsonc")
 }
 
-func (installer *engine) mcpOpenCodeRegistration() map[string]any {
+func (installer *engine) mcpOpenCodeRegistration(names ...string) map[string]any {
+	args := mcpStdioArgs
+	if len(names) > 0 {
+		args = mcpFamilyStdioArgs(names[0])
+	}
 	return map[string]any{
-		"type":    openCodeLocal,
-		"command": append([]string{installer.mcpChatCommand()}, mcpStdioArgs...),
-		"enabled": true,
+		"type":           openCodeLocal,
+		configCommandKey: append([]string{installer.mcpChatCommand()}, args...),
+		"enabled":        true,
 	}
 }
 
@@ -490,6 +511,10 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 			return fmt.Errorf("OpenCode MCP config %s: mcp must be an object", path)
 		}
 	}
+	if registration, ok := servers[professorName].(map[string]any); ok &&
+		!installer.isPFMLegacyOpenCodeClient(professorName, registration) {
+		installer.skip("preserve foreign OpenCode MCP client professor")
+	}
 	owned := ownership.OpenCodeRegistrations[path]
 	if owned == nil {
 		owned = map[string]any{}
@@ -501,7 +526,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 	}
 	wanted := map[string]bool{}
 	for _, name := range names {
-		if name == professorName {
+		if isFamilyRegistration(name) {
 			wanted[name] = true
 		}
 	}
@@ -523,7 +548,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 			continue
 		}
 		if wanted[name] {
-			desired := installer.mcpOpenCodeRegistration()
+			desired := installer.mcpOpenCodeRegistration(name)
 			next[name] = desired
 			if !sameJSONValue(current, desired) {
 				setNames[name] = desired
@@ -533,7 +558,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 		removeNames[name] = true
 	}
 	for name := range wanted {
-		registration := installer.mcpOpenCodeRegistration()
+		registration := installer.mcpOpenCodeRegistration(name)
 		current, present := servers[name]
 		_, ours := next[name]
 		if present && !ours {

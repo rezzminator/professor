@@ -15,6 +15,8 @@ case "${1:-}" in
     # The Codex/OpenCode compiler pfm execs, from the source lanes/container.sh mounts at /engine-sync.
     . /worktree/infra/fence/engine-sync.sh
     engine_sync_build "${ENGINE_SYNC_BIN:?lanes/container.sh sets ENGINE_SYNC_BIN}"
+    # No Claude session runs here, so no plugin wrapper makes the stable link pfm install's PATH link needs.
+    engine_sync_link_stable "$ENGINE_SYNC_BIN"
     for engine in claude codex opencode; do ln -sf /usr/local/libexec/pfm-lanes/mock-engine "/usr/local/bin/$engine"; done
     cp "$HERE/scenarios/default.json" "$HOME/.local/share/pfm-lanes/default.json"
     ;;
@@ -40,6 +42,8 @@ JSON
     mkdir -p "$HOME/.config/opencode"
     printf '{"model":"openai/lane-fixture"}\n' >"$HOME/.config/opencode/opencode.jsonc"
     (cd /worktree && pfm install --yes)
+    [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
+      { echo "provision: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
     settings_tmp="$(mktemp)"
     jq --arg t "custom:professor-gold" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
     cat "$settings_tmp" >"$HOME/.claude/settings.json"

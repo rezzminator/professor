@@ -225,6 +225,7 @@ func professorUpdatePrompt(row compose.Row) string {
 		"`UPDATED`: port each listed upstream commit's intent into the local file, keeping the project's own edits, then `pfm update pin <local>`; a version kept on purpose is `pfm update pin <local> --keep \"<what you did not take, and why>\"`, never a row left open. " +
 		"`NEW`: decide from the project's own rules, then adopt it (`pfm update pin --template <template> <local>`) or `pfm update ignore <template>`. " +
 		"`RETIRED-NAME`: edit the line to its successor, or `pfm update accept <path> --reason \"<why>\"` for a mention that must stay. " +
+		"`INCOMPLETE`: inspect the unscanned text, then `pfm update accept <path> --coverage --reason \"<why>\"` once reviewed. " +
 		"`GONE-UPSTREAM`, `MOVED` and `LOCAL-DELETED`: the verbs printed on the row. " +
 		"Run the verbs one at a time, never in parallel: each rewrites `.professor/baseline.json`. Re-run the report after each project and quote its last line; then do the `per project` actions; report the exact result of each step. " +
 		"Do not push, tag, publish, release, or edit the source manually."

@@ -11,87 +11,50 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// DeadLink is a dangling registry link whose resolved target belongs to pfm.
-type DeadLink struct{ Path, Target string }
-
-// InspectDeadRegistryLinks shares ownership and absence rules between install
-// and doctor. WalkDir never follows a symlink into an operator's directory.
-func InspectDeadRegistryLinks(home, store string, repos []string) ([]DeadLink, error) {
-	roots := append([]string(nil), repos...)
-	roots = append(roots, managedRootForHome(home), paths.GeneratedClaudeAgentsDir(home))
-	var dead []DeadLink
-	for _, registry := range []string{
-		filepath.Join(store, "agents"), filepath.Join(store, "commands"),
-		filepath.Join(store, "skills"), filepath.Join(home, ".agents", "skills"),
-	} {
-		err := filepath.WalkDir(registry, func(path string, entry fs.DirEntry, walkErr error) error {
-			if path == registry && errors.Is(walkErr, fs.ErrNotExist) {
-				return nil
-			}
-			if walkErr != nil {
-				return fmt.Errorf("inspect registry path %s: %w", path, walkErr)
-			}
-			if path == registry && !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
-				return fmt.Errorf("inspect registry path %s: not a directory", path)
-			}
-			if entry.Type()&os.ModeSymlink == 0 {
-				return nil
-			}
-			target, err := os.Readlink(path)
-			if err != nil {
-				return fmt.Errorf("read registry link %s: %w", path, err)
-			}
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(filepath.Dir(path), target)
-			}
-			target = filepath.Clean(target)
-			owned := false
-			for _, root := range roots {
-				if withinGlobalSource(target, filepath.Clean(root)) {
-					owned = true
-					break
-				}
-			}
-			if !owned {
-				return nil
-			}
-			if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) {
-				dead = append(dead, DeadLink{Path: path, Target: target})
-			} else if err != nil {
-				return fmt.Errorf("inspect registry link %s target %s: %w", path, target, err)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return dead, nil
-}
-
+// retireDeadRegistryLinks retires what the registry-ownership scan classes
+// STORE, ORPHAN or DEAD, one "retire {path}" line each; RETIRED and unlisted
+// entries are never touched. An uninstall plans nothing, so every owned link
+// left in a registry goes. It then prunes the directories the retirement
+// emptied below a registry.
 func (installer *engine) retireDeadRegistryLinks() error {
 	storeRoot := skillStoreRoot(installer.options.Home)
 	unlock, busy, err := installer.lockSkillStore(storeRoot)
 	if err != nil {
-		installer.skip("registry dead-link check skipped: " + err.Error())
+		installer.skip("registry-ownership check skipped: " + err.Error())
 		return nil
 	}
 	if busy {
-		installer.skip("registry dead-link check skipped: another pfm install holds " + storeRoot)
+		installer.skip("registry-ownership check skipped: another pfm install holds " + storeRoot)
 		return nil
 	}
 	defer unlock()
 	repos, err := installer.recordedProfessorSourceRepos()
 	if err != nil {
-		installer.skip("registry dead-link check skipped: " + err.Error() +
+		installer.skip("registry-ownership check skipped: " + err.Error() +
 			" — rerun pfm install --yes from inside your Professor clone")
 		return nil
 	}
 	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
-	dead, err := InspectDeadRegistryLinks(installer.options.Home, installer.options.ConfigDir, repos)
+	scan := RegistryScan{Home: installer.options.Home, Store: installer.options.ConfigDir, Roots: repos}
+	if installer.options.Mode != ModeUninstall {
+		clone, err := installer.globalSourceRepoRoot()
+		if err != nil {
+			return fmt.Errorf("resolve registry plan clone: %w", err)
+		}
+		scan.Plan, err = PlanRegistryLinks(
+			installer.options.Home, installer.options.ConfigDir, clone, installer.options.ThemeManifestURL,
+		)
+		if errors.Is(err, errPlanSkillSources) {
+			installer.skip("registry-ownership check skipped: " + err.Error())
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+	result, err := InspectRegistryOwnership(scan)
 	if err != nil {
 		return err
 	}
@@ -101,8 +64,16 @@ func (installer *engine) retireDeadRegistryLinks() error {
 	}
 	registries[filepath.Join(installer.options.Home, ".agents", "skills")] = true
 	directories := map[string]bool{}
-	for _, link := range dead {
-		if err := installer.retire(link.Path, "dead pfm link -> "+link.Target); err != nil {
+	for _, link := range result.Findings {
+		reason := map[string]string{
+			RegistryStore:  "retired store link -> ",
+			RegistryOrphan: "orphan pfm link -> ",
+			RegistryDead:   "dead pfm link -> ",
+		}[link.Class]
+		if reason == "" {
+			continue // RETIRED is reported by pfm doctor, never touched
+		}
+		if err := installer.retire(link.Path, reason+link.Target); err != nil {
 			return fmt.Errorf("retire registry link %s: %w", link.Path, err)
 		}
 		if registries[link.Path] {

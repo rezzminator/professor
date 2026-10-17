@@ -6,7 +6,7 @@ import (
 )
 
 // BookmarkLabel scrapes a chat's own 🔖 label off a captured pane. It is the
-// single implementation of that read (K3): the label resolver, the inject
+// single implementation of that read (K3): the label resolver, the call
 // sender signature, and the claude half of window-name convergence all ask the
 // same question of the same screen text, and three spellings of it drifted
 // apart once already.
@@ -23,25 +23,24 @@ func BookmarkLabel(capture string) string {
 	return BookmarkLabelFor(capture, nil)
 }
 
-// DeliveredFooterMarker opens the reply hint inject stamps onto every
-// message it delivers (internal/inject signatureParts). It lives here, beside
+// DeliveredFooterMarker opens the reply hint call stamps onto every
+// message it delivers (internal/call signatureParts). It lives here, beside
 // the scraper, because this package owns the one question both sides of it
 // ask: which lines on a pane are the pane's OWN identity, and which are text
 // somebody else put there. A line carrying this marker is a message this
 // fleet delivered INTO the pane — never the pane's own statusline — and
 // BookmarkLabelFor skips it.
-const DeliveredFooterMarker = "to reply: chat_inject "
+const DeliveredFooterMarker = "to reply: call "
+
+// retiredDeliveredFooterMarker opens the footer binaries stamped before
+// `chat inject` became `chat call`; such a footer stays on a live pane until
+// it scrolls away, and is just as foreign to the pane's identity.
+const retiredDeliveredFooterMarker = "to reply: chat_inject "
 
 // BookmarkLabelFor is BookmarkLabel with the configured account emoji set
 // supplied by the caller. Legacy medals remain accepted for old live labels.
 //
-// A delivered footer is skipped outright. Older footers stamped "🔖 <sender
-// label>" into the recipient's pane, and because the LAST 🔖 line wins, a
-// chat's resolved label could become whatever the most recent message it
-// received claimed its sender was called. inject no longer writes that
-// marker, but footers already on screen and in scrollback still carry it, so
-// the read side refuses them by their own signature rather than trusting them
-// to have aged out.
+// Delivered footer lines do not represent the recipient's identity.
 //
 // This defends against the footer THIS fleet writes, which it can recognise
 // exactly. It is not a defence against arbitrary screen text: a capture is
@@ -51,7 +50,7 @@ const DeliveredFooterMarker = "to reply: chat_inject "
 func BookmarkLabelFor(capture string, configured []string) string {
 	label := ""
 	for _, line := range strings.Split(capture, "\n") {
-		if strings.Contains(line, DeliveredFooterMarker) {
+		if strings.Contains(line, DeliveredFooterMarker) || strings.Contains(line, retiredDeliveredFooterMarker) {
 			continue
 		}
 		if !strings.Contains(line, "🔖") || !ContainsMedalFor(line, configured) {

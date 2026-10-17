@@ -44,7 +44,7 @@ func readGptHookOwnership(managedRoot string) ([]string, error) {
 	}
 	for _, target := range receipt.Targets {
 		if !filepath.IsAbs(target) || filepath.Clean(target) != target ||
-			!slices.Contains(gptHookAssets, filepath.Base(target)) {
+			!isGptHookName(filepath.Base(target)) {
 			return nil, fmt.Errorf("gpt hook ownership %s: invalid asset target %q", path, target)
 		}
 	}
@@ -57,14 +57,25 @@ func (installer *engine) gptHookTargets() ([]string, error) {
 	)
 }
 
+func (installer *engine) retiredGptHookTargets() ([]string, error) {
+	return gptHookTargetsNamed(
+		gptHookDirs(installer.options.Home, installer.options.ConfigDir, installer.options.ClaudeAccounts),
+		retiredGptHookAssets,
+	)
+}
+
 func gptHookTargets(dirs []string) ([]string, error) {
+	return gptHookTargetsNamed(dirs, gptHookAssets)
+}
+
+func gptHookTargetsNamed(dirs, names []string) ([]string, error) {
 	var targets []string
 	for _, dir := range dirs {
 		parent, err := filepath.Abs(filepath.Join(dir, "hooks"))
 		if err != nil {
 			return nil, fmt.Errorf("resolve gpt hook directory %s: %w", dir, err)
 		}
-		for _, name := range gptHookAssets {
+		for _, name := range names {
 			// Canonicalize the parent, not the asset symlink (which resolves to
 			// its managed source), so moved account aliases leave no orphan.
 			targets = append(targets, filepath.Join(paths.PhysicalPath(parent), name))

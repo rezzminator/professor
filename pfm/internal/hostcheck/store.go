@@ -129,6 +129,13 @@ func unlinkAccountFix(dir string) string {
 const storeIdentityProblem = " is account identity inside the store, written by a Claude launched with " +
 	"CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)"
 
+// storeRebuildableEntries are AccountEntries a store copy of which is no
+// identity: Claude rebuilds a cache, and other tools' hooks write under the
+// store's cache (cache/write-state-sync), so no stray lands there from a launch
+// with the wrong config dir. store-identity skips them; an account's own copy
+// stays an account entry.
+var storeRebuildableEntries = []string{"cache"}
+
 func storeIdentity(env Env) ([]Row, error) {
 	var rows []Row
 	acct := firstAccountDir(env)
@@ -142,6 +149,11 @@ func storeIdentity(env Env) ([]Row, error) {
 	for _, entry := range installer.AccountEntries {
 		if slices.Contains(installer.RetiredStoreEntries, entry) {
 			// Its store copy is retired-store-entry's: pfm install archives it.
+			continue
+		}
+		if slices.Contains(storeRebuildableEntries, entry) && storeEntryIsPlainDir(filepath.Join(env.Store, entry)) {
+			// A plain directory is rebuildable scratch any hook may write; a link,
+			// a file or an unreadable entry there is still inspected below.
 			continue
 		}
 		if entry == "state" {
@@ -434,7 +446,8 @@ func unclassified(env Env) ([]Row, error) {
 		for _, entry := range readDir(&rows, classUnclassified, dir) {
 			name := entry.Name()
 			if installer.EntryClass(name) != classUnclassified || backupName(name) ||
-				strings.HasPrefix(name, ".claude.json.tmp.") || known[paths.PhysicalPath(filepath.Join(dir, name))] {
+				strings.HasPrefix(name, ".claude.json.tmp.") || known[paths.PhysicalPath(filepath.Join(dir, name))] ||
+				(dir == env.Store && storeMarkdown(entry)) {
 				continue
 			}
 			rows = append(
@@ -450,6 +463,14 @@ func unclassified(env Env) ([]Row, error) {
 		}
 	}
 	return rows, nil
+}
+
+// storeMarkdown reports a regular *.md file, which at the store's top level is
+// the user's own instruction material (a note their CLAUDE.md cites): every
+// seat reaches the store, so it is shared by construction. In an account dir
+// the same name is still unclassified.
+func storeMarkdown(entry fs.DirEntry) bool {
+	return entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".md")
 }
 
 // installedPlugins names every plugin the store's registry lists, the part of
@@ -580,4 +601,14 @@ func besideBackup(env Env) ([]Row, error) {
 		}
 	}
 	return rows, nil
+}
+
+// storeEntryIsPlainDir reports a store entry that is absent or a real
+// directory, never a symbolic link, a file or one that cannot be lstat'd.
+func storeEntryIsPlainDir(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return info.IsDir()
 }

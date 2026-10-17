@@ -549,7 +549,7 @@ func TestMovedCloneInstallRefreshesMarker(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("install from moved clone: %v\n%s", err, output.String())
 	}
-	want := "  skip    registry dead-link check skipped: read source repository marker for registry dead-link check: " +
+	want := "  skip    registry-ownership check skipped: read source repository marker for registry-ownership check: " +
 		markerErr.Error() + " — rerun pfm install --yes from inside your Professor clone\n"
 	if !strings.Contains(output.String(), want) {
 		t.Errorf("output missing %q:\n%s", want, output.String())

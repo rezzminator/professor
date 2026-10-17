@@ -35,6 +35,8 @@ tools)
   (cd "$SRC/pfm" && go build -ldflags "-X main.version=$(cat ../VERSION)" -o "$HOME/.local/bin/pfm" ./cmd/pfm)
   . "$SRC/infra/fence/engine-sync.sh"
   engine_sync_build "${ENGINE_SYNC_BIN:?up.sh sets ENGINE_SYNC_BIN on the container}"
+  # No Claude session has run yet, so no plugin wrapper made the stable link pfm install's PATH link needs.
+  engine_sync_link_stable "$ENGINE_SYNC_BIN"
   command -v claude >/dev/null && command -v codex >/dev/null || npm install -g @anthropic-ai/claude-code @openai/codex >/dev/null
   command -v opencode >/dev/null || npm install -g opencode-ai >/dev/null
   command -v starship >/dev/null || curl -fsSL https://starship.rs/install.sh | sh -s -- -y >/dev/null
@@ -57,7 +59,7 @@ install)
   done < <(jq -r '.codex.homes[].home' "$CONFIG")
   [ -s "$HOME/.local/share/opencode/auth.json" ] || { echo "setup: OpenCode has no auth.json under ~/.local/share/opencode — run creds.sh --opencode first" >&2; exit 1; }
   # 1b. OpenCode's own config, model only: pfm install (step 2 below) merges the
-  #     `professor` registration (`pfm mcp serve --stdio`) and the `instructions`
+  #     family registrations (`pfm mcp serve --stdio --family …`) and the `instructions`
   #     array into this same file, so the demo writes nothing under "mcp" itself.
   mkdir -p "$HOME/.config/opencode"
   cat > "$HOME/.config/opencode/opencode.jsonc" <<EOF
@@ -78,6 +80,8 @@ EOF
     echo "setup: WARNING — pfm install with the harvester failed (see above); retrying with --skip-harvest: the professor MCP's harvester tools are NOT available in this container" >&2
     (cd "$SRC" && pfm install --yes --skip-harvest)
   fi
+  [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
+    { echo "setup: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
   # Shared settings use the primary seat's theme and the presenter's defaults.
   primary_emoji="$(jq -r '.accounts[] | select(.id == 1) | .emoji' "$CONFIG")"
   case "$primary_emoji" in 🥇) theme=professor-gold ;; 🥈) theme=professor-silver ;; 🥉) theme=professor-bronze ;; *) theme=tokyo-night ;; esac
@@ -121,7 +125,7 @@ EOF
   # 6. OpenCode: one ChatGPT-authenticated home; pfm sees it once opencode.db exists,
   #    which the first run below creates — and that run proves the copied auth is live.
   #    opencode.jsonc itself was written in step 1b, ahead of pfm install (step 2),
-  #    which merged in the `professor` registration and `instructions`.
+  #    which merged in both family registrations and `instructions`.
   echo '{"$schema": "https://opencode.ai/tui.json", "theme": "tokyonight"}' > "$HOME/.config/opencode/tui.json"
   if [ "${DEMO_OPENCODE_PROBE:-1}" = 0 ]; then
     # The lane root's --no-adopt build spends no model turn at all

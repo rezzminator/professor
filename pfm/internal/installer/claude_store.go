@@ -72,12 +72,16 @@ var AccountEntries = []string{
 
 // IgnoredEntries are neither shared nor per-account identity: IDE locks, pfm's
 // pane bookkeeping, a project settings name, Claude Code's own runtime scratch
-// (debug logs, the daemon's lock and status, temp files) and the native runtime
-// and user customization paths it keeps in place (chrome, dev-mods, keybindings).
+// (debug logs, the daemon's lock and status, the state file's write lock, temp
+// files) and the native runtime and user customization paths it keeps in place
+// (chrome, dev-mods, keybindings), and engine-sync's machine policy
+// (engine-sync.json), which pfm install renders into the store itself and no
+// account directory carries: engine-sync reads it from $HOME/.claude whatever
+// CLAUDE_CONFIG_DIR says.
 var IgnoredEntries = []string{
 	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
-	"debug", "daemon.lock", "daemon.status.json", "tmp",
-	"chrome", "dev-mods", "keybindings.json", "hooks",
+	"debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp",
+	"chrome", "dev-mods", "keybindings.json", "hooks", "engine-sync.json",
 }
 
 // EntryClass classifies a top-level Claude entry.

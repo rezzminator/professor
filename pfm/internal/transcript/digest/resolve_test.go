@@ -45,7 +45,7 @@ func TestResolvePicksOneTranscriptOrSaysWhy(t *testing.T) {
 	}
 }
 
-// TestNameLookupStopsOnceTheContextIsDone pins chat_digest's deadline over a
+// TestNameLookupStopsOnceTheContextIsDone pins digest's deadline over a
 // chat-title source: the name walk reads the tail of every session file under
 // the roots, so a done context ends it, never a found transcript.
 func TestNameLookupStopsOnceTheContextIsDone(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -18,7 +19,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/recovery"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -256,7 +256,7 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 		return 2
 	}
 	name := flags.Arg(0)
-	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
+	engine, err := pfmchat.NewCallEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat resolve: %v\n", err)
 		return codeUndelivered
@@ -267,13 +267,13 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 		return codeUndelivered
 	}
 	if code != 0 {
-		if code == inject.CodeUnknown {
+		if code == pfmcall.CodeUnknown {
 			return renderNoSuchChat(name, stdout, stderr, false)
 		}
 		if detail != "" {
 			fmt.Fprintln(stderr, detail)
 		}
-		if code == inject.CodeAmbiguous {
+		if code == pfmcall.CodeAmbiguous {
 			return 2
 		}
 		return codeUndelivered
@@ -307,8 +307,8 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
 		return 1
 	}
-	capture, err := (inject.TmuxInjector{}).Capture(
-		context.Background(), socketPath, pfmchat.PaneTarget(chat), true, inject.FullScrollback,
+	capture, err := (pfmcall.TmuxCaller{}).Capture(
+		context.Background(), socketPath, pfmchat.PaneTarget(chat), true, pfmcall.FullScrollback,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
@@ -357,7 +357,7 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 	)
 	fmt.Fprintf(
 		stdout,
-		"\nBrief a replacement seat with:\n  pfm chat inject <socket> 'RECOVERY: read %s, then compaction-memory.md, then the end of transcript.md.'\n",
+		"\nBrief a replacement seat with:\n  pfm chat call <socket> 'RECOVERY: read %s, then compaction-memory.md, then the end of transcript.md.'\n",
 		filepath.Join(codexHome, "recovered-"+result.ThreadID, "brief.md"),
 	)
 	return 0

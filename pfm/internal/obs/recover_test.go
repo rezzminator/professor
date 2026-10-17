@@ -10,8 +10,8 @@ import (
 // caller-supplied label, the panic value's dynamic type, and its message —
 // capped, never a stack dump of the panicking call's arguments.
 func TestRecoveredNamesTheLabelTypeAndBoundedMessage(t *testing.T) {
-	err := Recovered("tool chat_inject", errors.New("index out of range [3] with length 2"))
-	for _, want := range []string{"tool chat_inject", "index out of range"} {
+	err := Recovered("tool call", errors.New("index out of range [3] with length 2"))
+	for _, want := range []string{"tool call", "index out of range"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Recovered error = %q, want it to contain %q", err.Error(), want)
 		}
@@ -35,7 +35,7 @@ func TestRecoveredCapsAnOversizeMessage(t *testing.T) {
 // carries something secret-shaped never reaches the returned error text —
 // it is client-visible (an MCP tool error), not just a log field.
 func TestRecoveredRefusesACredentialShapedPanicMessage(t *testing.T) {
-	err := Recovered("tool chat_inject", errors.New("Bearer sk-ant-api03-PLANTEDPANICSECRET"))
+	err := Recovered("tool call", errors.New("Bearer sk-ant-api03-PLANTEDPANICSECRET"))
 	if strings.Contains(err.Error(), "PLANTEDPANICSECRET") {
 		t.Fatalf("Recovered leaked a credential-shaped panic message: %q", err.Error())
 	}

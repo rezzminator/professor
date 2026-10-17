@@ -21,8 +21,8 @@ func TestBuildCosmosLiveDropsEventMatchedRowsThatAreNotLive(t *testing.T) {
 		{Kind: LiveClaude, ID: "bg-id", Name: "BGLive", Socket: "cc-bg", PaneID: "%2", BG: true, ActivityNS: 5},
 	}
 	events := []fleetdb.CommsEvent{
-		{AtNS: 10, Kind: fleetdb.KindInject, SenderUUID: "resumable-id", Target: "resumable-codex-id", Message: "a"},
-		{AtNS: 11, Kind: fleetdb.KindInject, SenderUUID: "live-id", Target: "resumable-id", Message: "b"},
+		{AtNS: 10, Kind: fleetdb.KindCall, SenderUUID: "resumable-id", Target: "resumable-codex-id", Message: "a"},
+		{AtNS: 11, Kind: fleetdb.KindCall, SenderUUID: "live-id", Target: "resumable-id", Message: "b"},
 		{AtNS: 12, Kind: fleetdb.KindSpawn, SenderUUID: "live-id", Target: "bg-id", Message: "c"},
 	}
 

@@ -34,7 +34,7 @@ func (fake *cappedProxyChat) List(_ context.Context, request chat.ListRequest) (
 
 // TestChatRowStateNamesTheKilledButLiveContradiction is the honesty half of the
 // kill regression. A kill that closed nothing still wrote its tombstone row, so
-// chat_ls handed back a row asserting BOTH things at once — killed:true beside
+// ls handed back a row asserting BOTH things at once — killed:true beside
 // state "idle" over a live kind — and a caller had no way to tell a real kill
 // from a de-listing. The state names the contradiction instead of collapsing
 // it into either half.
@@ -107,7 +107,7 @@ func TestListProjectedKeepsDistinctPrivateTranscriptPaths(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestResolvesProxyIdentity(t *testing.T) {
+func TestCallEngineForRequestResolvesProxyIdentity(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
@@ -133,7 +133,7 @@ func TestCallerForRequestResolvesProxyIdentity(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
+func TestCallEngineForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy",
@@ -181,7 +181,7 @@ func TestCallerForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestRejectsConflictingProxySocketPair(t *testing.T) {
+func TestCallEngineForRequestRejectsConflictingProxySocketPair(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", Kind: compose.LiveClaude,
@@ -252,7 +252,7 @@ func TestReviewProxySocketPathRejectsForeignNamespace(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) {
+func TestCallEngineForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -314,7 +314,7 @@ func TestCallerForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestSessionFallbackReachesResolvedSelf(t *testing.T) {
+func TestCallEngineForRequestSessionFallbackReachesResolvedSelf(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -347,7 +347,7 @@ func TestCallerForRequestSessionFallbackReachesResolvedSelf(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestRejectsInvalidFallbackSocket(t *testing.T) {
+func TestCallEngineForRequestRejectsInvalidFallbackSocket(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
 		SessionName: "oc-seat", ID: "opencode-id", Kind: compose.LiveOpenCode,
@@ -366,7 +366,7 @@ func TestCallerForRequestRejectsInvalidFallbackSocket(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
+func TestCallEngineForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
 	t.Parallel()
 	rows := []compose.Row{
 		{
@@ -390,7 +390,7 @@ func TestCallerForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestRejectsSplitProxyConflicts(t *testing.T) {
+func TestCallEngineForRequestRejectsSplitProxyConflicts(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{Kind: compose.LiveSplit, Socket: "cc-split"}
 	tests := []struct {
@@ -441,7 +441,7 @@ func TestCallerForRequestRejectsSplitProxyConflicts(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestNamesSplitTranscriptFailures(t *testing.T) {
+func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -507,7 +507,7 @@ func TestCallerForRequestNamesSplitTranscriptFailures(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
+func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -693,7 +693,7 @@ func TestSplitCallerRequiresReadableExactPaneBinding(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestUsesProxyPaneToDisambiguateSession(t *testing.T) {
+func TestCallEngineForRequestUsesProxyPaneToDisambiguateSession(t *testing.T) {
 	t.Parallel()
 	rows := []compose.Row{
 		{
@@ -718,7 +718,7 @@ func TestCallerForRequestUsesProxyPaneToDisambiguateSession(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
+func TestCallEngineForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -742,7 +742,7 @@ func TestCallerForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
+func TestCallEngineForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -766,7 +766,7 @@ func TestCallerForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
+func TestCallEngineForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -801,7 +801,7 @@ func TestCallerForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
+func TestCallEngineForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
@@ -838,7 +838,7 @@ func TestCallerForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestReturnsProxyVersionAndListingErrors(t *testing.T) {
+func TestCallEngineForRequestReturnsProxyVersionAndListingErrors(t *testing.T) {
 	t.Parallel()
 	current := &backend{chat: &fakeChatVerbs{err: errors.New("fleet database busy")}}
 	_, err := current.callerForRequest(context.Background(), mcp.Meta{
@@ -861,7 +861,7 @@ func TestCallerForRequestReturnsProxyVersionAndListingErrors(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestMarksMalformedProxyPresent(t *testing.T) {
+func TestCallEngineForRequestMarksMalformedProxyPresent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -882,7 +882,7 @@ func TestCallerForRequestMarksMalformedProxyPresent(t *testing.T) {
 	}
 }
 
-func TestCallerForRequestKeepsThreadIDPrecedenceAndEmptyMetadata(t *testing.T) {
+func TestCallEngineForRequestKeepsThreadIDPrecedenceAndEmptyMetadata(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -936,20 +936,20 @@ func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
 		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
 	}}
 
-	whoami := callToolWithMeta[WhoamiOutput](t, protocol.clientSession, "chat_whoami", meta, WhoamiInput{})
+	whoami := callToolWithMeta[WhoamiOutput](t, protocol.clientSession, "whoami", meta, WhoamiInput{})
 	if whoami.Status != "ok" || whoami.Session != "cc-seat" || whoami.ID != "session-id" ||
 		whoami.Source != "mcp-proxy" {
 		t.Fatalf("proxied whoami = %+v", whoami)
 	}
-	last := callToolWithMeta[LastOutput](t, protocol.clientSession, "chat_last", meta, LastInput{Target: "self"})
+	last := callToolWithMeta[LastOutput](t, protocol.clientSession, "last", meta, LastInput{Target: "self"})
 	if last.Text != "proxy self answer" || !reflect.DeepEqual(verbs.lasts, []chat.LastRequest{{Target: "self"}}) ||
 		!reflect.DeepEqual(verbs.resolvedSelfIDs, []string{"session-id"}) {
-		t.Fatalf("proxied chat_last = %+v, verb calls = %+v", last, verbs.lasts)
+		t.Fatalf("proxied last = %+v, verb calls = %+v", last, verbs.lasts)
 	}
-	created := callToolWithMeta[ActionOutput](t, protocol.clientSession, "chat_new", meta, NewInput{Name: "child"})
+	created := callToolWithMeta[ActionOutput](t, protocol.clientSession, "new", meta, NewInput{Name: "child"})
 	wantCalls := [][]string{{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", "/work/proxy"}}
 	if created.Status != "ok" || !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("proxied chat_new = %+v, dispatch calls = %q", created, calls)
+		t.Fatalf("proxied new = %+v, dispatch calls = %q", created, calls)
 	}
 
 	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: meta}}

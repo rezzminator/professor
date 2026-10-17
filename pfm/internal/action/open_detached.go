@@ -111,8 +111,25 @@ func (executor *Executor) OpenDetached(
 	if err := executor.tmux.CreateChatServer(ctx, *plan.ChatServer); err != nil {
 		return OpenResult{}, fmt.Errorf("open detached: %w", err)
 	}
+	// A caller with no terminal never sees the pane: a chat that died at
+	// launch, or one held at a dialog only the human may answer, reaches it
+	// through this result or not at all.
+	held, err := executor.watchLaunch(
+		ctx,
+		*plan.ChatServer,
+		request.Row.Name,
+		request.Config.Claude.Binary,
+		request.Config.Codex.Binary,
+		request.Config.OpenCode.Binary,
+	)
+	if err != nil {
+		return OpenResult{}, fmt.Errorf("open detached: %w", err)
+	}
 	trail.Reach("opened", "detached server created")
 	return OpenResult{
-		Name: request.Row.Name, Socket: plan.ChatServer.Socket, State: "opened", Warnings: plan.Warnings,
+		Name:     request.Row.Name,
+		Socket:   plan.ChatServer.Socket,
+		State:    "opened",
+		Warnings: launchWarnings(plan.Warnings, held),
 	}, nil
 }

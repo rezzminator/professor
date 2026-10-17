@@ -1,6 +1,6 @@
 // Package mockengine is the scripted stand-in for the three engines pfm drives
 // — Claude Code, Codex and OpenCode — selected by argv[0]'s basename. It speaks
-// only the protocol doors pfm consumes: the TUI pane shapes internal/inject
+// only the protocol doors pfm consumes: the TUI pane shapes internal/call
 // matches, the hooks and statusline from settings.json and --settings, the transcript
 // and rollout files internal/transcript and internal/index read, the OpenCode
 // session store, and the MCP-over-HTTP handshake. Behaviour comes from a JSON

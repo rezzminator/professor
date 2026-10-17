@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -55,6 +56,14 @@ func (fake *fakeOpenTmux) CreateChatServer(_ context.Context, server action.Chat
 	fake.created = append(fake.created, server)
 	return fake.createErr
 }
+
+// LaunchPane shows every created pane as a settled chat: these tests are about
+// which chat opens where, the launch watch's own cases live in action's tests.
+func (fake *fakeOpenTmux) LaunchPane(context.Context, string) (action.LaunchPaneState, error) {
+	return action.LaunchPaneState{Screen: "fake chat ready", Command: "claude"}, nil
+}
+
+func (fake *fakeOpenTmux) SetRemainOnExit(context.Context, string, bool) error { return nil }
 
 // emptyProcesses is an action.ProcessTable that reports no processes: a jailed
 // open must never sweep the operator's real ones.
@@ -631,21 +640,61 @@ func TestOpenGoneWorkbench(t *testing.T) {
 	}
 }
 
+// TestOpenPlainGoneDirectory pins the CLI door's fallback for a row whose own
+// directory is unusable — gone, or never recorded: the chat opens in the
+// directory the opener stands in, and stderr says so, since an open in an
+// unexpected place reads as an empty chat otherwise.
 func TestOpenPlainGoneDirectory(t *testing.T) {
 	root := testjail.Fleet(t)
-	fake := &fakeOpenTmux{}
-	stubOpenExecutor(t, fake)
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr, stdout bytes.Buffer
-	row := compose.Row{Kind: compose.NewClaude, CWD: filepath.Join(root, "gone")}
-	if code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, nil); code != 0 {
-		t.Fatalf("open=%d: %s", code, stderr.String())
-	}
-	if len(fake.created) != 1 || fake.created[0].CWD != cwd {
-		t.Fatalf("plain fallback=%#v, want %s", fake.created, cwd)
+	gone := filepath.Join(root, "gone")
+	for _, test := range []struct {
+		name      string
+		cwd       string
+		want      string
+		createErr error
+	}{
+		{name: "its directory is gone", cwd: gone, want: "opened in " + cwd + ": its own directory " + gone + " is gone"},
+		{name: "no directory was recorded", want: "opened in " + cwd + ": no directory of its own was recorded"},
+		// An open that fails never announces where it opened.
+		{name: "the open fails", cwd: gone, createErr: errors.New("tmux: server refused")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeOpenTmux{createErr: test.createErr}
+			stubOpenExecutor(t, fake)
+			// On a terminal the attach that follows covers the notice; it is
+			// held for Enter first, as every launch warning is.
+			t.Cleanup(launchnotice.Replace(strings.NewReader("\n"), true))
+			var stderr, stdout bytes.Buffer
+			row := compose.Row{Kind: compose.NewClaude, CWD: test.cwd}
+			code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, nil)
+			if test.createErr != nil {
+				if code == 0 || strings.Contains(stderr.String(), "opened in") {
+					t.Fatalf(
+						"failed open: code %d, stderr %q; want a failure that never says it opened",
+						code,
+						stderr.String(),
+					)
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("open=%d: %s", code, stderr.String())
+			}
+			if len(fake.created) != 1 || fake.created[0].CWD != cwd {
+				t.Fatalf("plain fallback=%#v, want %s", fake.created, cwd)
+			}
+			notice := strings.Index(stderr.String(), test.want)
+			if notice < 0 {
+				t.Fatalf("stderr = %q, want it to say %q", stderr.String(), test.want)
+			}
+			if !strings.Contains(stderr.String()[notice:], launchnotice.EnterPrompt) {
+				t.Fatalf("stderr = %q: the notice is not held for Enter before the attach covers it", stderr.String())
+			}
+		})
 	}
 }
 

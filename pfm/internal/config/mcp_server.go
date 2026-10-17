@@ -10,11 +10,6 @@ import (
 const (
 	MCPServerHarvester = "harvester"
 	MCPServerChat      = "chat"
-	// MCPServerProfessor is the one MCP server every client registers: it
-	// carries every enabled family's tools.
-	MCPServerProfessor = "professor"
-	// MCPPathProfessor is the daemon route of the combined professor server.
-	MCPPathProfessor = "/mcp/" + MCPServerProfessor
 )
 
 // MCPServerKey names where a registered server's enabled flag is configured.
@@ -25,10 +20,14 @@ func MCPServerKey(name string) string {
 	return "mcp.servers." + name + ".enabled"
 }
 
-// MCPFamilyPath is the daemon route of one family's view of the professor
-// server.
+// MCPRegistrationName names the client registration for a configured family.
+func MCPRegistrationName(family string) string {
+	return family + "-professor"
+}
+
+// MCPFamilyPath is the daemon route of one configured family.
 func MCPFamilyPath(family string) string {
-	return MCPPathProfessor + "/" + family
+	return "/mcp/" + MCPRegistrationName(family)
 }
 
 func validateThirdParty(path string, entries map[string]json.RawMessage) error {
@@ -38,8 +37,8 @@ func validateThirdParty(path string, entries map[string]json.RawMessage) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if name == MCPServerProfessor {
-			return fmt.Errorf("config %s: mcp.thirdParty.professor: the name professor is pfm's own server", path)
+		if name == MCPRegistrationName(MCPServerChat) || name == MCPRegistrationName(MCPServerHarvester) {
+			return fmt.Errorf("config %s: mcp.thirdParty.%s: the name %s is pfm's own server", path, name, name)
 		}
 		entry := bytes.TrimSpace(entries[name])
 		if !json.Valid(entry) || len(entry) == 0 || entry[0] != '{' {

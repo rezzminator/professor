@@ -23,6 +23,7 @@ func TestProbeEnv(t *testing.T) {
 		"ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink",
 		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0",
 		"FORCE_PROMPT_CACHING_5M=1",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 		"CLAUDE_CONFIG_DIR=/scratch",
 	}
 	if got := ProbeEnv(input, "http://sink", "/scratch"); !reflect.DeepEqual(got, want) {

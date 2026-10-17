@@ -93,7 +93,7 @@ The tools, their inputs and their output fields are named by `naming-spec.md` (t
 | `infra/readme-cards/deck.html` | the demo card: `search_literature` → `read` with the handle in `publications` |
 | `docs/design/RR/rr.md` | the `searchCache` design notes removed |
 | `pfm/internal/harvest/README.md`, `pfm/cmd/pfm/mcp_serve_test.go` | new names |
-| `.professor/retro.md` | the open `searchCache` entries are stamped resolved by removal |
+| `docs/retro/harvester/` | the open `searchCache` entries are stamped resolved by removal |
 
 Releases and demo inventories are history and stay as written. The `pfm archive` chat command is a different subject and is untouched.
 

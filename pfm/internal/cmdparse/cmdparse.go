@@ -1,13 +1,16 @@
 // Package cmdparse turns one Bash call's command string into its simple
 // commands, each with the program it runs and that program's arguments,
 // through mvdan.cc/sh/v3/syntax. It never writes a parser of its own. Its
-// owner is the git guard (internal/hookentry/git_guard.go), which reads every
-// part and denies a git command whose part did not parse or hit a parse bound.
+// owners are the git guard (internal/hookentry/git_guard.go), which reads every
+// part and denies a git command whose part did not parse or hit a parse bound,
+// and the store guard (internal/hookentry/store_guard.go), which reads each
+// part's Env.
 // Design: docs/design/hooks/git-guard.md § How it reads a command.
 package cmdparse
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -35,6 +38,9 @@ const (
 // absolute directory it ran in.
 type Call struct {
 	ID, Command, Cwd string
+	// Vars seeds the parse with variables the command's shell already has
+	// (HOME), so `$HOME/x` resolves; nil seeds nothing.
+	Vars map[string]string
 }
 
 // Part is one simple command of a call, in source order. Program is the
@@ -56,6 +62,11 @@ type Part struct {
 	Args    []string
 	Status  string
 	Bounded bool
+	// Env holds the variable assignments in force for the command: those set
+	// earlier in the call, its own `NAME=v` prefix and those of an
+	// `env`/`sudo` wrapper, less what `unset` and `env -u/-i` removed. A value
+	// the parse cannot know is its source text. nil when none is in force.
+	Env map[string]string
 }
 
 // ParseBatch parses every call and returns its parts keyed by Call.ID. The
@@ -78,8 +89,12 @@ func ParseBatch(calls []Call) (map[string][]Part, error) {
 // callParser walks one call's syntax tree in execution order, keeping the
 // literal values assigned so far.
 type callParser struct {
-	vars    map[string][]string
-	arrays  map[string][]string // literal indexed arrays: NAME=(a b c)
+	vars   map[string][]string
+	arrays map[string][]string // literal indexed arrays: NAME=(a b c)
+	// env is the assignments in force for the next command (Part.Env); base
+	// is the call's seeded variables, which a child shell inherits.
+	env     map[string]string
+	base    map[string]string
 	parts   []Part
 	printer *syntax.Printer
 	// shellDepth counts the literal -c strings the walk is inside, up to
@@ -91,7 +106,12 @@ func parseCall(call Call) *callParser {
 	p := &callParser{
 		vars:    map[string][]string{},
 		arrays:  map[string][]string{},
+		env:     map[string]string{},
+		base:    call.Vars,
 		printer: syntax.NewPrinter(),
+	}
+	for name, val := range call.Vars {
+		p.vars[name] = []string{val}
 	}
 	if len(call.Command) > maxCommandBytes {
 		p.parts = []Part{{Status: StatusUnparsed, Bounded: true}}
@@ -172,17 +192,59 @@ func (p *callParser) setVar(name string, vals []string, ok bool) {
 
 func (p *callParser) assign(a *syntax.Assign) {
 	if a.Name != nil && a.Array != nil && a.Index == nil && !a.Append {
+		delete(p.env, a.Name.Value)
 		p.assignArray(a.Name.Value, a.Array)
 		return
 	}
 	if a.Name == nil || a.Index != nil || a.Array != nil || a.Append || a.Value == nil {
 		if a.Name != nil {
 			p.setVar(a.Name.Value, nil, false)
+			if a.Value != nil {
+				delete(p.env, a.Name.Value)
+			}
 		}
 		return
 	}
 	w := p.eval(a.Value)
 	p.setVar(a.Name.Value, w.vals, w.ok && len(w.vals) == 1)
+	p.env[a.Name.Value] = p.assignedValue(a, w)
+}
+
+// assignedValue is what NAME=VALUE sets: the value when the parse knows it,
+// else its source text.
+func (p *callParser) assignedValue(a *syntax.Assign, w word) string {
+	if w.ok && len(w.vals) == 1 {
+		return w.vals[0]
+	}
+	return p.source(a.Value)
+}
+
+// partEnv is the Env of the command about to run: the assignments in force,
+// the command's own prefix and the wrapper operations, in that order.
+func (p *callParser) partEnv(prefix []*syntax.Assign, ops []envOp) map[string]string {
+	env := maps.Clone(p.env)
+	if env == nil {
+		env = map[string]string{}
+	}
+	for _, a := range prefix {
+		if a.Name != nil && a.Value != nil && a.Index == nil && a.Array == nil && !a.Append {
+			env[a.Name.Value] = p.assignedValue(a, p.eval(a.Value))
+		}
+	}
+	for _, op := range ops {
+		switch op.kind {
+		case envSet:
+			env[op.name] = op.value
+		case envUnset:
+			delete(env, op.name)
+		case envClear:
+			clear(env)
+		}
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 func (p *callParser) emit(part Part) {
@@ -208,23 +270,31 @@ func (p *callParser) callStmt(cmd *syntax.CallExpr) {
 		// unwrapProgram needs a word.
 		return
 	}
-	args, runs := unwrapProgram(args)
+	args, runs, ops := unwrapProgram(args)
 	program, rest := args[0].text, args[1:]
 	texts := argTexts(rest)
+	env := p.partEnv(cmd.Assigns, ops)
 	if !runs {
-		p.emit(Part{Program: program, Args: texts})
+		p.emit(Part{Program: program, Args: texts, Env: env})
 		return
 	}
 	base := filepath.Base(program)
 	if script, ok := shellScript(base, rest); ok {
-		p.innerShell(program, rest, script)
+		p.innerShell(program, rest, script, env)
 		return
 	}
 	if (base == "node" || base == "nodejs") && hasAny(texts, "-e", "--eval", "-p", "--print") {
-		p.emit(Part{Program: program, Args: texts, Status: StatusUnparsed})
+		p.emit(Part{Program: program, Args: texts, Status: StatusUnparsed, Env: env})
 		return
 	}
-	p.emit(Part{Program: program, Args: texts})
+	if program == "unset" && !hasAny(texts, "-f") {
+		for _, name := range texts {
+			if !strings.HasPrefix(name, "-") {
+				delete(p.env, name)
+			}
+		}
+	}
+	p.emit(Part{Program: program, Args: texts, Env: env})
 }
 
 func (p *callParser) declStmt(cmd *syntax.DeclClause) {
@@ -233,7 +303,7 @@ func (p *callParser) declStmt(cmd *syntax.DeclClause) {
 		p.assign(a)
 		texts = append(texts, p.source(a))
 	}
-	p.emit(Part{Program: cmd.Variant.Value, Args: texts})
+	p.emit(Part{Program: cmd.Variant.Value, Args: texts, Env: p.partEnv(nil, nil)})
 }
 
 func hasAny(texts []string, want ...string) bool {

@@ -35,7 +35,7 @@ func assertNoLeakedTempFiles(t *testing.T, directory string) {
 	}
 }
 
-// startHeadlessTmuxSession mirrors internal/inject's newInjectTmuxJail
+// startHeadlessTmuxSession mirrors internal/call's newCallTmuxJail
 // (tmux_jail_test.go): a real tmux server on a scratch socket rooted at
 // the current UID's tmux directory, never t.TempDir() (its test-name-derived path blows past
 // the unix socket sun_path limit). TMUX_TMPDIR is still pinned per

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -45,7 +45,7 @@ func TranscriptTitle(path string) (string, error) {
 // pre-append copy — cmd/pfm's dormant inject and this package's left-behind
 // label share it.
 func TranscriptBackupDir(home string) string {
-	return filepath.Join(home, ".claude-sessions", ".chat-inject-backups")
+	return filepath.Join(home, ".claude-sessions", ".chat-call-backups")
 }
 
 // followName makes the name follow the live pane after a `--new` reboot
@@ -74,9 +74,9 @@ func followName(ctx context.Context, request Request, options Options, tmux Tmux
 	// is still running. A slash command typed into a running turn is ordinary
 	// conversation text, not a TUI command, so the rename has to wait out that
 	// turn first. The wait is inject's, the one this repo has
-	// (inject.SettledTurn); a second copy here would drift from it.
+	// (pfmcall.SettledTurn); a second copy here would drift from it.
 	if request.Then != "" {
-		settled := inject.SettledTurn{
+		settled := pfmcall.SettledTurn{
 			Capture: func(ctx context.Context) (string, error) {
 				return tmux.Capture(ctx, request.SocketPath, request.Pane)
 			},

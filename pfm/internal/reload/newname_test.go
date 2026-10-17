@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -51,7 +51,7 @@ func (tmux *renameTmux) Capture(ctx context.Context, socket, pane string) (strin
 }
 
 func (tmux *renameTmux) SendLiteral(ctx context.Context, socket, pane, value string) error {
-	if capture, err := tmux.Capture(ctx, socket, pane); err == nil && inject.IsBusy(capture) {
+	if capture, err := tmux.Capture(ctx, socket, pane); err == nil && pfmcall.IsBusy(capture) {
 		tmux.typedWhileBusy = append(tmux.typedWhileBusy, value)
 	}
 	tmux.literals = append(tmux.literals, value)
@@ -377,7 +377,7 @@ func TestRunNewRefusesToTypeANameThatIsNotOneLine(t *testing.T) {
 // ended, so the /rename went in while the model was still answering — where a
 // slash command is ordinary conversation text, not a TUI command, and the
 // chat keeps its auto-name. The rename now waits out that turn through the
-// one settled-turn wait this repo has (inject.SettledTurn).
+// one settled-turn wait this repo has (pfmcall.SettledTurn).
 func TestRunNewTypesTheRenameOnlyAfterTheSteersTurnSettles(t *testing.T) {
 	home := t.TempDir()
 	claudeRoot := filepath.Join(home, "projects")

@@ -558,6 +558,122 @@ else
   bad 'F5: pre-push without a remote name passes no --remote' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
 fi
 
+# F10, hook side: judge the pushed commit, never staged, dirty or untracked repairs.
+arch_push() { # arch_push <ref> [tip]: one new-ref push of the selected commit
+  : > "$T/hook-calls"
+  printf '%s %s %s %s\n' "$1" "${2:-$hook_sha}" "$1" 0000000000000000000000000000000000000000 \
+    | (cd "$hook_repo" && unset PFM_DEV_REPO_GIT_DIR PFM_DEV_REPO_WORK_TREE; bash .githooks/pre-push origin > /dev/null 2> "$T/hook-err")
+  rc=$?
+}
+arch_commit() {
+  git -C "$hook_repo" add pfm
+  git -C "$hook_repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "$1"
+  hook_sha="$(git -C "$hook_repo" rev-parse HEAD)"
+}
+arch_push refs/heads/develop
+if [[ "$rc" -ne 0 && "$(cat "$T/hook-err")" == *"pfm architecture check missing"* ]]; then
+  ok 'F10: a develop push with no architecture check is blocked, never passed'
+else
+  bad 'F10: a develop push with no architecture check is blocked, never passed' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+mkdir -p "$hook_repo/pfm/scripts" "$hook_repo/pfm/.arch"
+cp "$ROOT/pfm/scripts/repo-git.sh" "$hook_repo/pfm/scripts/repo-git.sh"
+cat > "$hook_repo/pfm/scripts/arch-check.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source scripts/repo-git.sh
+if [[ -n "${ARCH_OBSERVE:-}" ]]; then printf '%s\n' "$PWD" >> "$ARCH_OBSERVE"; fi
+files="$(repo_git ls-files -co --exclude-standard '*.go')"
+[[ -n "$files" ]] || { echo 'CHECK fixture ERROR no sources'; exit 2; }
+while IFS= read -r file; do
+  if [[ "$(cat "$file")" != "$(cat .arch/allowed.txt)" ]]; then
+    echo "CHECK C1-ceiling-src FAIL $file (committed content)"; exit 1
+  fi
+done <<< "$files"
+echo 'CHECK C1-ceiling-src PASS 0 new'
+EOF
+printf 'clean\n' > "$hook_repo/pfm/source.go"
+printf 'clean\n' > "$hook_repo/pfm/.arch/allowed.txt"
+# export-ignore must not remove committed policy or sources from the judgment.
+printf 'pfm/source.go export-ignore\n' > "$hook_repo/.gitattributes"
+git -C "$hook_repo" add .gitattributes
+arch_commit green
+green_tip="$hook_sha"
+arch_push refs/heads/develop
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-err")" == *"pre-push: pfm architecture check passed"* ]]; then
+  ok 'F10: a develop push runs the architecture check and passes on green'
+else
+  bad 'F10: a develop push runs the architecture check and passes on green' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+printf 'defect\n' > "$hook_repo/pfm/source.go"
+arch_commit red
+red_tip="$hook_sha"
+printf 'clean\n' > "$hook_repo/pfm/source.go"
+git -C "$hook_repo" add pfm/source.go
+arch_push refs/heads/develop
+if [[ "$rc" -ne 0 && "$(cat "$T/hook-err")" == *"CHECK C1-ceiling-src FAIL source.go"* && "$(cat "$T/hook-err")" == *"PUSH BLOCKED: pfm architecture check failed"* ]]; then
+  ok 'F10: a committed defect blocks despite a staged working-tree repair'
+else
+  bad 'F10: a committed defect blocks despite a staged working-tree repair' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+if [[ "$(git -C "$hook_repo" show :pfm/source.go)" == clean ]]; then
+  ok 'F10: architecture snapshot leaves the caller index untouched'
+else
+  bad 'F10: architecture snapshot leaves the caller index untouched'
+fi
+printf 'defect\n' > "$hook_repo/pfm/untracked.go"
+arch_push refs/heads/develop "$green_tip"
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-err")" == *"pre-push: pfm architecture check passed"* ]]; then
+  ok 'F10: non-HEAD green tip ignores dirty, staged and untracked work'
+else
+  bad 'F10: non-HEAD green tip ignores dirty, staged and untracked work' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+# A green HEAD must not hide a red commit selected for pushing.
+rm "$hook_repo/pfm/untracked.go"
+arch_commit repaired
+arch_push refs/heads/develop "$red_tip"
+if [[ "$rc" -ne 0 && "$(cat "$T/hook-err")" == *"CHECK C1-ceiling-src FAIL source.go"* ]]; then
+  ok 'F10: a non-HEAD red pushed tip is checked and blocked'
+else
+  bad 'F10: a non-HEAD red pushed tip is checked and blocked' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+printf 'defect\n' > "$hook_repo/pfm/source.go"
+arch_push refs/heads/develop
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-err")" == *"architecture check passed"* ]]; then
+  ok 'F10: committed green HEAD ignores an unstaged defect'
+else
+  bad 'F10: committed green HEAD ignores an unstaged defect' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+arch_push refs/heads/feature
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-err")" != *architecture* ]]; then
+  ok 'F10: a push of another branch does not run the architecture check'
+else
+  bad 'F10: a push of another branch does not run the architecture check' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+# F7: scratch belongs to the derived project/pre-push purpose and is private per run.
+mkdir -p "$T/arch-temp"
+TMPDIR="$T/arch-temp" ARCH_OBSERVE="$T/arch-paths" arch_push refs/heads/develop
+pass_rc="$rc"
+TMPDIR="$T/arch-temp" ARCH_OBSERVE="$T/arch-paths" arch_push refs/heads/develop "$red_tip"
+fail_rc="$rc"
+arch_paths=()
+while IFS= read -r arch_path; do arch_paths+=("$arch_path"); done < "$T/arch-paths"
+if [[ "$pass_rc" -eq 0 && "$fail_rc" -ne 0 && "${#arch_paths[@]}" -eq 2 &&
+      "${arch_paths[0]}" == "$T/arch-temp/hook-repo/pre-push/"*/tree/pfm &&
+      "${arch_paths[1]}" == "$T/arch-temp/hook-repo/pre-push/"*/tree/pfm &&
+      "${arch_paths[0]}" != "${arch_paths[1]}" ]]; then
+  ok 'F7: architecture scratch is unique under the derived project/pre-push purpose'
+else
+  bad 'F7: architecture scratch is unique under the derived project/pre-push purpose' "pass=$pass_rc; fail=$fail_rc; paths=${arch_paths[*]}"
+fi
+if [[ ! -e "${arch_paths[0]%/tree/pfm}" && ! -e "${arch_paths[1]%/tree/pfm}" &&
+      -z "$(find "$T/arch-temp" -type f -print)" ]]; then
+  ok 'F7: architecture scratch is removed on passing and blocked pushes'
+else
+  bad 'F7: architecture scratch is removed on passing and blocked pushes' "leftovers=$(find "$T/arch-temp" -print)"
+fi
+rm -rf "$hook_repo/pfm"
+
 printf '!structural-only\n' > "$T/structural-terms"
 TERMS="$T/structural-terms" run_check clean-1.txt
 if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'PRIVATE COVERAGE SKIPPED'* && "$err" == *'4 structural pattern(s)'* ]]; then

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # verify.sh — runs INSIDE the demo fence container after fleet.sh: the deck,
 # checked the way it was checked by hand before the first live run — every beat
-# exercised for real (chats spawned, messages injected, a storm blown, headless
+# exercised for real (chats spawned, messages called, a storm blown, headless
 # calls made) and judged from what pfm and the transcripts report, never from a
 # script's own exit code. This is the end-to-end gate the fence exists for:
 # up.sh runs it last, and a green run means the container carries the whole deck.
 #
 #   verify.sh              every check, in order
 #   verify.sh CHECK...     only the named checks:
-#                          seats daemon fleet express (five beats) inject reload storm idle headless
+#                          seats daemon fleet express (five beats) call reload storm idle headless
 #
 # Cost: five throwaway chats (PING_CLAUDE, PING_CODEX, RELOAD_T,
 # STORM_1..2) — a few short model turns; they are ended and hidden at the end.
@@ -119,7 +119,7 @@ check_express() { # five independently counted install-fidelity beats on the ado
     fail express-doctor "pfm doctor exit $rc with failure row: $doctor_bad; full output: $out"
   else
     summary="$(grep -m1 '^doctor: warnings=' "$out" || true)"
-    [ -n "$summary" ] || summary="$(grep -m1 '^doctor: clean$' "$out" || true)"
+    [ -n "$summary" ] || summary="$(grep -m1 -E '^doctor: (clean|machine checks clean; project_updates warnings=[0-9]+)$' "$out" || true)"
     pass express-doctor "pfm doctor exit $rc · ${summary:-no summary line}"
   fi
 
@@ -140,9 +140,9 @@ check_express() { # five independently counted install-fidelity beats on the ado
   fi
 
   out=/tmp/verify-express-codex.log
-  (cd "$root" && pfm codex check .) >"$out" 2>&1; rc=$?
+  (cd "$root" && engine-sync codex check .) >"$out" 2>&1; rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail express-codex "pfm codex check . exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+    fail express-codex "engine-sync codex check . exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
   elif ! grep -q '^CODEX CHECK PASS' "$out"; then
     fail express-codex "exit 0 without CODEX CHECK PASS; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
   else
@@ -179,24 +179,24 @@ check_express() { # five independently counted install-fidelity beats on the ado
     fi
   fi
 }
-check_inject() { # slide 2: a Claude chat messages a Codex chat and reads the answer back — signed both ways
+check_call() { # slide 2: a Claude chat messages a Codex chat and reads the answer back — signed both ways
   local out
-  out="$(throwaway PING_CLAUDE cc "$SEAT_A")" || { fail inject "PING_CLAUDE never came up: $out"; return; }
-  out="$(throwaway PING_CODEX cx)" || { fail inject "PING_CODEX never came up: $out"; return; }
-  out="$(pfm chat inject --allow-unsigned PING_CLAUDE "Use the chat_inject tool to send PING_CODEX this line: 'ping from PING_CLAUDE — reply to me with chat_inject: pong'. When PING_CODEX's pong reaches you, answer with exactly the word PONG-OK and nothing else." 2>&1)" \
-    || { fail inject "pfm chat inject PING_CLAUDE refused: $(tail -2 <<<"$out" | tr '\n' ' ')"; return; }
-  if out="$(wait_last PING_CLAUDE PONG-OK 180)"; then pass inject "PING_CLAUDE → PING_CODEX → PING_CLAUDE round trip"
-  else fail inject "no PONG-OK from PING_CLAUDE in 180 s; its last: $(tr '\n' ' ' <<<"$out")"; fi
+  out="$(throwaway PING_CLAUDE cc "$SEAT_A")" || { fail call "PING_CLAUDE never came up: $out"; return; }
+  out="$(throwaway PING_CODEX cx)" || { fail call "PING_CODEX never came up: $out"; return; }
+  out="$(pfm chat call --allow-unsigned PING_CLAUDE "Use the mcp__chat-professor__call tool to send PING_CODEX this line: 'ping from PING_CLAUDE — reply to me with mcp__chat-professor__call: pong'. When PING_CODEX's pong reaches you, answer with exactly the word PONG-OK and nothing else." 2>&1)" \
+    || { fail call "pfm chat call PING_CLAUDE refused: $(tail -2 <<<"$out" | tr '\n' ' ')"; return; }
+  if out="$(wait_last PING_CLAUDE PONG-OK 180)"; then pass call "PING_CLAUDE → PING_CODEX → PING_CLAUDE round trip"
+  else fail call "no PONG-OK from PING_CLAUDE in 180 s; its last: $(tr '\n' ' ' <<<"$out")"; fi
 }
 check_reload() { # slide 8: /reload onto another seat, same conversation, then the steer
   local out
   out="$(throwaway RELOAD_T cc "$SEAT_A")" || { fail reload "RELOAD_T never came up: $out"; return; }
-  out="$(pfm chat inject --allow-unsigned RELOAD_T "/reload --account $SEAT_B --model sonnet --then \"reply with exactly one word: RELOADED\"" 2>&1)" \
-    || { fail reload "pfm chat inject RELOAD_T refused: $(tail -2 <<<"$out" | tr '\n' ' ')"; return; }
+  out="$(pfm chat call --allow-unsigned RELOAD_T "/reload --account $SEAT_B --model sonnet --then \"reply with exactly one word: RELOADED\"" 2>&1)" \
+    || { fail reload "pfm chat call RELOAD_T refused: $(tail -2 <<<"$out" | tr '\n' ' ')"; return; }
   if out="$(wait_last RELOAD_T RELOADED 180)"; then pass reload "RELOAD_T rebooted in place onto seat $SEAT_B and ran its --then steer"
   else fail reload "no RELOADED from RELOAD_T in 180 s; its last: $(tr '\n' ' ' <<<"$out")"; fi
 }
-check_storm() { # slide 4: two storm chats exchange signed injects, then kill-storm leaves the rest untouched
+check_storm() { # slide 4: two storm chats exchange signed calls, then kill-storm leaves the rest untouched
   local out deadline last
   out="$("$HERE/storm.sh" start 2 2 2>&1)" || { fail storm "storm.sh start 2 2: $(tail -3 <<<"$out" | tr '\n' ' ')"; return; }
   # STORM_1's first answer is the literal 'ready'; the seed (signed as STORM_2)
@@ -229,7 +229,7 @@ check_headless() { # slide 11: the two printed commands, run as the presenter ru
   else fail headless "expected 2 structured answers, saw $n — $(grep -v '^\s*$' <<<"$out" | tail -3 | tr '\n' ' ')"; fi
 }
 
-all="seats daemon fleet express inject reload storm idle headless"
+all="seats daemon fleet express call reload storm idle headless"
 [ $# -gt 0 ] || set -- $all
 for c in "$@"; do
   if declare -F "check_$c" >/dev/null; then "check_$c"; else fail "$c" "unknown check (one of: $all)"; fi

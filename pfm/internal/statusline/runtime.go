@@ -86,6 +86,9 @@ type Runtime struct {
 	// Prices is the machine's served price table (LoadServedPrices); nil
 	// leaves the main line's own dollars unpriced, "$?".
 	Prices *pricing.Prices
+
+	// Warn takes the render's diagnostic lines; nil is os.Stderr.
+	Warn io.Writer
 }
 
 func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
@@ -210,6 +213,9 @@ func (runtime Runtime) normalized() Runtime {
 	}
 	if runtime.Command == nil {
 		runtime.Command = commandRunner{}
+	}
+	if runtime.Warn == nil {
+		runtime.Warn = os.Stderr
 	}
 	return runtime
 }

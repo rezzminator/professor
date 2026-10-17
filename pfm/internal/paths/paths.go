@@ -125,7 +125,10 @@ const (
 	EnvLogLevel      = "PFM_LOG_LEVEL"
 	EnvLogComponents = "PFM_LOG_COMPONENTS"
 	EnvLogMirror     = "PFM_LOG"
-	defaultTmpDir    = "/tmp"
+	// EnvAutoEffortStateFile is the auto-effort plugin's own variable naming
+	// its per-session state file (AutoEffortStateFile); pfm only reads it.
+	EnvAutoEffortStateFile = "AUTO_EFFORT_STATE_FILE"
+	defaultTmpDir          = "/tmp"
 )
 
 const sourceRepoMarkerName = "source-repo"
@@ -555,6 +558,51 @@ func ClaudeMCPConfigDir(home string) string {
 // creates it 0700; callmeter reads the same path as optional data.
 func CostLedgerDir(env Env, home string) string {
 	return EnvOrFrom(env, EnvCostLedgerDir, filepath.Join(home, ".local", "state", "pfm", "cost-ledger"))
+}
+
+// AutoEffortStateFile is the auto-effort plugin's state file for one session,
+// by the plugin's own rule: EnvAutoEffortStateFile (trimmed, blank is unset; a leading
+// `~/` is home), else state.json under the home's auto-effort state directory;
+// the session id, every character outside [A-Za-z0-9_-] made `_` (one per
+// UTF-16 unit, as the plugin's JavaScript counts), goes before the file name's
+// last extension, or after a name without one (sessionLogPath in the plugin's
+// src/log.ts). A path set only through the plugin's own options is not seen.
+func AutoEffortStateFile(env Env, home, sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", errors.New("auto-effort state file: empty session id")
+	}
+	file := strings.TrimSpace(env.Get(EnvAutoEffortStateFile))
+	if file == "" {
+		file = "~/.local/state/auto-effort/state.json"
+	}
+	if file == "~" || strings.HasPrefix(file, "~/") {
+		if home == "" {
+			return "", fmt.Errorf("auto-effort state file %s: the home directory is unknown", file)
+		}
+		file = strings.TrimRight(home, "/") + file[1:]
+	}
+	var safe strings.Builder
+	for _, char := range sessionID {
+		switch {
+		case char >= 'A' && char <= 'Z',
+			char >= 'a' && char <= 'z',
+			char >= '0' && char <= '9',
+			char == '_',
+			char == '-':
+			safe.WriteRune(char)
+		case char > 0xFFFF:
+			safe.WriteString("__")
+		default:
+			safe.WriteByte('_')
+		}
+	}
+	slash := strings.LastIndex(file, "/")
+	dir, name := file[:slash+1], file[slash+1:]
+	dot := strings.LastIndex(name, ".")
+	if dot <= 0 {
+		return dir + name + "." + safe.String(), nil
+	}
+	return dir + name[:dot] + "." + safe.String() + name[dot:], nil
 }
 
 // CostSinkLog is the file the detached cost sink logs its failures to, beside

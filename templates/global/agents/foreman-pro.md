@@ -8,5 +8,5 @@ effortControl:
   ceiling: xhigh
   landing: flights-lander gpt-flights-lander
 add:
-  tools: [mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down]
+  tools: [mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, mcp__effort-live-control__effort_auto]
 ---

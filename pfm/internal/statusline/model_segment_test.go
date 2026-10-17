@@ -1,32 +1,307 @@
 package statusline
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
+// The main line's effort reads auto-effort's state file for the session when
+// one exists: its mode and level, ERR in red for a file that cannot be read or
+// says nothing valid, and today's emoji form when there is none.
 func TestModelSegmentCarriesEffort(t *testing.T) {
+	withSession := strings.Replace(styledPayload, `"session_name"`, `"session_id":"sess-1","session_name"`, 1)
+	withoutEffort := strings.Replace(withSession, `"effort":{"level":"high"},`, "", 1)
+	thinkingOff := strings.Replace(withSession, `"enabled":true`, `"enabled":false`, 1)
+	byTranscript := strings.Replace(
+		styledPayload,
+		`"session_name"`,
+		`"transcript_path":"/work/projects/sess-2.jsonl","session_name"`,
+		1,
+	)
+	keeper := startKeeper(t)
+	live := strconv.Itoa(keeper)
+	dead := strconv.Itoa(reapedPID(t))
+	self := strconv.Itoa(os.Getpid())
+	// line is the plugin's state line with its keeper ("" leaves the key out).
+	line := func(mode, level, keeper string) string {
+		keeperField := ""
+		if keeper != "" {
+			keeperField = `,"keeper":` + keeper
+		}
+		return `{"version":2,"mode":"` + mode + `","level":` + level + `,"reason":"a lookup over logs"` +
+			keeperField + `,"updatedAt":"2026-10-17T09:30:00.000Z"}` + "\n"
+	}
+	state := func(mode, level string) string { return line(mode, level, live) }
+	const sess1 = ".local/state/auto-effort/state.sess-1.json"
 	for _, testcase := range []struct {
-		name, payload, want string
+		name, payload, file, content, want, colour string
+		directory, fifo, wantWarn, unreadableArgs  bool
 	}{
-		{name: "with effort", payload: styledPayload, want: "◆ Opus 4·🏎️ high │ "},
-		{
-			name:    "thinking off",
-			payload: strings.Replace(styledPayload, `"enabled":true`, `"enabled":false`, 1),
-			want:    "◆ Opus 4·💤 high (off) │ ",
-		},
-		{
-			name:    "without effort",
-			payload: strings.Replace(styledPayload, `"effort":{"level":"high"},`, "", 1),
-			want:    "◆ Opus 4 │ ",
-		},
+		{name: "auto at medium", payload: withSession, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·AUTO - Medium │ ", colour: cEffort},
+		{name: "auto at low", payload: withSession, file: sess1, content: state("auto", `"low"`), want: "◆ Opus 4·AUTO - Low │ ", colour: cEffort},
+		{name: "auto before the first request", payload: withSession, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·AUTO │ ", colour: cEffort},
+		{name: "the main chat's own level", payload: withSession, file: sess1, content: state("model", `"high"`), want: "◆ Opus 4·MODEL - High │ ", colour: cEffort},
+		{name: "the main chat at max", payload: withSession, file: sess1, content: state("model", `"max"`), want: "◆ Opus 4·MODEL - Max │ ", colour: cEffort},
+		{name: "the user's pin", payload: withSession, file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·PIN - XHigh │ ", colour: cEffort},
+		{name: "off at the payload level", payload: withSession, file: sess1, content: state("off", "null"), want: "◆ Opus 4·OFF - High │ ", colour: cEffort},
+		{name: "off without a payload level", payload: withoutEffort, file: sess1, content: state("off", "null"), want: "◆ Opus 4·OFF │ ", colour: cEffort},
+		{name: "session from the transcript name", payload: byTranscript, file: ".local/state/auto-effort/state.sess-2.json", content: state("auto", `"high"`), want: "◆ Opus 4·AUTO - High │ ", colour: cEffort},
+		{name: "unreadable", payload: withSession, file: sess1, directory: true, want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "a pipe, never waited on", payload: withSession, file: sess1, fifo: true, want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "garbage", payload: withSession, file: sess1, content: "not json\n", want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "empty file", payload: withSession, file: sess1, content: "", want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "unknown version", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":3`, 1), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "version 1", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":1`, 1), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, ""), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "keeper not an integer", payload: withSession, file: sess1, content: line("auto", `"medium"`, "1.5"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "keeper a string", payload: withSession, file: sess1, content: line("auto", `"medium"`, `"`+live+`"`), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "keeper negative", payload: withSession, file: sess1, content: line("auto", `"medium"`, "-3"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "keeper null", payload: withSession, file: sess1, content: line("auto", `"medium"`, "null"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "no keeper vouches", payload: withSession, file: sess1, content: line("model", `"high"`, "0"), want: "◆ Opus 4·STALE - High │ ", colour: cMuted},
+		{name: "stale without a payload level", payload: withoutEffort, file: sess1, content: line("auto", `"medium"`, "0"), want: "◆ Opus 4·STALE │ ", colour: cMuted},
+		{name: "the keeper is gone", payload: withSession, file: sess1, content: line("pin", `"xhigh"`, dead), want: "◆ Opus 4·STALE - High │ ", colour: cMuted},
+		{name: "the pid is no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), want: "◆ Opus 4·STALE - High │ ", colour: cMuted},
+		{name: "the keeper's argv unreadable", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), unreadableArgs: true, want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "unknown mode", payload: withSession, file: sess1, content: state("turbo", `"medium"`), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "level not in the five", payload: withSession, file: sess1, content: state("auto", `"ultra"`), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "the main chat's level missing", payload: withSession, file: sess1, content: state("model", "null"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "the pin's level missing", payload: withSession, file: sess1, content: state("pin", "null"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
+		{name: "error without a payload level", payload: withoutEffort, file: sess1, content: "{", want: "◆ Opus 4·ERR │ ", colour: cBad, wantWarn: true},
+		{name: "no state file", payload: withSession, want: "◆ Opus 4·🏎️ high │ ", colour: cEffort},
+		{name: "no session to name a file", payload: styledPayload, file: ".local/state/auto-effort/state.json", content: state("auto", `"medium"`), want: "◆ Opus 4·🏎️ high │ ", colour: cEffort},
+		{name: "thinking off", payload: thinkingOff, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·💤 high (off) │ ", colour: cMuted},
+		{name: "without effort", payload: withoutEffort, want: "◆ Opus 4 │ "},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
-			l1, _ := renderStyled(t, testcase.payload)
+			home := t.TempDir()
+			path := filepath.Join(home, testcase.file)
+			if testcase.file != "" {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if testcase.directory {
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				} else if testcase.fifo {
+					if err := syscall.Mkfifo(path, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.WriteFile(path, []byte(testcase.content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if testcase.unreadableArgs {
+				// A proc tree at the runtime's root whose argv entry for the pid
+				// cannot be read: the process is alive, its argv unknown.
+				if err := os.MkdirAll(filepath.Join(home, "proc", self, "cmdline"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			l1, warn := renderEffort(t, home, testcase.payload)
 			plain := styleANSI.ReplaceAllString(l1, "")
 			if !strings.Contains(plain, testcase.want) {
 				t.Fatalf("line 1 = %q, want %q", plain, testcase.want)
 			}
+			if testcase.colour != "" {
+				effort := testcase.want[strings.Index(testcase.want, "·")+len("·") : strings.Index(testcase.want, " │ ")]
+				if !strings.Contains(l1, testcase.colour+effort+reset) {
+					t.Fatalf("line 1 = %q, want %q in colour %q", l1, effort, testcase.colour)
+				}
+			}
+			if testcase.colour == cMuted && warn != "" {
+				t.Fatalf("warn = %q, want none: a stale or thinking-off effort is no failure", warn)
+			}
+			if testcase.wantWarn {
+				lines := strings.Split(strings.TrimSuffix(warn, "\n"), "\n")
+				if len(lines) != 1 || !strings.Contains(lines[0], path) ||
+					!strings.Contains(lines[0], "auto-effort state") {
+					t.Fatalf("warn = %q, want one auto-effort state line naming %s", warn, path)
+				}
+			}
 		})
+	}
+}
+
+// The plugin rewrites the file in place, so a read can meet a torn write: the
+// reader reads once more before it calls the file broken.
+func TestAutoEffortStateReadsATornWriteOnceMore(t *testing.T) {
+	good := []byte(
+		`{"version":2,"mode":"auto","level":"medium","reason":"r","keeper":42,"updatedAt":"2026-10-17T09:30:00.000Z"}` + "\n",
+	)
+	for _, testcase := range []struct {
+		name      string
+		reads     [][]byte
+		wantMode  string
+		wantLevel string
+		wantErr   string
+	}{
+		{name: "torn then whole", reads: [][]byte{[]byte(`{"version":2,"mo`), good}, wantMode: "auto", wantLevel: "medium"},
+		{name: "torn twice", reads: [][]byte{[]byte(`{"version":2,"mo`), []byte(`{"vers`)}, wantErr: "parse"},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			calls := 0
+			got := parseAutoEffortState("/state/state.s.json", func(string) ([]byte, error) {
+				calls++
+				return testcase.reads[calls-1], nil
+			}, func(pid int) (bool, error) { return pid == 42, nil })
+			if calls != 2 {
+				t.Fatalf("reads = %d, want 2", calls)
+			}
+			if testcase.wantErr != "" {
+				if got.err == nil || !strings.Contains(got.err.Error(), testcase.wantErr) {
+					t.Fatalf("state = %+v, want an error containing %q", got, testcase.wantErr)
+				}
+				return
+			}
+			if got.err != nil || got.mode != testcase.wantMode || got.level != testcase.wantLevel {
+				t.Fatalf("state = %+v, want mode %q level %q", got, testcase.wantMode, testcase.wantLevel)
+			}
+		})
+	}
+	if got := parseAutoEffortState(
+		"/state/none.json",
+		func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		func(int) (bool, error) { return true, nil },
+	); got.found ||
+		got.err != nil {
+		t.Fatalf("missing file state = %+v, want absent", got)
+	}
+	if got := parseAutoEffortState(
+		"/state/big.json",
+		func(string) ([]byte, error) { return nil, errors.New("denied") },
+		func(int) (bool, error) { return true, nil },
+	); got.err == nil {
+		t.Fatalf("unreadable file state = %+v, want an error", got)
+	}
+}
+
+// The keeper runs as the status line's own user, so a pid the null signal may
+// not reach belongs to another user: a stale line whose pid was reused, never
+// the keeper — even where that process's argv cannot be read (macOS refuses
+// another user's argv; Linux shows it).
+func TestKeeperProbeCallsAnotherUsersProcessNoKeeper(t *testing.T) {
+	root := t.TempDir()
+	const pid = 4242
+	if err := os.MkdirAll(filepath.Join(root, strconv.Itoa(pid), "cmdline"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	probe := keeperProbe(gather.NewProcFS(root), func(int) error { return syscall.EPERM })
+	if live, err := probe(pid); live || err != nil {
+		t.Fatalf("probe(%d) = %v, %v; want false, nil: another user's process is no keeper", pid, live, err)
+	}
+}
+
+// startKeeper starts a process with auto-effort's keeper argv (its src/state.ts
+// KEEPER_ARGV, last element KEEPER_MARK) for the test's life and returns its pid.
+func startKeeper(t *testing.T) int {
+	t.Helper()
+	keeper := exec.Command(
+		"/bin/sh", "-c", `echo $$; while kill -0 "$PPID" 2>/dev/null; do sleep 2; done`, "auto-effort-keeper",
+	)
+	// Stdout stays /dev/null: a pipe would hold Wait until the loop's orphaned
+	// sleep exits.
+	if err := keeper.Start(); err != nil {
+		t.Fatalf("start the keeper: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := keeper.Process.Kill(); err != nil {
+			t.Errorf("kill the keeper %d: %v", keeper.Process.Pid, err)
+		}
+		_ = keeper.Wait() // killed: its exit status is the signal
+	})
+	return keeper.Process.Pid
+}
+
+// reapedPID is the pid of a child that ran, exited and was reaped: no process.
+func reapedPID(t *testing.T) int {
+	t.Helper()
+	child := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := child.Run(); err != nil {
+		t.Fatalf("run a child to reap: %v", err)
+	}
+	return child.Process.Pid
+}
+
+// renderEffort renders one main statusline over a throwaway runtime rooted at
+// home and returns the raw first line and the render's warn output.
+func renderEffort(t *testing.T, home, payload string) (string, string) {
+	t.Helper()
+	var warn bytes.Buffer
+	type rendered struct {
+		text string
+		err  error
+	}
+	done := make(chan rendered, 1)
+	go func() {
+		text, err := Render(context.Background(), []byte(payload), Runtime{
+			Now:      func() time.Time { return time.Unix(1_786_838_400, 0) },
+			Home:     home,
+			CacheDir: filepath.Join(home, "cache"),
+			TmuxDir:  filepath.Join(home, "tmux"),
+			ProcRoot: filepath.Join(home, "proc"),
+			Columns:  120,
+			UID:      1000,
+			Env:      map[string]string{},
+			Command:  quietRunner{},
+			Warn:     &warn,
+		})
+		done <- rendered{text, err}
+	}()
+	// A render that waits on what sits at the state path fails here, never
+	// hangs the suite.
+	var got rendered
+	select {
+	case got = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("render still blocked after 5s under %s", home)
+	}
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	return strings.Split(got.text, "\n")[0], warn.String()
+}
+
+// A keeper the reader refuses reaches the warn line quoted and clipped, as the
+// mode and the parse text do: the file's bytes never reach stderr raw.
+func TestAutoEffortStateQuotesTheKeeperItRefuses(t *testing.T) {
+	keeper := "\"" + strings.Repeat("x", 200) + "\u009b[2J\""
+	got := parseAutoEffortState("/state/state.s.json", func(string) ([]byte, error) {
+		return []byte(`{"version":2,"mode":"auto","level":"medium","reason":"r","keeper":` + keeper + `}`), nil
+	}, func(int) (bool, error) { return true, nil })
+	if got.err == nil {
+		t.Fatalf("state = %+v, want an error", got)
+	}
+	text := got.err.Error()
+	if strings.ContainsRune(text, '\u009b') || !strings.Contains(text, "…") || len(text) > 200 ||
+		!strings.Contains(text, "is no pid") {
+		t.Fatalf("err = %q, want the keeper quoted and clipped", text)
+	}
+}
+
+// A state file with no path (the home is unknown) is named once, by its cause:
+// the warn line holds no empty path slot.
+func TestAutoEffortWarnNamesAStateFileWithNoHome(t *testing.T) {
+	var warn bytes.Buffer
+	data := input{SessionID: "sess1"}
+	data.Thinking.Enabled = true
+	got := sessionAutoEffort(Runtime{Env: map[string]string{}, Warn: &warn}, data)
+	if got.err == nil {
+		t.Fatalf("state = %+v, want an error for the unknown home", got)
+	}
+	if line := warn.String(); !strings.HasPrefix(line, "statusline: auto-effort state file") ||
+		strings.Contains(line, "  ") || !strings.Contains(line, "the home directory is unknown") {
+		t.Fatalf("warn = %q, want one line naming the state file by its cause", line)
 	}
 }

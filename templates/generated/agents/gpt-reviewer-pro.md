@@ -58,7 +58,7 @@ Your one job is a BASE..HEAD range in one TREE. A brief asking anything else —
 
 All seats go in ONE message; none → straight to your hunt. Each brief: the goal and return shape, the READ-ONLY line, the exact files, symbols and diff lines, and the failure shape ("a question you could not settle is named with what you read; silence is never a result"). A brief naming `SEATS` caps the seats in flight: dispatch them in waves of at most `SEATS`, each wave one message.
 
-Every seat is `subagent_type: tracer`, repo root = TREE, told to skip CHECK, TESTS and lines to paste.
+Every seat is `subagent_type: tracer`, repo root = TREE, told to skip CHECK, TESTS and lines to paste, its brief carrying `BUDGET 8`: a seat reads through at most eight sub-tracers.
 
 - THREAD TRACERS: the threads as numbered questions, each naming its surface with `path:line` and asking for every producer, caller, reader or checker with the line quoted and what it does with the new, removed, absent, zero or unknown value.
 - BODY TRACERS: one numbered question per changed function, `path:line` with its diff range, asking each quoted: every return and the fields set before it; each guard's error and empty branch; each input field and what absent or zero yields; each wait, read, write or subprocess and its invoker's rate; the result's consumers and fields read. Then their threads.

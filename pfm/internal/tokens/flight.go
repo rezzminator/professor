@@ -26,8 +26,11 @@ type ledgerRow struct {
 
 // names is a ledger row whose engine column admits engine: that engine, a
 // seat (either engine), or "?" (unrecorded).
+// names reports whether the row may belong to engine. A model-qualified engine
+// ("claude-opus", "codex-gpt") names its family, the part before the first dash.
 func (row ledgerRow) names(engine string) bool {
-	return row.engine == engine || row.engine == "?" || row.engine == "seat"
+	family, _, _ := strings.Cut(row.engine, "-")
+	return family == engine || row.engine == "?" || row.engine == "seat"
 }
 
 func (row ledgerRow) json() *object {
@@ -54,7 +57,7 @@ type flightPlan struct {
 }
 
 var (
-	ledgerHeader  = regexp.MustCompile(`(?i)^task[-_ ]?id$`)
+	ledgerHeader  = regexp.MustCompile(`(?i)^(task[-_ ]?id|unit)$`)
 	clockStamp    = regexp.MustCompile(`T\d{2}:\d{2}`)
 	runBaseline   = jsRegexp(`baseline\s+([0-9a-f]{7,40})`)
 	runInstant    = regexp.MustCompile(`(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)`)

@@ -13,15 +13,22 @@ import (
 
 // BaselineVersion is the version of a baseline that carries no decision
 // records; one holding a keep (`kept`) or an accepted retired-name rule is
-// written as BaselineDecisionsVersion, so an older pfm — a rolled-back binary,
-// a teammate's machine — refuses the file instead of rewriting it without them.
+// written as BaselineDecisionsVersion. Explicit coverage decisions require
+// BaselineCoverageVersion, so older binaries refuse rather than treating them
+// as hit acceptance or rewriting the baseline without their scope.
 const (
 	BaselineVersion          = 1
 	BaselineDecisionsVersion = 2
+	BaselineCoverageVersion  = 3
 )
 
 // versionFor is the version a baseline is written at.
 func versionFor(baseline Baseline) int {
+	for _, rule := range baseline.RetiredAccepted {
+		if rule.Coverage {
+			return BaselineCoverageVersion
+		}
+	}
 	if len(baseline.RetiredAccepted) != 0 {
 		return BaselineDecisionsVersion
 	}
@@ -71,14 +78,22 @@ type KeptNote struct {
 
 // RetiredRule accepts every retired-name hit at Path (a file, or a directory
 // and everything under it) and, when Name is set, only that retired name.
+// Coverage instead accepts only incomplete scan coverage, never hits or read failures.
+// Missing coverage in an existing baseline retains hit-only acceptance.
 type RetiredRule struct {
-	Path   string `json:"path"`
-	Name   string `json:"name,omitempty"`
-	Reason string `json:"reason"`
+	Path     string `json:"path"`
+	Name     string `json:"name,omitempty"`
+	Coverage bool   `json:"coverage,omitempty"`
+	Reason   string `json:"reason"`
 }
 
 // Covers reports whether the rule accepts a hit of name at path.
+// An empty name queries incomplete coverage instead, requiring an explicit
+// coverage rule. A coverage rule with a name is invalid and matches neither.
 func (rule RetiredRule) Covers(path, name string) bool {
+	if rule.Coverage != (name == "") || (rule.Coverage && rule.Name != "") {
+		return false
+	}
 	if rule.Name != "" && rule.Name != name {
 		return false
 	}
@@ -131,13 +146,24 @@ func Load(root string) (Baseline, error) {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		return Baseline{}, fmt.Errorf("BASELINE-MALFORMED %s: %w", path, err)
 	}
-	if baseline.Version != BaselineVersion && baseline.Version != BaselineDecisionsVersion {
+	if baseline.Version != BaselineVersion && baseline.Version != BaselineDecisionsVersion &&
+		baseline.Version != BaselineCoverageVersion {
 		return Baseline{}, fmt.Errorf("BASELINE-VERSION %d: unsupported", baseline.Version)
 	}
 	if baseline.Files == nil {
 		baseline.Files = make(map[string]FilePin)
 	}
 	baseline.Ignored = normalizeIgnored(baseline.Ignored)
+	for _, rule := range baseline.RetiredAccepted {
+		if rule.Coverage && rule.Name != "" {
+			return Baseline{}, fmt.Errorf(
+				"BASELINE-MALFORMED %s: coverage rule for %q cannot also name %q; remove name or coverage",
+				path,
+				rule.Path,
+				rule.Name,
+			)
+		}
+	}
 	baseline.RetiredAccepted = normalizeRetiredRules(baseline.RetiredAccepted)
 	return baseline, nil
 }
@@ -168,12 +194,16 @@ func normalizeIgnored(values []string) []string {
 	return deduped
 }
 
-// normalizeRetiredRules sorts the rules by path then name, one rule per
-// path+name (the later reason wins), nil for none.
+// normalizeRetiredRules sorts by path, name and coverage (hits first), one rule
+// per path+name+coverage (the later reason wins), nil for none.
 func normalizeRetiredRules(rules []RetiredRule) []RetiredRule {
-	byKey := make(map[[2]string]RetiredRule, len(rules))
+	type key struct {
+		path, name string
+		coverage   bool
+	}
+	byKey := make(map[key]RetiredRule, len(rules))
 	for _, rule := range rules {
-		byKey[[2]string{rule.Path, rule.Name}] = rule
+		byKey[key{rule.Path, rule.Name, rule.Coverage}] = rule
 	}
 	if len(byKey) == 0 {
 		return nil
@@ -186,13 +216,17 @@ func normalizeRetiredRules(rules []RetiredRule) []RetiredRule {
 		if result[i].Path != result[j].Path {
 			return result[i].Path < result[j].Path
 		}
-		return result[i].Name < result[j].Name
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		return !result[i].Coverage && result[j].Coverage
 	})
 	return result
 }
 
 func Save(root string, baseline Baseline) error {
-	if baseline.Version != BaselineVersion && baseline.Version != BaselineDecisionsVersion {
+	if baseline.Version != BaselineVersion && baseline.Version != BaselineDecisionsVersion &&
+		baseline.Version != BaselineCoverageVersion {
 		return fmt.Errorf("BASELINE-VERSION %d: unsupported", baseline.Version)
 	}
 	if baseline.Files == nil {

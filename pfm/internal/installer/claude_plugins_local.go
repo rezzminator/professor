@@ -599,6 +599,16 @@ func writeWhileUnchanged(
 func settingsEditTarget(path string) (string, fs.FileMode, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if errors.Is(err, fs.ErrNotExist) {
+		info, linkErr := os.Lstat(path)
+		if linkErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", 0, fmt.Errorf(
+				"settings file %s is a dangling symlink — repair its target and rerun pfm install",
+				path,
+			)
+		}
+		if linkErr != nil && !errors.Is(linkErr, fs.ErrNotExist) {
+			return "", 0, fmt.Errorf("inspect settings file %s: %w", path, linkErr)
+		}
 		return path, 0o600, nil
 	}
 	if err != nil {

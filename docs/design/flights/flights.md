@@ -29,7 +29,7 @@ A change lands in the design doc first, then in the template, then in every surf
 | `/flights:init` | command | Readies a project for flights, once: maps its build units inside-out, writes the project map, and gives each unit a testing manual, a test command and a static-check command | the main chat |
 | `/flights:spec` | command | The human front: maps only what asking needs, grills the user until no gap is left, writes `requirements.md`, hands it to `flights-foreman` | the main chat |
 | `/flights:orchestrate-cross-harness` | command | The main chat acts as the root foreman; child foremen run as chat seats of another engine | the main chat |
-| `/flights:audit` | command | The skeptic over a flight, running or landed: every claim against its artifact | the main chat |
+| `/flights:doctor` | command | The skeptic over a flight, running or landed: every claim against its artifact | the main chat |
 
 Four agents, four commands. Project law reaches them through the project contract and the project's [testing manual](testing-manual.md); `gitter` is the fleet's own.
 
@@ -39,7 +39,7 @@ Four agents, four commands. Project law reaches them through the project contrac
 2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request; a chat that wants only the spec of novel, large work spawns `flights-speccer` on its own.
 3. Build. One root `flights-foreman`: for novel, large work with no pattern in the codebase, first one `flights-speccer`, whose `spec.md` becomes the request; the base gate, the doors; the cut; the data shapes, the decision; the interface frozen in the innermost unit, or the spine inside one; the producer built by the foreman that read it; one child foreman per other unit or segment, in parallel against it; every return verified; the owner repairs its own reds.
 4. Land. One `flights-lander` for the whole flight, then, when the caller ordered it, the commit and, for a worktree flight, the merge through the repository's git writer, the lander's `PASS` or `FIXED` being the merge nod.
-5. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
+5. Doctor. `/flights:doctor` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
 
 ## The flight directory
 
@@ -55,10 +55,10 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
   metrics.md      per-agent calls, context, tokens, price    written by pfm tokens at landing
   gate.md         the gate's attack map and findings         written by flights-lander
   REVIEW.md       the merge-gating report, from gate.md      written by the root flights-foreman
-  audit.md        the last audit's report                    written by /flights:audit
+  doctor.md       the last doctor report                     written by /flights:doctor
 ```
 
-- The directory lives outside the repo, under `$HOME/.local/state/pfm/flights/{project}/` (`{project}` = the repo directory's basename, leading dot stripped), kept across reboots; the audit reads it after the landing.
+- The directory lives outside the repo, under `$HOME/.local/state/pfm/flights/{project}/` (`{project}` = the repo directory's basename, leading dot stripped), kept across reboots; the doctor reads it after the landing.
 - Beside the project's flight directories sits `project-map.md`: the project's static facts — its build units in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. `/flights:init` alone writes it, a flight's scoped map living in its own flight directory; a foreman reads it at intake and reports a line it finds wrong. The code wins over it.
 - Each writer owns its own files; nobody edits another writer's file.
 
@@ -67,9 +67,9 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
 | Token | Written by | Means |
 | --- | --- | --- |
 | `CLAIMED` | the spawning foreman, at spawn | A child or executor holds this unit or task |
-| `DONE` | child → parent, after verification; the root, after a gate `PASS` or `FIXED` | The unit's requirement rows are met and proven; a gate `FAIL` makes the root's `FAILED` or `PARTIAL` |
+| `DONE` | child → parent, after verification; the root, after a gate `PASS` or `FIXED` | The unit's requirement rows are met and proven, with no `UNBUILT` requested element; a gate `FAIL` makes the root's `FAILED` or `PARTIAL` |
 | `SPEC` | `flights-speccer` | `spec.md` is written whole; its path follows |
-| `PARTIAL` | root foreman, `flights-speccer` | Some units `DONE`, the rest named with their cause; a spec cut at its cap, the rest in its `## Open` |
+| `PARTIAL` | root foreman, `flights-speccer` | Some units `DONE`, the rest named with their cause, including each requested element marked `UNBUILT` in the spec's `## Open`; a spec cut at its cap, the rest in its `## Open` |
 | `FAILED` | any builder | The goal was not reached; the return names the cause or what was read |
 | `SPEC-DRIFT` | `flights-mechanical-executor` | Its task file contradicts the tree; nothing guessed |
 | `BLOCKED` | any foreman, `flights-speccer` | A question only the user can answer, or a ruling contradicted; both sides quoted. A speccer's `PARTIAL` or `BLOCKED` becomes the root foreman's own first-line `BLOCKED`, nothing built |

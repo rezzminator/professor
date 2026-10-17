@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -283,6 +284,9 @@ func (installer *engine) ensureClaudePluginCache(
 			failures = append(failures, errors.New(after.behindGap(entry).Problem+" after claude plugin update"))
 		}
 	}
+	after.drifted = slices.DeleteFunc(after.drifted, func(gap ClaudePluginGap) bool {
+		return slices.Contains(cache.drifted, gap)
+	})
 	installer.warnClaudePluginDrift(run, target, after)
 	return errors.Join(failures...)
 }

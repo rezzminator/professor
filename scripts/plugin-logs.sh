@@ -30,7 +30,47 @@ if [ -n "$archive" ]; then valid_date "$archive" || usage "invalid archive date 
 if [ -n "$today" ]; then valid_date "$today" || usage "invalid today date $today"; fi
 [ -e "$dir" ] || { printf 'no log folder: %s\n' "$dir"; exit 3; }
 [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || unreadable "$dir" 'directory is not readable/searchable'
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/plugin-logs.XXXXXX") || unreadable "$dir" 'mktemp failed'
+root=$(cd -- "$root" 2>/dev/null && pwd -P) || usage "cannot resolve project root $root"
+project=$(basename -- "$root"); project=${project#.}
+scratch_root="${TMPDIR:-/tmp}/$project/plugin-logs"
+# A private run is not private if another user can replace its ancestry.
+# Resolve the platform temp alias first (for example /var on macOS), then
+# accept only trusted owners and non-world-writable or sticky ancestors.
+# User-owned group-writable scratch is normal under umask 002.
+temp_root=$(cd -- "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
+  unreadable "$dir" "cannot create scratch folder: $scratch_root"
+check_scratch_dir() {
+  local path=$1 private=$2 metadata owner permissions
+  [ -d "$path" ] && [ ! -L "$path" ] || unreadable "$dir" "untrusted scratch folder: $path"
+  metadata=$(stat -c '%u %a' -- "$path" 2>/dev/null) ||
+    metadata=$(stat -f '%u %Lp' -- "$path" 2>/dev/null) ||
+    unreadable "$dir" "cannot inspect scratch folder: $path"
+  read -r owner permissions <<< "$metadata"
+  if [ "$private" = 1 ]; then
+    [ "$owner" = "$EUID" ] && (( (8#$permissions & 0002) == 0 || (8#$permissions & 01000) != 0 )) ||
+      unreadable "$dir" "untrusted scratch folder: $path"
+  else
+    { [ "$owner" = 0 ] || [ "$owner" = "$EUID" ]; } &&
+      (( (8#$permissions & 0002) == 0 || (8#$permissions & 01000) != 0 )) ||
+      unreadable "$dir" "untrusted scratch folder: $path"
+  fi
+}
+ancestor=$temp_root
+while :; do
+  check_scratch_dir "$ancestor" 0
+  [ "$ancestor" != / ] || break
+  ancestor=$(dirname -- "$ancestor")
+done
+for scratch_parent in "$temp_root/$project" "$temp_root/$project/plugin-logs"; do
+  if [ ! -e "$scratch_parent" ] && [ ! -L "$scratch_parent" ]; then
+    if ! mkdir -- "$scratch_parent" 2>/dev/null && [ ! -e "$scratch_parent" ] && [ ! -L "$scratch_parent" ]; then
+      unreadable "$dir" "cannot create scratch folder: $scratch_parent"
+    fi
+  fi
+  check_scratch_dir "$scratch_parent" 1
+done
+scratch_root="$temp_root/$project/plugin-logs"
+scratch=$(mktemp -d "$scratch_root/run.XXXXXX") || unreadable "$dir" "mktemp failed under $scratch_root"
 cleanup() {
   local status=$?
   rm -rf -- "$scratch" || status=4
@@ -66,6 +106,13 @@ LC_ALL=C sort -u "$scratch/roster" > "$scratch/plugins"
 check_dir() {
   [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ] || unreadable "$1" 'directory is not readable/searchable'
 }
+vanished_level() {
+  if [ ! -e "$1" ] && [ ! -L "$1" ]; then
+    printf 'skipped vanished level file: %s\n' "$1"
+    return 0
+  fi
+  return 1
+}
 list_levels() { # one inventory, including same-day archive collision suffixes
   local folder=$1 archived=$2 name
   : > "$scratch/levels"
@@ -77,7 +124,10 @@ list_levels() { # one inventory, including same-day archive collision suffixes
     name=${path##*/}
     if [[ "$name" =~ ^(errors|warnings|info)\.jsonl(\.1)?$ ]] ||
        { [ "$archived" = 1 ] && [[ "$name" =~ ^(errors|warnings|info)-[0-9]+\.jsonl(\.1)?$ ]]; }; then
-      [ -f "$path" ] && [ -r "$path" ] || unreadable "$path" 'level file is unreadable'
+      if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+        if [ "$mode" = rotate ] && vanished_level "$path"; then continue; fi
+        unreadable "$path" 'level file is unreadable'
+      fi
       printf '%s\0' "$path" >> "$scratch/levels"
     fi
   done < "$scratch/sorted-list"
@@ -113,7 +163,10 @@ if [ "$mode" = rotate ]; then
           target="$dest/${name%%.jsonl*}-$n.jsonl${name#*.jsonl}"
           n=$((n + 1))
         done
-        mv -- "$path" "$target" 2> "$scratch/err" || unreadable "$path" "$(cat "$scratch/err")"
+        if ! mv -- "$path" "$target" 2> "$scratch/err"; then
+          if vanished_level "$path"; then continue; fi
+          unreadable "$path" "$(cat "$scratch/err")"
+        fi
       done < "$scratch/levels"
     fi
     while IFS= read -r date; do
@@ -138,13 +191,15 @@ if [ "$mode" = rotate ]; then
   exit 0
 fi
 : > "$scratch/rows"; : > "$scratch/rotates"
+skipped=0; archive_found=0
 # Normalize valid rows per line; malformed rows are skipped.
 read_rows() { # path plugin level -> normalized valid rows
   local file=$1 plugin=$2 level=$3 line part normalized status
-  exec 9< "$file" 2> "$scratch/err" || unreadable "$file" "$(cat "$scratch/err")"
+  { exec 9< "$file"; } 2> "$scratch/err" || unreadable "$file" "$(cat "$scratch/err")"
   while IFS= LC_ALL=C read -r -n 4096 line <&9 || [ -n "$line" ]; do
     if [ "${#line}" -ge 4096 ]; then
       while IFS= LC_ALL=C read -r -n 4096 part <&9 && [ "${#part}" -ge 4096 ]; do :; done
+      skipped=$((skipped + 1))
       continue
     fi
     status=0
@@ -168,7 +223,8 @@ read_rows() { # path plugin level -> normalized valid rows
     ' 2> "$scratch/err") || status=$?
     if [ "$status" = 0 ]; then
       printf '%s\n' "$normalized" >> "$scratch/rows"
-    elif [ "$status" = 4 ]; then : # malformed or noncontract row
+    elif [ "$status" = 4 ]; then
+      skipped=$((skipped + 1)) # malformed or noncontract row
     else
       unreadable "$file" "jq normalization failed ($status): $(cat "$scratch/err")"
     fi
@@ -182,7 +238,10 @@ while IFS= read -r plugin; do
   archive_dates "$pdir/archive"
   cat "$scratch/dates" >> "$scratch/rotates"
   folder=$pdir; archived=0
-  if [ -n "$archive" ]; then folder="$pdir/archive/$archive"; archived=1; fi
+  if [ -n "$archive" ]; then
+    folder="$pdir/archive/$archive"; archived=1
+    if [ -e "$folder" ]; then check_dir "$folder"; archive_found=1; fi
+  fi
   list_levels "$folder" "$archived"
   while IFS= read -r -d '' path; do
     name=${path##*/}
@@ -192,7 +251,11 @@ while IFS= read -r plugin; do
 done < "$scratch/plugins"
 span=$(jq -rs 'if length==0 then "none" else sort_by(._time)|.[0].ts+" .. "+.[-1].ts end' "$scratch/rows")
 last=$(LC_ALL=C sort "$scratch/rotates" | tail -1)
-printf 'plugin logs: %s · span: %s · last rotate: %s\n' "$dir" "$span" "${last:-none}"
+printf 'plugin logs: %s · span: %s · last rotate: %s · contract-skipped: %s\n' "$dir" "$span" "${last:-none}" "$skipped"
+if [ -n "$archive" ]; then
+  if [ "$archive_found" = 1 ]; then printf 'archive: %s\n' "$archive";
+  else printf 'no archive %s\n' "$archive"; fi
+fi
 for level in error warning; do
   if [ "$level" = error ]; then echo ERRORS; else echo WARNINGS; fi
   jq -rs --arg l "$level" '
@@ -206,5 +269,5 @@ echo INFO
 jq -rs 'map(select(.level=="info"))|group_by(.plugin)[]|"\(.[0].plugin) \(length)"' "$scratch/rows"
 jq -rs --rawfile plugins "$scratch/plugins" '
   ($plugins | split("\n") | map(select(length > 0))) - (map(.plugin) | unique) |
-  "wrote nothing: " + (if length == 0 then "none" else join(", ") end)
+  "no valid rows: " + (if length == 0 then "none" else join(", ") end)
 ' "$scratch/rows"

@@ -229,13 +229,11 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 
 var stdioProbeDaemon = probeDaemonContext
 
-// runStdioTransport forwards to the daemon's config.MCPFamilyPath(config.MCPServerChat) when it
-// mounts exactly the locally enabled families and, when chat is enabled, runs
-// the same chat runtime; otherwise it serves the selected family in process
-// and says why on the warnings writer. A daemon family this config disables
-// would reach the client through the forwarded tools/list, and a family that
-// failed to configure locally must answer its configuration error, so either
-// keeps the server in process.
+// runStdioTransport forwards the selected family to its daemon route when it
+// configured locally, the daemon mounts that route and, for chat, the runtime
+// matches. Otherwise it serves the selected family in process and says why on
+// the warnings writer. Other families' configuration and daemon mounts do not
+// affect the selected family's transport.
 func (professor *FamilyServers) runStdioTransport(
 	ctx context.Context,
 	reader io.ReadCloser,
@@ -263,8 +261,10 @@ func (professor *FamilyServers) runStdioTransport(
 		fmt.Fprintf(warnings, "pfm mcp stdio: %s; using in-process MCP; %s\n", reason, consequence)
 		return professor.views[options.Family].Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
 	}
-	if len(professor.failed) > 0 {
-		return inProcess(fmt.Sprintf("family %s failed to configure locally", strings.Join(professor.failed, ", ")))
+	for _, failed := range professor.failed {
+		if failed == options.Family {
+			return inProcess(fmt.Sprintf("family %s failed to configure locally", failed))
+		}
 	}
 	address := options.DaemonAddress
 	if address == "" {
@@ -289,6 +289,12 @@ func (professor *FamilyServers) runStdioTransport(
 	if options.Family == pfmconfig.MCPServerChat && professor.chat != nil && (status.ChatRuntimeIdentity == "" ||
 		status.ChatRuntimeIdentity != professor.chat.RuntimeIdentity()) {
 		return inProcess("runtime mismatch with daemon at " + address)
+	}
+	if routeErr := probeFamilyRoute(ctx, address, options.Family); routeErr != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("pfm mcp stdio: family route probe cancelled: %w", ctx.Err())
+		}
+		return inProcess(fmt.Sprintf("daemon family route unavailable (%v)", routeErr))
 	}
 	marker, markerErr := stale.HoldCompatibleProxy(options.Home)
 	if markerErr != nil {
@@ -371,7 +377,8 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 	}
 }
 
-// isChatToolCall: frame is a tools/call naming a chat tool, servicedesk included.
+// isChatToolCall classifies every tools/call on the chat-family proxy, even an
+// unknown tool name, for caller refresh and conservative runtime-safe replay.
 func (proxy *stdioProxy) isChatToolCall(frame proxyFrame) bool {
 	return proxy.family != pfmconfig.MCPServerHarvester && frame.Method == "tools/call"
 }

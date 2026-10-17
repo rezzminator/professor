@@ -100,6 +100,7 @@ same two findings to stderr for its own node, exit 0.
 A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2. Python 3 standard library only.
 """
 import contextlib
+import fcntl
 import glob
 import hashlib
 import io
@@ -110,6 +111,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 
 import tracemap
@@ -486,10 +488,10 @@ def intake_thread(card):
 
 
 def intake_recall(run, root, asked):
-    """RUN/recall.txt, the recall of the questions over earlier runs; a recall that fails writes its failure there.
-    The file's path, else a sentence naming why it could not be written."""
+    """RUN/recall.txt, the recall of the questions over the earlier runs of the last SEEK_HOURS; a recall that fails
+    writes its failure there. The file's path, else a sentence naming why it could not be written."""
     try:
-        text = "\n".join(recall(root, asked, exclude=run)) + "\n"
+        text = "\n".join(recall(root, asked, since_hours=SEEK_HOURS, exclude=run)) + "\n"
     except Exception as e:  # the spawn goes on whatever recall hits; the failure is the file's content
         text = f"RECALL FAILED — {type(e).__name__}: {e}: trace every question\n"
     path = os.path.join(run, "recall.txt")
@@ -504,7 +506,9 @@ def intake_recall(run, root, asked):
 
 CUTGATE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 CUTGATE_KIT = re.compile(r"tracetree\.py['\"]?\s+segment\b")
-CUTGATE_VERDICT = re.compile(r"(?m)^VERDICT (?!EMPTY\b)\S")
+CUTGATE_VERDICT = re.compile(r"(?m)^VERDICT (?!EMPTY\b)\S.*$")
+CUTGATE_STAMP = re.compile(r" · stamp ([0-9a-f]{16}) · CHILD \d+$")
+CUTGATE_STAMPABLE = re.compile(r"(?m)^(VERDICT (?:SPLIT|SOLO)\b.*?)( · CHILD \d+)$")
 # a child whose parent already cut: a segment child's `SEGMENT` line or a grandchild's `DEPTH 3` line
 CUTGATE_CHILD = re.compile(r"(?m)^SEGMENT |^DEPTH 3[ \t\r]*$")
 CUTGATE_BRIEF = re.compile(r"/[^\s'\"`;,()<>]*\.md\b")
@@ -512,8 +516,62 @@ CUTGATE_AGENT_ID = re.compile(r"[A-Za-z0-9_-]+")
 CUTGATE_DENY = {"hookSpecificOutput": {
     "hookEventName": "PreToolUse", "permissionDecision": "deny",
     "permissionDecisionReason": "cut-gate: step 4 first. Write the doors file (step 3), run python3 "
-    "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}, log its "
+    "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file} so its own "
+    "result shows its VERDICT line unfiltered (`| tee {file} | tail`: the file keeps the full printout, the tail shows its "
+    "last lines, VERDICT included; never `| grep`: a filtered run is no cut), log its "
     "CUT line in run.md, then edit. Flight-directory writes stay open."}}
+
+
+def cutgate_record(home, stamp):
+    return os.path.join(home, ".local", "state", "pfm", "cutgate", f"segment-{stamp}")
+
+
+def cutgate_stamp(text):
+    """The segment kit's printout with its SPLIT or SOLO VERDICT line stamped `· stamp {16 hex}` before `· CHILD n`,
+    the printout's hash, and the stamped line saved as its record, `cutgate_record`: the proof a verdict in a
+    transcript came from a kit run, never from text echoing one; the same run prints the same bytes. A record it
+    cannot save leaves the line unstamped and says so on stderr."""
+    m = CUTGATE_STAMPABLE.search(text)
+    if not m:
+        return text
+    stamp = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    line = f"{m.group(1)} · stamp {stamp}{m.group(2)}"
+    path = cutgate_record(os.environ.get("HOME") or os.path.expanduser("~"), stamp)
+    tmp = None
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path))
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(line + "\n")
+        os.replace(tmp, path)
+    except OSError as e:
+        if tmp:
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+        sys.stderr.write(f"tracetree segment: VERDICT left unstamped, its record {path} not saved ({e}): cutgate "
+                         "counts no cut from this run\n")
+        return text
+    return text[:m.start()] + line + text[m.end():]
+
+
+def cutgate_stamped(text, state):
+    """True when a VERDICT line of text other than EMPTY carries a stamp whose record under state holds that very
+    line. A record that is missing proves nothing; one that cannot be read raises OSError."""
+    for m in CUTGATE_VERDICT.finditer(text):
+        line = m.group(0).rstrip()
+        s = CUTGATE_STAMP.search(line)
+        if not s:
+            continue
+        path = os.path.join(state, "cutgate", f"segment-{s.group(1)}")
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                if f.read().rstrip("\n") == line:
+                    return True
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            raise OSError(f"VERDICT record {path} unreadable: {e}") from e
+    return False
 
 
 def cutgate_text(content):
@@ -566,7 +624,8 @@ def cutgate_child(first, state):
 
 def cutgate_cut(path, state):
     """True once the transcript shows a child whose parent cut, or a Bash call of the segment kit whose result holds a
-    VERDICT other than EMPTY; streamed, stopping at the first. An unreadable transcript raises OSError."""
+    stamped VERDICT other than EMPTY (`cutgate_stamped`); streamed, stopping at the first. An unreadable transcript
+    or VERDICT record raises OSError."""
     kit, first = set(), None
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -592,7 +651,7 @@ def cutgate_cut(path, state):
                         CUTGATE_KIT.search(str(given.get("command", ""))):
                     kit.add(b.get("id"))
                 elif b.get("type") == "tool_result" and b.get("tool_use_id") in kit and \
-                        CUTGATE_VERDICT.search(cutgate_text(b.get("content"))):
+                        cutgate_stamped(cutgate_text(b.get("content")), state):
                     return True
     return False
 
@@ -897,15 +956,38 @@ def cutgate_cache_path(event, home):
 
 
 def cutgate_cache_save(path, cache):
-    """Saves atomically and prunes caches a week old; an OSError rises to the caller."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}"
-    with open(tmp, "w") as f:
-        json.dump(cache, f)
-    os.replace(tmp, path)
+    """Merges cache into the saved one under the directory's `.lock` and saves atomically, so concurrent hooks of one
+    agent lose neither a cut nor a tree's first baseline; prunes caches and VERDICT records a week old. An OSError
+    rises to the caller."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(path) as f:
+                saved = json.load(f)
+        except FileNotFoundError:
+            saved = {}
+        except (OSError, ValueError) as e:
+            sys.stderr.write(f"tracetree cutgate: cache {path} unreadable at save, overwritten: {e}\n")
+            saved = {}
+        trees = saved.get("trees") if isinstance(saved, dict) and isinstance(saved.get("trees"), dict) else {}
+        merged = {"cut": bool(cache.get("cut") or (isinstance(saved, dict) and saved.get("cut"))),
+                  "trees": {**cache["trees"], **trees}}
+        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=folder)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(merged, f)
+            os.replace(tmp, path)
+        except OSError:
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+            raise
     week = time.time() - 7 * 86400
-    for old in os.listdir(os.path.dirname(path)):
-        full = os.path.join(os.path.dirname(path), old)
+    for old in os.listdir(folder):
+        if old == ".lock":
+            continue
+        full = os.path.join(folder, old)
         try:
             if os.path.getmtime(full) < week:
                 os.remove(full)
@@ -968,9 +1050,10 @@ def cutgate_bash(event, given, state, home, open_roots):
 def cmd_cutgate():
     """PreToolUse hook on a foreman's Bash, Edit, Write, MultiEdit and NotebookEdit: denies a code edit until the
     agent's own transcript shows its segment kit run printing a verdict (EMPTY alone is no cut); a Bash call is a code
-    edit per cutgate_bash. A write under the flight's state directory or /tmp, and a child whose parent already cut,
-    pass silently. A payload, transcript, cache or git state it cannot read allows the call and says so to the agent and
-    on stderr, never a silent pass."""
+    edit per cutgate_bash. A write under $HOME/.local/state/pfm, /tmp or /private/tmp (a Bash write also under /dev),
+    and a child whose parent already cut, pass silently. A payload, transcript, VERDICT record or git state it cannot
+    read, or a cache it cannot save, allows the call and says so to the agent and on stderr, never a silent pass; a
+    cache it cannot read is named on stderr and rebuilt empty, the call checked as on the agent's first look."""
     def unchecked(cause):
         sys.stderr.write(f"tracetree cutgate: {cause}\n")
         print(json.dumps({"hookSpecificOutput": {
@@ -3090,24 +3173,25 @@ def run_started(run):
 
 
 def recall_runs(rc, root, since_hours, exclude, before=None):
-    """(runs, unreadable): every earlier run under /tmp/{project}/tracer/ whose ROOT shares ROOT's git common dir (the
+    """(runs, unreadable, older): every earlier run under /tmp/{project}/tracer/ whose ROOT shares ROOT's git common dir (the
     same ROOT outside git), with `before` only those started strictly before that time, newest first, each (run, its ROOT, BASE or "", [(node, answer text, hops)]); a run that
-    cannot be read is (run, reason), never dropped."""
+    cannot be read is (run, reason), never dropped; older counts the runs since_hours left unread."""
     parent = os.path.join("/tmp", project_name(root), "tracer")
     mine = rc.common(root)
     try:
         names = sorted((n for n in os.listdir(parent) if RUN_ID.fullmatch(n)), reverse=True)
     except FileNotFoundError:
-        return [], []
+        return [], [], 0
     except OSError as e:
-        return [], [(parent, f"cannot list the runs: {e}")]
-    runs, unreadable, now = [], [], time.time()
+        return [], [(parent, f"cannot list the runs: {e}")], 0
+    runs, unreadable, older, now = [], [], 0, time.time()
     for name in names:
         run = os.path.join(parent, name)
         if run == exclude or not os.path.isdir(run):
             continue
         try:
             if since_hours is not None and now - os.path.getmtime(run) > since_hours * 3600:
+                older += 1
                 continue
             started = run_started(run)
             if before is not None and started >= before:
@@ -3151,7 +3235,7 @@ def recall_runs(rc, root, since_hours, exclude, before=None):
             unreadable.append((run, broken))
             continue
         runs.append((started, run, theirs, base, lines))
-    return [r[1:] for r in sorted(runs, key=lambda r: r[0], reverse=True)], unreadable
+    return [r[1:] for r in sorted(runs, key=lambda r: r[0], reverse=True)], unreadable, older
 
 
 def cite_paths(text, theirs):
@@ -3334,14 +3418,15 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
     per run that could not be read, last the RECALL COVER line."""
     rc, out = Recall(root), []
     try:
-        runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
+        runs, unreadable, older = recall_runs(rc, root, since_hours, exclude, before)
     except GitUnknown as e:
         out.append(f"RECALL GIT FAILED — {e}: candidates are runs on this exact ROOT")
         rc.commons[root] = None
-        runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
+        runs, unreadable, older = recall_runs(rc, root, since_hours, exclude, before)
     if rc.commons.get(root) is None and not out:
         out.append(f"RECALL: {root} is in no git repository — candidates are runs on this exact ROOT")
-    out.append(f"RECALL {root} · {len(runs)} earlier runs · {len(unreadable)} unreadable")
+    window = f" · runs of the last {since_hours:g} hours, {older} older not read" if since_hours is not None else ""
+    out.append(f"RECALL {root} · {len(runs)} earlier runs · {len(unreadable)} unreadable{window}")
     out += [f"UNREADABLE {run}: {why}" for run, why in unreadable]
     units, checked = [recall_unit(None, out)], {}
     served = stale = delta = gaps = 0
@@ -3438,7 +3523,7 @@ def main():
         return cmd_recall(rest[0], since, opts["--before"])
     if a and a[0] == "segment":
         import segment
-        sys.exit(segment.main(a[1:], fail))
+        sys.exit(segment.main(a[1:], fail, stamp=cutgate_stamp))
     if not a or a[0] not in ("new", "seek", "start", "check", "wait", "answer", "write", "map", "read", "show", "book") or (len(a) < 2 and a[0] != "book"):
         fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | recall ROOT [--since-hours N] [--before RUN] < questions | intake < PreToolUse hook payload | cutgate < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT] | segment ROOT [--rev SHA] --seed SEED...|--seeds FILE [--variant contract|package|cochange|tracer] [--floor LINES] [--read-max SHARE] [--max K] [--json]")
     if a[0] == "seek":

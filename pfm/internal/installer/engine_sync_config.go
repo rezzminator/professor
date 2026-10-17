@@ -174,7 +174,8 @@ func (installer *engine) wireEngineSyncConfig() error {
 	}
 	switch {
 	case plan.future == nil:
-		installer.say("  engine-sync machine policy source missing: %s", plan.source)
+		installer.skip("engine-sync machine policy source missing: " + plan.source)
+		return nil
 	case plan.state == engineSyncFileUnowned:
 		installer.skip(plan.path + " is not managed by professor — left unchanged " +
 			"(set machine.managedBy to \"" + engineSyncManagedBy + "\" to let pfm write it)")

@@ -345,3 +345,69 @@ func TestEnsureClaudePluginsBuildsCallmeterBeforeItsCopy(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureClaudePluginsSkipsDisabledCallmeterBuild(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	root := t.TempDir()
+	writeCallmeterCheckout(t, root, "0.4.0")
+	runner := &goRunner{missing: true}
+	var out bytes.Buffer
+	inst := pluginEngine(home, binary, first, second, runner, &out, true)
+	inst.options.Version, inst.options.ClaudePluginCheckoutRoot = alphaVersion, root
+	inst.options.ClaudePlugins = bareList()
+	inst.options.SourceRepo = writeMarketplaceClone(t, []string{"callmeter"}, nil)
+	simulateClaude(t, &runner.pluginRunner)
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("disabled callmeter required a toolchain: %v\n%s", err, out.String())
+	}
+	if len(runner.builds) != 0 {
+		t.Fatalf("disabled callmeter built: %v", runner.builds)
+	}
+	if _, err := os.Stat(
+		filepath.Join(
+			home,
+			".local",
+			"share",
+			"callmeter-dev",
+			"plugins",
+			"callmeter",
+			".claude-plugin",
+			"plugin.json",
+		),
+	); err != nil {
+		t.Fatalf("install-only copy missing: %v", err)
+	}
+}
+
+func TestCallmeterBuildUsesClaudeEnvHome(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	_, checkout := writeCallmeterCheckout(t, root, "0.4.0")
+	wantHome, ambient := filepath.Join(home, "configured"), filepath.Join(home, "ambient")
+	runner := &goRunner{output: "configured binary"}
+	var out bytes.Buffer
+	inst := &engine{
+		options: Options{
+			Home:          home,
+			ClaudeEnv:     map[string]string{"CALLMETER_HOME": wantHome},
+			Env:           &paths.MapEnv{Values: map[string]string{"CALLMETER_HOME": ambient}},
+			ProcessRunner: runner,
+			Stdout:        &out,
+		},
+		apply: true,
+	}
+	if err := inst.ensureCallmeterBinary(
+		context.Background(),
+		&ClaudePluginTarget{Name: "callmeter", Checkout: checkout},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(
+		filepath.Join(wantHome, "bin", "0.4.0", "callmeter"),
+	); err != nil ||
+		string(got) != "configured binary" {
+		t.Fatalf("claude.env binary absent: %q, %v", got, err)
+	}
+	if _, err := os.Stat(ambient); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("ambient home changed: %v", err)
+	}
+}

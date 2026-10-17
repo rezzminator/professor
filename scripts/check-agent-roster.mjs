@@ -102,8 +102,8 @@ for (const dir of agentSourceDirs) {
     process.exit(4);
   }
   if (scan.error || scan.status !== 0) {
-    // An uncaught Python traceback also exits 1: a crash, never a verdict on the source.
-    const rejected = !scan.error && scan.status === 1 && !scan.stderr.includes("Traceback (most recent call last)");
+    // Only the producer's validation verdict rejects a source; lookup failures and crashes are errors.
+    const rejected = !scan.error && scan.status === 1 && scan.stderr.startsWith("agent-source-inventory: REJECTED —");
     const context = scan.error?.stack || scan.stderr.trim() || `exit ${scan.status}, signal ${scan.signal || "none"}`;
     console.error(`agent-roster: ${rejected ? "SOURCE REJECTED" : "ERROR"} — python3 ${args.join(" ")}: ${context}`);
     process.exit(rejected ? 5 : 2);

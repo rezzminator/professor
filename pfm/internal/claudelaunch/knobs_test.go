@@ -2,6 +2,7 @@ package claudelaunch
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -105,31 +106,39 @@ func TestKnobHooksCountMatchesRegistry(t *testing.T) {
 	t.Fatal("no hooks knob in Knobs")
 }
 
-// TestClaudeEnvRefusesLaunchNames: every variable the launch sets, discards or
-// hands the wrapper, and a default plugin's prefix names, is one claude.env
-// refuses; a settings.json env copy of it would override the launch, and no
-// prefix warning would tell.
+// TestClaudeEnvRefusesLaunchNames guards against settings env overriding a
+// launch-owned plugin variable without even an unknown-plugin warning.
 func TestClaudeEnvRefusesLaunchNames(t *testing.T) {
-	prefixes := []string{}
+	var prefixes []string
 	for _, plugin := range pfmconfig.DefaultClaudePlugins() {
 		prefixes = append(prefixes, strings.ToUpper(strings.ReplaceAll(plugin.Name(), "-", "_"))+"_")
 	}
-	checked := 0
+	checked := map[string]bool{}
 	for _, knob := range Knobs {
 		if knob.Wire != WireEnv && knob.Wire != WireUnset && knob.Wire != WireWrapperEnv {
 			continue
 		}
 		for _, prefix := range prefixes {
-			if !strings.HasPrefix(knob.Target, prefix) {
+			if !strings.HasPrefix(knob.Target, prefix) || checked[knob.Target] {
 				continue
 			}
-			checked++
-			if _, refused := pfmconfig.ClaudeEnvRefusal(knob.Target); !refused {
-				t.Errorf("claude.env accepts %s, which the launch registry's %s knob owns", knob.Target, knob.Name)
-			}
+			checked[knob.Target] = true
+			t.Run(knob.Target, func(t *testing.T) {
+				home := t.TempDir()
+				path := filepath.Join(home, pfmconfig.FileName)
+				content := `{"version":2,"claude":{"env":{"` + knob.Target + `":"x"}}}`
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pfmconfig.Load(path, home, nil); err == nil {
+					t.Errorf("claude.env accepts %s, which the launch registry's %s knob owns", knob.Target, knob.Name)
+				} else if !strings.Contains(err.Error(), "claude.env."+knob.Target) {
+					t.Fatalf("Load failed for another reason: %v", err)
+				}
+			})
 		}
 	}
-	if checked == 0 {
+	if len(checked) == 0 {
 		t.Fatal("no launch variable carries a default plugin's prefix: the check ran on nothing")
 	}
 }

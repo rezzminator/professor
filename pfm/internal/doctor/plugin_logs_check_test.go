@@ -2,7 +2,9 @@ package doctor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // pluginLogsFixture is one alpha host: a store and two account config dirs
@@ -410,5 +413,41 @@ func TestPluginLogFolderGap(t *testing.T) {
 	); !strings.HasPrefix(gap, "no log folder at "+absent) ||
 		failure {
 		t.Fatalf("absent folder gap=%q failure=%v, want a no-log-folder warning", gap, failure)
+	}
+}
+
+func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
+	fixture := newPluginLogsFixture(t)
+	for _, dir := range []string{fixture.store, fixture.own} {
+		writePluginLogsFile(t, filepath.Join(dir, "settings.json"), `{"env":{"OTHER":"keep"}}`)
+	}
+	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	if _, err := installer.Run(
+		context.Background(),
+		installer.Options{
+			Home:             fixture.home,
+			ConfigDir:        fixture.store,
+			RosterConfigDirs: []string{fixture.linked, fixture.own},
+			SourceRepo:       fixture.clone,
+			Version:          "0.82.0-alpha",
+			Mode:             installer.ModeApply,
+			Stdout:           io.Discard,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	tally := &doctorTally{}
+	printPluginLogsDoctor(
+		&out,
+		[]string{fixture.store, fixture.linked, fixture.own},
+		installer.ClaudePluginBuild{Home: fixture.home, Version: "0.82.0-alpha", SourceRepo: fixture.clone},
+		&paths.MapEnv{},
+		unix.Access,
+		tally,
+	)
+	if tally.failures != 0 || tally.warnings != 0 ||
+		!strings.Contains(out.String(), "plugin_logs ok: PLUGIN_LOG_DIR=") {
+		t.Fatalf("installer leaves doctor unhealthy: %s", out.String())
 	}
 }

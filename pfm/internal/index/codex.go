@@ -83,11 +83,18 @@ func parseCodexRolloutFile(
 		}
 
 		if record.Type == "session_meta" {
-			if header, err := codexmeta.Decode(line); err == nil && header.Kind != codexmeta.Unknown {
-				rollout.UserThread = header.Kind == codexmeta.User
-				sourceKnown = true
-				if header.ParentThreadID != "" {
-					rollout.ParentThread = header.ParentThreadID
+			if header, err := codexmeta.Decode(line); err == nil {
+				// Exec rollouts can outlive their state DB rows. The entry
+				// point still identifies background work; state reconciliation
+				// runs after parsing and restores an explicitly renamed chat.
+				var source string
+				rollout.IsBG = json.Unmarshal(header.Source, &source) == nil && source == "exec"
+				if header.Kind != codexmeta.Unknown {
+					rollout.UserThread = header.Kind == codexmeta.User
+					sourceKnown = true
+					if header.ParentThreadID != "" {
+						rollout.ParentThread = header.ParentThreadID
+					}
 				}
 			}
 		}

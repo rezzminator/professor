@@ -678,6 +678,9 @@ func TestRetiredCoverageIncompleteIsVisibleAndNonfatal(t *testing.T) {
 	if !strings.Contains(stdout.String(), "lock.json   retired-name scan INCOMPLETE — read limit") {
 		t.Errorf("incomplete row missing: %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "pfm update accept lock.json --coverage --reason") {
+		t.Errorf("incomplete row lacks closing verb: %s", stdout.String())
+	}
 	if got := projectTerminal(report); got != "INCOMPLETE — 1 file(s) partially scanned for retired names" {
 		t.Errorf("terminal=%q, want incomplete not clean or failed", got)
 	}

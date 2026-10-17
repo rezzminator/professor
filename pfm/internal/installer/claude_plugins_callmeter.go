@@ -51,7 +51,11 @@ func (installer *engine) ensureCallmeterBinary(ctx context.Context, target *Clau
 	if err != nil {
 		return err
 	}
-	binary, err := callmeterBinaryPath(installer.env(), installer.options.Home, version)
+	binary, err := callmeterBinaryPath(
+		ClaudePluginEnvironment(installer.env(), installer.options.ClaudeEnv),
+		installer.options.Home,
+		version,
+	)
 	if err != nil {
 		return err
 	}
@@ -285,4 +289,27 @@ func callmeterBuildEnvironment() []string {
 func callmeterExecutable(binary string) bool {
 	info, err := os.Stat(binary)
 	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+}
+
+// ClaudePluginEnvironment layers the environment Claude gives plugin hooks over
+// pfm's process environment, so install and doctor resolve the same state paths.
+func ClaudePluginEnvironment(env paths.Env, overrides map[string]string) paths.Env {
+	return claudePluginEnvironment{Env: env, overrides: overrides}
+}
+
+type claudePluginEnvironment struct {
+	paths.Env
+	overrides map[string]string
+}
+
+func (env claudePluginEnvironment) Lookup(key string) (string, bool) {
+	if value, ok := env.overrides[key]; ok {
+		return value, true
+	}
+	return env.Env.Lookup(key)
+}
+
+func (env claudePluginEnvironment) Get(key string) string {
+	value, _ := env.Lookup(key)
+	return value
 }

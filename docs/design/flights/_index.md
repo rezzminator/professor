@@ -10,4 +10,4 @@
 | testing-manual | [testing-manual.md](testing-manual.md) | One project's testing law: where it lives, the eleven sections, who reads which, how it reaches a flight, what stays out |
 | /flights:init | [flights-init.md](flights-init.md) | Readies a repository for flights: maps build units inside-out, writes the project map, gives each unit a testing manual, test and check commands with their tests; re-runnable |
 | /flights:spec | [flights-spec.md](flights-spec.md) | The human front: walk only what asking needs, grill, write `requirements.md`, hand off to the foreman, the one question |
-| /flights:audit | [flights-audit.md](flights-audit.md) | The skeptic over a flight: the anchors, the pieces, the report |
+| /flights:doctor | [flights-doctor.md](flights-doctor.md) | The skeptic over a flight: the anchors, the pieces, the report |

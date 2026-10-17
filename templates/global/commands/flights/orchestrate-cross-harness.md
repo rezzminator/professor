@@ -19,8 +19,8 @@ Role-bearing seats support `claude` and `codex`. An `opencode` request returns `
 | Verify from the return and § Change inventory | The same tracked and untracked inventory; `mcp__chat-professor__last` on the seat when the call arrived cut short |
 | A red, or an `ESCALATE` answer, back to the child by `SendMessage` | `mcp__chat-professor__call` on the same seat, closing with "continue, then write your return once more"; an `ESCALATE` return is no verdict, so its seat stays alive |
 | The child's session | `pfm chat resolve {flight}-{unit}`, third column, read right after birth while the name resolves; on the `CLAIMED` line and on each verdict line as `transcript {session id}`, always before `mcp__chat-professor__kill`. No third column: `transcript UNRESOLVED · {what resolve printed}` |
-| A question only the user can answer → `BLOCKED` | `AskUserQuestion` now; the answer appended to `requirements.md` `## Rulings`, the seat re-briefed by call |
-| The caller hears from you once | The user is the caller: the return at the end |
+| A question only the user can answer → `BLOCKED` | `AskUserQuestion` now; under god speed, rule it yourself; the answer or ruling appended to `requirements.md` `## Rulings`, the seat re-briefed by call |
+| The caller hears from you once | The user is the caller: the return at the end, its first line and `OPEN` row as written |
 | After a child's verdict is recorded | `mcp__chat-professor__kill` the seat; the return's `UNITS` row names the seat's session |
 
 Every seat is one-shot: born for one unit, killed after its verdict. Waiting is the two Monitors below; a seat is never polled by `mcp__chat-professor__status`.

@@ -115,10 +115,9 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				commands := filepath.Join(h.clone, "templates", "global", "commands")
 				writeFixture(t, filepath.Join(commands, "plan.md"), "planned")
 				writeFixture(t, filepath.Join(commands, "flights", "x.md"), "planned dir")
-				writeFixture(t, filepath.Join(h.clone, "docs", "other.md"), "exists")
 				symlinkFixture(t, filepath.Join(commands, "plan.md"), filepath.Join(h.store, "commands", "plan.md"))
 				symlinkFixture(t, filepath.Join(commands, "flights"), filepath.Join(h.store, "commands", "flights"))
-				symlinkFixture(t, filepath.Join(h.clone, "docs", "other.md"), filepath.Join(h.store, "commands", "other.md"))
+				symlinkFixture(t, filepath.Join(commands, "plan.md"), filepath.Join(h.store, "commands", "other.md"))
 			},
 			want: []string{"ORPHAN .claude/commands/other.md"},
 		},
@@ -222,12 +221,15 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				symlinkFixture(t, filepath.Join(h.home, "foreign", "g.md"), filepath.Join(h.store, "commands", "g.md"))
 				symlinkFixture(t, h.clone+"-foreign", filepath.Join(h.store, "skills", "sibling"))
 				writeFixture(t, filepath.Join(h.store, "commands", "h.md"), "mine")
+				writeFixture(t, filepath.Join(h.clone, "RND", "mine.md"), "mine")
+				symlinkFixture(t, filepath.Join(h.clone, "RND", "mine.md"), filepath.Join(h.store, "commands", "rnd.md"))
+				symlinkFixture(t, filepath.Join(h.clone, "RND", "missing.md"), filepath.Join(h.store, "commands", "rnd-missing.md"))
 			},
 		},
 		{
 			name: "a registry root that is a dead link is DEAD, a live one is not an orphan",
 			setup: func(t *testing.T, h ownershipHome) {
-				symlinkFixture(t, filepath.Join(h.clone, "retired-skills"), filepath.Join(h.home, ".agents", "skills"))
+				symlinkFixture(t, filepath.Join(h.clone, "workflows", "retired-skills"), filepath.Join(h.home, ".agents", "skills"))
 				writeFixture(t, filepath.Join(h.clone, "kept-commands", "x.md"), "x")
 				symlinkFixture(t, filepath.Join(h.clone, "kept-commands"), filepath.Join(h.store, "commands"))
 			},

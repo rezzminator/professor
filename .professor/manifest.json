@@ -3,7 +3,7 @@
   "installed_from": {
     "mode": "self-hosted",
     "repo": "rezzminator/professor",
-    "version": "0.82.0-alpha"
+    "version": "0.83.0-alpha"
   },
   "profile": "minimal",
   "answers": {
@@ -97,7 +97,7 @@
   "file_hashes": {
     ".claude/agents/changelogger.md": "2b050225554d1143a8f219e57c8e478acf2ec7d740ac3e6ad8021f2f047fa62e",
     ".claude/agents/gitter.md": "5d8eed174450c7a2ec639675d13d02e66d04a1ffa88815dbb71912009408f13f",
-    ".claude/agents/pcm.md": "cf98d3bfff7e7631d69750b09ef39083c09975abe248c96f7f33cc2a315e14a9",
+    ".claude/agents/pcm.md": "628f5c64a5406efed3cf87d08d675712075d36ad11d449a0f68ac48042be6951",
     ".claude/agents/releaser.md": "f467e094dffa5245144fdd3e3d1b679a49ea589a93ee221473f7534b4b575cf9",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
@@ -118,7 +118,7 @@
     ".gitignore": "021b209e1e73bf71487b3f86a9d7d220146e331152e8190dae0c831b3e7cc02a",
     "CLAUDE.md": "d09bbbd75234ef5bdbca872babd6ee72aa2dcc53a2fd54f80109b57dee44ab77",
     "docs/commands/pcm/references/audit-scopes.md": "9c332606a6e91f9c7915e31b1f69776ea337a95e2b38ee45c05a621f973e2c69",
-    "docs/commands/pcm/references/refresh.md": "d21e629f15337e2c36c150be0128d05f1782dfc1681aa1fd342ed7e6c7df4038",
+    "docs/commands/pcm/references/refresh.md": "5c2033fc9acdb0e23d522feaf3965dfeb39ca182791a057201f83760dc1dfbcf",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
     "pfm/CLAUDE.md": "17eeef745a47a51eb1938087e31f5880e42e29ac5c82da0bfe3769b59030294a"
   }

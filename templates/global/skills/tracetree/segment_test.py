@@ -460,7 +460,7 @@ class SegmentCommandTest(unittest.TestCase):
     def test_a_segment_building_a_new_seed_is_a_child_and_one_without_is_kept(self):
         sha = fixture(self.root)
         seeds = self.seeds_file("R1: a/a.go new=AlphaCache\nR2: b/b.go\nR3: new=c/cache.go\n")
-        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1")
+        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1", "--child-min", "0")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertNotRegex(done.stdout, r"(?m)^NOTFOUND ")
         self.assertEqual(self.decide(done.stdout), {"a": ("CHILD", "builds new=AlphaCache"),
@@ -470,7 +470,7 @@ class SegmentCommandTest(unittest.TestCase):
         self.assertRegex(done.stdout, r"(?m)^VERDICT SPLIT 3 — .* · CHILD 2$")
         for sid in re.findall(r"(?m)^SEGMENT (S\d+) ", done.stdout):  # each DECIDE right after its ESCALATE
             self.assertRegex(done.stdout, rf"(?m)^  ESCALATE {sid} · .*\n  DECIDE {sid} ")
-        doc = json.loads(run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1",
+        doc = json.loads(run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1", "--child-min", "0",
                              "--json").stdout)
         self.assertEqual(doc["child"], 2)
         self.assertEqual({g["cells"][0]: g["decide"]["cut"] for g in doc["segments"]},
@@ -481,11 +481,21 @@ class SegmentCommandTest(unittest.TestCase):
     def test_a_segment_carrying_three_rows_is_a_child(self):
         sha = fixture(self.root)
         seeds = self.seeds_file("R1: Alpha\nR2: AlphaTwo\nR3: alphaLocal\nR4: b/b.go\n")
-        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1")
+        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1", "--child-min", "0")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(self.decide(done.stdout), {"a": ("CHILD", "3 rows (R1, R2, R3)"),
                                                     "b": ("KEEP", "1 row, no new symbol")})
         self.assertRegex(done.stdout, r"(?m)^VERDICT SPLIT 2 — .* · CHILD 1$")
+
+    def test_a_segment_under_the_child_floor_is_kept_whatever_its_rows(self):
+        sha = fixture(self.root)
+        seeds = self.seeds_file("R1: Alpha\nR2: AlphaTwo\nR3: alphaLocal\nR4: b/b.go\n")
+        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        got = self.decide(done.stdout)
+        self.assertEqual(got["a"][0], "KEEP")
+        self.assertRegex(got["a"][1], r"^3 rows \(R1, R2, R3\), but its doors read \d+ lines, under the 300-line child floor$")
+        self.assertRegex(done.stdout, r"(?m)^VERDICT SPLIT 2 — .* · CHILD 0$")
 
     def test_call_site_swaps_or_one_function_are_kept(self):
         sha = fixture(self.root)

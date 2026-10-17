@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // printClaudeEnvDoctor checks claude.env against the settings file install
@@ -19,7 +20,7 @@ func printClaudeEnvDoctor(
 	build installer.ClaudePluginBuild,
 	tally *doctorTally,
 ) {
-	if len(env) > 0 {
+	if len(installer.ClaudeEnvUnknownKeys(env, nil)) > 0 {
 		if build, err := build.WithMarketplacePlugins(); err != nil {
 			tally.warn()
 			fmt.Fprintf(
@@ -36,18 +37,32 @@ func printClaudeEnvDoctor(
 			}
 		}
 	}
+	settingsPath, err := installer.ClaudeEnvSettingsPath(managedRoot, settingsPath)
+	if err != nil {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: claude_env FAIL %v — repair it, then run pfm install --yes\n", err)
+		return
+	}
 	gaps, err := installer.ClaudeEnvGaps(managedRoot, settingsPath, env)
 	if err != nil {
 		tally.fail()
 		fmt.Fprintf(stdout, "doctor: claude_env FAIL %v — repair it, then run pfm install --yes\n", err)
 		return
 	}
+	reported, pluginLogsMissing := 0, false
 	for _, gap := range gaps {
+		if gap.Key == installer.PluginLogDirEnv && gap.Missing && obs.AlphaBuild(build.Version) {
+			pluginLogsMissing = true
+			continue
+		}
+		reported++
 		tally.fail()
-		fmt.Fprintf(stdout, "doctor: claude_env FAIL %s — run pfm install --yes\n", gap)
+		fmt.Fprintf(stdout, "doctor: claude_env FAIL %s — %s\n", gap.Problem, gap.Fix)
 	}
 	switch {
-	case len(gaps) > 0:
+	case reported > 0:
+	case pluginLogsMissing:
+		fmt.Fprintln(stdout, "doctor: claude_env ok — PLUGIN_LOG_DIR readiness is checked by plugin_logs")
 	case len(env) == 0:
 		fmt.Fprintln(stdout, "doctor: claude_env ok — claude.env is empty")
 	default:

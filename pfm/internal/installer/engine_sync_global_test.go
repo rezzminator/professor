@@ -188,7 +188,7 @@ func TestWireEngineSyncGlobalWithoutTheBinaryFailsTheStep(t *testing.T) {
 					t.Fatalf("wireEngineSyncGlobal = %v, want it to wrap the UnavailableError", err)
 				}
 				for _, repair := range []string{
-					"claude plugin install engine-sync@professor",
+					"claude plugin install engine-sync@engine-sync",
 					"start a new Claude session",
 					"pfm update",
 					"pfm install --yes",
@@ -217,7 +217,7 @@ func TestInstallPreflightWithoutEngineSyncNamesTheRepair(t *testing.T) {
 		Runner: &fakeRunner{}, Stdout: &output,
 	})
 	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
-		!strings.Contains(err.Error(), "claude plugin install engine-sync@professor") ||
+		!strings.Contains(err.Error(), "claude plugin install engine-sync@engine-sync") ||
 		!strings.Contains(err.Error(), "start a new Claude session") {
 		t.Fatalf("Run = %v, want the preflight refusal naming the engine-sync repair\n%s", err, output.String())
 	}
@@ -628,7 +628,7 @@ func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
 				!strings.Contains(
 					err.Error(),
 					"engine-sync "+version+" is older than required 0.4.0-alpha — update the plugin "+
-						"(`claude plugin update engine-sync@professor`), then start a new Claude session",
+						"(`claude plugin update engine-sync@engine-sync`), then start a new Claude session",
 				) || strings.Contains(err.Error(), "make host-install") {
 				t.Fatalf("old binary = %v", err)
 			}

@@ -1,6 +1,7 @@
 package professor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -116,7 +117,7 @@ func TestBaselineMalformedAndUnsupportedAreNamed(t *testing.T) {
 		want    string
 	}{
 		{name: "malformed", content: "{", want: "BASELINE-MALFORMED"},
-		{name: "unsupported", content: `{"version":3,"blueprint":{},"files":{}}`, want: "BASELINE-VERSION 3: unsupported"},
+		{name: "unsupported", content: `{"version":4,"blueprint":{},"files":{}}`, want: "BASELINE-VERSION 4: unsupported"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -148,5 +149,59 @@ func TestNormalizeIgnoredTrimsDropsEmptyAndDedupes(t *testing.T) {
 	}
 	if got := normalizeIgnored([]string{"", "   ", "\t"}); got != nil {
 		t.Fatalf("normalizeIgnored(all-empty) = %#v, want nil", got)
+	}
+}
+
+func TestBaselineRetiredAcceptanceScopeRoundTrip(t *testing.T) {
+	for _, row := range []struct {
+		name, rules             string
+		wantRules, wantCoverage int
+	}{
+		{"legacy hit rule", `[{"path":"docs","reason":"hits"}]`, 1, 0},
+		{"coverage rule", `[{"path":"docs","coverage":true,"reason":"coverage"}]`, 1, 1},
+		{"coexisting scopes and duplicate", `[{"path":"docs","reason":"old"},{"path":"docs","coverage":true,"reason":"coverage"},{"path":"docs","reason":"new"}]`, 2, 1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			root := t.TempDir()
+			var baseline Baseline
+			if err := json.Unmarshal([]byte(`{"version":2,"retiredAccepted":`+row.rules+`}`), &baseline); err != nil {
+				t.Fatal(err)
+			}
+			for round := 0; round < 2; round++ {
+				if err := Save(root, baseline); err != nil {
+					t.Fatal(err)
+				}
+				loaded, err := Load(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(loaded.RetiredAccepted) != row.wantRules {
+					t.Fatalf("round %d: scope rules=%+v want %d", round, loaded.RetiredAccepted, row.wantRules)
+				}
+				wantVersion := 2
+				if row.wantCoverage != 0 {
+					wantVersion = 3
+				}
+				if loaded.Version != wantVersion {
+					t.Fatalf(
+						"coverage baseline version=%d want %d (older readers must reject coverage)",
+						loaded.Version,
+						wantVersion,
+					)
+				}
+				raw, err := os.ReadFile(BaselinePath(root))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := strings.Count(string(raw), `"coverage": true`); got != row.wantCoverage {
+					t.Fatalf("round %d: coverage fields=%d want %d: %s", round, got, row.wantCoverage, raw)
+				}
+				if row.wantRules == 2 &&
+					(loaded.RetiredAccepted[0].Reason != "new" || loaded.RetiredAccepted[1].Reason != "coverage") {
+					t.Fatalf("scope ordering/reason = %+v", loaded.RetiredAccepted)
+				}
+				baseline = loaded
+			}
+		})
 	}
 }

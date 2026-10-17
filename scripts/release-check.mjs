@@ -89,6 +89,7 @@ const TIER1 = [
       "docs/SETUP.md",
       "docs/RELEASE.md",
       "docs/PLACEHOLDERS.md",
+      "docs/BLUEPRINT.md", // Keep its deletion in the public release review.
     ],
   },
   {

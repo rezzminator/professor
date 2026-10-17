@@ -250,6 +250,21 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 			versions: []string{checkoutVersion},
 		},
 		{
+			name: "a drifted snapshot alongside a stale project entry",
+			entries: func(project string) []cacheFixtureEntry {
+				return []cacheFixtureEntry{
+					{scope: "user", version: checkoutVersion, files: cacheFiles(name, checkoutVersion, "old\n")},
+					{scope: "project", projectPath: project, version: "1.0.0", files: cacheFiles(name, "1.0.0", "old\n")},
+				}
+			},
+			apply:     true,
+			wantCalls: func(string) []string { return []string{"plugin update " + id + " --scope project -y"} },
+			wantDirs:  func(project string) []string { return []string{project} },
+			wantLines: []string{"  warn    claude plugin " + id + " in {first}: plugin " + id + " cache {first}/plugins/cache/" + name + "-dev/" + name + "/" + checkoutVersion + " differs"},
+			wantErr:   []string{"after claude plugin update"},
+			versions:  []string{checkoutVersion, "1.0.0"},
+		},
+		{
 			name: "a current snapshot",
 			entries: func(string) []cacheFixtureEntry {
 				return []cacheFixtureEntry{{scope: "user", version: checkoutVersion, files: cacheFiles(name, checkoutVersion, hook)}}
@@ -436,8 +451,8 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 				}
 			}
 			for _, line := range test.wantLines {
-				if line = replace.Replace(line); !strings.Contains(out.String(), line) {
-					t.Fatalf("missing %q:\n%s", line, out.String())
+				if line = replace.Replace(line); strings.Count(out.String(), line) != 1 {
+					t.Fatalf("want exactly one %q:\n%s", line, out.String())
 				}
 			}
 			if test.wantLines == nil && strings.Contains(out.String(), "warn") {

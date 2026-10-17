@@ -87,15 +87,12 @@ async def render_route():
     server = serve(root)
     try:
         async with async_playwright() as p:
-            chrome = await p.chromium.launch(channel="chrome", headless=True)
-            try:
+            async with browser.chrome_browser(p) as chrome:
                 context = await chrome.new_context()
                 try:
                     return await render_page(context, server.server_address[1])
                 finally:
                     await context.close()
-            finally:
-                await chrome.close()
     finally:
         server.shutdown()
 

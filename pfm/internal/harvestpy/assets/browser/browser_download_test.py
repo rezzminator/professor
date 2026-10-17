@@ -98,8 +98,7 @@ async def capture_all(cases):
     results = {}
     try:
         async with async_playwright() as p:
-            chrome = await p.chromium.launch(channel="chrome", headless=True)
-            try:
+            async with browser.chrome_browser(p) as chrome:
                 for name, (path, max_bytes) in cases.items():
                     context = await chrome.new_context(accept_downloads=True)
                     dest = os.path.join(root, name)
@@ -114,8 +113,6 @@ async def capture_all(cases):
                         results[name] = (e, os.path.exists(dest))
                     finally:
                         await context.close()
-            finally:
-                await chrome.close()
     finally:
         server.shutdown()
     return results

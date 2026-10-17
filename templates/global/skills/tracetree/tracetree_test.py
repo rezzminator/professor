@@ -215,6 +215,103 @@ class StartQuestionTest(Repo):
         self.assertEqual(none.stdout.splitlines()[0], f"QUESTION Q1: (not in {self.run_dir}/questions)")
 
 
+class StartRecalledTest(Repo):
+    """A card's start prints the FRESH rows {RUN}/recall.txt holds under each question its QUESTION names, below the
+    QUESTION lines and above the FROM window."""
+
+    Q2_FRESH = ["FRESH 20261014-1 node 1: Handle refuses an empty target [app/srv/server.go:5]",
+                "FRESH 20261014-2 node 3: the only refusal text is \"target is required\" [app/srv/server.go:5]"]
+    Q3_FRESH = ["FRESH 20261014-1 node 2: kill.Run wraps the tmux error [app/kill/kill.go:6]"]
+    RECALL = "\n".join([
+        "RECALL /repo · 2 earlier runs · 1 unreadable",
+        "UNREADABLE /runs/old: no ROOT",
+        "GAP Q1 · the question names no anchor",
+        "TRACE Q1 · whole question",
+        "RECALL Q2 · 2/5 lines fresh · runs 20261014-1, 20261014-2",
+        "TRACE Q2 · 3 rows · app/kill/kill.go, `kill.Run`",
+        Q2_FRESH[0],
+        "DELTA 20261014-1 node 2: Run is called once [app/kill/kill.go:4] · changed since abc: `Run`",
+        "  + app/srv/server.go:7 return kill.Run(req.Target)",
+        "STALE Q2 · app/gone.go: no such file now",
+        Q2_FRESH[1],
+        "CHANGED Q2 · app/kill/kill.go",
+        "GAP Q2 · a closed-world claim naming no identifier or path to witness: nothing else refuses",
+        "RECALL Q3 · 1/2 lines fresh · runs 20261014-1",
+        "TRACE Q3 · 1 rows · app/kill/kill.go",
+        Q3_FRESH[0],
+        "CHANGED Q3 · app/kill/kill.go",
+        "RECALL CUT 3 lines past the 12 KB cap · 1 stale, 2 delta, 0 fresh · 3 collapsed to 1 CHANGED",
+        "RECALL COVER 2/3 · 1 stale · 1 delta",
+    ]) + "\n"
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.run_dir, "questions"), "w") as f:
+            f.write("1. What calls Handle?\n2. Where does Handle refuse?\n3. What does kill.Run wrap?\n")
+
+    def recall_file(self, text):
+        with open(os.path.join(self.run_dir, "recall.txt"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def head(self, qs, k):
+        return (f"RECALLED {qs} · {k} rows an earlier run verified, re-placed at these lines today — "
+                f"confirm each at its cite, never re-walk it:")
+
+    def test_a_card_gets_exactly_its_questions_fresh_rows_between_the_question_and_the_window(self):
+        before = tt(["start", self.run_dir, "2", "srv/server.go:5", "Q2"])
+        self.recall_file(self.RECALL)
+        got = tt(["start", self.run_dir, "3", "srv/server.go:5", "Q2"])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        want = before.stdout.replace("started 2", "started 3").splitlines()
+        want[1:1] = [self.head("Q2", 2)] + self.Q2_FRESH
+        self.assertEqual(got.stdout.splitlines(), want)
+        child = tt(["start", self.run_dir, "3.1", "srv/server.go:5", "Q3 and Q2"])
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(child.stdout.splitlines()[2:7],
+                         [self.head("Q3,Q2", 3)] + self.Q3_FRESH + self.Q2_FRESH + ["started 3.1 — app/srv/server.go"])
+
+    def test_the_block_is_capped_at_4_kb_and_names_the_rows_left_in_recall_txt(self):
+        rows = [f"FRESH 20261014-1 node {i}: Handle refuses an empty target, row {i:03} {'x' * 80} [app/srv/server.go:5]"
+                for i in range(60)]
+        self.recall_file("\n".join(["RECALL Q2 · 60/60 lines fresh · runs 20261014-1", "TRACE Q2 · none", *rows,
+                                    "RECALL COVER 1/1 · 0 stale · 0 delta"]) + "\n")
+        got = tt(["start", self.run_dir, "2", "srv/server.go:5", "Q2"])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        lines = got.stdout.splitlines()
+        end = lines.index("started 2 — app/srv/server.go")
+        block = lines[1:end]
+        self.assertLessEqual(sum(len(x.encode()) + 1 for x in block), 4096)
+        shown = block[1:-1]
+        self.assertGreater(len(shown), 0)
+        self.assertEqual(shown, rows[:len(shown)])
+        self.assertEqual(block[0], self.head("Q2", len(shown)))
+        self.assertEqual(block[-1], f"RECALLED Q2 · {60 - len(shown)} more rows in {self.run_dir}/recall.txt")
+
+    def test_no_recall_txt_or_no_fresh_row_for_the_card_prints_what_start_printed_before(self):
+        # A guard, green before the change by construction: absence of recall.txt is today's output.
+        plain = tt(["start", self.run_dir, "2", "srv/server.go:5", "Q1"])
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertEqual(plain.stdout.splitlines()[:2], ["QUESTION Q1: What calls Handle?", "started 2 — app/srv/server.go"])
+        self.recall_file(self.RECALL)
+        gap = tt(["start", self.run_dir, "4", "srv/server.go:5", "Q1"])
+        self.assertEqual(gap.stdout.replace("started 4", "started 2"), plain.stdout)
+
+    def test_an_unreadable_recall_txt_is_named_and_the_window_still_prints(self):
+        for name, make in (("a directory", lambda p: os.mkdir(p)),
+                           ("not utf-8", lambda p: open(p, "wb").write(b"RECALL Q2 \xff\xfe\n"))):
+            with self.subTest(name):
+                path = os.path.join(self.run_dir, "recall.txt")
+                shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else None
+                make(path)
+                got = tt(["start", self.run_dir, "2", "srv/server.go:5", "Q2"])
+                self.assertEqual(got.returncode, 0, got.stderr)
+                lines = got.stdout.splitlines()
+                self.assertRegex(lines[1], r"^RECALLED UNREADABLE — " + re.escape(path) + r": \S")
+                self.assertEqual(lines[2], "started 2 — app/srv/server.go")
+                self.assertRegex(got.stdout, r"\n\s+5\t\t\treturn errors.New")
+                self.assertTrue(os.path.exists(os.path.join(self.run_dir, "2.started")))
+
+
 class WriteTest(Repo):
     def test_write_stores_once_and_refuses_a_second_write(self):
         self.write("1", self.good())
@@ -2181,6 +2278,18 @@ class IntakeTest(Repo):
             self.assertRegex(f.read(), re.escape(run) + r": node 4 opened a thread for Q2 outside its TRACE lines — "
                              r"REASON: the FRESH line omits the error path")
 
+    def test_a_refused_card_is_told_reason_covers_an_uncovered_sub_ask_and_a_card_carrying_one_passes_logged(self):
+        run, card = self.traced_run()
+        refused = json.loads(self.hook(card("Q1"), subagent="sub-tracer"))["hookSpecificOutput"]
+        self.assertEqual(refused["permissionDecision"], "deny")
+        self.assertIn("A thread for a part of Q1 these TRACE lines do not cover, or for a FRESH row the tree "
+                      "contradicts, passes with `REASON: {the sub-ask it covers}` on its card — respawn it so, never "
+                      "read it yourself.", refused["permissionDecisionReason"])
+        self.assertEqual(self.hook(card("Q1", reason="REASON: who logs the refusal\n"), subagent="sub-tracer"), "")
+        with open(os.path.join(self.parent, "intake.log"), encoding="utf-8") as f:
+            self.assertRegex(f.read(), re.escape(run) + r": node 4 opened a thread for Q1 outside its TRACE lines — "
+                             r"REASON: who logs the refusal")
+
 class SeekTest(Repo):
     """`new ROOT --seek REGEX` and `new ROOT --questions`: earlier runs on the same root, and the stored questions."""
 
@@ -3423,6 +3532,101 @@ class RecallTest(unittest.TestCase):
         out = self.recall("1. Where does `Handle` refuse, app/srv/server.go?\n")
         self.assertRegex(out, r"(?m)^GAP Q1 · ")
         self.assertRegex(out, r"(?m)^TRACE Q1 · 1 rows · app/srv/server\.go$", "a GAP row of the question needs a trace")
+
+    def tracked(self, files):
+        """{rel: text} committed to the fixture repository."""
+        for rel, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(self.repo, rel)), exist_ok=True)
+            with open(os.path.join(self.repo, rel), "w") as f:
+                f.write(text)
+        self.git(self.repo, "add", "-A")
+        self.git(self.repo, "commit", "-q", "-m", "more")
+
+    WIDE = {f"app/w{i}/w.go": "package w\n// wide_name\n" for i in range(17)}
+
+    def test_a_trace_scope_keeps_cite_paths_existing_paths_and_names_few_tracked_files_hold(self):
+        self.tracked({**self.WIDE, "app/p0/p.go": "package p\n// pair_name\n", "app/p1/p.go": "package p\n// pair_name\n"})
+        self.run_with(self.repo, hops("1", ["- `Handle` refuses with `wide_name`, `pair_name`, `gone_name`, `abc`, "
+                                            "`app/srv/server.go`, `srv/server.go`, `server.go` and `app/kill/kill.go` "
+                                            "[app/srv/server.go:5]"], self.H5, ["END returned @ app/srv/server.go:5"]))
+        self.edit("app/new.go", ["package app", "// wide_name pair_name gone_name abc",
+                                 "// app/srv/server.go srv/server.go server.go app/kill/kill.go"])
+        out = self.recall("1. Where does `Handle` refuse?\n")
+        self.assertRegex(out, r"(?m)^DELTA .*changed since .*`wide_name`")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 1 rows · app/srv/server\.go, `app/kill/kill\.go`, `gone_name`, `pair_name`$")
+        self.assertNotIn("RECALL SPREAD FAILED", out)
+        # recall's anchors and witnesses never carry a KEYWORDS word, so the rule is asked of the kit directly
+        probe = ("import importlib.util, sys\n"
+                 "spec = importlib.util.spec_from_file_location('kit', sys.argv[1])\n"
+                 "kit = importlib.util.module_from_spec(spec)\n"
+                 "spec.loader.exec_module(kit)\n"
+                 "print(kit.scope_rule('`return`', [], sys.argv[2]), kit.scope_rule('`Return`', [], sys.argv[2]))\n")
+        got = subprocess.run([sys.executable, "-c", probe, SCRIPT, self.repo], capture_output=True, text=True,
+                             cwd=HERE, timeout=60)
+        self.assertEqual((got.returncode, got.stdout), (0, "drop drop\n"), got.stderr)
+
+    def test_a_spread_git_cannot_measure_narrows_no_scope_and_says_so(self):
+        root = tempfile.mkdtemp(prefix=".tracetree-nogit-")
+        self.addCleanup(shutil.rmtree, os.path.join("/tmp", os.path.basename(root).lstrip(".")), True)
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "app", "srv"))
+        with open(os.path.join(root, "app", "srv", "server.go"), "w") as f:
+            f.write("\n".join(SERVER) + "\n")
+        self.run_with(root, self.HANDLE)
+        out = self.recall("1. Where does `Handle` refuse, and is `close_pane` or `abc` reached?\n", root)
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 1 rows · app/srv/server\.go, `abc`, `close_pane`$")
+        self.assertRegex(out, r"(?m)^RECALL SPREAD FAILED — .+: TRACE scopes unnarrowed$")
+        self.assertTrue(out.rstrip("\n").splitlines()[-1].startswith("RECALL COVER "), out)
+
+    def timed_spread(self, attr, names, questions=""):
+        """(Recall.spread(names), recall's stdout) of one process whose kit carries `attr` set to a ceiling no git
+        grep meets, loaded the way the probe above loads it; the attribute is set on that process alone. Recall runs
+        only when questions are given: a short GIT_TIMEOUT fails its other git lookups too."""
+        probe = ("import importlib.util, json, sys\n"
+                 "spec = importlib.util.spec_from_file_location('kit', sys.argv[1])\n"
+                 "kit = importlib.util.module_from_spec(spec)\n"
+                 "spec.loader.exec_module(kit)\n"
+                 "setattr(kit, sys.argv[3], 1e-6)\n"
+                 "print(json.dumps(kit.Recall(sys.argv[2]).spread(json.loads(sys.argv[4]))))\n"
+                 "if sys.argv[5]:\n"
+                 "    kit.cmd_recall(sys.argv[2], None)\n")
+        got = subprocess.run([sys.executable, "-c", probe, SCRIPT, self.repo, attr, json.dumps(names), questions and "recall"],
+                             input=questions, capture_output=True, text=True, cwd=HERE, timeout=60)
+        self.assertEqual(got.returncode, 0, got.stderr + got.stdout)
+        spread, _, out = got.stdout.partition("\n")
+        return json.loads(spread), out
+
+    ASK = "1. Where does `Handle` refuse, and is `close_pane` reached?\n"
+
+    def test_the_spread_grep_has_its_own_ceiling_apart_from_the_quick_git_lookups(self):
+        spread, _ = self.timed_spread("GIT_TIMEOUT", ["Handle", "target", "close_pane"])
+        self.assertEqual(spread, {"Handle": 1, "target": 2, "close_pane": 0}, "a GIT_TIMEOUT too short for the grep failed the spread")
+
+    def test_a_spread_that_misses_its_own_ceiling_fails_loudly_and_narrows_nothing(self):
+        self.run_with(self.repo, self.HANDLE)
+        spread, out = self.timed_spread("SPREAD_TIMEOUT", ["Handle", "target", "close_pane"], self.ASK)
+        self.assertIsInstance(spread, str, "a spread past its own ceiling returns the reason, not counts")
+        self.assertRegex(spread, r"did not answer in 1e-06s")
+        self.assertRegex(out, r"(?m)^RECALL SPREAD FAILED — .*did not answer.*: TRACE scopes unnarrowed$")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 0 rows · `close_pane`$")
+        self.assertTrue(out.rstrip("\n").splitlines()[-1].startswith("RECALL COVER "), out)
+
+    def test_a_question_whose_every_scope_item_is_dropped_traces_whole_question_and_intake_passes_its_card(self):
+        self.tracked(self.WIDE)
+        self.run_with(self.repo, hops("1", ["- `wide_name` is set across the tree"], self.H5,
+                                      ["END returned @ app/srv/server.go:5"]))
+        out = self.recall("1. Where is `wide_name` set, and is `xyz` reached?\n")
+        self.assertRegex(out, r"(?m)^STALE Q1 · no \[path:N\] cite")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · whole question$")
+        run = tempfile.mkdtemp(prefix="tracetree-intake-run-")
+        self.addCleanup(shutil.rmtree, run, True)
+        with open(os.path.join(run, "recall.txt"), "w", encoding="utf-8") as f:
+            f.write(out)
+        card = f"RUN: {run}\nROOT: {self.repo}\nID: 4\nFUEL: 0\nQUESTION: Q1\nTHREAD: the refusal\nFROM: app/srv/server.go:5\n"
+        got = tt(["intake"], input=json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Agent", "cwd": self.repo,
+                                               "tool_input": {"subagent_type": "sub-tracer", "description": "thread",
+                                                              "prompt": card}}))
+        self.assertEqual((got.returncode, got.stdout), (0, ""), got.stderr)
 
 
 if __name__ == "__main__":

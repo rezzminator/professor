@@ -121,6 +121,8 @@ SEARCH_MAX_BYTES = 1 << 20
 READ_MAX_BYTES = 128 << 20
 PIN_ABBREV = 12
 GIT_TIMEOUT = 10
+# the spread grep's ceiling: a whole-tree grep a loaded host slows 100-fold, kept under the intake hook's 60 s default
+SPREAD_TIMEOUT = 30
 NOTE_SPAN = 40
 CITE_SLACK = 3
 PREFIX = re.compile(r"^\s*\d+(?:\t|→|:\s|\s{2,}|\|\s)")
@@ -481,8 +483,9 @@ def intake_thread(card):
            f"with their cites, and leave node {node} out of `tt wait`")
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
-        "permissionDecisionReason": f"tracer intake: {why}. A thread for a FRESH row the tree contradicts carries "
-        "`REASON: {why}` on its card."}}))
+        "permissionDecisionReason": f"tracer intake: {why}. A thread for a part of {qs} these TRACE lines do not "
+        "cover, or for a FRESH row the tree contradicts, passes with `REASON: {the sub-ask it covers}` on its card — "
+        "respawn it so, never read it yourself."}}))
 
 
 def intake_recall(run, root, asked):
@@ -1439,15 +1442,17 @@ class GitUnknown(Exception):
     """A git command that failed or timed out: the question it answers stays unanswered."""
 
 
-def git_out(files, args):
+def git_out(files, args, timeout=None):
     """(returncode, stdout, stderr) of `git -C ROOT args`, each decoded; GitUnknown when git cannot be run or does not
-    answer in GIT_TIMEOUT seconds — and, once it has failed that way, for every later call of the process."""
+    answer in `timeout` seconds (GIT_TIMEOUT, read at the call, unless the caller names a ceiling) — and, once it has failed that way,
+    for every later call of the process."""
     if files.git_dead:
         raise GitUnknown(files.git_dead)
+    timeout = GIT_TIMEOUT if timeout is None else timeout
     try:
-        done = subprocess.run(["git", "-C", files.root, *args], capture_output=True, timeout=GIT_TIMEOUT)
+        done = subprocess.run(["git", "-C", files.root, *args], capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        files.git_dead = f"git {args[0]} did not answer in {GIT_TIMEOUT}s"
+        files.git_dead = f"git {args[0]} did not answer in {timeout}s"
         raise GitUnknown(files.git_dead)
     except (OSError, subprocess.SubprocessError) as e:
         files.git_dead = f"git {args[0]} could not run: {type(e).__name__}: {e}"
@@ -2339,9 +2344,66 @@ def question_line(run, question):
     return "\n".join(f"QUESTION Q{n}: {got[n]}" if n in got else f"QUESTION Q{n}: (not in {path})" for n in nums)
 
 
+RECALLED_CAP = 4096
+# Every recall.txt line naming its question: a section head and the TRACE, GAP, STALE and CHANGED lines in it.
+RECALL_OWNED = re.compile(r"(?:RECALL|TRACE|GAP|STALE|CHANGED) Q(\d+) ")
+
+
+def recalled_block(run, question):
+    """The FRESH rows {RUN}/recall.txt holds under each question a card's QUESTION names, as `start` prints them: a
+    RECALLED head naming the questions with rows and how many it shows, each row verbatim in the order the QUESTION
+    names its questions (a row held under two of them once), within RECALLED_CAP bytes and past it a last line naming
+    the rows left. A FRESH row belongs to the question of the last line before it that names one; any other RECALL
+    line ends that question's section. No recall.txt or no row: nothing; one that cannot be read is named."""
+    nums = question_numbers(question)
+    if not nums:
+        return []
+    path = os.path.join(run, "recall.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeDecodeError) as e:
+        return [f"RECALLED UNREADABLE — {path}: {e}"]
+    rows, q = {n: [] for n in nums}, None
+    for line in text.splitlines():
+        m = RECALL_OWNED.match(line)
+        if m:
+            q = int(m.group(1))
+        elif line.startswith("RECALL"):
+            q = None
+        elif line.startswith("FRESH ") and q in rows:
+            rows[q].append(line)
+    has = [n for n in nums if rows[n]]
+    if not has:
+        return []
+    every = list(dict.fromkeys(x for n in has for x in rows[n]))
+    qs = ",".join(f"Q{n}" for n in has)
+
+    def head(k):
+        return (f"RECALLED {qs} · {k} rows an earlier run verified, re-placed at these lines today — "
+                f"confirm each at its cite, never re-walk it:")
+
+    def size(lines):
+        return sum(len(x.encode()) + 1 for x in lines)
+
+    if size([head(len(every))] + every) <= RECALLED_CAP:
+        return [head(len(every))] + every
+    more = f"RECALLED {qs} · {len(every)} more rows in {path}"
+    shown, used = [], size([head(len(every)), more])
+    for x in every:
+        if used + size([x]) > RECALLED_CAP:
+            break
+        shown.append(x)
+        used += size([x])
+    return [head(len(shown))] + shown + [f"RECALLED {qs} · {len(every) - len(shown)} more rows in {path}"]
+
+
 def cmd_start(run, name, at, question=""):
     """Register node ID as running ({ID}.started, holding `FROM<tab>QUESTION` for the map page) and print its FROM line
-    with the 40 lines after it, numbered; above them each question the card's QUESTION opens by naming (Q{n})."""
+    with the 40 lines after it, numbered; above them each question the card's QUESTION opens by naming (Q{n}), then
+    the recalled FRESH rows of those questions (`recalled_block`)."""
     if not NODE_ID.fullmatch(name):
         fail(f"ID {name!r} is not dotted numbers like 3 or 3.1")
     run = os.path.abspath(run)
@@ -2367,6 +2429,8 @@ def cmd_start(run, name, at, question=""):
     asked = question_line(run, question)
     if asked:
         print(asked)
+    for line in recalled_block(run, question):
+        print(line)
     print(f"started {name} — {os.path.relpath(key, root)}")
     if files.reach(key):
         print(f"{os.path.relpath(key, root)} is {megabytes(files.big[key])} — {big_limit()}")
@@ -2917,6 +2981,8 @@ FILE_EXT = {"go", "py", "sh", "mjs", "js", "ts", "tsx", "md", "json", "jsonc", "
 RECALL_SHOWN = 30
 DELTA_ROWS = 5
 RECALL_CAP = 12 * 1024
+SCOPE_SPREAD = 16  # a TRACE scope name held by more tracked files than this is noise, not a thread
+SPREAD_ARGV = 64 * 1024  # bytes of names one `git grep` of the spread carries
 SHELL_VAR = re.compile(r"\$[A-Za-z_]\w*")
 CLOSED_WORLD = re.compile(r"(?i)\b(?:nothing|no|none|only|every|never|all callers|"
                           r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) callers?)\b")
@@ -2929,7 +2995,35 @@ class Recall:
     def __init__(self, root):
         self.root = root
         self.files = Files(root)
-        self.commons, self.placed, self.witnessed, self.shown_base = {}, {}, {}, {}
+        self.commons, self.placed, self.witnessed, self.shown_base, self.spreads = {}, {}, {}, {}, {}
+        self.spread_failed = None
+
+    def spread(self, names):
+        """{name: how many tracked files of ROOT hold it as a whole word} for names, one `git grep` per SPREAD_ARGV
+        batch, cached for the pass; the reason as a str once git could not say."""
+        todo = [n for n in dict.fromkeys(names) if n not in self.spreads]
+        while todo and not self.spread_failed:
+            batch, size = [], 0
+            while todo and (not batch or size + len(todo[0].encode()) <= SPREAD_ARGV):
+                size += len(todo[0].encode()) + 4
+                batch.append(todo.pop(0))
+            try:
+                code, out, err = git_out(self.files, ["grep", "-I", "-o", "-w", "-F", "-z", "--no-color",
+                                                      *(a for n in batch for a in ("-e", n)), "--"],
+                                                      timeout=SPREAD_TIMEOUT)
+            except GitUnknown as e:
+                self.spread_failed = f"git could not say: {e}"
+                break
+            if code not in (0, 1) or (code == 1 and out):
+                self.spread_failed = f"git grep exited {code}: {err.strip()[:120]}"
+                break
+            held = {n: set() for n in batch}
+            for row in filter(None, out.split("\n")):
+                parts = row.split("\0")
+                if len(parts) > 1 and parts[-1] in held:
+                    held[parts[-1]].add(parts[0])
+            self.spreads.update((n, len(f)) for n, f in held.items())
+        return self.spread_failed or {n: self.spreads[n] for n in names}
 
     def common(self, path):
         """The absolute git common dir of the repository holding path, asked from its nearest existing ancestor so a
@@ -3270,34 +3364,68 @@ def recall_unit(kind, lines, q=None, **more):
                 **more)
 
 
-def recall_capped(units, anchors):
+def scope_rule(item, plain, root):
+    """How a TRACE scope item is held, plain its scope's cite paths: "keep" a cite path or a backticked path under
+    ROOT; "drop" a backticked copy, file name or `/`-bounded suffix of a cite path, or a name under 4 characters or in
+    KEYWORDS; "spread" any other name, kept only when at most SCOPE_SPREAD tracked files hold it."""
+    if not item.startswith("`"):
+        return "keep"
+    s = item.strip("`")
+    if any(p == s or p.endswith("/" + s) for p in plain):
+        return "drop"
+    home = os.path.join(os.path.normpath(root), "")
+    full = os.path.normpath(os.path.join(home, s))
+    if s and not os.path.isabs(s) and full.startswith(home) and os.path.exists(full):
+        return "keep"
+    return "drop" if len(s) < 4 or s.lower() in KEYWORDS else "spread"
+
+
+def recall_capped(units, anchors, rc):
     """The output lines of units within RECALL_CAP bytes. Kinds None, TRACE and GAP and pinned STALE rows always stay.
     Past the cap, fewest anchor hits first and the later unit first on a tie within each step: STALE lines collapse,
     then each DELTA line's occurrence rows shrink to `  +{rows} rows`, then DELTA lines collapse, then FRESH lines go.
     A collapsed line becomes `CHANGED Q{q} · {its first cite path}`, one per (question, path), never cut, so the cap
     never hides a changed fact. Each question with checked lines (anchors: {q: its anchors}) gets its TRACE line from
     what stays: `none` when every line is a kept FRESH one and every anchor is hit by a line, else `{k} rows · {scope}`
-    over its DELTA, STALE, CHANGED and GAP lines and FRESH lines cut, plus each anchor no line hits. A `RECALL CUT`
-    line names what went, before the last unit."""
+    over its DELTA, STALE, CHANGED and GAP lines and FRESH lines cut, plus each anchor no line hits, narrowed by
+    `scope_rule` against the spread rc measures once for every candidate name; `whole question` when narrowing leaves
+    nothing. A `RECALL CUT` line names what went, then a `RECALL SPREAD FAILED` line when the spread could not be
+    measured and nothing was narrowed, both before the last unit."""
     def size(lines):
         return sum(len(x.encode()) + 1 for x in lines)
 
     shown, keep, markers = [list(u["lines"]) for u in units], [True] * len(units), {}
     cut = {"STALE": 0, "trim": 0, "DELTA": 0, "FRESH": 0}
     of = {q: [i for i, u in enumerate(units) if u["q"] == q and u["kind"] in TRACED] for q in anchors}
+    bare = {q: anchors[q] - set().union(*(units[i]["carries"] for i in of[q])) for q in anchors}
+    rules = {}
+
+    def rule(item, plain):
+        if (item, plain) not in rules:
+            rules[item, plain] = scope_rule(item, plain, rc.root)
+        return rules[item, plain]
+
+    names = [s.strip("`") for q in anchors for s in [x for i in of[q] for x in units[i]["scope"]]
+             + [f"`{a}`" for a in bare[q]] if rule(s, ()) == "spread"]
+    spread = rc.spread(names) if names else {}
+    failed = [f"RECALL SPREAD FAILED — {spread}: TRACE scopes unnarrowed"] if isinstance(spread, str) else []
 
     def trace(q):
-        rows = of[q]
-        todo = [i for i in rows if units[i]["kind"] != "FRESH" or not keep[i]]
-        bare = anchors[q] - set().union(*(units[i]["carries"] for i in rows))
-        scope = dict.fromkeys([s for i in todo for s in units[i]["scope"]] + [f"`{a}`" for a in sorted(bare)])
+        todo = [i for i in of[q] if units[i]["kind"] != "FRESH" or not keep[i]]
+        scope = list(dict.fromkeys([s for i in todo for s in units[i]["scope"]] + [f"`{a}`" for a in sorted(bare[q])]))
         if not todo and not scope:
             return f"TRACE Q{q} · none"
+        if not failed:
+            plain = tuple(REV_PIN.sub("", s) for s in scope if not s.startswith("`"))
+            scope = [s for s in scope if rule(s, plain) == "keep"
+                     or rule(s, plain) == "spread" and spread[s.strip("`")] <= SCOPE_SPREAD]
+            if not scope:
+                return f"TRACE Q{q} · whole question"
         return f"TRACE Q{q} · {len(todo)} rows · {', '.join(scope)}"
 
     def total():
-        return sum(size([trace(u["q"])]) if u["kind"] == "TRACE" else size(shown[i])
-                   for i, u in enumerate(units) if keep[i])
+        return size(failed) + sum(size([trace(u["q"])]) if u["kind"] == "TRACE" else size(shown[i])
+                                  for i, u in enumerate(units) if keep[i])
 
     for step, kind in (("STALE", "STALE"), ("trim", "DELTA"), ("DELTA", "DELTA"), ("FRESH", "FRESH")):
         for i in sorted((i for i, u in enumerate(units) if u["kind"] == kind and not u["pinned"]),
@@ -3324,6 +3452,7 @@ def recall_capped(units, anchors):
         trim = f" · {cut['trim']} delta lines cut to their head" if cut["trim"] else ""
         out.insert(len(out) - 1, f"RECALL CUT {s + d + f} lines past the {RECALL_CAP // 1024} KB cap · {s} stale, "
                    f"{d} delta, {f} fresh · {s + d} collapsed to {len(markers)} CHANGED{trim}")
+    out[len(out) - 1:len(out) - 1] = failed
     return out
 
 
@@ -3396,7 +3525,7 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
         served += fresh > 0
     gap = f" · {gaps} unwitnessed" if gaps else ""
     units.append(recall_unit(None, [f"RECALL COVER {served}/{len(asked)} · {stale} stale · {delta} delta{gap}"]))
-    return recall_capped(units, checked)
+    return recall_capped(units, checked, rc)
 
 
 def cmd_recall(root, since_hours, before_run=None):

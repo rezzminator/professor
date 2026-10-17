@@ -26,13 +26,14 @@ const (
 	Light Appearance = "light"
 )
 
-// StateColors are the four agent states, one hex each, identical on every
+// StateColors are the five agent states, one hex each, identical on every
 // surface that draws a state.
 type StateColors struct {
 	Blocked string `json:"blocked"`
 	Working string `json:"working"`
 	Done    string `json:"done"`
 	Idle    string `json:"idle"`
+	Unknown string `json:"unknown"`
 }
 
 // Variant is one side of a derived theme: the terminal colours (ANSI 0–15,

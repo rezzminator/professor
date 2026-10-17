@@ -23,12 +23,14 @@ const (
 
 // deriveVariant maps one resolved token set onto a Variant (D11): terminal
 // background and foreground from inverseText and text, ANSI 1–6 from the
-// sub-agent hues, 8 and 15 from inactive and text; the four agent states from
-// claude (working), permission (blocked), success (done) and inactiveShimmer
-// (idle). A state hue under the guard against the background, or the muted
-// overlay under its guard against the surface, is lifted (liftColor) so every
-// surface draws the one lifted hue. A missing or unparseable token is an
-// error naming it; name is the theme the error names.
+// sub-agent hues, 8 and 15 from inactive and text; the five agent states from
+// the theme's blue (working), yellow (blocked), success (done),
+// inactiveShimmer (idle) and inactive (unknown). A state hue under the guard
+// against the background or against any other background Herdr's sidebar
+// paints (sidebarBackgrounds), or the muted overlay under its guard against
+// the surface, is lifted (liftColor, liftColorAll) so every surface draws the
+// one lifted hue. A missing or unparseable token is an error naming it; name
+// is the theme the error names.
 func deriveVariant(name string, tokens map[string]string) (Variant, error) {
 	colours := map[string]string{}
 	for _, name := range deriveTokens {
@@ -55,7 +57,8 @@ func deriveVariant(name string, tokens map[string]string) (Variant, error) {
 		Accent:              pick("claude"),
 		Orange:              pick("orange_FOR_SUBAGENTS_ONLY"),
 		State: StateColors{
-			Working: pick("claude"), Blocked: pick("permission"), Done: pick("success"), Idle: pick("inactiveShimmer"),
+			Working: pick("blue_FOR_SUBAGENTS_ONLY"), Blocked: pick("yellow_FOR_SUBAGENTS_ONLY"),
+			Done: pick("success"), Idle: pick("inactiveShimmer"), Unknown: pick("inactive"),
 		},
 	}
 	background, surface := variant.Background, variant.Surface
@@ -68,6 +71,7 @@ func deriveVariant(name string, tokens map[string]string) (Variant, error) {
 		{"blocked", background, &variant.State.Blocked, stateContrast},
 		{"done", background, &variant.State.Done, stateContrast},
 		{"idle", background, &variant.State.Idle, stateContrast},
+		{"unknown", background, &variant.State.Unknown, stateContrast},
 		{"muted", surface, &variant.Muted, mutedContrast},
 	} {
 		colour, err := liftColor(name, lifted.token, *lifted.colour, lifted.against, lifted.guard)
@@ -75,6 +79,22 @@ func deriveVariant(name string, tokens map[string]string) (Variant, error) {
 			return Variant{}, err
 		}
 		*lifted.colour = colour
+	}
+	for _, state := range []struct {
+		token  string
+		colour *string
+	}{
+		{"working", &variant.State.Working},
+		{"blocked", &variant.State.Blocked},
+		{"done", &variant.State.Done},
+		{"idle", &variant.State.Idle},
+		{"unknown", &variant.State.Unknown},
+	} {
+		colour, err := liftColorAll(name, state.token, *state.colour, variant.sidebarBackgrounds(), stateContrast)
+		if err != nil {
+			return Variant{}, err
+		}
+		*state.colour = colour
 	}
 	hues := []string{
 		pick("red_FOR_SUBAGENTS_ONLY"), pick("green_FOR_SUBAGENTS_ONLY"), pick("yellow_FOR_SUBAGENTS_ONLY"),
@@ -131,6 +151,95 @@ func liftColor(theme, token, colour, background string, guard float64) (string, 
 		background,
 		guard,
 	)
+}
+
+// sidebarBackgrounds are the backgrounds Herdr's sidebar and panels paint under
+// a state hue, in the order liftColorAll gives them up last to first:
+// sidebar_bg and surface0 (Surface), which every sidebar row and mark sits on,
+// the active and Navigate-cursor row (SelectionBackground), panel_bg
+// (Background) and the hovered row (surface1, Overlay); herdrTokens is the one
+// map from Variant fields to those tokens.
+func (variant Variant) sidebarBackgrounds() []string {
+	return []string{variant.Surface, variant.SelectionBackground, variant.Background, variant.Overlay}
+}
+
+// liftColorAll returns colour unchanged when it measures at least guard:1
+// against every background, else the nearest colour that does: the same hue
+// and saturation with HSL lightness moved in 1% steps, darker or lighter,
+// whichever clears every background in fewer steps (a tie goes away from the
+// first background, as liftColor moves). Backgrounds are in priority order;
+// when no lightness clears them all (a palette theme whose surface and
+// selection sit at opposite ends of the range), the last background is dropped
+// and the search repeats, down to the first alone, so a theme that always
+// resolved still resolves. When no lightness clears even the first, the error
+// names the theme, the token and the ratio reached.
+func liftColorAll(theme, token, colour string, backgrounds []string, guard float64) (string, error) {
+	fg, err := parseColor(colour)
+	if err != nil {
+		return "", fmt.Errorf("themesync: theme %q token %q: %w", theme, token, err)
+	}
+	var against []rgb
+	for _, background := range backgrounds {
+		bg, err := parseColor(background)
+		if err != nil {
+			return "", fmt.Errorf("themesync: theme %q token %q background: %w", theme, token, err)
+		}
+		against = append(against, bg)
+	}
+	if len(against) == 0 {
+		return "", fmt.Errorf("themesync: theme %q token %q: no background to measure against", theme, token)
+	}
+	reached := 0.0
+	for count := len(against); count >= 1; count-- {
+		lifted, lowest, ok := liftAgainst(fg, against[:count], guard)
+		if ok {
+			if lifted == fg {
+				return colour, nil
+			}
+			return lifted.String(), nil
+		}
+		reached = lowest
+	}
+	return "", fmt.Errorf(
+		"themesync: theme %q token %q: contrast ratio %.2f against %s stays under %.1f at every lightness",
+		theme, token, reached, backgrounds[0], guard,
+	)
+}
+
+// liftAgainst is the search liftColorAll runs over one set of backgrounds: fg
+// itself when it clears them all, else the nearest clearing lightness. When
+// none clears, ok is false and lowest is the best ratio reached moving away
+// from the first background.
+func liftAgainst(fg rgb, against []rgb, guard float64) (lifted rgb, lowest float64, ok bool) {
+	clears := func(candidate rgb) (bool, float64) {
+		floor := math.Inf(1)
+		for _, bg := range against {
+			floor = math.Min(floor, contrastRatio(candidate, bg))
+		}
+		return floor >= guard, floor
+	}
+	if cleared, _ := clears(fg); cleared {
+		return fg, 0, true
+	}
+	hue, saturation, lightness := fg.hsl()
+	away := 1.0
+	if relativeLuminance(against[0]) > blackWhiteCrossover {
+		away = -1
+	}
+	for step := 1; step <= 100; step++ {
+		for _, direction := range []float64{away, -away} {
+			moved := math.Min(1, math.Max(0, lightness+direction*float64(step)/100))
+			candidate := hslColor(hue, saturation, moved)
+			cleared, floor := clears(candidate)
+			if cleared {
+				return candidate, 0, true
+			}
+			if direction == away {
+				lowest = floor
+			}
+		}
+	}
+	return rgb{}, lowest, false
 }
 
 // blackWhiteCrossover is the background luminance where black and white

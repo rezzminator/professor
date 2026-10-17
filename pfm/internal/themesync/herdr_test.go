@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -167,4 +168,94 @@ func TestHerdrExtractReadsTheStampedGeneration(t *testing.T) {
 	if _, _, found := herdrExtract(herdrWithTheme); found {
 		t.Fatal("a file without markers must report not found")
 	}
+}
+
+const herdrSidebar = "[ui.sidebar.agents]\nrows = [\n  [\"$pfm_working\", \"agent\"],\n  [\"$pfm_blocked\"],\n" +
+	"  [\"$pfm_done\", \"$pfm_unknown\"]\n]\n\n[ui.sidebar.spaces]\nrows = [[\"name\", \"$pfm_working\"]]\n"
+
+// goldStyled is herdrSidebar after an apply under professor-gold: working is
+// the theme's blue, blocked its yellow, done its success, and unknown its
+// inactive #565f89 lifted to 3:1 on the sidebar backgrounds.
+func goldStyled(t *testing.T) string {
+	t.Helper()
+	out := herdrSidebar
+	for token, hue := range map[string]string{
+		"pfm_working": "#7aa2f7", "pfm_blocked": "#e0af68", "pfm_done": "#9ece6a", "pfm_unknown": "#747ea8",
+	} {
+		out = strings.ReplaceAll(out, `"$`+token+`"`, `{ token = "$`+token+`", fg = "`+hue+`" }`)
+	}
+	return out
+}
+
+func herdrConfigWithSidebar(h *harness) string {
+	config := fixtureHerdr + "\n" + herdrSidebar
+	h.write(".config/herdr/config.toml", config)
+	return config
+}
+
+func TestHerdrApplyStylesTheSidebarRowsAndOffRestoresThemBare(t *testing.T) {
+	h := newHarness(t)
+	before := herdrConfigWithSidebar(h)
+	wantVerdict(t, h.on(), "herdr", VerdictInSync, "")
+	got := h.read(".config/herdr/config.toml")
+	if !strings.Contains(got, goldStyled(t)) {
+		t.Fatalf("sidebar rows not styled with the gold hues:\n%s", got)
+	}
+	wantVerdict(t, h.status(), "herdr", VerdictInSync, "")
+
+	h.write(".config/herdr/config.toml", strings.Replace(got, `fg = "#e0af68"`, `fg = "#111111"`, 1))
+	wantVerdict(t, h.status(), "herdr", VerdictDrift, "sidebar row pfm token styles differ")
+	wantVerdict(t, h.sync(false), "herdr", VerdictInSync, "")
+	if !strings.Contains(h.read(".config/herdr/config.toml"), goldStyled(t)) {
+		t.Fatalf("drifted fg not rewritten:\n%s", h.read(".config/herdr/config.toml"))
+	}
+
+	wantVerdict(t, offReport(t, h), "herdr", VerdictRestored, "")
+	if after := h.read(".config/herdr/config.toml"); after != before {
+		t.Fatalf("off left the rows styled:\n%s\nwant\n%s", after, before)
+	}
+}
+
+func offReport(t *testing.T, h *harness) Report {
+	t.Helper()
+	report, err := Off(t.Context(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report
+}
+
+func TestHerdrOffStripsStyledRowsEvenWhenThePfmBlockIsGone(t *testing.T) {
+	h := newHarness(t)
+	herdrConfigWithSidebar(h)
+	h.on()
+	styled := h.read(".config/herdr/config.toml")
+	if !strings.Contains(styled, goldStyled(t)) {
+		t.Fatalf("on did not style the sidebar rows:\n%s", styled)
+	}
+	block, _, found := herdrExtract(styled)
+	if !found {
+		t.Fatal("no pfm block after on")
+	}
+	h.write(".config/herdr/config.toml", strings.Replace(styled, block, "", 1))
+	wantVerdict(t, offReport(t, h), "herdr", VerdictRestored, "pfm block already gone")
+	if after := h.read(".config/herdr/config.toml"); strings.Contains(after, "fg =") {
+		t.Fatalf("styled rows survived off:\n%s", after)
+	}
+}
+
+func TestHerdrReadBackOfAStateWithoutTheUnknownHueIsDriftNotError(t *testing.T) {
+	h := newHarness(t)
+	herdrConfigWithSidebar(h)
+	h.on()
+	const stateRel = ".local/state/pfm/theme/state.json"
+	// a state written before the unknown hue existed, read back while the
+	// source cannot resolve (so Applied is not re-derived)
+	stale := regexp.MustCompile(`"unknown":\s*"#[0-9a-f]{6}"`).ReplaceAllString(h.read(stateRel), `"unknown": ""`)
+	if stale == h.read(stateRel) {
+		t.Fatal("setup: the state carries no unknown hue to remove")
+	}
+	h.write(stateRel, stale)
+	h.write(settingsRel, `{"theme":`)
+	wantVerdict(t, h.status(), "herdr", VerdictDrift, "carries no hue")
 }

@@ -80,10 +80,11 @@ With several accounts the global surfaces follow the account whose `theme` value
 | `Muted` | `inactive` |
 | `Accent` | `claude` |
 | `Orange` | `orange_FOR_SUBAGENTS_ONLY` |
-| `State.Working` | `claude` |
-| `State.Blocked` | `permission` |
+| `State.Working` | `blue_FOR_SUBAGENTS_ONLY` |
+| `State.Blocked` | `yellow_FOR_SUBAGENTS_ONLY` |
 | `State.Done` | `success` |
 | `State.Idle` | `inactiveShimmer` |
+| `State.Unknown` | `inactive` |
 | `ANSI[0]` | `inverseText` |
 | `ANSI[1..6]` and `ANSI[9..14]` | the `red`, `green`, `yellow`, `blue`, `purple`, `cyan` tokens, each `_FOR_SUBAGENTS_ONLY` |
 | `ANSI[7]` and `ANSI[15]` | `text` |
@@ -91,11 +92,15 @@ With several accounts the global surfaces follow the account whose `theme` value
 
 ### liftColor
 
-The contrast lift runs inside `deriveVariant`, so every surface draws the one lifted hue. Each of `State.Working`, `State.Blocked`, `State.Done` and `State.Idle` is held to a 3:1 contrast ratio against `Background` (`stateContrast`), and `Muted` to 2.5:1 against `Surface` (`mutedContrast`). A colour already clear is returned byte-identical. Otherwise `liftColor` keeps hue and saturation and moves HSL lightness in 1% steps away from the background (darker when the background's relative luminance exceeds 0.1791, the point where black out-contrasts white; else lighter) and returns the first colour that clears the guard. A hue no lightness can lift is an error naming theme, token and ratio. The tokens a built-in lifts today: `light-ansi` done `#009500` and idle `#828282`; `light-daltonized` working `#e67300`. `dark`, `light`, `dark-daltonized`, `dark-ansi` and a gold custom theme need no lift.
+The contrast lift runs inside `deriveVariant`, so every surface draws the one lifted hue. Each of the five `State` hues is held to a 3:1 contrast ratio (`stateContrast`) against `Background`, and `Muted` to 2.5:1 against `Surface` (`mutedContrast`). A colour already clear is returned byte-identical. Otherwise `liftColor` keeps hue and saturation and moves HSL lightness in 1% steps away from the background (darker when the background's relative luminance exceeds 0.1791, the point where black out-contrasts white; else lighter) and returns the first colour that clears the guard. A hue no lightness can lift is an error naming theme, token and ratio.
+
+A second pass, `liftColorAll`, holds each state hue to the same 3:1 against every background Herdr's sidebar paints under it (`Variant.sidebarBackgrounds`, in priority order): `Surface` (`sidebar_bg`, `surface0`, `surface_dim`: what every sidebar row and mark sits on), `SelectionBackground` (`active_row_bg`, `selection_bg`: the focused row), `Background` (`panel_bg`) and `Overlay` (`surface1`: the hovered row). It keeps hue and saturation, searches lightness in 1% steps in both directions, and returns the colour that clears every background in the fewest steps (a tie goes away from `Surface`, the first background). When no lightness clears all of them (`dark-ansi`: a `#7f7f7f` surface, a `#0000ee` selection, a black background and a `#e5e5e5` overlay), the last background is dropped and the search repeats, down to `Surface` alone, so the sidebar's own background is the last one given up and a theme that always resolved still resolves; `dark-ansi` therefore holds its hues to the first three and gives the hover row up. A hue no lightness lifts against `Surface` alone is the same error.
+
+Which hue becomes which state is the theme's own palette, never a hard-coded hex: working is the theme's blue, blocked its yellow, done its `success`, idle its `inactiveShimmer` and unknown its `inactive`. A loud theme whose blue sits under 3:1 on its raised overlay (the round-3 `ultrafunk` blue `#8292f7` on `#a63784`) gets that blue lightened until it clears, hue kept.
 
 ### herdrTokens
 
-Herdr's 19 theme tokens come from the lifted variant: `accent` = `Accent`; `panel_bg` = `Background`; `sidebar_bg`, `surface0`, `surface_dim` = `Surface`; `active_row_bg`, `selection_bg` = `SelectionBackground`; `surface1` = `Overlay`; `overlay0` = `Muted`; `overlay1`, `subtext0`, `green` (idle) = `State.Idle`; `text` = `Foreground`; `mauve` = `ANSI[5]`; `yellow` (working) = `State.Working`; `red` (blocked) = `State.Blocked`; `blue`, `teal` (done) = `State.Done`; `peach` = `Orange`. `accent` stays the unlifted `Accent` while `yellow` carries the lifted working hue, so the two differ only where the lift moved working (`light-daltonized`). Agent states therefore wear the hues Claude draws: working `claude`, blocked `permission`, done `success`, idle `inactiveShimmer`.
+Herdr's 19 theme tokens come from the lifted variant: `accent` = `Accent`; `panel_bg` = `Background`; `sidebar_bg`, `surface0`, `surface_dim` = `Surface`; `active_row_bg`, `selection_bg` = `SelectionBackground`; `surface1` = `Overlay`; `overlay0` = `Muted`; `overlay1`, `subtext0`, `green` (idle) = `State.Idle`; `text` = `Foreground`; `mauve` = `ANSI[5]`; `yellow` (working) = `State.Working`; `red` (blocked) = `State.Blocked`; `blue`, `teal` (done) = `State.Done`; `peach` = `Orange`. `accent` stays the unlifted `Accent` while `yellow` carries the lifted working hue, so the two differ only where the lift moved working (`light-daltonized`). Agent states therefore wear the hues Claude's palette carries: working its blue, blocked its yellow, done `success`, idle `inactiveShimmer`; `State.Unknown` (`inactive`) has no Herdr theme token and reaches Herdr only through the sidebar row styles below. tmux's `@pfm-state-*` options follow `State` too, so a blocked pane border is the theme's yellow.
 
 With `agent_panel_sort = "priority"` in the Herdr config, the sidebar orders blocked, done, working, idle, unknown (see [the Herdr reporter](../hooks/hooks.md#herdr-reporter)).
 
@@ -170,7 +175,7 @@ Off: restores each style to its captured prior (unsets it when none was captured
 
 ### surfaceHerdr
 
-**Surface:** `herdr` — **File:** `~/.config/herdr/config.toml` — **Live reload:** `herdr server reload-config`
+**Surface:** `herdr` — **Files:** `~/.config/herdr/config.toml`, `~/.config/herdr/pfm-indicators/herdr-plugin.toml` — **Live reload:** `herdr server reload-config`
 
 Render (`herdrRender`): a marker-fenced block `# >>> pfm theme · {value, spaces to -} · gen {N} >>>` … `# <<< pfm theme <<<` holding the `[theme]` table and Herdr's 19 custom tokens (`herdrTokens`):
 
@@ -180,11 +185,15 @@ Render (`herdrRender`): a marker-fenced block `# >>> pfm theme · {value, spaces
 
 Install (`herdrInstall`): the block replaces the user's existing `[theme]` and `[theme.*]` tables (first `[theme]` header through the last theme section's last content line); with none it is appended. A root-level `theme` key, or theme tables split around another table, is an ERROR naming the line. The span replaced (or text appended) is snapshotted in `state.herdr`, with a backup beside the file. A missing config is created when `herdr` is on PATH, else ABSENT.
 
+Sidebar row styles (`herdr_rows.go`): outside the pfm block, inside the `[ui.sidebar]` and `[ui.sidebar.*]` tables, every row entry that names an indicator token (`herdr.IndicatorTokens`: `pfm_working`, `pfm_blocked`, `pfm_done`, `pfm_unknown`) is rewritten to the one canonical inline table `{ token = "$pfm_X", fg = "#hex" }`: a bare array element exactly `"$pfm_X"`, or an inline table with no nested braces whose `token` is `"$pfm_X"` (its other keys are dropped). The hex is the state's hue from the applied theme on the side the appearance shows (`Applied.variant(Appearance)`, so a light auto theme gets its light-lifted hues): `pfm_working` = `State.Working`, `pfm_blocked` = `State.Blocked`, `pfm_done` = `State.Done`, `pfm_unknown` = `State.Unknown`. The scan reads TOML as TOML (comments, basic, literal and multi-line strings, brackets, inline tables), so a token named in a comment or inside a string, a table outside the sidebar tables and the pfm block are left byte-for-byte; a string that never closes is an ERROR naming its line. A file whose rows name no `$pfm_` token is untouched and no drift. Every apply restyles, so a theme change moves the hexes with the generation.
+
+Plugin (`herdr_plugin.go`): the manifest `~/.config/herdr/pfm-indicators/herdr-plugin.toml` carries the id `herdr.IndicatorPluginID`, a name and version, `min_herdr_version = "0.9.5"`, `platforms = ["macos", "linux"]`, one `[[startup]]` and one `[[events]]` per `herdr.IndicatorEvents()`, each running `{pfm} internal herdr-indicators`. It is written when it differs, then linked with `herdr plugin link {dir}` when `~/.config/herdr/plugins.json` lacks the id, or when the manifest was just rewritten, so the registry entry is taken again from the manifest on disk (Herdr re-reads every linked manifest before it runs the hooks). Herdr 0.9.5 links with no server up by writing `plugins.json` itself; `herdr` off PATH is a note `indicator plugin applies when Herdr is running`, and read-back says DRIFT `is not linked in Herdr` only while `herdr` is on PATH. Any other link failure is an ERROR naming the command and Herdr's text. The plugin step runs after the due reload, so its failure never withholds a reload.
+
 Reload: a Herdr server that is not running, or `herdr` not on PATH, gives APPLIED with `applies when Herdr starts`; any other reload failure is an ERROR and stays `due`.
 
-Read-back: finds the block, requires its text to equal the render and its header generation to equal the state's; a missing block or file is DRIFT.
+Read-back: finds the block, requires its text to equal the render and its header generation to equal the state's; a missing block or file is DRIFT. Then the sidebar rows must equal their restyle (DRIFT `sidebar row pfm token styles differ`; a row naming a token the applied theme has no hue for, a state written before that hue existed, is DRIFT naming it, healed by the next apply), the plugin manifest must equal its render (DRIFT `manifest missing` or `differs`) and, with `herdr` on PATH, `plugins.json` must carry the plugin id (DRIFT `is not linked in Herdr`).
 
-Off: puts the replaced span back (or removes the appended text; deletes a file the sync created if it is empty again), reloads Herdr; RESTORED.
+Off: puts the replaced span back (or removes the appended text; deletes a file the sync created if it is empty again), turns every styled row entry (an inline table of exactly `token` and `fg`) back to its bare `"$pfm_X"` string, also when the block is already gone, runs `herdr plugin unlink {id}` for a linked plugin, removes the manifest and its directory, clears the indicator tokens on every Herdr server a painter recorded (`herdr.ClearIndicators`, [hooks](../hooks/hooks.md); a failure is an ERROR and the next off retries it), reloads Herdr; RESTORED. An unlink that cannot run for want of a server leaves the registry entry and says which command removes it; any other unlink failure is an ERROR. Restoring is not byte-exact for an entry that was an inline table before the first apply: it comes back bare.
 
 ### surfaceVscode
 

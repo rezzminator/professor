@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/harvestcli"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/kill"
@@ -71,7 +72,8 @@ var topLevelSubcommands = []string{
 var internalSubcommands = []string{
 	"agent-open", "call-cap", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-launch", "codex-transport", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
-	"exit-close", "exit-intercept", "explore-deny", "git-guard", "herdr-shell", "herdr-state", "kill-exit", "launch",
+	"exit-close", "exit-intercept", "explore-deny", "git-guard", "herdr-indicators", "herdr-shell", "herdr-state",
+	"kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
 	reloadRunCommand, staleCommand, statuslineCommand, "store-guard", thenAction, "tmux-title-renudge",
 	"update-check",
@@ -459,6 +461,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "call-cap" {
 		return hookentry.CallCapHook(args[1:], os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "herdr-indicators" {
+		return herdr.IndicatorsEntry(stderr, paths.OSEnv{}, herdr.PaintIndicators)
+	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
 	}
@@ -534,7 +539,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|call-cap|chat-server|claude-launch|claude-version|clear-kill|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|call-cap|chat-server|claude-launch|claude-version|clear-kill|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|herdr-indicators|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

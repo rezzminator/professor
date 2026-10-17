@@ -14,7 +14,7 @@ func TestTmuxOptionsRenderStylesAndUserOptions(t *testing.T) {
 	if len(options) != len(byName) || len(options) != 21 {
 		t.Fatalf("got %d options (%d unique), want 21", len(options), len(byName))
 	}
-	format := "#{?#{==:#{@pfm-state},blocked},#bb9af7,#{?#{==:#{@pfm-state},working},#7aa2f7," +
+	format := "#{?#{==:#{@pfm-state},blocked},#e0af68,#{?#{==:#{@pfm-state},working},#7aa2f7," +
 		"#{?#{==:#{@pfm-state},done},#9ece6a,#7b84af}}}"
 	want := map[string]string{
 		"status-style":                "bg=#1f2335,fg=#c0caf5",
@@ -29,7 +29,7 @@ func TestTmuxOptionsRenderStylesAndUserOptions(t *testing.T) {
 		"@pfm-theme-generation":       "3",
 		"@pfm-c-bg":                   "#1a1b26",
 		"@pfm-c-accent":               "#7aa2f7",
-		"@pfm-state-blocked":          "#bb9af7",
+		"@pfm-state-blocked":          "#e0af68",
 		"@pfm-state-idle":             "#7b84af",
 		"@pfm-state-colour":           format,
 	}

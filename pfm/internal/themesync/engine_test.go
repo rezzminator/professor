@@ -30,6 +30,9 @@ const (
 	herdrBinary   = "/opt/bin/herdr"
 	settingsRel   = ".claude/settings.json"
 	goldRel       = ".claude/themes/professor-gold.json"
+
+	herdrRegistryRel = ".config/herdr/plugins.json"
+	herdrManifestRel = ".config/herdr/pfm-indicators/herdr-plugin.toml"
 )
 
 type fakeTmux struct {
@@ -112,6 +115,8 @@ type harness struct {
 	appearanceOut      string // "Dark" or "" (missing key)
 	appearanceFail     string
 	herdrReload        deps.RunResult
+	herdrLink          deps.RunResult
+	herdrUnlink        deps.RunResult
 	psVscode           string
 	herdrOnPath        bool
 	runner             *deps.FakeRunner
@@ -129,6 +134,7 @@ func newHarness(t *testing.T) *harness {
 	harness.write(goldRel, fixtureGold)
 	harness.write(settingsRel, `{"theme":"custom:professor-gold","model":"opus"}`)
 	harness.write(".config/herdr/config.toml", fixtureHerdr)
+	harness.write(herdrRegistryRel, `[{"plugin_id":"professor.indicators","name":"x"}]`)
 	harness.write("Library/Application Support/Code/User/settings.json", fixtureVscode)
 	harness.rearm()
 	return harness
@@ -179,6 +185,8 @@ func (h *harness) rearm() {
 	if h.herdrOnPath {
 		runner.ScriptLookPath("herdr", herdrBinary, nil)
 		runner.Script([]string{herdrBinary, "server", "reload-config"}, h.herdrReload, nil)
+		runner.Script([]string{herdrBinary, "plugin", "link"}, h.herdrLink, nil)
+		runner.Script([]string{herdrBinary, "plugin", "unlink"}, h.herdrUnlink, nil)
 	}
 	runner.Script([]string{"ps", "-axo", "args="}, deps.RunResult{Stdout: []byte(h.psVscode)}, nil)
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
@@ -287,7 +295,7 @@ func TestOnReadBackOffRoundTrip(t *testing.T) {
 	for _, socket := range []string{"cc-a", "cc-b"} {
 		got := h.tmux.servers[socket]
 		for name, want := range map[string]string{
-			"@pfm-c-bg": "#1a1b26", "@pfm-state-working": "#7aa2f7", "@pfm-state-blocked": "#bb9af7",
+			"@pfm-c-bg": "#1a1b26", "@pfm-state-working": "#7aa2f7", "@pfm-state-blocked": "#e0af68",
 			"@pfm-state-done": "#9ece6a", "@pfm-state-idle": "#7b84af", "@pfm-theme": "custom:professor-gold",
 		} {
 			if got[name] != want {

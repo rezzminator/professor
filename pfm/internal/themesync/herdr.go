@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -290,17 +293,39 @@ func (s *session) applyHerdr(ctx context.Context) SurfaceResult {
 			return s.failed(surfaceHerdr, path, err)
 		}
 	}
+	if updated, err = herdrRowsStyled(updated, s.herdrHues()); err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
 	changed := updated != string(original) || missing
 	if changed {
 		if err := s.replaceFile(path, []byte(updated)); err != nil {
 			return s.failed(surfaceHerdr, path, err)
 		}
 	}
-	if !s.reloadDue(surfaceHerdr, changed) {
-		return s.result(surfaceHerdr, VerdictApplied, path, "")
+	// The reload runs before the plugin step, so a plugin failure never
+	// withholds a due reload; a failed reload stays due either way.
+	reloadNote, reloadErr := "", error(nil)
+	if s.reloadDue(surfaceHerdr, changed) {
+		reloadNote, reloadErr = s.herdrReload(ctx)
+		s.setDue(surfaceHerdr, reloadErr != nil)
 	}
-	note, err := s.herdrReload(ctx)
-	return s.settle(surfaceHerdr, path, note, err)
+	pluginNote, pluginErr := s.applyHerdrPlugin(ctx)
+	if err := errors.Join(reloadErr, pluginErr); err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	return s.result(surfaceHerdr, VerdictApplied, path, strings.TrimSpace(reloadNote+" "+pluginNote))
+}
+
+// herdrHues are the hexes the sidebar rows' pfm tokens are styled with: the
+// applied theme's state hues on the side the appearance shows, so a light
+// auto theme gets its light-lifted hues. A missing hue is left empty, which
+// herdrRowsStyled reports only when a row names that token.
+func (s *session) herdrHues() map[string]string {
+	state := s.theme().variant(s.state.Appearance).State
+	return map[string]string{
+		herdr.IndicatorWorking: state.Working, herdr.IndicatorBlocked: state.Blocked,
+		herdr.IndicatorDone: state.Done, herdr.IndicatorUnknown: state.Unknown,
+	}
 }
 
 func (s *session) readHerdr(_ context.Context) SurfaceResult {
@@ -331,6 +356,29 @@ func (s *session) readHerdr(_ context.Context) SurfaceResult {
 			generation,
 		)
 	}
+	styled, err := herdrRowsStyled(string(content), s.herdrHues())
+	if errors.Is(err, errHerdrNoHue) {
+		return s.in(surfaceHerdr, VerdictDrift, path, err.Error(), generation)
+	}
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	if styled != string(content) {
+		return s.in(
+			surfaceHerdr,
+			VerdictDrift,
+			path,
+			"sidebar row pfm token styles differ from the theme's hues",
+			generation,
+		)
+	}
+	drift, err := s.readHerdrPlugin()
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	if drift != "" {
+		return s.in(surfaceHerdr, VerdictDrift, path, drift, generation)
+	}
 	return s.in(surfaceHerdr, VerdictInSync, path, "", generation)
 }
 
@@ -345,19 +393,39 @@ func (s *session) restoreHerdr(ctx context.Context) SurfaceResult {
 		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: read %s: %w", path, err))
 	}
 	restored, found := herdrRemove(string(content), *snapshot)
+	if !found {
+		restored = string(content)
+	}
+	bare, err := herdrRowsBare(restored)
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
 	detail := ""
 	switch {
-	case !found:
+	case !found && bare == string(content):
 		detail = "pfm block already gone"
-	case snapshot.Created && strings.TrimSpace(restored) == "":
+	case found && snapshot.Created && strings.TrimSpace(bare) == "":
 		if err := s.removeFile(path); err != nil {
 			return s.failed(surfaceHerdr, path, err)
 		}
 	default:
-		if err := s.replaceFile(path, []byte(restored)); err != nil {
+		if err := s.replaceFile(path, []byte(bare)); err != nil {
 			return s.failed(surfaceHerdr, path, err)
 		}
+		if !found {
+			detail = "pfm block already gone"
+		}
 	}
+	pluginNote, err := s.restoreHerdrPlugin(ctx)
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	// The indicator tokens carry no ttl: with the plugin unlinked nothing
+	// would repaint them, so they are cleared on every server pfm painted.
+	if err := herdr.ClearIndicators(ctx, paths.HerdrLockDir(s.env.Home), io.Discard); err != nil {
+		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: clear the herdr indicators: %w", err))
+	}
+	detail = strings.TrimSpace(detail + " " + pluginNote)
 	s.state.Herdr = nil
 	if note, err := s.herdrReload(ctx); err != nil {
 		return s.failed(surfaceHerdr, path, err)

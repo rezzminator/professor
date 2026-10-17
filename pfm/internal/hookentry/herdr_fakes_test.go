@@ -32,6 +32,13 @@ type fakePane struct {
 
 type fakeAgent struct{ name, pane string }
 
+// fakeTab is a tab in the fake Herdr: the label its bar shows and how many
+// panes it holds.
+type fakeTab struct {
+	label string
+	panes int
+}
+
 // fakeHerdr is a Herdr socket: it records every request line and answers each
 // from its pane table and agent list, with the configured error for a method
 // (or for a rename to one name), and with pane_not_found (live Herdr 0.9.5's
@@ -46,6 +53,10 @@ type fakeHerdr struct {
 	panes        []fakePane
 	vacated      map[string]bool
 	agents       []fakeAgent
+	// tabOf is the tab agent.list names for an agent's pane; tabs answers
+	// tab.get, and tab.rename relabels one.
+	tabOf map[string]string
+	tabs  map[string]fakeTab
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -55,6 +66,8 @@ func newFakeHerdr(t *testing.T) *fakeHerdr {
 		refuse:       map[string]string{},
 		refuseRename: map[string]string{},
 		vacated:      map[string]bool{},
+		tabOf:        map[string]string{},
+		tabs:         map[string]fakeTab{},
 	}
 	listener, err := net.Listen("unix", server.path)
 	if err != nil {
@@ -151,12 +164,17 @@ func (server *fakeHerdr) serve(conn net.Conn) {
 			Target string `json:"target"`
 			Name   string `json:"name"`
 			State  string `json:"state"`
+			TabID  string `json:"tab_id"`
+			Label  string `json:"label"`
 		} `json:"params"`
 	}
 	_ = json.Unmarshal([]byte(line), &request)
 	server.mu.Lock()
 	server.lines = append(server.lines, line)
 	code, result := server.answer(request.Method, request.Params.PaneID, request.Params.Target, request.Params.Name)
+	if code == "" && strings.HasPrefix(request.Method, "tab.") {
+		code, result = server.answerTab(request.Method, request.Params.TabID, request.Params.Label)
+	}
 	// refuse also takes "{method} {state}": one report state refused alone.
 	if refused := server.refuse[request.Method+" "+request.Params.State]; request.Params.State != "" && refused != "" {
 		code = refused
@@ -197,10 +215,11 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 		type listed struct {
 			Name   *string `json:"name"`
 			PaneID string  `json:"pane_id"`
+			TabID  string  `json:"tab_id,omitempty"`
 		}
 		agents := make([]listed, 0, len(server.agents))
 		for _, agent := range server.agents {
-			entry := listed{PaneID: agent.pane}
+			entry := listed{PaneID: agent.pane, TabID: server.tabOf[agent.pane]}
 			if agent.name != "" {
 				entry.Name = &agent.name
 			}
@@ -225,6 +244,39 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 		return "pane_not_found", ""
 	}
 	return "", `{"type":"ok"}`
+}
+
+// answerTab is called with the lock held: tab.get answers the tab's
+// tab_info, tab.rename relabels it, an unknown tab is tab_not_found.
+func (server *fakeHerdr) answerTab(method, id, label string) (code, result string) {
+	tab, ok := server.tabs[id]
+	if !ok {
+		return "tab_not_found", ""
+	}
+	if method == "tab.rename" {
+		tab.label = label
+		server.tabs[id] = tab
+		return "", `{"type":"ok"}`
+	}
+	return "", mustJSON(map[string]any{"type": "tab_info", "tab": map[string]any{
+		"tab_id": id, "label": tab.label, "pane_count": tab.panes, "workspace_id": "w1", "number": 1,
+	}})
+}
+
+// putAgentInTab seats the agent of pane in tab, labelled label and holding
+// panes panes.
+func (server *fakeHerdr) putAgentInTab(pane, tab, label string, panes int) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.tabOf[pane] = tab
+	server.tabs[tab] = fakeTab{label: label, panes: panes}
+}
+
+// tabLabel is the label tab's bar shows now.
+func (server *fakeHerdr) tabLabel(tab string) string {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return server.tabs[tab].label
 }
 
 func mustJSON(value any) string {

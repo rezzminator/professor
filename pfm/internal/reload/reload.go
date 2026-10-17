@@ -93,16 +93,10 @@ type Request struct {
 	Then         string
 	// Name is the chat's pfm label, carried to Claude as --name: on --new the
 	// custom title the reborn chat inherits (followName also types /rename and
-	// relabels the session left behind). A same-pane Claude reboot owns it
-	// instead: prepareReload sets it from Label for the session it resumes.
-	// "" carries nothing.
+	// relabels the session left behind). A same-pane Claude reboot sets none:
+	// the session it resumes restores its own name (claudelaunch.Render gives
+	// a resume no --name). "" carries nothing.
 	Name string
-	// Label is set for a same-pane Claude reboot only: it resolves a session's
-	// pfm label (store.SessionLabel), and prepareReload asks it again whenever
-	// a handoff moves the reboot onto another session, so the reborn pane
-	// never wears the label of the session the pane used to show. When set it
-	// owns Name; "" carries no --name; the resolver reports its own failure.
-	Label func(sessionID string) string
 	// Model and Effort pin the reborn seat's tier — the same pair
 	// HeadlessRequest carries for a fresh launch (internal/action/headless.go).
 	// "" means "inherit whatever the CLI/account would have chosen on its

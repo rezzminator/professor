@@ -183,6 +183,8 @@ env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={
 
 Each door builds a `claudelaunch.Request` — account, purpose, door verbs, per-launch choices — and calls `Render`.
 
+A launch that resumes a session in place (`Resume`, or `--resume`, `-r`, `--continue`, `-c` in its args, with no `--fork-session`) carries no `--name`: the session restores its own name from its transcript, and Claude applies a launch name only once its session registers, so one landing then would revert a `/rename` the user typed meanwhile. A fresh launch and a fork keep theirs.
+
 ### PlanClaude
 
 `pfm chat new` and MCP `new`. Verbs: `--session-id`, `--name`, the prompt positional. Per-launch: `--account`, `--cache 1h|5m`, `--model`, `--effort`, role seat file.

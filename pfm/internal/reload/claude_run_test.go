@@ -28,7 +28,6 @@ func TestClaudeRunCarriesTheChatLabel(t *testing.T) {
 		fresh bool
 		label string
 	}{
-		{"same-pane resume with a label", false, "Fix login"},
 		{"fresh launch with a label", true, "Fix login"},
 		{"same-pane resume without a label", false, ""},
 		{"fresh launch without a label", true, ""},

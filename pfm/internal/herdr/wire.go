@@ -206,6 +206,90 @@ func (rename AgentRename) Line() ([]byte, error) {
 	})
 }
 
+// TabGet is one tab.get request: the tab's label and how many panes it holds.
+type TabGet struct {
+	Tab string
+	Seq uint64
+}
+
+// Line renders the tab.get request line (no trailing newline).
+func (get TabGet) Line() ([]byte, error) {
+	if get.Tab == "" {
+		return nil, fmt.Errorf("herdr tab.get: tab is required")
+	}
+	return json.Marshal(request{
+		ID:     fmt.Sprintf("pfm-%d", get.Seq),
+		Method: "tab.get",
+		Params: struct {
+			TabID string `json:"tab_id"`
+		}{get.Tab},
+	})
+}
+
+// Tab is one tab.get answer: the tab, the label Herdr's tab bar shows, and
+// how many panes it holds.
+type Tab struct {
+	TabID     string
+	Label     string
+	PaneCount int
+}
+
+// ParseTab decodes a tab.get result ({"type":"tab_info","tab":{…}}).
+func ParseTab(result json.RawMessage) (Tab, error) {
+	var decoded struct {
+		Type string `json:"type"`
+		Tab  struct {
+			TabID     string `json:"tab_id"`
+			Label     string `json:"label"`
+			PaneCount int    `json:"pane_count"`
+		} `json:"tab"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return Tab{}, fmt.Errorf("herdr tab.get: decode result %q: %w", result, err)
+	}
+	if decoded.Type != "tab_info" {
+		return Tab{}, fmt.Errorf("herdr tab.get: result type %q, want tab_info", decoded.Type)
+	}
+	if decoded.Tab.TabID == "" {
+		return Tab{}, fmt.Errorf("herdr tab.get: result %q names no tab", result)
+	}
+	return Tab{TabID: decoded.Tab.TabID, Label: decoded.Tab.Label, PaneCount: decoded.Tab.PaneCount}, nil
+}
+
+// TabLabel is the label TabRename sends for label: the label a tab carries
+// once renamed to it.
+func TabLabel(label string) string {
+	return capTitle(label)
+}
+
+// TabRename is one tab.rename request: the tab's bar label becomes Label.
+type TabRename struct {
+	Tab   string
+	Label string
+	Seq   uint64
+}
+
+// Line renders the tab.rename request line (no trailing newline). The label is
+// cleaned as a title is (control characters and surrounding space gone, cut at
+// MaxTitleRunes), and an empty one is an error.
+func (rename TabRename) Line() ([]byte, error) {
+	if rename.Tab == "" {
+		return nil, fmt.Errorf("herdr tab.rename: tab is required")
+	}
+	label := TabLabel(rename.Label)
+	if label == "" {
+		return nil, fmt.Errorf("herdr tab.rename: label %q is empty once cleaned", rename.Label)
+	}
+	return json.Marshal(request{
+		ID:     fmt.Sprintf("pfm-%d", rename.Seq),
+		Method: "tab.rename",
+		Params: struct {
+			TabID string `json:"tab_id"`
+			Label string `json:"label"`
+		}{rename.Tab, label},
+	})
+}
+
 // PaneList is one pane.list request with no workspace filter: every pane Herdr
 // holds, each with the terminal that outlives a pane move.
 type PaneList struct {

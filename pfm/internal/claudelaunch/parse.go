@@ -154,6 +154,29 @@ func argsName(args []string) bool {
 	return false
 }
 
+// resumesInPlace reports whether the launch continues an existing session
+// rather than forking it — Resume, or the caller's own --resume, --resume=…,
+// -r, --continue or -c, with no --fork-session. Such a session carries its
+// name in its transcript and Claude restores it, so Render gives it no
+// --name: Claude applies a launch name only once its session registers, and
+// one landing then reverts a /rename the user typed meanwhile.
+func resumesInPlace(request Request) bool {
+	if request.Fork || slices.Contains(request.Args, flagForkSession) {
+		return false
+	}
+	if request.Resume != "" {
+		return true
+	}
+	for _, arg := range request.Args {
+		switch {
+		case arg == flagResume, arg == flagResumeShort, arg == flagContinue, arg == flagContinueShort,
+			strings.HasPrefix(arg, flagResume+"="):
+			return true
+		}
+	}
+	return false
+}
+
 func parseHooks(raw any) ([]Hook, error) {
 	if raw == nil {
 		return nil, nil

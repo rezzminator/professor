@@ -128,7 +128,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	if request.Fork {
 		result.Argv = append(result.Argv, flagForkSession)
 	}
-	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) {
+	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
 	result.Argv = append(result.Argv, request.Args...)

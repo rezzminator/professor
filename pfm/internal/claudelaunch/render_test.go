@@ -733,6 +733,20 @@ func TestRenderNameFlag(t *testing.T) {
 			Request{Name: "other", Args: []string{"--name=keep"}},
 			nil,
 		},
+		// A resumed session carries its own name in its transcript: a launch name
+		// lands after a /rename typed while Claude registers, and reverts it.
+		{"a resumed session carries no flag", Request{Name: "keep", Resume: "s1"}, nil},
+		{"an Args --resume carries no flag", Request{Name: "keep", Args: []string{"--resume", "s1"}}, nil},
+		{"an Args --resume= carries no flag", Request{Name: "keep", Args: []string{"--resume=s1"}}, nil},
+		{"an Args -r carries no flag", Request{Name: "keep", Args: []string{"-r", "s1"}}, nil},
+		{"an Args --continue carries no flag", Request{Name: "keep", Args: []string{"--continue"}}, nil},
+		{"an Args -c carries no flag", Request{Name: "keep", Args: []string{"-c"}}, nil},
+		{"a forked resume is a new session, named", Request{Name: "keep", Resume: "s1", Fork: true}, []string{"keep"}},
+		{
+			"an Args fork of a resume is named",
+			Request{Name: "keep", Args: []string{"--resume", "s1", "--fork-session"}},
+			[]string{"keep"},
+		},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			request := scenario.request

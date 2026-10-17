@@ -51,7 +51,8 @@ func envStripWords(names []string) string {
 // home and claude carry the systemPrompt choice; the launcher re-decides it
 // every spawn (hygiene strips any inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).
 // machine supplies only its MCP servers and mcp.thirdParty, never its roster.
-// name is the chat's pfm label, carried as --name; "" carries nothing.
+// name is the chat's pfm label, carried as --name; "" carries nothing, and
+// neither does a resume in place (claudelaunch.Render).
 func LauncherRun(
 	realBinary string,
 	args []string,
@@ -394,7 +395,7 @@ func Synthesize(request Request) (Plan, error) {
 			request.Cache1H,
 			machine,
 			request.Persona,
-			request.Row.Name,
+			"", // a resume restores its own name (claudelaunch.Render)
 			claudeResumeFlag,
 			request.Row.ID,
 		)
@@ -429,7 +430,7 @@ func Synthesize(request Request) (Plan, error) {
 			request.Cache1H,
 			machine,
 			request.Persona,
-			request.Row.Name,
+			"", // a resume restores its own name (claudelaunch.Render)
 			claudeResumeFlag,
 			request.Row.ID,
 		)

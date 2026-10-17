@@ -730,47 +730,6 @@ func TestLauncherRunCarriesTheMachineMCP(t *testing.T) {
 	}
 }
 
-func TestResumeRoutesCarryTheChatLabel(t *testing.T) {
-	for _, scenario := range []struct {
-		name string
-		kind compose.Kind
-		row  string
-		want string
-	}{
-		{"resume with a label", compose.ResumeClaude, "Fix login", "'--name' 'Fix login'"},
-		{"agent fallback with a label", compose.Agent, "Fix login", "'--name' 'Fix login'"},
-		{"resume without a label", compose.ResumeClaude, "", ""},
-		{"agent fallback without a label", compose.Agent, "", ""},
-	} {
-		t.Run(scenario.name, func(t *testing.T) {
-			home := t.TempDir()
-			plan, err := synthesizeWithTestConfig(Request{
-				Row: compose.Row{
-					Kind: scenario.kind,
-					ID:   "22222222-2222-4222-8222-222222222222",
-					CWD:  "/work",
-					Name: scenario.row,
-				},
-				PrimaryAccount: 2,
-				Home:           home,
-				FreshSocket:    "cc-label-test",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if scenario.want == "" {
-				if strings.Contains(plan.Run, "'--name'") {
-					t.Fatal("an unlabelled row carries --name")
-				}
-				return
-			}
-			if !strings.Contains(plan.Run, scenario.want) {
-				t.Fatalf("the run does not carry %s", scenario.want)
-			}
-		})
-	}
-}
-
 func TestLauncherResumeTarget(t *testing.T) {
 	const id = "33333333-3333-4333-8333-333333333333"
 	for _, scenario := range []struct {

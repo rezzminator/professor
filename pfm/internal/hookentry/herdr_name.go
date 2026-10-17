@@ -91,7 +91,8 @@ func (reporter *herdrReporter) nameSync(
 
 // namePane names the agent in one pane after the chat. A name another agent
 // holds, or one Herdr refuses, moves on to the next free suffix, up to -9; the
-// pane's title is the exact chat name.
+// pane's title is the exact chat name, and so is the label of the tab the
+// agent sits in alone (Herdr's tab bar shows the label, never the title).
 func (reporter *herdrReporter) namePane(ctx context.Context, target herdrTarget, name string) error {
 	if !target.ok() {
 		return nil
@@ -109,8 +110,11 @@ func (reporter *herdrReporter) namePane(ctx context.Context, target herdrTarget,
 		return fmt.Errorf("name pane %s: %w", target.pane, err)
 	}
 	taken := map[string]bool{}
+	tab := ""
 	for _, agent := range agents {
-		if agent.PaneID != target.pane && agent.Name != "" {
+		if agent.PaneID == target.pane {
+			tab = agent.TabID
+		} else if agent.Name != "" {
 			taken[agent.Name] = true
 		}
 	}
@@ -139,6 +143,46 @@ func (reporter *herdrReporter) namePane(ctx context.Context, target herdrTarget,
 	}
 	if err := herdr.Send(ctx, target.socket, title); err != nil {
 		return fmt.Errorf("title pane %s %q: %w", target.pane, name, err)
+	}
+	// A tab Herdr will not read or relabel is named, never fatal: the agent
+	// and the title carry the name, so it settles, and a resize or repaint
+	// does not re-run the whole naming against a Herdr that refuses every
+	// time. The next name change or re-announce tries the tab again.
+	if err := reporter.labelTab(ctx, target, tab, name); err != nil {
+		reporter.warn("pfm internal herdr-state %s: %v", reporter.options.event, err)
+	}
+	return nil
+}
+
+// labelTab gives the tab of the chat's agent the chat's name, when the agent
+// sits in it alone: a tab shared with other panes keeps its label, one already
+// carrying the name is left alone, and an agent Herdr lists in no tab labels
+// nothing.
+func (reporter *herdrReporter) labelTab(ctx context.Context, target herdrTarget, tab, name string) error {
+	if tab == "" {
+		return nil
+	}
+	get, err := herdr.TabGet{Tab: tab, Seq: reporter.nextSent()}.Line()
+	if err != nil {
+		return err
+	}
+	results, err := herdr.Call(ctx, target.socket, get)
+	if err != nil {
+		return fmt.Errorf("name tab %s of pane %s: %w", tab, target.pane, err)
+	}
+	info, err := herdr.ParseTab(results[0])
+	if err != nil {
+		return fmt.Errorf("name tab %s of pane %s: %w", tab, target.pane, err)
+	}
+	if info.PaneCount != 1 || info.Label == herdr.TabLabel(name) {
+		return nil
+	}
+	rename, err := herdr.TabRename{Tab: tab, Label: name, Seq: reporter.nextSent()}.Line()
+	if err != nil {
+		return err
+	}
+	if err := herdr.Send(ctx, target.socket, rename); err != nil {
+		return fmt.Errorf("name tab %s of pane %s %q: %w", tab, target.pane, name, err)
 	}
 	return nil
 }

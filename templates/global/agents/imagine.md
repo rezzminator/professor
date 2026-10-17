@@ -33,7 +33,7 @@ Write `spec.md` at the brief's spec path, once, whole: decisions, never code. Th
 - `## Boldest element`: what it is and what its receiver keeps of it.
 - `## What the material holds`: what you found in it that the work is built on, with the query or file that shows it.
 - `## Medium and materials`: medium, stack and libraries, each tied to what the machine can run.
-- `## The work`: part by part, raised by every lens that returned in Pro, every detail chosen — names, timing, colour, spacing, copy, the empty, error and reduced-motion states.
+- `## The work`: the one living view, layer by layer, channel by channel, raised by every lens that returned in Pro, every detail chosen — names, timing, colour, spacing, copy, the empty, error and reduced-motion states.
 - `## How it is met`: the receiver's path through it — the first second, the first minute, the second look.
 - `## Under the hood`: one short section — the data path the experience rests on; the builder owns the rest.
 - `## Open`: each fact the design stands around that neither the brief nor the material settled.

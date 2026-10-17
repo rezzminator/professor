@@ -214,7 +214,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		directoryName = "~"
 	}
 
-	l1 := badge + modelSegment(data)
+	l1 := badge + modelSegment(data, sessionAutoEffort(runtime, data))
 	l1 += sep + blue + directoryName + reset
 	if data.Worktree.Name != "" {
 		l1 += sep + magenta + "🌳 " + data.Worktree.Name + reset

@@ -489,3 +489,117 @@ func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testi
 		t.Errorf("CostSinkLog = %q, want %q", got, want)
 	}
 }
+
+// The auto-effort state file is the plugin's own path rule, mirrored: its
+// variable (blank is unset, `~/` the home), else its default under the home's
+// state directory, the session id made file-safe and set before the name's last
+// extension (`sessionLogPath` in the plugin's src/log.ts).
+func TestAutoEffortStateFileMirrorsThePluginsPathRule(t *testing.T) {
+	cases := []struct {
+		name, home, setting, sessionID, want, wantErr string
+		set                                           bool
+	}{
+		{
+			name:      "default",
+			home:      "/jail/home",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort/state.sess-1.json",
+		},
+		{
+			name:      "blank variable is unset",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort/state.sess-1.json",
+		},
+		{
+			name:      "whitespace variable is unset",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "  ",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort/state.sess-1.json",
+		},
+		{
+			name:      "variable set",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/elsewhere/effort.json",
+			sessionID: "sess-1",
+			want:      "/elsewhere/effort.sess-1.json",
+		},
+		{
+			name:      "padded variable trimmed",
+			home:      "/jail/home",
+			set:       true,
+			setting:   " /elsewhere/effort.json\n",
+			sessionID: "sess-1",
+			want:      "/elsewhere/effort.sess-1.json",
+		},
+		{
+			name:      "home expanded",
+			home:      "/jail/root/",
+			set:       true,
+			setting:   "~/notes/effort.json",
+			sessionID: "sess-1",
+			want:      "/jail/root/notes/effort.sess-1.json",
+		},
+		{
+			name:      "last extension only",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/x/effort.state.json",
+			sessionID: "sess-1",
+			want:      "/x/effort.state.sess-1.json",
+		},
+		{
+			name:      "extensionless name",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/x.d/effort",
+			sessionID: "sess-1",
+			want:      "/x.d/effort.sess-1",
+		},
+		{
+			name:      "dot-first name",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/x/.effort",
+			sessionID: "sess-1",
+			want:      "/x/.effort.sess-1",
+		},
+		{
+			name:      "session id made file-safe",
+			home:      "/jail/home",
+			sessionID: "a/b c.d:é😀_-Z9",
+			want:      "/jail/home/.local/state/auto-effort/state.a_b_c_d_____-Z9.json",
+		},
+		{name: "empty session id", home: "/jail/home", sessionID: "", wantErr: "empty session id"},
+		{
+			name:      "home needed but unknown",
+			home:      "",
+			set:       true,
+			setting:   "~/effort.json",
+			sessionID: "sess-1",
+			wantErr:   "home directory",
+		},
+		{name: "default needs the home", home: "", sessionID: "sess-1", wantErr: "home directory"},
+	}
+	for _, tc := range cases {
+		env := &MapEnv{}
+		if tc.set {
+			env.Values = map[string]string{EnvAutoEffortStateFile: tc.setting}
+		}
+		got, err := AutoEffortStateFile(env, tc.home, tc.sessionID)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("%s: AutoEffortStateFile = %q, %v; want an error containing %q", tc.name, got, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("%s: AutoEffortStateFile = %q, %v; want %q", tc.name, got, err, tc.want)
+		}
+	}
+}

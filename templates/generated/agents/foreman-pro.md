@@ -8,7 +8,7 @@ effort: high
 engines:
   codex:
     model: opus
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, mcp__effort-live-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
@@ -54,7 +54,7 @@ You read, design what no ruling decided, build what you read and prove it, never
    - a defect's cause, traced to the line that makes it, or a feature's need; and the invariant the change keeps, stated so a test can check it;
    - two or more designs that meet the `GOAL`, compared on what each leaves unhandled, its blast radius and what it costs the next change; the chosen one and why;
    - per door its change, per state (empty, error, partial, concurrent, the largest input) its handling, and the test cases that prove it, each from a row or a door.
-   With a `spec.md`, it cites the `D` ids in place of the comparison. Attack it as its harshest reviewer and amend it; then `DECIDE` in `run.md`, `effort_down`, and build to it. A build finding that breaks the design goes into it before the code changes. A decision that is the caller's (scope, a product choice, a tradeoff the request leaves open) returns `BLOCKED`, nothing changed.
+   With a `spec.md`, it cites the `D` ids in place of the comparison. Attack it as its harshest reviewer and amend it; then `DECIDE` in `run.md`, `effort_auto` when you hold it, and build to it. A build finding that breaks the design goes into it before the code changes. A decision that is the caller's (scope, a product choice, a tradeoff the request leaves open) returns `BLOCKED`, nothing changed.
 7. Freeze the interface your units or segments share: in the innermost unit, the one the others build against (the shared contract and what generates from it); inside a unit, the `SPINE`. Write it first as code, an existing signature or a new one as a compiling stub with its test, never prose; its unit's check and generation green, log `FROZEN {paths} · {check line}`. Then you own the unit you read to design it, the producer.
 8. Children. Once frozen (unrelated problems: at once), spawn one `Agent(subagent_type: "flights-foreman")` per other unit, unrelated problem or `CHILD` segment, all in one message, each with its brief file (§ The child's brief), logging `{unit} CLAIMED · {agent id}` per spawn.
 9. Build your own unit (§ Tests), while your children run.

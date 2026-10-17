@@ -2,7 +2,8 @@
 imported by tracetree.py.
 
   tracetree.py segment ROOT [--rev SHA] --seed SEED... [--seeds FILE] [--within PATH...] [--variant V]
-                       [--run RUN] [--history N] [--floor LINES] [--read-max SHARE] [--max K] [--json]
+                       [--run RUN] [--history N] [--floor LINES] [--read-max SHARE] [--max K] [--child-min LINES]
+                       [--json]
 
 A SEED is a symbol (`ReadLines`), a qualified symbol (`codexgen.Run`, `Row.RatesAt`), a wire key (`custom-title`) or
 a tracked path (`transcript/lines.go`, `pfm/internal/codexgen/`, `tokens/claude.go:461`); `gone=PATH` is a file that
@@ -25,7 +26,9 @@ searched and never NOTFOUND, a file placed where it will live, anything else bes
             package: one segment per top-level directory, no spine); a segment under --floor estimated lines, or whose
             ORDER costs the parent more than --read-max of its weight in lines read, folds back into the parent
 
-  DECIDE    per segment: CHILD when it builds a `new=` seed or its seeds carry three or more rows, else KEEP
+  DECIDE    per segment: CHILD when it builds a `new=` seed or its seeds carry three or more rows AND its doors
+            reach --child-min READ lines (default 300: a smaller change costs more in a child's re-reading than it saves),
+            else KEEP
 
 Weight is the lines of the components holding a seed hit (a path seed: its whole file); READ is what the parent reads to
 write a child's ORDER: the door lines (each hit, two lines either side) and the contracts' signatures.
@@ -62,6 +65,7 @@ ROW_HEAD = re.compile(r"[A-Za-z0-9_.-]+:")  # a seeds-file line's `{row}:` head:
 BROAD_FILES = 60
 MIN_EDGE = 2
 MIN_NAME = 4
+CHILD_MIN = 300  # a CHILD segment's door lines (READ) reach this; below it, a spawn re-reads more than it saves
 NEW_FILE_LINES = 150  # the estimated weight of a file the request names that does not exist yet
 DEF_CAP, REF_CAP, CONTEXT = 200, 120, 2
 HISTORY_SWEEP = 40
@@ -601,7 +605,7 @@ def signature(repo, path, ln):
 
 
 def segment(repo, raws, seed_files=(), within=(), variant="contract", run=None, history=300, floor=150,
-            read_max=0.5, max_k=4, spine_off=False):
+            read_max=0.5, max_k=4, spine_off=False, child_min=CHILD_MIN):
     if variant not in VARIANTS:
         raise SegmentError(f"--variant {variant}: one of {', '.join(VARIANTS)}")
     pairs = parse_seeds(raws, seed_files)
@@ -747,7 +751,7 @@ def segment(repo, raws, seed_files=(), within=(), variant="contract", run=None, 
         g["id"] = f"S{n}"
     place_rows(seeds, kept, spine)
     for g in kept:
-        g["decide"] = decide(g, seeds)
+        g["decide"] = decide(g, seeds, child_min)
     pfiles = sorted(parent_files | {f for g in folded for f in g["files"]})
     parent = {"files": pfiles, "cells": sorted({info[p]["cell"] for p in pfiles}),
               "weight": sum(span(info[p]["touched"]) for p in pfiles),
@@ -798,12 +802,15 @@ def place_rows(seeds, kept, spine):
                 g["contracts"].append(s["name"])
 
 
-def decide(g, seeds):
-    """CHILD when the segment builds a `new=` seed or its seeds carry three or more rows; else KEEP, naming why."""
+def decide(g, seeds, child_min=CHILD_MIN):
+    """CHILD when the segment builds a `new=` seed or its seeds carry three or more rows, and its READ
+    reaches child_min lines; else KEEP, naming why."""
     built = [seeds[i]["raw"] for i in g["seed_ids"] + g["new"] if seeds[i].get("create")]
     rows = g["rows"]
     why = (["builds " + ", ".join(built)] if built else []) + (
         [f"{len(rows)} rows ({', '.join(rows)})"] if len(rows) >= 3 else [])
+    if why and g["read"] < child_min:
+        return {"cut": "KEEP", "reason": f"{'; '.join(why)}, but its doors read {g['read']} lines, under the {child_min}-line child floor"}
     if why:
         return {"cut": "CHILD", "reason": "; ".join(why)}
     sites = [x for v in g["sites"].values() for x in v]
@@ -1176,13 +1183,14 @@ def as_json(res):
 
 USAGE = ("usage: tracetree.py segment ROOT [--rev SHA] --seed SEED... [--seeds FILE] [--within PATH...] "
          "[--variant contract|package|cochange|tracer] [--run RUN] [--history N] [--floor LINES] [--read-max SHARE] [--max K] "
+         "[--child-min LINES] "
          "[--json]")
 
 
 def main(argv, fail, stamp=None):
     """The command's exit code; stamp, when given, rewrites a SPLIT or SOLO text printout before it is written."""
     opts = {"--rev": None, "--run": None, "--history": "300", "--floor": "150", "--read-max": "0.5", "--max": "4",
-            "--variant": "contract"}
+            "--child-min": str(CHILD_MIN), "--variant": "contract"}
     raws, files, within, roots, js, i = [], [], [], [], False, 0
     while i < len(argv):
         a = argv[i]
@@ -1214,14 +1222,15 @@ def main(argv, fail, stamp=None):
         fail(USAGE)
     try:
         history, floor, read_max = int(opts["--history"]), int(opts["--floor"]), float(opts["--read-max"])
-        max_k = int(opts["--max"])
+        max_k, child_min = int(opts["--max"]), int(opts["--child-min"])
     except ValueError:
-        fail("--history, --floor and --max take whole numbers, --read-max a share like 0.5")
-    if history < 0 or floor < 0 or read_max < 0 or max_k < 0:
-        fail("--history, --floor, --max and --read-max take values of 0 or more")
+        fail("--history, --floor, --max and --child-min take whole numbers, --read-max a share like 0.5")
+    if history < 0 or floor < 0 or read_max < 0 or max_k < 0 or child_min < 0:
+        fail("--history, --floor, --max, --child-min and --read-max take values of 0 or more")
     try:
         repo = Repo(roots[0], opts["--rev"])
-        res = segment(repo, raws, files, within, opts["--variant"], opts["--run"], history, floor, read_max, max_k)
+        res = segment(repo, raws, files, within, opts["--variant"], opts["--run"], history, floor, read_max, max_k,
+                      child_min=child_min)
         out = as_json(res) + "\n" if js else render(res)
     except SegmentError as e:
         fail(str(e))

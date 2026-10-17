@@ -30,7 +30,7 @@ class FlightContracts(unittest.TestCase):
                         'inventory counts untracked source and names aliases and strays')
         self.assertIn('nonzero', inventory, 'inventory failure must be visible')
         for file in ('templates/global/agents/flights-lander.md',
-                     'templates/global/commands/flights/audit.md',
+                     'templates/global/commands/flights/doctor.md',
                      'templates/global/commands/flights/orchestrate-cross-harness.md'):
             self.assertIn('Change inventory', Path(file).read_text(), f'{file}: canonical inventory')
         lander = Path('templates/global/agents/flights-lander.md').read_text()

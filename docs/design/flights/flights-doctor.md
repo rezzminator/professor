@@ -1,6 +1,6 @@
-# /flights:audit
+# /flights:doctor
 
-`/flights:audit` is the skeptic over a flight, running or landed. It believes artifacts: `run.md`, the statement of intent (a [`flights-speccer`](flights-speccer.md) `spec.md` when the flight has one, else `requirements.md`, else the root's `GOAL` line), git, the transcripts, the checks' output, the seats' state. It never believes a message, a return, a recap or its own earlier picture. It finds defects and inefficiencies and routes them; it fixes nothing. User-only: a model never invokes it.
+`/flights:doctor` is the skeptic over a flight, running or landed. It believes artifacts: `run.md`, the statement of intent (a [`flights-speccer`](flights-speccer.md) `spec.md` when the flight has one, else `requirements.md`, else the root's `GOAL` line), git, the transcripts, the checks' output, the seats' state. It never believes a message, a return, a recap or its own earlier picture. It finds defects and inefficiencies and routes them; it fixes nothing. User-only: a model never invokes it.
 
 ## Contents
 
@@ -42,7 +42,7 @@ An anchor that cannot be read is a finding ("failed to look"), never an absence.
 
 ## Report and writes
 
-One table — `unit · claimed · evidence found · gaps` — then findings ranked most severe first, each with its artifact quoted and its prescription (the owning foreman, `gitter`, or the user when only the user can). Writes `{flight directory}/audit.md` and nothing else.
+One table — `unit · claimed · evidence found · gaps` — then findings ranked most severe first, each with its artifact quoted and its prescription (the owning foreman, `gitter`, or the user when only the user can). Writes `{flight directory}/doctor.md` and nothing else.
 
 ## Rules
 
@@ -54,6 +54,6 @@ One table — `unit · claimed · evidence found · gaps` — then findings rank
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The command | `templates/global/commands/flights/audit.md` | The anchors and pieces |
+| The command | `templates/global/commands/flights/doctor.md` | The anchors and pieces |
 | The builder | [`flights-foreman`](flights-foreman.md) | The `run.md` shape, the brief, the return |
 | The lander | [`flights-lander`](flights-lander.md) | `gate.md` and the return file |

@@ -1,10 +1,10 @@
 ---
-name: flights:audit
-description: 'USER-ONLY — /flights:audit [directory], default the newest under $HOME/.local/state/pfm/flights/{project}/: checks every DONE, check, gate and commit claim of a running or landed flight against run.md, the spec, git and the transcripts; routes findings, fixes nothing. flights-foreman → here. Writes {directory}/audit.md.'
+name: flights:doctor
+description: 'USER-ONLY — /flights:doctor [directory], default the newest under $HOME/.local/state/pfm/flights/{project}/: checks every DONE, check, gate and commit claim of a running or landed flight against run.md, the spec, git and the transcripts; routes findings, fixes nothing. flights-lander → here. Writes {directory}/doctor.md.'
 disable-model-invocation: true
 ---
 
-# Audit — doubt the flight
+# Doctor — doubt the flight
 
 Ground truth only: `run.md`, the statement of intent (`spec.md` when the flight has one, else `requirements.md`, else the root's `GOAL` line), git, the transcripts, the checks' own output, the seats' state. Never a return, a recap, a message, or your own earlier picture. You find defects and inefficiencies and route them; you fix nothing. Input: $ARGUMENTS — the flight directory, else the newest under `$HOME/.local/state/pfm/flights/{project}/`.
 
@@ -22,14 +22,14 @@ An anchor you cannot read is a finding ("failed to look"), never an absence ("no
 | `design.md`, `design-{unit}.md` | the directory | The root's and each child's design, written before its first code edit; a `DECIDE` line without its file is a finding |
 | `tasks/{id}.md` | the directory | Each mechanical bulk edit the foreman fixed, and the `Files` its executor's diff must stay inside |
 | `returns/{unit}-r{round}.md`, `returns/speccer-r{round}.md`, `returns/gate-r{round}.md` | the directory | Each child's, seat's, speccer's and lander's return as written; a verdict line in `run.md` without its return file is a finding |
-| `audit.md` | the directory | The previous audit, for a delta |
+| `doctor.md`, else `audit.md` | the directory | The previous report, for a delta |
 | Git | `~/.claude/agents/flights-foreman.md` § Change inventory, `git log {baseline}..HEAD`, `git status --porcelain` | Tracked and untracked content and line counts per unit, with strays named |
 | Transcripts | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-*.jsonl`, default `~/.claude`, one flat directory whatever the depth; the `.meta.json` beside each names its `agentType` and `spawnDepth`; a seat's through `mcp__chat-professor__read` | Calls per agent against its cap, peak context, what each foreman read and when, waits, children spawned |
 | The gate | `gate.md` and the `flights-lander` transcript of each round: each project's full runs (a second only after a failed one), the review run — its tier against the sink count `gate.md` records — and its `review-r{round}/review.md`, the attack map, the tests it wrote; the return's `GATE` row is the claim checked against them | Every changed hunk mapped; findings and their terminal state |
 | `REVIEW.md` | the directory, for a flight that merged | Every `gate.md` finding as `F{n}` with its status; one missing or contradicted is a finding |
 | Spend | your own run of `pfm tokens --flight {directory} --metrics-out {a scratch file}`; `metrics.md` and the `COST` row are claims compared against it | Per agent: calls, context, tokens, price, failed commands, poll calls, re-reads, compactions, over cap; an `UNMATCHED` row is a finding |
 
-## The audit, piece by piece
+## The examination, piece by piece
 
 1. Before the first edit, per foreman, from its transcript: the base gate ran on the untouched tree; a `GOAL` line and the door searches came before the first edit; every door hit was built or ruled out by its own `path:line`; each data shape the work relies on was read from its producer, not only a consumer or one sample; a `DECIDE` line exists where no ruling decided the design.
 2. The split: each child is a build unit, an unrelated problem, or a `CHILD` segment of the foreman's step 4 — the `CUT` ran on the door list before any of the segment's code was read (its transcript); a `CHILD` segment the parent built itself is a finding unless an `OVERRIDE` line names a fact that checks out (a `path:line`, a row, a spine contract; a need to read its code never does), and so is a `KEEP` segment spawned. Foremen go at most three deep (a `DEPTH 3` foreman spawned no foreman) and only the root spawned a speccer or a lander; `FROZEN` with its check line, a signature or compiling stub with its test and never a prose contract, precedes the first child's spawn; each `ESCALATE` was answered by a re-frozen spine before the child resumed; each child's brief carries its own requirement rows verbatim (with a spec, the `spec.md` path and the `D` ids they rest on), a segment's `SEGMENT`, `ORDER`, `ESCALATE` and `DECIDE` lines verbatim, the interface's or spine's paths and acceptance, and no steps or beliefs about code the parent did not read.
@@ -46,7 +46,7 @@ One table — `unit · claimed · evidence found · gaps` — then findings rank
 
 ## Writes
 
-`{directory}/audit.md`, this report, overwritten each run. Nothing else.
+`{directory}/doctor.md`, this report, overwritten each run. Nothing else.
 
 ## Rules
 

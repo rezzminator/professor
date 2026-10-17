@@ -33,7 +33,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ### Critical invariants
 
 - Path variables: agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- Pipeline flow lives in the flights commands (`/flights:spec` → `flights-foreman` → `flights-lander`, the foreman's first spawn `flights-speccer` on novel, large work; `/flights:orchestrate-cross-harness` substitutes child seats; `/flights:audit` over a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
+- Pipeline flow lives in the flights commands (`/flights:spec` → `flights-foreman` → `flights-lander`, the foreman's first spawn `flights-speccer` on novel, large work; `/flights:orchestrate-cross-harness` substitutes child seats; `/flights:doctor` over a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
 - Agent frontmatter matches behavior: `name`, `description`, `tools`.
 - Registry over tables: a command's or skill's `description:` is its routing, written to `/quality:description`; `disable-model-invocation: true` hides a command from the model and goes only on user-triggered-by-design commands.
 - No command over 35KB, no agent over 15KB. Every `general-purpose` spawn carries the full root `CLAUDE.md`, so a root line is the most expensive line; `@path` imports expand at launch, so cut content, never relocate it.
@@ -86,7 +86,7 @@ Consistency checklist:
 - Project dir names in `CLAUDE.md` match the directories
 - Agent frontmatter matches behavior and the tools needed
 - `worktree.sh` project resolution matches directory names
-- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
+- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:doctor`) match agent names and doc paths
 - Tech stack descriptions match `package.json` or `pyproject.toml` deps
 - Pipeline flow in the flights commands matches agent ordering constraints
 

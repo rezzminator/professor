@@ -98,9 +98,9 @@ See `SETUP.md` for the install interview and adaptation guidance.
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator and root identity — lives in CLAUDE.md, not a separate command.
 - **/pcm** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
-- **/flights:{init,spec,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics with light Professor voice.
+- **/flights:{init,spec,orchestrate-cross-harness,doctor}, /dev** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/flights:spec`, `/flights:audit`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
+**Bundled commands (ship with the blueprint):** `/flights:spec`, `/flights:doctor`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `legal` is bundled under `templates/project/skills/`.
 

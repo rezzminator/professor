@@ -1,6 +1,6 @@
 ---
 name: flights:spec
-description: 'Settles requirements with the user — the main chat''s front of a flight whose requirements are open: /flights:spec [work | file] grills until no gap is left, writes requirements.md. /flights:init → /flights:spec → flights-foreman (→ flights-speccer) → flights-lander → /flights:audit. Returns the foreman''s return.'
+description: 'Settles requirements with the user — the main chat''s front of a flight whose requirements are open: /flights:spec [work | file] grills until no gap is left, writes requirements.md. /flights:init → /flights:spec → flights-foreman (→ flights-speccer) → flights-lander → /flights:doctor. Returns the foreman''s return.'
 argument-hint: [work | file holding it]
 ---
 
@@ -51,4 +51,4 @@ A `BLOCKED` return carries a question. Put it to the user in one round holding t
 
 ## Present
 
-The foreman's return as it came: its first line (a `PARTIAL` included), the `UNITS` and `GATE` rows, every `OPEN` item, `UNPROVEN`, `OUTSIDE`, and the flight directory's path for `/flights:audit`.
+The foreman's return as it came: its first line (a `PARTIAL` included), the `UNITS` and `GATE` rows, every `OPEN` item, `UNPROVEN`, `OUTSIDE`, and the flight directory's path for `/flights:doctor`.

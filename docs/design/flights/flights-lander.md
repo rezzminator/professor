@@ -26,7 +26,7 @@ A builder that tests its own code is biased toward making it pass. The lander ha
 
 From the root foreman's brief, and nothing more:
 
-- the flight directory: `run.md` for the baseline sha, and the statement of intent the attack reads against, the same rule for the lander, its reviewer and `/flights:audit`: a [`flights-speccer`](flights-speccer.md) `spec.md` when the flight has one (it carries every `requirements.md` row verbatim plus its `## Decisions`, binding as rulings), else `requirements.md`, else the root's `GOAL` line;
+- the flight directory: `run.md` for the baseline sha, and the statement of intent the attack reads against, the same rule for the lander, its reviewer and `/flights:doctor`: a [`flights-speccer`](flights-speccer.md) `spec.md` when the flight has one (it carries every `requirements.md` row verbatim plus its `## Decisions`, binding as rulings), else `requirements.md`, else the root's `GOAL` line;
 - the baseline sha from `run.md`'s header, whose `DONE` lines name the done units: the diff is `git diff {baseline}` over the worktree, plus the uncommitted tree;
 - every project the flight touched, each with the path of its [testing manual](testing-manual.md);
 - the standing rules and the worktree or worktrees.
@@ -90,7 +90,7 @@ A lander certifies its own fixes. The research collected for this design condemn
 | The agent | `templates/global/agents/flights-lander.md` | The executable wording |
 | The builder | [`flights-foreman`](flights-foreman.md) | The landing: the lander and the wait on its return file, then `gitter`'s commit and merge; the reaction to `FAIL` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project law the sweep and the gate run against |
-| The audit | [`flights-audit`](flights-audit.md) | `gate.md` and `returns/gate-r{round}.md` as anchors; the review read from the lander's transcript |
+| The doctor | [`flights-doctor`](flights-doctor.md) | `gate.md` and `returns/gate-r{round}.md` as anchors; the review read from the lander's transcript |
 | The family | [`flights.md`](flights.md) | The lander among the four agents and the directory's writers |
 
 ## Evidence

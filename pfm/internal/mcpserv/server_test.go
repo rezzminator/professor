@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -852,4 +853,62 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
+	for _, literal := range []bool{false, true} {
+		t.Run(fmt.Sprint(literal), func(t *testing.T) {
+			root := testjail.ShortRoot(t)
+			socket := filepath.Join(root, "native.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := listener.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			got := make(chan map[string]any, 1)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				var request map[string]any
+				if err := json.NewDecoder(conn).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				got <- request
+				_ = json.NewEncoder(conn).
+					Encode(map[string]any{"id": request["id"], "result": map[string]any{"type": "ok"}})
+			}()
+			service := newFixtureService(t)
+			service.backend.callEngine = resolveGateCaller{
+				target: pfmcall.Target{Backend: "herdr", SocketPath: socket, Pane: "w6:p3"},
+			}
+			_, output, err := service.chatKeys(
+				context.Background(),
+				nil,
+				KeysInput{Target: "NATIVE", Keys: []string{"Enter"}, Literal: literal},
+			)
+			if err != nil || output.Count != 1 {
+				t.Fatalf("native keys output=%+v err=%v", output, err)
+			}
+			select {
+			case request := <-got:
+				want := "pane.send_keys"
+				if literal {
+					want = "pane.send_text"
+				}
+				if request["method"] != want {
+					t.Fatalf("native method=%v", request)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("native keys never reached resolved socket")
+			}
+		})
+	}
 }

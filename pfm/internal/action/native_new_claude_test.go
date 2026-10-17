@@ -1,6 +1,11 @@
 package action
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,7 +14,9 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func mustProfessorPromptPath(t *testing.T, home string) string {
@@ -193,4 +200,79 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 			})
 		}
 	}
+}
+
+func TestHerdrPickerPreparesSamePaneSeatHost(t *testing.T) {
+	testjail.Fleet(t)
+	socket := herdrPickerSocket(t)
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	t.Setenv("TMUX", "")
+	home := t.TempDir()
+	machine := configuredMachinePolicy(home)
+	machine.Claude.Binary = filepath.Join(home, "native-claude")
+	if err := testjail.WriteExecutable(machine.Claude.Binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := executor.Open(
+		context.Background(),
+		Request{
+			Row:            compose.Row{Kind: compose.NewClaude, CWD: "/work/project"},
+			Home:           home,
+			PrimaryAccount: 42,
+			FreshSocket:    "cc-unused",
+			Config:         machine,
+		},
+	)
+	if err != nil || !strings.HasPrefix(line, "exec pfm internal seat-host ") {
+		t.Fatalf("line=%q err=%v", line, err)
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	seat, found, err := state.Seat(context.Background(), strings.TrimPrefix(line, "exec pfm internal seat-host "))
+	if err != nil || !found || seat.Backend != "herdr" || seat.HerdrPane != "w6:p3" {
+		t.Fatalf("seat=%+v found=%v err=%v", seat, found, err)
+	}
+}
+
+func herdrPickerSocket(t *testing.T) string {
+	t.Helper()
+	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID string `json:"id"`
+				}
+				if json.NewDecoder(conn).Decode(&req) != nil {
+					return
+				}
+				_, _ = fmt.Fprintf(conn, `{"id":%q,"ok":true,"result":{"pane":{"pane_id":"w6:p3"}}}`+"\n", req.ID)
+			}()
+		}
+	}()
+	return socket
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -30,7 +31,8 @@ import (
 // Repo, when set, is a repository root (gitroot.RepoRoot): only rows whose cwd
 // resolves to it are listed, the rest counted as Elsewhere — so a chat in a
 // linked worktree lists from the repo root and the reverse. LiveOnly keeps
-// addressable, unkilled chats and counts the killed ones in KilledCount.
+// addressable chats and native diagnostics, excluding killed rows and counting
+// them in KilledCount. Diagnostics do not become addressable chats.
 // ReadOnly scans without the picker's reconciling writes.
 type ListRequest struct {
 	View     compose.View
@@ -49,6 +51,7 @@ type ListRequest struct {
 // presence string per row of Rows, in order (herdr.Probe.Presence), which List
 // fills and a caller that builds a result by hand may leave empty.
 type ListResult struct {
+	Errors      []string
 	Rows        []compose.Row
 	Herdr       []string
 	Matched     int
@@ -84,6 +87,7 @@ func List(
 		return ListResult{}, fmt.Errorf("chat list: scan fleet: %w", err)
 	}
 	result = Select(scan.Output.Rows, scan.Output.KilledCount, request)
+	result.Errors = scan.Errors
 	result.Home = scan.Env.Paths.Home
 	result.Herdr = rowsPresence(
 		ctx, realHerdrProbe(warn, scan.Env.Paths, scan.Env.Config.Claude.Binary), scan.Env.Paths, result.Rows,
@@ -191,7 +195,7 @@ func rowsPresence(ctx context.Context, probe herdr.Probe, values paths.Values, r
 	seats := make([]herdr.Seat, len(rows))
 	for index := range rows {
 		row := &rows[index]
-		if row.Socket == "" {
+		if row.Socket == "" || row.Backend == spawn.BackendHerdr {
 			continue
 		}
 		socketPath, err := values.SocketUnder(row.Socket)
@@ -203,7 +207,17 @@ func rowsPresence(ctx context.Context, probe herdr.Probe, values paths.Values, r
 			SocketPath: socketPath, Session: row.SessionName, Pane: row.PaneID, Name: row.Name, PanePIDs: row.PanePIDs,
 		}
 	}
-	return probe.Presence(ctx, seats)
+	presence := probe.Presence(ctx, seats)
+	for i := range rows {
+		row := &rows[i]
+		if row.Backend == spawn.BackendHerdr {
+			presence[i] = "native"
+			if row.BackendError != "" {
+				presence[i] = row.BackendError
+			}
+		}
+	}
+	return presence
 }
 
 // PresenceOf is row index's Herdr presence. A result whose presence was never
@@ -231,7 +245,7 @@ func Select(rows []compose.Row, killedCount int, request ListRequest) ListResult
 			continue
 		}
 		if request.LiveOnly {
-			if !row.Kind.IsAddressable() {
+			if !row.Kind.IsAddressable() && (row.Backend != spawn.BackendHerdr || row.BackendError == "") {
 				continue
 			}
 			if row.Killed || row.NameKilled {

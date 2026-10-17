@@ -54,13 +54,14 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		return 0
 	}
 	if *asLabel && identity.SocketPath != "" {
-		target := identity.Pane
-		if target == "" {
-			target = identity.Session
+		transport, transportErr := pfmcall.New(pfmcall.Dependencies{})
+		if transportErr != nil {
+			fmt.Fprintf(stderr, "pfm whoami: %v\n", transportErr)
+			return 1
 		}
-		capture, captureErr := (pfmcall.TmuxCaller{}).Capture(
-			ctx, identity.SocketPath, target, true, pfmcall.FullScrollback,
-		)
+		target := pfmcall.Target{Backend: identity.Backend, SocketPath: identity.SocketPath}
+		target.Pane = chatPaneTarget(identity.Pane, identity.Session, "")
+		capture, captureErr := transport.CaptureTarget(ctx, target, pfmcall.FullScrollback)
 		if captureErr == nil {
 			emojis := []string(nil)
 			if len(runtimes) != 0 {

@@ -50,11 +50,12 @@ type Tmux interface {
 // which owns the launch ceremony; this package owns only the session and the
 // keystrokes.
 type Request struct {
-	Engine pfmengine.ID
-	Name   string
-	Socket string
-	CWD    string
-	Run    string
+	SessionID string
+	Engine    pfmengine.ID
+	Name      string
+	Socket    string
+	CWD       string
+	Run       string
 	// Binary mirrors SessionSpec.Binary: the executable word Run launches,
 	// preflighted before the server exists. Empty skips the preflight.
 	Binary    string

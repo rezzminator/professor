@@ -1,11 +1,15 @@
 package chat
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -61,5 +65,42 @@ func TestKillServerRecordsAChatStateTransition(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("KillServer() wrote no chat->ended transition: %s", recorder.Raw())
+	}
+}
+
+func TestKillServerRefusesNativeSocket(t *testing.T) {
+	root := t.TempDir()
+	socket := filepath.Join(root, "herdr.sock")
+	if err := os.WriteFile(socket, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := KillServer(
+		context.Background(),
+		paths.Values{TmuxDir: root, StateDB: filepath.Join(root, "state.db")},
+		socket,
+	)
+	body, readErr := os.ReadFile(socket)
+	if err == nil || !strings.Contains(err.Error(), "phase 2") || readErr != nil || string(body) != "preserve" {
+		t.Fatalf("native end err=%v body=%q read=%v", err, body, readErr)
+	}
+}
+
+func TestEndResolvedRefusesNative(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := EndResolved(
+		context.Background(),
+		headless.Chat{
+			Backend: "herdr",
+			ID:      "native",
+			Live:    true,
+			Socket:  filepath.Join(t.TempDir(), "herdr.sock"),
+			Pane:    "w6:p3",
+		},
+		&stdout,
+		&stderr,
+		nil,
+	)
+	if code != 2 || !strings.Contains(stderr.String(), "phase 2") || stdout.Len() != 0 {
+		t.Fatalf("native end code=%d out=%q err=%q", code, stdout.String(), stderr.String())
 	}
 }

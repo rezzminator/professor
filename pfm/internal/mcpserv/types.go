@@ -15,18 +15,22 @@ type LSInput struct {
 
 // ChatRow is one structured live or resumable fleet row.
 type ChatRow struct {
-	Session string       `json:"session"`
-	ID      string       `json:"id"`
-	Engine  pfmengine.ID `json:"engine"`
-	State   string       `json:"state"`
-	Dir     string       `json:"dir"`
-	Project string       `json:"project"`
-	Name    string       `json:"name"`
-	Account int          `json:"account,omitempty"`
-	Kind    string       `json:"kind"`
-	Killed  bool         `json:"killed,omitempty"`
-	Socket  string       `json:"socket,omitempty"`
-	Pane    string       `json:"pane,omitempty"`
+	Backend        string       `json:"backend,omitempty"`
+	SeatID         string       `json:"seat_id,omitempty"`
+	HerdrWorkspace string       `json:"herdr_workspace,omitempty"`
+	BackendError   string       `json:"backend_error,omitempty"`
+	Session        string       `json:"session"`
+	ID             string       `json:"id"`
+	Engine         pfmengine.ID `json:"engine"`
+	State          string       `json:"state"`
+	Dir            string       `json:"dir"`
+	Project        string       `json:"project"`
+	Name           string       `json:"name"`
+	Account        int          `json:"account,omitempty"`
+	Kind           string       `json:"kind"`
+	Killed         bool         `json:"killed,omitempty"`
+	Socket         string       `json:"socket,omitempty"`
+	Pane           string       `json:"pane,omitempty"`
 	// Herdr is the chat's Herdr presence, the string pfm chat ls prints: "—"
 	// on a host with no Herdr, "not in herdr", the pane id, workspace, agent
 	// status and agent name ("no-agent" for a pane Herdr lists no agent on),
@@ -37,8 +41,9 @@ type ChatRow struct {
 
 // LSOutput is ls's structured response.
 type LSOutput struct {
-	Rows  []ChatRow `json:"rows"`
-	Count int       `json:"count"`
+	Errors []string  `json:"errors,omitempty"`
+	Rows   []ChatRow `json:"rows"`
+	Count  int       `json:"count"`
 	// Matched is how many rows the view and the project filter selected,
 	// before Limit cut the payload down. Count < Matched is the ONLY way a
 	// caller can tell a short answer from an empty fleet, so Truncated names

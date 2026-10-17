@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -46,5 +47,31 @@ func TestRebootRowDemotesToTheSeatsOwnEngine(t *testing.T) {
 		if row.Socket != "" || row.PaneID != "" || row.SessionName != "" {
 			t.Fatalf("rebootRow(%s) kept a dead address: %+v", test.kind, row)
 		}
+	}
+}
+
+func TestNativeLifecycleRefusesPhaseTwo(t *testing.T) {
+	row := compose.Row{
+		Kind:    compose.LiveClaude,
+		ID:      "native",
+		Name:    "NATIVE",
+		Backend: "herdr",
+		Socket:  "/fixture/herdr.sock",
+		PaneID:  "w6:p3",
+	}
+	resolved := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
+	for _, action := range []string{"deactivate", "reboot"} {
+		t.Run(action, func(t *testing.T) {
+			var err error
+			var stderr bytes.Buffer
+			if action == "deactivate" {
+				err = deactivateApplier(context.Background(), resolved)(row)
+			} else {
+				_, err = rebootRow(context.Background(), resolved, row, &stderr)
+			}
+			if err == nil || !strings.Contains(err.Error(), "phase 2") {
+				t.Fatalf("native %s error=%v output=%q, want phase 2 refusal", action, err, stderr.String())
+			}
+		})
 	}
 }

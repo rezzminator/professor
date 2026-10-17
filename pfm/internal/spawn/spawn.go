@@ -156,6 +156,9 @@ func Run(
 		Window:  window,
 		Name:    request.Name,
 	}
+	if err := recordSpawnSeat(ctx, request); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("tmux chat exists; persist seat: %v", err))
+	}
 	target := spec.Session
 	trace.step("session %s created, running: %s", spec.Session, request.Run)
 	boot, err := waitForBoot(ctx, tmux, request.Socket, target, timings)

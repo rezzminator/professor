@@ -389,7 +389,10 @@ func (service *Service) chatKeys(
 		}
 		return nil, output, fmt.Errorf("resolve %q: %s", input.Target, detail)
 	}
-	tmux := pfmcall.TmuxCaller{}
+	transport, err := pfmcall.New(pfmcall.Dependencies{})
+	if err != nil {
+		return nil, KeysOutput{}, fmt.Errorf("keys transport: %w", err)
+	}
 	for index, key := range input.Keys {
 		if index > 0 && delay > 0 {
 			timer := service.backend.clock.NewTimer(delay)
@@ -402,9 +405,9 @@ func (service *Service) chatKeys(
 		}
 		var sendErr error
 		if input.Literal {
-			sendErr = tmux.SendLiteral(ctx, target.SocketPath, target.Pane, key)
+			sendErr = transport.SendLiteral(ctx, target, key)
 		} else {
-			sendErr = tmux.SendKey(ctx, target.SocketPath, target.Pane, key)
+			sendErr = transport.SendKey(ctx, target, key)
 		}
 		if sendErr != nil {
 			return nil, KeysOutput{

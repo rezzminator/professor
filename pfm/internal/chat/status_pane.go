@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,8 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -147,6 +150,9 @@ func statusFromPane(
 	capture PaneCapture,
 	runtime *pfmconfig.Runtime,
 ) (headless.Status, error) {
+	if chat.Backend == spawn.BackendHerdr {
+		return statusFromHerdr(ctx, chat, status)
+	}
 	screen, err := readPane(ctx, chat, capture, runtime)
 	if err != nil {
 		return status, err
@@ -168,6 +174,13 @@ func blockedFromPane(
 	capture PaneCapture,
 	runtime *pfmconfig.Runtime,
 ) (headless.Status, error) {
+	if chat.Backend == spawn.BackendHerdr {
+		native, err := statusFromHerdr(ctx, chat, status)
+		if err != nil || native.State == headless.StateBlocked {
+			return native, err
+		}
+		return status, nil
+	}
 	screen, err := readPane(ctx, chat, capture, runtime)
 	if err != nil {
 		return status, err
@@ -176,6 +189,39 @@ func blockedFromPane(
 		return status, nil
 	}
 	status.State = headless.StateBlocked
+	status.IdleSeconds = 0
+	return status, nil
+}
+
+// statusFromHerdr reads the target-owned native state only when transcript evidence
+// cannot decide, or the existing quiet-tool rule needs a blocking-state check.
+func statusFromHerdr(ctx context.Context, chat headless.Chat, status headless.Status) (headless.Status, error) {
+	body, err := herdr.SeatRequest(ctx, chat.Socket, "agent.get", map[string]string{"target": chat.Pane})
+	if err != nil {
+		return status, fmt.Errorf("read %s Herdr state: %w", chat.Name, err)
+	}
+	var result struct {
+		Agent struct {
+			Pane  string `json:"pane_id"`
+			State string `json:"agent_status"`
+		} `json:"agent"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return status, fmt.Errorf("decode Herdr state for %s: %w", chat.Pane, err)
+	}
+	if result.Agent.Pane != chat.Pane {
+		return status, fmt.Errorf("herdr state for %s returned pane %q", chat.Pane, result.Agent.Pane)
+	}
+	switch result.Agent.State {
+	case "idle", "done":
+		status.State = headless.StateIdle
+	case "working":
+		status.State = headless.StateWorking
+	case "blocked":
+		status.State = headless.StateBlocked
+	default:
+		return status, fmt.Errorf("herdr pane %s has unknown state %q", chat.Pane, result.Agent.State)
+	}
 	status.IdleSeconds = 0
 	return status, nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +13,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/codexprompt"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -273,6 +278,68 @@ func (reloadTargetTmux) Respawn(context.Context, string, string, string, string)
 }
 func (reloadTargetTmux) Display(context.Context, string, string, string) error { return nil }
 
+func TestReloadTargetWarnsAndPreservesTmuxWhenNativeSeatsUnreadable(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		wantError string
+	}{
+		{name: "newer-schema", wantError: "newer than binary"},
+		{name: "corrupt", wantError: "not a database"},
+		{name: "stat-error", wantError: "not a directory"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("TMUX", "")
+			t.Setenv("TMUX_PANE", "")
+			t.Setenv("HERDR_ENV", "")
+			statePath := filepath.Join(t.TempDir(), "state.sqlite")
+			switch testCase.name {
+			case "newer-schema":
+				db, err := sql.Open("sqlite", statePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := db.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				if _, err := db.Exec("PRAGMA user_version=2147483647"); err != nil {
+					t.Fatal(err)
+				}
+			case "corrupt", "stat-error":
+				if err := os.WriteFile(statePath, []byte("not a SQLite database"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if testCase.name == "stat-error" {
+					statePath = filepath.Join(statePath, "state.sqlite")
+				}
+			}
+			want := reload.Pane{ID: "%1", PID: 11, CurrentPath: "/worktree"}
+			var stderr bytes.Buffer
+			socket, pane, state, code := reloadTarget(
+				context.Background(), "/jail/tmux/cc-test", "%1",
+				paths.Values{StateDB: statePath}, commandRuntime{},
+				reloadTargetTmux{panes: []reload.Pane{want}}, &stderr, nil,
+			)
+			if code != 0 || socket != "/jail/tmux/cc-test" || pane != want.ID || state != want {
+				t.Fatalf(
+					"tmux target=(%q,%q,%+v,%d), want live pane despite unreadable native seats; stderr=%q",
+					socket,
+					pane,
+					state,
+					code,
+					stderr.String(),
+				)
+			}
+			for _, text := range []string{"WARNING", "read native seats", testCase.wantError} {
+				if !strings.Contains(stderr.String(), text) {
+					t.Errorf("native-seat warning=%q, want %q", stderr.String(), text)
+				}
+			}
+		})
+	}
+}
+
 func TestReloadUsageIsCanonical(t *testing.T) {
 	if !strings.Contains(reload.Usage, "usage: pfm chat reload") {
 		t.Fatalf("reload usage=%q", reload.Usage)
@@ -475,5 +542,98 @@ func TestRefreshReloadKeepsTheRecordedHarnessPrompt(t *testing.T) {
 	if _, err := agentrole.RefreshSeatPrompt(pfmengine.Claude, sidDir, "cc-plain", "%1", repo, home); err == nil ||
 		!strings.Contains(err.Error(), harness) {
 		t.Fatalf("gone harness prompt error = %v, want the path", err)
+	}
+}
+
+func TestNativeChatKillRefusesPhaseTwo(t *testing.T) {
+	jailTest(t)
+	var stdout, stderr bytes.Buffer
+	code := runResolvedChatKillContext(
+		context.Background(),
+		headless.Chat{
+			Backend: "herdr",
+			Live:    true,
+			ID:      "native",
+			Engine:  pfmengine.Claude,
+			Socket:  "/fixture/herdr.sock",
+			Pane:    "w6:p3",
+		},
+		true,
+		&stdout,
+		&stderr,
+	)
+	if code != 2 || !strings.Contains(stderr.String(), "phase 2") || stdout.Len() != 0 {
+		t.Fatalf("native kill code=%d out=%q err=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestNativeChatReloadRefusesBeforeWorker(t *testing.T) {
+	for _, mode := range []string{"ambient", "socket", "identity"} {
+		t.Run(mode, func(t *testing.T) {
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			runtime, err := pfmconfig.LoadRuntime("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(jail.root, "herdr.sock")
+			t.Setenv("TMUX", "")
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			var args []string
+			if mode == "socket" {
+				args = []string{"--sock", socket, "--pane", "w6:p3"}
+				db := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+				err := db.PutSeat(
+					context.Background(),
+					fleetdb.Seat{
+						SeatID:      "native",
+						SessionID:   "native-session",
+						Backend:     "herdr",
+						Engine:      "cc",
+						State:       "live",
+						HerdrSocket: socket,
+						HerdrPane:   "w6:p3",
+					},
+				)
+				closeErr := db.Close()
+				if err != nil || closeErr != nil {
+					t.Fatalf("seed: %v %v", err, closeErr)
+				}
+			}
+			started := false
+			previous := startReloadWorker
+			startReloadWorker = func([]string, deps.StartOptions) error { started = true; return nil }
+			t.Cleanup(func() { startReloadWorker = previous })
+			var stdout, stderr bytes.Buffer
+			var code int
+			if mode == "identity" {
+				_, _, _, code = reloadTargetFromIdentity(
+					context.Background(),
+					resolve.Identity{Backend: "herdr", SocketPath: socket, Pane: "w6:p3"},
+					reloadTargetTmux{panes: []reload.Pane{{ID: "w6:p3", PID: 1}}},
+					&stderr,
+					paths.OSEnv{},
+				)
+			} else {
+				code = runChatReloadWithRuntime(args, &stdout, &stderr, runtime, paths.OSEnv{})
+			}
+			logs, logErr := filepath.Glob(filepath.Join(runtime.Paths.SIDDir, "reload-*.log"))
+			if code != 2 || !strings.Contains(stderr.String(), "phase 2") || stdout.Len() != 0 || started ||
+				logErr != nil ||
+				len(logs) != 0 {
+				t.Fatalf(
+					"native %s reload code=%d out=%q err=%q started=%v logs=%v err=%v",
+					mode,
+					code,
+					stdout.String(),
+					stderr.String(),
+					started,
+					logs,
+					logErr,
+				)
+			}
+		})
 	}
 }

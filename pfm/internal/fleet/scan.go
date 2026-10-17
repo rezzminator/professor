@@ -61,6 +61,7 @@ func (env Env) Runtime() pfmconfig.Runtime {
 
 // Result is one composed snapshot of the fleet.
 type Result struct {
+	Errors   []string
 	Output   compose.Output
 	Live     gather.Snapshot
 	Counters fleetindex.Counters
@@ -119,8 +120,13 @@ func Scan(
 			return Result{}, err
 		}
 	}
+	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, live)
+	if err != nil {
+		return Result{}, err
+	}
 	return Result{
-		Output:   ComposeFleet(env, request.View, data, live),
+		Errors:   failures,
+		Output:   output,
 		Live:     live,
 		Counters: counters,
 		Env:      env,
@@ -147,7 +153,15 @@ func ScanCached(
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Output: ComposeFleet(env, request.View, data, gather.Snapshot{}), Env: env}, nil
+	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, gather.Snapshot{})
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{
+		Output: output,
+		Errors: failures,
+		Env:    env,
+	}, nil
 }
 
 // RowAddress is the engine, transcript, and live tmux address carried by one
@@ -275,7 +289,13 @@ func ResolveEnv(request Request) (Env, error) {
 
 // Compose classifies, merges and sorts one view's rows from the loaded data
 // and the live snapshot. It never writes.
-func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) compose.Output {
+func ComposeFleet(
+	env Env,
+	view compose.View,
+	data Data,
+	live gather.Snapshot,
+	native ...gather.HerdrSeat,
+) compose.Output {
 	data, live = followContinuations(data, live)
 	launches, launchErr := fleetdb.OpenLaunches(context.Background(), env.Paths)
 	if launches != nil {
@@ -285,6 +305,7 @@ func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) c
 		Workbenches:      env.Workbenches,
 		WorkbenchErrors:  env.WorkbenchErrors,
 		Snapshot:         live,
+		HerdrSeats:       native,
 		Transcripts:      data.Transcripts,
 		Rollouts:         data.Rollouts,
 		OpenCodeSessions: data.OpenCodeSessions,

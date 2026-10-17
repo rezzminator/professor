@@ -19,7 +19,7 @@ import (
 // pfm's statements survive (they name their columns, and its default fills
 // their inserts) is added at open with no bump: addColumnAtOpen; a table
 // rename likewise: renameRemindersTable.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // RetiredSchemaVersion reserves the version stamped by a develop build that
 // added hidden.revision. The column is now added at open; migration 5 follows
@@ -35,9 +35,12 @@ var migrationV3 string
 //go:embed migration_v5.sql
 var migrationV5 string
 
+//go:embed migration_v6.sql
+var migrationV6 string
+
 // sharedMigrations is indexed by the version each step produces; version 1 is
 // schemaDDL itself, so the first two slots stay empty.
-var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3, 5: migrationV5}
+var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3, 5: migrationV5, 6: migrationV6}
 
 // hiddenRevisionDDL adds the column KillWithRevision decides rollback
 // ownership by. A version-3 pfm's inserts take its default.

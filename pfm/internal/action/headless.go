@@ -112,8 +112,9 @@ func CodexDeveloperInstructionsArg(prompt string) []string {
 // HeadlessPlan is the pure result: the command the tmux session runs, its
 // optional launch record, and whether the prompt travelled on the command.
 type HeadlessPlan struct {
-	Run    string
-	Record *fleetdb.Launch
+	SeatRun *fleetdb.SeatRun
+	Run     string
+	Record  *fleetdb.Launch
 	// Binary is the unquoted executable word Run launches, stated so the
 	// spawn layer can prove it resolves BEFORE a tmux server is created
 	// around it — a pane that dies on "command not found" takes the fresh
@@ -276,8 +277,13 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
+	recipe, err := spawn.SeatRun(request.CWD)
+	if err != nil {
+		return HeadlessPlan{}, err
+	}
 	return HeadlessPlan{
-		Run: run,
+		SeatRun: &recipe,
+		Run:     run,
 		Record: &fleetdb.Launch{
 			SessionID: id, Engine: pfmengine.Claude, Account: request.PrimaryAccount,
 			Cache1H: resolvedCache1H(machine, request.PrimaryAccount, request.Cache1H),

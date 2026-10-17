@@ -63,6 +63,42 @@ func TestSelectLiveOnlyDropsKilledAndResumableRows(t *testing.T) {
 	}
 }
 
+func TestSelectLiveOnlyKeepsNativeDiagnosticsNonAddressable(t *testing.T) {
+	for _, tc := range []struct {
+		name, backend, diagnostic string
+		killed                    bool
+		want                      int
+	}{
+		{"failed", "herdr", "HERDR FAILED: engine exited", false, 1},
+		{"lost", "herdr", "HERDR LOST: engine exited", false, 1},
+		{"killed diagnostic", "herdr", "HERDR FAILED: engine exited", true, 0},
+		{"ordinary resume", "herdr", "", false, 0},
+		{"tmux resume", "", "warning", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := compose.Row{
+				Kind:         compose.ResumeClaude,
+				ID:           "diagnostic",
+				SeatID:       "failed",
+				Backend:      tc.backend,
+				BackendError: tc.diagnostic,
+				Killed:       tc.killed,
+				CWD:          "/work/alpha",
+			}
+			result := Select([]compose.Row{row}, 0, ListRequest{LiveOnly: true})
+			if len(result.Rows) != tc.want {
+				t.Fatalf("native diagnostics=%+v, want %d visible rows", result.Rows, tc.want)
+			}
+			if tc.want == 1 {
+				if result.Rows[0].Kind.IsAddressable() || result.Rows[0].BackendError != tc.diagnostic ||
+					result.Rows[0].Kind != compose.ResumeClaude {
+					t.Fatalf("diagnostic became live or lost cause: %+v", result.Rows[0])
+				}
+			}
+		})
+	}
+}
+
 // TestRowsPresenceAddressesEachRowsTmuxServerAndNamesItsFailure pins the
 // row-to-seat mapping: a row with a socket is read through its tmux session on
 // the socket under the tmux directory, a resumable row (no socket) is in no

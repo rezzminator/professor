@@ -289,6 +289,11 @@ func Synthesize(request Request) (Plan, error) {
 		if err != nil {
 			return Plan{}, err
 		}
+		recipe, err := spawn.SeatRun(request.Row.CWD)
+		if err != nil {
+			return Plan{}, err
+		}
+		plan.SeatRun = &recipe
 		plan.Run = run
 		plan.Warnings = spawn.warnings()
 		plan.Record = &fleetdb.Launch{

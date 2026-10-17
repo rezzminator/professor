@@ -359,8 +359,11 @@ func streamFleetRefreshesWith(
 		if err != nil {
 			return stop(" live cache", err)
 		}
-		if _, ok := sendRefresh(ctx, environment, request, data, live, true, updates); !ok {
+		if sent, ok := sendRefresh(ctx, database, environment, request, data, live, true, updates); !ok {
 			return false
+		} else if sent.failed {
+			pendingRefresh = true
+			return true
 		}
 		movedBinding := false
 		if !request.ReadOnly {
@@ -400,10 +403,15 @@ func streamFleetRefreshesWith(
 				return stop(" live cache", err)
 			}
 		}
-		var ok bool
-		if lastSent, ok = sendRefresh(ctx, environment, request, data, live, false, updates); !ok {
+		sent, ok := sendRefresh(ctx, database, environment, request, data, live, false, updates)
+		if !ok {
 			return false
 		}
+		if sent.failed {
+			pendingRefresh = true
+			return true
+		}
+		lastSent = sent
 		if err = presence.record(environment, live); err != nil {
 			// The rows just landed, but the parked poll cannot watch them:
 			// the masthead says so instead of letting them read as watched.
@@ -609,8 +617,10 @@ func streamFleetRefreshesWith(
 		if !request.ReadOnly {
 			movedBinding = fleet.ReconcileCodexPanes(ctx, database, live, environment.Runtime(), warn)
 		}
-		if _, ok := sendRefresh(ctx, environment, request, data, live, true, updates); !ok {
+		if sent, ok := sendRefresh(ctx, database, environment, request, data, live, true, updates); !ok {
 			return
+		} else if sent.failed {
+			continue
 		}
 		if indexer == nil {
 			// The first pass failed before it could build the indexer.
@@ -658,10 +668,14 @@ func streamFleetRefreshesWith(
 				continue
 			}
 		}
-		var ok bool
-		if lastSent, ok = sendRefresh(ctx, environment, request, data, live, false, updates); !ok {
+		sent, ok := sendRefresh(ctx, database, environment, request, data, live, false, updates)
+		if !ok {
 			return
 		}
+		if sent.failed {
+			continue
+		}
+		lastSent = sent
 		pendingRefresh, failStreak = false, 0
 		if err = presence.record(environment, live); err != nil {
 			// The rows just landed, but the parked poll cannot watch them:

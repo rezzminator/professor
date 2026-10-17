@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -235,4 +236,19 @@ func writeAssignments(command *strings.Builder, assignments []string) {
 		command.WriteByte('=')
 		command.WriteString(Quote(value))
 	}
+}
+
+// SeatRun retains the canonical engine recipe, not the tmux launch wrapper.
+func (spawn ClaudeSpawn) SeatRun(cwd string) (fleetdb.SeatRun, error) {
+	launch, err := spawn.render()
+	if err != nil {
+		return fleetdb.SeatRun{}, err
+	}
+	return fleetdb.SeatRun{
+		Binary:     launch.Binary,
+		Args:       append([]string(nil), launch.Argv...),
+		Env:        launchEnvironment(os.Environ(), launch),
+		CWD:        cwd,
+		CostLedger: spawn.Machine.EffectiveClaude(spawn.Account).CostLedger,
+	}, nil
 }

@@ -83,7 +83,8 @@ type herdrDeps struct {
 	stateDir string
 	// sidDir holds the reload pane mutexes (reload.LockPath): an end event
 	// during a reload's /exit leaves the chat server's title alone.
-	sidDir string
+	sidDir    string
+	seatPaths *paths.Values
 }
 
 func realHerdrDeps() herdrDeps {
@@ -98,6 +99,10 @@ func realHerdrDeps() herdrDeps {
 	if err == nil {
 		deps.lockDir = paths.HerdrLockDir(home)
 		deps.stateDir = themesync.DefaultStateDir(home)
+		deps.seatPaths = &paths.Values{
+			Home:    home,
+			StateDB: paths.EnvOrFrom(env, paths.EnvStateDB, paths.DefaultStateDB(home)),
+		}
 	}
 	deps.logError = func(session string, at time.Time, message string) error {
 		if err != nil {
@@ -253,9 +258,10 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 }
 
 type herdrReporter struct {
-	options herdrOptions
-	deps    herdrDeps
-	stderr  io.Writer
+	nativeSeatReport bool
+	options          herdrOptions
+	deps             herdrDeps
+	stderr           io.Writer
 	// seq orders EVENTS: the start time of this process. sent orders the
 	// REQUESTS to Herdr: each is taken under the session lock, so Herdr sees
 	// them in the order they were made.
@@ -382,7 +388,16 @@ func (reporter *herdrReporter) hostHasHerdr() bool {
 // registered for its session (runCodex). Inside a pfm chat tmux server the
 // pane belongs to the tmux CLIENT that attached from a Herdr pane, never to
 // the process environment.
-func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) error {
+func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) (returnErr error) {
+	if reporter.deps.seatPaths != nil && reporter.deps.getenv("TMUX") != "" {
+		// Durable bookkeeping must not suppress or consume the legacy bridge's deadline.
+		defer func() {
+			returnErr = errors.Join(returnErr, reporter.tmuxSeatLifecycle(ctx, payload))
+		}()
+	}
+	if handled, err := reporter.nativeSeat(ctx, payload); handled || err != nil {
+		return err
+	}
 	if reporter.options.engine == pfmengine.Codex && reporter.firedByEngine() {
 		return reporter.runCodex(ctx, payload)
 	}
@@ -735,7 +750,7 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 		Message: action.stored.Message, SessionID: action.stored.SessionID, Seq: seq,
 	}
 	if report.SessionID != "" {
-		argv, err := herdr.ResumeArgv(report.SessionID)
+		argv, err := reporter.resumeArgv(report.SessionID)
 		if err != nil {
 			reporter.warn(
 				"pfm internal herdr-state %s: no resume command for session %q (state still reported): %v",
@@ -764,23 +779,6 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 		err = herdr.Send(ctx, target.socket, line)
 	}
 	return err
-}
-
-// releaseSettled turns Herdr's pane-not-found for a release (the pane closed
-// since it was resolved) into success, as the pane has nothing left to release;
-// any other error stays one.
-func releaseSettled(err error) error {
-	if isHerdrNotFound(err) {
-		return nil
-	}
-	return err
-}
-
-// isHerdrNotFound is Herdr refusing a request because its pane id names no
-// pane, in either spelling of the code.
-func isHerdrNotFound(err error) bool {
-	var refusal *herdr.Refusal
-	return errors.As(err, &refusal) && (refusal.Code == herdrPaneNotFound || refusal.Code == herdrNotFound)
 }
 
 // PayloadHook runs the hook entries that read an engine's payload on stdin and

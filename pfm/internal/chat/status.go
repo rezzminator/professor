@@ -10,6 +10,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -94,6 +95,8 @@ func inspectTarget(
 		return headless.Status{}, err
 	}
 	switch {
+	case target.Backend == spawn.BackendHerdr && target.Live && status.State == headless.StateWorking:
+		status, err = statusFromHerdr(ctx, target, status)
 	case pane:
 		status, err = statusFromPane(ctx, target, status, capture, runtime)
 	case awaitsPane(target, status):

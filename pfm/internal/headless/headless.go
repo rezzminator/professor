@@ -55,15 +55,18 @@ const (
 // Chat is one resolved seat: who it is, where its record lives, and whether a
 // server is still holding it up.
 type Chat struct {
-	Name    string
-	ID      string
-	Engine  pfmengine.ID
-	Path    string
-	CWD     string
-	Socket  string
-	Session string
-	Pane    string
-	Live    bool
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	Name           string
+	ID             string
+	Engine         pfmengine.ID
+	Path           string
+	CWD            string
+	Socket         string
+	Session        string
+	Pane           string
+	Live           bool
 	// PanePID is the process at the root of the seat's pane, as the fleet
 	// last listed it; 0 when unknown.
 	PanePID int

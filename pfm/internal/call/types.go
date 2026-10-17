@@ -76,12 +76,15 @@ const (
 
 // Target is one resolved tmux destination.
 type Target struct {
-	SocketPath string `json:"socket_path"`
-	Pane       string `json:"pane"`
-	Engine     string `json:"engine"`
-	Name       string `json:"name,omitempty"`
-	ID         string `json:"id,omitempty"`
-	Session    string `json:"session,omitempty"`
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	SocketPath     string `json:"socket_path"`
+	Pane           string `json:"pane"`
+	Engine         string `json:"engine"`
+	Name           string `json:"name,omitempty"`
+	ID             string `json:"id,omitempty"`
+	Session        string `json:"session,omitempty"`
 }
 
 // Request describes one live call.
@@ -192,6 +195,9 @@ type ThenSpawner interface {
 
 // SteerSpawn is one detached follow-up delivery.
 type SteerSpawn struct {
+	// Backend is the resolved target substrate; empty retains legacy tmux.
+	Backend    string
+	herdrTurn  *herdrTurn
 	SocketPath string
 	Target     string
 	// Engine is the target's engine as the spawning chat resolved it
@@ -210,6 +216,8 @@ type SteerSpawn struct {
 // hands Engine.DeliverThen: the pane to ride out, the steers to deliver once
 // it settles, and the engine identity the waiter cannot derive on its own.
 type ThenWait struct {
+	// Backend is carried explicitly by the detached waiter, never inferred.
+	Backend    string
 	SocketPath string
 	Target     string
 	Steers     []string

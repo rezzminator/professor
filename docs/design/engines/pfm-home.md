@@ -25,7 +25,7 @@ Where pfm keeps its own configuration and state. Nothing here belongs to one eng
 - **Written by pfm** only at the resolved path: `pfm config init`, `pfm mcp {server} enable|disable`, and the installer's log-default insertion.
 - **`harvester.config.json`** lives beside it, `{clone}/harvester.config.json`, also gitignored.
 - **Created by `pfm install`** from `example.pfm.config.json` when absent; an existing file is never overwritten. Keys a newer pfm adds are reported by `pfm doctor` as `missing key … (default …)`, not written silently.
-- **Blocks:** `accounts` (the Claude account roster: `id`, `configDir`, per-account overrides), `claude` (every Claude launch setting — the full list is [claude-launch.md § Config keys](claude-launch.md#config-keys)), `codex`, `opencode`, `mcp`, `tmux`, `state`.
+- **Blocks:** `accounts` (the Claude account roster: `id`, `configDir`, per-account overrides), `chat` (the birth backend, below), `claude` (every Claude launch setting — the full list is [claude-launch.md § Config keys](claude-launch.md#config-keys)), `codex`, `opencode`, `mcp`, `tmux`, `state`.
 - **Legacy config refusal:** without an explicit override, a missing clone config with a legacy config under `$XDG_CONFIG_HOME/pfm` (else `~/.config/pfm`) refuses normal runtime loading with `config not migrated: run pfm doctor for the fix ({legacy} present, {target} absent)` (`config.ErrNotMigrated`). Install loads through `config.LoadInstallRuntime` so its read-only host gate can name the problem; it does not relocate the file. Doctor uses a diagnostic runtime and prints the error and the operator fix.
 
 ### accounts
@@ -41,6 +41,10 @@ An explicit roster validates positive unique IDs, absolute or home-relative path
 - `entry {n} configDir {dir} duplicates entry {earlier}`.
 
 An entry naming the store loads; `account-is-store` blocks it and directs the operator to point its `configDir` at the account's default directory. Physical aliases to the store or into it are also blocked by `account-is-store`. A symlinked account directory resolving outside the store is accepted. Launch refuses a missing directory with `run pfm install`, and a file or a directory resolving into the store with `run pfm doctor`. It also refuses a dangling link, naming its inspection error, and an unknown roster ID ([claude-launch.md](claude-launch.md#checkconfigdir)).
+
+### chat
+
+`chat.backend` picks where a new Claude chat is born: `auto` (default), `tmux` or `herdr`. An explicit `--backend` on `pfm chat new` outranks it; the rules `auto` follows, and what a forced `herdr` does when its pane is unreachable, are in [claude-launch.md § The Herdr seat door](claude-launch.md#the-herdr-seat-door). Any other value, the empty string included, is refused with `config {path}: chat.backend must be auto, tmux or herdr`; a key set in the file reports source `file` in `pfm config show`, an absent one the default. It lives in `pfm/internal/config/chat.go` and the example file.
 
 ### mcp.thirdParty
 

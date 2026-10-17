@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -315,5 +316,29 @@ func TestHeadlessClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.
 				}
 			})
 		}
+	}
+}
+
+func TestHeadlessClaudeRetainsStructuredSeatRecipe(t *testing.T) {
+	request := HeadlessRequest{
+		Engine:         pfmengine.Claude,
+		Name:           "REVIEW",
+		CWD:            "/work/alpha",
+		Home:           t.TempDir(),
+		PrimaryAccount: 2,
+		Prompt:         "a prompt with 'quotes' and $(nope)",
+	}
+	plan, err := headlessWithTestConfig(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SeatRun == nil || plan.SeatRun.CWD != request.CWD || plan.SeatRun.Binary == "" ||
+		len(plan.SeatRun.Args) == 0 ||
+		!slices.Contains(plan.SeatRun.Args, request.Prompt) {
+		t.Fatalf("structured recipe=%+v", plan.SeatRun)
+	}
+	parsed := parsedShell(t, plan.Run)
+	if parsed.SessionID != plan.Record.SessionID {
+		t.Fatalf("recipe and launch identity diverged: %+v", plan)
 	}
 }

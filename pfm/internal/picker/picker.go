@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/rowfacts"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
@@ -249,6 +250,10 @@ func Run(
 	case ui.OutcomeProfessorUpdate:
 		return openProfessorUpdate(ctx, outcome, stdout, stderr, runtime)
 	case ui.OutcomeDeactivate:
+		if outcome.Row.Backend == spawn.BackendHerdr {
+			fmt.Fprintln(stderr, "pfm ls: native Herdr deactivate is not supported until phase 2")
+			return 2
+		}
 		if outcome.Row.Socket == "" {
 			fmt.Fprintf(stderr, "pfm ls: deactive %s: no live server\n", outcome.Row.Name)
 			return 1
@@ -540,6 +545,9 @@ func killApplier(
 		return nil, err
 	}
 	return func(change ui.KillChange) error {
+		if filepath.IsAbs(change.Socket) {
+			return errors.New("native Herdr kill is not supported until phase 2")
+		}
 		if !change.Killed {
 			removed, err := manager.Unkill(ctx, change.ID)
 			if err == nil && !removed {
@@ -568,6 +576,9 @@ func deactivateApplier(
 	resolved paths.Values,
 ) func(compose.Row) error {
 	return func(row compose.Row) error {
+		if row.Backend == spawn.BackendHerdr {
+			return errors.New("native Herdr deactivate is not supported until phase 2")
+		}
 		if row.Socket == "" {
 			return errors.New("selected chat has no live server")
 		}
@@ -581,6 +592,9 @@ func rebootRow(
 	row compose.Row,
 	stderr io.Writer,
 ) (compose.Row, error) {
+	if row.Backend == spawn.BackendHerdr {
+		return compose.Row{}, errors.New("native Herdr reboot is not supported until phase 2")
+	}
 	if row.Kind == compose.LiveSplit || row.ID == "" {
 		return compose.Row{}, errors.New("a split live row cannot be rebooted as one chat")
 	}

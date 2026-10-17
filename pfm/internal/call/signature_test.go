@@ -725,3 +725,42 @@ func TestSignatureFooterPlantsNoBookmarkMarkerInTheRecipientsPane(t *testing.T) 
 		t.Fatalf("the delivered footer resolves as a pane label: %q", label)
 	}
 }
+
+func TestSignatureUsesNativeHerdrSenderCapture(t *testing.T) {
+	socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+		if request.Method == "pane.read" {
+			return map[string]any{
+				"type": "pane_read",
+				"read": map[string]any{"pane_id": "p2", "text": "🥇 │ 🔖 NativeSender │ status\n❯ ", "truncated": false},
+			}, ""
+		}
+		if request.Method == "agent.get" {
+			return nativeAgent("agent_info", "idle"), ""
+		}
+		return nativeAgent("agent_prompted", "working"), ""
+	})
+	engine := newSignatureEngine(
+		t,
+		"cc-1-2-3",
+		&fakeTmux{capture: "🥇 │ 🔖 WrongTmuxSender │ status\n❯ ", submitOnEnter: true},
+		fakeIdentifier{
+			identity: resolve.Identity{
+				Backend:    "herdr",
+				SocketPath: socket.path,
+				Pane:       "p2",
+				Session:    "sender-native",
+				Engine:     "cc",
+			},
+		},
+	)
+	target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+	result, err := engine.CallTarget(context.Background(), target, Request{Target: "recipient", Message: "hello"})
+	if err != nil || result.Code != 0 {
+		t.Fatalf("call=%+v err=%v", result, err)
+	}
+	calls := socket.calls()
+	text, _ := calls[len(calls)-1].Params["text"].(string)
+	if !strings.Contains(text, "call NativeSender") {
+		t.Fatalf("Herdr sender signed from wrong backend: %q", text)
+	}
+}

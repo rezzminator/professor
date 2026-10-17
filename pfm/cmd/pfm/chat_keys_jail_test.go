@@ -2,10 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 // TestChatKeysRefusesATokenTmuxWouldType guards the silent failure the whole
@@ -127,4 +135,93 @@ func TestRunRescuesAPromptStrandedByAnOverlay(t *testing.T) {
 		!strings.Contains(stderr.String(), "the model recorded it") {
 		t.Fatalf("rescue report = %q, want it to say what it did", stderr.String())
 	}
+}
+
+func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
+	jailTest(t)
+	values := jailPaths(t)
+	socket := filepath.Join(t.TempDir(), "h.sock")
+	serveNativeAdapter(t, socket, map[string]string{
+		"agent.get": `{"type":"agent_info","agent":{"pane_id":"p3","terminal_id":"w6:p3","agent":"claude","agent_status":"idle"}}`,
+		"pane.process_info": fmt.Sprintf(
+			`{"process_info":{"pane_id":"w6:p3","foreground_processes":[{"pid":%d,"argv0":"claude"}]}}`,
+			os.Getpid(),
+		),
+		"pane.read":      `{"type":"pane_read","read":{"pane_id":"p3","workspace_id":"w6","text":"native screen\n🔖 🥇 Captured Label │ project","truncated":false}}`,
+		"pane.send_keys": `{"type":"ok"}`,
+		"pane.send_text": `{"type":"ok"}`,
+	})
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := state.PutSeat(
+		context.Background(),
+		fleetdb.Seat{
+			SeatID:         "native-adapter",
+			SessionID:      "native-session",
+			Engine:         "cc",
+			Backend:        "herdr",
+			State:          "live",
+			Name:           "NATIVE",
+			HerdrSocket:    socket,
+			HerdrPane:      "w6:p3",
+			HerdrWorkspace: "w6",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	for _, args := range [][]string{{"chat", "keys", "--delay", "0s", "NATIVE", "Enter", "Escape", "C-c", "Down", "Tab"}, {"chat", "keys", "--literal", "--capture", "NATIVE", "native text"}, {"chat", "capture", "NATIVE"}, {"chat", "whoami", "--label"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Errorf("native adapter %v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
+		}
+		if args[1] == "whoami" && strings.TrimSpace(stdout.String()) != "🥇 Captured Label" {
+			t.Errorf("native label=%q", stdout.String())
+		}
+		if args[1] == "capture" && !strings.Contains(stdout.String(), "native screen") {
+			t.Errorf("native capture=%q", stdout.String())
+		}
+	}
+}
+
+func serveNativeAdapter(t *testing.T, path string, table map[string]string) {
+	t.Helper()
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+					t.Error(err)
+					return
+				}
+				var request map[string]any
+				if err := json.NewDecoder(conn).Decode(&request); err != nil {
+					return
+				}
+				_ = json.NewEncoder(conn).
+					Encode(map[string]any{"id": request["id"], "result": json.RawMessage(table[fmt.Sprint(request["method"])])})
+			}()
+		}
+	}()
 }

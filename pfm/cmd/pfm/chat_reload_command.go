@@ -19,24 +19,27 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (
-	reloadNewFlag     = "--new"
-	reloadHideFlag    = "--hide"
-	reloadThenFlag    = "--then"
-	reloadSocketFlag  = "--sock"
-	reloadModelFlag   = "--model"
-	reloadEffortFlag  = "--effort"
-	reloadPaneFlag    = "--pane"
-	reloadCacheFlag   = "--cache"
-	reloadAccountFlag = "--account"
+	nativeReloadRefusal = "pfm chat reload: native Herdr reload is not supported until phase 2"
+	reloadNewFlag       = "--new"
+	reloadHideFlag      = "--hide"
+	reloadThenFlag      = "--then"
+	reloadSocketFlag    = "--sock"
+	reloadModelFlag     = "--model"
+	reloadEffortFlag    = "--effort"
+	reloadPaneFlag      = "--pane"
+	reloadCacheFlag     = "--cache"
+	reloadAccountFlag   = "--account"
 )
 
 // startReloadWorker launches the detached worker (Detach: true) and releases
@@ -512,15 +515,8 @@ func reloadDurationEnv(name string, fallbackMS int, env paths.Env) time.Duration
 	return time.Duration(fallbackMS) * time.Millisecond
 }
 
-// reloadTarget resolves the (socket, pane) a reload acts on. pane is the
-// worker-only escape hatch: when the scheduler in runChatReloadWithRuntime
-// already knows which pane called it, it hands that pane straight to the
-// detached worker via --pane, and this function selects that exact pane out
-// of ListPanes instead of falling back to the "exactly one pane" rule below.
-// pane is always "" for the scheduler's own call (it has nothing to hand
-// itself) and for the ambient-identity branch beneath this one, which never
-// takes --pane at all — only an explicit --sock server can carry more than
-// one live pane.
+// reloadTarget preserves explicit tmux pane selection and rejects native targets
+// before either the scheduler or detached worker can probe them as tmux.
 func reloadTarget(
 	ctx context.Context,
 	sock, pane string,
@@ -531,10 +527,29 @@ func reloadTarget(
 	env paths.Env,
 ) (string, string, reload.Pane, int) {
 	env = defaultEnv(env)
+	if sock == "" && env.Get("TMUX") == "" && env.Get("HERDR_ENV") == "1" {
+		fmt.Fprintln(stderr, nativeReloadRefusal)
+		return "", "", reload.Pane{}, 2
+	}
+
 	if sock != "" {
 		path := sock
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(resolved.TmuxDir, path)
+		}
+		if resolved.StateDB != "" {
+			seats, err := fleetdb.ReadSeats(ctx, resolved)
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm chat reload: WARNING: read native seats: %v\n", err)
+			} else {
+				for i := range seats {
+					seat := &seats[i]
+					if seat.Backend == spawn.BackendHerdr && seat.HerdrSocket == path {
+						fmt.Fprintln(stderr, nativeReloadRefusal)
+						return "", "", reload.Pane{}, 2
+					}
+				}
+			}
 		}
 		panes, err := tmux.ListPanes(ctx, path)
 		if err != nil {
@@ -584,6 +599,10 @@ func reloadTargetFromIdentity(
 	stderr io.Writer,
 	env paths.Env,
 ) (string, string, reload.Pane, int) {
+	if identity.Backend == spawn.BackendHerdr {
+		fmt.Fprintln(stderr, nativeReloadRefusal)
+		return "", "", reload.Pane{}, 2
+	}
 	env = defaultEnv(env)
 	path := identity.SocketPath
 	pane := identity.Pane

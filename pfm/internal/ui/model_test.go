@@ -910,3 +910,46 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeLifecycleKeepsVisibleRows(t *testing.T) {
+	for _, action := range []string{"kill", "reboot", "reboot-menu", "deactivate"} {
+		t.Run(action, func(t *testing.T) {
+			row := compose.Row{
+				Kind:    compose.LiveClaude,
+				ID:      "native",
+				Name:    "NATIVE",
+				Backend: "herdr",
+				Socket:  "/fixture/herdr.sock",
+				PaneID:  "w6:p3",
+			}
+			model := NewModel(Snapshot{Rows: []compose.Row{row}})
+			model.applyKill = func(KillChange) error { return nil }
+			model.applyDeactivate = func(compose.Row) error { return nil }
+			switch action {
+			case "kill":
+				model.toggleKilled()
+			case "deactivate":
+				model.deactivate(row)
+			case "reboot":
+				model, _ = applyKey(t, model, controlKey('o'))
+			case "reboot-menu":
+				model.actionIndex = 1
+				model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			}
+			if !strings.Contains(model.killStatus, "phase 2") || model.outcome != OutcomeNone || len(model.rows) != 1 ||
+				len(model.deactivatedSockets) != 0 ||
+				len(model.killChanges) != 0 ||
+				model.rows[0].Killed {
+				t.Fatalf(
+					"native %s receipt=%q outcome=%v rows=%+v deactivated=%v kills=%v",
+					action,
+					model.killStatus,
+					model.outcome,
+					model.rows,
+					model.deactivatedSockets,
+					model.killChanges,
+				)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package call
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +34,12 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 			1,
 			"then waiter needs a socket, a target, and at least one steer",
 		), nil
+	}
+	if !supportedBackend(wait.Backend) {
+		return backendRefusal(wait.Backend), nil
+	}
+	if wait.Backend == backendHerdr {
+		return engine.deliverHerdrThen(ctx, wait)
 	}
 	if socketPath != "" {
 		// The socket rides the environment so a pane-id target resolves on the
@@ -242,6 +249,12 @@ func (spawner CommandThenSpawner) Spawn(
 		"--target",
 		request.Target,
 	)
+	if !supportedBackend(request.Backend) {
+		return fmt.Errorf("then spawn: unsupported seat backend %q", request.Backend)
+	}
+	if request.Backend == backendHerdr {
+		arguments = append(arguments, "--backend", request.Backend)
+	}
 	if request.Engine != "" {
 		arguments = append(arguments, "--engine", request.Engine)
 	}
@@ -260,6 +273,17 @@ func (spawner CommandThenSpawner) Spawn(
 	stated := []string{
 		"CHAT_CALL_SOCKET=" + request.SocketPath,
 		"CHAT_THEN_CHAIN=1",
+	}
+	if request.Backend == backendHerdr {
+		if request.herdrTurn == nil || request.herdrTurn.SocketPath != request.SocketPath ||
+			request.herdrTurn.Pane != request.Target {
+			return fmt.Errorf("then spawn: missing or mismatched native Herdr turn evidence for %q", request.Target)
+		}
+		turn, err := json.Marshal(request.herdrTurn)
+		if err != nil {
+			return fmt.Errorf("encode native Herdr turn evidence: %w", err)
+		}
+		stated = append(stated, herdrTurnEnv+"="+string(turn))
 	}
 	stated = append(stated, senderEnvironment(request.Sender)...)
 	// Any inherited definition of these names is dropped first: os.Getenv
@@ -376,6 +400,7 @@ func withoutNames(environment, pairs []string) []string {
 	// inherits CHAT_SENDER_LABEL from an earlier hop while this hop states
 	// only a session would sign with two different chats' fields.
 	for _, name := range []string{
+		herdrTurnEnv,
 		SenderSessionEnv,
 		SenderLabelEnv,
 		SenderIDEnv,

@@ -508,14 +508,20 @@ func Call(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessag
 
 // callOne is one request over one connection.
 func callOne(ctx context.Context, socket string, line []byte) (json.RawMessage, error) {
+	return callOneWithin(ctx, socket, line, ioTimeout)
+}
+
+func callOneWithin(ctx context.Context, socket string, line []byte, limit time.Duration) (json.RawMessage, error) {
 	conn, err := deps.DialUnix(ctx, socket, dialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("herdr socket %s: dial for %s: %w", socket, requestName(line), err)
 	}
 	defer func() { _ = conn.Close() }()
+	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopCancel()
 	// The exchange ends at the I/O timeout or the caller's deadline, whichever
 	// comes first, and a response is read up to maxResponse bytes.
-	deadline := clock.Real.Now().Add(ioTimeout)
+	deadline := clock.Real.Now().Add(limit)
 	if bound, ok := ctx.Deadline(); ok && bound.Before(deadline) {
 		deadline = bound
 	}
@@ -527,6 +533,9 @@ func callOne(ctx context.Context, socket string, line []byte) (json.RawMessage, 
 	}
 	response, err := bufio.NewReader(io.LimitReader(conn, maxResponse)).ReadBytes('\n')
 	if err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 		return nil, fmt.Errorf("herdr socket %s: read response to %s: %w", socket, requestName(line), err)
 	}
 	var decoded struct {

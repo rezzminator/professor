@@ -22,9 +22,11 @@ const (
 // (how to index it, how to spawn it, how to recognise its process) lives in
 // the consumer packages' registries — see the spec, § 3.
 type Descriptor struct {
-	ID    ID
-	Name  string // "Claude Code" — the product name, for doctor and help text
-	Short string // "Claude" — the one-word label pickers and the statusline show
+	// HerdrNativePrompt is proven native foreground detection and prompt delivery.
+	HerdrNativePrompt bool
+	ID                ID
+	Name              string // "Claude Code" — the product name, for doctor and help text
+	Short             string // "Claude" — the one-word label pickers and the statusline show
 	// Binary is the executable's base name; BinaryPathHints are substrings of
 	// an executable path that also identify the engine (Claude's versioned
 	// installs live under ".../claude/versions/<v>/claude").

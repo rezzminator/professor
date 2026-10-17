@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +18,7 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -349,6 +353,230 @@ func TestFirstReplyVerdict(t *testing.T) {
 				if !strings.Contains(message, want) {
 					t.Fatalf("message = %q, want it to contain %q", message, want)
 				}
+			}
+		})
+	}
+}
+
+func TestChatNewBackendFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name, backend, want string
+		code                int
+	}{
+		{name: "invalid", backend: "other", want: "--backend must be auto, tmux or herdr", code: 2},
+		{name: "forced unreachable", backend: "herdr", want: "pane w6:p3 unreachable", code: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			t.Setenv("TMUX", "")
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			t.Setenv("HERDR_SOCKET_PATH", filepath.Join(t.TempDir(), "missing.sock"))
+			var stdout, stderr bytes.Buffer
+			code := run(
+				[]string{
+					"chat",
+					"new",
+					"--name",
+					"BACKEND",
+					"--engine",
+					"cc",
+					"--cwd",
+					jail.root,
+					"--backend",
+					tc.backend,
+				},
+				&stdout,
+				&stderr,
+			)
+			if code != tc.code || !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf(
+					"code=%d stdout=%q stderr=%q, want code=%d %q",
+					code,
+					stdout.String(),
+					stderr.String(),
+					tc.code,
+					tc.want,
+				)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("failed birth printed success: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestInternalSeatHostDispatch(t *testing.T) {
+	jailTest(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"internal", "seat-host"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "pfm internal seat-host: expected one seat id") {
+		t.Fatalf("seat-host code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestChatNewNativeBackendBirth(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	socket := filepath.Join(testjail.ShortRoot(t), "native.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	requests := make(chan string, 8)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var request struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(conn).Decode(&request); err != nil {
+					return
+				}
+				requests <- request.Method
+				result := `{"pane":{"pane_id":"w6:p3"}}`
+				if request.Method == "layout.apply" {
+					result = `{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}`
+				}
+				_, _ = fmt.Fprintf(conn, "{\"id\":%q,\"result\":%s}\n", request.ID, result)
+			}()
+		}
+	}()
+	t.Setenv("TMUX", "")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"chat", "new", "--name", "NATIVE", "--engine", "cc", "--cwd", jail.root, "--backend", "herdr"},
+		&stdout,
+		&stderr,
+	)
+	if code != 0 || !strings.Contains(stdout.String(), "herdr") || strings.Contains(stdout.String(), "tmux -L") {
+		t.Fatalf("native birth code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	close(requests)
+	var layout int
+	for method := range requests {
+		if method == "layout.apply" {
+			layout++
+		}
+	}
+	if layout != 1 {
+		t.Fatalf("native birth layout.apply=%d, want one", layout)
+	}
+}
+
+func TestChatNameNativeDeliveryConvergesWithoutTmuxWindow(t *testing.T) {
+	jailTest(t)
+	var stderr bytes.Buffer
+	delivered := false
+	code := applyChatName(
+		context.Background(),
+		headless.Chat{Backend: "herdr", Socket: "/not-a-tmux-socket", Pane: "w6:p3", Engine: pfmengine.Claude},
+		"INTEGRATION",
+		func(_ context.Context, target headless.Chat, name string) (int, string, error) {
+			delivered = target.Backend == "herdr" && name == "INTEGRATION"
+			return 0, "", nil
+		},
+		&stderr,
+	)
+	if code != 0 || !delivered {
+		t.Fatalf("native name code=%d delivered=%t stderr=%q", code, delivered, stderr.String())
+	}
+}
+
+func TestChatNewNativeUnsupportedEngineRefusal(t *testing.T) {
+	for _, engine := range []string{"codex", "opencode"} {
+		t.Run(engine, func(t *testing.T) {
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			socket := filepath.Join(testjail.ShortRoot(t), "unsupported.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			layouts := make(chan struct{}, 4)
+			go func() {
+				for {
+					conn, err := listener.Accept()
+					if err != nil {
+						return
+					}
+					func() {
+						defer func() { _ = conn.Close() }()
+						var req struct {
+							ID     string `json:"id"`
+							Method string `json:"method"`
+						}
+						if json.NewDecoder(conn).Decode(&req) != nil {
+							return
+						}
+						result := `{"pane":{"pane_id":"w6:p3"}}`
+						if req.Method == "layout.apply" {
+							layouts <- struct{}{}
+							result = `{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}`
+						}
+						_, _ = fmt.Fprintf(conn, "{\"id\":%q,\"result\":%s}\n", req.ID, result)
+					}()
+				}
+			}()
+			store := filepath.Join(jail.root, "opencode-store")
+			if err := atomicfile.Write(filepath.Join(store, "auth.json"), []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(pfmengine.MustLookup(pfmengine.OpenCode).RootEnv, store)
+			ctx := pfmchat.WithResolvedSelf(
+				context.Background(),
+				headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", HerdrWorkspace: "w6"},
+			)
+			var stdout, stderr bytes.Buffer
+			runtime, err := pfmconfig.LoadRuntime("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			code := runChatWithRuntime(
+				[]string{"new", "--engine", engine, "--name", "UNSUPPORTED", "--cwd", jail.root},
+				nil,
+				&stdout,
+				&stderr,
+				runtime,
+				ctx,
+			)
+			state := fleetdb.OpenSharedState(ctx, runtime.Paths)
+			defer func() { _ = state.Close() }()
+			seats, seatErr := state.Seats(ctx)
+			recipes, recipeErr := filepath.Glob(filepath.Join(filepath.Dir(runtime.Paths.StateDB), "seats", "*.json"))
+			if code != 2 || !strings.Contains(stderr.String(), engine) ||
+				!strings.Contains(stderr.String(), "phase 2") ||
+				!strings.Contains(stderr.String(), "--backend tmux") ||
+				stdout.Len() != 0 ||
+				len(layouts) != 0 ||
+				seatErr != nil ||
+				len(seats) != 0 ||
+				recipeErr != nil ||
+				len(recipes) != 0 {
+				t.Fatalf(
+					"native %s code=%d stdout=%q stderr=%q layouts=%d seats=%+v err=%v recipes=%v err=%v",
+					engine,
+					code,
+					stdout.String(),
+					stderr.String(),
+					len(layouts),
+					seats,
+					seatErr,
+					recipes,
+					recipeErr,
+				)
 			}
 		})
 	}

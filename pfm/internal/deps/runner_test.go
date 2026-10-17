@@ -584,3 +584,62 @@ func TestRealRunnerProcessGroupDeadlineKillsBackgroundedDescendants(t *testing.T
 		t.Fatalf("backgrounded descendant %d survived the deadline", pid)
 	}
 }
+
+func TestRealRunnerStartCanonicalArgvAndForeground(t *testing.T) {
+	for _, opts := range []StartOptions{{Foreground: true, Detach: true}, {Foreground: true, Ctty: -1}} {
+		process, err := (RealRunner{}).Start(context.Background(), []string{"sh", "-c", "exit 0"}, opts)
+		if err == nil {
+			if !opts.Detach {
+				_ = process.Wait()
+			}
+			t.Errorf("invalid foreground options accepted: %+v", opts)
+		}
+	}
+	var stdout bytes.Buffer
+	process, err := (RealRunner{}).Start(
+		context.Background(),
+		[]string{"sh", "-c", `printf '%s' "$0"`},
+		StartOptions{Argv0: "canonical-agent", Stdout: &stdout},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "canonical-agent" {
+		t.Errorf("child argv0 = %q, want canonical-agent", stdout.String())
+	}
+	for _, tc := range []struct {
+		name                       string
+		opts                       StartOptions
+		foreground, group, session bool
+		tty                        int
+	}{
+		{name: "ordinary"},
+		{name: "group", opts: StartOptions{ProcessGroup: true}, group: true},
+		{name: "detached", opts: StartOptions{Detach: true}, session: true},
+		{name: "foreground", opts: StartOptions{Foreground: true, Ctty: 7}, foreground: true, group: true, tty: 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := startProcessAttributes(tc.opts)
+			if got == nil {
+				if tc.foreground || tc.group || tc.session {
+					t.Fatalf("no process attributes for %+v", tc.opts)
+				}
+				return
+			}
+			if got.Foreground != tc.foreground || got.Setpgid != tc.group || got.Setsid != tc.session ||
+				got.Ctty != tc.tty {
+				t.Fatalf(
+					"process attributes = %+v, want foreground=%v group=%v session=%v tty=%d",
+					got,
+					tc.foreground,
+					tc.group,
+					tc.session,
+					tc.tty,
+				)
+			}
+		})
+	}
+}

@@ -10,7 +10,8 @@ const CodexNoDaemon = "--no-daemon"
 
 func init() {
 	Register(Descriptor{
-		ID: Claude, Name: "Claude Code", Short: "Claude", LongName: "claude",
+		HerdrNativePrompt: true,
+		ID:                Claude, Name: "Claude Code", Short: "Claude", LongName: "claude",
 		Binary: "claude", BinaryPathHints: []string{"/claude/versions/"},
 		SocketPrefix: "cc-",
 		SessionEnv:   "CLAUDE_CODE_SESSION_ID",

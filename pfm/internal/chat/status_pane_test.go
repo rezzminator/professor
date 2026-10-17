@@ -1,9 +1,13 @@
 package chat
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -334,4 +338,96 @@ func TestInspectSeatKeepsAnOpenCodexTurnWorking(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Native states are the fallback only; a broken or unknown response is not idle.
+func TestHerdrStatusNativeFallback(t *testing.T) {
+	t.Run("quiet pending tool preserves transcript working", func(t *testing.T) {
+		socket := herdrStatusSocket(t, `{"agent":{"pane_id":"w6:p3","agent_status":"idle"}}`)
+		got, err := blockedFromPane(context.Background(),
+			headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Live: true},
+			headless.Status{State: headless.StateWorking, PendingTool: "Bash", QuietSeconds: 10}, nil, nil)
+		if err != nil || got.State != headless.StateWorking {
+			t.Fatalf("native idle overrode pending transcript tool: %+v err=%v", got, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		state, want string
+		bad         bool
+	}{
+		{"idle", headless.StateIdle, false},
+		{"done", headless.StateIdle, false},
+		{"working", headless.StateWorking, false},
+		{"blocked", headless.StateBlocked, false},
+		{"unknown", "", true},
+		{"future", "", true},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			socket := herdrStatusSocket(t, fmt.Sprintf(`{"agent":{"pane_id":"w6:p3","agent_status":%q}}`, tc.state))
+			got, err := InspectSeat(
+				context.Background(),
+				nil,
+				headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Engine: pfmengine.Claude, Live: true},
+				time.Now(),
+				nil,
+			)
+			if tc.bad {
+				if err == nil {
+					t.Fatalf("unknown state returned %+v, want error", got)
+				}
+				return
+			}
+			if err != nil || got.State != tc.want {
+				t.Fatalf("status=%+v, %v; want %s", got, err, tc.want)
+			}
+		})
+	}
+	t.Run("unreachable", func(t *testing.T) {
+		_, err := InspectSeat(
+			context.Background(),
+			nil,
+			headless.Chat{Backend: "herdr", Socket: filepath.Join(t.TempDir(), "dead.sock"), Pane: "w6:p3", Live: true},
+			time.Now(),
+			nil,
+		)
+		if err == nil {
+			t.Fatal("unreachable returned no error")
+		}
+	})
+}
+
+func herdrStatusSocket(t *testing.T, result string) string {
+	t.Helper()
+	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var request struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&request); err != nil {
+					return
+				}
+				response := fmt.Sprintf(`{"id":%q,"ok":true,"result":%s}`+"\n", request.ID, result)
+				_, _ = io.WriteString(conn, response)
+			}()
+		}
+	}()
+	return socket
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // New constructs an action executor using only K4-overridable paths.
@@ -150,6 +151,43 @@ func (executor *Executor) Open(
 	if err != nil {
 		return "", err
 	}
+	if request.Row.Kind == compose.NewClaude {
+		choice, chooseErr := spawn.ChooseBackend(ctx, request.Config.Chat.Backend, os.Environ(), nil)
+		if chooseErr != nil {
+			return "", chooseErr
+		}
+		if choice.Warning != "" {
+			fmt.Fprintln(executor.stderr, choice.Warning)
+		}
+		if choice.Backend == spawn.BackendHerdr {
+			values, pathErr := paths.Resolve()
+			if pathErr != nil {
+				return "", pathErr
+			}
+			if plan.SeatRun == nil || plan.Record == nil {
+				return "", errors.New("native picker launch has no structured recipe or identity")
+			}
+			prepared, prepareErr := spawn.PrepareHerdr(
+				ctx,
+				spawn.HerdrRequest{
+					Choice: choice,
+					Paths:  values,
+					Run:    *plan.SeatRun,
+					Seat: fleetdb.Seat{
+						SessionID: plan.Record.SessionID,
+						Engine:    string(pfmengine.Claude),
+						Name:      request.LaunchName,
+					},
+				},
+			)
+			if prepareErr != nil {
+				return "", prepareErr
+			}
+			executor.recordLaunch(ctx, plan.Record)
+			launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
+			return prepared.Eval, nil
+		}
+	}
 	if plan.ChatServer != nil {
 		executor.recordLaunch(ctx, plan.Record)
 		if err := executor.tmux.CreateChatServer(
@@ -157,6 +195,25 @@ func (executor *Executor) Open(
 			*plan.ChatServer,
 		); err != nil {
 			return "", err
+		}
+		if plan.Record != nil {
+			values, pathErr := paths.Resolve()
+			if pathErr != nil {
+				return "", pathErr
+			}
+			if persistErr := spawn.RecordTmuxSeat(
+				ctx,
+				values,
+				fleetdb.Seat{
+					SeatID:     plan.Record.SessionID,
+					SessionID:  plan.Record.SessionID,
+					Engine:     string(plan.Record.Engine),
+					Name:       request.LaunchName,
+					TmuxSocket: plan.ChatServer.Socket,
+				},
+			); persistErr != nil {
+				fmt.Fprintf(executor.stderr, "pfm: tmux picker chat exists; seat registration failed: %v\n", persistErr)
+			}
 		}
 		held, err := executor.watchLaunch(
 			ctx,

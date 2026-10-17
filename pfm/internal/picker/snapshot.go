@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -129,12 +130,14 @@ func rereadFacts(environment fleet.Env, request scanRequest, last sentRefresh) u
 // poll can re-read row facts over it without a new gather) and the snapshot
 // the picker received.
 type sentRefresh struct {
+	failed   bool
 	output   compose.Output
 	snapshot ui.Snapshot
 }
 
 func sendRefresh(
 	ctx context.Context,
+	database *store.Store,
 	environment fleet.Env,
 	request scanRequest,
 	data fleet.Data,
@@ -142,7 +145,20 @@ func sendRefresh(
 	refreshing bool,
 	updates chan<- ui.Snapshot,
 ) (sentRefresh, bool) {
-	output := fleet.ComposeFleet(environment, request.View, data, live)
+	native, _, err := fleet.NativeSeats(ctx, environment.Paths)
+	if err == nil {
+		data, err = fleet.EnrichNative(ctx, database, data, native)
+	}
+	if err != nil {
+		return sentRefresh{failed: true}, sendRefreshFailure(
+			ctx,
+			updates,
+			"native seats",
+			err,
+			time.Unix(0, environment.NowNS),
+		)
+	}
+	output := fleet.ComposeFleet(environment, request.View, data, live, native...)
 	snapshot := buildSnapshot(ctx, environment, request, output)
 	snapshot.Refreshing = refreshing
 	return sentRefresh{output: output, snapshot: snapshot}, publishSnapshot(ctx, snapshot, updates)

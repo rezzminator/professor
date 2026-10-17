@@ -2,12 +2,14 @@ package usagehook
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -211,48 +213,6 @@ func TestEvaluateTreatsUnparsableResetsAtAsUnknownNotExpired(t *testing.T) {
 	}
 }
 
-// CachedFableWindow's hour, now measured by cacheAge, must keep its
-// mtime fallback for legacy records and must still refuse a stale one.
-func TestCachedFableWindowAgesLegacyRecordsByMtime(t *testing.T) {
-	for _, testcase := range []struct {
-		name     string
-		mtimeAge time.Duration
-		wantOK   bool
-	}{
-		{name: "fresh legacy record", mtimeAge: time.Minute, wantOK: true},
-		{name: "two-hour-old legacy record", mtimeAge: 2 * time.Hour},
-	} {
-		t.Run(testcase.name, func(t *testing.T) {
-			base := t.TempDir()
-			configDir := filepath.Join(base, ".cc", "7")
-			now := time.Now().Truncate(time.Second)
-			percent := 44.0
-			scoped := ScopedLimit{
-				Kind: "weekly_scoped", Percent: &percent,
-				ResetsAt: now.Add(72 * time.Hour).Format(time.RFC3339), IsActive: true,
-			}
-			scoped.Scope.Model.DisplayName = "Fable"
-			path := CachePath(UsageCacheDir(base, os.Getuid()), 7)
-			if err := WriteCacheRecord(path, CacheRecord{
-				Usage: Usage{Limits: []ScopedLimit{scoped}}, ConfigDir: configDir,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			stamp := now.Add(-testcase.mtimeAge)
-			if err := os.Chtimes(path, stamp, stamp); err != nil {
-				t.Fatal(err)
-			}
-			window, ok := CachedFableWindow(base, os.Getuid(), 7, configDir, now)
-			if ok != testcase.wantOK {
-				t.Fatalf("CachedFableWindow ok=%v want %v (window=%#v)", ok, testcase.wantOK, window)
-			}
-			if ok && (window.Utilization == nil || *window.Utilization != 44) {
-				t.Fatalf("fable window=%#v", window)
-			}
-		})
-	}
-}
-
 // corrupt store files. A truncated, empty, or half-written record must
 // send the hook to a refresh, never to a warning built out of garbage.
 func TestCorruptCacheRecordsNeverWarn(t *testing.T) {
@@ -295,5 +255,126 @@ func TestCorruptCacheRecordsNeverWarn(t *testing.T) {
 				t.Fatalf("corrupt record did not trigger a refresh: hits=%d", hits)
 			}
 		})
+	}
+}
+
+// The statusline reads synchronously: cache artifacts must be bounded regular
+// files, never links or special files supplied through the shared temp path.
+func TestReadCacheRecordRejectsUnsafeArtifacts(t *testing.T) {
+	for _, shape := range []string{"leaf symlink", "relative leaf symlink", "directory symlink", "oversized", "fifo"} {
+		t.Run(shape, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "cache")
+			path := CachePath(dir, 2)
+			if err := WriteCacheRecord(path, CacheRecord{ConfigDir: "fixture"}); err != nil {
+				t.Fatal(err)
+			}
+			switch shape {
+			case "leaf symlink", "relative leaf symlink":
+				target := filepath.Join(dir, "real.json")
+				if err := os.Rename(path, target); err != nil {
+					t.Fatal(err)
+				}
+				if shape == "relative leaf symlink" {
+					target = filepath.Base(target)
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			case "directory symlink":
+				target := filepath.Join(root, "real")
+				if err := os.Rename(dir, target); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, dir); err != nil {
+					t.Fatal(err)
+				}
+			case "oversized":
+				body := []byte(`{"config_dir":"fixture"}` + strings.Repeat(" ", 1<<20))
+				if err := os.WriteFile(path, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "fifo":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := syscall.Mkfifo(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan error, 1)
+			go func() { _, err := ReadCacheRecord(path); done <- err }()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatalf("unsafe %s accepted as a normal cache", shape)
+				}
+			case <-time.After(time.Second):
+				// Release an unfixed blocking FIFO reader before failing the case.
+				writer, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+				if err != nil {
+					t.Fatal(fmt.Errorf("release blocked reader: %w", err))
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				<-done
+				t.Fatalf("unsafe %s blocked the synchronous cache reader", shape)
+			}
+		})
+	}
+}
+
+// An atomic publisher may replace the pathname after the reader opens it.
+// Legacy age must still describe that descriptor's payload, not the new file.
+func TestReadCacheRecordKeepsLegacyMetadataWithItsBytes(t *testing.T) {
+	path := CachePath(t.TempDir(), 2)
+	if err := WriteCacheRecord(path, CacheRecord{ConfigDir: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := WriteCacheRecord(path, CacheRecord{ConfigDir: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	record, modified, err := readCacheRecordFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.ConfigDir != "old" || !modified.Equal(stamp) {
+		t.Fatalf(
+			"legacy bytes and age split across replacement: record=%+v modified=%s want=%s",
+			record,
+			modified,
+			stamp,
+		)
+	}
+}
+
+// The error-preserving statusline selector keeps real readings with unknown
+// resets, while the legacy hook selector continues to require a future reset.
+func TestFableWindowAtKeepsUnknownResetWithoutChangingLegacySelector(t *testing.T) {
+	now := time.Now().UTC()
+	percent := 0.0
+	limit := ScopedLimit{Kind: "weekly_scoped", Percent: &percent}
+	limit.Scope.Model.DisplayName = "Fable"
+	usage := Usage{Limits: []ScopedLimit{limit}}
+	window, ok, err := usage.FableWindowAt(now)
+	if err != nil || !ok || window.Utilization == nil || *window.Utilization != 0 || window.ResetsAt != "" {
+		t.Fatalf("unknown-reset selector lost reading: window=%+v ok=%v err=%v", window, ok, err)
+	}
+	if _, legacy := usage.fableWindow(now); legacy {
+		t.Fatal("legacy selector unexpectedly accepted unknown reset")
 	}
 }

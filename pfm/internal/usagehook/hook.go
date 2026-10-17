@@ -109,11 +109,8 @@ var knownWindowDescriptors = []WindowDescriptor{
 	{Key: sevenDayFableKey, Label: "7d-fable", Known: true},
 }
 
-// AllWindows returns every window this build knows how to render, in canonical
-// display order, whether or not the current response carries it. A renderer
-// that iterates only the PRESENT keys cannot distinguish "this window is at 0%"
-// from "this window's data never arrived" — the two render identically as
-// nothing at all. Callers that must keep those apart start here.
+// AllWindows returns canonical windows, including absent ones, so renderers
+// can distinguish a measured zero from a missing reading.
 func AllWindows() []WindowDescriptor {
 	return append([]WindowDescriptor(nil), knownWindowDescriptors...)
 }
@@ -165,7 +162,18 @@ func (usage Usage) NamedWindowsAt(now time.Time) []NamedWindow {
 }
 
 func (usage Usage) fableWindow(now time.Time) (Window, bool) {
+	window, ok, _ := usage.selectFableWindow(now, false)
+	return window, ok
+}
+
+// FableWindowAt keeps unknown resets and reports malformed ones to renderers.
+func (usage Usage) FableWindowAt(now time.Time) (Window, bool, error) {
+	return usage.selectFableWindow(now, true)
+}
+
+func (usage Usage) selectFableWindow(now time.Time, allowUnknown bool) (Window, bool, error) {
 	var fallback *ScopedLimit
+	var invalidReset error
 	for index := range usage.Limits {
 		limit := &usage.Limits[index]
 		if strings.TrimSpace(limit.Kind) != "weekly_scoped" ||
@@ -173,21 +181,31 @@ func (usage Usage) fableWindow(now time.Time) (Window, bool) {
 			limit.Percent == nil {
 			continue
 		}
-		resetAt, err := time.Parse(time.RFC3339, strings.TrimSpace(limit.ResetsAt))
-		if err != nil || !resetAt.After(now) {
+		stamp := strings.TrimSpace(limit.ResetsAt)
+		if stamp == "" && !allowUnknown {
 			continue
 		}
+		if stamp != "" {
+			resetAt, err := time.Parse(time.RFC3339, stamp)
+			if err != nil {
+				invalidReset = fmt.Errorf("decode cached Fable reset %q: %w", limit.ResetsAt, err)
+				continue
+			}
+			if !resetAt.After(now) {
+				continue
+			}
+		}
 		if limit.IsActive {
-			return Window{Utilization: limit.Percent, ResetsAt: limit.ResetsAt}, true
+			return Window{Utilization: limit.Percent, ResetsAt: limit.ResetsAt}, true, nil
 		}
 		if fallback == nil {
 			fallback = limit
 		}
 	}
 	if fallback == nil {
-		return Window{}, false
+		return Window{}, false, invalidReset
 	}
-	return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true
+	return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true, nil
 }
 
 type usageWindow = Window
@@ -470,45 +488,9 @@ func RefreshLockPath(cacheDir string, account int) string {
 	return filepath.Join(cacheDir, fmt.Sprintf("acct-%d.lock", account))
 }
 
-// CachedFableWindow reads pfm's own usage cache for account — the cache this
-// hook's own OAuth refresh (and the Limits tab's LimitsSampler) already
-// maintain — and runs the exact same fableWindow selector a live fetch uses.
-// It is the statusline render path's second source for the Fable window,
-// consulted only when a harness payload carried no scoped `limits` array at
-// all (see statusline.rateLimits.windowsAt).
-//
-// It never returns an error: a missing cache, an unreadable or malformed
-// file, an active backoff (another picker's already-recorded 429 or other
-// failure — treated as "no fresh data", not stale-but-usable), a cache older
-// than one hour, or a cache with no qualifying Fable entry all report
-// ok=false. One hour matches Evaluate's own "a stale cache remains usable for
-// about an hour" bound above, rather than inventing a second number for the
-// same file. A statusline read degrades to "window absent" on any of these —
-// it must never crash the render or fabricate a reading from a bad file.
-func CachedFableWindow(base string, uid, account int, configDir string, now time.Time) (Window, bool) {
-	path := CachePath(UsageCacheDir(base, uid), account)
-	record, err := ReadCacheRecord(path)
-	if err != nil || !record.MatchesConfigDir(configDir) {
-		return Window{}, false
-	}
-	if record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
-		return Window{}, false
-	}
-	if cacheAge(record, path, now) > time.Hour {
-		return Window{}, false
-	}
-	return record.fableWindow(now)
-}
-
-// CacheBackoff records a rate-limited or otherwise failed fetch so every
-// reader of the shared cache — this hook, and every `pfm ls` Limits tab —
-// skips its own request until RetryAfter instead of each picker process
-// rediscovering the same failure independently.
-//
-// Credential is the fingerprint of the credential the failure was recorded
-// against (CredentialFingerprint), so a changed credential lifts it; Refusal
-// keeps a 401 or 403 typed, so a replay classifies exactly like the live
-// answer.
+// CacheBackoff shares failed-fetch cooldowns across readers until RetryAfter.
+// Credential fingerprints let changed credentials lift the cooldown; Refusal
+// preserves typed 401/403 failures when replayed.
 type CacheBackoff struct {
 	Message    string       `json:"message"`
 	RetryAfter time.Time    `json:"retry_after"`
@@ -566,24 +548,86 @@ func (record CacheRecord) MatchesConfigDir(configDir string) bool {
 		filepath.Clean(record.ConfigDir) == filepath.Clean(configDir)
 }
 
-// ReadCacheRecord decodes the shared cache file at path. A missing or
-// unreadable file is reported through the error return — callers treat it as
-// "nothing usable cached yet," never as a record with an empty Backoff.
+// ReadCacheRecord decodes a bounded, owned cache file; read failures are errors.
 func ReadCacheRecord(path string) (CacheRecord, error) {
-	body, err := os.ReadFile(path)
+	record, _, err := ReadCacheRecordWithMtime(path)
+	return record, err
+}
+
+// ReadCacheRecordWithMtime binds legacy confirmation age to the bytes read.
+// Only bounded regular files in an owned, non-writable cache directory qualify.
+func ReadCacheRecordWithMtime(path string) (CacheRecord, time.Time, error) {
+	dir := filepath.Dir(path)
+	info, err := os.Lstat(dir)
 	if err != nil {
-		return CacheRecord{}, err
+		return CacheRecord{}, time.Time{}, err
+	}
+	stat, owned := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !owned || int(stat.Uid) != os.Getuid() || info.Mode().Perm()&0o022 != 0 {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("usage cache directory %s is not a private owned directory", dir)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return CacheRecord{}, time.Time{}, err
+	}
+	defer func() { _ = root.Close() }()
+	opened, err := root.Stat(".")
+	if err != nil {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("stat opened usage cache directory %s: %w", dir, err)
+	}
+	if !os.SameFile(info, opened) {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("usage cache directory %s changed while opening", dir)
+	}
+	leaf, err := root.Lstat(filepath.Base(path))
+	if err != nil {
+		return CacheRecord{}, time.Time{}, err
+	}
+	if !leaf.Mode().IsRegular() {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("usage cache %s is not a regular leaf", path)
+	}
+	file, err := root.OpenFile(filepath.Base(path), os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return CacheRecord{}, time.Time{}, err
+	}
+	defer func() { _ = file.Close() }()
+	openedLeaf, err := file.Stat()
+	if err != nil {
+		return CacheRecord{}, time.Time{}, err
+	}
+	if !os.SameFile(leaf, openedLeaf) {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("usage cache %s changed while opening", path)
+	}
+	return readCacheRecordFile(file)
+}
+
+func readCacheRecordFile(file *os.File) (CacheRecord, time.Time, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("stat usage cache %s: %w", file.Name(), err)
+	}
+	stat, owned := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || !owned || int(stat.Uid) != os.Getuid() || info.Mode().Perm()&0o022 != 0 {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("usage cache %s is not an owned regular file", file.Name())
+	}
+	const maxCacheBytes = 1 << 20
+	if info.Size() > maxCacheBytes {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("usage cache %s exceeds %d bytes", file.Name(), maxCacheBytes)
+	}
+	body, err := io.ReadAll(io.LimitReader(file, maxCacheBytes+1))
+	if err != nil {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("read usage cache %s: %w", file.Name(), err)
+	}
+	if len(body) > maxCacheBytes {
+		return CacheRecord{}, time.Time{}, fmt.Errorf("usage cache %s exceeds %d bytes", file.Name(), maxCacheBytes)
 	}
 	var record CacheRecord
 	if err := json.Unmarshal(body, &record); err != nil {
-		return CacheRecord{}, fmt.Errorf("decode usage cache %s: %w", path, err)
+		return CacheRecord{}, time.Time{}, fmt.Errorf("decode usage cache %s: %w", file.Name(), err)
 	}
-	return record, nil
+	return record, info.ModTime(), nil
 }
 
-// WriteCacheRecord atomically writes record to path with the same private
-// directory and atomic-rename discipline this hook's own refresh() has
-// always used.
+// WriteCacheRecord atomically publishes a private cache record.
 func WriteCacheRecord(path string, record CacheRecord) error {
 	if err := EnsurePrivateDir(filepath.Dir(path)); err != nil {
 		return err
@@ -679,10 +723,7 @@ func utilization(window usageWindow, fallback int) int {
 	return int(*window.Utilization)
 }
 
-// currentUtilization is utilization for a window that still exists. A window
-// whose resets_at has already passed describes quota that has since rolled
-// over — the same rule fableWindow applies — so it reads as absent and can
-// never raise the warning on its own.
+// currentUtilization excludes windows whose known reset has passed.
 func currentUtilization(window usageWindow, now time.Time, fallback int) int {
 	if resetPassed(window.ResetsAt, now) {
 		return fallback
@@ -697,18 +738,9 @@ func resetPassed(raw string, now time.Time) bool {
 	return err == nil && !resetAt.After(now)
 }
 
-// cacheAge is how long ago this record's PAYLOAD was fetched, not how long ago
-// the file was touched. Any writer that records only a backoff carries the
-// previous fetched_at forward while bumping mtime (internal/stats: a 429
-// recorded against a last-good payload), and an mtime-only reading would
-// revive hours-old usage as fresh. The file's mtime is the fallback for
-// identity-bound records that predate fetched_at, and for a missing file.
-//
-// A fetched_at stamped AFTER now is unverifiable — corruption or clock skew —
-// and trusting it would make the cache permanently fresh: never refreshed,
-// never aged out of the warning. It is refused the same way internal/stats'
-// cacheFresh refuses a confirmedAt that is After(now), and the record falls
-// back to the file's mtime.
+// cacheAge measures payload age, not a backoff writer's newer file mtime.
+// Legacy or future-dated records fall back to mtime, matching existing hook
+// behavior; the statusline rejects explicit future stamps instead.
 func cacheAge(record CacheRecord, path string, now time.Time) time.Duration {
 	if record.FetchedAt != nil && !record.FetchedAt.After(now) {
 		return now.Sub(*record.FetchedAt)
@@ -724,14 +756,7 @@ func fileAge(path string, now time.Time) time.Duration {
 	return now.Sub(info.ModTime())
 }
 
-// recoveredWindowPhrase states one window's standing in the recovery banner.
-// currentUtilization collapses a window whose resets_at has already passed to
-// the caller's fallback, and this banner's fallback is 0 — so a bare "5h 0%%"
-// here would assert a MEASURED zero when the truth is "the window rolled over
-// and we have not re-asked yet". That is the same fabrication windowPhrase
-// refuses on the warn line, and an expired window is precisely what drives the
-// recovery branch (it drags `maximum` under the warn threshold), so this is
-// the banner's likely reading, not a corner of it.
+// recoveredWindowPhrase distinguishes an expired reading from measured zero.
 func recoveredWindowPhrase(label string, window usageWindow, percent int, now time.Time) string {
 	if resetPassed(window.ResetsAt, now) {
 		return label + " — (reset passed · awaiting refetch)"
@@ -739,11 +764,7 @@ func recoveredWindowPhrase(label string, window usageWindow, percent int, now ti
 	return fmt.Sprintf("%s %d%%", label, percent)
 }
 
-// windowPhrase is one window's clause in the hook's warn line. A window whose
-// resets_at has already passed describes quota that has since rolled over —
-// currentUtilization refuses to count it toward the warning, so the clause must
-// not advertise its stale percentage or a reset moment already in the past
-// either. It reads "5h — (reset passed)" until a refetch lands.
+// windowPhrase renders a reading or marks its known reset as passed.
 func windowPhrase(label string, window usageWindow, percent int, now time.Time, layout string) string {
 	if resetPassed(window.ResetsAt, now) {
 		return label + " — (reset passed)"

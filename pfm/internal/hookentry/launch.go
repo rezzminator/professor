@@ -256,10 +256,13 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		}
 		identity = freshID
 	}
-	// A resumed or forked chat keeps its pfm label as Claude's --name, so
-	// Remote Control shows the name the picker shows. A fresh launch has none.
+	// A forked chat keeps its parent's pfm label as Claude's --name, so Remote
+	// Control shows the name the picker shows. A fresh launch has none, and so
+	// has a resume in place: it restores its own name from its transcript
+	// (claudelaunch.Render gives it no --name).
 	name := ""
-	if target := action.LauncherResumeTarget(arguments); target != "" {
+	inPlace := resuming && !continuing
+	if target := action.LauncherResumeTarget(arguments); target != "" && !inPlace {
 		label, labelErr := store.SessionLabel(context.Background(), target, store.WithWarningWriter(stderr))
 		if labelErr != nil {
 			fmt.Fprintf(

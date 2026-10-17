@@ -276,6 +276,9 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 		{"title under its own source", Metadata{Pane: "w1:p1", Source: "pfm-shell", Title: "make exit 0 · 12s", Seq: 8}.Line, `{"id":"pfm-8","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm-shell","title":"make exit 0 · 12s"}}`},
 		{"pane.list", PaneList{Seq: 8}.Line, `{"id":"pfm-8","method":"pane.list","params":{}}`},
 		{"pane.process_info", ProcessInfo{Pane: "w2:p1", Seq: 9}.Line, `{"id":"pfm-9","method":"pane.process_info","params":{"pane_id":"w2:p1"}}`},
+		{"tab.get", TabGet{Tab: "w6:t3", Seq: 10}.Line, `{"id":"pfm-10","method":"tab.get","params":{"tab_id":"w6:t3"}}`},
+		{"tab.rename", TabRename{Tab: "w6:t3", Label: " XC\tAWS\n", Seq: 11}.Line, `{"id":"pfm-11","method":"tab.rename","params":{"tab_id":"w6:t3","label":"XC AWS"}}`},
+		{"tab label capped on a rune boundary", TabRename{Tab: "t", Label: long, Seq: 12}.Line, `{"id":"pfm-12","method":"tab.rename","params":{"tab_id":"t","label":"` + strings.Repeat("é", 80) + `"}}`},
 	} {
 		if line, err := test.line(); err != nil || string(line) != test.want {
 			t.Errorf("%s: Line = %s, %v\nwant %s", test.name, line, err, test.want)
@@ -286,6 +289,9 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 		"title of only controls":  Metadata{Pane: "p", Title: " \n\t "}.Line,
 		"metadata without a pane": Metadata{Title: "x"}.Line,
 		"process info no pane":    ProcessInfo{}.Line,
+		"tab.get without a tab":   TabGet{}.Line,
+		"tab label of controls":   TabRename{Tab: "t", Label: " \n\t "}.Line,
+		"tab.rename without tab":  TabRename{Label: "x"}.Line,
 	} {
 		if got, err := line(); err == nil {
 			t.Errorf("%s: Line = %s, want an error", name, got)
@@ -329,7 +335,21 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	if err != nil || shellPID != 51234 {
 		t.Errorf("ParseShellPID = %d, %v, want 51234", shellPID, err)
 	}
+	// The shape a live Herdr answered for the tab of an agent's pane.
+	tab, err := ParseTab(json.RawMessage(
+		`{"type":"tab_info","tab":{"agent_status":"idle","focused":false,"label":"1","number":3,` +
+			`"pane_count":1,"tab_id":"w6:t3","workspace_id":"w6"}}`,
+	))
+	if err != nil || tab != (Tab{TabID: "w6:t3", Label: "1", PaneCount: 1}) {
+		t.Errorf("ParseTab = %+v, %v, want w6:t3 labelled 1 holding one pane", tab, err)
+	}
 	for name, parse := range map[string]func() error{
+		"tab of another type": func() error {
+			_, err := ParseTab(json.RawMessage(`{"type":"ok","tab":{"tab_id":"w6:t3","label":"1","pane_count":1}}`))
+			return err
+		},
+		"tab garbage":        func() error { _, err := ParseTab(json.RawMessage(`[1]`)); return err },
+		"tab without its id": func() error { _, err := ParseTab(json.RawMessage(`{"type":"tab_info","tab":{}}`)); return err },
 		"shell pid of another type": func() error {
 			_, err := ParseShellPID(json.RawMessage(`{"type":"ok","process_info":{"shell_pid":7}}`))
 			return err

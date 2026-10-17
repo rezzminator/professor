@@ -18,7 +18,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
-	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -106,19 +105,11 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	// The resumed chat keeps its pfm label as Claude's --name.
-	label, labelErr := store.SessionLabel(ctx, id, store.WithWarningWriter(stderr))
-	if labelErr != nil {
-		fmt.Fprintf(
-			stderr,
-			"pfm internal agent-open: resolve the label of session %s: %v — Claude names this chat itself\n",
-			id, labelErr,
-		)
-		label = ""
-	}
+	// No --name: the resumed session restores its own name from its
+	// transcript (claudelaunch.Render gives a resume none).
 	spawn := action.ClaudeSpawn{
 		Purpose: claudelaunch.PurposeResume,
-		Account: account, Cache1H: &cache1H, Resume: id, Name: label,
+		Account: account, Cache1H: &cache1H, Resume: id,
 		Home: commands.Home, Machine: commands.Machine,
 		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
 	}

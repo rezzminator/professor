@@ -125,6 +125,68 @@ func TestHerdrStateNameSyncTriesEverySuffixThenNamesTheRefusal(t *testing.T) {
 	}
 }
 
+// Herdr's tab bar shows the tab's label, never the pane title: a chat's name
+// labels the tab its agent sits in alone, and a tab shared with other panes
+// keeps its own label. A tab Herdr will not read or relabel is named on stderr
+// and never holds the name back: the name settles, so the next window rename
+// (a resize, a repaint) sends Herdr nothing.
+func TestHerdrStateNameSyncLabelsTheAgentsTab(t *testing.T) {
+	const tabGet, tabRename = `tab.get {"tab_id":"w1:t1"}`, `tab.rename {"tab_id":"w1:t1","label":"Fix It"}`
+	named := []string{listCall, `agent.list {}`, renameCall("w1:p1", "fix-it"), titleCall("w1:p1", "Fix It")}
+	for _, test := range []struct {
+		name        string
+		tab         string
+		label       string
+		panes       int
+		refuse      string
+		wantCalls   []string
+		wantLabel   string
+		wantStderr  string
+		wantStorage string
+	}{
+		{"a single-pane tab takes the name", "w1:t1", "1", 1, "", append(slices.Clone(named), tabGet, tabRename), "Fix It", "", "Fix It"},
+		{"a tab already labelled is left alone", "w1:t1", "Fix It", 1, "", append(slices.Clone(named), tabGet), "Fix It", "", "Fix It"},
+		{"a shared tab keeps its label", "w1:t1", "1", 2, "", append(slices.Clone(named), tabGet), "1", "", "Fix It"},
+		{"an agent Herdr lists in no tab labels nothing", "", "", 0, "", named, "", "", "Fix It"},
+		{
+			"a refused label is named and the name still settles", "w1:t1", "1", 1, "tab.rename",
+			append(slices.Clone(named), tabGet, tabRename), "1", "name tab w1:t1 of pane w1:p1", "Fix It",
+		},
+		{
+			"an unreadable tab is named and the name still settles", "w1:t1", "1", 1, "tab.get",
+			append(slices.Clone(named), tabGet), "1", "name tab w1:t1 of pane w1:p1", "Fix It",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rig := namedRig(t, "Fix It")
+			rig.herdr.setAgents(fakeAgent{"", "w1:p1"})
+			if test.tab != "" {
+				rig.herdr.putAgentInTab("w1:p1", test.tab, test.label, test.panes)
+			}
+			if test.refuse != "" {
+				rig.herdr.refuse[test.refuse] = "invalid_params"
+			}
+			got := rig.hook("name")
+			rig.wantCalls(test.wantCalls...)
+			if test.wantStderr == "" {
+				rig.wantQuiet(got)
+			} else if got.rc != 0 || !strings.Contains(got.stderr, test.wantStderr) {
+				t.Fatalf("rc=%d stderr=%q, want exit 0 naming %q", got.rc, got.stderr, test.wantStderr)
+			}
+			if test.tab != "" {
+				if label := rig.herdr.tabLabel(test.tab); label != test.wantLabel {
+					t.Fatalf("tab label = %q, want %q", label, test.wantLabel)
+				}
+			}
+			if state := rig.tmux.storedState(t); state.Name != test.wantStorage {
+				t.Fatalf("stored name = %q, want %q", state.Name, test.wantStorage)
+			}
+			rig.wantQuiet(rig.hook("name"))
+			rig.wantCalls(append(slices.Clone(test.wantCalls), listCall)...)
+		})
+	}
+}
+
 func TestHerdrStateNameSyncErrorsAreNamedNeverSilent(t *testing.T) {
 	t.Run("agent.list failing: no rename, stderr names it", func(t *testing.T) {
 		rig := namedRig(t, "Fix It")

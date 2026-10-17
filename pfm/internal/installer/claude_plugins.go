@@ -90,8 +90,8 @@ type ClaudePluginTarget struct {
 	// MarketplaceName is the marketplace a full id names; empty for a bare name.
 	MarketplaceName string
 	// ProfessorID is a bare name's id in the professor marketplace,
-	// {name}@professor: on an -alpha build a third copy of ours, retired like
-	// the GitHub one; empty on a release and when claude.plugins lists that id.
+	// {name}@professor: a third copy of ours, which every build retires like
+	// its other copies; empty when claude.plugins lists that id.
 	ProfessorID string
 	// InstallOnly marks an -alpha marketplace plugin claude.plugins does not
 	// name: installed from its checkout, every copy kept disabled.
@@ -139,9 +139,9 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 	return targets
 }
 
-// ownClaudePluginTarget plans the bare name of a plugin of ours. On an -alpha
-// build its professor-marketplace id is a third copy, unless claude.plugins
-// lists that id itself.
+// ownClaudePluginTarget plans the bare name of a plugin of ours. Its
+// professor-marketplace id is a third copy, unless claude.plugins lists that
+// id itself.
 func ownClaudePluginTarget(
 	name string,
 	build ClaudePluginBuild,
@@ -157,11 +157,11 @@ func ownClaudePluginTarget(
 		Source:   claudePluginOwner + "/" + name,
 		Own:      true,
 	}
-	if !alpha {
-		return target
-	}
 	if professor := name + "@" + professorMarketplaceName; !listed[professor] {
 		target.ProfessorID = professor
+	}
+	if !alpha {
+		return target
 	}
 	return localClaudePluginTarget(target, build)
 }

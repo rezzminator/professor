@@ -129,6 +129,28 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 	})
 }
 
+// TestEnsureClaudePluginsReleaseRetiresTheProfessorCopy: a release install
+// ensures engine-sync@engine-sync and sets an enabled engine-sync@professor
+// false, so only one copy's hooks run.
+func TestEnsureClaudePluginsReleaseRetiresTheProfessorCopy(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	settings := filepath.Join(first, "settings.json")
+	writeFixture(t, settings, `{"enabledPlugins":{"engine-sync@professor":true,"other@market":true}}`)
+	var out bytes.Buffer
+	if err := pluginEngine(home, binary, first, second, &pluginRunner{}, &out, true).ensureClaudePlugins(
+		context.Background(),
+	); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	enabled, _ := mustSettings(t, settings)["enabledPlugins"].(map[string]any)
+	if enabled["engine-sync@professor"] != false || enabled["other@market"] != true {
+		t.Fatalf("enabledPlugins=%v, want engine-sync@professor false and other@market kept\n%s", enabled, out.String())
+	}
+	if line := "disable engine-sync@professor in " + settings + ": engine-sync@engine-sync replaces it"; !strings.Contains(out.String(), line) {
+		t.Fatalf("no %q line:\n%s", line, out.String())
+	}
+}
+
 // TestClaudePluginGapsNamesEveryCopy: on an -alpha build a plugin of ours has
 // three copies — GitHub, professor, -dev — and any two enabled is one gap; an
 // install-only plugin enabled under any copy is a gap; a local copy whose

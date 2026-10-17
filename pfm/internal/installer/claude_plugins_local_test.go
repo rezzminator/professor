@@ -131,7 +131,7 @@ func TestClaudePluginTargets(t *testing.T) {
 			Local: true, Marketplace: marketplace, Checkout: filepath.Join(root, p.Name, "plugins", p.Name), Own: true,
 		}
 	}
-	// pro gives each own target of an -alpha build its professor-marketplace copy.
+	// pro gives each own target its professor-marketplace copy, which every build retires.
 	pro := func(targets ...ClaudePluginTarget) []ClaudePluginTarget {
 		for index := range targets {
 			if targets[index].Own {
@@ -176,12 +176,12 @@ func TestClaudePluginTargets(t *testing.T) {
 	}{
 		{"release", ClaudePluginBuild{
 			Version: "0.80.0", Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
-		}, []ClaudePluginTarget{
+		}, pro(
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
-		}},
-		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
+		)},
+		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
-		}},
+		)},
 		{"alpha without the key or a source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, Plugins: defaults,
 		}, pro(
@@ -231,7 +231,7 @@ func TestClaudePluginTargets(t *testing.T) {
 		)},
 		{"the list decides which bare names", ClaudePluginBuild{
 			Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: table[2].Name}},
-		}, []ClaudePluginTarget{github(extra, ""), github(table[2], "")}},
+		}, pro(github(extra, ""), github(table[2], ""))},
 		{"a bare name beyond the default installs from its checkout", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}},
 		}, pro(local(extra, root))},
@@ -257,7 +257,7 @@ func TestClaudePluginTargets(t *testing.T) {
 		{"a release plans no unlisted plugin", ClaudePluginBuild{
 			Version: "0.80.0", Home: home, CheckoutRoot: root,
 			Plugins: []pfmconfig.ClaudePlugin{{ID: table[2].Name}}, Unlisted: []string{extra.Name},
-		}, []ClaudePluginTarget{github(table[2], "")}},
+		}, pro(github(table[2], ""))},
 		{"an empty list ensures nothing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{}}, []ClaudePluginTarget{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

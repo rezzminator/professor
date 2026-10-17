@@ -56,14 +56,21 @@ launch_arguments() makes that proxy the only way out of the browser.
 
 import asyncio
 import base64
+import contextlib
 import io
 import json
 from html import escape as html_escape
 import os.path
+import shlex
 import shutil
+import signal
 import sys
+import tempfile
 import urllib.parse
 
+
+# The one binary patchright's chrome channel launches on darwin.
+CHROME_CHANNEL_DARWIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 # Only binaries `channel="chrome"` can actually launch — patchright's chrome
 # channel means GOOGLE Chrome; a chromium-only host must report MISSING here,
@@ -73,7 +80,7 @@ CHROME_CANDIDATES = [
     "google-chrome-stable",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    CHROME_CHANNEL_DARWIN,
 ]
 
 
@@ -86,6 +93,239 @@ def chrome_binary():
         if found:
             return found
     return None
+
+
+# macOS attributes a process's TCC requests to its "responsible process", the
+# one that started the chain: Chrome launched by this worker is blamed on the
+# `pfm` binary at the top of it, and tccd refuses Chrome's touch of its own app
+# bundle (kTCCServiceSystemPolicyAppBundles) as pfm modifying apps on the Mac
+# — a notification on every launch, and no grant survives pfm's ad-hoc
+# signature changing on a rebuild. A process spawned with responsibility
+# DISCLAIMED is its own responsible process. Playwright spawns Chrome with
+# node's spawn, which cannot set that attribute, so on darwin it spawns a
+# one-line wrapper (WRAPPER) as the browser's executable instead; the wrapper
+# runs this file in launcher mode (LAUNCHER_FLAG), which posix_spawns the real
+# Chrome disclaimed. Nothing else about the launch changes: Playwright keeps
+# its arguments (the stealth and proxy switches among them), the
+# --remote-debugging-pipe descriptors 3 and 4 pass through posix_spawn, the
+# launcher stays in Chrome's process group (Playwright's kill(-pid) reaches
+# both) and ends with Chrome's own status.
+LAUNCHER_FLAG = "--chrome-launcher"
+LIBSYSTEM = "/usr/lib/libSystem.B.dylib"
+DISCLAIM_SYMBOL = "responsibility_spawnattrs_setdisclaim"
+STATUS_DISCLAIMED = "disclaimed"
+STATUS_FAILED = "FAILED"
+# Signals whose default action on darwin is a core dump: the crash reporter
+# answers one that ends THIS process with a "Python quit unexpectedly" dialog,
+# so a real Chrome crash would also be reported against the launcher.
+CRASH_SIGNALS = tuple(
+    getattr(signal, name)
+    for name in ("SIGABRT", "SIGSEGV", "SIGBUS", "SIGILL", "SIGFPE", "SIGTRAP", "SIGSYS", "SIGQUIT", "SIGEMT")
+    if hasattr(signal, name)
+)
+WRAPPER = "#!/bin/sh\nexec %s %s %s %s \"$@\"\n"
+
+
+def spawn_disclaimed(path, argv, env, libc=None):
+    """posix_spawn *path* with responsibility disclaimed; returns the pid.
+    Raises OSError (libSystem absent or a call refused, errno named) or
+    AttributeError (a libSystem without the disclaim symbol): the launcher
+    decides what a failed disclaim means. Descriptors without close-on-exec
+    pass through to the child, as they do through exec."""
+    import ctypes
+
+    if libc is None:
+        libc = ctypes.CDLL(LIBSYSTEM, use_errno=True)
+    set_disclaim = getattr(libc, DISCLAIM_SYMBOL)
+    attr = ctypes.c_void_p()  # posix_spawnattr_t is an opaque pointer on darwin
+    refused = libc.posix_spawnattr_init(ctypes.byref(attr))
+    if refused:
+        raise OSError(refused, f"posix_spawnattr_init: {os.strerror(refused)}")
+    try:
+        refused = set_disclaim(ctypes.byref(attr), 1)
+        if refused:
+            raise OSError(refused, f"{DISCLAIM_SYMBOL}: {os.strerror(refused)}")
+        c_argv = (ctypes.c_char_p * (len(argv) + 1))(*[os.fsencode(a) for a in argv], None)
+        entries = [os.fsencode(f"{k}={v}") for k, v in env.items()]
+        c_env = (ctypes.c_char_p * (len(entries) + 1))(*entries, None)
+        pid = ctypes.c_int()
+        refused = libc.posix_spawn(ctypes.byref(pid), os.fsencode(path), None, ctypes.byref(attr), c_argv, c_env)
+        if refused:
+            raise OSError(refused, f"posix_spawn {path}: {os.strerror(refused)}")
+        return pid.value
+    finally:
+        libc.posix_spawnattr_destroy(ctypes.byref(attr))
+
+
+def _record_status(status_path, line):
+    """The launcher's one-line report to the worker (the Chrome process's own
+    stderr goes to Playwright's debug log, which nobody reads). Written whole
+    under a temporary name, then renamed: the worker never reads a half."""
+    try:
+        with open(status_path + ".tmp", "w", encoding="utf-8") as status:
+            status.write(line + "\n")
+        os.replace(status_path + ".tmp", status_path)
+    except OSError as e:
+        print(f"chrome launcher could not write its status {status_path}: {e}; status: {line}",
+              file=sys.stderr)
+
+
+def chrome_launcher_main(argv, spawn=spawn_disclaimed, execute=os.execve, wait=os.waitpid):
+    """Launcher mode: argv is [status_path, chrome, *chrome_arguments]. Starts
+    Chrome with responsibility disclaimed, forwards SIGTERM, SIGINT and SIGHUP
+    to it and waits. Returns ("exit", code) or ("signal", number) for how
+    Chrome ended — a process-level caller reproduces it. When the disclaim
+    cannot be done Chrome is exec'd normally in its place and the reason goes
+    to the status file: an unavailable disclaim degrades to the launch before
+    this wrapper, never to no browser. Returns ("exit", 127) when Chrome itself
+    cannot be started, and ("signal", number) without starting it when a
+    forwarded signal arrived before it could be."""
+    status_path, chrome, *chrome_arguments = argv
+    command = [chrome, *chrome_arguments]
+    child = {"pid": None, "pending": []}
+
+    def forward(signum, frame):
+        if child["pid"] is None:
+            child["pending"].append(signum)
+            return
+        try:
+            os.kill(child["pid"], signum)
+        except ProcessLookupError:
+            pass  # Chrome already ended; the wait below reports how
+
+    # A signal the caller ignores stays ignored for Chrome, as without the
+    # wrapper; a handled one is forwarded. Python ignores SIGPIPE and SIGXFSZ
+    # for itself, and an ignored signal survives into Chrome, which a
+    # node-spawned Chrome never inherits.
+    forwarded, defaulted = {}, {}
+    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        if signal.getsignal(signum) is not signal.SIG_IGN:
+            forwarded[signum] = signal.signal(signum, forward)
+    for signum in (signal.SIGPIPE, signal.SIGXFSZ):
+        defaulted[signum] = signal.signal(signum, signal.SIG_DFL)
+    try:
+        try:
+            child["pid"] = spawn(chrome, command, dict(os.environ))
+        except Exception as e:  # noqa: BLE001 — whatever the disclaim hit, Chrome still launches, and the status names it
+            _record_status(
+                status_path,
+                f"{STATUS_FAILED} to disclaim responsibility, launching Chrome normally: {type(e).__name__}: {e}",
+            )
+            for signum, handler in forwarded.items():  # SIGPIPE and SIGXFSZ stay default for Chrome
+                signal.signal(signum, handler)
+            if child["pending"]:  # told to stop before Chrome started: it never does
+                return ("signal", child["pending"][0])
+            try:
+                execute(chrome, command, dict(os.environ))
+            except OSError as exec_error:
+                _record_status(status_path, f"{STATUS_FAILED} to exec {chrome}: {exec_error}")
+            return ("exit", 127)
+        _record_status(status_path, f"{STATUS_DISCLAIMED} pid={child['pid']}")
+        for signum in child["pending"]:
+            forward(signum, None)
+        _, wait_status = wait(child["pid"], 0)
+    finally:
+        for signum, handler in (*forwarded.items(), *defaulted.items()):
+            signal.signal(signum, handler)
+    if os.WIFSIGNALED(wait_status):
+        return ("signal", os.WTERMSIG(wait_status))
+    return ("exit", os.WEXITSTATUS(wait_status))
+
+
+def exit_like_chrome(how, kill=os.kill, finish=sys.exit):
+    """End this process the way Chrome ended: by the same signal when it died
+    of one, else with its exit code. A crash-class signal (CRASH_SIGNALS) is
+    never raised on this process — the crash reporter would blame the launcher
+    for Chrome's crash — it becomes the conventional 128 + signal exit, logged."""
+    kind, value = how
+    if kind == "signal":
+        if value in CRASH_SIGNALS:
+            print(f"chrome launcher: Chrome died of {signal.Signals(value).name}; exiting {128 + value}",
+                  file=sys.stderr)
+        else:
+            if value not in (signal.SIGKILL, signal.SIGSTOP):  # always default, and refused by signal()
+                signal.signal(value, signal.SIG_DFL)
+            kill(os.getpid(), value)
+        return finish(128 + value)
+    return finish(value)
+
+
+class ChromeLauncher:
+    """One launch's wrapper script and status file in a private directory."""
+
+    def __init__(self, directory, chrome):
+        self.directory = directory
+        self.status_path = os.path.join(directory, "status")
+        self.executable = os.path.join(directory, "chrome")
+        script = WRAPPER % (
+            # The file this worker loaded, not the env-browser/…/current link a
+            # re-provision flips: launcher mode runs the same source as the worker.
+            shlex.quote(sys.executable), shlex.quote(os.path.realpath(__file__)), LAUNCHER_FLAG,
+            shlex.quote(self.status_path) + " " + shlex.quote(chrome),
+        )
+        with open(self.executable, "w", encoding="utf-8") as wrapper:
+            wrapper.write(script)
+        os.chmod(self.executable, 0o700)
+        self.options = {"executable_path": self.executable}
+
+    def report(self):
+        """Print what the launcher recorded when it is not a clean disclaim: a
+        failed disclaim or a launcher that never reported is a diagnosis, not
+        an absence."""
+        try:
+            with open(self.status_path, encoding="utf-8") as status:
+                line = status.read().strip()
+        except OSError as e:
+            print(f"browser rung: chrome launcher left no status ({self.status_path}): {e}", file=sys.stderr)
+            return
+        if not line.startswith(STATUS_DISCLAIMED):
+            print(f"browser rung: chrome launcher: {line}", file=sys.stderr)
+
+
+class _NoLauncher:
+    """Off darwin, or with no channel Chrome on darwin: Playwright launches its
+    own channel unchanged (and reports a missing one itself)."""
+
+    options = {}
+
+    def report(self):
+        pass
+
+
+@contextlib.contextmanager
+def chrome_launcher(platform=None):
+    """The launcher for one Chrome launch: on darwin a ChromeLauncher around the
+    very binary channel="chrome" launches (CHROME_CHANNEL_DARWIN, never a
+    google-chrome found on PATH or in the working directory), a no-op elsewhere
+    or when that binary is not an executable file. Its directory is removed on
+    exit."""
+    chrome = CHROME_CHANNEL_DARWIN
+    if (platform or sys.platform) != "darwin" or not (os.path.isfile(chrome) and os.access(chrome, os.X_OK)):
+        yield _NoLauncher()
+        return
+    directory = tempfile.mkdtemp(prefix="pfm-chrome-launcher-")
+    try:
+        yield ChromeLauncher(directory, chrome)
+    finally:
+        try:
+            shutil.rmtree(directory)
+        except OSError as e:
+            print(f"browser rung: could not remove the chrome launcher directory {directory}: {e}", file=sys.stderr)
+
+
+@contextlib.asynccontextmanager
+async def chrome_browser(p, **options):
+    """Launch headless system Chrome through patchright — with responsibility
+    disclaimed on darwin — and close it on exit."""
+    with chrome_launcher() as launcher:
+        try:
+            browser = await p.chromium.launch(channel="chrome", headless=True, **launcher.options, **options)
+        finally:
+            launcher.report()
+        try:
+            yield browser
+        finally:
+            await browser.close()
 
 
 # The refusal one missing proxy earns. Go validates every URL through the ask
@@ -970,9 +1210,7 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000,
 
     async def _render():
         async with async_playwright() as p:  # type: ignore[attr-defined]
-            browser = await p.chromium.launch(channel="chrome", headless=True, proxy=proxy,
-                                              args=launch_args)
-            try:
+            async with chrome_browser(p, proxy=proxy, args=launch_args) as browser:
                 context, ua_override = await guarded_context(browser, guarded_ask, caller)
 
                 html, status, outcome = await render_page(context, url, timeout_ms, referer=referer,
@@ -984,8 +1222,6 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000,
                 if report is not None:
                     report["final_url"] = outcome.get("url", "")
                 return html, status
-            finally:
-                await browser.close()
 
     try:
         html, status = await _render()
@@ -1220,14 +1456,11 @@ async def download_browser(url, ask_fetchable, dest, max_bytes, proxy_url=None, 
     if error is not None:
         return error
     async with async_playwright() as p:  # type: ignore[attr-defined]
-        chrome = await p.chromium.launch(channel="chrome", headless=True, proxy=proxy_settings(proxy_url),
-                                         args=launch_arguments(proxy_url, host_resolver_rules))
-        try:
+        async with chrome_browser(p, proxy=proxy_settings(proxy_url),
+                                  args=launch_arguments(proxy_url, host_resolver_rules)) as chrome:
             context, ua_override = await guarded_context(chrome, guarded_ask, caller, accept_downloads=True)
             return await capture_download(context, url, dest, max_bytes, timeout_ms, referer=referer,
                                           ua_override=ua_override, caller_documents=caller is not None)
-        finally:
-            await chrome.close()
 
 
 async def handle_download(request):
@@ -1371,4 +1604,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == [LAUNCHER_FLAG]:
+        exit_like_chrome(chrome_launcher_main(sys.argv[2:]))
     main()

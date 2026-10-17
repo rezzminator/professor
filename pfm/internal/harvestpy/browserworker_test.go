@@ -483,6 +483,32 @@ func TestBrowserRoutePythonSeam(t *testing.T) {
 	}
 }
 
+// TestBrowserChromeLauncherPythonSeam runs the Chrome launcher seam with NO
+// browser and NO patchright: on darwin Chrome is spawned with TCC
+// responsibility disclaimed (so tccd stops blaming pfm for Chrome touching its
+// own app bundle) and keeps its arguments, environment, descriptors, signals
+// and exit status; off darwin the launch is untouched.
+func TestBrowserChromeLauncherPythonSeam(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("named gap: python3 is unavailable on this host; the browser Chrome launcher seam test did not run")
+	}
+	command := exec.Command(python, filepath.Join("assets", "browser", "browser_chrome_launcher_test.py"))
+	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(os.Environ())
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("browser Chrome launcher seam failed: %v\n%s", err, output)
+	}
+	// A case that cannot run here (the kernel's responsibility answer is
+	// darwin's) says GAP; a passing run still names it in the test log.
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.HasPrefix(line, "GAP ") {
+			t.Log(line)
+		}
+	}
+}
+
 func assetDirForTest() string {
 	if _, err := os.Stat(filepath.Join("assets", "browser")); err == nil {
 		return "."

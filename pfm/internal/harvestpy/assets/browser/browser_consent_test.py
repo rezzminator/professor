@@ -221,8 +221,7 @@ async def render_fixtures(names):
     results = {}
     try:
         async with async_playwright() as p:
-            chrome = await p.chromium.launch(channel="chrome", headless=True)
-            try:
+            async with browser.chrome_browser(p) as chrome:
                 for name in names:
                     context = await chrome.new_context()
                     try:
@@ -230,8 +229,6 @@ async def render_fixtures(names):
                                                           marker_token="tok")
                     finally:
                         await context.close()
-            finally:
-                await chrome.close()
     finally:
         server.shutdown()
     return results
@@ -304,8 +301,7 @@ async def dismiss_label_pages():
         raise AssertionError("BROWSER_LIVE=1 but no system Chrome resolves")
     results = {}
     async with async_playwright() as p:
-        chrome = await p.chromium.launch(channel="chrome", headless=True)
-        try:
+        async with browser.chrome_browser(p) as chrome:
             context = await chrome.new_context()
             try:
                 page = await context.new_page()
@@ -315,8 +311,6 @@ async def dismiss_label_pages():
                     results[label] = (await browser.dismiss_consent(page))["pressed"]
             finally:
                 await context.close()
-        finally:
-            await chrome.close()
     return results
 
 

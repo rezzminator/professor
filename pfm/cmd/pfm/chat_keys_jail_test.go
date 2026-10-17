@@ -141,6 +141,7 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 	jailTest(t)
 	values := jailPaths(t)
 	socket := filepath.Join(t.TempDir(), "h.sock")
+	keys := make(chan string, 32)
 	serveNativeAdapter(t, socket, map[string]string{
 		"agent.get": `{"type":"agent_info","agent":{"pane_id":"p3","terminal_id":"w6:p3","agent":"claude","agent_status":"idle"}}`,
 		"pane.process_info": fmt.Sprintf(
@@ -150,7 +151,7 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 		"pane.read":      `{"type":"pane_read","read":{"pane_id":"p3","workspace_id":"w6","text":"native screen\n🔖 🥇 Captured Label │ project","truncated":false}}`,
 		"pane.send_keys": `{"type":"ok"}`,
 		"pane.send_text": `{"type":"ok"}`,
-	})
+	}, keys)
 	state := fleetdb.OpenSharedState(context.Background(), values)
 	defer func() {
 		if err := state.Close(); err != nil {
@@ -178,7 +179,7 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_SOCKET_PATH", socket)
 	t.Setenv("HERDR_PANE_ID", "w6:p3")
-	for _, args := range [][]string{{"chat", "keys", "--delay", "0s", "NATIVE", "Enter", "Escape", "C-c", "Down", "Tab"}, {"chat", "keys", "--literal", "--capture", "NATIVE", "native text"}, {"chat", "capture", "NATIVE"}, {"chat", "whoami", "--label"}} {
+	for _, args := range [][]string{{"chat", "keys", "--delay", "0s", "NATIVE", "Enter", "Escape", "C-c", "Down", "Tab"}, {"chat", "keys", "--literal", "--capture", "NATIVE", "native text"}, {"chat", "capture", "NATIVE"}, {"chat", "whoami", "--label"}, {"chat", "modal", "NATIVE", "deny", "1"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 0 {
 			t.Errorf("native adapter %v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
@@ -190,9 +191,16 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 			t.Errorf("native capture=%q", stdout.String())
 		}
 	}
+	var got []string
+	for len(keys) > 0 {
+		got = append(got, <-keys)
+	}
+	if len(got) < 2 || strings.Join(got[len(got)-2:], ",") != "Down,Enter" {
+		t.Fatalf("native modal keys=%v", got)
+	}
 }
 
-func serveNativeAdapter(t *testing.T, path string, table map[string]string) {
+func serveNativeAdapter(t *testing.T, path string, table map[string]string, recorded ...chan string) {
 	t.Helper()
 	listener, err := net.Listen("unix", path)
 	if err != nil {
@@ -218,6 +226,13 @@ func serveNativeAdapter(t *testing.T, path string, table map[string]string) {
 				var request map[string]any
 				if err := json.NewDecoder(conn).Decode(&request); err != nil {
 					return
+				}
+				if len(recorded) > 0 && request["method"] == "pane.send_keys" {
+					params, _ := request["params"].(map[string]any)
+					keys, _ := params["keys"].([]any)
+					for _, key := range keys {
+						recorded[0] <- fmt.Sprint(key)
+					}
 				}
 				_ = json.NewEncoder(conn).
 					Encode(map[string]any{"id": request["id"], "result": json.RawMessage(table[fmt.Sprint(request["method"])])})

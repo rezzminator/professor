@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
@@ -151,7 +152,7 @@ func TestHerdrCallNative(t *testing.T) {
 		{name: "not-ready", state: "idle", refusal: "agent_not_ready", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_not_ready"},
 		{name: "stalled", state: "idle", refusal: "agent_prompt_stalled", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_prompt_stalled"},
 		{name: "unknown-result", state: "idle", response: "surprise", status: "typed_unconfirmed", code: CodeUndelivered, detail: "surprise"},
-		{name: "unsupported", state: "idle", engine: "cx", status: "refused", code: CodeUndelivered, detail: "unsupported"},
+		{name: "unsupported", state: "idle", engine: "invalid-engine", status: "refused", code: CodeUndelivered, detail: "unsupported"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
@@ -791,5 +792,157 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 	second := <-requests
 	if second.Method != "agent.wait" || !reflect.DeepEqual(second.Params["until"], []any{"working", "blocked"}) {
 		t.Fatalf("producer was not waiting on a missed transient state: %+v", second)
+	}
+}
+
+func TestHerdrCallRaw(t *testing.T) {
+	for _, test := range []struct {
+		name, body, before, after, refusal, badMethod string
+		wantPayload                                   string
+		id                                            pfmengine.ID
+		wantCode                                      int
+		wantTyped                                     bool
+	}{
+		{name: "multiline", id: pfmengine.Codex, body: "a\nb", wantPayload: "\x1b[200~a\nb\x1b[201~", wantTyped: true},
+		{name: "opencode", id: pfmengine.OpenCode, body: "a\nb", wantPayload: "\x1b[200~a\nb\x1b[201~", wantTyped: true},
+		{name: "large", id: pfmengine.Codex, body: strings.Repeat("line\n", 2000), wantTyped: true},
+		{name: "command", id: pfmengine.Codex, body: "/status", wantTyped: true},
+		{name: "draft", id: pfmengine.Codex, body: "a\nb", before: "› unsent", wantCode: CodeUndelivered},
+		{name: "busy", id: pfmengine.OpenCode, body: "a\nb", before: "› \nesc interrupt", wantCode: CodeBusy},
+		{name: "menu", id: pfmengine.Codex, body: "a\nb", before: "› 1. Allow once\n  2. Deny", wantCode: CodeUndelivered},
+		{name: "missing-composer", id: pfmengine.Codex, body: "a\nb", before: "Starting...", wantCode: CodeUndelivered},
+		{name: "read-malformed", id: pfmengine.Codex, body: "a\nb", badMethod: "pane.read", wantCode: CodeUndelivered},
+		{name: "paste-refused", id: pfmengine.Codex, body: "a\nb", refusal: "pane.send_text", wantCode: CodeUndelivered, wantTyped: true},
+		{name: "paste-malformed", id: pfmengine.Codex, body: "a\nb", badMethod: "pane.send_text", wantCode: CodeUndelivered, wantTyped: true},
+		{name: "enter-refused", id: pfmengine.Codex, body: "a\nb", refusal: "pane.send_keys", wantCode: CodeUndelivered, wantTyped: true},
+		{name: "still-in-composer", id: pfmengine.Codex, body: "a\nb", after: "› [Pasted text #1 +2 lines]", wantCode: CodeUndelivered, wantTyped: true},
+		{name: "no-confirmation", id: pfmengine.Codex, body: "a\nb", after: "unrelated screen", wantCode: CodeUndelivered, wantTyped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			entered := false
+			var payload string
+			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+				if request.Method == test.refusal {
+					return nil, "pane_send_failed"
+				}
+				if request.Method == test.badMethod {
+					return map[string]any{"type": "unexpected"}, ""
+				}
+				switch request.Method {
+				case "pane.read":
+					screen := test.before
+					if screen == "" {
+						screen = "› "
+					}
+					if entered {
+						screen = test.after
+						if screen == "" {
+							screen = strings.TrimSuffix(strings.TrimPrefix(payload, "\x1b[200~"), "\x1b[201~") + "\n› "
+						}
+					}
+					return nativePaneRead(request, screen), ""
+				case "pane.send_text":
+					payload, _ = request.Params["text"].(string)
+				case "pane.send_keys":
+					entered = true
+				default:
+					t.Errorf("raw engine used unexpected API %s", request.Method)
+				}
+				return map[string]any{"type": "ok"}, ""
+			})
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: string(test.id)}
+			engine := nativeEngine(t, target)
+			// Pin row 9 at the raw wire boundary without adding a sender footer.
+			engine.options.DisableSignature = test.wantPayload != ""
+			prepared, err := engine.prepareLiveMessage(context.Background(), target, test.body, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := engine.CallTarget(context.Background(), target, Request{Message: test.body})
+			if err != nil || result.Code != test.wantCode || result.Typed != test.wantTyped {
+				t.Fatalf("raw call=%+v err=%v; want code=%d typed=%t", result, err, test.wantCode, test.wantTyped)
+			}
+			if test.wantCode == 0 {
+				if result.Status != statusDelivered {
+					t.Fatalf("raw status=%+v", result)
+				}
+				wantPayload := test.wantPayload
+				if wantPayload == "" {
+					wantPayload = "\x1b[200~" + prepared.Message + "\x1b[201~"
+				}
+				if payload != wantPayload {
+					t.Fatalf("paste payload=%q want %q", payload, wantPayload)
+				}
+				calls := socket.calls()
+				if len(calls) != 4 || calls[0].Method != "pane.read" || calls[1].Method != "pane.send_text" ||
+					calls[2].Method != "pane.send_keys" ||
+					calls[3].Method != "pane.read" ||
+					!reflect.DeepEqual(calls[2].Params["keys"], []any{"Enter"}) {
+					t.Fatalf("raw call order=%+v", calls)
+				}
+			}
+		})
+	}
+}
+
+func TestHerdrThenRawBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		screens    []string
+		sawWorking bool
+		wantCode   int
+	}{
+		{name: "observed-working", screens: []string{"› \nesc interrupt", "› "}},
+		{name: "already-observed", screens: []string{"› "}, sawWorking: true},
+		{name: "stale-idle", screens: []string{"› "}, wantCode: CodeUndelivered},
+		{name: "blocked", screens: []string{"› 1. Allow once\n  2. Deny"}, wantCode: CodeUndelivered},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			i, entered := 0, false
+			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+				switch request.Method {
+				case "pane.read":
+					screen := test.screens[min(i, len(test.screens)-1)]
+					i++
+					if entered {
+						screen = "resume the port\n› "
+					}
+					return nativePaneRead(request, screen), ""
+				case "pane.send_keys":
+					entered = true
+				case "pane.send_text":
+				}
+				return map[string]any{"type": "ok"}, ""
+			})
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: string(pfmengine.OpenCode)}
+			engine := nativeEngine(t, target)
+			engine.options.ThenBusyTries, engine.options.ThenIdleTries, engine.options.ThenIdlePoll = 3, 2, time.Millisecond
+			turn, err := json.Marshal(
+				map[string]any{"socket_path": socket.path, "pane": "p2", "raw": true, "saw_working": test.sawWorking},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine.env = &paths.MapEnv{Values: map[string]string{herdrTurnEnv: string(turn)}}
+			result, err := engine.DeliverThen(
+				context.Background(),
+				ThenWait{
+					Backend:    "herdr",
+					SocketPath: socket.path,
+					Target:     "p2",
+					Engine:     string(pfmengine.OpenCode),
+					Steers:     []string{"resume the port"},
+				},
+			)
+			if err != nil || result.Code != test.wantCode || (test.wantCode == 0 && !result.Typed) {
+				t.Fatalf("raw steer=%+v err=%v; want code=%d", result, err, test.wantCode)
+			}
+			if test.wantCode == 0 {
+				calls := socket.calls()
+				if calls[len(calls)-2].Method != "pane.send_keys" {
+					t.Fatalf("raw steer not submitted: %+v", calls)
+				}
+			}
+		})
 	}
 }

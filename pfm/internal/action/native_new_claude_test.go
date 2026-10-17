@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -265,9 +266,18 @@ func herdrPickerSocket(t *testing.T) string {
 			func() {
 				defer func() { _ = conn.Close() }()
 				var req struct {
-					ID string `json:"id"`
+					ID     string `json:"id"`
+					Method string `json:"method"`
 				}
 				if json.NewDecoder(conn).Decode(&req) != nil {
+					return
+				}
+				if req.Method == "ping" {
+					_, _ = fmt.Fprintf(
+						conn,
+						`{"id":%q,"ok":true,"result":{"type":"pong","version":"0.9.5","protocol":22}}`+"\n",
+						req.ID,
+					)
 					return
 				}
 				_, _ = fmt.Fprintf(conn, `{"id":%q,"ok":true,"result":{"pane":{"pane_id":"w6:p3"}}}`+"\n", req.ID)
@@ -275,4 +285,55 @@ func herdrPickerSocket(t *testing.T) string {
 		}
 	}()
 	return socket
+}
+
+func TestHerdrPickerRawEnginesPrepareSamePane(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
+		t.Run(kind.String(), func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := herdrPickerSocket(t)
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			t.Setenv("TMUX", "")
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
+			binary := filepath.Join(home, "raw-engine")
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			machine.Codex.Binary = binary
+			machine.OpenCode.Binary = binary
+			executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
+			if err != nil {
+				t.Fatal(err)
+			}
+			line, err := executor.Open(
+				context.Background(),
+				Request{
+					Row:            compose.Row{Kind: kind, CWD: home},
+					Home:           home,
+					PrimaryAccount: 2,
+					FreshSocket:    "unused",
+					Config:         machine,
+				},
+			)
+			if err != nil || !strings.HasPrefix(line, "exec pfm internal seat-host ") {
+				t.Fatalf("raw picker line=%q err=%v", line, err)
+			}
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() { _ = db.Close() }()
+			seat, found, err := db.Seat(context.Background(), strings.TrimPrefix(line, "exec pfm internal seat-host "))
+			id := compose.EngineForKind(kind)
+			if err != nil || !found || seat.Engine != string(id) || seat.SessionID == "" || seat.HerdrPane != "w6:p3" ||
+				pfmengine.MustLookup(id).HerdrNativePrompt {
+				t.Fatalf("raw picker seat=%+v found=%v err=%v", seat, found, err)
+			}
+		})
+	}
 }

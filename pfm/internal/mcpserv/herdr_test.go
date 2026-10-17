@@ -2,6 +2,7 @@ package mcpserv
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -67,5 +69,49 @@ func TestHerdrProxyRequesterCarriesItsOwnBackend(t *testing.T) {
 		self.SeatID != "seat1" ||
 		self.HerdrWorkspace != "w6" {
 		t.Fatalf("self=%+v err=%v", self, err)
+	}
+}
+
+func TestHerdrLossNoteIsNotBackendFailure(t *testing.T) {
+	for _, test := range []struct{ note, failure, state string }{
+		{note: "your last message was not answered — re-send it", state: "lost"},
+		{failure: "HERDR UNREACHABLE own socket", state: "error"},
+	} {
+		row := compose.Row{
+			Kind:         compose.ResumeClaude,
+			ID:           "sid",
+			Backend:      "herdr",
+			LostNote:     test.note,
+			BackendError: test.failure,
+		}
+		current := &backend{chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}}}
+		listed, err := current.list(context.Background(), LSInput{})
+		if err != nil || len(listed.Rows) != 1 {
+			t.Fatalf("list=%+v err=%v", listed, err)
+		}
+		data, err := json.Marshal(listed.Rows[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output map[string]any
+		if err := json.Unmarshal(data, &output); err != nil {
+			t.Fatal(err)
+		}
+		if output["state"] != test.state || (test.note != "" && output["lost_note"] != test.note) ||
+			(test.failure != "" && output["backend_error"] != test.failure) {
+			t.Errorf("native row=%s", data)
+		}
+		status := statusOutput(headless.Status{Name: "sid", State: "lost", LostNote: test.note, Error: test.failure})
+		data, err = json.Marshal(status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output = nil
+		if err := json.Unmarshal(data, &output); err != nil {
+			t.Fatal(err)
+		}
+		if test.note != "" && output["lost_note"] != test.note {
+			t.Errorf("native status lost note: %s", data)
+		}
 	}
 }

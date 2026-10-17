@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -121,6 +125,16 @@ func claudePersonaSpawn(
 // the Herdr reporter plugin for every chat — and, for a persona, its system
 // and fleet prompt files.
 func openCodePersonaEnv(request Request) (string, error) {
+	assignments, err := openCodePersonaAssignments(request)
+	if err != nil {
+		return "", err
+	}
+	var command strings.Builder
+	writeAssignments(&command, assignments)
+	return command.String(), nil
+}
+
+func openCodePersonaAssignments(request Request) ([]string, error) {
 	hasPersona := request.Persona.Prompt != ""
 	var plugins []string
 	if hasPersona {
@@ -130,7 +144,7 @@ func openCodePersonaEnv(request Request) (string, error) {
 		plugins = append(plugins, (&url.URL{Scheme: "file", Path: request.OpenCodeHerdrPlugin}).String())
 	}
 	if len(plugins) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	config := map[string]any{"plugin": plugins}
 	if hasPersona {
@@ -139,15 +153,36 @@ func openCodePersonaEnv(request Request) (string, error) {
 	body, err := json.Marshal(config)
 	if err != nil {
 		obs.Logger(context.Background()).Error("OpenCode launch config", obs.FieldErr, err)
-		return "", err
+		return nil, err
 	}
-	env := " OPENCODE_CONFIG_CONTENT=" + Quote(string(body))
+	env := []string{"OPENCODE_CONFIG_CONTENT=" + string(body)}
 	if !hasPersona {
 		return env, nil
 	}
 	if request.OpenCodeFleetPrompt != "" {
-		env += " PFM_OPENCODE_FLEET_FILE=" + Quote(request.OpenCodeFleetPrompt)
+		env = append(env, "PFM_OPENCODE_FLEET_FILE="+request.OpenCodeFleetPrompt)
 	}
-	return env +
-		" PFM_OPENCODE_SYSTEM_FILE=" + Quote(request.Persona.Prompt), nil
+	return append(env, "PFM_OPENCODE_SYSTEM_FILE="+request.Persona.Prompt), nil
+}
+
+func openCodeSeatRun(request Request, machine pfmconfig.Config, resume bool) (*fleetdb.SeatRun, error) {
+	assignments, err := openCodePersonaAssignments(request)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{}
+	if resume {
+		args = append(args, "--session", request.Row.ID)
+	}
+	args = append(args, request.Row.CWD)
+	if request.Prompt != "" {
+		args = append(args, "--prompt", request.Prompt)
+	}
+	launch := claudelaunch.Launch{Env: assignments, Unset: opencodeHygieneNames}
+	return &fleetdb.SeatRun{
+		Binary: binaryWord(machine.OpenCode.Binary, pfmengine.MustLookup(pfmengine.OpenCode).Binary, false),
+		Args:   args,
+		Env:    launchEnvironment(os.Environ(), launch),
+		CWD:    request.Row.CWD,
+	}, nil
 }

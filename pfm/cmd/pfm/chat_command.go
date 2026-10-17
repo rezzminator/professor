@@ -71,13 +71,17 @@ func runChatOpen(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (exitCode int) {
-	flags := cli.NewFlagSet("chat open", "usage: pfm chat open <target>", stderr)
+	flags := cli.NewFlagSet("chat open", "usage: pfm chat open [--restored] <target>", stderr)
+	restored := flags.Bool("restored", false, "resume a restored pane without interactive prompts")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
 		return 2
+	}
+	if *restored {
+		return pfmchat.OpenRestoredID(context.Background(), flags.Arg(0), stdout, stderr, &runtime)
 	}
 	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtime)
 	if code != 0 {
@@ -153,12 +157,10 @@ func runChatKillContext(
 	}
 	switch {
 	case found:
-		if chat.Backend == pfmcall.HerdrBackend {
-			return runResolvedChatKillContext(ctx, chat, *exit, stdout, stderr, runtimes...)
-		}
 		id = chat.ID
-		if chat.Live && chat.Socket != "" && chat.Pane != "" {
-			return runResolvedChatKillContext(ctx, chat, true, stdout, stderr, runtimes...)
+		addressed := chat.Live && chat.Socket != "" && chat.Pane != ""
+		if addressed || chat.Backend == pfmcall.HerdrBackend {
+			return runResolvedChatKillContext(ctx, chat, *exit || addressed, stdout, stderr, runtimes...)
 		}
 		if chat.Live {
 			// Live with no address to close: say so instead of letting the
@@ -205,10 +207,6 @@ func runResolvedChatKillContext(
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
 ) (exitCode int) {
-	if chat.Backend == pfmcall.HerdrBackend {
-		fmt.Fprintln(stderr, "pfm chat kill: native Herdr kill is not supported until phase 2")
-		return 2
-	}
 	return pfmchat.KillResolved(ctx, chat, exit, stdout, stderr, firstRuntime(runtimes))
 }
 
@@ -617,6 +615,9 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 			stdout, "  %-28s %-24s %-7s %s%s\n",
 			transcript.Truncate(row.Name, 28), handle, state, location, transcript.Truncate(row.LastPrompt, 64),
 		)
+		if row.LostNote != "" {
+			fmt.Fprintf(stdout, "    loss note: %s\n", row.LostNote)
+		}
 	}
 	if len(listed.Rows) == 0 {
 		fmt.Fprintln(stdout, "  (none)")

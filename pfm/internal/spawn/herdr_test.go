@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -38,15 +39,11 @@ func TestHerdrSpawnReservesStructuredRecipeAndCleansRefusal(t *testing.T) {
 			t.Cleanup(func() { _ = listener.Close() })
 			requests := make(chan map[string]any, 1)
 			go func() {
-				conn, err := listener.Accept()
+				conn, req, err := acceptBirthRequest(listener)
 				if err != nil {
 					return
 				}
 				defer func() { _ = conn.Close() }()
-				var req map[string]any
-				if json.NewDecoder(conn).Decode(&req) != nil {
-					return
-				}
 				requests <- req
 				if mode == "malformed" {
 					_, _ = fmt.Fprintln(conn, "not-json")
@@ -219,15 +216,11 @@ func TestHerdrBirthResolvesRealEngineBeforeReservation(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = listener.Close() })
 				go func() {
-					conn, err := listener.Accept()
+					conn, req, err := acceptBirthRequest(listener)
 					if err != nil {
 						return
 					}
 					defer func() { _ = conn.Close() }()
-					var req map[string]any
-					if json.NewDecoder(conn).Decode(&req) != nil {
-						return
-					}
 					_, _ = fmt.Fprintf(
 						conn,
 						`{"id":%q,"ok":true,"result":{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}}`+"\n",
@@ -292,4 +285,161 @@ func TestHerdrBirthResolvesRealEngineBeforeReservation(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
+	for _, engineID := range []pfmengine.ID{pfmengine.Codex, pfmengine.OpenCode} {
+		for _, mode := range []string{"configured", "path", "missing"} {
+			t.Run(string(engineID)+"/"+mode, func(t *testing.T) {
+				testjail.Fleet(t)
+				values, err := paths.Resolve()
+				if err != nil {
+					t.Fatal(err)
+				}
+				binary := filepath.Join(values.Home, "real", pfmengine.MustLookup(engineID).Binary)
+				if err := os.MkdirAll(filepath.Dir(binary), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if mode != "missing" {
+					if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Setenv("PATH", filepath.Dir(binary))
+				word := binary
+				if mode != "configured" {
+					word = pfmengine.MustLookup(engineID).Binary
+				}
+				request := HerdrRequest{
+					Paths: values,
+					Choice: BackendChoice{
+						Backend:        BackendHerdr,
+						HerdrSocket:    birthPingSocket(t),
+						HerdrPane:      "w6:p3",
+						HerdrWorkspace: "w6",
+					},
+					Seat: fleetdb.Seat{SeatID: "raw-seat", SessionID: "provisional", Engine: string(engineID)},
+					Run:  fleetdb.SeatRun{Binary: word, CWD: values.Home, Args: []string{"a b", "a'quote"}},
+				}
+				result, err := PrepareHerdr(context.Background(), request)
+				db := fleetdb.OpenSharedState(context.Background(), values)
+				defer func() { _ = db.Close() }()
+				if mode == "missing" {
+					if err == nil || !strings.Contains(err.Error(), "resolve native") {
+						t.Fatalf("missing raw binary result=%+v err=%v", result, err)
+					}
+					if _, found, err := db.Seat(context.Background(), "raw-seat"); err != nil || found {
+						t.Fatalf("missing birth row found=%v err=%v", found, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				run, err := db.ReadSeatRun(result.Seat.SeatID)
+				want := request.Run
+				want.Binary = binary
+				if err != nil || !reflect.DeepEqual(run, want) {
+					t.Fatalf("raw actual recipe=%+v want=%+v err=%v", run, want, err)
+				}
+			})
+		}
+	}
+}
+
+func TestHerdrBirthRefusesProtocolBeforeReservation(t *testing.T) {
+	testjail.Fleet(t)
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(testjail.ShortRoot(t), "protocol.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		var req map[string]any
+		if json.NewDecoder(conn).Decode(&req) != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(
+			conn,
+			`{"id":%q,"ok":true,"result":{"type":"pong","version":"0.9.5","protocol":23}}`+"\n",
+			req["id"],
+		)
+	}()
+	binary := filepath.Join(values.Home, "real-engine")
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err = PrepareHerdr(
+		context.Background(),
+		HerdrRequest{
+			Paths:  values,
+			Choice: BackendChoice{Backend: BackendHerdr, HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6"},
+			Seat:   fleetdb.Seat{SeatID: "protocol-seat", SessionID: "sid", Engine: "cc"},
+			Run:    fleetdb.SeatRun{Binary: binary, CWD: values.Home},
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "seats disabled") {
+		t.Fatalf("protocol23 birth error=%v", err)
+	}
+	db := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() { _ = db.Close() }()
+	if _, found, err := db.Seat(context.Background(), "protocol-seat"); err != nil || found {
+		t.Fatalf("protocol refusal reservation found=%v err=%v", found, err)
+	}
+	if _, err := db.ReadSeatRun("protocol-seat"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("protocol refusal recipe=%v", err)
+	}
+}
+
+func acceptBirthRequest(listener net.Listener) (net.Conn, map[string]any, error) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return nil, nil, err
+		}
+		var req map[string]any
+		if err := json.NewDecoder(conn).Decode(&req); err != nil {
+			_ = conn.Close()
+			return nil, nil, err
+		}
+		if req["method"] != "ping" {
+			return conn, req, nil
+		}
+		_, err = fmt.Fprintf(
+			conn,
+			`{"id":%q,"ok":true,"result":{"type":"pong","version":"0.9.5","protocol":22}}`+"\n",
+			req["id"],
+		)
+		_ = conn.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+}
+
+func birthPingSocket(t *testing.T) string {
+	t.Helper()
+	socket := filepath.Join(testjail.ShortRoot(t), "ping.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		conn, _, err := acceptBirthRequest(listener)
+		if err == nil {
+			_ = conn.Close()
+		}
+	}()
+	return socket
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -315,6 +316,141 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 			lines := server.requests()
 			if len(lines) != 1 || !strings.Contains(lines[0], `"state":"`+wantState+`"`) || stderr.Len() != 0 {
 				t.Fatalf("read-only native %s report=%q stderr=%s", event, lines, &stderr)
+			}
+		})
+	}
+}
+
+func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name, event, payload string
+		engine               pfmengine.ID
+		clear, pending       bool
+	}{
+		{name: "resume", event: "start", payload: `{"session_id":"sid","source":"resume"}`},
+		{name: "idle", event: "idle", payload: `{"session_id":"sid"}`},
+		{name: "tool working", event: "working", payload: `{"session_id":"sid","hook_event_name":"PostToolUse","tool_name":"Bash"}`},
+		{name: "prompt", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"private"}`, clear: true},
+		{name: "end reload", event: "end", payload: `{"session_id":"sid","reason":"prompt_input_exit"}`, pending: true},
+		{name: "opencode state", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid"}`},
+		{name: "opencode replayed user message", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"message.updated","role":"user"}`},
+		{name: "opencode prompt", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"chat.message"}`, clear: true},
+		{name: "opencode interrupted prompt", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"chat.message","is_interrupt":true}`},
+		{name: "claude rejects opencode marker", event: "working", payload: `{"session_id":"sid","hook_event_name":"chat.message"}`},
+		{name: "opencode idle marker", engine: pfmengine.OpenCode, event: "idle", payload: `{"session_id":"sid","hook_event_name":"chat.message"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newFakeHerdr(t)
+			server.addPane("w6:p3", "native")
+			root := t.TempDir()
+			t.Setenv(paths.EnvHome, root)
+			t.Setenv(paths.EnvStateDB, filepath.Join(root, "pfm.db"))
+			t.Setenv("TMUX", "")
+			for k, v := range herdrPaneEnv(server, "w6:p3") {
+				t.Setenv(k, v)
+			}
+			db := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: filepath.Join(root, "pfm.db")})
+			defer func() { _ = db.Close() }()
+			note := "your last message was not answered — re-send it"
+			engine := tc.engine
+			if engine == "" {
+				engine = pfmengine.Claude
+			}
+			seat := fleetdb.Seat{
+				SeatID:        "seat-note",
+				SessionID:     "sid",
+				Engine:        string(engine),
+				Backend:       "herdr",
+				State:         "live",
+				HerdrSocket:   server.path,
+				HerdrPane:     "w6:p3",
+				LostNote:      note,
+				ReloadPending: tc.pending,
+			}
+			if err := db.PutSeat(context.Background(), seat); err != nil {
+				t.Fatal(err)
+			}
+			var stderr bytes.Buffer
+			if rc := reportToHerdr(
+				[]string{"--engine", string(engine), tc.event},
+				strings.NewReader(tc.payload),
+				&stderr,
+				realHerdrDeps(),
+			); rc != 0 ||
+				stderr.Len() != 0 {
+				t.Fatalf("hook rc=%d stderr=%s", rc, &stderr)
+			}
+			current, found, err := db.Seat(context.Background(), seat.SeatID)
+			if err != nil || !found {
+				t.Fatalf("read note: %v %v", found, err)
+			}
+			want := note
+			if tc.clear {
+				want = ""
+			}
+			if current.LostNote != want || current.ReloadPending != tc.pending {
+				t.Fatalf("note/pending after %s: %+v want note=%q", tc.name, current, want)
+			}
+			if tc.pending || strings.Contains(tc.payload, `"is_interrupt":true`) {
+				if len(server.requests()) != 0 {
+					t.Fatalf("pending reload released pane: %v", server.requests())
+				}
+			} else {
+				if len(server.requests()) != 1 ||
+					!strings.Contains(server.requests()[0], `"method":"pane.report_agent"`) {
+					t.Fatalf("native report=%v", server.requests())
+				}
+			}
+		})
+	}
+}
+
+func TestBareHerdrDegradedSeatStoreStillReportsWithVisibleError(t *testing.T) {
+	for _, failure := range []string{"corrupt", "newer"} {
+		t.Run(failure, func(t *testing.T) {
+			server := newFakeHerdr(t)
+			server.addPane("w6:p3", "bare")
+			root := t.TempDir()
+			t.Setenv(paths.EnvHome, root)
+			t.Setenv(paths.EnvStateDB, filepath.Join(root, "pfm.db"))
+			t.Setenv("TMUX", "")
+			for k, v := range herdrPaneEnv(server, "w6:p3") {
+				t.Setenv(k, v)
+			}
+			values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
+			database := seatStateSQL(
+				t,
+				values,
+				fleetdb.Seat{SeatID: "other", Backend: "tmux", State: "live", Engine: string(pfmengine.Claude)},
+			)
+			if failure == "corrupt" {
+				if err := os.WriteFile(values.StateDB, []byte("not SQLite"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := database.Exec(fmt.Sprintf("PRAGMA user_version=%d", fleetdb.SchemaVersion+1)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var stderr bytes.Buffer
+			if rc := reportToHerdr(
+				[]string{"start"},
+				strings.NewReader(`{"session_id":"sid","source":"startup"}`),
+				&stderr,
+				realHerdrDeps(),
+			); rc != 0 || !strings.Contains(stderr.String(), "seat") ||
+				!strings.Contains(stderr.String(), "fail-open") {
+				t.Fatalf("degraded rc=%d stderr=%s", rc, &stderr)
+			}
+			lines := server.requests()
+			reported := false
+			for _, line := range lines {
+				if strings.Contains(line, `"method":"pane.report_agent"`) {
+					reported = true
+				}
+			}
+			if !reported {
+				t.Fatalf("legacy report missing after visible degradation: %v stderr=%s", lines, &stderr)
 			}
 		})
 	}

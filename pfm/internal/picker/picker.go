@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -18,8 +19,10 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
@@ -250,10 +253,6 @@ func Run(
 	case ui.OutcomeProfessorUpdate:
 		return openProfessorUpdate(ctx, outcome, stdout, stderr, runtime)
 	case ui.OutcomeDeactivate:
-		if outcome.Row.Backend == spawn.BackendHerdr {
-			fmt.Fprintln(stderr, "pfm ls: native Herdr deactivate is not supported until phase 2")
-			return 2
-		}
 		if outcome.Row.Socket == "" {
 			fmt.Fprintf(stderr, "pfm ls: deactive %s: no live server\n", outcome.Row.Name)
 			return 1
@@ -262,14 +261,14 @@ func Run(
 			fmt.Fprintln(stderr, "pfm ls: deactive refused for split live window")
 			return 1
 		}
-		if err := pfmchat.KillServer(ctx, scan.Paths, outcome.Row.Socket); err != nil {
+		if err := deactivateApplier(ctx, scan.Paths)(outcome.Row); err != nil {
 			fmt.Fprintf(stderr, "pfm ls: deactive %s: %v\n", outcome.Row.Name, err)
 			return 1
 		}
 		fmt.Fprintf(stderr, "pfm ls: deactivated %s — ready to resume\n", outcome.Row.Name)
 		return 0
 	case ui.OutcomeReboot:
-		row, err := rebootRow(ctx, scan.Paths, outcome.Row, stderr)
+		row, err := rebootRow(ctx, scan.Paths, outcome.Row, stderr, runtime)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
@@ -545,9 +544,6 @@ func killApplier(
 		return nil, err
 	}
 	return func(change ui.KillChange) error {
-		if filepath.IsAbs(change.Socket) {
-			return errors.New("native Herdr kill is not supported until phase 2")
-		}
 		if !change.Killed {
 			removed, err := manager.Unkill(ctx, change.ID)
 			if err == nil && !removed {
@@ -577,7 +573,20 @@ func deactivateApplier(
 ) func(compose.Row) error {
 	return func(row compose.Row) error {
 		if row.Backend == spawn.BackendHerdr {
-			return errors.New("native Herdr deactivate is not supported until phase 2")
+			var diagnostic strings.Builder
+			runtime := pfmconfig.Runtime{Paths: resolved}
+			target := headless.Chat{
+				Backend: row.Backend,
+				SeatID:  row.SeatID,
+				ID:      row.ID,
+				Engine:  compose.EngineForKind(row.Kind),
+				Socket:  row.Socket,
+				Pane:    row.PaneID,
+			}
+			if code := pfmchat.EndResolved(ctx, target, io.Discard, &diagnostic, &runtime); code != 0 {
+				return fmt.Errorf("native deactivate: %s", strings.TrimSpace(diagnostic.String()))
+			}
+			return nil
 		}
 		if row.Socket == "" {
 			return errors.New("selected chat has no live server")
@@ -591,9 +600,56 @@ func rebootRow(
 	resolved paths.Values,
 	row compose.Row,
 	stderr io.Writer,
+	runtimes ...pfmconfig.Runtime,
 ) (compose.Row, error) {
 	if row.Backend == spawn.BackendHerdr {
-		return compose.Row{}, errors.New("native Herdr reboot is not supported until phase 2")
+		if !row.Kind.IsLiveSeat() {
+			return row, nil
+		}
+		runtime, err := pfmconfig.OptionalRuntime(runtimes)
+		if err != nil {
+			return compose.Row{}, fmt.Errorf("native reboot runtime: %w", err)
+		}
+		primary := row.Account
+		if primary == 0 {
+			primary, err = fleet.PrimaryAccount(resolved, runtime.Config)
+			if err != nil {
+				return compose.Row{}, fmt.Errorf("native reboot account: %w", err)
+			}
+		}
+		ids := runtime.Config.AccountIDs()
+		codexHome := ""
+		if compose.EngineForKind(row.Kind) == pfmengine.Codex {
+			ids = runtime.Config.CodexAccountIDs()
+			selected, found := runtime.Config.CodexAccountByID(primary)
+			if !found {
+				return compose.Row{}, fmt.Errorf("native reboot Codex account %d is not configured", primary)
+			}
+			codexHome = selected.Home
+		}
+		_, err = reload.RunHerdr(
+			ctx,
+			reload.Request{
+				Engine:     compose.EngineForKind(row.Kind),
+				SocketPath: row.Socket,
+				Pane:       row.PaneID,
+				SessionID:  row.ID,
+				CWD:        row.CWD,
+				Name:       row.Name,
+				Account:    primary,
+				AccountIDs: ids,
+				Cache1H:    row.C1H,
+				CodexHome:  codexHome,
+				Home:       resolved.Home,
+				Machine:    runtime.Config,
+			},
+			reload.Options{Home: resolved.Home, SIDDir: resolved.SIDDir},
+			stderr,
+		)
+		if err != nil {
+			return compose.Row{}, fmt.Errorf("native reboot: %w", err)
+		}
+		return row, nil
 	}
 	if row.Kind == compose.LiveSplit || row.ID == "" {
 		return compose.Row{}, errors.New("a split live row cannot be rebooted as one chat")

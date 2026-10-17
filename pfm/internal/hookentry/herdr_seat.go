@@ -2,11 +2,13 @@ package hookentry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
@@ -29,6 +31,9 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if errors.Is(db.Degraded(), fleetdb.ErrAbsent) {
 		return false, nil // No durable seats exist; retain the environment-only reporter.
 	}
+	if err := db.Degraded(); err != nil {
+		return false, fmt.Errorf("resolve native seat state: %w", err)
+	}
 	seat, found, err := db.SeatByPane(ctx, env(herdr.EnvSocket), env(herdr.EnvPane))
 	if err != nil {
 		return true, fmt.Errorf("resolve native seat: %w", err)
@@ -48,6 +53,9 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if reporter.options.event.FiredByTmux() {
 		return true, nil
 	}
+	if reporter.options.event == herdr.EventEnd && seat.ReloadPending {
+		return true, nil
+	}
 	action := reporter.plan(payload)
 	if action == nil {
 		return true, nil
@@ -56,10 +64,15 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if payload.SessionID != "" {
 		seat.SessionID = payload.SessionID
 	}
+	promptSubmitted := payload.HookEventName == "UserPromptSubmit" ||
+		(reporter.options.engine == pfmengine.OpenCode && payload.HookEventName == "chat.message")
+	if reporter.options.event == herdr.EventWorking && promptSubmitted && !payload.IsInterrupt {
+		seat.LostNote = ""
+	}
 	reporter.session = seat.SessionID
 	// A bound state-only hook needs no schema work or durable heartbeat write.
 	if reporter.options.event == herdr.EventStart || reporter.options.event == herdr.EventEnd ||
-		seat.SessionID != before.SessionID {
+		seat.SessionID != before.SessionID || seat.LostNote != before.LostNote {
 		writable := fleetdb.OpenSharedState(ctx, *reporter.deps.seatPaths)
 		defer func() {
 			if err := writable.Close(); err != nil {
@@ -144,4 +157,20 @@ func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload he
 	before := seat
 	seat.SessionID = payload.SessionID
 	return db.UpdateSeat(ctx, before, seat)
+}
+
+// herdrPayload is the part of an engine's hook payload the reporter reads.
+type herdrPayload struct {
+	HookEventName    string          `json:"hook_event_name"`
+	SessionID        string          `json:"session_id"`
+	AgentID          string          `json:"agent_id"`
+	Source           string          `json:"source"`
+	Reason           string          `json:"reason"`
+	NotificationType string          `json:"notification_type"`
+	Message          string          `json:"message"`
+	ToolName         string          `json:"tool_name"`
+	ToolInput        json.RawMessage `json:"tool_input"`
+	IsInterrupt      bool            `json:"is_interrupt"`
+	Title            string          `json:"title"`
+	TranscriptPath   string          `json:"transcript_path"`
 }

@@ -63,6 +63,7 @@ func Compose(input Input) Output {
 	// collapseLiveServers — that function's multi-server winner selection
 	// exists for LiveClaude/LiveCodex identity collapse, a different problem.
 	liveRows = append(liveRows, current.bootingRows()...)
+	nativeRows := current.herdrRows()
 	agentRows := current.agentRows()
 
 	output := Output{
@@ -93,7 +94,7 @@ func Compose(input Input) Output {
 	}
 
 	liveRows = append(liveRows, agentRows...)
-	liveRows = append(liveRows, current.herdrRows()...)
+	liveRows = append(liveRows, nativeRows...)
 	for index := range liveRows {
 		row := liveRows[index]
 		row = current.applyKill(row, EngineForKind(row.Kind))

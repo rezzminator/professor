@@ -97,7 +97,7 @@ func statusOutput(status headless.Status) StatusOutput {
 		Name: status.Name, State: status.State, IdleSeconds: status.IdleSeconds,
 		Engine: status.Engine, Model: status.Model, CWD: status.CWD,
 		SessionID: status.SessionID, Socket: status.Socket, ContextPct: status.ContextPct,
-		Last: status.Last, Error: status.Error, Summary: status.Summary,
+		Last: status.Last, Error: status.Error, LostNote: status.LostNote, Summary: status.Summary,
 		SummaryCached: status.SummaryCached, Ask: status.Ask,
 	}
 }

@@ -21,8 +21,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -44,7 +46,9 @@ func init() {
 	if os.Getenv("PFM_S3_FIXTURE") != "1" {
 		return
 	}
-	if os.Args[0] != "claude" && os.Args[0] != "seat-descendant" {
+	if os.Args[0] != "claude" && os.Args[0] != pfmengine.MustLookup(pfmengine.Codex).Binary &&
+		os.Args[0] != pfmengine.MustLookup(pfmengine.OpenCode).Binary &&
+		os.Args[0] != "seat-descendant" {
 		return
 	}
 	root := os.Getenv("PFM_S3_ROOT")
@@ -122,8 +126,24 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "engine-report"), body, 0o600); err != nil {
+	reportFile := "engine-report"
+	if os.Getenv("PFM_S3_PASS") == "next" {
+		reportFile += "-next"
+	}
+	if err := atomicfile.Write(filepath.Join(root, reportFile), body, 0o600); err != nil {
 		panic(err)
+	}
+	if strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "reload-") {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if _, err := os.Stat(filepath.Join(root, reportFile+"-release")); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				panic("reload release timeout")
+			}
+			time.Sleep(time.Millisecond)
+		}
 	}
 	if child != nil {
 		<-hup
@@ -193,6 +213,7 @@ func TestSeatHostPTY(t *testing.T) {
 	for _, mode := range []string{
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
+		"reload-success", "reload-retry", "reload-close", "raw-codex", "raw-opencode",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -221,12 +242,19 @@ func TestSeatHostPTY(t *testing.T) {
 			if strings.Contains(mode, "ledger-") {
 				environment = append(environment, claudelaunch.CostEnv(11111, 1)...)
 			}
+			engineID := pfmengine.Claude
+			if mode == "raw-codex" {
+				engineID = pfmengine.Codex
+			}
+			if mode == "raw-opencode" {
+				engineID = pfmengine.OpenCode
+			}
 			if mode != "launch" && !strings.HasPrefix(mode, "launch-ledger-") {
 				if err := db.PutSeat(
 					context.Background(),
 					fleetdb.Seat{
 						SeatID:      "native-seat",
-						Engine:      "cc",
+						Engine:      string(engineID),
 						Backend:     "herdr",
 						State:       "live",
 						HerdrPane:   "w6:p3",
@@ -294,6 +322,95 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() { done <- command.Wait() }()
+			if strings.HasPrefix(mode, "failed-") {
+				if _, err := master.Write([]byte{4}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.HasPrefix(mode, "reload-") {
+				waitSeatFixture(
+					t,
+					done,
+					func() bool { _, err := os.Stat(filepath.Join(root, "engine-report")); return err == nil },
+				)
+				seat, found, err := db.Seat(context.Background(), "native-seat")
+				if err != nil || !found {
+					t.Fatalf("read first seat: %v %v", found, err)
+				}
+				before := seat
+				seat.ReloadPending = true
+				run, err := db.ReadSeatRun(seat.SeatID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.Args = []string{"--model", "next-model"}
+				run.Env = append(run.Env, "PFM_S3_PASS=next")
+				if mode != "reload-success" {
+					run.Binary = filepath.Join(root, "missing-next-engine")
+				}
+				if err := db.WriteSeatRun(seat.SeatID, run); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.UpdateSeat(context.Background(), before, seat); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(
+					filepath.Join(root, "engine-report-release"),
+					[]byte("ready"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				if mode != "reload-success" {
+					waitSeatFixture(t, done, func() bool {
+						current, found, err := db.Seat(context.Background(), seat.SeatID)
+						return err == nil && found && current.State == "failed"
+					})
+					current, _, err := db.Seat(context.Background(), seat.SeatID)
+					if err != nil || !current.ReloadPending || current.HerdrPane != "w6:p3" {
+						t.Fatalf("failed reload lost pending/current pane: %+v err=%v", current, err)
+					}
+					if mode == "reload-close" {
+						if _, err := master.WriteString("q\n"); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						run.Binary = binary
+						if err := db.WriteSeatRun(seat.SeatID, run); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := master.WriteString("\n"); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if mode != "reload-close" {
+					waitSeatFixture(t, done, func() bool {
+						current, found, err := db.Seat(context.Background(), seat.SeatID)
+						_, fileErr := os.Stat(filepath.Join(root, "engine-report-next"))
+						return err == nil && found && current.State == "live" && !current.ReloadPending &&
+							fileErr == nil
+					})
+					body, err := os.ReadFile(filepath.Join(root, "engine-report-next"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					var next seatFixtureReport
+					if err := json.Unmarshal(body, &next); err != nil {
+						t.Fatal(err)
+					}
+					if next.Pane != "w6:p3" || next.SupervisorPID != command.Process.Pid {
+						t.Fatalf("reload moved lifetime owner: %+v", next)
+					}
+					if err := os.WriteFile(
+						filepath.Join(root, "engine-report-next-release"),
+						[]byte("ready"),
+						0o600,
+					); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
 			if mode == "hup" {
 				deadline := time.NewTimer(8 * time.Second)
 				defer deadline.Stop()
@@ -339,6 +456,20 @@ func TestSeatHostPTY(t *testing.T) {
 				}
 				return
 			}
+			if mode == "reload-close" {
+				if command.ProcessState.ExitCode() != 0 ||
+					!strings.Contains(output.String(), "press Enter to retry, q to close") {
+					t.Fatalf("close retry status=%v output=%s", err, &output)
+				}
+				seats, readErr := db.Seats(context.Background())
+				if readErr != nil || len(seats) != 0 {
+					t.Fatalf("closed failed seats=%+v err=%v", seats, readErr)
+				}
+				return
+			}
+			if mode == "reload-retry" && !strings.Contains(output.String(), "press Enter to retry, q to close") {
+				t.Fatalf("missing retry UX: %s", &output)
+			}
 			if command.ProcessState.ExitCode() != 7 {
 				t.Fatalf("supervisor status=%v: %s", err, &output)
 			}
@@ -359,9 +490,12 @@ func TestSeatHostPTY(t *testing.T) {
 					t.Errorf("engine fd%d device=%d, concrete PTY device=%d", fd, device, terminal.Rdev)
 				}
 			}
-			if report.Argv0 != "claude" || report.Group != report.PID || report.Foreground != report.Group ||
+			if report.Argv0 != pfmengine.MustLookup(engineID).Binary || report.Group != report.PID ||
+				report.Foreground != report.Group ||
 				report.Pane != "w6:p3" ||
-				report.Socket != server.path || !report.StdoutTTY || !report.StderrTTY {
+				report.Socket != server.path ||
+				!report.StdoutTTY ||
+				!report.StderrTTY {
 				t.Fatalf("foreground engine = %+v", report)
 			}
 			if (mode == "launch" || strings.HasPrefix(mode, "launch-ledger-")) && report.Session == "" {
@@ -451,4 +585,45 @@ func newSeatHostHerdr(t *testing.T) *fakeHerdr {
 		}
 	}()
 	return server
+}
+
+func waitSeatFixture(t *testing.T, done <-chan error, ready func() bool) {
+	t.Helper()
+	deadline := time.NewTimer(8 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("supervisor exited before expected transition: %v", err)
+		case <-deadline.C:
+			t.Fatal("supervisor transition timeout")
+		case <-tick.C:
+			if ready() {
+				return
+			}
+		}
+	}
+}
+
+func TestSeatHostDoesNotCloseAnAbsentSeat(t *testing.T) {
+	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
+	db := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var stderr bytes.Buffer
+	status := closeSeat(
+		context.Background(),
+		db,
+		fleetdb.Seat{SeatID: "removed", HerdrSocket: "/fixture/unowned.sock", HerdrPane: "w6:p3"},
+		0,
+		&stderr,
+	)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("absent seat attempted stale close: status=%d stderr=%s", status, &stderr)
+	}
 }

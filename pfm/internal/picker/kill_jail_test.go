@@ -261,3 +261,33 @@ func TestHidingAChatDoesNotCleanUpADeadSocket(t *testing.T) {
 		t.Fatalf("hide changed process-lifecycle state: %v", err)
 	}
 }
+
+func TestNativeUnkillUsesExistingLedger(t *testing.T) {
+	jailTest(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	apply, err := killApplier(context.Background(), database, pfmconfig.Runtime{Paths: jailPaths(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := ui.KillChange{ID: "44444444-4444-4444-8444-444444444444", Engine: "cc", Killed: true}
+	if err := apply(change); err != nil {
+		t.Fatal(err)
+	}
+	change.Socket = "/fixture/herdr.sock"
+	change.PaneID = "w6:p3"
+	change.Killed = false
+	if err := apply(change); err != nil {
+		t.Fatalf("native unkill: %v", err)
+	}
+	if _, found, err := database.Killed(context.Background(), change.ID); err != nil || found {
+		t.Fatalf("unkilled ledger found=%v err=%v", found, err)
+	}
+}

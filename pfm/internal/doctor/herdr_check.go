@@ -128,6 +128,12 @@ func printHerdrDoctor(ctx context.Context, stdout io.Writer, dependencies Depend
 				state,
 				engine,
 			)
+			fmt.Fprintf(
+				stdout,
+				"doctor: herdr integration %s installed — a second reporter on pfm panes; run herdr integration uninstall %s\n",
+				engine,
+				engine,
+			)
 		}
 	}
 	if len(unread) > 0 {

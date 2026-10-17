@@ -320,3 +320,39 @@ func dossierPurposeLinesText(purpose string, inner int) []string {
 	}
 	return text
 }
+
+func TestDossierKeepsLossNoteSeparateFromPromptAndFailure(t *testing.T) {
+	model := deckModel(160, 38)
+	for _, test := range []struct{ note, failure string }{
+		{note: "your last message was not answered — re-send it"},
+		{failure: "HERDR UNREACHABLE own socket"},
+	} {
+		row := compose.Row{
+			Kind:         compose.LiveClaude,
+			ID:           "sid",
+			Name:         "NATIVE",
+			Backend:      "herdr",
+			Socket:       "native.sock",
+			PaneID:       "w1:p1",
+			LastPrompt:   "a private prompt",
+			LostNote:     test.note,
+			BackendError: test.failure,
+		}
+		lines := model.dossierDetails(row, 100, 0)
+		var text strings.Builder
+		for _, line := range lines {
+			text.WriteString(ansi.Strip(joinSpans(line)))
+			text.WriteByte('\n')
+		}
+		shown := text.String()
+		if test.note != "" && !strings.Contains(shown, test.note) {
+			t.Errorf("loss note not shown: %q", shown)
+		}
+		if test.failure != "" && !strings.Contains(shown, test.failure) {
+			t.Errorf("backend failure not shown: %q", shown)
+		}
+		if !strings.Contains(shown, "herdr") || strings.Contains(shown, row.LastPrompt) {
+			t.Errorf("dossier conflated address/prompt: %q", shown)
+		}
+	}
+}

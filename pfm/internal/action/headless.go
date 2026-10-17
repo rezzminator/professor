@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -28,10 +30,11 @@ var headlessHygiene = envStripWords(claudelaunch.Hygiene())
 
 // HeadlessRequest is one detached, named chat to start.
 type HeadlessRequest struct {
-	Engine pfmengine.ID
-	Name   string
-	CWD    string
-	Prompt string
+	Engine          pfmengine.ID
+	ResumeSessionID string
+	Name            string
+	CWD             string
+	Prompt          string
 	// PromptChannel is already composed for the selected engine: a per-seat
 	// system-prompt file path for Claude, or the complete developer
 	// instructions value for Codex. Empty preserves the ordinary launch.
@@ -112,6 +115,7 @@ func CodexDeveloperInstructionsArg(prompt string) []string {
 // HeadlessPlan is the pure result: the command the tmux session runs, its
 // optional launch record, and whether the prompt travelled on the command.
 type HeadlessPlan struct {
+	Engine  pfmengine.ID
 	SeatRun *fleetdb.SeatRun
 	Run     string
 	Record  *fleetdb.Launch
@@ -180,7 +184,12 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 		if err != nil {
 			return HeadlessPlan{}, err
 		}
+		recipe, err := spawn.SeatRun(request.CWD)
+		if err != nil {
+			return HeadlessPlan{}, err
+		}
 		return HeadlessPlan{
+			Engine: pfmengine.Claude, SeatRun: &recipe,
 			Run:                 run,
 			Binary:              claudeBinaryWord(machine),
 			PromptOnCommandLine: true,
@@ -206,6 +215,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 		}
 		arguments = append(arguments, "fork", request.SessionID)
 		return HeadlessPlan{
+			Engine: pfmengine.Codex, SeatRun: codexSeatRun(machine, request.PrimaryAccount, request.CWD, arguments...),
 			Run: codexCommandWithAccount(
 				headlessHygiene,
 				machine,
@@ -282,8 +292,8 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 		return HeadlessPlan{}, err
 	}
 	return HeadlessPlan{
-		SeatRun: &recipe,
-		Run:     run,
+		Engine: pfmengine.Claude, SeatRun: &recipe,
+		Run: run,
 		Record: &fleetdb.Launch{
 			SessionID: id, Engine: pfmengine.Claude, Account: request.PrimaryAccount,
 			Cache1H: resolvedCache1H(machine, request.PrimaryAccount, request.Cache1H),
@@ -328,9 +338,77 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 	if request.PromptChannel != "" {
 		arguments = append(arguments, CodexDeveloperInstructionsArg(request.PromptChannel)...)
 	}
+	if request.ResumeSessionID != "" {
+		if strings.ContainsAny(request.ResumeSessionID, "\r\n\x00") {
+			return HeadlessPlan{}, errors.New("codex resume requires one safe session id")
+		}
+		arguments = append(arguments, "resume", request.ResumeSessionID)
+	}
 	return HeadlessPlan{
+		Engine: pfmengine.Codex, SeatRun: codexSeatRun(machine, request.PrimaryAccount, request.CWD, arguments...),
 		Run:       codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),
 		Binary:    codexBinaryWord(machine, request.PrimaryAccount),
 		CodexHome: account.Home,
+	}, nil
+}
+
+// codexSeatRun retains argv and account environment without a shell or the cx launcher.
+func codexSeatRun(machine pfmconfig.Config, account int, cwd string, args ...string) *fleetdb.SeatRun {
+	env := []string{}
+	if selected, found := machine.CodexAccountByID(account); found {
+		env = append(env, "CODEX_HOME="+selected.Home)
+	}
+	launch := claudelaunch.Launch{Env: env, Unset: append(append([]string{}, hygieneNames...), "CODEX_HOME")}
+	arguments := append(codexAutonomyArgs(machine.EffectiveCodex(account).Yolo), args...)
+	return &fleetdb.SeatRun{
+		Binary: codexBinaryWord(machine, account),
+		Args:   arguments,
+		Env:    launchEnvironment(os.Environ(), launch),
+		CWD:    cwd,
+	}
+}
+
+func codexAutonomyArgs(yolo bool) []string {
+	args := []string{pfmengine.CodexNoDaemon}
+	if yolo {
+		return append(args, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	return append(args, "--sandbox", "workspace-write")
+}
+
+// PlanOpenCode uses the same launch producer as an interactive fresh seat.
+func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
+	if err := validateHeadlessRequest(request); err != nil {
+		return HeadlessPlan{}, err
+	}
+	if request.Effort != "" || request.PromptChannel != "" {
+		return HeadlessPlan{}, errors.New("OpenCode headless effort and prompt channel are not supported")
+	}
+	machine := normalizedMachineConfig(request.Config, request.Home)
+	launch := Request{
+		Row:            compose.Row{Kind: compose.NewOpenCode, CWD: request.CWD},
+		FreshSocket:    "headless-plan",
+		PrimaryAccount: request.PrimaryAccount,
+		Home:           request.Home,
+		Config:         machine,
+		Prompt:         request.Prompt,
+	}
+	if err := applyWorkbench(&launch); err != nil {
+		return HeadlessPlan{}, err
+	}
+	plan, err := Synthesize(launch)
+	if err != nil {
+		return HeadlessPlan{}, err
+	}
+	if request.Model != "" {
+		plan.SeatRun.Args = append(plan.SeatRun.Args, "--model", request.Model)
+		plan.Run += " --model " + Quote(request.Model)
+	}
+	return HeadlessPlan{
+		Engine:              pfmengine.OpenCode,
+		SeatRun:             plan.SeatRun,
+		Run:                 plan.Run,
+		Binary:              plan.SeatRun.Binary,
+		PromptOnCommandLine: true,
 	}, nil
 }

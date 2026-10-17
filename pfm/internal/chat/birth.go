@@ -7,11 +7,16 @@ import (
 	"io"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // BirthBackend adapts a verified request-local caller to the backend selector.
@@ -39,25 +44,45 @@ func BirthBackend(ctx context.Context, requested string, env paths.Env) (spawn.B
 // BirthHerdr creates and reports a native seat without fabricating a tmux handle.
 // The boolean preserves launch prompt state when a pane exists or may exist.
 func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.HeadlessPlan, runtime *pfmconfig.Runtime,
-	name, prompt string, await, attach bool, stdout, stderr io.Writer,
+	name, prompt string, await, attach bool, stdout, stderr io.Writer, awaitOptions ...headless.AwaitOptions,
 ) (bool, int) {
-	if await || attach {
-		fmt.Fprintln(
-			stderr,
-			"pfm chat new: native Herdr --await/--attach are not supported in phase 1; omit them (the new tab stays unfocused)",
-		)
-		return false, 2
-	}
-	if plan.SeatRun == nil || plan.Record == nil {
-		fmt.Fprintln(stderr, "pfm chat new: native birth has no structured recipe or session identity")
+	if plan.SeatRun == nil {
+		fmt.Fprintln(stderr, "pfm chat new: native birth has no structured recipe")
 		return false, 1
 	}
-	if err := fleetdb.RecordLaunch(ctx, runtime.Paths, *plan.Record, clock.Real.Now().Unix()); err != nil {
-		fmt.Fprintf(stderr, "pfm chat new: record native launch %s: %v\n", plan.Record.SessionID, err)
+	engineID := plan.Engine
+	id := ""
+	if plan.Record != nil {
+		id = plan.Record.SessionID
+		if engineID == "" {
+			engineID = plan.Record.Engine
+		}
+	}
+	if _, err := pfmengine.Lookup(engineID); err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: native engine: %v\n", err)
+		return false, 1
+	}
+	if id == "" {
+		var err error
+		id, err = claudelaunch.NewSessionID()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat new: native session identity: %v\n", err)
+			return false, 1
+		}
+	}
+
+	if err := herdr.CheckProtocol(ctx, choice.HerdrSocket); err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return false, 1
+	}
+	if plan.Record != nil {
+		if err := fleetdb.RecordLaunch(ctx, runtime.Paths, *plan.Record, clock.Real.Now().Unix()); err != nil {
+			fmt.Fprintf(stderr, "pfm chat new: record native launch %s: %v\n", plan.Record.SessionID, err)
+		}
 	}
 	result, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
 		Choice: choice, Paths: runtime.Paths, Run: *plan.SeatRun,
-		Seat: fleetdb.Seat{SessionID: plan.Record.SessionID, Engine: string(plan.Record.Engine), Name: name},
+		Seat: fleetdb.Seat{SessionID: id, Engine: string(engineID), Name: name},
 	})
 	born := result.Seat.SeatID != ""
 	if err = CommitWorkbenchLaunch(ctx, born, name, err); err != nil {
@@ -73,14 +98,45 @@ func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.Hea
 		fmt.Fprintf(stderr, "pfm chat new: native seat is starting; comms ledger: %v\n", err)
 	}
 	plan.Report(stderr, "pfm chat new")
+	report := stdout
+	if await {
+		report = stderr
+	}
 	fmt.Fprintf(
-		stdout,
+		report,
 		"%s\t%s\therdr\t%s\t%s\tstarting\n",
-		plan.Record.Engine,
+		engineID,
 		name,
 		result.Seat.HerdrSocket,
 		result.Seat.HerdrPane,
 	)
+	if await {
+		options := headless.AwaitOptions{}
+		if len(awaitOptions) > 0 {
+			options = awaitOptions[0]
+		}
+		turn, err := headless.Await(ctx, func(ctx context.Context) (headless.Chat, bool, error) {
+			return nativeBirthTarget(ctx, result.Seat, runtime)
+		}, options)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat new: native await: %v\n", err)
+			return true, 1
+		}
+		if turn.Error != "" {
+			fmt.Fprintf(stderr, "pfm chat new: native turn: %s\n", turn.Error)
+			return true, 1
+		}
+		if _, err := fmt.Fprintln(stdout, turn.Answer); err != nil {
+			fmt.Fprintf(stderr, "pfm chat new: print native answer: %v\n", err)
+			return true, 1
+		}
+	}
+	if attach {
+		if err := viewNative(ctx, result.Seat, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+			return true, 1
+		}
+	}
 	RecordVerb(ctx, "new", 0)
 	return true, 0
 }
@@ -91,4 +147,60 @@ func LaunchSessionID(record *fleetdb.Launch) string {
 		return ""
 	}
 	return record.SessionID
+}
+
+// Resolve through the durable seat ID: reporters may replace a raw planner's
+// provisional session identity before its first transcript appears.
+func nativeBirthTarget(
+	ctx context.Context,
+	initial fleetdb.Seat,
+	runtime *pfmconfig.Runtime,
+) (target headless.Chat, found bool, returnErr error) {
+	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
+	seat, found, err := db.Seat(ctx, initial.SeatID)
+	if err != nil || !found {
+		return target, found, err
+	}
+	if pfmengine.ID(seat.Engine) == pfmengine.Claude {
+		index, err := store.Open()
+		if err != nil {
+			return target, false, err
+		}
+		defer func() { returnErr = errors.Join(returnErr, index.Close()) }()
+		record, found, err := index.Transcript(ctx, seat.SessionID)
+		if err != nil {
+			return target, false, err
+		}
+		if !found {
+			rows, err := Rows(ctx, io.Discard, runtime)
+			if err != nil {
+				return target, false, err
+			}
+			for index := range rows {
+				row := &rows[index]
+				if row.ID == seat.SessionID && row.Path != "" {
+					return FromRow(*row), true, nil
+				}
+			}
+			return target, false, nil
+		}
+		return headless.Chat{
+			ID:      seat.SessionID,
+			SeatID:  seat.SeatID,
+			Engine:  pfmengine.Claude,
+			Backend: spawn.BackendHerdr,
+			Name:    seat.Name,
+			Socket:  seat.HerdrSocket,
+			Pane:    seat.HerdrPane,
+			Path:    record.Path,
+			CWD:     record.CWD,
+			Live:    seat.State == liveState,
+		}, true, nil
+	}
+	target, err = Target(ctx, seat.SessionID, runtime)
+	if errors.Is(err, ErrUnknownChat) {
+		return target, false, nil
+	}
+	return target, err == nil, err
 }

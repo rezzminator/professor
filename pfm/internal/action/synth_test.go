@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -823,5 +824,49 @@ func TestCodexDoorsRunInProcess(t *testing.T) {
 		if strings.Count(door.run, "--no-daemon") != 1 {
 			t.Errorf("%s carries --no-daemon %d times: %q", door.name, strings.Count(door.run, "--no-daemon"), door.run)
 		}
+	}
+}
+
+func TestSynthesizeRawNativeRecipesRetainTypedLaunch(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
+		t.Run(kind.String(), func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
+			machine.OpenCode.Binary = "/opt/open code"
+			machine.Codex.Binary = "/opt/codex stable"
+			t.Setenv("CLAUDECODE", "stale")
+			t.Setenv("CLAUDE_CODE_SSE_PORT", "stale-port")
+			request := Request{
+				Row:            compose.Row{Kind: kind, CWD: "/work/native"},
+				Home:           home,
+				PrimaryAccount: 2,
+				FreshSocket:    "unused",
+				Prompt:         "a 'quoted' prompt",
+				Config:         machine,
+			}
+			plan, err := Synthesize(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.SeatRun == nil || plan.SeatRun.CWD != request.Row.CWD ||
+				!slices.Contains(plan.SeatRun.Args, request.Prompt) {
+				t.Fatalf("raw native launch=%+v", plan.SeatRun)
+			}
+			if lastEnvironmentValueNative(plan.SeatRun.Env, "CLAUDECODE") != "" {
+				t.Fatalf("stale identity in native environment: %v", plan.SeatRun.Env)
+			}
+			if kind == compose.NewCodex {
+				account, _ := machine.CodexAccountByID(2)
+				if plan.SeatRun.Binary != machine.Codex.Binary || plan.SeatRun.Args[0] != pfmengine.CodexNoDaemon ||
+					lastEnvironmentValueNative(plan.SeatRun.Env, "CODEX_HOME") != account.Home {
+					t.Fatalf("Codex native recipe=%+v", plan.SeatRun)
+				}
+			} else if plan.SeatRun.Binary != machine.OpenCode.Binary ||
+				lastEnvironmentValueNative(plan.SeatRun.Env, "CLAUDE_CODE_SSE_PORT") != "" ||
+				!slices.Contains(plan.SeatRun.Args, "--prompt") {
+				t.Fatalf("OpenCode native recipe=%+v", plan.SeatRun)
+			}
+		})
 	}
 }

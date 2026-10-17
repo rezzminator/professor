@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -50,12 +51,6 @@ func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (resul
 	if err != nil {
 		return result, err
 	}
-	if !descriptor.HerdrNativePrompt {
-		return result, fmt.Errorf(
-			"engine %s native Herdr raw launch path is not supported until phase 2; use --backend tmux",
-			descriptor.LongName,
-		)
-	}
 	if request.Run.Binary == "" || !filepath.IsAbs(request.Run.CWD) {
 		return result, errors.New("native seat requires a binary and absolute cwd")
 	}
@@ -67,11 +62,22 @@ func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (resul
 			return result, errors.New("native seat values cannot contain NUL")
 		}
 	}
-	binary, err := gather.ResolveClaudeBinary(request.Paths.Home, request.Run.Binary, (paths.OSEnv{}).Get("PATH"))
+	var binary string
+	if descriptor.ID == pfmengine.Claude {
+		binary, err = gather.ResolveClaudeBinary(request.Paths.Home, request.Run.Binary, (paths.OSEnv{}).Get("PATH"))
+	} else {
+		binary, err = deps.Resolve(request.Run.Binary)
+		if err == nil {
+			binary, err = filepath.Abs(binary)
+		}
+	}
 	if err != nil {
-		return result, fmt.Errorf("resolve native Claude engine: %w", err)
+		return result, fmt.Errorf("resolve native %s engine: %w", descriptor.LongName, err)
 	}
 	request.Run.Binary = binary
+	if err := herdr.CheckProtocol(ctx, choice.HerdrSocket); err != nil {
+		return result, fmt.Errorf("native seat protocol: %w", err)
+	}
 	seat := request.Seat
 	if seat.SeatID == "" {
 		var bytes [16]byte

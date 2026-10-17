@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,8 +16,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -24,7 +27,7 @@ import (
 // branch-seat marker.
 func KillServer(ctx context.Context, resolved paths.Values, socket string) (err error) {
 	if filepath.IsAbs(socket) {
-		return errors.New("native Herdr end/deactivate/reboot is not supported until phase 2")
+		return errors.New("KillServer requires a tmux socket name; use EndResolved for a native Herdr seat")
 	}
 	end := obs.Transition(ctx, "chat", "live", "ended", "KillServer")
 	defer func() { end(err) }()
@@ -52,9 +55,17 @@ func KillServer(ctx context.Context, resolved paths.Values, socket string) (err 
 
 // EndResolved ends a resolved live chat without re-resolving its identity.
 func EndResolved(ctx context.Context, chat headless.Chat, stdout, stderr io.Writer, runtime *pfmconfig.Runtime) int {
-	if chat.Backend == "herdr" {
-		fmt.Fprintln(stderr, "pfm chat end: native Herdr end is not supported until phase 2")
-		return 2
+	if chat.Backend == spawn.BackendHerdr {
+		effective, err := pfmconfig.RuntimeOrDefault(runtime)
+		if err == nil {
+			err = endHerdr(ctx, chat, effective.Paths)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "ended %s\n", chat.ID)
+		return 0
 	}
 	var runtimes []pfmconfig.Runtime
 	if runtime != nil {
@@ -80,4 +91,48 @@ func EndResolved(ctx context.Context, chat headless.Chat, stdout, stderr io.Writ
 	}
 	fmt.Fprintf(stdout, "ended %s\n", chat.ID)
 	return 0
+}
+
+// endHerdr validates the durable owner before closing only the selected pane.
+func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (returnErr error) {
+	state := fleetdb.OpenSharedState(ctx, values)
+	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
+	seat, found, err := state.Seat(ctx, chat.SeatID)
+	if err != nil {
+		return fmt.Errorf("read end seat %s: %w", chat.SeatID, err)
+	}
+	if !found || seat.Backend != spawn.BackendHerdr || seat.SessionID != chat.ID || seat.HerdrSocket != chat.Socket ||
+		seat.HerdrPane != chat.Pane {
+		return fmt.Errorf("native end target %s no longer matches its durable seat", chat.SeatID)
+	}
+	body, err := herdr.SeatRequest(
+		ctx,
+		seat.HerdrSocket,
+		"pane.close",
+		map[string]string{nativePaneIDKey: seat.HerdrPane},
+	)
+	if err != nil {
+		var refusal *herdr.Refusal
+		if !errors.As(err, &refusal) || refusal.Code != "pane_not_found" {
+			return fmt.Errorf("close Herdr pane %s: %w", seat.HerdrPane, err)
+		}
+	} else {
+		var ack struct {
+			Type string `json:"type"`
+			Pane string `json:"pane_id"`
+		}
+		if err := json.Unmarshal(body, &ack); err != nil {
+			return fmt.Errorf("decode Herdr pane close: %w", err)
+		}
+		if ack.Type != "ok" && (ack.Type != "pane_closed" || ack.Pane != seat.HerdrPane) {
+			return fmt.Errorf("unexpected Herdr pane close acknowledgement: %s", body)
+		}
+	}
+	if err := state.DeleteSeatRun(seat.SeatID); err != nil {
+		return fmt.Errorf("remove ended seat recipe: %w", err)
+	}
+	if err := state.DeleteSeat(ctx, seat.SeatID); err != nil {
+		return fmt.Errorf("remove ended seat: %w", err)
+	}
+	return nil
 }

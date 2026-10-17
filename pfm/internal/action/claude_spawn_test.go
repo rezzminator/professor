@@ -180,7 +180,7 @@ func TestClaudeSeatRunRetainsCanonicalArgsEnvironmentAndLedgerPolicy(t *testing.
 			prepared, err := seatspawn.PrepareHerdr(context.Background(), seatspawn.HerdrRequest{
 				Choice: seatspawn.BackendChoice{
 					Backend:        "herdr",
-					HerdrSocket:    filepath.Join(home, "herdr.sock"),
+					HerdrSocket:    herdrPickerSocket(t),
 					HerdrWorkspace: "w1",
 					HerdrPane:      "w1:p2",
 				},

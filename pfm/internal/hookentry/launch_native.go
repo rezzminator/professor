@@ -111,7 +111,7 @@ func launchNative(
 		HerdrPane:      choice.HerdrPane,
 		HerdrWorkspace: choice.HerdrWorkspace,
 		Name:           request.Name,
-		State:          "live",
+		State:          nativeSeatLive,
 		UpdatedAt:      clock.Real.Now().Unix(),
 	}
 	run := fleetdb.SeatRun{
@@ -175,7 +175,7 @@ func recordLauncherTmuxSeat(ctx context.Context, runtime config.Runtime, socket,
 			TmuxSocket: filepath.Join(runtime.Paths.TmuxDir, socket),
 			TmuxPane:   "%0",
 			Name:       name,
-			State:      "live",
+			State:      nativeSeatLive,
 			UpdatedAt:  clock.Real.Now().Unix(),
 		},
 	)

@@ -91,7 +91,9 @@ type Status struct {
 	Last        string       `json:"last,omitempty"`
 	// Error is the kind of the error the turn ended on (server_overloaded,
 	// server_error, ...), set only when State is error.
-	Error         string `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+	// LostNote is the seat loss note from fleetdb seat.lost_note, empty unless the seat was lost.
+	LostNote      string `json:"lost_note,omitempty"`
 	Summary       string `json:"summary,omitempty"`
 	SummaryCached bool   `json:"summary_cached,omitempty"`
 	Ask           string `json:"ask,omitempty"`
@@ -145,6 +147,9 @@ func (status Status) Line() string {
 	}
 	if status.Last != "" {
 		line += "\t" + status.Last
+	}
+	if status.LostNote != "" {
+		line += "\t" + status.LostNote
 	}
 	return line
 }

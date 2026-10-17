@@ -308,6 +308,20 @@ func Synthesize(request Request) (Plan, error) {
 			return Plan{}, errors.New("new Codex action requires a project directory")
 		}
 		account, _ := machine.CodexAccountByID(request.PrimaryAccount)
+		args := []string{}
+		if request.Persona.Model != "" {
+			args = append(args, "--model", request.Persona.Model)
+		}
+		if request.Persona.Effort != "" {
+			args = append(args, CodexEffortArg(request.Persona.Effort)...)
+		}
+		if request.Persona.Applies() {
+			args = append(args, CodexDeveloperInstructionsArg(request.Persona.Body)...)
+		}
+		if request.Prompt != "" {
+			args = append(args, request.Prompt)
+		}
+		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, args...)
 		plan.Line = "(cd -- " + Quote(request.Row.CWD) + " && CODEX_HOME=" +
 			Quote(account.Home) + " cx"
 		if request.Prompt != "" {
@@ -338,6 +352,10 @@ func Synthesize(request Request) (Plan, error) {
 			command.WriteString(Quote(request.Prompt))
 		}
 		plan.Run = command.String()
+		plan.SeatRun, err = openCodeSeatRun(request, machine, false)
+		if err != nil {
+			return Plan{}, err
+		}
 		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
 	case ResumeOpenCode:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
@@ -364,6 +382,10 @@ func Synthesize(request Request) (Plan, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(request.Row.CWD))
 		plan.Run = opencodeContinuityBanner(request.Row) + command.String()
+		plan.SeatRun, err = openCodeSeatRun(request, machine, true)
+		if err != nil {
+			return Plan{}, err
+		}
 		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
 	case Live:
 		if request.Row.Socket == "" {
@@ -655,13 +677,9 @@ func codexCommandWithAccount(
 		pfmengine.MustLookup(pfmengine.Codex).Binary,
 		policy.Binary != "" && policy.Binary != pfmengine.MustLookup(pfmengine.Codex).Binary,
 	))
-	// Every door here opens the TUI on pfm-built arguments: in-process, so its hooks reach its pane.
-	command.WriteString(" " + pfmengine.CodexNoDaemon)
-	if policy.Yolo {
-		command.WriteString(" --dangerously-bypass-approvals-and-sandbox")
-	} else {
-		command.WriteString(" --sandbox workspace-write")
-	}
+	// The typed recipe and shell door share the engine's fixed autonomy prefix.
+	command.WriteByte(' ')
+	command.WriteString(strings.Join(codexAutonomyArgs(policy.Yolo), " "))
 	for _, argument := range args {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))

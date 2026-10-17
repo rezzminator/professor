@@ -124,21 +124,6 @@ func runTmuxForHerdr(ctx context.Context, socket string, args ...string) (string
 	return string(output), nil
 }
 
-// herdrPayload is the part of an engine's hook payload the reporter reads.
-type herdrPayload struct {
-	SessionID        string          `json:"session_id"`
-	AgentID          string          `json:"agent_id"`
-	Source           string          `json:"source"`
-	Reason           string          `json:"reason"`
-	NotificationType string          `json:"notification_type"`
-	Message          string          `json:"message"`
-	ToolName         string          `json:"tool_name"`
-	ToolInput        json.RawMessage `json:"tool_input"`
-	IsInterrupt      bool            `json:"is_interrupt"`
-	Title            string          `json:"title"`
-	TranscriptPath   string          `json:"transcript_path"`
-}
-
 // herdrClient (a tmux client attached from a Herdr pane: the pane its chat reports
 // to while that client stays attached) and herdrStored are the reporter's names
 // for the stored state pfm chat ls reads too (herdr.Client, herdr.Stored).
@@ -395,8 +380,12 @@ func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) (r
 			returnErr = errors.Join(returnErr, reporter.tmuxSeatLifecycle(ctx, payload))
 		}()
 	}
-	if handled, err := reporter.nativeSeat(ctx, payload); handled || err != nil {
+	if handled, err := reporter.nativeSeat(ctx, payload); handled {
 		return err
+	} else if err != nil {
+		// A degraded store cannot identify a durable seat; keep the legacy report
+		// visible as well as the diagnostic, just like the tmux bridge.
+		defer func() { returnErr = errors.Join(returnErr, err) }()
 	}
 	if reporter.options.engine == pfmengine.Codex && reporter.firedByEngine() {
 		return reporter.runCodex(ctx, payload)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -545,7 +546,7 @@ func TestRefreshReloadKeepsTheRecordedHarnessPrompt(t *testing.T) {
 	}
 }
 
-func TestNativeChatKillRefusesPhaseTwo(t *testing.T) {
+func TestNativeChatKillUsesBackendRatchet(t *testing.T) {
 	jailTest(t)
 	var stdout, stderr bytes.Buffer
 	code := runResolvedChatKillContext(
@@ -562,12 +563,12 @@ func TestNativeChatKillRefusesPhaseTwo(t *testing.T) {
 		&stdout,
 		&stderr,
 	)
-	if code != 2 || !strings.Contains(stderr.String(), "phase 2") || stdout.Len() != 0 {
+	if code != 1 || !strings.Contains(stderr.String(), "pfm chat kill:") || stdout.Len() != 0 {
 		t.Fatalf("native kill code=%d out=%q err=%q", code, stdout.String(), stderr.String())
 	}
 }
 
-func TestNativeChatReloadRefusesBeforeWorker(t *testing.T) {
+func TestNativeChatReloadSchedulesResolvedPane(t *testing.T) {
 	for _, mode := range []string{"ambient", "socket", "identity"} {
 		t.Run(mode, func(t *testing.T) {
 			jail := newRunJail(t)
@@ -584,6 +585,8 @@ func TestNativeChatReloadRefusesBeforeWorker(t *testing.T) {
 			var args []string
 			if mode == "socket" {
 				args = []string{"--sock", socket, "--pane", "w6:p3"}
+			}
+			{
 				db := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
 				err := db.PutSeat(
 					context.Background(),
@@ -604,7 +607,14 @@ func TestNativeChatReloadRefusesBeforeWorker(t *testing.T) {
 			}
 			started := false
 			previous := startReloadWorker
-			startReloadWorker = func([]string, deps.StartOptions) error { started = true; return nil }
+			startReloadWorker = func(argv []string, _ deps.StartOptions) error {
+				started = true
+				if !strings.Contains(strings.Join(argv, " "), socket) ||
+					!strings.Contains(strings.Join(argv, " "), "w6:p3") {
+					t.Errorf("worker target %v", argv)
+				}
+				return nil
+			}
 			t.Cleanup(func() { startReloadWorker = previous })
 			var stdout, stderr bytes.Buffer
 			var code int
@@ -620,9 +630,7 @@ func TestNativeChatReloadRefusesBeforeWorker(t *testing.T) {
 				code = runChatReloadWithRuntime(args, &stdout, &stderr, runtime, paths.OSEnv{})
 			}
 			logs, logErr := filepath.Glob(filepath.Join(runtime.Paths.SIDDir, "reload-*.log"))
-			if code != 2 || !strings.Contains(stderr.String(), "phase 2") || stdout.Len() != 0 || started ||
-				logErr != nil ||
-				len(logs) != 0 {
+			if code != 0 || (mode != "identity" && (!started || len(logs) != 1)) || logErr != nil {
 				t.Fatalf(
 					"native %s reload code=%d out=%q err=%q started=%v logs=%v err=%v",
 					mode,
@@ -633,6 +641,94 @@ func TestNativeChatReloadRefusesBeforeWorker(t *testing.T) {
 					logs,
 					logErr,
 				)
+			}
+		})
+	}
+}
+
+func TestChatOpenRestoredFlag(t *testing.T) {
+	jailTest(t)
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	code := runChatOpen([]string{"--restored", ""}, &out, &stderr, runtime)
+	if code != 2 || !strings.Contains(stderr.String(), "restored session ID is required") {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), stderr.String())
+	}
+}
+
+func TestNativeReloadWorkerForwardsTypedRequest(t *testing.T) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		t.Run(string(engine), func(t *testing.T) {
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			runtime, err := pfmconfig.LoadRuntime("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(jail.root, "not-an-engine.sock")
+			db := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+			if err := db.PutSeat(
+				context.Background(),
+				fleetdb.Seat{
+					SeatID:      "worker",
+					SessionID:   "session",
+					Engine:      string(engine),
+					Backend:     "herdr",
+					State:       "live",
+					HerdrSocket: socket,
+					HerdrPane:   "w6:p3",
+				},
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			prior := runHerdrReload
+			t.Cleanup(func() { runHerdrReload = prior })
+			calls := 0
+			runHerdrReload = func(_ context.Context, request reload.Request, options reload.Options, _ io.Writer) (reload.Result, error) {
+				calls++
+				if request.Engine != engine || request.SocketPath != socket || request.Pane != "w6:p3" ||
+					request.Model != "new-model" ||
+					request.Effort != "high" ||
+					request.Then != "follow up" ||
+					request.Cache1H ||
+					!request.CacheGiven ||
+					!request.AccountGiven ||
+					options.SIDDir != runtime.Paths.SIDDir {
+					t.Errorf("request=%+v options=%+v", request, options)
+				}
+				return reload.Result{}, nil
+			}
+			var out, stderr bytes.Buffer
+			code := runChatReloadWorkerWithRuntime(
+				[]string{
+					"--sock",
+					socket,
+					"--pane",
+					"w6:p3",
+					"--model",
+					"new-model",
+					"--effort",
+					"high",
+					"--then",
+					"follow up",
+					"--cache",
+					"5m",
+					"--account",
+					"1",
+				},
+				&out,
+				&stderr,
+				runtime,
+				paths.OSEnv{},
+			)
+			if code != 0 || calls != 1 || !strings.Contains(out.String(), "respawned in place") {
+				t.Fatalf("code=%d calls=%d out=%q err=%q", code, calls, out.String(), stderr.String())
 			}
 		})
 	}

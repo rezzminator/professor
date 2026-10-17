@@ -143,6 +143,10 @@ func runRun(
 				if accountErr != nil {
 					return false
 				}
+				if id == pfmengine.OpenCode && birth.Backend != spawn.BackendHerdr {
+					unplanned = id
+					return false
+				}
 				if _, plannerErr := action.PlannerFor(id); plannerErr != nil {
 					if unplanned == "" {
 						unplanned, unplannedAccount = id, candidate
@@ -175,12 +179,8 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
-	if birth.Backend == spawn.BackendHerdr && !pfmengine.MustLookup(engineName).HerdrNativePrompt {
-		fmt.Fprintf(
-			stderr,
-			"pfm chat new: engine %s native Herdr raw launch path is not supported until phase 2; use --backend tmux\n",
-			pfmengine.MustLookup(engineName).LongName,
-		)
+	if engineName == pfmengine.OpenCode && birth.Backend != spawn.BackendHerdr {
+		fmt.Fprintln(stderr, "pfm chat new: OpenCode does not support headless chat")
 		return 2
 	}
 	if *name == "" {
@@ -287,8 +287,30 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
+	var progressOut io.Writer
+	if *progress && *await {
+		progressOut = stderr
+	}
+	awaitOptions := headless.AwaitOptions{
+		Grace:    launchGrace,
+		Settle:   time.Duration(*settle) * time.Second,
+		Timeout:  time.Duration(*timeout) * time.Second,
+		Progress: progressOut,
+	}
 	if birth.Backend == spawn.BackendHerdr {
-		born, code := pfmchat.BirthHerdr(ctx, birth, plan, &runtime, *name, prompt, *await, *attach, stdout, stderr)
+		born, code := pfmchat.BirthHerdr(
+			ctx,
+			birth,
+			plan,
+			&runtime,
+			*name,
+			prompt,
+			*await,
+			*attach,
+			stdout,
+			stderr,
+			awaitOptions,
+		)
 		if born {
 			seatStateWritten = false
 		}
@@ -378,20 +400,11 @@ func runRun(
 	if prompt == "" {
 		return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
 	}
-	var progressOut io.Writer
-	if *progress && *await {
-		progressOut = stderr
-	}
 	code := awaitLaunch(
 		ctx,
 		*name,
 		*await,
-		headless.AwaitOptions{
-			Grace:    launchGrace,
-			Settle:   time.Duration(*settle) * time.Second,
-			Timeout:  time.Duration(*timeout) * time.Second,
-			Progress: progressOut,
-		},
+		awaitOptions,
 		result,
 		stdout,
 		stderr,

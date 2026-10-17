@@ -160,13 +160,16 @@ func (engine *Engine) callHerdr(
 		return base, nil
 	}
 	id, err := pfmengine.Parse(target.Engine)
-	if err != nil || !pfmengine.MustLookup(id).HerdrNativePrompt {
+	if err != nil {
 		base.Code = CodeUndelivered
 		base.Message = fmt.Sprintf(
-			"ABORT: unsupported native Herdr call engine %q; raw-engine delivery is not implemented",
+			"ABORT: unsupported Herdr call engine %q",
 			target.Engine,
 		)
 		return base, nil
+	}
+	if !pfmengine.MustLookup(id).HerdrNativePrompt {
+		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
 	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
 	if err != nil {
@@ -253,6 +256,113 @@ func (engine *Engine) callHerdr(
 	return base, nil
 }
 
+// callHerdrRaw preserves the existing composer guard and confirmation without
+// relying on native agent detection for an engine whose capability is unproven.
+func (engine *Engine) callHerdrRaw(
+	ctx context.Context,
+	request Request,
+	target Target,
+	base Result,
+	lock *targetLock,
+	id pfmengine.ID,
+) (Result, error) {
+	before, _, err := herdrCapture(ctx, target, herdrRecentLines)
+	if err != nil {
+		base.Code, base.Message = CodeUndelivered, fmt.Sprintf(
+			"ABORT: Herdr composer could not be checked; nothing was typed: %v",
+			err,
+		)
+		return base, nil
+	}
+	if IsFooterBusy(id, before) {
+		base.Busy, base.Code, base.Message = true, CodeBusy, "ABORT: target pane is busy; nothing was typed"
+		return base, nil
+	}
+	if !ComposerRowShown(before) || SelectorLine(before) != "" || ComposerDraftText(before) != "" {
+		base.Status, base.Code, base.Message = statusUndelivered, CodeUndelivered, "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
+		return base, nil
+	}
+	prepared, err := engine.prepareLiveMessage(ctx, target, request.Message, false)
+	if err != nil {
+		base.Code, base.Message = CodeUndelivered, fmt.Sprintf("prepare Herdr call: %v", err)
+		return base, nil
+	}
+	base.Unsigned, base.AutoFilePath = prepared.Unsigned, prepared.AutoFilePath
+	// A failed acknowledgement cannot prove the bytes were not admitted. Never
+	// retry the paste: it could already be waiting in the recipient's composer.
+	base.Typed = true
+	if err := engine.SendLiteral(ctx, target, "\x1b[200~"+prepared.Message+"\x1b[201~"); err != nil {
+		base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
+			"Herdr raw paste unconfirmed: %v",
+			err,
+		)
+		return base, nil
+	}
+	prefix := headRunes(normalizeSpace(prepared.Message), 24)
+	for attempt := 1; attempt <= engine.options.EnterTries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
+				"Herdr raw submit cancelled: %v",
+				err,
+			)
+			return base, nil
+		}
+		if err := lock.beat(); err != nil {
+			return lockLost(base, target.Pane, err), nil
+		}
+		base.SubmitRetries = attempt
+		if err := engine.SendKey(ctx, target, "Enter"); err != nil {
+			base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
+				"Herdr raw Enter unconfirmed: %v",
+				err,
+			)
+			return base, nil
+		}
+		engine.sleepContext(ctx, engine.options.EnterSettle)
+		after, _, err := herdrCapture(ctx, target, herdrRecentLines)
+		if err != nil {
+			base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
+				"Herdr raw confirmation failed: %v",
+				err,
+			)
+			return base, nil
+		}
+		input := composerLastLine(after)
+		if HasPastePlaceholder(input) || (input != "" && strings.Contains(normalizeSpace(input), prefix)) {
+			continue
+		}
+		if !ComposerRowShown(after) && !deliveryProven(id, before, after, prepared.Message, false, request.FileBacked) {
+			break
+		}
+		base.Status, base.Code = statusDelivered, 0
+		base.Message = fmt.Sprintf("called LIVE into %q — Herdr raw composer confirmed", target.Pane)
+		base.Proof = lastNonEmptyLines(after, engine.options.ProofLines)
+		for _, warning := range prepared.Warnings {
+			base.Message += " — WARNING: " + warning
+		}
+		if len(request.Then) > 0 {
+			lock.release()
+			if engine.armSteers(
+				ctx,
+				request,
+				target,
+				&base,
+				&herdrTurn{
+					SocketPath: target.SocketPath,
+					Pane:       target.Pane,
+					Raw:        true,
+					SawWorking: IsFooterBusy(id, after),
+				},
+			) {
+				base.Message += fmt.Sprintf(" — %d then steer(s) queued (log: %s)", base.Steers, base.SteerLog)
+			}
+		}
+		return base, nil
+	}
+	base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, "typed Herdr raw text but could not confirm submission; do not retry blindly"
+	return base, nil
+}
+
 func supportedBackend(backend string) bool {
 	return backend == "" || backend == backendTmux || backend == backendHerdr
 }
@@ -274,6 +384,7 @@ type herdrTurn struct {
 	StateChangeSeq uint64  `json:"state_change_seq"`
 	CompletionSeq  *uint64 `json:"completion_seq"`
 	SawWorking     bool    `json:"saw_working"`
+	Raw            bool    `json:"raw,omitempty"`
 }
 
 func (engine *Engine) armSteers(
@@ -335,7 +446,7 @@ func (engine *Engine) deliverHerdrThen(ctx context.Context, wait ThenWait) (resu
 		time.Duration(engine.options.ThenIdleTries)*engine.options.ThenIdlePoll + engine.options.ThenSettle
 	bounded, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	if err := waitHerdrTurn(bounded, target, turn); err != nil {
+	if err := engine.waitHerdrTurn(bounded, target, turn); err != nil {
 		return fail(err)
 	}
 	if checked, ok := engine.checkSteerChain(
@@ -351,7 +462,33 @@ func (engine *Engine) deliverHerdrThen(ctx context.Context, wait ThenWait) (resu
 	)
 }
 
-func waitHerdrTurn(ctx context.Context, target Target, turn herdrTurn) error {
+func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn herdrTurn) error {
+	if turn.Raw {
+		id, err := pfmengine.Parse(target.Engine)
+		if err != nil {
+			return fmt.Errorf("raw Herdr turn engine: %w", err)
+		}
+		for attempt := 0; attempt < engine.options.ThenBusyTries+engine.options.ThenIdleTries; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("raw Herdr turn for %q: %w", target.Pane, err)
+			}
+			screen, _, err := herdrCapture(ctx, target, herdrRecentLines)
+			if err != nil {
+				return fmt.Errorf("raw Herdr turn capture: %w", err)
+			}
+			if SelectorLine(screen) != "" {
+				return fmt.Errorf("raw Herdr target %q is blocked by a menu", target.Pane)
+			}
+			if IsFooterBusy(id, screen) {
+				turn.SawWorking = true
+			} else if turn.SawWorking && ComposerRowShown(screen) && ComposerDraftText(screen) == "" {
+				return nil
+			}
+			engine.sleepContext(ctx, engine.options.ThenIdlePoll)
+		}
+		return fmt.Errorf("raw Herdr turn boundary for %q was not established", target.Pane)
+	}
+
 	until := []string{herdrIdle, herdrDone, herdrBlocked}
 	// At most three snapshots: stale pre-turn idle, observed working, settled.
 	// A server response that ignores the requested transition is a protocol

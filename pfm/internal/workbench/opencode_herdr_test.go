@@ -93,7 +93,12 @@ const logs = []
 const client = {app: {log: async (input) => { logs.push(input.body) }}}
 const hooks = await module.PfmHerdr({client})
 if (hooks.event) {
-  for (const event of row.events) await hooks.event({event})
+  for (const event of row.events) {
+    if (event.type === "test.prompt") {
+      assert.equal(typeof hooks["chat.message"], "function", "actual prompt submit hook must be registered")
+      await hooks["chat.message"](event.input, event.output)
+    } else await hooks.event({event})
+  }
 }
 process.stdout.write(JSON.stringify({hasEvent: Boolean(hooks.event), logs}))
 `
@@ -434,5 +439,49 @@ func TestOpenCodeHerdrPluginSaysSoWhenThePfmBinaryCannotRun(t *testing.T) {
 		if entry.Service != "pfm-herdr" || entry.Level != "error" || !strings.Contains(entry.Message, missing) {
 			t.Fatalf("log entry %+v does not name service pfm-herdr, level error and the binary %s", entry, missing)
 		}
+	}
+}
+
+func TestOpenCodeHerdrPluginReportsActualPromptWithoutPromptText(t *testing.T) {
+	prompt := func(session string) map[string]any {
+		return map[string]any{
+			"type":  "test.prompt",
+			"input": map[string]any{"sessionID": session},
+			"output": map[string]any{
+				"message": map[string]any{"role": "user"},
+				"parts":   []map[string]any{{"type": "text", "text": "private prompt must not escape"}},
+			},
+		}
+	}
+	for name, env := range map[string]map[string]string{
+		"native": {"HERDR_ENV": "1"},
+		"tmux":   {"TMUX": "/jail/tmux,1,0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run, calls := runHerdrPlugin(t, env, []map[string]any{
+				createdEvent("ses_root", ""),
+				createdEvent("ses_child", "ses_root"),
+				statusEvent("ses_root", "busy"),
+				prompt("ses_root"), prompt("ses_root"),
+				prompt("ses_child"), prompt("ses_unknown"), prompt(""),
+				statusEvent("ses_root", "busy"),
+			}, "")
+			want := []herdrRecorderCall{
+				{"start", map[string]string{"session_id": "ses_root"}},
+				{"working", map[string]string{"session_id": "ses_root"}},
+				{"working", map[string]string{"session_id": "ses_root", "hook_event_name": "chat.message"}},
+				{"working", map[string]string{"session_id": "ses_root", "hook_event_name": "chat.message"}},
+				{"working", map[string]string{"session_id": "ses_root"}},
+				{"end", map[string]string{"session_id": "ses_root"}},
+			}
+			if !run.HasEvent || !reflect.DeepEqual(calls, want) || len(run.Logs) != 0 {
+				t.Fatalf(
+					"actual prompt reports must be distinct, private and main-session-only: calls=%+v want=%+v logs=%+v",
+					calls,
+					want,
+					run.Logs,
+				)
+			}
+		})
 	}
 }

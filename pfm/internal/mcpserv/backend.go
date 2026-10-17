@@ -243,6 +243,7 @@ func (current *backend) listProjected(
 			SeatID:         row.SeatID,
 			HerdrWorkspace: row.HerdrWorkspace,
 			BackendError:   row.BackendError,
+			LostNote:       row.LostNote,
 			Session:        session,
 			ID:             row.ID,
 			Engine:         compose.EngineForKind(row.Kind),
@@ -281,6 +282,9 @@ func (current *backend) listProjected(
 func chatRowState(row compose.Row) string {
 	if row.BackendError != "" {
 		return "error"
+	}
+	if row.Backend == "herdr" && row.LostNote != "" && !row.Kind.IsAddressable() {
+		return "lost"
 	}
 	switch {
 	case row.Killed && row.Kind.IsAddressable():

@@ -443,6 +443,9 @@ func TestChatNewNativeBackendBirth(t *testing.T) {
 				}
 				requests <- request.Method
 				result := `{"pane":{"pane_id":"w6:p3"}}`
+				if request.Method == "ping" {
+					result = `{"type":"pong","version":"0.9.5","protocol":22}`
+				}
 				if request.Method == "layout.apply" {
 					result = `{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}`
 				}
@@ -494,7 +497,7 @@ func TestChatNameNativeDeliveryConvergesWithoutTmuxWindow(t *testing.T) {
 	}
 }
 
-func TestChatNewNativeUnsupportedEngineRefusal(t *testing.T) {
+func TestChatNewNativeRawEngineBirth(t *testing.T) {
 	for _, engine := range []string{"codex", "opencode"} {
 		t.Run(engine, func(t *testing.T) {
 			jail := newRunJail(t)
@@ -522,6 +525,9 @@ func TestChatNewNativeUnsupportedEngineRefusal(t *testing.T) {
 							return
 						}
 						result := `{"pane":{"pane_id":"w6:p3"}}`
+						if req.Method == "ping" {
+							result = `{"type":"pong","version":"0.9.5","protocol":22}`
+						}
 						if req.Method == "layout.apply" {
 							layouts <- struct{}{}
 							result = `{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}`
@@ -535,6 +541,11 @@ func TestChatNewNativeUnsupportedEngineRefusal(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv(pfmengine.MustLookup(pfmengine.OpenCode).RootEnv, store)
+			binary := filepath.Join(jail.root, pfmengine.MustLookup(pfmengine.OpenCode).Binary)
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", jail.root+string(os.PathListSeparator)+os.Getenv("PATH"))
 			ctx := pfmchat.WithResolvedSelf(
 				context.Background(),
 				headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", HerdrWorkspace: "w6"},
@@ -545,7 +556,7 @@ func TestChatNewNativeUnsupportedEngineRefusal(t *testing.T) {
 				t.Fatal(err)
 			}
 			code := runChatWithRuntime(
-				[]string{"new", "--engine", engine, "--name", "UNSUPPORTED", "--cwd", jail.root},
+				[]string{"new", "--engine", engine, "--name", "RAW", "--cwd", jail.root},
 				nil,
 				&stdout,
 				&stderr,
@@ -556,15 +567,8 @@ func TestChatNewNativeUnsupportedEngineRefusal(t *testing.T) {
 			defer func() { _ = state.Close() }()
 			seats, seatErr := state.Seats(ctx)
 			recipes, recipeErr := filepath.Glob(filepath.Join(filepath.Dir(runtime.Paths.StateDB), "seats", "*.json"))
-			if code != 2 || !strings.Contains(stderr.String(), engine) ||
-				!strings.Contains(stderr.String(), "phase 2") ||
-				!strings.Contains(stderr.String(), "--backend tmux") ||
-				stdout.Len() != 0 ||
-				len(layouts) != 0 ||
-				seatErr != nil ||
-				len(seats) != 0 ||
-				recipeErr != nil ||
-				len(recipes) != 0 {
+			if code != 0 || !strings.Contains(stdout.String(), "herdr") || len(layouts) != 1 ||
+				seatErr != nil || len(seats) != 1 || recipeErr != nil || len(recipes) != 1 {
 				t.Fatalf(
 					"native %s code=%d stdout=%q stderr=%q layouts=%d seats=%+v err=%v recipes=%v err=%v",
 					engine,

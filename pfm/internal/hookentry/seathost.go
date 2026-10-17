@@ -1,6 +1,7 @@
 package hookentry
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -25,7 +26,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
+const nativeSeatLive = "live"
+
 // SeatHost supervises a native engine without a shell or a tmux intermediary.
+
 func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	if len(args) != 1 {
 		fmt.Fprintln(stderr, "pfm internal seat-host: expected one seat id")
@@ -57,7 +61,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		return 1
 	}
 	descriptor, lookupErr := pfmengine.Lookup(pfmengine.ID(seat.Engine))
-	if lookupErr != nil || !descriptor.HerdrNativePrompt {
+	if lookupErr != nil {
 		return failedSeatStart(ctx, db, seat, fmt.Errorf("engine %q has no native seat support", seat.Engine), stderr)
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR|syscall.O_NOCTTY, 0)
@@ -83,63 +87,118 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			fmt.Fprintf(stderr, "pfm internal seat-host: close pane terminal: %v\n", err)
 		}
 	}()
+	input := bufio.NewReader(terminal)
 	for {
-		run, err := db.ReadSeatRun(seat.SeatID)
-		if err != nil {
-			return failedSeatStart(ctx, db, seat, err, stderr)
+		run, runErr := db.ReadSeatRun(seat.SeatID)
+		var argv []string
+		var options deps.StartOptions
+		if runErr == nil {
+			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
 		}
-		argv, options, err := seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
-		if err != nil {
-			return failedSeatStart(ctx, db, seat, err, stderr)
+		status, started := 1, false
+		if runErr == nil {
+			options.Env = seatEnvironment(
+				options.Env,
+				[]string{paths.EnvStateDB + "=" + runtime.Paths.StateDB},
+				[]string{paths.EnvStateDB},
+			)
+			options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
+			acknowledge := seat.ReloadPending
+			status, started, runErr = runSeatEngine(argv, options, tty, func() error {
+				current, found, err := db.Seat(ctx, seat.SeatID)
+				if err != nil {
+					return fmt.Errorf("read started seat: %w", err)
+				}
+				if !found || current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane {
+					return errors.New("started seat binding changed")
+				}
+				before := current
+				if current.State == "failed" {
+					current.LostNote = ""
+				}
+				current.State = nativeSeatLive
+				if acknowledge {
+					current.ReloadPending = false
+				}
+				current.UpdatedAt = clock.Real.Now().Unix()
+				if err := db.UpdateSeat(ctx, before, current); err != nil {
+					return fmt.Errorf("record started seat: %w", err)
+				}
+				return nil
+			})
 		}
-		options.Env = seatEnvironment(
-			options.Env,
-			[]string{paths.EnvStateDB + "=" + runtime.Paths.StateDB},
-			[]string{paths.EnvStateDB},
-		)
-		// Every native birth door shares this lifetime owner; no shell wrapper or creator-bound sink.
-		options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
-		status, started, err := runSeatEngine(argv, options, tty)
 		if !started {
-			return failedSeatStart(ctx, db, seat, err, stderr)
+			failedSeatStart(ctx, db, seat, runErr, stderr)
+			for {
+				fmt.Fprintln(stderr, "press Enter to retry, q to close")
+				line, err := input.ReadString('\n')
+				if err != nil {
+					fmt.Fprintf(stderr, "pfm internal seat-host: read retry choice: %v\n", err)
+					return 1
+				}
+				choice := strings.TrimSpace(line)
+				if choice == "q" {
+					return closeSeat(ctx, db, seat, 0, stderr)
+				}
+				if choice == "" {
+					break
+				}
+			}
+			current, found, err := db.Seat(ctx, seat.SeatID)
+			if err != nil || !found {
+				fmt.Fprintf(stderr, "pfm internal seat-host: read retry seat: found=%t: %v\n", found, err)
+				return 1
+			}
+			if current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane {
+				fmt.Fprintln(stderr, "pfm internal seat-host: retry seat binding changed")
+				return 1
+			}
+			seat = current
+			continue
 		}
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm internal seat-host: seat %s: %v\n", seat.SeatID, err)
+		if runErr != nil {
+			fmt.Fprintf(stderr, "pfm internal seat-host: seat %s: %v\n", seat.SeatID, runErr)
 		}
 		next, found, readErr := db.Seat(ctx, seat.SeatID)
 		if readErr != nil {
 			fmt.Fprintf(stderr, "pfm internal seat-host: read ended seat: %v\n", readErr)
 			return 1
 		}
-		if found && next.ReloadPending && err == nil {
-			before := next
-			next.ReloadPending = false
-			if err := db.UpdateSeat(ctx, before, next); err != nil {
-				fmt.Fprintf(stderr, "pfm internal seat-host: clear reload: %v\n", err)
-				return 1
-			}
+		if found && next.ReloadPending && runErr == nil {
 			seat = next
 			continue
 		}
-		cleanupErr := errors.Join(db.DeleteSeatRun(seat.SeatID), db.DeleteSeat(ctx, seat.SeatID))
-		if cleanupErr != nil {
-			fmt.Fprintf(stderr, "pfm internal seat-host: clean ended seat: %v\n", cleanupErr)
-			return 1
-		}
-		if _, err := herdr.SeatRequest(
-			ctx,
-			seat.HerdrSocket,
-			"pane.close",
-			map[string]string{"pane_id": seat.HerdrPane},
-		); err != nil &&
-			!isHerdrNotFound(err) {
-			fmt.Fprintf(stderr, "pfm internal seat-host: close ended pane: %v\n", err)
-			if status == 0 {
-				return 1
-			}
-		}
+		return closeSeat(ctx, db, seat, status, stderr)
+	}
+}
+
+// closeSeat verifies the current binding before deleting its row and closing its pane.
+func closeSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat, status int, stderr io.Writer) int {
+	current, found, err := db.Seat(ctx, seat.SeatID)
+	if err != nil || (found && (current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane)) {
+		fmt.Fprintf(stderr, "pfm internal seat-host: ended seat binding changed: %v\n", err)
+		return 1
+	}
+	if !found {
 		return status
 	}
+	if err := errors.Join(db.DeleteSeatRun(seat.SeatID), db.DeleteSeat(ctx, seat.SeatID)); err != nil {
+		fmt.Fprintf(stderr, "pfm internal seat-host: clean ended seat: %v\n", err)
+		return 1
+	}
+	if _, err := herdr.SeatRequest(
+		ctx,
+		seat.HerdrSocket,
+		"pane.close",
+		map[string]string{"pane_id": seat.HerdrPane},
+	); err != nil &&
+		!isHerdrNotFound(err) {
+		fmt.Fprintf(stderr, "pfm internal seat-host: close ended pane: %v\n", err)
+		if status == 0 {
+			return 1
+		}
+	}
+	return status
 }
 
 // failedSeatStart preserves the durable row and recipe for diagnosis. It is not
@@ -202,7 +261,12 @@ func seatEnvironment(saved, current, keys []string) []string {
 	return result
 }
 
-func runSeatEngine(argv []string, options deps.StartOptions, tty *os.File) (status int, started bool, returnErr error) {
+func runSeatEngine(
+	argv []string,
+	options deps.StartOptions,
+	tty *os.File,
+	onStarted ...func() error,
+) (status int, started bool, returnErr error) {
 	defer func() {
 		ignored := signal.Ignored(syscall.SIGTTOU)
 		signal.Ignore(syscall.SIGTTOU)
@@ -218,6 +282,11 @@ func runSeatEngine(argv []string, options deps.StartOptions, tty *os.File) (stat
 	process, err := startSeatEngine(argv, options)
 	if err != nil {
 		return 1, false, err
+	}
+	for _, acknowledge := range onStarted {
+		if err := acknowledge(); err != nil {
+			return 1, false, errors.Join(err, process.KillGroup(), process.Wait())
+		}
 	}
 	done := make(chan struct{})
 	forwarded := make(chan struct{})
@@ -258,6 +327,13 @@ func runSeatEngine(argv []string, options deps.StartOptions, tty *os.File) (stat
 }
 
 func startSeatEngine(argv []string, options deps.StartOptions) (deps.Process, error) {
+	if options.Argv0 != pfmengine.MustLookup(pfmengine.Claude).Binary {
+		process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, options)
+		if err != nil {
+			return nil, fmt.Errorf("start foreground engine: %w", err)
+		}
+		return process, nil
+	}
 	guard, err := gather.AcquireAccountGuard(claudelaunch.ConfigDirFromEnv(options.Env), true)
 	if err != nil {
 		return nil, fmt.Errorf("guard native engine account: %w", err)

@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// SupportedProtocol is the native-seat wire contract, independent of release lifetime safety.
+const SupportedProtocol = 22
+
 // SeatRequest is the existing socket facade for native-seat commands. Agent waits
 // use the caller's deadline rather than the reporter's short I/O timeout.
 func SeatRequest(ctx context.Context, socket, method string, params any) (json.RawMessage, error) {

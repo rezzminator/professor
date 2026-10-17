@@ -42,6 +42,7 @@ func (current *composer) herdrRows() []Row {
 		}
 		row.Backend = "herdr"
 		row.SeatID = seat.SeatID
+		row.LostNote = seat.LostNote
 		row.HerdrWorkspace = seat.HerdrWorkspace
 		row.ID = seat.SessionID
 		if seat.Name != "" {

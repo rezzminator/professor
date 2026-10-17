@@ -11,6 +11,8 @@ import (
 )
 
 const (
+	// No supported release is yet proven to contain the macOS lifetime fix.
+	herdrLifetimeUnverified = false
 	// serviceManagerLinuxName is the value printServiceManagerDoctor reports
 	// for the "manager=" field on Linux.
 	serviceManagerLinuxName = "systemd"

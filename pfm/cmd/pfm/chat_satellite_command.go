@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -718,13 +719,33 @@ func historyPools(runtimes ...commandRuntime) ([]string, error) {
 func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int {
 	clk = defaultClock(clk)
 	if len(args) != 3 || args[1] != "deny" {
-		fmt.Fprintln(stderr, "usage: pfm chat modal <tmux-session> deny <down-count>")
+		fmt.Fprintln(stderr, "usage: pfm chat modal <target> deny <down-count>")
 		return 2
 	}
 	count, err := strconv.Atoi(args[2])
 	if err != nil || count < 0 {
-		fmt.Fprintln(stderr, "usage: pfm chat modal <tmux-session> deny <down-count>")
+		fmt.Fprintln(stderr, "usage: pfm chat modal <target> deny <down-count>")
 		return 2
+	}
+	chat, found, err := pfmchat.Resolve(context.Background(), args[0], io.Discard, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat modal: resolve target: %v\n", err)
+		return 1
+	}
+	if found && chat.Backend == pfmcall.HerdrBackend {
+
+		target := pfmcall.Target{
+			Backend:    chat.Backend,
+			SocketPath: chat.Socket,
+			Pane:       chat.Pane,
+			Engine:     string(chat.Engine),
+		}
+		if err := pfmcall.DenyModal(context.Background(), target, count, clk); err != nil {
+			fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "modal denied on %s\n", args[0])
+		return 0
 	}
 	socketPath, err := chatSocketPath(args[0])
 	if err != nil {

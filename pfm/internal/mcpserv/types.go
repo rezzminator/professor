@@ -19,6 +19,7 @@ type ChatRow struct {
 	SeatID         string       `json:"seat_id,omitempty"`
 	HerdrWorkspace string       `json:"herdr_workspace,omitempty"`
 	BackendError   string       `json:"backend_error,omitempty"`
+	LostNote       string       `json:"lost_note,omitempty"`
 	Session        string       `json:"session"`
 	ID             string       `json:"id"`
 	Engine         pfmengine.ID `json:"engine"`
@@ -278,6 +279,7 @@ type StatusOutput struct {
 	ContextPct    float64      `json:"context_pct,omitempty"`
 	Last          string       `json:"last,omitempty"`
 	Error         string       `json:"error,omitempty"`
+	LostNote      string       `json:"lost_note,omitempty"`
 	Summary       string       `json:"summary,omitempty"`
 	SummaryCached bool         `json:"summary_cached,omitempty"`
 	Ask           string       `json:"ask,omitempty"`

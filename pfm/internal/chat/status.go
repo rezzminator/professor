@@ -105,6 +105,19 @@ func inspectTarget(
 	if err != nil {
 		return headless.Status{}, err
 	}
+	if target.Backend == spawn.BackendHerdr {
+		effective, runtimeErr := pfmconfig.RuntimeOrDefault(runtime)
+		if runtimeErr != nil {
+			return headless.Status{}, runtimeErr
+		}
+		seat, found, seatErr := nativeSeat(ctx, effective, target.ID, target.SeatID)
+		if seatErr != nil {
+			return headless.Status{}, fmt.Errorf("read status loss note: %w", seatErr)
+		}
+		if found {
+			status.LostNote = seat.LostNote
+		}
+	}
 	return status, nil
 }
 

@@ -5,7 +5,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -29,5 +31,33 @@ func TestStatusReportsADeadChatAsAStatusNotAnError(t *testing.T) {
 	}
 	if status.Summary != "" || status.Ask != "" {
 		t.Fatalf("Status() ran a runner nobody asked for: %+v", status)
+	}
+}
+
+func TestInspectSeatReportsDurableLossUntilNextPrompt(t *testing.T) {
+	testjail.Fleet(t)
+	runtime, db, seat := nativeChatSeat(t, "/fixture/unreachable.sock", "lost")
+	for _, note := range []string{"your last message was not answered — re-send it", ""} {
+		before := seat
+		seat.LostNote = note
+		if err := db.UpdateSeat(context.Background(), before, seat); err != nil {
+			t.Fatal(err)
+		}
+		status, err := InspectSeat(
+			context.Background(),
+			&runtime,
+			headless.Chat{
+				ID:      seat.SessionID,
+				SeatID:  seat.SeatID,
+				Backend: "herdr",
+				Engine:  pfmengine.Claude,
+				Name:    seat.Name,
+			},
+			time.Now(),
+			nil,
+		)
+		if err != nil || status.LostNote != note {
+			t.Fatalf("status=%+v err=%v want lost_note=%q", status, err, note)
+		}
 	}
 }

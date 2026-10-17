@@ -751,6 +751,7 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 			Backend:        "herdr",
 			State:          "live",
 			Name:           "OFFLINE",
+			LostNote:       "your last message was not answered — re-send it",
 			HerdrSocket:    filepath.Join(t.TempDir(), "dead.sock"),
 			HerdrPane:      "w6:p3",
 			HerdrWorkspace: "w6",
@@ -761,7 +762,10 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "ls", "--all"}, &stdout, &stderr)
 	if code != 1 || !strings.Contains(stdout.String(), "OFFLINE") ||
-		!strings.Contains(stderr.String(), "HERDR UNREACHABLE") {
+		!strings.Contains(
+			stderr.String(),
+			"HERDR UNREACHABLE",
+		) || !strings.Contains(stdout.String(), "loss note: your last message was not answered — re-send it") {
 		t.Fatalf("unreachable list code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

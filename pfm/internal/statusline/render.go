@@ -88,6 +88,8 @@ type input struct {
 type rateWindow struct {
 	UsedPercentage float64 `json:"used_percentage"`
 	ResetsAt       int64   `json:"resets_at"`
+	Cached         bool    `json:"-"`
+	Failure        bool    `json:"-"`
 }
 
 type rateLimits struct {
@@ -147,31 +149,18 @@ func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) 
 			ResetsAt:       resetAt.Unix(),
 		}
 	}
-	// The harness's own `limits` array — when it sent one at all — is
-	// authoritative for the Fable window; pfm's usage cache is a fallback for
-	// a harness that omitted the array entirely (limits.Scoped is nil only
-	// when the payload's "limits" key was absent, never when json decoded a
-	// present-but-empty array), not a second opinion on a payload that DID
-	// report and simply carries no Fable entry for this account.
-	if limits.Scoped == nil && account > 0 {
-		if fable, ok := usagehook.CachedFableWindow(
-			runtime.CacheDir,
-			runtime.UID,
-			account,
-			runtime.ConfigDir,
-			now,
-		); ok {
-			if resetAt, err := time.Parse(time.RFC3339, fable.ResetsAt); err == nil {
-				windows["seven_day_fable"] = rateWindow{
-					UsedPercentage: *fable.Utilization,
-					ResetsAt:       resetAt.Unix(),
-				}
-			}
-			// A cache entry whose resets_at fails to parse degrades to
-			// absent rather than failing the render — a cache-read problem
-			// must never propagate out of Render (unlike a malformed harness
-			// payload above, which is a hard decode error).
+	// A reported window is authoritative, even at zero. Only missing
+	// windows use the shared usage cache; an explicit scoped array also owns
+	// the absence of Fable, independently of missing main windows.
+	missing := make(map[string]bool)
+	for _, descriptor := range usagehook.AllWindows() {
+		if _, present := windows[descriptor.Key]; !present &&
+			(descriptor.Key != "seven_day_fable" || limits.Scoped == nil) {
+			missing[descriptor.Key] = true
 		}
+	}
+	if account > 0 && len(missing) > 0 {
+		fillCachedRateWindows(now, runtime, account, windows, missing)
 	}
 	return windows, nil
 }
@@ -193,8 +182,8 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		directory = data.CWD
 	}
 	now := runtime.now()
-	// account is resolved here, ahead of windowsAt, because the Fable
-	// window's cache fallback needs to know which account's cache file to
+	// account is resolved here, ahead of windowsAt, because the usage
+	// windows' cache fallback needs to know which account's cache file to
 	// read; accountBadge is pure and side-effect-free, so calling it before
 	// its other use below duplicates no logic, only the (cheap) lookup.
 	badge, account := accountBadge(runtime)
@@ -354,6 +343,10 @@ func appendRateSegments(line string, now time.Time, data input) string {
 		window, present := data.RateLimits.Windows[descriptor.Key]
 		if !present {
 			line = appendSegment(line, makeBar(0, 5)+" "+dim+descriptor.Label+"-used:—"+reset)
+			continue
+		}
+		if window.Failure {
+			line = appendSegment(line, makeBar(0, 5)+" "+red+descriptor.Label+"-used:ERR"+reset)
 			continue
 		}
 		used := gaugePercent(window.UsedPercentage)
@@ -667,11 +660,12 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	// into this map, so the Fable window arrives here like the flat ones — and
 	// a reader that has fallen back to this file (a signed-out or unreachable
 	// account) can render no window this writer did not carry. A payload whose
-	// windows have all reset writes nothing.
+	// windows have all reset writes nothing. Cache-derived readings must not
+	// acquire a fresh confirmation timestamp on every draw.
 	windows := make(map[string]rateWindow, len(data.RateLimits.Windows))
 	live := false
 	for key, window := range data.RateLimits.Windows {
-		if window.ResetsAt <= 0 {
+		if window.ResetsAt <= 0 || window.Cached || window.Failure {
 			continue
 		}
 		windows[key] = window

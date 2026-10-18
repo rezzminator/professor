@@ -12,7 +12,7 @@ from .engines import Failure, load as load_jsonl, opencode
 from .labels import MECH, mechanical
 from .rows import die, opt
 
-KIT_DIR = os.environ.get("CHATLOG_KIT_DIR", "/tmp/chatlog-kit")
+KIT_DIR = os.environ.get("CHATLOG_KIT_DIR") or os.path.join(tempfile.gettempdir(), "chatlog-kit")
 USAGE = """chatlog kit: the mechanics of reading one transcript, so a reader only reads.
 
   prep TARGET [--lines A-B] [--dir DIR] [--window BYTES] [--reader-max BYTES]

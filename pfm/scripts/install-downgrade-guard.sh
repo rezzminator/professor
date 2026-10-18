@@ -5,8 +5,9 @@
 # default), readable back as `go version -m <binary>` -> a
 # `build	vcs.revision=<sha>` line. This script compares that revision
 # against the calling repo's HEAD and refuses to let host-install proceed
-# when installed history is neither ancestral nor an ordered, whitespace-exact
-# rebase equivalent in HEAD-only history after divergence — unless FORCE=1.
+# when installed history is neither ancestral, nor an ordered, whitespace-exact
+# rebase equivalent in HEAD-only history after divergence, nor absorbed (merging
+# it into HEAD leaves HEAD's tree unchanged) — unless FORCE=1.
 #
 # usage: install-downgrade-guard.sh <installed-binary-path> [repo-dir]
 #   repo-dir defaults to the git toplevel of this script's own tree.
@@ -94,7 +95,7 @@ rev_short="$(git_ rev-parse --short "$rev_full" 2>/dev/null)"
 # --verbatim preserves whitespace (including source-string contents), unlike
 # ordinary patch-id; all old patches must appear in order in HEAD-only history.
 # Shared ancestors cannot prove a new installed replay of a reverted patch.
-# Merge/empty installed commits remain unverifiable and therefore refuse.
+# Merge/empty installed commits have no patch proof here; absorbed() may prove them.
 REBASE_ERROR=""
 rebase_equivalent() {
   local common commits old_patches new_patches line id commit extra rc
@@ -147,6 +148,29 @@ rebase_equivalent() {
   return 1
 }
 
+# The content proof, for history a patch match cannot vouch for (a commit an
+# upstream one superseded, a replay over newer lines, a merge, an empty or
+# reordered series): a three-way merge of the installed commit into HEAD
+# carries every installed change HEAD lacks and conflicts where both sides
+# changed one hunk differently, a gitlink resolving to the commit containing
+# the other. A clean merge leaving HEAD's tree unchanged is the proof that
+# installing HEAD drops nothing; a reverted change reappears and refuses.
+ABSORB_ERROR=""
+absorbed() {
+  local out rc merged head_tree
+  out="$(git_ merge-tree --write-tree "$head_sha" "$rev_full" 2>&1)"; rc=$?
+  [ "$rc" -eq 1 ] && return 1
+  if [ "$rc" -ne 0 ]; then
+    ABSORB_ERROR="git merge-tree failed (rc $rc) for $rev_full into $head_sha: ${out%%$'\n'*}"; return 2
+  fi
+  merged="${out%%$'\n'*}"
+  head_tree="$(git_ rev-parse "$head_sha^{tree}" 2>/dev/null)" || {
+    ABSORB_ERROR="git could not resolve HEAD's tree"; return 2;
+  }
+  [[ "$merged" =~ ^[[:xdigit:]]+$ ]] || { ABSORB_ERROR="git merge-tree returned no tree id: $merged"; return 2; }
+  [ "$merged" = "$head_tree" ]
+}
+
 git_ merge-base --is-ancestor "$rev_full" "$head_sha"
 mb_rc=$?
 case "$mb_rc" in
@@ -162,6 +186,15 @@ case "$mb_rc" in
     fi
     if [ "$equivalent_rc" -eq 2 ]; then
       echo "install-guard: ERROR $REBASE_ERROR" >&2
+      exit 2
+    fi
+    absorbed; absorbed_rc=$?
+    if [ "$absorbed_rc" -eq 0 ]; then
+      echo "install-guard: ok — installed $rev_short is absorbed: merging it into HEAD $head_short changes nothing"
+      exit 0
+    fi
+    if [ "$absorbed_rc" -eq 2 ]; then
+      echo "install-guard: ERROR $ABSORB_ERROR" >&2
       exit 2
     fi
     subject="$(git_ log -1 --format=%s "$rev_full" 2>/dev/null)"

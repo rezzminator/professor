@@ -72,18 +72,36 @@ def show(dig, lab, a, b):
 
 
 def read(args):
+    """A window (N), digest lines (A-B, D-prefixed or bare) or transcript lines (LA-LB, mapped to the
+    digest lines that render them, result tails included); a selector outside the digest is FAILED."""
+    usage = "usage: chatlog.py read DIR N|A-B|DA-DB|LA-LB"
     if len(args) != 2:
-        die("usage: chatlog.py read DIR N|A-B", 2)
+        die(usage, 2)
     kit, dig = load(args[0])
-    sel = args[1]
-    if "-" in sel:
-        a, b = sel.split("-", 1)
-        a, b = int(a), int(b or len(dig))
+    sel = args[1].strip()
+    m = re.fullmatch(r"([DdLl]?)(\d+)(?:-[DdLl]?(\d*))?", sel)
+    if not m:
+        die(f"KIT FAILED — read {sel!r}: not a window, D range or L range ({usage})")
+    kind, a, b = m.group(1).upper(), int(m.group(2)), m.group(3)
+    if kind == "" and b is None:
+        n = len(kit["windows"])
+        if not 1 <= a <= n:
+            die(f"KIT FAILED — window {a}: there are {n}")
+        a, b = kit["windows"][a - 1]
+    elif kind == "L":
+        b = int(b) if b else a
+        ev = [(i, int(x.group(1))) for i, x in ((i, re.match(r"L(\d+) ", l)) for i, l in enumerate(dig, 1)) if x]
+        hit = [i for i, n in ev if a <= n <= b]
+        if not hit:
+            span = f"L{ev[0][1]}-L{ev[-1][1]}" if ev else "no L lines"
+            die(f"KIT FAILED — read L{a}-L{b}: no digest line renders those transcript lines: dropped or collapsed records (the DROPPED rows count them; the raw record: pfm transcript show PATH --lines {a}-{b} --results full), digest covers {span}")
+        nxt = [i for i, _ in ev if i > hit[-1]]
+        a, b = hit[0], (nxt[0] - 1 if nxt else len(dig))
     else:
-        k = int(sel)
-        if not 1 <= k <= len(kit["windows"]):
-            die(f"KIT FAILED — window {k}: there are {len(kit['windows'])}")
-        a, b = kit["windows"][k - 1]
+        b = int(b) if b else (a if b is None else len(dig))
+        if not 1 <= a <= len(dig) or b < a:
+            die(f"KIT FAILED — read D{a}-D{b}: the digest has D1-D{len(dig)}")
+        b = min(b, len(dig))
     show(dig, labels_by_line(args[0]), a, b)
 
 

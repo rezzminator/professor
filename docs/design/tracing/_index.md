@@ -2,7 +2,7 @@
 
 | Topic | File | Covers |
 | --- | --- | --- |
-| transcript-investigator | [transcript-investigator.md](transcript-investigator.md) | Past runs investigated and audited: the brief, the flow, the `haiku` transcript-reader and its checked rows, the chatlog kit under both, why spawning is capped, the bench |
+| agent-investigator | [agent-investigator.md](agent-investigator.md) | Past runs investigated and audited: the brief, the flow, the `haiku` transcript-reader and its checked rows, the chatlog kit under both, why spawning is capped, the bench |
 | codeprobe | [codeprobe.md](codeprobe.md) | The script under `collector`: the family, what a caller needs, the commands, extraction verbs, the return, mechanisms that replaced rules, what was left out, measuring a run, the surfaces in sync |
 | collector | [collector.md](collector.md) | Exact code text for numbered orders: the run, why the text stays in a file, the manifest, the measured scoreboard |
 | tracer | [tracer.md](tracer.md) | Questions answered from code in prose by a `sonnet` lead over `haiku` sub-tracers: the parts, why a tree, a run end to end, the intake hook with its doctor check and python3 dependency, the rules for the lead, the sub-tracer, the final and the caller with the reason for each, the harness behaviour it rests on, the model and why it stays on Claude, open items |

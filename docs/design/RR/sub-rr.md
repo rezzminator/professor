@@ -41,11 +41,11 @@ then, once for the brief:
 - one `Goal:` line, the query in one line, identical in every brief of the run, which fills the footer's `{goal}` slot so rabbit holes serve the run and not the page in general;
 - last, `Report: {run dir}/sub-rr/{nn}-{group-slug}.md`, absolute, or `Report: none — {reason}` when the run has no directory.
 
-A red-team brief is just another lens: its `Lens:` line, then the facts to attack as numbered sub-queries, their sources as the pages already read, and the `Goal:` line (`rr.md` in this directory, § The red team). The digger needs no rule of its own for it; a fact with nothing against it comes back `NOTHING FOUND`. No brief casts the digger as anyone: the lens names methods and sources, never a voice.
+No brief casts the digger as anyone: the lens names methods and sources, never a voice.
 
 ## The fetch path
 
-1. WebSearch each sub-query, the first query aimed at a `sources:` item of its lens, then wider; read the 2-3 best sources, a `sources:` item before a page reporting on one; a source serving two sub-queries is read once. One aimed query, not one per listed item, keeps a seven-item red-team list from multiplying the searches.
+1. WebSearch each sub-query, the first query aimed at a `sources:` item of its lens, then wider; read the 2-3 best sources, a `sources:` item before a page reporting on one; a source serving two sub-queries is read once. One aimed query, not one per listed item, keeps a lens with a long `sources:` list from multiplying the searches.
 2. `read` with `publications` for a paper, book chapter, PDF or document identifier, `search_literature` first when only a title is known. WebFetch is the default for a page.
 3. `read` with `urls` when a WebFetch fails or returns an encoded or empty body.
 4. Every WebFetch prompt asks the key question first, asks for the exact sentence behind every figure and date, then appends the rabbit-hole footer with the `Goal:` line in its slot. A harvester-read document carries no footer; the digger lists the rabbit holes it raises itself.
@@ -95,5 +95,5 @@ Digger returns across the family's runs, counted by script over the transcripts 
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/sub-rr.md` |
-| The briefs it receives | `templates/global/agents/rr.md`, step 2 (the lens line and the run directory), step 4 (the `Report:` line) and § Red team |
+| The briefs it receives | `templates/global/agents/rr.md`, step 2 (the lens line and the run directory) and step 4 (the `Report:` line) |
 | The family doc | `docs/design/RR/rr.md` |

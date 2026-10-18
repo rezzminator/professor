@@ -62,6 +62,30 @@ def wait_for(path, seconds=10):
         time.sleep(0.02)
 
 
+def ready_then_await_signal(ready, seconds=30):
+    """Fake-Chrome body lines, after its handlers are set: publish *ready*, then
+    wait up to *seconds* for a signal. Two races end a case that waits on a
+    bare time.sleep with a lost signal, and a loaded machine wins both:
+    `open(ready, "w").write("up")` shows the file before the statement ends,
+    and a signal landing in the file's implicit close runs its handler inside
+    that destructor, which discards the handler's SystemExit; and a signal
+    landing just before the sleep starts waits out the whole sleep, since
+    Python runs a handler only between bytecodes. So *ready* appears only
+    once it is written and closed, by rename; and the wakeup fd records the
+    signal whenever it lands, so select returns at once and the handler runs
+    in plain bytecode, where its exit ends the process."""
+    return textwrap.dedent(f"""
+        import os, select, signal
+        wake_read, wake_write = os.pipe()
+        os.set_blocking(wake_write, False)
+        signal.set_wakeup_fd(wake_write)
+        with open({ready + ".tmp"!r}, "w") as up:
+            up.write("up")
+        os.replace({ready + ".tmp"!r}, {ready!r})
+        select.select([wake_read], [], [], {seconds})
+        """)
+
+
 def spawn_for_real(path, argv, env):
     """A spawn that really starts the child, as spawn_disclaimed would."""
     return os.posix_spawn(path, argv, env)
@@ -286,17 +310,14 @@ def test_launcher_forwards_sigterm_to_chrome_and_returns_its_exit():
             sender = threading.Thread(target=send)
             sender.start()
             try:
-                how, _ = launch(tmp, f"""
-                    import signal, sys, time
+                how, _ = launch(tmp, textwrap.dedent(f"""
+                    import signal, sys
                     def stop(number, frame):
                         open({got!r}, "w").write(str(number))
                         sys.exit(3)
                     for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                         signal.signal(number, stop)
-                    open({ready!r}, "w").write("up")
-                    time.sleep(30)
-                    sys.exit(9)
-                    """)
+                    """) + ready_then_await_signal(ready) + "sys.exit(9)\n")
             finally:
                 sender.join()
             assert how == ("exit", 3), (sent, how)
@@ -305,11 +326,12 @@ def test_launcher_forwards_sigterm_to_chrome_and_returns_its_exit():
 
 def test_launcher_restores_the_signal_handlers_it_took():
     before = {n: signal.getsignal(n) for n in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGPIPE,
-                                              signal.SIGXFSZ)}
+                                              signal.SIGXFSZ, signal.SIGCHLD)}
     with tempfile.TemporaryDirectory() as tmp:
         launch(tmp, "pass\n")
     after = {n: signal.getsignal(n) for n in before}
     assert after == before, (before, after)
+    assert signal.set_wakeup_fd(-1) == -1, "the launcher left its wait's wakeup fd set"
 
 
 def test_launcher_leaves_chromes_signals_default_not_ignored():
@@ -439,12 +461,10 @@ def test_wrapper_ends_with_the_signal_chrome_died_of():
 
 def test_wrapper_delivers_sigterm_to_chrome():
     with tempfile.TemporaryDirectory() as tmp:
-        chrome = fake_chrome(tmp, f"""
-            import signal, sys, time
+        chrome = fake_chrome(tmp, textwrap.dedent("""
+            import signal, sys
             signal.signal(signal.SIGTERM, lambda number, frame: sys.exit(4))
-            open({os.path.join(tmp, "ready")!r}, "w").write("up")
-            time.sleep(30)
-            """)
+            """) + ready_then_await_signal(os.path.join(tmp, "ready")))
         launcher_dir = os.path.join(tmp, "launcher")
         os.mkdir(launcher_dir)
         launcher = make_launcher(launcher_dir, chrome)

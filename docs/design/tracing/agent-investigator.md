@@ -1,6 +1,6 @@
-# transcript-investigator
+# agent-investigator
 
-`transcript-investigator` answers one mission about past runs — main chats, their sub-agents, Codex threads, OpenCode sessions — and audits them for faults: failures, mistakes, broken rules, waste, misbehaviour. It judges; `transcript-reader` agents on `haiku` read, one per transcript, so no transcript enters the judge's context whole. Both stand on the chatlog skill's reader kit, `templates/global/skills/chatlog/chatlog.py`, which does every mechanical step in code. The pair replaces three agents: `chat-investigator` (missions over transcripts), `agent-optimizer` (one agent's run audited against its prompt) and `sub-investigator` (its digest reader).
+`agent-investigator` answers one mission about past runs — main chats, their sub-agents, Codex threads, OpenCode sessions — and audits them for faults: failures, mistakes, broken rules, waste, misbehaviour. It judges; `transcript-reader` agents on `haiku` read, one per transcript, so no transcript enters the judge's context whole. Both stand on the chatlog skill's reader kit, `templates/global/skills/chatlog/chatlog.py`, which does every mechanical step in code. The pair replaces three agents: `chat-investigator` (missions over transcripts), `agent-optimizer` (one agent's run audited against its prompt) and `sub-investigator` (its digest reader).
 
 ## Contents
 
@@ -15,14 +15,14 @@
 
 ## Identity
 
-| Field | `transcript-investigator` | `transcript-reader` |
+| Field | `agent-investigator` | `transcript-reader` |
 | --- | --- | --- |
-| Kind | original agent, `templates/global/agents/transcript-investigator.md`, linked by `pfm install` | original agent, `templates/global/agents/transcript-reader.md`, linked by `pfm install` |
-| Class | none: any caller, the user included | visible to `transcript-investigator` only |
+| Kind | original agent, `templates/global/agents/agent-investigator.md`, linked by `pfm install` | original agent, `templates/global/agents/transcript-reader.md`, linked by `pfm install` |
+| Class | none: any caller, the user included | visible to `agent-investigator` only |
 | Model, effort | `opus`, `high`: the work is judgment | `haiku`, `medium`: the work is reading and labelling, never judging |
-| Tools | `Read, Grep, Glob, Bash, Write, Agent`, the chat MCP's `ls`, `find`, `status`, `last` | `Read, Bash` |
+| Tools | `Read, Grep, Glob, Bash, Write, Edit, Agent`, the chat MCP's `ls`, `find`, `status`, `last` | `Read, Bash` |
 | Budget | 40 tool calls, two rounds of readers (at most 8, then at most 4) | the windows `prep` prints |
-| Writes | an AUDIT report under `$HOME/.local/state/pfm/transcript-investigator/`; the answer is its final message | its kit directory under the investigator's run directory |
+| Writes | an AUDIT report under `$HOME/.local/state/pfm/agent-investigator/`; fixes to the kit it maintains; the answer is its final message | its kit directory under the investigator's run directory |
 
 ## The brief
 
@@ -52,6 +52,8 @@ The reader runs `prep`, reads every window in order, and adds only the rows that
 
 `chatlog.py` (stdlib Python, run `python3 -I`) owns every mechanical step: the digest with noise collapsed, the timeline and its costs, compactions, spawns, errors, denials, waits, writes, repeats, reading windows, the split of a transcript too large for one reader, row checking, and the state on disk of every file a run wrote. It is a package (`chatlog.py` entry, `chatlogkit/` modules per concern) that reads Claude, Codex and OpenCode stores natively into one event model, so every mechanical label is computed the same way on every engine and an engine without a concept says so in the digest header; costs are priced per call from each record's usage against `pfm model-cost --json --all`, the one price table. Its verbs, modules and per-engine label mapping are documented in `templates/global/skills/chatlog/SKILL.md` § The reader kit. A `--dir` already holding another target's digest gets a fresh subdirectory, so two readers handed one `Dir:` never overwrite each other's rows.
 
+The investigator owns the kit. Reading raw transcript data — any shell tool or script over a `.jsonl`, an `opencode.db` or a `tool-results/` file, or `pfm transcript show --results full` — is forbidden to both agents, with one exception: the investigator diagnosing a kit fault, which it then fixes at the kit's source and re-runs before answering, naming the fix under `KIT FIXED` for its caller to commit. The reader never works around a fault; it names it as `KIT WRONG` on its return line. The rule exists because an audit of one heavy investigation chat found about 177 hand-written census calls over raw JSONL, roughly $34, where the kit lacked a verb: a missing count becomes a kit verb, never a hand script.
+
 ## Why its spawning is capped
 
 An uncapped investigation once fanned out to 17 agents three levels deep in 13 minutes for $29.47. The tree is two levels by construction: `transcript-reader` holds no `Agent` tool, and the investigator spawns at most 8 readers and then 4. A mission larger than that returns what was read and the targets left.
@@ -64,6 +66,6 @@ Run on real transcripts on this host: a `tracer` audit, a 56 MB main chat (diges
 
 | Surface | File |
 | --- | --- |
-| The agents | `templates/global/agents/transcript-investigator.md`, `templates/global/agents/transcript-reader.md` |
+| The agents | `templates/global/agents/agent-investigator.md`, `templates/global/agents/transcript-reader.md` |
 | The kit | `templates/global/skills/chatlog/chatlog.py`, `templates/global/skills/chatlog/chatlogkit/`, `templates/global/skills/chatlog/chatlog_test.py`, `templates/global/skills/chatlog/SKILL.md` |
 | The report timestamp metavariable | `docs/PLACEHOLDERS.md` (`{HHMMSS}`) |

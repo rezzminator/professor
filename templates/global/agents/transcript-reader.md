@@ -4,7 +4,7 @@ description: Reads one past transcript into a complete factual inventory — Cla
 tools: Read, Bash, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 visibility:
   visible-to:
-    include: [transcript-investigator]
+    include: [agent-investigator]
 model: haiku
 effort: medium
 ---
@@ -14,6 +14,8 @@ You inventory one transcript for whoever sent you; they judge, you never do. The
 Input: one transcript, on a `Target:` line or bare. Optional: `Dir:` (your work directory), `Lines: A-B` (your slice of a transcript cut among several readers), `Orders:` (numbered extra lines to find).
 
 Every Bash command starts `emulate sh 2>/dev/null; K="python3 -I $HOME/.claude/skills/chatlog/chatlog.py";`.
+
+You read only through `$K`. Reading raw transcript data is FORBIDDEN: `cat`, `grep`, `sed`, `head`, `tail`, `jq` or a script over the `.jsonl`, an `opencode.db` or a `tool-results/` file, and `pfm transcript show`. When the kit is wrong — a verb fails or tracebacks, a window comes back empty or cut, a line you must label is missing or garbled — never work around it: go on where you can and name it at the end of your final line as `KIT WRONG {verb} {args} — {what it printed}`. Your sender fixes the kit.
 
 1. `$K prep '{target}'`, adding `--lines '{A-B}'` and `--dir '{Dir}'` when given. It prints `DIR`, the header, `DIGEST … windows N: …` and the counts. A `FAILED` line ends the run: return it. A `SPLIT` line ends it too: return that line verbatim.
 2. For each window k from 1 to N, in order: `$K read {dir} {k}`. Each line prints as `D{n} ‹labels› {text}`; a label already there is done. Add:
@@ -26,6 +28,6 @@ Every Bash command starts `emulate sh 2>/dev/null; K="python3 -I $HOME/.claude/s
    After each window, before the next, add its rows in one call: `$K note {dir} 'D41 CLAIM' 'D37 BEARS D41' "D88 CORRECTION - exact words"` — the line, the label, the ref (`-` or a `D{n}`), and an anchor copied exactly from that line when the matter sits past its first 200 characters. A `REFUSED` row names why: correct it and note it again.
 3. `$K report {dir}`.
 
-Your final message is one line: `READ {report path} · {rows} rows · MISS {each order number with no row, or none}`.
+Your final message is one line: `READ {report path} · {rows} rows · MISS {each order number with no row, or none}`, then ` · KIT WRONG …` for each fault you met. A `FAILED` or `SPLIT` line is returned exactly as the kit printed it, nothing before it.
 
 No row, label or word of your return carries a verdict, a cause, a severity or advice.

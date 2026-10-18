@@ -94,13 +94,16 @@ func NotifyWorkerFailure(ctx context.Context, values paths.Values, socket, pane,
 	if seat == nil {
 		return false, nil
 	}
-	_, err = herdr.SeatRequest(
+	body, err := herdr.SeatRequest(
 		ctx,
 		socket,
 		"notification.show",
 		map[string]string{"title": "pfm chat reload failed", "body": message},
 	)
 	if err != nil {
+		return true, fmt.Errorf("native reload failure notification: %w", err)
+	}
+	if err := herdr.ValidateNotificationShown(body); err != nil {
 		return true, fmt.Errorf("native reload failure notification: %w", err)
 	}
 	return true, nil

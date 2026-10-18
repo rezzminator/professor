@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -297,6 +298,9 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 
 			var rows []string
 			for _, line := range strings.Split(stdout.String(), "\n") {
+				if strings.Contains(line, "home=") {
+					continue
+				}
 				if strings.HasPrefix(line, herdrIntegrationRow) ||
 					strings.HasPrefix(line, "doctor: herdr integration ") {
 					rows = append(rows, line)
@@ -480,5 +484,87 @@ func TestHerdrReporterErrorsDoctorExit(t *testing.T) {
 	}
 	if code != 1 || !strings.Contains(stdout.String(), "doctor: warnings=1\n") {
 		t.Fatalf("code=%d want 1, stdout:\n%s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestHerdrDoctorChecksEveryManagedHome(t *testing.T) {
+	for _, engine := range []string{"claude", "codex"} {
+		t.Run(engine, func(t *testing.T) {
+			runtime := buildCleanDoctorHome(t)
+			second := filepath.Join(t.TempDir(), "second")
+			if engine == "claude" {
+				runtime.Config.Accounts = append(runtime.Config.Accounts, config.Account{ID: 2, ConfigDir: second})
+			} else {
+				runtime.Config.CodexAccounts = append(
+					runtime.Config.CodexAccounts,
+					config.CodexAccount{ID: 2, Home: second},
+				)
+			}
+			stub := filepath.Join(t.TempDir(), "herdr")
+			key := "CLAUDE_CONFIG_DIR"
+			if engine == "codex" {
+				key = "CODEX_HOME"
+			}
+			clean := herdrStatus(notInstalledClaude, notInstalledCodex, notInstalledOpenCode)
+			conflict := strings.Replace(clean, engine+": not installed", engine+": current (v10)", 1)
+			script := "#!/bin/sh\n[ \"$*\" = \"integration status\" ] || exit 9\n" +
+				"if [ \"$" + key + "\" = '" + second + "' ]; then printf '%s' '" + conflict + "'; else printf '%s' '" + clean + "'; fi\n"
+			if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HERDR_BIN_PATH", stub)
+			t.Setenv("HERDR_SOCKET_PATH", serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
+			t.Setenv("HERDR_CONFIG_PATH", filepath.Join(t.TempDir(), "config.toml"))
+			var stdout, stderr bytes.Buffer
+			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
+			if code != 3 || !strings.Contains(stdout.String(), "home="+second) ||
+				!strings.Contains(stdout.String(), "FAIL need=no bundled "+engine) {
+				t.Fatalf(
+					"missed %s second home: code=%d stdout=%s stderr=%s",
+					engine,
+					code,
+					stdout.String(),
+					stderr.String(),
+				)
+			}
+		})
+	}
+}
+
+func TestHerdrDoctorLabelsScopedErrorsAndRepair(t *testing.T) {
+	for _, bad := range []string{"installed", "command failed", "unreadable output"} {
+		t.Run(bad, func(t *testing.T) {
+			runtime := buildCleanDoctorHome(t)
+			second := filepath.Join(t.TempDir(), "second home")
+			runtime.Config.Accounts = append(runtime.Config.Accounts, config.Account{ID: 2, ConfigDir: second})
+			clean := herdrStatus(notInstalledClaude, notInstalledCodex, notInstalledOpenCode)
+			scoped := "printf '%s' '" + herdrStatus(currentClaude, notInstalledCodex, notInstalledOpenCode) + "'"
+			if bad == "command failed" {
+				scoped = "echo 'permission denied' >&2; exit 7"
+			}
+			if bad == "unreadable output" {
+				scoped = "echo 'unexpected status format'"
+			}
+			stub := filepath.Join(t.TempDir(), "herdr")
+			script := "#!/bin/sh\n[ \"$*\" = \"integration status\" ] || exit 9\nif [ \"$CLAUDE_CONFIG_DIR\" = '" + second + "' ]; then " + scoped + "; else printf '%s' '" + clean + "'; fi\n"
+			if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HERDR_BIN_PATH", stub)
+			dependencies := normalizeDependencies(testDependencies())
+			var stdout bytes.Buffer
+			// Exercise the production config handoff without involving backend probing.
+			warnings, failures := printHerdrDoctor(t.Context(), &stdout, dependencies, runtime.Config)
+			if bad == "installed" && failures != 1 {
+				t.Fatalf("failures=%d stdout=%s", failures, stdout.String())
+			}
+			if bad != "installed" && warnings != 1 {
+				t.Fatalf("warnings=%d stdout=%s", warnings, stdout.String())
+			}
+			if got := stdout.String(); !strings.Contains(got, "home="+second) ||
+				!strings.Contains(got, "CLAUDE_CONFIG_DIR='"+second+"' herdr integration") {
+				t.Fatalf("scoped error/repair lost its home: %s", got)
+			}
+		})
 	}
 }

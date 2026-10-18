@@ -163,23 +163,67 @@ func TestAnEmptyHerdrIsNotPaintedAndIsNotBlocked(t *testing.T) {
 }
 
 func TestARefusedTargetIsLoggedAndThePaintGoesOn(t *testing.T) {
-	herdr := &fakeIndicatorHerdr{
-		panes: []*fakeTarget{
-			{ID: "w1:p1", Workspace: "w1", Status: "working"},
-			{ID: "w1:p2", Workspace: "w1", Status: "working"},
-		},
-		spaces: []*fakeTarget{{ID: "w1", Status: "working"}},
-		refuse: map[string]bool{"w1:p1": true},
+	for _, kind := range []string{targetPane, targetWorkspace} {
+		t.Run(kind, func(t *testing.T) {
+			id := "w1:p1"
+			if kind == targetWorkspace {
+				id = "w1"
+			}
+			herdr := &fakeIndicatorHerdr{
+				panes: []*fakeTarget{
+					{ID: "w1:p1", Workspace: "w1", Status: "working"},
+					{ID: "w1:p2", Workspace: "w1", Status: "working"},
+				},
+				spaces: []*fakeTarget{{ID: "w1", Status: "working"}, {ID: "w2", Status: "working"}},
+				failTo: map[string]error{
+					id: &Refusal{Request: kind + ".report_metadata", Code: kind + "_not_found", Message: "gone"},
+				},
+			}
+			painter, _, stderr := newTestPainter(t, herdr, phaseOn)
+			if _, _, err := painter.paint(context.Background()); err != nil {
+				t.Fatalf("paint = %v, want a missing target to be logged only", err)
+			}
+			if !strings.Contains(stderr.String(), id) || !strings.Contains(stderr.String(), kind+"_not_found") {
+				t.Fatalf("stderr = %q, want the missing target and Herdr's code", stderr)
+			}
+			if len(herdr.panes[1].Tokens) != 1 || len(herdr.spaces[1].Tokens) != 1 {
+				t.Fatalf("p2 %v and w2 %v must still be painted", herdr.panes[1].Tokens, herdr.spaces[1].Tokens)
+			}
+		})
 	}
-	painter, _, stderr := newTestPainter(t, herdr, phaseOn)
-	if _, _, err := painter.paint(context.Background()); err != nil {
-		t.Fatalf("paint = %v, want a refusal on one target to be logged only", err)
-	}
-	if !strings.Contains(stderr.String(), "w1:p1") || !strings.Contains(stderr.String(), "target_not_found") {
-		t.Fatalf("stderr = %q, want the refused pane and Herdr's code", stderr)
-	}
-	if len(herdr.panes[1].Tokens) != 1 || len(herdr.spaces[0].Tokens) != 1 {
-		t.Fatalf("p2 %v and the workspace %v must still be painted", herdr.panes[1].Tokens, herdr.spaces[0].Tokens)
+}
+
+func TestMetadataRefusalsFailPaint(t *testing.T) {
+	for _, kind := range []string{targetPane, targetWorkspace} {
+		codes := []string{
+			"metadata_token_limit", "metadata_sequence_source_limit", "invalid_metadata_source",
+			"invalid_metadata_token", "invalid_metadata_ttl", "invalid_metadata_request",
+		}
+		otherNotFound := "pane_not_found"
+		if kind == targetPane {
+			otherNotFound = "workspace_not_found"
+		}
+		for _, code := range append(codes, otherNotFound) {
+			t.Run(kind+"/"+code, func(t *testing.T) {
+				id := "w1:p1"
+				if kind == targetWorkspace {
+					id = "w1"
+				}
+				herdr := &fakeIndicatorHerdr{
+					panes:  []*fakeTarget{{ID: "w1:p1", Workspace: "w1", Status: "working"}},
+					spaces: []*fakeTarget{{ID: "w1", Status: "working"}},
+					failTo: map[string]error{
+						id: &Refusal{Request: kind + ".report_metadata", Code: code, Message: "refused"},
+					},
+				}
+				painter, _, _ := newTestPainter(t, herdr, phaseOn)
+				_, _, err := painter.paint(context.Background())
+				var refusal *Refusal
+				if !errors.As(err, &refusal) || refusal.Code != code || !strings.Contains(err.Error(), kind+" "+id) {
+					t.Fatalf("paint = %v, want %s refusal with %s %s context", err, code, kind, id)
+				}
+			})
+		}
 	}
 }
 

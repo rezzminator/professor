@@ -332,10 +332,12 @@ func Run(
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
 	tally.failures += printTracerIntakeDoctor(ctx, stdout, resolved.Home, dependencies)
-	herdrWarnings, herdrFailures := printHerdrDoctor(ctx, stdout, dependencies)
+	herdrWarnings, herdrFailures := printHerdrDoctor(ctx, stdout, dependencies, runtime.Config)
 	tally.warnings += herdrWarnings
 	tally.failures += herdrFailures
-	backendWarnings, backendFailures := printHerdrBackendDoctor(ctx, stdout, dependencies, herdrLifetimeUnverified)
+	backendWarnings, backendFailures := printSelectedHerdrBackendDoctor(
+		ctx, stdout, dependencies, runtime.Config, herdrLifetimeUnverified,
+	)
 	tally.warnings += backendWarnings
 	tally.failures += backendFailures
 	tally.warnings += printHerdrReporterErrors(stdout, paths.HerdrLockDir(resolved.Home), dependencies.Clock.Now())

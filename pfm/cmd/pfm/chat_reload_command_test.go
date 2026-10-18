@@ -22,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestRefreshReloadRolePromptReResolvesAndRewritesBothEngineChannels(t *testing.T) {
@@ -731,5 +732,47 @@ func TestNativeReloadWorkerForwardsTypedRequest(t *testing.T) {
 				t.Fatalf("code=%d calls=%d out=%q err=%q", code, calls, out.String(), stderr.String())
 			}
 		})
+	}
+}
+
+func TestReloadWorkerReportsSuppressedNativeNotification(t *testing.T) {
+	t.Setenv(paths.EnvStateDB, filepath.Join(t.TempDir(), "pfm.db"))
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(testjail.ShortRoot(t), "notify.sock")
+	serveNativeAdapter(
+		t,
+		socket,
+		map[string]string{"notification.show": `{"type":"notification_show","shown":false,"reason":"disabled"}`},
+	)
+	db := fleetdb.OpenSharedState(t.Context(), values)
+	if err := db.PutSeat(
+		t.Context(),
+		fleetdb.Seat{
+			SeatID:      "notify",
+			Backend:     "herdr",
+			Engine:      "claude",
+			State:       "live",
+			HerdrSocket: socket,
+			HerdrPane:   "w6:p3",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	announceReloadWorkerFailure(
+		[]string{"--sock", socket, "--pane", "w6:p3"},
+		"reload failed",
+		func(context.Context, string, string, string) error { return io.ErrUnexpectedEOF },
+		&stderr,
+	)
+	if got := stderr.String(); !strings.Contains(got, "native failure notification:") ||
+		!strings.Contains(got, "not shown (disabled)") {
+		t.Fatalf("notification suppression was hidden: %q", got)
 	}
 }

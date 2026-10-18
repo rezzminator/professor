@@ -27,13 +27,16 @@ func TestHerdrPluginManifestRender(t *testing.T) {
 		"\n[[startup]]\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-indicators\"]\n",
 		"\n[[events]]\non = \"pane.agent_status_changed\"\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-indicators\"]\n",
 		"\n[[events]]\non = \"workspace.created\"\n",
+		"\n[[events]]\non = \"pane.focused\"\n",
+		"\n[[events]]\non = \"tab.focused\"\n",
+		"\n[[events]]\non = \"workspace.focused\"\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("manifest lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "[[startup]]") != 1 || strings.Count(got, "[[events]]") != 8 {
-		t.Errorf("manifest wants one startup and 8 events:\n%s", got)
+	if strings.Count(got, "[[startup]]") != 1 || strings.Count(got, "[[events]]") != 11 {
+		t.Errorf("manifest wants one startup and 11 events:\n%s", got)
 	}
 }
 

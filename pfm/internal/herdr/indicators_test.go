@@ -44,8 +44,10 @@ func TestIndicatorContractIsFrozen(t *testing.T) {
 	if strings.HasPrefix(IndicatorSource, "herdr:") {
 		t.Fatalf("source %q takes Herdr's reserved prefix", IndicatorSource)
 	}
-	if !slices.Contains(IndicatorEvents(), "pane.agent_status_changed") {
-		t.Fatalf("IndicatorEvents() = %q lacks pane.agent_status_changed", IndicatorEvents())
+	for _, event := range []string{"pane.agent_status_changed", "pane.focused", "tab.focused", "workspace.focused"} {
+		if !slices.Contains(IndicatorEvents(), event) {
+			t.Errorf("IndicatorEvents() = %q lacks %s", IndicatorEvents(), event)
+		}
 	}
 }
 
@@ -73,10 +75,9 @@ type fakeIndicatorHerdr struct {
 	lists  int
 	writes []fakeWrite
 	// onList runs at the start of the n-th pane.list (1-based); failList makes
-	// it fail; refuse makes a report on that target id a Refusal.
+	// it fail; failTo makes a report on that target id fail.
 	onList   func(listNo int)
 	failList func(listNo int) error
-	refuse   map[string]bool
 	failTo   map[string]error
 }
 
@@ -119,9 +120,6 @@ func (herdr *fakeIndicatorHerdr) call(_ context.Context, socket string, lines ..
 			if err := herdr.failTo[id]; err != nil {
 				return nil, err
 			}
-			if herdr.refuse[id] {
-				return nil, &Refusal{Request: request.Method, Code: "target_not_found", Message: "gone"}
-			}
 			if request.Params.Source != IndicatorSource {
 				return nil, fmt.Errorf("fake herdr: source %q, want %q", request.Params.Source, IndicatorSource)
 			}
@@ -152,8 +150,12 @@ func (herdr *fakeIndicatorHerdr) listResult(kind, key, idKey string, targets []*
 	entries := make([]map[string]any, 0, len(targets))
 	for _, target := range targets {
 		entry := map[string]any{idKey: target.ID, "agent_status": target.Status}
-		if target.Workspace != "" {
+		if key == "panes" {
+			entry["terminal_id"] = "terminal-" + target.ID
 			entry["workspace_id"] = target.Workspace
+			entry["tab_id"] = target.Workspace + ":t1"
+			entry["focused"] = false
+			entry["revision"] = 1
 		}
 		if len(target.Tokens) > 0 {
 			entry["tokens"] = target.Tokens
@@ -612,5 +614,83 @@ func TestClearIndicatorsClearsEveryRecordedSocketAndForgetsTheGoneOnes(t *testin
 	absent := filepath.Join(t.TempDir(), "absent")
 	if err := clearRecordedIndicators(context.Background(), absent, nil, route); err != nil {
 		t.Fatalf("clear over a missing lock directory = %v, want nil", err)
+	}
+}
+
+func TestDoneIndicatorsClearWhenSeenWithoutAnAgentTransition(t *testing.T) {
+	for _, ticks := range []int{1, 2} {
+		t.Run(fmt.Sprintf("seen_after_%d_ticks", ticks), func(t *testing.T) {
+			herdr := &fakeIndicatorHerdr{
+				panes:  []*fakeTarget{{ID: "w1:p1", Workspace: "w1", Status: "done"}},
+				spaces: []*fakeTarget{{ID: "w1", Status: "done"}},
+			}
+			painter, stepping, stderr := newTestPainter(t, herdr, phaseOn)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stepping.onSleep = func(ctx context.Context) error {
+				if len(stepping.sleeps) >= ticks {
+					// Herdr marks an idle agent seen without a new agent-state event;
+					// the second case also has no focus identity change or hook.
+					herdr.setStatus("idle")
+				}
+				if len(stepping.sleeps) > 4 {
+					cancel()
+					return ctx.Err()
+				}
+				return nil
+			}
+			if err := painter.run(ctx); err != nil {
+				t.Fatalf("run = %v; stderr %q", err, stderr)
+			}
+			want := []string{`{"pfm_done":"✓"}`, `{"pfm_done":null}`}
+			if got := herdr.paneWrites("w1:p1"); !slices.Equal(got, want) {
+				t.Fatalf("pane writes = %q, want done then cleared %q", got, want)
+			}
+			for _, target := range []*fakeTarget{herdr.panes[0], herdr.spaces[0]} {
+				if len(target.Tokens) != 0 {
+					t.Errorf("seen %s tokens = %v, want cleared", target.ID, target.Tokens)
+				}
+			}
+			if len(stepping.sleeps) != ticks || herdr.lists != ticks+2 {
+				t.Errorf("sleeps = %d, lists = %d, want %d ticks then stop", len(stepping.sleeps), herdr.lists, ticks)
+			}
+		})
+	}
+}
+
+func TestBlinkerCountsMetadataRefusalsTowardItsFailureBound(t *testing.T) {
+	herdr := blockedHerdr()
+	herdr.onList = func(listNo int) {
+		if listNo == 2 {
+			tokens := map[string]string{}
+			for i := range 32 {
+				tokens[fmt.Sprintf("other_%d", i)] = "keep"
+			}
+			herdr.panes = append(herdr.panes, &fakeTarget{
+				ID: "w1:p2", Workspace: "w1", Status: "working", Tokens: tokens,
+			})
+			herdr.failTo = map[string]error{"w1:p2": &Refusal{
+				Request: "pane.report_metadata",
+				Code:    "metadata_token_limit",
+				Message: "pane metadata may contain at most 32 tokens",
+			}}
+		}
+		if listNo > 5 {
+			herdr.setStatus("idle") // keep the broken implementation's run finite
+		}
+	}
+	painter, stepping, stderr := newTestPainter(t, herdr, phaseOn)
+	err := painter.run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "metadata_token_limit") ||
+		!strings.Contains(err.Error(), "3 failed repaints in a row") {
+		t.Fatalf("run = %v, want metadata refusal after exactly three failed ticks; stderr %q", err, stderr)
+	}
+	if herdr.lists != 4 || len(stepping.sleeps) != 3 || strings.Count(stderr.String(), "metadata_token_limit") != 3 {
+		t.Fatalf(
+			"lists %d, sleeps %d, stderr %q, want first paint and three failed ticks",
+			herdr.lists,
+			len(stepping.sleeps),
+			stderr,
+		)
 	}
 }

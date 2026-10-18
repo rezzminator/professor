@@ -80,3 +80,23 @@ func SeatRequest(ctx context.Context, socket, method string, params any) (json.R
 	}
 	return result, nil
 }
+
+// ValidateNotificationShown distinguishes delivery from transport success.
+func ValidateNotificationShown(body json.RawMessage) error {
+	var ack struct {
+		Type   string `json:"type"`
+		Shown  *bool  `json:"shown"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(body, &ack); err != nil {
+		return fmt.Errorf("decode Herdr notification: %w", err)
+	}
+	if ack.Type != "notification_show" || ack.Shown == nil || ack.Reason == "" ||
+		(*ack.Shown && ack.Reason != "shown") || (!*ack.Shown && ack.Reason == "shown") {
+		return fmt.Errorf("unexpected Herdr notification acknowledgement: %s", body)
+	}
+	if !*ack.Shown {
+		return fmt.Errorf("herdr notification not shown (%s)", ack.Reason)
+	}
+	return nil
+}

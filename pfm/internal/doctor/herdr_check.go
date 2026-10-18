@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -56,8 +58,60 @@ func herdrJudgedEngines() []string {
 // line by line, by the engine word before the first colon; a command that
 // fails, or output without a line for a judged engine, is a WARN naming what
 // was seen, never read as "not installed".
-func printHerdrDoctor(ctx context.Context, stdout io.Writer, dependencies Dependencies) (warnings, failures int) {
+func printHerdrDoctor(
+	ctx context.Context,
+	stdout io.Writer,
+	dependencies Dependencies,
+	machines ...config.Config,
+) (warnings, failures int) {
+	warnings, failures = printHerdrIntegrationHome(ctx, stdout, dependencies, nil, herdrJudgedEngines(), "", "")
+	seen := map[string]bool{}
+	for i := range machines {
+		machine := &machines[i]
+		for _, engine := range []struct {
+			name, key string
+			homes     []string
+		}{
+			{"claude", "CLAUDE_CONFIG_DIR", machine.ClaudeConfigDirs()},
+			{"codex", "CODEX_HOME", machine.CodexHomes()},
+		} {
+			for _, home := range engine.homes {
+				if seen[engine.key+"="+home] {
+					continue
+				}
+				seen[engine.key+"="+home] = true
+				scope := " engine=" + engine.name + " home=" + home
+				if home == "" {
+					warnings++
+					fmt.Fprintf(stdout, "%s WARN%s: managed integration home is empty\n", herdrIntegrationRow, scope)
+					continue
+				}
+				w, f := printHerdrIntegrationHome(
+					ctx,
+					stdout,
+					dependencies,
+					deps.EnvironmentWith(engine.key, home),
+					[]string{engine.name},
+					scope,
+					engine.key+"="+action.Quote(home)+" ",
+				)
+				warnings += w
+				failures += f
+			}
+		}
+	}
+	return warnings, failures
+}
+
+func printHerdrIntegrationHome(
+	ctx context.Context,
+	stdout io.Writer,
+	dependencies Dependencies,
+	environment, engines []string,
+	scope, commandPrefix string,
+) (warnings, failures int) {
 	runner := dependencies.Runner
+	fixStatus := strings.Replace(herdrFixStatus, "run herdr", "run "+commandPrefix+"herdr", 1)
 	warn := func(need, checked, key, detail string) {
 		warnings++
 		fmt.Fprintf(
@@ -68,7 +122,7 @@ func printHerdrDoctor(ctx context.Context, stdout io.Writer, dependencies Depend
 			checked,
 			key,
 			detail,
-			herdrFixStatus,
+			fixStatus,
 		)
 	}
 	binary, ok := resolveHerdrBinary(runner, dependencies, func(checked, detail, fix string) {
@@ -84,16 +138,16 @@ func printHerdrDoctor(ctx context.Context, stdout io.Writer, dependencies Depend
 	})
 	if binary == "" {
 		if ok {
-			fmt.Fprintf(stdout, "%s ok n/a (herdr not installed)\n", herdrIntegrationRow)
+			fmt.Fprintf(stdout, "%s ok n/a (herdr not installed)%s\n", herdrIntegrationRow, scope)
 		}
 		return warnings, failures
 	}
 
-	command := "herdr integration status"
+	command := "herdr integration status" + scope
 	bounded, cancel := context.WithTimeout(ctx, herdrStatusBound)
 	defer cancel()
 	result, err := runner.Run(bounded, []string{binary, "integration", "status"}, deps.RunOptions{
-		WaitDelay: 2 * time.Second, ProcessGroup: true,
+		WaitDelay: 2 * time.Second, ProcessGroup: true, Env: environment,
 	})
 	switch {
 	case bounded.Err() != nil:
@@ -105,13 +159,12 @@ func printHerdrDoctor(ctx context.Context, stdout io.Writer, dependencies Depend
 	case result.ExitCode != 0:
 		warnings++
 		fmt.Fprintf(stdout, "%s WARN need=integration status checked=%s exit=%d stderr=%q — fix: %s\n",
-			herdrIntegrationRow, command, result.ExitCode, capturedLine(result.Stderr, "empty"), herdrFixStatus)
+			herdrIntegrationRow, command, result.ExitCode, capturedLine(result.Stderr, "empty"), fixStatus)
 		return warnings, failures
 	}
 
 	states := herdrIntegrationStates(result.Stdout)
 	var unread []string
-	engines := herdrJudgedEngines()
 	for _, engine := range engines {
 		state, found := states[engine]
 		switch {
@@ -121,17 +174,20 @@ func printHerdrDoctor(ctx context.Context, stdout io.Writer, dependencies Depend
 			failures++
 			fmt.Fprintf(
 				stdout,
-				"%s FAIL need=no bundled %s integration checked=%s state=%q — fix: herdr integration uninstall %s\n",
+				"%s FAIL need=no bundled %s integration checked=%s state=%q — fix: %sherdr integration uninstall %s\n",
 				herdrIntegrationRow,
 				engine,
 				command,
 				state,
+				commandPrefix,
 				engine,
 			)
 			fmt.Fprintf(
 				stdout,
-				"doctor: herdr integration %s installed — a second reporter on pfm panes; run herdr integration uninstall %s\n",
+				"doctor: herdr integration %s installed%s — a second reporter on pfm panes; run %sherdr integration uninstall %s\n",
 				engine,
+				scope,
+				commandPrefix,
 				engine,
 			)
 		}
@@ -144,7 +200,7 @@ func printHerdrDoctor(ctx context.Context, stdout io.Writer, dependencies Depend
 			stdout,
 			"%s ok %s: no bundled Herdr integration installed\n",
 			herdrIntegrationRow,
-			strings.Join(engines, ", "),
+			strings.Join(engines, ", ")+scope,
 		)
 	}
 	return warnings, failures

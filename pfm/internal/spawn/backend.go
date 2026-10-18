@@ -100,7 +100,7 @@ func selectBackend(env backendEnvironment, probe func(string, string) error) (Ba
 			workspace = env.Requester.HerdrWorkspace
 		}
 	}
-	if requested == BackendAuto && (env.TMUX != "" || env.Marker != "1" || env.Socket == "" || env.Pane == "") {
+	if requested == BackendAuto && AutoBackend(env.Marker, env.Socket, env.Pane, env.TMUX) == BackendTmux {
 		return tmux, nil
 	}
 	if env.Socket == "" || env.Pane == "" {
@@ -122,4 +122,13 @@ func selectBackend(env backendEnvironment, probe func(string, string) error) (Ba
 		HerdrPane:      env.Pane,
 		HerdrWorkspace: workspace,
 	}, nil
+}
+
+// AutoBackend selects the auto candidate from the pane environment, before the
+// live probe. Callers with a requester seat apply its overrides first.
+func AutoBackend(marker, socket, pane, tmux string) string {
+	if tmux != "" || marker != "1" || socket == "" || pane == "" {
+		return BackendTmux
+	}
+	return BackendHerdr
 }

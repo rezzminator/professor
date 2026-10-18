@@ -18,6 +18,7 @@ const lockFileName = "pfm-theme.lock"
 // herdrSnapshot is what Off needs to put the user's Herdr theme tables back:
 // the replaced span verbatim, or the exact text appended when there was none.
 type herdrSnapshot struct {
+	Path    string `json:"path,omitempty"`
 	Span    string `json:"span"`
 	Added   string `json:"added"`
 	Backup  string `json:"backup"`

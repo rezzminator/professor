@@ -268,26 +268,29 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		owned, engine bool
+		engineErr     error
 		proof         error
 		views         int
 		state         string
 	}{
-		{"proved owner, engine in foreground", true, true, nil, 1, ""},
+		{"proved owner, engine in foreground", true, true, nil, nil, 1, ""},
 		// A supervisor outlives an abruptly dead engine until it retires the seat.
-		{"proved owner, engine gone", true, false, nil, 1, "dead"},
-		{"proved supervisor death", false, true, nil, 1, "dead"},
-		{"ownership unproved", false, true, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
+		{"proved owner, engine gone", true, false, nil, nil, 1, "dead"},
+		{"proved supervisor death", false, true, nil, nil, 1, "dead"},
+		{"proved owner, foreground unavailable", true, false, errors.New("foreground evidence unavailable"), nil, 1, "unknown"},
+		{"ownership unproved", false, true, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warnings := &bytes.Buffer{}
 			proof := tc.proof
+			engineErr := tc.engineErr
 			reader := tabViewReader{
 				runtime: &config.Runtime{Paths: values},
 				warn:    warnings,
 				prove: func(_ context.Context, seat fleetdb.Seat, _ paths.Values) (fleetdb.Seat, bool, error) {
 					return seat, tc.owned, proof
 				},
-				engine: func(context.Context, fleetdb.Seat) (bool, error) { return tc.engine, nil },
+				engine: func(context.Context, fleetdb.Seat) (bool, error) { return tc.engine, engineErr },
 			}
 			got, err := reader.views(ctx, target, "endpoint", []herdr.TabPane{pane})
 			if err != nil || len(got) != tc.views {
@@ -299,11 +302,54 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 				}
 				return
 			}
-			if got[0].State != tc.state || got[0].Identity != "seat1:s1" || warnings.Len() != 0 {
+			if got[0].State != tc.state || got[0].Identity != "seat1:s1" ||
+				(tc.engineErr == nil && warnings.Len() != 0) {
 				t.Fatalf("decoration=%+v warnings=%q", got[0], warnings)
+			}
+			if tc.engineErr != nil {
+				if !strings.Contains(warnings.String(), tc.engineErr.Error()) {
+					t.Fatalf("missing foreground diagnostic: %s", warnings)
+				}
+				provider := herdrTabProvider{
+					scan: func(context.Context) (FleetScan, error) {
+						return FleetScan{
+							Rows: []compose.Row{
+								{
+									Backend: "herdr",
+									SeatID:  "seat1",
+									ID:      "s1",
+									Socket:  "endpoint",
+									PaneID:  "w1:p1",
+									Kind:    compose.LiveClaude,
+								},
+							},
+						}, nil
+					},
+					views: func(ctx context.Context, c headless.Chat, socket string) ([]herdr.TabDecoration, error) {
+						return reader.views(ctx, c, socket, []herdr.TabPane{pane})
+					},
+					inspect: func(context.Context, headless.Chat, time.Time) (headless.Status, error) {
+						return headless.Status{State: "idle"}, nil
+					},
+					mode: func() (string, error) { return "emoji", nil }, warn: warnings,
+				}
+				if tabs, err := provider.tabs(
+					ctx,
+					"endpoint",
+				); err != nil || len(tabs) != 1 ||
+					tabs[0].State != "unknown" {
+					t.Fatalf("unavailable evidence became known state: tabs=%+v err=%v", tabs, err)
+				}
 			}
 			if valid, err := got[0].Validate(ctx); err != nil || !valid {
 				t.Fatalf("proved owner valid=%t err=%v", valid, err)
+			}
+			if tc.engineErr != nil {
+				engineErr = nil
+				if valid, err := got[0].Validate(ctx); err != nil || valid {
+					t.Fatalf("changed foreground evidence must invalidate unknown: valid=%t err=%v", valid, err)
+				}
+				engineErr = tc.engineErr
 			}
 			proof = errors.New("seat seat1 supervisor birth changed during proof")
 			if valid, err := got[0].Validate(ctx); err != nil || valid ||

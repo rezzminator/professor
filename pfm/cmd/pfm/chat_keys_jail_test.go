@@ -146,9 +146,9 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "h.sock")
 	keys := make(chan string, 32)
 	serveNativeAdapter(t, socket, map[string]string{
-		"pane.get":  `{"type":"pane_info","pane":{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3"}}`,
-		"pane.list": `{"type":"pane_list","panes":[{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3"}]}`,
-		"agent.get": `{"type":"agent_info","agent":{"pane_id":"p3","terminal_id":"w6:p3","agent":"claude","agent_status":"idle"}}`,
+		"pane.get":  `{"type":"pane_info","pane":{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3","tab_id":"w6:t1","focused":true}}`,
+		"pane.list": `{"type":"pane_list","panes":[{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3","tab_id":"w6:t1","focused":true}]}`,
+		"agent.get": `{"type":"agent_info","agent":{"pane_id":"w6:p3","terminal_id":"fixture-w6:p3","workspace_id":"w6","tab_id":"w6:t1","focused":true,"agent":"claude","agent_status":"idle","state_change_seq":0,"revision":1}}`,
 		"pane.process_info": fmt.Sprintf(
 			`{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","shell_pid":900001,"foreground_processes":[{"pid":%d,"argv0":"claude"}]}}`,
 			os.Getpid(),

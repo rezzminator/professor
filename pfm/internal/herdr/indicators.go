@@ -88,12 +88,18 @@ const (
 // indicatorPainter is one PaintIndicators run: the Herdr socket it paints, the
 // lock directory that keeps one blinker per socket, and the seams the socket
 // exchange and the time sit behind.
+// PaneProof proves a durable owner immediately before a pane-addressed write.
+type PaneProof func(context.Context, string, string) error
+
+var errIndicatorOwnership = errors.New("pane ownership unproved")
+
 type indicatorPainter struct {
-	socket  string
-	lockDir string
-	stderr  io.Writer
-	call    func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
-	clock   clock.Clock
+	provePane PaneProof
+	socket    string
+	lockDir   string
+	stderr    io.Writer
+	call      func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
+	clock     clock.Clock
 	// seq numbers the request ids; reported holds the unexpected agent_status
 	// strings already named on stderr, so a blinking pane names one once.
 	seq      uint64
@@ -111,13 +117,13 @@ type indicatorPainter struct {
 // any is blocked or done; lockDir holds the one-blinker-per-socket lock and the socket's
 // record, whose removal (ClearIndicators) stops the blinker; errors are
 // written to stderr with their context and returned.
-func PaintIndicators(ctx context.Context, socket, lockDir string, stderr io.Writer) error {
+func PaintIndicators(ctx context.Context, socket, lockDir string, stderr io.Writer, proof PaneProof) error {
 	if stderr == nil {
 		stderr = io.Discard
 	}
 	painter := &indicatorPainter{
 		socket: socket, lockDir: lockDir, stderr: stderr, call: Call, clock: clock.Real,
-		reported: map[string]bool{},
+		reported: map[string]bool{}, provePane: proof,
 	}
 	return painter.run(ctx)
 }
@@ -288,6 +294,9 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 				painter.socket, target.kind, target.id, target.status)
 		}
 		accepted, err := painter.report(ctx, target, indicatorPatch(target.tokens, want))
+		if errors.Is(err, errIndicatorOwnership) {
+			continue
+		}
 		if err != nil {
 			return blocked, wrote, err
 		}
@@ -323,12 +332,16 @@ func (painter *indicatorPainter) clear(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, target := range targets {
 		if _, err := painter.report(ctx, target, indicatorPatch(target.tokens, nil)); err != nil {
-			return err
+			if !errors.Is(err, errIndicatorOwnership) {
+				return errors.Join(append(failures, err)...)
+			}
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // list asks the socket for its panes and workspaces in one exchange.
@@ -369,6 +382,18 @@ func (painter *indicatorPainter) report(
 ) (accepted bool, err error) {
 	if patch == nil {
 		return false, nil
+	}
+	if target.kind == targetPane {
+		var err error
+		if painter.provePane == nil {
+			err = fmt.Errorf("ownership unproved: no pane proof configured")
+		} else {
+			err = painter.provePane(ctx, painter.socket, target.id)
+		}
+		if err != nil {
+			painter.logf("herdr indicators: socket %s: pane %s ownership unproved: %v", painter.socket, target.id, err)
+			return false, fmt.Errorf("%w: pane %s: %w", errIndicatorOwnership, target.id, err)
+		}
 	}
 	line, err := tokenReport{target: target, tokens: patch, seq: painter.nextSeq()}.Line()
 	if err != nil {
@@ -438,8 +463,8 @@ func (painter *indicatorPainter) recorded() bool {
 // also stops that socket's running blinker at its next tick. A failure on one
 // socket leaves its record, is written to stderr, and the rest are still
 // cleared; the failures come back joined.
-func ClearIndicators(ctx context.Context, lockDir string, stderr io.Writer) error {
-	return clearRecordedIndicators(ctx, lockDir, stderr, Call)
+func ClearIndicators(ctx context.Context, lockDir string, stderr io.Writer, proof PaneProof) error {
+	return clearRecordedIndicators(ctx, lockDir, stderr, Call, proof)
 }
 
 func clearRecordedIndicators(
@@ -447,6 +472,7 @@ func clearRecordedIndicators(
 	lockDir string,
 	stderr io.Writer,
 	call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error),
+	proof PaneProof,
 ) error {
 	if stderr == nil {
 		stderr = io.Discard
@@ -474,10 +500,10 @@ func clearRecordedIndicators(
 		}
 		painter := &indicatorPainter{
 			socket: string(socket), lockDir: lockDir, stderr: stderr, call: call, clock: clock.Real,
-			reported: map[string]bool{},
+			reported: map[string]bool{}, provePane: proof,
 		}
-		if err := painter.clear(ctx); err != nil && !errors.Is(err, syscall.ENOENT) &&
-			!errors.Is(err, syscall.ECONNREFUSED) {
+		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) ||
+			!errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED)) {
 			failures = append(failures, fmt.Errorf("herdr indicators: clear socket %s: %w", socket, err))
 			continue
 		}

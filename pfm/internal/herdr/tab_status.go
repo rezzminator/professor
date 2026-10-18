@@ -164,7 +164,11 @@ func reconcileTab(
 	if d.Tab == "" || d.Terminal == "" || d.Identity == "" {
 		return false, fmt.Errorf("tab observation has incomplete ownership: %+v", d)
 	}
-	err := withTabLabelLock(ctx, dir, socket, d.Tab, func(path string) error {
+	valid, err := validateTabOwner(ctx, d)
+	if err != nil || !valid {
+		return false, err
+	}
+	err = withTabLabelLock(ctx, dir, socket, d.Tab, func(path string) error {
 		pane, err := readTabPane(ctx, socket, d.Pane, call)
 		if err != nil {
 			return err
@@ -177,14 +181,9 @@ func reconcileTab(
 			return err
 		}
 		before := record
-		if d.Validate != nil {
-			valid, err := d.Validate(ctx)
-			if err != nil {
-				return fmt.Errorf("validate tab session: %w", err)
-			}
-			if !valid {
-				return nil
-			}
+		valid, err := validateTabOwner(ctx, d)
+		if err != nil || !valid {
+			return err
 		}
 		// Repeat the identity read after potentially slow validation. Herdr has no
 		// conditional rename: this minimizes, but cannot eliminate, external races.
@@ -261,7 +260,13 @@ func tabTargetGone(err error) bool {
 }
 
 // PaintIndicatorsWithTabs reuses the sidebar clock, failure bound and singleton.
-func PaintIndicatorsWithTabs(ctx context.Context, socket, lockDir string, stderr io.Writer, tabs TabProvider) error {
+func PaintIndicatorsWithTabs(
+	ctx context.Context,
+	socket, lockDir string,
+	stderr io.Writer,
+	tabs TabProvider,
+	proof PaneProof,
+) error {
 	if stderr == nil {
 		stderr = io.Discard
 	}
@@ -272,7 +277,7 @@ func PaintIndicatorsWithTabs(ctx context.Context, socket, lockDir string, stderr
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs,
+		tabs:     tabs, provePane: proof,
 	}
 	return painter.run(ctx)
 }
@@ -280,6 +285,13 @@ func PaintIndicatorsWithTabs(ctx context.Context, socket, lockDir string, stderr
 func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
 	for i := range painter.tabObservations {
 		d := painter.tabObservations[i]
+		valid, err := validateTabOwner(ctx, d)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			continue
+		}
 		pane, err := readTabPane(ctx, painter.socket, d.Pane, painter.call)
 		if err != nil {
 			if tabTargetGone(err) {
@@ -295,4 +307,15 @@ func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func validateTabOwner(ctx context.Context, d TabDecoration) (bool, error) {
+	if d.Validate == nil {
+		return false, fmt.Errorf("tab %s ownership unproved: no validator", d.Tab)
+	}
+	valid, err := d.Validate(ctx)
+	if err != nil {
+		return false, fmt.Errorf("tab %s ownership unproved: %w", d.Tab, err)
+	}
+	return valid, nil
 }

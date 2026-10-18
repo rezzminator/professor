@@ -76,7 +76,9 @@ func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
 				runtime.Paths,
 			)
 			if mode == "recycled" {
-				if err == nil || len(mutations) != 0 {
+				if err == nil ||
+					!strings.Contains(err.Error(), "ownership unproved: terminal not present in pane.list") ||
+					len(mutations) != 0 {
 					t.Fatalf("recycled occupant mutated: err=%v calls=%v", err, mutations)
 				}
 				return

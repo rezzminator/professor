@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // scriptHooksPathRead scripts a repository at the working directory, then
@@ -57,5 +59,31 @@ func TestDoctorPrePushWrapsHooksPathRunError(t *testing.T) {
 	}
 	if !errors.Is(gate.Error, runErr) {
 		t.Fatalf("gate error %v does not wrap the Run error", gate.Error)
+	}
+}
+
+func TestDoctorPrePushAcceptsEquivalentHooksPaths(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.Mkdir(filepath.Join(root, ".githooks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := testjail.WriteExecutable(
+		filepath.Join(root, ".githooks", "pre-push"),
+		[]byte("#!/bin/sh\nexit 0\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ path, state string }{
+		{".githooks", "armed"}, {filepath.Join(root, ".githooks"), "armed"}, {"./child/../.githooks", "armed"}, {filepath.Join(root, "elsewhere"), "unwired"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			runner := scriptHooksPathRead(t, deps.RunResult{Stdout: []byte(tc.path + "\n")}, nil)
+			gate := inspectPrePushGateWithRunner(context.Background(), runner)
+			if gate.State != tc.state || gate.Error != nil {
+				t.Fatalf("gate=%+v; want %s", gate, tc.state)
+			}
+		})
 	}
 }

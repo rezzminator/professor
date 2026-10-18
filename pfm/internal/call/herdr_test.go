@@ -62,10 +62,16 @@ func newNativeSocket(t *testing.T, respond func(nativeRequest) (any, string)) *n
 					t.Errorf("decode Herdr request: %v", err)
 					return
 				}
-				socket.mu.Lock()
-				socket.requests = append(socket.requests, request)
-				socket.mu.Unlock()
-				result, refusal := respond(request)
+				var result any
+				refusal := ""
+				if proof, ok := nativeOwnershipReply(request); ok {
+					result = proof
+				} else {
+					socket.mu.Lock()
+					socket.requests = append(socket.requests, request)
+					socket.mu.Unlock()
+					result, refusal = respond(request)
+				}
 				envelope := map[string]any{"id": request.ID, "result": result}
 				if refusal != "" {
 					delete(envelope, "result")
@@ -89,6 +95,31 @@ func newNativeSocket(t *testing.T, respond func(nativeRequest) (any, string)) *n
 	return socket
 }
 
+func nativeOwnershipReply(request nativeRequest) (any, bool) {
+	switch request.Method {
+	case "pane.list":
+		return map[string]any{
+			"type": "pane_list",
+			"panes": []any{
+				map[string]any{
+					"pane_id":      "w1:p2",
+					"workspace_id": "w1",
+					"tab_id":       "w1:t1",
+					"terminal_id":  "w1:p2",
+					"focused":      true,
+				},
+			},
+		}, true
+	case "pane.process_info":
+		return map[string]any{
+			"type":         "pane_process_info",
+			"process_info": map[string]any{"pane_id": "w1:p2", "shell_pid": 41},
+		}, true
+	default:
+		return nil, false
+	}
+}
+
 func (socket *nativeSocket) calls() []nativeRequest {
 	socket.mu.Lock()
 	defer socket.mu.Unlock()
@@ -98,7 +129,7 @@ func (socket *nativeSocket) calls() []nativeRequest {
 func nativeAgent(kind, state string) map[string]any {
 	return map[string]any{
 		"type":  kind,
-		"agent": map[string]any{"pane_id": "p2", "terminal_id": "w1:p2", "agent": "claude", "agent_status": state},
+		"agent": map[string]any{"pane_id": "w1:p2", "terminal_id": "w1:p2", "agent": "claude", "agent_status": state},
 	}
 }
 
@@ -116,6 +147,9 @@ func nativeEngine(t *testing.T, target Target) *Engine {
 	t.Helper()
 	engine := newTestEngine(t, "cc-1-2-3", &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true})
 	engine.names = nativeNames{target: target}
+	if target.Backend == "herdr" {
+		seedNativeOwner(t, target)
+	}
 	return engine.WithIdentity(
 		resolve.Identity{
 			Backend:    "tmux",
@@ -160,7 +194,7 @@ func TestHerdrCaptureNative(t *testing.T) {
 				return map[string]any{
 					"type": test.kind,
 					"read": map[string]any{
-						"pane_id":      "p2",
+						"pane_id":      "w1:p2",
 						"workspace_id": "w1",
 						"text":         test.text,
 						"truncated":    false,
@@ -172,7 +206,7 @@ func TestHerdrCaptureNative(t *testing.T) {
 				SeatID:         "seat-2",
 				HerdrWorkspace: "w1",
 				SocketPath:     socket.path,
-				Pane:           "p2",
+				Pane:           "w1:p2",
 				Engine:         "cc",
 			}
 			if test.pane != "" {
@@ -220,7 +254,7 @@ func TestHerdrCallMalformedAndUnreachable(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			socket := newNativeSocket(t, func(nativeRequest) (any, string) { return test.result, test.refusal })
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			result, err := nativeEngine(
 				t,
 				target,
@@ -233,7 +267,7 @@ func TestHerdrCallMalformedAndUnreachable(t *testing.T) {
 			}
 		})
 	}
-	target := Target{Backend: "herdr", SocketPath: filepath.Join(t.TempDir(), "missing"), Pane: "p2", Engine: "cc"}
+	target := Target{Backend: "herdr", SocketPath: filepath.Join(t.TempDir(), "missing"), Pane: "w1:p2", Engine: "cc"}
 	result, err := nativeEngine(
 		t,
 		target,
@@ -285,12 +319,12 @@ func TestHerdrThenNativeBoundary(t *testing.T) {
 				}
 				return nativeAgent("agent_prompted", "working"), ""
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			engine := nativeEngine(t, target)
 			turn, _ := json.Marshal(
 				map[string]any{
 					"socket_path":      socket.path,
-					"pane":             "p2",
+					"pane":             "w1:p2",
 					"state_change_seq": 4,
 					"completion_seq":   3,
 					"saw_working":      test.sawWorking,
@@ -302,7 +336,7 @@ func TestHerdrThenNativeBoundary(t *testing.T) {
 				ThenWait{
 					Backend:    "herdr",
 					SocketPath: socket.path,
-					Target:     "p2",
+					Target:     "w1:p2",
 					Engine:     "cc",
 					Steers:     []string{"resume the port", "then run the tests"},
 				},
@@ -319,7 +353,7 @@ func TestHerdrThenNativeBoundary(t *testing.T) {
 			}
 			if test.wantCode == 0 {
 				if !result.Typed || result.Steers != 1 || calls[len(calls)-1].Method != "agent.prompt" ||
-					calls[len(calls)-1].Params["target"] != "p2" {
+					calls[len(calls)-1].Params["target"] != "w1:p2" {
 					t.Fatalf("native steer target/chain lost: result=%+v calls=%+v", result, calls)
 				}
 				if text, _ := calls[len(calls)-1].Params["text"].(string); !strings.HasPrefix(text, "resume the port") {
@@ -343,7 +377,7 @@ func TestHerdrAllCallDirections(t *testing.T) {
 					}
 					return nativeAgent("agent_prompted", "working"), ""
 				})
-				target := Target{Backend: targetBackend, SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+				target := Target{Backend: targetBackend, SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 				caller := resolve.Identity{
 					Backend:    senderBackend,
 					SocketPath: "/different/caller",
@@ -363,7 +397,7 @@ func TestHerdrAllCallDirections(t *testing.T) {
 				}
 				spawned := engine.spawner.(*fakeSpawner).spawned()
 				if len(spawned) != 1 || spawned[0].Backend != targetBackend || spawned[0].SocketPath != socket.path ||
-					spawned[0].Target != "p2" {
+					spawned[0].Target != "w1:p2" {
 					t.Fatalf("steering handoff lost target backend: %+v", spawned)
 				}
 				// A reverse answer is an ordinary second call. Its target backend,
@@ -411,7 +445,7 @@ func TestHerdrResolvedAdapterFacades(t *testing.T) {
 	t.Run("bounded full capture reports limitation", func(t *testing.T) {
 		socket := newNativeSocket(t, func(nativeRequest) (any, string) {
 			return map[string]any{"type": "pane_read", "read": map[string]any{
-				"pane_id": "p2", "workspace_id": "w1", "truncated": true, "text": "tail",
+				"pane_id": "w1:p2", "workspace_id": "w1", "truncated": true, "text": "tail",
 			}}, ""
 		})
 		target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2"}
@@ -427,7 +461,7 @@ func TestHerdrResolvedAdapterFacades(t *testing.T) {
 			return map[string]any{
 				"type": "pane_read",
 				"read": map[string]any{
-					"pane_id":      "p2",
+					"pane_id":      "w1:p2",
 					"workspace_id": "w1",
 					"truncated":    false,
 					"text":         "native label\n❯ ",
@@ -503,12 +537,12 @@ func TestHerdrThenHonorsProducerUntil(t *testing.T) {
 				// In quick cases the working event preceded this request entirely.
 				return nil, "timeout"
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			engine := nativeEngine(t, target)
 			engine.options.ThenMin = 200 * time.Millisecond
 			engine.options.ThenBusyTries, engine.options.ThenIdleTries = 0, 0
 			engine.options.ThenSettle = 0
-			turn, err := json.Marshal(herdrTurn{SocketPath: socket.path, Pane: "p2", StateChangeSeq: 4})
+			turn, err := json.Marshal(herdrTurn{SocketPath: socket.path, Pane: "w1:p2", StateChangeSeq: 4})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -518,7 +552,7 @@ func TestHerdrThenHonorsProducerUntil(t *testing.T) {
 			started := time.Now()
 			result, err := engine.DeliverThen(ctx, ThenWait{
 				Backend: "herdr", SocketPath: socket.path,
-				Target: "p2", Engine: "cc", Steers: []string{"resume the port"},
+				Target: "w1:p2", Engine: "cc", Steers: []string{"resume the port"},
 			})
 			if err != nil || result.Code != test.wantCode || !strings.Contains(result.Message, test.wantDetail) ||
 				time.Since(started) > time.Second {
@@ -554,7 +588,7 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 	requests := make(chan nativeRequest, 2)
 	go func() {
 		defer close(done)
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 2; {
 			conn, err := listener.Accept()
 			if err != nil {
 				t.Errorf("accept native wait: %v", err)
@@ -571,8 +605,16 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 					t.Errorf("decode native wait: %v", err)
 					return
 				}
+				if proof, ok := nativeOwnershipReply(request); ok {
+					if err := json.NewEncoder(conn).
+						Encode(map[string]any{"id": request.ID, "result": proof}); err != nil {
+						t.Errorf("reply ownership: %v", err)
+					}
+					return
+				}
 				requests <- request
-				if i == 1 {
+				i++
+				if i == 2 {
 					// The working event was before this request; the producer's
 					// current idle cannot match until=[working,blocked].
 					<-release
@@ -596,12 +638,12 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	target := Target{Backend: "herdr", SocketPath: socket, Pane: "p2", Engine: "cc"}
+	target := Target{Backend: "herdr", SocketPath: socket, Pane: "w1:p2", Engine: "cc"}
 	engine := nativeEngine(t, target)
 	engine.options.ThenMin = 60 * time.Millisecond
 	engine.options.ThenBusyTries, engine.options.ThenIdleTries = 0, 0
 	engine.options.ThenSettle = 0
-	turn, err := json.Marshal(herdrTurn{SocketPath: socket, Pane: "p2", StateChangeSeq: 4})
+	turn, err := json.Marshal(herdrTurn{SocketPath: socket, Pane: "w1:p2", StateChangeSeq: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +653,13 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 	started := time.Now()
 	result, err := engine.DeliverThen(
 		ctx,
-		ThenWait{Backend: "herdr", SocketPath: socket, Target: "p2", Engine: "cc", Steers: []string{"resume the port"}},
+		ThenWait{
+			Backend:    "herdr",
+			SocketPath: socket,
+			Target:     "w1:p2",
+			Engine:     "cc",
+			Steers:     []string{"resume the port"},
+		},
 	)
 	elapsed := time.Since(started)
 	if err != nil || result.Status != statusUndelivered || result.Code != CodeUndelivered || result.Typed ||
@@ -662,11 +710,21 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 				}
 				return map[string]any{"type": "ok"}, ""
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: string(pfmengine.OpenCode)}
+			target := Target{
+				Backend:    "herdr",
+				SocketPath: socket.path,
+				Pane:       "w1:p2",
+				Engine:     string(pfmengine.OpenCode),
+			}
 			engine := nativeEngine(t, target)
 			engine.options.ThenBusyTries, engine.options.ThenIdleTries, engine.options.ThenIdlePoll = 3, 2, time.Millisecond
 			turn, err := json.Marshal(
-				map[string]any{"socket_path": socket.path, "pane": "p2", "raw": true, "saw_working": test.sawWorking},
+				map[string]any{
+					"socket_path": socket.path,
+					"pane":        "w1:p2",
+					"raw":         true,
+					"saw_working": test.sawWorking,
+				},
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -677,7 +735,7 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 				ThenWait{
 					Backend:    "herdr",
 					SocketPath: socket.path,
-					Target:     "p2",
+					Target:     "w1:p2",
 					Engine:     string(pfmengine.OpenCode),
 					Steers:     []string{"resume the port"},
 				},

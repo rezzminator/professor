@@ -30,7 +30,7 @@ func TestChooseBackend(t *testing.T) {
 		{name: "missing socket", env: backendEnvironment{Marker: "1", Pane: live.Pane}, want: "tmux"},
 		{name: "missing pane environment", env: backendEnvironment{Marker: "1", Socket: live.Socket}, want: "tmux"},
 		{name: "tmux requester precedence", env: backendEnvironment{Marker: "1", Socket: live.Socket, Pane: live.Pane, Requester: &fleetdb.Seat{Backend: "tmux"}}, want: "tmux"},
-		{name: "dead socket", env: live, probeErr: errors.New("dial unix /tmp/x/herdr.sock: connect: no such file or directory"), want: "tmux", warning: "pfm: Herdr pane w6:p3 unreachable (dial unix /tmp/x/herdr.sock: connect: no such file or directory) — starting in tmux"},
+		{name: "dead socket", env: live, probeErr: &net.OpError{Op: "dial", Net: "unix", Addr: &net.UnixAddr{Name: "/tmp/x/herdr.sock", Net: "unix"}, Err: errors.New("connect: no such file or directory")}, want: "tmux", warning: "pfm: Herdr pane w6:p3 unreachable (dial unix /tmp/x/herdr.sock: connect: no such file or directory) — starting in tmux"},
 		{name: "missing pane", env: live, probeErr: errors.New("pane_not_found"), want: "tmux", warning: "pane_not_found"},
 		{name: "forced unreachable", env: backendEnvironment{Requested: "herdr", Socket: live.Socket, Pane: live.Pane}, probeErr: errors.New("dead socket"), err: "dead socket"},
 		{name: "forced tmux", env: backendEnvironment{Requested: "tmux", Marker: "1", Socket: live.Socket, Pane: live.Pane}, want: "tmux"},
@@ -130,5 +130,56 @@ func TestChooseBackendResolvesMovedCaller(t *testing.T) {
 				t.Fatalf("moved caller choice=%+v err=%v; want canonical w9:p4 in w9", got, err)
 			}
 		})
+	}
+}
+
+func TestChooseBackendNamesTransportAndReplyFailures(t *testing.T) {
+	for _, requested := range []string{"auto", "herdr"} {
+		for _, state := range []string{"unreachable", "probe failed"} {
+			t.Run(requested+"/"+state, func(t *testing.T) {
+				socket := filepath.Join(testjail.ShortRoot(t), "backend.sock")
+				if state == "probe failed" {
+					listener, err := net.Listen("unix", socket)
+					if err != nil {
+						t.Fatal(err)
+					}
+					done := make(chan struct{})
+					t.Cleanup(func() { _ = listener.Close(); <-done })
+					go func() {
+						defer close(done)
+						conn, err := listener.Accept()
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						defer func() { _ = conn.Close() }()
+						var req struct {
+							ID string `json:"id"`
+						}
+						if err := json.NewDecoder(conn).Decode(&req); err != nil {
+							t.Error(err)
+							return
+						}
+						if _, err := fmt.Fprintf(conn, "{\"id\":%q,\"result\":{}}\n", req.ID); err != nil {
+							t.Error(err)
+						}
+					}()
+				}
+				choice, err := ChooseBackend(context.Background(), requested,
+					[]string{"HERDR_ENV=1", "HERDR_SOCKET_PATH=" + socket, "HERDR_PANE_ID=w1:p2"}, nil)
+				message := choice.Warning
+				if requested == "herdr" {
+					if err == nil {
+						t.Fatal("forced backend lost probe failure")
+					}
+					message = err.Error()
+				} else if err != nil || choice.Backend != "tmux" || !strings.Contains(message, "starting in tmux") {
+					t.Fatalf("fallback=%+v err=%v", choice, err)
+				}
+				if !strings.Contains(message, state) {
+					t.Fatalf("backend state=%q; want %q", message, state)
+				}
+			})
+		}
 	}
 }

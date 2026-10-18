@@ -732,7 +732,7 @@ func TestSignatureUsesNativeHerdrSenderCapture(t *testing.T) {
 			return map[string]any{
 				"type": "pane_read",
 				"read": map[string]any{
-					"pane_id":   "p2",
+					"pane_id":   "w1:p2",
 					"text":      "🥇 │ 🔖 NativeSender │ status\n────────\n❯ \n────────",
 					"truncated": false,
 				},
@@ -751,13 +751,14 @@ func TestSignatureUsesNativeHerdrSenderCapture(t *testing.T) {
 			identity: resolve.Identity{
 				Backend:    "herdr",
 				SocketPath: socket.path,
-				Pane:       "p2",
+				Pane:       "w1:p2",
 				Session:    "sender-native",
 				Engine:     "cc",
 			},
 		},
 	)
-	target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+	target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
+	seedNativeOwner(t, target)
 	result, err := engine.CallTarget(context.Background(), target, Request{Target: "recipient", Message: "hello"})
 	if err != nil || result.Code != 0 {
 		t.Fatalf("call=%+v err=%v", result, err)

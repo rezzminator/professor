@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -67,7 +68,7 @@ func TestHerdrCallNative(t *testing.T) {
 				SeatID:         "seat-2",
 				HerdrWorkspace: "w1",
 				SocketPath:     socket.path,
-				Pane:           "p2",
+				Pane:           "w1:p2",
 				Engine:         "cc",
 				Session:        "recipient",
 			}
@@ -106,7 +107,7 @@ func TestHerdrCallNative(t *testing.T) {
 				calls := socket.calls()
 				if len(calls) != 3 || calls[0].Method != "agent.get" || calls[1].Method != "pane.read" ||
 					calls[2].Method != "agent.prompt" ||
-					calls[2].Params["target"] != "p2" {
+					calls[2].Params["target"] != "w1:p2" {
 					t.Fatalf("native calls = %+v", calls)
 				}
 				text, _ := calls[len(calls)-1].Params["text"].(string)
@@ -139,7 +140,7 @@ func TestHerdrNativePayloadSafety(t *testing.T) {
 				}
 				return nativeAgent("agent_prompted", "working"), ""
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			engine := nativeEngine(t, target)
 			if test.unsigned {
 				engine.options.Sender = &Sender{}
@@ -219,7 +220,7 @@ func TestHerdrCallRaw(t *testing.T) {
 							screen = test.before
 						}
 						return map[string]any{"type": "pane_read", "read": map[string]any{
-							"pane_id": "p2", "text": screen, "format": format, "truncated": false,
+							"pane_id": "w1:p2", "text": screen, "format": format, "truncated": false,
 						}}, ""
 					}
 					screen := test.before
@@ -242,7 +243,7 @@ func TestHerdrCallRaw(t *testing.T) {
 				}
 				return map[string]any{"type": "ok"}, ""
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: string(test.id)}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: string(test.id)}
 			engine := nativeEngine(t, target)
 			// Pin row 9 at the raw wire boundary without adding a sender footer.
 			engine.options.DisableSignature = test.wantPayload != ""
@@ -319,7 +320,7 @@ func TestHerdrNativeStyledComposer(t *testing.T) {
 				}
 				return nativeAgent("agent_prompted", "idle"), ""
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			got, err := nativeEngine(t, target).CallTarget(context.Background(), target, Request{Message: "hello"})
 			if err != nil || (got.Code == 0) != tc.delivered || got.Typed != tc.delivered {
 				t.Fatalf("styled composer result=%+v err=%v delivered=%t", got, err, tc.delivered)
@@ -341,7 +342,7 @@ func TestHerdrOversizedBodyNotTyped(t *testing.T) {
 					}
 					return nativeAgent("agent_prompted", "idle"), ""
 				})
-				target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: engineID}
+				target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: engineID}
 				got, err := nativeEngine(t, target).CallTarget(context.Background(), target, Request{Message: body})
 				if err != nil || got.Typed || got.Code != CodeUndelivered || got.Status != "undelivered" ||
 					!strings.Contains(got.Message, "request") {
@@ -396,7 +397,7 @@ func TestHerdrTurnSubmissionAnchor(t *testing.T) {
 				}
 				return response, ""
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			engine := nativeEngine(t, target)
 			got, err := engine.CallTarget(
 				context.Background(),
@@ -466,7 +467,7 @@ func TestHerdrTurnPreservesIdentity(t *testing.T) {
 			data, err := json.Marshal(
 				map[string]any{
 					"socket_path":      socket.path,
-					"pane":             "p2",
+					"pane":             "w1:p2",
 					"state_change_seq": 4,
 					"terminal_id":      "w1:p2",
 					"agent_session": map[string]string{
@@ -484,7 +485,7 @@ func TestHerdrTurnPreservesIdentity(t *testing.T) {
 			if err := json.Unmarshal(data, &turn); err != nil {
 				t.Fatal(err)
 			}
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			err = nativeEngine(t, target).waitHerdrTurn(ctx, target, turn)
@@ -517,12 +518,33 @@ func TestHerdrDialFailureNotTyped(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: id}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: id}
 			got, err := nativeEngine(t, target).CallTarget(context.Background(), target, Request{Message: "hello"})
 			if err != nil || got.Typed || got.Status != "undelivered" ||
 				!strings.Contains(got.Message, "nothing was typed") {
 				t.Fatalf("known pre-input failure result=%+v err=%v", got, err)
 			}
 		})
+	}
+}
+
+func TestHerdrRawOwnershipRevokedBeforePaste(t *testing.T) {
+	socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+		if request.Method == "pane.read" {
+			if err := os.Remove(filepath.Join(os.Getenv("PFM_PROC_ROOT"), "42", "cmdline")); err != nil {
+				t.Error(err)
+			}
+			return nativePaneRead(request, "› "), ""
+		}
+		t.Errorf("input after revoked owner: %s", request.Method)
+		return map[string]any{"type": "ok"}, ""
+	})
+	target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cx"}
+	engine := nativeEngine(t, target)
+	engine.options.DisableSignature = true
+	got, err := engine.CallTarget(context.Background(), target, Request{Message: "hello"})
+	if err != nil || got.Typed || got.Status != statusUndelivered || got.Code != CodeUndelivered ||
+		!strings.Contains(got.Message, "nothing was typed") || !strings.Contains(got.Message, "ownership unproved") {
+		t.Fatalf("pre-input revocation receipt=%+v err=%v", got, err)
 	}
 }

@@ -96,6 +96,9 @@ func realHerdrDeps() herdrDeps {
 		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch,
 	}
 	home, err := paths.HomeFrom(env)
+	// A real reporter always enables durable-seat resolution, even when home
+	// lookup fails. Nil is reserved for isolated legacy transport test seams.
+	deps.seatPaths = &paths.Values{}
 	if err == nil {
 		deps.lockDir = paths.HerdrLockDir(home)
 		deps.stateDir = themesync.DefaultStateDir(home)

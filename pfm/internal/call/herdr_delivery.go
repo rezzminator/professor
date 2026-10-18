@@ -35,6 +35,12 @@ func (engine *Engine) callHerdr(
 	if !pfmengine.MustLookup(id).HerdrNativePrompt {
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
+	target, err = ProveHerdrTarget(ctx, target)
+	if err != nil {
+		base.Status, base.Code = statusUndelivered, CodeUndelivered
+		base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
+		return base, nil
+	}
 	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
 	if err != nil {
 		return base, fmt.Errorf("herdr read target %q on %q: %w", target.Pane, target.SocketPath, err)
@@ -99,6 +105,12 @@ func (engine *Engine) callHerdr(
 	}
 	base.Unsigned = prepared.Unsigned
 	base.AutoFilePath = prepared.AutoFilePath
+	target, err = ProveHerdrTarget(ctx, target)
+	if err != nil {
+		base.Status, base.Code = statusUndelivered, CodeUndelivered
+		base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
+		return base, nil
+	}
 	result, err = herdr.SeatRequest(ctx, target.SocketPath, "agent.prompt", struct {
 		Target string `json:"target"`
 		Text   string `json:"text"`
@@ -285,6 +297,10 @@ func (engine *Engine) callHerdrRaw(
 }
 
 func herdrSendText(ctx context.Context, target Target, text, method string) error {
+	target, err := ProveHerdrTarget(ctx, target)
+	if err != nil {
+		return &herdr.InputNotSentError{Cause: err}
+	}
 	result, err := herdr.SeatRequest(
 		ctx,
 		target.SocketPath,

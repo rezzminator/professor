@@ -774,3 +774,37 @@ func TestHerdrKillRequiresCanonicalSupervisor(t *testing.T) {
 		})
 	}
 }
+
+func TestHerdrUnboundRetirementNamesItsState(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	server := newKillHerdr(t)
+	seat := fleetdb.Seat{
+		SeatID:         "unbound-kill",
+		Backend:        "herdr",
+		Engine:         "cc",
+		State:          "live",
+		HerdrSocket:    server.socket,
+		HerdrPane:      "w1:p1",
+		HerdrWorkspace: "w1",
+	}
+	if err := database.Shared().PutSeat(context.Background(), seat); err != nil {
+		t.Fatal(err)
+	}
+	server.gone = true
+	client := herdrKiller{database: database, seat: seat, engine: pfmengine.Claude}
+	for _, door := range []string{"exists", "close"} {
+		t.Run(door, func(t *testing.T) {
+			var err error
+			if door == "exists" {
+				_, err = client.PaneExists(context.Background(), "", "")
+			} else {
+				err = client.KillPane(context.Background(), "", "")
+			}
+			if err == nil || !strings.Contains(err.Error(), "unbound") ||
+				!strings.Contains(err.Error(), "pane absent") {
+				t.Fatalf("retirement diagnostic=%v; want unbound retained seat with pane absent", err)
+			}
+		})
+	}
+}

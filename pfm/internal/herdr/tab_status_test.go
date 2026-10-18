@@ -121,6 +121,7 @@ func tabObservation(state string) TabDecoration {
 		Terminal:    "term1",
 		Tab:         "w1:t1",
 		Identity:    "seat1:s1",
+		Validate:    func(context.Context) (bool, error) { return true, nil },
 		Name:        "Chat",
 		State:       state,
 		Mode:        "emoji",
@@ -311,5 +312,49 @@ func TestTabStatusActualSocketAndSidebar(t *testing.T) {
 	}
 	if got, _ := wantedIndicators("blocked", true); got[IndicatorBlocked] != GlyphBlocked {
 		t.Fatalf("sidebar changed: %v", got)
+	}
+}
+
+func TestTabOwnershipPrecedesPaneReads(t *testing.T) {
+	for _, restoring := range []bool{false, true} {
+		for _, refusal := range []string{"missing proof", "retired", "unreadable"} {
+			t.Run(fmt.Sprintf("restore=%t/%s", restoring, refusal), func(t *testing.T) {
+				f := newTabStatusFixture()
+				d := tabObservation("blocked")
+				d.Validate = nil
+				if refusal != "missing proof" {
+					d.Validate = func(context.Context) (bool, error) {
+						if refusal == "unreadable" {
+							return false, fmt.Errorf("owner store unreadable")
+						}
+						return false, nil
+					}
+				}
+				reads := 0
+				f.before = func(method string) {
+					if method == "pane.get" {
+						reads++
+					}
+				}
+				var err error
+				if restoring {
+					painter := indicatorPainter{
+						socket:          "endpoint",
+						lockDir:         t.TempDir(),
+						call:            f.call,
+						tabObservations: []TabDecoration{d},
+					}
+					err = painter.restoreTabs(context.Background())
+				} else {
+					_, err = reconcileTab(context.Background(), "endpoint", t.TempDir(), d, true, f.call)
+				}
+				if reads != 0 || len(f.renames) != 0 {
+					t.Fatalf("unproved %s: reads=%d renames=%v err=%v", refusal, reads, f.renames, err)
+				}
+				if refusal != "retired" && (err == nil || !strings.Contains(err.Error(), "ownership unproved")) {
+					t.Fatalf("unproved cause must be named: %v", err)
+				}
+			})
+		}
 	}
 }

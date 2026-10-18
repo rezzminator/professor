@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -476,7 +477,7 @@ func (s *session) restoreHerdr(ctx context.Context) SurfaceResult {
 	}
 	// The indicator tokens carry no ttl: with the plugin unlinked nothing
 	// would repaint them, so they are cleared on every server pfm painted.
-	if err := herdr.ClearIndicators(ctx, paths.HerdrLockDir(s.env.Home), io.Discard); err != nil {
+	if err := herdr.ClearIndicators(ctx, paths.HerdrLockDir(s.env.Home), io.Discard, call.ProveHerdrPane); err != nil {
 		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: clear the herdr indicators: %w", err))
 	}
 	detail = strings.TrimSpace(detail + " " + pluginNote)

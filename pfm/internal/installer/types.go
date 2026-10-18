@@ -79,6 +79,9 @@ type Options struct {
 	ManagedSettingsDir    string
 	CleanupPeriodDays     int
 	RequireManagedCleanup bool
+	// themeFollowerRefresh re-applies the theme follower's launch agent for
+	// home while the theme sync is on; nil uses themesync.Sync.
+	themeFollowerRefresh func(ctx context.Context, home string) error
 	// writeManaged is the atomic managed-drop-in writer; nil uses atomicfile.Write.
 	writeManaged func(string, []byte) error
 	// themeOff runs `pfm theme off` for home before an uninstall while the

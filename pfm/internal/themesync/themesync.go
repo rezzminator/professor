@@ -161,7 +161,9 @@ type Env struct {
 	Home string
 	// StateDir is DefaultStateDir(Home) unless a test points it elsewhere.
 	StateDir string
-	// PfmBinary is the pfm the follower's launch agent runs.
+	// PfmBinary is the pfm the herdr plugin runs and the follower requires;
+	// the follower's launch agent runs the stable launcher, which execs
+	// ~/.local/bin/pfm (agentlauncher).
 	PfmBinary string
 	// Runner runs defaults, herdr, ps and launchctl.
 	Runner deps.Runner
@@ -174,6 +176,9 @@ type Env struct {
 
 // FollowerLabel is the launchd job label of the follower's launch agent.
 const FollowerLabel = followerLabel
+
+// FollowerSurface is the report row naming the follower's launch agent.
+const FollowerSurface = surfaceFollower
 
 // tmuxStateName is the server option the agent-state hook sets and the
 // theme's state-colour formats read; off unsets it with the theme's own.

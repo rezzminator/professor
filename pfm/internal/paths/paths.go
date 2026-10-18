@@ -422,6 +422,16 @@ func ServicePath(home string) string {
 	}, ":")
 }
 
+// AgentLauncher is the one executable every pfm-written launchd agent names as
+// ProgramArguments[0]: a fixed shell script that execs the installed pfm. macOS
+// Background Task Management keys a launch item on the code identity of that
+// first argument, and an ad-hoc-signed pfm is a new identity on every build —
+// so an agent naming pfm itself raised an "App Background Activity" advisory
+// per rebuild. The script never changes, so neither does the item.
+func AgentLauncher(home string) string {
+	return filepath.Join(home, ".local", "libexec", "pfm", "pfm-agent")
+}
+
 // Resolve returns the standard host paths with all K4 test-jail overrides
 // applied. It only computes pathnames; it does not access the filesystem.
 func DefaultStateDB(home string) string {

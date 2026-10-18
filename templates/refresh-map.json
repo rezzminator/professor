@@ -103,9 +103,6 @@
     "global/agents/tracer.md": {
       "curated": true
     },
-    "global/agents/imagine.md": {
-      "curated": true
-    },
     "global/agents/imagination.md": {
       "curated": true
     },
@@ -130,16 +127,7 @@
     "global/commands/housekeeping.md": {
       "curated": true
     },
-    "global/commands/imagine/build-fast.md": {
-      "curated": true
-    },
-    "global/commands/imagine/build-spec.md": {
-      "curated": true
-    },
-    "global/commands/imagine/build.md": {
-      "curated": true
-    },
-    "global/commands/imagine/callmeter.md": {
+    "global/commands/imagine.md": {
       "curated": true
     },
     "global/commands/iterative-improvement.md": {
@@ -173,12 +161,6 @@
       "curated": true
     },
     "global/commands/quality/prompt.md": {
-      "curated": true
-    },
-    "global/skills/imagine-core/SKILL.md": {
-      "curated": true
-    },
-    "global/skills/imagine-core/live.md": {
       "curated": true
     },
     "global/skills/ultimate/SKILL.md": {

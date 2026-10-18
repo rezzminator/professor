@@ -196,6 +196,8 @@ def call_key(r, msg, path, n):
 
 
 TOKEN = re.compile(rb'"([0-9A-Za-z_.:-]+)"')
+SESSION_ID = re.compile(rb'"(?:sessionId|session_id)"\s*:\s*"([0-9A-Za-z_.:-]+)"')
+FORK_ORIGIN = re.compile(rb'"forkedFrom"\s*:\s*\{[^}]*?"sessionId"\s*:\s*"([0-9A-Za-z_.:-]+)"')
 
 
 def _walk(d, out, scan):
@@ -226,8 +228,8 @@ def owners(path, keys, scan):
     at = me.find(f"{os.sep}subagents{os.sep}")
     if at >= 0:
         domain = os.path.dirname(me[:at])
-    if os.path.basename(domain).startswith("-"):
-        domain = os.path.dirname(domain)
+    # The transcript's own project directory, never the whole projects root: pfm's default scans every
+    # project (~3,000 directories, ~30 s) for fork copies that live beside their origin in practice.
     found, seen, files = [], set(), []
     _walk(domain, found, scan)
     for f in found:
@@ -239,13 +241,34 @@ def owners(path, keys, scan):
         files.append(me)
     needles = {k.split(":", 1)[1].encode() for k in want}
     exact = all(TOKEN.fullmatch(b'"' + v + b'"') for v in needles)
+    # Cheap gates before the token scan: a copy of this transcript's calls carries one of its session ids
+    # (its records' sessionId, or forkedFrom naming it) and was written after it began; the origin this
+    # transcript names in forkedFrom is read unconditionally.
+    try:
+        with open(me, "rb") as fh:
+            mine = fh.read()
+    except OSError as e:
+        scan.read_errors.append(f"{me}: {e}")
+        mine = b""
+    ids = set(SESSION_ID.findall(mine))
+    origins = {o.decode() for o in FORK_ORIGIN.findall(mine)}
+    born = getattr(os.stat(me), "st_birthtime", None) if os.path.exists(me) else None
     holders = {}
     for f in files:
+        if f != me and not any(f"{os.sep}{o}.jsonl" in f or f"{os.sep}{o}{os.sep}" in f for o in origins):
+            try:
+                if born is not None and os.path.getmtime(f) < born - 60:
+                    continue
+            except OSError as e:
+                scan.read_errors.append(f"{f}: {e}")
+                continue
         try:
             with open(f, "rb") as fh:
-                data = fh.read()
+                data = mine if f == me else fh.read()
         except OSError as e:
             scan.read_errors.append(f"{f}: {e}")
+            continue
+        if f != me and ids and not any(i in data for i in ids) and not any(o.encode() in f.encode() for o in origins):
             continue
         if f != me and exact and not needles.intersection(TOKEN.findall(data)):
             continue

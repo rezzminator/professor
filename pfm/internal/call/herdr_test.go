@@ -531,7 +531,8 @@ func TestHerdrThenHonorsProducerUntil(t *testing.T) {
 					t.Errorf("wait omitted producer until: %+v", request)
 					return nil, "invalid_params"
 				}
-				if ms, ok := request.Params["timeout_ms"].(float64); !ok || ms < 1 || ms > float64(budget.Milliseconds()) {
+				if ms, ok := request.Params["timeout_ms"].(float64); !ok || ms < 1 ||
+					ms > float64(budget.Milliseconds()) {
 					t.Errorf("wait lost its bounded timeout: %+v", request)
 				}
 				for _, allowed := range until {

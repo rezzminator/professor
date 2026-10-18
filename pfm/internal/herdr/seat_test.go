@@ -108,6 +108,7 @@ func TestSeatRecentReadDeadline(t *testing.T) {
 		{"history", "recent", 3 * time.Second, true}, {"caller-bound", "recent", 30 * time.Millisecond, false}, {"visible-stays-short", "visible", 3 * time.Second, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			release := make(chan struct{})
 			defer close(release)
 			socket := serve(t, func(string) string {

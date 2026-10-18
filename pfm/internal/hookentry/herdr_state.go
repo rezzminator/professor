@@ -259,6 +259,9 @@ type herdrReporter struct {
 	tmuxPane string
 	// panes caches one pane.list per Herdr socket for this run.
 	panes map[string]paneListing
+	// verifiedClients reuses the foreground proof from adoption in this locked
+	// transaction, rather than probing the same client's pane twice.
+	verifiedClients map[string]herdrClient
 }
 
 type paneListing struct {
@@ -448,10 +451,6 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	}
 	return reporter.event(ctx, session, state, payload)
 }
-
-type herdrTarget struct{ pane, socket string }
-
-func (target herdrTarget) ok() bool { return target.pane != "" && target.socket != "" }
 
 func (reporter *herdrReporter) processTarget() herdrTarget {
 	if reporter.deps.getenv(herdr.EnvMarker) != "1" {
@@ -679,6 +678,11 @@ func (reporter *herdrReporter) event(
 	state herdrStored,
 	payload herdrPayload,
 ) error {
+	unlockBridge, err := reporter.lockBridge(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlockBridge()
 	action := reporter.plan(payload)
 	if action == nil || state.Seq > reporter.seq || keepsStored(reporter.options.event, payload, state) {
 		return nil
@@ -701,7 +705,7 @@ func (reporter *herdrReporter) event(
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]
 		errs = append(errs, reporter.send(
-			ctx, herdrTarget{pane: client.Pane, socket: client.Socket}, action, reporter.nextSent(),
+			ctx, clientTarget(pid, client), action, reporter.nextSent(),
 		))
 	}
 	if !action.release {
@@ -721,6 +725,10 @@ func (reporter *herdrReporter) event(
 func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, action *herdrAction, seq uint64) error {
 	if !target.ok() {
 		return nil
+	}
+	allowed, err := reporter.preparePane(target, action.release)
+	if err != nil || !allowed {
+		return err
 	}
 	label := action.stored.Engine
 	if action.release {

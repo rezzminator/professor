@@ -21,10 +21,10 @@
 | Model, effort | `opus`, `medium` |
 | Tools | `WebSearch, WebFetch, Read, Write, Agent, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` — `rr.md`'s list plus `Read`, added by `add.tools` in its declaration |
 | Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
-| Writes | the one RR document, into the directory on its `RR-DIR:` line; an existing file of the same name is overwritten (§ Read, and the name guard it gives up) |
+| Writes | the run's plan and synthesis, `plan.md` and `{slug}.md` in its run directory under the `RR-DIR:` line (`rr.md` § The document); an existing plan or synthesis of the same name is overwritten (§ Read, and the name guard it gives up) |
 | Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max\|gpt-rr\|gpt-rr-pro\|gpt-rr-pro-max` |
 
-Description, verbatim: `Maps a query exhaustively — tier 3, the ultimate: rr-pro → here. Delegate for "rr pro max", "rr-pro-max X", when every sub-area must settle whatever the cost. Returns the saved RR path, then the cited map.`
+Description, verbatim: `rr tier 3 on opus medium`
 
 ## How the variant is built
 
@@ -50,11 +50,11 @@ Nothing else ends a run. A lead that keeps adding sub-areas, or judges each roun
 
 ## Read, and the name guard it gives up
 
-`rr-pro-max` holds `Read`; `rr` and `rr-pro` do not (`rr.md` § The document). The harness refuses a Write over an existing file the agent has not read, and lifts that refusal for an agent holding `Read`. An `rr-pro-max` run that derives a slug already taken on the same date therefore overwrites the earlier document silently, where the other leads would be refused. The user ruled this accepted: the lead gains local reads, and the ledger loses its overwrite guard for this lead alone. `Read` also lets the lead open an earlier RR document; the prompt still admits only web URLs and document identifiers as sources, so a map built on a local file is a prompt violation, not a permitted path.
+`rr-pro-max` holds `Read`; `rr` and `rr-pro` do not (`rr.md` § The document). The harness refuses a Write over an existing file the agent has not read, and lifts that refusal for an agent holding `Read`. An `rr-pro-max` run that derives a slug already taken on the same date therefore claims the earlier run's directory and overwrites its plan and synthesis silently, where the other leads would be refused; its diggers hold no `Read`, so a report path the earlier run left is refused and that digger returns `NOT SAVED` with its report inline. The user ruled this accepted: the lead gains local reads, and the ledger loses its overwrite guard for this lead alone. `Read` also lets the lead open an earlier RR or a digger's report; the prompt forbids reading a report and still admits only web URLs and document identifiers as sources, so a map built on a local file is a prompt violation, not a permitted path.
 
 ## Cost
 
-A run costs `r(d + 1) + 5` lead calls; each round of 8 diggers costs 9, and `r` has no bound. Each lead call re-sends the lead's whole context, which grows by every digger's findings, so a round late in a run costs more than an early one. `pfm tokens --family {the chat's session-id prefix}` prices the lead and the diggers per agent type, then the 14 costliest agents one by one, so a long run's cheaper diggers drop out of that list; the number to watch is rounds used, since no ceiling reports a runaway for you.
+A run costs `r(d + 1) + 6` lead calls; each round of 8 diggers costs 9, and `r` has no bound. Each lead call re-sends the lead's whole context, which grows by every digger's findings, so a round late in a run costs more than an early one. `pfm tokens --family {the chat's session-id prefix}` prices the lead and the diggers per agent type, then the 14 costliest agents one by one, so a long run's cheaper diggers drop out of that list; the number to watch is rounds used, since no ceiling reports a runaway for you.
 
 ## Running it
 

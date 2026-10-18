@@ -275,6 +275,9 @@ func (client herdrKiller) PaneExists(ctx context.Context, _, _ string) (bool, er
 		if !retained {
 			return false, nil
 		}
+		if owner.SeatHostPID == 0 {
+			return false, fmt.Errorf("native seat %s is unbound with pane absent; seat retained", owner.SeatID)
+		}
 		return false, fmt.Errorf(
 			"native seat %s supervisor is dead; pane disappearance unproved, seat retained",
 			client.seat.SeatID,
@@ -314,41 +317,13 @@ func (client herdrKiller) PaneExists(ctx context.Context, _, _ string) (bool, er
 }
 
 func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bool, error) {
-	var response struct {
-		Type string `json:"type"`
-		Info *struct {
-			Pane      string `json:"pane_id"`
-			Workspace string `json:"workspace_id"`
-			Processes []struct {
-				PID   int    `json:"pid"`
-				Name  string `json:"name"`
-				Argv0 string `json:"argv0"`
-			} `json:"foreground_processes"`
-		} `json:"process_info"`
+	present, err := herdr.EngineForeground(result, pane, client.engine)
+	if err != nil || present {
+		return present, err
 	}
-	if err := json.Unmarshal(result, &response); err != nil {
-		return false, fmt.Errorf("decode Herdr processes in %s: %w", pane, err)
-	}
-	if response.Type != "pane_process_info" || response.Info == nil ||
-		!herdrPaneMatches(pane, response.Info.Pane, response.Info.Workspace) {
-		return false, fmt.Errorf("read Herdr processes in %s: malformed process_info result", pane)
-	}
-	if len(response.Info.Processes) == 0 {
-		return false, fmt.Errorf("herdr foreground evidence unavailable in %s; engine exit is unproved", pane)
-	}
-	for _, process := range response.Info.Processes {
-		if process.PID <= 0 || (process.Name == "" && process.Argv0 == "") {
-			return false, fmt.Errorf("read Herdr processes in %s: process has no valid pid or identity", pane)
-		}
-		for _, name := range []string{process.Name, process.Argv0} {
-			if pfmengine.MatchCommand(client.engine, []string{name}, client.engine == pfmengine.Claude) {
-				return true, nil
-			}
-		}
-	}
+	// Engine absence does not prove the pane or its live supervisor retired.
 	return false, fmt.Errorf(
-		"herdr foreground evidence unavailable in %s; live supervisor engine exit is unproved",
-		pane,
+		"herdr foreground evidence unavailable in %s; live supervisor engine exit is unproved", pane,
 	)
 }
 
@@ -478,11 +453,17 @@ func (client herdrKiller) SendKey(ctx context.Context, socket, pane, key string)
 
 func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) error {
 	// A retry prompt has a live supervisor but no foreground engine.
-	_, owned, err := client.prove(ctx)
+	owner, owned, err := client.prove(ctx)
 	if err != nil {
 		return fmt.Errorf("refuse Herdr close without supervisor proof: %w", err)
 	}
 	if !owned {
+		if owner.SeatHostPID == 0 {
+			return fmt.Errorf(
+				"native seat %s is unbound with pane absent; pane not closed, seat retained",
+				owner.SeatID,
+			)
+		}
 		return fmt.Errorf("native seat %s supervisor is dead; pane not closed, seat retained", client.seat.SeatID)
 	}
 

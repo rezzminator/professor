@@ -8,10 +8,12 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -26,13 +28,15 @@ func TestClosePickerPaneAfterHerdrOpen(t *testing.T) {
 		code      int
 		wantClose bool
 	}{
-		{name: "herdr tab open closes the picker pane", inHerdr: true, wantClose: true},
+		{name: "unproved picker stays open after successful chat open", inHerdr: true},
 		{name: "eval line for this terminal keeps it", inHerdr: true, evalLine: "exec tmux attach"},
 		{name: "failed open keeps it", inHerdr: true, code: 1},
 		{name: "outside herdr keeps it"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(paths.EnvHome, t.TempDir())
+			t.Setenv(paths.EnvStateDB, filepath.Join(t.TempDir(), "absent.db"))
 			socket := filepath.Join(testjail.ShortRoot(t), "pick.sock")
 			listener, err := net.Listen("unix", socket)
 			if err != nil {
@@ -69,6 +73,10 @@ func TestClosePickerPaneAfterHerdrOpen(t *testing.T) {
 			})
 			if code != test.code {
 				t.Fatalf("code=%d want %d", code, test.code)
+			}
+			if test.inHerdr && test.evalLine == "" && test.code == 0 &&
+				!strings.Contains(stderr.String(), "ownership unproved") {
+				t.Fatalf("unproved successful open must name why picker stayed: %s", &stderr)
 			}
 			if stdout.String() != lineOrEmpty(test.evalLine) {
 				t.Fatalf("stdout=%q, the eval line must pass through unchanged", stdout.String())

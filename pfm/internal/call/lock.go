@@ -97,15 +97,20 @@ func acquireTargetLock(
 }
 
 // lockTarget takes the pane's ONE call lock — the same directory
-// engine.call holds while it types, keyed by socket:pane — and returns the
-// refusal text for a caller to report when it could not be had. Live calls
-// share this lock so the key, timings and wording cannot drift apart.
+// engine.call holds while it types, keyed by socket:pane, a proved Herdr seat
+// by its seat id so a stale and a moved address serialize on one key — and
+// returns the refusal text for a caller to report when it could not be had.
+// Live calls share this lock so the key, timings and wording cannot drift apart.
 func (engine *Engine) lockTarget(ctx context.Context, target Target) (*targetLock, string) {
+	key := target.SocketPath + ":" + target.Pane
+	if target.Backend == backendHerdr && target.SeatID != "" {
+		key = "herdr-seat:" + target.SeatID
+	}
 	lock, err := acquireTargetLock(
 		ctx,
 		engine.options.Clock,
 		engine.options.LockRoot,
-		target.SocketPath+":"+target.Pane,
+		key,
 		engine.options.LockTimeout,
 		engine.options.LockPoll,
 		engine.options.LockMaxHold,

@@ -38,6 +38,10 @@ func herdrCaptureSource(ctx context.Context, target Target, lines int, source, f
 	if target.SocketPath == "" || target.Pane == "" {
 		return "", "", fmt.Errorf("herdr capture: socket and pane are required")
 	}
+	target, err := ProveHerdrTarget(ctx, target)
+	if err != nil {
+		return "", "", err
+	}
 	limit := lines
 	if limit <= 0 || limit > herdrRecentLines {
 		limit = herdrRecentLines
@@ -290,6 +294,11 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 			return fmt.Errorf("herdr agent.wait for %q: missing deadline", target.Pane)
 		}
 		remaining := time.Until(deadline)
+		var err error
+		target, err = ProveHerdrTarget(ctx, target)
+		if err != nil {
+			return err
+		}
 		result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.wait", struct {
 			Target    string   `json:"target"`
 			Until     []string `json:"until"`
@@ -361,7 +370,8 @@ func (engine *Engine) SendLiteral(ctx context.Context, target Target, text strin
 	case "", backendTmux:
 		return engine.tmux.SendLiteral(ctx, target.SocketPath, target.Pane, text)
 	case backendHerdr:
-		return herdrSendText(ctx, target, text, "pane.send_text")
+		_, err := herdrSendText(ctx, target, text, "pane.send_text")
+		return err
 	default:
 		return fmt.Errorf("unsupported seat backend %q", target.Backend)
 	}

@@ -83,17 +83,27 @@ const (
 	// maxSettleRounds bounds the extra list-and-paint rounds a run makes
 	// after paints that wrote with nothing blocked.
 	maxSettleRounds = 3
+	// unprovedReprove is how long a paint skips a pane whose ownership proof
+	// failed while its agent_status is unchanged, so a foreign pane costs one
+	// proof per interval, never one per half-second tick.
+	unprovedReprove = 5 * time.Second
 )
 
 // indicatorPainter is one PaintIndicators run: the Herdr socket it paints, the
 // lock directory that keeps one blinker per socket, and the seams the socket
 // exchange and the time sit behind.
+// PaneProof proves a durable owner immediately before a pane-addressed write.
+type PaneProof func(context.Context, string, string) error
+
+var errIndicatorOwnership = errors.New("pane ownership unproved")
+
 type indicatorPainter struct {
-	socket  string
-	lockDir string
-	stderr  io.Writer
-	call    func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
-	clock   clock.Clock
+	provePane PaneProof
+	socket    string
+	lockDir   string
+	stderr    io.Writer
+	call      func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
+	clock     clock.Clock
 	// seq numbers the request ids; reported holds the unexpected agent_status
 	// strings already named on stderr, so a blinking pane names one once.
 	seq      uint64
@@ -104,6 +114,16 @@ type indicatorPainter struct {
 	tabs            TabProvider
 	hasTabs         bool
 	tabObservations []TabDecoration
+	// unproved holds each pane whose ownership proof failed: the status it
+	// failed under and when. Such a pane is named once while it stays
+	// unproved, and paint re-proves it only once its status changes or
+	// unprovedReprove passed; a proof that succeeds forgets it.
+	unproved map[string]unprovedPane
+}
+
+type unprovedPane struct {
+	status string
+	at     time.Time
 }
 
 // PaintIndicators repaints every pane's and workspace's indicator token on the
@@ -111,13 +131,13 @@ type indicatorPainter struct {
 // any is blocked or done; lockDir holds the one-blinker-per-socket lock and the socket's
 // record, whose removal (ClearIndicators) stops the blinker; errors are
 // written to stderr with their context and returned.
-func PaintIndicators(ctx context.Context, socket, lockDir string, stderr io.Writer) error {
+func PaintIndicators(ctx context.Context, socket, lockDir string, stderr io.Writer, proof PaneProof) error {
 	if stderr == nil {
 		stderr = io.Discard
 	}
 	painter := &indicatorPainter{
 		socket: socket, lockDir: lockDir, stderr: stderr, call: Call, clock: clock.Real,
-		reported: map[string]bool{},
+		reported: map[string]bool{}, provePane: proof,
 	}
 	return painter.run(ctx)
 }
@@ -287,7 +307,14 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 			painter.logf("herdr indicators: socket %s: %s %s has agent_status %q, painted as unknown",
 				painter.socket, target.kind, target.id, target.status)
 		}
-		accepted, err := painter.report(ctx, target, indicatorPatch(target.tokens, want))
+		patch := indicatorPatch(target.tokens, want)
+		if patch != nil && painter.skipUnproved(target) {
+			continue
+		}
+		accepted, err := painter.report(ctx, target, patch)
+		if errors.Is(err, errIndicatorOwnership) {
+			continue
+		}
 		if err != nil {
 			return blocked, wrote, err
 		}
@@ -298,37 +325,69 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		if err != nil {
 			return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
 		}
-		painter.tabObservations = observations
-		painter.hasTabs = false
-		for i := range observations {
-			observation := observations[i]
-			painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
-			accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.call)
-			if err != nil {
-				return blocked, wrote, err
-			}
-			wrote = wrote || accepted
+		accepted, err := painter.paintTabs(ctx, observations, blinkOn)
+		wrote = wrote || accepted
+		if err != nil {
+			return blocked, wrote, err
 		}
 	}
 	return blocked, wrote, nil
 }
 
+// paintTabs reconciles every observed tab's status label. One tab's failure
+// never stops the others: an unproved owner or a foreign label leaves that tab
+// untouched, named once while it lasts; any other failure is named and joined
+// into the returned error after every other tab is painted.
+func (painter *indicatorPainter) paintTabs(
+	ctx context.Context,
+	observations []TabDecoration,
+	blinkOn bool,
+) (wrote bool, err error) {
+	painter.tabObservations = observations
+	painter.hasTabs = false
+	var failures []error
+	for i := range observations {
+		observation := observations[i]
+		painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
+		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.call)
+		wrote = wrote || accepted
+		key := "tab\x00" + observation.Tab + "\x00" + observation.Identity
+		switch {
+		case errors.Is(err, errTabOwnership) || errors.Is(err, errTabLabelForeign):
+			if !painter.reported[key] {
+				painter.reported[key] = true
+				painter.logf("herdr tab status: socket %s: %v (left untouched)", painter.socket, err)
+			}
+		case err != nil:
+			painter.logf("herdr tab status: socket %s: %v (painting the other tabs)", painter.socket, err)
+			failures = append(failures, err)
+		default:
+			delete(painter.reported, key)
+		}
+	}
+	return wrote, errors.Join(failures...)
+}
+
 // clear lists every pane and workspace once and removes the indicator tokens
 // each holds, leaving every other source's tokens alone.
 func (painter *indicatorPainter) clear(ctx context.Context) error {
+	var failures []error
 	if err := painter.restoreTabs(ctx); err != nil {
-		return err
+		failures = append(failures, err)
 	}
 	targets, err := painter.list(ctx)
 	if err != nil {
-		return err
+		return errors.Join(append(failures, err)...)
 	}
 	for _, target := range targets {
 		if _, err := painter.report(ctx, target, indicatorPatch(target.tokens, nil)); err != nil {
-			return err
+			if !errors.Is(err, errIndicatorOwnership) {
+				return errors.Join(append(failures, err)...)
+			}
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // list asks the socket for its panes and workspaces in one exchange.
@@ -370,6 +429,30 @@ func (painter *indicatorPainter) report(
 	if patch == nil {
 		return false, nil
 	}
+	if target.kind == targetPane {
+		var err error
+		if painter.provePane == nil {
+			err = fmt.Errorf("ownership unproved: no pane proof configured")
+		} else {
+			err = painter.provePane(ctx, painter.socket, target.id)
+		}
+		if err != nil {
+			if _, named := painter.unproved[target.id]; !named {
+				painter.logf(
+					"herdr indicators: socket %s: pane %s ownership unproved: %v",
+					painter.socket,
+					target.id,
+					err,
+				)
+			}
+			if painter.unproved == nil {
+				painter.unproved = map[string]unprovedPane{}
+			}
+			painter.unproved[target.id] = unprovedPane{status: target.status, at: painter.clock.Now()}
+			return false, fmt.Errorf("%w: pane %s: %w", errIndicatorOwnership, target.id, err)
+		}
+		delete(painter.unproved, target.id)
+	}
 	line, err := tokenReport{target: target, tokens: patch, seq: painter.nextSeq()}.Line()
 	if err != nil {
 		return false, fmt.Errorf("herdr indicators: render the report for %s %s: %w", target.kind, target.id, err)
@@ -384,6 +467,17 @@ func (painter *indicatorPainter) report(
 		return false, fmt.Errorf("herdr indicators: paint %s %s: %w", target.kind, target.id, err)
 	}
 	return true, nil
+}
+
+// skipUnproved says whether paint leaves a pane alone without proving it
+// again: its last proof failed under the same agent_status less than
+// unprovedReprove ago. Skipping writes nothing, so it can only fail closed.
+func (painter *indicatorPainter) skipUnproved(target indicatorTarget) bool {
+	if target.kind != targetPane {
+		return false
+	}
+	last, ok := painter.unproved[target.id]
+	return ok && last.status == target.status && painter.clock.Now().Sub(last.at) < unprovedReprove
 }
 
 // socketKey names a socket's files in the lock directory: the first 8 hex of
@@ -438,8 +532,8 @@ func (painter *indicatorPainter) recorded() bool {
 // also stops that socket's running blinker at its next tick. A failure on one
 // socket leaves its record, is written to stderr, and the rest are still
 // cleared; the failures come back joined.
-func ClearIndicators(ctx context.Context, lockDir string, stderr io.Writer) error {
-	return clearRecordedIndicators(ctx, lockDir, stderr, Call)
+func ClearIndicators(ctx context.Context, lockDir string, stderr io.Writer, proof PaneProof) error {
+	return clearRecordedIndicators(ctx, lockDir, stderr, Call, proof)
 }
 
 func clearRecordedIndicators(
@@ -447,6 +541,7 @@ func clearRecordedIndicators(
 	lockDir string,
 	stderr io.Writer,
 	call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error),
+	proof PaneProof,
 ) error {
 	if stderr == nil {
 		stderr = io.Discard
@@ -474,10 +569,10 @@ func clearRecordedIndicators(
 		}
 		painter := &indicatorPainter{
 			socket: string(socket), lockDir: lockDir, stderr: stderr, call: call, clock: clock.Real,
-			reported: map[string]bool{},
+			reported: map[string]bool{}, provePane: proof,
 		}
-		if err := painter.clear(ctx); err != nil && !errors.Is(err, syscall.ENOENT) &&
-			!errors.Is(err, syscall.ECONNREFUSED) {
+		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) ||
+			!errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED)) {
 			failures = append(failures, fmt.Errorf("herdr indicators: clear socket %s: %w", socket, err))
 			continue
 		}

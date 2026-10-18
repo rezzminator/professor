@@ -97,6 +97,10 @@ func (engine *Engine) SendKey(ctx context.Context, target Target, key string) er
 		if err != nil {
 			return err
 		}
+		target, err = ProveHerdrTarget(ctx, target)
+		if err != nil {
+			return err
+		}
 		result, err := herdr.SeatRequest(ctx, target.SocketPath, "pane.send_keys", struct {
 			Pane string   `json:"pane_id"`
 			Keys []string `json:"keys"`

@@ -422,8 +422,8 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 	}
 }
 
-func TestBareHerdrDegradedSeatStoreStillReportsWithVisibleError(t *testing.T) {
-	for _, failure := range []string{"corrupt", "newer"} {
+func TestBareHerdrDegradedSeatStoreRefusesUnprovedReport(t *testing.T) {
+	for _, failure := range []string{"corrupt", "newer", "no owner"} {
 		t.Run(failure, func(t *testing.T) {
 			server := newFakeHerdr(t)
 			server.addPane("w6:p3", "bare")
@@ -440,11 +440,12 @@ func TestBareHerdrDegradedSeatStoreStillReportsWithVisibleError(t *testing.T) {
 				values,
 				fleetdb.Seat{SeatID: "other", Backend: "tmux", State: "live", Engine: string(pfmengine.Claude)},
 			)
-			if failure == "corrupt" {
+			switch failure {
+			case "corrupt":
 				if err := os.WriteFile(values.StateDB, []byte("not SQLite"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-			} else {
+			case "newer":
 				if _, err := database.Exec(fmt.Sprintf("PRAGMA user_version=%d", fleetdb.SchemaVersion+1)); err != nil {
 					t.Fatal(err)
 				}
@@ -466,8 +467,8 @@ func TestBareHerdrDegradedSeatStoreStillReportsWithVisibleError(t *testing.T) {
 					reported = true
 				}
 			}
-			if !reported {
-				t.Fatalf("legacy report missing after visible degradation: %v stderr=%s", lines, &stderr)
+			if reported || !strings.Contains(stderr.String(), "ownership unproved") {
+				t.Fatalf("unproved native report must be refused visibly: %v stderr=%s", lines, &stderr)
 			}
 		})
 	}

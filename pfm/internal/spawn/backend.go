@@ -115,10 +115,15 @@ func selectBackend(env backendEnvironment, probe func(string, string) error) (Ba
 		return BackendChoice{}, fmt.Errorf("herdr backend requires HERDR_SOCKET_PATH and HERDR_PANE_ID")
 	}
 	if err := probe(env.Socket, env.Pane); err != nil {
-		if requested == BackendHerdr {
-			return BackendChoice{}, fmt.Errorf("herdr pane %s unreachable (%w)", env.Pane, err)
+		state := "probe failed"
+		var transport *net.OpError
+		if errors.As(err, &transport) {
+			state = "unreachable"
 		}
-		tmux.Warning = fmt.Sprintf("pfm: Herdr pane %s unreachable (%v) — starting in tmux", env.Pane, err)
+		if requested == BackendHerdr {
+			return BackendChoice{}, fmt.Errorf("herdr pane %s %s (%w)", env.Pane, state, err)
+		}
+		tmux.Warning = fmt.Sprintf("pfm: Herdr pane %s %s (%v) — starting in tmux", env.Pane, state, err)
 		return tmux, nil
 	}
 	if workspace == "" {

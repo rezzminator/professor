@@ -120,7 +120,7 @@ func TestQuietFollowerSync(t *testing.T) {
 		{
 			name:       "an apply prints one line",
 			fake:       fakeThemesync{on: true, report: changed},
-			wantStdout: "theme sync gen 7: custom:professor-gold (dark) from /h/.claude/settings.json · tmux 2 · herdr · vscode contract\n",
+			wantStdout: "theme sync gen 7: custom:hibiscus-night (dark) from /h/.claude/settings.json · tmux 2 · herdr · vscode contract\n",
 			wantLogged: []string{""},
 		},
 		{

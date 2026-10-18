@@ -13,16 +13,16 @@ import (
 func TestClaudeSpawnCarriesThemedSettingsWhenConfigured(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
-	machine.Accounts[0].Claude = &pfmconfig.ClaudePrefs{Theme: "custom:professor-silver"}
+	machine.Accounts[0].Claude = &pfmconfig.ClaudePrefs{Theme: "custom:lagoon"}
 	spawn := ClaudeSpawn{Purpose: PurposeInteractive, Account: 42, Home: home, Machine: machine}
 	shell, err := spawn.ShellCommand()
 	if err != nil {
 		t.Fatalf("shell spawn: %v", err)
 	}
-	if got := parsedShell(t, shell).Settings["theme"]; got != "custom:professor-silver" {
+	if got := parsedShell(t, shell).Settings["theme"]; got != "custom:lagoon" {
 		t.Fatalf("shell theme = %#v", got)
 	}
-	if got := parsedSpawn(t, spawn).Settings["theme"]; got != "custom:professor-silver" {
+	if got := parsedSpawn(t, spawn).Settings["theme"]; got != "custom:lagoon" {
 		t.Fatalf("direct theme = %#v", got)
 	}
 }

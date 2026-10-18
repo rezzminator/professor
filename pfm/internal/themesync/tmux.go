@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,9 +15,19 @@ type tmuxOption struct{ Name, Value string }
 
 const (
 	tmuxPriorPrefix   = "@pfm-theme-prior-"
-	tmuxGenerationKey = "@pfm-theme-generation"
 	tmuxLivenessProbe = "status-style"
 	tmuxPriorSentinel = "v:"
+	// tmuxPriorUnset is the prior of a chip option the user never set: restoring it unsets the option.
+	tmuxPriorUnset = "u:"
+)
+
+// The four user options the follower keeps for itself, not for the theme: the theme's name, the generation and
+// chip markers, and the state-colour format the style options read. A pin never names one.
+const (
+	tmuxThemeKey       = "@pfm-theme"
+	tmuxGenerationKey  = "@pfm-theme-generation"
+	tmuxChipsKey       = "@pfm-theme-chips"
+	tmuxStateColourKey = "@pfm-state-colour"
 )
 
 // tmuxStyleNames are the built-in options the theme styles; each one's prior
@@ -25,6 +36,16 @@ var tmuxStyleNames = []string{
 	"status-style", "window-status-style", "window-status-current-style", "pane-border-style",
 	"pane-active-border-style", "message-style", "message-command-style", "mode-style",
 }
+
+// tmuxChipNames are the user options the user's status formats read at draw
+// time (the host chip and its palette); the theme paints them like styles and
+// keeps each one's prior the same way, except that an option the user never
+// set has an unset prior.
+var tmuxChipNames = []string{
+	"@host_accent", "@p_g0", "@p_g3", "@p_fg", "@p_fg1", "@p_fg2", "@p_red", "@p_amber",
+}
+
+func isTmuxChip(name string) bool { return slices.Contains(tmuxChipNames, name) }
 
 // tmuxPriorName is the user option that keeps an option's value from before the theme.
 func tmuxPriorName(option string) string { return tmuxPriorPrefix + option }
@@ -38,6 +59,9 @@ func tmuxPriorParse(raw string) (string, bool) {
 	return value, ok
 }
 
+// tmuxPriorIsUnset reports a prior captured while the option was unset.
+func tmuxPriorIsUnset(raw string) bool { return raw == tmuxPriorUnset }
+
 // tmuxStateFormat is a tmux conditional format that picks the state colour
 // from the @pfm-state option the agent-state hook sets on its own server.
 func tmuxStateFormat(state StateColors) string {
@@ -46,8 +70,10 @@ func tmuxStateFormat(state StateColors) string {
 		",#{?#{==:#{@pfm-state},done}," + state.Done + "," + state.Idle + "}}}"
 }
 
-// tmuxOptions renders the 8 styles then the 13 @pfm-* user options for one
-// appearance at one generation.
+// tmuxOptions renders the 8 styles, the 8 chip options, then the 14 @pfm-*
+// user options (30 in all) for one appearance at one generation, the theme's
+// tmux pins laid over what derive filled: a pin replaces the value of the
+// option it names, and nothing derived from that value follows it.
 func tmuxOptions(applied Applied, appearance Appearance, generation int) []tmuxOption {
 	variant := applied.variant(appearance)
 	format := tmuxStateFormat(variant.State)
@@ -60,8 +86,17 @@ func tmuxOptions(applied Applied, appearance Appearance, generation int) []tmuxO
 		{"message-style", "bg=" + variant.Overlay + ",fg=" + variant.Foreground},
 		{"message-command-style", "bg=" + variant.Surface + ",fg=" + variant.Accent},
 		{"mode-style", "bg=" + variant.SelectionBackground + ",fg=" + variant.SelectionForeground},
-		{"@pfm-theme", applied.Value},
+		{"@host_accent", variant.Accent},
+		{"@p_g0", variant.Surface},
+		{"@p_g3", variant.Background},
+		{"@p_fg", variant.Foreground},
+		{"@p_fg1", variant.Muted},
+		{"@p_fg2", variant.Muted},
+		{"@p_red", variant.ANSI[1]},
+		{"@p_amber", variant.ANSI[3]},
+		{tmuxThemeKey, applied.Value},
 		{tmuxGenerationKey, strconv.Itoa(generation)},
+		{tmuxChipsKey, "1"},
 		{"@pfm-c-bg", variant.Background},
 		{"@pfm-c-fg", variant.Foreground},
 		{"@pfm-c-surface", variant.Surface},
@@ -72,7 +107,13 @@ func tmuxOptions(applied Applied, appearance Appearance, generation int) []tmuxO
 		{"@pfm-state-working", variant.State.Working},
 		{"@pfm-state-done", variant.State.Done},
 		{"@pfm-state-idle", variant.State.Idle},
-		{"@pfm-state-colour", format},
+		{tmuxStateColourKey, format},
+	}
+	pins := tmuxPins(applied.Pins)
+	for index, option := range options {
+		if pin, pinned := pins[option.Name]; pinned {
+			options[index].Value = pin
+		}
 	}
 	return options
 }
@@ -80,16 +121,27 @@ func tmuxOptions(applied Applied, appearance Appearance, generation int) []tmuxO
 // tmuxApplySocket themes one chat server: liveness first (a dead socket is an
 // error naming it), each style's prior captured once — on a server not yet
 // themed, so a failed read of a captured prior never overwrites it with a
-// themed value — then every option set in one apply.
+// themed value — each chip option's prior captured once, on a server not yet
+// carrying the chip marker (an unset chip is captured as unset, so a server
+// themed before the chips existed still gets them), then every option set in
+// one apply.
 func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 	if _, err := s.servers.Show(ctx, socket, tmuxLivenessProbe); err != nil {
 		return fmt.Errorf("tmux %s: %w", socket, err)
 	}
 	mark, markErr := s.servers.Show(ctx, socket, tmuxGenerationKey)
 	themed := markErr == nil && mark != ""
+	chipMark, chipMarkErr := s.servers.Show(ctx, socket, tmuxChipsKey)
+	chipped := chipMarkErr == nil && chipMark != ""
 	var commands [][]string
 	options := tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation)
 	for _, option := range options {
+		if isTmuxChip(option.Name) {
+			if !chipped {
+				commands = s.tmuxCaptureChip(ctx, socket, option.Name, commands)
+			}
+			continue
+		}
 		if themed || strings.HasPrefix(option.Name, "@") {
 			continue
 		}
@@ -112,6 +164,20 @@ func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 		return fmt.Errorf("tmux %s: apply: %w", socket, err)
 	}
 	return nil
+}
+
+// tmuxCaptureChip appends the command keeping one chip option's value, unless
+// a prior of it is already held. A failed read of the option, the server
+// having proved alive, is the option unset.
+func (s *session) tmuxCaptureChip(ctx context.Context, socket, name string, commands [][]string) [][]string {
+	if prior, err := s.servers.Show(ctx, socket, tmuxPriorName(name)); err == nil && prior != "" {
+		return commands
+	}
+	captured := tmuxPriorUnset
+	if current, err := s.servers.Show(ctx, socket, name); err == nil {
+		captured = tmuxPriorValue(current)
+	}
+	return append(commands, []string{tmuxSetOption, tmuxGlobal, tmuxPriorName(name), captured})
 }
 
 const (
@@ -200,8 +266,10 @@ func (s *session) readTmux(ctx context.Context) SurfaceResult {
 }
 
 // tmuxRestoreSocket puts each style's prior back (or, on a server the theme
-// reached, unsets it when none was captured) and removes every @pfm-* theme
-// option from one server. A server the theme never reached — one born after an
+// reached, unsets it when none was captured), does the same for each chip
+// option (an unset prior, or none on a server carrying the chip marker, unsets
+// it; no prior on any other server leaves the user's value alone) and removes
+// every @pfm-* theme option from one server. A server the theme never reached — one born after an
 // earlier off — keeps its own styles.
 func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 	if _, err := s.servers.Show(ctx, socket, tmuxLivenessProbe); err != nil {
@@ -209,6 +277,8 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 	}
 	mark, markErr := s.servers.Show(ctx, socket, tmuxGenerationKey)
 	themed := markErr == nil && mark != ""
+	chipMark, chipMarkErr := s.servers.Show(ctx, socket, tmuxChipsKey)
+	chipped := chipMarkErr == nil && chipMark != ""
 	var commands [][]string
 	for _, name := range tmuxStyleNames {
 		raw, err := s.servers.Show(ctx, socket, tmuxPriorName(name))
@@ -219,8 +289,17 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 		}
 		commands = append(commands, []string{tmuxSetOption, tmuxUnset, tmuxPriorName(name)})
 	}
+	for _, name := range tmuxChipNames {
+		raw, err := s.servers.Show(ctx, socket, tmuxPriorName(name))
+		if value, ok := tmuxPriorParse(raw); err == nil && ok {
+			commands = append(commands, []string{tmuxSetOption, tmuxGlobal, name, value})
+		} else if (err == nil && tmuxPriorIsUnset(raw)) || chipped {
+			commands = append(commands, []string{tmuxSetOption, tmuxUnset, name})
+		}
+		commands = append(commands, []string{tmuxSetOption, tmuxUnset, tmuxPriorName(name)})
+	}
 	for _, option := range tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation) {
-		if strings.HasPrefix(option.Name, "@") {
+		if strings.HasPrefix(option.Name, "@") && !isTmuxChip(option.Name) {
 			commands = append(commands, []string{tmuxSetOption, tmuxUnset, option.Name})
 		}
 	}

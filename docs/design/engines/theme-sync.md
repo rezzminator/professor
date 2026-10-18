@@ -1,12 +1,13 @@
 # Theme sync
 
-`pfm theme` reads Claude Code's `theme` setting, read-only, and renders it into the native format of every surface the user looks at: tmux, Herdr and VS Code. It reloads each live, reads each back, and stamps all of it with one generation number, so "in sync" is a fact the status matrix proves. pfm never writes a Claude file. The engine is `pfm/internal/themesync`; the verb and the name-sync door are `pfm/internal/themecmd`; the tmux seam is `pfm/internal/themetmux`. It ships inert: nothing is read, written or reloaded until `pfm theme on` writes `state.json`.
+`pfm theme` reads Claude Code's `theme` setting, read-only, and renders it into the native format of every surface the user looks at: tmux, Herdr and VS Code. It reloads each live, reads each back, and stamps all of it with one generation number, so "in sync" is a fact the status matrix proves. The sync never writes a Claude file; only `pfm theme use` sets the `theme` key of each account's settings.json ([List and use](#list-and-use)). The engine is `pfm/internal/themesync`; the verb and the name-sync door are `pfm/internal/themecmd`; the tmux seam is `pfm/internal/themetmux`. It ships inert: nothing is read, written or reloaded until `pfm theme on` writes `state.json`.
 
 ## Contents
 
 - [Verb](#verb)
 - [Source](#source)
 - [Derivation](#derivation)
+- [Profile pins](#profile-pins)
 - [State directory](#state-directory)
 - [Engine](#engine)
 - [Verdicts](#verdicts)
@@ -40,6 +41,16 @@ Text output is a header `pfm theme · {value} ({title}) · {appearance} · gen {
 `last flip {RFC3339 UTC} {origin file}: tmux +{s} s · herdr +{s} s · vscode contract +{s} s[, ack +{s} s]`. The offsets are measured from the origin file's mtime to each surface's apply completion: the governing `settings.json`, or the custom theme file, whichever is newer; an appearance-only flip uses the mtime of `~/Library/Preferences/.GlobalPreferences.plist`. The `ack` offset is the VS Code extension's `appliedAt` minus the origin, shown once an ack for the stored generation exists. The measurement is stored in `state.json` `lastFlip` (`themesync.Flip`) and recorded by every apply that bumps the generation.
 
 `themecmd.Main` builds the `themesync.Env`: `Home`, `StateDir` (`DefaultStateDir`), `PfmBinary` (`~/.local/bin/pfm`, the stable launcher), the `obs`-wrapped runner, `themetmux.AtDir(values.TmuxDir)` and `LaunchdJob` (`XPC_SERVICE_NAME`).
+
+### List and use
+
+`pfm theme list [--json]` and `pfm theme use {name} [--json]` are the one door that picks a theme. Picking sets the `theme` key of every Claude account `settings.json`, which stays the only source of truth; one sync then runs and the follower chain repaints tmux, Herdr and VS Code. `use` is the only place pfm writes a Claude file, and it writes that one key through the installer's `EditSettings` (atomic rename through a symlink, mode kept, every other key and number spelling kept, key order sorted); `themesync` takes it injected as `SettingsEdit` because the installer imports `themesync`.
+
+- `themesync.ListThemes` lists the custom themes (the union of the `*.json` stems in every account's themes dir, title from the file's `name`, else the stem) then Claude's built-ins and `auto`, each sorted by name. `Missing` names each account (`~/…`) whose themes dir lacks a custom theme; an absent themes dir is no error, but every custom theme then lists that account. A themes dir that cannot be read (not a directory, a dangling link), a theme file that does not parse and a `settings.json` that cannot be read are `Errors` rows naming the path, never absence; a themes dir shared by symlink between accounts is read once. `Current` is the value of the account `govern` picks from the stored memory while the sync is on (none while it is off), `dark` for an absent key; list writes nothing and runs with the sync on or off.
+- `themesync.UseTheme` resolves the name against an exact `Value` first (`custom:x`, a built-in id, `auto`), then a custom stem, so a stem equal to a built-in id needs `custom:`; an unknown name is an error listing the valid names. For each account it refuses the custom theme when the file is missing from that account's themes dir (the `Refused` row names the dir and the file), and refuses an account whose edit fails; the run goes on to the other accounts and errors only when none was written. Theme files are never copied between accounts: the themes dirs are the installer's, and `themesync` only reads them.
+- Text output: `list` draws `NAME  VALUE  TITLE` rows, `*` ahead of the current one, `missing in {dirs}` after a title, then `ERROR {path}: {error}` per `Errors` row. `use` prints `wrote {path}` per written file and `refused {path}: {error}` on stderr per refusal, then runs `Sync` once when the sync is on and draws its matrix, or prints `theme sync is off: run pfm theme on to repaint tmux, herdr and VS Code`, and ends with `new chats follow; run /theme in open chats`.
+- `--json`: `list` prints the `ThemeList` (`themes` and `errors` are `[]` when empty), `use` prints `{"use": UseResult, "report": Report|null}` (`null` when the sync is off or its run failed).
+- Exit codes: `list` is `1` when `Errors` is non-empty, else `0`. `use` is `0` when every account was written and the sync report is OK; `1` on any refusal, a failed sync or a report with a DRIFT or ERROR surface, the cause on stderr in one readable line per cause (the VS Code extension shows it); `2` when the name is missing or more than one is given.
 
 ## Source
 
@@ -106,7 +117,31 @@ With `agent_panel_sort = "priority"` in the Herdr config, the sidebar orders blo
 
 ### Applied
 
-`Applied{Value, Title, Auto, Side, Primary, Alternate}` is the derived theme in force, persisted in `state.json` `applied`, so a tmux server born later (`ApplyTmuxServer`) renders it with no source read. `Primary` is the dark side for `auto` and `Alternate` the light side; `Applied.variant(appearance)` picks the side for the single-variant surfaces (tmux, VS Code).
+`Applied{Value, Title, Auto, Side, Primary, Alternate, Pins}` is the derived theme in force, persisted in `state.json` `applied`, so a tmux server born later (`ApplyTmuxServer`) renders it with no source read. `Primary` is the dark side for `auto` and `Alternate` the light side; `Applied.variant(appearance)` picks the side for the single-variant surfaces (tmux, VS Code). `Pins` are the governing profile's surface pins ([Profile pins](#profile-pins)), so a pin change is a changed theme.
+
+## Profile pins
+
+A theme profile is `templates/themes/{name}.json`: Claude Code's palette (`name`, `base`, `overrides`) and an optional `surfaces` object of per-surface pins that win over what derive fills. `pfm install` writes the palette alone into Claude's themes dir and the whole profile, pins included, to `~/.local/share/pfm/install/themes/{name}.json` (`ProfilePath`); the follower reads the pins there. The settings.json `theme` value stays the only source of truth: `custom:{name}` selects the profile by name, any other value has no pins, and a profile is a dropped `.json` file, never Go code.
+
+```json
+"surfaces": {
+  "tmux": { "@host_accent": "#ff2e93", "status-style": "bg=#1a0a12,fg=#f5e6ee" },
+  "herdr": { "accent": "#ff2e93" },
+  "vscode": { "colors": { "terminal.background": "#1a0a12" }, "chrome": { "titleBar.activeBackground": "#2a0a1a" } }
+}
+```
+
+A pin is keyed by the name its renderer emits: tmux by option name (`tmuxOptions`), Herdr by custom token (`herdrTokens`), VS Code by contract key, `colors` and `chrome` apart (`vscodeContract`). `renderedPinKeys` collects the key sets by rendering a built-in dark theme through those renderers, so a key a renderer gains is pinnable with no second list. `ParseProfile` runs `validatePins` and refuses, naming the surface and the key:
+
+- a key its renderer does not emit, `vscode colors` and `vscode chrome` included, so a chrome key under `colors` is refused;
+- the four tmux bookkeeping options, `@pfm-theme`, `@pfm-theme-generation`, `@pfm-theme-chips` and `@pfm-state-colour`, which the follower keeps for its own bookkeeping;
+- an empty value; a tmux chip (`@host_accent`, `@p_*`), `@pfm-c-*` or `@pfm-state-{blocked,working,done,idle}` option or a Herdr token whose value `parseColor` rejects; a VS Code key whose value is not `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`. A tmux style option takes any non-empty string, tmux's own to judge.
+
+Pins are stored canonical (`canonicalPins`): tmux and Herdr colours as `#rrggbb`, VS Code hex as written, empty maps dropped, nil when nothing is pinned, so `Applied` still equals its `state.json` round trip.
+
+`resolveSource` reads `ProfilePath` after `resolveValue` and sets `Applied.Pins`. An absent profile file means no pins and renders as before. A file that exists but cannot be read, parsed or validated, or is not a regular file, is an `ERROR` source row naming the profile file, and nothing is written: pins never fall silently away. Each renderer replaces the value of the key a pin names and no value derived from it follows (pinning `@pfm-state-working` leaves `window-status-current-style`'s state format as derive built it); both sides of an `auto` theme take the same pins, Herdr in `[theme.custom]` and `[theme.custom.light]` alike. The read-back compares each surface against this same pinned render, so a pinned surface reads `IN-SYNC` and a reset one `DRIFT`.
+
+`Applied.Pins` persists in `state.json`, so a tmux server born later renders the pins too, and a pin change is a changed `Applied`: it bumps the generation and applies every surface. The profile file joins `settings.json` and Claude's theme file as a candidate flip origin: the newest mtime of the three is the edit the latency is measured from.
 
 ## State directory
 
@@ -165,13 +200,13 @@ The read-back is generation-stamped where the surface can carry a stamp: the tmu
 
 **Surface:** `tmux` — **Targets:** every live pfm chat server (sockets in the chat tmux directory) — **Live reload:** `set-option -g` takes effect at once
 
-Render (`tmuxOptions`): 8 style options (`status-style`, `window-status-style`, `window-status-current-style`, `pane-border-style`, `pane-active-border-style`, `message-style`, `message-command-style`, `mode-style`) and 13 user options: `@pfm-theme` (the Claude theme value), `@pfm-theme-generation`, `@pfm-c-{bg,fg,surface,overlay,muted,accent}`, `@pfm-state-{blocked,working,done,idle}` and `@pfm-state-colour`. The current-window and active-border styles use `tmuxStateFormat`, a conditional format on `@pfm-state` that picks the state colour (`blocked`, `working`, `done`, else the idle colour).
+Render (`tmuxOptions`): 8 style options (`status-style`, `window-status-style`, `window-status-current-style`, `pane-border-style`, `pane-active-border-style`, `message-style`, `message-command-style`, `mode-style`), 8 chip options (`tmuxChipNames`, which the user's status formats read at draw time: `@host_accent` the accent, `@p_g0` the surface (the bar base `status-style` paints), `@p_g3` the background, `@p_fg` the foreground, `@p_fg1` and `@p_fg2` the muted colour, `@p_red` and `@p_amber` ANSI 1 and 3) and 14 user options: `@pfm-theme` (the Claude theme value), `@pfm-theme-generation`, `@pfm-theme-chips` (the chip marker, `1`), `@pfm-c-{bg,fg,surface,overlay,muted,accent}`, `@pfm-state-{blocked,working,done,idle}` and `@pfm-state-colour`. The current-window and active-border styles use `tmuxStateFormat`, a conditional format on `@pfm-state` that picks the state colour (`blocked`, `working`, `done`, else the idle colour).
 
-Apply (`tmuxApplySocket`): probe liveness (`status-style`; a dead socket is an error naming it), capture each style's prior value as `@pfm-theme-prior-{option}` on a server not yet carrying `@pfm-theme-generation` (stored as `v:{value}` so an empty prior still reads as captured), then set every option in one apply per server. A partial failure reports `{n} of {k} servers failed`.
+Apply (`tmuxApplySocket`): probe liveness (`status-style`; a dead socket is an error naming it), capture each style's prior value as `@pfm-theme-prior-{option}` on a server not yet carrying `@pfm-theme-generation` (stored as `v:{value}` so an empty prior still reads as captured), capture each chip option's prior in the same `@pfm-theme-prior-{option}` mechanism on a server not yet carrying `@pfm-theme-chips` — independent of the generation marker, so a server themed before the chips existed gets them captured on its next sync — as `v:{value}`, or `u:` when the option was unset (a read that fails once the server proved alive), then set every option in one apply per server. A partial failure reports `{n} of {k} servers failed`.
 
-Read-back: every option on every server against the render; a value mismatch is DRIFT, an unreadable option ERROR; the generation reported is `@pfm-theme-generation`. No live server: ABSENT (`no live pfm chat servers`).
+Read-back: every option on every server against the render, a chip a user `tmux source-file` reset included (DRIFT, healed by the next sync with its prior kept); a value mismatch is DRIFT, an unreadable option ERROR; the generation reported is `@pfm-theme-generation`. No live server: ABSENT (`no live pfm chat servers`).
 
-Off: restores each style to its captured prior (unsets it when none was captured on a server carrying `@pfm-theme-generation`), unsets the prior options and every `@pfm-*` option, the hook's `@pfm-state` included; RESTORED with the server count.
+Off: restores each style to its captured prior (unsets it when none was captured on a server carrying `@pfm-theme-generation`) and each chip option likewise (`v:{value}` sets it back, `u:` unsets it, no prior unsets it only on a server carrying `@pfm-theme-chips` and leaves the user's value alone otherwise), unsets the prior options and every `@pfm-*` option, the hook's `@pfm-state` included; RESTORED with the server count.
 
 ### surfaceHerdr
 
@@ -199,24 +234,25 @@ Off: puts the replaced span back (or removes the appended text; deletes a file t
 
 **Surface:** `vscode` — **Contract:** `current.json` — **Live reload:** the pfm VS Code extension, `theme.js`, started in `activate`
 
-Pfm never edits VS Code settings itself. It writes the contract `current.json` (`enabled`, `generation`, `palette` — the wire key, now carrying the Claude theme value —, `title`, `mode` (`dark|light|auto`), `appearance`, `colors`; the colours are `terminal.background`, `terminal.foreground`, `terminalCursor.foreground`, `terminal.selectionBackground`, `terminal.tab.activeBorder` and the 16 `terminal.ansi*` keys). Before the first `on` it copies each existing `settings.json` of `Code`, `Code - Insiders`, `VSCodium` and `Cursor` (`~/Library/Application Support/{product}/User/`) beside itself. None present: ABSENT.
+Pfm never edits VS Code settings itself. It writes the contract `current.json` (`enabled`, `generation`, `palette` — the wire key, now carrying the Claude theme value —, `title`, `mode` (`dark|light|auto`), `appearance`, `colors`, `chrome`; the colours are `terminal.background`, `terminal.foreground`, `terminalCursor.foreground`, `terminal.selectionBackground`, `terminal.tab.activeBorder` and the 16 `terminal.ansi*` keys; `chrome` is the 27 window-chrome keys, derived from the variant: Surface paints `titleBar.activeBackground`, `activityBar.activeBackground`, `activityBarTop.activeBackground` and `statusBar.background`; Foreground the active title, activity-bar, command-center and status-bar foregrounds; Background the inactive title and status-bar backgrounds, `activityBar.background`, `activityBarTop.background`, `activityBarBadge.foreground`, `statusBar.debuggingForeground` and `statusBarItem.remoteForeground`; Muted the three inactive foregrounds; Accent both activity-bar active borders, `activityBarBadge.background`, `sash.hoverBorder`, `statusBar.debuggingBackground` and `statusBarItem.remoteBackground`; Overlay `commandCenter.border` and `statusBarItem.hoverBackground`. They are exactly the keys Peacock paints in a local workspace, so none stays Peacock's colour. `chrome` is a field apart from `colors` because the extension writes `colors` to the Global settings and `chrome` only to a local window's Workspace settings). Before the first `on` it copies each existing `settings.json` of `Code`, `Code - Insiders`, `VSCodium` and `Cursor` (`~/Library/Application Support/{product}/User/`) beside itself. None present: ABSENT.
 
-The extension polls the contract every 2000 ms (`professor.theme.stateDir` overrides the directory; the setting is `machine`-scoped and only its user value is read, so no workspace can point it elsewhere), merges the contract's terminal colours (`terminal.*` and `terminalCursor.*` keys with hex values; any other key or value is dropped) into the user's global `workbench.colorCustomizations` touching no other key, and writes `vscode-ack.json` (`generation`, `appliedAt`, `keys`, `error`). A generation applies once: another window or a restart finds it recorded in `vscode-applied.json` and skips it, so a colour the user changed by hand since stays theirs until the next generation. Each key set is recorded with the value it replaced; a key the next generation drops, or every key when the contract is `enabled: false`, goes back to its prior value unless the user changed it since. Windows serialise on the `vscode-apply.lock` directory (stale after 30 s). With no contract file the extension writes nothing.
+The extension polls the contract every 2000 ms (`professor.theme.stateDir` overrides the directory; the setting is `machine`-scoped and only its user value is read, so no workspace can point it elsewhere), merges the contract's terminal colours (`terminal.*` and `terminalCursor.*` keys with hex values; any other key or value is dropped) into the user's global `workbench.colorCustomizations` touching no other key, and writes `vscode-ack.json` (`generation`, `appliedAt`, `keys`, `error`, `chrome`). A generation applies once: another window or a restart finds it recorded in `vscode-applied.json` and skips it, so a colour the user changed by hand since stays theirs until the next generation. Each key set is recorded with the value it replaced; a key the next generation drops, or every key when the contract is `enabled: false`, goes back to its prior value unless the user changed it since. Windows serialise on the `vscode-apply.lock` directory (stale after 30 s). With no contract file the extension writes nothing. The contract's `chrome` goes only to a local window on a saved workspace (`env.remoteName` undefined and `workspaceFile` a `file` URI), into that workspace's own `workbench.colorCustomizations`: the Workspace layer beats Global, and it is the layer Peacock writes. Only keys under `titleBar.`, `activityBar.`, `activityBarTop.`, `activityBarBadge.`, `commandCenter.`, `sash.`, `statusBar.` and `statusBarItem.` with hex values are written, and every other key of that workspace's customizations (Peacock's, the user's, `[Theme]` blocks) stays. A remote window, a folder-only window (its Workspace layer is a repo's `.vscode/settings.json`) and an untitled workspace get no chrome and add no ack entry. The record is `vscode-chrome.json`, `{workspace file: {generation, keys: {key: {value, prior}}}}` under the same lock, with its own once-per-generation guard per workspace: a window opening a workspace not yet painted at the generation paints it even when the Global colours are done, and the restore rules are the Global ones (an emptied layer drops the setting, an emptied record is removed). The ack's `chrome` map is `{workspace file: {generation, keys, error}}`; each window replaces its own entry and keeps the others' (read and written under the lock), and a Workspace write failure is that entry's `error`, never the top-level one. Peacock (`johnpapa.vscode-peacock`) rewrites its managed keys in the Workspace layer at every window start except those in `peacock.excludedSettings`, so with Peacock installed and a wanted chrome key missing from that setting the extension writes no chrome, advances no record and sets the entry's error `Peacock repaints {n} of {m} chrome keys at every window start: list them in this workspace's peacock.excludedSettings`; an edit of that setting re-runs the sync, and restoring (`enabled: false`) is never blocked. The extension's `Professor: Choose Theme` command (`choose.js`; palette entry hidden by `!remoteName`, the handler refusing in a remote window before it runs anything) lists with `pfm theme list --json` in a quick pick, current theme first, and sets the pick with `pfm theme use {name}`, run by execFile from `~/.local/bin/pfm`, so the Claude source theme changes and the usual sync follows; the extension writes no setting for it, and a failure of either run is shown with pfm's stderr.
 
 ### vscodeVerdict
 
 Read-back is ABSENT when no VS Code `User/settings.json` exists, and ERROR naming the path when one cannot be looked at. It judges the ack against the state's generation, in order:
 
 - an ack with `error` is ERROR (`extension reported: …`);
-- an ack at the generation is IN-SYNC;
+- an ack whose `chrome` map holds an entry with a non-empty `error` is ERROR (`window chrome {workspace file name}: {error}`, entries sorted by path and joined with `; `), so a chrome failure the extension acknowledged never reads IN-SYNC;
+- an ack at the generation is IN-SYNC, its detail `window chrome in {n} local workspace(s)` counting the `chrome` entries at the generation without an error, empty when there are none;
 - no VS Code process running is PENDING (`applies when VS Code starts`);
 - a contract younger than 10 s (`vscodeGrace`) is PENDING (`waiting for the extension to apply generation {N}`);
 - no ack ever, with VS Code running past the grace, is PENDING (`reload a VS Code window once: no Professor extension has acknowledged a theme yet ({stateDir}/vscode-ack.json absent)`);
 - an ack for another generation past the grace is DRIFT.
 
-A contract that differs from the render is DRIFT.
+A contract that differs from the render is DRIFT, a contract written before `chrome` existed included: the next sync rewrites it.
 
-Off: writes a disabled contract (`enabled` false, no colours, bumped generation); the row reads APPLIED with `the extension clears the colours when it next reads current.json`, and the snapshot is dropped.
+Off: writes a disabled contract (`enabled` false, no colours, no chrome, bumped generation); the row reads APPLIED with `the extension clears the colours when it next reads current.json`, and the snapshot is dropped.
 
 ### surfaceFollower
 

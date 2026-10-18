@@ -349,8 +349,9 @@ func shortHome(home, path string) string {
 	return path
 }
 
-// resolveSource reads the accounts, picks the governing one (D9) and derives
-// its theme. Any failure names the file; the run then writes no surface.
+// resolveSource reads the accounts, picks the governing one (D9), derives its
+// theme and lays the pins of its profile over it. Any failure names the file;
+// the run then writes no surface.
 func resolveSource(env Env, state themeState) (sourceState, error) {
 	accounts, err := readAccounts(env.Home)
 	if err != nil {
@@ -365,9 +366,19 @@ func resolveSource(env Env, state themeState) (sourceState, error) {
 	if err != nil {
 		return sourceState{}, fmt.Errorf("%s: %w", governing.Path, err)
 	}
+	profile, err := profilePins(env.Home, governing.Value)
+	if err != nil {
+		return sourceState{}, fmt.Errorf("%s: %w", governing.Path, err)
+	}
+	theme.Applied.Pins = profile.pins
 	origin := &flipOrigin{path: governing.Path, at: governing.ModTime}
 	if theme.ThemeFile != "" && theme.ThemeTime.After(origin.at) {
 		origin = &flipOrigin{path: theme.ThemeFile, at: theme.ThemeTime}
+	}
+	// A pin change is a source change as much as a palette change: the newest
+	// of the three files is the one whose edit the surfaces are waiting on.
+	if profile.file != "" && profile.at.After(origin.at) {
+		origin = &flipOrigin{path: profile.file, at: profile.at}
 	}
 	return sourceState{
 		info: SourceInfo{

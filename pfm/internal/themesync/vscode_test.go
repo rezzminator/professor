@@ -1,16 +1,17 @@
 package themesync
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestVscodeContractKeysAndValues(t *testing.T) {
-	applied := goldApplied(t)
+	applied := hibiscusApplied(t)
 	contract := applied.vscodeContract(Dark, 4)
-	if !contract.Enabled || contract.Generation != 4 || contract.Palette != "custom:professor-gold" ||
-		contract.Title != "Professor Gold · Tokyo Night" || contract.Mode != "dark" || contract.Appearance != "dark" {
+	if !contract.Enabled || contract.Generation != 4 || contract.Palette != "custom:hibiscus-night" ||
+		contract.Title != "Hibiscus Night" || contract.Mode != "dark" || contract.Appearance != "dark" {
 		t.Fatalf("contract = %+v", contract)
 	}
 	if contract.Colors["terminal.background"] != "#1a1b26" || contract.Colors["terminal.ansiRed"] != "#f7768e" {
@@ -64,6 +65,148 @@ func TestVscodeContractKeysAndValues(t *testing.T) {
 	}
 	if off := vscodeOffContract(5); off.Enabled || off.Generation != 5 || len(off.Colors) != 0 || off.Colors == nil {
 		t.Fatalf("off contract = %+v, want enabled false, generation 5, an empty (non-nil) colors object", off)
+	}
+}
+
+func TestVscodeContractCarriesTheWindowChrome(t *testing.T) {
+	applied := hibiscusApplied(t)
+	variant := applied.Primary
+	contract := applied.vscodeContract(Dark, 4)
+	want := map[string]string{
+		"titleBar.activeBackground":         variant.Surface,
+		"activityBar.activeBackground":      variant.Surface,
+		"activityBarTop.activeBackground":   variant.Surface,
+		"statusBar.background":              variant.Surface,
+		"titleBar.activeForeground":         variant.Foreground,
+		"activityBar.foreground":            variant.Foreground,
+		"activityBarTop.foreground":         variant.Foreground,
+		"commandCenter.foreground":          variant.Foreground,
+		"statusBar.foreground":              variant.Foreground,
+		"titleBar.inactiveBackground":       variant.Background,
+		"activityBar.background":            variant.Background,
+		"activityBarTop.background":         variant.Background,
+		"statusBar.inactiveBackground":      variant.Background,
+		"activityBarBadge.foreground":       variant.Background,
+		"statusBar.debuggingForeground":     variant.Background,
+		"statusBarItem.remoteForeground":    variant.Background,
+		"titleBar.inactiveForeground":       variant.Muted,
+		"activityBar.inactiveForeground":    variant.Muted,
+		"activityBarTop.inactiveForeground": variant.Muted,
+		"activityBar.activeBorder":          variant.Accent,
+		"activityBarTop.activeBorder":       variant.Accent,
+		"activityBarBadge.background":       variant.Accent,
+		"sash.hoverBorder":                  variant.Accent,
+		"statusBar.debuggingBackground":     variant.Accent,
+		"statusBarItem.remoteBackground":    variant.Accent,
+		"commandCenter.border":              variant.Overlay,
+		"statusBarItem.hoverBackground":     variant.Overlay,
+	}
+	if len(want) != 27 {
+		t.Fatalf("test table has %d chrome keys, want 27", len(want))
+	}
+	if len(contract.Chrome) != len(want) {
+		t.Fatalf("chrome has %d keys, want %d: %v", len(contract.Chrome), len(want), contract.Chrome)
+	}
+	for key, value := range want {
+		if value == "" {
+			t.Errorf("fixture variant has no value for %s", key)
+		}
+		if got, ok := contract.Chrome[key]; !ok || got != value {
+			t.Errorf("chrome[%s] = %q (present %v), want %q", key, got, ok, value)
+		}
+	}
+	for key := range contract.Chrome {
+		if _, ok := contract.Colors[key]; ok {
+			t.Errorf("%s is in both colors and chrome", key)
+		}
+	}
+	for key := range contract.Colors {
+		if !strings.HasPrefix(key, "terminal") {
+			t.Errorf("colors carries the non-terminal key %s", key)
+		}
+	}
+	if len(contract.Colors) != 21 {
+		t.Errorf("colors has %d keys, want the 21 terminal keys", len(contract.Colors))
+	}
+
+	off := vscodeOffContract(5)
+	if off.Chrome == nil || len(off.Chrome) != 0 {
+		t.Fatalf("off chrome = %#v, want an empty non-nil map", off.Chrome)
+	}
+	wire, err := json.MarshalIndent(off, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire), `"chrome": {}`) {
+		t.Errorf("off contract serialises as %s, want \"chrome\": {}", wire)
+	}
+}
+
+func TestVscodeVerdictJudgesWindowChrome(t *testing.T) {
+	stale := 30 * time.Second
+	broken := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{
+		"/w/zeta/zeta.code-workspace":   {Generation: 4, Keys: []string{"statusBar.background"}},
+		"/w/alpha/alpha.code-workspace": {Generation: 4, Error: "read-only"},
+		"/w/beta/beta.code-workspace":   {Generation: 4, Error: "bad json"},
+	}}
+	verdict, detail := vscodeVerdict(broken, true, 4, true, stale, "/s/vscode-ack.json")
+	want := "window chrome alpha.code-workspace: read-only; window chrome beta.code-workspace: bad json"
+	if verdict != VerdictError || detail != want {
+		t.Errorf("chrome error = %s %q, want ERROR %q", verdict, detail, want)
+	}
+
+	clean := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{
+		"/w/a/a.code-workspace": {Generation: 4, Keys: []string{"statusBar.background"}},
+		"/w/b/b.code-workspace": {Generation: 4, Keys: []string{"statusBar.background"}},
+		"/w/c/c.code-workspace": {Generation: 3, Keys: []string{"statusBar.background"}},
+	}}
+	verdict, detail = vscodeVerdict(clean, true, 4, true, stale, "/s/vscode-ack.json")
+	if verdict != VerdictInSync || detail != "window chrome in 2 local workspaces" {
+		t.Errorf("two clean entries = %s %q, want IN-SYNC with 2 local workspaces", verdict, detail)
+	}
+
+	one := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{"/w/a/a.code-workspace": {Generation: 4}}}
+	verdict, detail = vscodeVerdict(one, true, 4, true, stale, "/s/vscode-ack.json")
+	if verdict != VerdictInSync || detail != "window chrome in 1 local workspace" {
+		t.Errorf("one clean entry = %s %q, want IN-SYNC with 1 local workspace", verdict, detail)
+	}
+
+	verdict, detail = vscodeVerdict(vscodeAck{Generation: 4}, true, 4, true, stale, "/s/vscode-ack.json")
+	if verdict != VerdictInSync || detail != "" {
+		t.Errorf("ack without chrome = %s %q, want IN-SYNC with no detail", verdict, detail)
+	}
+
+	staleOnly := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{"/w/a/a.code-workspace": {Generation: 3}}}
+	verdict, detail = vscodeVerdict(staleOnly, true, 4, true, stale, "/s/vscode-ack.json")
+	if verdict != VerdictInSync || detail != "" {
+		t.Errorf("only an old-generation chrome entry = %s %q, want IN-SYNC with no detail", verdict, detail)
+	}
+}
+
+func TestVscodeContractWithoutChromeReadsDriftUntilTheNextSync(t *testing.T) {
+	h := newHarness(t)
+	h.on()
+	rel := ".local/state/pfm/theme/current.json"
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(h.read(rel)), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["chrome"]; !ok {
+		t.Fatalf("current.json after on has no chrome field: %s", h.read(rel))
+	}
+	delete(fields, "chrome")
+	old, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.write(rel, string(old)+"\n")
+	wantVerdict(t, h.status(), "vscode", VerdictDrift, "current.json differs from the render")
+	h.sync(true)
+	if !strings.Contains(h.read(rel), `"chrome": {`) || strings.Contains(h.read(rel), `"chrome": {}`) {
+		t.Errorf("current.json after the next sync lacks the chrome keys: %s", h.read(rel))
+	}
+	if got := row(t, h.status(), "vscode"); got.Verdict == VerdictDrift {
+		t.Errorf("vscode row after the next sync = %s %q, want no DRIFT", got.Verdict, got.Detail)
 	}
 }
 

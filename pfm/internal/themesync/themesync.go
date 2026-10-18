@@ -1,10 +1,11 @@
 // Package themesync is `pfm theme`: Claude Code's `theme` setting is the one
-// read-only source, derived into a Variant (or, for `auto`, two) and rendered
+// source, derived into a Variant (or, for `auto`, two) and rendered
 // into the native format of every surface the user looks at — pfm's per-chat
 // tmux servers, Herdr's config and the pfm VS Code extension — applied live,
 // read back from each surface and stamped with one generation number so "in
-// sync" is a fact the status matrix proves rather than a claim. No Claude file
-// is ever written. Nothing here runs until `pfm theme on` writes the state
+// sync" is a fact the status matrix proves rather than a claim. The sync never
+// writes a Claude file; only `pfm theme use` (UseTheme) sets the `theme` key of
+// each account's settings.json, through the editor it is handed. Nothing here runs until `pfm theme on` writes the state
 // file: every door other packages call is a no-op without it.
 package themesync
 
@@ -57,14 +58,17 @@ type Variant struct {
 // Applied is the derived theme in force: the Claude `theme` value it came
 // from and its Variant — for `auto` both sides, the dark one primary. It is
 // persisted in state.json so a surface born later (a tmux server at spawn)
-// renders it without reading the source.
+// renders it without reading the source. Pins are the profile's per-surface
+// values, laid over what derive filled on both sides of an auto theme; they
+// are part of Applied so a pin change counts as a changed theme.
 type Applied struct {
-	Value     string     `json:"value"`
-	Title     string     `json:"title"`
-	Auto      bool       `json:"auto,omitempty"`
-	Side      Appearance `json:"side"`
-	Primary   Variant    `json:"primary"`
-	Alternate *Variant   `json:"alternate,omitempty"`
+	Value     string       `json:"value"`
+	Title     string       `json:"title"`
+	Auto      bool         `json:"auto,omitempty"`
+	Side      Appearance   `json:"side"`
+	Primary   Variant      `json:"primary"`
+	Alternate *Variant     `json:"alternate,omitempty"`
+	Pins      *SurfacePins `json:"pins,omitempty"`
 }
 
 // variant is the side a single-variant surface (tmux, VS Code) draws: the

@@ -70,35 +70,43 @@ func (variant Variant) herdrTokens() []herdrToken {
 	}
 }
 
-func herdrWriteTokens(out *strings.Builder, table string, variant Variant) {
+// herdrWriteTokens writes one custom table: the variant's tokens, each one
+// the theme's pin of that name when it has one.
+func herdrWriteTokens(out *strings.Builder, table string, variant Variant, pins map[string]string) {
 	out.WriteString("[" + table + "]\n")
 	for _, token := range variant.herdrTokens() {
-		fmt.Fprintf(out, "%s = %q\n", token.name, token.value)
+		value := token.value
+		if pin, pinned := pins[token.name]; pinned {
+			value = pin
+		}
+		fmt.Fprintf(out, "%s = %q\n", token.name, value)
 	}
 }
 
 // herdrRender is the marker-fenced block that replaces the user's [theme]
 // tables: name / auto_switch (an auto source) / dark_name / light_name and
 // every custom token, the primary variant in [theme.custom], an auto source's
-// light one in [theme.custom.light].
+// light one in [theme.custom.light]; the theme's Herdr pins lay over the
+// tokens of both tables.
 func herdrRender(applied Applied, generation int) string {
 	var out strings.Builder
+	pins := herdrPins(applied.Pins)
 	fmt.Fprintf(&out, "%s · %s · gen %d >>>\n[%s]\n", herdrBlockOpen,
 		strings.Join(strings.Fields(applied.Value), "-"), generation, herdrThemeTable)
 	switch {
 	case applied.Auto && applied.Alternate != nil:
 		fmt.Fprintf(&out, "name = %q\nauto_switch = true\ndark_name = %q\nlight_name = %q\n\n",
 			herdrDarkName, herdrDarkName, herdrLightName)
-		herdrWriteTokens(&out, "theme.custom", applied.Primary)
+		herdrWriteTokens(&out, "theme.custom", applied.Primary, pins)
 		out.WriteString("\n")
-		herdrWriteTokens(&out, "theme.custom.light", *applied.Alternate)
+		herdrWriteTokens(&out, "theme.custom.light", *applied.Alternate, pins)
 	default:
 		name := herdrDarkName
 		if applied.Side == Light {
 			name = herdrLightName
 		}
 		fmt.Fprintf(&out, "name = %q\nauto_switch = false\n\n", name)
-		herdrWriteTokens(&out, "theme.custom", applied.Primary)
+		herdrWriteTokens(&out, "theme.custom", applied.Primary, pins)
 	}
 	out.WriteString(herdrBlockClose + "\n")
 	return out.String()

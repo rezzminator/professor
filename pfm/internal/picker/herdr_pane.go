@@ -48,8 +48,8 @@ func closePickerPaneAfter(ctx context.Context, stdout, stderr io.Writer, open fu
 	if code != 0 || written != 0 {
 		return code
 	}
-	if err := call.ProveHerdrPane(ctx, socket, pane); err != nil {
-		fmt.Fprintf(stderr, "pfm ls: the chat opened, but this picker’s Herdr pane %s stayed open: %v\n", pane, err)
+	if err := call.ProveHerdrSeatPane(ctx, socket, pane); err != nil {
+		fmt.Fprintf(stderr, "pfm ls: the chat opened, but this picker's Herdr pane %s stayed open: %v\n", pane, err)
 		return code
 	}
 	if _, err := herdr.SeatRequest(ctx, socket, "pane.close", map[string]string{"pane_id": pane}); err != nil {

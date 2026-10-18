@@ -548,3 +548,49 @@ func TestHerdrRawOwnershipRevokedBeforePaste(t *testing.T) {
 		t.Fatalf("pre-input revocation receipt=%+v err=%v", got, err)
 	}
 }
+
+// A stale and a canonical address of one moved Herdr seat serialize on one
+// call lock, and the receipt names the pane the message was delivered to.
+func TestHerdrMovedSeatSerializesOnSeatLock(t *testing.T) {
+	socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+		switch request.Method {
+		case "pane.read":
+			return nativePaneRead(request, "❯ "), ""
+		case "agent.get":
+			return nativeAgent("agent_info", "idle"), ""
+		}
+		return nativeAgent("agent_prompted", "working"), ""
+	})
+	canonical := Target{
+		Backend: "herdr", SeatID: "seat-2", HerdrWorkspace: "w1",
+		SocketPath: socket.path, Pane: "w1:p2", Engine: "cc", Session: "recipient",
+	}
+	stale := canonical
+	stale.Pane = "w1:p1"
+	engine := nativeEngine(t, canonical)
+	engine.options.LockTimeout, engine.options.LockPoll = 100*time.Millisecond, time.Millisecond
+	held, refusal := engine.lockTarget(context.Background(), canonical)
+	if refusal != "" {
+		t.Fatal(refusal)
+	}
+	for _, target := range []Target{stale, canonical} {
+		got, err := engine.CallTarget(context.Background(), target, Request{Target: "recipient", Message: "hello"})
+		if err != nil || got.Typed || got.Code != CodeUndelivered ||
+			!strings.Contains(got.Message, "could not acquire call lock") {
+			t.Fatalf("%s while the seat's lock is held: %+v err=%v", target.Pane, got, err)
+		}
+	}
+	if calls := socket.calls(); len(calls) != 0 {
+		t.Fatalf("a locked seat was driven: %+v", calls)
+	}
+	held.release()
+	got, err := engine.CallTarget(context.Background(), stale, Request{Target: "recipient", Message: "hello"})
+	if err != nil || got.Status != statusDelivered || got.Pane != "w1:p2" || got.SocketPath != socket.path {
+		t.Fatalf("stale-address receipt=%+v err=%v; want delivered naming w1:p2", got, err)
+	}
+	calls := socket.calls()
+	if len(calls) == 0 || calls[len(calls)-1].Method != "agent.prompt" ||
+		calls[len(calls)-1].Params["target"] != "w1:p2" {
+		t.Fatalf("native calls=%+v", calls)
+	}
+}

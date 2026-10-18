@@ -83,6 +83,10 @@ const (
 	// maxSettleRounds bounds the extra list-and-paint rounds a run makes
 	// after paints that wrote with nothing blocked.
 	maxSettleRounds = 3
+	// unprovedReprove is how long a paint skips a pane whose ownership proof
+	// failed while its agent_status is unchanged, so a foreign pane costs one
+	// proof per interval, never one per half-second tick.
+	unprovedReprove = 5 * time.Second
 )
 
 // indicatorPainter is one PaintIndicators run: the Herdr socket it paints, the
@@ -110,6 +114,16 @@ type indicatorPainter struct {
 	tabs            TabProvider
 	hasTabs         bool
 	tabObservations []TabDecoration
+	// unproved holds each pane whose ownership proof failed: the status it
+	// failed under and when. Such a pane is named once while it stays
+	// unproved, and paint re-proves it only once its status changes or
+	// unprovedReprove passed; a proof that succeeds forgets it.
+	unproved map[string]unprovedPane
+}
+
+type unprovedPane struct {
+	status string
+	at     time.Time
 }
 
 // PaintIndicators repaints every pane's and workspace's indicator token on the
@@ -293,7 +307,11 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 			painter.logf("herdr indicators: socket %s: %s %s has agent_status %q, painted as unknown",
 				painter.socket, target.kind, target.id, target.status)
 		}
-		accepted, err := painter.report(ctx, target, indicatorPatch(target.tokens, want))
+		patch := indicatorPatch(target.tokens, want)
+		if patch != nil && painter.skipUnproved(target) {
+			continue
+		}
+		accepted, err := painter.report(ctx, target, patch)
 		if errors.Is(err, errIndicatorOwnership) {
 			continue
 		}
@@ -307,32 +325,60 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		if err != nil {
 			return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
 		}
-		painter.tabObservations = observations
-		painter.hasTabs = false
-		for i := range observations {
-			observation := observations[i]
-			painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
-			accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.call)
-			if err != nil {
-				return blocked, wrote, err
-			}
-			wrote = wrote || accepted
+		accepted, err := painter.paintTabs(ctx, observations, blinkOn)
+		wrote = wrote || accepted
+		if err != nil {
+			return blocked, wrote, err
 		}
 	}
 	return blocked, wrote, nil
 }
 
+// paintTabs reconciles every observed tab's status label. One tab's failure
+// never stops the others: an unproved owner or a foreign label leaves that tab
+// untouched, named once while it lasts; any other failure is named and joined
+// into the returned error after every other tab is painted.
+func (painter *indicatorPainter) paintTabs(
+	ctx context.Context,
+	observations []TabDecoration,
+	blinkOn bool,
+) (wrote bool, err error) {
+	painter.tabObservations = observations
+	painter.hasTabs = false
+	var failures []error
+	for i := range observations {
+		observation := observations[i]
+		painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
+		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.call)
+		wrote = wrote || accepted
+		key := "tab\x00" + observation.Tab + "\x00" + observation.Identity
+		switch {
+		case errors.Is(err, errTabOwnership) || errors.Is(err, errTabLabelForeign):
+			if !painter.reported[key] {
+				painter.reported[key] = true
+				painter.logf("herdr tab status: socket %s: %v (left untouched)", painter.socket, err)
+			}
+		case err != nil:
+			painter.logf("herdr tab status: socket %s: %v (painting the other tabs)", painter.socket, err)
+			failures = append(failures, err)
+		default:
+			delete(painter.reported, key)
+		}
+	}
+	return wrote, errors.Join(failures...)
+}
+
 // clear lists every pane and workspace once and removes the indicator tokens
 // each holds, leaving every other source's tokens alone.
 func (painter *indicatorPainter) clear(ctx context.Context) error {
+	var failures []error
 	if err := painter.restoreTabs(ctx); err != nil {
-		return err
+		failures = append(failures, err)
 	}
 	targets, err := painter.list(ctx)
 	if err != nil {
-		return err
+		return errors.Join(append(failures, err)...)
 	}
-	var failures []error
 	for _, target := range targets {
 		if _, err := painter.report(ctx, target, indicatorPatch(target.tokens, nil)); err != nil {
 			if !errors.Is(err, errIndicatorOwnership) {
@@ -391,9 +437,21 @@ func (painter *indicatorPainter) report(
 			err = painter.provePane(ctx, painter.socket, target.id)
 		}
 		if err != nil {
-			painter.logf("herdr indicators: socket %s: pane %s ownership unproved: %v", painter.socket, target.id, err)
+			if _, named := painter.unproved[target.id]; !named {
+				painter.logf(
+					"herdr indicators: socket %s: pane %s ownership unproved: %v",
+					painter.socket,
+					target.id,
+					err,
+				)
+			}
+			if painter.unproved == nil {
+				painter.unproved = map[string]unprovedPane{}
+			}
+			painter.unproved[target.id] = unprovedPane{status: target.status, at: painter.clock.Now()}
 			return false, fmt.Errorf("%w: pane %s: %w", errIndicatorOwnership, target.id, err)
 		}
+		delete(painter.unproved, target.id)
 	}
 	line, err := tokenReport{target: target, tokens: patch, seq: painter.nextSeq()}.Line()
 	if err != nil {
@@ -409,6 +467,17 @@ func (painter *indicatorPainter) report(
 		return false, fmt.Errorf("herdr indicators: paint %s %s: %w", target.kind, target.id, err)
 	}
 	return true, nil
+}
+
+// skipUnproved says whether paint leaves a pane alone without proving it
+// again: its last proof failed under the same agent_status less than
+// unprovedReprove ago. Skipping writes nothing, so it can only fail closed.
+func (painter *indicatorPainter) skipUnproved(target indicatorTarget) bool {
+	if target.kind != targetPane {
+		return false
+	}
+	last, ok := painter.unproved[target.id]
+	return ok && last.status == target.status && painter.clock.Now().Sub(last.at) < unprovedReprove
 }
 
 // socketKey names a socket's files in the lock directory: the first 8 hex of

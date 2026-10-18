@@ -370,7 +370,8 @@ func (engine *Engine) SendLiteral(ctx context.Context, target Target, text strin
 	case "", backendTmux:
 		return engine.tmux.SendLiteral(ctx, target.SocketPath, target.Pane, text)
 	case backendHerdr:
-		return herdrSendText(ctx, target, text, "pane.send_text")
+		_, err := herdrSendText(ctx, target, text, "pane.send_text")
+		return err
 	default:
 		return fmt.Errorf("unsupported seat backend %q", target.Backend)
 	}

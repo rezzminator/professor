@@ -1,8 +1,10 @@
 package herdr
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -302,6 +304,11 @@ func TestTabStatusActualSocketAndSidebar(t *testing.T) {
 	})
 	dir := filepath.Join(t.TempDir(), "locks")
 	d := tabObservation("blocked")
+	validations := 0
+	d.Validate = func(context.Context) (bool, error) {
+		validations++
+		return true, nil
+	}
 	for _, on := range []bool{true, true, false, false} {
 		if _, err := reconcileTab(context.Background(), socket, dir, d, on, Call); err != nil {
 			t.Fatal(err)
@@ -309,6 +316,10 @@ func TestTabStatusActualSocketAndSidebar(t *testing.T) {
 	}
 	if strings.Join(f.renames, ",") != "🔴 Chat,⬜ Chat" {
 		t.Fatalf("wire tab.rename requests=%v", f.renames)
+	}
+	// A bridge validation costs tmux execs and Herdr calls: one per tab per tick.
+	if validations != 4 {
+		t.Fatalf("owner validations over 4 ticks = %d, want 4", validations)
 	}
 	if got, _ := wantedIndicators("blocked", true); got[IndicatorBlocked] != GlyphBlocked {
 		t.Fatalf("sidebar changed: %v", got)
@@ -356,5 +367,119 @@ func TestTabOwnershipPrecedesPaneReads(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func newTabPainter(t *testing.T, call func(context.Context, string, ...[]byte) ([]json.RawMessage, error)) (
+	*indicatorPainter,
+	*bytes.Buffer,
+) {
+	t.Helper()
+	stderr := &bytes.Buffer{}
+	return &indicatorPainter{
+		socket: "endpoint", lockDir: t.TempDir(), stderr: stderr, call: call,
+		clock: &steppingClock{now: phaseOn}, reported: map[string]bool{},
+	}, stderr
+}
+
+// A bridge tab keeps painting while another tab's proof fails, a retained
+// tab without pfm's own label record is refused, or a tab's read fails.
+func TestTabFailureNeverStopsOtherTabs(t *testing.T) {
+	f := newTabStatusFixture()
+	unproved := tabObservation("blocked")
+	unproved.Tab, unproved.Pane = "w1:t9", "w1:p9"
+	unproved.Validate = func(context.Context) (bool, error) { return false, errors.New("bridge client gone") }
+	retained := tabObservation("dead")
+	retained.Tab, retained.Validate, retained.Retained = "w1:t8", nil, true
+	bridge := tabObservation("blocked")
+	bridge.Identity = "/fixture/tmux/cc-1:cc-1:s1"
+	painter, stderr := newTabPainter(t, f.call)
+	for range 2 {
+		wrote, err := painter.paintTabs(context.Background(), []TabDecoration{unproved, retained, bridge}, true)
+		if err != nil {
+			t.Fatalf("ownership refusals stopped the paint: wrote=%t err=%v", wrote, err)
+		}
+	}
+	if strings.Join(f.renames, ",") != "🔴 Chat" {
+		t.Fatalf("bridge tab renames=%v; want one blocked marker", f.renames)
+	}
+	for _, tab := range []string{"w1:t9", "w1:t8"} {
+		if strings.Count(stderr.String(), "tab "+tab) != 1 {
+			t.Fatalf("refusal of %s must be named once:\n%s", tab, stderr)
+		}
+	}
+
+	failing := newTabStatusFixture()
+	calls := 0
+	refuseFirst := func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("pane read refused")
+		}
+		return failing.call(ctx, socket, lines...)
+	}
+	painter, stderr = newTabPainter(t, refuseFirst)
+	broken := tabObservation("blocked")
+	broken.Tab = "w1:t7"
+	_, err := painter.paintTabs(context.Background(), []TabDecoration{broken, bridge}, true)
+	if err == nil || !strings.Contains(err.Error(), "pane read refused") ||
+		!strings.Contains(stderr.String(), "pane read refused") || strings.Join(failing.renames, ",") != "🔴 Chat" {
+		t.Fatalf("read failure: err=%v renames=%v log=%s", err, failing.renames, stderr)
+	}
+}
+
+// After its live owner is gone, a retained tab is acted on only through pfm's
+// own label record: it names the view's identity and the tab still shows the
+// label pfm rendered; anything else leaves the tab untouched, unread.
+func TestRetainedTabActsOnlyOnOwnRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name, owner, userLabel, want, restored string
+		refused                                bool
+	}{
+		{name: "own-record", owner: "seat1:s1", want: "⬛ Chat", restored: "Chat"},
+		{name: "renamed-by-user", owner: "seat1:s1", userLabel: "Mine", want: "Mine", restored: "Mine", refused: true},
+		{name: "other-identity", owner: "seat2:s1", want: "🔴 Chat", restored: "🔴 Chat", refused: true},
+		{name: "no-record", want: "Chat", restored: "Chat", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newTabStatusFixture()
+			painter, stderr := newTabPainter(t, f.call)
+			if tc.owner != "" {
+				live := tabObservation("blocked")
+				live.Identity = tc.owner
+				if _, err := painter.paintTabs(context.Background(), []TabDecoration{live}, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.userLabel != "" {
+				f.label = tc.userLabel
+			}
+			retained := tabObservation("dead")
+			retained.Validate, retained.Retained = nil, true
+			reads := 0
+			f.before = func(method string) {
+				if method == "pane.get" {
+					reads++
+				}
+			}
+			if _, err := painter.paintTabs(context.Background(), []TabDecoration{retained}, true); err != nil {
+				t.Fatalf("retained refusal stopped the paint: %v", err)
+			}
+			if f.label != tc.want {
+				t.Fatalf("retained label=%q want %q", f.label, tc.want)
+			}
+			if tc.refused != strings.Contains(stderr.String(), "left untouched") {
+				t.Fatalf("refused=%t but log:\n%s", tc.refused, stderr)
+			}
+			if tc.refused && tc.name != "renamed-by-user" && reads != 0 {
+				t.Fatalf("a tab without pfm's record was read %d times", reads)
+			}
+			if err := painter.restoreTabs(context.Background()); err != nil {
+				t.Fatalf("retained restore: %v", err)
+			}
+			if f.label != tc.restored {
+				t.Fatalf("restored label=%q want %q", f.label, tc.restored)
+			}
+		})
 	}
 }

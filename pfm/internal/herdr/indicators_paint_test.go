@@ -374,8 +374,15 @@ func TestIndicatorProofIsFreshForPaintAndClear(t *testing.T) {
 	if _, _, err := painter.paint(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := painter.clear(context.Background()); err == nil || !strings.Contains(err.Error(), "supervisor retired") {
-		t.Fatalf("clear must retain its ownership failure for retry: %v", err)
+	// A tab whose owner cannot be proved never stops the panes' clear.
+	painter.tabObservations = []TabDecoration{{
+		Tab: "w1:t9", Pane: "w1:p9", Terminal: "term9", Identity: "s9",
+		Validate: func(context.Context) (bool, error) { return false, errors.New("bridge client gone") },
+	}}
+	err := painter.clear(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "supervisor retired") ||
+		!strings.Contains(err.Error(), "bridge client gone") {
+		t.Fatalf("clear must retain its tab and ownership failures for retry: %v", err)
 	}
 	if proved["w1:p1"] != 2 || proved["w1:p2"] != 2 || len(server.paneWrites("w1:p1")) != 1 ||
 		len(server.paneWrites("w1:p2")) != 2 ||
@@ -384,5 +391,46 @@ func TestIndicatorProofIsFreshForPaintAndClear(t *testing.T) {
 	}
 	if len(server.spaces[0].Tokens) != 0 {
 		t.Fatal("workspace must clear despite unproved pane")
+	}
+}
+
+// TestAnUnprovedPaneIsNamedOnceAndReprovedOnlyOnChange pins the hot path: a
+// blinking pane pfm cannot prove costs one proof and one diagnostic, not one
+// per half-second tick; a status change or the reprove interval proves it
+// again, and a proof that succeeds paints it at once.
+func TestAnUnprovedPaneIsNamedOnceAndReprovedOnlyOnChange(t *testing.T) {
+	server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: "blocked"}}}
+	painter, stepping, stderr := newTestPainter(t, server, phaseOn)
+	proofs, owned := 0, false
+	painter.provePane = func(context.Context, string, string) error {
+		proofs++
+		if owned {
+			return nil
+		}
+		return errors.New("no durable owner")
+	}
+	paint := func() {
+		t.Helper()
+		if _, _, err := painter.paint(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		stepping.now = stepping.now.Add(blinkHalfPeriod)
+	}
+	for range 4 {
+		paint()
+	}
+	if proofs != 1 || strings.Count(stderr.String(), "ownership unproved") != 1 {
+		t.Fatalf("4 ticks over one unproved blocked pane: proofs=%d stderr=%s", proofs, stderr)
+	}
+	server.setStatus("working")
+	paint()
+	if proofs != 2 || strings.Count(stderr.String(), "ownership unproved") != 1 {
+		t.Fatalf("a status change must re-prove, still named once: proofs=%d stderr=%s", proofs, stderr)
+	}
+	stepping.now = stepping.now.Add(unprovedReprove)
+	owned = true
+	paint()
+	if proofs != 3 || len(server.paneWrites("w1:p1")) != 1 {
+		t.Fatalf("past the interval a proved pane is painted: proofs=%d writes=%v", proofs, server.writes)
 	}
 }

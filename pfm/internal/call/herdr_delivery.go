@@ -41,6 +41,7 @@ func (engine *Engine) callHerdr(
 		base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
 		return base, nil
 	}
+	base.SocketPath, base.Pane = target.SocketPath, target.Pane
 	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
 	if err != nil {
 		return base, fmt.Errorf("herdr read target %q on %q: %w", target.Pane, target.SocketPath, err)
@@ -111,6 +112,7 @@ func (engine *Engine) callHerdr(
 		base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
 		return base, nil
 	}
+	base.SocketPath, base.Pane = target.SocketPath, target.Pane
 	result, err = herdr.SeatRequest(ctx, target.SocketPath, "agent.prompt", struct {
 		Target string `json:"target"`
 		Text   string `json:"text"`
@@ -215,7 +217,8 @@ func (engine *Engine) callHerdrRaw(
 	// A failed acknowledgement cannot prove the bytes were not admitted. Never
 	// retry the paste: it could already be waiting in the recipient's composer.
 	base.Typed = true
-	if err := herdrSendText(ctx, target, prepared.Message, "pane.send_input"); err != nil {
+	sent, err := herdrSendText(ctx, target, prepared.Message, "pane.send_input")
+	if err != nil {
 		base.Typed = !herdrInputUnsent(err)
 		base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
 			"Herdr raw paste unconfirmed: %v",
@@ -227,6 +230,8 @@ func (engine *Engine) callHerdrRaw(
 		}
 		return base, nil
 	}
+	target = sent
+	base.SocketPath, base.Pane = target.SocketPath, target.Pane
 	prefix := headRunes(normalizeSpace(prepared.Message), 24)
 	for attempt := 1; attempt <= engine.options.EnterTries; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -296,10 +301,12 @@ func (engine *Engine) callHerdrRaw(
 	return base, nil
 }
 
-func herdrSendText(ctx context.Context, target Target, text, method string) error {
+// herdrSendText proves the seat, then sends text to the pane it holds now,
+// returning that proved target so a receipt names where the text went.
+func herdrSendText(ctx context.Context, target Target, text, method string) (Target, error) {
 	target, err := ProveHerdrTarget(ctx, target)
 	if err != nil {
-		return &herdr.InputNotSentError{Cause: err}
+		return target, &herdr.InputNotSentError{Cause: err}
 	}
 	result, err := herdr.SeatRequest(
 		ctx,
@@ -308,18 +315,18 @@ func herdrSendText(ctx context.Context, target Target, text, method string) erro
 		map[string]any{"pane_id": target.Pane, "text": text},
 	)
 	if err != nil {
-		return fmt.Errorf("send literal to Herdr pane %s: %w", target.Pane, err)
+		return target, fmt.Errorf("send literal to Herdr pane %s: %w", target.Pane, err)
 	}
 	var ack struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(result, &ack); err != nil {
-		return fmt.Errorf("decode Herdr literal acknowledgement for %s: %w", target.Pane, err)
+		return target, fmt.Errorf("decode Herdr literal acknowledgement for %s: %w", target.Pane, err)
 	}
 	if ack.Type != "ok" {
-		return fmt.Errorf("herdr literal acknowledgement for %s: unexpected type %q", target.Pane, ack.Type)
+		return target, fmt.Errorf("herdr literal acknowledgement for %s: unexpected type %q", target.Pane, ack.Type)
 	}
-	return nil
+	return target, nil
 }
 
 func herdrInputUnsent(err error) bool {

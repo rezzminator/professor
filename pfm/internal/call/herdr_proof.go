@@ -2,6 +2,7 @@ package call
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -62,10 +63,32 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 
 // ProveHerdrPane refuses stale observations rather than applying their data to
 // a different canonical pane. Callers with retargetable input use ProveHerdrTarget.
+// A pane no durable seat owns is proved when it hosts a pfm tmux chat client.
 func ProveHerdrPane(ctx context.Context, socket, pane string) error {
+	return proveHerdrPaneOrBridge(ctx, socket, pane, ProveHerdrBridge)
+}
+
+// ProveHerdrSeatPane is ProveHerdrPane without the bridge: only a durable seat
+// proves the pane. A caller that closes the pane uses it, since a pfm tmux
+// client in a pane's foreground proves a view of a chat, not a pane to close.
+func ProveHerdrSeatPane(ctx context.Context, socket, pane string) error {
+	return proveHerdrPaneOrBridge(ctx, socket, pane, nil)
+}
+
+func proveHerdrPaneOrBridge(
+	ctx context.Context,
+	socket, pane string,
+	bridge func(context.Context, string, string) (HerdrBridge, error),
+) error {
 	proved, err := ProveHerdrTarget(ctx, Target{SocketPath: socket, Pane: pane})
-	if err != nil {
+	if err != nil && bridge == nil {
 		return err
+	}
+	if err != nil {
+		if _, bridgeErr := bridge(ctx, socket, pane); bridgeErr != nil {
+			return errors.Join(err, bridgeErr)
+		}
+		return nil
 	}
 	if proved.SocketPath != socket || proved.Pane != pane {
 		return fmt.Errorf(

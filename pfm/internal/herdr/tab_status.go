@@ -17,13 +17,27 @@ const TabStatusOff = "off"
 
 const tabPaneListResult = "pane_list"
 
+// errTabOwnership marks a tab whose owner could not be proved, and
+// errTabLabelForeign a retained tab whose label pfm cannot show is its own:
+// either leaves that tab untouched while every other tab keeps painting.
+var (
+	errTabOwnership    = errors.New("tab ownership unproved")
+	errTabLabelForeign = errors.New("tab label is not pfm's")
+)
+
 // TabDecoration binds an inspection to a pane incarnation and generation.
-// Validate rechecks the producing session immediately before a rename.
+// Validate rechecks the producing session once per tick, before the tab
+// lock and every pane read that precede a rename.
 type TabDecoration struct {
 	Pane, Terminal, Tab, Identity, Name, State, Mode, AgentStatus string
 	Revision                                                      uint64
 	Session                                                       json.RawMessage
 	Validate                                                      func(context.Context) (bool, error)
+	// Retained marks a view whose live owner is gone (a bridge tab whose tmux
+	// client exited): it carries no Validate and is acted on only while pfm's
+	// own label record for the tab names its Identity and the tab still shows
+	// the label pfm rendered.
+	Retained bool
 }
 
 // TabProvider enumerates the chats displayed on one Herdr endpoint.
@@ -164,33 +178,28 @@ func reconcileTab(
 	if d.Tab == "" || d.Terminal == "" || d.Identity == "" {
 		return false, fmt.Errorf("tab observation has incomplete ownership: %+v", d)
 	}
-	valid, err := validateTabOwner(ctx, d)
-	if err != nil || !valid {
-		return false, err
+	if !d.Retained {
+		valid, err := validateTabOwner(ctx, d)
+		if err != nil || !valid {
+			return false, err
+		}
 	}
-	err = withTabLabelLock(ctx, dir, socket, d.Tab, func(path string) error {
-		pane, err := readTabPane(ctx, socket, d.Pane, call)
-		if err != nil {
-			return err
-		}
-		if !sameTabObservation(pane, d) {
-			return nil
-		}
+	err := withTabLabelLock(ctx, dir, socket, d.Tab, func(path string) error {
 		record, err := readTabLabel(path)
 		if err != nil {
 			return err
 		}
-		before := record
-		valid, err := validateTabOwner(ctx, d)
-		if err != nil || !valid {
-			return err
+		if d.Retained && (record.Identity != d.Identity || record.Rendered == "") {
+			return fmt.Errorf("%w: tab %s holds no label record of %s", errTabLabelForeign, d.Tab, d.Identity)
 		}
-		// Repeat the identity read after potentially slow validation. Herdr has no
-		// conditional rename: this minimizes, but cannot eliminate, external races.
-		pane, err = readTabPane(ctx, socket, d.Pane, call)
+		before := record
+		pane, err := readTabPane(ctx, socket, d.Pane, call)
 		if err != nil {
 			return err
 		}
+		// The owner was proved once before the lock, ahead of every pane read:
+		// one validation per tab per tick. Herdr has no conditional rename, so
+		// this read narrows, but cannot close, an external race.
 		if !sameTabObservation(pane, d) {
 			return nil
 		}
@@ -211,6 +220,14 @@ func reconcileTab(
 		}
 		if tab.TabID != d.Tab || tab.PaneCount != 1 {
 			return nil
+		}
+		if d.Retained && tab.Label != record.Rendered {
+			return fmt.Errorf(
+				"%w: tab %s was renamed after pfm rendered %q",
+				errTabLabelForeign,
+				d.Tab,
+				record.Rendered,
+			)
 		}
 		if d.Mode == TabStatusOff {
 			if record.Identity != d.Identity || record.Rendered != tab.Label {
@@ -282,40 +299,48 @@ func PaintIndicatorsWithTabs(
 	return painter.run(ctx)
 }
 
+// restoreTabs returns every observed tab pfm can prove its own to its base
+// label: an unproved owner is named in the joined error, a retained tab whose
+// label is not pfm's is left as it is, and either never stops the other tabs.
 func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
+	var failures []error
 	for i := range painter.tabObservations {
 		d := painter.tabObservations[i]
-		valid, err := validateTabOwner(ctx, d)
-		if err != nil {
-			return err
-		}
-		if !valid {
-			continue
+		if !d.Retained {
+			valid, err := validateTabOwner(ctx, d)
+			if err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			if !valid {
+				continue
+			}
 		}
 		pane, err := readTabPane(ctx, painter.socket, d.Pane, painter.call)
 		if err != nil {
-			if tabTargetGone(err) {
-				continue
+			if !tabTargetGone(err) {
+				failures = append(failures, fmt.Errorf("restore tab %s: %w", d.Tab, err))
 			}
-			return fmt.Errorf("restore tab %s: %w", d.Tab, err)
+			continue
 		}
 		d.Revision = pane.Revision
 		d.AgentStatus = pane.State
 		d.Mode = TabStatusOff
-		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, true, painter.call); err != nil {
-			return err
+		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, true, painter.call); err != nil &&
+			!errors.Is(err, errTabLabelForeign) {
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func validateTabOwner(ctx context.Context, d TabDecoration) (bool, error) {
 	if d.Validate == nil {
-		return false, fmt.Errorf("tab %s ownership unproved: no validator", d.Tab)
+		return false, fmt.Errorf("%w: tab %s has no validator", errTabOwnership, d.Tab)
 	}
 	valid, err := d.Validate(ctx)
 	if err != nil {
-		return false, fmt.Errorf("tab %s ownership unproved: %w", d.Tab, err)
+		return false, fmt.Errorf("%w: tab %s: %w", errTabOwnership, d.Tab, err)
 	}
 	return valid, nil
 }

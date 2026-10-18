@@ -1,9 +1,12 @@
 package run
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ApplyEngineSelector resolves the headless CLI's `--engine` selector onto
@@ -43,6 +46,29 @@ func ApplyEngineSelector(request *Request, selector string) error {
 	if request.Effort == "" {
 		request.Effort = prefs.Effort
 	}
+	if request.Model, err = hostCodexModel(request.Model); err != nil {
+		return err
+	}
 	request.Engine = pfmengine.OpenCode
 	return nil
+}
+
+// hostCodexModel resolves a bare roster tier (astra) to its full Codex id against this host's agent
+// personas, pfmengine.CodexModel; a full id passes through.
+func hostCodexModel(model string) (string, error) {
+	home, homeErr := paths.Home()
+	resolved, err := pfmengine.CodexModel(model, home)
+	if err != nil {
+		return "", errors.Join(fmt.Errorf("resolve codex model: %w", err), homeErr)
+	}
+	return resolved, nil
+}
+
+// codexExecModelArgs renders a codex exec `--model` pair through hostCodexModel; no model renders no flag.
+func codexExecModelArgs(model string) ([]string, error) {
+	resolved, err := hostCodexModel(model)
+	if err != nil || resolved == "" {
+		return nil, err
+	}
+	return []string{"--model", resolved}, nil
 }

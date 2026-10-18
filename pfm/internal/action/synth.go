@@ -308,9 +308,9 @@ func Synthesize(request Request) (Plan, error) {
 			return Plan{}, errors.New("new Codex action requires a project directory")
 		}
 		account, _ := machine.CodexAccountByID(request.PrimaryAccount)
-		args := []string{}
-		if request.Persona.Model != "" {
-			args = append(args, "--model", request.Persona.Model)
+		args, err := codexModelArgs(request.Persona.Model, request.Home)
+		if err != nil {
+			return Plan{}, err
 		}
 		if request.Persona.Effort != "" {
 			args = append(args, CodexEffortArg(request.Persona.Effort)...)
@@ -495,9 +495,9 @@ func Synthesize(request Request) (Plan, error) {
 				"resuming Codex requires id, cwd, and fresh socket",
 			)
 		}
-		var arguments []string
-		if request.Persona.Model != "" {
-			arguments = append(arguments, "--model", request.Persona.Model)
+		arguments, err := codexModelArgs(request.Persona.Model, request.Home)
+		if err != nil {
+			return Plan{}, err
 		}
 		if request.Persona.Effort != "" {
 			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)

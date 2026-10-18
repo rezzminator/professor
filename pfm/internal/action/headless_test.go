@@ -11,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHeadlessClaudeAssignsSessionAndLaunchRecord(t *testing.T) {
@@ -386,6 +387,44 @@ func TestHeadlessCodexRetainsStructuredSeatRecipe(t *testing.T) {
 				t.Fatalf("Codex environment=%v", plan.SeatRun.Env)
 			}
 		})
+	}
+}
+
+// A bare roster tier is not a Codex model id: OpenAI answers `codex --model astra` with a 400. chat new and
+// the MCP new tool reach PlanCodex, which resolves the tier through the registered agent persona of
+// that name, the roster's own model; a full id passes through unchanged.
+func TestPlanCodexResolvesBareRosterTierToCodexModelID(t *testing.T) {
+	home := t.TempDir()
+	testjail.StageGlobalAgents(t, home)
+	machine := testMachineConfig(home)
+	for tier, want := range map[string]string{"astra": "gpt-6-astra", "gpt-6-astra": "gpt-6-astra"} {
+		plan, err := PlanCodex(HeadlessRequest{
+			Engine: pfmengine.Codex, Name: "TIER", CWD: "/work/alpha", Home: home,
+			PrimaryAccount: 2, Model: tier, Config: machine,
+		})
+		if err != nil {
+			t.Fatalf("PlanCodex(--model %s): %v", tier, err)
+		}
+		at := slices.Index(plan.SeatRun.Args, "--model")
+		if at < 0 || at+1 >= len(plan.SeatRun.Args) || plan.SeatRun.Args[at+1] != want {
+			t.Fatalf("--model %s launched args %q, want --model %s", tier, plan.SeatRun.Args, want)
+		}
+		if !strings.Contains(plan.Run, Quote("--model")+" "+Quote(want)) || strings.Contains(plan.Run, Quote("astra")) {
+			t.Fatalf("--model %s launched run %q, want --model %s", tier, plan.Run, want)
+		}
+	}
+	for _, tier := range []string{"sol", "luna"} {
+		plan, err := PlanCodex(HeadlessRequest{
+			Engine: pfmengine.Codex, Name: "TIER", CWD: "/work/alpha", Home: home,
+			PrimaryAccount: 2, Model: tier, Config: machine,
+		})
+		if err != nil {
+			t.Fatalf("PlanCodex(--model %s): %v", tier, err)
+		}
+		at := slices.Index(plan.SeatRun.Args, "--model")
+		if got := plan.SeatRun.Args[at+1]; !strings.HasPrefix(got, "gpt-") || !strings.HasSuffix(got, "-"+tier) {
+			t.Fatalf("--model %s launched --model %q, want the roster's gpt-*-%s id", tier, got, tier)
+		}
 	}
 }
 

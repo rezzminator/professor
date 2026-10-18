@@ -205,7 +205,11 @@ func codexWorkbenchArgs(args []string, home string) ([]string, error) {
 	}
 	var inserted []string
 	if persona.Model != "" && !model {
-		inserted = append(inserted, "--model", persona.Model)
+		resolved, err := pfmengine.CodexModel(persona.Model, home)
+		if err != nil {
+			return nil, err
+		}
+		inserted = append(inserted, "--model", resolved)
 	}
 	if persona.Effort != "" && !effort {
 		inserted = append(inserted, action.CodexEffortArg(persona.Effort)...)

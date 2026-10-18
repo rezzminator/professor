@@ -103,6 +103,16 @@ func CodexEffortArg(effort string) []string {
 	return []string{"-c", `model_reasoning_effort="` + effort + `"`}
 }
 
+// codexModelArgs renders a Codex seat's `--model` pair, a bare roster tier (astra) resolved to its
+// full Codex id through pfmengine.CodexModel; no model renders no flag.
+func codexModelArgs(model, home string) ([]string, error) {
+	resolved, err := pfmengine.CodexModel(model, home)
+	if err != nil || resolved == "" {
+		return nil, err
+	}
+	return []string{"--model", resolved}, nil
+}
+
 // CodexDeveloperInstructionsArg renders one complete developer-instructions
 // override. Both a fresh role seat and its reload use this door so escaping
 // cannot drift between the two launch paths.
@@ -204,9 +214,11 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 			)
 		}
 		arguments := make([]string, 0, 3)
-		if model := request.Persona.ModelOr(request.Model); model != "" {
-			arguments = append(arguments, "--model", model)
+		modelArgs, err := codexModelArgs(request.Persona.ModelOr(request.Model), request.Home)
+		if err != nil {
+			return HeadlessPlan{}, err
 		}
+		arguments = append(arguments, modelArgs...)
 		if request.Persona.Effort != "" {
 			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
 		}
@@ -328,10 +340,11 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
-	arguments := make([]string, 0, 6)
-	if request.Model != "" {
-		arguments = append(arguments, "--model", request.Model)
+	modelArgs, err := codexModelArgs(request.Model, request.Home)
+	if err != nil {
+		return HeadlessPlan{}, err
 	}
+	arguments := append(make([]string, 0, 6), modelArgs...)
 	if effort != "" {
 		arguments = append(arguments, CodexEffortArg(effort)...)
 	}

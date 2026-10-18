@@ -218,8 +218,8 @@ func (server herdrServer) start(ctx context.Context) (string, error) {
 	return fmt.Sprintf("server pid %d up; herdr status reads running", process.Pid()), nil
 }
 
-// findHerdr is the Herdr family: the server the herdr binary reports, when
-// one is running.
+// findHerdr is the Herdr family: the server the herdr binary reports. One
+// that was not running stays stopped: named, never started.
 func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tableErr error) {
 	name := finder.deps.HerdrBinary
 	if name == "" {
@@ -244,7 +244,15 @@ func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tab
 		return
 	}
 	if !status.Running {
-		finder.found(FamilyHerdr, binary+" status --json: no server running — nothing to stop or start")
+		finder.found(FamilyHerdr, binary+" status --json: no server running — it stays stopped")
+		name := "herdr server"
+		if status.Socket != "" {
+			name += " " + status.Socket
+		}
+		finder.plan.Units = append(finder.plan.Units, Unit{
+			Family: FamilyHerdr, Name: name, FoundBy: binary + " status --json",
+			Before: "server.running=false", StaysStopped: true,
+		})
 		return
 	}
 	finder.found(FamilyHerdr, binary+" status --json: server running on "+status.Socket)
@@ -262,6 +270,7 @@ func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tab
 		StopHow: binary + " server stop; verified: herdr status reads not running, and every process it ran " +
 			"is gone (one that outlives it: SIGTERM, then SIGKILL)",
 		StartHow: binary + " server, detached; verified: herdr status reads running",
+		Before:   "server.running=true",
 		Stop: func(ctx context.Context) (string, error) {
 			return server.stop(ctx, status.Socket, tree, stopper)
 		},

@@ -93,7 +93,8 @@ func TestFindHerdrNamesAnAbsentBinaryAndAStoppedServer(t *testing.T) {
 		t.Fatalf("absent herdr = %+v", finder.plan)
 	}
 	plan, _, _ := herdrPlan(t, &herdrModel{})
-	if len(plan.Units) != 0 || !strings.Contains(plan.Findings[0].Detail, "no server running") {
+	if len(plan.Units) != 1 || !plan.Units[0].StaysStopped ||
+		!strings.Contains(plan.Findings[0].Detail, "no server running — it stays stopped") {
 		t.Fatalf("stopped herdr = %+v", plan)
 	}
 }
@@ -209,4 +210,23 @@ func TestOpenStartLogCreatesItsDirectory(t *testing.T) {
 	if body, err := os.ReadFile(path); err != nil || string(body) != "line\n" {
 		t.Fatalf("log = %q, %v", body, err)
 	}
+}
+
+// TestHerdrAServerNotRunningBeforeStaysStopped: an installed Herdr whose
+// server was not running is named as staying stopped and never started.
+func TestHerdrAServerNotRunningBeforeStaysStopped(t *testing.T) {
+	plan, runner, _ := herdrPlan(t, &herdrModel{})
+	printed, executed, code := printAndRun(t, plan.Units)
+	if code != 0 {
+		t.Fatalf("Execute = %d, want 0:\n%s", code, executed)
+	}
+	if len(runner.starts) != 0 {
+		t.Fatalf("a Herdr server that was not running before was started: %+v", runner.starts)
+	}
+	for _, argv := range runner.ran() {
+		if strings.Join(argv[1:], " ") != "status --json" {
+			t.Fatalf("a Herdr server that was not running before was touched: %v", argv)
+		}
+	}
+	assertStaysStopped(t, printed, executed, "herdr server", "server.running=false")
 }

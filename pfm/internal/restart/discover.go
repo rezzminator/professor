@@ -79,9 +79,10 @@ func (finder *discoverer) failed(family string, err error) {
 	finder.plan.Findings = append(finder.plan.Findings, Finding{Family: family, Err: err})
 }
 
-// BuildPlan finds everything the restart stops and starts, in stop order. It
-// only reads: the fleet scan, the process table, the service managers'
-// state, `herdr status`, `docker ps`.
+// BuildPlan finds everything the restart stops and starts, in stop order, each
+// unit's state read once, before anything stops. It only reads: the fleet
+// scan, the process table, the service managers' state, `herdr status`,
+// `docker ps` and `docker inspect`.
 func BuildPlan(ctx context.Context, dependencies Deps) Plan {
 	finder := &discoverer{deps: dependencies, claimed: map[int]bool{}}
 	finder.findChats(ctx)
@@ -92,11 +93,11 @@ func BuildPlan(ctx context.Context, dependencies Deps) Plan {
 		finder.findHelpers(table)
 	}
 	finder.findHerdr(ctx, table, tableErr)
-	supervised := finder.findServices(ctx)
+	supervised, servicesErr := finder.findServices(ctx)
 	if tableErr != nil {
 		finder.failed(FamilyMCPDaemon, tableErr)
 	} else {
-		finder.findMCPDaemon(table, supervised)
+		finder.findMCPDaemon(table, supervised, servicesErr)
 	}
 	finder.findSearch(ctx)
 	if tableErr != nil {
@@ -183,11 +184,14 @@ func (finder *discoverer) chatUnit(chat headless.Chat) Unit {
 }
 
 // findServices is the services family: every launch agent or user unit pfm
-// installs. It reports whether the MCP daemon is among them, supervised.
-func (finder *discoverer) findServices(ctx context.Context) bool {
+// installs. It reports whether the MCP daemon is among them and was up: a
+// daemon unit that stays stopped supervises nothing, so a daemon run by hand
+// beside it is the mcp-daemon family's. A failed find returns its error: who
+// supervises the daemon is then unknown, never "nobody".
+func (finder *discoverer) findServices(ctx context.Context) (bool, error) {
 	if finder.deps.Services == nil {
 		finder.found(FamilyServices, "no service manager on this platform — no supervised services")
-		return false
+		return false, nil
 	}
 	units, detail, err := finder.deps.Services.Units(ctx, FamilyServices, func(name string) bool {
 		return strings.HasPrefix(name, pfmLaunchdPrefix) || strings.HasPrefix(name, pfmSystemdPrefix)
@@ -199,22 +203,24 @@ func (finder *discoverer) findServices(ctx context.Context) bool {
 	})
 	if err != nil {
 		finder.failed(FamilyServices, err)
-		return false
+		return false, err
 	}
 	finder.found(FamilyServices, detail)
 	finder.plan.Units = append(finder.plan.Units, units...)
-	for _, unit := range units {
-		if unit.Name == "launchd "+mcpLaunchdLabel || unit.Name == "systemd "+mcpSystemdUnit {
-			return true
+	for index := range units {
+		unit := &units[index]
+		if !unit.StaysStopped && (unit.Name == "launchd "+mcpLaunchdLabel || unit.Name == "systemd "+mcpSystemdUnit) {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // findMCPDaemon is the loopback MCP daemon run by hand (a container or an
 // unmanaged host). A supervised daemon belongs to its service unit: its pids
-// are claimed so nothing stops them twice.
-func (finder *discoverer) findMCPDaemon(table processTable, supervised bool) {
+// are claimed so nothing stops them twice. When the services find failed, a
+// daemon may be supervised: it is claimed and left running, a failed find.
+func (finder *discoverer) findMCPDaemon(table processTable, supervised bool, servicesErr error) {
 	defer finder.failedOn(FamilyMCPDaemon, table.unreadableErr())
 	var daemons []process
 	for _, proc := range table.Processes {
@@ -222,6 +228,12 @@ func (finder *discoverer) findMCPDaemon(table processTable, supervised bool) {
 			finder.claimed[proc.PID] = true
 			daemons = append(daemons, proc)
 		}
+	}
+	if servicesErr != nil {
+		finder.failed(FamilyMCPDaemon, fmt.Errorf(
+			"the services find failed, so whether a service unit supervises the daemon is unknown — "+
+				"%d pfm mcp serve process(es) left running: %w", len(daemons), servicesErr))
+		return
 	}
 	if supervised {
 		finder.found(FamilyMCPDaemon, fmt.Sprintf(

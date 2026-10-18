@@ -12,7 +12,6 @@
     "retiredAgents": [
       "frr",
       "gpt-executor",
-      "gpt-foreman",
       "gpt-lander",
       "imagine",
       "rr-super",

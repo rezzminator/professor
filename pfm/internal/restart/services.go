@@ -28,6 +28,8 @@ const (
 	pfmLaunchdPrefix = "com.professor.pfm."
 	// pfmSystemdPrefix opens every systemd user unit pfm installs.
 	pfmSystemdPrefix = "pfm-"
+	// launchdLoaded is the word for a launch agent launchd knows.
+	launchdLoaded = "loaded"
 )
 
 // ServiceManager finds the user services under this host's service manager
@@ -147,6 +149,8 @@ func NewLaunchdManager(runner deps.Runner, clk clock.Clock, home string, uid int
 
 // Units lists every matching plist as a launch agent unit. The MCP daemon,
 // which every other agent's chats reach, is ordered last so it starts first.
+// An agent is up when launchd has it loaded — a job launchd runs or schedules,
+// a KeepAlive one whatever its state word; one not loaded stays stopped.
 func (manager LaunchdManager) Units(
 	ctx context.Context, family string, match func(string) bool, verify Verifier,
 ) ([]Unit, string, error) {
@@ -224,21 +228,22 @@ func (manager LaunchdManager) loaded(ctx context.Context, label string) (bool, e
 func (manager LaunchdManager) unit(
 	family, label, path string, loaded, keepAlive bool, verify func(context.Context) error,
 ) Unit {
-	upWord := "loaded"
+	upWord := launchdLoaded
 	if keepAlive {
 		upWord = "loaded and state = running"
 	}
 	if verify != nil {
 		upWord += ", then its own health probe"
 	}
-	found := "plist " + path + ", not loaded"
+	before := "not loaded"
 	if loaded {
-		found = "plist " + path + ", loaded"
+		before = launchdLoaded
 	}
-	return Unit{
+	unit := Unit{
 		Family:   family,
 		Name:     "launchd " + label,
-		FoundBy:  found,
+		FoundBy:  "plist " + path + ", " + before,
+		Before:   before,
 		StopHow:  "launchctl bootout " + manager.target(label) + "; verified: launchctl print no longer knows it",
 		StartHow: "launchctl bootstrap gui/" + strconv.Itoa(manager.UID) + " " + path + "; verified: " + upWord,
 		Stop: func(ctx context.Context) (string, error) {
@@ -248,6 +253,10 @@ func (manager LaunchdManager) unit(
 			return manager.start(ctx, label, path, keepAlive, verify)
 		},
 	}
+	if !loaded {
+		unit.StaysStopped, unit.Stop, unit.Start = true, nil, nil
+	}
+	return unit
 }
 
 func (manager LaunchdManager) stop(ctx context.Context, label string) (string, error) {
@@ -297,7 +306,7 @@ func (manager LaunchdManager) start(
 		return "", fmt.Errorf("not loaded after launchctl bootstrap %s (exit %d: %s)",
 			path, last.ExitCode, strings.TrimSpace(string(last.Stderr)))
 	}
-	detail := "loaded"
+	detail := launchdLoaded
 	if keepAlive {
 		var state string
 		running, err := manager.waitFor(ctx, serviceStartWithin, func() (bool, error) {
@@ -353,8 +362,10 @@ func NewSystemdManager(runner deps.Runner, clk clock.Clock, home string) Systemd
 	}
 }
 
-// Units lists every matching unit file. A service a .timer or .path of the
-// same name triggers stops but is not started directly: its trigger starts it.
+// Units lists every matching unit file, every ActiveState read before any
+// unit is built. A service a .timer or .path of the same name triggers, and
+// that trigger was up, stops but is not started directly: its trigger starts
+// it. One whose triggers all stay stopped starts directly.
 // Order: triggers, triggered services, then standalone services (the MCP
 // daemon), so start brings the standalone ones up first.
 func (manager SystemdManager) Units(
@@ -374,20 +385,34 @@ func (manager SystemdManager) Units(
 	for _, name := range names {
 		installed[name] = true
 	}
-	var triggers, triggered, standalone []Unit
+	states, up := map[string]string{}, map[string]bool{}
 	for _, name := range names {
 		state, err := manager.activeState(ctx, name)
 		if err != nil {
 			return nil, "", err
 		}
+		if up[name], err = systemdUp(name, state); err != nil {
+			return nil, "", err
+		}
+		states[name] = state
+	}
+	var triggers, triggered, standalone []Unit
+	for _, name := range names {
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
 		switch {
 		case filepath.Ext(name) != ".service":
-			triggers = append(triggers, manager.unit(family, name, state, true, verify.check(name)))
+			triggers = append(triggers, manager.unit(family, name, states[name], up[name], "", verify.check(name)))
 		case installed[stem+".timer"] || installed[stem+".path"]:
-			triggered = append(triggered, manager.unit(family, name, state, false, nil))
+			trigger := ""
+			if up[stem+".timer"] || up[stem+".path"] {
+				trigger = "its timer or path unit starts it again"
+			}
+			triggered = append(
+				triggered,
+				manager.unit(family, name, states[name], up[name], trigger, verify.check(name)),
+			)
 		default:
-			standalone = append(standalone, manager.unit(family, name, state, true, verify.check(name)))
+			standalone = append(standalone, manager.unit(family, name, states[name], up[name], "", verify.check(name)))
 		}
 	}
 	units := append(append(triggers, triggered...), standalone...)
@@ -411,16 +436,39 @@ func (manager SystemdManager) activeState(ctx context.Context, unit string) (str
 	return state, nil
 }
 
-func (manager SystemdManager) unit(family, name, state string, starts bool, verify func(context.Context) error) Unit {
+// systemdUp reads an ActiveState word as up or not: active, activating,
+// reloading and refreshing are up; inactive, failed, deactivating and
+// maintenance are not. Any other word is a failed read, never "stopped".
+func systemdUp(name, state string) (bool, error) {
+	switch state {
+	case "active", "activating", "reloading", "refreshing":
+		return true, nil
+	case "inactive", "failed", "deactivating", "maintenance":
+		return false, nil
+	}
+	return false, fmt.Errorf("systemctl --user show %s: unknown ActiveState %q", name, state)
+}
+
+// unit is one user unit. One not up stays stopped. One up whose trigger was
+// up too (trigger names how it comes back) is stopped and left to it; any
+// other up unit stops and starts.
+func (manager SystemdManager) unit(
+	family, name, state string, up bool, trigger string, verify func(context.Context) error,
+) Unit {
 	unit := Unit{
 		Family:  family,
 		Name:    "systemd " + name,
 		FoundBy: filepath.Join(manager.Dir, name) + ", ActiveState=" + state,
 		StopHow: "systemctl --user stop " + name + "; verified: ActiveState inactive or failed",
 		Stop:    func(ctx context.Context) (string, error) { return manager.stop(ctx, name) },
+		Before:  "ActiveState=" + state,
 	}
-	if !starts {
-		unit.StopHow += " (its timer or path unit starts it again)"
+	if !up {
+		unit.StaysStopped, unit.Stop = true, nil
+		return unit
+	}
+	if trigger != "" {
+		unit.StopHow += " (" + trigger + ")"
 		return unit
 	}
 	unit.StartHow = "systemctl --user start " + name + "; verified: ActiveState active"

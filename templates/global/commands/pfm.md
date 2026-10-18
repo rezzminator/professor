@@ -30,7 +30,7 @@ Operator verbs:
 - uninstall: remove it
 - update: bare form updates the binary from its source clone; `adopt|pin|ignore|drop|accept` manage this project's template baseline (`pfm doctor --project-updates` reports it)
 - init: scaffold project templates once and pin their baselines (`pfm init [dir] [--force]`); `pfm init --render [dir]` fills install-time tokens once from `.professor/manifest.json`
-- restart: end every chat, then restart Herdr and every pfm service, each verified up; `--dry-run` prints the ordered plan and changes nothing
+- restart: end every chat, then restart Herdr and every pfm service that was running before, each verified up; a unit found stopped stays stopped, named; `--dry-run` prints the ordered plan and changes nothing
 - config: `init | show | validate` machine configuration
 - doctor: fleet database and jail health — exit 0 machine checks clean (`project_updates` rows advisory), 1 warnings, 3 failures
 - version: print the pfm version

@@ -233,7 +233,7 @@ func printUsage(w io.Writer) {
 		"  uninstall remove the self-contained host integration",
 		"  update    update the binary; check, adopt, pin, ignore, drop or accept project template baselines",
 		"  init      scaffold project templates once and pin their baselines",
-		"  restart   end every chat, then restart Herdr and every pfm service, each verified up: --dry-run",
+		"  restart   end every chat, restart Herdr and every pfm service that ran, each verified up: --dry-run",
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",

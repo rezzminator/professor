@@ -1,4 +1,3 @@
-cmd/pfm/archive_command.go
 cmd/pfm/chat_ask_command.go
 cmd/pfm/chat_command.go
 cmd/pfm/chat_dispatch.go
@@ -14,17 +13,14 @@ cmd/pfm/runtime_config.go
 cmd/pfm/uninstall_command.go
 cmd/pfm/whoami_command.go
 e2e/doc.go
-internal/action/claude_spawn.go
 internal/action/doc.go
 internal/action/process_darwin.go
 internal/action/process_linux.go
 internal/action/quote.go
-internal/action/solo.go
 internal/action/termios_bsd.go
 internal/action/termios_linux.go
 internal/action/types.go
 internal/archive/manifest.go
-internal/call/body.go
 internal/call/types.go
 internal/chat/call_engine.go
 internal/claudelaunch/doc.go
@@ -45,7 +41,6 @@ internal/gather/agents.go
 internal/gather/claudeproc.go
 internal/gather/codex_held_root.go
 internal/gather/gather.go
-internal/gather/procfs_darwin.go
 internal/gather/procfs_native_darwin.go
 internal/gather/procscan.go
 internal/gather/types.go
@@ -60,16 +55,12 @@ internal/harvestpy/digest.go
 internal/harvestpy/embed.go
 internal/headless/run/process_unix.go
 internal/headless/stream.go
-internal/headless/watch.go
 internal/heal/runner.go
 internal/hookentry/claude_version.go
-internal/hookentry/codex_launch.go
 internal/hookentry/doc.go
 internal/hookentry/launcher_repair.go
 internal/hookentry/prompt_block.go
 internal/hostfixture/doc.go
-internal/index/claude.go
-internal/index/codex.go
 internal/index/cxindex.go
 internal/index/incremental.go
 internal/index/sync_sources.go
@@ -84,7 +75,6 @@ internal/installer/scheduler_other.go
 internal/installer/settings.go
 internal/installer/settings_ownership.go
 internal/kill/doc.go
-internal/kill/finisher.go
 internal/kill/lineage.go
 internal/kill/manager.go
 internal/kill/self.go
@@ -104,7 +94,6 @@ internal/spawn/service_scope_linux.go
 internal/spawn/types.go
 internal/stats/resources_darwin.go
 internal/stats/resources_linux.go
-internal/stats/tokens.go
 internal/statusline/render.go
 internal/statusline/runtime.go
 internal/store/doc.go

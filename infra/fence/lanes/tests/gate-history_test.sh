@@ -390,6 +390,30 @@ LD=$T/ld-foreign
 out=$(gh report --project p 2>&1); rc=$?
 eq 'report on a ledger with a foreign first line: BAD LEDGER, exit 1' '1 yes' "$rc $(grep -q '^gate-history: BAD LEDGER ' <<< "$out" && echo yes || echo "no: $out")"
 
+# --- concurrent ingests: one ledger writer at a time ------------------------------------------------------------
+# Six runs in six bases, each base ingested twice at once, racing the v1 header upgrade: every run lands once,
+# no row is lost to the upgrade's rename, none is duplicated by a dedupe read before another's append.
+bad_rounds=""
+for round in 1 2 3 4 5; do
+  LD=$T/ld-race$round
+  mkdir -p "$LD/p"
+  { printf '%s\n' "$HEADER_V1"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\n'; } > "$LD/p/ledger.tsv"
+  pids=()
+  for i in 1 2 3 4 5 6; do
+    old_run "$T/race$round/wt$i/timing/run.R$i" 20260927000$i.00
+  done
+  for i in 1 2 3 4 5 6 1 2 3 4 5 6; do
+    gh ingest "$T/race$round/wt$i/timing" --project p > /dev/null 2>&1 &
+    pids+=($!)
+  done
+  for pid in "${pids[@]}"; do wait "$pid"; done
+  L=$LD/p/ledger.tsv
+  got="$(head -n 1 "$L" | awk -F'\t' '{ print NF }') $(rowcount "$L") $(awk -F'\t' 'NR > 1 { print $3 FS $2 FS $6 }' "$L" | sort | uniq -d | wc -l | tr -d ' ') $(awk -F'\t' 'NF != 16' "$L" | wc -l | tr -d ' ')"
+  [ "$got" = '16 20 0 0' ] || bad_rounds="$bad_rounds round $round: $got;"
+done
+eq 'concurrent ingests racing the header upgrade: 16-column header, 1+1+6x3 rows, no duplicate, no short row' '' "$bad_rounds"
+ls -d "$T"/ld-race*/p/ledger.tsv.lock 2> /dev/null | grep -q . && bad 'concurrent ingests left their ledger lock behind' || ok 'concurrent ingests release the ledger lock'
+
 # --- ingest then report ---------------------------------------------------------------------------------------
 LD=$T/ld-both
 gh ingest "$T/wt1/timing" "$T/wt 2/timing" --project p > /dev/null 2>&1

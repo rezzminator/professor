@@ -47,7 +47,7 @@ live_count() {
 }
 
 modules_ready() { # modules_ready <module dir>...: go mod download once per go.sum content
-  local d sum stamp out
+  local d sum stamp out tmp
   mkdir -p /cache/gomod/.pfm-fence-ready || return 1
   for d in "$@"; do
     [[ -f "$d/go.sum" ]] || continue
@@ -57,7 +57,10 @@ modules_ready() { # modules_ready <module dir>...: go mod download once per go.s
       echo "shared-run: go mod download in $d failed — a private run has no network to fetch modules: ${out//$'\n'/ }" >&2
       return 1
     fi
-    : > "$stamp"
+    # The stamp appears whole, by rename, only after the download; concurrent downloads of one module
+    # are safe on Go's own module-cache file locks.
+    tmp="$(mktemp "$stamp.XXXXXX")" && mv -f "$tmp" "$stamp" \
+      || echo "shared-run: the module stamp $stamp could not be written — the next private run downloads again" >&2
   done
 }
 
@@ -102,7 +105,9 @@ cmd_run() {
     unshare "${flags[@]}" -- bash "$SELF" inner "$id" "$mode" "$tree" "$es" "$wt" -- "$@" || rc=$?
   else
     exec 3<&0
-    unshare "${flags[@]}" -- bash "$SELF" inner "$id" "$mode" "$tree" "$es" "$wt" -- "$@" </dev/null &
+    # A background job of this non-interactive shell starts with SIGINT and SIGQUIT ignored, an ignore
+    # every process of the run would inherit and none could trap: env restores their defaults.
+    env --default-signal=INT,QUIT unshare "${flags[@]}" -- bash "$SELF" inner "$id" "$mode" "$tree" "$es" "$wt" -- "$@" </dev/null &
     ns=$!
     echo "$ns" > "$run/ns.pid"
     (

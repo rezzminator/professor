@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for `.claude/scripts/dev.sh iso`'s doors into the shared fence container:
 # every action but sim enters the one container with `docker exec` of infra/fence/shared-run.sh
-# (status, install, build, typecheck and run in the shared network; verify, test, e2e, cover, all,
-# gate and run under PFM_FENCE_NET=private in the run's own); a running container is entered with no
+# (install alone, and run under PFM_FENCE_NET=shared, in the shared network; every other action and
+# run by default in the run's own); a running container is entered with no
 # housekeeping and no start; a missing one has its cache volumes ensured, is started once, and only
 # then is housekeeping run, detached; a stale image is built before the start; the container's name
 # and label carry the image key; iso gate is one exec of the egress recorder, then the ledger ingest,
@@ -106,17 +106,17 @@ for a in status "run true"; do
     ok "iso $a: a running shared container is entered with docker exec — no start, no housekeeping"
   else bad "iso $a" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 done
-for a in status install build typecheck "run true"; do
+# install alone fetches from outside, so it alone shares the container's network; every other action, and
+# `iso run` unless PFM_FENCE_NET=shared opts in, gets its own namespace: a fixed loopback port never collides.
+iso install
+if [ "$(exec_mode)" = shared ]; then ok "iso install runs in the shared network"; else bad "iso install network" "$(exec_mode)" "$(cat "$STUB_DOCKER_LOG")"; fi
+for a in status build typecheck verify test e2e cover all gate "run true"; do
   # shellcheck disable=SC2086
   iso $a
-  if [ "$(exec_mode)" = shared ]; then ok "iso $a runs in the shared network"; else bad "iso $a network" "$(exec_mode)" "$(cat "$STUB_DOCKER_LOG")"; fi
-done
-for a in verify test e2e cover all gate; do
-  iso "$a"
   if [ "$(exec_mode)" = private ]; then ok "iso $a runs in its own network namespace"; else bad "iso $a network" "$(exec_mode)" "$(cat "$STUB_DOCKER_LOG")"; fi
 done
-PFM_FENCE_NET=private iso run true
-if [ "$(exec_mode)" = private ]; then ok "iso run under PFM_FENCE_NET=private runs in its own network namespace"; else bad "iso run private" "$(cat "$STUB_DOCKER_LOG")"; fi
+PFM_FENCE_NET=shared iso run true
+if [ "$(exec_mode)" = shared ]; then ok "iso run under PFM_FENCE_NET=shared runs in the shared network"; else bad "iso run shared" "$(cat "$STUB_DOCKER_LOG")"; fi
 PFM_FENCE_NET=bogus iso run true
 if [ "$RC" -eq 2 ] && grep -qF 'iso run: PFM_FENCE_NET must be private or shared: bogus' <<<"$OUT"; then ok "a bad PFM_FENCE_NET is refused, exit 2"; else bad "bad PFM_FENCE_NET" "rc=$RC" "$OUT"; fi
 

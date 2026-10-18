@@ -48,6 +48,10 @@ if [ "$rc" = 7 ]; then ok "a run exits with its command's code"; else bad "a run
 out="$(srun r-tree shared '[ "$PWD" = /worktree ] && [ "$(cat /worktree/marker)" = here ] && ! touch /worktree/x 2>/dev/null && [ "$HOME" = /root ]')"; rc=$?
 if [ "$rc" = 0 ]; then ok "a run starts in its tree on /worktree, read-only, HOME=/root"; else bad "the run's tree, cwd and HOME" "rc=$rc" "$out"; fi
 if [ ! -e "$TREE/x" ]; then ok "a run never writes its tree"; else bad "a run wrote its tree"; fi
+# A run's command gets SIGINT and SIGQUIT at their defaults, never the ignore bash gives a background job
+# (an ignore inherited at entry cannot be trapped, so a test that sends INT would see it vanish).
+out="$(srun r-sig shared 'awk "/^SigIgn:/ { print \$2 }" /proc/self/status')"; rc=$?
+if [ "$rc" = 0 ] && [[ "$out" =~ ^[0-9a-f]+$ ]] && (( (16#$out & 6) == 0 )); then ok "a run's command has SIGINT and SIGQUIT at their defaults"; else bad "a run's command ignores SIGINT or SIGQUIT" "rc=$rc SigIgn=$out"; fi
 
 # --- per-run fixed paths ----------------------------------------------------------------------------------
 fixed='for d in /tmp /root /var/tmp /dev/shm; do echo "$ID" > "$d/fixed"; done; sleep 1.5
@@ -86,11 +90,12 @@ if [ "$rc" = 0 ]; then ok "a private run has lo up and no outside connection"; e
 
 # --- the heartbeat kill -----------------------------------------------------------------------------------
 start=$(date +%s)
-out="$( { printf '.\n'; sleep 1; } | bash "$SUT" run r-eof shared "$TREE" - wt -- bash -c 'sleep 60' 2>&1)"; rc=$?
+eof_sleep="sleep 60.$$" # a marker of this test alone: the gate runs other suites' sleeps in this pid namespace
+out="$( { printf '.\n'; sleep 1; } | bash "$SUT" run r-eof shared "$TREE" - wt -- bash -c "$eof_sleep" 2>&1)"; rc=$?
 el=$(( $(date +%s) - start ))
 if [ "$rc" != 0 ] && [ "$el" -le 5 ]; then ok "a heartbeat EOF kills the run within 5 s (${el}s)"; else bad "a heartbeat EOF kill" "rc=$rc after ${el}s" "$out"; fi
 if grep -qF 'shared-run: the caller of run r-eof is gone (heartbeat ended) — killing the run' <<<"$out"; then ok "the EOF kill is named"; else bad "the EOF kill is named" "$out"; fi
-if ! pgrep -f 'sleep 60' >/dev/null; then ok "a killed run leaves no process"; else bad "a killed run left a process" "$(pgrep -af 'sleep 60')"; fi
+if ! pgrep -f "$eof_sleep" >/dev/null; then ok "a killed run leaves no process"; else bad "a killed run left a process" "$(pgrep -af "$eof_sleep")"; fi
 # The stalled caller: a writer holding the run's stdin open without a beat. A fifo, not < <(…): the
 # command substitution would wait for its process substitution's exit.
 mkfifo "$T/stall"

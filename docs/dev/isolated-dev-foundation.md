@@ -19,7 +19,7 @@ All train/code work happens in a `git worktree` under `.worktrees/{train-or-wave
 One long-lived dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.27, and pinned Node 22) per host — per main checkout and image key — serves every fenced call of every worktree (`infra/fence/shared.sh`). The first caller starts it; only its creation is serialized, by a short lock, and runs never queue behind each other. Every call enters it with `docker exec` and runs inside namespaces of its own (`infra/fence/shared-run.sh`):
 
 - Own pid and mount namespace, own `$HOME`, `/tmp`, `/var/tmp` and `/dev/shm`, removed when the run ends — `pfm install --yes` runs against that HOME, doctor runs in it, the shim sources into its zshrc. A process scan or a `pkill` sees this run alone.
-- Own network namespace for `.claude/scripts/test.sh`, the gate and the test actions (`verify`, `test`, `e2e`, `cover`, `all`), so a fixed test port never collides and the gate's egress verdict covers its own run alone; `iso run` takes one with `PFM_FENCE_NET=private`.
+- Own network namespace, loopback only, for every run, so a fixed test port never collides and the gate's egress verdict covers its own run alone; only `install`, which fetches from outside, and the interactive `iso shell` share the container's network, and `iso run` does only under `PFM_FENCE_NET=shared`.
 - Own tmux server, own socket dir — fleet experiments (spawn/call/capture) run against run-local chats, never the live `cc-*`/`cx-*` sockets. The live-box law is physically satisfied, not just promised.
 - Nothing publishes a port to the host unless a task explicitly asks.
 - Builds land in the run's `~/.local/bin`, never the host's.

@@ -28,7 +28,7 @@
 #   PFM_FENCE_TEST_P    go test -p (pfm/Makefile TESTFLAGS); unset, the container's CPU cap
 #   PFM_FENCE_IDLE_S (1800)       a container with no live run this long exits (read at creation)
 #   PFM_FENCE_HEARTBEAT_S (4)     a run whose caller's heartbeat stops this long is killed
-#   PFM_FENCE_NET (shared)        iso run's network: private gives the run its own network namespace
+#   PFM_FENCE_NET (private)       iso run's network: shared opts into the container's network
 # Only creation is serialized: the lock directory /tmp/{project}/fence/shared.lock.d around inspect,
 # image build and `docker run`; runs never queue behind each other. A new image key starts a new
 # container and marks the root's other containers superseded: each drains its live runs, then exits.

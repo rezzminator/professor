@@ -379,8 +379,9 @@ dispatch() { # dispatch <project> <action>
 # Runs a command inside the ONE shared pfm-dev container (infra/fence/shared.sh) with THIS
 # checkout — the worktree this script belongs to — at /worktree, read-only: every call is a
 # `docker exec` with its own pid and mount namespaces, its own HOME, /tmp, /var/tmp and /dev/shm,
-# removed at the end (infra/fence/shared-run.sh); the test actions (verify test e2e cover all gate)
-# and `iso run` under PFM_FENCE_NET=private also get their own network namespace. Files are edited
+# removed at the end (infra/fence/shared-run.sh), and its own network namespace (loopback only, so a
+# fixed test port never collides), except `install`, which fetches from outside, the interactive
+# `iso shell`, and `iso run` under PFM_FENCE_NET=shared, which share the container's network. Files are edited
 # on the host; the container only builds and tests. `iso sim` alone keeps a container of its own
 # per call (docker compose run of the pfm-sim image: Chrome, a per-worktree harvester volume).
 # First output line is the fence proof (container hostname + HOME + /worktree + run id).
@@ -491,9 +492,9 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   case "$action" in
     shell)
       fence_shared_exec tty "$proof; exec zsh -i" ;;
-    install|build|typecheck|status)
+    install)
       fence_shared_exec shared "$proof; ./.claude/scripts/dev.sh $action $target" ;;
-    verify|test|e2e|cover|all)
+    build|typecheck|status|verify|test|e2e|cover|all)
       fence_shared_exec private "$proof; ./.claude/scripts/dev.sh $action $target" ;;
     gate)
       # The flight gate: pfm and templates rows as concurrent steps in ONE run, the
@@ -511,8 +512,9 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       # An arbitrary command inside the fence, from the worktree root — for the
       # probes the fixed rows do not cover (`go test -json ./cmd/pfm`, a single
       # package, `make -C pfm lint`). Exit status is the command's own.
-      # PFM_FENCE_NET=private gives it its own network namespace (test.sh does).
-      local cmd="${*:2}" net="${PFM_FENCE_NET:-shared}"
+      # Its own network namespace by default; PFM_FENCE_NET=shared opts into the container's network
+      # for a command that fetches from outside.
+      local cmd="${*:2}" net="${PFM_FENCE_NET:-private}"
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
       case "$net" in private|shared) ;; *) echo "iso run: PFM_FENCE_NET must be private or shared: $net" >&2; exit 2 ;; esac
       fence_shared_exec "$net" "$proof; $cmd" ;;
@@ -557,7 +559,7 @@ shared fence knobs, read per call:
   PFM_FENCE_TEST_P       go test package concurrency, -p (default: the CPU cap)
   PFM_FENCE_IDLE_S       a container with no live run exits after this long (default 1800)
   PFM_FENCE_HEARTBEAT_S  a run whose caller stops beating this long is killed (default 4)
-  PFM_FENCE_NET          iso run's network: shared (default) or private
+  PFM_FENCE_NET          iso run's network: private (default, loopback only) or shared
 
 Every project that cannot be checked reports TOOLCHAIN-MISSING or NOT-INSTALLED
 and exits non-zero. A skipped check is never a pass.

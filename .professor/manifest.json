@@ -103,7 +103,7 @@
     ".claude/commands/pfm/release.md": "18bb6c6b52a74875bb95b39fd15f9163e3c73a0fdfc5d7c2b027bbcd3807e24b",
     ".claude/commands/pfm/update.md": "e3d515c7ef2bf14554426c63b3b6f7f48746ba066e00ff4611b3060cfb28ff2e",
     ".claude/engine-sync.json": "081bec5b4a32e8863e9aef9daf09ac20fb4c018a36807b05e5e20dbdf9261b99",
-    ".claude/scripts/dev.sh": "3bc0600a41ce862cc24b68ef3387d5f7bb0b6f8dbb617632f34d01668ff4aec1",
+    ".claude/scripts/dev.sh": "3ae0d39a3f56ad16ac0a6dcebe0b3f090cfbcde5094e153032829b571f8382f4",
     ".claude/scripts/format-md.sh": "bba3241e6011300c45238b75ea47aa82ba5ba179299b4048a4eae04c240894d3",
     ".claude/scripts/test.sh": "1367d9f4d22742d5fb88c30c439a0a82bea1e8d759e0c7a49cce51891dc77f0a",
     ".claude/scripts/unit-path.sh": "ec5dc00d19662e53439a5cd210af12d5a3d8680acc5ec6b76606d036b14450bd",

@@ -56,6 +56,7 @@ case "$1" in
       if [ "${STUB_PROBE_FAIL:-0}" = 1 ]; then echo 'fixture image probe error' >&2; exit 6; fi
       echo 'sha256:fixture-base-id'; exit 0
     fi
+    [ -e "${STUB_ROOT_PRESENT:-/nonexistent}" ] && exit 0
     exit 1 ;; # root image inspect: no root for this hash yet
   inspect)
     if [ "${STUB_PROBE_FAIL:-0}" = 1 ]; then echo 'fixture inspect probe error' >&2; exit 6; fi
@@ -371,4 +372,34 @@ for flag in --accounts --no-adopt; do
   if [ "$RC" -eq 2 ] && grep -q '^usage: root.sh' <<<"$OUT"; then ok "unsupported root input $flag reports usage"
   else bad "invalid root input $flag" "rc=$RC" "$OUT"; fi
 done
+# One root build per hash at a time: a build holds /tmp/{project}/lanes/root-build-<hash>.lock over the
+# inspect and the build, so two concurrent builds never race on one tag or the shared cache volumes. A
+# waiter that finds the image once the lock is free reuses it; a dead holder's lock is broken.
+HASH="$(bash "$R/infra/fence/lanes/root.sh" --print-hash 2>/dev/null)"
+LK="/tmp/$(basename "$R")/lanes/root-build-$HASH.lock"
+mkdir -p "$LK"
+sleep 30 &
+holder=$!
+printf '%s\n' "$holder" >"$LK/pid"
+: >"$STUB_DOCKER_LOG"
+STUB_ROOT_PRESENT="$T/root.present" bash "$R/infra/fence/lanes/root.sh" >"$T/wait.out" 2>&1 </dev/null &
+waiter=$!
+for ((i = 0; i < 50; i++)); do grep -q 'waiting for the root build' "$T/wait.out" 2>/dev/null && break; sleep 0.1; done
+waited="$(grep -c 'waiting for the root build' "$T/wait.out")"
+: >"$T/root.present"
+rm -rf "$LK"
+wait "$waiter"; wrc=$?
+ps -o args= -p "$holder" 2>/dev/null | grep -qF 'sleep 30' && kill "$holder" 2>/dev/null
+if [ "$waited" -ge 1 ] && [ "$wrc" -eq 0 ] && grep -q "^root: reusing pfm-lane-root:$HASH" "$T/wait.out" &&
+  ! grep -qE '^(run -d|commit) ' "$STUB_DOCKER_LOG" && [ ! -e "$LK" ]; then
+  ok "a root build waits for a concurrent build of its hash, then reuses the image it made and leaves no lock"
+else bad "concurrent root build" "waited=$waited rc=$wrc" "$(cat "$T/wait.out")" "$(cat "$STUB_DOCKER_LOG")"; fi
+rm -f "$T/root.present"
+mkdir -p "$LK"
+printf '999999\n' >"$LK/pid"
+run_root ok
+if [ "$RC" -eq 0 ] && grep -q '^commit ' "$STUB_DOCKER_LOG" && [ ! -e "$LK" ]; then
+  ok "a dead holder's root build lock is broken, the build runs and releases its lock"
+else bad "dead holder lock" "rc=$RC" "$OUT"; fi
+
 shtest_end

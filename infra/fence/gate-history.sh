@@ -227,6 +227,27 @@ fail() { # fail <line>: a named line on stderr, exit 1
 }
 
 # --- ingest ------------------------------------------------------------------------
+# One ledger writer at a time: an ingest holds <ledger>.lock (mkdir is atomic; flock is not on macOS)
+# from its dedupe read through its last append and any header upgrade, so concurrent gates neither
+# duplicate a run nor lose a row to the upgrade's rename. A dead holder's lock (its pid file names
+# a process that is gone) is broken; a live holder past 120 s is LEDGER-NOT-WRITTEN.
+ledger_lock() {
+  local dir=${ledger%/*} lk="$ledger.lock" err holder i
+  if ! err=$(mkdir -p "$dir" 2>&1); then fail "LEDGER-NOT-WRITTEN $ledger: cannot create $dir: ${err##*: }"; fi
+  for ((i = 0; i < 1200; i++)); do
+    if mkdir "$lk" 2> /dev/null; then
+      printf '%s\n' "$$" > "$lk/pid"
+      trap 'rm -rf "$ledger.lock"' EXIT
+      return 0
+    fi
+    holder=$(cat "$lk/pid" 2> /dev/null || true)
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2> /dev/null; then rm -rf "$lk"; continue; fi
+    if [ -z "$holder" ] && [ -n "$(find "$lk" -maxdepth 0 -mmin +1 2> /dev/null)" ]; then rm -rf "$lk"; continue; fi
+    sleep 0.1
+  done
+  fail "LEDGER-NOT-WRITTEN $ledger: $lk is still held by pid ${holder:-?} after 120 s"
+}
+
 ensure_ledger() { # the ledger exists with its header; any other first line is refused
   local dir=${ledger%/*} err first
   if [ ! -s "$ledger" ]; then
@@ -351,6 +372,7 @@ ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows; 
 do_ingest() {
   local base absbase wt run epoch key known plan="" sorted line newest="" newest_load=NA appended=0 pdir load
   errors=0
+  ledger_lock
   ensure_ledger
   known=$(awk -F'\t' 'NR > 1 && !seen[$3 FS $2]++ { print $3 FS $2 }' "$ledger")
   # Pass 1: which runs are new real gates, and when each finished.

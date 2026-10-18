@@ -59,6 +59,8 @@ func IndicatorEvents() []string {
 	return []string{
 		"pane.agent_status_changed",
 		"pane.agent_detected",
+		"pane.created",
+		"tab.created",
 		"pane.focused",
 		"pane.closed",
 		"pane.exited",
@@ -98,7 +100,10 @@ type indicatorPainter struct {
 	reported map[string]bool
 	// hasDone keeps the blinker reconciling unseen completions: marking an
 	// already-focused tab seen need not emit any focus or agent-state event.
-	hasDone bool
+	hasDone         bool
+	tabs            TabProvider
+	hasTabs         bool
+	tabObservations []TabDecoration
 }
 
 // PaintIndicators repaints every pane's and workspace's indicator token on the
@@ -118,7 +123,13 @@ func PaintIndicators(ctx context.Context, socket, lockDir string, stderr io.Writ
 }
 
 func (painter *indicatorPainter) logf(format string, args ...any) {
-	_, _ = fmt.Fprintf(painter.stderr, format+"\n", args...)
+	message := fmt.Sprintf(format, args...)
+	_, _ = fmt.Fprintln(painter.stderr, message)
+	if painter.lockDir != "" {
+		if err := AppendError(painter.lockDir, "indicators", painter.clock.Now(), message); err != nil {
+			_, _ = fmt.Fprintf(painter.stderr, "persist indicator diagnostic: %v\n", err)
+		}
+	}
 }
 
 func (painter *indicatorPainter) nextSeq() uint64 {
@@ -148,6 +159,33 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		painter.logf("%v", err)
 		return err
 	}
+	if painter.tabs != nil {
+		release, held, err := painter.takeBlinkerLock()
+		if err != nil {
+			painter.logf("%v", err)
+			return err
+		}
+		if !held {
+			return nil
+		}
+		defer release()
+		blocked, _, err := painter.paint(ctx)
+		if err != nil {
+			painter.logf("%v", err)
+			return err
+		}
+		if !blocked && !painter.hasDone && !painter.hasTabs {
+			return nil
+		}
+		_, err = painter.blink(ctx)
+		if ctx.Err() != nil {
+			if restoreErr := painter.restoreTabs(context.WithoutCancel(ctx)); restoreErr != nil {
+				painter.logf("%v", restoreErr)
+				return errors.Join(err, restoreErr)
+			}
+		}
+		return err
+	}
 	settles := 0
 	for {
 		blocked, wrote, err := painter.paint(ctx)
@@ -155,7 +193,7 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 			painter.logf("%v", err)
 			return err
 		}
-		if !blocked && !painter.hasDone {
+		if !blocked && !painter.hasDone && !painter.hasTabs {
 			if !wrote || settles >= maxSettleRounds {
 				return nil
 			}
@@ -221,7 +259,7 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 			continue
 		}
 		failures = 0
-		if !blocked && !painter.hasDone {
+		if !blocked && !painter.hasDone && !painter.hasTabs {
 			return false, nil
 		}
 	}
@@ -241,7 +279,7 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 	blinkOn := painter.clock.Now().UnixMilli()/blinkHalfPeriod.Milliseconds()%2 == 0
 	painter.hasDone = false
 	for _, target := range targets {
-		blocked = blocked || target.status == "blocked"
+		blocked = blocked || target.status == string(StateBlocked)
 		painter.hasDone = painter.hasDone || target.status == "done"
 		want, known := wantedIndicators(target.status, blinkOn)
 		if !known && !painter.reported[target.status] {
@@ -255,12 +293,32 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		}
 		wrote = wrote || accepted
 	}
+	if painter.tabs != nil {
+		observations, err := painter.tabs(ctx, painter.socket)
+		if err != nil {
+			return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
+		}
+		painter.tabObservations = observations
+		painter.hasTabs = false
+		for i := range observations {
+			observation := observations[i]
+			painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
+			accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.call)
+			if err != nil {
+				return blocked, wrote, err
+			}
+			wrote = wrote || accepted
+		}
+	}
 	return blocked, wrote, nil
 }
 
 // clear lists every pane and workspace once and removes the indicator tokens
 // each holds, leaving every other source's tokens alone.
 func (painter *indicatorPainter) clear(ctx context.Context) error {
+	if err := painter.restoreTabs(ctx); err != nil {
+		return err
+	}
 	targets, err := painter.list(ctx)
 	if err != nil {
 		return err

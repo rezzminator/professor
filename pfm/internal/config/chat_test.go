@@ -55,3 +55,35 @@ func TestChatBackendConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestHerdrTabStatusConfiguration(t *testing.T) {
+	for _, mode := range []string{"emoji", "text", "off", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), FileName)
+			if err := os.WriteFile(
+				path,
+				[]byte(`{"version":2,"chat":{"herdrTabStatus":"`+mode+`"}}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load(path, t.TempDir(), nil)
+			if mode == "invalid" {
+				if err == nil || !strings.Contains(err.Error(), "herdrTabStatus") {
+					t.Fatalf("invalid mode error=%v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := Marshal(got, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), `"herdrTabStatus": "`+mode+`"`) {
+				t.Fatalf("roundtrip lost mode: %s", data)
+			}
+		})
+	}
+}

@@ -46,6 +46,12 @@ An entry naming the store loads; `account-is-store` blocks it and directs the op
 
 `chat.backend` picks where a new Claude chat is born: `auto` (default), `tmux` or `herdr`. An explicit `--backend` on `pfm chat new` outranks it; the rules `auto` follows, and what a forced `herdr` does when its pane is unreachable, are in [claude-launch.md § The Herdr seat door](claude-launch.md#the-herdr-seat-door). Any other value, the empty string included, is refused with `config {path}: chat.backend must be auto, tmux or herdr`; a key set in the file reports source `file` in `pfm config show`, an absent one the default. It lives in `pfm/internal/config/chat.go` and the example file.
 
+### chat.herdrTabStatus
+
+`chat.herdrTabStatus` controls sole-chat Herdr tab labels: `emoji` (default), `text`, or `off`. Any other value is refused with `chat.herdrTabStatus must be emoji, text or off`. Emoji markers are working yellow circle, idle green circle, blocked red circle, error red square, dead black square, unknown white question mark. Blocked/error alternate with a white square every 500 ms; every marker occupies two display columns. Text fallback uses `[W]`, `[I]`, `[B]`, `[E]`, `[D]`, `[?]`, with `[ ]` for the attention off-phase. The name remains visible; focusing a blocked tab does not stop its pulse. These are glyph colors, not theme RGB or tab backgrounds: Herdr v0.9.5 exposes no per-status background API.
+
+The existing `professor.indicators` plugin, linked by the Herdr theme-sync surface, runs the chat-aware `pfm internal herdr-indicators` painter. It monitors eligible chats even while idle so missed hooks, failed turns and process death are observed. `off` restores labels whose ownership still matches and stops tab monitoring; sidebar behavior is unchanged. The setting is reread at each poll. Status inspection failures show the unknown marker and a diagnostic under `HerdrLockDir`; they never become idle/dead. External Herdr changes can race the final validation and rename because the server has no conditional rename operation.
+
 ### mcp.thirdParty
 
 A map from server name to a JSON object in Claude's `mcpServers` shape, default `{}`. pfm preserves each object's fields and passes every entry through `--mcp-config`. Definitions are operator-managed; host checks name entries still present in account or home state files. Validation refuses `mcp.thirdParty.professor: the name professor is pfm's own server` and `mcp.thirdParty.{name} must be a JSON object (a Claude mcpServers entry)`, prefixed `config {path}:`.

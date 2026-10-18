@@ -694,3 +694,30 @@ func TestBlinkerCountsMetadataRefusalsTowardItsFailureBound(t *testing.T) {
 		)
 	}
 }
+
+func TestTabMonitorKeepsPollingAndTakesSingletonBeforePaint(t *testing.T) {
+	fake := &fakeIndicatorHerdr{}
+	painter, step, _ := newTestPainter(t, fake, phaseOn)
+	polls := 0
+	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+		polls++
+		return nil, fmt.Errorf("tab provider failure")
+	}
+	step.onSleep = func(context.Context) error { return context.Canceled }
+	err := painter.run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "tab provider failure") || polls != 1 {
+		t.Fatalf("polls=%d err=%v", polls, err)
+	}
+	release, held, err := painter.takeBlinkerLock()
+	if err != nil || !held {
+		t.Fatalf("take singleton: %t %v", held, err)
+	}
+	defer release()
+	before := fake.lists
+	if err := painter.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.lists != before || polls != 1 {
+		t.Fatalf("competing painter did work: lists %d -> %d polls=%d", before, fake.lists, polls)
+	}
+}

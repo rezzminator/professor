@@ -290,7 +290,15 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 		},
 		ClaudeProcesses: []gather.ClaudeProcess{{Socket: "cc-1-2-3"}},
 	}
-	output, failures, err := composeNativeFleet(context.Background(), nil, environment, compose.DefaultView, data, live)
+	output, failures, err := composeNativeFleet(
+		context.Background(),
+		nil,
+		environment,
+		compose.DefaultView,
+		data,
+		live,
+		true,
+	)
 	if err != nil {
 		t.Fatalf("native DB failure discarded healthy live snapshot: %v", err)
 	}
@@ -307,4 +315,39 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 		}
 	}
 	t.Fatalf("native DB error omitted healthy live tmux row: %+v", output.Rows)
+}
+
+func TestReadOnlyNativeScanDoesNotCreateState(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprint(cached), func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := config.ResolvePaths()
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, err := store.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			runtime := config.Runtime{Config: config.Defaults(values.Home, values.Roots["cc"]), Paths: values}
+			runtime.Paths.StateDB = filepath.Join(t.TempDir(), "absent", "state.db")
+			request := Request{View: compose.DefaultView, ReadOnly: true, Runtime: &runtime}
+			if cached {
+				_, err = ScanCached(context.Background(), db, request)
+			} else {
+				_, err = Scan(context.Background(), db, request, &bytes.Buffer{})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Dir(runtime.Paths.StateDB)); !os.IsNotExist(err) {
+				t.Fatalf("read-only native scan created state directory: %v", err)
+			}
+		})
+	}
 }

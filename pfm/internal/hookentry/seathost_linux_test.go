@@ -22,11 +22,14 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -37,6 +40,9 @@ type seatFixtureReport struct {
 	SupervisorPID                     int
 	LedgerMarker, LedgerPID, ArmCalls string
 	LedgerArmed                       bool
+	HostStart                         uint64
+	HostBirth                         int64
+	Terminal                          string
 	StdoutTTY, StderrTTY              bool
 	Devices                           [3]uint64
 }
@@ -45,6 +51,21 @@ type seatFixtureReport struct {
 func init() {
 	if os.Getenv("PFM_S3_FIXTURE") != "1" {
 		return
+	}
+	if len(os.Args) >= 4 && os.Args[1] == "internal" && os.Args[2] == "seat-host" {
+		TestSeatHostPTY(nil)
+		return
+	}
+	if len(os.Args) >= 5 && os.Args[1] == "chat" && os.Args[2] == "end" && os.Args[3] == "--native-end-worker" {
+		values, err := paths.Resolve()
+		if err != nil {
+			panic(err)
+		}
+		if err := pfmchat.EndNativeWorker(context.Background(), os.Args[4], values); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	if os.Args[0] != "claude" && os.Args[0] != pfmengine.MustLookup(pfmengine.Codex).Binary &&
 		os.Args[0] != pfmengine.MustLookup(pfmengine.OpenCode).Binary &&
@@ -115,6 +136,24 @@ func init() {
 			panic(err)
 		}
 	}
+	db := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: os.Getenv(paths.EnvStateDB)})
+	bound, found, readErr := db.Seat(context.Background(), "native-seat")
+	if os.Getenv("PFM_S3_MODE") == "launch" || strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "launch-ledger-") {
+		bound, found, readErr = db.SeatByPane(context.Background(), report.Socket, report.Pane)
+	}
+	if readErr != nil || !found {
+		panic(fmt.Sprintf("bound seat missing: %v %v", found, readErr))
+	}
+	_ = db.Close()
+	report.HostStart = bound.SeatHostStart
+	report.HostBirth = bound.SeatHostBirth
+	report.Terminal = bound.HerdrTerminalID
+	if bound.SeatHostPID != report.SupervisorPID {
+		panic(fmt.Sprintf("host PID %d expected supervisor %d", bound.SeatHostPID, report.SupervisorPID))
+	}
+	if report.HostStart == 0 || report.HostBirth == 0 || report.Terminal == "" {
+		panic(fmt.Sprintf("unstamped supervisor: %+v", bound))
+	}
 	for fd := range report.Devices {
 		var stat unix.Stat_t
 		if err := unix.Fstat(fd, &stat); err != nil {
@@ -133,7 +172,7 @@ func init() {
 	if err := atomicfile.Write(filepath.Join(root, reportFile), body, 0o600); err != nil {
 		panic(err)
 	}
-	if strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "reload-") {
+	if strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "reload-") || os.Getenv("PFM_S3_MODE") == "move-start" {
 		deadline := time.Now().Add(10 * time.Second)
 		for {
 			if _, err := os.Stat(filepath.Join(root, reportFile+"-release")); err == nil {
@@ -186,13 +225,15 @@ func TestSeatHostPTY(t *testing.T) {
 		runtime := config.Runtime{
 			Config: config.Config{Claude: config.ClaudePrefs{CostLedger: strings.HasSuffix(mode, "ledger-on")}},
 			Paths: paths.Values{
-				Home:    root,
-				StateDB: os.Getenv(paths.EnvStateDB),
-				SIDDir:  filepath.Join(root, "sid"),
-				TmuxDir: filepath.Join(root, "tmux"),
+				Home:     root,
+				StateDB:  os.Getenv(paths.EnvStateDB),
+				ProcRoot: "/proc",
+				SIDDir:   filepath.Join(root, "sid"),
+				TmuxDir:  filepath.Join(root, "tmux"),
 			},
 		}
-		if os.Getenv("PFM_S3_MODE") == "launch" || strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "launch-ledger-") {
+		if (os.Getenv("PFM_S3_MODE") == "launch" || strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "launch-ledger-")) &&
+			(len(os.Args) <= 2 || os.Args[1] != "internal") {
 			os.Exit(
 				Launch(
 					[]string{"--real", os.Getenv("PFM_S3_BINARY"), "--cwd", root, "--"},
@@ -212,12 +253,16 @@ func TestSeatHostPTY(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		os.Exit(SeatHost([]string{"native-seat"}, os.Stdout, os.Stderr, runtime))
+		id := "native-seat"
+		if len(os.Args) == 4 && os.Args[1] == "internal" {
+			id = os.Args[3]
+		}
+		os.Exit(SeatHost([]string{id}, os.Stdout, os.Stderr, runtime))
 	}
 	for _, mode := range []string{
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
-		"reload-success", "reload-retry", "reload-close", "raw-codex", "raw-opencode", "hangup-exit-one",
+		"reload-failure-locked", "reload-success", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -225,11 +270,17 @@ func TestSeatHostPTY(t *testing.T) {
 			if err := os.Symlink(os.Args[0], binary); err != nil {
 				t.Fatal(err)
 			}
-			server := newSeatHostHerdr(t)
+			server := newSeatHostHerdr(t, root, mode)
 			server.addPane("w6:p3", "native")
+			if mode == "move-start" {
+				if err := os.WriteFile(filepath.Join(root, "move-on-proof"), []byte("move"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			environment = append(
 				environment,
 				"PFM_S3_FIXTURE=1",
+				paths.EnvProcRoot+"=/proc",
 				"PFM_S3_ROOT="+root,
 				"PFM_S3_BINARY="+binary,
 				"PFM_S3_MODE="+mode,
@@ -258,6 +309,7 @@ func TestSeatHostPTY(t *testing.T) {
 					context.Background(),
 					fleetdb.Seat{
 						SeatID:      "native-seat",
+						SessionID:   "fixture-session",
 						Engine:      string(engineID),
 						Backend:     "herdr",
 						State:       "live",
@@ -311,7 +363,15 @@ func TestSeatHostPTY(t *testing.T) {
 			defer func() { _ = slave.Close() }()
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSeatHostPTY$")
+			hostBinary := filepath.Join(root, "pfm")
+			if err := os.Symlink(os.Args[0], hostBinary); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"internal", "seat-host", "native-seat"}
+			if mode == "launch" || strings.HasPrefix(mode, "launch-ledger-") {
+				args = []string{"-test.run=^TestSeatHostPTY$"}
+			}
+			command := exec.CommandContext(ctx, hostBinary, args...)
 			command.Env = environment
 			command.Stdin = slave
 			command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
@@ -326,10 +386,56 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() { done <- command.Wait() }()
+			if mode == "move-start" {
+				waitSeatFixture(t, done, func() bool {
+					current, found, err := db.Seat(context.Background(), "native-seat")
+					return err == nil && found && current.State == "live" && current.HerdrPane == "w9:p2"
+				})
+				if err := os.WriteFile(
+					filepath.Join(root, "engine-report-release"),
+					[]byte("ready"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if strings.HasPrefix(mode, "failed-") {
 				if _, err := master.Write([]byte{4}); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if mode == "reload-failure-locked" {
+				waitSeatFixture(
+					t,
+					done,
+					func() bool { _, err := os.Stat(filepath.Join(root, "engine-report")); return err == nil },
+				)
+				// Run the real reloader against a real supervisor. Its next exec fails.
+				t.Setenv(paths.EnvStateDB, values.StateDB)
+				t.Setenv(paths.EnvProcRoot, "/proc")
+				request, options := seatReloadFailure(t, root, server.path)
+				_, reloadErr := reload.RunHerdr(ctx, request, options, io.Discard)
+				// Stop the helper before reading its shared output buffer on either path.
+				cancel()
+				<-done
+				current, found, readErr := db.Seat(context.Background(), "native-seat")
+				if reloadErr == nil || !strings.Contains(reloadErr.Error(), "new engine failed") ||
+					!strings.Contains(reloadErr.Error(), "missing-next-engine") {
+					t.Fatalf(
+						"reload did not observe startup failure while holding exclusion: err=%v row=%+v output=%s",
+						reloadErr,
+						current,
+						&output,
+					)
+				}
+				if readErr != nil || !found || current.State != "failed" || !current.ReloadPending ||
+					!strings.Contains(current.LostNote, "missing-next-engine") {
+					t.Fatalf("failure publication=%+v found=%v err=%v output=%s", current, found, readErr, &output)
+				}
+				if _, err := db.ReadSeatRun(current.SeatID); err != nil {
+					t.Fatal(err)
+				}
+				return
 			}
 			if strings.HasPrefix(mode, "reload-") {
 				waitSeatFixture(
@@ -374,6 +480,21 @@ func TestSeatHostPTY(t *testing.T) {
 					if err != nil || !current.ReloadPending || current.HerdrPane != "w6:p3" {
 						t.Fatalf("failed reload lost pending/current pane: %+v err=%v", current, err)
 					}
+					if mode == "reload-move-retry" {
+						before := current
+						current.HerdrPane = "w9:p2"
+						current.HerdrWorkspace = "w9"
+						if err := os.WriteFile(
+							filepath.Join(root, "canonical-pane"),
+							[]byte(current.HerdrPane),
+							0o600,
+						); err != nil {
+							t.Fatal(err)
+						}
+						if err := db.UpdateSeat(context.Background(), before, current); err != nil {
+							t.Fatal(err)
+						}
+					}
 					if mode == "reload-close" {
 						if _, err := master.WriteString("q\n"); err != nil {
 							t.Fatal(err)
@@ -403,7 +524,11 @@ func TestSeatHostPTY(t *testing.T) {
 					if err := json.Unmarshal(body, &next); err != nil {
 						t.Fatal(err)
 					}
-					if next.Pane != "w6:p3" || next.SupervisorPID != command.Process.Pid {
+					wantPane := "w6:p3"
+					if mode == "reload-move-retry" {
+						wantPane = "w9:p2"
+					}
+					if next.Pane != wantPane || next.SupervisorPID != command.Process.Pid {
 						t.Fatalf("reload moved lifetime owner: %+v", next)
 					}
 					if err := os.WriteFile(
@@ -567,9 +692,9 @@ func TestSeatHostPTY(t *testing.T) {
 	}
 }
 
-// This supervisor fixture implements only its two producer methods. The older
-// bridge fixture has no native pane.get contract.
-func newSeatHostHerdr(t *testing.T) *fakeHerdr {
+// This supervisor fixture supplies native identity, enumeration and shell proof.
+// The older bridge fixture has no native pane.get contract.
+func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 	t.Helper()
 	server := &fakeHerdr{path: filepath.Join(testjail.ShortRoot(t), "h.sock")}
 	listener, err := net.Listen("unix", server.path)
@@ -578,6 +703,9 @@ func newSeatHostHerdr(t *testing.T) *fakeHerdr {
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	go func() {
+		proofReads := 0
+		currentPane := "w6:p3"
+		text := "❯ "
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -586,24 +714,134 @@ func newSeatHostHerdr(t *testing.T) *fakeHerdr {
 			func() {
 				defer func() { _ = conn.Close() }()
 				var req struct {
-					ID     string            `json:"id"`
-					Method string            `json:"method"`
-					Params map[string]string `json:"params"`
+					ID     string                     `json:"id"`
+					Method string                     `json:"method"`
+					Params map[string]json.RawMessage `json:"params"`
 				}
 				if json.NewDecoder(conn).Decode(&req) != nil {
 					return
 				}
+				var pane string
+				_ = json.Unmarshal(req.Params["pane_id"], &pane)
 				line, _ := json.Marshal(req)
 				server.mu.Lock()
 				server.lines = append(server.lines, string(line))
 				server.mu.Unlock()
 				result := map[string]any{"type": "ok"}
-				if req.Method == "pane.get" {
-					result = map[string]any{
-						"type": "pane_info",
-						"pane": map[string]string{"pane_id": req.Params["pane_id"]},
+				if len(roots) > 0 {
+					if raw, err := os.ReadFile(filepath.Join(roots[0], "canonical-pane")); err == nil {
+						currentPane = string(raw)
+					} else if !os.IsNotExist(err) {
+						t.Error(err)
 					}
 				}
+				if req.Method == "pane.get" {
+					result = testjail.HerdrPaneInfo(pane)
+					result["pane"].(map[string]any)["terminal_id"] = "stable-terminal"
+				}
+				if req.Method == "pane.list" {
+					proofReads++
+					if len(roots) > 0 {
+						if _, err := os.Stat(filepath.Join(roots[0], "move-on-proof")); err == nil && proofReads >= 2 {
+							currentPane = "w9:p2"
+						}
+					}
+					pane := testjail.HerdrPaneInfo(currentPane)["pane"].(map[string]any)
+					pane["terminal_id"] = "stable-terminal"
+					result = map[string]any{"type": "pane_list", "panes": []any{pane}}
+				}
+				if req.Method == "pane.process_info" {
+					shell := 0
+					proc := gather.NewProcFS("/proc")
+					pids, err := proc.PIDs()
+					if err != nil {
+						t.Error(err)
+					}
+					for _, pid := range pids {
+						argv, err := proc.Cmdline(pid)
+						if err != nil {
+							continue
+						}
+						if len(argv) != 4 || argv[1] != "internal" || argv[2] != "seat-host" {
+							continue
+						}
+						env, err := proc.Environ(pid)
+						if err != nil {
+							continue
+						}
+						if len(roots) > 0 && env["PFM_S3_ROOT"] != roots[0] {
+							continue
+						}
+						shell = pid
+						break
+					}
+					result = map[string]any{
+						"type":         "pane_process_info",
+						"process_info": map[string]any{"pane_id": pane, "shell_pid": shell},
+					}
+				}
+
+				if len(roots) > 1 && roots[1] == "reload-failure-locked" {
+					switch req.Method {
+					case "pane.process_info":
+						raw, err := os.ReadFile(filepath.Join(roots[0], "engine-report"))
+						if err == nil {
+							var report seatFixtureReport
+							if err := json.Unmarshal(raw, &report); err != nil {
+								t.Error(err)
+							}
+							result["process_info"].(map[string]any)["foreground_processes"] = []any{
+								map[string]any{
+									"pid":   report.PID,
+									"name":  "claude",
+									"argv0": "claude",
+									"argv":  []string{"claude"},
+								},
+							}
+						} else if !os.IsNotExist(err) {
+							t.Error(err)
+						}
+					case "agent.get":
+						result = map[string]any{
+							"type":  "agent_info",
+							"agent": map[string]any{"pane_id": currentPane, "agent_status": "idle"},
+						}
+					case "pane.read":
+						result = map[string]any{
+							"type": "pane_read",
+							"read": map[string]any{
+								"pane_id":      currentPane,
+								"workspace_id": "w6",
+								"text":         text,
+								"truncated":    false,
+								"format":       "ansi",
+							},
+						}
+					case "pane.send_text":
+						var value string
+						if err := json.Unmarshal(req.Params["text"], &value); err != nil {
+							t.Error(err)
+						}
+						text += value
+					case "pane.send_keys":
+						var keys []string
+						if err := json.Unmarshal(req.Params["keys"], &keys); err != nil {
+							t.Error(err)
+						}
+						for _, key := range keys {
+							if key == "Enter" {
+								if err := os.WriteFile(
+									filepath.Join(roots[0], "engine-report-release"),
+									[]byte("ready"),
+									0o600,
+								); err != nil {
+									t.Error(err)
+								}
+							}
+						}
+					}
+				}
+
 				_ = json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result})
 			}()
 		}
@@ -680,5 +918,68 @@ func TestSeatHostDoesNotCloseAnAbsentSeat(t *testing.T) {
 	)
 	if status != 0 || stderr.Len() != 0 {
 		t.Fatalf("absent seat attempted stale close: status=%d stderr=%s", status, &stderr)
+	}
+}
+
+func TestSeatHostCloseFailureKeepsOwnerAndRecipe(t *testing.T) {
+	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
+	db := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() { _ = db.Close() }()
+	seat := fleetdb.Seat{
+		SeatID:      "pending-close",
+		SessionID:   "session",
+		Backend:     "herdr",
+		State:       "live",
+		HerdrSocket: "/fixture/missing.sock",
+		HerdrPane:   "w1:p1",
+	}
+	if err := db.PutSeat(context.Background(), seat); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WriteSeatRun(seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/engine"}); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	code := closeSeat(context.Background(), db, seat, 0, &stderr, config.Runtime{Paths: values})
+	_, found, err := db.Seat(context.Background(), seat.SeatID)
+	_, recipeErr := db.ReadSeatRun(seat.SeatID)
+	if code != 1 || !found || err != nil || recipeErr != nil ||
+		!strings.Contains(stderr.String(), "prove native end") ||
+		!strings.Contains(stderr.String(), "missing.sock") {
+		t.Fatalf("failed close lost durable recovery: code=%d found=%v err=%v recipe=%v", code, found, err, recipeErr)
+	}
+}
+
+func TestFailedSeatStartDoesNotOverwriteAReplacementSupervisor(t *testing.T) {
+	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")}
+	db := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() { _ = db.Close() }()
+	old := fleetdb.Seat{
+		SeatID:        "rebound",
+		Backend:       "herdr",
+		State:         "live",
+		SeatHostPID:   100,
+		SeatHostStart: 1,
+		SeatHostBirth: 1,
+	}
+	next := old
+	next.SeatHostPID = 101
+	next.SeatHostStart = 2
+	next.SeatHostBirth = 2
+	if err := db.PutSeat(context.Background(), next); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	failedSeatStart(context.Background(), db, old, fmt.Errorf("old startup failed"), &stderr)
+	current, found, err := db.Seat(context.Background(), old.SeatID)
+	if err != nil || !found || current != next || !strings.Contains(stderr.String(), "supervisor binding changed") {
+		t.Fatalf(
+			"replacement changed: before=%+v after=%+v found=%v err=%v stderr=%s",
+			next,
+			current,
+			found,
+			err,
+			&stderr,
+		)
 	}
 }

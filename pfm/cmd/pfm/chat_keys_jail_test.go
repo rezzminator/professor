@@ -9,11 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestChatKeysRefusesATokenTmuxWouldType guards the silent failure the whole
@@ -143,9 +146,11 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "h.sock")
 	keys := make(chan string, 32)
 	serveNativeAdapter(t, socket, map[string]string{
+		"pane.get":  `{"type":"pane_info","pane":{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3"}}`,
+		"pane.list": `{"type":"pane_list","panes":[{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3"}]}`,
 		"agent.get": `{"type":"agent_info","agent":{"pane_id":"p3","terminal_id":"w6:p3","agent":"claude","agent_status":"idle"}}`,
 		"pane.process_info": fmt.Sprintf(
-			`{"process_info":{"pane_id":"w6:p3","foreground_processes":[{"pid":%d,"argv0":"claude"}]}}`,
+			`{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","shell_pid":900001,"foreground_processes":[{"pid":%d,"argv0":"claude"}]}}`,
 			os.Getpid(),
 		),
 		"pane.read":      `{"type":"pane_read","read":{"pane_id":"p3","workspace_id":"w6","text":"native screen\n🔖 🥇 Captured Label │ project","truncated":false}}`,
@@ -158,20 +163,54 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if err := state.PutSeat(
-		context.Background(),
-		fleetdb.Seat{
-			SeatID:         "native-adapter",
-			SessionID:      "native-session",
-			Engine:         "cc",
-			Backend:        "herdr",
-			State:          "live",
-			Name:           "NATIVE",
-			HerdrSocket:    socket,
-			HerdrPane:      "w6:p3",
-			HerdrWorkspace: "w6",
-		},
-	); err != nil {
+	seat := fleetdb.Seat{
+		SeatID:          "native-adapter",
+		SessionID:       "native-session",
+		Engine:          "cc",
+		Backend:         "herdr",
+		State:           "live",
+		Name:            "NATIVE",
+		HerdrSocket:     socket,
+		HerdrPane:       "w6:p3",
+		HerdrWorkspace:  "w6",
+		HerdrTerminalID: "fixture-w6:p3",
+	}
+	values.ProcRoot = t.TempDir()
+	t.Setenv(paths.EnvProcRoot, values.ProcRoot)
+	if err := os.WriteFile(filepath.Join(values.ProcRoot, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []struct {
+		pid, parent int
+		argv        string
+	}{
+		{900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00native-adapter\x00"},
+		{os.Getpid(), 900001, "pfm-test\x00"},
+	} {
+		dir := filepath.Join(values.ProcRoot, strconv.Itoa(entry.pid))
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fields := make([]string, 24)
+		for i := range fields {
+			fields[i] = "0"
+		}
+		fields[0], fields[1], fields[19] = "S", strconv.Itoa(entry.parent), "100"
+		if err := os.WriteFile(
+			filepath.Join(dir, "stat"),
+			[]byte(fmt.Sprintf("%d (pfm) %s", entry.pid, strings.Join(fields, " "))),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(entry.argv), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := gather.StampHerdrHost(gather.NewProcFS(values.ProcRoot), &seat, 900001); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.PutSeat(context.Background(), seat); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("TMUX", "")

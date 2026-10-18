@@ -437,12 +437,24 @@ func TestChatNewNativeBackendBirth(t *testing.T) {
 				var request struct {
 					ID     string `json:"id"`
 					Method string `json:"method"`
+					Params struct {
+						Pane string `json:"pane_id"`
+					} `json:"params"`
 				}
 				if err := json.NewDecoder(conn).Decode(&request); err != nil {
 					return
 				}
 				requests <- request.Method
-				result := `{"pane":{"pane_id":"w6:p3"}}`
+				pane := request.Params.Pane
+				if pane == "" {
+					pane = "w6:p3"
+				}
+				body, err := json.Marshal(testjail.HerdrPaneInfo(pane))
+				if err != nil {
+					t.Errorf("encode native pane fixture: %v", err)
+					return
+				}
+				result := string(body)
 				if request.Method == "ping" {
 					result = `{"type":"pong","version":"0.9.5","protocol":22}`
 				}
@@ -520,11 +532,23 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 						var req struct {
 							ID     string `json:"id"`
 							Method string `json:"method"`
+							Params struct {
+								Pane string `json:"pane_id"`
+							} `json:"params"`
 						}
 						if json.NewDecoder(conn).Decode(&req) != nil {
 							return
 						}
-						result := `{"pane":{"pane_id":"w6:p3"}}`
+						pane := req.Params.Pane
+						if pane == "" {
+							pane = "w6:p3"
+						}
+						body, err := json.Marshal(testjail.HerdrPaneInfo(pane))
+						if err != nil {
+							t.Errorf("encode native pane fixture: %v", err)
+							return
+						}
+						result := string(body)
 						if req.Method == "ping" {
 							result = `{"type":"pong","version":"0.9.5","protocol":22}`
 						}

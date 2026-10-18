@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,13 +31,24 @@ func TestOpenRestoredIDRejectsMissingSession(t *testing.T) {
 }
 
 func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
-	for _, history := range []string{"unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing"} {
+	for _, history := range []string{"never-bound absent", "unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing", "unknown legacy", "same address legacy", "same address never-bound", "same address live legacy", "unlearned restore", "unrelated caller"} {
 		t.Run(history, func(t *testing.T) {
 			testjail.Fleet(t)
 			notices := make(chan string, 4)
 			labels := make(chan string, 4)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				switch req.Method {
+				case "pane.list":
+					if strings.HasPrefix(history, "same address") || history == "unlearned restore" {
+						return map[string]any{
+							"type":  "pane_list",
+							"panes": []any{testjail.HerdrPaneInfo("w9:p2")["pane"]},
+						}, ""
+					}
+					if history == "never-bound absent" {
+						return map[string]any{"type": "pane_list", "panes": []any{}}, ""
+					}
+					return nil, "permission_denied"
 				case "ping":
 					protocol := 22
 
@@ -50,20 +62,25 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 					if pane == "w6:p3" && history != "unsafe live owner" && history != "unsafe old probe" {
 						return nil, "pane_not_found"
 					}
-					return map[string]any{"pane": map[string]any{"pane_id": pane}}, ""
+					return testjail.HerdrPaneInfo(pane), ""
 				case "pane.process_info":
-					if history == "unsafe old probe" {
+					var pane string
+					_ = json.Unmarshal(req.Params["pane_id"], &pane)
+					if pane == "w6:p3" && history == "unsafe old probe" {
 						return nil, "permission_denied"
 					}
 					return map[string]any{
-						"type": "pane_process_info",
-						"process_info": map[string]any{
-							"pane_id": "w6:p3",
-							"foreground_processes": []any{
-								map[string]any{"pid": 42, "name": "claude", "argv0": "claude"},
-							},
-						},
+						"type":         "pane_process_info",
+						"process_info": map[string]any{"pane_id": pane, "shell_pid": 700001},
 					}, ""
+
+				case "tab.get":
+					return map[string]any{
+						"type": "tab_info",
+						"tab":  map[string]any{"tab_id": "w9:t1", "label": "INTEGRATION", "pane_count": 1},
+					}, ""
+				case "tab.rename":
+					return map[string]any{"type": "ok"}, ""
 				case "pane.rename":
 					var label string
 					_ = json.Unmarshal(req.Params["label"], &label)
@@ -90,6 +107,24 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				}
 			})
 			runtime, db, seat := nativeChatSeat(t, socket, "lost")
+			if history != "never-bound absent" && history != "unknown legacy" &&
+				!strings.HasPrefix(history, "same address") &&
+				history != "unlearned restore" {
+				seat = nativeChatHost(t, db, seat, history == "unsafe live owner" || history == "unsafe old probe")
+			}
+			if strings.HasPrefix(history, "same address") || history == "unlearned restore" {
+				if history == "same address never-bound" {
+					seat.HerdrTerminalID = "pre-restart-terminal"
+				}
+				if history == "unlearned restore" {
+					seat.SessionID = ""
+				}
+				seat.HerdrPane = "w9:p2"
+				seat.HerdrWorkspace = "w9"
+				if err := db.PutSeat(context.Background(), seat); err != nil {
+					t.Fatal(err)
+				}
+			}
 			run := fleetdb.SeatRun{
 				Binary:     "/fixture/claude",
 				CWD:        runtime.Paths.Home,
@@ -139,14 +174,38 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 			t.Setenv("HERDR_SOCKET_PATH", socket)
 			t.Setenv("HERDR_PANE_ID", "w9:p2")
 			t.Setenv("TMUX", "")
+			nativeChatRestoredCaller(t, history != "unrelated caller")
+			if history == "same address live legacy" {
+				dir := filepath.Join(runtime.Paths.ProcRoot, "700002")
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				for name, body := range map[string]string{"cmdline": "/fixture/pfm\x00internal\x00launch\x00--engine\x00cc\x00", "environ": "HERDR_SOCKET_PATH=" + socket + "\x00HERDR_PANE_ID=w9:p2\x00"} {
+					if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
 			var stdout, stderr bytes.Buffer
-			code := OpenRestoredID(context.Background(), seat.SessionID, &stdout, &stderr, &runtime)
-			if history == "unsafe live owner" || history == "unsafe old probe" {
+			target := seat.SessionID
+			if target == "" {
+				target = seat.SeatID
+			}
+			code := OpenRestoredID(context.Background(), target, &stdout, &stderr, &runtime)
+			if history == "unsafe live owner" || history == "unsafe old probe" || history == "unknown legacy" ||
+				history == "same address live legacy" ||
+				history == "unrelated caller" {
 				current, _, err := db.Seat(context.Background(), seat.SeatID)
 				recipe, recipeErr := db.ReadSeatRun(seat.SeatID)
-				want := "still owns a live engine"
+				want := "still owns a live supervisor"
+				if history == "unrelated caller" {
+					want = "outside restored caller pane"
+				}
+				if history == "unknown legacy" {
+					want = "saved supervisor birth"
+				}
 				if history == "unsafe old probe" {
-					want = "permission_denied"
+					want = "still owns a live supervisor"
 				}
 				if code != 1 || !strings.Contains(stderr.String(), want) || err != nil || recipeErr != nil ||
 					current.HerdrPane != seat.HerdrPane ||
@@ -193,6 +252,7 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 			current, found, err := db.Seat(context.Background(), seat.SeatID)
 			if err != nil || !found || current.SessionID != seat.SessionID || current.HerdrPane != "w9:p2" ||
 				current.HerdrWorkspace != "w9" ||
+				current.HerdrTerminalID != "fixture-w9:p2" || current.SeatHostPID != 0 || current.SeatHostStart != 0 || current.SeatHostBirth != 0 ||
 				current.Name != seat.Name {
 				t.Fatalf("rebound seat=%+v found=%t err=%v", current, found, err)
 			}
@@ -205,7 +265,11 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				!slices.Contains(recipe.Env, "HERDR_PANE_ID=w9:p2") {
 				t.Fatalf("lost recipe preferences: %+v", recipe)
 			}
-			if !slices.Equal(
+			if history == "unlearned restore" {
+				if !slices.Equal(recipe.Args, run.Args) {
+					t.Fatalf("unlearned seat did not preserve birth recipe: %q", recipe.Args)
+				}
+			} else if !slices.Equal(
 				recipe.Args,
 				[]string{
 					"--model",
@@ -342,7 +406,19 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 		case "ping":
 			return map[string]any{"type": "pong", "protocol": 22, "version": "fixture"}, ""
 		case "pane.get":
-			return map[string]any{"pane": map[string]any{"pane_id": "w9:p2"}}, ""
+			return testjail.HerdrPaneInfo("w9:p2"), ""
+		case "pane.process_info":
+			return map[string]any{
+				"type":         "pane_process_info",
+				"process_info": map[string]any{"pane_id": "w9:p2", "shell_pid": 700001},
+			}, ""
+		case "tab.get":
+			return map[string]any{
+				"type": "tab_info",
+				"tab":  map[string]any{"tab_id": "w9:t1", "label": "INTEGRATION", "pane_count": 1},
+			}, ""
+		case "tab.rename":
+			return map[string]any{"type": "ok"}, ""
 		case "pane.rename":
 			var label string
 			_ = json.Unmarshal(req.Params["label"], &label)
@@ -359,6 +435,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", socket)
 	t.Setenv("HERDR_PANE_ID", "w9:p2")
 	t.Setenv("TMUX", "")
+	nativeChatRestoredCaller(t, true)
 	runtime, err := config.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
@@ -405,7 +482,19 @@ func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
 		case "ping":
 			return map[string]any{"type": "pong", "protocol": 22, "version": "fixture"}, ""
 		case "pane.get":
-			return map[string]any{"pane": map[string]any{"pane_id": "w9:p2"}}, ""
+			return testjail.HerdrPaneInfo("w9:p2"), ""
+		case "pane.process_info":
+			return map[string]any{
+				"type":         "pane_process_info",
+				"process_info": map[string]any{"pane_id": "w9:p2", "shell_pid": 700001},
+			}, ""
+		case "tab.get":
+			return map[string]any{
+				"type": "tab_info",
+				"tab":  map[string]any{"tab_id": "w9:t1", "label": "INTEGRATION", "pane_count": 1},
+			}, ""
+		case "tab.rename":
+			return map[string]any{"type": "ok"}, ""
 		case "pane.rename":
 			var label string
 			_ = json.Unmarshal(req.Params["label"], &label)
@@ -424,6 +513,7 @@ func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", socket)
 	t.Setenv("HERDR_PANE_ID", "w9:p2")
 	t.Setenv("TMUX", "")
+	nativeChatRestoredCaller(t, true)
 	bin := t.TempDir()
 	if err := testjail.WriteExecutable(filepath.Join(bin, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -485,5 +575,32 @@ func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("resume argv=%q", run.Args)
+	}
+}
+
+func nativeChatRestoredCaller(t *testing.T, inside bool) {
+	t.Helper()
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := 700001
+	if !inside {
+		parent = 700002
+	}
+	for pid, ppid := range map[int]int{os.Getpid(): parent, parent: 1} {
+		dir := filepath.Join(values.ProcRoot, fmt.Sprint(pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fields := strings.Fields("S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 100")
+		fields[1] = fmt.Sprint(ppid)
+		if err := os.WriteFile(
+			filepath.Join(dir, "stat"),
+			[]byte(fmt.Sprintf("%d (pfm) %s", pid, strings.Join(fields, " "))),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

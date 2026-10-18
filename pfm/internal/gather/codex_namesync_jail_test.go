@@ -1,4 +1,4 @@
-package gather
+package gather_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -94,15 +95,15 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	windowID := strings.TrimSpace(string(windowIDOutput))
-	renames := computeWindowRenames(
-		[]ProbePane{{
+	renames := gather.ComputeWindowRenames(
+		[]gather.ProbePane{{
 			Socket:      socket,
 			SessionName: socket,
 			WindowID:    windowID,
 			WindowName:  "before",
 			PaneID:      "%0",
 		}},
-		[]LiveCodex{{Socket: socket, PaneID: "%0", ThreadID: threadID}},
+		[]gather.LiveCodex{{Socket: socket, PaneID: "%0", ThreadID: threadID}},
 		nil,
 		nil,
 		func(id string) string { return names[id] },
@@ -114,7 +115,7 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	if renames[0].ChatName != "INDEX_TWIN" {
 		t.Fatalf("rename ChatName = %q, want the thread name INDEX_TWIN", renames[0].ChatName)
 	}
-	if err := (TmuxProbe{TmuxTmpDir: root}).RenameWindow(
+	if err := (gather.TmuxProbe{TmuxTmpDir: root}).RenameWindow(
 		context.Background(), renames[0],
 	); err != nil {
 		t.Fatal(err)

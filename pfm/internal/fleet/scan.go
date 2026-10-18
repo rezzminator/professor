@@ -120,7 +120,7 @@ func Scan(
 			return Result{}, err
 		}
 	}
-	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, live)
+	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, live, request.ReadOnly)
 	if err != nil {
 		return Result{}, err
 	}
@@ -153,7 +153,15 @@ func ScanCached(
 	if err != nil {
 		return Result{}, err
 	}
-	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, gather.Snapshot{})
+	output, failures, err := composeNativeFleet(
+		ctx,
+		database,
+		env,
+		request.View,
+		data,
+		gather.Snapshot{},
+		request.ReadOnly,
+	)
 	if err != nil {
 		return Result{}, err
 	}

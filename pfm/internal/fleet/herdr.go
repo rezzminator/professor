@@ -16,12 +16,12 @@ import (
 // NativeSeats reads the same durable native seats for every fleet surface.
 // Non-live rows retain their failure without probing an address they no longer
 // own; live probe failures remain rows as well as scan errors.
-func NativeSeats(ctx context.Context, values paths.Values) ([]gather.HerdrSeat, []string, error) {
+func NativeSeats(ctx context.Context, values paths.Values, readOnly bool) ([]gather.HerdrSeat, []string, error) {
 	durable, err := fleetdb.ReadSeats(ctx, values)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read durable seats: %w", err)
 	}
-	seats := gather.ProbeHerdrSeats(ctx, durable)
+	seats := gather.ProbeHerdrSeats(ctx, values, durable, readOnly)
 	for index := range durable {
 		seat := &durable[index]
 		if seat.Backend == "herdr" && seat.State != "live" {
@@ -99,8 +99,9 @@ func composeNativeFleet(
 	view compose.View,
 	data Data,
 	live gather.Snapshot,
+	readOnly bool,
 ) (compose.Output, []string, error) {
-	native, failures, err := NativeSeats(ctx, environment.Paths)
+	native, failures, err := NativeSeats(ctx, environment.Paths, readOnly)
 	if err != nil {
 		failures = append(failures, err.Error())
 	}

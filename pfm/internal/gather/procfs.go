@@ -352,3 +352,14 @@ func procExecutablePath(buffer []byte) (string, error) {
 	}
 	return filepath.Clean(path), nil
 }
+
+// processReadError distinguishes a vanished process using an independent probe.
+func processReadError(pid int, readErr, probeErr error) error {
+	if pid > 0 && errors.Is(probeErr, syscall.ESRCH) {
+		return fmt.Errorf("process %d disappeared: %w", pid, fs.ErrNotExist)
+	}
+	if probeErr != nil && !errors.Is(probeErr, syscall.EPERM) {
+		return errors.Join(readErr, fmt.Errorf("probe process %d existence: %w", pid, probeErr))
+	}
+	return readErr
+}

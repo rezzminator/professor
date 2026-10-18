@@ -53,8 +53,17 @@ func TestResumeArgvObeysHerdrsRules(t *testing.T) {
 // reporter finds its pane through TMUX_PANE.
 func TestStripPaneDropsTheHerdrNamesAndStripReporterAlsoTheTmuxPane(t *testing.T) {
 	environ := []string{
-		"KEEP=1", "HERDR_ENV=1", "HERDR_PANE_ID=w1:p1", "TMUX=/tmp/t,1,0", "HERDR_SOCKET_PATH=/tmp/h.sock",
-		"TMUX_PANE=%3", "HERDR_BIN_PATH=/usr/local/bin/herdr", "HERDR_ENV_EXTRA=kept", "KEEP2=2",
+		"KEEP=1",
+		"HERDR_ENV=1",
+		"HERDR_PANE_ID=w1:p1",
+		"TMUX=/tmp/t,1,0",
+		"HERDR_SOCKET_PATH=/tmp/h.sock",
+		"TMUX_PANE=%3",
+		"HERDR_BIN_PATH=/usr/local/bin/herdr",
+		"HERDR_ENV_EXTRA=kept",
+		"KEEP2=2",
+		"HERDR_WORKSPACE_ID=w1",
+		"HERDR_TAB_ID=w1:t1",
 	}
 	if got, want := StripPane(environ), []string{
 		"KEEP=1", "TMUX=/tmp/t,1,0", "TMUX_PANE=%3", "HERDR_ENV_EXTRA=kept", "KEEP2=2",

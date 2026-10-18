@@ -12,11 +12,16 @@ import (
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
-const herdrPaneKey = "pane_id"
+const (
+	herdrPaneKey = "pane_id"
+	herdrBackend = "herdr"
+)
 
 // herdrTarget resolves ownership before the index fallback: a new native engine
 // can be live before it has flushed any transcript. Environment is not routing.
@@ -43,7 +48,54 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 		target := Target{SocketPath: filepath.Join(manager.paths.tmuxDir, request.SocketName), PaneID: request.PaneID}
 		return Target{}, false, warnTmuxSeatFallback(manager.paths.tmuxDir, target, manager.log, lookupErr)
 	}
-	if !found || seat.Backend != "herdr" || seat.State != "live" {
+	if !found && request.ID != "" && request.SocketName != "" {
+		candidate, ok, lookupErr := manager.database.Shared().SeatBySession(ctx, request.ID)
+		if lookupErr != nil {
+			return Target{}, false, fmt.Errorf("resolve moved native kill owner: %w", lookupErr)
+		}
+		if ok && candidate.Backend == herdrBackend && candidate.HerdrSocket == request.SocketName {
+			values, err := paths.Resolve()
+			if err != nil {
+				return Target{}, false, fmt.Errorf("resolve moved native kill paths: %w", err)
+			}
+			proved, owned, err := gather.ResolveHerdrSeat(ctx, values, candidate)
+			if err != nil {
+				return Target{}, false, fmt.Errorf("prove moved native kill owner: %w", err)
+			}
+			if !owned {
+				return Target{}, false, fmt.Errorf("native kill explicit pane has no live proved owner")
+			}
+			if proved.HerdrPane != request.PaneID {
+				body, err := herdr.SeatRequest(
+					ctx,
+					proved.HerdrSocket,
+					"pane.get",
+					map[string]string{herdrPaneKey: request.PaneID},
+				)
+				if err != nil {
+					return Target{}, false, fmt.Errorf("resolve native kill caller alias: %w", err)
+				}
+				var alias struct {
+					Type string `json:"type"`
+					Pane struct {
+						ID        string `json:"pane_id"`
+						Terminal  string `json:"terminal_id"`
+						Workspace string `json:"workspace_id"`
+					} `json:"pane"`
+				}
+				if err := json.Unmarshal(body, &alias); err != nil {
+					return Target{}, false, fmt.Errorf("decode native kill caller alias: %w", err)
+				}
+				if alias.Type != "pane_info" || alias.Pane.ID != proved.HerdrPane ||
+					alias.Pane.Terminal != proved.HerdrTerminalID ||
+					alias.Pane.Workspace != proved.HerdrWorkspace {
+					return Target{}, false, fmt.Errorf("native kill explicit pane is not the proved owner")
+				}
+			}
+			seat, found = proved, true
+		}
+	}
+	if !found || seat.Backend != herdrBackend || seat.State != "live" {
 		return Target{}, false, nil
 	}
 	if request.ID != "" && request.ID != seat.SessionID && request.ID != seat.SeatID {
@@ -66,6 +118,11 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 			request.Engine,
 		)
 	}
+	proved, _, err := (herdrKiller{database: manager.database, seat: seat}).prove(ctx)
+	if err != nil {
+		return Target{}, false, fmt.Errorf("resolve native kill ownership: %w", err)
+	}
+	seat = proved
 	id := seat.SessionID
 	if id == "" {
 		id = seat.SeatID
@@ -100,6 +157,15 @@ func targetClient(
 			return nil, false, fallbackErr
 		}
 		return fallback, false, nil
+	}
+	if !found && target.ID != "" {
+		candidate, ok, lookupErr := database.Shared().SeatBySession(ctx, target.ID)
+		if lookupErr != nil {
+			return nil, false, fmt.Errorf("resolve moved kill seat: %w", lookupErr)
+		}
+		if ok && candidate.Backend == herdrBackend && candidate.HerdrSocket == target.SocketPath {
+			seat, found = candidate, true
+		}
 	}
 	if found {
 		if (target.ID != "" && target.ID != seat.SessionID && target.ID != seat.SeatID) ||
@@ -159,12 +225,67 @@ type herdrKiller struct {
 	seat     fleetdb.Seat
 }
 
-func (client herdrKiller) PaneExists(ctx context.Context, socket, pane string) (bool, error) {
+// prove re-reads by stable seat identity; stale wire addresses never confer ownership.
+func (client herdrKiller) prove(ctx context.Context) (fleetdb.Seat, bool, error) {
+	owner, found, err := client.database.Shared().Seat(ctx, client.seat.SeatID)
+	if err != nil {
+		return owner, false, fmt.Errorf("read native kill owner: %w", err)
+	}
+	if !found {
+		values, err := paths.Resolve()
+		if err != nil {
+			return owner, false, fmt.Errorf("native kill proof paths: %w", err)
+		}
+		dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), client.seat)
+		if err != nil {
+			return owner, false, fmt.Errorf("prove retired native kill host: %w", err)
+		}
+		if dead {
+			return client.seat, false, nil
+		}
+		return owner, false, fmt.Errorf("native kill owner disappeared with live supervisor")
+	}
+	if owner.Backend != herdrBackend || owner.HerdrSocket != client.seat.HerdrSocket ||
+		owner.SessionID != client.seat.SessionID ||
+		owner.Engine != client.seat.Engine ||
+		client.seat.HerdrTerminalID != "" && owner.HerdrTerminalID != client.seat.HerdrTerminalID ||
+		client.seat.SeatHostPID > 0 &&
+			(owner.SeatHostPID != client.seat.SeatHostPID || owner.SeatHostStart != client.seat.SeatHostStart || client.seat.SeatHostBirth > 0 && owner.SeatHostBirth != client.seat.SeatHostBirth) {
+		return owner, false, fmt.Errorf("native kill durable ownership changed")
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		return owner, false, fmt.Errorf("native kill proof paths: %w", err)
+	}
+	return gather.ResolveHerdrSeat(ctx, values, owner)
+}
+
+func (client herdrKiller) PaneExists(ctx context.Context, _, _ string) (bool, error) {
+	owner, owned, err := client.prove(ctx)
+	if err != nil {
+		return false, fmt.Errorf("prove native kill target: %w", err)
+	}
+	if !owned {
+		// An acknowledged close retires the durable row before confirmation.
+		// A dead supervisor with a retained row is not evidence of pane death.
+		_, retained, readErr := client.database.Shared().Seat(ctx, client.seat.SeatID)
+		if readErr != nil {
+			return false, fmt.Errorf("read native kill retirement: %w", readErr)
+		}
+		if !retained {
+			return false, nil
+		}
+		return false, fmt.Errorf(
+			"native seat %s supervisor is dead; pane disappearance unproved, seat retained",
+			client.seat.SeatID,
+		)
+	}
+	socket, pane := owner.HerdrSocket, owner.HerdrPane
 	result, err := herdr.SeatRequest(ctx, socket, "pane.get", map[string]string{herdrPaneKey: pane})
 	if err != nil {
 		var refusal *herdr.Refusal
 		if errors.As(err, &refusal) && refusal.Code == "pane_not_found" {
-			return false, nil
+			return false, fmt.Errorf("native kill pane disappeared while its supervisor remains live: %w", err)
 		}
 		return false, fmt.Errorf("get Herdr pane %s: %w", pane, err)
 	}
@@ -198,7 +319,7 @@ func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bo
 		Info *struct {
 			Pane      string `json:"pane_id"`
 			Workspace string `json:"workspace_id"`
-			Processes *[]struct {
+			Processes []struct {
 				PID   int    `json:"pid"`
 				Name  string `json:"name"`
 				Argv0 string `json:"argv0"`
@@ -208,11 +329,14 @@ func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bo
 	if err := json.Unmarshal(result, &response); err != nil {
 		return false, fmt.Errorf("decode Herdr processes in %s: %w", pane, err)
 	}
-	if response.Type != "pane_process_info" || response.Info == nil || response.Info.Processes == nil ||
+	if response.Type != "pane_process_info" || response.Info == nil ||
 		!herdrPaneMatches(pane, response.Info.Pane, response.Info.Workspace) {
 		return false, fmt.Errorf("read Herdr processes in %s: malformed process_info result", pane)
 	}
-	for _, process := range *response.Info.Processes {
+	if len(response.Info.Processes) == 0 {
+		return false, fmt.Errorf("herdr foreground evidence unavailable in %s; engine exit is unproved", pane)
+	}
+	for _, process := range response.Info.Processes {
 		if process.PID <= 0 || (process.Name == "" && process.Argv0 == "") {
 			return false, fmt.Errorf("read Herdr processes in %s: process has no valid pid or identity", pane)
 		}
@@ -222,7 +346,10 @@ func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bo
 			}
 		}
 	}
-	return false, nil
+	return false, fmt.Errorf(
+		"herdr foreground evidence unavailable in %s; live supervisor engine exit is unproved",
+		pane,
+	)
 }
 
 func herdrPaneMatches(target, pane, workspace string) bool {
@@ -233,7 +360,15 @@ func (client herdrKiller) Capture(ctx context.Context, socket, pane string) (str
 	return client.captureFormat(ctx, socket, pane, "text")
 }
 
-func (client herdrKiller) captureFormat(ctx context.Context, socket, pane, format string) (string, error) {
+func (client herdrKiller) captureFormat(ctx context.Context, _, _, format string) (string, error) {
+	owner, owned, err := client.prove(ctx)
+	if err != nil {
+		return "", fmt.Errorf("prove native capture target: %w", err)
+	}
+	if !owned {
+		return "", fmt.Errorf("native capture supervisor is dead")
+	}
+	socket, pane := owner.HerdrSocket, owner.HerdrPane
 	result, err := herdr.SeatRequest(
 		ctx,
 		socket,
@@ -281,14 +416,32 @@ func (client herdrKiller) CaptureStyled(ctx context.Context, socket, pane string
 	return frame, nil
 }
 
-func (client herdrKiller) ack(ctx context.Context, socket, pane, method string, params any) error {
-	owner, found, err := client.database.Shared().SeatByPane(ctx, socket, pane)
+func (client herdrKiller) ack(ctx context.Context, _, _, method string, params any) error {
+	owner, owned, err := client.prove(ctx)
 	if err != nil {
 		return fmt.Errorf("verify owner before Herdr %s: %w", method, err)
 	}
-	if !found || owner.SeatID != client.seat.SeatID || owner.SessionID != client.seat.SessionID ||
-		owner.Engine != client.seat.Engine {
-		return fmt.Errorf("herdr %s pane %s: durable ownership changed", method, pane)
+	if !owned {
+		return fmt.Errorf("herdr %s: saved supervisor is dead", method)
+	}
+	socket, pane := owner.HerdrSocket, owner.HerdrPane
+	if method != "pane.close" {
+		evidence, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{herdrPaneKey: pane})
+		if err != nil {
+			return fmt.Errorf("verify foreground before Herdr %s: %w", method, err)
+		}
+		if _, err := client.enginePresent(evidence, pane); err != nil {
+			return fmt.Errorf("verify foreground before Herdr %s: %w", method, err)
+		}
+	}
+
+	switch values := params.(type) {
+	case map[string]string:
+		values[herdrPaneKey] = pane
+	case map[string]any:
+		values[herdrPaneKey] = pane
+	default:
+		return fmt.Errorf("herdr %s: unsupported mutation params", method)
 	}
 	result, err := herdr.SeatRequest(ctx, socket, method, params)
 	if err != nil {
@@ -324,6 +477,15 @@ func (client herdrKiller) SendKey(ctx context.Context, socket, pane, key string)
 }
 
 func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) error {
+	// A retry prompt has a live supervisor but no foreground engine.
+	_, owned, err := client.prove(ctx)
+	if err != nil {
+		return fmt.Errorf("refuse Herdr close without supervisor proof: %w", err)
+	}
+	if !owned {
+		return fmt.Errorf("native seat %s supervisor is dead; pane not closed, seat retained", client.seat.SeatID)
+	}
+
 	if err := client.ack(ctx, socket, pane, "pane.close", map[string]string{herdrPaneKey: pane}); err != nil {
 		return err
 	}

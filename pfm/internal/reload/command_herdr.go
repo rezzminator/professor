@@ -21,11 +21,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const nativeReloadFailed = "failed"
+const (
+	nativeReloadFailed = "failed"
+	herdrPaneKey       = "pane_id"
+)
 
 type nativeReload struct {
 	request Request
@@ -33,6 +37,7 @@ type nativeReload struct {
 	target  pfmcall.Target
 	client  pfmcall.Engine
 	db      *fleetdb.Store
+	owner   fleetdb.Seat
 }
 
 // RunHerdr reboots a native seat without replacing its Herdr pane. Seat-host
@@ -60,11 +65,6 @@ func RunHerdr(
 	if options.SIDDir == "" {
 		options.SIDDir = values.SIDDir
 	}
-	lock, err := lockNativeReload(ctx, request, options)
-	if err != nil {
-		return Result{}, err
-	}
-	defer func() { returnErr = errors.Join(returnErr, lock.Close()) }()
 	db := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
 	n := nativeReload{
@@ -82,6 +82,24 @@ func RunHerdr(
 	if err != nil {
 		return Result{}, err
 	}
+	conversation := fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID)
+	unlock, err := fleetdb.LockSeat(ctx, values, conversation)
+	if err != nil {
+		return Result{}, fmt.Errorf("lock native reload conversation: %w", err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	seat, err = n.seat(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	request.Pane = seat.HerdrPane
+	n.request.Pane = seat.HerdrPane
+	n.target.Pane = seat.HerdrPane
+	lock, err := lockNativeReload(ctx, request, options)
+	if err != nil {
+		return Result{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, lock.Close()) }()
 	old, err := db.ReadSeatRun(seat.SeatID)
 	if err != nil {
 		return Result{}, err
@@ -132,13 +150,23 @@ func RunHerdr(
 	if err != nil {
 		return Result{}, fmt.Errorf("recheck native reload seat: %w", err)
 	}
-	if !found || current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane ||
+	if !found || current.HerdrSocket != seat.HerdrSocket || current.HerdrTerminalID != seat.HerdrTerminalID ||
+		current.SeatHostPID != seat.SeatHostPID || current.SeatHostStart != seat.SeatHostStart || current.SeatHostBirth != seat.SeatHostBirth ||
 		current.Engine != seat.Engine ||
 		current.State != seat.State ||
 		current.ReloadPending != seat.ReloadPending ||
 		current.SessionID != seat.SessionID {
 		return Result{}, errors.New("native reload seat binding changed before publication")
 	}
+	current, owned, err := gather.ResolveHerdrSeat(ctx, values, current)
+	if err != nil {
+		return Result{}, fmt.Errorf("reprove native reload before publication: %w", err)
+	}
+	if !owned {
+		return Result{}, errors.New("native reload supervisor is dead")
+	}
+	n.target.Pane = current.HerdrPane
+	n.request.Pane = current.HerdrPane
 	seat = current
 	if err := db.WriteSeatRun(seat.SeatID, run); err != nil {
 		return Result{}, fmt.Errorf("publish native reload recipe: %w", err)
@@ -163,12 +191,15 @@ func RunHerdr(
 		}
 	}()
 	if !retry {
-		if err := n.client.SendLiteral(ctx, n.target, "/exit"); err != nil {
+		if err := n.sendLiteral(ctx, "/exit"); err != nil {
 			return Result{}, err
 		}
 		if err := n.renderExit(ctx); err != nil {
 			return Result{}, err
 		}
+	}
+	if err := n.refreshTarget(ctx); err != nil {
+		return Result{}, err
 	}
 	submitted = true
 	if err := n.client.SendKey(ctx, n.target, "Enter"); err != nil {
@@ -255,30 +286,6 @@ func nativeReloadLockOwner(file *os.File, directory bool) error {
 		return errors.New("native reload mutex is not a regular file")
 	}
 	return nil
-}
-
-func (n *nativeReload) seat(ctx context.Context) (fleetdb.Seat, error) {
-	seat, found, err := n.db.SeatByPane(ctx, n.request.SocketPath, n.request.Pane)
-	if err != nil {
-		return seat, fmt.Errorf("resolve native reload seat: %w", err)
-	}
-	if !found && n.request.SessionID != "" {
-		seat, found, err = n.db.SeatBySession(ctx, n.request.SessionID)
-	}
-	if err != nil {
-		return seat, fmt.Errorf("resolve native reload session: %w", err)
-	}
-	if !found || seat.Backend != "herdr" || seat.HerdrSocket != n.request.SocketPath ||
-		seat.HerdrPane != n.request.Pane {
-		return seat, errors.New("native reload seat does not match the explicit socket and pane")
-	}
-	if seat.Engine != string(n.request.Engine) {
-		return seat, fmt.Errorf("native reload seat engine %q differs from requested %q", seat.Engine, n.request.Engine)
-	}
-	if seat.State != "live" && seat.State != nativeReloadFailed {
-		return seat, fmt.Errorf("native reload seat is %s", seat.State)
-	}
-	return seat, nil
 }
 
 func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun) (Request, fleetdb.SeatRun, error) {
@@ -428,12 +435,15 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 }
 
 func (n *nativeReload) capture(ctx context.Context) (string, error) {
+	if err := n.refreshTarget(ctx); err != nil {
+		return "", err
+	}
 	body, err := herdr.SeatRequest(
 		ctx,
 		n.target.SocketPath,
 		"pane.read",
 		map[string]any{
-			"pane_id":    n.target.Pane,
+			herdrPaneKey: n.target.Pane,
 			"source":     "visible",
 			"lines":      1000,
 			"strip_ansi": false,
@@ -459,6 +469,9 @@ func (n *nativeReload) capture(ctx context.Context) (string, error) {
 	if result.Type != "pane_read" || result.Read == nil || result.Read.Text == nil || result.Read.Truncated == nil ||
 		result.Read.Format != "ansi" {
 		return "", errors.New("native reload malformed pane_read result")
+	}
+	if err := n.refreshTarget(ctx); err != nil {
+		return "", err
 	}
 	if result.Read.Pane != n.target.Pane && result.Read.Workspace+":"+result.Read.Pane != n.target.Pane {
 		return "", fmt.Errorf("native reload snapshot belongs to pane %q", result.Read.Pane)
@@ -523,7 +536,7 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 				if !stash {
 					return errors.New("native reload composer holds a draft")
 				}
-				if err := n.client.SendKey(ctx, n.target, "ctrl+s"); err != nil {
+				if err := n.sendKey(ctx, "ctrl+s"); err != nil {
 					return fmt.Errorf("stash native reload draft: %w", err)
 				}
 				stash = false
@@ -566,11 +579,14 @@ type nativeReloadProcess struct {
 }
 
 func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
+	if err := n.refreshTarget(ctx); err != nil {
+		return 0, nil, err
+	}
 	body, err := herdr.SeatRequest(
 		ctx,
 		n.target.SocketPath,
 		"pane.process_info",
-		map[string]string{"pane_id": n.target.Pane},
+		map[string]string{herdrPaneKey: n.target.Pane},
 	)
 	if err != nil {
 		return 0, nil, fmt.Errorf("native reload process_info: %w", err)
@@ -585,8 +601,7 @@ func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 	if err := json.Unmarshal(body, &result); err != nil {
 		return 0, nil, fmt.Errorf("decode native reload process_info: %w", err)
 	}
-	if result.Type != "pane_process_info" || result.Info == nil || result.Info.Pane != n.target.Pane ||
-		result.Info.Processes == nil {
+	if result.Type != "pane_process_info" || result.Info == nil || result.Info.Pane != n.target.Pane {
 		return 0, nil, errors.New("native reload malformed process_info or mismatched pane")
 	}
 	binary := pfmengine.MustLookup(n.request.Engine).Binary
@@ -611,6 +626,9 @@ func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run fleetdb.SeatRun) error {
 	for attempt := 0; attempt < n.options.ExitTries+n.options.ExitGraceTries; attempt++ {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := n.refreshTarget(ctx); err != nil {
 			return err
 		}
 		seat, found, err := n.db.Seat(ctx, id)
@@ -639,7 +657,7 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 				return err
 			}
 			if pfmcall.ExitDialogOpen(screen) || composerShowsExit(screen) {
-				if err := n.client.SendKey(ctx, n.target, "Enter"); err != nil {
+				if err := n.sendKey(ctx, "Enter"); err != nil {
 					return fmt.Errorf("confirm native reload exit: %w", err)
 				}
 			}
@@ -681,7 +699,7 @@ func (n *nativeReload) rollback(
 		}
 		if composerShowsExit(screen) {
 			for range len("/exit") {
-				if err := n.client.SendKey(ctx, n.target, "BSpace"); err != nil {
+				if err := n.sendKey(ctx, "BSpace"); err != nil {
 					return fmt.Errorf("clear unsubmitted native /exit: %w", err)
 				}
 			}
@@ -708,6 +726,9 @@ func (n *nativeReload) then(ctx context.Context, stderr io.Writer) error {
 	)
 	if err != nil {
 		return fmt.Errorf("native reload --then client: %w", err)
+	}
+	if err := n.refreshTarget(ctx); err != nil {
+		return err
 	}
 	result, err := caller.CallTarget(ctx, n.target, pfmcall.Request{Message: n.request.Then})
 	if err != nil {

@@ -2,6 +2,7 @@ package fleetdb
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,23 +21,45 @@ import (
 
 // Seat is the durable address of one interactive engine.
 type Seat struct {
-	SeatID         string
-	SessionID      string
-	Engine         string
-	Backend        string
-	TmuxSocket     string
-	TmuxPane       string
-	HerdrSocket    string
-	HerdrPane      string
-	HerdrWorkspace string
-	Name           string
-	State          string
-	ReloadPending  bool
-	LostNote       string
-	UpdatedAt      int64
+	SeatID          string
+	SessionID       string
+	Engine          string
+	Backend         string
+	TmuxSocket      string
+	TmuxPane        string
+	HerdrSocket     string
+	HerdrPane       string
+	HerdrWorkspace  string
+	Name            string
+	State           string
+	ReloadPending   bool
+	LostNote        string
+	HerdrTerminalID string
+	SeatHostPID     int
+	SeatHostStart   uint64
+	SeatHostBirth   int64
+	EndPending      bool
+	UpdatedAt       int64
 }
 
-const seatColumns = `seat_id,session_id,engine,backend,tmux_socket,tmux_pane,herdr_socket,herdr_pane,herdr_workspace,name,state,reload_pending,lost_note,updated_at`
+// ConversationIdentity is the shared lock/lookup identity before and after the
+// engine learns its session. Empty sessions use the durable seat reservation.
+func ConversationIdentity(sessionID, seatID string) string {
+	if sessionID != "" {
+		return sessionID
+	}
+	return seatID
+}
+
+const seatColumns = `seat_id,session_id,engine,backend,tmux_socket,tmux_pane,herdr_socket,herdr_pane,herdr_workspace,name,state,reload_pending,lost_note,updated_at,herdr_terminal_id,seat_host_pid,seat_host_start,seat_host_birth,end_pending`
+
+const (
+	seatHerdrTerminalIDColumn = "herdr_terminal_id"
+	seatHostPIDColumn         = "seat_host_pid"
+	seatHostStartColumn       = "seat_host_start"
+	seatHostBirthColumn       = "seat_host_birth"
+	seatEndPendingColumn      = "end_pending"
+)
 
 // PutSeat reserves or updates a seat. A failed database is never an absent seat.
 func (s *Store) PutSeat(ctx context.Context, seat Seat) error {
@@ -48,13 +71,14 @@ func (s *Store) PutSeat(ctx context.Context, seat Seat) error {
 	}
 	args := append(seatValues(seat), seat.Backend, seat.State, seat.HerdrSocket, seat.HerdrPane,
 		seat.HerdrSocket, seat.HerdrPane, seat.SeatID)
-	result, err := s.exec(ctx, `INSERT INTO seat (`+seatColumns+`) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?
+	result, err := s.exec(ctx, `INSERT INTO seat (`+seatColumns+`) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
  WHERE ?!='herdr' OR ?!='live' OR ?='' OR ?='' OR NOT EXISTS (
  SELECT 1 FROM seat WHERE backend='herdr' AND state='live' AND herdr_socket=? AND herdr_pane=? AND seat_id<>?)
  ON CONFLICT(seat_id) DO UPDATE SET session_id=excluded.session_id,engine=excluded.engine,backend=excluded.backend,
  tmux_socket=excluded.tmux_socket,tmux_pane=excluded.tmux_pane,herdr_socket=excluded.herdr_socket,
  herdr_pane=excluded.herdr_pane,herdr_workspace=excluded.herdr_workspace,name=excluded.name,state=excluded.state,
- reload_pending=excluded.reload_pending,lost_note=excluded.lost_note,updated_at=excluded.updated_at`,
+ reload_pending=excluded.reload_pending,lost_note=excluded.lost_note,updated_at=excluded.updated_at,herdr_terminal_id=excluded.herdr_terminal_id,
+ seat_host_pid=excluded.seat_host_pid,seat_host_start=excluded.seat_host_start,seat_host_birth=excluded.seat_host_birth,end_pending=excluded.end_pending`,
 		args...)
 	if err != nil {
 		return fmt.Errorf("write seat %q: %w", seat.SeatID, err)
@@ -83,12 +107,16 @@ func (s *Store) UpdateSeat(ctx context.Context, before, after Seat) error {
 	var args []any
 	for i := 1; i < len(columns); i++ {
 		if old[i] != next[i] {
-			assignments = append(assignments, columns[i]+"=?")
+			assignment := columns[i] + "=?"
+			if columns[i] == "updated_at" {
+				assignment = "updated_at=MAX(updated_at,?)"
+			}
+			assignments = append(assignments, assignment)
 			args = append(args, next[i])
 		}
 	}
 	if len(assignments) == 0 {
-		return nil
+		assignments = append(assignments, "seat_id=seat_id")
 	}
 	args = append(args, after.SeatID)
 	// Unchanged fields must come from the stored row: before may predate a bind.
@@ -107,9 +135,50 @@ func (s *Store) UpdateSeat(ctx context.Context, before, after Seat) error {
 		candidate(
 			"herdr_socket",
 		) + " AND owner.herdr_pane=" + candidate("herdr_pane") + " AND owner.seat_id<>current.seat_id)"
+	// Compare every field this writer changes. Disjoint updates still compose,
+	// but an old canonicalization or supervisor bind cannot clobber a new one.
+	var unchanged []string
+	for i := 1; i < len(columns); i++ {
+		if old[i] != next[i] && columns[i] != "updated_at" {
+			unchanged = append(unchanged, "current."+columns[i]+"=?")
+			args = append(args, old[i])
+		}
+	}
+	// Failure/startup publication runs while reload holds conversation exclusion.
+	// Its lifecycle CAS must reject a concurrent bind or end, not just changed metadata.
+	guardOwnership := before.State != after.State || before.LostNote != after.LostNote ||
+		before.ReloadPending != after.ReloadPending || before.SessionID != after.SessionID || before.Engine != after.Engine ||
+		before.Backend != after.Backend || before.HerdrSocket != after.HerdrSocket ||
+		before.HerdrPane != after.HerdrPane ||
+		before.HerdrTerminalID != after.HerdrTerminalID ||
+		before.SeatHostPID != after.SeatHostPID ||
+		before.SeatHostStart != after.SeatHostStart ||
+		before.SeatHostBirth != after.SeatHostBirth ||
+		before.EndPending != after.EndPending ||
+		(len(assignments) == 1 && assignments[0] == "seat_id=seat_id")
+	if guardOwnership {
+		for _, column := range []string{"backend", "herdr_socket", "herdr_pane", seatHerdrTerminalIDColumn, seatHostPIDColumn, seatHostStartColumn, seatHostBirthColumn, "engine", seatEndPendingColumn} {
+			for i, name := range columns {
+				if name == column {
+					unchanged = append(unchanged, "current."+column+"=?")
+					args = append(args, old[i])
+					break
+				}
+			}
+		}
+	}
+	if len(unchanged) == 0 {
+		unchanged = append(unchanged, "1=1")
+	}
 	result, err := s.exec(
 		ctx,
-		"UPDATE seat AS current SET "+strings.Join(assignments, ",")+" WHERE seat_id=? AND ("+guard+")",
+		"UPDATE seat AS current SET "+strings.Join(
+			assignments,
+			",",
+		)+" WHERE seat_id=? AND ("+guard+") AND "+strings.Join(
+			unchanged,
+			" AND ",
+		),
 		args...)
 	if err != nil {
 		return fmt.Errorf("update seat %q: %w", after.SeatID, err)
@@ -126,9 +195,25 @@ func (s *Store) UpdateSeat(ctx context.Context, before, after Seat) error {
 
 func seatValues(seat Seat) []any {
 	return []any{
-		seat.SeatID, seat.SessionID, seat.Engine, seat.Backend, seat.TmuxSocket, seat.TmuxPane,
-		seat.HerdrSocket, seat.HerdrPane, seat.HerdrWorkspace, seat.Name, seat.State, seat.ReloadPending,
-		seat.LostNote, seat.UpdatedAt,
+		seat.SeatID,
+		seat.SessionID,
+		seat.Engine,
+		seat.Backend,
+		seat.TmuxSocket,
+		seat.TmuxPane,
+		seat.HerdrSocket,
+		seat.HerdrPane,
+		seat.HerdrWorkspace,
+		seat.Name,
+		seat.State,
+		seat.ReloadPending,
+		seat.LostNote,
+		seat.UpdatedAt,
+		seat.HerdrTerminalID,
+		seat.SeatHostPID,
+		seat.SeatHostStart,
+		seat.SeatHostBirth,
+		seat.EndPending,
 	}
 }
 
@@ -145,7 +230,8 @@ func (s *Store) SeatBySession(ctx context.Context, id string) (Seat, bool, error
 	return s.findSeat(ctx, "session_id=?", id)
 }
 
-// SeatByPane verifies the socket and pane together, never the pane id alone.
+// SeatByPane locates an address candidate, never ownership. Callers must prove
+// the terminal and supervisor before using the candidate to authorize a mutation.
 func (s *Store) SeatByPane(ctx context.Context, socket, pane string) (seat Seat, found bool, returnErr error) {
 	if socket == "" || pane == "" {
 		return Seat{}, false, nil
@@ -153,9 +239,13 @@ func (s *Store) SeatByPane(ctx context.Context, socket, pane string) (seat Seat,
 	if s.db == nil {
 		return Seat{}, false, fmt.Errorf("read pane owner: %w", s.degraded)
 	}
+	columns, err := s.seatReadColumns(ctx)
+	if err != nil {
+		return Seat{}, false, err
+	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		"SELECT "+seatColumns+" FROM seat WHERE backend='herdr' AND state='live' AND herdr_socket=? AND herdr_pane=? LIMIT 2",
+		"SELECT "+columns+" FROM seat WHERE backend='herdr' AND state='live' AND herdr_socket=? AND herdr_pane=? LIMIT 2",
 		socket,
 		pane,
 	)
@@ -187,10 +277,14 @@ func (s *Store) findSeat(ctx context.Context, where string, args ...any) (Seat, 
 	if s.db == nil {
 		return Seat{}, false, fmt.Errorf("read seat: %w", s.degraded)
 	}
+	columns, err := s.seatReadColumns(ctx)
+	if err != nil {
+		return Seat{}, false, err
+	}
 	seat, err := scanSeat(
 		s.db.QueryRowContext(
 			ctx,
-			"SELECT "+seatColumns+" FROM seat WHERE "+where+" ORDER BY updated_at DESC,seat_id LIMIT 1",
+			"SELECT "+columns+" FROM seat WHERE "+where+" ORDER BY updated_at DESC,seat_id LIMIT 1",
 			args...),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -203,11 +297,19 @@ func (s *Store) findSeat(ctx context.Context, where string, args ...any) (Seat, 
 }
 
 // Seats enumerates the persisted seats in stable order.
-func (s *Store) Seats(ctx context.Context) (seats []Seat, returnErr error) {
+func (s *Store) Seats(ctx context.Context) ([]Seat, error) {
+	columns, err := s.seatReadColumns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.enumerateSeats(ctx, columns)
+}
+
+func (s *Store) enumerateSeats(ctx context.Context, columns string) (seats []Seat, returnErr error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("list seats: %w", s.degraded)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+seatColumns+" FROM seat ORDER BY seat_id")
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM seat ORDER BY seat_id")
 	if err != nil {
 		return nil, fmt.Errorf("list seats: %w", err)
 	}
@@ -257,6 +359,7 @@ func scanSeat(row interface{ Scan(...any) error }) (Seat, error) {
 		&seat.ReloadPending,
 		&seat.LostNote,
 		&seat.UpdatedAt,
+		&seat.HerdrTerminalID, &seat.SeatHostPID, &seat.SeatHostStart, &seat.SeatHostBirth, &seat.EndPending,
 	)
 	return seat, err
 }
@@ -384,4 +487,51 @@ func ReadSeats(ctx context.Context, values paths.Values) (seats []Seat, returnEr
 		return nil, nil
 	}
 	return (&Store{db: db, path: values.StateDB}).Seats(ctx)
+}
+
+func (s *Store) seatReadColumns(ctx context.Context) (string, error) {
+	if s.db == nil {
+		return "", fmt.Errorf("inspect seat columns: %w", s.degraded)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT name FROM pragma_table_info('seat')")
+	if err != nil {
+		return "", fmt.Errorf("inspect durable seat columns: %w", err)
+	}
+	present := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return "", errors.Join(fmt.Errorf("read durable seat column: %w", err), rows.Close())
+		}
+		present[name] = true
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return "", fmt.Errorf("enumerate durable seat columns: %w", err)
+	}
+	// Only additive ownership fields have legacy defaults. A damaged base schema
+	// still fails its SELECT rather than looking like an empty fleet.
+	columns := strings.Split(seatColumns, ",")
+	for i, column := range columns {
+		if present[column] {
+			continue
+		}
+		switch column {
+		case seatHerdrTerminalIDColumn:
+			columns[i] = "''"
+		case seatHostPIDColumn, seatHostStartColumn, seatHostBirthColumn, seatEndPendingColumn:
+			columns[i] = "0"
+		}
+	}
+	return strings.Join(columns, ","), nil
+}
+
+// LockSeat serializes replacement and explicit restore by conversation, not by
+// a pane address that can move. The migration lock provides cancellation and
+// cross-process exclusion without holding a database transaction across RPCs.
+func LockSeat(ctx context.Context, values paths.Values, sessionID string) (func() error, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("lock seat: empty conversation identity")
+	}
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte(sessionID)))
+	return LockMigration(ctx, values.StateDB+".seat-"+key)
 }

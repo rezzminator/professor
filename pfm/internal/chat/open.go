@@ -214,7 +214,10 @@ func OpenDetachedTarget(
 		if err != nil {
 			return action.OpenResult{}, err
 		}
-		if !found || seat.HerdrSocket != target.Socket || seat.HerdrPane != target.Pane {
+		// The caller's pane may predate a move already persisted by another
+		// probe. Exact seat/session/socket checks remain; detachedNative proves
+		// and returns the current terminal-owned address under its lock.
+		if !found || seat.HerdrSocket != target.Socket {
 			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
 		}
 		return detachedNative(ctx, seat, stderr, effective, false)

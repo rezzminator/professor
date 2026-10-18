@@ -1,6 +1,7 @@
 package fleetdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestSeatSchema(t *testing.T) {
@@ -29,6 +32,11 @@ func TestSeatSchema(t *testing.T) {
 		"reload_pending",
 		"lost_note",
 		"updated_at",
+		"herdr_terminal_id",
+		"seat_host_pid",
+		"seat_host_start",
+		"seat_host_birth",
+		"end_pending",
 	}
 	if !reflect.DeepEqual(columns, want) {
 		t.Fatalf("seat columns = %v, want %v", columns, want)
@@ -324,5 +332,214 @@ func TestSeatPaneHistoricalDuplicatesRefuse(t *testing.T) {
 	got, found, err := state.SeatByPane(ctx, owner.HerdrSocket, owner.HerdrPane)
 	if err == nil || !strings.Contains(err.Error(), "multiple live seats") || found || got.SeatID != "" {
 		t.Fatalf("ambiguous owner=%+v found=%v err=%v", got, found, err)
+	}
+}
+
+func TestSeatUpdateRejectsStaleCanonicalAddress(t *testing.T) {
+	state, _ := openTestStore(t)
+	ctx := context.Background()
+	before := Seat{SeatID: "moving", Backend: "herdr", State: "live", HerdrPane: "w1:p1", HerdrSocket: "fixture"}
+	if err := state.PutSeat(ctx, before); err != nil {
+		t.Fatal(err)
+	}
+	moved := before
+	moved.HerdrPane = "w2:p4"
+	if err := state.UpdateSeat(ctx, before, moved); err != nil {
+		t.Fatal(err)
+	}
+	stale := before
+	stale.HerdrPane = "w3:p9"
+	if err := state.UpdateSeat(ctx, before, stale); err == nil {
+		t.Fatal("stale canonical writer overwrote moved seat")
+	}
+	got, _, err := state.Seat(ctx, before.SeatID)
+	if err != nil || got.HerdrPane != moved.HerdrPane {
+		t.Fatalf("canonical seat=%+v err=%v", got, err)
+	}
+}
+
+// The reader must work before any writer has added ownership columns.
+func TestReadSeatsPreOwnershipV6(t *testing.T) {
+	for _, added := range []string{"", "ALTER TABLE seat ADD COLUMN herdr_terminal_id TEXT NOT NULL DEFAULT '';"} {
+		t.Run(fmt.Sprintf("partial=%t", added != ""), func(t *testing.T) {
+			values := paths.Values{StateDB: filepath.Join(t.TempDir(), "legacy.db")}
+			seedSharedState(t, values.StateDB, migrationV6+added+`
+PRAGMA user_version=6;
+INSERT INTO seat(seat_id,session_id,engine,backend,tmux_socket,tmux_pane,herdr_socket,herdr_pane,herdr_workspace,name,state,reload_pending,lost_note,updated_at)
+VALUES('legacy','session','claude','herdr','','','fixture.sock','w1:p2','w1','OLD','live',0,'',42);`)
+			before, err := os.ReadFile(values.StateDB)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows, err := ReadSeats(context.Background(), values)
+			want := []Seat{
+				{
+					SeatID:         "legacy",
+					SessionID:      "session",
+					Engine:         "claude",
+					Backend:        "herdr",
+					HerdrSocket:    "fixture.sock",
+					HerdrPane:      "w1:p2",
+					HerdrWorkspace: "w1",
+					Name:           "OLD",
+					State:          "live",
+					UpdatedAt:      42,
+				},
+			}
+			if err != nil || !reflect.DeepEqual(rows, want) {
+				t.Fatalf("pre-ownership read=%+v err=%v, want %+v", rows, err, want)
+			}
+			store := OpenSharedStateReadOnly(context.Background(), values)
+			defer func() { _ = store.Close() }()
+			listed, listErr := store.Seats(context.Background())
+			if listErr != nil || !reflect.DeepEqual(listed, want) {
+				t.Errorf("read-only Store seats=%+v err=%v, want %+v", listed, listErr, want)
+			}
+			for _, lookup := range []func(context.Context) (Seat, bool, error){
+				func(ctx context.Context) (Seat, bool, error) { return store.Seat(ctx, "legacy") },
+				func(ctx context.Context) (Seat, bool, error) { return store.SeatBySession(ctx, "session") },
+				func(ctx context.Context) (Seat, bool, error) { return store.SeatByPane(ctx, "fixture.sock", "w1:p2") },
+			} {
+				got, found, lookupErr := lookup(context.Background())
+				if lookupErr != nil || !found || got != want[0] {
+					t.Errorf("read-only Store lookup=%+v found=%v err=%v, want %+v", got, found, lookupErr, want[0])
+				}
+			}
+			after, err := os.ReadFile(values.StateDB)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("read-only enumeration wrote the old-schema database")
+			}
+		})
+	}
+}
+
+func TestSeatFailurePublicationRejectsChangedBinding(t *testing.T) {
+	for _, change := range []string{"host", "terminal", "end"} {
+		t.Run(change, func(t *testing.T) {
+			db, _ := openTestStore(t)
+			ctx := context.Background()
+			before := Seat{
+				SeatID:          "failure",
+				SessionID:       "conversation",
+				Backend:         "herdr",
+				State:           "live",
+				HerdrSocket:     "fixture",
+				HerdrPane:       "w1:p1",
+				HerdrTerminalID: "terminal",
+				SeatHostPID:     10,
+				SeatHostStart:   20,
+				SeatHostBirth:   30,
+			}
+			if err := db.PutSeat(ctx, before); err != nil {
+				t.Fatal(err)
+			}
+			next := before
+			switch change {
+			case "host":
+				next.SeatHostPID++
+			case "terminal":
+				next.HerdrTerminalID = "replacement"
+			case "end":
+				next.EndPending = true
+			}
+			if err := db.UpdateSeat(ctx, before, next); err != nil {
+				t.Fatal(err)
+			}
+			failed := before
+			failed.State = "failed"
+			failed.LostNote = "old attempt"
+			if err := db.UpdateSeat(ctx, before, failed); err == nil {
+				t.Fatal("stale failure publication overwrote changed binding")
+			}
+			got, found, err := db.Seat(ctx, before.SeatID)
+			if err != nil || !found || got != next {
+				t.Fatalf("binding=%+v found=%v err=%v want=%+v", got, found, err, next)
+			}
+		})
+	}
+}
+
+func TestSeatLifecycleIgnoresHeartbeatConflict(t *testing.T) {
+	for _, lifecycle := range []string{"start", "failure", "heartbeat"} {
+		t.Run(lifecycle, func(t *testing.T) {
+			db, _ := openTestStore(t)
+			ctx := context.Background()
+			before := Seat{SeatID: "heartbeat", Backend: "herdr", State: "live", SessionID: "session", UpdatedAt: 1}
+			if err := db.PutSeat(ctx, before); err != nil {
+				t.Fatal(err)
+			}
+			concurrent := before
+			concurrent.UpdatedAt = 4
+			concurrent.Name = "renamed"
+			if err := db.UpdateSeat(ctx, before, concurrent); err != nil {
+				t.Fatal(err)
+			}
+			after := before
+			after.UpdatedAt = 3
+			switch lifecycle {
+			case "start":
+				after.LostNote = "started"
+			case "failure":
+				after.State = "failed"
+				after.LostNote = "exec failed"
+			}
+			if err := db.UpdateSeat(ctx, before, after); err != nil {
+				t.Fatalf("metadata conflict rejected lifecycle: %v", err)
+			}
+			got, found, err := db.Seat(ctx, before.SeatID)
+			if err != nil || !found || got.State != after.State || got.LostNote != after.LostNote ||
+				got.Name != "renamed" ||
+				got.UpdatedAt != 4 {
+				t.Fatalf("composed lifecycle=%+v found=%v err=%v", got, found, err)
+			}
+		})
+	}
+}
+
+func TestSeatLifecycleComposesLearnedSession(t *testing.T) {
+	for _, phase := range []string{"retry-start", "reload-start", "failure"} {
+		t.Run(phase, func(t *testing.T) {
+			db, _ := openTestStore(t)
+			ctx := context.Background()
+			before := Seat{
+				SeatID:          "learning",
+				Backend:         "herdr",
+				State:           "failed",
+				LostNote:        "retry",
+				SessionID:       "provisional",
+				Engine:          "cc",
+				HerdrSocket:     "fixture",
+				HerdrPane:       "w1:p1",
+				HerdrTerminalID: "terminal",
+				SeatHostPID:     10,
+				SeatHostStart:   20,
+			}
+			before.ReloadPending = phase == "reload-start"
+			if err := db.PutSeat(ctx, before); err != nil {
+				t.Fatal(err)
+			}
+			learned := before
+			learned.SessionID = "engine-session"
+			if err := db.UpdateSeat(ctx, before, learned); err != nil {
+				t.Fatal(err)
+			}
+			after := before
+			after.State, after.LostNote, after.ReloadPending = "live", "", false
+			if phase == "failure" {
+				after.State, after.LostNote = "failed", "exec failed"
+			}
+			if err := db.UpdateSeat(ctx, before, after); err != nil {
+				t.Fatalf("SessionID learning rejected %s callback: %v", phase, err)
+			}
+			want := after
+			want.SessionID = learned.SessionID
+			got, found, err := db.Seat(ctx, before.SeatID)
+			if err != nil || !found || got != want {
+				t.Fatalf("started authority=%+v want=%+v found=%t err=%v", got, want, found, err)
+			}
+		})
 	}
 }

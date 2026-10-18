@@ -5,9 +5,7 @@ package gather
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,7 +81,11 @@ func (proc *DarwinProcFS) Environ(pid int) (map[string]string, error) {
 func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
-		return ProcessIdentity{}, fmt.Errorf("read process identity for pid %d via kern.proc.pid: %w", pid, err)
+		return ProcessIdentity{}, fmt.Errorf(
+			"read process identity for pid %d via kern.proc.pid: %w",
+			pid,
+			processReadError(pid, err, unix.Kill(pid, 0)),
+		)
 	}
 	command := make([]byte, 0, len(process.Proc.P_comm))
 	for _, character := range process.Proc.P_comm {
@@ -108,13 +110,13 @@ func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 func (proc *DarwinProcFS) Stat(pid int) (ProcStat, error) {
 	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
-		// kern.proc.pid answers an exited pid with an empty record, which
-		// x/sys reports as EIO: the kernel's ESRCH says it is gone, as a
-		// missing /proc entry does on Linux.
-		if pid > 0 && errors.Is(unix.Kill(pid, 0), unix.ESRCH) {
-			return ProcStat{}, fmt.Errorf("read kern.proc.pid for %d: process gone: %w", pid, fs.ErrNotExist)
-		}
-		return ProcStat{}, fmt.Errorf("read kern.proc.pid for %d: %w", pid, err)
+		// Empty kinfo records and protected argv errors have ambiguous errnos;
+		// only the independent kernel existence probe can establish death.
+		return ProcStat{}, fmt.Errorf(
+			"read kern.proc.pid for %d: %w",
+			pid,
+			processReadError(pid, err, unix.Kill(pid, 0)),
+		)
 	}
 	started := process.Proc.P_starttime
 	return ProcStat{
@@ -293,7 +295,11 @@ func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
 func procArgs(pid int) (argv, env []string, err error) {
 	buffer, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read kern.procargs2 for %d: %w", pid, err)
+		return nil, nil, fmt.Errorf(
+			"read kern.procargs2 for %d: %w",
+			pid,
+			processReadError(pid, err, unix.Kill(pid, 0)),
+		)
 	}
 	if len(buffer) < 4 {
 		return nil, nil, fmt.Errorf("short kern.procargs2 buffer for %d: %d bytes", pid, len(buffer))

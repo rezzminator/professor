@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -28,6 +30,8 @@ type HerdrRequest struct {
 	Run    fleetdb.SeatRun
 	Paths  paths.Values
 	Focus  bool
+	// Stderr receives post-birth focus warnings; nil uses the process stderr.
+	Stderr io.Writer
 	// TabLabel is the requester's label for a new tab (a launch or resumed
 	// chat's name), ahead of the seat's own name; it never names the seat.
 	TabLabel string
@@ -202,5 +206,42 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 		return result, fmt.Errorf("herdr pane %s exists; persist address: %w", seat.HerdrPane, err)
 	}
 	result.Seat = seat
+	if request.Focus {
+		if err := focusHerdrPane(ctx, seat); err != nil {
+			// Birth is complete: returning a launch error would let callers retry
+			// the old seat and create another tab instead of retiring it.
+			stderr := request.Stderr
+			if stderr == nil {
+				stderr = os.Stderr
+			}
+			fmt.Fprintf(stderr, "pfm: Herdr pane %s opened, but focus failed: %v\n", seat.HerdrPane, err)
+		}
+	}
 	return result, nil
+}
+
+func focusHerdrPane(ctx context.Context, seat fleetdb.Seat) error {
+	body, err := herdr.SeatRequest(
+		ctx,
+		seat.HerdrSocket,
+		"pane.focus",
+		map[string]string{"pane_id": seat.HerdrPane},
+	)
+	if err != nil {
+		return fmt.Errorf("focus Herdr clients: %w", err)
+	}
+	var ack struct {
+		Type string `json:"type"`
+		Pane struct {
+			ID      string `json:"pane_id"`
+			Focused bool   `json:"focused"`
+		} `json:"pane"`
+	}
+	if err := json.Unmarshal(body, &ack); err != nil {
+		return fmt.Errorf("decode Herdr focus: %w", err)
+	}
+	if ack.Type != "pane_info" || ack.Pane.ID != seat.HerdrPane || !ack.Pane.Focused {
+		return fmt.Errorf("unexpected Herdr focus acknowledgement: %s", body)
+	}
+	return nil
 }

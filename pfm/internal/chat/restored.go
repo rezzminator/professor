@@ -2,12 +2,12 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -15,7 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -37,7 +37,7 @@ func (restoredGate) Confirm(ctx context.Context, _ action.GateRequest) (bool, er
 }
 
 // OpenRestoredID resumes a restored pane without an interactive decision.
-func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, runtime *config.Runtime) int {
+func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, runtime *config.Runtime) (code int) {
 	if id == "" {
 		fmt.Fprintln(stderr, "pfm chat open: restored session ID is required")
 		return 2
@@ -48,7 +48,8 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 		return 1
 	}
 	ctx = context.WithValue(ctx, restoredOpenKey{}, true)
-	seat, found, err := nativeSeat(ctx, effective, id, "")
+	// Initialize the state directory before the conversation's lock file opens.
+	initial, initialFound, err := nativeSeat(ctx, effective, id, "")
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored seat: %v\n", err)
 		return 1
@@ -64,6 +65,26 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 	if choice.Backend != spawn.BackendHerdr {
 		return OpenID(ctx, id, stdout, stderr, &effective)
 	}
+	lockID := id
+	if initialFound {
+		lockID = fleetdb.ConversationIdentity(initial.SessionID, initial.SeatID)
+	}
+	unlock, err := fleetdb.LockSeat(ctx, effective.Paths, lockID)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: lock restored conversation: %v\n", err)
+		return 1
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			fmt.Fprintf(stderr, "pfm chat open: unlock restored conversation: %v\n", err)
+			code = 1
+		}
+	}()
+	seat, found, err := nativeSeat(ctx, effective, id, "")
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: reread restored seat: %v\n", err)
+		return 1
+	}
 	if !found {
 		seat, err = prepareRestoredSeat(ctx, id, effective, choice, stderr)
 		if err != nil {
@@ -71,7 +92,7 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 			return 1
 		}
 	}
-	if err := restoreNative(ctx, effective, seat, choice, stdout, stderr); err != nil {
+	if err := restoreNative(ctx, effective, seat, choice, !found, stdout, stderr); err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored recovery: %v\n", err)
 		return 1
 	}
@@ -83,24 +104,66 @@ func restoreNative(
 	runtime config.Runtime,
 	seat fleetdb.Seat,
 	choice spawn.BackendChoice,
+	created bool,
 	stdout, stderr io.Writer,
 ) (returnErr error) {
 	if err := herdr.CheckProtocol(ctx, choice.HerdrSocket); err != nil {
 		return err
 	}
-	if seat.HerdrSocket != choice.HerdrSocket || seat.HerdrPane != choice.HerdrPane {
-		alive, err := nativeAlive(ctx, seat)
-		if err != nil && !errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED) {
-			return fmt.Errorf("probe old restored owner: %w", err)
+	if seat.EndPending {
+		return fmt.Errorf("native seat %s end is pending", seat.SeatID)
+	}
+
+	body, err := herdr.SeatRequest(
+		ctx,
+		choice.HerdrSocket,
+		"pane.get",
+		map[string]string{nativePaneIDKey: choice.HerdrPane},
+	)
+	if err != nil {
+		return fmt.Errorf("read restored caller pane: %w", err)
+	}
+	var pane struct {
+		Type string `json:"type"`
+		Pane struct {
+			ID        string `json:"pane_id"`
+			Terminal  string `json:"terminal_id"`
+			Workspace string `json:"workspace_id"`
+			Tab       string `json:"tab_id"`
+		} `json:"pane"`
+	}
+	if err := json.Unmarshal(body, &pane); err != nil {
+		return fmt.Errorf("decode restored caller pane: %w", err)
+	}
+	if pane.Type != "pane_info" || pane.Pane.ID != choice.HerdrPane || pane.Pane.Terminal == "" ||
+		pane.Pane.Workspace != choice.HerdrWorkspace ||
+		pane.Pane.Tab == "" {
+		return fmt.Errorf("invalid restored caller identity: %s", body)
+	}
+	if err := restoredCallerAuthority(ctx, runtime.Paths, choice.HerdrSocket, pane.Pane.ID); err != nil {
+		return err
+	}
+	if !created {
+		proc := gather.NewProcFS(runtime.Paths.ProcRoot)
+		dead, err := gather.HerdrSeatRetired(ctx, proc, seat)
+		// This explicit repair runs in its own proved pane, never at a stale target.
+		// Legacy seats lack a birth: completed supervisor absence is required, and
+		// an RPC/metadata error is not converted into permission.
+		if err == nil && !dead && seat.SeatHostPID == 0 {
+			dead, err = gather.HerdrSupervisorAbsent(proc, seat)
 		}
-		if alive {
+		if err != nil {
+			return fmt.Errorf("prove old restored owner dead: %w", err)
+		}
+		if !dead {
 			return fmt.Errorf(
-				"native seat %s still owns a live engine in %s; refusing restored rebind",
+				"native seat %s still owns a live supervisor in %s; refusing restored rebind",
 				seat.SeatID,
 				seat.HerdrPane,
 			)
 		}
 	}
+
 	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
 	run, err := db.ReadSeatRun(seat.SeatID)
@@ -135,6 +198,10 @@ func restoreNative(
 	current.HerdrSocket = choice.HerdrSocket
 	current.HerdrPane = choice.HerdrPane
 	current.HerdrWorkspace = choice.HerdrWorkspace
+	current.HerdrTerminalID = pane.Pane.Terminal
+	current.SeatHostPID = 0
+	current.SeatHostStart = 0
+	current.SeatHostBirth = 0
 	// SeatHost marks live only after the engine actually starts.
 	current.State = "lost"
 	if noteErr != nil {
@@ -153,13 +220,7 @@ func restoreNative(
 		return fmt.Errorf("rebind restored seat: %w", err)
 	}
 	if current.Name != "" {
-		target := headless.Chat{
-			Backend: spawn.BackendHerdr,
-			SeatID:  current.SeatID,
-			Socket:  current.HerdrSocket,
-			Pane:    current.HerdrPane,
-		}
-		if err := renameHerdr(ctx, target, current.Name, runtime.Paths); err != nil {
+		if err := renameNativeOwned(ctx, db, current, current.Name); err != nil {
 			var refusal *herdr.Refusal
 			if !errors.As(err, &refusal) || refusal.Code != "agent_not_found" ||
 				!strings.HasPrefix(refusal.Request, "agent.rename ") {
@@ -231,6 +292,9 @@ func resumeNativeRun(run fleetdb.SeatRun, seat fleetdb.Seat) (fleetdb.SeatRun, e
 	engineID := pfmengine.ID(seat.Engine)
 	if _, err := pfmengine.Lookup(engineID); err != nil {
 		return run, err
+	}
+	if seat.SessionID == "" {
+		return run, nil
 	}
 	if engineID == pfmengine.Claude {
 		if _, err := claudelaunch.Parse(append([]string{run.Binary}, run.Args...)); err != nil {
@@ -420,4 +484,40 @@ func prepareRestoredSeat(
 		},
 	)
 	return prepared.Seat, err
+}
+
+// restoredCallerAuthority authorizes only the terminal running this explicit
+// restore command, not an arbitrary pane named by inherited environment values.
+func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, pane string) error {
+	body, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{nativePaneIDKey: pane})
+	if err != nil {
+		return fmt.Errorf("read restored caller shell: %w", err)
+	}
+	var info struct {
+		Type string `json:"type"`
+		Info struct {
+			Pane  string `json:"pane_id"`
+			Shell int    `json:"shell_pid"`
+		} `json:"process_info"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		return fmt.Errorf("decode restored caller shell: %w", err)
+	}
+	if info.Type != "pane_process_info" || info.Info.Pane != pane || info.Info.Shell <= 0 {
+		return fmt.Errorf("invalid restored caller shell identity: %s", body)
+	}
+	proc := gather.NewProcFS(values.ProcRoot)
+	seen := map[int]bool{}
+	for pid := os.Getpid(); pid > 1 && !seen[pid]; {
+		if pid == info.Info.Shell {
+			return nil
+		}
+		seen[pid] = true
+		stat, err := proc.Stat(pid)
+		if err != nil {
+			return fmt.Errorf("prove restored caller ancestry at %d: %w", pid, err)
+		}
+		pid = stat.ParentPID
+	}
+	return fmt.Errorf("process %d is outside restored caller pane %s", os.Getpid(), pane)
 }

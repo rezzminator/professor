@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -17,32 +16,56 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // killHerdr is a throwaway socket, never an installed Herdr or a real engine.
 type killHerdr struct {
-	t           *testing.T
-	mu          sync.Mutex
-	socket      string
-	frame       string
-	styledFrame string
-	processes   any
-	probeError  string
-	closeError  string
-	gone        bool
-	exitGone    bool
-	closed      bool
-	events      []string
-	onRead      func()
-	processType string
+	t             *testing.T
+	mu            sync.Mutex
+	socket        string
+	frame         string
+	styledFrame   string
+	processes     any
+	probeError    string
+	closeError    string
+	gone          bool
+	exitGone      bool
+	closed        bool
+	events        []string
+	onRead        func()
+	onExit        func()
+	processType   string
+	omitProcesses bool
+	pane          string
+	terminal      string
+	proc          string
 }
 
 func newKillHerdr(t *testing.T) *killHerdr {
 	t.Helper()
+	proc := t.TempDir()
+	t.Setenv(paths.EnvProcRoot, proc)
+	for name, body := range map[string]string{"stat": "btime 1000000000\n", "90/stat": "90 (pfm) S 1 " + strings.Repeat("0 ", 17) + "9 0\n", "90/cmdline": "pfm\x00internal\x00seat-host\x00seat-kill\x00"} {
+		p := filepath.Join(proc, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	server := &killHerdr{
-		t: t, socket: filepath.Join(t.TempDir(), "s"), frame: idleFrame, processType: "pane_process_info",
-		processes: []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}},
+		t:           t,
+		pane:        "w1:p1",
+		terminal:    "kill-terminal",
+		proc:        proc,
+		socket:      filepath.Join(t.TempDir(), "s"),
+		frame:       idleFrame,
+		processType: "pane_process_info",
+		processes:   []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}},
 	}
 	listener, err := net.Listen("unix", server.socket)
 	if err != nil {
@@ -88,22 +111,36 @@ func (server *killHerdr) serve(conn net.Conn) {
 	server.events = append(server.events, request.Method+" "+fmt.Sprint(request.Params))
 	result := any(map[string]any{"type": "ok"})
 	code := ""
-	if request.Params["pane_id"] != "w1:p1" {
+	if request.Method != "pane.list" && request.Params["pane_id"] != server.pane &&
+		(request.Method != "pane.get" || request.Params["pane_id"] != "w1:p1") {
 		code = "wrong_target"
 	}
 	switch request.Method {
+	case "pane.list":
+		info := testjail.HerdrPaneInfo(server.pane)["pane"].(map[string]any)
+		info["terminal_id"] = server.terminal
+		result = map[string]any{"type": "pane_list", "panes": []any{info}}
+		if server.gone || server.closed {
+			result = map[string]any{"type": "pane_list", "panes": []any{}}
+		}
+		if server.probeError != "" {
+			code = server.probeError
+		}
 	case "pane.get":
-		result = map[string]any{"type": "pane_info", "pane": map[string]any{"pane_id": "w1:p1", "workspace_id": "w1"}}
+		info := testjail.HerdrPaneInfo(server.pane)
+		info["pane"].(map[string]any)["terminal_id"] = server.terminal
+		result = info
 		if server.gone || server.closed {
 			code = "pane_not_found"
 		} else if server.probeError != "" {
 			code = server.probeError
 		}
 	case "pane.process_info":
-		result = map[string]any{
-			"type":         server.processType,
-			"process_info": map[string]any{"pane_id": "w1:p1", "foreground_processes": server.processes},
+		info := map[string]any{"pane_id": server.pane, "shell_pid": 90}
+		if !server.omitProcesses {
+			info["foreground_processes"] = server.processes
 		}
+		result = map[string]any{"type": server.processType, "process_info": info}
 	case "pane.read":
 		if server.onRead != nil {
 			server.onRead()
@@ -122,8 +159,8 @@ func (server *killHerdr) serve(conn net.Conn) {
 		result = map[string]any{
 			"type": "pane_read",
 			"read": map[string]any{
-				"pane_id":      "p1",
-				"workspace_id": "w1",
+				"pane_id":      server.pane,
+				"workspace_id": strings.Split(server.pane, ":")[0],
 				"text":         text,
 				"truncated":    false,
 				"format":       format,
@@ -136,12 +173,23 @@ func (server *killHerdr) serve(conn net.Conn) {
 	case "pane.send_keys":
 		if server.exitGone {
 			server.processes = []any{map[string]any{"pid": 6, "argv0": "pfm"}}
+			// Successful engine exit runs the independent seat closer.
+			server.gone = true
+			if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
+				server.t.Error(err)
+			}
+			if server.onExit != nil {
+				server.onExit()
+			}
 		}
 	case "pane.close":
 		if server.closeError != "" {
 			code = server.closeError
 		} else {
 			server.closed = true
+			if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
+				server.t.Error(err)
+			}
 		}
 	default:
 		code = "unsupported_method"
@@ -161,15 +209,21 @@ func seedKillHerdr(t *testing.T, database *store.Store, server *killHerdr) fleet
 	seat := fleetdb.Seat{
 		SeatID: "seat-kill", SessionID: "native-session", Engine: string(pfmengine.Claude),
 		Backend: "herdr", HerdrSocket: server.socket, HerdrPane: "w1:p1", State: "live",
+		HerdrWorkspace: "w1", HerdrTerminalID: "kill-terminal", SeatHostPID: 90, SeatHostStart: 9,
 	}
 	if err := database.Shared().PutSeat(context.Background(), seat); err != nil {
 		t.Fatal(err)
+	}
+	if server.gone {
+		if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return seat
 }
 
 func TestHerdrKillRoutesByDurableSeat(t *testing.T) {
-	for _, selector := range []string{"address", "session", "mismatch", "unowned", "partial"} {
+	for _, selector := range []string{"address", "session", "mismatch", "unowned", "partial", "moved-canonical", "moved-alias"} {
 		t.Run(selector, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
@@ -183,6 +237,19 @@ func TestHerdrKillRoutesByDurableSeat(t *testing.T) {
 			request := Request{ID: seat.SessionID, Engine: pfmengine.ID(seat.Engine), Exit: true}
 			if selector != "session" {
 				request.SocketName, request.PaneID = seat.HerdrSocket, seat.HerdrPane
+			}
+			if selector == "moved-canonical" {
+				server.pane = "w9:p2"
+				request.PaneID = server.pane
+			}
+			if selector == "moved-alias" {
+				server.pane = "w9:p2"
+				next := seat
+				next.HerdrPane = server.pane
+				next.HerdrWorkspace = "w9"
+				if err := database.Shared().UpdateSeat(context.Background(), seat, next); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if selector == "mismatch" {
 				request.ID = "another-session"
@@ -203,7 +270,7 @@ func TestHerdrKillRoutesByDurableSeat(t *testing.T) {
 			if err != nil {
 				t.Fatalf("durable Herdr kill: %v", err)
 			}
-			if target.SocketPath != seat.HerdrSocket || target.PaneID != seat.HerdrPane ||
+			if target.SocketPath != seat.HerdrSocket || target.PaneID != server.pane ||
 				target.ID != seat.SessionID ||
 				len(spawner.args) != 1 {
 				t.Fatalf("native target/spawn = %+v / %+v", target, spawner.args)
@@ -251,6 +318,14 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 			if err := database.Shared().WriteSeatRun(seat.SeatID, recipe); err != nil {
 				t.Fatal(err)
 			}
+			server.onExit = func() {
+				if err := database.Shared().DeleteSeatRun(seat.SeatID); err != nil {
+					t.Error(err)
+				}
+				if err := database.Shared().DeleteSeat(context.Background(), seat.SeatID); err != nil {
+					t.Error(err)
+				}
+			}
 			tmux := &fakeTmux{}
 			finisher, err := NewFinisher(
 				database,
@@ -294,13 +369,7 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 			if len(tmux.sent)+len(tmux.killedPanes)+len(tmux.killedServers) != 0 {
 				t.Fatalf("native kill reached tmux: %+v", tmux)
 			}
-			got, err := database.Shared().ReadSeatRun(seat.SeatID)
-			if !closed {
-				if err != nil || !reflect.DeepEqual(got.Args, recipe.Args) {
-					t.Fatalf("graceful recipe changed before supervisor cleanup: %+v %v", got, err)
-				}
-				return
-			}
+			_, err = database.Shared().ReadSeatRun(seat.SeatID)
 			if _, found, err := database.Shared().Seat(context.Background(), seat.SeatID); err != nil || found {
 				t.Fatalf("closed native pane kept a live durable seat: found=%t err=%v", found, err)
 			}
@@ -315,28 +384,31 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 	for _, test := range []struct {
 		name                 string
 		missingType          bool
+		omitProcesses        bool
 		processes            any
 		gone                 bool
 		probeError           string
 		wantError, wantClose bool
 	}{
-		{name: "pane gone", gone: true},
-		{name: "supervisor only", processes: []any{map[string]any{"pid": 7, "argv0": "pfm"}}},
-		{name: "name only supervisor", processes: []any{map[string]any{"pid": 7, "name": "pfm"}}},
-		{name: "empty list", processes: []any{}},
+		{name: "pane gone", gone: true, wantError: true},
+		{name: "supervisor only", wantClose: true, wantError: true, processes: []any{map[string]any{"pid": 7, "argv0": "pfm"}}},
+		{name: "name only supervisor", wantClose: true, wantError: true, processes: []any{map[string]any{"pid": 7, "name": "pfm"}}},
+		{name: "empty list", wantClose: true, processes: []any{}, wantError: true},
+		{name: "omitted list", wantClose: true, omitProcesses: true, wantError: true},
 		{name: "engine argv0", processes: []any{map[string]any{"pid": 7, "argv0": "/opt/bin/" + pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
 		{name: "engine name", processes: []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
-		{name: "missing process type", missingType: true, processes: []any{}, wantError: true, wantClose: true},
-		{name: "null list", wantError: true, wantClose: true},
-		{name: "unknown process", processes: []any{map[string]any{"pid": 7}}, wantError: true, wantClose: true},
-		{name: "wrong list shape", processes: "unknown", wantError: true, wantClose: true},
-		{name: "refused probe", probeError: "permission_denied", wantError: true, wantClose: true},
+		{name: "missing process type", missingType: true, processes: []any{}, wantError: true},
+		{name: "null list", wantClose: true, wantError: true},
+		{name: "unknown process", wantClose: true, processes: []any{map[string]any{"pid": 7}}, wantError: true},
+		{name: "wrong list shape", wantClose: true, processes: "unknown", wantError: true},
+		{name: "refused probe", probeError: "permission_denied", wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
 			server := newKillHerdr(t)
 			server.processes, server.gone, server.probeError = test.processes, test.gone, test.probeError
+			server.omitProcesses = test.omitProcesses
 			if test.missingType {
 				server.processType = ""
 			}
@@ -344,6 +416,11 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 				server.closeError = "permission_denied"
 			}
 			seat := seedKillHerdr(t, database, server)
+			if err := database.Shared().WriteSeatRun(
+				seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/claude", CWD: jail.root},
+			); err != nil {
+				t.Fatal(err)
+			}
 			tmux := &fakeTmux{}
 			manager, err := New(database, Dependencies{Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1})
 			if err != nil {
@@ -369,6 +446,18 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 			}
 			if len(tmux.killedPanes)+len(tmux.killedServers) != 0 {
 				t.Fatalf("native escalation reached tmux: %+v", tmux)
+			}
+			if test.wantError {
+				current, found, readErr := database.Shared().Seat(context.Background(), seat.SeatID)
+				if readErr != nil || !found || current.SeatID != seat.SeatID {
+					t.Fatalf("unknown owner lost: %+v found=%t err=%v", current, found, readErr)
+				}
+				if _, err := database.Shared().ReadSeatRun(seat.SeatID); err != nil {
+					t.Fatalf("unknown recipe lost: %v", err)
+				}
+				if test.wantClose && !strings.Contains(err.Error(), "permission_denied") {
+					t.Fatalf("supervisor-proved close refusal hidden: %v", err)
+				}
 			}
 		})
 	}
@@ -401,13 +490,19 @@ func TestHerdrConfirmUnreachableIsNotGone(t *testing.T) {
 }
 
 func TestHerdrFinisherProtectsGoneOrReownedPane(t *testing.T) {
-	for _, state := range []string{"engine absent", "pane absent", "reowned"} {
+	for _, state := range []string{"engine absent", "pane absent", "reowned", "host died"} {
 		t.Run(state, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, database, server)
 			switch state {
+			case "host died":
+				server.onRead = func() {
+					if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
+						t.Error(err)
+					}
+				}
 			case "engine absent":
 				server.processes = []any{map[string]any{"pid": 7, "name": "pfm"}}
 			case "pane absent":
@@ -446,14 +541,15 @@ func TestHerdrFinisherProtectsGoneOrReownedPane(t *testing.T) {
 					PaneID:     seat.HerdrPane,
 				},
 			)
-			if (err != nil) != (state == "reowned") {
+			if (err != nil) != (state == "reowned" || state == "pane absent" || state == "host died") {
 				t.Fatalf("finisher=%v state=%s", err, state)
 			}
 			server.mu.Lock()
 			events := strings.Join(server.events, "\n")
 			server.mu.Unlock()
-			if strings.Contains(events, "pane.close ") || strings.Contains(events, "pane.send_text ") {
-				t.Fatalf("mutated gone/reowned pane: %s", events)
+			if strings.Contains(events, "pane.close ") != (state == "engine absent") ||
+				strings.Contains(events, "pane.send_text ") {
+				t.Fatalf("supervisor close crossed gone/reowned authority: %s", events)
 			}
 		})
 	}
@@ -594,6 +690,86 @@ func TestHerdrDegradedSeatStoreKeepsExplicitTmux(t *testing.T) {
 						warnings.String(),
 					)
 				}
+			}
+		})
+	}
+}
+
+func TestHerdrKillRequiresCanonicalSupervisor(t *testing.T) {
+	for _, mode := range []string{"recycled", "unknown-host", "moved", "dead-host", "move-before-ack", "retry-prompt"} {
+		t.Run(mode, func(t *testing.T) {
+			jail := newKillJail(t)
+			db := jail.open(t)
+			server := newKillHerdr(t)
+			seat := seedKillHerdr(t, db, server)
+			if err := db.Shared().WriteSeatRun(seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/engine"}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "retry-prompt" {
+				server.processes = []any{}
+			}
+			if mode == "recycled" {
+				server.terminal = "unrelated-terminal"
+			}
+			if mode == "unknown-host" {
+				if err := os.WriteFile(
+					filepath.Join(server.proc, "90", "cmdline"),
+					[]byte("claude\x00"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "moved" {
+				server.pane = "w9:p2"
+			}
+			if mode == "dead-host" {
+				if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			client := herdrKiller{engine: pfmengine.Claude, database: db, seat: seat}
+			if mode == "move-before-ack" {
+				server.pane = "w9:p2"
+				if err := client.SendKey(context.Background(), seat.HerdrSocket, seat.HerdrPane, "Escape"); err != nil {
+					t.Fatalf("moved ack: %v", err)
+				}
+				return
+			}
+			err := client.KillPane(context.Background(), seat.HerdrSocket, seat.HerdrPane)
+			if mode == "moved" || mode == "retry-prompt" {
+				if err != nil || !server.closed {
+					t.Fatalf("moved owned close=%t err=%v", server.closed, err)
+				}
+				return
+			}
+			if mode == "dead-host" {
+				if err == nil || !strings.Contains(err.Error(), "retained") {
+					t.Errorf("dead supervisor falsely reported closed: %v", err)
+				}
+				if _, probeErr := client.PaneExists(
+					context.Background(),
+					seat.HerdrSocket,
+					seat.HerdrPane,
+				); probeErr == nil ||
+					!strings.Contains(probeErr.Error(), "retained") {
+					t.Errorf("dead supervisor falsely reported gone: %v", probeErr)
+				}
+				current, found, readErr := db.Shared().Seat(context.Background(), seat.SeatID)
+				if readErr != nil || !found || current.SeatID != seat.SeatID {
+					t.Fatalf("retained seat=%+v found=%t err=%v", current, found, readErr)
+				}
+				if _, err := db.Shared().ReadSeatRun(seat.SeatID); err != nil {
+					t.Fatalf("retained recipe: %v", err)
+				}
+
+				if server.closed {
+					t.Fatal("dead host closed unrelated occupant")
+				}
+				return
+			}
+			if err == nil || server.closed {
+				t.Fatalf("unproved %s close=%t err=%v", mode, server.closed, err)
 			}
 		})
 	}

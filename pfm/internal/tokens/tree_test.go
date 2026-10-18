@@ -108,8 +108,8 @@ func TestTreeMeasuresEveryAgentOfTheSession(t *testing.T) {
 		{treeForeman, "flights-foreman", treeSession, 1, 74100, 0, 48},
 		{treeSession, "main", "", 0, 48500, 0, 29},
 		// Write 12 + Edit 12 + MultiEdit 5+5 + NotebookEdit 5; /tmp, /private/tmp and /work/other count 0
-		{treeWorker1, "flights-worker", treeForeman, 2, 22800, 39, 71},
-		{treeWorker2, "flights-worker", treeForeman, 2, 10100, 0, 25},
+		{treeWorker1, "flights-foreman-sonnet", treeForeman, 2, 22800, 39, 71},
+		{treeWorker2, "flights-foreman-sonnet", treeForeman, 2, 10100, 0, 25},
 		{treeTracer, "tracer", treeForeman, 2, 6600, 0, 32},
 	}
 	if len(document.Agents) != len(want) {
@@ -141,9 +141,9 @@ func TestTreeMeasuresEveryAgentOfTheSession(t *testing.T) {
 		t.Errorf("excluded %q, want %q", document.Excluded, landedRules)
 	}
 	workers := document.Types[2]
-	if workers.Type != "flights-worker" || workers.Agents != 2 || workers.WrittenReadRatio == nil ||
+	if workers.Type != "flights-foreman-sonnet" || workers.Agents != 2 || workers.WrittenReadRatio == nil ||
 		math.Abs(*workers.WrittenReadRatio-39.0/96.0) > 1e-12 {
-		t.Errorf("types %+v, want flights-worker third with ratio 39/96", document.Types)
+		t.Errorf("types %+v, want flights-foreman-sonnet third with ratio 39/96", document.Types)
 	}
 }
 

@@ -12,8 +12,18 @@ AGENTS = Path('templates/global/agents')
 GENERATED = Path('templates/generated/agents')
 
 
+def resolved(name):
+    # The file that holds the agent's full text: a `from:` declaration is a thin overlay, its render in GENERATED the agent.
+    declared = AGENTS / f'{name}.md'
+    return GENERATED / f'{name}.md' if '\nfrom: ' in declared.read_text() else declared
+
+
 def text(name):
-    return (AGENTS / f'{name}.md').read_text()
+    return resolved(name).read_text()
+
+
+def body(name):
+    return text(name).split('---\n', 2)[2]
 
 
 def frontmatter(path):
@@ -24,18 +34,24 @@ def frontmatter(path):
 class FlightContracts(unittest.TestCase):
     def test_cast_tiers(self):
         cast = {
-            'flights-foreman-mini': ('opus', 'medium'), 'flights-foreman': ('opus', 'high'),
-            'flights-foreman-pro': ('opus', 'xhigh'), 'flights-worker': ('sonnet', 'high'),
-            'flights-worker-pro': ('sonnet', 'xhigh'), 'flights-lander-mini': ('sonnet', 'high'),
-            'flights-lander': ('opus', 'medium'), 'flights-lander-pro': ('opus', 'high'),
+            'flights-foreman': ('opus', 'high'), 'flights-foreman-sonnet': ('sonnet', 'high'),
+            'flights-lander-mini': ('sonnet', 'high'), 'flights-lander': ('opus', 'medium'),
+            'flights-lander-pro': ('opus', 'high'),
         }
         for name, (model, effort) in cast.items():
-            declared = AGENTS / f'{name}.md'
-            path = GENERATED / f'{name}.md' if '\nfrom: ' in declared.read_text() else declared
+            path = resolved(name)
             self.assertEqual(frontmatter(path), {'model': model, 'effort': effort}, f'{path}: tier')
 
+    def test_the_two_foremen_share_one_manual(self):
+        self.assertIn('\nfrom: flights-foreman\n', (AGENTS / 'flights-foreman-sonnet.md').read_text(), 'the Sonnet foreman derives from flights-foreman')
+        self.assertEqual(body('flights-foreman-sonnet'), body('flights-foreman'), 'the Sonnet foreman carries the foreman manual whole')
+        for name in ('flights-foreman', 'flights-foreman-sonnet'):
+            head = text(name).split('---\n', 2)[1]
+            self.assertIn('effortControl:', head, f'{name}: steered by auto-effort-control')
+            self.assertNotRegex(head, r'(?m)^tools:', f'{name}: no tools line, so it inherits every tool and the effort buttons')
+
     def test_one_blocking_wait_past_ten_minutes(self):
-        for name in ('flights-foreman', 'flights-worker', 'flights-lander'):
+        for name in ('flights-foreman', 'flights-foreman-sonnet', 'flights-lander'):
             body = text(name)
             self.assertIn('longer than 10 minutes', body, f'{name}: the long-command threshold')
             self.assertIn("timeout {s} bash -c 'until [ -s \"$1\" ]", body, f'{name}: the one blocking wait')

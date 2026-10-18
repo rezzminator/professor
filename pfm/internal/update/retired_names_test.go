@@ -808,9 +808,9 @@ func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct{ line, name, successor, definition string }{
-		{"spawn gpt-foreman", "gpt-foreman", "gpt-flights-foreman", ""},
+		{"spawn gpt-foreman", "", "", ""},
 		{"spawn gpt-lander", "gpt-lander", "gpt-flights-lander", ""},
-		{"spawn gpt-executor", "gpt-executor", "flights-worker", ""},
+		{"spawn gpt-executor", "gpt-executor", "", ""},
 		{`subagent_type: "terra"`, `subagent_type: "terra"`, "", ""},
 		{`subagent_type:"terra"`, `subagent_type:"terra"`, "", ""},
 		{`subagent_type: 'terra'`, `subagent_type: 'terra'`, "", ""},
@@ -848,17 +848,17 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 }
 
 // TestRetiredNamesReportTheFlightsCut: every agent and command the flights
-// family cut retires is a hit with its successor, and the live names beside
-// them — the successors, the longer twin names, /flights:doctor — are none.
+// family cut retires is a hit with no successor, and the live names beside
+// them — the current foremen, gpt-foreman, /flights:doctor — are none.
 func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 	t.Parallel()
 	rows := []struct{ line, name, kind, successor string }{
-		{"spawn foreman-pro for it", "foreman-pro", "agent", "flights-foreman-pro"},
-		{"spawn gpt-foreman-pro for it", "gpt-foreman-pro", "agent", "gpt-flights-foreman-pro"},
-		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", "flights-worker"},
-		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", "flights-worker"},
-		{"flights-speccer writes the spec", "flights-speccer", "agent", "flights-foreman-pro"},
-		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", "flights-foreman-pro"},
+		{"spawn foreman-pro for it", "foreman-pro", "agent", ""},
+		{"spawn gpt-foreman-pro for it", "gpt-foreman-pro", "agent", ""},
+		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", ""},
+		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", ""},
+		{"flights-speccer writes the spec", "flights-speccer", "agent", ""},
+		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", ""},
 		{"run /flights:spec first", "/flights:spec", "command", ""},
 		{"run /flights:init once", "/flights:init", "command", ""},
 		{"run /flights:orchestrate-cross-harness on codex", "/flights:orchestrate-cross-harness", "command", ""},
@@ -872,7 +872,7 @@ func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 			Path: "notes.md", Line: index + 1, Name: row.name, Kind: row.kind, Successor: row.successor,
 		})
 	}
-	content.WriteString("spawn flights-foreman-pro, gpt-flights-foreman-pro or flights-worker; run /flights:doctor\n")
+	content.WriteString("spawn flights-foreman, flights-foreman-sonnet or gpt-foreman; run /flights:doctor\n")
 	writeRetiredFixture(t, root, map[string]string{"notes.md": content.String()})
 	scan := ScanRetiredNames(root, nil)
 	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {

@@ -74,14 +74,9 @@ func RetiredPfmCommand(command string) (name, successor string, ok bool) {
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
 const chatlogSuccessor = "the chatlog skill"
 
-// The flights cut's successors: flightsSuccessor takes new work since
-// /flights:spec retired, so the /wave family, the wave-builder skill and
-// /imagine:build-spec point there too.
-const (
-	flightsSuccessor    = "the flights-foreman agent"
-	workerSuccessor     = "flights-worker"
-	foremanProSuccessor = "flights-foreman-pro"
-)
+// flightsSuccessor takes new work since /flights:spec retired, so the /wave
+// family, the wave-builder skill and /imagine:build-spec point there too.
+const flightsSuccessor = "the flights-foreman agent"
 
 // imagineSuccessor is what replaced /imagine:build, /imagine:build-fast,
 // /imagine:callmeter, /ultimate-spec and the ultimate visualization skill.
@@ -178,20 +173,18 @@ var retiredNames = []retiredName{
 	// Commit f0c88ffb "tracer-rr is clone-distiller".
 	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
 	// Commit 3b401f24: the twin agents take their originals' full names; terra retires.
-	{name: "gpt-foreman", kind: retiredAgent, successor: "gpt-flights-foreman", match: matchExact},
 	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
-	{name: "gpt-executor", kind: retiredAgent, successor: workerSuccessor, match: matchExact},
+	{name: "gpt-executor", kind: retiredAgent, match: matchExact},
 	// The flights family cut (docs/design/flights/flights.md § The family): the
-	// foreman-pro twins take the flights- prefix, the mechanical executors
-	// become flights-worker, and the speccer's work moves into
-	// flights-foreman-pro. /flights:spec, /flights:init and
-	// /flights:orchestrate-cross-harness retire with no successor command.
-	{name: "foreman-pro", kind: retiredAgent, successor: foremanProSuccessor, match: matchExact},
-	{name: "gpt-foreman-pro", kind: retiredAgent, successor: "gpt-flights-foreman-pro", match: matchExact},
-	{name: "flights-mechanical-executor", kind: retiredAgent, successor: workerSuccessor, match: matchExact},
-	{name: "gpt-flights-mechanical-executor", kind: retiredAgent, successor: workerSuccessor, match: matchExact},
-	{name: "flights-speccer", kind: retiredAgent, successor: foremanProSuccessor, match: matchExact},
-	{name: "gpt-flights-speccer", kind: retiredAgent, successor: foremanProSuccessor, match: matchExact},
+	// foreman-pro twins, the mechanical executors and the speccer retire, and
+	// so do /flights:spec, /flights:init and /flights:orchestrate-cross-harness.
+	// None has a successor: the agents they once pointed at retired too.
+	{name: "foreman-pro", kind: retiredAgent, match: matchExact},
+	{name: "gpt-foreman-pro", kind: retiredAgent, match: matchExact},
+	{name: "flights-mechanical-executor", kind: retiredAgent, match: matchExact},
+	{name: "gpt-flights-mechanical-executor", kind: retiredAgent, match: matchExact},
+	{name: "flights-speccer", kind: retiredAgent, match: matchExact},
+	{name: "gpt-flights-speccer", kind: retiredAgent, match: matchExact},
 	{name: "/flights:spec", kind: retiredCommand, match: matchExact},
 	{name: "/flights:init", kind: retiredCommand, match: matchExact},
 	{name: "/flights:orchestrate-cross-harness", kind: retiredCommand, match: matchExact},

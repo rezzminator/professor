@@ -360,7 +360,7 @@ func TestHerdrStatusNativeFallback(t *testing.T) {
 		{"done", headless.StateIdle, false},
 		{"working", headless.StateWorking, false},
 		{"blocked", headless.StateBlocked, false},
-		{"unknown", "", true},
+		{"unknown", headless.StateWorking, false},
 		{"future", "", true},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
@@ -399,6 +399,11 @@ func TestHerdrStatusNativeFallback(t *testing.T) {
 
 func herdrStatusSocket(t *testing.T, result string) string {
 	t.Helper()
+	return herdrStatusSocketReplies(t, func() string { return result })
+}
+
+func herdrStatusSocketReplies(t *testing.T, result func() string) string {
+	t.Helper()
 	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -424,7 +429,7 @@ func herdrStatusSocket(t *testing.T, result string) string {
 				if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&request); err != nil {
 					return
 				}
-				response := fmt.Sprintf(`{"id":%q,"ok":true,"result":%s}`+"\n", request.ID, result)
+				response := fmt.Sprintf(`{"id":%q,"ok":true,"result":%s}`+"\n", request.ID, result())
 				_, _ = io.WriteString(conn, response)
 			}()
 		}

@@ -236,9 +236,27 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		if f.mode == "read-error" {
 			return nil, "snapshot unavailable"
 		}
+		format := "text"
+		text := strings.NewReplacer("\x1b[2m", "", "\x1b[0m", "").Replace(f.text)
+		if string(p["format"]) == `"ansi"` {
+			format = "ansi"
+			text = f.text
+		}
+		if string(p["source"]) != `"visible"` {
+			f.t.Errorf("reload composer starts history collection: %s", p["source"])
+		}
+		if strings.HasPrefix(text, "❯") {
+			text = "────────\n" + text + "\n────────"
+		}
 		return map[string]any{
 			"type": "pane_read",
-			"read": map[string]any{"pane_id": f.request.Pane, "workspace_id": "w6", "text": f.text, "truncated": false},
+			"read": map[string]any{
+				"pane_id":      f.request.Pane,
+				"workspace_id": "w6",
+				"text":         text,
+				"truncated":    false,
+				"format":       format,
+			},
 		}, ""
 	case "agent.get":
 		status := "idle"
@@ -247,7 +265,7 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		}
 		return map[string]any{
 			"type":  "agent_info",
-			"agent": map[string]any{"pane_id": f.request.Pane, "agent_status": status},
+			"agent": map[string]any{"pane_id": f.request.Pane, "terminal_id": f.request.Pane, "agent_status": status},
 		}, ""
 	case "pane.send_text":
 		var text string
@@ -310,8 +328,12 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 	case "agent.prompt":
 		_ = json.Unmarshal(p["text"], &f.prompted)
 		return map[string]any{
-			"type":  "agent_prompted",
-			"agent": map[string]any{"pane_id": f.request.Pane, "agent_status": "working"},
+			"type": "agent_prompted",
+			"agent": map[string]any{
+				"pane_id":      f.request.Pane,
+				"terminal_id":  f.request.Pane,
+				"agent_status": "working",
+			},
 		}, ""
 	default:
 		return nil, "unexpected method " + method
@@ -331,6 +353,8 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		draft, then      bool
 	}{
 		{name: "model-and-account"},
+		{name: "dim-hint", mode: "dim-hint"},
+		{name: "same-text-draft", draft: true},
 		{name: "pending-cleared-before-new-process", mode: "pending-race"},
 		{name: "stashed-draft", draft: true},
 		{name: "same-target-then", then: true},
@@ -348,8 +372,14 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReloadHerdrFixture(t)
 			f.mode = tc.mode
+			if tc.mode == "dim-hint" {
+				f.text = "❯ \x1b[2mTry running tests\x1b[0m"
+			}
 			if tc.draft {
 				f.text = "❯ parked draft"
+				if tc.name == "same-text-draft" {
+					f.text = "❯ Try running tests"
+				}
 			}
 			if tc.then {
 				f.request.Then = "resume the port"
@@ -393,6 +423,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			}
 			if !reflect.DeepEqual(run, canonical) {
 				t.Fatalf("recipe=%+v, canonical=%+v", run, canonical)
+			}
+			if tc.mode == "dim-hint" && slices.Contains(f.keys, "ctrl+s") {
+				t.Fatalf("dim hint stashed as draft: %v", f.keys)
 			}
 			if tc.draft && !slices.Contains(f.keys, "ctrl+s") {
 				t.Fatalf("draft not stashed: %v", f.keys)

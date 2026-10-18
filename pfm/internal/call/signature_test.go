@@ -731,7 +731,11 @@ func TestSignatureUsesNativeHerdrSenderCapture(t *testing.T) {
 		if request.Method == "pane.read" {
 			return map[string]any{
 				"type": "pane_read",
-				"read": map[string]any{"pane_id": "p2", "text": "🥇 │ 🔖 NativeSender │ status\n❯ ", "truncated": false},
+				"read": map[string]any{
+					"pane_id":   "p2",
+					"text":      "🥇 │ 🔖 NativeSender │ status\n────────\n❯ \n────────",
+					"truncated": false,
+				},
 			}, ""
 		}
 		if request.Method == "agent.get" {

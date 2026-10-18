@@ -48,17 +48,8 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 	target, keys := rest[0], rest[1:]
 
 	if !*literal {
-		for _, key := range keys {
-			if pfmchat.KeyValid(key) {
-				continue
-			}
-			fmt.Fprintf(
-				stderr,
-				"pfm chat keys: %q is not a tmux key — tmux would type it as "+
-					"text; pass --literal to mean that, or use one of: %s\n",
-				key,
-				pfmchat.KeyNames(),
-			)
+		if err := pfmchat.ValidateKeyNames(keys); err != nil {
+			fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
 			return 2
 		}
 	}
@@ -86,6 +77,12 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 		}
 	}
 	seat := pfmcall.Target{Backend: chat.Backend, SocketPath: socketPath, Pane: pfmchat.PaneTarget(chat)}
+	if !*literal {
+		if err := pfmcall.ValidateKeyCapabilities(seat, keys); err != nil {
+			fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
+			return 2
+		}
+	}
 	for index, key := range keys {
 		if index > 0 && *delay > 0 {
 			if err := clk.Sleep(ctx, *delay); err != nil {

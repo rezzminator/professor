@@ -432,7 +432,13 @@ func (n *nativeReload) capture(ctx context.Context) (string, error) {
 		ctx,
 		n.target.SocketPath,
 		"pane.read",
-		map[string]any{"pane_id": n.target.Pane, "source": "recent", "lines": 1000, "strip_ansi": false},
+		map[string]any{
+			"pane_id":    n.target.Pane,
+			"source":     "visible",
+			"lines":      1000,
+			"strip_ansi": false,
+			"format":     "ansi",
+		},
 	)
 	if err != nil {
 		return "", fmt.Errorf("native reload read composer: %w", err)
@@ -444,12 +450,14 @@ func (n *nativeReload) capture(ctx context.Context) (string, error) {
 			Workspace string  `json:"workspace_id"`
 			Text      *string `json:"text"`
 			Truncated *bool   `json:"truncated"`
+			Format    string  `json:"format"`
 		} `json:"read"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("decode native reload composer: %w", err)
 	}
-	if result.Type != "pane_read" || result.Read == nil || result.Read.Text == nil || result.Read.Truncated == nil {
+	if result.Type != "pane_read" || result.Read == nil || result.Read.Text == nil || result.Read.Truncated == nil ||
+		result.Read.Format != "ansi" {
 		return "", errors.New("native reload malformed pane_read result")
 	}
 	if result.Read.Pane != n.target.Pane && result.Read.Workspace+":"+result.Read.Pane != n.target.Pane {

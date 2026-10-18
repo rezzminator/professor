@@ -193,18 +193,35 @@ func blockedFromPane(
 	return status, nil
 }
 
-// statusFromHerdr reads the target-owned native state only when transcript evidence
-// cannot decide, or the existing quiet-tool rule needs a blocking-state check.
-func statusFromHerdr(ctx context.Context, chat headless.Chat, status headless.Status) (headless.Status, error) {
+// nativeStatusObservation is one validated native snapshot, shared with this
+// watch's idle clock. AgentSession mirrors the producer's identity fields.
+type nativeStatusObservation struct {
+	TranscriptRest bool   `json:"-"`
+	Pane           string `json:"pane_id"`
+	State          string `json:"agent_status"`
+	Terminal       string `json:"terminal_id"`
+	StateChangeSeq uint64 `json:"state_change_seq"`
+	AgentSession   *struct {
+		Source string `json:"source"`
+		Agent  string `json:"agent"`
+		Kind   string `json:"kind"`
+		Value  string `json:"value"`
+	} `json:"agent_session"`
+}
+
+// statusFromHerdr reconciles live native activity with transcript turn evidence.
+func statusFromHerdr(
+	ctx context.Context,
+	chat headless.Chat,
+	status headless.Status,
+	observations ...*nativeStatusObservation,
+) (headless.Status, error) {
 	body, err := herdr.SeatRequest(ctx, chat.Socket, "agent.get", map[string]string{"target": chat.Pane})
 	if err != nil {
 		return status, fmt.Errorf("read %s Herdr state: %w", chat.Name, err)
 	}
 	var result struct {
-		Agent struct {
-			Pane  string `json:"pane_id"`
-			State string `json:"agent_status"`
-		} `json:"agent"`
+		Agent nativeStatusObservation `json:"agent"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return status, fmt.Errorf("decode Herdr state for %s: %w", chat.Pane, err)
@@ -212,16 +229,27 @@ func statusFromHerdr(ctx context.Context, chat headless.Chat, status headless.St
 	if result.Agent.Pane != chat.Pane {
 		return status, fmt.Errorf("herdr state for %s returned pane %q", chat.Pane, result.Agent.Pane)
 	}
+	result.Agent.TranscriptRest = status.State == headless.StateIdle || status.State == headless.StateError
 	switch result.Agent.State {
 	case "idle", "done":
-		status.State = headless.StateIdle
-	case "working":
-		status.State = headless.StateWorking
-	case "blocked":
-		status.State = headless.StateBlocked
+		if status.State != headless.StateIdle && status.State != headless.StateError {
+			status.State = headless.StateIdle
+			status.IdleSeconds = 0
+			status.Error = ""
+		}
+	case "working", "blocked":
+		status.State = result.Agent.State
+		status.IdleSeconds = 0
+		status.Error = ""
+	case "unknown":
+		status.StateSource = "transcript (Herdr unknown)"
 	default:
 		return status, fmt.Errorf("herdr pane %s has unknown state %q", chat.Pane, result.Agent.State)
 	}
-	status.IdleSeconds = 0
+	for _, observation := range observations {
+		if observation != nil {
+			*observation = result.Agent
+		}
+	}
 	return status, nil
 }

@@ -10,15 +10,15 @@ import (
 
 // herdrRawCapture projects OpenCode's box onto the shared composer guard.
 // The transcript and footer stay intact for busy and receipt checks.
-func herdrRawCapture(ctx context.Context, target Target, format string) (string, string, error) {
-	screen, pane, err := herdrCaptureFormat(ctx, target, herdrRecentLines, format)
+func herdrRawCapture(ctx context.Context, target Target, format string) (string, error) {
+	screen, _, err := herdrCaptureFormat(ctx, target, herdrRecentLines, format)
 	if err != nil {
-		return "", pane, err
+		return "", err
 	}
 	if target.Engine == string(pfmengine.OpenCode) {
 		screen = openCodeComposer(screen)
 	}
-	return screen, pane, nil
+	return screen, nil
 }
 
 // OpenCode 1.14.30 draws contiguous left-border rows, a model row, and

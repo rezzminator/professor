@@ -94,7 +94,7 @@ func (service *Service) chatStatus(
 // also carries json:"-" evidence (PendingTool, QuietSeconds) the tool never returns.
 func statusOutput(status headless.Status) StatusOutput {
 	return StatusOutput{
-		Name: status.Name, State: status.State, IdleSeconds: status.IdleSeconds,
+		Name: status.Name, State: status.State, StateSource: status.StateSource, IdleSeconds: status.IdleSeconds,
 		Engine: status.Engine, Model: status.Model, CWD: status.CWD,
 		SessionID: status.SessionID, Socket: status.Socket, ContextPct: status.ContextPct,
 		Last: status.Last, Error: status.Error, LostNote: status.LostNote, Summary: status.Summary,

@@ -514,7 +514,9 @@ func callOne(ctx context.Context, socket string, line []byte) (json.RawMessage, 
 func callOneWithin(ctx context.Context, socket string, line []byte, limit time.Duration) (json.RawMessage, error) {
 	conn, err := deps.DialUnix(ctx, socket, dialTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("herdr socket %s: dial for %s: %w", socket, requestName(line), err)
+		return nil, &InputNotSentError{
+			Cause: fmt.Errorf("herdr socket %s: dial for %s: %w", socket, requestName(line), err),
+		}
 	}
 	defer func() { _ = conn.Close() }()
 	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -526,7 +528,7 @@ func callOneWithin(ctx context.Context, socket string, line []byte, limit time.D
 		deadline = bound
 	}
 	if err := conn.SetDeadline(deadline); err != nil {
-		return nil, fmt.Errorf("herdr socket %s: set deadline: %w", socket, err)
+		return nil, &InputNotSentError{Cause: fmt.Errorf("herdr socket %s: set deadline: %w", socket, err)}
 	}
 	if _, err := conn.Write(append(append([]byte{}, line...), '\n')); err != nil {
 		return nil, fmt.Errorf("herdr socket %s: write %s: %w", socket, requestName(line), err)

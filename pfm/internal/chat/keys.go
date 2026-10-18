@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -44,4 +45,18 @@ func KeyNames() string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, " ") + " F1-F12, each optionally prefixed C- M- S-"
+}
+
+// ValidateKeyNames refuses words tmux would otherwise type as literal text.
+func ValidateKeyNames(keys []string) error {
+	for _, key := range keys {
+		if !KeyValid(key) {
+			return fmt.Errorf(
+				"%q is not a tmux key — tmux would type it as text; pass --literal to mean that, or use one of: %s",
+				key,
+				KeyNames(),
+			)
+		}
+	}
+	return nil
 }

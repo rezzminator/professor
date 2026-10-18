@@ -191,6 +191,21 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 			t.Errorf("native capture=%q", stdout.String())
 		}
 	}
+	for _, key := range []string{"Home", "End", "Delete", "DC", "Insert", "IC", "PageUp", "PPage", "PageDown", "NPage", "PgUp", "PgDn"} {
+		before := len(keys)
+		var out, errout bytes.Buffer
+		code := run([]string{"chat", "keys", "--delay", "0s", "NATIVE", "Enter", key}, &out, &errout)
+		if code != 2 || !strings.Contains(errout.String(), "Herdr") || len(keys) != before {
+			t.Fatalf(
+				"unsupported second key %s code=%d keys before=%d after=%d stderr=%q",
+				key,
+				code,
+				before,
+				len(keys),
+				errout.String(),
+			)
+		}
+	}
 	var got []string
 	for len(keys) > 0 {
 		got = append(got, <-keys)

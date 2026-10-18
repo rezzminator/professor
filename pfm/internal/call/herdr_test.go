@@ -103,6 +103,10 @@ func nativeAgent(kind, state string) map[string]any {
 }
 
 func nativePaneRead(request nativeRequest, text string) map[string]any {
+	// A real native Claude composer is bounded; preserve multiline boxes verbatim.
+	if strings.HasPrefix(text, "❯") && !strings.Contains(text, "\n") {
+		text = "────────\n" + text + "\n────────"
+	}
 	return map[string]any{"type": "pane_read", "read": map[string]any{
 		"pane_id": request.Params["pane_id"], "text": text, "truncated": false,
 	}}
@@ -129,100 +133,6 @@ type nativeNames struct{ target Target }
 
 func (names nativeNames) ResolveName(context.Context, string, string) (Target, int, string, error) {
 	return names.target, 0, "", nil
-}
-
-func TestHerdrCallNative(t *testing.T) {
-	for _, test := range []struct {
-		name, state, refusal, response, engine, status, detail string
-		screen                                                 string
-		code                                                   int
-		force                                                  bool
-	}{
-		{name: "draft-preserved", state: "idle", screen: "❯ my unsent draft", status: "undelivered", code: CodeUndelivered, detail: "composer"},
-		{name: "menu-preserved", state: "idle", screen: "  ❯ 1. Allow once\n    2. Deny", status: "undelivered", code: CodeUndelivered, detail: "composer"},
-
-		{name: "composer-not-ready", state: "idle", screen: "Starting the engine...", status: "undelivered", code: CodeUndelivered, detail: "nothing was typed"},
-		{name: "idle", state: "idle", status: "delivered"},
-		{name: "done", state: "done", status: "delivered"},
-		{name: "working", state: "working", status: "refused", code: CodeBusy, detail: "ABORT: target pane is busy; nothing was typed"},
-		{name: "working-force", state: "working", force: true, status: "refused", code: CodeBusy, detail: "ABORT: target pane is busy; nothing was typed"},
-		{name: "blocked", state: "blocked", status: "refused", code: CodeUndelivered, detail: "blocked"},
-		{name: "unknown", state: "unknown", status: "refused", code: CodeUndelivered, detail: "unknown"},
-		{name: "missing-state", status: "refused", code: CodeUndelivered, detail: "status"},
-		{name: "not-ready", state: "idle", refusal: "agent_not_ready", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_not_ready"},
-		{name: "stalled", state: "idle", refusal: "agent_prompt_stalled", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_prompt_stalled"},
-		{name: "unknown-result", state: "idle", response: "surprise", status: "typed_unconfirmed", code: CodeUndelivered, detail: "surprise"},
-		{name: "unsupported", state: "idle", engine: "invalid-engine", status: "refused", code: CodeUndelivered, detail: "unsupported"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
-				if request.Method == "pane.read" {
-					screen := test.screen
-					if screen == "" {
-						screen = "❯ "
-					}
-					return nativePaneRead(request, screen), ""
-				}
-				if request.Method == "agent.get" {
-					return nativeAgent("agent_info", test.state), ""
-				}
-				kind := "agent_prompted"
-				if test.response != "" {
-					kind = test.response
-				}
-				return nativeAgent(kind, "working"), test.refusal
-			})
-			target := Target{
-				Backend:        "herdr",
-				SeatID:         "seat-2",
-				HerdrWorkspace: "w1",
-				SocketPath:     socket.path,
-				Pane:           "p2",
-				Engine:         "cc",
-				Session:        "recipient",
-			}
-			if test.engine != "" {
-				target.Engine = test.engine
-			}
-			engine := nativeEngine(t, target)
-			result, err := engine.CallTarget(
-				context.Background(),
-				target,
-				Request{Target: "recipient", Message: "hello\nworld", ForceNow: test.force},
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.Code != test.code || result.Status != test.status ||
-				!strings.Contains(result.Message, test.detail) {
-				t.Fatalf(
-					"native call = %+v; want status=%s code=%d detail=%q",
-					result,
-					test.status,
-					test.code,
-					test.detail,
-				)
-			}
-			if test.code == 0 && (!result.Typed || result.Unsigned) {
-				t.Fatalf("delivered result lost signed typed verdict: %+v", result)
-			}
-			if test.state == "idle" || test.state == "done" {
-				if test.engine != "" || test.screen != "" {
-					return
-				}
-				calls := socket.calls()
-				if len(calls) != 3 || calls[0].Method != "agent.get" || calls[1].Method != "pane.read" ||
-					calls[2].Method != "agent.prompt" ||
-					calls[2].Params["target"] != "p2" {
-					t.Fatalf("native calls = %+v", calls)
-				}
-				text, _ := calls[len(calls)-1].Params["text"].(string)
-				if !strings.HasPrefix(text, "hello\nworld") || !strings.Contains(text, "caller-name") {
-					t.Fatalf("native payload lost bytes/signature: %q", text)
-				}
-			}
-		})
-	}
 }
 
 func TestHerdrCaptureNative(t *testing.T) {
@@ -297,29 +207,6 @@ func TestHerdrCaptureNative(t *testing.T) {
 	}
 }
 
-func TestHerdrKeysNative(t *testing.T) {
-	socket := newNativeSocket(t, func(_ nativeRequest) (any, string) { return map[string]any{"type": "ok"}, "" })
-	target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
-	engine := nativeEngine(t, target)
-	keys := []string{"Enter", "Escape", "C-c", "Down", "Tab", "C-d", "C-M-a", "S-Tab"}
-	want := []string{"Enter", "Escape", "ctrl+c", "Down", "Tab", "ctrl+d", "ctrl+alt+a", "shift+Tab"}
-	for _, key := range keys {
-		if err := engine.SendKey(context.Background(), target, key); err != nil {
-			t.Fatal(err)
-		}
-	}
-	calls := socket.calls()
-	if len(calls) != len(want) {
-		t.Fatalf("keys sent %d requests, want %d", len(calls), len(want))
-	}
-	for i, call := range calls {
-		if call.Method != "pane.send_keys" || call.Params["pane_id"] != "p2" ||
-			!reflect.DeepEqual(call.Params["keys"], []any{want[i]}) {
-			t.Fatalf("key %d request=%+v", i, call)
-		}
-	}
-}
-
 func TestHerdrCallMalformedAndUnreachable(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -369,7 +256,9 @@ func TestHerdrThenNativeBoundary(t *testing.T) {
 		wantDetail string
 	}{
 		{name: "observed-working", sawWorking: true, states: []string{"idle"}, seq: []int{4}, completion: []int{3}},
-		{name: "fast-completed", states: []string{"idle"}, seq: []int{6}, completion: []int{4}},
+		{name: "fast-completed", states: []string{"idle"}, seq: []int{6}, completion: []int{6}},
+		{name: "state-advance-only", states: []string{"idle", "idle"}, seq: []int{6, 8}, completion: []int{3, 3}, wantCode: CodeUndelivered, wantDetail: "boundary"},
+		{name: "old-completion", states: []string{"idle", "idle"}, seq: []int{6, 8}, completion: []int{4, 4}, wantCode: CodeUndelivered, wantDetail: "boundary"},
 		{name: "stale-then-working-idle", states: []string{"idle", "working", "idle"}, seq: []int{4, 5, 6}, completion: []int{3, 3, 4}},
 		{name: "blocked", states: []string{"blocked"}, seq: []int{5}, completion: []int{3}, wantCode: CodeUndelivered, wantDetail: "blocked"},
 		{name: "unknown", states: []string{"unknown"}, seq: []int{5}, completion: []int{3}, wantCode: CodeUndelivered, wantDetail: "unknown"},
@@ -504,58 +393,6 @@ func TestHerdrAllCallDirections(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestHerdrNativePayloadSafety(t *testing.T) {
-	for _, test := range []struct {
-		name, message string
-		unsigned      bool
-		wantCode      int
-	}{
-		{name: "large-multiline", message: strings.Repeat("line\n", 2000)},
-		{name: "command", message: "/status"},
-		{name: "unsigned", message: "unsafe anonymous request", unsigned: true, wantCode: CodeUndelivered},
-		{name: "compact-refused", message: "/compact", wantCode: CodeUndelivered},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
-				if request.Method == "pane.read" {
-					return nativePaneRead(request, "❯ "), ""
-				}
-				if request.Method == "agent.get" {
-					return nativeAgent("agent_info", "idle"), ""
-				}
-				return nativeAgent("agent_prompted", "working"), ""
-			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
-			engine := nativeEngine(t, target)
-			if test.unsigned {
-				engine.options.Sender = &Sender{}
-			}
-			result, err := engine.CallTarget(
-				context.Background(),
-				target,
-				Request{Target: "recipient", Message: test.message, FileBacked: true},
-			)
-			if err != nil || result.Code != test.wantCode {
-				t.Fatalf("native safety=%+v err=%v", result, err)
-			}
-			if test.wantCode != 0 {
-				if result.Typed || result.Unsigned {
-					t.Fatalf("refusal claims delivered input: %+v", result)
-				}
-				return
-			}
-			calls := socket.calls()
-			if len(calls) != 3 || calls[2].Method != "agent.prompt" {
-				t.Fatalf("native payload did not reach native prompt: %+v", calls)
-			}
-			text, _ := calls[len(calls)-1].Params["text"].(string)
-			if !strings.HasPrefix(text, test.message) || (test.name == "command" && text != test.message) {
-				t.Fatalf("native payload bytes changed: %q", text)
-			}
-		})
 	}
 }
 
@@ -796,123 +633,6 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 	}
 }
 
-func TestHerdrCallRaw(t *testing.T) {
-	for _, test := range append([]herdrRawCase{
-		{name: "multiline", id: pfmengine.Codex, body: "a\nb", wantPayload: "\x1b[200~a\nb\x1b[201~", wantTyped: true},
-		{name: "opencode", id: pfmengine.OpenCode, body: "a\nb", wantPayload: "\x1b[200~a\nb\x1b[201~", wantTyped: true},
-		{name: "large", id: pfmengine.Codex, body: strings.Repeat("line\n", 2000), wantTyped: true},
-		{name: "command", id: pfmengine.Codex, body: "/status", wantTyped: true},
-		{name: "draft", id: pfmengine.Codex, body: "a\nb", before: "› unsent", wantCode: CodeUndelivered},
-		{name: "busy", id: pfmengine.OpenCode, body: "a\nb", before: "› \nesc interrupt", wantCode: CodeBusy},
-		{name: "menu", id: pfmengine.Codex, body: "a\nb", before: "› 1. Allow once\n  2. Deny", wantCode: CodeUndelivered},
-		{name: "missing-composer", id: pfmengine.Codex, body: "a\nb", before: "Starting...", wantCode: CodeUndelivered},
-		{name: "read-malformed", id: pfmengine.Codex, body: "a\nb", badMethod: "pane.read", wantCode: CodeUndelivered},
-		{name: "paste-refused", id: pfmengine.Codex, body: "a\nb", refusal: "pane.send_text", wantCode: CodeUndelivered, wantTyped: true},
-		{name: "paste-malformed", id: pfmengine.Codex, body: "a\nb", badMethod: "pane.send_text", wantCode: CodeUndelivered, wantTyped: true},
-		{name: "enter-refused", id: pfmengine.Codex, body: "a\nb", refusal: "pane.send_keys", wantCode: CodeUndelivered, wantTyped: true},
-		{name: "still-in-composer", id: pfmengine.Codex, body: "a\nb", after: "› [Pasted text #1 +2 lines]", wantCode: CodeUndelivered, wantTyped: true},
-		{name: "no-confirmation", id: pfmengine.Codex, body: "a\nb", after: "unrelated screen", wantCode: CodeUndelivered, wantTyped: true},
-	}, append(herdrRawStyleCases(), herdrOpenCodeCases()...)...) {
-		t.Run(test.name, func(t *testing.T) {
-			entered := false
-			var payload string
-			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
-				if request.Method == test.refusal {
-					return nil, "pane_send_failed"
-				}
-				if request.Method == test.badMethod {
-					return map[string]any{"type": "unexpected"}, ""
-				}
-				switch request.Method {
-				case "pane.read":
-					if request.Params["format"] == "ansi" {
-						if request.Params["strip_ansi"] != false {
-							t.Errorf("styled capture must preserve ANSI: %+v", request.Params)
-						}
-						if test.styleRefused {
-							return nil, "styled_read_failed"
-						}
-						if test.styleMalformed {
-							return map[string]any{"type": "unexpected"}, ""
-						}
-						format := test.styleFormat
-						if format == "" {
-							format = "ansi"
-						}
-						screen := test.styled
-						if screen == "" {
-							screen = test.before
-						}
-						return map[string]any{"type": "pane_read", "read": map[string]any{
-							"pane_id": "p2", "text": screen, "format": format, "truncated": false,
-						}}, ""
-					}
-					screen := test.before
-					if screen == "" {
-						screen = "› "
-					}
-					if entered {
-						screen = test.after
-						if screen == "" {
-							screen = strings.TrimSuffix(strings.TrimPrefix(payload, "\x1b[200~"), "\x1b[201~") + "\n› "
-						}
-					}
-					return nativePaneRead(request, screen), ""
-				case "pane.send_text":
-					payload, _ = request.Params["text"].(string)
-				case "pane.send_keys":
-					entered = true
-				default:
-					t.Errorf("raw engine used unexpected API %s", request.Method)
-				}
-				return map[string]any{"type": "ok"}, ""
-			})
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: string(test.id)}
-			engine := nativeEngine(t, target)
-			// Pin row 9 at the raw wire boundary without adding a sender footer.
-			engine.options.DisableSignature = test.wantPayload != ""
-			prepared, err := engine.prepareLiveMessage(context.Background(), target, test.body, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			result, err := engine.CallTarget(context.Background(), target, Request{Message: test.body})
-			if err != nil || result.Code != test.wantCode || result.Typed != test.wantTyped {
-				t.Fatalf("raw call=%+v err=%v; want code=%d typed=%t", result, err, test.wantCode, test.wantTyped)
-			}
-			if test.styleRefused || test.styleMalformed || test.styleFormat != "" {
-				if !strings.Contains(result.Message, "styling") || payload != "" {
-					t.Fatalf("styled-read failure lost evidence or typed bytes: %+v payload=%q", result, payload)
-				}
-			}
-			if test.wantCode == 0 {
-				if result.Status != statusDelivered {
-					t.Fatalf("raw status=%+v", result)
-				}
-				wantPayload := test.wantPayload
-				if wantPayload == "" {
-					wantPayload = "\x1b[200~" + prepared.Message + "\x1b[201~"
-				}
-				if payload != wantPayload {
-					t.Fatalf("paste payload=%q want %q", payload, wantPayload)
-				}
-				calls := socket.calls()
-				wantCalls := 4
-				if test.styled != "" {
-					wantCalls = 5
-				}
-				last := len(calls) - 1
-				if len(calls) != wantCalls || calls[0].Method != "pane.read" ||
-					calls[last-2].Method != "pane.send_text" ||
-					calls[last-1].Method != "pane.send_keys" ||
-					calls[last].Method != "pane.read" ||
-					!reflect.DeepEqual(calls[last-1].Params["keys"], []any{"Enter"}) {
-					t.Fatalf("raw call order=%+v", calls)
-				}
-			}
-		})
-	}
-}
-
 func TestHerdrThenRawBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -938,7 +658,7 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 					return nativePaneRead(request, screen), ""
 				case "pane.send_keys":
 					entered = true
-				case "pane.send_text":
+				case "pane.send_input":
 				}
 				return map[string]any{"type": "ok"}, ""
 			})

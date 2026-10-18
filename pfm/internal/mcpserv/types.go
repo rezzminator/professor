@@ -116,6 +116,9 @@ type KeysInput struct {
 	Capture bool     `json:"capture,omitempty" jsonschema:"return the pane after the keys land"`
 }
 
+// codeCapability marks a pre-send backend refusal, not a dead target.
+const codeCapability = 10
+
 // KeysOutput is the structured receipt for keys.
 type KeysOutput struct {
 	Status     string   `json:"status"`
@@ -270,6 +273,7 @@ type StatusInput struct {
 type StatusOutput struct {
 	Name          string       `json:"name"`
 	State         string       `json:"state"`
+	StateSource   string       `json:"state_source,omitempty"`
 	IdleSeconds   int64        `json:"idle_seconds"`
 	Engine        pfmengine.ID `json:"engine"`
 	Model         string       `json:"model,omitempty"`

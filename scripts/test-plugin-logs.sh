@@ -17,8 +17,8 @@ cat > "$T/root/.gitmodules" <<'EOF'
  path = plugins/callmeter
 [submodule "buddy"]
  path = plugins/buddy
-[submodule "agent-effort"]
- path = plugins/effort-live-control
+[submodule "auto-effort-control"]
+ path = plugins/auto-effort-control
 [submodule "tvc"]
  path = plugins/tool-visibility-controller
 [submodule "engine-sync"]
@@ -46,7 +46,7 @@ row tool-visibility-controller info started 2026-10-14T15:19:31.123Z started > "
 run_sut report --dir "$T/logs"
 expect 'report groups event and where with exact count, first/last and last message' '[ "$RC" = 0 ] && grep -Fxq "store-failed · internal/hookentry/callmeter.go#store · 2 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:21:31.123Z · still locked" "$T/out"'
 expect 'report fixed section ordering and exact info count' '[ "$(grep -E "^(ERRORS|WARNINGS|INFO)$" "$T/out" | paste -sd, -)" = ERRORS,WARNINGS,INFO ] && grep -Fxq "callmeter 1" "$T/out"'
-expect 'no valid rows lists roster plugins with zero actual rows' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'no valid rows lists roster plugins with zero actual rows' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: auto-effort-control, buddy, engine-sync, gpt-gateway" "$T/out"'
 expect 'header states real span, no rotate and folder' 'grep -Fq "$T/logs" "$T/out" && grep -Fq "2026-10-14T15:19:31.123Z .. 2026-10-14T15:22:31.123Z" "$T/out" && grep -Fq "last rotate: none" "$T/out" && grep -Fq "contract-skipped: 0" "$T/out"'
 # Observe the real allocation without inventing a test-only production knob.
 mkdir -p "$T/scratch-bin" "$T/temp-root" "$T/.fixture-project"
@@ -133,10 +133,10 @@ for filter in '.level="WARN"' '.extra=true' '.ts="not-a-date"'; do
   row buddy warning degraded 2026-10-14T15:20:31.123Z invalid | jq -c "$filter" >> "$T/logs/buddy/warnings.jsonl"
 done
 run_sut report --dir "$T/logs"
-expect 'contract-skipped count distinguishes malformed input from silence' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out" && grep -Fq "contract-skipped: 5" "$T/out"'
+expect 'contract-skipped count distinguishes malformed input from silence' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: auto-effort-control, buddy, engine-sync, gpt-gateway" "$T/out" && grep -Fq "contract-skipped: 5" "$T/out"'
 row buddy warning degraded 2026-10-14T15:20:31.123Z fallback >> "$T/logs/buddy/warnings.jsonl"
 run_sut report --dir "$T/logs"
-expect 'a valid row after malformed rows contributes to grouping and roster activity' '[ "$RC" = 0 ] && grep -Fxq "degraded · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · fallback" "$T/out" && grep -Fxq "no valid rows: effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'a valid row after malformed rows contributes to grouping and roster activity' '[ "$RC" = 0 ] && grep -Fxq "degraded · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · fallback" "$T/out" && grep -Fxq "no valid rows: auto-effort-control, engine-sync, gpt-gateway" "$T/out"'
 row callmeter warning capped 2026-10-14T15:23:31.123Z capped > "$T/logs/callmeter/warnings.jsonl.1"
 run_sut report --dir "$T/logs"
 expect 'report includes capped .1 rows' 'grep -Fq "capped · internal/hookentry/callmeter.go#store · 1" "$T/out"'
@@ -200,7 +200,7 @@ git -C "$T/ignore" init -q
 if git -C "$T/ignore" check-ignore -q --no-index plugins/tmp/logs/x/errors.jsonl; then ok 'plugins/tmp logs are ignored'; else bad 'plugins/tmp logs are ignored'; fi
 mkdir -p "$T/report/callmeter"
 run_sut report --dir "$T/report" --archive 2026-10-01
-expect 'missing selected archive is named rather than reported as empty' '[ "$RC" = 0 ] && grep -Fxq "no archive 2026-10-01" "$T/out" && grep -Fxq "no valid rows: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+expect 'missing selected archive is named rather than reported as empty' '[ "$RC" = 0 ] && grep -Fxq "no archive 2026-10-01" "$T/out" && grep -Fxq "no valid rows: auto-effort-control, buddy, callmeter, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
 mkdir -p "$T/report/callmeter/archive/2026-10-01"
 run_sut report --dir "$T/report" --archive 2026-10-01
 expect 'existing empty archive has a distinct visible state' '[ "$RC" = 0 ] && grep -Fxq "archive: 2026-10-01" "$T/out" && grep -Fq "span: none" "$T/out"'
@@ -232,8 +232,8 @@ mkdir -p "$T/empty-rotation"
 run_sut rotate --dir "$T/empty-rotation" --today 2026-10-16
 expect 'empty rotation succeeds' '[ "$RC" = 0 ] && grep -Fxq "rotated: $T/empty-rotation · 2026-10-16" "$T/out"'
 run_sut report --dir "$T/empty-rotation"
-expect 'empty live period lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
-for plugin in buddy callmeter effort-live-control engine-sync gpt-gateway tool-visibility-controller; do
+expect 'empty live period lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: auto-effort-control, buddy, callmeter, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+for plugin in buddy callmeter auto-effort-control engine-sync gpt-gateway tool-visibility-controller; do
   mkdir -p "$T/empty-rotation/$plugin"
   row "$plugin" info started 2026-10-14T15:20:31.123Z started > "$T/empty-rotation/$plugin/info.jsonl"
 done

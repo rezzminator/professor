@@ -12,6 +12,7 @@ The foreman exists to raise the ratio of code written to tokens read. That ratio
 - [Reading and the trace store](#reading-and-the-trace-store)
 - [Waiting](#waiting)
 - [Tests](#tests)
+- [Effort buttons](#effort-buttons)
 - [Decisions](#decisions)
 - [What the family never carries](#what-the-family-never-carries)
 - [Harness settings](#harness-settings)
@@ -144,6 +145,21 @@ The main chat chooses at dispatch; a foreman chooses for its own children.
 - **A red full gate:** the lander fixes it, gets the failing tests green with the affected-test command, never a gate rerun, then runs that gate once more. That is the only repeat.
 - **The testing manual:** a project's testing manual, where one exists (this repo's `.claude/commands/pfm-testing-manual.md`), names the affected-test command and the full gate. Without one, agents use the project's documented test commands.
 - **Where tests run:** this repo runs every test in the fence through `.claude/scripts/test.sh`.
+
+## Effort buttons
+
+The `auto-effort-control` plugin gives an agent whose frontmatter carries `effortControl` three tools, `effort_up`, `effort_down` and `effort_auto` (`mcp__auto-effort-control__…`), and steers its effort while it works (`plugins/auto-effort-control/README.md`). `effortControl: on` takes the plugin's default band, floor medium and ceiling xhigh.
+
+| Agent | `effortControl` |
+| --- | --- |
+| `flights-foreman`, `flights-foreman-mini` | `on` |
+| `flights-foreman-pro` | floor high, ceiling xhigh |
+| `flights-worker` | `on` |
+| `flights-worker-pro` | floor high, ceiling xhigh |
+| `flights-lander`, `flights-lander-mini`, `flights-lander-pro` | floor medium, ceiling xhigh, tripwires `redispatch` |
+| `reviewer`, `reviewer-pro`, `reviewer-nt`, `documenter` | `on` |
+
+A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. No `gpt-*` twin carries it: each GPT twin pins a `tools:` line without the buttons and unsets the key (see [gpt-twins.md](../gpt-twins/gpt-twins.md#declarations)); nor does `pcm` or `releaser`. Every steered agent lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix ([flights-lander.md](flights-lander.md#declaration)).
 
 ## Decisions
 

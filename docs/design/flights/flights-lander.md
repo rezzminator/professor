@@ -94,4 +94,5 @@ One message:
 - **Base:** `templates/global/agents/flights-lander.md`, opus at effort medium.
 - **Tiers:** `flights-lander-mini.md` (sonnet, high) and `flights-lander-pro.md` (opus, high) are `from: flights-lander` declarations.
 - **GPT twin:** `gpt-flights-lander` is a `from:` declaration that renames its reviewers to the GPT twins.
+- **Effort buttons:** `effortControl` floor medium, ceiling xhigh, tripwires `redispatch`, inherited by both tiers; the `tools:` line carries `mcp__auto-effort-control__effort_{up,down,auto}`, and `gpt-flights-lander` pins a `tools:` line without them and unsets `effortControl` ([flights.md](flights.md#effort-buttons)).
 - **Visibility:** visible to the main chat.

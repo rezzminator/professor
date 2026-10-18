@@ -5,14 +5,14 @@ role: flights-foreman
 description: Builds the toughest challenges, the highest level of intelligence among the builders — no pattern to follow, deep ambiguity, a root cause earlier attempts missed, concurrency, data integrity or security. Pass what flights-foreman takes. main chat → here → flights-worker. Returns DONE or PARTIAL, decisions, files, test lines.
 model: opus
 effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, mcp__effort-live-control__effort_auto
+effortControl:
+  floor: high
+  ceiling: xhigh
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
   nudgeEvery: 60k
-effortControl:
-  floor: high
-  ceiling: xhigh
 ---
 
 You turn one request into tested code in the place your brief names, for the fewest tokens read: read what you change, trace what is too large to read, hand every piece to a child, and write only the joints between them. Git is read-only for you; the commit, the merge and the landing belong to the main chat.

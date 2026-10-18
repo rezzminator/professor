@@ -20,7 +20,7 @@ import (
 var doctorPluginIDs = []string{
 	"cache-live-control@cache-live-control",
 	"sub-agent-compact@sub-agent-compact",
-	"effort-live-control@effort-live-control",
+	"auto-effort-control@auto-effort-control",
 	"tool-visibility-controller@tool-visibility-controller",
 	"engine-sync@engine-sync",
 }
@@ -28,7 +28,7 @@ var doctorPluginIDs = []string{
 var doctorDevIDs = []string{
 	"cache-live-control@cache-live-control-dev",
 	"sub-agent-compact@sub-agent-compact-dev",
-	"effort-live-control@effort-live-control-dev",
+	"auto-effort-control@auto-effort-control-dev",
 	"tool-visibility-controller@tool-visibility-controller-dev",
 	"engine-sync@engine-sync-dev",
 }
@@ -143,13 +143,13 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 		}, 2, 0},
 		{
 			"an unreadable marketplace record",
-			pfmconfig.ClaudePlugin{ID: "effort-live-control"},
+			pfmconfig.ClaudePlugin{ID: "auto-effort-control"},
 			false, `{`,
 			func(path, store string) string {
 				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
 					filepath.Join(store, "plugins", "known_marketplaces.json") + ": unexpected end of JSON input\n" +
-					"doctor: claude_plugins plugin effort-live-control@effort-live-control not enabled in " + path + " — " + bareNameFix("effort-live-control") + "\n" +
-					"doctor: claude_plugins plugin effort-live-control@effort-live-control not installed in " + store + " — " + bareNameFix("effort-live-control") + "\n" +
+					"doctor: claude_plugins plugin auto-effort-control@auto-effort-control not enabled in " + path + " — " + bareNameFix("auto-effort-control") + "\n" +
+					"doctor: claude_plugins plugin auto-effort-control@auto-effort-control not installed in " + store + " — " + bareNameFix("auto-effort-control") + "\n" +
 					"doctor: claude_plugins plugin typesafe@typesafe-ai cannot be checked: marketplace typesafe-ai cannot be looked up" +
 					" while the plugin records are unreadable, and its claude.plugins entry has no source — " +
 					"repair the unreadable file named above, then run pfm doctor again\n"
@@ -493,7 +493,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	names := []string{
 		"cache-live-control",
 		"sub-agent-compact",
-		"effort-live-control",
+		"auto-effort-control",
 		"tool-visibility-controller",
 		"engine-sync",
 	}

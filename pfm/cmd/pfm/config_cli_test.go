@@ -400,7 +400,7 @@ func TestConfigShowReportsClaudePlugins(t *testing.T) {
 	for _, test := range []struct{ name, content, want string }{
 		{
 			"unset", `{"version":2}`,
-			"config claude.plugins=cache-live-control,sub-agent-compact,effort-live-control,tool-visibility-controller,engine-sync (default)",
+			"config claude.plugins=cache-live-control,sub-agent-compact,auto-effort-control,tool-visibility-controller,engine-sync (default)",
 		},
 		{
 			"listed",

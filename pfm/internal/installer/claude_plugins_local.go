@@ -637,7 +637,20 @@ func settingsEditTarget(path string) (string, fs.FileMode, error) {
 // (ClaudePluginGaps); install disables it, never uninstalls it, once the
 // successor is ensured.
 var retiredClaudePlugins = map[string][]string{
-	"effort-live-control": {"agent-effort@agent-effort", "agent-effort@agent-effort-dev"},
+	"auto-effort-control": {
+		"agent-effort@agent-effort",
+		"agent-effort@agent-effort-dev",
+		"agent-effort@professor",
+		"agent-effort@rezzminator",
+		"auto-effort@auto-effort",
+		"auto-effort@auto-effort-dev",
+		"auto-effort@professor",
+		"auto-effort@rezzminator",
+		"effort-live-control@effort-live-control",
+		"effort-live-control@effort-live-control-dev",
+		"effort-live-control@professor",
+		"effort-live-control@rezzminator",
+	},
 }
 
 // planRetiredPluginDisable plans the settings.json edit that sets every

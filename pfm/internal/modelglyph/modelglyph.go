@@ -1,23 +1,12 @@
-// Package modelglyph owns the glyphs that name a model and the effort it runs
-// at: the one table the status line and the picker's rows both read, so a model
-// never wears two symbols and an effort level never wears two emoji.
-//
-// The status line writes each effort as a free-standing emoji, some of them a
-// base character plus a variation selector (🏍️ 🏎️ 🛰️). A terminal that counts
-// such a pair as one cell while the program counts two throws every cell after
-// it off by a column, which a status line survives and a column-aligned list
-// does not. RowEffort is therefore the list's own form: every glyph in it is a
-// single code point that is wide by default, so its width is two cells in every
-// terminal that draws emoji at all.
+// Package modelglyph owns model symbols, statusline effort bars and width-safe picker glyphs.
 package modelglyph
 
 import "strings"
 
 const (
 	// EffortOther marks an effort level this table does not know — one Claude
-	// Code adds later — and EffortOff one whose thinking is off.
+	// Code adds later — in the picker.
 	EffortOther = "🔆"
-	EffortOff   = "💤"
 	// Unknown is the symbol of a model whose family this table does not know.
 	Unknown = "●"
 )
@@ -52,26 +41,15 @@ func ListSymbol(model string) string {
 	return "◈"
 }
 
-// statusEffort is the status line's emoji per effort level.
+// statusEffort is the statusline's bar per effort level: the filled steps of
+// a five-step scale, no empty ones.
 var statusEffort = map[string]string{
-	"low": "🚲", "medium": "🏍️", "high": "🏎️", "xhigh": "🚀", "max": "🛰️",
+	"low": "▰", "medium": "▰▰", "high": "▰▰▰", "xhigh": "▰▰▰▰", "max": "▰▰▰▰▰",
 }
 
 // rowEffort is the list's width-safe emoji per level, slowest to fastest.
 var rowEffort = map[string]string{
 	"low": "🚲", "medium": "🛵", "high": "🚄", "xhigh": "🚀", "max": "🛸",
-}
-
-// EffortEmoji is the status line's emoji for a level: EffortOther for a level
-// not in the table, and "" for no level at all.
-func EffortEmoji(level string) string {
-	if level == "" {
-		return ""
-	}
-	if emoji, ok := statusEffort[level]; ok {
-		return emoji
-	}
-	return EffortOther
 }
 
 // RowEffort is the list's emoji for a level: always two cells wide, EffortOther
@@ -86,7 +64,24 @@ func RowEffort(level string) string {
 	return EffortOther
 }
 
-// EffortLabel prefixes a level with its status-line emoji.
+// EffortBar normalises a level to lowercase and returns its filled-only bar:
+// medium → ("medium", "▰▰"). A level outside the five has no bar; no level
+// returns two empty strings.
+func EffortBar(level string) (name, bar string) {
+	name = strings.ToLower(strings.TrimSpace(level))
+	return name, statusEffort[name]
+}
+
+// EffortLabel renders a lowercase level after its filled-only bar, medium →
+// "▰▰ medium"; a level outside the five stays explicit, without a bar.
 func EffortLabel(level string) string {
-	return EffortEmoji(level) + " " + level
+	name, bar := EffortBar(level)
+	switch {
+	case name == "":
+		return ""
+	case bar == "":
+		return "effort " + name + " (unknown)"
+	default:
+		return bar + " " + name
+	}
 }

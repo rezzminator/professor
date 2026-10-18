@@ -6,8 +6,6 @@ effort: xhigh
 effortControl:
   floor: high
   ceiling: xhigh
-add:
-  tools: [mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, mcp__effort-live-control__effort_auto]
 append: |-
   Before a design choice the code leaves open, `effort_up`; once it is decided, `effort_auto`.
 ---

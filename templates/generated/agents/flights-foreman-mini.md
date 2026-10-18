@@ -5,7 +5,8 @@ role: flights-foreman
 description: Builds clear work with a pattern to follow — the codebase has the pattern, the requirements are settled, little is left to decide. Pass what flights-foreman takes. main chat → here → flights-worker. Returns DONE or PARTIAL, decisions, files, test lines.
 model: opus
 effort: medium
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+effortControl: on
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

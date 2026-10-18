@@ -33,27 +33,14 @@
       "keywords": ["claude-code", "prompt-cache", "cache-ttl", "function-hooks", "professor"]
     },
     {
-      "name": "effort-live-control",
-      "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/rezzminator/effort-live-control.git",
-        "path": "plugins/effort-live-control",
-        "ref": "main"
-      },
-      "description": "Set each Claude Code sub-agent's reasoning effort per spawn with [effort: low|medium|high|xhigh|max], and let an opted-in agent's effort rise at each failing test run or red sub-task and come home once the trouble resolves.",
-      "homepage": "https://github.com/rezzminator/effort-live-control",
-      "license": "MIT",
-      "keywords": ["claude-code", "sub-agent", "effort", "reasoning-effort", "function-hooks", "professor"]
-    },
-    {
-      "name": "auto-effort",
+      "name": "auto-effort-control",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/auto-effort.git",
-        "path": "plugins/auto-effort",
+        "path": "plugins/auto-effort-control",
         "ref": "main"
       },
-      "description": "Automatic reasoning effort for the Claude Code main chat: the plugin plans each turn, the model raises or lowers it with set_effort, and a cache check keeps it safe.",
+      "description": "Tune reasoning levels — automatic main-chat tuning; set_effort, effort_up, effort_down and effort_auto choices; /effort pins; [effort: low|medium|high|xhigh|max] sub-agent launches with bounded failure escalation.",
       "homepage": "https://github.com/rezzminator/auto-effort",
       "license": "MIT",
       "keywords": ["claude-code", "claude-code-plugin", "effort", "reasoning-effort", "thinking", "function-hooks", "claude-mods", "token-cost", "prompt-cache", "professor"]
@@ -109,6 +96,19 @@
       "homepage": "https://github.com/rezzminator/engine-sync",
       "license": "MIT",
       "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"]
+    },
+    {
+      "name": "cache-keepwarm",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/cache-keepwarm.git",
+        "path": "plugins/cache-keepwarm",
+        "ref": "main"
+      },
+      "description": "Keeps the main chat's prompt cache warm while it waits on background agents, shells, Monitors and workflows: one invisible replay before expiry, admitted only while the forecast spend stays under the rewrite it saves.",
+      "homepage": "https://github.com/rezzminator/cache-keepwarm",
+      "license": "MIT",
+      "keywords": ["claude-code", "prompt-cache", "keep-warm", "function-hooks", "professor"]
     }
   ]
 }

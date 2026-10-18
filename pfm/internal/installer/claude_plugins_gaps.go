@@ -31,7 +31,7 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 // ids (GitHub, professor, -dev), every install-only plugin enabled under any,
 // every local target whose copy is missing, not a plain directory or not the
 // checkout's content, every other plugin enabled under two or more keys, and
-// every enabled retired default agent-effort copy. A
+// every enabled retired default plugin copy. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -91,13 +91,15 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			}
 		}
 	}
-	for _, id := range retiredClaudePlugins["effort-live-control"] {
-		if pluginEnabled(document, id) {
-			gaps = append(gaps, ClaudePluginGap{
-				Problem: "plugin " + id + " retired (now effort-live-control) but still enabled in " + path,
-				Fix: "claude plugin uninstall " + shellCommandLine(id) + " --scope user" +
-					"; if claude.plugins still lists it, replace that entry with effort-live-control",
-			})
+	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
+		for _, id := range retiredClaudePlugins[successor] {
+			if pluginEnabled(document, id) {
+				gaps = append(gaps, ClaudePluginGap{
+					Problem: "plugin " + id + " retired (now " + successor + ") but still enabled in " + path,
+					Fix: "claude plugin uninstall " + shellCommandLine(id) + " --scope user" +
+						"; if claude.plugins still lists it, replace that entry with " + successor,
+				})
+			}
 		}
 	}
 	return append(gaps, claudePluginDuplicateGaps(document, path, targets)...), nil

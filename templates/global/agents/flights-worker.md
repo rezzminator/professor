@@ -8,7 +8,8 @@ visibility:
     include: [tracer]
 model: sonnet
 effort: high
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+effortControl: on
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

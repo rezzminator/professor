@@ -2,7 +2,9 @@
 # Self-test for scripts/install-downgrade-guard.sh: it must let an installed
 # binary whose commit HEAD still contains pass (ok), refuse one built from a
 # commit HEAD does not contain — whether a plain descendant-mismatch or a
-# sibling branch — refuse one from a revision this repo has never heard of,
+# sibling branch — pass history HEAD already holds (a patch-exact rebase, or
+# absorbed: merging the installed commit into HEAD changes nothing), refuse one
+# from a revision this repo has never heard of,
 # let FORCE=1 override any refusal, and treat a missing binary or one with no
 # vcs.revision as "could not check", never as ok or as a failure.
 #
@@ -175,7 +177,8 @@ else
   bad "install-guard: expected complete rebase to pass" "$out (rc $rc)"
 fi
 
-# Matching only the installed tip cannot excuse a missing earlier change.
+# A combined upstream commit carrying the earlier change matches no patch, yet
+# HEAD holds every installed line: absorbed.
 gitc "$REPO" checkout -q -b partial-series "$SHA_A"
 printf 'package main\n\nfunc main() { _ = 1 }\n' > "$REPO/main.go"
 printf 'different combined patch\n' > "$REPO/combined.txt"
@@ -183,10 +186,10 @@ gitc "$REPO" add -A
 gitc "$REPO" commit -q -m combined
 gitc "$REPO" cherry-pick "$SHA_B2" >/dev/null
 out="$(run "$BIN/B2" "$REPO")"; rc=$?
-if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
-  ok "install-guard: only equivalent tip with unmatched earlier history refuses"
+if [[ "$out" == *"absorbed"* ]] && [ $rc -eq 0 ]; then
+  ok "install-guard: earlier change carried by a combined upstream commit is absorbed, exit 0"
 else
-  bad "install-guard: incomplete equivalence must refuse" "$out (rc $rc)"
+  bad "install-guard: a combined commit holding the earlier change must pass as absorbed" "$out (rc $rc)"
 fi
 
 # Ordinary patch-id strips semantic whitespace inside source strings.
@@ -204,19 +207,20 @@ else
   bad "install-guard: whitespace-only semantic divergence must refuse" "$out (rc $rc)"
 fi
 
-# An empty installed-only commit has no patch proof and must remain refused.
+# An empty installed-only commit has no patch proof, but its tree is in HEAD.
 gitc "$REPO" checkout -q -b installed-empty "$SHA_B2"
 gitc "$REPO" commit -q --allow-empty -m empty
 buildbin "$REPO" "$BIN/empty"
 gitc "$REPO" checkout -q rebased-series
 out="$(run "$BIN/empty" "$REPO")"; rc=$?
-if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
-  ok "install-guard: empty installed-only commit has no equivalence proof"
+if [[ "$out" == *"absorbed"* ]] && [ $rc -eq 0 ]; then
+  ok "install-guard: empty installed-only commit over rebased content is absorbed, exit 0"
 else
-  bad "install-guard: empty installed-only history must refuse" "$out (rc $rc)"
+  bad "install-guard: an empty installed-only commit over HEAD's content must pass as absorbed" "$out (rc $rc)"
 fi
 
-# Independent changes cannot be accepted in the opposite history order.
+# Independent changes replayed in the opposite order fail the ordered patch
+# proof, but leave identical trees: absorbed.
 gitc "$REPO" checkout -q -b ordered-installed "$SHA_A"
 printf 'first\n' > "$REPO/first.txt"
 gitc "$REPO" add first.txt
@@ -230,13 +234,13 @@ buildbin "$REPO" "$BIN/ordered"
 gitc "$REPO" checkout -q -b reverse-candidate "$SHA_A"
 gitc "$REPO" cherry-pick "$SHA_SECOND" "$SHA_FIRST" >/dev/null
 out="$(run "$BIN/ordered" "$REPO")"; rc=$?
-if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
-  ok "install-guard: reversed independent patch order refuses despite identical trees"
+if [[ "$out" == *"absorbed"* ]] && [ $rc -eq 0 ]; then
+  ok "install-guard: reversed independent patch order with identical trees is absorbed, exit 0"
 else
-  bad "install-guard: reversed patch history must refuse" "$out (rc $rc)"
+  bad "install-guard: reversed independent patches with identical trees must pass as absorbed" "$out (rc $rc)"
 fi
 
-# A merge-only installed commit cannot be proved by its individual side patches.
+# An installed merge has no patch proof; HEAD holding both sides absorbs it.
 gitc "$REPO" checkout -q -b merge-installed "$SHA_A"
 printf 'main\n' > "$REPO/merge-main.txt"
 gitc "$REPO" add merge-main.txt
@@ -253,10 +257,10 @@ buildbin "$REPO" "$BIN/merge"
 gitc "$REPO" checkout -q -b linear-candidate "$SHA_A"
 gitc "$REPO" cherry-pick "$SHA_MERGE_MAIN" "$SHA_MERGE_SIDE" >/dev/null
 out="$(run "$BIN/merge" "$REPO")"; rc=$?
-if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
-  ok "install-guard: installed merge refuses despite matching linear side patches"
+if [[ "$out" == *"absorbed"* ]] && [ $rc -eq 0 ]; then
+  ok "install-guard: installed merge whose sides HEAD holds linearly is absorbed, exit 0"
 else
-  bad "install-guard: installed merge history must refuse" "$out (rc $rc)"
+  bad "install-guard: an installed merge whose sides HEAD holds must pass as absorbed" "$out (rc $rc)"
 fi
 
 gitc "$REPO" checkout -q rebased-series
@@ -281,6 +285,42 @@ if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
   ok "install-guard: shared reverted patch cannot excuse missing installed replay"
 else
   bad "install-guard: historical reverted patch must not prove current installed replay" "$out (rc $rc)"
+fi
+
+gitc "$REPO" checkout -q rebased-series
+
+# An installed commit superseded upstream by a broader commit: no patch matches,
+# yet merging the installed commit into HEAD changes nothing — nothing to lose.
+gitc "$REPO" checkout -q -b superseded-installed "$SHA_A"
+printf 'v1\n' > "$REPO/sup.txt"
+gitc "$REPO" add sup.txt
+gitc "$REPO" commit -q -m superseded
+buildbin "$REPO" "$BIN/superseded"
+gitc "$REPO" checkout -q -b superseding-upstream "$SHA_A"
+printf 'v1\n' > "$REPO/sup.txt"
+printf 'wider\n' > "$REPO/wider.txt"
+gitc "$REPO" add sup.txt wider.txt
+gitc "$REPO" commit -q -m superseding
+out="$(run "$BIN/superseded" "$REPO")"; rc=$?
+if [[ "$out" == *"install-guard: ok"* && "$out" == *"absorbed"* ]] && [ $rc -eq 0 ]; then
+  ok "install-guard: installed change superseded by a broader upstream commit is absorbed, exit 0"
+else
+  bad "install-guard: a superseded installed change must pass as absorbed" "$out (rc $rc)"
+fi
+
+# One installed change HEAD truly lacks, on top of a superseded one: the merge
+# would add it, so installing HEAD would drop it — REFUSED.
+gitc "$REPO" checkout -q -b superseded-plus "$(git -C "$REPO" rev-parse superseded-installed)"
+printf 'extra\n' > "$REPO/extra.txt"
+gitc "$REPO" add extra.txt
+gitc "$REPO" commit -q -m extra
+buildbin "$REPO" "$BIN/superseded-plus"
+gitc "$REPO" checkout -q superseding-upstream
+out="$(run "$BIN/superseded-plus" "$REPO")"; rc=$?
+if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
+  ok "install-guard: an installed change HEAD lacks still refuses beside an absorbed one, exit 1"
+else
+  bad "install-guard: a change missing from HEAD must refuse" "$out (rc $rc)"
 fi
 
 gitc "$REPO" checkout -q rebased-series

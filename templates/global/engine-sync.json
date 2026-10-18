@@ -110,8 +110,8 @@
   },
   "mcp": {
     "globalServers": [
+      "auto-effort-control",
       "chat-professor",
-      "effort-live-control",
       "harvester-professor",
       "sub-agent-compact"
     ],

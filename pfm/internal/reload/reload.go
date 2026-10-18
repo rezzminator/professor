@@ -586,8 +586,12 @@ func codexRun(request Request) (string, error) {
 	} else {
 		parts = append(parts, "--sandbox", "workspace-write")
 	}
-	if request.Model != "" {
-		parts = append(parts, "--model", action.Quote(request.Model))
+	model, err := pfmengine.CodexModel(request.Model, request.Home)
+	if err != nil {
+		return "", fmt.Errorf("resolve codex respawn model: %w", err)
+	}
+	if model != "" {
+		parts = append(parts, "--model", action.Quote(model))
 	}
 	if effort != "" {
 		flag := action.CodexEffortArg(effort)

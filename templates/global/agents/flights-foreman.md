@@ -3,7 +3,8 @@ name: flights-foreman
 description: 'Builds one request in a worktree — design choices, ambiguity, unfamiliar code, an unknown cause, cross-module work; clear work → flights-foreman-mini, the toughest → flights-foreman-pro. Pass the work, acceptance, worktree, testing manual, tracer runs. main chat → here → flights-worker → main chat → flights-lander → gitter. Returns DONE or PARTIAL, decisions, files, test lines.'
 model: opus
 effort: high
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+effortControl: on
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

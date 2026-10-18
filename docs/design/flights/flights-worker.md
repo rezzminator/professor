@@ -51,4 +51,5 @@ One message:
 
 - **Base:** `templates/global/agents/flights-worker.md`, sonnet at effort high.
 - **Pro tier:** `flights-worker-pro.md` is a `from: flights-worker` declaration at effort xhigh.
-- **Tools:** Read, Write, Edit, Bash, Glob, Grep, Agent (tracer only) and the sub-agent-compact tools.
+- **Effort buttons:** the base carries `effortControl: on` and the `mcp__auto-effort-control__` effort buttons in its `tools:` line; the pro tier inherits them and narrows `effortControl` to floor high, ceiling xhigh ([flights.md](flights.md#effort-buttons)).
+- **Tools:** Read, Write, Edit, Bash, Glob, Grep, Agent (tracer only), the sub-agent-compact tools and the three effort buttons.

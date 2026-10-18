@@ -71,12 +71,12 @@ func TestFunctionHookModulesUnsetFlagWarnsOnlyWithModulePlugins(t *testing.T) {
 	writeFile(t, accountStateFile(env), `{"cachedGrowthBookFeatures":{"other":true}}`)
 	installModulePlugin(t, dir, "plain@plain", false)
 	assertRows(t, detect(t, "function-hook-modules", env))
-	installModulePlugin(t, dir, "effort-live-control@effort-live-control", true)
+	installModulePlugin(t, dir, "auto-effort-control@auto-effort-control", true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn {
 		t.Fatalf("row=%+v, want WARN", row)
 	}
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "effort-live-control@effort-live-control")
+	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "auto-effort-control@auto-effort-control")
 }
 
 func TestFunctionHookModulesMissingStateFileWarnsWithModulePlugins(t *testing.T) {

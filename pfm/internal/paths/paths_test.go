@@ -490,20 +490,21 @@ func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testi
 	}
 }
 
-// The auto-effort state file is the plugin's own path rule, mirrored: its
+// The auto-effort-control state file is the plugin's own path rule, mirrored: its
 // variable (blank is unset, `~/` the home), else its default under the home's
 // state directory, the session id made file-safe and set before the name's last
 // extension (`sessionLogPath` in the plugin's src/log.ts).
 func TestAutoEffortStateFileMirrorsThePluginsPathRule(t *testing.T) {
 	cases := []struct {
 		name, home, setting, sessionID, want, wantErr string
+		legacy                                        string
 		set                                           bool
 	}{
 		{
 			name:      "default",
 			home:      "/jail/home",
 			sessionID: "sess-1",
-			want:      "/jail/home/.local/state/auto-effort/state.sess-1.json",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
 		},
 		{
 			name:      "blank variable is unset",
@@ -511,7 +512,7 @@ func TestAutoEffortStateFileMirrorsThePluginsPathRule(t *testing.T) {
 			set:       true,
 			setting:   "",
 			sessionID: "sess-1",
-			want:      "/jail/home/.local/state/auto-effort/state.sess-1.json",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
 		},
 		{
 			name:      "whitespace variable is unset",
@@ -519,7 +520,7 @@ func TestAutoEffortStateFileMirrorsThePluginsPathRule(t *testing.T) {
 			set:       true,
 			setting:   "  ",
 			sessionID: "sess-1",
-			want:      "/jail/home/.local/state/auto-effort/state.sess-1.json",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
 		},
 		{
 			name:      "variable set",
@@ -573,7 +574,39 @@ func TestAutoEffortStateFileMirrorsThePluginsPathRule(t *testing.T) {
 			name:      "session id made file-safe",
 			home:      "/jail/home",
 			sessionID: "a/b c.d:é😀_-Z9",
-			want:      "/jail/home/.local/state/auto-effort/state.a_b_c_d_____-Z9.json",
+			want:      "/jail/home/.local/state/auto-effort-control/state.a_b_c_d_____-Z9.json",
+		},
+		{
+			name:      "legacy override",
+			home:      "/jail/home",
+			legacy:    " /old/state.json ",
+			sessionID: "sess-1",
+			want:      "/old/state.sess-1.json",
+		},
+		{
+			name:      "same old and new override",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/same/state.json",
+			legacy:    "/same/state.json",
+			sessionID: "sess-1",
+			want:      "/same/state.sess-1.json",
+		},
+		{
+			name:      "conflicting overrides",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/new/state.json",
+			legacy:    "/old/state.json",
+			sessionID: "sess-1",
+			wantErr:   "AUTO_EFFORT_STATE_FILE conflicts with AUTO_EFFORT_CONTROL_STATE_FILE",
+		},
+		{
+			name: "retired override falls back like the producer",
+			home: "/jail/home", set: true,
+			setting:   "~/.local/state/safe/../auto-effort/state.json",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
 		},
 		{name: "empty session id", home: "/jail/home", sessionID: "", wantErr: "empty session id"},
 		{
@@ -587,9 +620,9 @@ func TestAutoEffortStateFileMirrorsThePluginsPathRule(t *testing.T) {
 		{name: "default needs the home", home: "", sessionID: "sess-1", wantErr: "home directory"},
 	}
 	for _, tc := range cases {
-		env := &MapEnv{}
+		env := &MapEnv{Values: map[string]string{"AUTO_EFFORT_STATE_FILE": tc.legacy}}
 		if tc.set {
-			env.Values = map[string]string{EnvAutoEffortStateFile: tc.setting}
+			env.Values["AUTO_EFFORT_CONTROL_STATE_FILE"] = tc.setting
 		}
 		got, err := AutoEffortStateFile(env, tc.home, tc.sessionID)
 		if tc.wantErr != "" {

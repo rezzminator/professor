@@ -28,7 +28,7 @@
     "plugins": [
       "cache-live-control",
       "sub-agent-compact",
-      "effort-live-control",
+      "auto-effort-control",
       "tool-visibility-controller",
       "engine-sync"
     ],

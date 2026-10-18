@@ -118,6 +118,6 @@ One message:
 ## Declaration
 
 - **Base:** `templates/global/agents/flights-foreman.md`, opus at effort high.
-- **Tiers:** `flights-foreman-mini.md` (effort medium) and `flights-foreman-pro.md` (effort xhigh) are `from: flights-foreman` declarations, rendered into `templates/generated/agents/`. `flights-foreman-pro` carries the effort-live-control tools with `effortControl` floor high, ceiling xhigh.
+- **Tiers:** `flights-foreman-mini.md` (effort medium) and `flights-foreman-pro.md` (effort xhigh) are `from: flights-foreman` declarations, rendered into `templates/generated/agents/`. The base carries `effortControl: on` and the `mcp__auto-effort-control__` effort buttons in its `tools:` line; both tiers inherit them, and `flights-foreman-pro` narrows `effortControl` to floor high, ceiling xhigh ([flights.md](flights.md#effort-buttons)).
 - **GPT twins:** `gpt-flights-foreman` and `gpt-flights-foreman-pro` are `from:` declarations over the same body. Their rename maps leave the worker names alone, so they spawn the Claude workers.
 - **Tools:** Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill and the sub-agent-compact tools.

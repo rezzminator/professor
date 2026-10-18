@@ -107,7 +107,7 @@ The `data gaps:` line is the report's own honesty, and `data gaps: none` means t
 | Verb | Does |
 | --- | --- |
 | `$K prep TARGET [--lines A-B] [--dir DIR] [--window 40000] [--reader-max 250000]` | the digest with noise collapsed (task notifications, system reminders, compact summaries), the timeline, every mechanical row, the reading windows; prints `DIR`, the header, `DIGEST … windows`, `TOOLS`, `MECH` counts, and `SPLIT … Lines: …` when one reader cannot hold it |
-| `$K read DIR N` · `$K read DIR A-B` | window N, or digest lines A–B, each as `D{n} ‹labels› {text}` |
+| `$K read DIR N` · `$K read DIR DA-DB` · `$K read DIR LA-LB` | window N, digest lines A–B (bare `A-B` too), or the digest lines rendering transcript lines A–B, result tails included; each as `D{n} ‹labels› {text}`. A selector outside the digest, or an L range whose records were dropped, prints `KIT FAILED — …` and exits 1, never an empty result |
 | `$K find DIR REGEX [-C N]` | digest lines matching REGEX, case-insensitive, with their labels |
 | `$K note DIR 'D41 CLAIM' 'D37 BEARS D41' "D88 CORRECTION - exact words"` | adds reader rows (line, label, ref, anchor), refusing a bad one with its reason: a line past the digest, a label outside `CORRECTION CLAIM BEARS WRITE O{n}`, a `BEARS` without its claim, an anchor not in its line |
 | `$K report DIR [--out FILE]` | `report.tsv`: header (target, path, digest, timeline, tools), one row per labelled line copied from its source, counts |

@@ -69,7 +69,7 @@ In the repository's script-test home (none: beside the scripts, and a gap), with
 
 ## 7 — The manual names both
 
-The test command as the only way to run the unit's tests; the check command as its static-check command, run once, last, with the files changed, and on a red fixed and run again. Align a line naming another way to run an affected test; the lander's gate commands stay.
+The test command as the only way to run the unit's tests; the check command as its static-check command, run once, last, with the files changed, and on a red fixed and run again; and this rule, verbatim: "The full gate runs ONCE per worktree, right before its merge. During development you run ONLY the tests your change affects. No full suite at any other time: not per repair round, not to verify a fix, not before the gate. A red gate is fixed with affected tests only, then the gate runs once more before the merge." Align a line naming another way to run an affected test; the lander's gate commands stay.
 
 ## 8 — Engine copies
 

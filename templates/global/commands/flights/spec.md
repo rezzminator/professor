@@ -39,7 +39,7 @@ Write `requirements.md`:
 - `## Rulings`: the confirmed decisions, numbered, binding.
 - `## Requirements`: numbered rows, each testable, each naming the build unit that owns it (a unit from the project map), each with a concrete example in real values: `call(args) → result` for a unit, `given … / when … / then …` at the project's real entry and exit for an integration. A row states what must be true, never how the code does it; a shape seen in one sample is no row.
 - `## Boundaries`: out of scope, files another owner holds.
-- `## Standing rules`: the worktree, the fence, the child `CLAUDE.md` paths the work touches, each touched unit's testing manual path.
+- `## Standing rules`: the worktree, the fence, the child `CLAUDE.md` paths the work touches, each touched unit's testing manual path, and this rule, verbatim: "The full gate runs ONCE per worktree, right before its merge. During development you run ONLY the tests your change affects. No full suite at any other time: not per repair round, not to verify a fix, not before the gate. A red gate is fixed with affected tests only, then the gate runs once more before the merge."
 - `## Evidence`: the path of each probe map you received, never its content.
 
 ## S4 — Hand off

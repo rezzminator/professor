@@ -56,7 +56,7 @@ Decisions, never code; exact text only where copied from code, the user or a run
 - `## Layout` and `## Tests`: where each new thing lives and how each tier proves it, per the loaded laws.
 - `## Requirements`: numbered rows, each naming its owning build unit and carrying an example in real values — `call(args) → result` for a unit, `given … / when … / then …` at the real entry and exit for an integration; a derived value (a date, epoch, timestamp, hash) is the pasted output of the command that computes it, never typed; a `requirements.md` row travels verbatim with its number.
 - `## Phases`: when the work is more than one flight, the flights in order, each its own foreman run and landing with its row numbers, the first ending at something the user can see working; one flight, no phases.
-- `## Boundaries` and `## Standing rules`: out of scope; the worktree, the fence, the child `CLAUDE.md` paths, each touched unit's testing manual path.
+- `## Boundaries` and `## Standing rules`: out of scope; the worktree, the fence, the child `CLAUDE.md` paths, each touched unit's testing manual path, and this rule, verbatim, which every phase's test plan and price follow: "The full gate runs ONCE per worktree, right before its merge. During development you run ONLY the tests your change affects. No full suite at any other time: not per repair round, not to verify a fix, not before the gate. A red gate is fixed with affected tests only, then the gate runs once more before the merge."
 - `## Open`: each fact neither the request, the material nor the research settled; each question for the user; each problem found outside the request; each requested element left unspecced, as `UNBUILT {element}`.
 
 ## Law

@@ -89,7 +89,7 @@ The step's `steps/<name>.xtrace` (see [Per step](#per-step)). For a red shell st
 
 ## Where
 
-`$run` is `/pfm-timing/run.XXXXXX` in the fence and `/tmp/<worktree>/timing/run.XXXXXX` on the host. Besides `steps/<name>.log`, `steps/<name>.failures`, `unit.json`, `unit.tsv`, `unit.load`, `unit-shards/`, `e2e.json` and `e2e.tsv`:
+`$run` is `/pfm-timing/run.XXXXXX` in the fence and `/tmp/{project}/fence/shared/<worktree>/timing/run.XXXXXX` on the host. Besides `steps/<name>.log`, `steps/<name>.failures`, `unit.json`, `unit.tsv`, `unit.load`, `unit-shards/`, `e2e.json` and `e2e.tsv`:
 
 | Path under `$run` | Writer | Content |
 | --- | --- | --- |
@@ -141,9 +141,9 @@ The spin reference is the least floor over this file and its sibling runs, a flo
 
 ## Ledger and report
 
-`.claude/scripts/dev.sh iso gate` runs `infra/fence/gate-history.sh ingest <timing-base> --host-load-now` on the host after the container exits; a failed ingest prints `LEDGER-NOT-WRITTEN` and leaves the gate verdict alone. The ledger is `${PFM_GATE_HISTORY_DIR:-$HOME/.local/state/pfm/gate-history}/<project>/ledger.tsv`, append-only, header `stamp run worktree commit target step verdict wall_s cpu_s io_mb psi_cpu_s psi_io_s psi_mem_s attribution host_load`. `<project>` is the basename of the parent of `git rev-parse --git-common-dir` without a leading dot; `--project` overrides.
+`.claude/scripts/dev.sh iso gate` runs `infra/fence/gate-history.sh ingest <timing-base> --host-load-now` on the host after the run ends; a failed ingest prints `LEDGER-NOT-WRITTEN` and leaves the gate verdict alone. The ledger is `${PFM_GATE_HISTORY_DIR:-$HOME/.local/state/pfm/gate-history}/<project>/ledger.tsv`, append-only, header `stamp run worktree commit target step verdict wall_s cpu_s io_mb psi_cpu_s psi_io_s psi_mem_s attribution host_load concurrent_runs`; `concurrent_runs` is `gate.meta`'s count of the runs live in the shared fence container when the gate started (`NA` when unrecorded), and a ledger with the 15-column header is upgraded in place first, every old row gaining `NA`. `<project>` is the basename of the parent of `git rev-parse --git-common-dir` without a leading dot; `--project` overrides.
 
-- **What counts as a gate:** a run whose `gate.tsv` has a `templates.leak` row and whose `gate.meta` does not say `fixtures 1`. Others are skipped. Ingest adds one row per `profile.tsv` row, `GATE` included (a run without `profile.tsv` gives one row per `gate.tsv` step plus `GATE`, unmeasured cells `NA`). A run is keyed worktree + run, so a second ingest of the same base appends nothing.
+- **What counts as a gate:** a run with a `gate.tsv` and a `gate.meta` (an older run without `gate.meta` counts when its `gate.tsv` has a `templates.leak` row) whose `gate.meta` does not say `fixtures 1`. Others are skipped. Ingest adds one row per `profile.tsv` row, `GATE` included (a run without `profile.tsv` gives one row per `gate.tsv` step plus `GATE`, unmeasured cells `NA`). A run is keyed worktree + run, so a second ingest of the same base appends nothing.
 - **`gate-history.sh report [--last N] [--project P]`** (N defaults to 20): per step of the newest gate, the earlier runs' count, median and p90 (NOT-RUN rows left out), the newest wall and verdict, and a flag: `history <3` (fewer than three earlier measurements), `REGRESSION` (newest wall > 1.5 × the median, attribution `CODE`), `slow (<WORD>)` (the same slowdown under `CONTENTION` or `not measured`), `not run` / `no wall`, or `ok`.
 - **Flips:** one `FLIP <step>: <before> → <after> (<run>)` line per step whose verdict differs between the last two gates.
 
@@ -176,7 +176,7 @@ Hazards:
 
 ## Fixtures
 
-`PFM_GATE_FIXTURES=1 .claude/scripts/dev.sh iso gate templates` registers five deliberately red steps in phase 0, the instrument's own proof:
+`PFM_GATE_FIXTURES=1 .claude/scripts/dev.sh iso gate` registers five deliberately red steps in phase 0, the instrument's own proof:
 
 | Step | What it proves |
 | --- | --- |

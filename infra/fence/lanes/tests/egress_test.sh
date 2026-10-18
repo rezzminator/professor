@@ -145,5 +145,10 @@ expect 'recorder exits before marker arrives' 2 'EGRESS NOT RECORDED — end mar
 run_case env STUB_MODE=good EGRESS_END_WAIT_S=0.2 bash "$SUT" run bash -c 'printf command-output; exit 7'
 expect 'command rc retained with verdict' 7 'EGRESS PASS 0 DNS queries, 0 outside destinations'
 if [[ "$OUT" == command-output* ]]; then ok 'recorded command output kept'; else bad 'recorded command output kept' "$OUT"; fi
+# A shared fence run's pid namespace restarts $$ at 1: the run id keeps two concurrent runs' recordings apart.
+run_case env STUB_MODE=good EGRESS_END_WAIT_S=0.2 PFM_TEST_TIMING_DIR="$T/td" PFM_FENCE_RUN_ID=run-xyz bash "$SUT" run true
+expect 'a shared fence run records' 0 'EGRESS PASS 0 DNS queries, 0 outside destinations'
+named=("$T"/td/egress/*-run-xyz-*.pcap)
+if [ -f "${named[0]}" ]; then ok 'the recording carries the shared fence run id'; else bad 'the recording carries the run id' "$(ls "$T/td/egress" 2>&1)"; fi
 
 shtest_end

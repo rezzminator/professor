@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pfm test timing ratchet — `make iso` (part of `make gate`), `make timing`,
+# pfm test timing ratchet — the full gate (.claude/scripts/test.sh --full), `make timing`,
 # and the pinned Tier U/A budget in pfm/.testtiming.yml. Design:
 # docs/dev/testing/timing.md.
 #

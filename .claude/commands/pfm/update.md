@@ -54,11 +54,11 @@ Each step ends on its check. A STOP ends the run with § Report so far; a step n
    - Check: per plugin `git -C REPO ls-tree HEAD plugins/{p}` and `git -C REPO/plugins/{p} rev-parse HEAD` both print `T`; the commit stays local.
 
 3. Gate, in the fence, from REPO.
-   - Always `REPO/.claude/scripts/dev.sh iso gate templates`; add `iso gate pfm` when `REV` is empty, or when `git -C REPO diff --name-only REV -- pfm plugins/engine-sync` (REV against the working tree step 4 builds) or `git -C REPO ls-files -o --exclude-standard -- pfm` prints a path or fails.
+   - `REPO/.claude/scripts/test.sh --full`: the full gate, pfm and templates in one run.
    - The gate covers every sibling's uncommitted edits in REPO: a red in a path this update did not touch is named as a sibling's, never fixed here.
    - A TIMEOUT whose PROFILE line attributes CONTENTION is load: rerun once at normal load. A skipped or filtered step is a named gap, never a pass.
-   - A gate run on a flight worktree instead: rebuild its untracked mirrors with its own engine-sync inside the fence and `chmod 644 templates/generated/agents/*.md` first; the fence mounts read-only and a checkout writes 0664.
-   - Check: every run gate reads PASS, else STOP; a red `develop` is never installed.
+   - A gate run on a flight worktree instead: `chmod 644 templates/generated/agents/*.md` first; the fence mounts read-only and a checkout writes 0664.
+   - Check: the gate reads PASS, else STOP; a red `develop` is never installed.
 
 4. Host build: `make -C REPO/pfm host-install`.
    - `install-guard: REFUSED`: the installed pfm carries patches HEAD lacks, typically another chat's worktree build. Report the refusal verbatim with `git -C REPO branch -a --contains REV` and what installing would drop; `install-guard: cannot verify` is an unverified downgrade check, never a pass. A refusing install check is reported verbatim. `FORCE=1` and `SKIP_INSTALL_CHECK=1` run only on the user's word.

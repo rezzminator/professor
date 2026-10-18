@@ -6,13 +6,18 @@
 #   gate-history.sh ingest <timing-base>... [--host-load-now] [--project P]
 #   gate-history.sh report [--last N] [--project P]        (N defaults to 20)
 #
-# A timing base is the directory holding run.* gate runs (/tmp/<worktree>/timing).
-# A run is a real gate when its gate.tsv has a templates.leak row and its
-# gate.meta (when there is one) does not say `fixtures<TAB>1`; every other run is
-# skipped silently, by design. One ledger row per profile.tsv row (the GATE row
+# A timing base is the directory holding run.* gate runs (/tmp/{project}/fence/shared/<worktree>/timing).
+# A run is a real gate — pfm-only, templates-only or both — when it has a gate.tsv
+# and a gate.meta (gate_run writes it; an old run without one counts when its
+# gate.tsv has a templates.leak row) and its gate.meta does not say
+# `fixtures<TAB>1`; every other run is skipped silently, by design. One ledger row per profile.tsv row (the GATE row
 # included); a run without profile.tsv yields one row per gate.tsv step plus a
 # GATE row, its unmeasured columns NA. A run is keyed worktree + run, so a second
 # ingest of the same base appends nothing. Each run's rows go in as one append.
+# The last column, concurrent_runs, is gate.meta's count of the runs live in the
+# shared fence container when the gate started (NA when unrecorded). A ledger with
+# the 15-column header of before is upgraded in place first — every old row gains
+# NA — through one atomic rename.
 #
 # Ledger: ${PFM_GATE_HISTORY_DIR:-$HOME/.local/state/pfm/gate-history}/<project>/ledger.tsv.
 # <project> is the parent directory of `git rev-parse --git-common-dir`, its
@@ -42,7 +47,8 @@ set -uo pipefail
 
 TAB=$'\t'
 NL=$'\n'
-HEADER="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
+HEADER_V1="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
+HEADER="${HEADER_V1}${TAB}concurrent_runs"
 PROFILE_HEADER_HEAD="step${TAB}verdict${TAB}wall_s"
 
 usage() {
@@ -228,7 +234,18 @@ ensure_ledger() { # the ledger exists with its header; any other first line is r
     if ! err=$({ printf '%s\n' "$HEADER" >> "$ledger"; } 2>&1); then fail "LEDGER-NOT-WRITTEN $ledger: ${err##*: }"; fi
   fi
   first=$(head -n 1 "$ledger" 2> /dev/null)
+  if [ "$first" = "$HEADER_V1" ]; then upgrade_ledger; first=$(head -n 1 "$ledger" 2> /dev/null); fi
   [ "$first" = "$HEADER" ] || fail "LEDGER-NOT-WRITTEN $ledger: the first line is not the ledger header (found: ${first:-<empty>})"
+}
+
+upgrade_ledger() { # the 15-column ledger gains concurrent_runs: NA on every old row, one atomic rename
+  local tmp err
+  tmp="$ledger.upgrade.$$"
+  if ! err=$(awk -F'\t' -v OFS='\t' -v h="$HEADER" 'NR == 1 { print h; next } NF == 0 { print; next } { print $0, "NA" }' "$ledger" 2>&1 > "$tmp"); then
+    rm -f "$tmp"; fail "LEDGER-NOT-WRITTEN $ledger: the upgrade to the concurrent_runs header failed: ${err:-awk failed}"
+  fi
+  if ! err=$(mv -f "$tmp" "$ledger" 2>&1); then rm -f "$tmp"; fail "LEDGER-NOT-WRITTEN $ledger: the upgraded ledger could not replace it: $err"; fi
+  printf 'gate-history: upgraded %s to the concurrent_runs header (old rows NA)\n' "$ledger" >&2
 }
 
 has_row() { # has_row <gate.tsv> <step>: a row whose first field is the step
@@ -243,7 +260,7 @@ eligible() { # eligible <run dir>: 0 a real gate, 1 not one; an unreadable gate.
     errors=$((errors + 1))
     return 1
   fi
-  has_row "$gt" templates.leak || return 1
+  [ -f "$1/gate.meta" ] || has_row "$gt" templates.leak || return 1
   if [ -f "$1/gate.meta" ] && awk -F'\t' '$1 == "fixtures" && $2 == "1" { f = 1; exit } END { exit !f }' "$1/gate.meta" 2> /dev/null; then return 1; fi
   return 0
 }
@@ -252,7 +269,7 @@ eligible() { # eligible <run dir>: 0 a real gate, 1 not one; an unreadable gate.
 # Exit 3 on a header that is not the profile header, 4 on a short row or no GATE row.
 rows_of_profile() {
   awk -F'\t' -v OFS='\t' -v want="$PROFILE_HEADER_HEAD" '
-    BEGIN { prefix = ENVIRON["PREFIX"]; load = ENVIRON["LOAD"] }
+    BEGIN { prefix = ENVIRON["PREFIX"]; load = ENVIRON["LOAD"] OFS ENVIRON["CONC"] }
     NR == 1 {
       if ($1 OFS $2 OFS $3 != want || $9 != "attribution") { bad = 3; exit }
       next
@@ -272,7 +289,7 @@ rows_of_profile() {
 # Exit 3 on a header that is not the gate.tsv header, 4 when there is no STEPS or WALL row.
 rows_of_gate() {
   awk -F'\t' -v OFS='\t' '
-    BEGIN { prefix = ENVIRON["PREFIX"]; load = ENVIRON["LOAD"] }
+    BEGIN { prefix = ENVIRON["PREFIX"]; load = ENVIRON["LOAD"] OFS ENVIRON["CONC"] }
     NR == 1 {
       if ($1 OFS $2 OFS $3 != "step" OFS "verdict" OFS "seconds") { bad = 3; exit }
       next
@@ -292,7 +309,7 @@ rows_of_gate() {
 }
 
 ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows; 0 appended, 1 a named failure
-  local run=$1 wt=$2 load=$3 name stamp commit target rows rc src err
+  local run=$1 wt=$2 load=$3 name stamp commit target rows rc src err conc
   name=${run##*/}
   stamp=$(meta_value "$run/gate.meta" started)
   case $stamp in
@@ -301,7 +318,9 @@ ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows; 
   esac
   commit=$(meta_value "$run/gate.meta" commit)
   target=$(meta_value "$run/gate.meta" target)
-  export PREFIX="$stamp$TAB$name$TAB$wt$TAB$commit$TAB$target" LOAD=$load
+  conc=$(meta_value "$run/gate.meta" concurrent_runs)
+  case $conc in '' | *[!0-9]*) conc=NA ;; esac
+  export PREFIX="$stamp$TAB$name$TAB$wt$TAB$commit$TAB$target" LOAD=$load CONC=$conc
   if [ -f "$run/profile.tsv" ]; then
     rows=$(rows_of_profile "$run/profile.tsv")
     rc=$?
@@ -381,8 +400,10 @@ do_report() {
   [ -r "$ledger" ] || fail "LEDGER-UNREADABLE $ledger"
   local first
   first=$(head -n 1 "$ledger" 2> /dev/null)
-  if [ -n "$first" ] && [ "$first" != "$HEADER" ]; then fail "BAD LEDGER $ledger: the first line is not the ledger header (found: $first)"; fi
-  LEDGER_PATH=$ledger awk -F'\t' -v last="$last" '
+  local nf=16
+  [ "$first" != "$HEADER_V1" ] || nf=15 # not yet upgraded: the next ingest adds concurrent_runs
+  if [ -n "$first" ] && [ "$first" != "$HEADER" ] && [ "$first" != "$HEADER_V1" ]; then fail "BAD LEDGER $ledger: the first line is not the ledger header (found: $first)"; fi
+  LEDGER_PATH=$ledger awk -F'\t' -v last="$last" -v nf="$nf" '
     function gt(a, b,    sa, sb) {
       sa = gstamp[a] ""; sb = gstamp[b] ""
       if (sa != sb) return sa > sb
@@ -393,7 +414,7 @@ do_report() {
     BEGIN { ledger = ENVIRON["LEDGER_PATH"]; n = 0; bad = 0 }
     $1 == "stamp" { next }
     NF == 0 { next }
-    NF != 15 { bad++; next }
+    NF != nf { bad++; next }
     {
       key = $3 FS $2
       if (!(key in gi)) {

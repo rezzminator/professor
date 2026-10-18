@@ -11,7 +11,8 @@ SUT="${GATE_HISTORY_SUT:-$(dirname -- "${BASH_SOURCE[0]}")/../../gate-history.sh
 [[ $SUT == /* ]] || SUT=$PWD/$SUT # the git cases change directory
 
 TAB=$'\t'
-HEADER="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
+HEADER_V1="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
+HEADER="${HEADER_V1}${TAB}concurrent_runs"
 
 # Nothing a developer's or CI's environment sets may steer these cases.
 export HOME="$T/home"
@@ -52,9 +53,9 @@ L=$LD/p/ledger.tsv
 eq 'ingest profiled run: exit 0' 0 "$rc"
 eq 'ingest profiled run: stdout names the count and the ledger' "gate-history: ingested 1 run(s) → $L" "$out"
 want=$(printf '%s\n' "$HEADER" \
-  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}120.5${TAB}3.2${TAB}0.4${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA" \
-  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}not measured${TAB}NA" \
-  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}GATE${TAB}PASS${TAB}41.1${TAB}125.0${TAB}3.5${TAB}0.5${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA")
+  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}120.5${TAB}3.2${TAB}0.4${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA${TAB}NA" \
+  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}not measured${TAB}NA${TAB}NA" \
+  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}GATE${TAB}PASS${TAB}41.1${TAB}125.0${TAB}3.5${TAB}0.5${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA${TAB}NA")
 eq 'ingest profiled run: header, then one row per profile.tsv row (GATE included), columns per the contract' "$want" "$(cat "$L")"
 cp "$L" "$T/prof.ledger"
 
@@ -78,9 +79,9 @@ eq 'ingest old run: three runs in a base whose path holds a space' "gate-history
 NAs="NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA"
 eq 'ingest old run (WALL): a row per step plus a GATE row from WALL, unmeasured columns NA, stamp from the run directory mtime' \
   "$(printf '%s\n' \
-    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}${NAs}${TAB}NA" \
-    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}${NAs}${TAB}NA" \
-    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}GATE${TAB}PASS${TAB}63.2${TAB}${NAs}${TAB}NA")" \
+    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}${NAs}${TAB}NA${TAB}NA" \
+    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}${NAs}${TAB}NA${TAB}NA" \
+    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}GATE${TAB}PASS${TAB}63.2${TAB}${NAs}${TAB}NA${TAB}NA")" \
   "$(rows_of "$L" run.OLDW)"
 eq 'ingest old run (STEPS PASS + BUDGET FAIL): the GATE verdict is FAIL' "GATE${TAB}FAIL${TAB}63.2" \
   "$(rows_of "$L" run.OLDB | awk -F'\t' '$6 == "GATE" { print $6 FS $7 FS $8 }')"
@@ -117,6 +118,36 @@ L=$LD/p/ledger.tsv
 eq 'not a real gate / fixture gate: only the real gate is ingested (stub without templates.leak, fixtures 1, a run still going: skipped)' \
   "gate-history: ingested 1 run(s) → $L" "$out"
 eq 'not a real gate / fixture gate: the ledger holds the real run alone' 'run.REAL' "$(awk -F'\t' 'NR > 1 && !s[$2]++ { print $2 }' "$L")"
+
+# --- every gate run counts, pfm-only included, with its concurrent-run count ---------------
+LD=$T/ld-pfmonly
+b=$T/wt-conc/timing
+mkdir -p "$b/run.PFM"
+printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.PFM/gate.tsv"
+printf 'target\tpfm\ncommit\tdef5678\nstarted\t2026-10-02T09:00:00Z\nfixtures\t0\nconcurrent_runs\t3\n' > "$b/run.PFM/gate.meta"
+out=$(gh ingest "$b" --project p 2>&1)
+L=$LD/p/ledger.tsv
+eq 'pfm-only gate (gate.meta, no templates.leak row): ingested' "gate-history: ingested 1 run(s) → $L" "$out"
+eq 'pfm-only gate: every row carries the concurrent runs from gate.meta' '3 3' \
+  "$(awk -F'\t' 'NR > 1 { printf "%s%s", (n++ ? " " : ""), $16 } END { print "" }' "$L")"
+mkdir -p "$b/run.BADC"
+printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.BADC/gate.tsv"
+printf 'target\tpfm\nstarted\t2026-10-02T10:00:00Z\nconcurrent_runs\tNA not in the shared fence\n' > "$b/run.BADC/gate.meta"
+gh ingest "$b" --project p > /dev/null 2>&1
+eq 'a gate with no recorded count: concurrent_runs NA' 'NA' "$(awk -F'\t' '$2 == "run.BADC" { print $16; exit }' "$L")"
+
+# --- an old 15-column ledger is upgraded in place --------------------------------------------
+LD=$T/ld-upgrade
+mkdir -p "$LD/p"
+{ printf '%s\n' "$HEADER_V1"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\n'; } > "$LD/p/ledger.tsv"
+out=$(gh ingest "$b" --project p 2>&1); rc=$?
+L=$LD/p/ledger.tsv
+eq 'upgrade: ingest into an old ledger exits 0 and names the upgrade' '0 yes' \
+  "$rc $(grep -q '^gate-history: upgraded .* to the concurrent_runs header (old rows NA)$' <<< "$out" && echo yes || echo "no: $out")"
+eq 'upgrade: the header gains concurrent_runs, the old row NA, the new rows their count' \
+  "$HEADER|2026-09-01T00:00:00Z${TAB}run.OLD${TAB}wtU${TAB}abc${TAB}all${TAB}GATE${TAB}PASS${TAB}9.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}CODE${TAB}0.5${TAB}NA|3" \
+  "$(head -n 1 "$L")|$(sed -n 2p "$L")|$(awk -F'\t' '$2 == "run.PFM" { print $16; exit }' "$L")"
+eq 'upgrade: no row is short or long afterwards' '' "$(awk -F'\t' 'NF != 16' "$L")"
 
 # --- re-ingest ----------------------------------------------------------------------------
 LD=$T/ld-prof
@@ -243,7 +274,7 @@ done
 
 # --- report ---------------------------------------------------------------------------------------------
 # led <ledger> <stamp> <run> <step> <verdict> <wall> <attribution>
-led() { printf '%s\t%s\twtL\tabc\tall\t%s\t%s\t%s\tNA\tNA\tNA\tNA\tNA\t%s\tNA\n' "$2" "$3" "$4" "$5" "$6" "$7" >> "$1"; }
+led() { printf '%s\t%s\twtL\tabc\tall\t%s\t%s\t%s\tNA\tNA\tNA\tNA\tNA\t%s\tNA\tNA\n' "$2" "$3" "$4" "$5" "$6" "$7" >> "$1"; }
 # gate <ledger> <n> : gate g<n> at hour <n>, steps by their wall in that gate
 gate() {
   local f=$1 n=$2 stamp run unit

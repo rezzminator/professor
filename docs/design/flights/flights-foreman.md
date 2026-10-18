@@ -121,7 +121,7 @@ Carried over from the v2 executors unchanged in substance:
 - Each decision is tested once, in the test of the unit whose code makes it; that unit's rows are cases of one table-driven test, or assertions of one test, in the unit's existing test file (a new file only where the source has no test home).
 - Tests before code; one red run of every new or extended test against the unfixed tree, failing on an assertion, its log kept; then the code; then the same command green.
 - No catch-nothing assertions; a test proves behaviour that exists, never that something is gone.
-- Affected tests only while building; the testing manual's static-check command once, last, over the files changed; the full suite is the lander's.
+- Affected tests only while building; the testing manual's static-check command once, last, over the files changed; the full gate is the lander's, once, right before the merge.
 
 Measured: the v2 test rules took the test-to-code line ratio from 3.55 (v1) to 2.0 (v2 flight) and 1.33 (arm B) with no behaviour lost.
 

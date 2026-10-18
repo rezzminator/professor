@@ -34,6 +34,7 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 ## Run commands
 
+- The full gate runs ONCE per worktree, right before its merge. During development you run ONLY the tests your change affects. No full suite at any other time: not per repair round, not to verify a fix, not before the gate. A red gate is fixed with affected tests only, then the gate runs once more before the merge.
 - Affected, an executor's only run (flight or general): `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
 - Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
 - Static check, an executor's only one, run once, last, given its task's files: {the one static-check command that takes a list of files}; a red is fixed and the same command run again.

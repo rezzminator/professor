@@ -21,7 +21,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - flights: `flights-foreman` builds and lands any work past the direct rung, with or without a `/flights:spec` spec, `/flights:*` with the `flights-*` agents · `templates/global/commands/flights/` · design `docs/design/flights/`
 - flight directory: a flight's requirements, run log and audit trail, outside the tree and kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
 - quality laws: the `/quality:*` family every prompt and orientation-file edit loads · `templates/global/commands/quality/` · design `docs/design/quality/`
-- fence: the isolated dev container — fresh machine, own HOME, worktree mounted — with the `pfm-dev` image and the `pfm-sim` real-browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
+- fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - demo fence: for presentations · `infra/demo/`
 - self-hosted manifest: the tracked ledger of this repo's own install, verified (restamped with `--write`) by a repo gate · `.professor/manifest.json`, `infra/check-self-hosted-manifest.sh`
 - retro inbox: the steering ledger `/pcm retro` folds, one lesson per file · `docs/retro/{owner}/` · format `docs/retro/README.md`
@@ -60,13 +60,13 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Local
 
-- On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` only; `verify`, `test`, `cover`, `all` and `gate` refuse outside the fence.
+- On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` only; the test actions refuse outside the fence.
 - Scratch lives in `/tmp/{project}/{purpose}/`: `{project}` is this repo's directory name minus any leading dot (`.professor` → `professor`), derived, never hardcoded.
-- One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{timing|lanes}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
+- One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{test|fence|lanes}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
 
 ## Fence
 
-- `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|gate|status|e2e|shell} [project]` or `iso {run|sim} {command…}` runs in the fence against a worktree under `.worktrees/{flight}/`; it needs a reachable docker daemon.
+- `.claude/scripts/dev.sh iso {install|build|typecheck|status|shell} [project]` or `iso {run|sim} {command…}` runs in the fence against a worktree under `.worktrees/{flight}/`.
 
 ## CI
 
@@ -135,15 +135,15 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - When `gitter` is unavailable, only the active main Codex chat performs scoped Git writes, and only after the user's explicit authorization in the current turn; publication still needs its own request under § Publication.
 - Commit only code whose tests pass.
 - Prompt files: a task touching `.claude/**`, any `CLAUDE.md` (the source of its `AGENTS.md`) or `templates/**` routes to the `pcm` agent (the user's `/pcm` dispatches it), which loads `/quality:prompt` before the first edit and `/quality:claude-md` before a `CLAUDE.md` edit.
-- Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build and test through `.claude/scripts/dev.sh iso`; an executor runs only its affected tests per `.claude/commands/pfm-testing-manual.md`; the full suite is the gate's.
-- Dev and test runs target fence worktrees, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
+- Code flights build and test in a fence worktree under `.worktrees/{flight}/`, every build through `.claude/scripts/dev.sh iso`, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Template, doc, prompt and config-file changes land on `develop` directly, in the main checkout.
-- A fenced flight closes in order: one `flights-lander` for the whole flight (every project's checks, one review of the whole diff, adversarial tests, its own fixes) → the landing's checks → the authorized Git writer commits to `develop` → the host mirror build under § Host.
+- A fenced flight closes in order: one `flights-lander` for the whole flight → the landing's checks → the authorized Git writer commits to `develop` → the host mirror build under § Host.
 - At every milestone, checkpoint the plan to a file, then compact before the next phase; a held turn arms an idle-fired self-call instead.
 - AskUserQuestion is the user's whole screen: context travels inside the question text; each round simpler and more concrete, never a rephrase.
 
 ## Testing
 
-- **Every test runs inside the fence, never on the host:** the gate is `.claude/scripts/dev.sh iso gate [pfm|templates]`, run before claiming anything works; never report a suite you did not watch run.
+- **Every test runs inside the fence, never on the host:** `.claude/scripts/test.sh <path>…` before claiming anything works, `test.sh --full` the full gate; never report a suite you did not watch run.
+- The full gate runs ONCE per worktree, right before its merge. During development you run ONLY the tests your change affects. No full suite at any other time: not per repair round, not to verify a fix, not before the gate. A red gate is fixed with affected tests only, then the gate runs once more before the merge.
 - A regression test counts only after it was watched failing against the unfixed code.
 - A skipped or filtered suite is a named gap in the report, never a pass.

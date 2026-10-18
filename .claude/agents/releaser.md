@@ -39,9 +39,9 @@ You run one phase of a release and return its verdict to `/pfm:release`. You jud
 
 ## GATE
 
-1. The fence mounts a tree read-only and the engine mirrors are untracked, so first generate them in each tree a lane runs in: `engine-sync codex build {tree} && engine-sync opencode build {tree}`. Then each lane — `.claude/scripts/dev.sh iso all templates`, `iso all pfm`, `iso e2e` — in the background, unpiped into `DIR/gate/candidate-{templates|pfm|e2e}.log`, closed by the shell with the command's own status: `; echo "EXIT $? @$(git rev-parse HEAD)" >> {log}`. End your message to wait; each lane's exit wakes you.
-2. A red lane runs again in `STABLE` into `DIR/gate/stable-{lane}.log`, closed the same way. Red there too is inherited: named, never a candidate verdict. A green candidate lane needs no stable run.
-3. `DIR/gate.md`: line one `GATE PASS {sha}` or `GATE FAIL {sha}`; a line per lane with its exit and its verdict line quoted.
+1. The full gate, once: `.claude/scripts/test.sh --full` in the background, unpiped into `DIR/gate/candidate.log`, closed by the shell with the command's own status: `; echo "EXIT $? @$(git rev-parse HEAD)" >> {log}`. End your message to wait; its exit wakes you.
+2. Each red step's failing tests run again in `STABLE` with `.claude/scripts/test.sh {their files}` into `DIR/gate/stable-{step}.log`, closed the same way. Red there too is inherited: named, never a candidate verdict. A green gate needs no stable run.
+3. `DIR/gate.md`: line one `GATE PASS {sha}` or `GATE FAIL {sha}`; the gate's exit and its `STEPS` line quoted, then a line per red step with its stable verdict.
 4. Return `DONE GATE`, or `FIX GATE: {n}` with a row per new red naming the failing test.
 
 ## REHEARSE
@@ -55,7 +55,7 @@ Read `$CDOCS/pfm/$REFS/release-rehearsal.md` and run one round of it: machines `
 
 ## READY
 
-1. Write the note's `## Verification` section, last in the file, from the verdict files only: reviewers dispatched and returned, findings fixed and waived, the gate's lanes and any inherited red, the rehearsal's machines, rounds and what they caught. Facts and numbers, no adjectives.
+1. Write the note's `## Verification` section, last in the file, from the verdict files only: reviewers dispatched and returned, findings fixed and waived, the gate's steps and any inherited red, the rehearsal's machines, rounds and what they caught. Facts and numbers, no adjectives.
 2. NOTES step 4, then `gitter` Phase COMMIT: `release(notes): v{NEW} verification`; then NOTES step 4 again at the new HEAD with `--record`.
 3. `node scripts/release-check.mjs ready DIR --worktree CANDIDATE --stamp`. Each `RERUN {phase}` line is a row routed `rerun`: return `FIX READY: {n}`.
 4. Return `DONE READY @{sha}` with the user's report: the note's path, bullets per section, actions per timing, stops, each waived finding with its reason, and every verdict line.

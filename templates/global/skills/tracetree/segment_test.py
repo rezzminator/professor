@@ -1,4 +1,4 @@
-"""Tests for segment.py, the `tracetree.py segment` command — run through `.claude/scripts/test-templates.sh`."""
+"""Tests for segment.py, the `tracetree.py segment` command — run through `.claude/scripts/test.sh`."""
 import json
 import os
 import re

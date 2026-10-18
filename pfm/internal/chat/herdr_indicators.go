@@ -1,0 +1,351 @@
+package chat
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/tmux"
+)
+
+type herdrTabProvider struct {
+	scan    func(context.Context) (FleetScan, error)
+	inspect func(context.Context, headless.Chat, time.Time) (headless.Status, error)
+	views   func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
+	mode    func() (string, error)
+	warn    io.Writer
+}
+
+func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]herdr.TabDecoration, error) {
+	mode, err := provider.mode()
+	if err != nil {
+		return nil, fmt.Errorf("read tab status configuration: %w", err)
+	}
+	scan, err := provider.scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scan tab chats: %w", err)
+	}
+	var decorations []herdr.TabDecoration
+	for i := range scan.Rows {
+		target := FromRow(scan.Rows[i])
+		views, err := provider.views(ctx, target, socket)
+		if err != nil {
+			return nil, fmt.Errorf("locate tab views of %s: %w", target.ID, err)
+		}
+		if len(views) == 0 {
+			continue
+		}
+		if !target.Live && len(scan.Unreadable) > 0 {
+			return nil, fmt.Errorf("fleet inspection incomplete, refusing dead tab status: %v", scan.Unreadable)
+		}
+		if views[0].State == "dead" {
+			target.Live = false
+		}
+		state := "unknown"
+		if status, err := provider.inspect(ctx, target, clock.Real.Now()); err != nil {
+			if _, writeErr := fmt.Fprintf(
+				provider.warn,
+				"Herdr tab status of %s: %v\n",
+				target.ID,
+				err,
+			); writeErr != nil {
+				return nil, fmt.Errorf("persist status inspection failure: %w", writeErr)
+			}
+		} else {
+			state = status.State
+		}
+		for i := range views {
+			view := views[i]
+			view.Name = target.Name
+			view.State = state
+			view.Mode = mode
+			decorations = append(decorations, view)
+		}
+	}
+	return decorations, nil
+}
+
+// PaintHerdrIndicators is the actual plugin command's chat-aware painter.
+// The inspector persists across half-second polls and incrementally reads tails.
+func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io.Writer) error {
+	warnings := tabIndicatorWarnings{dir: lockDir, stderr: stderr}
+	runtime, err := pfmconfig.RuntimeOrDefault(nil)
+	if err != nil {
+		loadErr := fmt.Errorf("load tab indicator runtime: %w", err)
+		_, writeErr := fmt.Fprintln(warnings, loadErr)
+		return errors.Join(loadErr, writeErr)
+	}
+	inspector := NewSeatInspector(&runtime)
+	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings}
+	provider.mode = func() (string, error) {
+		latest, err := pfmconfig.LoadRuntime(runtime.Config.Path)
+		if err != nil {
+			return "", err
+		}
+		return latest.Config.Chat.HerdrTabStatus, nil
+	}
+	var panes []herdr.TabPane
+	var loaded bool
+	provider.scan = func(ctx context.Context) (FleetScan, error) {
+		loaded = false
+		inspector.Sweep()
+		return ScanRows(ctx, warnings, &runtime)
+	}
+	addresses := tabViewReader{
+		runtime: &runtime,
+		tmux: func(ctx context.Context, socket string, args ...string) (string, error) {
+			output, err := tmux.Exec(ctx, "", socket, args...).Output()
+			if err != nil {
+				return "", fmt.Errorf("tmux %s on %s: %w", strings.Join(args, " "), socket, err)
+			}
+			return string(output), nil
+		},
+		resolve: herdr.WireResolver(
+			gather.NewProcFS(runtime.Paths.ProcRoot).Environ,
+			herdr.Call,
+			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
+		).Resolve,
+	}
+	provider.views = func(ctx context.Context, target headless.Chat, socket string) ([]herdr.TabDecoration, error) {
+		if !loaded {
+			var err error
+			panes, err = herdr.ReadTabPanes(ctx, socket)
+			if err != nil {
+				return nil, err
+			}
+			loaded = true
+		}
+		return addresses.views(ctx, target, socket, panes)
+	}
+	return herdr.PaintIndicatorsWithTabs(ctx, socket, lockDir, warnings, provider.tabs)
+}
+
+type tabIndicatorWarnings struct {
+	dir    string
+	stderr io.Writer
+}
+
+func (writer tabIndicatorWarnings) Write(body []byte) (int, error) {
+	if writer.stderr != nil {
+		if _, err := writer.stderr.Write(body); err != nil {
+			return 0, fmt.Errorf("write tab diagnostic: %w", err)
+		}
+	}
+	if err := herdr.AppendError(writer.dir, "tab-status", clock.Real.Now(), string(body)); err != nil {
+		return 0, fmt.Errorf("persist tab diagnostic: %w", err)
+	}
+	return len(body), nil
+}
+
+type tabViewReader struct {
+	runtime  *pfmconfig.Runtime
+	tmux     func(context.Context, string, ...string) (string, error)
+	resolve  func(context.Context, int) (herdr.Location, bool, error)
+	previous map[string][]herdr.TabDecoration
+}
+
+func (reader *tabViewReader) views(
+	ctx context.Context,
+	target headless.Chat,
+	socket string,
+	panes []herdr.TabPane,
+) ([]herdr.TabDecoration, error) {
+	if reader.previous == nil {
+		reader.previous = map[string][]herdr.TabDecoration{}
+	}
+	if target.Backend == "herdr" {
+		if target.Socket != socket {
+			return nil, nil
+		}
+		for _, pane := range panes {
+			if pane.Pane != target.Pane {
+				continue
+			}
+			return reader.nativeView(ctx, target, socket, pane)
+		}
+		return nil, nil
+	}
+	if !target.Live {
+		var dead []herdr.TabDecoration
+		for i := range reader.previous[target.ID] {
+			old := reader.previous[target.ID][i]
+			for _, pane := range panes {
+				if pane.Terminal == old.Terminal {
+					matches, err := tabPaneSession(pane, target)
+					if err != nil {
+						return nil, err
+					}
+					if matches {
+						dead = append(dead, tabView(pane, old.Identity))
+					}
+				}
+			}
+		}
+		return dead, nil
+	}
+	raw, err := reader.stored(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	var stored herdr.Stored
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+			return nil, fmt.Errorf("decode tab client mappings: %w", err)
+		}
+	}
+	if stored.SessionID != "" && stored.SessionID != target.ID {
+		return nil, nil
+	}
+	output, err := reader.tmux(ctx, target.Socket, "list-clients", "-t", tabTmuxTarget(target), "-F", "#{client_pid}")
+	if err != nil {
+		return nil, fmt.Errorf("list tab tmux clients: %w", err)
+	}
+	seen := map[string]bool{}
+	var views []herdr.TabDecoration
+	for _, pidText := range strings.Fields(output) {
+		pid, err := strconv.Atoi(pidText)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tab client pid %q: %w", pidText, err)
+		}
+		location, found, err := reader.resolve(ctx, pid)
+		if err != nil {
+			return nil, fmt.Errorf("resolve tab client %d: %w", pid, err)
+		}
+		if !found || location.Socket != socket || seen[location.Terminal] {
+			continue
+		}
+		seen[location.Terminal] = true
+		for _, pane := range panes {
+			if pane.Terminal == location.Terminal && pane.Pane == location.Pane {
+				// Resolve live client pids, not a possibly stale registered mapping.
+				d := tabView(pane, target.Socket+":"+target.Session+":"+target.ID)
+				d.Validate = func(ctx context.Context) (bool, error) {
+					current, err := reader.stored(ctx, target)
+					if err != nil {
+						return false, err
+					}
+					if current != raw {
+						return false, nil
+					}
+					now, found, err := reader.resolve(ctx, pid)
+					if err != nil {
+						return false, err
+					}
+					return found && now == location, nil
+				}
+				views = append(views, d)
+			}
+		}
+	}
+	reader.previous[target.ID] = views
+	return views, nil
+}
+
+func (reader *tabViewReader) stored(ctx context.Context, target headless.Chat) (string, error) {
+	raw, err := reader.tmux(ctx, target.Socket, "show-options", "-qv", "-t", tabTmuxTarget(target), herdr.StoredOption)
+	if err != nil {
+		return "", fmt.Errorf("read tab client generation: %w", err)
+	}
+	return raw, nil
+}
+
+func tabTmuxTarget(target headless.Chat) string {
+	if target.Session != "" {
+		return target.Session
+	}
+	return target.Pane
+}
+
+func tabView(pane herdr.TabPane, identity string) herdr.TabDecoration {
+	return herdr.TabDecoration{
+		Pane:        pane.Pane,
+		Terminal:    pane.Terminal,
+		Tab:         pane.Tab,
+		Identity:    identity,
+		Revision:    pane.Revision,
+		Session:     pane.Session,
+		AgentStatus: pane.State,
+	}
+}
+
+func tabPaneSession(pane herdr.TabPane, target headless.Chat) (bool, error) {
+	if len(pane.Session) == 0 || string(pane.Session) == "null" {
+		return false, nil
+	}
+	var session struct{ Source, Agent, Kind, Value string }
+	if err := json.Unmarshal(pane.Session, &session); err != nil {
+		return false, fmt.Errorf("decode tab agent_session: %w", err)
+	}
+	if session.Source == "" || session.Agent == "" || session.Value == "" {
+		return false, fmt.Errorf("incomplete tab agent_session: %s", pane.Session)
+	}
+	switch session.Kind {
+	case "id":
+		return session.Value == target.ID, nil
+	case "path":
+		if target.Path == "" {
+			return false, fmt.Errorf("cannot verify tab session path %q without transcript path", session.Value)
+		}
+		return filepath.Clean(session.Value) == filepath.Clean(target.Path), nil
+	default:
+		return false, fmt.Errorf("unsupported tab agent_session kind %q", session.Kind)
+	}
+}
+
+func (reader *tabViewReader) nativeView(
+	ctx context.Context,
+	target headless.Chat,
+	socket string,
+	pane herdr.TabPane,
+) ([]herdr.TabDecoration, error) {
+	matches, err := tabPaneSession(pane, target)
+	if err != nil {
+		return nil, err
+	}
+	if !matches {
+		return nil, nil
+	}
+	seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
+	if err != nil {
+		return nil, fmt.Errorf("read native tab seat: %w", err)
+	}
+	if !found || seat.ReloadPending || seat.HerdrSocket != socket || seat.HerdrPane != pane.Pane {
+		return nil, nil
+	}
+	alive, err := nativeAlive(ctx, seat)
+	if err != nil {
+		return nil, fmt.Errorf("probe tab engine: %w", err)
+	}
+	d := tabView(pane, target.SeatID+":"+target.ID)
+	if !alive {
+		d.State = "dead"
+	}
+	d.Validate = func(ctx context.Context) (bool, error) {
+		seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
+		if err != nil {
+			return false, fmt.Errorf("read native tab owner: %w", err)
+		}
+		if !found || seat.SessionID != target.ID || seat.HerdrSocket != socket || seat.HerdrPane != target.Pane ||
+			seat.ReloadPending {
+			return false, nil
+		}
+		currentAlive, err := nativeAlive(ctx, seat)
+		if err != nil {
+			return false, fmt.Errorf("revalidate tab engine: %w", err)
+		}
+		return currentAlive == alive, nil
+	}
+	reader.previous[target.ID] = []herdr.TabDecoration{d}
+	return []herdr.TabDecoration{d}, nil
+}

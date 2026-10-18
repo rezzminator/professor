@@ -2,7 +2,8 @@
   "version": 2,
   "theme": "default",
   "chat": {
-    "backend": "auto"
+    "backend": "auto",
+    "herdrTabStatus": "emoji"
   },
   "state": {
     "db": "~/.local/state/pfm/pfm.db",

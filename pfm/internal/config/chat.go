@@ -9,11 +9,18 @@ import (
 // DefaultChatBackend chooses from the requester seat or current pane environment.
 const DefaultChatBackend = "auto"
 
+// DefaultHerdrTabStatus is the installed-version colored tab marker policy.
+const DefaultHerdrTabStatus = "emoji"
+
 // ChatConfig selects the default birth backend.
-type ChatConfig struct{ Backend string }
+type ChatConfig struct {
+	Backend        string
+	HerdrTabStatus string
+}
 
 type rawChat struct {
-	Backend *string `json:"backend,omitempty"`
+	Backend        *string `json:"backend,omitempty"`
+	HerdrTabStatus *string `json:"herdrTabStatus,omitempty"`
 }
 
 // applyChatAndAsk decodes the chat birth and one-shot engine preferences.
@@ -25,6 +32,15 @@ func applyChatAndAsk(result *Config, raw rawConfig) error {
 			result.Sources["chat.backend"] = SourceFile
 		default:
 			return fmt.Errorf("config %s: chat.backend must be auto, tmux or herdr", result.Path)
+		}
+	}
+	if raw.Chat != nil && raw.Chat.HerdrTabStatus != nil {
+		switch *raw.Chat.HerdrTabStatus {
+		case DefaultHerdrTabStatus, "text", "off":
+			result.Chat.HerdrTabStatus = *raw.Chat.HerdrTabStatus
+			result.Sources["chat.herdrTabStatus"] = SourceFile
+		default:
+			return fmt.Errorf("config %s: chat.herdrTabStatus must be emoji, text or off", result.Path)
 		}
 	}
 	if raw.Ask != nil {

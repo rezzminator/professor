@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -22,6 +23,11 @@ func linkCalls(h *harness) int {
 
 func TestHerdrPluginManifestRender(t *testing.T) {
 	got := herdrPluginRender("/opt/bin/pfm")
+	for _, event := range []string{"pane.created", "tab.created"} {
+		if !strings.Contains(got, "on = "+strconv.Quote(event)) {
+			t.Errorf("manifest lacks topology event %s", event)
+		}
+	}
 	for _, want := range []string{
 		"id = \"professor.indicators\"\n", "min_herdr_version = \"0.9.5\"\n", "platforms = [\"macos\", \"linux\"]\n",
 		"\n[[startup]]\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-indicators\"]\n",
@@ -35,8 +41,8 @@ func TestHerdrPluginManifestRender(t *testing.T) {
 			t.Errorf("manifest lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "[[startup]]") != 1 || strings.Count(got, "[[events]]") != 11 {
-		t.Errorf("manifest wants one startup and 11 events:\n%s", got)
+	if strings.Count(got, "[[startup]]") != 1 || strings.Count(got, "[[events]]") != 13 {
+		t.Errorf("manifest wants one startup and 13 events:\n%s", got)
 	}
 }
 

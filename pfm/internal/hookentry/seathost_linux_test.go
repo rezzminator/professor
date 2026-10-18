@@ -145,6 +145,10 @@ func init() {
 			time.Sleep(time.Millisecond)
 		}
 	}
+	if os.Getenv("PFM_S3_MODE") == "hangup-exit-one" {
+		<-hup
+		os.Exit(1)
+	}
 	if child != nil {
 		<-hup
 		if err := os.WriteFile(filepath.Join(root, "engine-hup"), []byte("HUP"), 0o600); err != nil {
@@ -213,7 +217,7 @@ func TestSeatHostPTY(t *testing.T) {
 	for _, mode := range []string{
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
-		"reload-success", "reload-retry", "reload-close", "raw-codex", "raw-opencode",
+		"reload-success", "reload-retry", "reload-close", "raw-codex", "raw-opencode", "hangup-exit-one",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -434,6 +438,26 @@ func TestSeatHostPTY(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if mode == "hangup-exit-one" {
+				waitSeatFixture(t, done, func() bool {
+					_, err := os.Stat(filepath.Join(root, "engine-report"))
+					return err == nil
+				})
+				if err := master.Close(); err != nil {
+					t.Fatal(err)
+				}
+				<-done
+				if command.ProcessState.ExitCode() != 129 {
+					t.Fatalf("terminal loss status=%d output=%s", command.ProcessState.ExitCode(), &output)
+				}
+				if _, found, err := db.Seat(context.Background(), "native-seat"); err != nil || !found {
+					t.Fatalf("terminal loss discarded seat: found=%t err=%v", found, err)
+				}
+				if _, err := db.ReadSeatRun("native-seat"); err != nil {
+					t.Fatalf("terminal loss discarded recipe: %v", err)
+				}
+				return
+			}
 			err = <-done
 			if strings.HasPrefix(mode, "failed-") {
 				cause := map[string]string{
@@ -604,6 +628,37 @@ func waitSeatFixture(t *testing.T, done <-chan error, ready func() bool) {
 				return
 			}
 		}
+	}
+}
+
+func TestSeatHostHangupPreservesRestorableSeat(t *testing.T) {
+	ctx := context.Background()
+	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
+	db := fleetdb.OpenSharedState(ctx, values)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	seat := fleetdb.Seat{
+		SeatID: "interrupted", SessionID: "session", Backend: "herdr", State: "live",
+		HerdrSocket: "/fixture/stopped.sock", HerdrPane: "w6:p3",
+	}
+	if err := db.PutSeat(ctx, seat); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WriteSeatRun(seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/engine"}); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	if status := closeSeat(ctx, db, seat, 129, &stderr); status != 129 || stderr.Len() != 0 {
+		t.Fatalf("hangup status=%d stderr=%s", status, &stderr)
+	}
+	if _, found, err := db.Seat(ctx, seat.SeatID); err != nil || !found {
+		t.Fatalf("hangup discarded restoration owner: found=%t err=%v", found, err)
+	}
+	if _, err := db.ReadSeatRun(seat.SeatID); err != nil {
+		t.Fatalf("hangup discarded restoration recipe: %v", err)
 	}
 }
 

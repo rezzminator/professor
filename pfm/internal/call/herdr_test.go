@@ -301,8 +301,9 @@ func TestHerdrKeysNative(t *testing.T) {
 	socket := newNativeSocket(t, func(_ nativeRequest) (any, string) { return map[string]any{"type": "ok"}, "" })
 	target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2", Engine: "cc"}
 	engine := nativeEngine(t, target)
-	want := []string{"Enter", "Escape", "C-c", "Down", "Tab"}
-	for _, key := range want {
+	keys := []string{"Enter", "Escape", "C-c", "Down", "Tab", "C-d", "C-M-a", "S-Tab"}
+	want := []string{"Enter", "Escape", "ctrl+c", "Down", "Tab", "ctrl+d", "ctrl+alt+a", "shift+Tab"}
+	for _, key := range keys {
 		if err := engine.SendKey(context.Background(), target, key); err != nil {
 			t.Fatal(err)
 		}
@@ -796,13 +797,7 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 }
 
 func TestHerdrCallRaw(t *testing.T) {
-	for _, test := range []struct {
-		name, body, before, after, refusal, badMethod string
-		wantPayload                                   string
-		id                                            pfmengine.ID
-		wantCode                                      int
-		wantTyped                                     bool
-	}{
+	for _, test := range append([]herdrRawCase{
 		{name: "multiline", id: pfmengine.Codex, body: "a\nb", wantPayload: "\x1b[200~a\nb\x1b[201~", wantTyped: true},
 		{name: "opencode", id: pfmengine.OpenCode, body: "a\nb", wantPayload: "\x1b[200~a\nb\x1b[201~", wantTyped: true},
 		{name: "large", id: pfmengine.Codex, body: strings.Repeat("line\n", 2000), wantTyped: true},
@@ -817,7 +812,7 @@ func TestHerdrCallRaw(t *testing.T) {
 		{name: "enter-refused", id: pfmengine.Codex, body: "a\nb", refusal: "pane.send_keys", wantCode: CodeUndelivered, wantTyped: true},
 		{name: "still-in-composer", id: pfmengine.Codex, body: "a\nb", after: "› [Pasted text #1 +2 lines]", wantCode: CodeUndelivered, wantTyped: true},
 		{name: "no-confirmation", id: pfmengine.Codex, body: "a\nb", after: "unrelated screen", wantCode: CodeUndelivered, wantTyped: true},
-	} {
+	}, herdrRawStyleCases()...) {
 		t.Run(test.name, func(t *testing.T) {
 			entered := false
 			var payload string
@@ -830,6 +825,28 @@ func TestHerdrCallRaw(t *testing.T) {
 				}
 				switch request.Method {
 				case "pane.read":
+					if request.Params["format"] == "ansi" {
+						if request.Params["strip_ansi"] != false {
+							t.Errorf("styled capture must preserve ANSI: %+v", request.Params)
+						}
+						if test.styleRefused {
+							return nil, "styled_read_failed"
+						}
+						if test.styleMalformed {
+							return map[string]any{"type": "unexpected"}, ""
+						}
+						format := test.styleFormat
+						if format == "" {
+							format = "ansi"
+						}
+						screen := test.styled
+						if screen == "" {
+							screen = test.before
+						}
+						return map[string]any{"type": "pane_read", "read": map[string]any{
+							"pane_id": "p2", "text": screen, "format": format, "truncated": false,
+						}}, ""
+					}
 					screen := test.before
 					if screen == "" {
 						screen = "› "
@@ -862,6 +879,11 @@ func TestHerdrCallRaw(t *testing.T) {
 			if err != nil || result.Code != test.wantCode || result.Typed != test.wantTyped {
 				t.Fatalf("raw call=%+v err=%v; want code=%d typed=%t", result, err, test.wantCode, test.wantTyped)
 			}
+			if test.styleRefused || test.styleMalformed || test.styleFormat != "" {
+				if !strings.Contains(result.Message, "styling") || payload != "" {
+					t.Fatalf("styled-read failure lost evidence or typed bytes: %+v payload=%q", result, payload)
+				}
+			}
 			if test.wantCode == 0 {
 				if result.Status != statusDelivered {
 					t.Fatalf("raw status=%+v", result)
@@ -874,10 +896,16 @@ func TestHerdrCallRaw(t *testing.T) {
 					t.Fatalf("paste payload=%q want %q", payload, wantPayload)
 				}
 				calls := socket.calls()
-				if len(calls) != 4 || calls[0].Method != "pane.read" || calls[1].Method != "pane.send_text" ||
-					calls[2].Method != "pane.send_keys" ||
-					calls[3].Method != "pane.read" ||
-					!reflect.DeepEqual(calls[2].Params["keys"], []any{"Enter"}) {
+				wantCalls := 4
+				if test.styled != "" {
+					wantCalls = 5
+				}
+				last := len(calls) - 1
+				if len(calls) != wantCalls || calls[0].Method != "pane.read" ||
+					calls[last-2].Method != "pane.send_text" ||
+					calls[last-1].Method != "pane.send_keys" ||
+					calls[last].Method != "pane.read" ||
+					!reflect.DeepEqual(calls[last-1].Params["keys"], []any{"Enter"}) {
 					t.Fatalf("raw call order=%+v", calls)
 				}
 			}

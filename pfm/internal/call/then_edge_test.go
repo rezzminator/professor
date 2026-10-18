@@ -54,6 +54,8 @@ type paneFrame struct {
 	// exists for: a receipt that is in the pane's history but clipped out of
 	// the visible fold, and scrolls back into view later.
 	visible string
+	// visibleErr models a failed current-screen read, independent of history.
+	visibleErr error
 	// err is a capture that FAILED. The zero paneSample is not what this
 	// frame hands back — the error is, so the waiter can tell a pane it could
 	// not read from a pane with nothing on it.
@@ -97,13 +99,20 @@ func (script *paneScript) Capture(
 	script.mu.Lock()
 	defer script.mu.Unlock()
 	index := script.served
+	if scrollback == 0 && index > 0 {
+		index--
+	} else {
+		script.served++
+	}
 	if index >= len(script.frames) {
 		index = len(script.frames) - 1
 	}
-	script.served++
 	frame := script.frames[index]
 	if frame.err != nil {
 		return "", frame.err
+	}
+	if scrollback == 0 && frame.visibleErr != nil {
+		return "", frame.visibleErr
 	}
 	if scrollback == 0 && frame.visible != "" {
 		return frame.visible, nil

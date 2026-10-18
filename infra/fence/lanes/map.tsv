@@ -145,3 +145,18 @@ pfm usage-hook	O1	O1.13-misc-ops
 pfm version	O1	O1.13-misc-ops
 pfm whoami	O1	O1.13-misc-ops
 mcp__chat-professor__servicedesk	M	M.10-chat-tools-gap
+pfm chat new	H	H.birth
+pfm internal seat-host	H	H.seat-host
+pfm chat call	H	H.native-call
+pfm whoami	H	H.whoami
+pfm ls	H	H.discovery
+pfm chat status	H	H.status
+pfm chat keys	H	H.keys
+pfm chat capture	H	H.capture
+pfm chat call	H	H.tmux-to-tmux
+pfm chat call	H	H.tmux-to-herdr
+pfm chat call	H	H.herdr-to-tmux
+pfm chat call	H	H.herdr-to-herdr
+pfm chat watch	H	H.watch
+pfm chat name	H	H.name
+pfm chat open	H	H.open-restored

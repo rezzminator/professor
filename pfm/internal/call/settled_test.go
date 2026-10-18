@@ -213,3 +213,59 @@ func TestIsFooterBusyIgnoresTranscriptRecords(t *testing.T) {
 		})
 	}
 }
+
+// TestSettledTurnUsesCurrentVisibleFooter replays tmux's ESC[2J ESC[H
+// repaint: the root's real tmux probe left esc-to-interrupt in the last 20
+// nonempty history lines after the visible screen had become idle. Exercise
+// waitForSettledTurn itself, so using the wrong tmux scrollback mode bites.
+func TestSettledTurnUsesCurrentVisibleFooter(t *testing.T) {
+	blind := errors.New("current screen capture failed")
+	receipt := "Compacted (ctrl+o to see full summary)\n"
+	retained := receipt + "conversation\n  esc to interrupt\nBUSY_READY\nidle\n"
+	for _, tc := range []struct {
+		name       string
+		visible    string
+		history    string
+		visibleErr error
+		want       bool
+		wantErr    error
+	}{
+		{"retained busy footer with visible idle", "conversation\nreply complete\n❯ IDLE_READY\n", retained + captureIdle, nil, true, nil},
+		{"retained busy footer with empty visible pane", "\n\n", retained, nil, true, nil},
+		{"actually visible busy", captureBusy, retained + captureBusy, nil, false, nil},
+		{"new historical receipt outside visible fold", captureBusy, retained + receipt + captureBusy, nil, true, nil},
+		{"unreadable visible pane", captureIdle, retained + captureIdle, blind, false, blind},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frames := repeatFrame(phasePrimary, receipt+captureBusy, 3)
+			if tc.wantErr != nil {
+				for index := range frames {
+					frames[index].visibleErr = tc.visibleErr
+				}
+			}
+			done := repeatFrame(phaseDone, tc.history, 12)
+			for index := range done {
+				done[index].visible = tc.visible
+				done[index].visibleErr = tc.visibleErr
+			}
+			engine, script := newScriptedEngine(t, append(frames, done...))
+			engine.options.ThenBusyTries = 3
+			engine.options.ThenIdleTries = 6
+			engine.options.ThenIdleStable = 2
+			observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", pfmengine.Claude)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("waitForSettledTurn error = %v, want %v", err, tc.wantErr)
+			}
+			if observed != tc.want {
+				t.Fatalf(
+					"waitForSettledTurn observed = %t, want %t: historical busy must not replace the current visible footer",
+					observed,
+					tc.want,
+				)
+			}
+			if tc.want && script.decidedIn() != phaseDone {
+				t.Fatalf("boundary phase = %q, want %q", script.decidedIn(), phaseDone)
+			}
+		})
+	}
+}

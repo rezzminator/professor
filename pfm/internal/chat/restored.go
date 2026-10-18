@@ -161,7 +161,13 @@ func restoreNative(
 			Pane:    current.HerdrPane,
 		}
 		if err := renameHerdr(ctx, target, current.Name, runtime.Paths); err != nil {
-			return fmt.Errorf("restore name: %w", err)
+			var refusal *herdr.Refusal
+			if !errors.As(err, &refusal) || refusal.Code != "agent_not_found" ||
+				!strings.HasPrefix(refusal.Request, "agent.rename ") {
+				return fmt.Errorf("restore name: %w", err)
+			}
+			// The pane label is acknowledged; seat-host registers the agent after launch.
+			fmt.Fprintf(stderr, "pfm chat open: restored pane named; agent not registered yet: %v\n", err)
 		}
 	}
 	if current.LostNote != "" {

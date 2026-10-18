@@ -145,7 +145,10 @@ func sendRefresh(
 	refreshing bool,
 	updates chan<- ui.Snapshot,
 ) (sentRefresh, bool) {
-	native, _, err := fleet.NativeSeats(ctx, environment.Paths)
+	native, failures, err := fleet.NativeSeats(ctx, environment.Paths)
+	if err == nil && len(failures) > 0 {
+		err = fmt.Errorf("probe native seats: %s", strings.Join(failures, "\n"))
+	}
 	if err == nil {
 		data, err = fleet.EnrichNative(ctx, database, data, native)
 	}

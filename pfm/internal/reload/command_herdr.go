@@ -515,7 +515,7 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 				if !stash {
 					return errors.New("native reload composer holds a draft")
 				}
-				if err := n.client.SendKey(ctx, n.target, "C-s"); err != nil {
+				if err := n.client.SendKey(ctx, n.target, "ctrl+s"); err != nil {
 					return fmt.Errorf("stash native reload draft: %w", err)
 				}
 				stash = false

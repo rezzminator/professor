@@ -124,6 +124,9 @@ func Run(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
+		for _, failure := range scan.Errors {
+			fmt.Fprintf(stderr, "pfm ls: %s\n", failure)
+		}
 		if scan.Snapshot.ScheduleError != "" {
 			fmt.Fprintf(stderr, "pfm ls: %s\n", scan.Snapshot.ScheduleError)
 		}
@@ -160,6 +163,9 @@ func Run(
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
+		}
+		for _, failure := range scan.Errors {
+			fmt.Fprintf(stderr, "pfm ls: %s\n", failure)
 		}
 		if hasUpdate {
 			scan.Snapshot.Rows = append([]compose.Row{updateRow}, scan.Snapshot.Rows...)
@@ -224,6 +230,9 @@ func Run(
 		return 1
 	}
 	if *plain || *tsv {
+		if len(scan.Errors) > 0 {
+			return 1
+		}
 		return 0
 	}
 	// Every ⌃X already landed the moment it was typed, so there is nothing

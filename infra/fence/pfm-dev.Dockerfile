@@ -82,5 +82,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* \
  && google-chrome-stable --version
 
-# pfm-dev — the default target: the base as it is.
+# pfm-dev carries the real headless Herdr used by the native-seat lane.
 FROM pfm-base AS pfm-dev
+ARG HERDR_VERSION=0.9.5
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+      amd64) herdr_arch=x86_64; herdr_sum=14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d ;; \
+      arm64) herdr_arch=aarch64; herdr_sum=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c ;; \
+      *) echo "unsupported Herdr architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/herdr "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-${herdr_arch}" \
+ && echo "${herdr_sum}  /tmp/herdr" | sha256sum -c - \
+ && install -m 0755 /tmp/herdr /usr/local/bin/herdr \
+ && rm /tmp/herdr \
+ && herdr --version

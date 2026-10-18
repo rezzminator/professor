@@ -261,7 +261,7 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		f.keys = append(f.keys, keys...)
 		for _, key := range keys {
 			switch key {
-			case "C-s":
+			case "ctrl+s":
 				f.text = f.composer()
 			case "BSpace":
 				f.text = strings.TrimSuffix(f.text, "t")
@@ -394,7 +394,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if !reflect.DeepEqual(run, canonical) {
 				t.Fatalf("recipe=%+v, canonical=%+v", run, canonical)
 			}
-			if tc.draft && !slices.Contains(f.keys, "C-s") {
+			if tc.draft && !slices.Contains(f.keys, "ctrl+s") {
 				t.Fatalf("draft not stashed: %v", f.keys)
 			}
 			if tc.then && !strings.Contains(f.prompted, f.request.Then) {

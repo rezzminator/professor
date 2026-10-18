@@ -95,6 +95,10 @@ func inspectTarget(
 		return headless.Status{}, err
 	}
 	switch {
+	case target.Backend == spawn.BackendHerdr && target.Live && status.State != headless.StateWorking:
+		// A finished transcript decides the turn, not whether its pane still exists.
+		// Preserve transcript state and duration only after validating this agent.
+		_, err = statusFromHerdr(ctx, target, status)
 	case target.Backend == spawn.BackendHerdr && target.Live && status.State == headless.StateWorking:
 		status, err = statusFromHerdr(ctx, target, status)
 	case pane:
@@ -103,6 +107,9 @@ func inspectTarget(
 		status, err = blockedFromPane(ctx, target, status, capture, runtime)
 	}
 	if err != nil {
+		if target.Backend == spawn.BackendHerdr {
+			err = fmt.Errorf("read Herdr endpoint %s pane %s: %w", target.Socket, target.Pane, err)
+		}
 		return headless.Status{}, err
 	}
 	if target.Backend == spawn.BackendHerdr {

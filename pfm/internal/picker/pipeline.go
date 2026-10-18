@@ -158,6 +158,7 @@ type unseenScheduleReader interface {
 }
 
 type scanResult struct {
+	Errors   []string
 	Output   compose.Output
 	Snapshot ui.Snapshot
 	Live     gather.Snapshot
@@ -183,6 +184,7 @@ func scanFleet(
 		return scanResult{}, err
 	}
 	return scanResult{
+		Errors:   result.Errors,
 		Output:   result.Output,
 		Snapshot: buildSnapshot(ctx, result.Env, request, result.Output),
 		Live:     result.Live,
@@ -207,7 +209,7 @@ func scanFleetCached(
 	request.Facts = nil
 	snapshot := buildSnapshot(ctx, result.Env, request, result.Output)
 	snapshot.Refreshing = true
-	return scanResult{Output: result.Output, Snapshot: snapshot, Paths: result.Env.Paths}, nil
+	return scanResult{Errors: result.Errors, Output: result.Output, Snapshot: snapshot, Paths: result.Env.Paths}, nil
 }
 
 type indexRunner interface {

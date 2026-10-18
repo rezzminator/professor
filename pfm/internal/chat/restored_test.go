@@ -30,10 +30,11 @@ func TestOpenRestoredIDRejectsMissingSession(t *testing.T) {
 }
 
 func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
-	for _, history := range []string{"unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe"} {
+	for _, history := range []string{"unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing"} {
 		t.Run(history, func(t *testing.T) {
 			testjail.Fleet(t)
 			notices := make(chan string, 4)
+			labels := make(chan string, 4)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				switch req.Method {
 				case "ping":
@@ -64,8 +65,20 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 						},
 					}, ""
 				case "pane.rename":
+					var label string
+					_ = json.Unmarshal(req.Params["label"], &label)
+					labels <- label
+					if history == "pane agent missing" {
+						return nil, "agent_not_found"
+					}
 					return map[string]any{"pane": map[string]any{"pane_id": "w9:p2", "label": "INTEGRATION"}}, ""
 				case "agent.rename":
+					if history == "agent missing" {
+						return nil, "agent_not_found"
+					}
+					if history == "agent denied" {
+						return nil, "permission_denied"
+					}
 					return map[string]any{"agent": map[string]any{"pane_id": "w9:p2", "name": "integration"}}, ""
 				case "notification.show":
 					var body string
@@ -157,6 +170,19 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 					t.Fatalf("protocol refusal code=%d seat=%+v err=%v stderr=%q", code, current, err, stderr.String())
 				}
 				return
+			}
+			if history == "agent denied" || history == "pane agent missing" {
+				want := "permission_denied"
+				if history == "pane agent missing" {
+					want = "agent_not_found"
+				}
+				if code != 1 || !strings.Contains(stderr.String(), want) || stdout.Len() != 0 {
+					t.Fatalf("rename failure code=%d out=%q err=%q", code, stdout.String(), stderr.String())
+				}
+				return
+			}
+			if len(labels) != 1 || <-labels != seat.Name {
+				t.Fatal("restored pane label did not match durable name")
 			}
 			if code != 0 {
 				t.Fatalf("restored code=%d out=%q err=%q", code, stdout.String(), stderr.String())

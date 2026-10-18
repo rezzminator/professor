@@ -74,6 +74,29 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 	}
 }
 
+func TestHookNativeHangupIsInterruptedNotFailure(t *testing.T) {
+	for _, name := range []string{"seat-host", "claude-launch", "launch", "then"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, recorder := Test(t)
+			_, finish := Hook(ctx, name, &bytes.Buffer{})
+			finish(129)
+			record := recorder.Records()[0]
+			requireField(t, record, FieldExit, float64(129))
+			if name == "then" {
+				requireField(t, record, "decision", "error")
+				if record.Level != slog.LevelError.String() {
+					t.Fatalf("unrelated hook failure level=%s", record.Level)
+				}
+				return
+			}
+			requireField(t, record, "decision", "interrupted")
+			if record.Level != slog.LevelInfo.String() {
+				t.Fatalf("native terminal hangup level=%s", record.Level)
+			}
+		})
+	}
+}
+
 // TestHookCapturesOnlyAHeadOfStdout: a hook streaming more than the capture
 // cap (a statusline render, a picker listing) is passed through whole while
 // the record keeps no more than the cap — and non-JSON stdout yields no

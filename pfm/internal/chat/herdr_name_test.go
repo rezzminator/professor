@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -104,5 +106,26 @@ func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
 	want := []string{"pane.rename:INTEGRATION", "agent.rename:integration", "agent.rename:integration-2"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("requests=%v want=%v", got, want)
+	}
+}
+
+func TestRenameHerdrRequiresExistingAgent(t *testing.T) {
+	testjail.Fleet(t)
+	socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+		if req.Method == "pane.rename" {
+			return map[string]any{"pane": map[string]any{"pane_id": "w6:p3", "label": "INTEGRATION"}}, ""
+		}
+		return nil, "agent_not_found"
+	})
+	runtime, _, seat := nativeChatSeat(t, socket, "lost")
+	err := renameHerdr(
+		context.Background(),
+		headless.Chat{SeatID: seat.SeatID, Socket: socket, Pane: seat.HerdrPane},
+		"INTEGRATION",
+		runtime.Paths,
+	)
+	var refusal *herdr.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "agent_not_found" {
+		t.Fatalf("ordinary rename error=%v", err)
 	}
 }

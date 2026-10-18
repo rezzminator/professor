@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -174,6 +176,11 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 
 // closeSeat verifies the current binding before deleting its row and closing its pane.
 func closeSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat, status int, stderr io.Writer) int {
+	// Losing the terminal is not an intentional chat end. Herdr restoration
+	// needs this owner and recipe, possibly already rebound by the new host.
+	if status == 128+int(syscall.SIGHUP) {
+		return status
+	}
 	current, found, err := db.Seat(ctx, seat.SeatID)
 	if err != nil || (found && (current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane)) {
 		fmt.Fprintf(stderr, "pfm internal seat-host: ended seat binding changed: %v\n", err)
@@ -273,6 +280,18 @@ func runSeatEngine(
 		restoreErr := seatForeground(int(tty.Fd()), syscall.Getpgrp())
 		if !ignored {
 			signal.Reset(syscall.SIGTTOU)
+		}
+		// An engine may handle terminal loss by exiting 1 rather than by signal.
+		// Judge the actual PTY hangup, not its exit code or an unreachable API:
+		// ordinary engine failures must remain errors even if Herdr is offline.
+		terminal := []unix.PollFd{{Fd: int32(options.Ctty)}}
+		_, pollErr := unix.Poll(terminal, 0)
+		if pollErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("probe ended terminal: %w", pollErr))
+		}
+		if pollErr == nil && terminal[0].Revents&unix.POLLHUP != 0 {
+			status = 128 + int(syscall.SIGHUP)
+			return
 		}
 		returnErr = errors.Join(returnErr, restoreErr)
 	}()

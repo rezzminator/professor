@@ -139,13 +139,21 @@ func viewNative(ctx context.Context, seat fleetdb.Seat, stdout, stderr io.Writer
 			return fmt.Errorf("focus Herdr pane %s: %w", seat.HerdrPane, err)
 		}
 		var ack struct {
-			Type string `json:"type"`
-			Pane string `json:"pane_id"`
+			Type  string `json:"type"`
+			Pane  string `json:"pane_id"`
+			Agent *struct {
+				Pane    string `json:"pane_id"`
+				Focused bool   `json:"focused"`
+			} `json:"agent"`
 		}
 		if err := json.Unmarshal(body, &ack); err != nil {
 			return fmt.Errorf("decode Herdr focus: %w", err)
 		}
-		if ack.Type != "pane_focused" || ack.Pane != seat.HerdrPane {
+		valid := ack.Type == "pane_focused" && ack.Pane == seat.HerdrPane
+		if ack.Type == "agent_info" {
+			valid = ack.Agent != nil && ack.Agent.Pane == seat.HerdrPane && ack.Agent.Focused
+		}
+		if !valid {
 			return fmt.Errorf("unexpected Herdr focus acknowledgement: %s", body)
 		}
 		return nil

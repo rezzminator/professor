@@ -274,8 +274,17 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 				t.Fatalf("native kill reached tmux: %+v", tmux)
 			}
 			got, err := database.Shared().ReadSeatRun(seat.SeatID)
-			if err != nil || !reflect.DeepEqual(got.Args, recipe.Args) {
-				t.Fatalf("recipe changed: %+v %v", got, err)
+			if !closed {
+				if err != nil || !reflect.DeepEqual(got.Args, recipe.Args) {
+					t.Fatalf("graceful recipe changed before supervisor cleanup: %+v %v", got, err)
+				}
+				return
+			}
+			if _, found, err := database.Shared().Seat(context.Background(), seat.SeatID); err != nil || found {
+				t.Fatalf("closed native pane kept a live durable seat: found=%t err=%v", found, err)
+			}
+			if err == nil {
+				t.Fatal("closed native pane kept its run recipe")
 			}
 		})
 	}

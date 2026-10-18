@@ -305,5 +305,16 @@ func (client herdrKiller) SendKey(ctx context.Context, socket, pane, key string)
 }
 
 func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) error {
-	return client.ack(ctx, socket, pane, "pane.close", map[string]string{herdrPaneKey: pane})
+	if err := client.ack(ctx, socket, pane, "pane.close", map[string]string{herdrPaneKey: pane}); err != nil {
+		return err
+	}
+	// A forced pane close also kills its supervisor, so it cannot retire the
+	// durable address itself. Keep the independent kill ledger untouched.
+	if err := client.database.Shared().DeleteSeatRun(client.seat.SeatID); err != nil {
+		return fmt.Errorf("remove closed Herdr seat recipe %s: %w", client.seat.SeatID, err)
+	}
+	if err := client.database.Shared().DeleteSeat(ctx, client.seat.SeatID); err != nil {
+		return fmt.Errorf("remove closed Herdr seat %s: %w", client.seat.SeatID, err)
+	}
+	return nil
 }

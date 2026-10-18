@@ -37,6 +37,8 @@ func (engine *Engine) SendKey(ctx context.Context, target Target, key string) er
 	case "", backendTmux:
 		return engine.tmux.SendKey(ctx, target.SocketPath, target.Pane, key)
 	case backendHerdr:
+		// The public keys grammar is tmux's; Herdr spells modifiers with pluses.
+		key = strings.NewReplacer("C-", "ctrl+", "M-", "alt+", "S-", "shift+").Replace(key)
 		result, err := herdr.SeatRequest(ctx, target.SocketPath, "pane.send_keys", struct {
 			Pane string   `json:"pane_id"`
 			Keys []string `json:"keys"`
@@ -60,6 +62,10 @@ func (engine *Engine) SendKey(ctx context.Context, target Target, key string) er
 }
 
 func herdrCapture(ctx context.Context, target Target, lines int) (string, string, error) {
+	return herdrCaptureFormat(ctx, target, lines, "")
+}
+
+func herdrCaptureFormat(ctx context.Context, target Target, lines int, format string) (string, string, error) {
 	if target.SocketPath == "" || target.Pane == "" {
 		return "", "", fmt.Errorf("herdr capture: socket and pane are required")
 	}
@@ -67,17 +73,25 @@ func herdrCapture(ctx context.Context, target Target, lines int) (string, string
 	if limit <= 0 || limit > herdrRecentLines {
 		limit = herdrRecentLines
 	}
+	var stripANSI *bool
+	if format == "ansi" {
+		strip := false
+		stripANSI = &strip
+	}
 	result, err := herdr.SeatRequest(ctx, target.SocketPath, "pane.read", struct {
-		Pane   string `json:"pane_id"`
-		Source string `json:"source"`
-		Lines  int    `json:"lines"`
-	}{target.Pane, "recent", limit})
+		Pane      string `json:"pane_id"`
+		Source    string `json:"source"`
+		Lines     int    `json:"lines"`
+		Format    string `json:"format,omitempty"`
+		StripANSI *bool  `json:"strip_ansi,omitempty"`
+	}{target.Pane, "recent", limit, format, stripANSI})
 	if err != nil {
 		return "", "", fmt.Errorf("herdr capture %q on %q: %w", target.Pane, target.SocketPath, err)
 	}
 	var response struct {
 		Type string `json:"type"`
 		Read *struct {
+			Format    string  `json:"format"`
 			Pane      string  `json:"pane_id"`
 			Workspace string  `json:"workspace_id"`
 			Text      *string `json:"text"`
@@ -90,6 +104,11 @@ func herdrCapture(ctx context.Context, target Target, lines int) (string, string
 	if response.Type != "pane_read" || response.Read == nil || response.Read.Text == nil ||
 		response.Read.Truncated == nil {
 		return "", "", fmt.Errorf("herdr capture %q: malformed pane_read result (type %q)", target.Pane, response.Type)
+	}
+	if format != "" && response.Read.Format != format {
+		return "", "", fmt.Errorf(
+			"herdr capture %q: requested format %q, received %q", target.Pane, format, response.Read.Format,
+		)
 	}
 	if response.Read.Pane != target.Pane && response.Read.Workspace+":"+response.Read.Pane != target.Pane {
 		return "", "", fmt.Errorf("herdr capture %q: result belongs to pane %q", target.Pane, response.Read.Pane)
@@ -278,8 +297,29 @@ func (engine *Engine) callHerdrRaw(
 		base.Busy, base.Code, base.Message = true, CodeBusy, "ABORT: target pane is busy; nothing was typed"
 		return base, nil
 	}
-	if !ComposerRowShown(before) || SelectorLine(before) != "" || ComposerDraftText(before) != "" {
+	if !ComposerRowShown(before) || SelectorLine(before) != "" {
 		base.Status, base.Code, base.Message = statusUndelivered, CodeUndelivered, "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
+		return base, nil
+	}
+	empty, _, err := ComposerEmpty(before, func() (string, error) {
+		styled, _, readErr := herdrCaptureFormat(ctx, target, herdrRecentLines, "ansi")
+		if readErr != nil {
+			return "", readErr
+		}
+		if !ComposerRowShown(styled) || SelectorLine(styled) != "" || IsFooterBusy(id, styled) {
+			return "", fmt.Errorf("herdr composer changed while checking styling")
+		}
+		return styled, nil
+	})
+	if err != nil {
+		base.Code, base.Message = CodeUndelivered, fmt.Sprintf(
+			"ABORT: Herdr composer styling could not be checked; nothing was typed: %v", err,
+		)
+		return base, nil
+	}
+	if !empty {
+		base.Status, base.Code = statusUndelivered, CodeUndelivered
+		base.Message = "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
 		return base, nil
 	}
 	prepared, err := engine.prepareLiveMessage(ctx, target, request.Message, false)

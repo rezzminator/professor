@@ -75,6 +75,10 @@ func RetiredPfmCommand(command string) (name, successor string, ok bool) {
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
 const chatlogSuccessor = "the chatlog skill"
 
+// imagineSuccessor is what replaced /imagine:build, /imagine:build-fast,
+// /imagine:callmeter, /ultimate-spec and the ultimate visualization skill.
+const imagineSuccessor = "/imagine"
+
 // retiredNames is the one registry of retired names `pfm doctor
 // --project-updates` scans a project's files for. Every entry cites
 // the release note or commit that retired it. A retired name that is also a
@@ -220,26 +224,52 @@ var retiredNames = []retiredName{
 	// moved to professor as /imagine:callmeter" its skill. /ultimate itself is
 	// live again as a standalone skill, so it is no row and no agent row below
 	// matches a reference to that skill (`/ultimate`, skills/ultimate/).
-	{name: "/ultimate-spec", kind: retiredCommand, successor: "/imagine:build", match: matchExact},
+	// Commit 471d4b63 "the imagine family collapses to /imagine, the imagination
+	// agent and the ultimate skill" retired every /imagine: subcommand, the
+	// imagine agent and the imagine-core skill (its law lives in the imagination
+	// agent); /imagine itself is live, so it is no row. A spec without a build
+	// starts with /flights:spec. Commit 196ec68b "retire /imagine:evolve with its
+	// imagine-historian agent" left both with no successor.
+	{name: "/ultimate-spec", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
 	{
-		name: "/callmeter:ultimate-visualization", kind: retiredSkill, successor: "/imagine:callmeter",
+		name: "/callmeter:ultimate-visualization", kind: retiredSkill, successor: imagineSuccessor,
 		match: matchExact,
 	},
+	{name: "/imagine:build", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
+	{name: "/imagine:build-fast", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
+	{name: "/imagine:build-spec", kind: retiredCommand, successor: "/flights:spec", match: matchExact},
+	{name: "/imagine:callmeter", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
+	{name: "imagine-core", kind: retiredSkill, successor: "the imagination agent", match: matchExact},
+	{name: "/imagine:evolve", kind: retiredCommand, match: matchExact},
+	{name: "imagine-historian", kind: retiredAgent, match: matchExact},
 	// The agent is named by its context only — the bare word is everyday prose.
 	// One row per spelling an agent reference takes: the Agent tool's
 	// subagent_type in YAML, call, keyword and JSON form, the agent file's path,
 	// and the backticked name beside the word agent or sub-agent.
-	retiredAgentRow("ultimate", "imagine", `subagent_type: "ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type:"ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type: 'ultimate'`),
-	retiredAgentRow("ultimate", "imagine", "subagent_type: ultimate"),
-	retiredAgentRow("ultimate", "imagine", `subagent_type="ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type": "ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type":"ultimate"`),
-	retiredAgentRow("ultimate", "imagine", "agents/ultimate.md"),
-	retiredAgentRow("ultimate", "imagine", "`ultimate` agent"),
-	retiredAgentRow("ultimate", "imagine", "`ultimate` sub-agent"),
-	retiredAgentRow("ultimate", "imagine", "`ultimate` subagent"),
+	retiredAgentRow("ultimate", "imagination", `subagent_type: "ultimate"`),
+	retiredAgentRow("ultimate", "imagination", `subagent_type:"ultimate"`),
+	retiredAgentRow("ultimate", "imagination", `subagent_type: 'ultimate'`),
+	retiredAgentRow("ultimate", "imagination", "subagent_type: ultimate"),
+	retiredAgentRow("ultimate", "imagination", `subagent_type="ultimate"`),
+	retiredAgentRow("ultimate", "imagination", `subagent_type": "ultimate"`),
+	retiredAgentRow("ultimate", "imagination", `subagent_type":"ultimate"`),
+	retiredAgentRow("ultimate", "imagination", "agents/ultimate.md"),
+	retiredAgentRow("ultimate", "imagination", "`ultimate` agent"),
+	retiredAgentRow("ultimate", "imagination", "`ultimate` sub-agent"),
+	retiredAgentRow("ultimate", "imagination", "`ultimate` subagent"),
+	// The imagine agent, named by its context for the same reason: imagination,
+	// /imagine and imagine-core are other names and never reach these rows.
+	retiredAgentRow("imagine", "imagination", `subagent_type: "imagine"`),
+	retiredAgentRow("imagine", "imagination", `subagent_type:"imagine"`),
+	retiredAgentRow("imagine", "imagination", `subagent_type: 'imagine'`),
+	retiredAgentRow("imagine", "imagination", "subagent_type: imagine"),
+	retiredAgentRow("imagine", "imagination", `subagent_type="imagine"`),
+	retiredAgentRow("imagine", "imagination", `subagent_type": "imagine"`),
+	retiredAgentRow("imagine", "imagination", `subagent_type":"imagine"`),
+	retiredAgentRow("imagine", "imagination", "agents/imagine.md"),
+	retiredAgentRow("imagine", "imagination", "`imagine` agent"),
+	retiredAgentRow("imagine", "imagination", "`imagine` sub-agent"),
+	retiredAgentRow("imagine", "imagination", "`imagine` subagent"),
 }
 
 // retiredAgentRow is one contextual spelling of a retired agent reference.

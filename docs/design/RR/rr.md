@@ -1,6 +1,6 @@
 # rr
 
-`rr` maps the knowledge area one query asks about. A lead opens the query, plans its sub-areas by subject with a field's lens on each, sends diggers down the rabbit holes that serve the plan, checks the facts its answer rests on against their pages, and saves one cited document. This file holds the family's shared decisions and the `rr` lead's; each other member's own decisions live in its file beside this one.
+`rr` maps the knowledge area one query asks about. A lead opens the query, plans its sub-areas by subject with a field's lens on each, sends diggers down the rabbit holes that serve the plan, checks the facts its answer rests on against their pages, and saves a run directory: its cited synthesis and every digger's full report. This file holds the family's shared decisions and the `rr` lead's; each other member's own decisions live in its file beside this one.
 
 A change lands in this file first, then in the templates, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -9,7 +9,7 @@ A change lands in this file first, then in the templates, then in every surface 
 - [The family](#the-family)
 - [The run](#the-run)
 - [The document](#the-document)
-- [Why diggers never write](#why-diggers-never-write)
+- [Why each digger writes its own report](#why-each-digger-writes-its-own-report)
 - [The lead-call budget](#the-lead-call-budget)
 - [The plan](#the-plan)
 - [The lens](#the-lens)
@@ -28,10 +28,10 @@ A change lands in this file first, then in the templates, then in every surface 
 
 | Member | Kind | Does | Runs at | Design |
 | --- | --- | --- | --- | --- |
-| `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only agent holding `Write`, and it holds no `Read` | smart (`opus`), effort `low` | this file |
+| `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only writer of the run's synthesis, and it holds no `Read` | smart (`opus`), effort `low` | this file |
 | `rr-pro` | variant of `rr` | The same body at higher effort with wider caps and the repository lane set in `rr.md`'s § Budget and § Spawning by `rr-pro.md` and its shared `shared/repo-lane.md` section overrides, rendered by `pfm install` | `opus`, effort `medium` | [rr-pro.md](rr-pro.md) |
 | `rr-pro-max` | variant of `rr` | As `rr-pro`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [rr-pro-max.md](rr-pro-max.md) |
-| `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | collector (`haiku`), effort `medium` | [sub-rr.md](sub-rr.md) |
+| `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, writes its full report into the run directory, returns the report's path, findings and rabbit holes | collector (`haiku`), effort `medium` | [sub-rr.md](sub-rr.md) |
 | `clone-distiller` | agent | The general repository digger, the code lane of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [clone-distiller.md](../clone-distiller/clone-distiller.md) |
 | `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max\|gpt-rr\|gpt-rr-pro\|gpt-rr-pro-max` | `pfm internal rr-dir` | this file |
 
@@ -48,24 +48,33 @@ Vocabulary, one term per concept: a rabbit hole is a link, gap or missing piece 
 ## The run
 
 1. OPEN. One message carries the WebSearch and, for a scholarly question, the harvester lookups; the next message fetches the 1-3 best starting pages. An opening read that shows the lead no page text is marked `UNREAD` and its question goes to a round-1 digger, never into the map as an absence. A failed or empty search ends the run with a one-line report.
-2. PLAN. The lead restates the query as verbs, names the fields that do that work, and splits the knowledge area by subject into 3-7 sub-areas, each with a plan line, `{sub-area} — settled when {evidence}`, and a `Lens:` line under it (§ The lens); both open every brief that owns the sub-area.
+2. PLAN. The lead restates the query as verbs, names the fields that do that work, and splits the knowledge area by subject into 3-7 sub-areas, each with a plan line, `{sub-area} — settled when {evidence}`, and a `Lens:` line under it (§ The lens); both open every brief that owns the sub-area. The step ends with the Write that claims the run directory (§ The document).
 3. AGGREGATE. Findings and rabbit holes are pooled, each sub-area is judged against its plan line (`settled` names the evidence that meets it; a digger's unsettled question or unverified inference on a part the line names makes it `partial`), and the frontier is rebuilt from the rabbit holes that serve an unsettled sub-area.
-4. DIG. One digger per unsettled sub-area, each carrying that sub-area alone under its lens, up to the lead's cap a round (§ The family), from round 2 on one seat of it for the red team; the smallest groups merge only when they outnumber the cap, so no two diggers own the same ground, and a round of the red team alone when digging ends with a round left and no red team run (§ The red team), every digger of the round in one message. The lead waits by ending its message.
+4. DIG. One digger per unsettled sub-area, each carrying that sub-area alone under its lens, up to the lead's cap a round (§ The family), from round 2 on one seat of it for the red team; the smallest groups merge only when they outnumber the cap, so no two diggers own the same ground, and a round of the red team alone when digging ends with a round left and no red team run (§ The red team), every digger of the round in one message, which opens with its count line, `Round {n}: {u} unsettled sub-areas + {0|1} red team → {d} diggers (cap {c})`, `r` the red-team seat, `d` = min(u + r, c), so a merge with a seat free shows as arithmetic on the record. Every `sub-rr` brief ends with `Report: {run dir}/sub-rr/{nn}-{group-slug}.md`, `nn` counting every digger of the run in spawn order (the red team's `{nn}-red-team.md`), or `Report: none — {reason}` when the run has no directory. The lead waits by ending its message.
 5. LOOP. Steps 3-4 repeat until the stop rule fires. Each round closes with a status block — one `{sub-area}: settled | partial | open — {why}` line each, then `Next: round {n}` or `Digging ended: {condition}` — so the stop decision is on the record.
 6. VERIFY. One message of WebFetch checks over the facts the answer rests on.
-7. SYNTHESIZE. Answer, map, coverage (each sub-area with its lens's field, and whether the red team ran and what it disputed), verification, open rabbit holes.
-8. SAVE, then RETURN. One Write of the finished document; the return is the saved path, then the answer, `Coverage`, `Verification` and the open rabbit holes copied from it. The map stays in the file.
+7. SYNTHESIZE. Answer, map, coverage (each sub-area with its lens's field and its report files relative to the run directory, and whether the red team ran, what it disputed and its report), verification, open rabbit holes. A report is never a source: the map cites web URLs and document identifiers only.
+8. SAVE, then RETURN. One Write of `{run dir}/{slug}.md`, a new file holding the finished synthesis; the return is the saved path, then the answer, `Coverage`, `Verification`, the open rabbit holes and a `Reports` line copied from it, plain text with no bullets, bold or headings. The map stays in the file, the findings' detail in the reports.
 
 ## The document
 
-One run produces one markdown document, `{RR dir}/{slug}-{YYYY-MM-DD}.md`, and nothing beside it: no part files, no sidecar directory, no log.
+One run produces one run directory, `{RR dir}/{slug}-{YYYY-MM-DD}/`:
 
-- One writer. The lead is the only agent that writes it. `sub-rr` holds no `Write`, `Edit` or `Bash`; its `tools:` line carries that invariant, so the harness enforces it and no prose has to. `clone-distiller` holds `Bash` to clone and writes only its own result file under `{RR dir}/clone-distiller/`, which the document lists and never absorbs.
-- One write. The finished document is written once, at SAVE. Nothing is written before it and nothing is appended, so the lead needs no `Edit` tool and no sentinel lines.
-- No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing. It is what turns a second run on a taken name into a refusal instead of the silent loss of the first run's document. Adding `Read` to the lead's `tools:` line removes the guard. It would also let a lead open the ledger and inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path. `rr-pro-max` alone opts out: its `tools` override adds `Read`, accepting both costs ([rr-pro-max.md](rr-pro-max.md) § Read, and the name guard it gives up).
-- A failed save is loud. With no `RR-DIR:` line, an `RR-DIR-ERROR:` line, or a Write that fails for any reason but a taken name, the return opens `NOT SAVED — {reason}` and carries the synthesis inline.
+```text
+{run dir}/plan.md                         the lead's plan, the run's claim
+{run dir}/{slug}.md                       the lead's synthesis
+{run dir}/sub-rr/{nn}-{group-slug}.md     each digger's full report; the red team's is {nn}-red-team.md
+{run dir}/clone-distiller/{file}          each repository digger's result file (rr-pro, rr-pro-max)
+```
 
-Layout of the finished document:
+- One writer per file, written once. The lead writes only `plan.md` and `{slug}.md`; each `sub-rr` writes only the `Report:` path its brief names, once, as its last call; `clone-distiller` gets the run directory as its `OUT-DIR:` and its own code appends `clone-distiller/`. No two agents ever hold one path, so nothing races.
+- The claim. At the end of PLAN the lead Writes `plan.md` with the heading, the `Question:` line and the plan lines; that Write claims the directory. At SAVE it Writes `{slug}.md`, a new file, with the heading, the `Question:` line and the finished synthesis; nothing ever rewrites a file. A second Write of one path would be refused: the lead ends its turn while its diggers run and is re-invoked by their notifications, and after that its own earlier Write no longer counts as a read (`File has not been read yet. Read it first before writing to it.`). A run that step 1 ended writes no plan, so its `{slug}.md` Write is the claim. A dead run leaves its plan on disk.
+- No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet. Read it first before writing to it.`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing: it turns a claim on a taken name into a refusal, and the lead takes `-2`, then `-3`, on the directory name, instead of erasing the first run's synthesis. Adding `Read` to the lead's `tools:` line removes the guard. It would also invite the lead to re-read its diggers' reports, the tokens the reports exist to keep out of its context, and to inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path. `rr-pro-max` alone opts out: its `tools` override adds `Read`, accepting both costs ([rr-pro-max.md](rr-pro-max.md) § Read, and the name guard it gives up).
+- The reports are for the caller. The lead never reads one; what it aggregates is each digger's return. A report keeps everything the digger found (each fact with its quote and URL, every page fetched and what it lacked, every failed fetch), so the main chat or whoever called the lead can investigate past the synthesis. `Coverage` names each sub-area's report files and the return's `Reports` line lists them, relative to the run directory, so a tracked synthesis carries no machine path.
+- Tracked and local. `plan.md` and `{slug}.md` are tracked; `sub-rr/` and `clone-distiller/` under each run directory are git-ignored, machine-local dig evidence (verbatim third-party text, paths into `/tmp` clones).
+- A failed save is loud. With no `RR-DIR:` line, an `RR-DIR-ERROR:` line, or a claim Write that fails for any reason but a taken name, the run has no directory: every brief carries `Report: none — {reason}`, each digger returns its full report inline, and the lead's return opens `NOT SAVED — {reason}` with the synthesis inline. A digger whose own Write fails returns `NOT SAVED — {the Write error}` and its full report inline; the `Reports` line marks it `NOT SAVED — {group}`.
+
+Layout of the finished synthesis:
 
 ```text
 # RR — {question in one line}
@@ -73,28 +82,27 @@ Question: {the query, verbatim}
 
 {answer, one to two sentences of prose, each clause carrying the inline link of the map fact it states; lists belong in the map}
 {the map, by sub-area}
-Coverage       the plan, each sub-area (its field) settled | partial | open; Red team; Digging ended
+Coverage       the plan, each sub-area (its field) settled | partial | open with its report files; Red team with its report; Digging ended
 Verification   facts checked; every NOT ON PAGE and UNCHECKED by name
 {rabbit holes left open}
 ```
 
-Two runs on one name: the slug is chosen by each lead alone, so a second run on one subject, the same day, can pick a name already taken. The harness settles it: the second lead's Write lands on a file it has not read, is refused, and that lead takes the suffix `-2`, then `-3`. The refused Write costs the document a second time as output tokens, the price of a rare case.
+Two runs on one name: the slug is chosen by each lead alone, so a second run on one subject, the same day, can pick a directory already taken. The harness settles it at the claim: the second lead's Write lands on a `plan.md` it has not read, is refused, and that lead takes the suffix `-2`, then `-3`, before any brief names a report path. A run that step 1 ended claims with `{slug}.md` and leaves no `plan.md`, so a later run on its name claims the directory and finds its own `{slug}.md` Write refused at SAVE: that return opens `NOT SAVED` with the synthesis inline, loud, and the first run's line stays intact.
 
-## Why diggers never write
+## Why each digger writes its own report
 
-Up to eight diggers run at once. Any design where they write into the run's one document is a race, and every design that avoids the race by other means costs lead calls or breaks the one-document rule:
+Diggers read far more than they return: on one measured run they read about 423K characters of pages, returned about 28K, and the saved synthesis kept 9.9K. The detail between those numbers is what a caller investigates. Every route for it to reach disk was weighed:
 
 | Design | What goes wrong |
 | --- | --- |
-| Diggers `Write` the document | `Write` replaces the file: the last digger to finish erases the others |
-| Diggers `Edit` the document | Read-modify-write: the harness refuses an edit over a file changed since the read, so every collision is a re-read of a growing file and a retry, and the window between read and edit stays open |
-| One part file per digger, the lead merges | The lead either re-emits every finding as output tokens or reads each part file, one more lead call per round |
-| One part file per digger, a shell `cat` merges | `Bash` on an agent that reads the open web |
-| One part file per digger, a stop hook merges | The document's completeness would hang on a process that runs after the lead has returned and can no longer report on it |
-| Part files kept beside the document | Two artifacts per run |
+| Diggers `Write` the synthesis | `Write` replaces the file: the last digger to finish erases the others |
+| Diggers `Edit` the synthesis | Read-modify-write: the harness refuses an edit over a file changed since the read, so every collision is a re-read of a growing file and a retry |
+| The lead writes the detail | It re-emits every finding as output tokens, and the detail must first enter its context |
 | The digger returns a path, the lead reads the file | The same tokens enter the lead's context, plus one call per round |
+| A stop hook merges part files | Completeness would hang on a process that runs after the lead has returned and can no longer report on it |
+| Each digger Writes its own file, the lead never reads it | Chosen: one writer per path, so no race; no lead call and no lead tokens; the return still carries what the lead steers from |
 
-The findings have to reach the lead's context whatever happens, because the lead steers and synthesizes from them. A digger's return already does that at no extra call. So the return is the only channel, and the document has one writer.
+The findings reach the lead's context through the return, because the lead steers and synthesizes from them, so the return keeps its 2-4 sentence findings and adds only the report's path. The report sits beside the synthesis for the caller.
 
 ## The lead-call budget
 
@@ -103,14 +111,14 @@ A lead call is one model invocation of the lead; each re-sends the lead's whole 
 | Phase | Lead calls | Note |
 | --- | --- | --- |
 | OPEN | 2 | The harvester lookups ride in the search message |
-| PLAN | 0 | Reasoning only, inside the call that sends round 1 |
+| PLAN | 1 | The claim Write; the next call sends round 1 |
 | Each dig round | `d + 1` | One spawn message, one wait line, one note per return; the last return's call sends the next step |
 | VERIFY | 1 | Every check in one message |
-| SAVE, RETURN | 2 | The Write, then the final message |
+| SAVE, RETURN | 2 | The synthesis Write, then the final message |
 
-A run costs `r(d + 1) + 5` lead calls: 15 for two rounds of four, 20 at `rr`'s ceiling of three, 40 at `rr-pro`'s ceiling of five rounds of six; `rr-pro-max` has no ceiling, so its cost is bounded only by convergence, at 9 lead calls a round of eight; a round of fewer diggers costs fewer, so three rounds of 4, 3 and 2 diggers cost 17. Every digger costs the lead one call when it returns, which is why width is bought inside a digger (more sub-queries per batch) and never as more diggers.
+A run costs `r(d + 1) + 6` lead calls: 16 for two rounds of four, 21 at `rr`'s ceiling of three, 41 at `rr-pro`'s ceiling of five rounds of six; `rr-pro-max` has no ceiling, so its cost is bounded only by convergence, at 9 lead calls a round of eight; a round of fewer diggers costs fewer, so three rounds of 4, 3 and 2 diggers cost 18. Every digger costs the lead one call when it returns, which is why width is bought inside a digger (more sub-queries per batch) and never as more diggers.
 
-What enters the lead's context is held flat: a finding keeps its 2-4 sentence size with quotes in place of paraphrase, a verification answer is a YES or NO with one sentence (8 pages came to about 1K tokens), and `Coverage` and `Verification` add a few hundred output tokens a run.
+What enters the lead's context is held flat: a digger's detail goes to its report on disk, a finding keeps its 2-4 sentence size with quotes in place of paraphrase, a verification answer is a YES or NO with one sentence (8 pages came to about 1K tokens), and `Coverage` and `Verification` add a few hundred output tokens a run.
 
 ## The plan
 
@@ -191,7 +199,7 @@ One vocabulary across the digger's return, the lead's messages and the document,
 | `unverified` | lead | A claim with no fetched source behind it |
 | `UNREAD — {url}: {why}` | lead | An opening read showed no page text (a result saved to a file the lead cannot open, an error, a fetch model reporting no match on a long page); its question goes to a round-1 digger |
 | `confirmed`, `NOT ON PAGE`, `UNCHECKED — {error}` | lead | The verification verdicts; `NOT ON PAGE` is also the collector's mark for a source read that does not carry the item |
-| `NOT SAVED — {reason}` | lead | The document was not written; the synthesis travels inline |
+| `NOT SAVED — {reason}` | lead, digger | The synthesis (lead) or the report (digger) was not written; its content travels inline |
 
 An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOUND`, `DIG FAILED`, `CLONE FAILED` and `FETCH FAILED` against `NOTHING FOUND`, `UNCHECKED`, `UNREAD` and `PARTIAL READ` against `NOT ON PAGE`.
 
@@ -203,7 +211,6 @@ An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOU
 | More than 4 diggers a round for `rr` | Each digger is one more lead call on return; width goes into the batch. `rr-pro` and `rr-pro-max` buy width at that price by design |
 | A fourth dig round for `rr` | Depth saturates; the three-round ceiling keeps the run under its former cost with verification included. `rr-pro` and `rr-pro-max` pay for depth by design |
 | A log of findings written round by round | Every finding would be emitted twice, once by the digger and once by the lead |
-| A `RUNNING` stub written at the start and replaced at the end | Replacing it is a Write over an existing file: refused without `Read`, even for the lead's own stub, and allowed for every file with it, which removes the name guard. A dead run leaves no document; its plan and findings are in the transcript |
 | A human gate on the plan | The lead is a sub-agent and holds no way to ask; the plan is reported in `Coverage` |
 | A sub-area per field | Two diggers on one subject; the field rides as a lens inside the brief instead (§ The lens) |
 | A persona in the brief ("act as", "you are a {field}") | It changes the digger's vocabulary, not its searches or its sources |
@@ -228,7 +235,7 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 ## Measuring a run
 
-`pfm tokens --family {the chat's session-id prefix}` (`--since` widening its 24 h window to the run's start) prices the chat's agents per agent type, the lead's and the diggers', then its 14 costliest agents one by one with their calls, context and price; `pfm tokens --timeline {the lead's transcript}` lists the lead's calls one by one with their tokens and tool uses. Three numbers say whether a run held the budget: the lead's calls against `r(d + 1) + 5`, the rounds used against the lead's round ceiling, and the `NOT ON PAGE` count in the document's `Verification` section. A `NOT ON PAGE` rate that stays above zero across runs means findings are still being paraphrased, and the fix is in the digger's fetch prompt, not in a larger verification sample. Two more say whether the lens and the red team pay: the share of findings whose bracket names a `sources:` item rather than `other:`, and the facts the `Red team:` line marks `DISPUTED`.
+`pfm tokens --family {the chat's session-id prefix}` (`--since` widening its 24 h window to the run's start) prices the chat's agents per agent type, the lead's and the diggers', then its 14 costliest agents one by one with their calls, context and price; `pfm tokens --timeline {the lead's transcript}` lists the lead's calls one by one with their tokens and tool uses. Three numbers say whether a run held the budget: the lead's calls against `r(d + 1) + 6`, the rounds used against the lead's round ceiling, and the `NOT ON PAGE` count in the document's `Verification` section. A `NOT ON PAGE` rate that stays above zero across runs means findings are still being paraphrased, and the fix is in the digger's fetch prompt, not in a larger verification sample. Two more say whether the lens and the red team pay: the share of findings whose bracket names a `sources:` item rather than `other:`, and the facts the `Red team:` line marks `DISPUTED`.
 
 ## Surfaces that stay in sync
 
@@ -236,11 +243,12 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 | --- | --- | --- |
 | The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `clone-distiller.md`, `rr-pro.md`, `rr-pro-max.md`, `shared/repo-lane.md` | The three protocols, the lens and red-team rules in `rr.md` step 2, step 4 and § Red team, and the digger's side in `sub-rr.md`; the `rr-pro` and `rr-pro-max` overrides of `rr.md`'s § Budget and § Spawning, each hash-pinned, and their repository lane, the shared file `shared/repo-lane.md` |
 | The rendered variants | `templates/generated/agents/` (tracked), linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro`, `rr-pro-max`, `gpt-rr`, `gpt-rr-pro` and `gpt-rr-pro-max`, re-rendered by `pfm install` (`engine-sync global`) after every edit of `rr.md` or `shared/repo-lane.md`; the fence step `templates.generated-agents` fails when the tracked files differ from a fresh render |
-| The hook | `pfm internal rr-dir`, wired by `pfm/internal/installer/expected_hooks.go` | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
+| The hook | `pfm internal rr-dir`, registered by `HookTemplates` in `pfm/internal/claudelaunch/hooks.go` (matcher `HookRRDirMatcher`) | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
+| The ignore lines | `.gitignore` | `sub-rr/` and `clone-distiller/` under each run directory stay machine-local |
 | This directory | `docs/design/RR/` | This file and one file per other member |
 
 ## Open items
 
-- A document name made unique by a mechanism: the `rr-dir` hook handing the lead a run token for the file name. A name no other run can hold makes an early stub safe to replace, which would put a dead run's plan on disk.
+- A run directory made unique by a mechanism for `rr-pro-max`, whose `Read` lifts the claim's refusal: the `rr-dir` hook handing the lead a run token for the directory name.
 - The lens and the red team have no measured run: the next runs set the source-class share and the dispute count under [Measuring a run](#measuring-a-run).
-- The three numbers under [Measuring a run](#measuring-a-run) have two measured runs behind them: 13 lead calls against a budget of 13 for rounds of 4 and 2 diggers, and one `NOT ON PAGE` in 25 facts on the other run. The next ten runs set the baseline.
+- The three numbers under [Measuring a run](#measuring-a-run) have two measured runs behind them: 13 lead calls against a budget of 13 for rounds of 4 and 2 diggers, counted before the claim Write, and one `NOT ON PAGE` in 25 facts on the other run. The next ten runs set the baseline.

@@ -19,10 +19,10 @@
 | Model, effort | `opus`, `medium` |
 | Tools | `WebSearch, WebFetch, Write, Agent, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` (inherited from `rr.md`) |
 | Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
-| Writes | the one RR document, into the directory on its `RR-DIR:` line |
+| Writes | the run's plan and synthesis, `plan.md` and `{slug}.md` in its run directory under the `RR-DIR:` line (`rr.md` § The document) |
 | Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max\|gpt-rr\|gpt-rr-pro\|gpt-rr-pro-max` |
 
-Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → here → rr-pro-max. Delegate for "rr pro", "rr-pro X", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.`
+Description, verbatim: `rr tier 2 on opus medium`
 
 ## How the variant is built
 
@@ -39,7 +39,7 @@ Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → he
 
 ## Cost
 
-A run costs `r(d + 1) + 5` lead calls (the family's lead-call budget: one spawn message and one note per digger each round, 2 to open, 1 to verify, 2 to save and return). At the ceiling of 5 rounds of 6 diggers that is 40 calls, each re-sending the lead's whole context. A digger costs the lead one call on return, so the extra width is bought knowingly; the convergence stops (every sub-area settled, or a round that settled nothing and added no sub-area) usually end a run well before the ceiling.
+A run costs `r(d + 1) + 6` lead calls (the family's lead-call budget: one spawn message and one note per digger each round, 2 to open, 1 to claim the run directory, 1 to verify, 2 to save and return). At the ceiling of 5 rounds of 6 diggers that is 41 calls, each re-sending the lead's whole context. A digger costs the lead one call on return, so the extra width is bought knowingly; the convergence stops (every sub-area settled, or a round that settled nothing and added no sub-area) usually end a run well before the ceiling.
 
 ## When a caller picks it
 

@@ -807,7 +807,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	)
 	reload := fix.waitRecorded("UserPromptSubmit", 2)[1]
 	var blocked, blockErr bytes.Buffer
-	front := func(args []string, _, _ io.Writer, _ config.Runtime) int {
+	front := func(_ context.Context, args []string, _, _ io.Writer, _ config.Runtime) int {
 		if len(args) != 2 || args[0] != "--model" || args[1] != "opus" {
 			t.Errorf("reload front got %q", args)
 		}
@@ -838,7 +838,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	})
 	exitWord := fix.waitRecorded("UserPromptSubmit", 3)[2]
 	killed := false
-	kill := func(args []string, _, _ io.Writer, _ ...config.Runtime) int {
+	kill := func(_ context.Context, args []string, _, _ io.Writer, _ ...config.Runtime) int {
 		killed = len(args) == 2 && args[0] == "--self" && args[1] == "--exit"
 		return 0
 	}

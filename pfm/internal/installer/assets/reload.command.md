@@ -47,8 +47,10 @@ After running it, reply with ONE short line and END YOUR TURN immediately. The w
 only once your turn has ended (it holds up to two minutes for the pane to go idle, then refuses
 without typing), confirms Claude Code's "background work is running" exit dialog itself, and if
 the chat still has not exited after 20s it takes back whatever it put on the screen — the dialog
-or the typed `/exit` — leaves the chat running, and says so in `reload-<socket>.log`. In-flight
-sub-agents, background shells, and session crons die with the reboot.
+or the typed `/exit` — leaves the chat running, and says so in its log: `reload-<socket>.log` for a
+tmux chat, `reload-herdr-<seat>.log` for a native Herdr chat (beside its `reload-herdr-<seat>.pid`
+schedule record; ending the chat removes both). In-flight sub-agents, background shells, and
+session crons die with the reboot.
 
 ## Cache-only reboot — `/reload --cache 1h|5m`
 

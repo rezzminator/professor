@@ -317,7 +317,7 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
+func runKill(ctx context.Context, args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
 	flags := cli.NewFlagSet(
 		"chat kill",
 		"usage: pfm chat kill [self | id] [--exit]",
@@ -344,7 +344,6 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		return code
 	}
 	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
-	ctx := context.Background()
 	id := ""
 	var engine pfmengine.ID
 	rolloutPath := ""
@@ -474,8 +473,8 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return hookentry.EpicInject(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "reload-intercept" {
-		reloadFront := func(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-			return runChatReloadWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
+		reloadFront := func(ctx context.Context, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+			return runChatReloadWithRuntime(ctx, args, stdout, stderr, runtime, paths.OSEnv{})
 		}
 		return hookentry.ReloadIntercept(os.Stdin, stdout, stderr, runtime, reloadFront)
 	}

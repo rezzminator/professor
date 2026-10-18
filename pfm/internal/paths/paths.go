@@ -27,8 +27,14 @@ const (
 	SIDEffortPrefix = "statusline-effort-"
 	// SIDKillExitLogPrefix names the detached kill-exit finisher's log,
 	// SIDKillExitLogPrefix+socketName+".log", beside reload's worker logs
-	// (reload-{socket}.log); the doctor's crumb audit accepts both.
+	// (reload-{socket}.log for a tmux chat, SIDReloadHerdrPrefix+seat+".log"
+	// for a native one); the doctor's crumb audit accepts all of them.
 	SIDKillExitLogPrefix = "kill-exit-"
+	// SIDReloadHerdrPrefix names a native Herdr chat's reload schedule,
+	// SIDReloadHerdrPrefix+seat+".pid" (the scheduled worker's record) and
+	// SIDReloadHerdrPrefix+seat+".log" (its log); the doctor's crumb audit
+	// accepts both, and ending the seat removes both.
+	SIDReloadHerdrPrefix = "reload-herdr-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
 	// a crash can leave one behind, so the crumb audit accepts it.

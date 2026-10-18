@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -145,7 +147,15 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 	if target.SocketPath == "" || target.PaneID == "" {
 		return nil
 	}
-	client, native, err := targetClient(ctx, manager.database, manager.tmux, manager.paths.tmuxDir, target, manager.log)
+	client, native, err := targetClient(
+		ctx,
+		manager.database,
+		manager.tmux,
+		manager.paths.tmuxDir,
+		manager.paths.sidDir,
+		target,
+		manager.log,
+	)
 	if err != nil {
 		return err
 	}
@@ -190,7 +200,7 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 	return fmt.Errorf("pane %s still alive after kill", target.PaneID)
 }
 
-// Environment reads the three caller values used by --self, through env
+// Environment reads the caller values used by --self, through env
 // (pfm/TESTPLAN.md § Seams, paths.Env); nil reads the real process
 // environment.
 func Environment(env paths.Env) SelfEnvironment {
@@ -201,6 +211,9 @@ func Environment(env paths.Env) SelfEnvironment {
 		TMUX:            env.Get("TMUX"),
 		TMUXPane:        env.Get("TMUX_PANE"),
 		ClaudeSessionID: env.Get("CLAUDE_CODE_SESSION_ID"),
+		HerdrMarker:     env.Get(herdr.EnvMarker),
+		HerdrSocket:     env.Get(herdr.EnvSocket),
+		HerdrPane:       env.Get(herdr.EnvPane),
 	}
 }
 
@@ -264,6 +277,24 @@ func (manager *Manager) Kill(
 		}
 	}
 
+	// The row, the finisher launch and a rollback are one commit section: the
+	// hook deadline that closes the gate refuses a Kill that has not begun and
+	// never cuts one in half, so the process cannot exit between the row and
+	// its finisher. The row write still runs under the deadline (a busy store
+	// waits seconds, and an uncommitted row leaves nothing to finish); once the
+	// row is written, the launch and its rollback run on committed, which the
+	// deadline cannot cancel.
+	committed := ctx
+	if spawn || !AddressOnly(target) {
+		end, ok := deps.BeginCommit(ctx)
+		if !ok {
+			return Target{}, errors.New(
+				"the hook deadline passed before the chat was ended; nothing was written",
+			)
+		}
+		defer end()
+		committed = context.WithoutCancel(ctx)
+	}
 	// A seat with no id, or keyed on its own socket name, has no identity to
 	// tombstone: the key names where the chat is, not which chat it is, and it
 	// stops meaning anything the moment the seat's session is pinned down. The
@@ -286,8 +317,8 @@ func (manager *Manager) Kill(
 	}
 
 	if spawn {
-		if err := manager.spawner.Spawn(ctx, ExitArgs(target)); err != nil {
-			return Target{}, manager.rollBackKill(ctx, target.ID, rollbackRevision, err)
+		if err := manager.spawner.Spawn(committed, ExitArgs(target)); err != nil {
+			return Target{}, manager.rollBackKill(committed, target.ID, rollbackRevision, err)
 		}
 	}
 	return target, nil

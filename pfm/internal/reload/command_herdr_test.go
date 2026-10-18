@@ -504,12 +504,13 @@ func TestRunHerdrPublicationAndCancellation(t *testing.T) {
 				}
 				want = "seat"
 			case "publish-failure":
+				// A seat row retired while reload waited is a chat that was ended.
 				f.onRead = func() {
 					if err := f.db.DeleteSeat(ctx, f.seat.SeatID); err != nil {
 						t.Error(err)
 					}
 				}
-				want = "seat"
+				want = "the chat was ended while reload waited"
 			case "cancel-before":
 				cancel()
 				want = "canceled"

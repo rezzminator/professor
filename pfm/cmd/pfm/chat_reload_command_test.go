@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -611,13 +612,13 @@ func TestNativeChatReloadSchedulesResolvedPane(t *testing.T) {
 			}
 			started := false
 			previous := startReloadWorker
-			startReloadWorker = func(argv []string, _ deps.StartOptions) error {
+			startReloadWorker = func(argv []string, _ deps.StartOptions) (int, error) {
 				started = true
 				if !strings.Contains(strings.Join(argv, " "), socket) ||
 					!strings.Contains(strings.Join(argv, " "), "w6:p3") {
 					t.Errorf("worker target %v", argv)
 				}
-				return nil
+				return 0, nil
 			}
 			t.Cleanup(func() { startReloadWorker = previous })
 			var stdout, stderr bytes.Buffer
@@ -631,7 +632,7 @@ func TestNativeChatReloadSchedulesResolvedPane(t *testing.T) {
 					paths.OSEnv{},
 				)
 			} else {
-				code = runChatReloadWithRuntime(args, &stdout, &stderr, runtime, paths.OSEnv{})
+				code = runChatReloadWithRuntime(t.Context(), args, &stdout, &stderr, runtime, paths.OSEnv{})
 			}
 			logs, logErr := filepath.Glob(filepath.Join(runtime.Paths.SIDDir, "reload-*.log"))
 			if code != 0 || (mode != "identity" && (!started || len(logs) != 1)) || logErr != nil {
@@ -771,6 +772,7 @@ func TestReloadWorkerReportsSuppressedNativeNotification(t *testing.T) {
 	announceReloadWorkerFailure(
 		[]string{"--sock", socket, "--pane", "w6:p3"},
 		"reload failed",
+		false,
 		func(context.Context, string, string, string) error { return io.ErrUnexpectedEOF },
 		&stderr,
 	)
@@ -885,5 +887,84 @@ func TestChatEndRetryPendingIntentRunsRealDetachedCLIWorker(t *testing.T) {
 			t.Fatalf("real detached CLI worker did not reconcile: %s", body)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestNativeChatReloadRefusesASecondScheduleForTheSameSeat: a native chat's
+// /reload schedules one worker; a second /reload while that worker lives is
+// refused by name, and a record whose worker is gone is replaced.
+func TestNativeChatReloadRefusesASecondScheduleForTheSameSeat(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	// The worker's liveness is read from the kernel: the stub worker is this
+	// test process, which the jail's fake proc tree does not hold.
+	t.Setenv(paths.EnvProcRoot, "/proc")
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(jail.root, "herdr.sock")
+	t.Setenv("TMUX", "")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	db := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+	err = db.PutSeat(context.Background(), fleetdb.Seat{
+		SeatID: "native", SessionID: "native-session", Backend: "herdr", Engine: "cc",
+		State: "live", HerdrSocket: socket, HerdrPane: "w6:p3",
+	})
+	if closeErr := db.Close(); err != nil || closeErr != nil {
+		t.Fatalf("seed: %v %v", err, closeErr)
+	}
+	started := 0
+	previous := startReloadWorker
+	// The scheduled worker is this test process: alive for the whole test.
+	startReloadWorker = func([]string, deps.StartOptions) (int, error) {
+		started++
+		return os.Getpid(), nil
+	}
+	t.Cleanup(func() { startReloadWorker = previous })
+	logPath := filepath.Join(runtime.Paths.SIDDir, "reload-herdr-native.log")
+	schedule := func() (int, string, string) {
+		var stdout, stderr bytes.Buffer
+		code := runChatReloadWithRuntime(
+			t.Context(), []string{"--sock", socket, "--pane", "w6:p3"}, &stdout, &stderr, runtime, paths.OSEnv{},
+		)
+		return code, stdout.String(), stderr.String()
+	}
+
+	code, stdout, stderr := schedule()
+	if code != 0 || started != 1 || !strings.Contains(stdout, "(log "+logPath+")") {
+		t.Fatalf("first schedule code=%d started=%d out=%q err=%q, want one worker logging to %s",
+			code, started, stdout, stderr, logPath)
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("per-seat worker log: %v", err)
+	}
+
+	code, stdout, stderr = schedule()
+	want := fmt.Sprintf(
+		"pfm chat reload: a reload is already scheduled for this chat (worker pid %d, log %s); it runs once the chat is idle\n",
+		os.Getpid(),
+		logPath,
+	)
+	if code != 2 || started != 1 || stderr != want || stdout != "" {
+		t.Fatalf("second schedule code=%d started=%d out=%q err=%q, want 2 and %q", code, started, stdout, stderr, want)
+	}
+
+	// A record whose pid now names another process (its birth differs) is stale.
+	record := filepath.Join(runtime.Paths.SIDDir, "reload-herdr-native.pid")
+	if err := os.WriteFile(record, []byte(fmt.Sprintf("%d 1\n", os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = schedule()
+	if code != 0 || started != 2 {
+		t.Fatalf(
+			"stale record schedule code=%d started=%d out=%q err=%q, want a fresh worker",
+			code,
+			started,
+			stdout,
+			stderr,
+		)
 	}
 }

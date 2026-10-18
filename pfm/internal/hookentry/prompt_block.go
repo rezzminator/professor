@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // quietPromptBlock is blockPromptQuietly's fixed encoding — kept as a
@@ -42,4 +46,33 @@ func blockPrompt(stdout io.Writer, reason string) int {
 // for and no additional line would be truthful to add.
 func blockPromptQuietly(stdout io.Writer) int {
 	return blockPrompt(stdout, "")
+}
+
+// exitWords are the prompts exit-intercept turns into the end of the chat.
+var exitWords = map[string]bool{"e": true, "/e": true}
+
+// isReloadPrompt reports whether reload-intercept takes prompt as a /reload.
+func isReloadPrompt(prompt string) bool {
+	trimmed := strings.TrimSpace(prompt)
+	return trimmed == "/reload" || strings.HasPrefix(trimmed, "/reload ")
+}
+
+// isExitPrompt reports whether exit-intercept takes prompt as an exit word.
+func isExitPrompt(prompt string) bool {
+	return exitWords[strings.TrimSpace(prompt)]
+}
+
+// interceptedPrompt reports whether reload-intercept or exit-intercept blocks
+// prompt — on success and on refusal alike — so it never starts a turn.
+func interceptedPrompt(prompt string) bool {
+	return isReloadPrompt(prompt) || isExitPrompt(prompt)
+}
+
+// interceptedSubmit reports whether a Claude prompt submission is one its
+// intercept blocks: it starts no turn, and no Stop would report the pane idle
+// again, so the Herdr state must stand.
+func interceptedSubmit(engine pfmengine.ID, payload herdrPayload) bool {
+	return engine == pfmengine.Claude &&
+		payload.HookEventName == claudelaunch.HookEventUserPromptSubmit &&
+		interceptedPrompt(payload.Prompt)
 }

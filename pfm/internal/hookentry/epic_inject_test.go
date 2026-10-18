@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -78,4 +79,22 @@ func setStoreTestJailForHookEntry(t *testing.T) {
 	t.Setenv(paths.EnvCodexHome, filepath.Join(root, "codex"))
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
+}
+
+// TestEpicInjectNativeWindowNameIsTheSeatName holds I1: a native Herdr chat's
+// window name is its seat name, read without a tmux call against the Herdr
+// socket.
+func TestEpicInjectNativeWindowNameIsTheSeatName(t *testing.T) {
+	identity := resolve.Identity{
+		Backend:    "herdr",
+		SocketPath: filepath.Join(t.TempDir(), "herdr.sock"),
+		Pane:       "w1:p2",
+		Session:    "E_alpha_native",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	window, err := epicInjectWindowName(ctx, identity)
+	if err != nil || window != "E_alpha_native" {
+		t.Fatalf("window name = %q, %v; want the seat name %q and no error", window, err, "E_alpha_native")
+	}
 }

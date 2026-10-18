@@ -2,6 +2,7 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,7 +31,7 @@ func TestRunExitIntercept(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls [][]string
-			front := func(args []string, stdout, _ io.Writer, _ ...config.Runtime) int {
+			front := func(_ context.Context, args []string, stdout, _ io.Writer, _ ...config.Runtime) int {
 				if !test.frontWanted {
 					t.Fatalf("front called unexpectedly with %v", args)
 				}
@@ -62,7 +63,7 @@ func TestRunExitIntercept(t *testing.T) {
 }
 
 func TestRunExitInterceptMalformedJSONNeverBlocks(t *testing.T) {
-	front := func(args []string, _, _ io.Writer, _ ...config.Runtime) int {
+	front := func(_ context.Context, args []string, _, _ io.Writer, _ ...config.Runtime) int {
 		t.Fatalf("front called on malformed JSON: %v", args)
 		return 0
 	}
@@ -79,7 +80,7 @@ func TestRunExitInterceptMalformedJSONNeverBlocks(t *testing.T) {
 }
 
 func TestRunExitInterceptFailureStaysLoud(t *testing.T) {
-	front := func(_ []string, _, stderr io.Writer, _ ...config.Runtime) int {
+	front := func(_ context.Context, _ []string, _, stderr io.Writer, _ ...config.Runtime) int {
 		fmt.Fprintln(stderr, "pfm chat kill: no live pane")
 		return 1
 	}

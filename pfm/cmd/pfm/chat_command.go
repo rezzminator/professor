@@ -134,7 +134,7 @@ func runChatKillContext(
 		if *exit {
 			killArgs = append(killArgs, "--exit")
 		}
-		return runKill(killArgs, stdout, stderr, runtimes...)
+		return runKill(ctx, killArgs, stdout, stderr, runtimes...)
 	}
 	target := targets[0]
 	id := target
@@ -191,7 +191,7 @@ func runChatKillContext(
 	}
 	killArgs = append(killArgs, id)
 	var killOut, killErr strings.Builder
-	code = runKill(killArgs, &killOut, &killErr, runtimes...)
+	code = runKill(ctx, killArgs, &killOut, &killErr, runtimes...)
 	_, _ = io.WriteString(stdout, killOut.String())
 	_, _ = io.WriteString(stderr, killErr.String())
 	if code != 0 && strings.Contains(killErr.String(), "not indexed") {

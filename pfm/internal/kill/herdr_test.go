@@ -728,7 +728,7 @@ func TestHerdrKillRequiresCanonicalSupervisor(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			client := herdrKiller{engine: pfmengine.Claude, database: db, seat: seat}
+			client := herdrKiller{engine: pfmengine.Claude, database: db, seat: seat, sidDir: jail.sidDir}
 			if mode == "move-before-ack" {
 				server.pane = "w9:p2"
 				if err := client.SendKey(context.Background(), seat.HerdrSocket, seat.HerdrPane, "Escape"); err != nil {
@@ -804,6 +804,153 @@ func TestHerdrUnboundRetirementNamesItsState(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "unbound") ||
 				!strings.Contains(err.Error(), "pane absent") {
 				t.Fatalf("retirement diagnostic=%v; want unbound retained seat with pane absent", err)
+			}
+		})
+	}
+}
+
+// A native Herdr chat has no TMUX: `e` ends it through `kill --self --exit`,
+// which names its seat by the HERDR_* variables its process inherited. Those
+// are a hint; the seat's saved supervisor and the pane proof stay the owner.
+func TestHerdrKillSelfResolvesNativeSeat(t *testing.T) {
+	for _, selector := range []string{"pane", "moved-pane", "no-session-hint", "unknown-pane", "tmux-in-herdr", "marker-missing"} {
+		t.Run(selector, func(t *testing.T) {
+			jail := newKillJail(t)
+			database := jail.open(t)
+			server := newKillHerdr(t)
+			seat := seedKillHerdr(t, database, server)
+			spawner := &captureSpawner{}
+			manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := &paths.MapEnv{Values: map[string]string{
+				"HERDR_ENV":              "1",
+				"HERDR_SOCKET_PATH":      seat.HerdrSocket,
+				"HERDR_PANE_ID":          seat.HerdrPane,
+				"CLAUDE_CODE_SESSION_ID": seat.SessionID,
+			}}
+			switch selector {
+			case "moved-pane":
+				// The engine's environment keeps the pane it started in.
+				server.pane = "w9:p2"
+				next := seat
+				next.HerdrPane, next.HerdrWorkspace = server.pane, "w9"
+				if err := database.Shared().UpdateSeat(context.Background(), seat, next); err != nil {
+					t.Fatal(err)
+				}
+			case "no-session-hint":
+				delete(env.Values, "CLAUDE_CODE_SESSION_ID")
+			case "unknown-pane":
+				env.Values["HERDR_PANE_ID"] = "w1:p2"
+				delete(env.Values, "CLAUDE_CODE_SESSION_ID")
+			case "tmux-in-herdr":
+				env.Values["TMUX"] = filepath.Join(jail.tmuxDir, "cc-100-1-1") + ",1,0"
+				env.Values["TMUX_PANE"] = "%3"
+			case "marker-missing":
+				delete(env.Values, "HERDR_ENV")
+			}
+			target, err := manager.Kill(context.Background(), Request{
+				Self: true, Exit: true, Environment: Environment(env),
+			})
+			if selector == "unknown-pane" || selector == "tmux-in-herdr" || selector == "marker-missing" {
+				if err == nil || len(spawner.args) != 0 {
+					t.Fatalf(
+						"self kill accepted a seat it cannot name: target=%+v err=%v spawns=%v",
+						target,
+						err,
+						spawner.args,
+					)
+				}
+				if selector == "unknown-pane" && !strings.Contains(err.Error(), "native") {
+					t.Fatalf("unknown native pane error = %v; want it to name the native seat", err)
+				}
+				if selector != "unknown-pane" && strings.Contains(err.Error(), "native") {
+					t.Fatalf("non-native environment routed to the native seat: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("native self kill: %v", err)
+			}
+			if target.ID != seat.SessionID || target.SocketPath != seat.HerdrSocket ||
+				target.PaneID != server.pane || len(spawner.args) != 1 {
+				t.Fatalf("native self target/spawn = %+v / %+v", target, spawner.args)
+			}
+			if row, found, err := database.Killed(
+				context.Background(),
+				seat.SessionID,
+			); err != nil || !found ||
+				row.ID != seat.SessionID {
+				t.Fatalf("kill record=%+v found=%t err=%v", row, found, err)
+			}
+		})
+	}
+}
+
+// The forced close retires a Herdr seat, so it retires the seat's reload
+// schedule record and log too; another seat's files stay.
+func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		// stuck plants a non-empty directory at the record, so its remove fails.
+		stuck       bool
+		wantWarning string
+	}{
+		{name: "removed with the seat"},
+		{
+			name:  "a file that will not go never keeps the closed pane's row",
+			stuck: true, wantWarning: "its reload files stay behind",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			jail := newKillJail(t)
+			database := jail.open(t)
+			server := newKillHerdr(t)
+			seat := seedKillHerdr(t, database, server)
+			reloadFile := func(seatID, suffix string) string {
+				return filepath.Join(jail.sidDir, paths.SIDReloadHerdrPrefix+seatID+suffix)
+			}
+			for _, path := range []string{
+				reloadFile(seat.SeatID, ".pid"),
+				reloadFile(seat.SeatID, ".log"),
+				reloadFile("other-seat", ".log"),
+			} {
+				if test.stuck && path == reloadFile(seat.SeatID, ".pid") {
+					if err := os.MkdirAll(filepath.Join(path, "held"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				if err := os.WriteFile(path, []byte("1\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var log bytes.Buffer
+			client := herdrKiller{
+				engine: pfmengine.Claude, database: database, seat: seat, sidDir: jail.sidDir, log: &log,
+			}
+			if err := client.KillPane(context.Background(), seat.HerdrSocket, seat.HerdrPane); err != nil {
+				t.Fatalf("forced close: %v", err)
+			}
+			if _, found, err := database.Shared().Seat(context.Background(), seat.SeatID); err != nil || found {
+				t.Fatalf("closed seat row found=%t err=%v; want it retired", found, err)
+			}
+			if !test.stuck {
+				for _, suffix := range []string{".pid", ".log"} {
+					if _, err := os.Stat(reloadFile(seat.SeatID, suffix)); !os.IsNotExist(err) {
+						t.Errorf("reload %s of the closed seat: stat err=%v; want it removed", suffix, err)
+					}
+				}
+			}
+			if test.wantWarning == "" && log.Len() != 0 {
+				t.Errorf("kill warnings = %q, want none", log.String())
+			}
+			if test.wantWarning != "" && !strings.Contains(log.String(), test.wantWarning) {
+				t.Errorf("kill warnings = %q, want one naming %q", log.String(), test.wantWarning)
+			}
+			if _, err := os.Stat(reloadFile("other-seat", ".log")); err != nil {
+				t.Errorf("another seat's reload log was touched: %v", err)
 			}
 		})
 	}

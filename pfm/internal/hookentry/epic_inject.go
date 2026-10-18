@@ -31,6 +31,14 @@ var epicInjectIdentify = func(ctx context.Context) (resolve.Identity, error) {
 }
 
 var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) (string, error) {
+	// A native Herdr chat has no tmux window: its socket is Herdr's, and its
+	// window name is its seat name.
+	if identity.Backend == pfmcall.HerdrBackend {
+		if identity.Session == "" {
+			return "", fmt.Errorf("native chat on %s has no seat name", identity.SocketPath)
+		}
+		return identity.Session, nil
+	}
 	target := identity.Pane
 	if target == "" {
 		target = identity.Session
@@ -41,8 +49,17 @@ var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) 
 	return (pfmcall.TmuxCaller{}).WindowName(ctx, identity.SocketPath, target)
 }
 
-// EpicInject injects an epic manifest once per session and epic name.
+// EpicInject injects an epic manifest once per session and epic name. It
+// fails open, so a step past promptHookDeadline lets the prompt through.
 func EpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
+	return RunPromptHook("pfm internal epic-inject", stdout, stderr, 0,
+		func(ctx context.Context, step func(string), stdout, stderr io.Writer) int {
+			return epicInjectBody(ctx, step, stdin, stdout, stderr)
+		})
+}
+
+func epicInjectBody(ctx context.Context, step func(string), stdin io.Reader, stdout, stderr io.Writer) int {
+	step("read hook payload")
 	var payload epicInjectPayload
 	if err := json.NewDecoder(stdin).Decode(&payload); err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: decode hook payload: %v\n", err)
@@ -51,12 +68,13 @@ func EpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
 	if strings.TrimSpace(payload.CWD) == "" {
 		return 0
 	}
-	ctx := context.Background()
+	step("identify chat")
 	identity, err := epicInjectIdentify(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: identify chat: %v\n", err)
 		return 0
 	}
+	step("read window name")
 	window, err := epicInjectWindowName(ctx, identity)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: read window name: %v\n", err)
@@ -67,6 +85,7 @@ func EpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
 		return 0
 	}
 	slug := match[1]
+	step("read manifest")
 	root, err := gitRootFrom(payload.CWD)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: find git root from %s: %v\n", payload.CWD, err)
@@ -95,6 +114,7 @@ func EpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
 	if sessionID == "" {
 		return 0
 	}
+	step("record state")
 	database, err := store.Open()
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: open state: %v\n", err)

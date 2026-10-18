@@ -29,7 +29,7 @@ func herdrOpenCodeCases() []herdrRawCase {
 			before:      openCodeTestScreen(hint),
 			styled:      styled,
 			after:       "R2\n" + openCodeTestScreen(""),
-			wantPayload: "\x1b[200~R2\x1b[201~",
+			wantPayload: "R2",
 			wantTyped:   true,
 		},
 		{

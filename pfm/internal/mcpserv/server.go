@@ -389,6 +389,14 @@ func (service *Service) chatKeys(
 		}
 		return nil, output, fmt.Errorf("resolve %q: %s", input.Target, detail)
 	}
+	if !input.Literal {
+		if err := pfmcall.ValidateKeyCapabilities(target, input.Keys); err != nil {
+			return nil, KeysOutput{
+				Status: statusError, Code: codeCapability, SocketPath: target.SocketPath,
+				Pane: target.Pane, Keys: append([]string(nil), input.Keys...),
+			}, fmt.Errorf("keys: %w", err)
+		}
+	}
 	transport, err := pfmcall.New(pfmcall.Dependencies{})
 	if err != nil {
 		return nil, KeysOutput{}, fmt.Errorf("keys transport: %w", err)

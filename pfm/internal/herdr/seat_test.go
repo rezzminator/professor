@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -94,4 +97,76 @@ func TestSeatWaitUsesCallerDeadline(t *testing.T) {
 			t.Fatal("accepted wait ignored cancellation until its long deadline")
 		}
 	})
+}
+
+func TestSeatRecentReadDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name, source string
+		bound        time.Duration
+		ok           bool
+	}{
+		{"history", "recent", 3 * time.Second, true}, {"caller-bound", "recent", 30 * time.Millisecond, false}, {"visible-stays-short", "visible", 3 * time.Second, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			defer close(release)
+			socket := serve(t, func(string) string {
+				select {
+				case <-time.After(1100 * time.Millisecond):
+				case <-release:
+				}
+				return `{"result":{"type":"pane_read"}}`
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), tc.bound)
+			defer cancel()
+			started := time.Now()
+			got, err := SeatRequest(ctx, socket, "pane.read", map[string]any{"pane_id": "w1:p1", "source": tc.source})
+			if (err == nil) != tc.ok || (tc.ok && len(got) == 0) {
+				t.Fatalf("read beyond 1s got=%s err=%v want ok=%t", got, err, tc.ok)
+			}
+			if tc.name == "caller-bound" && time.Since(started) > 500*time.Millisecond {
+				t.Fatalf("history read ignored shorter caller deadline: %v", time.Since(started))
+			}
+		})
+	}
+}
+
+func TestSeatEncodedRequestLimit(t *testing.T) {
+	const limit = 1024 * 1024
+	for _, unit := range []string{"x", "\x00", "界", "<&\""} {
+		for _, extra := range []int{0, 1} {
+			t.Run(fmt.Sprintf("%x/%d", unit, extra), func(t *testing.T) {
+				params := map[string]string{"target": "w1:p1", "text": ""}
+				prefix, err := json.Marshal(request{ID: "pfm-seat", Method: "agent.prompt", Params: params})
+				if err != nil {
+					t.Fatal(err)
+				}
+				encoded, err := json.Marshal(unit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				width := len(encoded) - 2
+				room := limit - len(prefix)
+				params["text"] = strings.Repeat(unit, room/width) + strings.Repeat("x", room%width+extra)
+				var calls atomic.Int32
+				socket := serve(t, func(line string) string {
+					calls.Add(1)
+					if len(line) != limit {
+						t.Errorf("wire envelope=%d want %d", len(line), limit)
+					}
+					return `{"result":{"type":"ok"}}`
+				})
+				_, err = SeatRequest(context.Background(), socket, "agent.prompt", params)
+				if extra == 0 {
+					if err != nil || calls.Load() != 1 {
+						t.Fatalf("exact limit refused: calls=%d err=%v", calls.Load(), err)
+					}
+				} else {
+					if err == nil || !strings.Contains(err.Error(), "request") || calls.Load() != 0 {
+						t.Fatalf("oversized envelope sent: calls=%d err=%v", calls.Load(), err)
+					}
+				}
+			})
+		}
+	}
 }

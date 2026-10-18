@@ -856,8 +856,16 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 }
 
 func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
-	for _, literal := range []bool{false, true} {
-		t.Run(fmt.Sprint(literal), func(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		literal, refused bool
+		keys             []string
+	}{
+		{name: "named", keys: []string{"Enter"}},
+		{name: "literal", literal: true, keys: []string{"Home"}},
+		{name: "unsupported second key", refused: true, keys: []string{"Enter", "Home"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			socket := filepath.Join(root, "native.sock")
 			listener, err := net.Listen("unix", socket)
@@ -892,15 +900,28 @@ func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
 			_, output, err := service.chatKeys(
 				context.Background(),
 				nil,
-				KeysInput{Target: "NATIVE", Keys: []string{"Enter"}, Literal: literal},
+				KeysInput{Target: "NATIVE", Keys: test.keys, Literal: test.literal},
 			)
+			if test.refused {
+				if err == nil || !strings.Contains(err.Error(), "Herdr") || output.Status != statusError ||
+					output.Code != 10 ||
+					output.Count != 0 {
+					t.Fatalf("capability refusal output=%+v err=%v", output, err)
+				}
+				select {
+				case request := <-got:
+					t.Fatalf("refused sequence sent input: %v", request)
+				default:
+				}
+				return
+			}
 			if err != nil || output.Count != 1 {
 				t.Fatalf("native keys output=%+v err=%v", output, err)
 			}
 			select {
 			case request := <-got:
 				want := "pane.send_keys"
-				if literal {
+				if test.literal {
 					want = "pane.send_text"
 				}
 				if request["method"] != want {

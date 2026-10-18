@@ -36,12 +36,20 @@ var webglCustomGlyphRanges = []struct {
 	{0x1FB00, 0x1FBFF, "Legacy Computing"},
 }
 
-// Files that BUILD custom-glyph runes arithmetically rather than spelling them
-// as literals, so the literal scan cannot see them. Each entry is a known,
-// accepted renderer; adding one here is a decision, not a convenience.
-var webglComputedGlyphExemptions = map[string]string{
-	"internal/ui/cosmoscanvas.go": "the cosmos star field is a braille dot canvas by construction; replacing it is a canvas rewrite, not a glyph swap",
-	"internal/call/guards.go":     "reads Codex's braille idle sparkle out of a captured pane to tell a draft from decoration; it recognises the range and renders nothing",
+// Each exemption is a reviewed renderer or an inbound recognizer, not a file-wide
+// literal waiver. A recognizer permits only the matching HasPrefix argument.
+var webglGlyphExemptions = map[string]struct {
+	computedReason string
+	recognizer     string
+}{
+	"internal/ui/cosmoscanvas.go": {
+		computedReason: "the cosmos star field is a braille dot canvas by construction; replacing it is a canvas rewrite, not a glyph swap",
+	},
+	"internal/call/guards.go": {
+		computedReason: "reads Codex's braille idle sparkle out of a captured pane to tell a draft from decoration; it recognises the range and renders nothing",
+	},
+	// OpenCode draws this border; pfm matches captured input, never renders the literal.
+	"internal/call/herdr_opencode.go": {recognizer: "╹▀"},
 }
 
 func webglCustomGlyphRange(r rune) string {
@@ -77,7 +85,7 @@ func TestNoWebGLCustomGlyphsInRenderedOutput(t *testing.T) {
 		case strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go"):
 			goFiles++
 			findings = append(findings, scanGoLiterals(t, root, path)...)
-			if _, exempt := webglComputedGlyphExemptions[rel]; !exempt {
+			if webglGlyphExemptions[rel].computedReason == "" {
 				findings = append(findings, scanRawText(root, path, "0x2800", "arithmetic braille base")...)
 			}
 		case strings.HasPrefix(rel, filepath.Join("internal", "installer", "assets")) && !strings.HasSuffix(path, ".md"):
@@ -95,6 +103,37 @@ func TestNoWebGLCustomGlyphsInRenderedOutput(t *testing.T) {
 	if len(findings) > 0 {
 		t.Fatalf("%d WebGL custom-glyph code point(s) in rendered sources (scanned %d Go files, %d assets):\n  %s",
 			len(findings), goFiles, assetFiles, strings.Join(findings, "\n  "))
+	}
+}
+
+// Exempt only inbound recognizer literals, never output in the same file.
+func TestWebGLGlyphGuardRecognizersAndOutput(t *testing.T) {
+	for _, test := range []struct {
+		name, path, source string
+		findings           int
+	}{
+		{"recognizer", "internal/call/herdr_opencode.go", `package call; func capture(s string) bool { return strings.HasPrefix(s, "╹▀") }`, 0},
+		{"same file output", "internal/call/herdr_opencode.go", `package call; func render() { fmt.Print("╹▀") }`, 1},
+		{"escaped output", "internal/call/herdr_opencode.go", `package call; func render() { fmt.Print("\u2580") }`, 1},
+		{"unclassified recognizer", "other.go", `package call; func capture(s string) bool { return strings.HasPrefix(s, "╹▀") }`, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, test.path)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(test.source), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			findings := scanGoLiterals(t, root, path)
+			if len(findings) != test.findings {
+				t.Fatalf("findings=%v, want %d", findings, test.findings)
+			}
+			if test.findings != 0 && !strings.Contains(findings[0], "U+2580") {
+				t.Fatalf("output finding lost glyph identity: %v", findings)
+			}
+		})
 	}
 }
 
@@ -124,7 +163,15 @@ func scanGoLiterals(t *testing.T, root, path string) []string {
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	var findings []string
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		t.Fatalf("relative source path %s: %v", path, err)
+	}
+	recognizers := make(map[token.Pos]bool)
 	ast.Inspect(file, func(n ast.Node) bool {
+		if argument := webglPrefixArgument(n); argument != token.NoPos {
+			recognizers[argument] = true
+		}
 		lit, ok := n.(*ast.BasicLit)
 		if !ok || (lit.Kind != token.STRING && lit.Kind != token.CHAR) {
 			return true
@@ -135,9 +182,11 @@ func scanGoLiterals(t *testing.T, root, path string) []string {
 		if err != nil {
 			t.Fatalf("unquote %s at %s: %v", lit.Value, fset.Position(lit.Pos()), err)
 		}
+		if recognizers[lit.Pos()] && value == webglGlyphExemptions[rel].recognizer {
+			return true
+		}
 		for _, r := range value {
 			if name := webglCustomGlyphRange(r); name != "" {
-				rel, _ := filepath.Rel(root, path)
 				findings = append(
 					findings,
 					fmt.Sprintf("%s:%d %q %U (%s)", rel, fset.Position(lit.Pos()).Line, r, r, name),
@@ -147,6 +196,24 @@ func scanGoLiterals(t *testing.T, root, path string) []string {
 		return true
 	})
 	return findings
+}
+
+// AST traversal visits a call before its arguments, so the scanner can classify
+// the input-pattern argument without exempting output literals in the same file.
+func webglPrefixArgument(node ast.Node) token.Pos {
+	call, ok := node.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 {
+		return token.NoPos
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "HasPrefix" {
+		return token.NoPos
+	}
+	name, ok := selector.X.(*ast.Ident)
+	if !ok || name.Name != "strings" {
+		return token.NoPos
+	}
+	return call.Args[1].Pos()
 }
 
 func scanRawGlyphs(root, path string) []string {

@@ -92,6 +92,10 @@ type Status struct {
 	// Error is the kind of the error the turn ended on (server_overloaded,
 	// server_error, ...), set only when State is error.
 	Error string `json:"error,omitempty"`
+	// StateSource explains a fallback when a native state cannot classify the turn.
+	StateSource string `json:"state_source,omitempty"`
+	// RestID is native rest evidence for a watch, never transcript content.
+	RestID string `json:"-"`
 	// LostNote is the seat loss note from fleetdb seat.lost_note, empty unless the seat was lost.
 	LostNote      string `json:"lost_note,omitempty"`
 	Summary       string `json:"summary,omitempty"`
@@ -150,6 +154,9 @@ func (status Status) Line() string {
 	}
 	if status.LostNote != "" {
 		line += "\t" + status.LostNote
+	}
+	if status.StateSource != "" {
+		line += fmt.Sprintf("\tstate_source=%q", status.StateSource)
 	}
 	return line
 }

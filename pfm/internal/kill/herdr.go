@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -229,11 +230,15 @@ func herdrPaneMatches(target, pane, workspace string) bool {
 }
 
 func (client herdrKiller) Capture(ctx context.Context, socket, pane string) (string, error) {
+	return client.captureFormat(ctx, socket, pane, "text")
+}
+
+func (client herdrKiller) captureFormat(ctx context.Context, socket, pane, format string) (string, error) {
 	result, err := herdr.SeatRequest(
 		ctx,
 		socket,
 		"pane.read",
-		map[string]any{herdrPaneKey: pane, "source": "recent", "lines": 1000},
+		map[string]any{herdrPaneKey: pane, "source": "visible", "lines": 1000, "format": format, "strip_ansi": false},
 	)
 	if err != nil {
 		return "", fmt.Errorf("read Herdr pane %s: %w", pane, err)
@@ -245,6 +250,7 @@ func (client herdrKiller) Capture(ctx context.Context, socket, pane string) (str
 			Workspace string  `json:"workspace_id"`
 			Text      *string `json:"text"`
 			Truncated *bool   `json:"truncated"`
+			Format    string  `json:"format"`
 		} `json:"read"`
 	}
 	if err := json.Unmarshal(result, &response); err != nil {
@@ -252,14 +258,27 @@ func (client herdrKiller) Capture(ctx context.Context, socket, pane string) (str
 	}
 	if response.Type != "pane_read" || response.Read == nil || response.Read.Text == nil ||
 		response.Read.Truncated == nil ||
-		!herdrPaneMatches(pane, response.Read.Pane, response.Read.Workspace) {
+		!herdrPaneMatches(
+			pane,
+			response.Read.Pane,
+			response.Read.Workspace,
+		) || (format == "ansi" && response.Read.Format != "ansi") {
 		return "", fmt.Errorf("read Herdr pane %s: malformed pane_read result", pane)
 	}
 	return *response.Read.Text, nil
 }
 
-func (client herdrKiller) CaptureStyled(context.Context, string, string) (string, error) {
-	return "", fmt.Errorf("herdr snapshots do not expose composer styling")
+func (client herdrKiller) CaptureStyled(ctx context.Context, socket, pane string) (string, error) {
+	frame, err := client.captureFormat(ctx, socket, pane, "ansi")
+	if err != nil {
+		return "", err
+	}
+	if !pfmcall.ComposerRowShown(frame) || pfmcall.SelectorLine(frame) != "" ||
+		pfmengine.ClaudeTrustDialog(frame) || pfmcall.IsFooterBusy(pfmengine.ID(client.seat.Engine), frame) ||
+		!pfmcall.ComposerBoxEmpty(frame) {
+		return "", fmt.Errorf("herdr pane %s: composer changed while checking styling", pane)
+	}
+	return frame, nil
 }
 
 func (client herdrKiller) ack(ctx context.Context, socket, pane, method string, params any) error {

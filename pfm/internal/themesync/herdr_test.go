@@ -11,10 +11,10 @@ import (
 )
 
 func TestHerdrRenderAutoForcedDarkAndLightSide(t *testing.T) {
-	gold := goldApplied(t)
-	dark := herdrRender(gold, 7)
+	hibiscus := hibiscusApplied(t)
+	dark := herdrRender(hibiscus, 7)
 	for _, want := range []string{
-		"# >>> pfm theme · custom:professor-gold · gen 7 >>>\n[theme]\n",
+		"# >>> pfm theme · custom:hibiscus-night · gen 7 >>>\n[theme]\n",
 		"name = \"tokyo-night\"\nauto_switch = false\n\n[theme.custom]\naccent = \"#7aa2f7\"\npanel_bg = \"#1a1b26\"\n",
 	} {
 		if !strings.Contains(dark, want) {
@@ -71,7 +71,7 @@ const herdrWithTheme = "onboarding = false\n\n[ui]\nstatus_indicators = \"dots\"
 	"[theme]\nname = \"solarized\"\nauto_switch = false\n\n# VS Code shortcuts\n# second line\n[keys]\nnew_tab = \"prefix+c\"\n"
 
 func TestHerdrInstallReplacesTheThemeSpanAndRemoveRestoresBytes(t *testing.T) {
-	block := herdrRender(goldApplied(t), 2)
+	block := herdrRender(hibiscusApplied(t), 2)
 	updated, snapshot, err := herdrInstall(herdrWithTheme, block)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestHerdrInstallReplacesTheThemeSpanAndRemoveRestoresBytes(t *testing.T) {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 	if strings.Contains(updated, "name = \"solarized\"") ||
-		!strings.Contains(updated, "# >>> pfm theme · custom:professor-gold · gen 2 >>>") {
+		!strings.Contains(updated, "# >>> pfm theme · custom:hibiscus-night · gen 2 >>>") {
 		t.Fatalf("theme span not replaced:\n%s", updated)
 	}
 	if !strings.Contains(updated, "# <<< pfm theme <<<\n\n# VS Code shortcuts\n# second line\n[keys]\n") {
@@ -94,7 +94,7 @@ func TestHerdrInstallReplacesTheThemeSpanAndRemoveRestoresBytes(t *testing.T) {
 
 func TestHerdrInstallWithCustomSubtablesAndNoTrailingNewline(t *testing.T) {
 	original := "[theme]\nname = \"catppuccin\"\n[theme.custom]\naccent = \"#fff\"\n[theme.custom.light]\ntext = \"#000\""
-	updated, snapshot, err := herdrInstall(original, herdrRender(goldApplied(t), 1))
+	updated, snapshot, err := herdrInstall(original, herdrRender(hibiscusApplied(t), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestHerdrInstallWithCustomSubtablesAndNoTrailingNewline(t *testing.T) {
 
 func TestHerdrInstallWithNoThemeAppendsAndRemoveStripsExactly(t *testing.T) {
 	for _, original := range []string{"", "a = 1\n", "a = 1", "a = 1\n\n", "[keys]\nx = 1\n"} {
-		block := herdrRender(goldApplied(t), 1)
+		block := herdrRender(hibiscusApplied(t), 1)
 		updated, snapshot, err := herdrInstall(original, block)
 		if err != nil {
 			t.Fatalf("%q: %v", original, err)
@@ -126,12 +126,12 @@ func TestHerdrInstallWithNoThemeAppendsAndRemoveStripsExactly(t *testing.T) {
 }
 
 func TestHerdrReplaceSwapsAnExistingBlockInPlaceAndKeepsUserEdits(t *testing.T) {
-	first, snapshot, err := herdrInstall(herdrWithTheme, herdrRender(goldApplied(t), 1))
+	first, snapshot, err := herdrInstall(herdrWithTheme, herdrRender(hibiscusApplied(t), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	edited := strings.Replace(first, "new_tab = \"prefix+c\"", "new_tab = \"prefix+t\"", 1)
-	second, replaced := herdrReplace(edited, herdrRender(goldApplied(t), 2))
+	second, replaced := herdrReplace(edited, herdrRender(hibiscusApplied(t), 2))
 	if !replaced || strings.Count(second, ">>> pfm theme") != 1 || !strings.Contains(second, "gen 2 >>>") {
 		t.Fatalf("replace = %v\n%s", replaced, second)
 	}
@@ -152,7 +152,7 @@ func TestHerdrInstallRefusesShapesItCannotRestoreByteForByte(t *testing.T) {
 	}
 	for name, original := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := herdrInstall(original, herdrRender(goldApplied(t), 1)); err == nil {
+			if _, _, err := herdrInstall(original, herdrRender(hibiscusApplied(t), 1)); err == nil {
 				t.Fatal("expected an error, got nil")
 			}
 		})
@@ -160,7 +160,7 @@ func TestHerdrInstallRefusesShapesItCannotRestoreByteForByte(t *testing.T) {
 }
 
 func TestHerdrExtractReadsTheStampedGeneration(t *testing.T) {
-	block := herdrRender(goldApplied(t), 9)
+	block := herdrRender(hibiscusApplied(t), 9)
 	updated, _, err := herdrInstall(herdrWithTheme, block)
 	if err != nil {
 		t.Fatal(err)
@@ -177,10 +177,10 @@ func TestHerdrExtractReadsTheStampedGeneration(t *testing.T) {
 const herdrSidebar = "[ui.sidebar.agents]\nrows = [\n  [\"$pfm_working\", \"agent\"],\n  [\"$pfm_blocked\"],\n" +
 	"  [\"$pfm_done\", \"$pfm_unknown\"]\n]\n\n[ui.sidebar.spaces]\nrows = [[\"name\", \"$pfm_working\"]]\n"
 
-// goldStyled is herdrSidebar after an apply under professor-gold: working is
+// hibiscusStyled is herdrSidebar after an apply under hibiscus-night: working is
 // the theme's blue, blocked its yellow, done its success, and unknown its
 // inactive #565f89 lifted to 3:1 on the sidebar backgrounds.
-func goldStyled(t *testing.T) string {
+func hibiscusStyled(t *testing.T) string {
 	t.Helper()
 	out := herdrSidebar
 	for token, hue := range map[string]string{
@@ -202,15 +202,15 @@ func TestHerdrApplyStylesTheSidebarRowsAndOffRestoresThemBare(t *testing.T) {
 	before := herdrConfigWithSidebar(h)
 	wantVerdict(t, h.on(), "herdr", VerdictInSync, "")
 	got := h.read(".config/herdr/config.toml")
-	if !strings.Contains(got, goldStyled(t)) {
-		t.Fatalf("sidebar rows not styled with the gold hues:\n%s", got)
+	if !strings.Contains(got, hibiscusStyled(t)) {
+		t.Fatalf("sidebar rows not styled with the hibiscus hues:\n%s", got)
 	}
 	wantVerdict(t, h.status(), "herdr", VerdictInSync, "")
 
 	h.write(".config/herdr/config.toml", strings.Replace(got, `fg = "#e0af68"`, `fg = "#111111"`, 1))
 	wantVerdict(t, h.status(), "herdr", VerdictDrift, "sidebar row pfm token styles differ")
 	wantVerdict(t, h.sync(false), "herdr", VerdictInSync, "")
-	if !strings.Contains(h.read(".config/herdr/config.toml"), goldStyled(t)) {
+	if !strings.Contains(h.read(".config/herdr/config.toml"), hibiscusStyled(t)) {
 		t.Fatalf("drifted fg not rewritten:\n%s", h.read(".config/herdr/config.toml"))
 	}
 
@@ -234,7 +234,7 @@ func TestHerdrOffStripsStyledRowsEvenWhenThePfmBlockIsGone(t *testing.T) {
 	herdrConfigWithSidebar(h)
 	h.on()
 	styled := h.read(".config/herdr/config.toml")
-	if !strings.Contains(styled, goldStyled(t)) {
+	if !strings.Contains(styled, hibiscusStyled(t)) {
 		t.Fatalf("on did not style the sidebar rows:\n%s", styled)
 	}
 	block, _, found := herdrExtract(styled)

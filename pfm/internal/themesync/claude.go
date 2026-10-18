@@ -31,9 +31,12 @@ type account struct {
 // dir is the account's config directory.
 func (a account) dir() string { return filepath.Dir(a.Path) }
 
+// ErrNoAccounts is accountSettings finding no account settings.json at all.
+var ErrNoAccounts = errors.New("no Claude account settings.json under ~/.claude or ~/.cc")
+
 // accountSettings lists every account settings.json — ~/.claude and the
-// ~/.cc/* config dirs — by real path, deduped and sorted. None is an error
-// naming where it looked.
+// ~/.cc/* config dirs — by real path, deduped and sorted. None is
+// ErrNoAccounts.
 func accountSettings(home string) ([]string, error) {
 	candidates := []string{filepath.Join(home, ".claude", "settings.json")}
 	matches, err := filepath.Glob(filepath.Join(home, ".cc", "*", "settings.json"))
@@ -57,7 +60,7 @@ func accountSettings(home string) ([]string, error) {
 		}
 	}
 	if len(paths) == 0 {
-		return nil, errors.New("no Claude account settings.json under ~/.claude or ~/.cc")
+		return nil, ErrNoAccounts
 	}
 	sort.Strings(paths)
 	return paths, nil
@@ -83,6 +86,29 @@ func readAccount(path string) (account, error) {
 	}
 	return account{Path: path, Value: settings.Theme, ModTime: info.ModTime()}, nil
 }
+
+// AccountsSelecting lists the settings.json of every account whose `theme`
+// is value, sorted; no account at all is none. An account it cannot read is
+// an error naming it, never "not selected".
+func AccountsSelecting(home, value string) ([]string, error) {
+	accounts, err := readAccounts(home)
+	if errors.Is(err, ErrNoAccounts) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var selecting []string
+	for _, read := range accounts {
+		if read.Value == value {
+			selecting = append(selecting, read.Path)
+		}
+	}
+	return selecting, nil
+}
+
+// CustomValue is the `theme` value selecting the custom theme file stem.
+func CustomValue(stem string) string { return customPrefix + stem }
 
 // readAccounts reads every account; the first failure names its file.
 func readAccounts(home string) ([]account, error) {

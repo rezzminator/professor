@@ -43,6 +43,26 @@ type PaneCapturer interface {
 // permission failure) under a wall of "exit status 1" after every picker close.
 var ErrServerGone = errors.New("no tmux server on socket")
 
+// ErrOptionUnset marks a read of a global option the server holds no value
+// for: tmux refuses an unset user option as "invalid option: @name" (an older
+// tmux says "unknown option"). It is tmux's definitive answer that the option
+// is unset, never a read that could not run.
+var ErrOptionUnset = errors.New("tmux option unset")
+
+// optionUnset reads tmux's refusal of an unset option named name.
+func optionUnset(err error, name string) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	for _, line := range strings.Split(string(exit.Stderr), "\n") {
+		if line = strings.TrimSpace(line); line == "invalid option: "+name || line == "unknown option: "+name {
+			return true
+		}
+	}
+	return false
+}
+
 // serverGone reads tmux's own words for a socket with nothing behind it. The
 // exit status alone cannot say it — tmux exits 1 for every failure and writes
 // the reason to stderr, which exec keeps on the ExitError rather than in the
@@ -443,7 +463,10 @@ func (tmux TmuxProbe) ShowGlobalOption(
 		if serverGone(err) {
 			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrServerGone)
 		}
-		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, err)
+		if optionUnset(err, name) {
+			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrOptionUnset)
+		}
+		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, withStderr(err))
 	}
 	return strings.TrimRight(string(output), "\n"), nil
 }

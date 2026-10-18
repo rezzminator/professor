@@ -405,16 +405,25 @@
     "themes/README.md": {
       "curated": true
     },
-    "themes/professor-bronze.json": {
+    "themes/hibiscus-night.json": {
       "curated": true
     },
-    "themes/professor-gold.json": {
+    "themes/lagoon.json": {
       "curated": true
     },
-    "themes/professor-silver.json": {
+    "themes/mirrorball.json": {
+      "curated": true
+    },
+    "themes/neon-sunset.json": {
       "curated": true
     },
     "themes/sources.json": {
+      "curated": true
+    },
+    "themes/ultrafunk.json": {
+      "curated": true
+    },
+    "themes/velvet-groove.json": {
       "curated": true
     },
     "global/agents/shared/gpt.md": {

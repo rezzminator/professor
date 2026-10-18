@@ -45,7 +45,7 @@ JSON
     [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
       { echo "provision: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
     settings_tmp="$(mktemp)"
-    jq --arg t "custom:professor-gold" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
+    jq --arg t "custom:hibiscus-night" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
     cat "$settings_tmp" >"$HOME/.claude/settings.json"
     rm -f "$settings_tmp"
     git config --global user.name demo

@@ -195,9 +195,11 @@ var retiredNames = []retiredName{
 	{name: "/tokens", kind: retiredCommand, successor: chatlogSuccessor, match: matchFamily},
 	{name: "skills/transcript", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
 	{name: "transcript skill", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
-	// Commit "pfm transcript counts|types and pfm tokens --timeline retire for the
-	// chatlog kit": its prep reads Claude, Codex and OpenCode itself (TOOLS rows,
+	// Commit 3fb6eda4 "retire pfm transcript counts|types and pfm tokens --timeline":
+	// the chatlog kit's prep reads Claude, Codex and OpenCode itself (TOOLS rows,
 	// timeline.txt). pfm transcript show|locate|agents and pfm tokens stay live.
+	// Known gap: the scan matches the exact phrase `pfm tokens --timeline`; the flag split from
+	// `pfm tokens` by other flags is not flagged.
 	{name: "pfm transcript counts", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
 	{name: "pfm transcript types", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
 	{name: "pfm tokens --timeline", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},

@@ -90,9 +90,9 @@ func intendedExit(code int, stderr string) int {
 
 func TestAuditReplaysTheNodeGoldens(t *testing.T) {
 	dirs := goldenDirs(t)
-	// 11 A1 modes and 56 suite runs: fewer means the enumerator lost some.
-	if len(dirs) != 67 {
-		t.Fatalf("found %d golden runs, want 67", len(dirs))
+	// 11 A1 modes and 57 suite runs: fewer means the enumerator lost some.
+	if len(dirs) != 68 {
+		t.Fatalf("found %d golden runs, want 68", len(dirs))
 	}
 	for _, dir := range dirs {
 		t.Run(filepath.Base(filepath.Dir(dir))+"/"+filepath.Base(dir), func(t *testing.T) {

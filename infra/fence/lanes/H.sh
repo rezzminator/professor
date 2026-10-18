@@ -289,23 +289,15 @@ PYOBS
     pass "another real pane cannot steal restored session from live owner"
   else fail "restored ownership refusal assertion rc=$rc"; fi
 }
-if [ "${LANE_H_SCOPE:-}" = restoration ]; then
-  h_restoration
-  lane_end
-  exit $?
-fi
-if [ "${LANE_H_SCOPE:-}" = lifecycle ]; then
-  h_lifecycle
-  lane_end
-  exit $?
-fi
-if [ "${LANE_H_SCOPE:-}" = reload ]; then
-  h_reload
-  lane_end
-  exit $?
-fi
-if [ "${LANE_H_SCOPE:-}" = open-live ]; then
-  h_open_live
+h_single=
+case "${LANE_H_SCOPE:-}" in
+  restoration) h_single=h_restoration ;;
+  lifecycle) h_single=h_lifecycle ;;
+  reload) h_single=h_reload ;;
+  open-live) h_single=h_open_live ;;
+esac
+if [ -n "$h_single" ]; then
+  "$h_single"
   lane_end
   exit $?
 fi

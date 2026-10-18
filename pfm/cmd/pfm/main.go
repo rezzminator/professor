@@ -465,7 +465,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return hookentry.CallCapHook(args[1:], os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "herdr-indicators" {
-		return herdr.IndicatorsEntry(stderr, paths.OSEnv{}, herdr.PaintIndicators)
+		return herdr.IndicatorsEntry(stderr, paths.OSEnv{}, pfmchat.PaintHerdrIndicators)
 	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})

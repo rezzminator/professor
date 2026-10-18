@@ -18,6 +18,7 @@ suites:
       github.com/rezzminator/professor/pfm/harness-prompts: 2
       github.com/rezzminator/professor/pfm/harness-prompts/compose: 2
       github.com/rezzminator/professor/pfm/internal/action: 26
+      github.com/rezzminator/professor/pfm/internal/agentlauncher: 2
       github.com/rezzminator/professor/pfm/internal/agentopen: 2
       github.com/rezzminator/professor/pfm/internal/agentrole: 2
       github.com/rezzminator/professor/pfm/internal/archive: 2

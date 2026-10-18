@@ -55,6 +55,7 @@ func Keys() []KeyDefault {
 		{keyVersion, Version},
 		{keyTheme, "default"},
 		{"chat.backend", DefaultChatBackend},
+		{"chat.herdrTabStatus", DefaultHerdrTabStatus},
 		{keyStateDB, "~/.local/state/pfm/pfm.db"},
 		{keyStateCacheDB, "~/.local/state/pfm/pfm-cache.db"},
 		{"claude.permissionMode", PermissionBypass},

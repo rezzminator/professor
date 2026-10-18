@@ -481,6 +481,7 @@ func defaultsWithMCPServers(
 		"mcp.http.port":                                      SourceDefault,
 		"ask.engine":                                         SourceDefault,
 		"chat.backend":                                       SourceDefault,
+		"chat.herdrTabStatus":                                SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,
@@ -506,7 +507,7 @@ func defaultsWithMCPServers(
 		sources[key] = SourceDefault
 	}
 	return Config{
-		Chat:             ChatConfig{Backend: DefaultChatBackend},
+		Chat:             ChatConfig{Backend: DefaultChatBackend, HerdrTabStatus: DefaultHerdrTabStatus},
 		Version:          Version,
 		InputVersion:     Version,
 		Theme:            "default",
@@ -1437,7 +1438,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		keyTheme:   config.Theme,
 		"state":    map[string]any{"db": config.State.DB, "cacheDb": config.State.CacheDB},
 		"accounts": accounts,
-		"chat":     map[string]any{"backend": config.Chat.Backend},
+		"chat":     map[string]any{"backend": config.Chat.Backend, "herdrTabStatus": config.Chat.HerdrTabStatus},
 		claudeName: marshalClaude(config),
 		codexName:  codexValue,
 		"tmux": map[string]any{

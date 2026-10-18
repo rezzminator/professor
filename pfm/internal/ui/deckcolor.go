@@ -62,16 +62,6 @@ func hexDigit(value byte) (uint8, bool) {
 	return 0, false
 }
 
-// onBackground returns the same tone over bg, the way a selected row lays its
-// highlight under every segment instead of wrapping the line in one style
-// (a wrap is cancelled by the first inner reset).
-func (paint tone) onBackground(bg string) tone {
-	if bg != "" {
-		paint.bg = bg
-	}
-	return paint
-}
-
 // span is one painted run of a composed line.
 type span struct {
 	text  string

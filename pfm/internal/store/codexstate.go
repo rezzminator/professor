@@ -209,19 +209,6 @@ func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error
 // process birth time back to whichever thread it started with, forever.
 type CodexPaneBound func(socket, paneID string) (id string, found bool)
 
-// NewCodexThreadResolver names the Codex conversation behind a live process
-// that holds no rollout file descriptor. The state stores are read once, on
-// the first such process, so an ordinary scan never pays for the query. The
-// returned function is what gather.Dependencies.CodexThread and
-// gather.DetectCodexThreads expect.
-func NewCodexThreadResolver(
-	ctx context.Context,
-	codexHome string,
-	bound CodexPaneBound,
-) func(exported, cwd string, birth int64, socket, paneID string) (id, rolloutPath string) {
-	return NewCodexThreadResolverRoots(ctx, []string{codexHome}, bound)
-}
-
 // NewCodexThreadResolverRoots resolves rollout-less live processes across the
 // complete config-owned Codex roster.
 func NewCodexThreadResolverRoots(

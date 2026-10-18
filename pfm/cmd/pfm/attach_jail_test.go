@@ -553,7 +553,3 @@ func replaceAttachEnv(environment []string, replacements map[string]string) []st
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
-
-func (jail *attachJail) String() string {
-	return fmt.Sprintf("attachJail(%s)", jail.root)
-}

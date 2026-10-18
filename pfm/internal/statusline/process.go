@@ -54,12 +54,6 @@ func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
 	return nil
 }
 
-// ReadCodexRateLimits performs the complete Codex App Server initialize exchange
-// and returns its id=1 response. It runs only in a detached refresher child.
-func ReadCodexRateLimits(ctx context.Context) ([]byte, error) {
-	return ReadCodexRateLimitsWithBinary(ctx, pfmengine.MustLookup(pfmengine.Codex).Binary)
-}
-
 // ReadCodexRateLimitsWithBinary uses the machine-configured Codex command.
 func ReadCodexRateLimitsWithBinary(ctx context.Context, binary string) ([]byte, error) {
 	return ReadCodexRateLimitsWithBinaryAtHome(ctx, binary, "")

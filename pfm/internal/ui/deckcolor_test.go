@@ -75,13 +75,6 @@ func TestToneCarriesItsColoursAndWeight(t *testing.T) {
 	if got := ansi.Strip(rendered); got != "x" {
 		t.Errorf("stripped render = %q, want x", got)
 	}
-	over := tone{fg: "#102030"}.onBackground("#405060")
-	if over.bg != "#405060" || over.fg != "#102030" {
-		t.Errorf("onBackground = %#v, want the same foreground over the new background", over)
-	}
-	if kept := (tone{bg: "#111111"}).onBackground(""); kept.bg != "#111111" {
-		t.Errorf("an empty background must leave the tone's own, got %#v", kept)
-	}
 }
 
 func TestSpansWidthMatchesJoinedWidth(t *testing.T) {

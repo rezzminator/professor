@@ -22,7 +22,7 @@ Build the design tree: the flight's goal at the root, each decision the flight r
 - Product: who the change is for, what must be true when it lands, what it must never do, what the user sees.
 - Touchpoints: every moment the flight would need the user (a secret, a deploy review, a destructive operation), pre-authorised now or cut from scope; a flight that stops mid-run for a user answer is a failed grill. Work that moves protected data gets a question about its channel, never a default.
 
-Work the tree in rounds. The frontier is every open decision whose prerequisites are settled. Round one always holds the scope boundary (the user's whole objective restated, what this flight includes, what it defers — scope never narrows silently). Ask the whole frontier in one plain-text message, then end it and wait:
+Work the tree in rounds. The frontier is every open decision whose prerequisites are settled. Round one always holds the objective and the scope boundary: the goal behind the request (what the user ultimately wants, what should happen once this flight lands) restated for the user to correct, then what this flight includes and what it defers — scope never narrows or widens silently. Ask the whole frontier in one plain-text message, then end it and wait:
 
 ```
 **Q1 — {title}**: {the question, its context and its options}
@@ -35,6 +35,7 @@ Each answer reshapes the tree; recompute the frontier and ask the next round. Fa
 
 Write `requirements.md`:
 
+- `## Objective`: the goal behind the request as the user confirmed it, in their words where they gave them.
 - `## Rulings`: the confirmed decisions, numbered, binding.
 - `## Requirements`: numbered rows, each testable, each naming the build unit that owns it (a unit from the project map), each with a concrete example in real values: `call(args) → result` for a unit, `given … / when … / then …` at the project's real entry and exit for an integration. A row states what must be true, never how the code does it; a shape seen in one sample is no row.
 - `## Boundaries`: out of scope, files another owner holds.

@@ -65,6 +65,6 @@ Three runs on one query (how faithfully fetch-and-answer tools quote a page) set
 | The declaration | `templates/global/agents/rr-pro.md` |
 | The body it overrides | `templates/global/agents/rr.md`, § Budget and § Spawning |
 | The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is shared through `templates/global/agents/shared/repo-lane.md` |
-| The renderer and its tests | `plugins/engine-sync/internal/source/variantrender.go`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
+| The renderer and its tests | `plugins/engine-sync/internal/source/declarationrender.go`, `plugins/engine-sync/internal/source/declarationrender_test.go`, `plugins/engine-sync/internal/machine/globaldeclarations_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The family doc | `docs/design/RR/rr.md` |

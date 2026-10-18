@@ -812,7 +812,7 @@ func TestHerdrCallRaw(t *testing.T) {
 		{name: "enter-refused", id: pfmengine.Codex, body: "a\nb", refusal: "pane.send_keys", wantCode: CodeUndelivered, wantTyped: true},
 		{name: "still-in-composer", id: pfmengine.Codex, body: "a\nb", after: "› [Pasted text #1 +2 lines]", wantCode: CodeUndelivered, wantTyped: true},
 		{name: "no-confirmation", id: pfmengine.Codex, body: "a\nb", after: "unrelated screen", wantCode: CodeUndelivered, wantTyped: true},
-	}, herdrRawStyleCases()...) {
+	}, append(herdrRawStyleCases(), herdrOpenCodeCases()...)...) {
 		t.Run(test.name, func(t *testing.T) {
 			entered := false
 			var payload string

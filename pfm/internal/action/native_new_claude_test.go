@@ -203,7 +203,7 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 	}
 }
 
-func TestHerdrPickerPreparesSamePaneSeatHost(t *testing.T) {
+func TestHerdrPickerSpawnsNewTab(t *testing.T) {
 	testjail.Fleet(t)
 	socket := herdrPickerSocket(t)
 	t.Setenv("HERDR_ENV", "1")
@@ -230,7 +230,7 @@ func TestHerdrPickerPreparesSamePaneSeatHost(t *testing.T) {
 			Config:         machine,
 		},
 	)
-	if err != nil || !strings.HasPrefix(line, "exec pfm internal seat-host ") {
+	if err != nil || line != "" {
 		t.Fatalf("line=%q err=%v", line, err)
 	}
 	values, err := paths.Resolve()
@@ -243,8 +243,8 @@ func TestHerdrPickerPreparesSamePaneSeatHost(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	seat, found, err := state.Seat(context.Background(), strings.TrimPrefix(line, "exec pfm internal seat-host "))
-	if err != nil || !found || seat.Backend != "herdr" || seat.HerdrPane != "w6:p3" {
+	seat, found, err := state.SeatByPane(context.Background(), socket, "w6:p9")
+	if err != nil || !found || seat.Backend != "herdr" || seat.HerdrPane != "w6:p9" {
 		t.Fatalf("seat=%+v found=%v err=%v", seat, found, err)
 	}
 }
@@ -272,6 +272,14 @@ func herdrPickerSocket(t *testing.T) string {
 				if json.NewDecoder(conn).Decode(&req) != nil {
 					return
 				}
+				if req.Method == "layout.apply" {
+					_, _ = fmt.Fprintf(
+						conn,
+						`{"id":%q,"ok":true,"result":{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}}`+"\n",
+						req.ID,
+					)
+					return
+				}
 				if req.Method == "ping" {
 					_, _ = fmt.Fprintf(
 						conn,
@@ -287,7 +295,7 @@ func herdrPickerSocket(t *testing.T) string {
 	return socket
 }
 
-func TestHerdrPickerRawEnginesPrepareSamePane(t *testing.T) {
+func TestHerdrPickerRawEnginesSpawnNewTab(t *testing.T) {
 	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
 		t.Run(kind.String(), func(t *testing.T) {
 			testjail.Fleet(t)
@@ -319,7 +327,7 @@ func TestHerdrPickerRawEnginesPrepareSamePane(t *testing.T) {
 					Config:         machine,
 				},
 			)
-			if err != nil || !strings.HasPrefix(line, "exec pfm internal seat-host ") {
+			if err != nil || line != "" {
 				t.Fatalf("raw picker line=%q err=%v", line, err)
 			}
 			values, err := paths.Resolve()
@@ -328,9 +336,9 @@ func TestHerdrPickerRawEnginesPrepareSamePane(t *testing.T) {
 			}
 			db := fleetdb.OpenSharedState(context.Background(), values)
 			defer func() { _ = db.Close() }()
-			seat, found, err := db.Seat(context.Background(), strings.TrimPrefix(line, "exec pfm internal seat-host "))
+			seat, found, err := db.SeatByPane(context.Background(), socket, "w6:p9")
 			id := compose.EngineForKind(kind)
-			if err != nil || !found || seat.Engine != string(id) || seat.SessionID == "" || seat.HerdrPane != "w6:p3" ||
+			if err != nil || !found || seat.Engine != string(id) || seat.SessionID == "" || seat.HerdrPane != "w6:p9" ||
 				pfmengine.MustLookup(id).HerdrNativePrompt {
 				t.Fatalf("raw picker seat=%+v found=%v err=%v", seat, found, err)
 			}

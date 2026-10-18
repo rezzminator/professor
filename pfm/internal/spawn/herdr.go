@@ -27,6 +27,7 @@ type HerdrRequest struct {
 	Seat   fleetdb.Seat
 	Run    fleetdb.SeatRun
 	Paths  paths.Values
+	Focus  bool
 }
 
 type HerdrResult struct {
@@ -36,7 +37,7 @@ type HerdrResult struct {
 
 var nativeSeatID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// PrepareHerdr reserves a durable seat in the current bare pane for the picker.
+// PrepareHerdr reserves a durable seat in the current bare pane for a launcher or restoration.
 func PrepareHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
 	return reserveHerdr(ctx, request, request.Choice.HerdrPane)
 }
@@ -113,7 +114,7 @@ func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (resul
 	return HerdrResult{Seat: seat, Eval: "exec pfm internal seat-host " + seat.SeatID}, nil
 }
 
-// SpawnHerdr creates one unfocused tab in the requester's workspace.
+// SpawnHerdr creates one tab in the requester's workspace, unfocused by default.
 func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
 	result, err := reserveHerdr(ctx, request, "")
 	if err != nil {
@@ -131,7 +132,7 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 	params := map[string]any{
 		"workspace_id": request.Choice.HerdrWorkspace,
 		"tab_label":    request.Seat.Name,
-		"focus":        false,
+		"focus":        request.Focus,
 		"root": map[string]any{
 			"type":    "pane",
 			"command": []string{"pfm", "internal", "seat-host", result.Seat.SeatID},

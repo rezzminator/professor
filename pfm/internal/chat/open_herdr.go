@@ -199,7 +199,13 @@ func openNativeRow(ctx context.Context, row compose.Row, stdout, stderr io.Write
 			case choiceErr != nil:
 				err = choiceErr
 			case choice.Backend == spawn.BackendHerdr:
-				return true, OpenRestoredID(ctx, row.ID, stdout, stderr, &runtime)
+				_, err = detachedNative(ctx, seat, stderr, runtime, true)
+				if err != nil {
+					fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
+					return true, 1
+				}
+				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+				return true, 0
 			default:
 				if choice.Warning != "" {
 					fmt.Fprintln(stderr, choice.Warning)
@@ -243,6 +249,7 @@ func detachedNative(
 	seat fleetdb.Seat,
 	stderr io.Writer,
 	runtime config.Runtime,
+	focus bool,
 ) (result action.OpenResult, returnErr error) {
 	alive, err := nativeAlive(ctx, seat)
 	if err != nil {
@@ -282,7 +289,7 @@ func detachedNative(
 		next.State = liveState
 		born, err := spawn.SpawnHerdr(
 			ctx,
-			spawn.HerdrRequest{Choice: choice, Seat: next, Run: run, Paths: runtime.Paths},
+			spawn.HerdrRequest{Choice: choice, Seat: next, Run: run, Paths: runtime.Paths, Focus: focus},
 		)
 		if err != nil {
 			return result, err

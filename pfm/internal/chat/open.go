@@ -180,7 +180,7 @@ func OpenDetachedID(
 		return action.OpenResult{}, seatErr
 	}
 	if found {
-		return detachedNative(ctx, seat, stderr, effective)
+		return detachedNative(ctx, seat, stderr, effective, false)
 	}
 	rows, err := Rows(ctx, stderr, &effective)
 	if err != nil {
@@ -217,7 +217,7 @@ func OpenDetachedTarget(
 		if !found || seat.HerdrSocket != target.Socket || seat.HerdrPane != target.Pane {
 			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
 		}
-		return detachedNative(ctx, seat, stderr, effective)
+		return detachedNative(ctx, seat, stderr, effective, false)
 	}
 	if target.Engine == pfmengine.Claude && target.Live {
 		rows, rowsErr := Rows(ctx, stderr, &effective)
@@ -277,7 +277,7 @@ func openDetachedResolvedRow(
 		if !found {
 			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
 		}
-		return detachedNative(ctx, seat, stderr, effective)
+		return detachedNative(ctx, seat, stderr, effective, false)
 	}
 	fleetPrimary, err := fleet.PrimaryAccount(effective.Paths, effective.Config)
 	if err != nil {

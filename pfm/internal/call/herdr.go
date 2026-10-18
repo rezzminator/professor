@@ -285,7 +285,7 @@ func (engine *Engine) callHerdrRaw(
 	lock *targetLock,
 	id pfmengine.ID,
 ) (Result, error) {
-	before, _, err := herdrCapture(ctx, target, herdrRecentLines)
+	before, _, err := herdrRawCapture(ctx, target, "")
 	if err != nil {
 		base.Code, base.Message = CodeUndelivered, fmt.Sprintf(
 			"ABORT: Herdr composer could not be checked; nothing was typed: %v",
@@ -302,7 +302,7 @@ func (engine *Engine) callHerdrRaw(
 		return base, nil
 	}
 	empty, _, err := ComposerEmpty(before, func() (string, error) {
-		styled, _, readErr := herdrCaptureFormat(ctx, target, herdrRecentLines, "ansi")
+		styled, _, readErr := herdrRawCapture(ctx, target, "ansi")
 		if readErr != nil {
 			return "", readErr
 		}
@@ -359,7 +359,7 @@ func (engine *Engine) callHerdrRaw(
 			return base, nil
 		}
 		engine.sleepContext(ctx, engine.options.EnterSettle)
-		after, _, err := herdrCapture(ctx, target, herdrRecentLines)
+		after, _, err := herdrRawCapture(ctx, target, "")
 		if err != nil {
 			base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
 				"Herdr raw confirmation failed: %v",
@@ -370,6 +370,10 @@ func (engine *Engine) callHerdrRaw(
 		input := composerLastLine(after)
 		if HasPastePlaceholder(input) || (input != "" && strings.Contains(normalizeSpace(input), prefix)) {
 			continue
+		}
+		if id == pfmengine.OpenCode && strings.Contains(before, "╹") &&
+			strings.Count(normalizeSpace(after), prefix) <= strings.Count(normalizeSpace(before), prefix) {
+			break
 		}
 		if !ComposerRowShown(after) && !deliveryProven(id, before, after, prepared.Message, false, request.FileBacked) {
 			break
@@ -512,7 +516,7 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("raw Herdr turn for %q: %w", target.Pane, err)
 			}
-			screen, _, err := herdrCapture(ctx, target, herdrRecentLines)
+			screen, _, err := herdrRawCapture(ctx, target, "")
 			if err != nil {
 				return fmt.Errorf("raw Herdr turn capture: %w", err)
 			}

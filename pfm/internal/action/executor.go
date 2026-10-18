@@ -152,7 +152,8 @@ func (executor *Executor) Open(
 		return "", err
 	}
 	if request.Row.Kind == compose.NewClaude || request.Row.Kind == compose.NewCodex ||
-		request.Row.Kind == compose.NewOpenCode {
+		request.Row.Kind == compose.NewOpenCode || request.Row.Kind == compose.ResumeClaude ||
+		request.Row.Kind == compose.ResumeCodex || request.Row.Kind == compose.ResumeOpenCode {
 		choice, chooseErr := spawn.ChooseBackend(ctx, request.Config.Chat.Backend, os.Environ(), nil)
 		if chooseErr != nil {
 			return "", chooseErr
@@ -169,19 +170,20 @@ func (executor *Executor) Open(
 				return "", errors.New("native picker launch has no structured recipe or identity")
 			}
 			engineID := compose.EngineForKind(request.Row.Kind)
-			sessionID := ""
+			sessionID := request.Row.ID
 			if plan.Record != nil {
 				sessionID = plan.Record.SessionID
-			} else {
+			} else if sessionID == "" {
 				sessionID, err = newSessionID()
 				if err != nil {
 					return "", err
 				}
 			}
-			prepared, prepareErr := spawn.PrepareHerdr(
+			_, prepareErr := spawn.SpawnHerdr(
 				ctx,
 				spawn.HerdrRequest{
 					Choice: choice,
+					Focus:  true,
 					Paths:  values,
 					Run:    *plan.SeatRun,
 					Seat: fleetdb.Seat{
@@ -196,7 +198,7 @@ func (executor *Executor) Open(
 			}
 			executor.recordLaunch(ctx, plan.Record)
 			launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
-			return prepared.Eval, nil
+			return "", nil
 		}
 	}
 	if plan.ChatServer != nil {

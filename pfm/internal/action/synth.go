@@ -465,6 +465,11 @@ func Synthesize(request Request) (Plan, error) {
 		if err != nil {
 			return Plan{}, err
 		}
+		recipe, err := resumeSpawn.SeatRun(request.Row.CWD)
+		if err != nil {
+			return Plan{}, err
+		}
+		plan.SeatRun = &recipe
 		plan.Warnings = resumeSpawn.warnings()
 		agent := agentCommand(
 			request.Cache1H,
@@ -501,6 +506,7 @@ func Synthesize(request Request) (Plan, error) {
 			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
 		}
 		arguments = append(arguments, "resume", request.Row.ID)
+		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, arguments...)
 		plan.Run = continuityBanner(request.Row) + codexCommandFor(machine, request.PrimaryAccount, arguments...)
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}

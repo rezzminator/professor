@@ -237,11 +237,11 @@ func TestClaudePluginTargets(t *testing.T) {
 		}, pro(local(extra, root))},
 		{"full ids are ensured as named, on any build", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{
-				{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, {ID: "effort-live-control@some-market"},
+				{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, {ID: "auto-effort-control@some-market"},
 			},
 		}, []ClaudePluginTarget{
 			{Name: "typesafe", ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills", MarketplaceName: "typesafe-ai"},
-			{Name: "effort-live-control", ID: "effort-live-control@some-market", MarketplaceName: "some-market"},
+			{Name: "auto-effort-control", ID: "auto-effort-control@some-market", MarketplaceName: "some-market"},
 		}},
 		{"an -alpha build keeps every unlisted marketplace plugin disabled", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root,
@@ -721,7 +721,7 @@ func TestEnsureClaudePluginsUndecidedLeavesBothCopies(t *testing.T) {
 // between pfm's read and its rename; pfm re-reads before the rename and
 // re-applies its edit to that content, so neither write is lost.
 func TestSettingsEditKeepsAWriteMadeAfterItsRead(t *testing.T) {
-	const name = "effort-live-control"
+	const name = "auto-effort-control"
 	target := &ClaudePluginTarget{
 		Name: name, ID: devID(name), DevID: devID(name), GitHubID: name + "@" + name,
 	}

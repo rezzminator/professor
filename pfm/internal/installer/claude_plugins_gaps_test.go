@@ -68,7 +68,7 @@ func mustSettings(t *testing.T, file string) map[string]any {
 }
 
 // TestEnsureClaudePluginsDisablesTheRetiredAgentEffort: the plugin was renamed
-// agent-effort -> effort-live-control; install ensures the successor and then
+// agent-effort -> auto-effort-control; install ensures the successor and then
 // sets each enabled retired id false (never uninstalls it).
 func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 	const retiredGitHub, retiredDev = "agent-effort@agent-effort", "agent-effort@agent-effort-dev"
@@ -103,13 +103,13 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 		}
 		installed := false
 		for _, call := range runner.calls {
-			installed = installed || call.argv == "plugin install effort-live-control@effort-live-control -y"
+			installed = installed || call.argv == "plugin install auto-effort-control@auto-effort-control -y"
 		}
 		if !installed {
 			t.Fatalf("the successor was not installed: %v", runner.calls)
 		}
 		if line := "disable " + retiredGitHub + ", " + retiredDev + " in " + filepath.Join(first, "settings.json") +
-			": retired, effort-live-control@effort-live-control replaces it"; !strings.Contains(out.String(), line) {
+			": retired, auto-effort-control@auto-effort-control replaces it"; !strings.Contains(out.String(), line) {
 			t.Fatalf("no %q line:\n%s", line, out.String())
 		}
 	})

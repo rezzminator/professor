@@ -4,8 +4,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 # Vocabulary
 
-- effort-live-control: a tag at the start of an Agent prompt sets that sub-agent's reasoning effort; an agent whose frontmatter carries `effortControl` has its effort raised at each failing test run or red sub-task and brought home once the trouble resolves · `effort-live-control/`
-- auto-effort: sets the main chat's reasoning effort each turn; the model moves it with `set_effort`, failing tests raise it, a cache gate per model · `auto-effort/`
+- auto-effort-control: reasoning effort for the main chat and the sub-agents it launches — the main chat's per turn, moved by the model's `set_effort`, raised by failing tests, a cache gate per model; a tag at the start of an Agent prompt sets that sub-agent's; an agent whose frontmatter carries `effortControl` is raised at each failing test run or red sub-task, brought home once the trouble resolves, and moves its own with `effort_up`, `effort_down`, `effort_auto` · `auto-effort-control/`
 - tool-visibility-controller: a `visibility` field in agent, skill and command frontmatter, plus a scope file, decides per loop which agents, skills, MCP tools and built-in tools it sees and may invoke · `tool-visibility-controller/`
 - buddy: an ASCII companion above the prompt that reacts to the work and answers `/buddy` · `buddy/`
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`
@@ -30,7 +29,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - Users install each plugin from its repository's `main`.
 - An alpha `pfm install` installs every plugin `.claude-plugin/marketplace.json` lists as `{name}@{name}-dev`, copied from `{name}/plugins/{name}` here (or under `claude.pluginCheckoutRoot` when set) into `~/.local/share/{name}-dev`, and disables its GitHub copies.
 - On alpha, `claude.plugins` in `pfm.config.json` is the enabled set, every marketplace plugin when unset; a plugin it leaves out installs disabled; a full `name@marketplace` id there is installed as named, never copied.
-- A plugin option is also an environment variable `{PLUGIN}_{OPTION}`, both names upper snake (`EFFORT_LIVE_CONTROL_FLOOR`): variable > the plugin's own option (`pluginConfigs`, `/config`, callmeter's `config.json`) > default; each plugin's README lists its settings.
+- A plugin option is also an environment variable `{PLUGIN}_{OPTION}`, both names upper snake (`AUTO_EFFORT_CONTROL_FLOOR`): variable > the plugin's own option (`pluginConfigs`, `/config`, callmeter's `config.json`) > default; each plugin's README lists its settings.
 - sub-agent-compact and buddy declare no `userConfig`: sub-agent-compact reads only its `SUB_AGENT_COMPACT_*` variables, set from `claude.env`; buddy reads no variable and keeps every setting in `${XDG_CONFIG_HOME:-$HOME/.config}/buddy/config.json`.
 - `pfm install` writes `claude.env` from `pfm.config.json` into the primary seat's `settings.json` `env`, which every seat shares, owning only the keys it wrote (ledger `~/.local/share/pfm/install/claude-env-ownership.json`); `pfm doctor` reports a key changed or dropped by hand.
 - On alpha, pfm builds callmeter's binary from its checkout into `{CALLMETER_HOME}/bin/{version}/` before refreshing its plugin copy; its `CLAUDE.md` § Dev install covers a host without pfm.

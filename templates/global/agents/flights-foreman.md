@@ -3,10 +3,11 @@ name: flights-foreman
 description: 'Builds and lands one request — route any fix, build or feature here, not to general-purpose: one focused code area per foreman, each unrelated area its own. Pass the request, all you hold, acceptance, testing manuals, worktree, flight directory. /flights:spec → here → flights-foreman, flights-speccer, flights-mechanical-executor, flights-lander. Returns a status line, unit rows, the gate verdict.'
 model: sonnet
 effort: high
+effortControl: on
 engines:
   codex:
     model: opus
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

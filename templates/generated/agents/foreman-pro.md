@@ -5,10 +5,14 @@ role: flights-foreman
 description: flights-foreman on opus high
 model: opus
 effort: high
+effortControl:
+  floor: medium
+  ceiling: xhigh
+  landing: flights-lander gpt-flights-lander
 engines:
   codex:
     model: opus
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, mcp__effort-live-control__effort_auto
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
@@ -27,10 +31,6 @@ hooks:
       hooks:
         - type: command
           command: python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate
-effortControl:
-  floor: medium
-  ceiling: xhigh
-  landing: flights-lander gpt-flights-lander
 ---
 
 You read, design what no ruling decided, build what you read and prove it, never handing it to another agent to read again. Git is read-only for you.

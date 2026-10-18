@@ -31,16 +31,16 @@ func TestListSymbolKeepsTheFamiliesAndNeverSpendsTheLiveDot(t *testing.T) {
 	}
 }
 
-func TestEffortLabelWearsTheStatusLineEmoji(t *testing.T) {
+func TestEffortLabelShowsFiveSteps(t *testing.T) {
 	for level, want := range map[string]string{
-		"low": "🚲 low", "medium": "🏍️ medium", "high": "🏎️ high", "xhigh": "🚀 xhigh", "max": "🛰️ max",
-		"turbo": "🔆 turbo",
+		"low": "effort ▰▱▱▱▱ low", "medium": "effort ▰▰▱▱▱ medium", "high": "effort ▰▰▰▱▱ high", "xhigh": "effort ▰▰▰▰▱ xhigh", "max": "effort ▰▰▰▰▰ max",
+		"turbo": "effort ▱▱▱▱▱ turbo (unknown)", "HIGH": "effort ▰▰▰▱▱ high", "": "",
 	} {
 		if got := EffortLabel(level); got != want {
 			t.Errorf("EffortLabel(%q) = %q, want %q", level, got, want)
 		}
 	}
-	if EffortEmoji("") != "" || RowEffort("") != "" {
+	if RowEffort("") != "" {
 		t.Error("no level, no emoji")
 	}
 }

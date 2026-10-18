@@ -159,7 +159,7 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			task: task(`"id":"a1","name":"scout","type":"local_agent","status":"running","label":"map the resolver",` +
 				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000,"tokenCount":312000,` +
 				`"tokenSamples":[0,125000,250000,500000,1000000]`),
-			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M Σ$0.01/2.0K/35/2│scout·tracer│opus·🏎️ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
+			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M Σ$0.01/2.0K/35/2│scout·tracer│opus·effort ▰▰▰▱▱ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
 				"⟲1│pfm│map the resolver",
 		},
 		{
@@ -190,13 +190,13 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			name: "a gpt- agent renders its tier then its version",
 			task: `{"id":"g1","name":"sol","status":"running","model":"gpt-6-sol","effort":"low",` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│sol│sol-6·🚲 low│running",
+			want: "4.2K│sol│sol-6·effort ▰▱▱▱▱ low│running",
 		},
 		{
 			name: "a gpt- agent's dotted version survives",
 			task: `{"id":"g2","name":"bot","status":"running","model":"gpt-5.6-terra","effort":"high",` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│bot│terra-5.6·🏎️ high│running",
+			want: "4.2K│bot│terra-5.6·effort ▰▰▰▱▱ high│running",
 		},
 		{
 			name: "a bare gpt- version has no tier and renders whole",
@@ -270,50 +270,50 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 					"name: gpt-flights-foreman\nmodel: gpt-6-sol\nrole: flights-foreman",
 				),
 			},
-			want: "│flights-foreman│sol-6·🏎️ high│",
+			want: "│flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name:    "the project's definition wins over the user's",
 			project: map[string]string{"gpt-flights-foreman.md": definition("role: project-foreman")},
 			user:    map[string]string{"gpt-flights-foreman.md": definition("role: flights-foreman")},
-			want:    "│project-foreman│sol-6·🏎️ high│",
+			want:    "│project-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name: "a quoted role loses its quotes",
 			user: map[string]string{"gpt-flights-foreman.md": definition(`role: "flights-foreman"`)},
-			want: "│flights-foreman│sol-6·🏎️ high│",
+			want: "│flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name: "a definition with no role key keeps the agentType",
 			user: map[string]string{"gpt-flights-foreman.md": definition("name: gpt-flights-foreman")},
-			want: "│gpt-flights-foreman│sol-6·🏎️ high│",
+			want: "│gpt-flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name: "a role in the body is not a role",
 			user: map[string]string{"gpt-flights-foreman.md": "no frontmatter\nrole: flights-foreman\n"},
-			want: "│gpt-flights-foreman│sol-6·🏎️ high│",
+			want: "│gpt-flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name: "no definition file keeps the agentType",
-			want: "│gpt-flights-foreman│sol-6·🏎️ high│",
+			want: "│gpt-flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name:    "a session below the project root reads the root's definition",
 			below:   filepath.Join("pfm", "internal"),
 			project: map[string]string{"gpt-flights-foreman.md": definition("role: project-foreman")},
 			user:    map[string]string{"gpt-flights-foreman.md": definition("role: flights-foreman")},
-			want:    "│project-foreman│sol-6·🏎️ high│",
+			want:    "│project-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name: "a padded agentType in the meta resolves its definition",
 			meta: " gpt-flights-foreman ",
 			user: map[string]string{"gpt-flights-foreman.md": definition("role: flights-foreman")},
-			want: "│flights-foreman│sol-6·🏎️ high│",
+			want: "│flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name: "an unreadable definition keeps the agentType and says why",
 			torn: true,
-			want: "│gpt-flights-foreman│sol-6·🏎️ high│",
+			want: "│gpt-flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 			warn: "agent definition (rows show gpt-flights-foreman)",
 		},
 		{
@@ -321,7 +321,7 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 			outer: map[string]string{
 				filepath.Join("work", ".claude", "agents", "gpt-flights-foreman.md"): definition("role: outer-foreman"),
 			},
-			want: "│gpt-flights-foreman│sol-6·🏎️ high│",
+			want: "│gpt-flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 		{
 			name:  "outside a git repository home's own .claude is not a project's",
@@ -329,7 +329,7 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 			outer: map[string]string{
 				filepath.Join(".claude", "agents", "gpt-flights-foreman.md"): definition("role: home-foreman"),
 			},
-			want: "│gpt-flights-foreman│sol-6·🏎️ high│",
+			want: "│gpt-flights-foreman│sol-6·effort ▰▰▰▱▱ high│",
 		},
 	}
 	for _, tc := range cases {

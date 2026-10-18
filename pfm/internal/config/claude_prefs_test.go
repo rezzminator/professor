@@ -297,19 +297,19 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 		{
 			"every key set to a non-default",
 			`{"version":2,"claude":{"helperModel":"claude-sonnet-5-5","pluginCheckoutRoot":"/opt/plugins",` +
-				`"plugins":["effort-live-control"],"costLedger":false}}`,
+				`"plugins":["auto-effort-control"],"costLedger":false}}`,
 			map[string]any{
 				"helperModel": "claude-sonnet-5-5", "pluginCheckoutRoot": "/opt/plugins",
-				"plugins": []any{"effort-live-control"}, "costLedger": false,
+				"plugins": []any{"auto-effort-control"}, "costLedger": false,
 			},
 		},
 		{
 			"keys the user set to their defaults",
 			`{"version":2,"claude":{"helperModel":"` + DefaultHelperModel + `","costLedger":true,` +
-				`"plugins":["cache-live-control","sub-agent-compact","effort-live-control","tool-visibility-controller"]}}`,
+				`"plugins":["cache-live-control","sub-agent-compact","auto-effort-control","tool-visibility-controller"]}}`,
 			map[string]any{
 				"helperModel": DefaultHelperModel, "costLedger": true,
-				"plugins": []any{"cache-live-control", "sub-agent-compact", "effort-live-control", "tool-visibility-controller"},
+				"plugins": []any{"cache-live-control", "sub-agent-compact", "auto-effort-control", "tool-visibility-controller"},
 			},
 		},
 		{"an explicitly empty list", `{"version":2,"claude":{"plugins":[]}}`, map[string]any{"plugins": []any{}}},

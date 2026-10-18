@@ -16,9 +16,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
-// The main line's effort reads auto-effort's state file for the session when
+// The main line's effort reads auto-effort-control's state file for the session when
 // one exists: its mode and level, ERR in red for a file that cannot be read or
-// says nothing valid, and today's emoji form when there is none.
+// says nothing valid, and the shared bar form when there is none.
 func TestModelSegmentCarriesEffort(t *testing.T) {
 	withSession := strings.Replace(styledPayload, `"session_name"`, `"session_id":"sess-1","session_name"`, 1)
 	withoutEffort := strings.Replace(withSession, `"effort":{"level":"high"},`, "", 1)
@@ -43,45 +43,50 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 			keeperField + `,"updatedAt":"2026-10-17T09:30:00.000Z"}` + "\n"
 	}
 	state := func(mode, level string) string { return line(mode, level, live) }
-	const sess1 = ".local/state/auto-effort/state.sess-1.json"
+	const sess1 = ".local/state/auto-effort-control/state.sess-1.json"
 	for _, testcase := range []struct {
 		name, payload, file, content, want, colour string
 		directory, fifo, wantWarn, unreadableArgs  bool
 	}{
-		{name: "auto at medium", payload: withSession, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·AUTO - Medium │ ", colour: cEffort},
-		{name: "auto at low", payload: withSession, file: sess1, content: state("auto", `"low"`), want: "◆ Opus 4·AUTO - Low │ ", colour: cEffort},
-		{name: "auto before the first request", payload: withSession, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·AUTO │ ", colour: cEffort},
-		{name: "the main chat's own level", payload: withSession, file: sess1, content: state("model", `"high"`), want: "◆ Opus 4·MODEL - High │ ", colour: cEffort},
-		{name: "the main chat at max", payload: withSession, file: sess1, content: state("model", `"max"`), want: "◆ Opus 4·MODEL - Max │ ", colour: cEffort},
-		{name: "the user's pin", payload: withSession, file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·PIN - XHigh │ ", colour: cEffort},
-		{name: "off at the payload level", payload: withSession, file: sess1, content: state("off", "null"), want: "◆ Opus 4·OFF - High │ ", colour: cEffort},
-		{name: "off without a payload level", payload: withoutEffort, file: sess1, content: state("off", "null"), want: "◆ Opus 4·OFF │ ", colour: cEffort},
-		{name: "session from the transcript name", payload: byTranscript, file: ".local/state/auto-effort/state.sess-2.json", content: state("auto", `"high"`), want: "◆ Opus 4·AUTO - High │ ", colour: cEffort},
-		{name: "unreadable", payload: withSession, file: sess1, directory: true, want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "a pipe, never waited on", payload: withSession, file: sess1, fifo: true, want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "garbage", payload: withSession, file: sess1, content: "not json\n", want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "empty file", payload: withSession, file: sess1, content: "", want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "unknown version", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":3`, 1), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "version 1", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":1`, 1), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, ""), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "keeper not an integer", payload: withSession, file: sess1, content: line("auto", `"medium"`, "1.5"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "keeper a string", payload: withSession, file: sess1, content: line("auto", `"medium"`, `"`+live+`"`), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "keeper negative", payload: withSession, file: sess1, content: line("auto", `"medium"`, "-3"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "keeper null", payload: withSession, file: sess1, content: line("auto", `"medium"`, "null"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "no keeper vouches", payload: withSession, file: sess1, content: line("model", `"high"`, "0"), want: "◆ Opus 4·STALE - High │ ", colour: cMuted},
-		{name: "stale without a payload level", payload: withoutEffort, file: sess1, content: line("auto", `"medium"`, "0"), want: "◆ Opus 4·STALE │ ", colour: cMuted},
-		{name: "the keeper is gone", payload: withSession, file: sess1, content: line("pin", `"xhigh"`, dead), want: "◆ Opus 4·STALE - High │ ", colour: cMuted},
-		{name: "the pid is no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), want: "◆ Opus 4·STALE - High │ ", colour: cMuted},
-		{name: "the keeper's argv unreadable", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), unreadableArgs: true, want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "unknown mode", payload: withSession, file: sess1, content: state("turbo", `"medium"`), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "level not in the five", payload: withSession, file: sess1, content: state("auto", `"ultra"`), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "the main chat's level missing", payload: withSession, file: sess1, content: state("model", "null"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "the pin's level missing", payload: withSession, file: sess1, content: state("pin", "null"), want: "◆ Opus 4·ERR - High │ ", colour: cBad, wantWarn: true},
-		{name: "error without a payload level", payload: withoutEffort, file: sess1, content: "{", want: "◆ Opus 4·ERR │ ", colour: cBad, wantWarn: true},
-		{name: "no state file", payload: withSession, want: "◆ Opus 4·🏎️ high │ ", colour: cEffort},
-		{name: "no session to name a file", payload: styledPayload, file: ".local/state/auto-effort/state.json", content: state("auto", `"medium"`), want: "◆ Opus 4·🏎️ high │ ", colour: cEffort},
-		{name: "thinking off", payload: thinkingOff, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·💤 high (off) │ ", colour: cMuted},
+		{name: "auto at medium", payload: withSession, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·effort ▰▰▱▱▱ medium AUTO │ ", colour: cEffort},
+		{name: "auto at low", payload: withSession, file: sess1, content: state("auto", `"low"`), want: "◆ Opus 4·effort ▰▱▱▱▱ low AUTO │ ", colour: cEffort},
+		{name: "auto before the first request", payload: withSession, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·effort AUTO │ ", colour: cEffort},
+		{name: "the main chat's own level", payload: withSession, file: sess1, content: state("model", `"high"`), want: "◆ Opus 4·effort ▰▰▰▱▱ high · model's pick │ ", colour: cEffort},
+		{name: "the main chat at max", payload: withSession, file: sess1, content: state("model", `"max"`), want: "◆ Opus 4·effort ▰▰▰▰▰ max · model's pick │ ", colour: cEffort},
+		{name: "the user's pin", payload: withSession, file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·effort ▰▰▰▰▱ xhigh · your /effort │ ", colour: cEffort},
+		{name: "off at the payload level", payload: withSession, file: sess1, content: state("off", "null"), want: "◆ Opus 4·effort off │ ", colour: cEffort},
+		{name: "off without a payload level", payload: withoutEffort, file: sess1, content: state("off", "null"), want: "◆ Opus 4·effort off │ ", colour: cEffort},
+		{name: "session from the transcript name", payload: byTranscript, file: ".local/state/auto-effort-control/state.sess-2.json", content: state("auto", `"high"`), want: "◆ Opus 4·effort ▰▰▰▱▱ high AUTO │ ", colour: cEffort},
+		{name: "unreadable", payload: withSession, file: sess1, directory: true, want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "a pipe, never waited on", payload: withSession, file: sess1, fifo: true, want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "garbage", payload: withSession, file: sess1, content: "not json\n", want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "empty file", payload: withSession, file: sess1, content: "", want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "unknown version", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":3`, 1), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "version 1", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":1`, 1), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, ""), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "keeper not an integer", payload: withSession, file: sess1, content: line("auto", `"medium"`, "1.5"), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "keeper a string", payload: withSession, file: sess1, content: line("auto", `"medium"`, `"`+live+`"`), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "keeper negative", payload: withSession, file: sess1, content: line("auto", `"medium"`, "-3"), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "keeper null", payload: withSession, file: sess1, content: line("auto", `"medium"`, "null"), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "no keeper vouches", payload: withSession, file: sess1, content: line("model", `"high"`, "0"), want: "◆ Opus 4·effort ▰▰▰▱▱ high · STALE │ ", colour: cMuted},
+		{name: "stale without a payload level", payload: withoutEffort, file: sess1, content: line("auto", `"medium"`, "0"), want: "◆ Opus 4·effort STALE │ ", colour: cMuted},
+		{name: "the keeper is gone", payload: withSession, file: sess1, content: line("pin", `"xhigh"`, dead), want: "◆ Opus 4·effort ▰▰▰▱▱ high · STALE │ ", colour: cMuted},
+		{name: "the pid is no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), want: "◆ Opus 4·effort ▰▰▰▱▱ high · STALE │ ", colour: cMuted},
+		{name: "the keeper's argv unreadable", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), unreadableArgs: true, want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "unknown mode", payload: withSession, file: sess1, content: state("turbo", `"medium"`), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "level not in the five", payload: withSession, file: sess1, content: state("auto", `"ultra"`), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "the main chat's level missing", payload: withSession, file: sess1, content: state("model", "null"), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "the pin's level missing", payload: withSession, file: sess1, content: state("pin", "null"), want: "◆ Opus 4·effort ▰▰▰▱▱ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "error without a payload level", payload: withoutEffort, file: sess1, content: "{", want: "◆ Opus 4·effort ERR │ ", colour: cBad, wantWarn: true},
+		{name: "no state file", payload: withSession, want: "◆ Opus 4·effort ▰▰▰▱▱ high │ ", colour: cEffort},
+		{name: "no session to name a file", payload: styledPayload, file: ".local/state/auto-effort-control/state.json", content: state("auto", `"medium"`), want: "◆ Opus 4·effort ▰▰▰▱▱ high │ ", colour: cEffort},
+		{name: "thinking off", payload: thinkingOff, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·effort off │ ", colour: cMuted},
 		{name: "without effort", payload: withoutEffort, want: "◆ Opus 4 │ "},
+		{name: "auto escalation", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"high"`), "a lookup over logs", "3 failing test runs", 1), want: "◆ Opus 4·effort ▰▰▰▱▱ high AUTO · raised: 3 failing tests │ ", colour: cEffort},
+		{name: "model reason is not escalation", payload: withSession, file: sess1, content: strings.Replace(state("model", `"high"`), "a lookup over logs", "3 failing test runs", 1), want: "◆ Opus 4·effort ▰▰▰▱▱ high · model's pick │ ", colour: cEffort},
+		{name: "malformed reason remains automatic", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"high"`), "a lookup over logs", "0 failing test runs", 1), want: "◆ Opus 4·effort ▰▰▰▱▱ high AUTO │ ", colour: cEffort},
+		{name: "partial reason remains automatic", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"high"`), "a lookup over logs", "3 failing test runs extra", 1), want: "◆ Opus 4·effort ▰▰▰▱▱ high AUTO │ ", colour: cEffort},
+		{name: "overflow reason remains automatic", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"high"`), "a lookup over logs", "99999999999999999999999999 failing test runs", 1), want: "◆ Opus 4·effort ▰▰▰▱▱ high AUTO │ ", colour: cEffort},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -126,8 +131,8 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 			if testcase.wantWarn {
 				lines := strings.Split(strings.TrimSuffix(warn, "\n"), "\n")
 				if len(lines) != 1 || !strings.Contains(lines[0], path) ||
-					!strings.Contains(lines[0], "auto-effort state") {
-					t.Fatalf("warn = %q, want one auto-effort state line naming %s", warn, path)
+					!strings.Contains(lines[0], "auto-effort-control state") {
+					t.Fatalf("warn = %q, want one auto-effort-control state line naming %s", warn, path)
 				}
 			}
 		})
@@ -203,12 +208,12 @@ func TestKeeperProbeCallsAnotherUsersProcessNoKeeper(t *testing.T) {
 	}
 }
 
-// startKeeper starts a process with auto-effort's keeper argv (its src/state.ts
+// startKeeper starts a process with auto-effort-control's keeper argv (its src/state.ts
 // KEEPER_ARGV, last element KEEPER_MARK) for the test's life and returns its pid.
 func startKeeper(t *testing.T) int {
 	t.Helper()
 	keeper := exec.Command(
-		"/bin/sh", "-c", `echo $$; while kill -0 "$PPID" 2>/dev/null; do sleep 2; done`, "auto-effort-keeper",
+		"/bin/sh", "-c", `echo $$; while kill -0 "$PPID" 2>/dev/null; do sleep 2; done`, "auto-effort-control-keeper",
 	)
 	// Stdout stays /dev/null: a pipe would hold Wait until the loop's orphaned
 	// sleep exits.
@@ -300,7 +305,7 @@ func TestAutoEffortWarnNamesAStateFileWithNoHome(t *testing.T) {
 	if got.err == nil {
 		t.Fatalf("state = %+v, want an error for the unknown home", got)
 	}
-	if line := warn.String(); !strings.HasPrefix(line, "statusline: auto-effort state file") ||
+	if line := warn.String(); !strings.HasPrefix(line, "statusline: auto-effort-control state file") ||
 		strings.Contains(line, "  ") || !strings.Contains(line, "the home directory is unknown") {
 		t.Fatalf("warn = %q, want one line naming the state file by its cause", line)
 	}

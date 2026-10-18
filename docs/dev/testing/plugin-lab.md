@@ -72,7 +72,7 @@ A beat whose `--needs` did not PASS is `ERROR blocked-by {id}` (`GAP blocked-by`
 1. Make the plugin's level and decision logs honour `PLUGIN_LOG_DIR`; a scenario whose session writes no row sets `LAB_LOGGER=no`.
 2. Nothing to ignore for the files Claude Code writes into the plugin's folder on load: `passport/identity` leaves out `tsconfig.json` and `.claude-plugin/types/`; any other file the load writes fails it as `tree-changed`.
 3. Create `infra/plugin-lab/scenarios/{plugin}/`, the directory name equal to the plugin's `name`.
-4. Write `logger-ready.sh` first, a turn that makes the plugin write its first row (copy `scenarios/effort-live-control/logger-ready.sh`); run it once live.
+4. Write `logger-ready.sh` first, a turn that makes the plugin write its first row (copy `scenarios/auto-effort-control/logger-ready.sh`); run it once live.
 5. Add a scenario per requirement row; list rows only unit tests can carry in `gaps.tsv`.
 6. Run `bash infra/plugin-lab/tests/scenarios_test.sh` before the first live run.
 
@@ -81,9 +81,9 @@ A beat whose `--needs` did not PASS is `ERROR blocked-by {id}` (`GAP blocked-by`
 A scenario is `scenarios/{plugin}/{slug}.sh`, sourced by the lab: a header of variables, then one function `lab_scenario` made of beats.
 
 ```bash
-# S2: one turn with an invalid option; the plugin's first row is its option-error warning under PLUGIN_LOG_DIR (R1).
+# S2: one turn with an invalid option; the plugin's first row is its option-error error under PLUGIN_LOG_DIR (R1).
 # shellcheck shell=bash disable=SC2034
-LAB_PLUGIN=effort-live-control
+LAB_PLUGIN=auto-effort-control
 LAB_ROWS=(R1)
 LAB_MODEL=haiku
 LAB_CAP_USD=0.25
@@ -95,7 +95,7 @@ lab_options '{"floor":"bogus"}'
 
 lab_scenario() {
   beat ready -- turn 'Reply with the word READY.' 300
-  beat option-error-row --needs ready -- level_has warnings 'select(.event == "option-error" and .where == "hooks/effort-live-control.ts#start")'
+  beat option-error-row --needs ready -- level_has errors 'select(.event == "option-error" and .where == "hooks/auto-effort-control.ts#start")'
 }
 ```
 

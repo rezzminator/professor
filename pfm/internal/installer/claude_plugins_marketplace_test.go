@@ -193,7 +193,7 @@ func bareList(names ...string) []pfmconfig.ClaudePlugin {
 // build with no clone are untouched; a list that cannot be read is an error
 // beside the unchanged build, never an empty list.
 func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
-	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort"}
+	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort-control"}
 	clone := writeMarketplaceClone(t, names, nil)
 	manifest := func(t *testing.T, content string) string {
 		dir := t.TempDir()
@@ -218,7 +218,7 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 			}}
 		}, []pfmconfig.ClaudePlugin{
 			{ID: "sub-agent-compact"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
-		}, []string{"buddy", "auto-effort"}, ""},
+		}, []string{"buddy", "auto-effort-control"}, ""},
 		{"a release reads nothing", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{Version: "0.80.0", SourceRepo: clone, Plugins: defaults, PluginsDefault: true}
 		}, defaults, nil, ""},
@@ -359,7 +359,7 @@ func simulateClaude(t *testing.T, runner *pluginRunner) {
 // removed) and every copy kept disabled. Unset, every plugin is enabled. An
 // existing -dev options entry is never overwritten.
 func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
-	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort"}
+	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort-control"}
 	for _, test := range []struct {
 		name        string
 		list        []pfmconfig.ClaudePlugin
@@ -374,15 +374,15 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				return []string{
 					"plugin marketplace add " + marketplace("engine-sync"), "plugin install engine-sync@engine-sync-dev -y",
 					"plugin marketplace add " + marketplace("buddy"),
-					"plugin marketplace add " + marketplace("auto-effort"), "plugin install auto-effort@auto-effort-dev -y",
+					"plugin marketplace add " + marketplace("auto-effort-control"), "plugin install auto-effort-control@auto-effort-control-dev -y",
 				}
 			},
 			map[string]any{
-				"sub-agent-compact@sub-agent-compact-dev": true,
-				"engine-sync@professor":                   false,
-				"engine-sync@engine-sync-dev":             true,
-				"buddy@buddy-dev":                         false,
-				"auto-effort@auto-effort-dev":             false,
+				"sub-agent-compact@sub-agent-compact-dev":     true,
+				"engine-sync@professor":                       false,
+				"engine-sync@engine-sync-dev":                 true,
+				"buddy@buddy-dev":                             false,
+				"auto-effort-control@auto-effort-control-dev": false,
 			},
 		},
 		{
@@ -391,15 +391,15 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				return []string{
 					"plugin marketplace add " + marketplace("engine-sync"), "plugin install engine-sync@engine-sync-dev -y",
 					"plugin marketplace add " + marketplace("buddy"), "plugin install buddy@buddy-dev -y",
-					"plugin marketplace add " + marketplace("auto-effort"), "plugin install auto-effort@auto-effort-dev -y",
+					"plugin marketplace add " + marketplace("auto-effort-control"), "plugin install auto-effort-control@auto-effort-control-dev -y",
 				}
 			},
 			map[string]any{
-				"sub-agent-compact@sub-agent-compact-dev": true,
-				"engine-sync@professor":                   false,
-				"engine-sync@engine-sync-dev":             true,
-				"buddy@buddy-dev":                         true,
-				"auto-effort@auto-effort-dev":             true,
+				"sub-agent-compact@sub-agent-compact-dev":     true,
+				"engine-sync@professor":                       false,
+				"engine-sync@engine-sync-dev":                 true,
+				"buddy@buddy-dev":                             true,
+				"auto-effort-control@auto-effort-control-dev": true,
 			},
 		},
 		// The install enables an install-only plugin and the edit after it disables
@@ -450,7 +450,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 			}
 			if test.preview {
-				for _, name := range []string{"engine-sync", "auto-effort"} {
+				for _, name := range []string{"engine-sync", "auto-effort-control"} {
 					want := "  change  disable " + name + "@" + name + "-dev in "
 					if !strings.Contains(out.String(), want) {
 						t.Fatalf("preview lacks %q:\n%s", want, out.String())
@@ -496,8 +496,8 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			if !test.listDefault {
 				for _, line := range []string{
 					"  ok      claude plugin buddy@buddy-dev installed in " + first + ", kept disabled: claude.plugins does not list buddy\n",
-					"  change  disable auto-effort@auto-effort-dev in " + filepath.Join(first, "settings.json") +
-						": claude.plugins does not list auto-effort\n",
+					"  change  disable auto-effort-control@auto-effort-control-dev in " + filepath.Join(first, "settings.json") +
+						": claude.plugins does not list auto-effort-control\n",
 					"  change  disable engine-sync@professor in " + filepath.Join(first, "settings.json") +
 						": engine-sync@engine-sync-dev replaces it; copy its pluginConfigs to engine-sync@engine-sync-dev\n",
 				} {

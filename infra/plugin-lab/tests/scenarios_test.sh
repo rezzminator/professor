@@ -49,4 +49,23 @@ lab_lib auth
 s8wall=$( (lab_options() { :; }; source "$LAB_DIR/scenarios/sub-agent-compact/unseen-reset.sh"; printf '%s' "$LAB_WALL_S") )
 LAB_AUTH_JSON=$(printf '{"claudeAiOauth":{"expiresAt":%s}}' "$(( ($(date +%s) + 19 * 60) * 1000 ))")
 expect_has 'S8 needs 20 minutes of token' "$(lab_auth_check "$s8wall" 2>&1)" 'auth-expiring 19 min left, need 20'
+# Execute the shipped scenario against the producer's error row, without a live chat or pane.
+logger_checks=$( (
+  lab_lib observe
+  lab_options() { :; }
+  # shellcheck source=/dev/null
+  source "$LAB_DIR/scenarios/auto-effort-control/logger-ready.sh"
+  LAB_RUN=$T/logger-ready; LAB_SCENARIO='logger-ready'
+  LAB_STARTED=2026-01-01T00:00:00Z; LAB_EXPECT_ERRORS=()
+  mkdir -p "$LAB_RUN/logs/$LAB_PLUGIN"
+  printf '%s\n' '{"ts":"2026-01-01T00:00:01Z","plugin":"auto-effort-control","level":"error","event":"option-error","msg":"floor is invalid","where":"hooks/auto-effort-control.ts#start"}' > "$LAB_RUN/logs/$LAB_PLUGIN/errors.jsonl"
+  : > "$LAB_RUN/logs/$LAB_PLUGIN/warnings.jsonl"
+  turn() { return 0; }
+  pane_lacks() { return 0; }
+  lab_scenario >/dev/null
+  vital_no_new_errors >/dev/null
+  cat "$LAB_RUN/checks.tsv"
+) )
+expect_eq 'logger-ready observes the producer option-error' "$(awk -F '\t' '$1 == "logger-ready/option-error-row" { print $3 }' <<< "$logger_checks")" PASS
+expect_eq 'logger-ready declares its induced option-error' "$(awk -F '\t' '$1 == "vital/no-new-errors" { print $3 }' <<< "$logger_checks")" PASS
 finish

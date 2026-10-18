@@ -26,7 +26,7 @@ func TestClaudePluginsKey(t *testing.T) {
 			want: []ClaudePlugin{
 				{ID: "cache-live-control"},
 				{ID: "sub-agent-compact"},
-				{ID: "effort-live-control"},
+				{ID: "auto-effort-control"},
 				{ID: "tool-visibility-controller"},
 				{ID: "engine-sync"},
 			},
@@ -130,18 +130,18 @@ func TestClaudePluginsKey(t *testing.T) {
 			source: SourceFile,
 		},
 		{
-			name: "a full id of a listed bare name's -dev copy", content: `{"version":2,"claude":{"plugins":["effort-live-control","effort-live-control@effort-live-control-dev"]}}`,
-			err: `claude.plugins[1] effort-live-control@effort-live-control-dev is a copy of claude.plugins[0] effort-live-control, which ensures one copy and disables the other: list the plugin once`,
+			name: "a full id of a listed bare name's -dev copy", content: `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@auto-effort-control-dev"]}}`,
+			err: `claude.plugins[1] auto-effort-control@auto-effort-control-dev is a copy of claude.plugins[0] auto-effort-control, which ensures one copy and disables the other: list the plugin once`,
 		},
 		{
-			name: "a full id of a listed bare name's GitHub copy", content: `{"version":2,"claude":{"plugins":["effort-live-control@effort-live-control","c","effort-live-control"]}}`,
-			err: `claude.plugins[2] effort-live-control is a bare name of claude.plugins[0] effort-live-control@effort-live-control, which it ensures or disables: list the plugin once`,
+			name: "a full id of a listed bare name's GitHub copy", content: `{"version":2,"claude":{"plugins":["auto-effort-control@auto-effort-control","c","auto-effort-control"]}}`,
+			err: `claude.plugins[2] auto-effort-control is a bare name of claude.plugins[0] auto-effort-control@auto-effort-control, which it ensures or disables: list the plugin once`,
 		},
 		{
 			name:        "a bare name beside the same plugin of another marketplace",
-			content:     `{"version":2,"claude":{"plugins":["effort-live-control","effort-live-control@some-market"]}}`,
-			want:        []ClaudePlugin{{ID: "effort-live-control"}, {ID: "effort-live-control@some-market"}},
-			wantMarshal: []any{"effort-live-control", "effort-live-control@some-market"},
+			content:     `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@some-market"]}}`,
+			want:        []ClaudePlugin{{ID: "auto-effort-control"}, {ID: "auto-effort-control@some-market"}},
+			wantMarshal: []any{"auto-effort-control", "auto-effort-control@some-market"},
 			source:      SourceFile,
 		},
 		{

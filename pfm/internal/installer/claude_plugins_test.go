@@ -30,9 +30,9 @@ var testPlugins = []testPlugin{
 	{Name: "cache-live-control", Source: "rezzminator/cache-live-control", ID: "cache-live-control@cache-live-control"},
 	{Name: "sub-agent-compact", Source: "rezzminator/sub-agent-compact", ID: "sub-agent-compact@sub-agent-compact"},
 	{
-		Name:   "effort-live-control",
-		Source: "rezzminator/effort-live-control",
-		ID:     "effort-live-control@effort-live-control",
+		Name:   "auto-effort-control",
+		Source: "rezzminator/auto-effort",
+		ID:     "auto-effort-control@auto-effort-control",
 	},
 	{
 		Name:   "tool-visibility-controller",
@@ -244,7 +244,7 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"effort-live-control@effort-live-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
+		`"sub-agent-compact@sub-agent-compact":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
 		`"engine-sync@engine-sync":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeInstalledPlugins(
@@ -342,7 +342,7 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{
-		{ID: "effort-live-control"},
+		{ID: "auto-effort-control"},
 		{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"},
 		{ID: "clangd-lsp@claude-plugins-official"},
 		{ID: "odd@odd-market", Source: "o/r;x"},
@@ -351,8 +351,8 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 	}
 	want := []string{
-		"plugin marketplace add rezzminator/effort-live-control",
-		"plugin install effort-live-control@effort-live-control -y",
+		"plugin marketplace add rezzminator/auto-effort",
+		"plugin install auto-effort-control@auto-effort-control -y",
 		"plugin marketplace add typesafe-ai/skills",
 		"plugin install typesafe@typesafe-ai -y",
 		"plugin install clangd-lsp@claude-plugins-official -y",
@@ -383,7 +383,7 @@ func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *te
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
-	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "typesafe@typesafe-ai"}, {ID: "effort-live-control"}}
+	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort-control"}}
 	err := inst.ensureClaudePlugins(context.Background())
 	want := "claude plugin typesafe@typesafe-ai in " + first + ": marketplace record unreadable, state unknown: parse " +
 		known + ": unexpected end of JSON input"
@@ -391,8 +391,8 @@ func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *te
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
 	wantCommands := []string{
-		"plugin marketplace add rezzminator/effort-live-control",
-		"plugin install effort-live-control@effort-live-control -y",
+		"plugin marketplace add rezzminator/auto-effort",
+		"plugin install auto-effort-control@auto-effort-control -y",
 	}
 	if got := pluginArgvs(runner); !reflect.DeepEqual(got, wantCommands) {
 		t.Fatalf("commands\n got %q\nwant %q\n%s", got, wantCommands, out.String())
@@ -412,7 +412,7 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{
-		{ID: "typesafe@typesafe-ai"}, {ID: "effort-live-control"}, {ID: "installed@gone-market"},
+		{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort-control"}, {ID: "installed@gone-market"},
 	}
 	err := inst.ensureClaudePlugins(context.Background())
 	want := "claude plugin typesafe@typesafe-ai in " + first + ": marketplace typesafe-ai is not known to Claude Code" +
@@ -421,8 +421,8 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
 	wantCommands := []string{
-		"plugin marketplace add rezzminator/effort-live-control",
-		"plugin install effort-live-control@effort-live-control -y",
+		"plugin marketplace add rezzminator/auto-effort",
+		"plugin install auto-effort-control@auto-effort-control -y",
 	}
 	if got := pluginArgvs(runner); !reflect.DeepEqual(got, wantCommands) {
 		t.Fatalf("commands\n got %q\nwant %q\n%s", got, wantCommands, out.String())
@@ -441,11 +441,11 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	for _, p := range testPlugins {
 		writePluginCheckout(t, root, p.Name)
 	}
-	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "effort-live-control"}}
+	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "auto-effort-control"}}
 	simulateClaude(t, runner)
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{`+
 		`"cache-live-control@cache-live-control":true,"cache-live-control@cache-live-control-dev":true,`+
-		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false,"effort-live-control@effort-live-control":true},`+
+		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false,"auto-effort-control@auto-effort-control":true},`+
 		`"pluginConfigs":{"cache-live-control@cache-live-control":{"options":{"keep":1}}}}`)
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
@@ -462,8 +462,8 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		"cache-live-control@cache-live-control-dev":   true,
 		"swift-lsp@claude-plugins-official":           true,
 		"buddy@buddy":                                 false,
-		"effort-live-control@effort-live-control":     false,
-		"effort-live-control@effort-live-control-dev": true,
+		"auto-effort-control@auto-effort-control":     false,
+		"auto-effort-control@auto-effort-control-dev": true,
 	}
 	wantConfigs := map[string]any{
 		"cache-live-control@cache-live-control": map[string]any{"options": map[string]any{"keep": float64(1)}},
@@ -478,7 +478,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		)
 	}
 	for _, argv := range pluginArgvs(runner) {
-		if !strings.Contains(argv, "effort-live-control") {
+		if !strings.Contains(argv, "auto-effort-control") {
 			t.Fatalf("a command touched an unlisted plugin: %q", argv)
 		}
 	}
@@ -487,7 +487,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"effort-live-control@effort-live-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
+		`"sub-agent-compact@sub-agent-compact":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
 		`"engine-sync@engine-sync":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
@@ -862,7 +862,17 @@ func TestClaudePluginGapsNamesEnabledLegacyEffort(t *testing.T) {
 		{"agent-effort@agent-effort", true, true},
 		{"agent-effort@agent-effort-dev", true, true},
 		{"agent-effort@agent-effort", false, false},
-		{"effort-live-control@effort-live-control", true, false},
+		{"agent-effort@professor", true, true},
+		{"agent-effort@rezzminator", true, true},
+		{"auto-effort@auto-effort", true, true},
+		{"auto-effort@auto-effort-dev", true, true},
+		{"auto-effort@professor", true, true},
+		{"auto-effort@rezzminator", true, true},
+		{"effort-live-control@effort-live-control", true, true},
+		{"effort-live-control@effort-live-control-dev", true, true},
+		{"effort-live-control@professor", true, true},
+		{"effort-live-control@rezzminator", true, true},
+		{"auto-effort-control@auto-effort-control", true, false},
 	} {
 		t.Run(fmt.Sprintf("%s enabled=%v", row.id, row.enabled), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")
@@ -881,8 +891,8 @@ func TestClaudePluginGapsNamesEnabledLegacyEffort(t *testing.T) {
 			if row.warning {
 				want = []ClaudePluginGap{
 					{
-						Problem: "plugin " + row.id + " retired (now effort-live-control) but still enabled in " + path,
-						Fix:     "claude plugin uninstall " + row.id + " --scope user; if claude.plugins still lists it, replace that entry with effort-live-control",
+						Problem: "plugin " + row.id + " retired (now auto-effort-control) but still enabled in " + path,
+						Fix:     "claude plugin uninstall " + row.id + " --scope user; if claude.plugins still lists it, replace that entry with auto-effort-control",
 					},
 				}
 			}

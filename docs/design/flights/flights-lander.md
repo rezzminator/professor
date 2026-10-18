@@ -74,7 +74,7 @@ The return is also a file. The lander's last act before returning writes it, ver
 
 ## Context budget
 
-- `tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, mcp__effort-live-control__effort_auto` — `Agent` is carried for the step 3 review spawn, `reviewer` or `reviewer-pro`; the effort tools are the lander's own; the rest is the executor's list.
+- `tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto` — `Agent` is carried for the step 3 review spawn, `reviewer` or `reviewer-pro`; the effort tools are the lander's own; the rest is the executor's list.
 - It reads the diff and the hunks' surroundings by range.
 - `autoCompact`, iteration 0: forced at 350k, nudged from 150k and every 60k after; at a nudge the lander finishes the step in hand and calls `mcp__sub-agent-compact__forward_handoff` carrying `gate.md` as its ledger, each project's gate runs done and left with their log paths, and in `next` the next step.
 - One lander per flight holds every project's manual and suite in one context: the price of one review that sees both sides of every contract change together. It is on the watch list ([Open items](flights.md#open-items)).

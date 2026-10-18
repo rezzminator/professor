@@ -24,10 +24,10 @@ printf '{"version":2,"plugins":{"sub-agent-compact@sub-agent-compact":[],"sub-ag
 mapfile -t ids < <(lab_installed_ids "$store" sub-agent-compact)
 expect_eq 'live ids of the plugin under test' "${ids[*]}" 'sub-agent-compact@sub-agent-compact sub-agent-compact@sub-agent-compact-dev'
 LAB_OPTIONS='{"floor":"bogus"}'; LAB_ALLOW=(Read mcp__sub-agent-compact__look_back); LAB_DENY=(Bash Grep); LAB_LAB=$LAB_DIR
-lab_settings_render effort-live-control "${ids[@]}"
+lab_settings_render auto-effort-control "${ids[@]}"
 s=$LAB_RUN/settings.json
 expect_eq 'enabledPlugins off' "$(jq -c .enabledPlugins "$s")" '{"sub-agent-compact@sub-agent-compact":false,"sub-agent-compact@sub-agent-compact-dev":false}'
-expect_eq 'options under name@inline' "$(jq -c '.pluginConfigs["effort-live-control@inline"].options.floor' "$s")" '"bogus"'
+expect_eq 'options under name@inline' "$(jq -c '.pluginConfigs["auto-effort-control@inline"].options.floor' "$s")" '"bogus"'
 expect_eq 'dontAsk' "$(jq -r .permissions.defaultMode "$s")" dontAsk
 expect_eq 'allow list exactly the scenario tools' "$(jq -c .permissions.allow "$s")" '["Read","mcp__sub-agent-compact__look_back"]'
 expect_eq 'deny list exactly the scenario denials' "$(jq -c .permissions.deny "$s")" '["Bash","Grep"]'

@@ -14,6 +14,7 @@ A change lands in the design doc first, then in the template, then in every surf
 - [Where each rule lives](#where-each-rule-lives)
 - [Names](#names)
 - [Harness settings the family needs](#harness-settings-the-family-needs)
+- [Effort buttons](#effort-buttons)
 - [What the family replaced](#what-the-family-replaced)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 - [Open items](#open-items)
@@ -102,6 +103,10 @@ A return opens with its token on the first line; the rest is evidence.
 ## Harness settings the family needs
 
 Claude Code stops the Agent tool three levels below the main chat by default and caps concurrent sub-agents. A flight is main → root foreman → child foreman → mechanical executor, or main → root foreman → lander → its review fork, or main → root foreman → speccer → its tracers and researchers. `pfm` writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line from its settings; neither ceiling is reported when hit, so the root counts its children in flight.
+
+## Effort buttons
+
+The `auto-effort-control` plugin gives an agent whose frontmatter says `effortControl: on` three tools, `effort_up`, `effort_down` and `effort_auto` (`mcp__auto-effort-control__…`), and steers its effort while it works (`plugins/auto-effort-control/README.md`). The agents that carry the key: `flights-foreman`, `flights-mechanical-executor`, `flights-speccer`, `flights-lander`, `foreman-pro`, `reviewer`, `reviewer-pro`, `reviewer-nt` and `documenter`; a derived Claude agent inherits it from its original. No `gpt-*` twin carries it (the rendered twins omit the key, see [gpt-twins.md](../gpt-twins/gpt-twins.md#declarations)), nor does `pcm` or `releaser`. An agent that lists the tools in its own `tools:` line, as `flights-lander` does ([flights-lander.md](flights-lander.md#context-budget)), names them under the `mcp__auto-effort-control__` prefix.
 
 ## What the family replaced
 

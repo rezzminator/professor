@@ -11,7 +11,7 @@ import (
 )
 
 // ClaudePlugin is one claude.plugins entry. ID is a bare plugin name of ours
-// ("effort-live-control": its GitHub repository rezzminator/effort-live-control, or its
+// ("auto-effort-control": its GitHub repository rezzminator/auto-effort (migration source), or its
 // checkout under claude.pluginCheckoutRoot, else under the source clone's
 // plugins/) or a full "name@marketplace" id.
 // Source is what `claude plugin marketplace add` takes (owner/repo, a git or
@@ -31,7 +31,7 @@ func DefaultClaudePlugins() []ClaudePlugin {
 	return []ClaudePlugin{
 		{ID: "cache-live-control"},
 		{ID: "sub-agent-compact"},
-		{ID: "effort-live-control"},
+		{ID: "auto-effort-control"},
 		{ID: "tool-visibility-controller"},
 		{ID: "engine-sync"},
 	}

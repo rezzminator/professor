@@ -520,6 +520,47 @@ for (const [name, model, effort, role, base] of twins) {
   });
 }
 
+// auto-effort-control steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
+// its buttons: exactly these Claude roles hold both; every other rendered agent, each GPT twin, pcm and releaser neither.
+const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort-control__${tool}`);
+const effortSteered = new Map([
+  ['flights-foreman', true], ['flights-mechanical-executor', true], ['flights-speccer', true],
+  ['reviewer', true], ['reviewer-pro', true], ['reviewer-nt', true], ['documenter', true],
+  ['flights-lander', { floor: 'medium', ceiling: 'xhigh', tripwires: 'redispatch' }],
+  ['foreman-pro', { floor: 'medium', ceiling: 'xhigh', landing: 'flights-lander gpt-flights-lander' }],
+]);
+test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pcm or releaser', () => {
+  const render = renderShipped([CAPABILITY]);
+  const dir = join(render.home, '.claude/agents');
+  const agents = [
+    ...readdirSync(dir).filter((file) => file.endsWith('.md')).map((file) => [file.slice(0, -3), readFileSync(join(dir, file), 'utf8')]),
+    ...['.claude/agents/pcm.md', '.claude/agents/releaser.md', 'templates/project/agents/pcm.md']
+      .map((path) => [path, readFileSync(join(ROOT, path), 'utf8')]),
+  ];
+  for (const [name] of twins)
+    assert.ok(agents.some(([agent]) => agent === name), `${name}: not rendered, so its lack of buttons is unproven`);
+  const steered = [];
+  for (const [name, text] of agents) {
+    const fm = parseFrontmatter(name, text);
+    const tools = (fm.tools ?? '').split(',').map((tool) => tool.trim());
+    const want = effortSteered.get(name);
+    if (want === undefined) {
+      assert.equal(fm.effortControl, undefined, `${name}: steered by effortControl but not an approved role`);
+      assert.deepEqual(tools.filter((tool) => /effort_(?:up|down|auto)$/.test(tool)), [], `${name}: holds effort buttons`);
+      continue;
+    }
+    steered.push(name);
+    assert.deepEqual(fm.effortControl, want, `${name}: effortControl`);
+    for (const button of effortButtons)
+      assert.equal(tools.filter((tool) => tool === button).length, 1, `${name}: must hold ${button} once; tools ${fm.tools}`);
+  }
+  assert.deepEqual(steered.sort(), [...effortSteered.keys()].sort(), 'an approved steered role was not rendered');
+  // A twin pins its own tools to drop the buttons: the rest stays its role's list (the lander's differs by contract).
+  const toolsOf = (name) => parseFrontmatter(name, renderedText(render, name)).tools.split(',').map((tool) => tool.trim());
+  for (const [name, , , role] of twins.filter(([, , , role]) => effortSteered.has(role) && role !== 'flights-lander'))
+    assert.deepEqual(toolsOf(name), toolsOf(role).filter((tool) => !effortButtons.includes(tool)), `${name}: tools drifted from ${role}`);
+});
+
 // sub-agent-compact registers `compact` only while forwardHandoffTool is off, and Professor runs it on:
 // a fixed tools list naming the plugin names forward_handoff and look_back, never the unregistered compact.
 test('every shipped agent naming sub-agent-compact holds forward_handoff and look_back, never compact', () => {

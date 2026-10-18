@@ -444,7 +444,7 @@ func subagentIdentity(name string, activity *agentActivity) string {
 }
 
 // subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·🏎️ high. The level its transcript recorded for its latest request
+// opus·effort ▰▰▰▱▱ high. The level its transcript recorded for its latest request
 // (recorded) wins: it is the effort that request went out at, after any
 // plugin pinned it, so it renders plainly on any model. Without one, the
 // payload's effort shows; one that is not a JSON string is left out. A row

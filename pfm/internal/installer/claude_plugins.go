@@ -154,7 +154,7 @@ func ownClaudePluginTarget(
 		ID:       id,
 		GitHubID: id,
 		DevID:    name + "@" + devMarketplaceName(name),
-		Source:   claudePluginOwner + "/" + name,
+		Source:   claudePluginRepository(name),
 		Own:      true,
 	}
 	if professor := name + "@" + professorMarketplaceName; !listed[professor] {
@@ -166,14 +166,22 @@ func ownClaudePluginTarget(
 	return localClaudePluginTarget(target, build)
 }
 
+// claudePluginRepository keeps the renamed identity on its existing public repository.
+func claudePluginRepository(name string) string {
+	if name == "auto-effort-control" {
+		return claudePluginOwner + "/auto-effort" // Migration exception until an authorized repository rename.
+	}
+	return claudePluginOwner + "/" + name
+}
+
 // BareClaudePluginRepair is the repair install's FAIL line (and pfm doctor)
 // names when a bare claude.plugins name could not be installed: pfm cannot know
 // offline whether the GitHub repository the name stands for exists.
 func BareClaudePluginRepair(name string) string {
 	return fmt.Sprintf(
-		"claude.plugins entry %q is a bare name: pfm installs it from github.com/%s/%s — "+
+		"claude.plugins entry %q is a bare name: pfm installs it from github.com/%s — "+
 			"fix or remove the entry in claude.plugins if that repository does not exist",
-		name, claudePluginOwner, name,
+		name, claudePluginRepository(name),
 	)
 }
 

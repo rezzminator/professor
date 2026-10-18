@@ -6,13 +6,14 @@ visibility:
     include: [main, flights-foreman, foreman-pro]
 model: claude-sonnet-5-5
 effort: high
+effortControl: on
 engines:
   codex:
     model: sonnet
     effort: xhigh
   opencode:
     model: sonnet
-tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

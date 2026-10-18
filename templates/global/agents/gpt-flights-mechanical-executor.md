@@ -12,4 +12,7 @@ visibility:
       - main
       - gpt-flights-foreman
       - gpt-foreman-pro
+tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+unset:
+  - effortControl
 ---

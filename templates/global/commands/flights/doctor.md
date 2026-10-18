@@ -27,6 +27,7 @@ Each row names its transcript `path:line` (`pfm transcript show {id}`).
 | Re-reads | a file an agent read again after a tracer answer citing it reached that agent |
 | Store hits | tracer questions answered `TRACE Q{n} · none` from the store, and questions walked again whose cited files were unchanged |
 | Full suites outside the lander | any full suite or gate a foreman or worker ran |
+| Gate repeats | a lander full gate run again with no red gate between, or a red gate's fix checked by rerunning the gate instead of its failing tests |
 | Idle gaps | a gap over 5 minutes between an agent's records, with who waited on what |
 | Greedy foreman | a foreman that wrote pieces a worker could have taken: its written bytes against its workers' |
 | Silent agents | agents that wrote nothing, ranked by input tokens |

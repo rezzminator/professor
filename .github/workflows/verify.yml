@@ -154,7 +154,8 @@ jobs:
         run: git submodule update --init -- plugins/engine-sync
 
       # Mirrors `.claude/scripts/dev.sh`'s own derivation: scratch artifacts land
-      # outside the checkout at /tmp/<project>, <project> = the checkout
+      # outside the checkout at /tmp/<project> (the shared fence's timing base is
+      # /tmp/<project>/fence/shared/<worktree>/timing), <project> = the checkout
       # directory's basename with any leading dot stripped. Computed once here
       # (the runner's checkout name is not $REPO_ROOT's basename on this host)
       # so the upload-artifact step below references the same path dev.sh wrote.
@@ -179,8 +180,8 @@ jobs:
         with:
           name: pfm-test-timing
           path: |
-            ${{ env.TMP_BASE }}/timing/**/*.tsv
-            ${{ env.TMP_BASE }}/timing/**/*.json
-            ${{ env.TMP_BASE }}/timing/**/profile/**
+            ${{ env.TMP_BASE }}/fence/shared/*/timing/**/*.tsv
+            ${{ env.TMP_BASE }}/fence/shared/*/timing/**/*.json
+            ${{ env.TMP_BASE }}/fence/shared/*/timing/**/profile/**
           if-no-files-found: warn
           retention-days: 14

@@ -1,4 +1,4 @@
-"""Tests for the chatlog reader kit — run through `.claude/scripts/test-templates.sh`.
+"""Tests for the chatlog reader kit — run through `.claude/scripts/test.sh`.
 
 Every transcript here is invented: a Claude jsonl, a Codex rollout and an OpenCode store the tests build in a
 temp directory, then read through the entry point (`python3 -I chatlog.py {verb}`) exactly as an agent does.

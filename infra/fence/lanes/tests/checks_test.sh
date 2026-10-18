@@ -164,7 +164,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -204,7 +204,7 @@ if gate_run templates >"$T/templates.out" &&
   graph_order templates; then
   ok 'templates graph runs its tests before static checks'
 else bad 'templates graph' "$(cat "$T/registered")"; fi
-for n in check-pfm check-templates test-pfm test-templates unit-path; do
+for n in test unit-path; do
   if grep -Fxq "templates.$n-tests checks_templates_unit_script $n" "$T/registered.args"; then
     ok "$n suite is registered with its own name"
   else bad "$n suite registration" "$(grep 'checks_templates_unit_script' "$T/registered.args")"; fi
@@ -393,21 +393,23 @@ if [ "$GATE_RC" -ne 0 ] && [ "$(tail -1 "$RUN/gate.tsv")" = "$(printf 'BUDGET\tP
   ok 'red steps: the BUDGET row still records its own verdict'
 else bad 'red steps with a budget row' "$(cat "$RUN/gate.tsv")"; fi
 
-PFM_GATE_FIXTURES=1 fx_case meta all
+PFM_FENCE_CONCURRENT=3 PFM_GATE_FIXTURES=1 fx_case meta all
 ts='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
-if [ "$(cut -f1 "$RUN/gate.meta" | paste -sd, -)" = 'target,commit,dirty_files,started,finished,fixtures,steps_bound_s,steps_jobs,steps_heavy_jobs' ] &&
+if [ "$(cut -f1 "$RUN/gate.meta" | paste -sd, -)" = 'target,commit,dirty_files,started,finished,fixtures,steps_bound_s,steps_jobs,steps_heavy_jobs,concurrent_runs' ] &&
+  [ "$(meta_get concurrent_runs "$RUN/gate.meta")" = 3 ] &&
   [ "$(meta_get target "$RUN/gate.meta")" = all ] && [ "$(meta_get commit "$RUN/gate.meta")" = abcdef012345 ] &&
   [ "$(meta_get dirty_files "$RUN/gate.meta")" = 3 ] && [ "$(meta_get fixtures "$RUN/gate.meta")" = 1 ] &&
   [ "$(meta_get steps_bound_s "$RUN/gate.meta")" = 494 ] && [ "$(meta_get steps_jobs "$RUN/gate.meta")" = 6 ] &&
   [ "$(meta_get steps_heavy_jobs "$RUN/gate.meta")" = 2 ] &&
   [[ "$(meta_get started "$RUN/gate.meta")" =~ $ts ]] && [[ "$(meta_get finished "$RUN/gate.meta")" =~ $ts ]]; then
-  ok 'gate.meta records what ran: target, commit, dirty files, UTC start and finish, fixtures, bound, job caps'
+  ok 'gate.meta records what ran: target, commit, dirty files, UTC start and finish, fixtures, bound, job caps, concurrent runs'
 else bad 'gate.meta' "$(cat "$RUN/gate.meta")"; fi
 if [ "$(meta_get finished "$T/meta.during")" = 'NA running' ] && [ "$(meta_get started "$T/meta.during")" = "$(meta_get started "$RUN/gate.meta")" ]; then
   ok 'gate.meta exists before the steps run, finished NA running'
 else bad 'gate.meta during the run' "$(cat "$T/meta.during")"; fi
 fx_case meta-plain all
 if [ "$(meta_get fixtures "$RUN/gate.meta")" = 0 ]; then ok 'fixtures is 0 without PFM_GATE_FIXTURES=1'; else bad 'fixtures 0' "$(cat "$RUN/gate.meta")"; fi
+if [ "$(meta_get concurrent_runs "$RUN/gate.meta")" = 'NA not in the shared fence' ]; then ok 'concurrent_runs is NA, named, outside the shared fence'; else bad 'concurrent_runs NA' "$(cat "$RUN/gate.meta")"; fi
 if (
     eval "orig_$(declare -f gate_budget_verdict)"
     gate_budget_verdict() { cp "$PFM_TEST_TIMING_DIR"/run.*/gate.meta "$T/meta.at-budget"; orig_gate_budget_verdict "$@"; }
@@ -726,7 +728,7 @@ es_bin="$TMP_BASE/engine-sync/engine-sync"
 es_case() { # es_case <function> [VAR=value…]: run it with engine_sync_build stubbed; output in $T/es.out
   local fn="$1"; shift
   : > "$MIRROR_CALLS"; : > "$T/es-build.calls"; : > "$T/es-stage.calls"; : > "$MIRROR_CALLS.policy"; FAILURES=0
-  rm -rf "$TMP_BASE/engine-sync/mirror-tree" "$TMP_BASE/engine-sync/mirror-tree.built"
+  rm -rf "$TMP_BASE/engine-sync/mirror-tree" "$TMP_BASE/engine-sync/mirror-tree.built" "$es_bin" "$es_bin.ok"
   (
     [ $# -eq 0 ] || export "$@"
     engine_sync_build() {
@@ -1043,11 +1045,11 @@ out="$( ( run() { shift 2; printf 'run [%s]\n' "$*"; }; head_() { printf 'head [
 if grep -Fxq 'run [bash /repo/scripts/test-unit-path.sh]' <<<"$out"; then
   ok 'the unit-path suite runs through bash'
 else bad 'checks_templates_unit_script run' "$out"; fi
-out="$( ( run() { return 3; }; head_() { :; }; REPO_ROOT=/repo; checks_templates_unit_script check-pfm; echo "rc=$?" ) 2>&1 )"
+out="$( ( run() { return 3; }; head_() { :; }; REPO_ROOT=/repo; checks_templates_unit_script test; echo "rc=$?" ) 2>&1 )"
 if [ "$out" = 'rc=3' ]; then ok "checks_templates_unit_script returns run's status, a red suite is not swallowed"
 else bad 'checks_templates_unit_script red suite' "$out"; fi
 
-# checks_templates (CI's iso test templates) calls each of the five unit-script suites once.
+# checks_templates (CI's iso test templates) calls each of the two unit-script suites once.
 out="$( (
   for f in $(declare -F | awk '{print $3}' | grep '^checks_templates_'); do
     case "$f" in checks_templates_steps|checks_templates_step_serial) continue ;; esac
@@ -1055,7 +1057,7 @@ out="$( (
   done
   checks_templates
 ) 2>&1 )"
-for n in check-pfm check-templates test-pfm test-templates unit-path; do
+for n in test unit-path; do
   if [ "$(grep -Fxc "checks_templates_unit_script $n" <<<"$out")" -eq 1 ]; then
     ok "the serial list calls the $n suite once"
   else bad "the serial list calls the $n suite once" "$out"; fi

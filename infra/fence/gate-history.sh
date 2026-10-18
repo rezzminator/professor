@@ -6,18 +6,26 @@
 #   gate-history.sh ingest <timing-base>... [--host-load-now] [--project P]
 #   gate-history.sh report [--last N] [--project P]        (N defaults to 20)
 #
-# A timing base is the directory holding run.* gate runs (/tmp/<worktree>/timing).
-# A run is a real gate when its gate.tsv has a templates.leak row and its
-# gate.meta (when there is one) does not say `fixtures<TAB>1`; every other run is
-# skipped silently, by design. One ledger row per profile.tsv row (the GATE row
+# A timing base is the directory holding run.* gate runs (/tmp/{project}/fence/shared/<worktree>/timing).
+# A run is a real gate — pfm-only, templates-only or both — when it has a gate.tsv
+# and a gate.meta (gate_run writes it; an old run without one counts when its
+# gate.tsv has a templates.leak row) and its gate.meta does not say
+# `fixtures<TAB>1`; every other run is skipped silently, by design. One ledger row per profile.tsv row (the GATE row
 # included); a run without profile.tsv yields one row per gate.tsv step plus a
 # GATE row, its unmeasured columns NA. A run is keyed worktree + run, so a second
 # ingest of the same base appends nothing. Each run's rows go in as one append.
+# A run's concurrent_runs — gate.meta's count of the runs live in the shared fence
+# container when the gate started, NA when unrecorded — goes to the sidecar
+# concurrent.tsv beside the ledger (worktree, run, concurrent_runs), so the ledger
+# keeps the 15-column header every older gate-history.sh still appends to and
+# reports on. A ledger carrying the interim 16-column header (concurrent_runs as its
+# last column) is split back first: its counts into the sidecar, then the
+# 15-column ledger through one atomic rename.
 #
 # Ledger: ${PFM_GATE_HISTORY_DIR:-$HOME/.local/state/pfm/gate-history}/<project>/ledger.tsv.
 # <project> is the parent directory of `git rev-parse --git-common-dir`, its
-# basename without the leading dot; --project overrides. This script writes
-# nowhere else.
+# basename without the leading dot; --project overrides. It writes there and to
+# concurrent.tsv beside it, nowhere else.
 #
 # Report: the gates (a worktree + run) ordered by stamp, the last N of them; per
 # step of the newest gate: runs, median and p90 (nearest rank, NOT-RUN rows left
@@ -40,9 +48,17 @@
 # loadavg-format file read instead of sysctl or /proc/loadavg).
 set -uo pipefail
 
+# shellcheck source=mkdir-lock.sh
+if ! . "$(dirname -- "${BASH_SOURCE[0]}")/mkdir-lock.sh"; then
+  printf 'gate-history: LEDGER-NOT-WRITTEN: cannot source %s/mkdir-lock.sh\n' "$(dirname -- "${BASH_SOURCE[0]}")" >&2
+  exit 1
+fi
+
 TAB=$'\t'
 NL=$'\n'
 HEADER="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
+HEADER_V2="${HEADER}${TAB}concurrent_runs" # the interim 16-column ledger, split back on ingest
+CONC_HEADER="worktree${TAB}run${TAB}concurrent_runs"
 PROFILE_HEADER_HEAD="step${TAB}verdict${TAB}wall_s"
 
 usage() {
@@ -157,6 +173,7 @@ else
 fi
 history_root=${history_root%/}
 ledger=$history_root/$project/ledger.tsv
+concs=$history_root/$project/concurrent.tsv
 
 # --- portable helpers ------------------------------------------------------------
 mtime_epoch() { # mtime_epoch <path>: epoch seconds, or NA
@@ -221,14 +238,67 @@ fail() { # fail <line>: a named line on stderr, exit 1
 }
 
 # --- ingest ------------------------------------------------------------------------
-ensure_ledger() { # the ledger exists with its header; any other first line is refused
+# One ledger writer at a time: an ingest holds <ledger>.lock (mkdir_lock_try, infra/fence/mkdir-lock.sh)
+# from its dedupe read through its last append and any split of an interim ledger, so concurrent gates
+# neither duplicate a run nor lose a row to the split's rename. A stale lock is broken; a live holder
+# past 120 s is LEDGER-NOT-WRITTEN.
+ledger_lock() {
+  local dir=${ledger%/*} lk="$ledger.lock" err i
+  if ! err=$(mkdir -p "$dir" 2>&1); then fail "LEDGER-NOT-WRITTEN $ledger: cannot create $dir: ${err##*: }"; fi
+  for ((i = 0; i < 1200; i++)); do
+    if mkdir_lock_try "$lk" "$$"; then
+      trap 'rm -rf "$ledger.lock"' EXIT
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "LEDGER-NOT-WRITTEN $ledger: $lk is still held by pid ${MKDIR_LOCK_HOLDER:-?} after 120 s"
+}
+
+ensure_ledger() { # the ledger and its sidecar exist with their headers, an interim ledger split back; any other first line is refused
   local dir=${ledger%/*} err first
   if [ ! -s "$ledger" ]; then
     if ! err=$(mkdir -p "$dir" 2>&1); then fail "LEDGER-NOT-WRITTEN $ledger: cannot create $dir: ${err##*: }"; fi
     if ! err=$({ printf '%s\n' "$HEADER" >> "$ledger"; } 2>&1); then fail "LEDGER-NOT-WRITTEN $ledger: ${err##*: }"; fi
   fi
+  ensure_concs
   first=$(head -n 1 "$ledger" 2> /dev/null)
+  if [ "$first" = "$HEADER_V2" ]; then split_ledger; first=$(head -n 1 "$ledger" 2> /dev/null); fi
   [ "$first" = "$HEADER" ] || fail "LEDGER-NOT-WRITTEN $ledger: the first line is not the ledger header (found: ${first:-<empty>})"
+}
+
+ensure_concs() { # the sidecar exists with its header; any other first line is refused
+  local err first
+  if [ ! -s "$concs" ]; then
+    if ! err=$({ printf '%s\n' "$CONC_HEADER" >> "$concs"; } 2>&1); then fail "LEDGER-NOT-WRITTEN $concs: ${err##*: }"; fi
+  fi
+  first=$(head -n 1 "$concs" 2> /dev/null)
+  [ "$first" = "$CONC_HEADER" ] || fail "LEDGER-NOT-WRITTEN $concs: the first line is not the concurrent_runs header (found: ${first:-<empty>})"
+}
+
+# split_ledger: the interim 16-column ledger goes back to 15 columns. Its counts reach the sidecar
+# first, one row per run not there yet, so a split cut short between the two renames loses nothing
+# and the next one adds no duplicate.
+split_ledger() {
+  local tmp ctmp err
+  tmp="$ledger.split.$$" ctmp="$concs.split.$$"
+  if ! err=$(awk -F'\t' -v OFS='\t' '
+      FNR == NR { if (FNR > 1) seen[$1 FS $2] = 1; print; next }
+      FNR == 1 || NF == 0 { next }
+      !seen[$3 FS $2]++ { print $3, $2, ((NF >= 16 && $16 != "") ? $16 : "NA") }
+    ' "$concs" "$ledger" 2>&1 > "$ctmp"); then
+    rm -f "$ctmp"; fail "LEDGER-NOT-WRITTEN $concs: the split of the concurrent_runs column failed: ${err:-awk failed}"
+  fi
+  if ! err=$(mv -f "$ctmp" "$concs" 2>&1); then rm -f "$ctmp"; fail "LEDGER-NOT-WRITTEN $concs: the split sidecar could not replace it: $err"; fi
+  if ! err=$(awk -F'\t' -v OFS='\t' -v h="$HEADER" '
+      NR == 1 { print h; next }
+      NF == 16 { r = $1; for (i = 2; i <= 15; i++) r = r OFS $i; print r; next }
+      { print }
+    ' "$ledger" 2>&1 > "$tmp"); then
+    rm -f "$tmp"; fail "LEDGER-NOT-WRITTEN $ledger: the split back to the 15-column header failed: ${err:-awk failed}"
+  fi
+  if ! err=$(mv -f "$tmp" "$ledger" 2>&1); then rm -f "$tmp"; fail "LEDGER-NOT-WRITTEN $ledger: the split ledger could not replace it: $err"; fi
+  printf 'gate-history: split %s back to the 15-column header, concurrent_runs → %s\n' "$ledger" "$concs" >&2
 }
 
 has_row() { # has_row <gate.tsv> <step>: a row whose first field is the step
@@ -243,7 +313,7 @@ eligible() { # eligible <run dir>: 0 a real gate, 1 not one; an unreadable gate.
     errors=$((errors + 1))
     return 1
   fi
-  has_row "$gt" templates.leak || return 1
+  [ -f "$1/gate.meta" ] || has_row "$gt" templates.leak || return 1
   if [ -f "$1/gate.meta" ] && awk -F'\t' '$1 == "fixtures" && $2 == "1" { f = 1; exit } END { exit !f }' "$1/gate.meta" 2> /dev/null; then return 1; fi
   return 0
 }
@@ -291,8 +361,8 @@ rows_of_gate() {
   ' "$1"
 }
 
-ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows; 0 appended, 1 a named failure
-  local run=$1 wt=$2 load=$3 name stamp commit target rows rc src err
+ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows, then its sidecar row; 0 appended, 1 a named failure
+  local run=$1 wt=$2 load=$3 name stamp commit target rows rc src err conc
   name=${run##*/}
   stamp=$(meta_value "$run/gate.meta" started)
   case $stamp in
@@ -301,6 +371,8 @@ ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows; 
   esac
   commit=$(meta_value "$run/gate.meta" commit)
   target=$(meta_value "$run/gate.meta" target)
+  conc=$(meta_value "$run/gate.meta" concurrent_runs)
+  case $conc in '' | *[!0-9]*) conc=NA ;; esac
   export PREFIX="$stamp$TAB$name$TAB$wt$TAB$commit$TAB$target" LOAD=$load
   if [ -f "$run/profile.tsv" ]; then
     rows=$(rows_of_profile "$run/profile.tsv")
@@ -326,12 +398,17 @@ ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows; 
     printf 'gate-history: LEDGER-NOT-WRITTEN %s: %s\n' "$ledger" "${err##*: }" >&2
     return 1
   fi
+  if ! err=$({ printf '%s\t%s\t%s\n' "$wt" "$name" "$conc" >> "$concs"; } 2>&1); then
+    printf 'gate-history: LEDGER-NOT-WRITTEN %s: %s\n' "$concs" "${err##*: }" >&2
+    return 1
+  fi
   return 0
 }
 
 do_ingest() {
   local base absbase wt run epoch key known plan="" sorted line newest="" newest_load=NA appended=0 pdir load
   errors=0
+  ledger_lock
   ensure_ledger
   known=$(awk -F'\t' 'NR > 1 && !seen[$3 FS $2]++ { print $3 FS $2 }' "$ledger")
   # Pass 1: which runs are new real gates, and when each finished.
@@ -381,8 +458,10 @@ do_report() {
   [ -r "$ledger" ] || fail "LEDGER-UNREADABLE $ledger"
   local first
   first=$(head -n 1 "$ledger" 2> /dev/null)
-  if [ -n "$first" ] && [ "$first" != "$HEADER" ]; then fail "BAD LEDGER $ledger: the first line is not the ledger header (found: $first)"; fi
-  LEDGER_PATH=$ledger awk -F'\t' -v last="$last" '
+  local nf=15
+  [ "$first" != "$HEADER_V2" ] || nf=16 # an interim ledger the next ingest splits back
+  if [ -n "$first" ] && [ "$first" != "$HEADER" ] && [ "$first" != "$HEADER_V2" ]; then fail "BAD LEDGER $ledger: the first line is not the ledger header (found: $first)"; fi
+  LEDGER_PATH=$ledger awk -F'\t' -v last="$last" -v nf="$nf" '
     function gt(a, b,    sa, sb) {
       sa = gstamp[a] ""; sb = gstamp[b] ""
       if (sa != sb) return sa > sb
@@ -393,7 +472,7 @@ do_report() {
     BEGIN { ledger = ENVIRON["LEDGER_PATH"]; n = 0; bad = 0 }
     $1 == "stamp" { next }
     NF == 0 { next }
-    NF != 15 { bad++; next }
+    NF != nf { bad++; next }
     {
       key = $3 FS $2
       if (!(key in gi)) {

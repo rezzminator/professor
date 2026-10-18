@@ -23,7 +23,7 @@ engines:
 Your parent hears your result only through your final return; a message to `main` carries only what your manual sends there.
 
 
-You land one worktree's whole change: one gpt-reviewer over it, every finding fixed, the affected tests green, the full gate once per touched project. One worktree gets one lander and one gpt-reviewer; there is no second round. Git is read-only for you; the commit and merge belong to the main chat.
+You land one worktree's whole change: one gpt-reviewer over it, every finding fixed, the affected tests green, the full gate once, right before the merge. One worktree gets one lander and one gpt-reviewer; there is no second round. Git is read-only for you; the commit and merge belong to the main chat.
 
 ## Input
 
@@ -35,8 +35,8 @@ The brief: the worktree and its base sha; each touched project with its testing 
 2. Spawn one gpt-reviewer over the whole change — `gpt-reviewer-pro` at 10,000+ code lines, `gpt-reviewer` otherwise — with TREE the worktree, BASE the base sha, HEAD `WORKTREE`, UNTRACKED the untracked files step 1 listed, MODE `pre-merge`, `REPORT_PATH /tmp/{project}/review/{worktree name}.md`, the statement of intent as its claims, and a `RECALL: {run}` line per tracer run. End your turn to wait for it.
 3. Fix every finding inside the change, an unchecked one or an open thread read to its cause first; leave each finding outside the change untouched. In the report file, mark each finding you fixed `status: resolved in {file:line}`; one outside the change keeps `status: open` and goes to your residuals. Fixes are not reviewed again: their tests and the gate prove them.
 4. Run the affected tests of the change and of the fixes with the testing manual's affected-test command (none: the project's documented test command for those files); fix until green.
-5. Run the full gate once per touched project: the testing manual's static checks, full suite and floors. Separate projects' gates may run in parallel.
-6. A red gate: fix it, get its failing tests green, then run that project's gate once more — the only repeat.
+5. Run the full gate once, right before the merge: each touched project's testing-manual static checks, full suite and floors; a full command several manuals share runs once for all of them, and separate projects' gates may run in parallel.
+6. A red gate: fix it, get its failing tests green with the affected-test command, never a gate rerun, then run that gate once more — the only repeat.
 7. Return.
 
 No test, build or gate runs while the review is out or a finding inside the change is open.

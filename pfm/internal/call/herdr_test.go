@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -490,7 +491,14 @@ func TestHerdrResolvedAdapterFacades(t *testing.T) {
 
 // Herdr matches the current status against until, not an unrequested snapshot
 // from a script. A completed turn before the next wait can therefore be missed.
+//
+// The fixture answers every request at once (its "timeout" refusal stands in
+// for the producer's own deadline), so no wall deadline is meant to expire
+// here: the waiter's budget is set past any scheduling delay, and the outcome
+// rests on the scripted states alone, never on how fast a loaded machine runs
+// the ownership proof and dials that precede each wait.
 func TestHerdrThenHonorsProducerUntil(t *testing.T) {
+	const budget = time.Minute
 	for _, test := range []struct {
 		name       string
 		states     []string
@@ -523,7 +531,8 @@ func TestHerdrThenHonorsProducerUntil(t *testing.T) {
 					t.Errorf("wait omitted producer until: %+v", request)
 					return nil, "invalid_params"
 				}
-				if ms, ok := request.Params["timeout_ms"].(float64); !ok || ms < 1 || ms > 200 {
+				if ms, ok := request.Params["timeout_ms"].(float64); !ok || ms < 1 ||
+					ms > float64(budget.Milliseconds()) {
 					t.Errorf("wait lost its bounded timeout: %+v", request)
 				}
 				for _, allowed := range until {
@@ -539,7 +548,7 @@ func TestHerdrThenHonorsProducerUntil(t *testing.T) {
 			})
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			engine := nativeEngine(t, target)
-			engine.options.ThenMin = 200 * time.Millisecond
+			engine.options.ThenMin = budget
 			engine.options.ThenBusyTries, engine.options.ThenIdleTries = 0, 0
 			engine.options.ThenSettle = 0
 			turn, err := json.Marshal(herdrTurn{SocketPath: socket.path, Pane: "w1:p2", StateChangeSeq: 4})
@@ -547,16 +556,19 @@ func TestHerdrThenHonorsProducerUntil(t *testing.T) {
 				t.Fatal(err)
 			}
 			engine.env = &paths.MapEnv{Values: map[string]string{herdrTurnEnv: string(turn)}}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
 			started := time.Now()
-			result, err := engine.DeliverThen(ctx, ThenWait{
+			result, err := engine.DeliverThen(context.Background(), ThenWait{
 				Backend: "herdr", SocketPath: socket.path,
 				Target: "w1:p2", Engine: "cc", Steers: []string{"resume the port"},
 			})
-			if err != nil || result.Code != test.wantCode || !strings.Contains(result.Message, test.wantDetail) ||
-				time.Since(started) > time.Second {
-				t.Fatalf("until-honoring waiter=%+v err=%v elapsed=%v", result, err, time.Since(started))
+			elapsed := time.Since(started)
+			if err != nil || result.Code != test.wantCode || !strings.Contains(result.Message, test.wantDetail) {
+				t.Fatalf("until-honoring waiter=%+v err=%v elapsed=%v", result, err, elapsed)
+			}
+			// Every answer came at once: a waiter that reached its budget sat out
+			// its own deadline instead of acting on the producer's reply.
+			if elapsed >= budget {
+				t.Fatalf("waiter spent its whole %v budget on immediate replies: %v", budget, elapsed)
 			}
 			if test.wantCode != 0 &&
 				(result.Status != statusUndelivered || result.Typed || result.Steers != 0 || !strings.Contains(result.Message, "steer kept in the log")) {
@@ -574,7 +586,46 @@ func TestHerdrThenHonorsProducerUntil(t *testing.T) {
 
 // The producer may block when a quick working→idle completed before the second
 // request. Exercise the actual socket deadline, not just an immediate refusal.
+//
+// The waiter's budget also pays for the ownership proof and the dials that
+// precede the blocking request, work whose wall time grows without bound on a
+// loaded machine. An attempt whose budget ran out before the blocking request
+// reached the producer exercised the fixture, not the deadline: it is
+// inconclusive, and the next attempt doubles the budget, a bounded number of
+// times. Only an attempt that reached the blocking request is judged.
 func TestHerdrThenProducerWaitDeadline(t *testing.T) {
+	const attempts = 8
+	budget := 60 * time.Millisecond
+	for attempt := 1; ; attempt++ {
+		run := runBlockingProducerWait(t, budget)
+		if len(run.requests) == 2 {
+			checkBlockingProducerWait(t, budget, run)
+			return
+		}
+		if attempt == attempts {
+			t.Fatalf("the blocking request never reached the producer in %d attempts (last budget %v): "+
+				"requests=%d result=%+v err=%v", attempts, budget, len(run.requests), run.result, run.err)
+		}
+		t.Logf("attempt %d inconclusive: the %v budget ran out after %d of 2 producer requests "+
+			"(the fixture's proof and dials outran it); retrying at %v", attempt, budget, len(run.requests), 2*budget)
+		budget *= 2
+	}
+}
+
+type blockingProducerRun struct {
+	result   Result
+	err      error
+	elapsed  time.Duration
+	guard    time.Duration
+	requests []nativeRequest
+}
+
+// runBlockingProducerWait drives DeliverThen at a producer that answers the
+// first agent.wait with a stale idle and never answers the second. The outer
+// context's deadline is only a hang guard, far past budget: the waiter's own
+// budget is the only bound meant to end the blocked wait.
+func runBlockingProducerWait(t *testing.T, budget time.Duration) blockingProducerRun {
+	t.Helper()
 	root, err := os.MkdirTemp("", "call-wait-")
 	if err != nil {
 		t.Fatal(err)
@@ -590,6 +641,9 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 		defer close(done)
 		for i := 0; i < 2; {
 			conn, err := listener.Accept()
+			if errors.Is(err, net.ErrClosed) {
+				return // the attempt ended before both requests arrived
+			}
 			if err != nil {
 				t.Errorf("accept native wait: %v", err)
 				return
@@ -602,13 +656,14 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 				}()
 				var request nativeRequest
 				if err := json.NewDecoder(conn).Decode(&request); err != nil {
-					t.Errorf("decode native wait: %v", err)
+					// A client whose deadline expired mid-request hangs up.
+					t.Logf("decode native wait: %v", err)
 					return
 				}
 				if proof, ok := nativeOwnershipReply(request); ok {
 					if err := json.NewEncoder(conn).
 						Encode(map[string]any{"id": request.ID, "result": proof}); err != nil {
-						t.Errorf("reply ownership: %v", err)
+						t.Logf("reply ownership: %v", err)
 					}
 					return
 				}
@@ -623,24 +678,28 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 				result := nativeAgent("agent_info", "idle")
 				result["agent"].(map[string]any)["state_change_seq"] = 4
 				if err := json.NewEncoder(conn).Encode(map[string]any{"id": request.ID, "result": result}); err != nil {
-					t.Errorf("reply stale idle: %v", err)
+					t.Logf("reply stale idle: %v", err)
 				}
 			}()
 		}
 	}()
-	t.Cleanup(func() {
-		close(release)
-		if err := listener.Close(); err != nil {
-			t.Error(err)
-		}
-		<-done
-		if err := os.RemoveAll(root); err != nil {
-			t.Error(err)
-		}
-	})
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			close(release)
+			if err := listener.Close(); err != nil {
+				t.Error(err)
+			}
+			<-done
+			if err := os.RemoveAll(root); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	defer stop()
 	target := Target{Backend: "herdr", SocketPath: socket, Pane: "w1:p2", Engine: "cc"}
 	engine := nativeEngine(t, target)
-	engine.options.ThenMin = 60 * time.Millisecond
+	engine.options.ThenMin = budget
 	engine.options.ThenBusyTries, engine.options.ThenIdleTries = 0, 0
 	engine.options.ThenSettle = 0
 	turn, err := json.Marshal(herdrTurn{SocketPath: socket, Pane: "w1:p2", StateChangeSeq: 4})
@@ -648,10 +707,11 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine.env = &paths.MapEnv{Values: map[string]string{herdrTurnEnv: string(turn)}}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	run := blockingProducerRun{guard: budget + time.Minute}
+	ctx, cancel := context.WithTimeout(context.Background(), run.guard)
 	defer cancel()
 	started := time.Now()
-	result, err := engine.DeliverThen(
+	run.result, run.err = engine.DeliverThen(
 		ctx,
 		ThenWait{
 			Backend:    "herdr",
@@ -661,23 +721,37 @@ func TestHerdrThenProducerWaitDeadline(t *testing.T) {
 			Steers:     []string{"resume the port"},
 		},
 	)
-	elapsed := time.Since(started)
-	if err != nil || result.Status != statusUndelivered || result.Code != CodeUndelivered || result.Typed ||
+	run.elapsed = time.Since(started)
+	stop() // the producer has stopped: no request arrives after this
+	close(requests)
+	for request := range requests {
+		run.requests = append(run.requests, request)
+	}
+	return run
+}
+
+// checkBlockingProducerWait judges an attempt whose blocking request reached
+// the producer: the waiter ended it at its own budget with a visible
+// undelivered verdict — no sooner (an immediate refusal) and not at the hang
+// guard (a wait that ignored its own bound).
+func checkBlockingProducerWait(t *testing.T, budget time.Duration, run blockingProducerRun) {
+	t.Helper()
+	result := run.result
+	if run.err != nil || result.Status != statusUndelivered || result.Code != CodeUndelivered || result.Typed ||
 		result.Steers != 0 ||
 		!strings.Contains(result.Message, "herdr agent.wait") ||
 		!strings.Contains(result.Message, "steer kept in the log") {
-		t.Fatalf("blocking producer lost visible undelivered outcome: result=%+v err=%v", result, err)
+		t.Fatalf("blocking producer lost visible undelivered outcome: result=%+v err=%v", result, run.err)
 	}
-	if elapsed < 20*time.Millisecond || elapsed > time.Second {
-		t.Fatalf("native wait did not honor its own 60ms bound: %v", elapsed)
+	if run.elapsed < budget || run.elapsed >= run.guard {
+		t.Fatalf("native wait did not end at its own %v bound: %v (hang guard %v)", budget, run.elapsed, run.guard)
 	}
-	if len(requests) != 2 {
-		t.Fatalf("native boundary requests=%d; want stale idle then until-working", len(requests))
-	}
-	<-requests
-	second := <-requests
+	second := run.requests[1]
 	if second.Method != "agent.wait" || !reflect.DeepEqual(second.Params["until"], []any{"working", "blocked"}) {
 		t.Fatalf("producer was not waiting on a missed transient state: %+v", second)
+	}
+	if ms, ok := second.Params["timeout_ms"].(float64); !ok || ms < 1 || ms > float64(budget.Milliseconds()) {
+		t.Fatalf("blocked agent.wait did not carry the waiter's %v bound: %+v", budget, second)
 	}
 }
 

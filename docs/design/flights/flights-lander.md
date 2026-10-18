@@ -39,14 +39,14 @@ The brief, as the spawn prompt:
 
 ```text
 read the change -> one reviewer -> fix every finding -> affected tests until green
--> full gate once per touched project -> return
+-> full gate once, right before the merge -> return
 ```
 
 1. **Read the change:** `git diff` of the worktree against the base, plus its untracked files.
 2. **Review:** spawn one reviewer over the whole change, then wait.
 3. **Fix:** fix every finding inside the change, and list each one outside it.
 4. **Affected tests:** run the affected tests of the change and of the fixes, and fix until green.
-5. **Full gate:** once per touched project.
+5. **Full gate:** once, right before the merge.
 6. **Return.**
 
 Nothing runs before step 3 is done: no test, build or gate runs while the review is out or its findings are open.
@@ -70,8 +70,8 @@ Nothing runs before step 3 is done: no test, build or gate runs while the review
 ## Tests and the gate
 
 - **Affected tests:** the testing manual's affected-test command over the change and the fixes, rerun after each fix until green.
-- **The full gate:** once per touched project, after the affected tests are green: the testing manual's static checks, the full suite, and its floors. The gates of separate projects may run in parallel. One longer than 10 minutes runs in the background and gets one blocking wait.
-- **A red gate:** fix it, get the failing tests green, then run that project's gate once more. That is the only repeat.
+- **The full gate:** once, right before the merge, after the affected tests are green: each touched project's testing-manual static checks, full suite and floors. A full command several manuals share runs once for all of them; the gates of separate projects may run in parallel. One longer than 10 minutes runs in the background and gets one blocking wait.
+- **A red gate:** fix it, get the failing tests green with the affected-test command, never a gate rerun, then run that gate once more. That is the only repeat.
 
 ## The return
 

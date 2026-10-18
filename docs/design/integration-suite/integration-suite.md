@@ -390,7 +390,7 @@ In a project installed from this blueprint, the flights cast builds and keeps th
 
 - The build goes to a `flights-foreman` tier, whose return names the decisions it made, and the lander's review covers the design.
 - The foreman, or a `flights-worker` it briefs with the files, the change and the acceptance, builds the harness, the mocks and the lanes in the order Build order produces, and records each row's bite.
-- `flights-lander` runs the testing manual's affected tests while it fixes, then its full gate once per touched project, so the manual's blocking commands, refused-shape sweep and lanes run on every landing wherever the manual carries them. A defect a test or a lane exposes is the lander's to fix.
+- `flights-lander` runs the testing manual's affected tests while it fixes, then the full gate once, right before the merge, so the manual's blocking commands, refused-shape sweep and lanes run on every landing wherever the manual carries them. A defect a test or a lane exposes is the lander's to fix.
 
 Outside this blueprint, the owner assigns the review, the build and the runs. Law 7 is the run policy, Law 20 the per-change policy, and Laws 11–15 the verdict rules at every tier.
 

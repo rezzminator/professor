@@ -45,7 +45,7 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 | TAG | inline below — hard-gated by § Remote Publication Boundary |
 | RELEASE | inline below — hard-gated by § Remote Publication Boundary; the only road onto `main`: the `develop → main` PR merged through `gh` |
 
-**COMMIT hard gate:** never commit code whose project gate did not pass. The brief must name the verification that ran (`/dev test pfm`, `npm test`, …) **and** you confirm it yourself where it is cheap to confirm — a verdict asserted in the brief is a claim you cannot audit. Docs-only and template-only commits are exempt from the test gate and never from § Scoped-commit discipline.
+**COMMIT hard gate:** never commit code whose project gate did not pass. The brief must name the verification that ran (`.claude/scripts/test.sh {paths}` or `.claude/scripts/test.sh --full`) **and** you confirm it yourself where it is cheap to confirm — a verdict asserted in the brief is a claim you cannot audit. Docs-only and template-only commits are exempt from the test gate and never from § Scoped-commit discipline.
 
 **SETUP** — resolve the caller's base to a full SHA; verify the base worktree is clean and the requested branch, path, and worktree registration do not already exist. Then run `git worktree add -b {branch} {path} {base-sha}` — or `git worktree add --detach {path} {base-sha}` when the caller asks for a detached checkout — and verify the new checkout is clean at that exact SHA. Never reuse or delete a colliding branch/path on the caller's behalf.
 

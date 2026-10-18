@@ -68,6 +68,12 @@ steps_seconds() { # start and end as EPOCHREALTIME values
 
 steps_jobs() {
   local jobs="${STEPS_JOBS:-}"
+  # Inside the shared fence the container's CPU quota is the machine (nproc reports every core
+  # of the VM): the default follows the cap, rounded up.
+  if [[ -z "$jobs" ]]; then
+    jobs="$(awk '$1 != "max" && $2 > 0 { q = $1 / $2; p = int(q); if (p < q) p++; print p }' "${STEPS_CPU_MAX_FILE:-/sys/fs/cgroup/cpu.max}" 2>/dev/null)" || jobs=""
+    [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=""
+  fi
   if [[ -z "$jobs" ]]; then
     jobs="$(nproc 2>/dev/null)" || jobs=""
     [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null)" || jobs=""

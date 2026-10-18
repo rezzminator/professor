@@ -140,10 +140,10 @@ The main chat chooses at dispatch; a foreman chooses for its own children.
 - **Who runs what:**
   - a worker runs its piece's test command;
   - a foreman runs the affected tests across its pieces after integrating;
-  - only the lander runs a full suite, once per touched project at the very end, after every review finding is fixed and the affected tests are green.
-- **A red full gate:** the lander fixes it, gets the failing tests green, then runs that project's gate once more. That is the only repeat.
+  - only the lander runs the full gate, once per worktree right before its merge, after every review finding is fixed and the affected tests are green.
+- **A red full gate:** the lander fixes it, gets the failing tests green with the affected-test command, never a gate rerun, then runs that gate once more. That is the only repeat.
 - **The testing manual:** a project's testing manual, where one exists (this repo's `.claude/commands/pfm-testing-manual.md`), names the affected-test command and the full gate. Without one, agents use the project's documented test commands.
-- **Where tests run:** this repo runs every test in the fence (`.claude/scripts/dev.sh iso`).
+- **Where tests run:** this repo runs every test in the fence through `.claude/scripts/test.sh`.
 
 ## Decisions
 

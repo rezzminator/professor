@@ -34,7 +34,7 @@
   tracetree.py wait RUN ID...           block until those nodes and every child they split off wrote their files,
                                         then print the answers view and an OPEN block (every NOT READ and LEAD line of
                                         the shown nodes, tied to its node; a path:line no verified hop holds is marked
-                                        grep only) (--timeout S, default 540); a named node not started after --start S
+                                        grep only) (--timeout S, default 180); a named node not started after --start S
                                         (default 120) is reported, never waited for; the full view is always written to
                                         RUN/answers.txt and over 28000 characters only a trimmed view is printed
   tracetree.py check RUN                each node's ANSWER lines, each cite checked against the run's verified hops
@@ -2805,7 +2805,7 @@ def main():
             fail("usage: tracetree.py show RUN FILE:A-B [FILE:A-B ...]")
         return cmd_show(a[1], a[2:])
     if a[0] == "wait":
-        opts, rest = timed_args(a[2:], {"--timeout": 540.0, "--grace": 15.0, "--start": 120.0})
+        opts, rest = timed_args(a[2:], {"--timeout": 180.0, "--grace": 15.0, "--start": 120.0})
         ids = [arg.rstrip(".,") for arg in rest]
         if not ids:
             fail("wait needs the IDs of the sub-tracers spawned")

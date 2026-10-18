@@ -116,7 +116,7 @@ With `--questions`, the [recall](#recall) of those questions follows (`recall_in
 
 **Function:** `cmd_wait` — **Run by:** the lead, as the last call of its spawn message
 
-`wait RUN ID… [--timeout S] [--grace S] [--start S]`, defaults 540, 15 and 120 seconds. It removes `.reads`, then polls until every node it waits for has written and no `.hops` or `.started` file changed for `--grace` seconds. It waits for the named nodes and every node that ran `start`. A named node with neither `.started` nor `.hops` after `--start` seconds never ran and is reported `never started`, never waited for.
+`wait RUN ID… [--timeout S] [--grace S] [--start S]`, defaults 180, 15 and 120 seconds. It removes `.reads`, then polls until every node it waits for has written and no `.hops` or `.started` file changed for `--grace` seconds. It waits for the named nodes and every node that ran `start`. A named node with neither `.started` nor `.hops` after `--start` seconds never ran and is reported `never started`, never waited for.
 
 The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s — started but never wrote: {IDs}` or `WAIT ended after {t}s: no node started`, each ending `— never started: {IDs}` when one did not. The rest is [the wait printout](#the-wait-printout).
 

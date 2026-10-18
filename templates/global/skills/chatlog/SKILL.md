@@ -105,7 +105,7 @@ The `data gaps:` line is the report's own honesty, and `data gaps: none` means t
 
 ## The reader kit — `chatlog.py`
 
-`K="python3 -I $HOME/.claude/skills/chatlog/chatlog.py"` does every mechanical step of reading one transcript, so a reader (the `transcript-reader` agent, or you) only reads and labels what needs reading. It drives `pfm transcript` and `pfm tokens` underneath, any target `pfm transcript locate` resolves.
+`K="python3 -I $HOME/.claude/skills/chatlog/chatlog.py"` does every mechanical step of reading one transcript, so a reader (the `transcript-reader` agent, or you) only reads and labels what needs reading. It reads the raw stores itself, natively on all three engines (no `pfm` call except `pfm model-cost --json --all`, the one price table, cached for a day), and resolves any target: a path, a session id or prefix, an agent id, a chat name, a Codex agent path, an OpenCode id, title or `{store}#{session}`.
 
 | Verb | Does |
 | --- | --- |
@@ -119,5 +119,16 @@ The `data gaps:` line is the report's own honesty, and `data gaps: none` means t
 | `$K writes DIR` | every file the run wrote (tool writes, redirections, `tee`, `sed -i`, `cp`/`mv` targets), its state now: size, mtime, git status, `GONE`, `UNRESOLVED` |
 | `$K runs --type T [--since 7d] [--project SUBSTR]` · `$K runs --session S` | every run of one agent type across projects, or a session's sub-agents |
 
-Mechanical labels `prep` sets: `BRIEF PROMPT FINAL NOTE NOTICE COMPACTION COMPACT-SUMMARY COMPACT-CALL HANDOFF SPAWN ERROR ERROR-OUTPUT DENIAL AFTER-ERROR NO-RESULT UNFINISHED WAIT WRITE REPEAT` on digest lines (`D{n}`), `TOTALS MODEL-WAIT COSTLIEST` on timeline lines (`M{n}`). Work directories land under `/tmp/chatlog-kit/` unless `--dir` names one; the price table is cached there for a day.
+### The package and the engines
 
+`chatlog.py` is the entry only (it adds its own resolved directory to `sys.path`, since `-I` drops it); the work is the stdlib package `chatlogkit/` beside it, one concern per module: `engines/{claude,codex,opencode}.py` (each raw record or store row into the one event model in `model.py`), `locate.py` (targets, a session's sub-agents, `runs`), `digest.py` (the digest and its header), `labels.py` (the mechanical labels, one rule set for every engine), `writes.py` (tool and shell writes), `cost/` (per-call timeline, TOTALS, COSTLIEST, MODEL-WAIT, priced from each record's usage), `rows.py` (read, find, note, report, verify, prompts, writes) and `cli.py` (prep and the dispatch). Tests: `chatlog_test.py`, run by the gate.
+
+| Engine | Source | Compaction | Spawn | Failed call | Cost per call |
+| --- | --- | --- | --- | --- | --- |
+| Claude | `projects/**.jsonl`, `subagents/agent-*.jsonl` + `.meta.json` | `compact_boundary` and `isCompactSummary` | `Agent`/`Task` call | `tool_result.is_error` | each assistant `usage` |
+| Codex | `sessions/**/rollout-*.jsonl` | `compacted` record | `spawn_agent` call | nonzero exit, `Script failed`, failed patch | each `token_count` `last_token_usage` (de-duplicated), priced on that call's model |
+| OpenCode | `opencode.db`, read-only | `compaction` part | `task` tool, `subtask` part | tool state `error` | each assistant message's `tokens` |
+
+`L{n}` is pfm's numbering (the file line, or an OpenCode record in store order), so a citation opens the same record through `pfm transcript show --lines`. A label an engine has no concept of is a header row `LABEL n/a (reason)`, never a silent zero. The header also carries `RECORDS n = rendered + header + dropped + unparsed`, one `DROPPED {kind} n` row per kind the digest does not show, and `UNPARSED L{n}` per line holding no JSON; every record is counted. A model the price table lacks is `n/a` and named in the data gaps, never $0.
+
+Mechanical labels `prep` sets: `BRIEF PROMPT FINAL NOTE NOTICE COMPACTION COMPACT-SUMMARY COMPACT-CALL HANDOFF SPAWN ERROR ERROR-OUTPUT DENIAL AFTER-ERROR NO-RESULT UNFINISHED WAIT WRITE REPEAT` on digest lines (`D{n}`), `TOTALS MODEL-WAIT COSTLIEST` on timeline lines (`M{n}`). Work directories land under `/tmp/chatlog-kit/` unless `--dir` names one; the price table is cached there for a day.

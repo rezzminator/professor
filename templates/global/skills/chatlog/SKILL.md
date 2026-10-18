@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: chatlog
-description: 'Digests and prices agent runs, and is the transcript readers'' kit — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, chat name or flight: `pfm transcript show|locate|agents`, `pfm tokens`, `pfm model-cost`, and `chatlog.py prep|read|find|note|report|verify|prompts|writes|runs|census`. Returns a digest, a spend report or a verified row report. Faults, an audit or "did it really do Y" → agent-investigator; static context → /context-meter.'
+description: 'Digests and prices agent runs — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, chat name or spawn tree: `pfm transcript show|locate|agents`, `pfm tokens`, `pfm model-cost`, `chatlog.py prep|read|find|note|report|verify|prompts|writes|runs|census`. Faults or audits → agent-investigator; static context → /context-meter.'
 ---
 
 # chatlog
@@ -12,7 +12,7 @@ Three pfm verbs over Claude Code transcripts, Codex rollouts and OpenCode sessio
 - `pfm tokens [flags]`: what runs cost, ranked and attributed per agent, priced from pfm's live price table.
 - `pfm model-cost`: that price table.
 
-All three are read-only on every transcript; a report reaches a file only through `--out`, `--metrics-out`, `--view` or `--briefs`, or as a flight's own `metrics.md`, and the daily price refresh `pfm tokens` and `pfm model-cost` share may rewrite the clone's `prices.json` and its check stamp. They search pfm's resolved Claude roots, Codex homes and OpenCode roots (each root's `opencode.db`, opened read-only). Transcript content can carry sensitive prompt text: read the digest or the report, never pipe or retain transcript bodies.
+All three are read-only on every transcript; a report reaches a file only through `--out`, `--view` or `--briefs`, and the daily price refresh `pfm tokens` and `pfm model-cost` share may rewrite the clone's `prices.json` and its check stamp. They search pfm's resolved Claude roots, Codex homes and OpenCode roots (each root's `opencode.db`, opened read-only). Transcript content can carry sensitive prompt text: read the digest or the report, never pipe or retain transcript bodies.
 
 ## What a run did — `pfm transcript`
 
@@ -75,22 +75,22 @@ Shape: `--text N` caps a prompt or reply (500 by default; 0 prints it whole), `-
 
 - Where did the last day go: no flags — the default report, bounded, with `data gaps:` and `CROSS-CHECK` lines.
 - A longer window, one repo: `--since 3d --project <substr>`.
-- Heaviest single runs: section `9 · TOP {N} SINGLE RUNS`; heaviest agent groups: section `8`; both carry each row's cache TTL (legend in the README's `--flight` section).
+- Heaviest single runs: section `9 · TOP {N} SINGLE RUNS`; heaviest agent groups: section `8`; both carry each row's cache TTL: `5m`, `1h`, `1h N%` when it wrote both, `—` for no cache writes or an engine reporting no split (Codex).
 - One chat and its agents: `--family <title|agent-type|session-id-prefix>`, or `--session <sid-prefix>` when a sub-agent orchestrated the work and no chat title exists.
 - Codex threads: `--codex` — one row per rollout thread, sub-agents attributed from `session_meta.source`.
-- OpenCode sessions: `--opencode` — one row per session, each assistant message priced from its own token record; `OC USD`, OpenCode's own recorded cost, stands beside `EST USD`, never in its place. It refuses every Claude-only flag and mode (`--codex`, `--flight`, `--root`, `--family`, `--session`, `--out`, `--view`, `--briefs` and kin, exit 2); a session's messages count only when created inside the window.
-- One flight's agents: `--flight <dir>` — see below.
+- OpenCode sessions: `--opencode` — one row per session, each assistant message priced from its own token record; `OC USD`, OpenCode's own recorded cost, stands beside `EST USD`, never in its place. It refuses every Claude-only flag and mode (`--codex`, `--tree`, `--root`, `--family`, `--session`, `--out`, `--view`, `--briefs` and kin, exit 2); a session's messages count only when created inside the window.
+- Code written per token read across one spawn tree: `--tree <session-or-agent-id>` — see below.
 - One agent run call by call: `chatlog.py prep TARGET` and its `timeline.txt` (the kit, below): a clock, the wait since the last tool result, context, output and price per model call, with the `TOTALS`, `MODEL-WAIT` and `COSTLIEST` rows.
 - The full dataset for a page or a diff: `--out FILE` (JSON); the per-project page data: `--view FILE` (`--host-label NAME` sets the host it shows); every brief and what its agent did: `--briefs FILE` (`--family-rx RE` keeps the families whose titles match, case ignored).
 - `--root DIR` (repeatable) reads these Claude roots in place of pfm's; `--codex-root DIR` reads this one Codex home in place of every Codex home pfm resolves; `--opencode-root DIR` reads the `opencode.db` in this directory in place of pfm's OpenCode roots; `--top N` sets the rows per section (12).
 
-### One flight — `--flight <dir>`
+### One spawn tree — `--tree <id>`
 
 ```bash
-pfm tokens --flight $HOME/.local/state/pfm/flights/{project}/<name>
+pfm tokens --tree <session-or-agent-id> --worktree <dir> --base <sha>
 ```
 
-Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report, one row per agent, joined to its transcript through `<dir>/agents.tsv` (else `run.md`'s `CLAIMED` lines); a ledger row or a transcript the join cannot pair is listed under `UNMATCHED`, never dropped. The README's `--flight` section carries the columns, the ledger format and every matching rule.
+Prints one row per agent of a session (or of one agent and its descendants): depth, type, model, input tokens, dollars, and the bytes it wrote under the write scope against the bytes it read; then per agent type, the tree's silent share (input spent by agents that wrote nothing), and with `--worktree`/`--base` the code lines landed and landed lines per million input tokens (else `NOT MEASURED`). `--json` prints the document instead; `--out FILE` writes it. The README's `--tree` section carries the counting rules.
 
 ### Reading the report
 
@@ -129,4 +129,4 @@ The `data gaps:` line is the report's own honesty, and `data gaps: none` means t
 
 `L{n}` is pfm's numbering (the file line, or an OpenCode record in store order), so a citation opens the same record through `pfm transcript show --lines`. A label an engine has no concept of is a header row `LABEL n/a (reason)`, never a silent zero. The header also carries `RECORDS n = rendered + header + dropped + unparsed`, one `DROPPED {kind} n` row per kind the digest does not show, and `UNPARSED L{n}` per line holding no JSON; every record is counted. A model the price table lacks is `n/a` and named in the data gaps, never $0.
 
-Mechanical labels `prep` sets: `BRIEF PROMPT FINAL NOTE NOTICE COMPACTION COMPACT-SUMMARY COMPACT-CALL HANDOFF SPAWN ERROR ERROR-OUTPUT DENIAL AFTER-ERROR NO-RESULT UNFINISHED WAIT WRITE REPEAT` on digest lines (`D{n}`), `TOTALS MODEL-WAIT COSTLIEST` on timeline lines (`M{n}`). Work directories land under `chatlog-kit/` in the system temp directory (`CHATLOG_KIT_DIR` overrides) unless `--dir` names one; the price table is cached there for a day.
+Mechanical labels `prep` sets: `BRIEF PROMPT FINAL NOTE NOTICE COMPACTION COMPACT-SUMMARY COMPACT-CALL HANDOFF HOOK SPAWN ERROR ERROR-OUTPUT DENIAL AFTER-ERROR NO-RESULT UNFINISHED WAIT WRITE REPEAT` on digest lines (`D{n}`), `TOTALS MODEL-WAIT COSTLIEST` on timeline lines (`M{n}`). Work directories land under `chatlog-kit/` in the system temp directory (`CHATLOG_KIT_DIR` overrides) unless `--dir` names one; the price table is cached there for a day.

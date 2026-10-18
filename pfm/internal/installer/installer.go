@@ -218,6 +218,7 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	systemdAssetChanged, err := installer.stageAssets(assets)
 	installer.deferFailure(err)
+	installer.deferFailure(installer.retireGptHooks())
 	installer.deferFailure(installer.installManagedCleanup(ctx))
 	installer.deferFailure(installer.wireClaudeLauncher())
 	installer.deferFailure(installer.pruneClaudeVersions())
@@ -297,6 +298,7 @@ func (installer *engine) install(ctx context.Context) error {
 		installer.warnRetiredNudge("retired compact-nudge state", err)
 	}
 	installer.retireMigrationJournal()
+	installer.retireStateDirs()
 	installer.expireStateBackups()
 	mcpErr := installer.wireMCP()
 	// A host build replaces the binary without changing the unit file, and MCP
@@ -964,11 +966,11 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		}
 	}
 	installer.say("")
-	return systemdChanged, installer.wireGptHookAssets()
+	return systemdChanged, nil
 }
 
 func (installer *engine) removeManagedAssets(assets []assetFile) error {
-	if err := installer.unwireGptHookAssets(); err != nil {
+	if err := installer.retireGptHooks(); err != nil {
 		return err
 	}
 	installer.say("managed assets -> %s", installer.managedRoot)

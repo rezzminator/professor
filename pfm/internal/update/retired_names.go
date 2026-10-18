@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -75,6 +74,15 @@ func RetiredPfmCommand(command string) (name, successor string, ok bool) {
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
 const chatlogSuccessor = "the chatlog skill"
 
+// The flights cut's successors: flightsSuccessor takes new work since
+// /flights:spec retired, so the /wave family, the wave-builder skill and
+// /imagine:build-spec point there too.
+const (
+	flightsSuccessor    = "the flights-foreman agent"
+	workerSuccessor     = "flights-worker"
+	foremanProSuccessor = "flights-foreman-pro"
+)
+
 // imagineSuccessor is what replaced /imagine:build, /imagine:build-fast,
 // /imagine:callmeter, /ultimate-spec and the ultimate visualization skill.
 const imagineSuccessor = "/imagine"
@@ -103,10 +111,11 @@ var retiredNames = []retiredName{
 	{name: "pfm chat inject", kind: retiredCommand, successor: "pfm chat call", match: matchExact},
 	{name: "chat_inject", kind: retiredTool, successor: "mcp__chat-professor__call", match: matchExact},
 	// releases/v0.78.0.md "Global: flights replaces wave": every /wave:*
-	// command and the wave-builder skill are removed; new work starts with
-	// /flights:spec. The bare /wave pair retired earlier (releases/v0.43.0.md).
-	{name: "/wave", kind: retiredCommand, successor: "/flights:spec", match: matchFamily},
-	{name: "wave-builder", kind: retiredSkill, successor: "/flights:spec", match: matchExact},
+	// command and the wave-builder skill are removed. The bare /wave pair
+	// retired earlier (releases/v0.43.0.md). New work started with
+	// /flights:spec until it retired too (below): flights-foreman takes it now.
+	{name: "/wave", kind: retiredCommand, successor: flightsSuccessor, match: matchFamily},
+	{name: "wave-builder", kind: retiredSkill, successor: flightsSuccessor, match: matchExact},
 	// releases/v0.77.0.md "B: templates — /jc and /qa:live are gone"; commit
 	// e7c8b6a2 "retire /jc, /qa:live and /pfm:refresh". /jc:wave was its
 	// namespace (releases/v0.32.0.md).
@@ -171,7 +180,21 @@ var retiredNames = []retiredName{
 	// Commit 3b401f24: the twin agents take their originals' full names; terra retires.
 	{name: "gpt-foreman", kind: retiredAgent, successor: "gpt-flights-foreman", match: matchExact},
 	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
-	{name: "gpt-executor", kind: retiredAgent, successor: "gpt-flights-mechanical-executor", match: matchExact},
+	{name: "gpt-executor", kind: retiredAgent, successor: workerSuccessor, match: matchExact},
+	// The flights family cut (docs/design/flights/flights.md § The family): the
+	// foreman-pro twins take the flights- prefix, the mechanical executors
+	// become flights-worker, and the speccer's work moves into
+	// flights-foreman-pro. /flights:spec, /flights:init and
+	// /flights:orchestrate-cross-harness retire with no successor command.
+	{name: "foreman-pro", kind: retiredAgent, successor: foremanProSuccessor, match: matchExact},
+	{name: "gpt-foreman-pro", kind: retiredAgent, successor: "gpt-flights-foreman-pro", match: matchExact},
+	{name: "flights-mechanical-executor", kind: retiredAgent, successor: workerSuccessor, match: matchExact},
+	{name: "gpt-flights-mechanical-executor", kind: retiredAgent, successor: workerSuccessor, match: matchExact},
+	{name: "flights-speccer", kind: retiredAgent, successor: foremanProSuccessor, match: matchExact},
+	{name: "gpt-flights-speccer", kind: retiredAgent, successor: foremanProSuccessor, match: matchExact},
+	{name: "/flights:spec", kind: retiredCommand, match: matchExact},
+	{name: "/flights:init", kind: retiredCommand, match: matchExact},
+	{name: "/flights:orchestrate-cross-harness", kind: retiredCommand, match: matchExact},
 	retiredAgentRow("terra", "", `subagent_type: "terra"`),
 	retiredAgentRow("terra", "", `subagent_type:"terra"`),
 	retiredAgentRow("terra", "", `subagent_type: 'terra'`),
@@ -236,8 +259,9 @@ var retiredNames = []retiredName{
 	// agent and the ultimate skill" retired every /imagine: subcommand, the
 	// imagine agent and the imagine-core skill (its law lives in the imagination
 	// agent); /imagine itself is live, so it is no row. A spec without a build
-	// starts with /flights:spec. Commit 196ec68b "retire /imagine:evolve with its
-	// imagine-historian agent" left both with no successor.
+	// went to /flights:spec, which retired since: flights-foreman takes it.
+	// Commit 196ec68b "retire /imagine:evolve with its imagine-historian agent"
+	// left both with no successor.
 	{name: "/ultimate-spec", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
 	{
 		name: "/callmeter:ultimate-visualization", kind: retiredSkill, successor: imagineSuccessor,
@@ -245,7 +269,7 @@ var retiredNames = []retiredName{
 	},
 	{name: "/imagine:build", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
 	{name: "/imagine:build-fast", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
-	{name: "/imagine:build-spec", kind: retiredCommand, successor: "/flights:spec", match: matchExact},
+	{name: "/imagine:build-spec", kind: retiredCommand, successor: flightsSuccessor, match: matchExact},
 	{name: "/imagine:callmeter", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
 	{name: "imagine-core", kind: retiredSkill, successor: "the imagination agent", match: matchExact},
 	{name: "/imagine:evolve", kind: retiredCommand, match: matchExact},
@@ -751,39 +775,3 @@ func isRetiredNameByte(b byte) bool {
 
 // openRetiredFile opens a file for the scan.
 func openRetiredFile(name string) (io.ReadCloser, error) { return os.Open(name) }
-
-// RetiredRegistryNames derives from retiredNames the names the registry
-// ownership scan matches against an unmarked entry: an agent by file stem, a
-// command by its path below the commands registry (`/qa:live` is
-// qa/live), a skill by directory name (`skills/transcript` is transcript). A
-// name that is not one registry entry (a phrase, an MCP tool, a path) is left out.
-func RetiredRegistryNames() installer.RetiredRegistryNames {
-	names := installer.RetiredRegistryNames{
-		Agents: map[string]bool{}, Commands: map[string]bool{}, Skills: map[string]bool{},
-	}
-	for _, retired := range retiredNames {
-		name := retired.name
-		if retired.kind == retiredAgent && retired.probe != "" {
-			name = strings.TrimSuffix(path.Base(retired.probe), ".md")
-		}
-		if strings.ContainsAny(name, " ") {
-			continue
-		}
-		switch retired.kind {
-		case retiredAgent:
-			if !strings.ContainsAny(name, "/:") {
-				names.Agents[name] = true
-			}
-		case retiredCommand:
-			if command, found := strings.CutPrefix(name, "/"); found && command != "" {
-				names.Commands[strings.ReplaceAll(strings.TrimSuffix(command, ":"), ":", "/")] = true
-			}
-		case retiredSkill:
-			skill := strings.TrimPrefix(name, "skills/")
-			if !strings.ContainsAny(skill, "/:") {
-				names.Skills[skill] = true
-			}
-		}
-	}
-	return names
-}

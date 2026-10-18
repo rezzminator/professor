@@ -37,22 +37,28 @@
     "global/agents/documenter.md": {
       "curated": true
     },
-    "global/agents/foreman-pro.md": {
+    "global/agents/flights-foreman-mini.md": {
       "curated": true
     },
-    "global/agents/gpt-flights-mechanical-executor.md": {
+    "global/agents/flights-foreman-pro.md": {
       "curated": true
     },
-    "global/agents/gpt-foreman-pro.md": {
+    "global/agents/flights-worker-pro.md": {
+      "curated": true
+    },
+    "global/agents/flights-lander-mini.md": {
+      "curated": true
+    },
+    "global/agents/flights-lander-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-flights-foreman-pro.md": {
       "curated": true
     },
     "global/agents/gpt-flights-foreman.md": {
       "curated": true
     },
     "global/agents/gpt-flights-lander.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-speccer.md": {
       "curated": true
     },
     "global/agents/gpt-reviewer-pro.md": {
@@ -113,9 +119,6 @@
       "curated": true
     },
     "global/commands/context-meter.md": {
-      "curated": true
-    },
-    "global/commands/flights/init.md": {
       "curated": true
     },
     "global/commands/h/gh.md": {

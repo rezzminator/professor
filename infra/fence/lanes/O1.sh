@@ -142,7 +142,7 @@ else
     fail "$settings is not a valid settings object"
   else
     missing=""
-    for verb in launcher-repair clear-kill exit-close explore-deny git-guard store-guard epic-inject reload-intercept exit-intercept; do
+    for verb in launcher-repair clear-kill exit-close git-guard store-guard epic-inject reload-intercept exit-intercept; do
       grep -q -- "$verb" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $verb;"
     done
     grep -q 'usage-hook' "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template usage-hook;"
@@ -473,8 +473,12 @@ beat O1.16-tokens
 spends none
 bad=""
 help_out="$(pfm tokens --help 2>&1)"; help_rc=$?
-if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--flight' <<<"$help_out" || ! grep -q -- '--metrics-out' <<<"$help_out"; then
-  bad="$bad pfm tokens --help lacks --codex, --flight or --metrics-out (exit $help_rc): $(one_line "$help_out");"
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--tree' <<<"$help_out" || ! grep -q -- '--worktree' <<<"$help_out"; then
+  bad="$bad pfm tokens --help lacks --codex, --tree or --worktree (exit $help_rc): $(one_line "$help_out");"
+fi
+pair_out="$(pfm tokens --tree some-id --worktree /w 2>&1)"; pair_rc=$?
+if [ "$pair_rc" -ne 2 ] || ! grep -qF -- '--worktree and --base go together' <<<"$pair_out"; then
+  bad="$bad pfm tokens --tree --worktree without --base exited $pair_rc, want 2 naming the pair: $(one_line "$pair_out");"
 fi
 since_out="$(pfm tokens --since 3x 2>&1)"; since_rc=$?
 if [ "$since_rc" -ne 2 ] || ! grep -qF -- '--since wants' <<<"$since_out"; then
@@ -489,10 +493,14 @@ empty_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --root "$tokens_root" 2>&1)"; empty
 if [ "$empty_rc" -ne 0 ] || ! grep -q '^TOKEN AUDIT · ' <<<"$empty_out"; then
   bad="$bad pfm tokens over an empty root did not print its report (exit $empty_rc): $(one_line "$empty_out");"
 fi
+tree_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --tree no-such-id --root "$tokens_root" 2>&1)"; tree_rc=$?
+if [ "$tree_rc" -ne 1 ] || ! grep -qF -- '--tree no-such-id: no session or agent transcript' <<<"$tree_out"; then
+  bad="$bad pfm tokens --tree over an empty root exited $tree_rc, want 1 naming the missing id: $(one_line "$tree_out");"
+fi
 rm -rf "$tokens_root"
 # The report's numbers are proven by the golden replay of internal/tokens.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "tokens help names --codex/--flight/--metrics-out; a bad --since exits 2; an unreadable --root exits 1; an empty root prints its report"
+  pass "tokens help names --codex/--tree/--worktree; a bad --since and a lone --worktree exit 2; an unreadable --root exits 1; an empty root prints its report; an unknown --tree id exits 1"
 fi
 
 # ─── O1.17 — transcript offline surface ────────────────────────────────────

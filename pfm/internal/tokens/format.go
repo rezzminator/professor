@@ -12,6 +12,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
+// firstText is a || b for strings.
+func firstText(text, fallback string) string {
+	if text != "" {
+		return text
+	}
+	return fallback
+}
+
 // The report's text measures and cuts strings in UTF-16 code units, as the
 // Node engine did: a title holding an emoji pads and truncates identically.
 

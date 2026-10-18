@@ -180,8 +180,8 @@ func TestOpenCodeModeFiltersByProject(t *testing.T) {
 }
 
 // openCodeOwnMode is the usage error of a flag --opencode cannot honour.
-const openCodeOwnMode = "pfm tokens: --opencode is its own mode: it takes no --codex, --flight, " +
-	"--root, --family, --family-rx, --session, --out, --view, --briefs or --metrics-out\n"
+const openCodeOwnMode = "pfm tokens: --opencode is its own mode: it takes no --codex, --tree, " +
+	"--root, --family, --family-rx, --session, --out, --view or --briefs\n"
 
 // A store that is missing or cannot be read is a failure naming it, never an
 // empty table; a flag the mode cannot honour is refused, never ignored.

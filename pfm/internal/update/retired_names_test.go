@@ -69,7 +69,7 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 			Path: ".codex/config.toml", Line: 2, Name: "mcp__harvester__", Kind: "tool",
 			Successor: "mcp__harvester-professor__*",
 		},
-		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
+		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
 		{Path: "scripts/legacy.sh", Line: 3, Name: "JC-COMMIT", Kind: "phase", Successor: "COMMIT"},
 	}
 	if !reflect.DeepEqual(scan.Hits, want) {
@@ -283,7 +283,7 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine"},
 	{"type /imagine:build to build it", "/imagine:build", "command", "/imagine"},
 	{"type /imagine:build-fast to build it", "/imagine:build-fast", "command", "/imagine"},
-	{"type /imagine:build-spec to spec it", "/imagine:build-spec", "command", "/flights:spec"},
+	{"type /imagine:build-spec to spec it", "/imagine:build-spec", "command", flightsSuccessor},
 	{"run /imagine:callmeter on the data", "/imagine:callmeter", "command", "/imagine"},
 	{`Agent(subagent_type: "imagine", prompt: "build it")`, `subagent_type: "imagine"`, "agent", "imagination"},
 	{`Agent({subagent_type:"imagine"})`, `subagent_type:"imagine"`, "agent", "imagination"},
@@ -617,7 +617,7 @@ func TestRetiredNameInACurrentPinnedFileIsReported(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  1\n",
-		"    .claude/current.md:2   /wave — retired command, now /flights:spec\n",
+		"    .claude/current.md:2   /wave — retired command, now the flights-foreman agent\n",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report missing %q:\n%s", want, report)
@@ -810,7 +810,7 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	for _, row := range []struct{ line, name, successor, definition string }{
 		{"spawn gpt-foreman", "gpt-foreman", "gpt-flights-foreman", ""},
 		{"spawn gpt-lander", "gpt-lander", "gpt-flights-lander", ""},
-		{"spawn gpt-executor", "gpt-executor", "gpt-flights-mechanical-executor", ""},
+		{"spawn gpt-executor", "gpt-executor", "flights-worker", ""},
 		{`subagent_type: "terra"`, `subagent_type: "terra"`, "", ""},
 		{`subagent_type:"terra"`, `subagent_type:"terra"`, "", ""},
 		{`subagent_type: 'terra'`, `subagent_type: 'terra'`, "", ""},
@@ -847,6 +847,39 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	}
 }
 
+// TestRetiredNamesReportTheFlightsCut: every agent and command the flights
+// family cut retires is a hit with its successor, and the live names beside
+// them — the successors, the longer twin names, /flights:doctor — are none.
+func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
+	t.Parallel()
+	rows := []struct{ line, name, kind, successor string }{
+		{"spawn foreman-pro for it", "foreman-pro", "agent", "flights-foreman-pro"},
+		{"spawn gpt-foreman-pro for it", "gpt-foreman-pro", "agent", "gpt-flights-foreman-pro"},
+		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", "flights-worker"},
+		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", "flights-worker"},
+		{"flights-speccer writes the spec", "flights-speccer", "agent", "flights-foreman-pro"},
+		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", "flights-foreman-pro"},
+		{"run /flights:spec first", "/flights:spec", "command", ""},
+		{"run /flights:init once", "/flights:init", "command", ""},
+		{"run /flights:orchestrate-cross-harness on codex", "/flights:orchestrate-cross-harness", "command", ""},
+	}
+	root := t.TempDir()
+	var content strings.Builder
+	var want []professor.RetiredNameHit
+	for index, row := range rows {
+		content.WriteString(row.line + "\n")
+		want = append(want, professor.RetiredNameHit{
+			Path: "notes.md", Line: index + 1, Name: row.name, Kind: row.kind, Successor: row.successor,
+		})
+	}
+	content.WriteString("spawn flights-foreman-pro, gpt-flights-foreman-pro or flights-worker; run /flights:doctor\n")
+	writeRetiredFixture(t, root, map[string]string{"notes.md": content.String()})
+	scan := ScanRetiredNames(root, nil)
+	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
+		t.Fatalf("flights cut scan =\n%+v\nwant\n%+v", scan, want)
+	}
+}
+
 func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	t.Parallel()
 	root := newUpdateGitFixture(t)
@@ -861,14 +894,14 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	gitTemp(t, root, "add", "large.txt")
 	scan := ScanRetiredNames(root, nil)
 	want := []professor.RetiredNameHit{
-		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
+		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
 		{Path: "large.txt", Line: 4, Name: "/jc", Kind: "command"},
 		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/quality:md-forlint"},
 	}
 	if len(scan.Failures) != 0 || len(scan.Incomplete) != 0 || !reflect.DeepEqual(scan.Hits, want) {
 		t.Errorf("large tracked scan = %+v, want complete hits %+v", scan, want)
 	}
-	clean := strings.NewReplacer("/wave", "/flights:spec", "/jc", "/pcm", "/quality:forlint", "/quality:md-forlint").
+	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/pcm", "/quality:forlint", "/quality:md-forlint").
 		Replace(content)
 	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
 	scan = ScanRetiredNames(root, nil)
@@ -913,32 +946,5 @@ func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) 
 				t.Fatalf("partial scan = %+v, want the completed hit and contextual %s failure", scan, operation)
 			}
 		})
-	}
-}
-
-func TestRetiredRegistryNames(t *testing.T) {
-	t.Parallel()
-	names := RetiredRegistryNames()
-	for kind, want := range map[string][]string{
-		"agent": {"rndier", "tracer-pro", "ultimate", "terra", "imagine", "imagine-historian"},
-		"command": {
-			"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint", "chat",
-			"imagine/build", "imagine/build-fast", "imagine/build-spec", "imagine/callmeter", "imagine/evolve",
-		},
-		"skill": {"wave-builder", "transcript", "close-out", "imagine-core"},
-	} {
-		set := map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills}[kind]
-		for _, name := range want {
-			if !set[name] {
-				t.Errorf("%s %q is not a retired registry name: %v", kind, name, set)
-			}
-		}
-	}
-	for _, phrase := range []string{`subagent_type="ultimate"`, "pfm chat inject", "transcript skill", "mcp__professor__", "JC-COMMIT", "/wave", "mono-architect/"} {
-		for kind, set := range map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills} {
-			if set[phrase] {
-				t.Errorf("%s set holds %q, which is not one registry entry", kind, phrase)
-			}
-		}
 	}
 }

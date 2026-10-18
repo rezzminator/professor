@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Flight prompt contracts: no-actor continuation and complete change inventory.
+# Flight prompt contracts: the cast's tiers, the one long-command wait, review sizing and input, critical decisions to main.
 # BROKEN STATE: a missing template or a failed contract assertion exits nonzero.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -8,36 +8,54 @@ from pathlib import Path
 import re
 import unittest
 
-class FlightContracts(unittest.TestCase):
-    def test_no_actor_continuation(self):
-        foreman = Path('templates/global/agents/flights-foreman.md').read_text()
-        step = re.search(r'^(\d+)\. (Wait only .+)$', foreman, re.M)
-        self.assertIsNotNone(step, 'the run has a numbered "Wait only" step')
-        n, wait = int(step.group(1)), step.group(2)
-        self.assertTrue('outstanding' in wait and f'step {n + 2}' in wait and f'step {n + 3}' in wait,
-                        'no-actor roots must continue to landing and children to return')
-        self.assertRegex(wait, rf'returns? to verify.*step {n + 1}\b',
-                         'children already returned during the build must be verified before landing')
-        for name, k in (('Verify', 1), ('Land', 2), ('Return once', 3)):
-            self.assertRegex(foreman, rf'(?m)^{n + k}\. {name}\b', f'step {n + k} is {name}')
+AGENTS = Path('templates/global/agents')
+GENERATED = Path('templates/generated/agents')
 
-    def test_complete_inventory(self):
-        foreman = Path('templates/global/agents/flights-foreman.md').read_text()
-        self.assertIn('## Change inventory\n', foreman, 'one shared complete inventory')
-        inventory = foreman.split('## Change inventory\n', 1)[1].split('\n## ', 1)[0]
-        self.assertIn('git ls-files --others --exclude-standard -z', inventory)
-        self.assertTrue('wc -l' in inventory and 'symlink' in inventory and 'stray' in inventory,
-                        'inventory counts untracked source and names aliases and strays')
-        self.assertIn('nonzero', inventory, 'inventory failure must be visible')
-        for file in ('templates/global/agents/flights-lander.md',
-                     'templates/global/commands/flights/doctor.md',
-                     'templates/global/commands/flights/orchestrate-cross-harness.md'):
-            self.assertIn('Change inventory', Path(file).read_text(), f'{file}: canonical inventory')
-        lander = Path('templates/global/agents/flights-lander.md').read_text()
-        reviewers = [Path(f'templates/global/agents/{name}.md').read_text() for name in ('reviewer', 'reviewer-pro')]
-        self.assertTrue('UNTRACKED the owned untracked files' in lander
-                        and all('untracked line count' in r and 'WORKTREE' in r for r in reviewers),
-                        'review sizing and input include untracked source, whichever tier the lander picks')
+
+def text(name):
+    return (AGENTS / f'{name}.md').read_text()
+
+
+def frontmatter(path):
+    head = path.read_text().split('---\n', 2)[1]
+    return dict(re.findall(r'(?m)^(model|effort): (\S+)$', head))
+
+
+class FlightContracts(unittest.TestCase):
+    def test_cast_tiers(self):
+        cast = {
+            'flights-foreman-mini': ('opus', 'medium'), 'flights-foreman': ('opus', 'high'),
+            'flights-foreman-pro': ('opus', 'xhigh'), 'flights-worker': ('sonnet', 'high'),
+            'flights-worker-pro': ('sonnet', 'xhigh'), 'flights-lander-mini': ('sonnet', 'high'),
+            'flights-lander': ('opus', 'medium'), 'flights-lander-pro': ('opus', 'high'),
+        }
+        for name, (model, effort) in cast.items():
+            declared = AGENTS / f'{name}.md'
+            path = GENERATED / f'{name}.md' if '\nfrom: ' in declared.read_text() else declared
+            self.assertEqual(frontmatter(path), {'model': model, 'effort': effort}, f'{path}: tier')
+
+    def test_one_blocking_wait_past_ten_minutes(self):
+        for name in ('flights-foreman', 'flights-worker', 'flights-lander'):
+            body = text(name)
+            self.assertIn('longer than 10 minutes', body, f'{name}: the long-command threshold')
+            self.assertIn("timeout {s} bash -c 'until [ -s \"$1\" ]", body, f'{name}: the one blocking wait')
+
+    def test_review_sizing_and_input(self):
+        lander = text('flights-lander')
+        self.assertIn('`reviewer-pro` at 10,000+ code lines', lander, 'reviewer-pro only past 10,000 code lines')
+        self.assertIn('diff --numstat', lander, 'code lines are counted, not guessed')
+        self.assertIn('ls-files --others --exclude-standard', lander, 'the lander lists untracked source')
+        self.assertIn('UNTRACKED the untracked files', lander, 'the reviewer brief carries the untracked files')
+        for name in ('reviewer', 'reviewer-pro'):
+            body = text(name)
+            self.assertTrue('untracked line count' in body and 'WORKTREE' in body, f'{name}: untracked source sizes and joins the review')
+
+    def test_critical_decisions_go_to_main(self):
+        for name in ('flights-foreman', 'flights-lander'):
+            body = text(name)
+            self.assertIn('never ask the user', body, f'{name}: decides, never asks')
+            self.assertIn('SendMessage(to: "main")', body, f'{name}: a critical decision goes to main')
+
 
 unittest.main()
 PY

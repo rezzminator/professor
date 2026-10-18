@@ -15,7 +15,6 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 	home := t.TempDir()
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	for _, testCase := range []struct {
 		name  string
 		setup func(t *testing.T)
@@ -52,7 +51,6 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 
 func TestReportHooksNoClaudeAccountAndCodexResidue(t *testing.T) {
 	home := t.TempDir()
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -81,7 +79,6 @@ func resumeUnkillKey(t *testing.T, account, body string) string {
 
 func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	home := t.TempDir()
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -115,7 +112,6 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 func stageCodexProbeHome(t *testing.T, hooksBody string) (home string, machine pfmconfig.Config, hooksPath string) {
 	t.Helper()
 	home = t.TempDir()
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {

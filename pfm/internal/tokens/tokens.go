@@ -4,7 +4,9 @@
 // records, prices every call from the one table `pfm model-cost` serves,
 // and traces each dollar to the context that caused it. A RUN is one
 // transcript (a main chat loop, a sub-agent, a Codex thread); a FAMILY is a
-// main chat plus every sub-agent it spawned. Dollars are list-price estimates:
+// main chat plus every sub-agent it spawned; a TREE (--tree, tree.go) is one
+// session or agent and every agent below it, measured agent by agent, with the
+// code lines its worktree landed (landed.go). Dollars are list-price estimates:
 // they rank and compare, they are not a bill, and a model with no priced key
 // or available rate renders "n/a", never $0, while its tokens still count.
 package tokens
@@ -114,11 +116,11 @@ type auditor struct {
 	claudeRoots  []string
 	codexHomes   []string
 	openCodeRoot []string
+	env          paths.Env
 	prices       *priceBook
 	scan         *scanState
 	global       *globals
 	runs         []*run
-	flight       *flightPlan
 	// ledgerDir holds the cost ledgers; transcripts is every transcript the ownership walk found, whatever
 	// the window or --session replays, because a ledger row is held by any transcript of its session
 	ledgerDir   string
@@ -152,8 +154,8 @@ func newAuditor(opts Options, parsed flags, host string) *auditor {
 		opts: parsed, stdout: opts.Stdout, stderr: opts.Stderr, loc: opts.Location, host: host, now: now,
 		since: now - float64(parsed.hours*3600e3), hours: parsed.hours,
 		claudeRoots: opts.ClaudeRoots, codexHomes: opts.CodexHomes, openCodeRoot: opts.OpenCodeRoots,
-		ledgerDir: opts.LedgerDir,
-		scan:      newScanState(), global: newGlobals(),
+		ledgerDir: opts.LedgerDir, env: opts.Env,
+		scan: newScanState(), global: newGlobals(),
 	}
 	if a.loc == nil {
 		a.loc = time.Local
@@ -186,10 +188,8 @@ func run0(ctx context.Context, opts Options) (int, error) {
 	if err != nil {
 		return 1, failure("%v", err)
 	}
-	if parsed.flight != "" {
-		if err := a.loadFlightPlan(); err != nil {
-			return 1, err
-		}
+	if parsed.tree != "" {
+		return a.runTree(ctx)
 	}
 	if parsed.codex {
 		return a.runCodex(ctx)
@@ -201,9 +201,6 @@ func run0(ctx context.Context, opts Options) (int, error) {
 		return 1, err
 	}
 	totals := a.aggregate()
-	if parsed.flight != "" {
-		return a.runFlight(ctx)
-	}
 	return a.runReport(totals)
 }
 

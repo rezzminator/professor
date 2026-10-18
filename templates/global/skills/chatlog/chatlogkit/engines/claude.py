@@ -40,9 +40,13 @@ def record(p, n, obj):
             p.title = title
         p.mark(n, HEADER, kind)
     elif kind == "system" and obj.get("subtype") == "compact_boundary":
-        ev = Event(n, ts, NOTE, text=COMPACTED_NOTE)
+        ev = Event(n, ts, NOTE, text=COMPACTED_NOTE + _compact_meta(obj.get("compactMetadata")))
         ev.mech.add("COMPACTION")
         p.add(ev, "system.compact_boundary")
+    elif kind == "system" and obj.get("subtype") == "stop_hook_summary" and _stop_hook_text(obj):
+        ev = Event(n, ts, NOTE, text=_stop_hook_text(obj))
+        ev.mech.add("HOOK")
+        p.add(ev, "system.stop_hook_summary (errors, context or stop)")
     elif kind == "system":
         sub = obj.get("subtype")
         p.mark(n, SKIPPED, "system." + ("?" if sub is None else pystr(sub)))
@@ -163,8 +167,51 @@ def _user(p, n, ts, obj, message):
         p.mark(n, SKIPPED, label)
 
 
+def _compact_meta(meta):
+    """The compact_boundary's own facts: trigger (auto|manual), tokens before and after, duration."""
+    if not isinstance(meta, dict):
+        return " · no compactMetadata"
+    parts = [f"{key} {pystr(meta[key])}" for key in ("trigger", "preTokens", "postTokens", "durationMs")
+             if key in meta]
+    return " · " + " · ".join(parts) if parts else " · compactMetadata empty"
+
+
+def _stop_hook_text(obj):
+    """A stop_hook_summary worth a line: one with errors, added context or a prevented continuation."""
+    errs, ctx = obj.get("hookErrors") or [], obj.get("hookAdditionalContext") or []
+    if not (errs or ctx or obj.get("preventedContinuation")):
+        return ""
+    return (f"HOOK Stop summary · errors {pystr(errs)} · context {pystr(ctx)} · prevented "
+            f"{pystr(obj.get('preventedContinuation'))} {pystr(obj.get('stopReason') or '')}").strip()
+
+
+HOOK_ATTACHMENTS = ("hook_additional_context", "hook_success", "hook_non_blocking_error",
+                    "hook_blocking_error", "hook_cancelled", "hook_error_during_execution",
+                    "hook_stopped_continuation")
+
+
+def _hook(att):
+    """One hook record as a line: event, hook, outcome, and what it injected or printed."""
+    kind = pystr(att.get("type"))[len("hook_"):]
+    where = pystr(att.get("hookName") or att.get("hookEvent") or "?")
+    body = att.get("content")
+    if isinstance(body, list):
+        body = " | ".join(pystr(x) for x in body)
+    body = body or att.get("stderr") or att.get("stdout") or att.get("blockingError") or ""
+    if kind == "cancelled":
+        body = (f"{pystr(att.get('command') or '')} · timed out {pystr(att.get('timedOut'))} after "
+                f"{pystr(att.get('durationMs'))} ms").strip()
+    return f"HOOK {where} {kind}: {pystr(body)}".rstrip(": ")
+
+
 def _attachment(p, n, ts, att):
     att = att if isinstance(att, dict) else {}
+    if att.get("type") in HOOK_ATTACHMENTS and not (att.get("type") == "hook_success"
+                                                     and not (att.get("content") or att.get("stdout"))):
+        ev = Event(n, ts, NOTE, text=_hook(att))
+        ev.mech.add("HOOK")
+        p.add(ev, "attachment." + pystr(att["type"]))
+        return
     if att.get("type") != "queued_command":
         p.mark(n, SKIPPED, "attachment." + ("?" if "type" not in att else pystr(att["type"])))
         return

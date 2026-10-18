@@ -331,7 +331,7 @@ func Run(
 	hookWarnings, hookFailures := installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
-	tally.failures += printTracerIntakeDoctor(ctx, stdout, resolved.Home, dependencies)
+	tally.failures += printTracetreeKitDoctor(ctx, stdout, resolved.Home, dependencies)
 	herdrWarnings, herdrFailures := printHerdrDoctor(ctx, stdout, dependencies, runtime.Config)
 	tally.warnings += herdrWarnings
 	tally.failures += herdrFailures

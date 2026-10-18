@@ -27,8 +27,7 @@ type repeatedCommand struct {
 	n   float64
 }
 
-// run is one transcript replayed: one main chat loop, one sub-agent, or (for
-// --flight) one Codex thread.
+// run is one transcript replayed: one main chat loop or one sub-agent.
 type run struct {
 	file, kind, sid, project, engine, agentID string
 	tok                                       tokenCounts
@@ -71,7 +70,6 @@ type run struct {
 	firstTS              float64
 	model, effort        string
 	cmp                  string
-	segments             float64 // Codex: resumed or compacted segments
 }
 
 // landing is one tool result carried through the run's later calls.

@@ -126,7 +126,7 @@ func TestSessionClosesEveryRowWithRecordedDecisions(t *testing.T) {
 			t.Fatalf("pfm update %v code=%d stdout=%q stderr=%q", step, code, stdout, stderr)
 		}
 	}
-	writeProjectFixtureFile(t, fixture.project, "src/notes.txt", "run /flights:spec now\n")
+	writeProjectFixtureFile(t, fixture.project, "src/notes.txt", "run /flights:doctor now\n")
 
 	code, report = fixture.sessionReport()
 	lines := strings.Split(strings.TrimSpace(report), "\n")

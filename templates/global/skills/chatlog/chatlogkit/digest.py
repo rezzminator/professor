@@ -233,7 +233,8 @@ def show(p, req, home):
 
 # ------------------------------------------------------------------ the reader's digest
 
-NOTIF = re.compile(r"<task-notification>.*?(?:<status>(.*?)</status>)?.*?(?:<summary>(.*?)</summary>)?", re.S)
+NOTIF_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
+NOTIF_SUMMARY = re.compile(r"<summary>(.*?)</summary>", re.S)
 REMINDER = re.compile(r"<system-reminder>.*?(</system-reminder>|$)", re.S)
 EVENT_LINE = re.compile(r"^L(\d+) (\S+) (\S+)")
 
@@ -245,9 +246,10 @@ def clean(line):
     if not m:
         return line
     if "<task-notification>" in line:
-        n = NOTIF.search(line)
-        st = (n.group(1) or "?") if n else "?"
-        sm = ((n.group(2) or "") if n else "").strip()
+        tail = line[line.index("<task-notification>"):]
+        s, u = NOTIF_STATUS.search(tail), NOTIF_SUMMARY.search(tail)
+        st = s.group(1).strip() if s else "?"
+        sm = u.group(1).strip() if u else ""
         return f"L{m.group(1)} {m.group(2)} NOTE task-notification · {st} · {sm[:200]}"
     line = REMINDER.sub("", line)
     if " COMPACT SUMMARY " in line:

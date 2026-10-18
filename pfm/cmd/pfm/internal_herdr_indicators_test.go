@@ -18,6 +18,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -55,6 +56,23 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	listed := make(chan struct{}, 64)
 	done := make(chan struct{})
 	const id = "6fafd8a7-5059-4288-bf58-23e60c5fdb88"
+	// A live native seat is owned by its pfm seat-host supervisor beneath the
+	// pane's shell; the proof finds it through shell_pid and the process table.
+	const shellPID, supervisorPID = 900100, 900101
+	if err := os.WriteFile(filepath.Join(values.ProcRoot, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeProcess(
+		t,
+		values.ProcRoot,
+		fakeProcessSpec{pid: shellPID, parentPID: 1, comm: "zsh", cmdline: []string{"zsh"}},
+	)
+	writeFakeProcess(t, values.ProcRoot, fakeProcessSpec{
+		pid:       supervisorPID,
+		parentPID: shellPID,
+		comm:      "pfm",
+		cmdline:   []string{"/fixture/pfm", "internal", "seat-host", "seat1"},
+	})
 	go func() {
 		defer close(done)
 		for {
@@ -128,8 +146,12 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 							)
 						}
 						result = map[string]any{
-							"type":         "pane_process_info",
-							"process_info": map[string]any{"pane_id": "w1:p1", "foreground_processes": processes},
+							"type": "pane_process_info",
+							"process_info": map[string]any{
+								"pane_id":              "w1:p1",
+								"shell_pid":            shellPID,
+								"foreground_processes": processes,
+							},
 						}
 					case "tab.get":
 						result = map[string]any{
@@ -176,21 +198,23 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 		}
 	}()
 	t.Cleanup(func() { _ = listener.Close(); <-done })
+	seat := fleetdb.Seat{
+		SeatID:          "seat1",
+		SessionID:       id,
+		Engine:          "cc",
+		Backend:         "herdr",
+		HerdrSocket:     socket,
+		HerdrPane:       "w1:p1",
+		HerdrWorkspace:  "w1",
+		HerdrTerminalID: "term1",
+		Name:            "Chat",
+		State:           "live",
+	}
+	if err := gather.StampHerdrHost(gather.NewProcFS(values.ProcRoot), &seat, supervisorPID); err != nil {
+		t.Fatal(err)
+	}
 	db := fleetdb.OpenSharedState(context.Background(), values)
-	if err := db.PutSeat(
-		context.Background(),
-		fleetdb.Seat{
-			SeatID:         "seat1",
-			SessionID:      id,
-			Engine:         "cc",
-			Backend:        "herdr",
-			HerdrSocket:    socket,
-			HerdrPane:      "w1:p1",
-			HerdrWorkspace: "w1",
-			Name:           "Chat",
-			State:          "live",
-		},
-	); err != nil {
+	if err := db.PutSeat(context.Background(), seat); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -254,7 +278,10 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 					return
 				}
 			case <-ctx.Done():
-				t.Fatalf("wanted tab label %q; painter timed out", want)
+				// Wait for the killed child so its output is complete and race-free.
+				exit := <-waited
+				waited <- exit
+				t.Fatalf("wanted tab label %q; painter timed out (exit %v): %s", want, exit, output.String())
 			}
 		}
 	}

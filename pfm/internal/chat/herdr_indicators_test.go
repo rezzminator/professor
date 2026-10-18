@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +12,12 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHerdrTabProviderNativeAndMultipleTmuxViews(t *testing.T) {
@@ -219,6 +224,91 @@ func TestHerdrTabSessionProducerForms(t *testing.T) {
 			matches, err := tabPaneSession(herdr.TabPane{Session: []byte(body)}, target)
 			if matches != tc.matches || (err != nil) != tc.fail {
 				t.Fatalf("session=%s matches=%t err=%v", body, matches, err)
+			}
+		})
+	}
+}
+
+// A native tab is painted only for a proved owner. An unproved or failed
+// ownership proof leaves that tab untouched with a diagnostic, at discovery and
+// at the final validation, and never aborts the paint of every other tab.
+func TestHerdrTabNativeOwnershipProof(t *testing.T) {
+	testjail.Fleet(t)
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	db := fleetdb.OpenSharedState(ctx, values)
+	if err := db.PutSeat(ctx, fleetdb.Seat{
+		SeatID:         "seat1",
+		SessionID:      "s1",
+		Engine:         "cc",
+		Backend:        "herdr",
+		HerdrSocket:    "endpoint",
+		HerdrPane:      "w1:p1",
+		HerdrWorkspace: "w1",
+		State:          "live",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	focused := false
+	pane := herdr.TabPane{
+		Pane:      "w1:p1",
+		Terminal:  "term1",
+		Tab:       "w1:t1",
+		Workspace: "w1",
+		Focused:   &focused,
+		Session:   []byte(`{"source":"pfm","agent":"claude","kind":"id","value":"s1"}`),
+	}
+	target := headless.Chat{ID: "s1", SeatID: "seat1", Backend: "herdr", Socket: "endpoint", Pane: "w1:p1", Live: true}
+	for _, tc := range []struct {
+		name          string
+		owned, engine bool
+		proof         error
+		views         int
+		state         string
+	}{
+		{"proved owner, engine in foreground", true, true, nil, 1, ""},
+		// A supervisor outlives an abruptly dead engine until it retires the seat.
+		{"proved owner, engine gone", true, false, nil, 1, "dead"},
+		{"proved supervisor death", false, true, nil, 1, "dead"},
+		{"ownership unproved", false, true, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			warnings := &bytes.Buffer{}
+			proof := tc.proof
+			reader := tabViewReader{
+				runtime: &config.Runtime{Paths: values},
+				warn:    warnings,
+				prove: func(_ context.Context, seat fleetdb.Seat, _ paths.Values) (fleetdb.Seat, bool, error) {
+					return seat, tc.owned, proof
+				},
+				engine: func(context.Context, fleetdb.Seat) (bool, error) { return tc.engine, nil },
+			}
+			got, err := reader.views(ctx, target, "endpoint", []herdr.TabPane{pane})
+			if err != nil || len(got) != tc.views {
+				t.Fatalf("views=%+v err=%v warnings=%q", got, err, warnings)
+			}
+			if tc.proof != nil {
+				if !strings.Contains(warnings.String(), tc.proof.Error()) {
+					t.Fatalf("unproved owner diagnostic=%q", warnings)
+				}
+				return
+			}
+			if got[0].State != tc.state || got[0].Identity != "seat1:s1" || warnings.Len() != 0 {
+				t.Fatalf("decoration=%+v warnings=%q", got[0], warnings)
+			}
+			if valid, err := got[0].Validate(ctx); err != nil || !valid {
+				t.Fatalf("proved owner valid=%t err=%v", valid, err)
+			}
+			proof = errors.New("seat seat1 supervisor birth changed during proof")
+			if valid, err := got[0].Validate(ctx); err != nil || valid ||
+				!strings.Contains(warnings.String(), "supervisor birth changed") {
+				t.Fatalf("unproved at validation valid=%t err=%v warnings=%q", valid, err, warnings)
 			}
 		})
 	}

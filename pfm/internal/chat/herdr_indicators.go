@@ -13,9 +13,12 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -104,6 +107,7 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 	}
 	addresses := tabViewReader{
 		runtime: &runtime,
+		warn:    warnings,
 		tmux: func(ctx context.Context, socket string, args ...string) (string, error) {
 			output, err := tmux.Exec(ctx, "", socket, args...).Output()
 			if err != nil {
@@ -148,11 +152,110 @@ func (writer tabIndicatorWarnings) Write(body []byte) (int, error) {
 	return len(body), nil
 }
 
+// tabViewReader's prove is the native seat ownership proof (nil: nativeAlive),
+// engine its foreground engine probe (nil: tabEngineForeground).
 type tabViewReader struct {
 	runtime  *pfmconfig.Runtime
 	tmux     func(context.Context, string, ...string) (string, error)
 	resolve  func(context.Context, int) (herdr.Location, bool, error)
+	prove    func(context.Context, fleetdb.Seat, paths.Values) (fleetdb.Seat, bool, error)
+	engine   func(context.Context, fleetdb.Seat) (bool, error)
+	warn     io.Writer
 	previous map[string][]herdr.TabDecoration
+}
+
+// liveness is a native tab's engine truth over a proved owner. proved=false
+// leaves the tab untouched: pfm never paints a pane whose owner is unproved.
+func (reader *tabViewReader) liveness(
+	ctx context.Context,
+	target headless.Chat,
+	seat fleetdb.Seat,
+) (alive, proved bool, err error) {
+	prove := reader.prove
+	if prove == nil {
+		prove = nativeAlive
+	}
+	canonical, owned, proofErr := prove(ctx, seat, reader.runtime.Paths)
+	if proofErr != nil {
+		return false, false, reader.unproved(target, proofErr)
+	}
+	if !owned {
+		return false, true, nil
+	}
+	engine := reader.engine
+	if engine == nil {
+		engine = tabEngineForeground
+	}
+	// The supervisor outlives an abruptly dead engine until it retires the seat.
+	alive, err = engine(ctx, canonical)
+	if err != nil {
+		return false, true, fmt.Errorf("probe tab engine: %w", err)
+	}
+	return alive, true, nil
+}
+
+// tabEngineForeground reports whether the seat's engine is in its pane's
+// foreground, from Herdr's pane.process_info.
+func tabEngineForeground(ctx context.Context, seat fleetdb.Seat) (bool, error) {
+	body, err := herdr.SeatRequest(
+		ctx,
+		seat.HerdrSocket,
+		"pane.process_info",
+		map[string]string{nativePaneIDKey: seat.HerdrPane},
+	)
+	if err != nil {
+		return false, fmt.Errorf("read Herdr foreground processes of %s: %w", seat.HerdrPane, err)
+	}
+	if _, err := herdr.ParseProcessInfo(body); err != nil {
+		return false, err
+	}
+	var info struct {
+		ProcessInfo struct {
+			Pane      string `json:"pane_id"`
+			Processes []struct {
+				PID   int      `json:"pid"`
+				Name  string   `json:"name"`
+				Argv0 string   `json:"argv0"`
+				Argv  []string `json:"argv"`
+			} `json:"foreground_processes"`
+		} `json:"process_info"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		return false, fmt.Errorf("decode Herdr foreground engine: %w", err)
+	}
+	if info.ProcessInfo.Pane != seat.HerdrPane || info.ProcessInfo.Processes == nil {
+		return false, fmt.Errorf("herdr process info missing pane identity or foreground_processes: %s", body)
+	}
+	id := pfmengine.ID(seat.Engine)
+	if _, err := pfmengine.Lookup(id); err != nil {
+		return false, fmt.Errorf("native seat engine: %w", err)
+	}
+	for _, process := range info.ProcessInfo.Processes {
+		if process.PID <= 0 || (process.Name == "" && process.Argv0 == "") {
+			return false, fmt.Errorf("herdr foreground process missing pid or identity")
+		}
+		for _, argv := range [][]string{{process.Name}, {process.Argv0}, process.Argv} {
+			if pfmengine.MatchCommand(id, argv, id == pfmengine.Claude) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// unproved records, through the painter's diagnostic writer (the Herdr plugin
+// log and the persistent Herdr error log), why a chat's tab was left untouched.
+func (reader *tabViewReader) unproved(target headless.Chat, proof error) error {
+	if _, err := fmt.Fprintf(
+		reader.warn,
+		"Herdr tab of %s left untouched: seat %s ownership unproved: %v\n",
+		target.ID,
+		target.SeatID,
+		proof,
+	); err != nil {
+		return fmt.Errorf("persist tab ownership failure: %w", errors.Join(proof, err))
+	}
+	return nil
 }
 
 func (reader *tabViewReader) views(
@@ -323,9 +426,10 @@ func (reader *tabViewReader) nativeView(
 	if !found || seat.ReloadPending || seat.HerdrSocket != socket || seat.HerdrPane != pane.Pane {
 		return nil, nil
 	}
-	alive, err := nativeAlive(ctx, seat)
-	if err != nil {
-		return nil, fmt.Errorf("probe tab engine: %w", err)
+	alive, proved, err := reader.liveness(ctx, target, seat)
+	if err != nil || !proved {
+		// An unproved owner never stops the other tabs.
+		return nil, err
 	}
 	d := tabView(pane, target.SeatID+":"+target.ID)
 	if !alive {
@@ -340,9 +444,9 @@ func (reader *tabViewReader) nativeView(
 			seat.ReloadPending {
 			return false, nil
 		}
-		currentAlive, err := nativeAlive(ctx, seat)
-		if err != nil {
-			return false, fmt.Errorf("revalidate tab engine: %w", err)
+		currentAlive, proved, err := reader.liveness(ctx, target, seat)
+		if err != nil || !proved {
+			return false, err
 		}
 		return currentAlive == alive, nil
 	}

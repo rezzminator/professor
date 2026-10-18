@@ -279,9 +279,23 @@ func herdrPickerLabels(t *testing.T) (string, <-chan string) {
 					Method string `json:"method"`
 					Params struct {
 						TabLabel *string `json:"tab_label"`
+						PaneID   string  `json:"pane_id"`
 					} `json:"params"`
 				}
 				if json.NewDecoder(conn).Decode(&req) != nil {
+					return
+				}
+				// Herdr answers pane.get and pane.focus with the canonical PaneInfo
+				// the backend probe and the post-birth focus both prove.
+				if req.Method == "pane.get" || req.Method == "pane.focus" {
+					body, err := json.Marshal(map[string]any{
+						"id": req.ID, "ok": true, "result": testjail.HerdrPaneInfo(req.Params.PaneID),
+					})
+					if err != nil {
+						t.Errorf("encode Herdr %s reply: %v", req.Method, err)
+						return
+					}
+					_, _ = fmt.Fprintf(conn, "%s\n", body)
 					return
 				}
 				if req.Method == "layout.apply" {

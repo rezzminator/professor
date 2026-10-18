@@ -1,9 +1,0 @@
-{
- "args": [
-  "types",
-  "{CLAUDE}",
-  "--grep",
-  "fork"
- ],
- "dirs": []
-}

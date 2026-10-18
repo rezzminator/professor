@@ -275,6 +275,8 @@ func moveNativeHere(
 func openNativeRow(
 	ctx context.Context,
 	row compose.Row,
+	primary int,
+	cache1H bool,
 	stdout, stderr io.Writer,
 	runtime config.Runtime,
 ) (handled bool, code int) {
@@ -377,6 +379,9 @@ func openNativeRow(
 				return true, 0
 			}
 			if err == nil {
+				seat, err = offerNativeAccount(ctx, seat, primary, cache1H, stderr, runtime)
+			}
+			if err == nil {
 				err = viewNative(ctx, seat, stdout, stderr)
 			}
 		}
@@ -461,6 +466,15 @@ func detachedNativeLocked(
 		)
 		if err != nil {
 			return result, err
+		}
+		// The old seat's reload schedule files are keyed by its id, which the
+		// new seat does not reuse: they go before its row, or nothing removes them.
+		if err := herdr.RemoveReloadFiles(runtime.Paths.SIDDir, seat.SeatID); err != nil {
+			return result, fmt.Errorf(
+				"new native pane %s exists; remove old seat reload files: %w",
+				born.Seat.HerdrPane,
+				err,
+			)
 		}
 		if err := db.DeleteSeat(ctx, seat.SeatID); err != nil {
 			return result, fmt.Errorf("new native pane %s exists; remove old seat: %w", born.Seat.HerdrPane, err)
@@ -547,8 +561,12 @@ func nativeRow(seat fleetdb.Seat) compose.Row {
 	}
 }
 
-// retireNative removes only the obsolete reservation after replacement succeeded.
+// retireNative removes only the obsolete reservation after replacement
+// succeeded: its reload schedule files first, then its row and recipe.
 func retireNative(ctx context.Context, values paths.Values, seat fleetdb.Seat) (returnErr error) {
+	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
+		return fmt.Errorf("retire replaced native seat %s reload files: %w", seat.SeatID, err)
+	}
 	db := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
 	if err := db.DeleteSeat(ctx, seat.SeatID); err != nil {

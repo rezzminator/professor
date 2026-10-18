@@ -324,6 +324,9 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 		if payload.IsInterrupt {
 			return nil
 		}
+		if interceptedSubmit(reporter.options.engine, payload) {
+			return nil
+		}
 		return report(herdr.StateWorking, "")
 	case herdr.EventBlocked:
 		return reporter.toolBlock(payload, report(herdr.StateBlocked, blockedMessage(payload)))
@@ -781,16 +784,13 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 	return err
 }
 
-// PayloadHook runs the hook entries that read an engine's payload on stdin and
-// answer on stdout (explore-deny and herdr-state), and the shim's shell
-// reporter herdr-shell. One dispatch branch in cmd/pfm serves all three, which
-// the dispatch line budget (arch C3) requires.
-func PayloadHook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	switch args[0] {
-	case "herdr-state":
-		return HerdrState(args[1:], stdin, stderr)
-	case "herdr-shell":
+// PayloadHook runs the Herdr reporter entries: herdr-state, which reads an
+// engine's payload on stdin, and the shim's shell reporter herdr-shell. One
+// dispatch branch in cmd/pfm serves both, which the dispatch line budget
+// (arch C3) requires.
+func PayloadHook(args []string, stdin io.Reader, stderr io.Writer) int {
+	if args[0] == "herdr-shell" {
 		return HerdrShell(args[1:], stderr)
 	}
-	return ExploreDeny(stdin, stdout, stderr)
+	return HerdrState(args[1:], stdin, stderr)
 }

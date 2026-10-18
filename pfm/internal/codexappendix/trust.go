@@ -181,34 +181,6 @@ func readReceiptNaming(account string, expected []Handler) (receiptNaming, error
 	return result, nil
 }
 
-// trustUnknown is the verdict on a handler a receipt names: the historical
-// receipt cannot verify current enabled state or trust hash.
-func trustUnknown(key string) error {
-	return fmt.Errorf(
-		"%w for hook %s: historical receipt cannot verify current enabled state or trust hash; inspect the native Codex hook state (doctor has no native readback)",
-		ErrNativeHookTrustUnknown,
-		key,
-	)
-}
-
-// HookTrustState distinguishes an absent receipt from one that cannot be
-// inspected. With handlers it answers for the set: a receipt recording none of
-// them cannot be inspected (no valid handler fingerprint); one recording any is
-// native-trust-unknown, the historical receipt being no proof of current trust.
-// Without handlers any fingerprint-shaped receipt key counts.
-func HookTrustState(account string, expected ...Handler) (recorded bool, err error) {
-	naming, err := readReceiptNaming(account, expected)
-	switch {
-	case err != nil:
-		return false, err
-	case !naming.exists:
-		return false, nil
-	case naming.firstKey != "":
-		return false, trustUnknown(naming.firstKey)
-	}
-	return false, fmt.Errorf("hook trust receipt %s has no valid handler fingerprint", hookReceiptPath(account))
-}
-
 // sourceEntry is one matcher entry of a hooks.json event, as far as the
 // receipt check reads it.
 type sourceEntry struct {

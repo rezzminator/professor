@@ -12,6 +12,25 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+// errChatEnded names a reload whose chat was ended while it waited: the end
+// marks the seat EndPending before it stops the supervisor, then retires the
+// row, so neither is a supervisor that died.
+var errChatEnded = errors.New("native reload: the chat was ended while reload waited")
+
+// supervisorGone names why the seat's supervisor no longer owns it: the chat
+// was ended (its end pending or its row retired), or the supervisor died
+// under a live seat.
+func (n *nativeReload) supervisorGone(ctx context.Context, seatID string) error {
+	current, found, err := n.db.Seat(ctx, seatID)
+	if err != nil {
+		return fmt.Errorf("native reload supervisor is dead; re-read its seat: %w", err)
+	}
+	if !found || current.EndPending {
+		return errChatEnded
+	}
+	return errors.New("native reload supervisor is dead")
+}
+
 func (n *nativeReload) seat(ctx context.Context) (fleetdb.Seat, error) {
 	seat, found, err := n.db.SeatByPane(ctx, n.request.SocketPath, n.request.Pane)
 	if err != nil {
@@ -35,7 +54,7 @@ func (n *nativeReload) seat(ctx context.Context) (fleetdb.Seat, error) {
 		return seat, fmt.Errorf("prove native reload supervisor: %w", err)
 	}
 	if !owned {
-		return seat, errors.New("native reload supervisor is dead")
+		return seat, n.supervisorGone(ctx, seat.SeatID)
 	}
 	if n.owner.SeatID == "" && n.request.Pane != seat.HerdrPane && n.request.Pane != proved.HerdrPane {
 		body, err := herdr.SeatRequest(
@@ -90,12 +109,14 @@ func (n *nativeReload) refreshTarget(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read native reload owner: %w", err)
 	}
-	if !found || current.HerdrSocket != n.owner.HerdrSocket || current.HerdrTerminalID != n.owner.HerdrTerminalID ||
+	if !found || current.EndPending {
+		return errChatEnded
+	}
+	if current.HerdrSocket != n.owner.HerdrSocket || current.HerdrTerminalID != n.owner.HerdrTerminalID ||
 		current.SeatHostPID != n.owner.SeatHostPID ||
 		current.SeatHostStart != n.owner.SeatHostStart ||
 		current.SeatHostBirth != n.owner.SeatHostBirth ||
-		current.Engine != n.owner.Engine ||
-		current.EndPending {
+		current.Engine != n.owner.Engine {
 		return errors.New("native reload seat supervisor binding changed")
 	}
 	values, err := paths.Resolve()
@@ -107,7 +128,7 @@ func (n *nativeReload) refreshTarget(ctx context.Context) error {
 		return fmt.Errorf("reprove native reload target: %w", err)
 	}
 	if !owned {
-		return errors.New("native reload supervisor is dead")
+		return n.supervisorGone(ctx, current.SeatID)
 	}
 	n.target.Pane = proved.HerdrPane
 	n.request.Pane = proved.HerdrPane

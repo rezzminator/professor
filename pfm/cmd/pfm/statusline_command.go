@@ -10,6 +10,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -137,22 +138,9 @@ func runUsageHookWithRuntime(
 	for _, account := range runtime.Config.Accounts {
 		accountDirs[account.ConfigDir] = account.ID
 	}
-	// The hook's log is stderr: a failed refresh is named there, while stdout
-	// stays the prompt text alone.
-	message, err := usagehook.Evaluate(context.Background(), usagehook.Options{
+	return hookentry.UsageHook(stdout, stderr, usagehook.Options{
 		AccountDirs:  accountDirs,
 		Version:      runtime.Version,
 		ClaudeBinary: runtime.Config.Claude.Binary,
-		Log:          stderr,
 	})
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm usage-hook: evaluate (fail-open): %v\n", err)
-		return 0
-	}
-	if message != "" {
-		if _, err := io.WriteString(stdout, message); err != nil {
-			fmt.Fprintf(stderr, "pfm usage-hook: write output (fail-open): %v\n", err)
-		}
-	}
-	return 0
 }

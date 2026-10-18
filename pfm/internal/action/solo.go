@@ -27,7 +27,15 @@ func (executor *Executor) Solo(
 	claudeBinaries ...string,
 ) (returnErr error) {
 	trail := obs.NewTrail(ctx, "action", "multi")
-	defer func() { trail.End(returnErr) }()
+	var kills soloKills
+	// The cause names what this pass closed, never a fixed label: a pass that
+	// found nothing says so, and an aborted pass reaches no state at all.
+	defer func() {
+		if returnErr == nil {
+			trail.Reach("solo", kills.cause())
+		}
+		trail.End(returnErr)
+	}()
 	if id == "" {
 		return nil
 	}
@@ -116,7 +124,7 @@ func (executor *Executor) Solo(
 					socket,
 					paneID,
 				)
-				_ = executor.tmux.KillPane(ctx, socket, paneID)
+				kills.recordPane(ctx, "solo.kill_pane", executor.tmux.KillPane(ctx, socket, paneID), socket, paneID)
 			}
 		} else if paneCrumbs[socket] == 0 && len(panes) == 1 {
 			fmt.Fprintf(
@@ -124,7 +132,7 @@ func (executor *Executor) Solo(
 				"cc: solo — closing duplicate of this chat on %s\n",
 				socket,
 			)
-			_ = executor.tmux.KillServer(ctx, socket)
+			kills.recordPane(ctx, "solo.kill_server", executor.tmux.KillServer(ctx, socket), socket, "")
 		}
 		if err := removeFile(crumbPath); err != nil {
 			return err
@@ -163,17 +171,46 @@ func (executor *Executor) Solo(
 		if _, keep := keepTTYs[strings.TrimPrefix(process.TTY, "/dev/")]; keep {
 			continue
 		}
-		if err := executor.processes.Terminate(process.PID); err == nil {
+		err := executor.processes.Terminate(process.PID)
+		if err == nil {
 			fmt.Fprintf(
 				executor.stderr,
 				"cc: solo — killed stray claude %d holding %s\n",
 				process.PID,
 				id,
 			)
+			kills.processes++
+			obs.Logger(ctx).Info("solo.kill_process", "pid", process.PID, "session_id", id)
+			continue
 		}
+		obs.Logger(ctx).Warn("solo.kill_process_failed", "pid", process.PID, "session_id", id, "err", err.Error())
 	}
-	trail.Reach("solo", "other panes killed")
 	return nil
+}
+
+// soloKills counts what one Solo pass actually closed.
+type soloKills struct {
+	panes     int
+	processes int
+}
+
+// recordPane logs one duplicate-pane (or duplicate-server) close through the
+// observability logger, not only the stderr notice, and counts it when it landed.
+func (kills *soloKills) recordPane(ctx context.Context, message string, err error, socket, paneID string) {
+	if err != nil {
+		obs.Logger(ctx).Warn(message+"_failed", "socket", socket, "pane", paneID, "err", err.Error())
+		return
+	}
+	kills.panes++
+	obs.Logger(ctx).Info(message, "socket", socket, "pane", paneID)
+}
+
+// cause is the transition cause the trail records for the pass.
+func (kills soloKills) cause() string {
+	if kills.panes == 0 && kills.processes == 0 {
+		return "no duplicates"
+	}
+	return fmt.Sprintf("closed %d duplicate panes, %d stray processes", kills.panes, kills.processes)
 }
 
 func flockContext(ctx context.Context, file *os.File) error {

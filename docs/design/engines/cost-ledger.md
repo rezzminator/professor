@@ -222,9 +222,9 @@ callmeter names the same difference as `PRE-LEDGER USD` in `report cost`, from t
 
 ## pfm tokens
 
-`pfm tokens`, `pfm tokens --session SID` and `pfm tokens --flight DIR` (`pfm/internal/tokens/costreport.go`) read each Claude chat's ledger beside its transcripts and print what the status line's markers point at. The ledger directory is `paths.CostLedgerDir`, so `PFM_COST_LEDGER_DIR` redirects it. Codex, OpenCode and `--timeline` runs have no Claude ledger and are unchanged.
+`pfm tokens` and `pfm tokens --session SID` (`pfm/internal/tokens/costreport.go`) read each Claude chat's ledger beside its transcripts and print what the status line's markers point at. The ledger directory is `paths.CostLedgerDir`, so `PFM_COST_LEDGER_DIR` redirects it. Codex and OpenCode runs have no Claude ledger and are unchanged.
 
-A chat with a ledger gets a block under `== COST LEDGER` (the flight report: `## cost ledger`), the chats dearest first:
+A chat with a ledger gets a block under `== COST LEDGER`, the chats dearest first:
 
 | Line | Source |
 | --- | --- |
@@ -240,7 +240,7 @@ A chat with a ledger gets a block under `== COST LEDGER` (the flight report: `##
 
 A chat with no ledger keeps today's output and one line, `side calls not measured (no cost ledger)` (per chat count when some chats have one). A ledger that exists and cannot be read is a read error on stderr and in the block, and exits 1, never "no ledger". The estimate columns elsewhere in the report (per-run dollars from the transcripts at the price table) are unchanged: the ledger adds a section, it replaces nothing.
 
-`--out` (the report and the flight form) gains a `costLedger` array, one object per chat with a ledger (every amount in micro-dollars, with `side`, `claudeCodeMicros`, `differenceMicros`, `beforeLedgerMicros`, `sessionMicros`, `byAgent`, `bySource`), only when a ledger exists, so a document from a machine without ledgers is byte-identical to before.
+`--out` gains a `costLedger` array, one object per chat with a ledger (every amount in micro-dollars, with `side`, `claudeCodeMicros`, `differenceMicros`, `beforeLedgerMicros`, `sessionMicros`, `byAgent`, `bySource`), only when a ledger exists, so a document from a machine without ledgers is byte-identical to before.
 
 ## Config and environment
 

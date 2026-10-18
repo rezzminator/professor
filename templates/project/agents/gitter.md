@@ -33,7 +33,7 @@ The dispatching brief provides:
 - `$PIPELINE` — kebab-case feature name
 - `$FLIGHT` — kebab-case flight name, or `none` when not flight-owned. Only meaningful for MERGE and DOCS-COMMIT.
 - **Phase** — one of the six dispatch-table phases
-- **Residue dir** — where ports.md/the review report/evidence live; a flight brief names the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`. Paths always travel IN the brief, never derived here.
+- **Residue dir** — where ports.md/the review report/evidence live. Paths always travel IN the brief, never derived here.
 - `Archive:` — DOCS-COMMIT only: pipeline dirs and consumed queue-spec files to move to tmp cold storage after committing, or `none`
 
 **Derived:** `$WORKTREE = .worktrees/$PIPELINE`
@@ -51,7 +51,7 @@ The spawn brief names a **Phase**. Card phases: `Read` the named card in `docs/c
 | PUSH | card `gitter-phase-push.md` — hard-gated by § Remote Publication Boundary |
 | PULL | inline below |
 
-**MERGE hard gate (core)** — before any git operation touches main, the merge-gating verdict must be a FILE read from disk: the brief-named REPORT_PATH, every `F{n}` finding `status: resolved @sha` or `waived — {ruling}` (card § 1). File absent or any finding `open` → REFUSE and name it — a verdict asserted in the dispatch brief is a claim this gate cannot audit and NEVER satisfies it. Never merge past an open review, regardless of card-read status.
+**MERGE hard gate (core)** — before any git operation touches main, the merge-gating verdict must be a FILE read from disk: the brief-named REPORT_PATH, every `F{n}` finding `status: resolved @sha`, `resolved in {file:line}` or `waived — {ruling}` (card § 1). File absent or any finding `open` → REFUSE and name it — a verdict asserted in the dispatch brief is a claim this gate cannot audit and NEVER satisfies it. Never merge past an open review, regardless of card-read status.
 
 No phase named = freeform request: handle with your git expertise — read commands (status, log, diff, branch, show) run freely; write operations follow § Rules and the matching card when one applies.
 

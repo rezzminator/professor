@@ -1,9 +1,11 @@
 package obs
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestParseLevelAcceptsEveryNameAndTheWarningAlias pins the one level parser:
@@ -72,5 +74,32 @@ func TestLevelNameRoundTripsEveryLevel(t *testing.T) {
 	}
 	if got := LevelName(slog.Level(3)); got != "info" {
 		t.Fatalf("LevelName(3) = %q, want the floor level info — a level between two names reads as the lower", got)
+	}
+}
+
+// TestRoutineLevelPicksTheLevelByOutcome pins the rule every per-call door
+// shares (db.statement, db.open, tmux.exec): the failure level on err, INFO
+// when retried or slow, DEBUG for a routine success.
+func TestRoutineLevelPicksTheLevelByOutcome(t *testing.T) {
+	failed := errors.New("boom")
+	for _, tc := range []struct {
+		name    string
+		err     error
+		failure slog.Level
+		retries int
+		elapsed time.Duration
+		want    slog.Level
+	}{
+		{"routine success", nil, slog.LevelError, 0, time.Millisecond, slog.LevelDebug},
+		{"just under slow", nil, slog.LevelError, 0, SlowCall - time.Millisecond, slog.LevelDebug},
+		{"slow success", nil, slog.LevelError, 0, SlowCall, slog.LevelInfo},
+		{"retried success", nil, slog.LevelError, 2, time.Millisecond, slog.LevelInfo},
+		{"failure at the door's level", failed, slog.LevelError, 0, time.Millisecond, slog.LevelError},
+		{"failure beats slow and retried", failed, slog.LevelError, 3, 2 * SlowCall, slog.LevelError},
+		{"failure the door keeps soft", failed, slog.LevelInfo, 0, 5 * SlowCall, slog.LevelInfo},
+	} {
+		if got := RoutineLevel(tc.err, tc.failure, tc.retries, tc.elapsed); got != tc.want {
+			t.Errorf("%s: level = %s, want %s", tc.name, got, tc.want)
+		}
 	}
 }

@@ -259,7 +259,7 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 			handled, code := openNativeRow(
 				context.Background(),
 				compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
-				&stdout, &stderr, runtime,
+				0, false, &stdout, &stderr, runtime,
 			)
 			wantCode := 0
 			if tc.diagnostic != "" {
@@ -338,7 +338,7 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 			handled, code := openNativeRow(
 				context.Background(),
 				compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
-				&stdout, &stderr, runtime,
+				0, false, &stdout, &stderr, runtime,
 			)
 			current, found, err := db.Seat(context.Background(), seat.SeatID)
 			if err != nil || !found {

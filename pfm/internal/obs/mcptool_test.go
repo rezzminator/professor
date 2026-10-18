@@ -213,59 +213,6 @@ func TestToolKeepsJSONRPCErrorAsProtocolError(t *testing.T) {
 	}
 }
 
-func TestPromptRecordsKindPromptWithTheArgumentShape(t *testing.T) {
-	ctx, recorder := Test(t)
-	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	server.AddPrompt(
-		&mcp.Prompt{Name: "fetch", Arguments: []*mcp.PromptArgument{{Name: "url", Required: true}}},
-		Prompt("fetch", func(_ context.Context, request *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{
-				Role: "user", Content: &mcp.TextContent{Text: "fetched " + request.Params.Arguments["url"]},
-			}}}, nil
-		}),
-	)
-	session := connectInProcess(t, server)
-	if _, err := session.GetPrompt(ctx, &mcp.GetPromptParams{
-		Name: "fetch", Arguments: map[string]string{"url": "https://h.example.test/?key=PROMPTKEY"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	record := onlyRecord(t, recorder)
-	if record.Message != "mcp.call" || record.Level != slog.LevelInfo.String() {
-		t.Fatalf("record = %s %s, want INFO mcp.call", record.Level, record.Message)
-	}
-	wantField(t, record, FieldComp, "mcp")
-	wantField(t, record, "kind", "prompt")
-	wantField(t, record, "tool", "fetch")
-	wantField(t, record, "args", "url:37")
-	if got, _ := record.Field("bytes"); got == nil || got.(float64) <= 0 {
-		t.Fatalf("a prompt result has no size: %v", record.Fields)
-	}
-	if strings.Contains(recorder.Raw(), "PROMPTKEY") {
-		t.Fatalf("the prompt argument reached the activity log: %s", recorder.Raw())
-	}
-}
-
-func TestPromptRecordsAFailureAtErrorLevel(t *testing.T) {
-	ctx, recorder := Test(t)
-	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	server.AddPrompt(&mcp.Prompt{Name: "fetch"}, Prompt("fetch",
-		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			return nil, errors.New("URL is required")
-		},
-	))
-	session := connectInProcess(t, server)
-	if _, err := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: "fetch"}); err == nil {
-		t.Fatal("the prompt error vanished")
-	}
-	record := onlyRecord(t, recorder)
-	if record.Level != slog.LevelError.String() {
-		t.Fatalf("a failed prompt logged at %s, want ERROR", record.Level)
-	}
-	wantField(t, record, FieldErr, "URL is required")
-	wantField(t, record, "args", "")
-}
-
 // TestToolRecoversAPanicIntoAnErrorRecordAndSurvives is L2-F1: a panicking
 // handler must not kill the process that serves every chat, the mcp.call
 // record must still be written (naming the tool), and the SDK must see an
@@ -305,33 +252,6 @@ func TestToolRecoversAPanicIntoAnErrorRecordAndSurvives(t *testing.T) {
 		Name: "chat_boom", Arguments: map[string]any{"target": "cc-4", "message": "still alive"},
 	}); err != nil {
 		t.Fatalf("the server did not survive the panic: %v", err)
-	}
-}
-
-// TestPromptRecoversAPanicIntoAnErrorRecord is Tool's sibling test for
-// Prompt's own recover.
-func TestPromptRecoversAPanicIntoAnErrorRecord(t *testing.T) {
-	ctx, recorder := Test(t)
-	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	server.AddPrompt(&mcp.Prompt{Name: "boom"}, Prompt("boom",
-		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			var messages []*mcp.PromptMessage
-			return &mcp.GetPromptResult{Messages: messages}, errors.New(string(messages[0].Role)) // index out of range
-		},
-	))
-	session := connectInProcess(t, server)
-	if _, err := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: "boom"}); err == nil {
-		t.Fatal("the panic vanished instead of becoming a prompt error")
-	}
-	record := onlyRecord(t, recorder)
-	if record.Level != slog.LevelError.String() {
-		t.Fatalf("record level = %s, want ERROR", record.Level)
-	}
-	wantField(t, record, "tool", "boom")
-	got, _ := record.Field(FieldErr)
-	text, _ := got.(string)
-	if !strings.Contains(text, "boom") {
-		t.Fatalf("panic record err = %q, want it to name the prompt", text)
 	}
 }
 

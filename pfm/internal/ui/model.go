@@ -196,7 +196,16 @@ type Model struct {
 	applyKill          func(KillChange) error
 	applyDeactivate    func(compose.Row) error
 	deactivatedSockets map[string]bool
-	killStatus         string
+	// deactivatedRows holds, per deactivated live seat, the resumable row it
+	// became: a refresh whose snapshot still lists the seat live (the stop has
+	// not reached the roster yet) shows this row in its place, so the cursor
+	// stays on the conversation just deactivated.
+	deactivatedRows map[string]compose.Row
+	// nativeEndSeats marks the deactivated seats that are native (Herdr)
+	// panes: their stop only schedules a detached end worker, so their
+	// resumable row refuses to open while the roster still lists the seat live.
+	nativeEndSeats map[string]bool
+	killStatus     string
 	// deck is the deck layer's own state: the reader's home and the arrival
 	// clock of chats that appeared while the picker was open (deckstate.go).
 	deck deckState
@@ -240,6 +249,8 @@ func NewModel(snapshot Snapshot) Model {
 		applyKill:           snapshot.ApplyKill,
 		applyDeactivate:     snapshot.ApplyDeactivate,
 		deactivatedSockets:  make(map[string]bool),
+		deactivatedRows:     make(map[string]compose.Row),
+		nativeEndSeats:      make(map[string]bool),
 		statsSampler:        snapshot.StatsSampler,
 		samplingContext:     snapshot.SamplingContext,
 		cosmosSampler:       snapshot.CosmosSampler,
@@ -525,6 +536,10 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return model, nil
 			default:
+				if model.nativeEndPending(row) {
+					model.killStatus = "resume refused — " + row.Name + " is still ending; resume once its pane has closed"
+					return model, nil
+				}
 				if isNewChatActionKind(row.Kind) {
 					row.Account = model.accountForKind(row.Kind)
 				}
@@ -988,25 +1003,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 			rows = append([]compose.Row{model.rows[previous]}, rows...)
 		}
 	}
-	rowsAdjusted := false
-	if len(model.deactivatedSockets) != 0 {
-		live := trackedChatSockets(rows)
-		for socket := range model.deactivatedSockets {
-			if !live[socket] {
-				delete(model.deactivatedSockets, socket)
-			}
-		}
-		filtered := make([]compose.Row, 0, len(rows))
-		for index := range rows {
-			row := &rows[index]
-			if row.Kind.IsLiveSeat() && model.deactivatedSockets[liveSeatKey(*row)] {
-				rowsAdjusted = true
-				continue
-			}
-			filtered = append(filtered, *row)
-		}
-		rows = filtered
-	}
+	rows, rowsAdjusted := model.settleDeactivated(rows)
 	if model.skyEnabled {
 		before := trackedChatSockets(model.rows)
 		after := trackedChatSockets(rows)
@@ -1077,31 +1074,6 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.rebuildCosmosPast()
 	model.mergeCosmosSeats()
 	model.rebuild(follow, fallback)
-}
-
-func (model *Model) deactivate(row compose.Row) {
-	if model.applyDeactivate == nil {
-		model.killStatus = "deactive refused — this picker cannot stop chats"
-		return
-	}
-	if err := model.applyDeactivate(row); err != nil {
-		model.killStatus = fmt.Sprintf("deactive failed — %s: %v", row.Name, err)
-		return
-	}
-	model.deactivatedSockets[liveSeatKey(row)] = true
-	model.killStatus = "deactivated — " + row.Name + " — ready to resume"
-	key := compose.RowKey(row)
-	fallback := model.cursor
-	kept := model.rows[:0]
-	for index := range model.rows {
-		candidate := &model.rows[index]
-		if compose.RowKey(*candidate) != key {
-			kept = append(kept, *candidate)
-		}
-	}
-	model.rows = kept
-	model.actionIndex = 0
-	model.rebuild("", fallback)
 }
 
 func (model *Model) toggleKilled() {

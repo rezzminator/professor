@@ -78,6 +78,27 @@ check_change() { # one manifest input changes while the old label stays put
 
 for scenario in file added executable symlink dockerfile target arg platform; do check_change "$scenario"; done
 
+# A .dockerignore allow-list (`*`, then `!path` lines) is the build context docker sends: the key
+# covers .dockerignore and the allowed paths alone, so an edit to any other file under the context
+# (a check script beside the Dockerfile) neither rebuilds the image nor forks the shared container.
+reset_context
+printf '*\n!pfm-dev.Dockerfile\n!data\n' >"$CTX/.dockerignore"
+allow_base="$(fence_image_key "$COMPOSE" pfm-dev)"
+printf 'changed\n' >"$CTX/other"
+allow_other="$(fence_image_key "$COMPOSE" pfm-dev)"
+printf 'changed\n' >"$CTX/data"
+allow_data="$(fence_image_key "$COMPOSE" pfm-dev)"
+printf '*\n!pfm-dev.Dockerfile\n!data\n!other\n' >"$CTX/.dockerignore"
+allow_list="$(fence_image_key "$COMPOSE" pfm-dev)"
+if [ -n "$allow_base" ] && [ "$allow_other" = "$allow_base" ] && [ "$allow_data" != "$allow_base" ] && [ "$allow_list" != "$allow_data" ]; then
+  ok "a .dockerignore allow-list keys only the paths it lets through"
+else bad "dockerignore allow-list" "base=$allow_base other=$allow_other data=$allow_data list=$allow_list"; fi
+printf '*.md\n' >"$CTX/.dockerignore"
+fence_image_key "$COMPOSE" pfm-dev >/dev/null 2>"$T/ignore.err"; rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'INPUTS-UNDERIVABLE pfm-dev: .dockerignore' "$T/ignore.err"; then
+  ok "a .dockerignore that is no allow-list is underivable, never guessed"
+else bad "dockerignore form" "rc=$rc" "$(cat "$T/ignore.err")"; fi
+
 reset_context
 dev_key="$(fence_image_key "$COMPOSE" pfm-dev)"
 sim_key="$(fence_image_key "$COMPOSE" pfm-sim)"

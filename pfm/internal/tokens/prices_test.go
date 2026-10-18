@@ -213,9 +213,8 @@ func TestLoadServedServesTheEmbeddedTableOfflineWithoutAClone(t *testing.T) {
 func TestAFailedRefreshServesTheCloneTableOnceAndLeadsTheGapsLine(t *testing.T) {
 	root := fixture(t, "claude/projects")
 	modes := map[string][]string{
-		"report":   {"--since", "99999d", "--root", root},
-		"codex":    {"--codex", "--since", "99999d", "--codex-root", fixture(t, "codex")},
-		"timeline": {"--timeline", fixture(t, "timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl")},
+		"report": {"--since", "99999d", "--root", root},
+		"codex":  {"--codex", "--since", "99999d", "--codex-root", fixture(t, "codex")},
 	}
 	for mode, args := range modes {
 		t.Run(mode, func(t *testing.T) {

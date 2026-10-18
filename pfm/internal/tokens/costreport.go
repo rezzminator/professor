@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/costledger"
-	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -580,50 +579,4 @@ func (a *auditor) reportCostLedger(t *totals) {
 	for _, line := range report.body(a.opts.top, heading) {
 		a.print(line)
 	}
-}
-
-// flightLedgerLines is the flight report's cost-ledger lines: the claude
-// sessions the flight's matched agents ran under, each in a fenced block.
-func (a *auditor) flightLedgerLines(matched []flightRow) []string {
-	var chats []ledgerChat
-	seen := map[string]bool{}
-	for _, row := range matched {
-		r := row.run
-		if r.engine != pricing.EngineClaude || seen[r.sid] {
-			continue
-		}
-		seen[r.sid] = true
-		chats = append(chats, ledgerChat{sid: r.sid, title: a.mainTitle(r.sid)})
-	}
-	report := a.measureLedgers(chats)
-	if len(report.measured) == 0 && len(report.failed) == 0 {
-		return report.body(0, "")
-	}
-	out := []string{"## cost ledger", ""}
-	for _, s := range report.measured {
-		out = append(out, "```")
-		out = append(out, s.lines(math.MaxInt)...)
-		out = append(out, "```", "")
-	}
-	out = append(out, report.failed...)
-	if report.unmeasured != 0 {
-		out = append(
-			out,
-			noLedgerLine+" for "+strconv.Itoa(report.unmeasured)+" of "+strconv.Itoa(report.chats)+" sessions",
-		)
-	}
-	for len(out) != 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
-	}
-	return out
-}
-
-// mainTitle is the title of the main chat of session sid, "" when no main run holds it.
-func (a *auditor) mainTitle(sid string) string {
-	for _, r := range a.runs {
-		if r.kind == kindMain && r.sid == sid {
-			return r.title
-		}
-	}
-	return ""
 }

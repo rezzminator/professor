@@ -48,7 +48,7 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 ## The outputStyle gate
 
-`infra/check-self-hosted-manifest.sh:247-265` (run by `.claude/scripts/check-templates.sh` and `.claude/scripts/dev.sh iso test templates`) fails when:
+`infra/check-self-hosted-manifest.sh:247-265` (run by `.claude/scripts/test.sh`'s `manifest` check and `.claude/scripts/dev.sh iso test templates`) fails when:
 
 - `.claude/output-styles/` is tracked or exists on disk;
 - the manifest advertises `installed.output_styles`;

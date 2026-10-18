@@ -116,14 +116,13 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | 39 | `cmd/pfm/epic_inject_command.go` | `cmd/pfm/internal_epic_inject.go` | `pfm internal epic-inject` |
 | 40 | `cmd/pfm/exit_close_command.go` | `cmd/pfm/internal_exit_close.go` | `pfm internal exit-close` |
 | 41 | `cmd/pfm/exit_intercept_command.go` | `cmd/pfm/internal_exit_intercept.go` | `pfm internal exit-intercept` |
-| 42 | `cmd/pfm/explore_deny_command.go` | `cmd/pfm/internal_explore_deny.go` | `pfm internal explore-deny` |
 | 43 | `cmd/pfm/launch_command.go` | `cmd/pfm/internal_launch.go` | `pfm internal launch` |
 | 44 | `cmd/pfm/launcher_repair_command.go` | `cmd/pfm/internal_launcher_repair.go` | `pfm internal launcher-repair` |
 | 45 | `cmd/pfm/reload_intercept_command.go` | `cmd/pfm/internal_reload_intercept.go` | `pfm internal reload-intercept` |
 | 46 | `cmd/pfm/then_command.go` | `cmd/pfm/internal_then.go` | `pfm internal then` |
 | 47 | `cmd/pfm/update_notice_command.go` | `cmd/pfm/internal_update_check.go` | `pfm internal update-check`; it is a hook entry the installer wires, so the entry unit wins over the update unit |
 | 48 | `cmd/pfm/prompt_block.go` | `cmd/pfm/internal_prompt_block.go` | the UserPromptSubmit block answer only hook entries use |
-| 49–60 | `cmd/pfm/{chat_server_command,claude_version_command,clear_kill_jail,codex_launch_compat,compact_nudge_command,epic_inject_command,exit_close_command,exit_close_reload,exit_intercept_command,explore_deny_command,launch_command,reload_intercept_command}_test.go` | `cmd/pfm/internal_{chat_server,claude_version,clear_kill_jail,codex_launch,compact_nudge,epic_inject,exit_close,exit_close_reload,exit_intercept,explore_deny,launch,reload_intercept}_test.go` | tests follow #32–#45 |
+| 49–60 | `cmd/pfm/{chat_server_command,claude_version_command,clear_kill_jail,codex_launch_compat,compact_nudge_command,epic_inject_command,exit_close_command,exit_close_reload,exit_intercept_command,launch_command,reload_intercept_command}_test.go` | `cmd/pfm/internal_{chat_server,claude_version,clear_kill_jail,codex_launch,compact_nudge,epic_inject,exit_close,exit_close_reload,exit_intercept,launch,reload_intercept}_test.go` | tests follow #32–#45 |
 | 61 | `cmd/pfm/update_notice_command_test.go` | `cmd/pfm/internal_update_check_test.go` | follows #47 |
 
 `kill-exit`, `primary-get`, `primary-set`, `stale` are dispatched inline in `main.go:runInternal` and `reload-run` is the reload verb's worker in the reload file — they have no file of their own and get none (no stubs).

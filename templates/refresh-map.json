@@ -37,22 +37,28 @@
     "global/agents/documenter.md": {
       "curated": true
     },
-    "global/agents/foreman-pro.md": {
+    "global/agents/flights-foreman-mini.md": {
       "curated": true
     },
-    "global/agents/gpt-flights-mechanical-executor.md": {
+    "global/agents/flights-foreman-pro.md": {
       "curated": true
     },
-    "global/agents/gpt-foreman-pro.md": {
+    "global/agents/flights-worker-pro.md": {
+      "curated": true
+    },
+    "global/agents/flights-lander-mini.md": {
+      "curated": true
+    },
+    "global/agents/flights-lander-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-flights-foreman-pro.md": {
       "curated": true
     },
     "global/agents/gpt-flights-foreman.md": {
       "curated": true
     },
     "global/agents/gpt-flights-lander.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-speccer.md": {
       "curated": true
     },
     "global/agents/gpt-reviewer-pro.md": {
@@ -85,9 +91,6 @@
     "global/agents/sol.md": {
       "curated": true
     },
-    "global/agents/agent-optimizer.md": {
-      "curated": true
-    },
     "global/agents/reviewer-pro.md": {
       "curated": true
     },
@@ -101,9 +104,6 @@
       "curated": true
     },
     "global/agents/tracer.md": {
-      "curated": true
-    },
-    "global/agents/imagine.md": {
       "curated": true
     },
     "global/agents/imagination.md": {
@@ -121,25 +121,13 @@
     "global/commands/context-meter.md": {
       "curated": true
     },
-    "global/commands/flights/init.md": {
-      "curated": true
-    },
     "global/commands/h/gh.md": {
       "curated": true
     },
     "global/commands/housekeeping.md": {
       "curated": true
     },
-    "global/commands/imagine/build-fast.md": {
-      "curated": true
-    },
-    "global/commands/imagine/build-spec.md": {
-      "curated": true
-    },
-    "global/commands/imagine/build.md": {
-      "curated": true
-    },
-    "global/commands/imagine/callmeter.md": {
+    "global/commands/imagine.md": {
       "curated": true
     },
     "global/commands/iterative-improvement.md": {
@@ -173,12 +161,6 @@
       "curated": true
     },
     "global/commands/quality/prompt.md": {
-      "curated": true
-    },
-    "global/skills/imagine-core/SKILL.md": {
-      "curated": true
-    },
-    "global/skills/imagine-core/live.md": {
       "curated": true
     },
     "global/skills/ultimate/SKILL.md": {

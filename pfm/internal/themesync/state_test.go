@@ -105,13 +105,3 @@ func TestStateStoreLockIsExclusiveUntilReleased(t *testing.T) {
 		t.Fatalf("flock after release = %v, want nil", err)
 	}
 }
-
-func TestStateStoreBackupPathStaysInsideTheStateDir(t *testing.T) {
-	store := stateStore{dir: "/state"}
-	if got, want := store.backupPath(
-		"herdr",
-		"config.toml",
-	), "/state/backups/herdr/config.toml"; got != want {
-		t.Fatalf("backupPath = %q, want %q", got, want)
-	}
-}

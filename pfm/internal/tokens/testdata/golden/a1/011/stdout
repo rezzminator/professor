@@ -1,5 +1,0 @@
-TIMELINE reviewer · unobtanium-9 · effort high · 2 calls · wall 6s · peak ctx 5.2K · out 110 tok · tool errors 0 · results >20KB 0 · n/a · {FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t2.jsonl
-  #1 10:01:42 after - · ctx 5.0K · out 50 · n/a · Glob: **/*.go 12ch 1.0s
-  #2 10:01:46 after 3.0s · ctx 5.2K · out 60 · n/a · (no tools)
-pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
-data gaps: 2 UNPRICED calls {"claude-unobtanium-9":2} — tokens counted, dollars "n/a"; check exact IDs and available rates with pfm model-cost --json --all

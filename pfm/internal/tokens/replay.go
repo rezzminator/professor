@@ -27,18 +27,7 @@ type repeatedCommand struct {
 	n   float64
 }
 
-// timelineRow is one model call of a --timeline run, or a response that billed
-// only its advisor (consultOnly: no call, no context).
-type timelineRow struct {
-	n, ts, ctx, out float64
-	advisor         advisorSpend // the consultations the call billed; their dollars are part of usd
-	consultOnly     bool
-	gap, usd        *float64
-	tools           []*timelineSlot
-}
-
-// run is one transcript replayed: one main chat loop, one sub-agent, or (for
-// --flight) one Codex thread.
+// run is one transcript replayed: one main chat loop or one sub-agent.
 type run struct {
 	file, kind, sid, project, engine, agentID string
 	tok                                       tokenCounts
@@ -79,11 +68,8 @@ type run struct {
 	tl                   [48]float64
 	tlf                  [5][48]float64
 	firstTS              float64
-	timeline             []timelineRow
-	recT0, recT1, big    float64
 	model, effort        string
 	cmp                  string
-	segments             float64 // Codex: resumed or compacted segments
 }
 
 // landing is one tool result carried through the run's later calls.
@@ -176,7 +162,6 @@ func (a *auditor) replay(file string, c *collected) *run {
 	}
 	var landed []landing
 	cmdCount := newObject()
-	lastToolTS := math.NaN()
 	copiedCalls := 0
 	seenReads, counted := map[string]bool{}, 0
 	countPending := func() {
@@ -188,7 +173,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 				}
 				seenReads[e.target] = true
 			}
-			a.countContext(r, *e, project, cmdCount, &lastToolTS)
+			a.countContext(r, *e, project, cmdCount)
 		}
 		counted = len(pending)
 	}
@@ -224,17 +209,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 				r.models.bump(modelKeyOf(call), 0)
 				r.efforts.bump(call.effort, 0)
 				r.span(call.ts)
-				advisor := a.bookAdvisors(r, call, call.ts, project)
-				if c.timelineRun {
-					var usd *float64
-					if advisor.unpriced == 0 {
-						usd = &advisor.usd
-					}
-					r.timeline = append(
-						r.timeline,
-						timelineRow{n: r.calls, ts: call.ts, consultOnly: true, usd: usd, tools: c.issued[e.call]},
-					)
-				}
+				a.bookAdvisors(r, call, call.ts, project)
 			}
 			continue
 		}
@@ -343,11 +318,6 @@ func (a *auditor) replay(file string, c *collected) *run {
 		row, _, found := a.prices.rates(call.model, ctx)
 		parts, priced := row.ResponseRequestsCostParts(call.requests)
 		modelKey := modelKeyOf(call)
-		gap := (*float64)(nil)
-		if !math.IsNaN(lastToolTS) {
-			value := ts - lastToolTS
-			gap = &value
-		}
 		if !found || !priced {
 			// An unpriced model is IGNORANCE, not a $0 spend: its tokens stay in every
 			// token total and its run renders "n/a", exactly as the Codex side does.
@@ -364,21 +334,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 			r.efforts.bump(call.effort, 0)
 			r.tok.add(inp, out, cw5, cw1, cr)
 			g.tok.add(inp, out, cw5, cw1, cr)
-			advisor := a.bookAdvisors(r, call, ts, project)
-			if c.timelineRun {
-				r.timeline = append(
-					r.timeline,
-					timelineRow{
-						n:       r.calls,
-						ts:      ts,
-						gap:     gap,
-						ctx:     ctx,
-						out:     out,
-						advisor: advisor,
-						tools:   c.issued[e.call],
-					},
-				)
-			}
+			a.bookAdvisors(r, call, ts, project)
 			r.mark(ts, ctx)
 			prev = &previousCall{ctx, ts, call.model}
 			continue
@@ -403,22 +359,6 @@ func (a *auditor) replay(file string, c *collected) *run {
 		r.tok.add(inp, out, cw5, cw1, cr)
 		r.calls++
 		advisor := a.bookAdvisors(r, call, ts, project)
-		if c.timelineRun {
-			value := usd + advisor.usd
-			r.timeline = append(
-				r.timeline,
-				timelineRow{
-					n:       r.calls,
-					ts:      ts,
-					gap:     gap,
-					ctx:     ctx,
-					out:     out,
-					usd:     &value,
-					advisor: advisor,
-					tools:   c.issued[e.call],
-				},
-			)
-		}
 		depth := "4 · calls 301+"
 		switch {
 		case r.calls <= 50:
@@ -491,7 +431,6 @@ func (a *auditor) replay(file string, c *collected) *run {
 		}
 		return nil
 	}
-	r.recT0, r.recT1, r.big = c.recT0, c.recT1, c.big
 	r.distinctRead = float64(len(c.seenReads))
 	a.finishRun(r, landed, cmdCount, project)
 	return r

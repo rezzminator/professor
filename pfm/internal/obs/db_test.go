@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // TestSQLRecordsShapeNeverText: one comp=db record per statement carrying
@@ -99,5 +102,53 @@ func TestSQLOpenRecordsKindPathAndResult(t *testing.T) {
 	requireDur(t, records[0])
 	if records[1].Level != slog.LevelError.String() {
 		t.Fatalf("failed open at %s, want ERROR", records[1].Level)
+	}
+}
+
+// TestDatabaseRecordsLevelByOutcome pins which db.statement and db.open
+// records reach INFO: a fast, first-try success is DEBUG (it was ~half of
+// every log line), while a failure, a retried statement and a call that took
+// SlowCall or longer stay visible at the levels that explain them.
+func TestDatabaseRecordsLevelByOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		elapsed time.Duration
+		retries int
+		err     error
+		want    string // db.statement
+		open    string // db.open: an open has no retry count
+	}{
+		{"fast success", 3 * time.Millisecond, 0, nil, "DEBUG", "DEBUG"},
+		{"slow success", SlowCall, 0, nil, "INFO", "INFO"},
+		{"retried success", time.Millisecond, 1, nil, "INFO", "DEBUG"},
+		{"failure", time.Millisecond, 0, errors.New("database is locked"), "ERROR", "ERROR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := clock.NewFake(time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC))
+			ctx, recorder := Test(t, WithTestClock(fake))
+			statement := SQL(ctx, "fleet", "SELECT value FROM meta WHERE key=?")
+			statement.Retries = tc.retries
+			fake.Advance(tc.elapsed)
+			statement.End(1, tc.err)
+			finish := SQLOpen(ctx, "store", "/state/pfm.db")
+			fake.Advance(tc.elapsed)
+			finish(tc.err)
+			records := recorder.Records()
+			if len(records) != 2 {
+				t.Fatalf("records = %d, want db.statement and db.open: %s", len(records), recorder.Raw())
+			}
+			for index, message := range []string{"db.statement", "db.open"} {
+				if records[index].Message != message {
+					t.Fatalf("record %d = %s, want %s", index, records[index].Message, message)
+				}
+				wantLevel := tc.want
+				if message == "db.open" {
+					wantLevel = tc.open
+				}
+				if records[index].Level != wantLevel {
+					t.Errorf("%s at %s, want %s: %s", message, records[index].Level, wantLevel, recorder.Raw())
+				}
+			}
+		})
 	}
 }

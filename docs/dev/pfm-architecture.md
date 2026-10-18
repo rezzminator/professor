@@ -1,6 +1,6 @@
 # pfm: architecture for agent maintainers
 
-**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`). Nothing here is built yet. Code moves through `/flights:spec` and the fenced executor, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
+**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`). Nothing here is built yet. Code moves through a `flights-foreman` tier in the fence, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
 
 ## Contents
 
@@ -78,7 +78,7 @@ pfm/
     hooks/                          # NEW. Harness hook bodies with no other domain home.
       README.md
       table.go                      # THE entry table {Entry, Event, Matcher, Engines, Summary}; installer reads it
-      explore_deny.go epic_inject.go reload_intercept.go exit_intercept.go exit_close.go …
+      epic_inject.go reload_intercept.go exit_intercept.go exit_close.go …
       <entry>_test.go
     doctor/                         # NEW. From cmd/pfm/doctor.go + *_doctor.go.
       README.md doctor.go           # probe runner; three distinct verdicts: healthy / broken / could-not-look
@@ -355,8 +355,6 @@ Commands:        .claude/scripts/dev.sh iso test pfm
                  pfm/scripts/arch-check.sh            (expected: PASS, baseline <name> shrinks by <k>)
 Acceptance:      <observable behavior> · C3 budget lowered to <N>
 ```
-
-Work-tree anatomy for each flight: `$HOME/.local/state/pfm/flights/{project}/<flight>/{index.md,<level>-<letter>.md,run.md,doctor.md}`, at most three levels deep. Evidence a later task needs is quoted into its task file.
 
 ## 10. Open rulings
 

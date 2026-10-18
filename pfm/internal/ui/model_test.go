@@ -197,8 +197,8 @@ func TestChatActionCarouselAndTheLaunchRowArrows(t *testing.T) {
 	if command != nil || model.Result().Kind != OutcomeNone || len(deactivated) != 1 || deactivated[0].Socket != "s" {
 		t.Fatalf("deactive carousel Enter result=%#v command=%v deactivated=%#v", model.Result(), command, deactivated)
 	}
-	if model.FilteredRowCount() != 0 {
-		t.Fatalf("deactivated live row remained visible: %#v", model.VisibleRows())
+	if row, ok := model.selectedRow(); !ok || row.ID != "live" || row.Kind.IsLiveSeat() || row.Socket != "" {
+		t.Fatalf("deactivated live row did not stay as a resumable row under the cursor: %#v", model.VisibleRows())
 	}
 }
 
@@ -955,7 +955,7 @@ func TestNativeLifecycleUsesBackendAwareAppliers(t *testing.T) {
 					t.Fatalf("kill not applied: calls=%d status=%q", kills, model.killStatus)
 				}
 			case "deactivate":
-				if stops != 1 || len(model.rows) != 0 {
+				if stops != 1 || len(model.rows) != 1 || model.rows[0].Kind.IsLiveSeat() || model.rows[0].PaneID != "" {
 					t.Fatalf("deactivate not applied: calls=%d status=%q", stops, model.killStatus)
 				}
 			default:
@@ -982,7 +982,13 @@ func TestNativeDeactivationKeepsSiblingPaneAfterRefresh(t *testing.T) {
 	model.deactivate(a)
 	model.applyRefresh(Snapshot{Rows: []compose.Row{a, b}})
 	rows := model.VisibleRows()
-	if len(rows) != 1 || rows[0].ID != b.ID {
+	var live []string
+	for _, row := range rows {
+		if row.Kind.IsLiveSeat() {
+			live = append(live, row.ID)
+		}
+	}
+	if len(rows) != 2 || len(live) != 1 || live[0] != b.ID {
 		t.Fatalf("native deactivate hid sibling or revived stopped pane: %+v", rows)
 	}
 }

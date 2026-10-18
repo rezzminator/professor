@@ -87,7 +87,6 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		})
 	}
 	results = append(results, probeCodexHooks(home, config, binary)...)
-	results = append(results, probeGptHookAssets(home, config)...)
 	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
 	ownership, _, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {

@@ -16,10 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -401,6 +403,9 @@ func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
 			}
 			runtime.Config = loaded.Config
 			seedClaudeChat(t, root, seat.SessionID)
+			// The replaced seat's reload schedule files go with its row: the
+			// new seat has a new id, so nothing else would remove them.
+			reloadFiles := plantNativeReloadFiles(t, runtime.Paths.SIDDir, seat.SeatID)
 			binary := filepath.Join(runtime.Paths.Home, "native-engine")
 			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
@@ -446,7 +451,35 @@ func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
 			if backend == "herdr" && (result.Socket != socket || !strings.Contains(result.Detail, "w6:p9")) {
 				t.Fatalf("native resume=%+v", result)
 			}
+			assertNativeReloadFilesGone(t, reloadFiles)
 		})
+	}
+}
+
+// plantNativeReloadFiles writes seatID's reload schedule record and log into
+// sidDir, as a native /reload leaves them, and returns their paths.
+func plantNativeReloadFiles(t *testing.T, sidDir, seatID string) []string {
+	t.Helper()
+	if err := os.MkdirAll(sidDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var planted []string
+	for _, suffix := range []string{".pid", ".log"} {
+		path := filepath.Join(sidDir, paths.SIDReloadHerdrPrefix+seatID+suffix)
+		if err := os.WriteFile(path, []byte("1 1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		planted = append(planted, path)
+	}
+	return planted
+}
+
+func assertNativeReloadFilesGone(t *testing.T, planted []string) {
+	t.Helper()
+	for _, path := range planted {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("retired seat's reload file %s still there (stat err=%v)", path, err)
+		}
 	}
 }
 
@@ -705,4 +738,198 @@ func TestRetireOtherHerdrViewsSparesAViewFromAnAgentPane(t *testing.T) {
 			}
 		})
 	}
+}
+
+type recordedReboot struct {
+	row     compose.Row
+	account int
+	cache1H bool
+}
+
+// A live native chat born on another account than the picker's default gets
+// the tmux rows' reload gate; yes reboots it onto the default account, every
+// other answer and every unknown birth opens it as today.
+func TestOpenNativeOffersAccountChange(t *testing.T) {
+	const claudeBirthDir, otherDir = "/fixture/cc/1", "/fixture/cc/2"
+	claudeEnv := func(dir string) []string { return []string{"A=b", "CLAUDE_CONFIG_DIR=" + dir} }
+	for _, test := range []struct {
+		name       string
+		engine     pfmengine.ID
+		env        []string
+		primary    int
+		gateAnswer bool
+		gateErr    error
+		rebootErr  error
+		noRecipe   bool
+		birthC1H   bool
+		wantGate   bool
+		wantBirth  int
+		wantWant   int
+		wantReboot bool
+		wantCode   int
+		wantAttach bool
+		wantStderr string
+	}{
+		{
+			name: "differs and yes reboots onto the default account", engine: pfmengine.Claude,
+			env: claudeEnv(claudeBirthDir), primary: 2, gateAnswer: true,
+			wantGate: true, wantBirth: 1, wantWant: 2, wantReboot: true, wantAttach: true,
+		},
+		{
+			name: "differs and no opens as today", engine: pfmengine.Claude,
+			env: claudeEnv(claudeBirthDir), primary: 2,
+			wantGate: true, wantBirth: 1, wantWant: 2, wantAttach: true,
+		},
+		{
+			name: "same account asks nothing", engine: pfmengine.Claude,
+			env: claudeEnv(claudeBirthDir), primary: 1, gateAnswer: true, wantAttach: true,
+		},
+		{
+			name: "recipe without an account asks nothing", engine: pfmengine.Claude,
+			env: []string{"A=b"}, primary: 2, gateAnswer: true, wantAttach: true,
+		},
+		{
+			name: "recipe naming an unconfigured directory asks nothing", engine: pfmengine.Claude,
+			env: claudeEnv("/fixture/cc/9"), primary: 2, gateAnswer: true, wantAttach: true,
+		},
+		{
+			name: "missing recipe asks nothing", engine: pfmengine.Claude,
+			noRecipe: true, primary: 2, gateAnswer: true, wantAttach: true,
+		},
+		{
+			name: "failed reboot is shown and the chat attaches as it is", engine: pfmengine.Claude,
+			env: claudeEnv(claudeBirthDir), primary: 2, gateAnswer: true, rebootErr: errors.New("reload exploded"),
+			wantGate: true, wantBirth: 1, wantWant: 2, wantReboot: true, wantAttach: true,
+			wantStderr: "reload exploded",
+		},
+		{
+			name: "failed gate stops the open and says why", engine: pfmengine.Claude,
+			env: claudeEnv(claudeBirthDir), primary: 2, gateErr: errors.New("tty gone"),
+			wantGate: true, wantBirth: 1, wantWant: 2, wantCode: 1, wantStderr: "tty gone",
+		},
+		{
+			name: "a launch on the 1h cache names the cache change", engine: pfmengine.Claude,
+			env: claudeEnv(claudeBirthDir), primary: 2, birthC1H: true,
+			wantGate: true, wantBirth: 1, wantWant: 2, wantAttach: true,
+		},
+		{
+			name: "codex seat on another codex account", engine: pfmengine.Codex,
+			env: []string{"CODEX_HOME=" + otherDir}, primary: 2, gateAnswer: true,
+			wantGate: true, wantBirth: 2, wantWant: 1, wantReboot: true, wantAttach: true,
+		},
+	} {
+		for _, door := range []string{"row", "id"} {
+			t.Run(test.name+"/"+door, func(t *testing.T) {
+				testjail.Fleet(t)
+				socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+					if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+						return value, code
+					}
+					return nil, "unexpected_method"
+				})
+				runtime, db, seat := nativeChatSeat(t, socket, "live")
+				seat.Engine = string(test.engine)
+				seat = nativeChatHost(t, db, seat, true)
+				runtime.Config = config.Config{
+					Accounts: []config.Account{{ID: 1, ConfigDir: claudeBirthDir}, {ID: 2, ConfigDir: otherDir}},
+					CodexAccounts: []config.CodexAccount{
+						{ID: 1, Home: claudeBirthDir}, {ID: 2, Home: otherDir},
+					},
+				}
+				if test.noRecipe {
+					if err := db.DeleteSeatRun(seat.SeatID); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := db.WriteSeatRun(seat.SeatID, fleetdb.SeatRun{
+					Binary: "/fixture/claude", Env: test.env, CWD: runtime.Paths.Home,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, test.primary); err != nil {
+					t.Fatal(err)
+				}
+				if test.birthC1H {
+					if err := fleetdb.RecordLaunch(context.Background(), runtime.Paths, fleetdb.Launch{
+						SessionID: seat.SessionID, Engine: test.engine, Account: 1, Cache1H: true,
+					}, 1); err != nil {
+						t.Fatal(err)
+					}
+				}
+				marker := filepath.Join(t.TempDir(), "attached")
+				bin := t.TempDir()
+				if err := testjail.WriteExecutable(
+					filepath.Join(bin, "herdr"), []byte("#!/bin/sh\necho \"$@\" > "+marker+"\n"), 0o700,
+				); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", bin)
+				t.Setenv("HERDR_SOCKET_PATH", "")
+				t.Setenv("HERDR_ENV", "")
+
+				var gateRequests []action.GateRequest
+				var reboots []recordedReboot
+				previousGate, previousReboot := nativeAccountGate, runNativeReboot
+				t.Cleanup(func() { nativeAccountGate, runNativeReboot = previousGate, previousReboot })
+				nativeAccountGate = gateFunc(func(_ context.Context, request action.GateRequest) (bool, error) {
+					gateRequests = append(gateRequests, request)
+					return test.gateAnswer, test.gateErr
+				})
+				runNativeReboot = func(
+					_ context.Context, _ paths.Values, row compose.Row, account int, cache1H bool,
+					_ io.Writer, _ ...config.Runtime,
+				) error {
+					reboots = append(reboots, recordedReboot{row: row, account: account, cache1H: cache1H})
+					return test.rebootErr
+				}
+
+				var stdout, stderr bytes.Buffer
+				code := 0
+				if door == "row" {
+					code = OpenRow(
+						context.Background(), nativeRow(seat), test.primary, false, "", &stdout, &stderr, &runtime,
+					)
+				} else {
+					code = OpenID(context.Background(), seat.SessionID, &stdout, &stderr, &runtime)
+				}
+				if code != test.wantCode {
+					t.Fatalf("code=%d want %d stderr=%s", code, test.wantCode, &stderr)
+				}
+				if (len(gateRequests) != 0) != test.wantGate || len(gateRequests) > 1 {
+					t.Fatalf("gate requests=%+v want asked=%t", gateRequests, test.wantGate)
+				}
+				if test.wantGate {
+					want := action.GateRequest{
+						Name: seat.Name, BirthAccount: test.wantBirth, PrimaryAccount: test.wantWant,
+						BirthCache1H: test.birthC1H,
+					}
+					if gateRequests[0] != want {
+						t.Fatalf("gate request=%+v want %+v", gateRequests[0], want)
+					}
+				}
+				if (len(reboots) == 1) != test.wantReboot || len(reboots) > 1 {
+					t.Fatalf("reboots=%+v want one=%t", reboots, test.wantReboot)
+				}
+				if test.wantReboot {
+					got := reboots[0]
+					if got.account != test.wantWant || got.row.ID != seat.SessionID ||
+						got.row.Socket != socket || got.row.PaneID != seat.HerdrPane ||
+						got.row.CWD != runtime.Paths.Home || got.row.Name != seat.Name {
+						t.Fatalf("reboot=%+v want account %d on %s %s", got, test.wantWant, socket, seat.HerdrPane)
+					}
+				}
+				if _, err := os.Stat(marker); (err == nil) != test.wantAttach {
+					t.Fatalf("attach marker err=%v want attached=%t stderr=%s", err, test.wantAttach, &stderr)
+				}
+				if test.wantStderr != "" && !strings.Contains(stderr.String(), test.wantStderr) {
+					t.Fatalf("stderr=%q want %q", &stderr, test.wantStderr)
+				}
+			})
+		}
+	}
+}
+
+type gateFunc func(context.Context, action.GateRequest) (bool, error)
+
+func (gate gateFunc) Confirm(ctx context.Context, request action.GateRequest) (bool, error) {
+	return gate(ctx, request)
 }

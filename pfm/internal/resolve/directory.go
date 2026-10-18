@@ -153,16 +153,6 @@ func NewDirectory[T any](entries []T, addressOf func(T) Address) *Directory[T] {
 	return directory
 }
 
-// Len reports how many chats this directory indexes. A caller distinguishing
-// "looked and found nothing" from "there was nothing to look in" reads it;
-// the two are different findings and must not report the same way.
-func (directory *Directory[T]) Len() int {
-	if directory == nil {
-		return 0
-	}
-	return len(directory.entries)
-}
-
 // Lookup answers with the chat this identity belongs to, in two passes.
 //
 // The first pass is the TYPED ladder: each field is tried in the namespace it

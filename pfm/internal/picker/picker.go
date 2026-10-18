@@ -22,7 +22,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
@@ -615,48 +614,8 @@ func rebootRow(
 		if !row.Kind.IsLiveSeat() {
 			return row, nil
 		}
-		runtime, err := pfmconfig.OptionalRuntime(runtimes)
-		if err != nil {
-			return compose.Row{}, fmt.Errorf("native reboot runtime: %w", err)
-		}
-		primary := row.Account
-		if primary == 0 {
-			primary, err = fleet.PrimaryAccount(resolved, runtime.Config)
-			if err != nil {
-				return compose.Row{}, fmt.Errorf("native reboot account: %w", err)
-			}
-		}
-		ids := runtime.Config.AccountIDs()
-		codexHome := ""
-		if compose.EngineForKind(row.Kind) == pfmengine.Codex {
-			ids = runtime.Config.CodexAccountIDs()
-			selected, found := runtime.Config.CodexAccountByID(primary)
-			if !found {
-				return compose.Row{}, fmt.Errorf("native reboot Codex account %d is not configured", primary)
-			}
-			codexHome = selected.Home
-		}
-		_, err = reload.RunHerdr(
-			ctx,
-			reload.Request{
-				Engine:     compose.EngineForKind(row.Kind),
-				SocketPath: row.Socket,
-				Pane:       row.PaneID,
-				SessionID:  row.ID,
-				CWD:        row.CWD,
-				Name:       row.Name,
-				Account:    primary,
-				AccountIDs: ids,
-				Cache1H:    row.C1H,
-				CodexHome:  codexHome,
-				Home:       resolved.Home,
-				Machine:    runtime.Config,
-			},
-			reload.Options{Home: resolved.Home, SIDDir: resolved.SIDDir},
-			stderr,
-		)
-		if err != nil {
-			return compose.Row{}, fmt.Errorf("native reboot: %w", err)
+		if err := pfmchat.RebootNative(ctx, resolved, row, row.Account, row.C1H, stderr, runtimes...); err != nil {
+			return compose.Row{}, err
 		}
 		return row, nil
 	}

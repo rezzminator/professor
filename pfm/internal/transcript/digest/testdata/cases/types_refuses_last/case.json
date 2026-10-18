@@ -1,9 +1,0 @@
-{
- "args": [
-  "types",
-  "{CLAUDE}",
-  "--last",
-  "2"
- ],
- "dirs": []
-}

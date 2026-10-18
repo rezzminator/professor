@@ -12,9 +12,9 @@ import (
 const defaultOnly = "prompt,reply,call,note,final"
 
 // verbChoices are the verbs, in the order a refusal lists them.
-var verbChoices = []string{"show", "counts", "types", "locate", "agents"}
+var verbChoices = []string{"show", "locate", "agents"}
 
-const usageText = `usage: pfm transcript {show,counts,types,locate,agents} TARGET [options]
+const usageText = `usage: pfm transcript {show,locate,agents} TARGET [options]
 
 Mechanical reader of Claude Code, Codex and OpenCode transcripts.
 
@@ -71,28 +71,23 @@ type optionSpec struct {
 	list    func(*request) *[]string
 }
 
-// The filter options a refusal names by their spelling.
+// The time-window options, whose value may begin with a dash.
 const (
-	optOnly  = "--only"
-	optTool  = "--tool"
 	optSince = "--since"
 	optUntil = "--until"
-	optGrep  = "--grep"
-	optFirst = "--first"
-	optLast  = "--last"
 )
 
 var options = map[string]*optionSpec{
 	"--root":        {list: func(r *request) *[]string { return &r.roots }},
-	optOnly:         {str: func(r *request) *string { return &r.only }},
-	optTool:         {list: func(r *request) *[]string { return &r.tools }},
+	"--only":        {str: func(r *request) *string { return &r.only }},
+	"--tool":        {list: func(r *request) *[]string { return &r.tools }},
 	optSince:        {str: func(r *request) *string { return &r.since }},
 	optUntil:        {str: func(r *request) *string { return &r.until }},
-	optGrep:         {str: func(r *request) *string { return &r.grep }},
+	"--grep":        {str: func(r *request) *string { return &r.grep }},
 	"-i":            {display: "-i/--ignore-case", flag: true},
 	"--ignore-case": {display: "-i/--ignore-case", flag: true},
-	optFirst:        {number: func(r *request) *int { return &r.first }},
-	optLast:         {number: func(r *request) *int { return &r.last }},
+	"--first":       {number: func(r *request) *int { return &r.first }},
+	"--last":        {number: func(r *request) *int { return &r.last }},
 	"--results":     {str: func(r *request) *string { return &r.results }},
 	"--err-lines":   {number: func(r *request) *int { return &r.errLines }},
 	"--text":        {number: func(r *request) *int { return &r.text }},

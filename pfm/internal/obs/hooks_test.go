@@ -50,10 +50,10 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 	finish(2)
 	_, finish = Hook(ctx, "then", &bytes.Buffer{})
 	finish(1)
-	tee, finish := Hook(ctx, "explore-deny", &bytes.Buffer{})
+	tee, finish := Hook(ctx, "store-guard", &bytes.Buffer{})
 	_, _ = tee.Write(
 		[]byte(
-			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Explore is read-only"}}`,
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"denied by policy"}}`,
 		),
 	)
 	finish(0)
@@ -68,7 +68,7 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 		t.Fatalf("levels: exit 1 at %s (want ERROR), exit 2 at %s (want INFO)", records[2].Level, records[1].Level)
 	}
 	requireField(t, records[3], "decision", "deny")
-	requireField(t, records[3], "reason", "Explore is read-only")
+	requireField(t, records[3], "reason", "denied by policy")
 	if _, found := records[0].Field("reason"); found {
 		t.Fatalf("a hook that gave no reason got one: %v", records[0].Fields)
 	}

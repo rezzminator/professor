@@ -3,8 +3,14 @@ package herdr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // SupportedProtocol is the native-seat wire contract, independent of release lifetime safety.
@@ -96,7 +102,43 @@ func ValidateNotificationShown(body json.RawMessage) error {
 		return fmt.Errorf("unexpected Herdr notification acknowledgement: %s", body)
 	}
 	if !*ack.Shown {
-		return fmt.Errorf("herdr notification not shown (%s)", ack.Reason)
+		return &NotificationNotShownError{Reason: ack.Reason}
 	}
 	return nil
+}
+
+// NotificationRateLimited is the not-shown reason Herdr gives a notification
+// it refused because others came too fast; a later attempt can be shown.
+const NotificationRateLimited = "rate_limited"
+
+// NotificationNotShownError is a well-formed acknowledgement whose
+// notification Herdr did not show, with Herdr's reason.
+type NotificationNotShownError struct {
+	Reason string
+}
+
+func (e *NotificationNotShownError) Error() string {
+	return fmt.Sprintf("herdr notification not shown (%s)", e.Reason)
+}
+
+// RemoveReloadFiles removes a retired native seat's reload schedule record and
+// log from sidDir; a file already gone is fine. An id that
+// reload.LockWorkerSchedule refuses to name a file with never had any. Every
+// door that retires a Herdr seat calls it before the seat row goes, so a
+// failure leaves the seat retryable.
+func RemoveReloadFiles(sidDir, seatID string) error {
+	if seatID == "" || seatID == "." || seatID == ".." || strings.ContainsAny(seatID, "/\x00") {
+		return nil
+	}
+	if sidDir == "" {
+		return errors.New("remove seat reload files: SID directory is unset")
+	}
+	var errs []error
+	for _, suffix := range []string{".pid", ".log"} {
+		path := filepath.Join(sidDir, paths.SIDReloadHerdrPrefix+seatID+suffix)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("remove %s: %w", path, err))
+		}
+	}
+	return errors.Join(errs...)
 }

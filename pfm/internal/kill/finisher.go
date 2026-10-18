@@ -164,6 +164,7 @@ func (finisher *Finisher) Run(
 		finisher.database,
 		finisher.tmux,
 		finisher.paths.tmuxDir,
+		finisher.paths.sidDir,
 		Target(args),
 		finisher.log,
 	)

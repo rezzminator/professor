@@ -31,3 +31,11 @@ const (
 	cWarn       = "\x1b[38;5;226m"
 	cBad        = "\x1b[1;38;5;203m"
 )
+
+// effortBarColors is the effort bar's colour per level, cool to hot, every one
+// a constant above: low calm blue (cWindow), medium green (cGood), high yellow
+// (cWarn), xhigh orange (cElapsed), max red (cBad). The level word keeps the
+// effort colour (cEffort), so the bar alone says how hard the model is steered.
+var effortBarColors = map[string]string{
+	"low": cWindow, "medium": cGood, "high": cWarn, "xhigh": cElapsed, "max": cBad,
+}

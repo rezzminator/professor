@@ -19,7 +19,7 @@ func TestMainLineWearsTheSubagentPalette(t *testing.T) {
 	l1, l2 := renderStyled(t, styledPayload)
 	for _, want := range []struct{ role, line, text string }{
 		{"model", l1, cModel + "◆ Opus 4"},
-		{"effort", l1, cEffort + "effort ▰▰▰▱▱ high"},
+		{"effort", l1, cWarn + "▰▰▰" + reset + cEffort + " high"},
 		{"label", l1, cLabel + "🔖 BUILDER:1"},
 		{"elapsed", l2, cElapsed + "⏳ 5m32s"},
 	} {

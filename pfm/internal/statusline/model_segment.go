@@ -39,19 +39,19 @@ func effortSuffix(data input, state autoEffortState) string {
 	}
 	switch {
 	case state.err != nil:
-		return joint + cBad + modeLabel("ERR", data.Effort.Level) + reset
+		return joint + cBad + modeLabel("ERR", modelglyph.EffortLabel(data.Effort.Level)) + reset
 	case state.stale:
-		return joint + cMuted + modeLabel("STALE", data.Effort.Level) + reset
+		return joint + cMuted + modeLabel("STALE", modelglyph.EffortLabel(data.Effort.Level)) + reset
 	case !state.found && data.Effort.Level == "":
 		return ""
 	case !state.found:
-		return joint + cEffort + modelglyph.EffortLabel(data.Effort.Level) + reset
+		return joint + paintedEffort(data.Effort.Level, cEffort) + reset
 	case state.mode == "off":
 		return joint + cEffort + "effort off" + reset
 	case state.mode == "auto":
-		label := modelglyph.EffortLabel(state.level)
+		label := paintedEffort(state.level, cEffort)
 		if label == "" {
-			label = "effort"
+			label = cEffort + "effort"
 		}
 		label += " AUTO"
 		// Only the producer's exact escalation reason names failing tests.
@@ -60,18 +60,36 @@ func effortSuffix(data input, state autoEffortState) string {
 				label += " · raised: " + count + " failing tests"
 			}
 		}
-		return joint + cEffort + label + reset
+		return joint + label + reset
 	default:
-		return joint + cEffort + modeLabel(autoEffortModes[state.mode], state.level) + reset
+		// model and pin always carry a level (parseAutoEffortState refuses them without one).
+		return joint + modeLabel(autoEffortModes[state.mode], paintedEffort(state.level, cEffort)) + reset
 	}
 }
 
-// modeLabel joins the level's bar and a source or visible state diagnostic.
-func modeLabel(mode, level string) string {
-	if level == "" {
+// modeLabel joins a level's label and a source or visible state diagnostic; no
+// label reads "effort {mode}". ERR and STALE pass the plain label, so the whole
+// segment wears the state's colour; the sources pass paintedEffort's.
+func modeLabel(mode, label string) string {
+	if label == "" {
 		return "effort " + mode
 	}
-	return modelglyph.EffortLabel(level) + " · " + mode
+	return label + " · " + mode
+}
+
+// paintedEffort is a level's filled-only bar in the level's own colour
+// (effortBarColors), then the level word in ambient, the colour the segment
+// wears. A level outside the five has no bar and no level colour, and no level
+// is "". The caller closes the segment with reset.
+func paintedEffort(level, ambient string) string {
+	name, bar := modelglyph.EffortBar(level)
+	if bar == "" {
+		if name == "" {
+			return ""
+		}
+		return ambient + modelglyph.EffortLabel(level)
+	}
+	return effortBarColors[name] + bar + reset + ambient + " " + name
 }
 
 // effortWords lists the producer's five valid levels.

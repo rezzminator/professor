@@ -31,10 +31,10 @@ func TestListSymbolKeepsTheFamiliesAndNeverSpendsTheLiveDot(t *testing.T) {
 	}
 }
 
-func TestEffortLabelShowsFiveSteps(t *testing.T) {
+func TestEffortLabelShowsOnlyTheFilledSteps(t *testing.T) {
 	for level, want := range map[string]string{
-		"low": "effort ▰▱▱▱▱ low", "medium": "effort ▰▰▱▱▱ medium", "high": "effort ▰▰▰▱▱ high", "xhigh": "effort ▰▰▰▰▱ xhigh", "max": "effort ▰▰▰▰▰ max",
-		"turbo": "effort ▱▱▱▱▱ turbo (unknown)", "HIGH": "effort ▰▰▰▱▱ high", "": "",
+		"low": "▰ low", "medium": "▰▰ medium", "high": "▰▰▰ high", "xhigh": "▰▰▰▰ xhigh", "max": "▰▰▰▰▰ max",
+		"turbo": "effort turbo (unknown)", "HIGH": "▰▰▰ high", "": "",
 	} {
 		if got := EffortLabel(level); got != want {
 			t.Errorf("EffortLabel(%q) = %q, want %q", level, got, want)
@@ -42,6 +42,16 @@ func TestEffortLabelShowsFiveSteps(t *testing.T) {
 	}
 	if RowEffort("") != "" {
 		t.Error("no level, no emoji")
+	}
+}
+
+func TestEffortBarNormalisesTheLevelAndLeavesAnUnknownOneBarless(t *testing.T) {
+	for _, testcase := range []struct{ level, name, bar string }{
+		{" Medium ", "medium", "▰▰"}, {"max", "max", "▰▰▰▰▰"}, {"turbo", "turbo", ""}, {"", "", ""},
+	} {
+		if name, bar := EffortBar(testcase.level); name != testcase.name || bar != testcase.bar {
+			t.Errorf("EffortBar(%q) = (%q, %q), want (%q, %q)", testcase.level, name, bar, testcase.name, testcase.bar)
+		}
 	}
 }
 

@@ -52,7 +52,7 @@ const (
 
 var (
 	opusAlone     = cModel + "opus" + reset
-	opusInherited = opusAlone + cMuted + "·" + reset + cEffort + "effort ▰▰▰▱▱ high" + reset
+	opusInherited = opusAlone + cMuted + "·" + reset + cWarn + "▰▰▰" + reset + cEffort + " high" + reset
 )
 
 func TestRecordSessionRecordsTheMainLineEffort(t *testing.T) {
@@ -68,7 +68,7 @@ func TestSubagentRowPayloadEffortWinsOverTheSessionRecord(t *testing.T) {
 	sidDir := t.TempDir()
 	recordMainLine(t, sidDir, "claude-opus-5-5[1m]", "high")
 	content, _ := renderEffortRow(t, sidDir, taskWithEffort)
-	if !strings.Contains(content, opusAlone+cMuted+"·"+reset+cEffort+"effort ▰▱▱▱▱ low"+reset) {
+	if !strings.Contains(content, opusAlone+cMuted+"·"+reset+cWindow+"▰"+reset+cEffort+" low"+reset) {
 		t.Fatalf("row = %q, want the payload's own effort low", content)
 	}
 }
@@ -92,7 +92,7 @@ func TestSubagentRowOnAnotherModelMutesTheSessionEffort(t *testing.T) {
 	sidDir := t.TempDir()
 	recordMainLine(t, sidDir, "claude-sonnet-5[1m]", "high")
 	content, _ := renderEffortRow(t, sidDir, taskWithoutEffort)
-	if want := opusAlone + cMuted + "·" + reset + cMuted + "effort ▰▰▰▱▱ high" + reset; !strings.Contains(
+	if want := opusAlone + cMuted + "·" + reset + cMuted + "▰▰▰ high" + reset; !strings.Contains(
 		content,
 		want,
 	) {
@@ -145,7 +145,7 @@ func TestSubagentRowShowsItsTranscriptsLastRecordedEffort(t *testing.T) {
 			sidDir := t.TempDir()
 			recordMainLine(t, sidDir, sessionModel, "xhigh")
 			content, warned := renderEffortAgentRow(t, sidDir, session, agentTaskWithoutEffort)
-			want := opusAlone + cMuted + "·" + reset + cEffort + "effort ▰▰▱▱▱ medium" + reset
+			want := opusAlone + cMuted + "·" + reset + cGood + "▰▰" + reset + cEffort + " medium" + reset
 			if !strings.Contains(content, want) || warned != "" {
 				t.Fatalf("row = %q warn=%q, want the transcript's last recorded effort %q", content, warned, want)
 			}
@@ -163,7 +163,7 @@ func TestSubagentRowWithoutARecordedEffortShowsTheSessionEffort(t *testing.T) {
 	sidDir := t.TempDir()
 	recordMainLine(t, sidDir, "claude-opus-5-5[1m]", "xhigh")
 	content, warned := renderEffortAgentRow(t, sidDir, session, agentTaskWithoutEffort)
-	if want := opusAlone + cMuted + "·" + reset + cEffort + "effort ▰▰▰▰▱ xhigh" + reset; !strings.Contains(
+	if want := opusAlone + cMuted + "·" + reset + cElapsed + "▰▰▰▰" + reset + cEffort + " xhigh" + reset; !strings.Contains(
 		content,
 		want,
 	) ||

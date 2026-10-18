@@ -41,9 +41,10 @@ func ListSymbol(model string) string {
 	return "◈"
 }
 
-// statusEffort is the statusline's five-step bar per effort level.
+// statusEffort is the statusline's bar per effort level: the filled steps of
+// a five-step scale, no empty ones.
 var statusEffort = map[string]string{
-	"low": "▰▱▱▱▱", "medium": "▰▰▱▱▱", "high": "▰▰▰▱▱", "xhigh": "▰▰▰▰▱", "max": "▰▰▰▰▰",
+	"low": "▰", "medium": "▰▰", "high": "▰▰▰", "xhigh": "▰▰▰▰", "max": "▰▰▰▰▰",
 }
 
 // rowEffort is the list's width-safe emoji per level, slowest to fastest.
@@ -63,14 +64,24 @@ func RowEffort(level string) string {
 	return EffortOther
 }
 
-// EffortLabel renders a lowercase level and five-step bar; unknown levels stay explicit.
+// EffortBar normalises a level to lowercase and returns its filled-only bar:
+// medium → ("medium", "▰▰"). A level outside the five has no bar; no level
+// returns two empty strings.
+func EffortBar(level string) (name, bar string) {
+	name = strings.ToLower(strings.TrimSpace(level))
+	return name, statusEffort[name]
+}
+
+// EffortLabel renders a lowercase level after its filled-only bar, medium →
+// "▰▰ medium"; a level outside the five stays explicit, without a bar.
 func EffortLabel(level string) string {
-	level = strings.ToLower(strings.TrimSpace(level))
-	if level == "" {
+	name, bar := EffortBar(level)
+	switch {
+	case name == "":
 		return ""
+	case bar == "":
+		return "effort " + name + " (unknown)"
+	default:
+		return bar + " " + name
 	}
-	if bar, ok := statusEffort[level]; ok {
-		return "effort " + bar + " " + level
-	}
-	return "effort ▱▱▱▱▱ " + level + " (unknown)"
 }

@@ -444,7 +444,7 @@ func subagentIdentity(name string, activity *agentActivity) string {
 }
 
 // subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·effort ▰▰▰▱▱ high. The level its transcript recorded for its latest request
+// opus·▰▰▰ high. The level its transcript recorded for its latest request
 // (recorded) wins: it is the effort that request went out at, after any
 // plugin pinned it, so it renders plainly on any model. Without one, the
 // payload's effort shows; one that is not a JSON string is left out. A row
@@ -454,7 +454,7 @@ func subagentIdentity(name string, activity *agentActivity) string {
 func subagentModel(model, recorded string, effort json.RawMessage, inherited sessionEffortRecord) string {
 	family := modelFamily(model)
 	level := strings.TrimSpace(recorded)
-	color := cEffort
+	color, painted := cEffort, true
 	if level == "" &&
 		(len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "") {
 		level = ""
@@ -462,14 +462,20 @@ func subagentModel(model, recorded string, effort json.RawMessage, inherited ses
 			level = inherited.Level
 		}
 		if modelVersion(model) != modelVersion(inherited.Model) {
-			color = cMuted
+			color, painted = cMuted, false
 		}
 	}
 	if level != "" {
-		if family == "" {
-			return color + modelglyph.EffortLabel(level) + reset
+		// A muted level may be another than the one shown, so its bar stays muted
+		// too; otherwise the bar wears the level's own colour.
+		label := color + modelglyph.EffortLabel(level)
+		if painted {
+			label = paintedEffort(level, color)
 		}
-		return cModel + family + reset + cMuted + "·" + reset + color + modelglyph.EffortLabel(level) + reset
+		if family == "" {
+			return label + reset
+		}
+		return cModel + family + reset + cMuted + "·" + reset + label + reset
 	}
 	if family == "" {
 		return ""

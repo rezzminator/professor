@@ -87,33 +87,35 @@ An unreadable fact renders as a failure to look, never as zero or empty: `Σ$?/?
 
 ## Effort
 
-The effort shows as the word `effort`, a five-step bar and the lowercase level, in the model block of both the main line and every row, in the effort colour (`cEffort`, `pfm/internal/statusline/palette.go`). No effort emoji appears on either surface. The bar draws the level as filled `▰` against empty `▱` steps, the gauge's own glyphs (`modelglyph.EffortLabel`, `pfm/internal/modelglyph/modelglyph.go`):
+The effort shows as a bar of filled `▰` blocks, one to five by level, then the lowercase level, in the model block of both the main line and every row. The bar wears its level's own colour, cool to hot, each one a constant of `palette.go` (`effortBarColors`); the level word wears the effort colour (`cEffort`). No empty `▱` steps, no `effort` word before the bar and no effort emoji appear on either surface (`modelglyph.EffortLabel`, `pfm/internal/modelglyph/modelglyph.go`):
 
-| Level | Reads |
-| --- | --- |
-| low | `effort ▰▱▱▱▱ low` |
-| medium | `effort ▰▰▱▱▱ medium` |
-| high | `effort ▰▰▰▱▱ high` |
-| xhigh | `effort ▰▰▰▰▱ xhigh` |
-| max | `effort ▰▰▰▰▰ max` |
-| a level outside the five | `effort ▱▱▱▱▱ {level} (unknown)`, the level as given |
+| Level | Reads | Bar colour |
+| --- | --- | --- |
+| low | `▰ low` | `cWindow`, blue |
+| medium | `▰▰ medium` | `cGood`, green |
+| high | `▰▰▰ high` | `cWarn`, yellow |
+| xhigh | `▰▰▰▰ xhigh` | `cElapsed`, orange |
+| max | `▰▰▰▰▰ max` | `cBad`, red |
+| a level outside the five | `effort {level} (unknown)`, the level as given | none: no bar, the effort colour |
+
+A bar the segment's state mutes or flags wears that colour whole: `STALE` and a sub-agent's guessed level are muted, `ERR` is red, so the level colour never hides a bar that cannot be trusted.
 
 Thinking off shows `effort off` in the muted colour, with no bar and no level, and reads no file; with no level in the payload it shows nothing.
 
 ### The main line's effort, from auto-effort-control
 
-When the auto-effort-control plugin keeps a state file for the session, the main line names where the level came from, after the bar and level: `effort ▰▰▰▱▱ high · model's pick`. The plugin writes the file (one JSON line, `version` 2, `mode`, `level`, `reason`, `keeper`, `updatedAt`; the plugin's `src/state.ts`) and pfm only reads it, on every render with thinking on (`sessionAutoEffort`, `pfm/internal/statusline/model_segment.go`). `keeper` is the pid of the plugin's keeper process, a shell whose argv ends in `auto-effort-control-keeper` and which lives exactly while the plugin's hooks are loaded in the session, or 0 when no process vouches for the line. A mode shows only while that pid is a live process carrying the mark (`keeperProbe`: a signal-0 probe, then the argv through `gather.ProcFS`):
+When the auto-effort-control plugin keeps a state file for the session, the main line names where the level came from, after the bar and level: `▰▰▰ high · model's pick`. The plugin writes the file (one JSON line, `version` 2, `mode`, `level`, `reason`, `keeper`, `updatedAt`; the plugin's `src/state.ts`) and pfm only reads it, on every render with thinking on (`sessionAutoEffort`, `pfm/internal/statusline/model_segment.go`). `keeper` is the pid of the plugin's keeper process, a shell whose argv ends in `auto-effort-control-keeper` and which lives exactly while the plugin's hooks are loaded in the session, or 0 when no process vouches for the line. A mode shows only while that pid is a live process carrying the mark (`keeperProbe`: a signal-0 probe, then the argv through `gather.ProcFS`):
 
 | State | Effort reads |
 | --- | --- |
-| `auto` with `reason` exactly `{N} failing test runs`, N a positive integer without leading zeros: the plugin's escalation | `effort ▰▰▰▰▱ xhigh AUTO · raised: 2 failing tests` |
-| `auto` with any other `reason`: the plugin's automatic rules | `effort ▰▰▰▱▱ high AUTO`, the file's level; `effort AUTO` before the session's first request |
-| `model`: the main chat's own `set_effort` level | `effort ▰▰▰▱▱ high · model's pick` |
-| `pin`: the user's `/effort` | `effort ▰▰▰▱▱ high · your /effort` |
+| `auto` with `reason` exactly `{N} failing test runs`, N a positive integer without leading zeros: the plugin's escalation | `▰▰▰▰ xhigh AUTO · raised: 2 failing tests` |
+| `auto` with any other `reason`: the plugin's automatic rules | `▰▰▰ high AUTO`, the file's level; `effort AUTO` before the session's first request |
+| `model`: the main chat's own `set_effort` level | `▰▰▰ high · model's pick` |
+| `pin`: the user's `/effort` | `▰▰▰ high · your /effort` |
 | `off`: auto-effort-control off, or the model not steered | `effort off`, no bar and no level |
-| `keeper` 0, no process at the pid, a zombie, another user's process (the signal-0 probe refused: the keeper runs as the status line's user), or a live process without the mark: the plugin was disabled, crashed, ended or moved its file | `effort ▰▰▰▱▱ high · STALE`, muted, the payload's level; `effort STALE` without one; no stderr line |
-| unreadable, still unparsable after one re-read (a write may be in progress), a `version` other than 2, unknown `mode`, a level outside the five, `model` or `pin` without a level, `keeper` missing, not an integer or negative, a probe or argv read failing any other way, or the state-file variables in conflict (below) | `effort ▰▰▰▱▱ high · ERR` in red, the payload's level; `effort ERR` without one; and one stderr line naming the path and the cause |
-| no file, or a payload naming no session | `effort ▰▰▰▱▱ high`, the payload's level as the bar alone, no source; nothing without a payload level |
+| `keeper` 0, no process at the pid, a zombie, another user's process (the signal-0 probe refused: the keeper runs as the status line's user), or a live process without the mark: the plugin was disabled, crashed, ended or moved its file | `▰▰▰ high · STALE`, muted whole, the payload's level; `effort STALE` without one; no stderr line |
+| unreadable, still unparsable after one re-read (a write may be in progress), a `version` other than 2, unknown `mode`, a level outside the five, `model` or `pin` without a level, `keeper` missing, not an integer or negative, a probe or argv read failing any other way, or the state-file variables in conflict (below) | `▰▰▰ high · ERR` in red whole, the payload's level; `effort ERR` without one; and one stderr line naming the path and the cause |
+| no file, or a payload naming no session | `▰▰▰ high`, the payload's level as the bar alone, no source; nothing without a payload level |
 
 The escalation count travels only in the producer's `reason` (the state file has no field for it), and an `auto` reason that is not that exact phrase reads `AUTO`. The path is the plugin's rule (`pfm/internal/paths/paths.go`): `$AUTO_EFFORT_CONTROL_STATE_FILE` (blank is unset, a leading `~/` the home), else the former plugin's `$AUTO_EFFORT_STATE_FILE`, else `~/.local/state/auto-effort-control/state.json`, with the session id made file-safe (`[^A-Za-z0-9_-]` to `_`) before the name's last extension: `state.{session}.json`. Both variables set to different values is an `ERR` row whose stderr line names both: unlike the plugin, which lets the canonical variable win and reports the former one, pfm shows no path it cannot trust. Equal values are no conflict. The session is the payload's `session_id`, else the transcript's base name.
 
@@ -125,7 +127,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 - The context gauge and every rate-limit `-used:` percent (Claude, Fable, Codex) round as a row's gauge does: to the nearest percent, stopping at 99% until the window is full (`gaugePercent`, `pfm/internal/statusline/context.go`).
 - After the context gauge, the spend block reads `💰$3.20/1.2M/40K/88` and holds exactly one dollar amount in every state (colour: dim, yellow from $2, red from $10). With a cost ledger the amount is the complete session total (the ledger total plus the spend before the ledger on a resumed or pre-ledger chat) and the tokens are the ledger's sums; without one it is Claude Code's own `cost.total_cost_usd` and the tokens are the transcripts' (the chat's and every sub-agent's, a response once per `message.id`, its last line). The distinct tool calls always come from those transcripts. `+?` marks a floor and `?` a transcript that could not be read. A state worth flagging ends in one amount-free marker (`sink failed`, `ledger preempted`, `ledger off`, `ledger unreadable`, `pre-ledger`, `unlogged`); the amounts behind a marker are in `pfm tokens`. Every number, its source and each marker's rule are in [cost-ledger.md](../engines/cost-ledger.md#the-status-lines). A Codex chat keeps `🧮` context tokens and `✎` prompts in its place (`pfm/internal/statusline/context.go`, `ledger_spend.go`).
-- The model block reads `◆ Opus 5.5·effort ▰▰▰▰▱ xhigh · model's pick` under auto-effort-control: model symbol and name, a muted `·`, then the effort ([The main line's effort](#the-main-lines-effort-from-auto-effort-control), `pfm/internal/statusline/model_segment.go`).
+- The model block reads `◆ Opus 5.5·▰▰▰▰ xhigh · model's pick` under auto-effort-control: model symbol and name, a muted `·`, then the effort ([The main line's effort](#the-main-lines-effort-from-auto-effort-control), `pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.
 - The cache window reads `💾1h✓59m:28s 94%`: the cache window, the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry.
 - The window (`1h` or `5m`) comes first from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). When the payload carries no expiry — no cached request yet, or an older build — pfm's launch record decides, never the statusline's own environment: `fleetdb.LaunchFor(ctx, session_id)`, keyed by the `session_id` in the statusline payload, returns the `cache1h` the chat was launched with ([claude-launch.md](../engines/claude-launch.md#the-launch-record)). A session pfm never launched (`ErrNoLaunch`) falls to the transcript (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else no cache marker. A failed launch read shows `💾⚠` and writes the cause to stderr, never a silent `5m`.
@@ -136,7 +138,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 One definition in `palette.go` serves both surfaces, so a part that means the same thing on both (model, effort, tokens, elapsed time) wears the same colour. The colours are bright 256-colour tones, chosen to stay legible over Claude Code's faint row body.
 
-Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge and the effort bar use Geometric Shapes (`▰▱`), single code points; the effort carries no emoji.
+Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge uses Geometric Shapes (`▰▱`) and the effort bar `▰` alone, single code points; the effort carries no emoji.
 
 ## What it does not do
 

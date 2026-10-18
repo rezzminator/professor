@@ -32,7 +32,7 @@ cp "$SUT" "$R/.claude/scripts/dev.sh"
 cp "$REPO/pfm/scripts/repo-git.sh" "$R/pfm/scripts/"
 cp "$REPO/infra/fence/housekeeping.sh" "$REPO/infra/fence/fence-env.sh" "$REPO/infra/fence/image-key.sh" "$REPO/infra/fence/docker-compose.yml" \
   "$REPO/infra/fence/steps.sh" "$REPO/infra/fence/stepprof.sh" "$REPO/infra/fence/checks.sh" "$REPO/infra/fence/gate-history.sh" \
-  "$REPO/infra/fence/shared.sh" "$REPO/infra/fence/shared-run.sh" "$REPO/infra/fence/.dockerignore" \
+  "$REPO/infra/fence/shared.sh" "$REPO/infra/fence/shared-run.sh" "$REPO/infra/fence/mkdir-lock.sh" "$REPO/infra/fence/.dockerignore" \
   "$REPO/infra/fence/engine-sync.sh" "$REPO/infra/fence/tools.env" "$REPO/infra/fence/tools.sh" "$R/infra/fence/"
 cp -R "$REPO/infra/fence/jscpd" "$R/infra/fence/"
 printf 'FROM scratch\n' >"$R/infra/fence/pfm-dev.Dockerfile"

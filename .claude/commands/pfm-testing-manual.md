@@ -56,7 +56,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - Coverage `pfm/.testcoverage.yml`: total 77, package 52, in the fence: `.claude/scripts/dev.sh iso cover pfm`; the full gate does not run it.
 - Every skip is a row in `pfm/scripts/known-skips.tsv` (`pfm/scripts/skip-check.sh`); an unlisted skip fails.
 - `iso gate` runs under `infra/fence/egress.sh` inside its run's own network namespace, so its verdict covers that run alone, and every non-dry lanes run ends with the verdict of a capture inside its lane container: `EGRESS PASS`, or red as `EGRESS FAIL` (each DNS name and destination listed) or NOT RECORDED; that verdict is the only network check.
-- Every gate run is appended to the host ledger `$HOME/.local/state/pfm/gate-history/<project>/ledger.tsv`, with the count of runs live in the shared fence container when it started (`concurrent_runs`); `bash infra/fence/gate-history.sh report` shows per-step medians, regressions and verdict flips.
+- Every gate run is appended to the host ledger `$HOME/.local/state/pfm/gate-history/<project>/ledger.tsv`, and the count of runs live in the shared fence container when it started (`concurrent_runs`) to `concurrent.tsv` beside it; `bash infra/fence/gate-history.sh report` shows per-step medians, regressions and verdict flips.
 
 ## Bug classes
 

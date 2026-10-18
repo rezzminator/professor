@@ -6,9 +6,13 @@
 # labels and the mounts; the lock is released on every path; a dead holder's lock is broken; a name
 # still in use is retried; a start that fails is a named iso line; the container runs its key's own
 # image tag, made from an image whose label was read, rebuilt when another checkout moved the plain
-# tag; stale keys' tags are removed; a new image key supersedes the root's other containers), and fence_shared_exec (the shared-run.sh argv, the run's env, exit 75
-# before the run started retried once in a fresh container, an engine-sync source outside the roots
-# refused). docker is a shell function recording its argv; no container or image is touched.
+# tag; stale keys' tags are removed; a name in use by a running container is entered), the detached
+# start housekeeping (a dead caller's run directory reaped, a live one's kept, the log rotated), and
+# fence_shared_exec (the shared-run.sh argv, the run's env, exit 75 or a container gone before the run
+# started retried once in a fresh container, any other refusal returned as it is, a worktree whose key
+# changed leaving its old container and another worktree's container untouched, an engine-sync
+# source outside the roots refused). docker is a shell function recording its argv; no container or
+# image is touched.
 #   bash infra/fence/lanes/tests/shared_test.sh
 # BROKEN STATE: a missing shared.sh exits 2 naming it; a case that cannot run is a FAIL line.
 set -uo pipefail
@@ -30,10 +34,14 @@ shtest_clean_also "/tmp/$PROJ"
 REC="$T/docker.rec"
 fence_volumes_ensure() { echo volumes >>"$REC"; }
 fence_housekeeping() { :; }
-docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_RUN_RC, STUB_UPDATE_RC; $T/run.inuse (one in-use refusal), $T/exec.rcs (space list) — files, as docker runs in $( ) subshells
+stub_docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_RUN_RC, STUB_UPDATE_RC; $T/run.inuse (one in-use refusal), $T/exec.rcs (space list) — files, as docker runs in $( ) subshells
   { printf 'docker'; printf ' %q' "$@"; printf '\n'; } >>"$REC"
   case "$1" in
-    inspect) [ -n "${STUB_INSPECT:-}" ] || return 1; echo "$STUB_INSPECT" ;;
+    inspect) # $T/gone: while it exists, the container has stopped and gone (`run --rm`)
+      [ ! -e "$T/gone" ] || return 1
+      local insp="${STUB_INSPECT:-}"; [ ! -e "$T/inspect.after" ] || insp="$(cat "$T/inspect.after")"
+      [ -n "$insp" ] || return 1
+      if [ "$2" = -f ] && [ "$3" = '{{.State.Running}}' ]; then echo "${insp%% *}"; else echo "$insp"; fi ;;
     image) # STUB_KTAG_LABEL: the k- tag's label (unset = no such tag); STUB_IMG: the plain tag's "id label"
       case "$2" in
         inspect) case "${*: -1}" in
@@ -46,7 +54,7 @@ docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_RUN_R
     tag) return 0 ;;
     compose) [ -z "${STUB_IMG_AFTER_BUILD:-}" ] || STUB_IMG="$STUB_IMG_AFTER_BUILD"; return "${STUB_BUILD_RC:-0}" ;;
     update) return "${STUB_UPDATE_RC:-0}" ;;
-    run) if [ -e "$T/run.inuse" ]; then rm -f "$T/run.inuse"; echo 'Conflict. The container name is already in use'; return 125; fi
+    run) if [ -e "$T/run.inuse" ]; then rm -f "$T/run.inuse"; [ -z "${STUB_INUSE_INSPECT:-}" ] || echo "$STUB_INUSE_INSPECT" >"$T/inspect.after"; echo 'Conflict. The container name is already in use'; return 125; fi
          [ "${STUB_RUN_RC:-0}" = 0 ] || { echo 'boom: no such image'; return "$STUB_RUN_RC"; }; echo cid ;;
     ps) printf '%s\n' "${STUB_PS:-}" ;;
     exec)
@@ -56,12 +64,17 @@ docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_RUN_R
       return "$rc" ;;
   esac
 }
+docker() { stub_docker "$@"; }
 sleep() { :; }
+# A start's detached housekeeping is recorded, not run (STUB_AFTER_SLEEP: it takes that long);
+# real_after_start is the real one, driven directly below.
+eval "real_after_start() $(declare -f _fence_sh_after_start | tail -n +2)"
+_fence_sh_after_start() { echo after_start >>"$REC"; [ -z "${STUB_AFTER_SLEEP:-}" ] || command sleep "$STUB_AFTER_SLEEP"; }
 PFM_DEV_GIT_COMMON="$MAIN/.git"
 init() { # init [tree]: a fresh fence_shared_init from MAIN (or the given tree)
   REPO_ROOT="${1:-$MAIN}"; fence_shared_init
 }
-reset() { : >"$REC"; unset STUB_INSPECT STUB_RUN_RC STUB_UPDATE_RC STUB_PS STUB_KTAG_LABEL STUB_IMG STUB_IMG_AFTER_BUILD STUB_BUILD_RC STUB_KTAGS; FENCE_IMAGE_BUILD=(); rm -f "$T/exec.rcs" "$T/run.inuse"; }
+reset() { : >"$REC"; unset STUB_INSPECT STUB_RUN_RC STUB_UPDATE_RC STUB_PS STUB_KTAG_LABEL STUB_IMG STUB_IMG_AFTER_BUILD STUB_BUILD_RC STUB_KTAGS STUB_INUSE_INSPECT STUB_AFTER_SLEEP; FENCE_IMAGE_BUILD=(); rm -f "$T/exec.rcs" "$T/run.inuse" "$T/gone" "$T/inspect.after"; }
 has() { if grep -qF -- "$2" "$REC"; then ok "$1"; else bad "$1" "no docker call with: $2" "$(cat "$REC")"; fi; }
 lacks() { if grep -qF -- "$2" "$REC"; then bad "$1" "a docker call with: $2" "$(cat "$REC")"; else ok "$1"; fi; }
 PFM_DEV_INPUTS_KEY=abcdef0123456789abcdef; FENCE_IMAGE_BUILD=(); FENCE_SH_COMPOSE="$T/docker-compose.yml"
@@ -119,6 +132,10 @@ has "the container gets the capabilities a run's namespaces need" '--cap-add SYS
 has "the container removes itself when its daemon exits" 'docker run -d --rm --init'
 has "the cache volumes are ensured first" volumes
 if [ "$rc" = 0 ] && [ ! -e "$FENCE_SH_LOCK" ]; then ok "a start releases the lock"; else bad "start lock" "rc=$rc lock=$(ls -d "$FENCE_SH_LOCK" 2>&1)"; fi
+reset; STUB_AFTER_SLEEP=3; t0=$SECONDS
+out="$(fence_shared_ensure 2>&1)"; rc=$?; took=$((SECONDS - t0))
+if [ "$rc" = 0 ] && [ "$took" -lt 2 ]; then ok "a start's housekeeping is detached: the caller's output closes without waiting for it"
+else bad "detached housekeeping" "rc=$rc took=${took}s (housekeeping 3 s)" "$out"; fi
 reset; STUB_RUN_RC=125
 out="$(fence_shared_ensure 2>&1)"; rc=$?
 if [ "$rc" = 1 ] && grep -qF "iso: the shared fence container $FENCE_SH_NAME did not start: boom: no such image" <<<"$out" && [ ! -e "$FENCE_SH_LOCK" ]; then
@@ -127,6 +144,10 @@ else bad "failed start" "rc=$rc" "$out"; fi
 reset; : >"$T/run.inuse"
 fence_shared_ensure >/dev/null 2>&1; rc=$?
 if [ "$rc" = 0 ] && [ "$(grep -c '^docker run' "$REC")" = 2 ]; then ok "a name still in use is retried"; else bad "in-use retry" "rc=$rc" "$(cat "$REC")"; fi
+reset; : >"$T/run.inuse"; STUB_INUSE_INSPECT='true 6000000000 5368709120'
+fence_shared_ensure >/dev/null 2>&1; rc=$?
+if [ "$rc" = 0 ] && [ "$(grep -c '^docker run' "$REC")" = 1 ] && [ ! -e "$FENCE_SH_LOCK" ]; then ok "a name in use by a running container is entered, never started again"
+else bad "in-use running" "rc=$rc" "$(cat "$REC")"; fi
 reset
 mkdir -p "$FENCE_SH_LOCK"; echo 999999 >"$FENCE_SH_LOCK/pid"
 fence_shared_ensure >/dev/null 2>&1; rc=$?
@@ -166,13 +187,22 @@ _fence_sh_untag_stale >/dev/null
 has "a stale key's tag no container runs is removed" "docker image rm $FENCE_SHARED_IMAGE:k-111111111111"
 lacks "a tag a running container runs is kept" "docker image rm $FENCE_SHARED_IMAGE:k-222222222222"
 lacks "this key's own tag is kept" "docker image rm $KTAG"
-
-reset; STUB_PS="pfm-fence-old oldkey
-$FENCE_SH_NAME $PFM_DEV_INPUTS_KEY"
-out="$(fence_shared_ensure 2>&1)"
-has "a new image key supersedes the root's other container" 'docker exec pfm-fence-old touch /var/fence/superseded'
-lacks "a container never supersedes itself" "docker exec $FENCE_SH_NAME touch"
-has "the supersede lists this root's containers only" "docker ps --filter label=pfm.fence.shared=$FENCE_SH_ROOTS"
+reset; STUB_PS="pfm-fence-old oldkey"
+fence_shared_ensure >/dev/null 2>&1
+lacks "a start supersedes no other container: another worktree's key keeps its warm container" 'docker exec'
+# the detached start housekeeping: a dead caller's run directory goes, a live one's stays, the log rotates
+reset; FENCE_SH_IMAGE="$KTAG"
+command sleep 60 & live=$!
+dead="$FENCE_SH_HOST/.runs/20261018T000000Z-999999-123"; alive="$FENCE_SH_HOST/.runs/20261018T000000Z-$live-456"
+mkdir -p "$dead" "$alive"; echo secret >"$dead/leak-terms.txt"
+HKLOG="/tmp/$PROJ/fence/housekeeping.log"
+head -c 1048577 /dev/zero >"$HKLOG"
+real_after_start
+if [ ! -e "$dead" ] && [ -d "$alive" ]; then ok "a dead caller's run directory (its leak terms) is reaped, a live caller's kept"; else bad "run reap" "dead=$(ls -d "$dead" 2>&1) alive=$(ls -d "$alive" 2>&1)"; fi
+if [ -s "$HKLOG.1" ] && [ "$(wc -c <"$HKLOG" | tr -d ' ')" -lt 1048576 ] && grep -qF "reaped the run directory $dead" "$HKLOG"; then ok "the housekeeping log rotates past 1 MiB and names the reap"
+else bad "log rotation" "$(ls -l "$HKLOG"* 2>&1)"; fi
+if [ ! -e "$FENCE_SH_LOCK" ]; then ok "the untag releases the start lock it held"; else bad "untag lock" "$(ls -d "$FENCE_SH_LOCK")"; fi
+kill "$live" 2>/dev/null; wait "$live" 2>/dev/null; rm -rf "$alive"
 
 # --- exec ----------------------------------------------------------------------------------------------------
 init "$MAIN/.worktrees/wt1"; reset
@@ -191,6 +221,42 @@ if [ "$rc" = 0 ] && [ "$(grep -c '^docker exec -i' "$REC")" = 2 ]; then ok "exit
 reset; STUB_INSPECT='true 6000000000 5368709120'; echo '75 75' >"$T/exec.rcs"
 PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true'; rc=$?
 if [ "$rc" = 75 ] && [ "$(grep -c '^docker exec -i' "$REC")" = 2 ]; then ok "a second 75 is returned, never a third try"; else bad "75 twice" "rc=$rc" "$(cat "$REC")"; fi
+# docker's own refusal of a container that stopped between ensure and exec: retried in a new one
+reset; STUB_INSPECT='true 6000000000 5368709120'; echo '1 0' >"$T/exec.rcs"
+docker() { # the container goes at the first exec; a docker run makes a new one
+  if [ "$1" = exec ] && [ "$(cat "$T/exec.rcs" 2>/dev/null)" = '1 0' ]; then : >"$T/gone"; fi
+  if [ "$1" = run ]; then rm -f "$T/gone"; fi
+  stub_docker "$@"
+}
+PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true' 2>"$T/gone.err"; rc=$?
+docker() { stub_docker "$@"; }
+if [ "$rc" = 0 ] && [ "$(grep -c '^docker exec -i' "$REC")" = 2 ] && grep -q '^docker run' "$REC" && grep -qF 'closed before the run started (exit 1)' "$T/gone.err"; then
+  ok "a container gone before the run started (docker's non-75 refusal) is retried once in a new container"
+else bad "gone retry" "rc=$rc" "$(cat "$REC" "$T/gone.err")"; fi
+reset; STUB_INSPECT='true 6000000000 5368709120'; echo '1 0' >"$T/exec.rcs"
+PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true' 2>/dev/null; rc=$?
+if [ "$rc" = 1 ] && [ "$(grep -c '^docker exec -i' "$REC")" = 1 ]; then ok "a refusal from a container still running is returned as it is, never retried"; else bad "running refusal" "rc=$rc" "$(cat "$REC")"; fi
+# a worktree whose key changed leaves its old container; a first call or the same key touches none
+init "$MAIN/.worktrees/wt1"; reset; rm -f "$FENCE_SH_HOST/wt1/key"
+STUB_INSPECT='true 6000000000 5368709120'
+PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true' 2>/dev/null
+if [ "$(cat "$FENCE_SH_HOST/wt1/key" 2>/dev/null)" = "$PFM_DEV_INPUTS_KEY" ] && ! grep -q 'docker exec pfm-fence-.* sh -c' "$REC"; then ok "a worktree's first call records its key and leaves no container"
+else bad "first key" "$(cat "$FENCE_SH_HOST/wt1/key" 2>&1)" "$(cat "$REC")"; fi
+reset; STUB_INSPECT='true 6000000000 5368709120'; echo 0123456789abcdefold >"$FENCE_SH_HOST/wt1/key"
+PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true' 2>/dev/null
+has "a worktree whose key changed leaves its old key's container, by name, as itself" "docker exec pfm-fence-$FENCE_SH_ROOTS-0123456789ab sh -c"
+if grep -q "docker exec pfm-fence-$FENCE_SH_ROOTS-0123456789ab sh -c .* _ wt1\$" "$REC" && [ "$(cat "$FENCE_SH_HOST/wt1/key")" = "$PFM_DEV_INPUTS_KEY" ]; then ok "the leave names this worktree and records the new key"
+else bad "leave argv" "$(cat "$REC")"; fi
+reset; STUB_INSPECT='true 6000000000 5368709120'
+PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true' 2>/dev/null
+lacks "an unchanged key leaves no container" ' sh -c '
+# the leave's own text: the old container is superseded only once no worktree is left in it
+LEAVE="$(sed -n "s/.*docker exec \"\$oname\" sh -c '\([^']*\)' _ .*/\1/p" "$SUT")"
+U="$T/leave"; mkdir -p "$U/worktrees"; : >"$U/worktrees/wt1"; : >"$U/worktrees/wt2"
+sh -c "${LEAVE//\/var\/fence/$U}" _ wt1
+if [ ! -e "$U/worktrees/wt1" ] && [ ! -e "$U/superseded" ]; then ok "a container another worktree still uses is not superseded when one leaves"; else bad "leave with a user left" "$(ls -R "$U")"; fi
+sh -c "${LEAVE//\/var\/fence/$U}" _ wt2
+if [ -e "$U/superseded" ]; then ok "the last worktree to leave supersedes the container"; else bad "last leave" "LEAVE=$LEAVE" "$(ls -R "$U")"; fi
 reset; STUB_INSPECT='true 6000000000 5368709120'
 out="$(PFM_DEV_ENGINE_SYNC_SRC="$T/elsewhere" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true' 2>&1)"; rc=$?
 if [ "$rc" = 1 ] && grep -q '^iso: the engine-sync source .* is outside the shared container' <<<"$out"; then ok "an engine-sync source outside the roots is refused, named"; else bad "engine-sync refusal" "rc=$rc" "$out"; fi

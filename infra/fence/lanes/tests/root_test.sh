@@ -22,12 +22,13 @@ source "$LANES/../../../scripts/shtest.sh"
 R="$T/repo-$BASHPID"
 FAIL_DIR="/tmp/$(basename "$R")/lanes/root-failures"
 # One EXIT trap for both scratch roots: a second trap would replace shtest's.
-trap 'rm -rf -- "$T" "/tmp/$(basename "$R")"' EXIT
+trap 'rm -rf -- "$T" "/tmp/$(basename "$R")" "/tmp/$(basename "$R")-wt"' EXIT
 mkdir -p "$R/infra/fence/lanes"
 cp "$SUT" "$R/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$R/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$R/infra/fence/fence-env.sh"
 cp "$LANES/../image-key.sh" "$R/infra/fence/image-key.sh"
+cp "$LANES/../mkdir-lock.sh" "$R/infra/fence/mkdir-lock.sh"
 printf 'FROM scratch\n' >"$R/infra/fence/pfm-dev.Dockerfile"
 printf 'services: {}\n' >"$R/infra/fence/docker-compose.yml"
 shtest_compose_config "$R/infra/fence" >"$T/compose-config.yml"
@@ -274,6 +275,7 @@ cp "$SUT" "$H/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$H/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$H/infra/fence/fence-env.sh"
 cp "$LANES/../image-key.sh" "$H/infra/fence/image-key.sh"
+cp "$LANES/../mkdir-lock.sh" "$H/infra/fence/mkdir-lock.sh"
 cp "$R/infra/fence/housekeeping.sh" "$H/infra/fence/housekeeping.sh"
 for script in provision adopt cred-scan; do cp "$R/infra/fence/lanes/$script.sh" "$H/infra/fence/lanes/$script.sh"; done
 for file in E1.sh lib.sh beats.md; do printf 'fixture\n' >"$H/infra/fence/lanes/$file"; done
@@ -401,5 +403,28 @@ run_root ok
 if [ "$RC" -eq 0 ] && grep -q '^commit ' "$STUB_DOCKER_LOG" && [ ! -e "$LK" ]; then
   ok "a dead holder's root build lock is broken, the build runs and releases its lock"
 else bad "dead holder lock" "rc=$RC" "$OUT"; fi
+# The lock is the machine's, not the worktree's: a build from a linked worktree of the repo waits on the
+# lock under the main checkout's /tmp/{project}/lanes, so two worktrees on one hash never build one tag at once.
+WT="$R-wt"
+git -C "$R" worktree add -q "$WT" 2>/dev/null || bad "cross-worktree lock: git worktree add failed" "$WT"
+WHASH="$(bash "$WT/infra/fence/lanes/root.sh" --print-hash 2>/dev/null)"
+LK="/tmp/$(basename "$R")/lanes/root-build-$WHASH.lock"
+mkdir -p "$LK"
+sleep 30 &
+holder=$!
+printf '%s\n' "$holder" >"$LK/pid"
+: >"$STUB_DOCKER_LOG"
+STUB_ROOT_PRESENT="$T/root.present" bash "$WT/infra/fence/lanes/root.sh" >"$T/wtwait.out" 2>&1 </dev/null &
+waiter=$!
+for ((i = 0; i < 50; i++)); do grep -q 'waiting for the root build' "$T/wtwait.out" 2>/dev/null && break; sleep 0.1; done
+waited="$(grep -c "waiting for the root build of $WHASH held by pid $holder ($LK)" "$T/wtwait.out")"
+: >"$T/root.present"
+rm -rf "$LK"
+wait "$waiter"; wrc=$?
+ps -o args= -p "$holder" 2>/dev/null | grep -qF 'sleep 30' && kill "$holder" 2>/dev/null
+rm -f "$T/root.present"
+if [ -n "$WHASH" ] && [ "$waited" -ge 1 ] && [ "$wrc" -eq 0 ] && grep -q "^root: reusing pfm-lane-root:$WHASH" "$T/wtwait.out" && [ ! -e "$LK" ]; then
+  ok "a root build from a linked worktree waits on the main checkout's lock for its hash, then reuses the image"
+else bad "cross-worktree root build lock" "hash=$WHASH waited=$waited rc=$wrc" "$(cat "$T/wtwait.out")"; fi
 
 shtest_end

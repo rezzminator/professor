@@ -8,7 +8,9 @@
 #
 # run: registers /var/fence/live/<id> (this supervisor's pid; the container's daemon kills and
 # removes the run of a dead supervisor), refuses with exit 75 when the container is closing, writes
-# the host-visible start marker /pfm-fence/.runs/<id>/started, counts the live runs into
+# the host-visible start marker /pfm-fence/.runs/<id>/started, records its worktree as a user of the
+# container (/var/fence/worktrees/<worktree>, which also lifts a superseded mark: a worktree still on this
+# key keeps it), counts the live runs into
 # PFM_FENCE_CONCURRENT, makes /var/fence/runs/<id>/{home,tmp,vartmp}, and starts the command under
 # `unshare --fork --pid --mount-proc --mount` (plus --net for private): its own pid namespace and
 # /proc, so a process scan or a pkill sees this run alone; its own mounts — the caller's tree
@@ -91,6 +93,8 @@ cmd_run() {
   echo "$$" > "$live"
   if [[ -e "$STATE/closing" ]]; then rm -f "$live"; echo "shared-run: the container is closing — start a new one" >&2; exit 75; fi
   [[ ! -d "$MNT/.runs/$id" ]] || : > "$MNT/.runs/$id/started"
+  if mkdir -p "$STATE/worktrees" && : > "$STATE/worktrees/$wt"; then rm -f "$STATE/superseded"
+  else echo "shared-run: the worktree record $STATE/worktrees/$wt could not be written — the container may be superseded under this worktree" >&2; fi
   PFM_FENCE_CONCURRENT="$(live_count)"; export PFM_FENCE_CONCURRENT
   mkdir -p "$run/home" "$run/tmp" "$run/vartmp" "$MNT/$wt/timing" || { rm -rf "$run" "$live"; die "the run directory $run could not be made"; }
   chmod 1777 "$run/tmp" "$run/vartmp"

@@ -46,7 +46,7 @@ Reading it from one run:
 2. **`steps/<name>.prof.tsv`**: `start_epoch` and `finish_epoch` place every step on one clock. Subtract the earliest `start_epoch` and sort by finish: the last phase-0 finish is where phase 1 opens (every phase-1 `start_epoch` is at or after it); the last finish overall is the end of `STEPS`.
 3. **Heavy-slot waits**: a heavy phase-1 step whose `start_epoch` is later than phase 1's opening waited that long for a slot (`STEPS_HEAVY_JOBS` and the registration order decide which). A light step waits only when `STEPS_JOBS` steps are already running.
 4. **Inside a Go step**: `unit.json` and `e2e.json` are `go test -json` streams; per package, the first event's `Time` and the terminal `pass`/`fail` event's `Time` and `Elapsed` give its start and end. The package ending last is what holds its step open; a package whose `Elapsed` far exceeds its CPU (`profile/<label>.<pid>/summary.json` `user_s` + `sys_s`) is waiting, not working.
-5. **`resources.tsv`**: Δ`cg_cpu_s` ÷ (Δ`epoch_s` × `cpus`) over a window is the container's CPU use; a long stretch well under the CPU count is idle time a reordering could fill. The maximum `cg_mem_peak_mb` is the run's memory peak against the 2 GiB cap; `cg_swap_mb` above zero means the run was memory-bound.
+5. **`resources.tsv`**: Δ`cg_cpu_s` ÷ (Δ`epoch_s` × `cpus`) over a window is the container's CPU use; a long stretch well under the CPU count is idle time a reordering could fill. The maximum `cg_mem_peak_mb` is the run's memory peak against the container's memory cap (5g by default, `PFM_FENCE_MEM`); `cg_swap_mb` above zero means the run was memory-bound.
 
 ## TSV
 
@@ -109,7 +109,7 @@ At `-p 6 -parallel 4`, the unit block, tagged e2e block, and gate walls use one 
 
 The target enables `--wait-quiet`, which prefers load below 4 before each capture. The wait is outside the timed command and capped at five minutes; sustained load emits a warning and proceeds with high-load evidence. The raw TSV records each result; its sibling `.load.log` records capture identity and dated uptime before and after, including failed captures. Unreadable load probes fail explicitly.
 
-The unit gate is pinned at `-p 6 -parallel 4` by the [2026-10 hermetic sweep](concurrency-sweep.md#hermetic--p-sweep-2026-10). The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `/tmp/{project}/timing/`.
+The unit gate is pinned at `-p 6 -parallel 4` by the [2026-10 hermetic sweep](concurrency-sweep.md#hermetic--p-sweep-2026-10). The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `/tmp/{project}/fence/shared/{worktree}/timing/`.
 
 ## Accepted measurements
 

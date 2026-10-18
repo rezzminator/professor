@@ -4,7 +4,7 @@
 # paths never see each other's), the hidden state and host directories, the live record and
 # PFM_FENCE_CONCURRENT, its own pid namespace, the private network (two concurrent runs bind the same
 # fixed port; an outside connect fails), the kill on a heartbeat EOF and on a stalled heartbeat, the
-# kill subcommand, exit 75 while closing, the started marker and /pfm-run, tty mode's foreground run,
+# kill subcommand, exit 75 while closing, the started marker and /pfm-run, the worktree's user record, tty mode's foreground run,
 # the argument refusals, and the container's main process (idle exit, dead-supervisor reap, superseded
 # drain). It needs unshare with CAP_SYS_ADMIN and CAP_NET_ADMIN — the shared fence
 # container grants both — and re-runs itself in a private mount namespace with a tmpfs on /mnt, where
@@ -45,6 +45,10 @@ wait_for() { # wait_for <path>: up to 10 s
 # --- exit code, tree, cwd -----------------------------------------------------------------------------
 out="$(srun r-exit shared 'exit 7')"; rc=$?
 if [ "$rc" = 7 ]; then ok "a run exits with its command's code"; else bad "a run exits with its command's code" "rc=$rc" "$out"; fi
+touch "$FENCE_STATE_DIR/superseded"
+out="$(srun r-user shared 'true')"; rc=$?
+if [ "$rc" = 0 ] && [ -e "$FENCE_STATE_DIR/worktrees/wt" ] && [ ! -e "$FENCE_STATE_DIR/superseded" ]; then ok "a run records its worktree as the container's user and lifts a superseded mark"
+else bad "the worktree record" "rc=$rc" "$(ls -A "$FENCE_STATE_DIR")" "$out"; fi
 out="$(srun r-tree shared '[ "$PWD" = /worktree ] && [ "$(cat /worktree/marker)" = here ] && ! touch /worktree/x 2>/dev/null && [ "$HOME" = /root ]')"; rc=$?
 if [ "$rc" = 0 ]; then ok "a run starts in its tree on /worktree, read-only, HOME=/root"; else bad "the run's tree, cwd and HOME" "rc=$rc" "$out"; fi
 if [ ! -e "$TREE/x" ]; then ok "a run never writes its tree"; else bad "a run wrote its tree"; fi

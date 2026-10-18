@@ -29,11 +29,17 @@
 #   PFM_FENCE_IDLE_S (1800)       a container with no live run this long exits (read at creation)
 #   PFM_FENCE_HEARTBEAT_S (4)     a run whose caller's heartbeat stops this long is killed
 #   PFM_FENCE_NET (private)       iso run's network: shared opts into the container's network
-# Only creation is serialized: the lock directory /tmp/{project}/fence/shared.lock.d around inspect,
-# image build and `docker run`; runs never queue behind each other. A new image key starts a new
-# container and marks the root's other containers superseded: each drains its live runs, then exits.
-# Housekeeping (infra/fence/housekeeping.sh) runs detached, only when a container is created; its
-# output goes to /tmp/{project}/fence/housekeeping.log.
+# Only creation is serialized: the lock directory /tmp/{project}/fence/shared.lock.d
+# (infra/fence/mkdir-lock.sh) around inspect, image build and `docker run`; runs never queue behind
+# each other. A new image key starts a new container. Each run records its worktree in the container
+# (/var/fence/worktrees/<worktree>); a worktree whose key changed (its last key, <worktree>/key under the
+# host directory) leaves its old key's container, and an old container no worktree uses any more is
+# superseded: it drains its live runs, then exits. Two worktrees on different keys each keep their
+# own warm container.
+# Housekeeping runs detached, only when a container is created, under the start lock: the k- tags no
+# running container uses are removed, the host run directories of dead callers (.runs/<id>, the pid
+# in the id) are reaped, then infra/fence/housekeeping.sh; its output goes to
+# /tmp/{project}/fence/housekeeping.log, rotated to housekeeping.log.1 past 1 MiB.
 # Kill: a heartbeat feeder writes to the run's stdin every 0.5 s while every pid in $$ and
 # PFM_FENCE_WATCH_PIDS lives; the caller's death closes it, and shared-run.sh kills the run's
 # namespaces on EOF or after PFM_FENCE_HEARTBEAT_S without a beat. A TERM or INT to the caller does
@@ -45,6 +51,8 @@
 # running caps.
 
 FENCE_SHARED_IMAGE=professor-pfm-dev
+# shellcheck source=infra/fence/mkdir-lock.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/mkdir-lock.sh" || { echo "iso: infra/fence/mkdir-lock.sh could not be sourced" >&2; return 1; }
 
 _fence_sh_sha12() { # _fence_sh_sha12 <text>
   local out
@@ -108,22 +116,15 @@ _fence_sh_caps() { # _fence_sh_caps <name> <nanocpus now> <memory now>
   fi
 }
 
-_fence_sh_lock() { # mkdir lock with the holder's pid; a dead holder's lock is broken
-  local i holder
+_fence_sh_lock() { # _fence_sh_lock [owner pid, default $$]: the start lock; a stale one is broken
+  local i me="${1:-$$}"
   mkdir -p "${FENCE_SH_LOCK%/*}" || return 1
   for ((i = 0; i < 3000; i++)); do
-    if mkdir "$FENCE_SH_LOCK" 2>/dev/null; then echo "$$" > "$FENCE_SH_LOCK/pid"; return 0; fi
-    holder="$(cat "$FENCE_SH_LOCK/pid" 2>/dev/null || true)"
-    if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
-      rm -rf "$FENCE_SH_LOCK"; continue
-    fi
-    if [[ -z "$holder" && -n "$(find "$FENCE_SH_LOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
-      rm -rf "$FENCE_SH_LOCK"; continue
-    fi
-    (( i % 50 != 0 )) || [[ $i == 0 ]] || echo "fence: waiting for the container start held by pid ${holder:-?} ($FENCE_SH_LOCK)" >&2
+    if mkdir_lock_try "$FENCE_SH_LOCK" "$me"; then return 0; fi
+    (( i % 50 != 0 )) || [[ $i == 0 ]] || echo "fence: waiting for the container start held by pid ${MKDIR_LOCK_HOLDER:-?} ($FENCE_SH_LOCK)" >&2
     sleep 0.2
   done
-  echo "iso: the fence start lock $FENCE_SH_LOCK is still held by pid ${holder:-?} after 600 s" >&2
+  echo "iso: the fence start lock $FENCE_SH_LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after 600 s" >&2
   return 1
 }
 
@@ -188,7 +189,9 @@ _fence_sh_image() {
 }
 
 # _fence_sh_untag_stale: every other key's k- tag that no running shared container runs is removed, so
-# its image turns dangling and fence housekeeping prunes it (detached, after a container start).
+# its image turns dangling and fence housekeeping prunes it (detached, after a container start, under
+# the start lock: a starter holds it from resolving its tag through `docker run`, so a tag never goes
+# between the two).
 _fence_sh_untag_stale() {
   local tag used
   used="$(docker ps --filter label=pfm.fence.long-lived=1 --format '{{.Image}}' 2>/dev/null)" || return 0
@@ -199,8 +202,63 @@ _fence_sh_untag_stale() {
   done < <(docker image ls --filter "reference=$FENCE_SHARED_IMAGE:k-*" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
 }
 
+# _fence_sh_reap_runs: every host run directory whose caller is gone (the pid in its id
+# <stamp>-<pid>-<rand>) is removed — a SIGKILLed caller never reaches its own rm, and the directory
+# may hold a copy of the private leak terms.
+_fence_sh_reap_runs() {
+  local d id pid
+  for d in "$FENCE_SH_HOST"/.runs/*; do
+    [[ -d "$d" ]] || continue
+    id="${d##*/}"; pid="${id#*-}"; pid="${pid%%-*}"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    kill -0 "$pid" 2>/dev/null && continue
+    if rm -rf "$d"; then echo "fence: reaped the run directory $d (its caller $pid is gone)"; else echo "fence: the run directory $d could not be reaped"; fi
+  done
+}
+
+# _fence_sh_after_start: the detached housekeeping of one container start, in its own subshell.
+_fence_sh_after_start() {
+  local log="/tmp/$FENCE_SH_PROJECT/fence/housekeeping.log" me size
+  size="$(wc -c <"$log" 2>/dev/null || echo 0)"
+  if [[ "${size// /}" -gt 1048576 ]]; then mv -f "$log" "$log.1" 2>/dev/null || true; fi
+  {
+    me="$(exec sh -c 'echo "$PPID"')" # this subshell's pid: $$ is the caller's, which may exit first
+    if _fence_sh_lock "$me"; then
+      _fence_sh_untag_stale; _fence_sh_unlock
+    else echo "fence: the stale k- tags stay — the start lock could not be taken"; fi
+    _fence_sh_reap_runs
+    fence_housekeeping
+  } </dev/null >>"$log" 2>&1
+}
+
+# _fence_sh_leave_old_key: when this worktree's last key (<worktree>/key) is another, this worktree
+# leaves that key's container; one no worktree uses any more is superseded (it drains, then exits).
+_fence_sh_leave_old_key() {
+  local f="$FENCE_SH_HOST/$FENCE_SH_WT/key" old oname
+  old="$(cat "$f" 2>/dev/null || true)"
+  [[ "$old" != "$PFM_DEV_INPUTS_KEY" ]] || return 0
+  printf '%s\n' "$PFM_DEV_INPUTS_KEY" >"$f" || echo "WARN fence: $f could not be written — the next call looks for an old container again" >&2
+  [[ -n "$old" ]] || return 0
+  oname="pfm-fence-$FENCE_SH_ROOTS-${old:0:12}"
+  # shellcheck disable=SC2016 # expands inside the container
+  if docker exec "$oname" sh -c 'rm -f "/var/fence/worktrees/$1"; [ -n "$(ls -A /var/fence/worktrees 2>/dev/null)" ] || touch /var/fence/superseded' _ "$FENCE_SH_WT" >/dev/null 2>&1; then
+    echo "fence: $FENCE_SH_WT left $oname for image ${PFM_DEV_INPUTS_KEY:0:12} — it exits once no other worktree uses it and its live runs end" >&2
+  fi
+}
+
+_fence_sh_running() { [[ "$(docker inspect -f '{{.State.Running}}' "$FENCE_SH_NAME" 2>/dev/null)" == true ]]; }
+
+_fence_sh_gone() { # the container stopped or vanished: 0 once it is not running, within about 2 s
+  local i
+  for ((i = 0; i < 10; i++)); do
+    _fence_sh_running || return 0
+    sleep 0.2
+  done
+  return 1
+}
+
 fence_shared_ensure() {
-  local name state running cpu mem other okey attempt out
+  local name state running cpu mem attempt out
   local -a mounts
   name="$(_fence_sh_name)"
   FENCE_SH_NAME="$name"
@@ -214,13 +272,6 @@ fence_shared_ensure() {
     if [[ "$running" == true ]]; then _fence_sh_unlock; _fence_sh_caps "$name" "$cpu" "$mem"; return 0; fi
   fi
   _fence_sh_image || { _fence_sh_unlock; return 1; }
-  # A new key supersedes this root's other containers: each drains its live runs, then exits.
-  while read -r other okey; do
-    [[ -n "$other" && "$other" != "$name" && "$okey" != "$PFM_DEV_INPUTS_KEY" ]] || continue
-    if docker exec "$other" touch /var/fence/superseded >/dev/null 2>&1; then
-      echo "fence: $other superseded by image ${PFM_DEV_INPUTS_KEY:0:12} — it exits once its live runs end" >&2
-    fi
-  done < <(docker ps --filter "label=pfm.fence.shared=$FENCE_SH_ROOTS" --format '{{.Names}} {{.Label "pfm.fence.inputs"}}' 2>/dev/null)
   fence_volumes_ensure
   mounts=(-v "$FENCE_SH_MAIN:/repo:ro" -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" -v "$FENCE_SH_HOST:/pfm-fence"
     -v pfm-dev-gocache:/cache/go-build -v pfm-dev-gomod:/cache/gomod -v pfm-dev-lintcache:/cache/lint)
@@ -237,12 +288,20 @@ fence_shared_ensure() {
       "$FENCE_SH_IMAGE" bash -c "$FENCE_SHARED_DAEMON" 2>&1)"; then
       _fence_sh_unlock
       echo "fence: started $name (cpus=$FENCE_SH_CPUS mem=$FENCE_SH_MEM image ${PFM_DEV_INPUTS_KEY:0:12})" >&2
-      # Housekeeping leaves the per-call path: detached, once per container start.
-      ( _fence_sh_untag_stale; fence_housekeeping ) </dev/null >>"/tmp/$FENCE_SH_PROJECT/fence/housekeeping.log" 2>&1 &
+      # Housekeeping leaves the per-call path: detached, once per container start, off the caller's
+      # stdin, stdout and stderr, so a caller reading this call's output (test.sh's tee) never waits on it.
+      ( _fence_sh_after_start ) </dev/null >/dev/null 2>&1 &
       return 0
     fi
-    # The same name still exiting (`--rm` removes it a moment after exit): wait for it to go.
-    case "$out" in *"is already in use"*) sleep 1; continue ;; esac
+    # The name in use: a container another starter made running (use it), or the same name still
+    # exiting (`--rm` removes it a moment after exit: wait for it to go).
+    case "$out" in *"is already in use"*)
+      if state="$(docker inspect -f '{{.State.Running}} {{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$name" 2>/dev/null)"; then
+        read -r running cpu mem <<<"$state"
+        if [[ "$running" == true ]]; then _fence_sh_unlock; _fence_sh_caps "$name" "$cpu" "$mem"; return 0; fi
+      fi
+      sleep 1; continue ;;
+    esac
     break
   done
   _fence_sh_unlock
@@ -296,6 +355,7 @@ fence_shared_exec() {
   fi
   for attempt in 1 2; do
     fence_shared_ensure || return 1
+    _fence_sh_leave_old_key
     id="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM$RANDOM"
     hdir="$FENCE_SH_HOST/.runs/$id"
     mkdir -p "$hdir" || { echo "iso: the run directory $hdir could not be created" >&2; return 1; }
@@ -341,8 +401,12 @@ fence_shared_exec() {
       kill -KILL "$feeder" 2>/dev/null || true
       wait "$feeder" 2>/dev/null || true
     fi
-    # Exit 75 before the run started: the container was closing; start a new one, once.
-    if [[ $rc == 75 && ! -e "$hdir/started" && $attempt == 1 ]]; then rm -rf "$hdir"; sleep 2; continue; fi
+    # Before the run started, the container was closing (exit 75) or stopped or vanished between
+    # ensure and exec (docker's own refusal): start a new one, once.
+    if [[ $rc != 0 && ! -e "$hdir/started" && $attempt == 1 ]] && { [[ $rc == 75 ]] || _fence_sh_gone; }; then
+      echo "fence: $FENCE_SH_NAME closed before the run started (exit $rc) — starting a new container" >&2
+      rm -rf "$hdir"; sleep 2; continue
+    fi
     rm -rf "$hdir"
     return "$rc"
   done

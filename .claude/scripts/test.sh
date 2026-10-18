@@ -16,9 +16,13 @@
 #   *_test.py                 python3 -m unittest; ::selector is -k; x.py brings x_test.py
 #   scripts/test-*.py         python3, no selector; scripts/x.{sh,py} brings scripts/test-x.{sh,py}
 #   *_test.sh, scripts/test-*.sh  bash, no selector; .claude/scripts/x.sh brings scripts/test-x.sh
-#                             (dev.sh: scripts/test-dev-report.sh, format-md.sh: scripts/test-format-md.sh
-#                             on that copy); infra/fence/x.sh, infra/fence/lanes/x.sh bring
-#                             infra/fence/lanes/tests/x_test.sh; infra/demo/x.sh infra/demo/tests/x_test.sh
+#                             (dev.sh: scripts/test-dev-report.sh and infra/fence/lanes/tests/
+#                             iso-housekeeping_test.sh, format-md.sh: scripts/test-format-md.sh on that
+#                             copy); infra/fence/x.sh, infra/fence/lanes/x.sh bring
+#                             infra/fence/lanes/tests/x_test.sh; infra/demo/x.sh infra/demo/tests/x_test.sh;
+#                             a sourced helper brings its users' tests: scripts/shtest.sh and
+#                             scripts/stub-root.sh every tracked test naming it, infra/fence/mkdir-lock.sh
+#                             its own and the shared, root and gate-history tests
 # Any other file brings no test, only checks. The checks, every one run even after one fails:
 #   pfm paths      fmt (golangci-lint fmt --diff, named .go files), typecheck (go vet of the named .go
 #                  files' packages plus every module package importing one, test imports included; with
@@ -41,10 +45,12 @@
 # the whole run, every runner's own output indented `  | ` so only this run's summary lines sit at
 # column 0. Exit 0 PASS, 1 FAIL, 2 usage.
 # --full is the full gate (dev.sh iso gate): pfm, templates, e2e and the lane self-tests as concurrent
-# steps in one run, the STEPS line, RUN DIR, gate.tsv, the budget and the ledger row. It runs ONCE per
-# worktree, right before its merge.
+# steps in one run, the STEPS line, RUN DIR, gate.tsv, the budget and the ledger row, streamed as it runs
+# and kept in the log; then its `VERDICT PASS|FAIL` from the gate's closing line (`all steps passed.` or
+# `N step(s) failed or could not run.`) and `log: <path>`, exit 0 PASS, else the gate's code (1 when it
+# exited 0 without its closing line). It runs ONCE per worktree, right before its merge.
 # BROKEN STATE: a missing unit-path.sh or dev.sh errors on source/exec; a usage or path problem exits 2
-# with a named line and never reaches the fence; a fence run that dies before its verdict prints
+# with a named line and never reaches the fence; a fence run (tests or --full) that dies before its verdict prints
 # `VERDICT FAIL (…)` naming why (docker absent, its daemon unreachable, or the run's exit code), never
 # a pass, and so does a PASS verdict the run's non-zero exit contradicts; a test that ran nothing or skipped one is red, never green.
 set -euo pipefail
@@ -127,7 +133,7 @@ s_check() { # s_check <name> <command>...
 }
 s_skip() { echo "CHECK SKIP $1 (no named file it applies to)"; }
 
-static_pfm() { # static_pfm <file>...: pfm's checks, from check-pfm's rules
+static_pfm() { # static_pfm <file>...: pfm's checks over the named files
   local gofiles=() pkgs=() f g d out rc mod lrc listed namedips vetpkgs ip imps i p hit seen burn path named
   for f in "$@"; do case "$f" in pfm/*.go) gofiles+=("${f#pfm/}") ;; esac; done
   if [ "${#gofiles[@]}" = 0 ]; then
@@ -310,10 +316,30 @@ fi
 
 # ─── host half ────────────────────────────────────────────────────────────────────────────────────
 [ "$#" -gt 0 ] || usage
+fence_dead() { # fence_dead <what> <rc>: the verdict of a fence run that printed none, its cause named
+  if ! command -v docker >/dev/null 2>&1; then echo 'VERDICT FAIL (fence: docker not found)'
+  elif ! docker info >/dev/null 2>&1; then echo 'VERDICT FAIL (fence: the docker daemon is not reachable — start Docker, then rerun)'
+  else echo "VERDICT FAIL (fence: $1 exited $2 before a verdict — see the log)"; fi
+}
 if [ "$1" = --full ]; then
   [ "$#" = 1 ] || usage
-  export PFM_FENCE_WATCH_PIDS="$$${PFM_FENCE_WATCH_PIDS:+ $PFM_FENCE_WATCH_PIDS}"
-  exec "$DEV" iso gate
+  unit_log test || { echo "test.sh: the log directory could not be created" >&2; exit 1; }
+  rc=0
+  PFM_FENCE_WATCH_PIDS="$$${PFM_FENCE_WATCH_PIDS:+ $PFM_FENCE_WATCH_PIDS}" "$DEV" iso gate 2>&1 | tee "$UNIT_LOG" || rc=$?
+  # The gate's closing line, colour codes stripped; the last one wins.
+  closing="$(sed $'s/\033\\[[0-9;]*m//g' "$UNIT_LOG" | grep -E '^(all steps passed\.|[0-9]+ step\(s\) failed or could not run\.)$' | tail -n 1 || true)"
+  case "$closing" in
+    'all steps passed.')
+      if [ "$rc" = 0 ]; then verdict='VERDICT PASS'
+      else verdict="VERDICT FAIL (fence: dev.sh iso gate exited $rc after its passing close — see the log)"; fi ;;
+    '') verdict="$(fence_dead 'dev.sh iso gate' "$rc")" ;;
+    *) verdict='VERDICT FAIL' ;;
+  esac
+  echo "$verdict"
+  echo "log: $UNIT_LOG"
+  [ "$verdict" != 'VERDICT PASS' ] || exit 0
+  [ "$rc" = 0 ] && exit 1
+  exit "$rc"
 fi
 for arg in "$@"; do
   case "$arg" in --*) usage ;; esac
@@ -394,7 +420,18 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
       base="${f##*/}"
       case "$f" in
         .claude/scripts/test.sh) shell_test scripts/test-test.sh ;;
-        .claude/scripts/dev.sh) shell_test scripts/test-dev-report.sh .claude/scripts/dev.sh ;;
+        .claude/scripts/dev.sh)
+          shell_test scripts/test-dev-report.sh .claude/scripts/dev.sh
+          [ ! -f "$ROOT/infra/fence/lanes/tests/iso-housekeeping_test.sh" ] || shell_test infra/fence/lanes/tests/iso-housekeeping_test.sh ;;
+        scripts/shtest.sh | scripts/stub-root.sh)
+          while IFS= read -r sib; do
+            [ -z "$sib" ] || [ "$sib" = "$f" ] || [ ! -f "$ROOT/$sib" ] || ! grep -qF -- "$f" "$ROOT/$sib" || shell_test "$sib"
+          done < <(git -C "$ROOT" ls-files -- '*_test.sh' 'scripts/test-*.sh') ;;
+        infra/fence/mkdir-lock.sh)
+          for sib in infra/fence/lanes/tests/mkdir-lock_test.sh infra/fence/lanes/tests/shared_test.sh \
+            infra/fence/lanes/tests/root_test.sh infra/fence/lanes/tests/gate-history_test.sh; do
+            [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
+          done ;;
         .claude/scripts/format-md.sh | templates/project/scripts/format-md.sh) shell_test scripts/test-format-md.sh "$f" ;;
         .claude/scripts/*.sh | scripts/*.sh | scripts/*.py)
           for sib in "scripts/test-${base%.*}.sh" "scripts/test-${base%.*}.py"; do
@@ -430,9 +467,7 @@ PFM_FENCE_NET=private PFM_FENCE_WATCH_PIDS="$$${PFM_FENCE_WATCH_PIDS:+ $PFM_FENC
 grep -E '^(TEST|CHECK|TESTS|STATIC) ' "$UNIT_LOG" || true
 verdict="$(grep -E '^VERDICT (PASS|FAIL)$' "$UNIT_LOG" | tail -n 1 || true)"
 if [ -z "$verdict" ]; then
-  if ! command -v docker >/dev/null 2>&1; then verdict='VERDICT FAIL (fence: docker not found)'
-  elif ! docker info >/dev/null 2>&1; then verdict='VERDICT FAIL (fence: the docker daemon is not reachable — start Docker, then rerun)'
-  else verdict="VERDICT FAIL (fence: dev.sh iso run exited $rc before a verdict — see the log)"; fi
+  verdict="$(fence_dead 'dev.sh iso run' "$rc")"
 elif [ "$verdict" = 'VERDICT PASS' ] && [ "$rc" != 0 ]; then
   verdict="VERDICT FAIL (fence: dev.sh iso run exited $rc after its PASS verdict — see the log)"
 fi

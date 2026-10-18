@@ -9,7 +9,8 @@
 # unittest test), every check after one fails (fmt, typecheck's scope, lint-new's scope, arch,
 # launch-literals, rumdl, leak and the templates unit's checks), the install gap, the host's verdict
 # when the fence dies (docker absent, its daemon down, an exit before a verdict, a PASS its exit
-# contradicts), the log, the red tail and --full. dev.sh and every tool are stubs in the fake root that
+# contradicts), the log, the red tail and --full (its streamed output and log, its verdict from the gate's
+# closing line, a named FAIL when the gate dies before it). dev.sh and every tool are stubs in the fake root that
 # record their argv and exit as the test tells them; `iso run` executes its command string with
 # PFM_DEV_FENCE=1 like the real fence. The host checkout and the real fence are never touched.
 #   bash scripts/test-test.sh [path to test.sh]
@@ -59,6 +60,12 @@ for f in pfm/scripts/s_test.sh pfm/scripts/s.sh scripts/test-w.sh scripts/w.sh s
   # shellcheck disable=SC2059 # the format is the fixture body
   printf "$REC_BODY" >"$R/$f"
 done
+# A sourced harness brings every tracked test naming it; the iso doors' suite comes with dev.sh.
+printf '# sources scripts/shtest.sh\n' >>"$R/infra/fence/lanes/tests/f_test.sh"
+printf '# sources scripts/shtest.sh\n' >>"$R/scripts/test-w.sh"
+echo '# the harness' >"$R/scripts/shtest.sh"
+# shellcheck disable=SC2059 # the format is the fixture body
+printf "$REC_BODY" >"$R/infra/fence/lanes/tests/iso-housekeeping_test.sh"
 echo 'print(1)' >"$R/scripts/z.py"
 echo 'print(1)' >"$R/scripts/test-z.py"
 echo 'print(1)' >"$R/tools/y.py"
@@ -220,6 +227,12 @@ run "$R" infra/fence/f.sh
 ran_has "infra/fence/x.sh brings infra/fence/lanes/tests/x_test.sh" infra/fence/lanes/tests/f_test.sh
 run "$R" .claude/scripts/dev.sh
 ran_has "dev.sh brings scripts/test-dev-report.sh run against the tree's dev.sh" "scripts/test-dev-report.sh $R/.claude/scripts/dev.sh"
+ran_has "dev.sh brings the suite of its iso doors" infra/fence/lanes/tests/iso-housekeeping_test.sh
+run "$R" scripts/shtest.sh
+ran_has "scripts/shtest.sh brings a lane test that names it" infra/fence/lanes/tests/f_test.sh
+ran_has "scripts/shtest.sh brings a scripts test that names it" scripts/test-w.sh
+if grep -q '^ran pfm/scripts/s_test.sh' "$REC"; then bad "scripts/shtest.sh brings no test that does not name it" "$(cat "$REC")"
+else ok "scripts/shtest.sh brings no test that does not name it"; fi
 reset; rule node '--test' 0 'ok 1 - a case\n# pass 1'; rule python3 'unittest' 0 'Ran 2 tests\n\nOK'; rule python3 'test-z.py' 0 'Ran 1 test\n\nOK'
 run "$R" templates/global/commands/x.mjs
 rec_has "a .mjs file brings its .test.mjs sibling under node --test" node --test --test-reporter=tap templates/global/commands/x.test.mjs
@@ -493,5 +506,25 @@ if grep -qE '^dev\.sh PFM_FENCE_NET= WATCH=[0-9]+$' "$REC.env"; then ok "--full 
 rule dev.sh 'iso gate' 7 'stub red'
 run "$R" --full
 rc_is "--full exits with the gate's code" 7
+expect "--full: a gate that dies before its closing line, docker absent, is a named FAIL" 7 'VERDICT FAIL (fence: docker not found)'
+if grep -qx 'stub red' <<<"$OUT" && grep -qE '^log: /tmp/'"$NAME"'/test/[0-9TZ]+-[0-9]+\.log$' <<<"$OUT" &&
+  grep -qx 'stub red' "$(sed -n 's/^log: //p' <<<"$OUT")"; then ok "--full streams the gate's output and keeps it in the named log"
+else bad "--full streams the gate's output and keeps it in the named log" "$OUT"; fi
+docker_on; reset; rule docker 'info' 0; rule dev.sh 'iso gate' 9 'half a gate'
+run "$R" --full
+expect "--full: a gate that dies before its closing line, docker up, names the exit" 9 'VERDICT FAIL (fence: dev.sh iso gate exited 9 before a verdict — see the log)'
+docker_off; reset; rule dev.sh 'iso gate' 0 '\n\033[32mall steps passed.\033[0m'
+run "$R" --full
+expect "--full: the gate's passing close (colour stripped) and exit 0 is VERDICT PASS" 0 'VERDICT PASS'
+reset; rule dev.sh 'iso gate' 1 '\n2 step(s) failed or could not run.'
+run "$R" --full
+expect "--full: the gate's failing close is VERDICT FAIL with the gate's code" 1 'VERDICT FAIL'
+reset; rule dev.sh 'iso gate' 0 'no close'
+run "$R" --full
+expect "--full: an exit 0 without the gate's closing line is a named FAIL, exit 1" 1 'VERDICT FAIL (fence: docker not found)'
+reset; rule dev.sh 'iso gate' 3 'all steps passed.'
+run "$R" --full
+expect "--full: a passing close its non-zero exit contradicts is a named FAIL" 3 'VERDICT FAIL (fence: dev.sh iso gate exited 3 after its passing close — see the log)'
+reset
 
 shtest_end

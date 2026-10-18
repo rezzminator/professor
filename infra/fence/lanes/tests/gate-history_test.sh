@@ -11,8 +11,9 @@ SUT="${GATE_HISTORY_SUT:-$(dirname -- "${BASH_SOURCE[0]}")/../../gate-history.sh
 [[ $SUT == /* ]] || SUT=$PWD/$SUT # the git cases change directory
 
 TAB=$'\t'
-HEADER_V1="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
-HEADER="${HEADER_V1}${TAB}concurrent_runs"
+HEADER="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
+HEADER_V2="${HEADER}${TAB}concurrent_runs" # the interim 16-column ledger
+CONC_HEADER="worktree${TAB}run${TAB}concurrent_runs"
 
 # Nothing a developer's or CI's environment sets may steer these cases.
 export HOME="$T/home"
@@ -53,9 +54,9 @@ L=$LD/p/ledger.tsv
 eq 'ingest profiled run: exit 0' 0 "$rc"
 eq 'ingest profiled run: stdout names the count and the ledger' "gate-history: ingested 1 run(s) → $L" "$out"
 want=$(printf '%s\n' "$HEADER" \
-  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}120.5${TAB}3.2${TAB}0.4${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA${TAB}NA" \
-  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}not measured${TAB}NA${TAB}NA" \
-  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}GATE${TAB}PASS${TAB}41.1${TAB}125.0${TAB}3.5${TAB}0.5${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA${TAB}NA")
+  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}120.5${TAB}3.2${TAB}0.4${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA" \
+  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}not measured${TAB}NA" \
+  "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}GATE${TAB}PASS${TAB}41.1${TAB}125.0${TAB}3.5${TAB}0.5${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA")
 eq 'ingest profiled run: header, then one row per profile.tsv row (GATE included), columns per the contract' "$want" "$(cat "$L")"
 cp "$L" "$T/prof.ledger"
 
@@ -79,9 +80,9 @@ eq 'ingest old run: three runs in a base whose path holds a space' "gate-history
 NAs="NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA"
 eq 'ingest old run (WALL): a row per step plus a GATE row from WALL, unmeasured columns NA, stamp from the run directory mtime' \
   "$(printf '%s\n' \
-    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}${NAs}${TAB}NA${TAB}NA" \
-    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}${NAs}${TAB}NA${TAB}NA" \
-    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}GATE${TAB}PASS${TAB}63.2${TAB}${NAs}${TAB}NA${TAB}NA")" \
+    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}pfm.unit${TAB}PASS${TAB}39.1${TAB}${NAs}${TAB}NA" \
+    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}${NAs}${TAB}NA" \
+    "2026-09-30T08:00:00Z${TAB}run.OLDW${TAB}wt 2${TAB}NA${TAB}NA${TAB}GATE${TAB}PASS${TAB}63.2${TAB}${NAs}${TAB}NA")" \
   "$(rows_of "$L" run.OLDW)"
 eq 'ingest old run (STEPS PASS + BUDGET FAIL): the GATE verdict is FAIL' "GATE${TAB}FAIL${TAB}63.2" \
   "$(rows_of "$L" run.OLDB | awk -F'\t' '$6 == "GATE" { print $6 FS $7 FS $8 }')"
@@ -126,28 +127,43 @@ mkdir -p "$b/run.PFM"
 printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.PFM/gate.tsv"
 printf 'target\tpfm\ncommit\tdef5678\nstarted\t2026-10-02T09:00:00Z\nfixtures\t0\nconcurrent_runs\t3\n' > "$b/run.PFM/gate.meta"
 out=$(gh ingest "$b" --project p 2>&1)
-L=$LD/p/ledger.tsv
+L=$LD/p/ledger.tsv C=$LD/p/concurrent.tsv
 eq 'pfm-only gate (gate.meta, no templates.leak row): ingested' "gate-history: ingested 1 run(s) → $L" "$out"
-eq 'pfm-only gate: every row carries the concurrent runs from gate.meta' '3 3' \
-  "$(awk -F'\t' 'NR > 1 { printf "%s%s", (n++ ? " " : ""), $16 } END { print "" }' "$L")"
+eq 'pfm-only gate: the ledger keeps the 15-column header, its rows 15 fields' "$HEADER|" "$(head -n 1 "$L")|$(awk -F'\t' 'NF != 15' "$L")"
+eq 'pfm-only gate: the sidecar holds the run once with the concurrent runs from gate.meta' \
+  "$CONC_HEADER|wt-conc${TAB}run.PFM${TAB}3" "$(head -n 1 "$C")|$(sed -n 2p "$C")"
 mkdir -p "$b/run.BADC"
 printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.BADC/gate.tsv"
 printf 'target\tpfm\nstarted\t2026-10-02T10:00:00Z\nconcurrent_runs\tNA not in the shared fence\n' > "$b/run.BADC/gate.meta"
 gh ingest "$b" --project p > /dev/null 2>&1
-eq 'a gate with no recorded count: concurrent_runs NA' 'NA' "$(awk -F'\t' '$2 == "run.BADC" { print $16; exit }' "$L")"
+eq 'a gate with no recorded count: concurrent_runs NA' 'NA' "$(awk -F'\t' '$2 == "run.BADC" { print $3; exit }' "$C")"
 
-# --- an old 15-column ledger is upgraded in place --------------------------------------------
-LD=$T/ld-upgrade
+# --- an interim 16-column ledger is split back: counts to the sidecar, 15 columns again ----------
+LD=$T/ld-split
 mkdir -p "$LD/p"
-{ printf '%s\n' "$HEADER_V1"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\n'; } > "$LD/p/ledger.tsv"
+{ printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'
+  printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tpfm.unit\tPASS\t8.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$LD/p/ledger.tsv"
 out=$(gh ingest "$b" --project p 2>&1); rc=$?
-L=$LD/p/ledger.tsv
-eq 'upgrade: ingest into an old ledger exits 0 and names the upgrade' '0 yes' \
-  "$rc $(grep -q '^gate-history: upgraded .* to the concurrent_runs header (old rows NA)$' <<< "$out" && echo yes || echo "no: $out")"
-eq 'upgrade: the header gains concurrent_runs, the old row NA, the new rows their count' \
-  "$HEADER|2026-09-01T00:00:00Z${TAB}run.OLD${TAB}wtU${TAB}abc${TAB}all${TAB}GATE${TAB}PASS${TAB}9.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}CODE${TAB}0.5${TAB}NA|3" \
-  "$(head -n 1 "$L")|$(sed -n 2p "$L")|$(awk -F'\t' '$2 == "run.PFM" { print $16; exit }' "$L")"
-eq 'upgrade: no row is short or long afterwards' '' "$(awk -F'\t' 'NF != 16' "$L")"
+L=$LD/p/ledger.tsv C=$LD/p/concurrent.tsv
+eq 'split: ingest into an interim ledger exits 0 and names the split' '0 yes' \
+  "$rc $(grep -q '^gate-history: split .* back to the 15-column header, concurrent_runs → .*concurrent.tsv$' <<< "$out" && echo yes || echo "no: $out")"
+eq 'split: the 15-column header, the old row cut to 15 fields, no row short or long' \
+  "$HEADER|2026-09-01T00:00:00Z${TAB}run.OLD${TAB}wtU${TAB}abc${TAB}all${TAB}GATE${TAB}PASS${TAB}9.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}CODE${TAB}0.5|" \
+  "$(head -n 1 "$L")|$(sed -n 2p "$L")|$(awk -F'\t' 'NF != 15' "$L")"
+eq 'split: the sidecar holds the old run once with its count, then the new runs' \
+  "$CONC_HEADER|wtU${TAB}run.OLD${TAB}2|wt-conc${TAB}run.BADC${TAB}NA|wt-conc${TAB}run.PFM${TAB}3" "$(paste -sd'|' "$C")"
+{ printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$L"
+printf '%s\nwtU\trun.OLD\t2\n' "$CONC_HEADER" > "$C"
+mkdir -p "$T/empty-base"
+gh ingest "$T/empty-base" --project p > /dev/null 2>&1
+eq 'split cut short after the sidecar rename: the next split adds no duplicate' "$CONC_HEADER|wtU${TAB}run.OLD${TAB}2|$HEADER" "$(paste -sd'|' "$C")|$(head -n 1 "$L")"
+LD=$T/ld-v1
+mkdir -p "$LD/p"
+{ printf '%s\n' "$HEADER"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\n'; } > "$LD/p/ledger.tsv"
+cp "$LD/p/ledger.tsv" "$T/v1.before"
+gh ingest "$b" --project p > /dev/null 2>&1
+eq 'a 15-column ledger (an older gate-history.sh writes it too) is appended to, never rewritten' \
+  "$(cat "$T/v1.before")" "$(head -n 2 "$LD/p/ledger.tsv")"
 
 # --- re-ingest ----------------------------------------------------------------------------
 LD=$T/ld-prof
@@ -274,7 +290,7 @@ done
 
 # --- report ---------------------------------------------------------------------------------------------
 # led <ledger> <stamp> <run> <step> <verdict> <wall> <attribution>
-led() { printf '%s\t%s\twtL\tabc\tall\t%s\t%s\t%s\tNA\tNA\tNA\tNA\tNA\t%s\tNA\tNA\n' "$2" "$3" "$4" "$5" "$6" "$7" >> "$1"; }
+led() { printf '%s\t%s\twtL\tabc\tall\t%s\t%s\t%s\tNA\tNA\tNA\tNA\tNA\t%s\tNA\n' "$2" "$3" "$4" "$5" "$6" "$7" >> "$1"; }
 # gate <ledger> <n> : gate g<n> at hour <n>, steps by their wall in that gate
 gate() {
   local f=$1 n=$2 stamp run unit
@@ -386,18 +402,24 @@ mkdir -p "$LD/p"
 printf '%s\n' "$HEADER" > "$LD/p/ledger.tsv"
 out=$(gh report --project p 2>&1); rc=$?
 eq 'empty ledger: header only is 0 gates recorded, exit 0' "0 gate-history: 0 gates recorded in $LD/p/ledger.tsv" "$rc $out"
+LD=$T/ld-interim
+mkdir -p "$LD/p"
+{ printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$LD/p/ledger.tsv"
+out=$(gh report --project p 2>&1); rc=$?
+eq 'report on an interim 16-column ledger not yet split: its gate read, none malformed' '0 yes no' \
+  "$rc $(grep -q '1 gate(s) recorded' <<< "$out" && echo yes || echo "no: $out") $(grep -q 'malformed' <<< "$out" && echo yes || echo no)"
 LD=$T/ld-foreign
 out=$(gh report --project p 2>&1); rc=$?
 eq 'report on a ledger with a foreign first line: BAD LEDGER, exit 1' '1 yes' "$rc $(grep -q '^gate-history: BAD LEDGER ' <<< "$out" && echo yes || echo "no: $out")"
 
 # --- concurrent ingests: one ledger writer at a time ------------------------------------------------------------
-# Six runs in six bases, each base ingested twice at once, racing the v1 header upgrade: every run lands once,
-# no row is lost to the upgrade's rename, none is duplicated by a dedupe read before another's append.
+# Six runs in six bases, each base ingested twice at once, racing the split of an interim ledger: every run lands
+# once, no row is lost to the split's renames, none is duplicated by a dedupe read before another's append.
 bad_rounds=""
 for round in 1 2 3 4 5; do
   LD=$T/ld-race$round
   mkdir -p "$LD/p"
-  { printf '%s\n' "$HEADER_V1"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\n'; } > "$LD/p/ledger.tsv"
+  { printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$LD/p/ledger.tsv"
   pids=()
   for i in 1 2 3 4 5 6; do
     old_run "$T/race$round/wt$i/timing/run.R$i" 20260927000$i.00
@@ -407,11 +429,12 @@ for round in 1 2 3 4 5; do
     pids+=($!)
   done
   for pid in "${pids[@]}"; do wait "$pid"; done
-  L=$LD/p/ledger.tsv
-  got="$(head -n 1 "$L" | awk -F'\t' '{ print NF }') $(rowcount "$L") $(awk -F'\t' 'NR > 1 { print $3 FS $2 FS $6 }' "$L" | sort | uniq -d | wc -l | tr -d ' ') $(awk -F'\t' 'NF != 16' "$L" | wc -l | tr -d ' ')"
-  [ "$got" = '16 20 0 0' ] || bad_rounds="$bad_rounds round $round: $got;"
+  L=$LD/p/ledger.tsv C=$LD/p/concurrent.tsv
+  got="$(head -n 1 "$L" | awk -F'\t' '{ print NF }') $(rowcount "$L") $(awk -F'\t' 'NR > 1 { print $3 FS $2 FS $6 }' "$L" | sort | uniq -d | wc -l | tr -d ' ') $(awk -F'\t' 'NF != 15' "$L" | wc -l | tr -d ' ')"
+  got="$got $(rowcount "$C") $(awk -F'\t' 'NR > 1 { print $1 FS $2 }' "$C" | sort | uniq -d | wc -l | tr -d ' ')"
+  [ "$got" = '15 20 0 0 8 0' ] || bad_rounds="$bad_rounds round $round: $got;"
 done
-eq 'concurrent ingests racing the header upgrade: 16-column header, 1+1+6x3 rows, no duplicate, no short row' '' "$bad_rounds"
+eq 'concurrent ingests racing the split: 15-column header, 1+1+6x3 rows, no duplicate, no short row; sidecar 1+1+6 rows, no duplicate' '' "$bad_rounds"
 ls -d "$T"/ld-race*/p/ledger.tsv.lock 2> /dev/null | grep -q . && bad 'concurrent ingests left their ledger lock behind' || ok 'concurrent ingests release the ledger lock'
 
 # --- ingest then report ---------------------------------------------------------------------------------------

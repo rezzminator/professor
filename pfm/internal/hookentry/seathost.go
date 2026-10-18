@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -342,11 +343,29 @@ func seatCommand(
 	}
 	options := deps.StartOptions{
 		Argv0: argv0, Dir: run.CWD,
-		Env:   seatEnvironment(run.Env, os.Environ(), append(herdr.PaneEnv(), "TMUX", "TMUX_PANE")),
+		Env:   seatEnvironment(run.Env, os.Environ(), seatPaneKeys(run.Env, os.Environ())),
 		Stdin: tty, Stdout: tty, Stderr: tty,
 		ProcessGroup: true, Foreground: true, Ctty: int(tty.Fd()),
 	}
 	return append([]string{run.Binary}, run.Args...), options, nil
+}
+
+// seatTerminalKeys is the terminal identity Herdr gives the pane seat-host runs
+// in (TERM, COLORTERM, TERM_PROGRAM, TERM_PROGRAM_VERSION, LANG on this host),
+// plus the locale and terminfo names that travel with it. A recipe born in the
+// launchd daemon captured no terminal, so these never come from the recipe.
+var seatTerminalKeys = []string{"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "TERMINFO"}
+
+// seatPaneKeys names every variable the current pane owns over the recipe: its
+// Herdr and tmux identity and its terminal identity, LC_* found in either env.
+func seatPaneKeys(saved, current []string) []string {
+	keys := append(append(herdr.PaneEnv(), "TMUX", "TMUX_PANE"), seatTerminalKeys...)
+	for _, entry := range append(append([]string(nil), saved...), current...) {
+		if key, _, _ := strings.Cut(entry, "="); strings.HasPrefix(key, "LC_") && !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // seatEnvironment applies saved engine settings, then the current pane identity.

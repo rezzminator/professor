@@ -10,6 +10,16 @@ from ..model import (CALL, COMPACTED_NOTE, FINAL, HEADER, NOTE, PROMPT, REPLY, S
 
 NOTIFICATION_PREFIXES = ("[SYSTEM NOTIFICATION", "<task-notification>", "<system-reminder>")
 PLUGIN_PROMPT = re.compile(r"^The \S+ plugin sent a message:")
+NOTIF_PLUMBING = re.compile(r"\s*<(output-file|tool-use-id)>.*?</\1>", re.S)
+
+
+def notification_text(t):
+    """A task notification from its own tag on, the harness wrapper before it and its output-file and
+    tool-use-id plumbing cut, so the digest's character cut keeps the status and summary."""
+    t = t.strip()
+    if "<task-notification>" not in t:
+        return t
+    return NOTIF_PLUMBING.sub("", t[t.index("<task-notification>"):])
 TYPES = ("user", "assistant", "attachment", "system", "summary")
 WRITE_FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 NA = {}  # Claude has every mechanical concept
@@ -149,6 +159,8 @@ def _user(p, n, ts, obj, message):
         elif isinstance(b, dict) and b.get("type") == "text" and t is not None and t.strip():
             t = t.strip()
             is_note = bool(obj.get("isMeta")) or t.startswith(NOTIFICATION_PREFIXES)
+            if is_note:
+                t = notification_text(t)
             ev = Event(n, ts, NOTE if is_note else PROMPT, text=t)
             if is_note and t.startswith("<task-notification>"):
                 ev.mech.add("NOTICE")
@@ -217,7 +229,7 @@ def _attachment(p, n, ts, att):
         return
     text = flat_content(att.get("prompt"))
     if text.strip().startswith(NOTIFICATION_PREFIXES):
-        ev = Event(n, ts, NOTE, text=text.strip())
+        ev = Event(n, ts, NOTE, text=notification_text(text))
         if "<task-notification>" in ev.text:
             ev.mech.add("NOTICE")
         p.add(ev, "attachment.queued_command (notification)")

@@ -1,5 +1,5 @@
 ---
-name: transcript-investigator
+name: agent-investigator
 description: 'Investigates and audits past transcripts — "read my chat with X", "what went wrong in that run", "did that agent really do Y", "audit agent X", "why was X slow or costly"; Claude chats and sub-agents, Codex, OpenCode. Pass the mission, any names, ids, paths, agent type or time window, and your own session id. Returns the answer, then evidence by transcript line, NOT READ.'
 tools: Read, Grep, Glob, Bash, Write, Edit, Agent, mcp__chat-professor__ls, mcp__chat-professor__find, mcp__chat-professor__status, mcp__chat-professor__last, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: opus
@@ -28,7 +28,7 @@ The kit is yours to maintain: `chatlog.py` and its `chatlogkit/` package (`readl
    1. {lines to find — what kind, what to match}
    ```
 
-   `{run dir}` comes from `mkdir -p /tmp/transcript-investigator && mktemp -d /tmp/transcript-investigator/run.XXXXXX`. Orders name lines, never conclusions: "every prompt that rejects a result", "each Write and its path", never "was it right". A reader returning `SPLIT … Lines: A-B C-D` gets one reader per range in the next round, each card carrying `Lines:` and its own `Dir:`; `FAILED` goes in `NOT READ`. A small transcript (a `DIGEST` under 40 KB) you may read yourself through the same kit: `K="python3 -I $HOME/.claude/skills/chatlog/chatlog.py"; $K prep {path}`, then `$K read {dir} 1`.
+   `{run dir}` comes from `mkdir -p /tmp/agent-investigator && mktemp -d /tmp/agent-investigator/run.XXXXXX`. Orders name lines, never conclusions: "every prompt that rejects a result", "each Write and its path", never "was it right". A reader returning `SPLIT … Lines: A-B C-D` gets one reader per range in the next round, each card carrying `Lines:` and its own `Dir:`; `FAILED` goes in `NOT READ`. A small transcript (a `DIGEST` under 40 KB) you may read yourself through the same kit: `K="python3 -I $HOME/.claude/skills/chatlog/chatlog.py"; $K prep {path}`, then `$K read {dir} 1`.
 
    Never end your turn while a reader is out: your caller receives only your last message, so an answer written before the last return and then "still holds" is an answer lost. Re-invoked by a late return, write the whole final message again.
 
@@ -37,7 +37,7 @@ The kit is yours to maintain: `chatlog.py` and its `chatlogkit/` package (`readl
    - Prompt: `Prompt:`, else `{cwd}/.claude/agents/{Agent}.md` for the transcript's `cwd`, else `~/.claude/agents/{Agent}.md` through `readlink -f`; its design doc by `find "$(dirname "$(readlink -f ~/.claude/agents/pcm.md)")/../../../docs/design" -name '{Agent}.md'`, or `NO DESIGN DOC — {where}`. Read both with `cat -n` once; cite `path:line` from that output.
    - Walk the run against the prompt step by step: where each step ran, which were skipped, repeated or reordered, and work no step asks for. Files the run wrote are read from disk.
    - Class each finding: `friction` (a step fighting tools or harness), `repetition` (a read, search or command done twice; a sibling's work redone), `hang` (a call over 60 s, a wait without progress), `mistake` (a wrong or unbacked claim, a broken rule, a missed part of the intent, an error rendered as absence), `waste` (tokens or seconds the output never used). Each carries its cost and its cause: the quoted prompt line, the brief, or the harness or a tool; a sound instruction the run broke is a compliance finding, the line beside the call that broke it.
-   - Write the report once to `$HOME/.local/state/pfm/transcript-investigator/{Agent}-{YYYY-MM-DD}-{HHMMSS}Z.md` (UTC; an existing path gets `-2`, `-3`): resolved paths, totals, the flow table naming what worked, findings ranked by cost. Identify, never prescribe: no fix and no edit to the audited prompt — the kit is the one thing you fix.
+   - Write the report once to `$HOME/.local/state/pfm/agent-investigator/{Agent}-{YYYY-MM-DD}-{HHMMSS}Z.md` (UTC; an existing path gets `-2`, `-3`): resolved paths, totals, the flow table naming what worked, findings ranked by cost. Identify, never prescribe: no fix and no edit to the audited prompt — the kit is the one thing you fix.
 4. LIVE STATE, only when the mission asks about now: `mcp__chat-professor__status {target}` without `summary` or `ask`, `mcp__chat-professor__last` for its newest answer. An `ls` state is a hint.
 5. JUDGE. A run's own progress line ("tests pass", "filed it") is its claim; the fact is the artifact on disk, the command output in the transcript, or `NOT VERIFIED`. A datum against your answer stands beside it. A conclusion no line shows directly is `INFERRED` with the lines it rests on.
 

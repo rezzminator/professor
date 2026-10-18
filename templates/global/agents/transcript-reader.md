@@ -4,7 +4,7 @@ description: Reads one past transcript into a complete factual inventory — Cla
 tools: Read, Bash, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 visibility:
   visible-to:
-    include: [transcript-investigator]
+    include: [agent-investigator]
 model: haiku
 effort: medium
 ---

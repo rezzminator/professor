@@ -1,6 +1,6 @@
-# transcript-investigator
+# agent-investigator
 
-`transcript-investigator` answers one mission about past runs — main chats, their sub-agents, Codex threads, OpenCode sessions — and audits them for faults: failures, mistakes, broken rules, waste, misbehaviour. It judges; `transcript-reader` agents on `haiku` read, one per transcript, so no transcript enters the judge's context whole. Both stand on the chatlog skill's reader kit, `templates/global/skills/chatlog/chatlog.py`, which does every mechanical step in code. The pair replaces three agents: `chat-investigator` (missions over transcripts), `agent-optimizer` (one agent's run audited against its prompt) and `sub-investigator` (its digest reader).
+`agent-investigator` answers one mission about past runs — main chats, their sub-agents, Codex threads, OpenCode sessions — and audits them for faults: failures, mistakes, broken rules, waste, misbehaviour. It judges; `transcript-reader` agents on `haiku` read, one per transcript, so no transcript enters the judge's context whole. Both stand on the chatlog skill's reader kit, `templates/global/skills/chatlog/chatlog.py`, which does every mechanical step in code. The pair replaces three agents: `chat-investigator` (missions over transcripts), `agent-optimizer` (one agent's run audited against its prompt) and `sub-investigator` (its digest reader).
 
 ## Contents
 
@@ -15,14 +15,14 @@
 
 ## Identity
 
-| Field | `transcript-investigator` | `transcript-reader` |
+| Field | `agent-investigator` | `transcript-reader` |
 | --- | --- | --- |
-| Kind | original agent, `templates/global/agents/transcript-investigator.md`, linked by `pfm install` | original agent, `templates/global/agents/transcript-reader.md`, linked by `pfm install` |
-| Class | none: any caller, the user included | visible to `transcript-investigator` only |
+| Kind | original agent, `templates/global/agents/agent-investigator.md`, linked by `pfm install` | original agent, `templates/global/agents/transcript-reader.md`, linked by `pfm install` |
+| Class | none: any caller, the user included | visible to `agent-investigator` only |
 | Model, effort | `opus`, `high`: the work is judgment | `haiku`, `medium`: the work is reading and labelling, never judging |
 | Tools | `Read, Grep, Glob, Bash, Write, Edit, Agent`, the chat MCP's `ls`, `find`, `status`, `last` | `Read, Bash` |
 | Budget | 40 tool calls, two rounds of readers (at most 8, then at most 4) | the windows `prep` prints |
-| Writes | an AUDIT report under `$HOME/.local/state/pfm/transcript-investigator/`; fixes to the kit it maintains; the answer is its final message | its kit directory under the investigator's run directory |
+| Writes | an AUDIT report under `$HOME/.local/state/pfm/agent-investigator/`; fixes to the kit it maintains; the answer is its final message | its kit directory under the investigator's run directory |
 
 ## The brief
 
@@ -66,6 +66,6 @@ Run on real transcripts on this host: a `tracer` audit, a 56 MB main chat (diges
 
 | Surface | File |
 | --- | --- |
-| The agents | `templates/global/agents/transcript-investigator.md`, `templates/global/agents/transcript-reader.md` |
+| The agents | `templates/global/agents/agent-investigator.md`, `templates/global/agents/transcript-reader.md` |
 | The kit | `templates/global/skills/chatlog/chatlog.py`, `templates/global/skills/chatlog/chatlogkit/`, `templates/global/skills/chatlog/chatlog_test.py`, `templates/global/skills/chatlog/SKILL.md` |
 | The report timestamp metavariable | `docs/PLACEHOLDERS.md` (`{HHMMSS}`) |

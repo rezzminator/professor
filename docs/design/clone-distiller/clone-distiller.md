@@ -93,7 +93,7 @@ The file holds:
 - per question: the finding, 2-4 sentences, then the detail (lists, commit histories) and its evidence, each `{absolute path}:{A-B}` (or `{sha12}:{path}:{A-B}` for a `git show` read) with its link beside it and the copied lines in a `~~~~` fence below;
 - `Not read`, then `Rabbit holes`.
 
-The file is for whoever opens the code after the run: the user following a claim into the clone, and `transcript-investigator` auditing the dig. The caller does not need to read it; an RR lead's document lists its path.
+The file is for whoever opens the code after the run: the user following a claim into the clone, and `agent-investigator` auditing the dig. The caller does not need to read it; an RR lead's document lists its path.
 
 ## The return
 

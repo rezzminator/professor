@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -220,19 +219,8 @@ func notifyNativeLoss(ctx context.Context, seat fleetdb.Seat, note string) error
 	if err != nil {
 		return err
 	}
-	var ack struct {
-		Type   string `json:"type"`
-		Shown  *bool  `json:"shown"`
-		Reason string `json:"reason"`
-	}
-	if err := json.Unmarshal(body, &ack); err != nil {
-		return fmt.Errorf("decode loss notification: %w", err)
-	}
-	if ack.Type != "notification_show" || ack.Shown == nil {
-		return fmt.Errorf("unexpected loss notification acknowledgement: %s", body)
-	}
-	if !*ack.Shown {
-		return fmt.Errorf("loss note saved; Herdr notification not shown (%s)", ack.Reason)
+	if err := herdr.ValidateNotificationShown(body); err != nil {
+		return fmt.Errorf("loss note saved; %w", err)
 	}
 	return nil
 }

@@ -13,12 +13,48 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
-// printHerdrBackendDoctor observes the server; it never starts or changes it.
+// printSelectedHerdrBackendDoctor explains the configured/environment candidate
+// and checks Herdr when selected. Doctor has no requester-seat override.
+func printSelectedHerdrBackendDoctor(
+	ctx context.Context,
+	stdout io.Writer,
+	dependencies Dependencies,
+	cfg pfmconfig.Config,
+	lifetimeUnverified bool,
+) (warnings, failures int) {
+	backend := cfg.Chat.Backend
+	backendReason := "selects " + backend
+	if backend == spawn.BackendAuto {
+		backend = spawn.AutoBackend(dependencies.Env.Get(herdr.EnvMarker), dependencies.Env.Get(herdr.EnvSocket),
+			dependencies.Env.Get(herdr.EnvPane), dependencies.Env.Get("TMUX"))
+		backendReason = "resolves to tmux here: not inside a Herdr pane"
+		if dependencies.Env.Get("TMUX") != "" {
+			backendReason = "resolves to tmux here: inside tmux (TMUX is set)"
+		}
+		if backend == spawn.BackendHerdr {
+			fmt.Fprintf(
+				stdout,
+				"doctor: herdr backend CHECKING — chat.backend=auto (%s) resolved to Herdr from the pane environment\n",
+				cfg.Source("chat.backend"),
+			)
+		}
+	}
+	if backend == spawn.BackendHerdr {
+		return printHerdrBackendDoctor(ctx, stdout, dependencies, lifetimeUnverified)
+	}
+	fmt.Fprintf(stdout, "doctor: herdr backend NOT CHECKED — chat.backend=%s (%s) %s\n",
+		cfg.Chat.Backend, cfg.Source("chat.backend"), backendReason)
+	return 0, 0
+}
+
+// printHerdrBackendDoctor checks a required Herdr backend; it never changes it.
 // The config row describes disk, not the running server's last loaded settings.
 func printHerdrBackendDoctor(
 	ctx context.Context,
@@ -29,13 +65,14 @@ func printHerdrBackendDoctor(
 	unreachable := func(reason string) {
 		failures++
 		fmt.Fprintf(stdout, "doctor: herdr backend UNREACHABLE — %s\n", reason)
+		fmt.Fprintln(
+			stdout,
+			"doctor: herdr backend repair — install or start Herdr, then run herdr status --json; change chat.backend if Herdr is not required",
+		)
 	}
-	socket, err := herdrDoctorSocket(ctx, stdout, dependencies)
+	socket, err := herdrDoctorSocket(ctx, dependencies)
 	if err != nil {
 		unreachable(err.Error())
-		return warnings, failures
-	}
-	if socket == "" {
 		return warnings, failures
 	}
 	pong, err := herdr.ProbeProtocol(ctx, socket)
@@ -75,7 +112,7 @@ func printHerdrBackendDoctor(
 	return warnings, failures
 }
 
-func herdrDoctorSocket(ctx context.Context, stdout io.Writer, dependencies Dependencies) (string, error) {
+func herdrDoctorSocket(ctx context.Context, dependencies Dependencies) (string, error) {
 	if socket := dependencies.Env.Get(herdr.EnvSocket); socket != "" {
 		return socket, nil
 	}
@@ -87,8 +124,7 @@ func herdrDoctorSocket(ctx context.Context, stdout io.Writer, dependencies Depen
 		return "", lookupError
 	}
 	if binary == "" {
-		fmt.Fprintln(stdout, "doctor: herdr backend ok n/a (herdr not installed)")
-		return "", nil
+		return "", errors.New("herdr not installed but chat.backend=herdr requires it")
 	}
 	bounded, cancel := context.WithTimeout(ctx, herdrStatusBound)
 	defer cancel()

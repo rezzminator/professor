@@ -2,6 +2,7 @@ package themesync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -237,8 +238,43 @@ func herdrRemove(content string, snapshot herdrSnapshot) (string, bool) {
 	return content[:start] + snapshot.Span + content[end:], true
 }
 
-func (s *session) herdrPath() string {
-	return filepath.Join(s.env.Home, ".config", "herdr", "config.toml")
+func (s *session) herdrPath() (string, error) {
+	if snapshot := s.state.Herdr; snapshot != nil {
+		if snapshot.Path != "" {
+			return snapshot.Path, nil
+		}
+		// Snapshots from before config overrides always edited this path.
+		return filepath.Join(s.env.Home, ".config", "herdr", "config.toml"), nil
+	}
+	if path, set := (paths.OSEnv{}).Lookup("HERDR_CONFIG_PATH"); set {
+		if path == "" {
+			return "", errors.New("themesync: HERDR_CONFIG_PATH is empty")
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return path, fmt.Errorf("themesync: resolve Herdr config %s: %w", path, err)
+		}
+		return absolute, nil
+	}
+	directory, set := (paths.OSEnv{}).Lookup("XDG_CONFIG_HOME")
+	if !set {
+		directory = filepath.Join(s.env.Home, ".config")
+	}
+	debug := filepath.Join(directory, "herdr-dev", "config.toml")
+	if _, err := os.Stat(debug); err == nil {
+		return debug, fmt.Errorf(
+			"themesync: debug Herdr config exists at %s; set HERDR_CONFIG_PATH to identify the server's config",
+			debug,
+		)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return debug, fmt.Errorf("themesync: inspect debug Herdr config %s: %w", debug, err)
+	}
+	path := filepath.Join(directory, "herdr", "config.toml")
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return path, fmt.Errorf("themesync: resolve Herdr config %s: %w", path, err)
+	}
+	return absolute, nil
 }
 
 // herdrReload asks a running Herdr server to reread its config; a server that
@@ -248,12 +284,20 @@ func (s *session) herdrReload(ctx context.Context) (string, error) {
 	if err != nil {
 		return "herdr not on PATH; " + herdrDeferred, nil //nolint:nilerr // absence of the binary is the deferred case, not a failure
 	}
-	result, err := s.env.Runner.Run(ctx, []string{binary, "server", "reload-config"}, deps.RunOptions{})
+	path, err := s.herdrPath()
+	if err != nil {
+		return "", err
+	}
+	result, err := s.env.Runner.Run(
+		ctx,
+		[]string{binary, "server", "reload-config"},
+		deps.RunOptions{Env: deps.EnvironmentWith("HERDR_CONFIG_PATH", path)},
+	)
 	if err != nil {
 		return "", fmt.Errorf("themesync: herdr server reload-config: %w", err)
 	}
 	if result.ExitCode == 0 {
-		return "", nil
+		return herdrReloadAcknowledgement(result.Stdout, result.Stderr)
 	}
 	text := strings.TrimSpace(string(result.Stderr) + " " + string(result.Stdout))
 	for _, marker := range herdrNotRunning {
@@ -265,7 +309,10 @@ func (s *session) herdrReload(ctx context.Context) (string, error) {
 }
 
 func (s *session) applyHerdr(ctx context.Context) SurfaceResult {
-	path := s.herdrPath()
+	path, pathErr := s.herdrPath()
+	if pathErr != nil {
+		return s.failed(surfaceHerdr, path, pathErr)
+	}
 	original, err := os.ReadFile(path)
 	missing := errors.Is(err, os.ErrNotExist)
 	if missing {
@@ -283,6 +330,7 @@ func (s *session) applyHerdr(ctx context.Context) SurfaceResult {
 			return s.failed(surfaceHerdr, path, err)
 		}
 		snapshot.Created = missing
+		snapshot.Path = path
 		if !missing {
 			if snapshot.Backup, err = s.backupBeside(path, original); err != nil {
 				return s.failed(surfaceHerdr, path, err)
@@ -329,7 +377,10 @@ func (s *session) herdrHues() map[string]string {
 }
 
 func (s *session) readHerdr(_ context.Context) SurfaceResult {
-	path := s.herdrPath()
+	path, pathErr := s.herdrPath()
+	if pathErr != nil {
+		return s.failed(surfaceHerdr, path, pathErr)
+	}
 	content, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist) && s.state.Herdr == nil:
@@ -383,7 +434,10 @@ func (s *session) readHerdr(_ context.Context) SurfaceResult {
 }
 
 func (s *session) restoreHerdr(ctx context.Context) SurfaceResult {
-	path := s.herdrPath()
+	path, pathErr := s.herdrPath()
+	if pathErr != nil {
+		return s.failed(surfaceHerdr, path, pathErr)
+	}
 	snapshot := s.state.Herdr
 	if snapshot == nil {
 		return s.absent(surfaceHerdr, path, "nothing applied")
@@ -426,11 +480,39 @@ func (s *session) restoreHerdr(ctx context.Context) SurfaceResult {
 		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: clear the herdr indicators: %w", err))
 	}
 	detail = strings.TrimSpace(detail + " " + pluginNote)
-	s.state.Herdr = nil
 	if note, err := s.herdrReload(ctx); err != nil {
+		s.setDue(surfaceHerdr, true)
 		return s.failed(surfaceHerdr, path, err)
 	} else if note != "" {
 		detail = strings.TrimSpace(detail + " " + note)
 	}
+	s.state.Herdr = nil
+	s.setDue(surfaceHerdr, false)
 	return s.result(surfaceHerdr, VerdictRestored, path, detail)
+}
+
+func herdrReloadAcknowledgement(stdout, stderr []byte) (string, error) {
+	var response struct {
+		Error  json.RawMessage `json:"error"`
+		Result struct {
+			Type        string   `json:"type"`
+			Status      string   `json:"status"`
+			Diagnostics []string `json:"diagnostics"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout, &response); err != nil {
+		return "", fmt.Errorf("themesync: decode Herdr config reload: %w", err)
+	}
+	if len(response.Error) != 0 {
+		return "", fmt.Errorf("themesync: Herdr config reload refused: %s", response.Error)
+	}
+	ack := response.Result
+	if ack.Type != "config_reload" || ack.Diagnostics == nil {
+		return "", fmt.Errorf("themesync: unexpected Herdr config reload acknowledgement: %s", stdout)
+	}
+	detail := strings.TrimSpace(strings.Join(ack.Diagnostics, "; ") + " " + string(stderr))
+	if ack.Status != "applied" {
+		return "", fmt.Errorf("themesync: Herdr config reload status %q: %s", ack.Status, detail)
+	}
+	return detail, nil
 }

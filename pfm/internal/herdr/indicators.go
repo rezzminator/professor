@@ -59,12 +59,15 @@ func IndicatorEvents() []string {
 	return []string{
 		"pane.agent_status_changed",
 		"pane.agent_detected",
+		"pane.focused",
 		"pane.closed",
 		"pane.exited",
 		"pane.moved",
+		"tab.focused",
 		"tab.moved",
 		"tab.closed",
 		"workspace.created",
+		"workspace.focused",
 	}
 }
 
@@ -93,11 +96,14 @@ type indicatorPainter struct {
 	// strings already named on stderr, so a blinking pane names one once.
 	seq      uint64
 	reported map[string]bool
+	// hasDone keeps the blinker reconciling unseen completions: marking an
+	// already-focused tab seen need not emit any focus or agent-state event.
+	hasDone bool
 }
 
 // PaintIndicators repaints every pane's and workspace's indicator token on the
-// Herdr server at socket from its agent_status, and keeps blinking while any
-// is blocked; lockDir holds the one-blinker-per-socket lock and the socket's
+// Herdr server at socket from its agent_status, and keeps reconciling while
+// any is blocked or done; lockDir holds the one-blinker-per-socket lock and the socket's
 // record, whose removal (ClearIndicators) stops the blinker; errors are
 // written to stderr with their context and returned.
 func PaintIndicators(ctx context.Context, socket, lockDir string, stderr io.Writer) error {
@@ -122,11 +128,11 @@ func (painter *indicatorPainter) nextSeq() uint64 {
 
 // run records the socket, then paints; a paint that wrote is followed by
 // another list and paint, up to maxSettleRounds, so a write that crossed a
-// newer state change is repainted from it. When anything is blocked it takes
-// the socket's blinker lock and keeps repainting on the half-second until
-// nothing is, or returns at once when another process holds the lock. After
-// the lock is released it lists one more time and takes it again if a blocked
-// agent appeared meanwhile.
+// newer state change is repainted from it. When anything is blocked or done
+// it takes the socket's blinker lock and repaints on the half-second until
+// neither remains, or returns at once when another process holds the lock. After
+// the lock is released it lists once more and takes it again if a blocked
+// or done agent appeared meanwhile.
 func (painter *indicatorPainter) run(ctx context.Context) error {
 	if painter.socket == "" {
 		err := fmt.Errorf("herdr indicators: no Herdr socket: %s is not set", EnvSocket)
@@ -149,7 +155,7 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 			painter.logf("%v", err)
 			return err
 		}
-		if !blocked {
+		if !blocked && !painter.hasDone {
 			if !wrote || settles >= maxSettleRounds {
 				return nil
 			}
@@ -175,7 +181,7 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 	}
 }
 
-// blink repaints on every half-second boundary until nothing is blocked. A
+// blink repaints on every half-second boundary until nothing is blocked or done. A
 // cancelled context ends it cleanly; maxPaintFailures failed repaints in a row
 // end it with the last error. A tick that finds the socket's record gone
 // (ClearIndicators removed it: pfm's Herdr theme is off) clears the
@@ -215,7 +221,7 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 			continue
 		}
 		failures = 0
-		if !blocked {
+		if !blocked && !painter.hasDone {
 			return false, nil
 		}
 	}
@@ -224,17 +230,19 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 // paint lists every pane and workspace once and writes the indicator tokens
 // that differ from what the blink phase of the clock wants, one request per
 // changed target. blocked says whether anything listed is blocked, wrote
-// whether Herdr accepted any write. A target Herdr refuses (closed between the
-// list and the report) is written to stderr and the paint goes on; any other
-// failure ends the paint with its error.
+// whether Herdr accepted any write. hasDone tracks unseen completions in the
+// latest list. A target that vanished between list and report is logged and
+// skipped; every other refusal or failure ends the paint with its error.
 func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool, err error) {
 	targets, err := painter.list(ctx)
 	if err != nil {
 		return false, false, err
 	}
 	blinkOn := painter.clock.Now().UnixMilli()/blinkHalfPeriod.Milliseconds()%2 == 0
+	painter.hasDone = false
 	for _, target := range targets {
 		blocked = blocked || target.status == "blocked"
+		painter.hasDone = painter.hasDone || target.status == "done"
 		want, known := wantedIndicators(target.status, blinkOn)
 		if !known && !painter.reported[target.status] {
 			painter.reported[target.status] = true
@@ -294,8 +302,8 @@ func (painter *indicatorPainter) list(ctx context.Context) ([]indicatorTarget, e
 }
 
 // report writes patch to target; a nil patch writes nothing. accepted says
-// whether Herdr took it: a refusal (the target closed since the list) is
-// written to stderr and is no error.
+// whether Herdr took it: only the matching resource-not-found refusal (the
+// target closed since the list) is logged and skipped. Other refusals fail.
 func (painter *indicatorPainter) report(
 	ctx context.Context,
 	target indicatorTarget,
@@ -310,7 +318,8 @@ func (painter *indicatorPainter) report(
 	}
 	if _, err := painter.call(ctx, painter.socket, line); err != nil {
 		var refusal *Refusal
-		if errors.As(err, &refusal) {
+		if errors.As(err, &refusal) && (target.kind == targetPane && refusal.Code == "pane_not_found" ||
+			target.kind == targetWorkspace && refusal.Code == "workspace_not_found") {
 			painter.logf("herdr indicators: socket %s: %s %s: %v", painter.socket, target.kind, target.id, err)
 			return false, nil
 		}

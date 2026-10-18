@@ -1,9 +1,13 @@
 package themesync
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestHerdrRenderAutoForcedDarkAndLightSide(t *testing.T) {
@@ -258,4 +262,130 @@ func TestHerdrReadBackOfAStateWithoutTheUnknownHueIsDriftNotError(t *testing.T) 
 	h.write(stateRel, stale)
 	h.write(settingsRel, `{"theme":`)
 	wantVerdict(t, h.status(), "herdr", VerdictDrift, "carries no hue")
+}
+
+func TestHerdrConfigOverridesStayPinnedThroughRestore(t *testing.T) {
+	for _, mode := range []string{"explicit", "xdg", "debug explicit"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newHarness(t)
+			t.Setenv("HERDR_CONFIG_PATH", "")
+			if err := os.Unsetenv("HERDR_CONFIG_PATH"); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("XDG_CONFIG_HOME", h.path("alternate"))
+			target := "alternate/herdr/config.toml"
+			if mode == "explicit" {
+				target = "chosen/custom.toml"
+			}
+			if mode == "debug explicit" {
+				target = "alternate/herdr-dev/config.toml"
+			}
+			if mode != "xdg" {
+				t.Setenv("HERDR_CONFIG_PATH", h.path(target))
+			}
+			h.write(target, fixtureHerdr)
+			got := row(t, h.on(), surfaceHerdr)
+			if got.Path != h.path(target) || got.Verdict == VerdictError {
+				t.Fatalf("apply=%+v, want %s", got, h.path(target))
+			}
+			if content := h.read(target); !strings.Contains(content, herdrBlockOpen) {
+				t.Fatalf("chosen config unmodified: %s", content)
+			}
+			if content := h.read(".config/herdr/config.toml"); content != fixtureHerdr {
+				t.Fatalf("default changed: %s", content)
+			}
+			t.Setenv("HERDR_CONFIG_PATH", h.path("unrelated/config.toml"))
+			t.Setenv("XDG_CONFIG_HOME", h.path("elsewhere"))
+			h.write("unrelated/config.toml", "# unrelated\n")
+			wantVerdict(t, offReport(t, h), surfaceHerdr, VerdictRestored, "")
+			if got := h.read(target); got != fixtureHerdr {
+				t.Fatalf("restore=%q, want original", got)
+			}
+			if got := h.read("unrelated/config.toml"); got != "# unrelated\n" {
+				t.Fatalf("unrelated config changed: %s", got)
+			}
+		})
+	}
+}
+
+func TestHerdrReloadAcknowledgementAndRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply, want string
+		bad               bool
+	}{
+		{"applied", `{"id":"cli:request","result":{"type":"config_reload","status":"applied","diagnostics":[]}}`, "", false},
+		{"warnings", `{"result":{"type":"config_reload","status":"applied","diagnostics":["unknown key: colour"]}}`, "unknown key: colour", false},
+		{"partial", `{"result":{"type":"config_reload","status":"partial","diagnostics":["some settings retained"]}}`, "partial", true},
+		{"failed", `{"result":{"type":"config_reload","status":"failed","diagnostics":["bad config"]}}`, "failed", true},
+		{"wrong type", `{"result":{"type":"ok","status":"applied","diagnostics":[]}}`, "acknowledgement", true},
+		{"unknown status", `{"result":{"type":"config_reload","status":"future","diagnostics":[]}}`, "future", true},
+		{"missing diagnostics", `{"result":{"type":"config_reload","status":"applied"}}`, "acknowledgement", true},
+		{"malformed", `not json`, "decode", true},
+		{"refusal", `{"error":{"code":"invalid_config","message":"bad config"}}`, "invalid_config", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.herdrReload = deps.RunResult{Stdout: []byte(tc.reply)}
+			h.rearm()
+			report := h.on()
+			got := row(t, report, surfaceHerdr)
+			if (got.Verdict == VerdictError) != tc.bad || !strings.Contains(got.Detail, tc.want) {
+				t.Fatalf("row=%+v want error=%v detail=%q", got, tc.bad, tc.want)
+			}
+			if h.state().Due[surfaceHerdr] != tc.bad {
+				t.Fatalf("due=%v want %v", h.state().Due, tc.bad)
+			}
+			if tc.bad {
+				if row(t, h.status(), surfaceHerdr).Verdict != VerdictError {
+					t.Fatal("failed live reload reads in sync")
+				}
+				h.herdrReload = deps.RunResult{
+					Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
+				}
+				h.rearm()
+				wantVerdict(t, h.sync(false), surfaceHerdr, VerdictInSync, "")
+				if reloadCalls(h) != 1 || h.state().Due[surfaceHerdr] {
+					t.Fatalf("retry calls=%d due=%v", reloadCalls(h), h.state().Due)
+				}
+			}
+		})
+	}
+}
+
+func TestHerdrOffRetriesRefusedReload(t *testing.T) {
+	h := newHarness(t)
+	h.on()
+	h.herdrReload = deps.RunResult{
+		Stdout: []byte(`{"result":{"type":"config_reload","status":"failed","diagnostics":["retry me"]}}`),
+	}
+	h.rearm()
+	wantVerdict(t, offReport(t, h), surfaceHerdr, VerdictError, "retry me")
+	if h.state().Herdr == nil {
+		t.Fatal("failed off lost its restore/reload obligation")
+	}
+	h.herdrReload = deps.RunResult{
+		Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
+	}
+	h.rearm()
+	wantVerdict(t, offReport(t, h), surfaceHerdr, VerdictRestored, "")
+	if reloadCalls(h) != 1 || h.state().Herdr != nil {
+		t.Fatalf("retry calls=%d snapshot=%+v", reloadCalls(h), h.state().Herdr)
+	}
+}
+
+func TestHerdrDebugConfigRequiresExplicitPath(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("HERDR_CONFIG_PATH", "")
+	if err := os.Unsetenv("HERDR_CONFIG_PATH"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", h.path(".config"))
+	h.write(".config/herdr-dev/config.toml", fixtureHerdr)
+	wantVerdict(t, h.on(), surfaceHerdr, VerdictError, "HERDR_CONFIG_PATH")
+	if got := h.read(".config/herdr/config.toml"); got != fixtureHerdr {
+		t.Fatalf("ambiguous config changed: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(h.home, ".config", "herdr-dev", "config.toml")); err != nil {
+		t.Fatal(err)
+	}
 }

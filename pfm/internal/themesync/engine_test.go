@@ -126,10 +126,21 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("HERDR_CONFIG_PATH", "")
+	if err := os.Unsetenv("HERDR_CONFIG_PATH"); err != nil {
+		t.Fatal(err)
+	}
 	harness := &harness{
-		t: t, home: home, stateDir: DefaultStateDir(home), tmux: newFakeTmux("cc-a", "cc-b"),
-		appearanceOut: "Dark", herdrOnPath: true,
-		herdrReload: deps.RunResult{Stdout: []byte(`{"result":{"status":"applied"}}`)},
+		t:             t,
+		home:          home,
+		stateDir:      DefaultStateDir(home),
+		tmux:          newFakeTmux("cc-a", "cc-b"),
+		appearanceOut: "Dark",
+		herdrOnPath:   true,
+		herdrReload: deps.RunResult{
+			Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
+		},
 	}
 	harness.write(goldRel, fixtureGold)
 	harness.write(settingsRel, `{"theme":"custom:professor-gold","model":"opus"}`)

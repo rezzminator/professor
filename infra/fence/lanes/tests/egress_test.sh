@@ -130,8 +130,14 @@ export STUB_PCAP="$T/absent/fixture-nonce.pcap" STUB_MARKER="$END_MARKER" EGRESS
 run_case env EGRESS_TCPDUMP="$T/no-tcpdump" bash "$SUT" run bash -c 'printf command-output'
 expect 'missing tcpdump still runs command' 2 'EGRESS NOT RECORDED — tcpdump not found'
 if [[ "$OUT" == command-output* ]]; then ok 'unrecorded command output kept'; else bad 'unrecorded command output kept' "$OUT"; fi
+# A short wait bound only where its expiry is the verdict under test (silent:
+# the listen wait; no-marker: the end wait). Every other case passes the wait
+# on its event, the stub's line or marker, and keeps the default bound: a
+# loaded machine can start the stub later than any short bound allows.
 for mode in no-listen silent missing no-summary dropped; do
-  run_case env STUB_MODE="$mode" EGRESS_LISTEN_WAIT_S=0.2 EGRESS_END_WAIT_S=0.2 bash "$SUT" run bash -c 'printf command-output'
+  listen_wait=()
+  [ "$mode" = silent ] && listen_wait=(EGRESS_LISTEN_WAIT_S=0.2)
+  run_case env STUB_MODE="$mode" ${listen_wait[@]+"${listen_wait[@]}"} bash "$SUT" run bash -c 'printf command-output'
   case "$mode" in
     no-listen|silent) want='EGRESS NOT RECORDED — tcpdump not listening' ;;
     missing) want='EGRESS NOT RECORDED — pcap' ;;
@@ -142,7 +148,7 @@ for mode in no-listen silent missing no-summary dropped; do
 done
 run_case env STUB_MODE=no-marker EGRESS_END_WAIT_S=0.2 bash "$SUT" run true
 expect 'recorder exits before marker arrives' 2 'EGRESS NOT RECORDED — end marker not captured within 0.2 s'
-run_case env STUB_MODE=good EGRESS_END_WAIT_S=0.2 bash "$SUT" run bash -c 'printf command-output; exit 7'
+run_case env STUB_MODE=good bash "$SUT" run bash -c 'printf command-output; exit 7'
 expect 'command rc retained with verdict' 7 'EGRESS PASS 0 DNS queries, 0 outside destinations'
 if [[ "$OUT" == command-output* ]]; then ok 'recorded command output kept'; else bad 'recorded command output kept' "$OUT"; fi
 

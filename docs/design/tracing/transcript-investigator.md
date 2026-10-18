@@ -20,9 +20,9 @@
 | Kind | original agent, `templates/global/agents/transcript-investigator.md`, linked by `pfm install` | original agent, `templates/global/agents/transcript-reader.md`, linked by `pfm install` |
 | Class | none: any caller, the user included | visible to `transcript-investigator` only |
 | Model, effort | `opus`, `high`: the work is judgment | `haiku`, `medium`: the work is reading and labelling, never judging |
-| Tools | `Read, Grep, Glob, Bash, Write, Agent`, the chat MCP's `ls`, `find`, `status`, `last` | `Read, Bash` |
+| Tools | `Read, Grep, Glob, Bash, Write, Edit, Agent`, the chat MCP's `ls`, `find`, `status`, `last` | `Read, Bash` |
 | Budget | 40 tool calls, two rounds of readers (at most 8, then at most 4) | the windows `prep` prints |
-| Writes | an AUDIT report under `$HOME/.local/state/pfm/transcript-investigator/`; the answer is its final message | its kit directory under the investigator's run directory |
+| Writes | an AUDIT report under `$HOME/.local/state/pfm/transcript-investigator/`; fixes to the kit it maintains; the answer is its final message | its kit directory under the investigator's run directory |
 
 ## The brief
 
@@ -51,6 +51,8 @@ The reader runs `prep`, reads every window in order, and adds only the rows that
 ## The kit
 
 `chatlog.py` (stdlib Python, run `python3 -I`) owns every mechanical step: the digest with noise collapsed, the timeline and its costs, compactions, spawns, errors, denials, waits, writes, repeats, reading windows, the split of a transcript too large for one reader, row checking, and the state on disk of every file a run wrote. It is a package (`chatlog.py` entry, `chatlogkit/` modules per concern) that reads Claude, Codex and OpenCode stores natively into one event model, so every mechanical label is computed the same way on every engine and an engine without a concept says so in the digest header; costs are priced per call from each record's usage against `pfm model-cost --json --all`, the one price table. Its verbs, modules and per-engine label mapping are documented in `templates/global/skills/chatlog/SKILL.md` § The reader kit. A `--dir` already holding another target's digest gets a fresh subdirectory, so two readers handed one `Dir:` never overwrite each other's rows.
+
+The investigator owns the kit. Reading raw transcript data — any shell tool or script over a `.jsonl`, an `opencode.db` or a `tool-results/` file, or `pfm transcript show --results full` — is forbidden to both agents, with one exception: the investigator diagnosing a kit fault, which it then fixes at the kit's source and re-runs before answering, naming the fix under `KIT FIXED` for its caller to commit. The reader never works around a fault; it names it as `KIT WRONG` on its return line. The rule exists because an audit of one heavy investigation chat found about 177 hand-written census calls over raw JSONL, roughly $34, where the kit lacked a verb: a missing count becomes a kit verb, never a hand script.
 
 ## Why its spawning is capped
 

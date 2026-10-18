@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -441,7 +442,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 		ProcFS:    proc,
 		Tmux:      client,
 		Now:       func() time.Time { return now },
-		CodexName: func(string) string { return longName },
+		CodexName: func(string) naming.CodexName { return naming.CodexName{Name: longName, User: true} },
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -584,11 +585,13 @@ func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
 		secondTwinID:  "TWIN",
 	}
 	gatherer, err := New(Dependencies{
-		ProcFS:      &fakeProcFS{processes: processes},
-		Tmux:        client,
-		Now:         func() time.Time { return now },
-		CodexName:   func(path string) string { return map[string]string{rolloutPath: "FRESH_THREAD"}[path] },
-		CodexIDName: func(threadID string) string { return namesByID[threadID] },
+		ProcFS: &fakeProcFS{processes: processes},
+		Tmux:   client,
+		Now:    func() time.Time { return now },
+		CodexName: func(path string) naming.CodexName {
+			return naming.CodexName{Name: map[string]string{rolloutPath: "FRESH_THREAD"}[path], User: true}
+		},
+		CodexIDName: func(threadID string) naming.CodexName { return naming.CodexName{Name: namesByID[threadID], User: true} },
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

@@ -10,18 +10,21 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -153,6 +156,19 @@ func nativeChatHost(t *testing.T, db *fleetdb.Store, seat fleetdb.Seat, alive bo
 	return seat
 }
 
+// nativeChatCallerHostsChat seats another chat in the caller's pane, so a
+// live open from it views by focus and moves nothing.
+func nativeChatCallerHostsChat(t *testing.T, db *fleetdb.Store, socket, pane string) {
+	t.Helper()
+	workspace, _, _ := strings.Cut(pane, ":")
+	if err := db.PutSeat(context.Background(), fleetdb.Seat{
+		SeatID: "caller-seat", SessionID: "11111111-1111-4111-8111-111111111111", Engine: string(pfmengine.Claude),
+		Backend: "herdr", HerdrSocket: socket, HerdrPane: pane, HerdrWorkspace: workspace, State: "live",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func nativeChatProof(req nativeChatRequest, pane string) (any, string, bool) {
 	switch req.Method {
 	case "pane.list":
@@ -232,6 +248,8 @@ func TestOpenNativeUsesActualProcessesAndDurableAddress(t *testing.T) {
 				t.Setenv("HERDR_ENV", "1")
 				t.Setenv("HERDR_SOCKET_PATH", socket)
 				t.Setenv("HERDR_PANE_ID", "w6:p8")
+				// A caller pane hosting a chat views a live chat by focus.
+				nativeChatCallerHostsChat(t, db, socket, "w6:p8")
 				var stdout, stderr bytes.Buffer
 				code := 0
 				switch door {
@@ -331,7 +349,7 @@ func TestOpenNativeOutsideReportsLocationWhenAttachFails(t *testing.T) {
 }
 
 func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
-	for _, backend := range []string{"tmux", "herdr", "herdr-focus-refused"} {
+	for _, backend := range []string{"tmux", "herdr"} {
 		t.Run(backend, func(t *testing.T) {
 			root := testjail.Fleet(t)
 			layouts := make(chan struct{}, 4)
@@ -411,40 +429,6 @@ func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
 			}
 			fake := &fakeOpenTmux{alive: map[string]bool{}}
 			stubOpenExecutor(t, fake)
-			if backend == "herdr-focus-refused" {
-				var stderr bytes.Buffer
-				result, err := detachedNative(ctx, seat, &stderr, runtime, true)
-				if err != nil || result.State != "opened" || !strings.Contains(stderr.String(), "focus failed") {
-					t.Fatalf("completed replacement=%+v err=%v stderr=%q", result, err, stderr.String())
-				}
-				if _, found, err := db.Seat(ctx, seat.SeatID); err != nil || found {
-					t.Fatalf("obsolete seat retained: found=%t err=%v", found, err)
-				}
-				if _, err := db.ReadSeatRun(seat.SeatID); err == nil {
-					t.Fatal("obsolete recipe retained")
-				}
-				assertNativeReloadFilesGone(t, reloadFiles)
-				// A stale exact row fails closed; the refreshed row finds the completed birth.
-				stale := headless.Chat{
-					ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr",
-					Socket: seat.HerdrSocket, Pane: seat.HerdrPane,
-				}
-				if _, err := OpenDetachedTarget(ctx, stale, &stderr, &runtime); err == nil {
-					t.Fatal("stale exact row unexpectedly resolved")
-				}
-				current, found, err := db.SeatBySession(ctx, seat.SessionID)
-				if err != nil || !found || current.HerdrPane != "w6:p9" {
-					t.Fatalf("replacement ownership lost: seat=%+v found=%t err=%v", current, found, err)
-				}
-				current = nativeChatHost(t, db, current, true)
-				stale.SeatID = current.SeatID
-				stale.Socket, stale.Pane = current.HerdrSocket, current.HerdrPane
-				result, err = OpenDetachedTarget(ctx, stale, &stderr, &runtime)
-				if err != nil || result.State != "live" || len(layouts) != 1 {
-					t.Fatalf("retry duplicated birth: result=%+v err=%v layouts=%d", result, err, len(layouts))
-				}
-				return
-			}
 			result, err := OpenDetachedTarget(
 				ctx,
 				headless.Chat{
@@ -468,6 +452,29 @@ func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
 				t.Fatalf("native resume=%+v", result)
 			}
 			assertNativeReloadFilesGone(t, reloadFiles)
+			if backend != "herdr" {
+				return
+			}
+			// A stale exact row fails closed; the refreshed row finds the
+			// completed birth and lays out no second tab.
+			stale := headless.Chat{
+				ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr",
+				Socket: seat.HerdrSocket, Pane: seat.HerdrPane,
+			}
+			if _, err := OpenDetachedTarget(ctx, stale, io.Discard, &runtime); err == nil {
+				t.Fatal("stale exact row unexpectedly resolved")
+			}
+			current, found, err := db.SeatBySession(ctx, seat.SessionID)
+			if err != nil || !found || current.HerdrPane != "w6:p9" {
+				t.Fatalf("replacement ownership lost: seat=%+v found=%t err=%v", current, found, err)
+			}
+			current = nativeChatHost(t, db, current, true)
+			stale.SeatID = current.SeatID
+			stale.Socket, stale.Pane = current.HerdrSocket, current.HerdrPane
+			result, err = OpenDetachedTarget(ctx, stale, io.Discard, &runtime)
+			if err != nil || result.State != "live" || len(layouts) != 1 {
+				t.Fatalf("retry duplicated birth: result=%+v err=%v layouts=%d", result, err, len(layouts))
+			}
 		})
 	}
 }
@@ -602,7 +609,7 @@ func TestDetachedNativeRereadsAfterConversationLock(t *testing.T) {
 					defer wg.Done()
 					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 					defer cancel()
-					result, err := detachedNative(ctx, seat, io.Discard, runtime, false)
+					result, err := detachedNative(ctx, seat, io.Discard, runtime)
 					if err == nil && result.State != "live" {
 						err = fmt.Errorf("result=%+v", result)
 					}
@@ -629,6 +636,128 @@ func TestDetachedNativeRereadsAfterConversationLock(t *testing.T) {
 				if err != nil {
 					t.Fatalf("serialized open did not reread current supervisor: %v", err)
 				}
+			}
+		})
+	}
+}
+
+// A tmux chat attached in a Herdr pane leaves no other Herdr view of it on
+// that server: each client its session's record lists in another pane is
+// closed only when the bridge proof names that very client of this chat's
+// tmux server and session (a pane already gone is no failure); an unproved view, one on
+// another server or the caller's own pane is left alone, each unproved one
+// named, and one failure never stops the others.
+func TestOpenLiveTmuxRetiresOtherHerdrViews(t *testing.T) {
+	const herdrSocket, tmuxSocket = "/run/herdr.sock", "/tmp/pfm-tmux/cc-chat"
+	record := `{"engine":"claude","clients":{` +
+		`"101":{"pane":"w6:p4","socket":"/run/herdr.sock"},` +
+		`"102":{"pane":"w6:p5","socket":"/run/herdr.sock"},` +
+		`"103":{"pane":"w6:p6","socket":"/run/other.sock"},` +
+		`"104":{"pane":"w6:p3","socket":"/run/herdr.sock"},` +
+		`"105":{"pane":"w6:p7","socket":"/run/herdr.sock"},` +
+		`"106":{"pane":"w6:p8","socket":"/run/herdr.sock"},` +
+		`"107":{"pane":"w6:p9","socket":"/run/herdr.sock"}}}`
+	proofs := map[string]call.HerdrBridge{
+		"w6:p4": {TmuxSocket: tmuxSocket, Session: "chat", ClientPID: 101},
+		"w6:p7": {TmuxSocket: tmuxSocket, Session: "chat", ClientPID: 999},
+		"w6:p8": {TmuxSocket: tmuxSocket, Session: "chat", ClientPID: 106},
+		"w6:p9": {TmuxSocket: tmuxSocket, Session: "other", ClientPID: 107},
+	}
+	var proved, closed []string
+	var stderr bytes.Buffer
+	retireHerdrViews(context.Background(), tmuxSocket, herdrSocket, "w6:p3", herdrViewRetirer{
+		session: "chat",
+		stored:  func(context.Context) (string, error) { return record + "\n", nil },
+		prove: func(_ context.Context, socket, pane string) (call.HerdrBridge, error) {
+			proved = append(proved, socket+" "+pane)
+			if proof, ok := proofs[pane]; ok {
+				return proof, nil
+			}
+			return call.HerdrBridge{}, errors.New("no pfm tmux client in its foreground")
+		},
+		close: func(_ context.Context, _, pane string) error {
+			closed = append(closed, pane)
+			if pane == "w6:p8" {
+				return &herdr.Refusal{Request: "pane.close", Code: "pane_not_found"}
+			}
+			return nil
+		},
+	}, &stderr)
+	wantProved := []string{
+		herdrSocket + " w6:p4", herdrSocket + " w6:p5", herdrSocket + " w6:p7", herdrSocket + " w6:p8",
+		herdrSocket + " w6:p9",
+	}
+	if !slices.Equal(proved, wantProved) || !slices.Equal(closed, []string{"w6:p4", "w6:p8"}) {
+		t.Fatalf("proved=%q closed=%q", proved, closed)
+	}
+	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
+	if len(lines) != 3 || !strings.Contains(lines[0], "w6:p5") || !strings.Contains(lines[0], "no pfm tmux client") ||
+		!strings.Contains(lines[1], "w6:p7") || !strings.Contains(lines[1], "999") ||
+		!strings.Contains(lines[2], "w6:p9") || !strings.Contains(lines[2], `session "other"`) {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+}
+
+// A tmux chat opened from a Herdr pane retires the chat's other Herdr views
+// only when its attach runs in the caller's own proved pane: a caller inside
+// tmux and a caller pane hosting a chat of its own (an agent's pfm call from
+// its native pane) retire nothing and ask Herdr nothing, an unproved pane is
+// named, and a proved plain pane reads the chat's Herdr record, a failed read
+// named.
+func TestRetireOtherHerdrViewsSparesAViewFromAnAgentPane(t *testing.T) {
+	for _, tc := range []struct {
+		name, tmux, wantStderr    string
+		callerHostsChat, unproved bool
+	}{
+		{name: "a plain caller pane", wantStderr: "other Herdr views of this chat stay: read @pfm_herdr"},
+		{name: "a caller pane hosting a chat", callerHostsChat: true},
+		{name: "a caller inside tmux", tmux: "/tmp/tmux-1/default,1,0"},
+		{name: "a pane this process does not front", unproved: true, wantStderr: "ownership unproved"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var asked []string
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				asked = append(asked, req.Method)
+				if req.Method != "pane.process_info" {
+					return nil, "unexpected_method"
+				}
+				pid := os.Getpid()
+				if tc.unproved {
+					pid = 1
+				}
+				return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+					"pane_id": "w6:p3", "shell_pid": 1, "foreground_processes": []any{map[string]any{"pid": pid}},
+				}}, ""
+			})
+			if tc.callerHostsChat {
+				db := fleetdb.OpenSharedState(context.Background(), values)
+				nativeChatCallerHostsChat(t, db, socket, "w6:p3")
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			t.Setenv("TMUX", tc.tmux)
+			var stderr bytes.Buffer
+			retireOtherHerdrViews(
+				context.Background(),
+				compose.Row{Name: "chat", Socket: "cc-chat", PaneID: "%1"},
+				config.Runtime{Paths: values},
+				&stderr,
+			)
+			if tc.wantStderr == "" && stderr.Len() != 0 ||
+				tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr=%q, want %q", stderr.String(), tc.wantStderr)
+			}
+			if (tc.callerHostsChat || tc.tmux != "") && len(asked) != 0 {
+				t.Fatalf("a caller that retires nothing asked Herdr %q", asked)
 			}
 		})
 	}

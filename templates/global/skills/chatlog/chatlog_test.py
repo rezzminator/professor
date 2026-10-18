@@ -572,6 +572,74 @@ class ClaudeKit(Fixture):
         self.assertIn("DIGEST", found.stdout)
 
 
+WRITTEN = "line one\n" + "x" * 3000 + "\nlast line"
+FINAL = "All " + "done " * 200 + "END"
+
+
+class EntryVerb(ClaudeKit):
+    """`entry` prints one event whole, where the digest caps it: a Write's content, a result up to --max, a final."""
+
+    def prepared(self):
+        recs = [c_user("Write the file.", 0),
+                c_call("w1", "Write", {"file_path": "/fx/big.txt", "content": WRITTEN}, 1), c_result("w1", "ok", 2),
+                c_call("b1", "Bash", {"command": "cat /fx/big.txt"}, 3), c_result("b1", "R" * 500 + "TAIL", 4),
+                c_call("b2", "Read", {"file_path": "/fx/none"}, 5), c_result("b2", "Error: no such file", 6, err=True),
+                c_call("b3", "Bash", {"command": "sleep 1"}, 7), c_final(FINAL, 9)]
+        path = self.write_claude(recs)
+        self.prep(path)
+        return path
+
+    def entry(self, *args, check=True):
+        return self.kitcmd("entry", self.dir, *args, check=check)
+
+    def test_a_call_prints_its_whole_input_and_result(self):
+        self.prepared()
+        out = self.entry("L2").stdout.splitlines()
+        self.assertEqual(out[:2], ["ENTRY L2 2026-01-01T10:00:01.000Z CALL Write", "INPUT"])
+        self.assertEqual(json.loads(out[2]), {"file_path": "/fx/big.txt", "content": WRITTEN})
+        self.assertEqual(out[3:], ["RESULT ok · 2 chars", "ok"])
+
+    def test_a_digest_line_names_the_same_event(self):
+        self.prepared()
+        d = next(i for i, ln in enumerate(self.digest(), 1) if ln.startswith("L2 "))
+        self.assertEqual(self.entry(f"D{d}").stdout, self.entry("L2").stdout)
+
+    def test_a_result_past_max_ends_in_a_marker_naming_the_rest(self):
+        self.prepared()
+        out = self.entry("L4", "--max", "100").stdout.splitlines()
+        self.assertEqual(out[3:], ["RESULT ok · 504 chars", "R" * 100, "[+404 chars not shown — raise --max]"])
+        self.assertEqual(self.entry("L4").stdout.splitlines()[4], "R" * 500 + "TAIL")
+
+    def test_a_failed_and_an_unanswered_call(self):
+        self.prepared()
+        self.assertEqual(self.entry("L6").stdout.splitlines()[3:], ["RESULT ERR · 19 chars", "Error: no such file"])
+        self.assertEqual(self.entry("L8").stdout.splitlines()[3:], ["RESULT none"])
+
+    def test_the_final_reply_whole(self):
+        self.prepared()
+        self.assertEqual(self.entry("L9").stdout.splitlines(), ["ENTRY L9 2026-01-01T10:00:09.000Z FINAL", FINAL])
+
+    def test_a_selector_naming_no_event_fails_never_prints_nothing(self):
+        path = self.prepared()
+        for args, why in ((("D1",), "names no transcript line"), (("D999",), "the digest has D1-D"),
+                          (("L3",), "no rendered event at that transcript line"), (("X3",), "not D{n} or L{n}"),
+                          (("L2", "--max", "-5"), "--max -5"), (("L2", "--max", "abc"), "--max abc")):
+            done = self.entry(*args, check=False)
+            self.assertEqual(done.returncode, 1, (args, done.stdout))
+            self.assertTrue(done.stdout.startswith("KIT FAILED — "), (args, done.stdout))
+            self.assertIn(why, done.stdout, args)
+        done = self.entry("L2", "L4", check=False)
+        self.assertEqual(done.returncode, 2, done.stdout)
+        self.assertIn("usage: chatlog.py entry DIR", done.stdout)
+        done = self.kitcmd("entry", self.path("not-prepared"), "L2", check=False)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("is not a prepared directory", done.stdout)
+        os.unlink(path)
+        done = self.entry("L2", check=False)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertTrue(done.stdout.startswith(f"FAILED entry {path} — "), done.stdout)
+
+
 # ------------------------------------------------------------------------------------------ Codex
 
 def x_rec(kind, payload, t):

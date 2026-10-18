@@ -126,6 +126,9 @@ type WindowRename struct {
 	// ChatName is the chat's exact name when the writer knows it; RenameWindow
 	// sets herdr.ChatNameOption to it in the same tmux command as the rename.
 	ChatName string
+	// Automatic says no user chose ChatName (a Codex thread's first prompt):
+	// RenameWindow also sets herdr.ChatNameAutoOption to it.
+	Automatic bool
 }
 
 // CrumblessLive is a live Claude pane whose socket carries no crumb yet: a

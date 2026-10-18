@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -72,29 +73,63 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 		t.Fatalf("indexed name=%q", names[threadID])
 	}
 
-	socket := fmt.Sprintf("probe-pfm-codex-name-%d", os.Getpid())
-	start := exec.Command(
-		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "sleep 120",
-	)
-	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	if output, err := start.CombinedOutput(); err != nil {
-		t.Fatalf("start probe server: %v: %s", err, output)
+	// A name a user chose (the session_index rename) leaves the automatic-name
+	// option as it was; a first-prompt fallback sets it to the name it wrote,
+	// so the Herdr reporter keeps a tab label the user set against it.
+	const fallbackID = "22222222-2222-4222-8222-222222222222"
+	_, byID := naming.CodexNameIndex([]naming.CodexThread{{
+		ID: fallbackID, Path: filepath.Join(codexHome, "fallback.jsonl"), FirstPrompt: "FIRST_PROMPT",
+	}}, names)
+	for index, test := range []struct {
+		name, threadID, wantName, wantAuto string
+	}{
+		{"a session_index name is the user's", threadID, "INDEX_TWIN", ""},
+		{"a first-prompt fallback is automatic", fallbackID, "FIRST_PROMPT", "FIRST_PROMPT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			chatName, auto := convergeCodexProbeWindow(t, root, index, test.threadID, func(id string) naming.CodexName {
+				return byID[id]
+			})
+			if chatName != test.wantName || auto != test.wantAuto {
+				t.Fatalf(
+					"@pfm_chat_name=%q @pfm_chat_name_auto=%q, want %q and %q",
+					chatName, auto, test.wantName, test.wantAuto,
+				)
+			}
+		})
 	}
+}
+
+// convergeCodexProbeWindow renames a fresh probe server's window after the
+// Codex thread threadID resolves to and answers the server's chat name and
+// automatic-name options.
+func convergeCodexProbeWindow(
+	t *testing.T,
+	root string,
+	index int,
+	threadID string,
+	resolveID gather.CodexIDNameResolver,
+) (chatName, auto string) {
+	t.Helper()
+	socket := fmt.Sprintf("probe-pfm-codex-name-%d-%d", os.Getpid(), index)
+	probeTmux := func(args ...string) string {
+		t.Helper()
+		command := exec.Command("tmux", append([]string{"-L", socket}, args...)...)
+		command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("tmux %q: %v: %s", args, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	probeTmux("-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "before", "sleep 120")
 	t.Cleanup(func() {
 		kill := exec.Command("tmux", "-L", socket, "kill-server")
 		kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 		_ = kill.Run()
 	})
-	windowIDCommand := exec.Command(
-		"tmux", "-L", socket, "list-windows", "-F", "#{window_id}",
-	)
-	windowIDCommand.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	windowIDOutput, err := windowIDCommand.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	windowID := strings.TrimSpace(string(windowIDOutput))
+	windowID := probeTmux("list-windows", "-F", "#{window_id}")
+	want := resolveID(threadID).Name
 	renames := gather.ComputeWindowRenames(
 		[]gather.ProbePane{{
 			Socket:      socket,
@@ -106,40 +141,23 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 		[]gather.LiveCodex{{Socket: socket, PaneID: "%0", ThreadID: threadID}},
 		nil,
 		nil,
-		func(id string) string { return names[id] },
+		resolveID,
 	)
-	if len(renames) != 1 || renames[0].TargetName != "INDEX_TWIN" {
-		t.Fatalf("renames=%#v", renames)
+	if len(renames) != 1 || renames[0].TargetName != want {
+		t.Fatalf("renames=%#v, want one to %q", renames, want)
 	}
 	// N2: the Codex half states the thread's exact name for the Herdr reporter.
-	if renames[0].ChatName != "INDEX_TWIN" {
-		t.Fatalf("rename ChatName = %q, want the thread name INDEX_TWIN", renames[0].ChatName)
+	if renames[0].ChatName != want {
+		t.Fatalf("rename ChatName = %q, want the thread name %q", renames[0].ChatName, want)
 	}
 	if err := (gather.TmuxProbe{TmuxTmpDir: root}).RenameWindow(
 		context.Background(), renames[0],
 	); err != nil {
 		t.Fatal(err)
 	}
-	readName := exec.Command(
-		"tmux", "-L", socket, "display-message", "-p", "#{window_name}",
-	)
-	readName.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	output, err := readName.Output()
-	if err != nil {
-		t.Fatal(err)
+	if got := probeTmux("display-message", "-p", "#{window_name}"); got != want {
+		t.Fatalf("window name=%q, want %q", got, want)
 	}
-	if got := strings.TrimSpace(string(output)); got != "INDEX_TWIN" {
-		t.Fatalf("window name=%q, want INDEX_TWIN", got)
-	}
-	readOption := exec.Command(
-		"tmux", "-L", socket, "show-options", "-v", "-t", socket, "@pfm_chat_name",
-	)
-	readOption.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	optionOutput, err := readOption.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(string(optionOutput)); got != "INDEX_TWIN" {
-		t.Fatalf("@pfm_chat_name=%q, want INDEX_TWIN", got)
-	}
+	return probeTmux("show-options", "-qv", "-t", socket, "@pfm_chat_name"),
+		probeTmux("show-options", "-qv", "-t", socket, "@pfm_chat_name_auto")
 }

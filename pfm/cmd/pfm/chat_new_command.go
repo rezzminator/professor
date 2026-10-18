@@ -183,7 +183,8 @@ func runRun(
 		fmt.Fprintln(stderr, "pfm chat new: OpenCode does not support headless chat")
 		return 2
 	}
-	if *name == "" {
+	poolName := *name == ""
+	if poolName {
 		auto, found, nameErr := pfmchat.ReserveWorkbenchName(ctx, directory, stderr, &runtime)
 		if nameErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", nameErr)
@@ -332,14 +333,15 @@ func runRun(
 		TmuxDir: resolved.TmuxDir,
 		Titles:  &titles,
 	}, spawn.Request{
-		SessionID: pfmchat.LaunchSessionID(plan.Record),
-		Trace:     trace,
-		Engine:    engineName,
-		Name:      *name,
-		Socket:    socket,
-		CWD:       directory,
-		Run:       plan.Run,
-		Binary:    plan.Binary, CodexHome: plan.CodexHome,
+		SessionID:     pfmchat.LaunchSessionID(plan.Record),
+		Trace:         trace,
+		Engine:        engineName,
+		Name:          *name,
+		NameAutomatic: poolName,
+		Socket:        socket,
+		CWD:           directory,
+		Run:           plan.Run,
+		Binary:        plan.Binary, CodexHome: plan.CodexHome,
 		Prompt:              prompt,
 		PromptOnCommandLine: plan.PromptOnCommandLine,
 		Width:               action.HeadlessWidth,

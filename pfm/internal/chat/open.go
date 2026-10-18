@@ -193,7 +193,7 @@ func OpenDetachedID(
 		return action.OpenResult{}, seatErr
 	}
 	if found {
-		return detachedNative(ctx, seat, stderr, effective, false)
+		return detachedNative(ctx, seat, stderr, effective)
 	}
 	rows, err := Rows(ctx, stderr, &effective)
 	if err != nil {
@@ -233,7 +233,7 @@ func OpenDetachedTarget(
 		if !found || seat.HerdrSocket != target.Socket {
 			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
 		}
-		return detachedNative(ctx, seat, stderr, effective, false)
+		return detachedNative(ctx, seat, stderr, effective)
 	}
 	if target.Engine == pfmengine.Claude && target.Live {
 		rows, rowsErr := Rows(ctx, stderr, &effective)
@@ -293,7 +293,7 @@ func openDetachedResolvedRow(
 		if !found {
 			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
 		}
-		return detachedNative(ctx, seat, stderr, effective, false)
+		return detachedNative(ctx, seat, stderr, effective)
 	}
 	fleetPrimary, err := fleet.PrimaryAccount(effective.Paths, effective.Config)
 	if err != nil {
@@ -430,6 +430,7 @@ func OpenRow(
 	// so the unseen flag clears before it.
 	markSchedulesSeen(ctx, effective.Paths, row.ID, stderr)
 	if line != "" {
+		retireOtherHerdrViews(ctx, row, effective, stderr)
 		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
 			return 1

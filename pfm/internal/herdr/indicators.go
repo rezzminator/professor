@@ -115,15 +115,33 @@ type indicatorPainter struct {
 	hasTabs         bool
 	tabObservations []TabDecoration
 	// unproved holds each pane whose ownership proof failed: the status it
-	// failed under and when. Such a pane is named once while it stays
-	// unproved, and paint re-proves it only once its status changes or
-	// unprovedReprove passed; a proof that succeeds forgets it.
+	// failed under, when, and under which Herdr server start. Such a pane is
+	// named once per server start while it stays unproved, and paint re-proves
+	// it only once its status changes or unprovedReprove passed; a proof that
+	// succeeds forgets it. Each hook-fired painter is its own process, so the
+	// memo is kept in lockDir per socket (unprovedPath) and reread every paint;
+	// a lost update between two painters only names a pane once more.
 	unproved map[string]unprovedPane
+	// serverStart reads the Herdr server's start identity (its socket file's
+	// mtime), the key of the unproved-pane memo; nil reads the socket file.
+	serverStart func() (int64, error)
+	// server is the start identity the memo was last read under; persisted
+	// says whether it was read, so the memo is kept in lockDir. A socket file
+	// that cannot be read keeps the memo in this process alone: a pane is
+	// then named once per painter, never left unnamed.
+	server    int64
+	persisted bool
+	// recordWritten says record ran, so the paint belongs to a theme-on run and
+	// its writes stand down to a later theme off; clearing marks the painter's
+	// own clear, which is that theme off's work.
+	recordWritten bool
+	clearing      bool
 }
 
 type unprovedPane struct {
-	status string
-	at     time.Time
+	Status string `json:"status"`
+	At     int64  `json:"at"`
+	Server int64  `json:"server"`
 }
 
 // PaintIndicators repaints every pane's and workspace's indicator token on the
@@ -175,7 +193,11 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		painter.logf("%v", err)
 		return err
 	}
-	if err := painter.record(); err != nil {
+	if err := painter.record(ctx); errors.Is(err, errThemeOff) {
+		// Not a failure: pfm's Herdr theme is off, and its stop marker stands.
+		_, _ = fmt.Fprintf(painter.stderr, "%v: socket %s left as theme off found it\n", err, painter.socket)
+		return nil
+	} else if err != nil {
 		painter.logf("%v", err)
 		return err
 	}
@@ -241,8 +263,8 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 
 // blink repaints on every half-second boundary until nothing is blocked or done. A
 // cancelled context ends it cleanly; maxPaintFailures failed repaints in a row
-// end it with the last error. A tick that finds the socket's record gone
-// (ClearIndicators removed it: pfm's Herdr theme is off) clears the
+// end it with the last error. A tick that finds the socket's stop marker, or
+// its record gone (ClearIndicators: pfm's Herdr theme is off), clears the
 // indicators and stops the blinker, stopped true. Every failure is written to
 // stderr as it happens.
 func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err error) {
@@ -252,7 +274,16 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 		if err := painter.clock.Sleep(ctx, wait); err != nil {
 			return false, nil // Sleep ends early only when ctx is done
 		}
-		if !painter.recorded() {
+		stop := !painter.recorded()
+		if !stop {
+			marked, err := painter.stopMarked()
+			if err != nil {
+				painter.logf("%v", err)
+				return true, err
+			}
+			stop = marked
+		}
+		if stop {
 			if err := painter.clear(ctx); err != nil {
 				painter.logf("%v", err)
 				return true, err
@@ -296,6 +327,7 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 	if err != nil {
 		return false, false, err
 	}
+	painter.loadUnproved()
 	blinkOn := painter.clock.Now().UnixMilli()/blinkHalfPeriod.Milliseconds()%2 == 0
 	painter.hasDone = false
 	for _, target := range targets {
@@ -315,6 +347,10 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		if errors.Is(err, errIndicatorOwnership) {
 			continue
 		}
+		if errors.Is(err, errThemeOff) {
+			// The blinker's next tick, or the theme off's own clear, takes it from here.
+			return blocked, wrote, nil
+		}
 		if err != nil {
 			return blocked, wrote, err
 		}
@@ -327,6 +363,9 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		}
 		accepted, err := painter.paintTabs(ctx, observations, blinkOn)
 		wrote = wrote || accepted
+		if errors.Is(err, errThemeOff) {
+			return blocked, wrote, nil
+		}
 		if err != nil {
 			return blocked, wrote, err
 		}
@@ -349,10 +388,12 @@ func (painter *indicatorPainter) paintTabs(
 	for i := range observations {
 		observation := observations[i]
 		painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
-		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.call)
+		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.guardedCall)
 		wrote = wrote || accepted
 		key := "tab\x00" + observation.Tab + "\x00" + observation.Identity
 		switch {
+		case errors.Is(err, errThemeOff):
+			return wrote, err
 		case errors.Is(err, errTabOwnership) || errors.Is(err, errTabLabelForeign):
 			if !painter.reported[key] {
 				painter.reported[key] = true
@@ -371,6 +412,8 @@ func (painter *indicatorPainter) paintTabs(
 // clear lists every pane and workspace once and removes the indicator tokens
 // each holds, leaving every other source's tokens alone.
 func (painter *indicatorPainter) clear(ctx context.Context) error {
+	painter.clearing = true
+	defer func() { painter.clearing = false }()
 	var failures []error
 	if err := painter.restoreTabs(ctx); err != nil {
 		failures = append(failures, err)
@@ -379,6 +422,7 @@ func (painter *indicatorPainter) clear(ctx context.Context) error {
 	if err != nil {
 		return errors.Join(append(failures, err)...)
 	}
+	painter.loadUnproved()
 	for _, target := range targets {
 		if _, err := painter.report(ctx, target, indicatorPatch(target.tokens, nil)); err != nil {
 			if !errors.Is(err, errIndicatorOwnership) {
@@ -448,16 +492,25 @@ func (painter *indicatorPainter) report(
 			if painter.unproved == nil {
 				painter.unproved = map[string]unprovedPane{}
 			}
-			painter.unproved[target.id] = unprovedPane{status: target.status, at: painter.clock.Now()}
+			painter.unproved[target.id] = unprovedPane{
+				Status: target.status, At: painter.clock.Now().UnixNano(), Server: painter.server,
+			}
+			painter.storeUnproved()
 			return false, fmt.Errorf("%w: pane %s: %w", errIndicatorOwnership, target.id, err)
 		}
-		delete(painter.unproved, target.id)
+		if _, named := painter.unproved[target.id]; named {
+			delete(painter.unproved, target.id)
+			painter.storeUnproved()
+		}
 	}
 	line, err := tokenReport{target: target, tokens: patch, seq: painter.nextSeq()}.Line()
 	if err != nil {
 		return false, fmt.Errorf("herdr indicators: render the report for %s %s: %w", target.kind, target.id, err)
 	}
-	if _, err := painter.call(ctx, painter.socket, line); err != nil {
+	if err := painter.write(ctx, line); err != nil {
+		if errors.Is(err, errThemeOff) {
+			return false, err
+		}
 		var refusal *Refusal
 		if errors.As(err, &refusal) && (target.kind == targetPane && refusal.Code == "pane_not_found" ||
 			target.kind == targetWorkspace && refusal.Code == "workspace_not_found") {
@@ -477,7 +530,80 @@ func (painter *indicatorPainter) skipUnproved(target indicatorTarget) bool {
 		return false
 	}
 	last, ok := painter.unproved[target.id]
-	return ok && last.status == target.status && painter.clock.Now().Sub(last.at) < unprovedReprove
+	return ok && last.Status == target.status &&
+		painter.clock.Now().Sub(time.Unix(0, last.At)) < unprovedReprove
+}
+
+// unprovedPath is the socket's unproved-pane memo in the lock directory.
+func (painter *indicatorPainter) unprovedPath() string {
+	return filepath.Join(painter.lockDir, "indicators-"+socketKey(painter.socket)+".unproved.json")
+}
+
+// loadUnproved rereads the memo every painter of the socket shares, keeping
+// only the panes named under the server's current start. A socket file that
+// cannot be read keeps the in-process memo; an unreadable or corrupt memo is
+// named, removed, and read as empty, so its panes are named once more.
+func (painter *indicatorPainter) loadUnproved() {
+	if painter.lockDir == "" {
+		return
+	}
+	read := painter.serverStart
+	if read == nil {
+		read = func() (int64, error) {
+			info, err := os.Stat(painter.socket)
+			if err != nil {
+				return 0, fmt.Errorf("stat Herdr socket %s: %w", painter.socket, err)
+			}
+			return info.ModTime().UnixNano(), nil
+		}
+	}
+	server, err := read()
+	if err != nil {
+		painter.persisted = false
+		return
+	}
+	painter.server, painter.persisted = server, true
+	path := painter.unprovedPath()
+	body, err := os.ReadFile(path)
+	stored := map[string]unprovedPane{}
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		painter.logf("herdr indicators: read unproved-pane memo %s: %v", path, err)
+	default:
+		if err := json.Unmarshal(body, &stored); err != nil {
+			painter.logf("herdr indicators: decode unproved-pane memo %s: %v (removed)", path, err)
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				painter.logf("herdr indicators: remove unproved-pane memo %s: %v", path, err)
+			}
+			stored = map[string]unprovedPane{}
+		}
+	}
+	painter.unproved = map[string]unprovedPane{}
+	for pane, entry := range stored {
+		if entry.Server == server {
+			painter.unproved[pane] = entry
+		}
+	}
+}
+
+// storeUnproved writes the memo back atomically; a failure is named, and only
+// costs a pane being named once more.
+func (painter *indicatorPainter) storeUnproved() {
+	if !painter.persisted {
+		return
+	}
+	path := painter.unprovedPath()
+	body, err := json.Marshal(painter.unproved)
+	if err == nil {
+		err = os.MkdirAll(painter.lockDir, 0o700)
+	}
+	if err == nil {
+		err = atomicfile.Write(path, body, 0o600)
+	}
+	if err != nil {
+		painter.logf("herdr indicators: store unproved-pane memo %s: %v", path, err)
+	}
 }
 
 // socketKey names a socket's files in the lock directory: the first 8 hex of
@@ -492,23 +618,6 @@ func socketKey(socket string) string {
 // painted.
 func (painter *indicatorPainter) recordPath() string {
 	return filepath.Join(painter.lockDir, "indicators-"+socketKey(painter.socket)+".socket")
-}
-
-// record writes the socket's record unless it already holds the socket,
-// atomically, so a reader never sees it half-written.
-func (painter *indicatorPainter) record() error {
-	path := painter.recordPath()
-	held, err := os.ReadFile(path)
-	switch {
-	case err == nil && string(held) == painter.socket:
-		return nil
-	case err != nil && !errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("herdr indicators: read socket record %s: %w", path, err)
-	}
-	if err := atomicfile.Write(path, []byte(painter.socket), 0o600); err != nil {
-		return fmt.Errorf("herdr indicators: write socket record %s: %w", path, err)
-	}
-	return nil
 }
 
 // recorded says whether the socket's record is still there. A stat failure
@@ -528,10 +637,15 @@ func (painter *indicatorPainter) recorded() bool {
 // of every Herdr server a painter recorded in lockDir: the step pfm theme off
 // takes once the plugin is unlinked, since a token carries no ttl and would
 // stay until its pane closes. A socket cleared, and a socket nobody listens
-// on (its server is gone, its tokens with it), has its record removed, which
-// also stops that socket's running blinker at its next tick. A failure on one
-// socket leaves its record, is written to stderr, and the rest are still
-// cleared; the failures come back joined.
+// on (its server is gone, its tokens with it), has its record removed. Each
+// socket's stop marker is written before its clear, so its running blinker
+// stops at its next tick whether or not the clear succeeds, and is kept after
+// it, so no painter records again until the theme on retires it
+// (RetireIndicatorStops). A failure on one
+// socket leaves its record and marker for the retry, is written to stderr and
+// to the lock directory's indicators log (each pane pfm could not prove keeps
+// its tokens, named there), and the rest are still cleared; the failures come
+// back joined.
 func ClearIndicators(ctx context.Context, lockDir string, stderr io.Writer, proof PaneProof) error {
 	return clearRecordedIndicators(ctx, lockDir, stderr, Call, proof)
 }
@@ -571,6 +685,9 @@ func clearRecordedIndicators(
 			socket: string(socket), lockDir: lockDir, stderr: stderr, call: call, clock: clock.Real,
 			reported: map[string]bool{}, provePane: proof,
 		}
+		if err := painter.writeStop(ctx); err != nil {
+			failures = append(failures, err)
+		}
 		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) ||
 			!errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED)) {
 			failures = append(failures, fmt.Errorf("herdr indicators: clear socket %s: %w", socket, err))
@@ -578,10 +695,20 @@ func clearRecordedIndicators(
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			failures = append(failures, fmt.Errorf("herdr indicators: remove socket record %s: %w", path, err))
+			continue
+		}
+		// The stop marker outlives the theme off: a painter that records after
+		// it meets the marker and stands down; the theme on retires it
+		// (RetireIndicatorStops).
+		if err := os.Remove(painter.unprovedPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			failures = append(failures, fmt.Errorf("herdr indicators: remove %s: %w", painter.unprovedPath(), err))
 		}
 	}
 	for _, failure := range failures {
 		_, _ = fmt.Fprintln(stderr, failure)
+		if err := AppendError(lockDir, "indicators", clock.Real.Now(), failure.Error()); err != nil {
+			_, _ = fmt.Fprintf(stderr, "persist indicator diagnostic: %v\n", err)
+		}
 	}
 	return errors.Join(failures...)
 }

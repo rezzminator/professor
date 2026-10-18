@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: chatlog
-description: 'Digests and prices agent runs, and is the transcript readers'' kit — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, chat name or flight: `pfm transcript show|locate|agents`, `pfm tokens`, `pfm model-cost`, and `chatlog.py prep|read|find|note|report|verify|prompts|writes|runs`. Returns a digest, a spend report or a verified row report. Faults, an audit or "did it really do Y" → agent-investigator; static context → /context-meter.'
+description: 'Digests and prices agent runs, and is the transcript readers'' kit — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, chat name or flight: `pfm transcript show|locate|agents`, `pfm tokens`, `pfm model-cost`, and `chatlog.py prep|read|find|note|report|verify|prompts|writes|runs|census`. Returns a digest, a spend report or a verified row report. Faults, an audit or "did it really do Y" → agent-investigator; static context → /context-meter.'
 ---
 
 # chatlog
@@ -102,7 +102,7 @@ The `data gaps:` line is the report's own honesty, and `data gaps: none` means t
 
 ## The reader kit — `chatlog.py`
 
-`K="python3 -I $HOME/.claude/skills/chatlog/chatlog.py"` does every mechanical step of reading one transcript, so a reader (the `transcript-reader` agent, or you) only reads and labels what needs reading. It reads the raw stores itself, natively on all three engines (no `pfm` call except `pfm model-cost --json --all`, the one price table, cached for a day), and resolves any target: a path, a session id or prefix, an agent id, a chat name, a Codex agent path, an OpenCode id, title or `{store}#{session}`.
+`K="python3 -I $HOME/.claude/skills/chatlog/chatlog.py"` does every mechanical step of reading a transcript, and counts across many (`census`), so a reader (the `transcript-reader` agent, or you) only reads and labels what needs reading. It reads the raw stores itself, natively on all three engines (no `pfm` call except `pfm model-cost --json --all`, the one price table, cached for a day), and resolves any target: a path, a session id or prefix, an agent id, a chat name, a Codex agent path, an OpenCode id, title or `{store}#{session}`.
 
 | Verb | Does |
 | --- | --- |
@@ -115,10 +115,11 @@ The `data gaps:` line is the report's own honesty, and `data gaps: none` means t
 | `$K prompts DIR` | every user prompt, beside the assistant line before it |
 | `$K writes DIR` | every file the run wrote (tool writes, redirections, `tee`, `sed -i`, `cp`/`mv` targets), its state now: size, mtime, git status, `GONE`, `UNRESOLVED` |
 | `$K runs --type T [--since 7d] [--project SUBSTR]` · `$K runs --session S` | every run of one agent type across projects, or a session's sub-agents |
+| `$K census --type T [--since 30d] [--project SUBSTR]` · `$K census --session S` · `$K census PATH…`, each `[--tree] [--out F]` | a count, cost or spawn tree across many runs: one TSV row per transcript (`id engine agent_type description start_utc wall_s calls errors denials compactions spawns usd final parent`) from the kit's own engines, labels and cost, then a `TOTAL` row. `--type` selects as `runs` does; `--session` takes a top-level Claude, Codex or OpenCode session and all its sub-agents. One `FAILED {path} — {reason}` line per transcript it could not read or whose ownership walk hit a read error (its dollars unsure), exit 1 when any; a `GAPS {path} — data gaps: …` line per transcript whose timeline names other data gaps, and one `GAPS prices — …` for the price table's, as `prep` prints them; a usage error exits 2. In the TOTAL and branch sums an unpriced cell counts as `+n n/a`, a failed one as `+n FAILED`. `--tree` prints the spawn tree (parent → child, indented) with calls and USD rolled up per branch; `--out F` writes the full TSV plus a `path` column, then the same FAILED and GAPS lines, stdout staying compact |
 
 ### The package and the engines
 
-`chatlog.py` is the entry only (it adds its own resolved directory to `sys.path`, since `-I` drops it); the work is the stdlib package `chatlogkit/` beside it, one concern per module: `engines/{claude,codex,opencode}.py` (each raw record or store row into the one event model in `model.py`), `locate.py` (targets, a session's sub-agents, `runs`), `digest.py` (the digest and its header), `labels.py` (the mechanical labels, one rule set for every engine), `writes.py` (tool and shell writes), `cost/` (per-call timeline, TOTALS, COSTLIEST, MODEL-WAIT, priced from each record's usage), `rows.py` (read, find, note, report, verify, prompts, writes) and `cli.py` (prep and the dispatch). Tests: `chatlog_test.py`, run by the gate.
+`chatlog.py` is the entry only (it adds its own resolved directory to `sys.path`, since `-I` drops it); the work is the stdlib package `chatlogkit/` beside it, one concern per module: `engines/{claude,codex,opencode}.py` (each raw record or store row into the one event model in `model.py`), `locate.py` (targets, a session's sub-agents, `runs`), `digest.py` (the digest and its header), `labels.py` (the mechanical labels, one rule set for every engine), `writes.py` (tool and shell writes), `cost/` (per-call timeline, TOTALS, COSTLIEST, MODEL-WAIT, priced from each record's usage), `rows.py` (read, find, note, report, verify, prompts, writes), `census.py` (the census verb) and `cli.py` (prep and the dispatch). Tests: `chatlog_test.py` and `census_test.py`, run by the gate.
 
 | Engine | Source | Compaction | Spawn | Failed call | Cost per call |
 | --- | --- | --- | --- | --- | --- |

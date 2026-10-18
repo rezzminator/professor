@@ -79,9 +79,14 @@ def find_sessions(roots, prefix):
     return found, errs
 
 
-def subagent_transcripts(folder):
+def subagent_transcripts(folder, errs=None):
+    """The agent-*.jsonl files under folder; a directory the walk cannot list goes to errs as (path, reason)."""
     found = []
-    for dp, dns, fns in os.walk(folder):
+
+    def failed(e):
+        if errs is not None:
+            errs.append((e.filename or folder, str(e)))
+    for dp, dns, fns in os.walk(folder, onerror=failed):
         for f in sorted(fns):
             if f.startswith("agent-") and f.endswith(".jsonl") and not os.path.isdir(os.path.join(dp, f)):
                 found.append(os.path.join(dp, f))
@@ -119,8 +124,16 @@ def walk_rollouts(home):
     return found, errs
 
 
-def rollout_agent_path(path):
-    """The agent_path a rollout's session_meta names, '' when none, None when its header cannot be read."""
+def first_text(*vals):
+    """The first non-empty string among vals, '' when none."""
+    return next((v for v in vals if isinstance(v, str) and v), "")
+
+
+def rollout_header(path):
+    """The session_meta facts of a rollout from its first 40 lines: id, parent (the thread that spawned it),
+    role, nickname and agent_path, each '' when absent, and child (a sub-agent rollout). Every fact is empty when
+    the rollout has no session_meta; None when the file cannot be read."""
+    head = dict(id="", parent="", role="", nickname="", agent_path="", child=False)
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for _, line in zip(range(40), f):
@@ -131,16 +144,26 @@ def rollout_agent_path(path):
                 if not isinstance(rec, dict) or rec.get("type") != "session_meta":
                     continue
                 pl = rec.get("payload") if isinstance(rec.get("payload"), dict) else {}
-                ap = rec.get("agent_path") or pl.get("agent_path")
-                if not ap:
-                    src = pl.get("source") if isinstance(pl.get("source"), dict) else {}
-                    sub = src.get("subagent") if isinstance(src.get("subagent"), dict) else {}
-                    spawn = sub.get("thread_spawn") if isinstance(sub.get("thread_spawn"), dict) else {}
-                    ap = spawn.get("agent_path")
-                return ap if isinstance(ap, str) else ""
+                src = pl.get("source") if isinstance(pl.get("source"), dict) else {}
+                sub = src.get("subagent") if isinstance(src.get("subagent"), dict) else {}
+                spawn = sub.get("thread_spawn") if isinstance(sub.get("thread_spawn"), dict) else {}
+                head.update(id=first_text(pl.get("id"), pl.get("session_id")),
+                            parent=first_text(spawn.get("parent_thread_id"), pl.get("parent_thread_id")),
+                            role=first_text(pl.get("agent_role"), spawn.get("agent_role")),
+                            nickname=first_text(pl.get("agent_nickname"), spawn.get("agent_nickname")),
+                            agent_path=first_text(rec.get("agent_path"), pl.get("agent_path"),
+                                                  spawn.get("agent_path")))
+                head["child"] = bool(src.get("subagent")) or bool(head["parent"])
+                return head
     except OSError:
         return None
-    return ""
+    return head
+
+
+def rollout_agent_path(path):
+    """The agent_path a rollout's session_meta names, '' when none, None when its header cannot be read."""
+    head = rollout_header(path)
+    return None if head is None else head["agent_path"]
 
 
 def opencode_sessions():
@@ -415,26 +438,32 @@ def opencode_agents(target):
     return lines
 
 
-def runs(args):
-    sess = opt(args, "--session")
-    if sess:
-        try:
-            path = resolve(sess)
-            lines = opencode_agents(path) if opencode.split_locator(path) else session_agents(path)
-        except (NotFound, opencode.StoreError) as e:
-            die(f"FAILED {sess} — {str(e)[:600]}")
-        print("\n".join(lines))
-        return
-    typ = opt(args, "--type")
-    since = opt(args, "--since", "30d")
-    proj = opt(args, "--project", "")
-    if not typ:
-        die("usage: chatlog.py runs --type T [--since 7d] [--project SUBSTR] | --session S", 2)
+def since_cutoff(since):
+    """The epoch second an `Nh` or `Nd` window reaches back to."""
     m = re.fullmatch(r"(\d+)([hd])", since)
     if not m:
         die(f"KIT FAILED — --since {since}: use Nh or Nd")
-    cutoff = time.time() - int(m.group(1)) * (3600 if m.group(2) == "h" else 86400)
-    found = []
+    return time.time() - int(m.group(1)) * (3600 if m.group(2) == "h" else 86400)
+
+
+def read_meta(mp):
+    """(meta, ''), or (None, the reason) when a sub-agent's .meta.json is no readable JSON object."""
+    try:
+        with open(mp) as f:
+            meta = json.load(f)
+    except (OSError, ValueError) as e:
+        return None, str(e)
+    if not isinstance(meta, dict):
+        return None, "not a JSON object"
+    return meta, ""
+
+
+def type_runs(typ, since, proj):
+    """([(mtime of the meta, transcript path, meta)] of the Claude sub-agent runs of agent type typ across
+    every project, [(meta path, reason)] of the metas that could not be read). Both `runs` and `census` select
+    through here."""
+    cutoff = since_cutoff(since)
+    found, unreadable = [], []
     for root in claude_roots():
         root = real(root)
         try:
@@ -452,19 +481,123 @@ def runs(args):
                         continue
                     mp = os.path.join(dp, f)
                     try:
-                        if os.path.getmtime(mp) < cutoff:
-                            continue
-                        with open(mp) as fh:
-                            meta = json.load(fh)
-                    except (OSError, ValueError) as e:
-                        print(f"UNREADABLE {mp} — {e}")
+                        mtime = os.path.getmtime(mp)
+                    except OSError as e:
+                        unreadable.append((mp, str(e)))
                         continue
-                    if meta.get("agentType") != typ:
+                    if mtime < cutoff:
                         continue
-                    jp = mp[:-len(".meta.json")] + ".jsonl"
-                    sz = os.path.getsize(jp) if os.path.exists(jp) else -1
-                    found.append((os.path.getmtime(mp), sz, meta.get("model") or "-",
-                                  meta.get("description") or "", jp))
-    for t, sz, mo, de, jp in sorted(found):
+                    meta, why = read_meta(mp)
+                    if meta is None:
+                        unreadable.append((mp, why))
+                    elif meta.get("agentType") == typ:
+                        found.append((mtime, mp[:-len(".meta.json")] + ".jsonl", meta))
+    return found, unreadable
+
+
+def runs(args):
+    sess = opt(args, "--session")
+    if sess:
+        try:
+            path = resolve(sess)
+            lines = opencode_agents(path) if opencode.split_locator(path) else session_agents(path)
+        except (NotFound, opencode.StoreError) as e:
+            die(f"FAILED {sess} — {str(e)[:600]}")
+        print("\n".join(lines))
+        return
+    typ = opt(args, "--type")
+    since = opt(args, "--since", "30d")
+    proj = opt(args, "--project", "")
+    if not typ:
+        die("usage: chatlog.py runs --type T [--since 7d] [--project SUBSTR] | --session S", 2)
+    found, unreadable = type_runs(typ, since, proj)
+    for mp, why in unreadable:
+        print(f"UNREADABLE {mp} — {why}")
+    listed = []
+    for mtime, jp, meta in found:
+        sz = os.path.getsize(jp) if os.path.exists(jp) else -1
+        listed.append((mtime, sz, meta.get("model") or "-", meta.get("description") or "", jp))
+    for t, sz, mo, de, jp in sorted(listed):
         print(f"{time.strftime('%m-%d %H:%M', time.localtime(t))}\t{sz}\t{mo}\t{de[:90]}\t{jp}")
     print(f"# runs {len(found)} of {typ} since {since}")
+
+
+# --- a session and everything under it ----------------------------------------------------------------
+
+def refuse(path, what):
+    die(f"usage: chatlog.py census --session takes a top-level session; {path} is {what}", 2)
+
+
+def claude_family(path):
+    name = os.path.basename(path)
+    if os.path.basename(os.path.dirname(path)) == "subagents" or name.startswith("agent-"):
+        refuse(path, "a sub-agent transcript")
+    folder = path[:-len(".jsonl")] + "/subagents" if path.endswith(".jsonl") else path + "/subagents"
+    if not os.path.exists(folder):
+        return [path], []
+    if not os.path.isdir(folder):
+        return [path], [(folder, "the subagents path is not a directory")]
+    errs = []
+    return [path] + unique(subagent_transcripts(folder, errs)), errs
+
+
+def codex_family(path):
+    head = rollout_header(path)
+    if head is None:
+        raise NotFound(f"cannot read the rollout {path}")
+    if head["child"]:
+        refuse(path, "a sub-agent rollout")
+    errs, by_parent = [], {}
+    for home in codex_homes():
+        rollouts, walk_errs = walk_rollouts(home)
+        errs += [(home, e) for e in walk_errs]
+        for r in rollouts:
+            h = rollout_header(r)
+            if h is None:
+                errs.append((r, "header unreadable — it could be a sub-agent of this session"))
+            elif h["parent"]:
+                by_parent.setdefault(h["parent"], []).append((r, h["id"]))
+    members, taken = [path], {real(path)}
+    queue = [head["id"]] if head["id"] else []
+    while queue:
+        for r, cid in sorted(by_parent.get(queue.pop(0), [])):
+            if real(r) in taken:
+                continue
+            members.append(r)
+            taken.add(real(r))
+            if cid:
+                queue.append(cid)
+    return members, errs
+
+
+def opencode_family(target):
+    db, sid = opencode.split_locator(target)
+    every = opencode.sessions(db)
+    root = next((s for s in every if s["id"] == sid), None)
+    if root is None:
+        raise NotFound(f"NOT FOUND {sid} — no such opencode session in {db}")
+    if root["parent_id"]:
+        refuse(target, "a child session")
+    kids = {}
+    for s in every:
+        kids.setdefault(s["parent_id"], []).append(s)
+    members, taken, queue = [opencode.locator(db, sid)], {sid}, [sid]
+    while queue:
+        for s in sorted(kids.get(queue.pop(0), []), key=lambda s: (s["created"], s["id"])):
+            if s["id"] not in taken:
+                taken.add(s["id"])
+                members.append(opencode.locator(db, s["id"]))
+                queue.append(s["id"])
+    return members, []
+
+
+def session_members(path):
+    """([the session's transcript or locator, then every sub-agent under it], [(place, reason)] the discovery
+    could not read). Claude: the subagents folder of the session; Codex: the rollouts whose session_meta
+    parent chain reaches the session's id; OpenCode: the descendants by parent_id. A sub-agent or child is
+    refused with a usage error naming it. Raises NotFound or opencode.StoreError for a session it cannot read."""
+    if opencode.split_locator(path):
+        return opencode_family(path)
+    if os.path.basename(path).startswith(ROLLOUT_PREFIX):
+        return codex_family(path)
+    return claude_family(path)

@@ -1,4 +1,4 @@
-"""chatlog kit: the mechanics of reading one transcript, so a reader only reads.
+"""chatlog kit: the mechanics of reading transcripts, so a reader only reads and a count is code.
 
 One event model (model.py) that every engine module (engines/claude.py, codex.py, opencode.py)
 maps its raw records into; digest.py renders it as the `pfm transcript show` digest; labels.py

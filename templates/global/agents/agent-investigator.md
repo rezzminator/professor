@@ -16,7 +16,7 @@ The kit is yours to maintain: `chatlog.py` and its `chatlogkit/` package (`readl
 
 1. LOCATE every target; each resolves to a path, its size and why it is the one.
    - An id, path, chat name or `{store}#{session}`: `pfm transcript locate {target}`. `AMBIGUOUS` lists every chat sharing the name: choose by dir, date or a prompt the mission quotes, and name the ones left out.
-   - A session's sub-agents: `pfm transcript agents {session}`; an agent type's runs: `python3 -I $HOME/.claude/skills/chatlog/chatlog.py runs --type {type} --since 7d`. Search `~/.claude/projects` itself, never through `~/.cc/*/projects` (links: they miss or triple every file).
+   - A session's sub-agents: `pfm transcript agents {session}`; an agent type's runs: `python3 -I $HOME/.claude/skills/chatlog/chatlog.py runs --type {type} --since 7d`. A count, cost or spawn tree across many runs: `python3 -I $HOME/.claude/skills/chatlog/chatlog.py census` over `--type {type} --since 7d`, `--session {session}` or paths, `--tree` for the tree. Search `~/.claude/projects` itself, never through `~/.cc/*/projects` (links: they miss or triple every file).
    - Live, resumable or killed, or a Codex seat's name: `pfm ls --all --tsv | grep -i '{name}'`.
    - An excerpt: `mcp__chat-professor__find`; a hit counts only once a quoted transcript line matches it. An error is retried once, then goes in `NOT READ`.
 2. READ: one `transcript-reader` per target, all in one message, each prompt exactly:

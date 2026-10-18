@@ -45,6 +45,7 @@ Each row names its transcript `path:line`.
 | Re-reads | a file read again by an agent after a tracer answer covering it reached that agent |
 | Store hits | tracer questions answered fresh from the store, and questions walked again with unchanged files |
 | Full suites outside the lander | any full suite or gate run by a foreman or worker |
+| Gate repeats | a lander full gate run again with no red gate between, or a red gate's fix checked by rerunning the gate |
 | Idle gaps | a gap over 5 minutes, with who waited on what |
 | Greedy foreman | a foreman that wrote pieces a worker could have taken: its written bytes against its workers' |
 | Silent agents | agents that wrote nothing, ranked by input tokens |

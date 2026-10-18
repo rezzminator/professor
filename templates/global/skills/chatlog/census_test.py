@@ -1,4 +1,4 @@
-"""Tests for the chatlog kit's `census` verb — run through `.claude/scripts/test-templates.sh`.
+"""Tests for the chatlog kit's `census` verb — run through `.claude/scripts/test.sh`.
 
 The fixtures are chatlog_test's: an invented Claude session with sub-agents, a Codex rollout pair and an OpenCode
 store with a child session, written into a temp world and read through the entry point

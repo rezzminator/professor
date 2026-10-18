@@ -10,6 +10,13 @@ import (
 // window name itself is clipped, this option is not.
 const ChatNameOption = "@pfm_chat_name"
 
+// ChatNameAutoOption is the tmux session option an automatic name writer (a
+// Codex first-prompt fallback, an OpenCode title) sets to the name it wrote
+// beside ChatNameOption; a user's name writer leaves it as it was. A chat name
+// equal to it is a name no user chose, which never replaces a tab label the
+// user set in Herdr.
+const ChatNameAutoOption = "@pfm_chat_name_auto"
+
 // EventName re-sends a chat's name to the Herdr panes registered for its
 // session; the tmux window-renamed hook runs it.
 const EventName Event = "name"

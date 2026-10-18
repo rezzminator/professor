@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -29,12 +27,6 @@ type HerdrRequest struct {
 	Seat   fleetdb.Seat
 	Run    fleetdb.SeatRun
 	Paths  paths.Values
-	Focus  bool
-	// Stderr receives post-birth focus warnings; nil uses the process stderr.
-	Stderr io.Writer
-	// TabLabel is the requester's label for a new tab (a launch or resumed
-	// chat's name), ahead of the seat's own name; it never names the seat.
-	TabLabel string
 }
 
 type HerdrResult struct {
@@ -121,13 +113,12 @@ func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (resul
 	return HerdrResult{Seat: seat, Eval: "exec pfm internal seat-host " + seat.SeatID}, nil
 }
 
-// birthTabLabel is the label a new seat's tab is born with, never empty: the
-// requester's label, else the seat's name, else the base name of the seat's
-// working directory (the project folder an unnamed chat runs in), each as
-// Herdr would show it.
-func birthTabLabel(request HerdrRequest) string {
-	folder := filepath.Base(request.Run.CWD)
-	for _, label := range []string{request.TabLabel, request.Seat.Name, folder} {
+// BirthTabLabel is the label a chat's tab is born with, never empty: the
+// chat's name, else the base name of its working directory (the project
+// folder an unnamed chat runs in), each as Herdr would show it.
+func BirthTabLabel(name, cwd string) string {
+	folder := filepath.Base(cwd)
+	for _, label := range []string{name, folder} {
 		if cleaned := herdr.TabLabel(label); cleaned != "" {
 			return cleaned
 		}
@@ -135,7 +126,7 @@ func birthTabLabel(request HerdrRequest) string {
 	return folder
 }
 
-// SpawnHerdr creates one tab in the requester's workspace, unfocused by default.
+// SpawnHerdr creates one unfocused tab in the requester's workspace.
 func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
 	result, err := reserveHerdr(ctx, request, "")
 	if err != nil {
@@ -152,8 +143,8 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 	}
 	params := map[string]any{
 		"workspace_id": request.Choice.HerdrWorkspace,
-		"tab_label":    birthTabLabel(request),
-		"focus":        request.Focus,
+		"tab_label":    BirthTabLabel(request.Seat.Name, request.Run.CWD),
+		"focus":        false,
 		"root": map[string]any{
 			"type":    "pane",
 			"command": []string{"pfm", "internal", "seat-host", result.Seat.SeatID},
@@ -206,42 +197,5 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 		return result, fmt.Errorf("herdr pane %s exists; persist address: %w", seat.HerdrPane, err)
 	}
 	result.Seat = seat
-	if request.Focus {
-		if err := focusHerdrPane(ctx, seat); err != nil {
-			// Birth is complete: returning a launch error would let callers retry
-			// the old seat and create another tab instead of retiring it.
-			stderr := request.Stderr
-			if stderr == nil {
-				stderr = os.Stderr
-			}
-			fmt.Fprintf(stderr, "pfm: Herdr pane %s opened, but focus failed: %v\n", seat.HerdrPane, err)
-		}
-	}
 	return result, nil
-}
-
-func focusHerdrPane(ctx context.Context, seat fleetdb.Seat) error {
-	body, err := herdr.SeatRequest(
-		ctx,
-		seat.HerdrSocket,
-		"pane.focus",
-		map[string]string{"pane_id": seat.HerdrPane},
-	)
-	if err != nil {
-		return fmt.Errorf("focus Herdr clients: %w", err)
-	}
-	var ack struct {
-		Type string `json:"type"`
-		Pane struct {
-			ID      string `json:"pane_id"`
-			Focused bool   `json:"focused"`
-		} `json:"pane"`
-	}
-	if err := json.Unmarshal(body, &ack); err != nil {
-		return fmt.Errorf("decode Herdr focus: %w", err)
-	}
-	if ack.Type != "pane_info" || ack.Pane.ID != seat.HerdrPane || !ack.Pane.Focused {
-		return fmt.Errorf("unexpected Herdr focus acknowledgement: %s", body)
-	}
-	return nil
 }

@@ -16,9 +16,24 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// LabelSoleTab is every name writer's shared policy. Its persistent base name
-// and flock are also used by the status painter, across plugin/hook processes.
+// LabelSoleTab is every name writer's shared policy for a chat name a user
+// chose that changed (pfm chat name, a Claude /rename, launch --name): the
+// name is pfm's again, whoever set the label before. Its
+// persistent base name and flock are also used by the status painter, across
+// plugin/hook processes.
 func LabelSoleTab(ctx context.Context, socket, tab, label string, seq func() uint64) error {
+	return labelTabByPolicy(ctx, socket, tab, label, true, seq)
+}
+
+// ReannounceSoleTab is LabelSoleTab for a name the chat already carried (a
+// session start, a client move, a re-announce) or one no user chose (an
+// automatic name, herdr.ChatNameAutoOption): no rename, so a label the user
+// set in Herdr since pfm last wrote the tab stays.
+func ReannounceSoleTab(ctx context.Context, socket, tab, label string, seq func() uint64) error {
+	return labelTabByPolicy(ctx, socket, tab, label, false, seq)
+}
+
+func labelTabByPolicy(ctx context.Context, socket, tab, label string, explicit bool, seq func() uint64) error {
 	if tab == "" {
 		return nil
 	}
@@ -26,22 +41,114 @@ func LabelSoleTab(ctx context.Context, socket, tab, label string, seq func() uin
 	if err != nil {
 		return fmt.Errorf("tab label home: %w", err)
 	}
-	return writeSoleTabLabel(ctx, socket, paths.HerdrLockDir(home), tab, label, seq, Call)
+	return writeSoleTabLabel(ctx, socket, paths.HerdrLockDir(home), tab, label, explicit, seq, Call)
 }
 
+// LabelPaneTab labels the tab pane sits in, found by pane.get, through
+// LabelSoleTab when explicit says a user chose the name, else through
+// ReannounceSoleTab, so a label the user set in Herdr stays: a tab the pane
+// shares with another answers ErrTabNotSole.
+func LabelPaneTab(ctx context.Context, socket, pane, label string, explicit bool) error {
+	body, err := SeatRequest(ctx, socket, "pane.get", map[string]string{"pane_id": pane})
+	if err != nil {
+		return fmt.Errorf("read Herdr pane %s: %w", pane, err)
+	}
+	var reply struct {
+		Pane struct {
+			ID  string `json:"pane_id"`
+			Tab string `json:"tab_id"`
+		} `json:"pane"`
+	}
+	if err := json.Unmarshal(body, &reply); err != nil {
+		return fmt.Errorf("decode Herdr pane %s: %w", pane, err)
+	}
+	if reply.Pane.ID != pane {
+		return fmt.Errorf("herdr pane.get for %s returned unexpected identity: %s", pane, body)
+	}
+	var seq uint64
+	next := func() uint64 { seq++; return seq }
+	write := ReannounceSoleTab
+	if explicit {
+		write = LabelSoleTab
+	}
+	if err := write(ctx, socket, reply.Pane.Tab, label, next); err != nil {
+		return fmt.Errorf("tab %s of pane %s: %w", reply.Pane.Tab, pane, err)
+	}
+	return nil
+}
+
+// ErrTabNotSole is the named skip of a tab the chat's pane shares with
+// another pane: its label is the user's, so no name writer relabels it.
+var ErrTabNotSole = errors.New("the chat's pane is not alone in its tab")
+
+// tabLabelRecord is a tab's label state: Base the name decorated, Rendered
+// the label pfm last wrote, Seen the chat name the status painter last saw
+// for it (empty until the painter follows the chat's name).
 type tabLabelRecord struct {
-	Base, Rendered, Identity, State, Mode string
-	On                                    bool
+	Base, Rendered, Identity, State, Mode, Seen string
+	On                                          bool
+	// UserSet says Base is a label the user set in Herdr, adopted by the
+	// status painter: no later automatic change of the chat's composed name
+	// replaces it, only a name the user chose does: an explicit pfm rename
+	// (LabelSoleTab) or a change of the chat's user name (SeenUser).
+	UserSet bool
+	// SeenUser is the chat's user name (TabDecoration.UserName) the status
+	// painter last saw on a row read from its source (UserKnown), UserSeen
+	// whether it saw such a row at all: a record written before the painter
+	// followed user names, or one only booting rows reached, starts following
+	// without a rename.
+	SeenUser string
+	UserSeen bool
+	// Pending is the label of a tab.rename whose answer was lost: Herdr may
+	// have applied it. The next writer settles it against the tab's label
+	// (settlePending) before it reads the label as anyone else's.
+	Pending string
 }
 
-func withTabLabelLock(ctx context.Context, dir, socket, tab string, work func(string) error) (returnErr error) {
+// settlePending resolves a rename whose answer was lost: a tab label equal to
+// the pending one says Herdr applied it, so it is the label pfm rendered; any
+// other label says it did not, or a later rename replaced it. Either way the
+// rename is settled; settled says the record changed.
+func (record *tabLabelRecord) settlePending(label string) (settled bool) {
+	if record.Pending == "" {
+		return false
+	}
+	if label == record.Pending {
+		record.Rendered = record.Pending
+	}
+	record.Pending = ""
+	return true
+}
+
+// renameFailed stores want as the record's pending rename after a tab.rename
+// whose call failed, so a lost answer is settled by the next writer instead of
+// read as the user's label; the call's error comes back, joined with any
+// failure to store the record. A rename a theme off stood down never left, and
+// the record stays as the theme off finds it.
+func renameFailed(path string, record tabLabelRecord, want string, err error) error {
+	if errors.Is(err, errThemeOff) {
+		return err
+	}
+	record.Pending = want
+	return errors.Join(err, writeTabLabel(path, record))
+}
+
+func withTabLabelLock(ctx context.Context, dir, socket, tab string, work func(string) error) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create tab label directory: %w", err)
 	}
 	path := filepath.Join(dir, fmt.Sprintf("tab-%x", sha256.Sum256([]byte(socket+"\x00"+tab))))
-	file, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	return withFlock(ctx, path+".lock", "tab label", func() error { return work(path + ".json") })
+}
+
+// withFlock runs work holding an exclusive flock on lockPath, polling for it
+// until ctx ends; what names the lock in its errors. The lock opens through
+// OpenStateFile, so a FIFO, a directory or a symlink at lockPath is a named
+// error, never a hang.
+func withFlock(ctx context.Context, lockPath, what string, work func() error) (returnErr error) {
+	file, err := OpenStateFile(filepath.Dir(lockPath), filepath.Base(lockPath), os.O_CREATE|os.O_RDWR, what+" lock")
 	if err != nil {
-		return fmt.Errorf("open tab label lock: %w", err)
+		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
 	for {
@@ -50,13 +157,13 @@ func withTabLabelLock(ctx context.Context, dir, socket, tab string, work func(st
 			break
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
-			return fmt.Errorf("lock tab label: %w", err)
+			return fmt.Errorf("lock %s: %w", what, err)
 		}
 		if err := clock.Real.Sleep(ctx, 10*time.Millisecond); err != nil {
-			return fmt.Errorf("wait for tab label lock: %w", err)
+			return fmt.Errorf("wait for %s lock: %w", what, err)
 		}
 	}
-	return work(path + ".json")
+	return work()
 }
 
 func readTabLabel(path string) (tabLabelRecord, error) {
@@ -88,6 +195,7 @@ func writeTabLabel(path string, record tabLabelRecord) error {
 func writeSoleTabLabel(
 	ctx context.Context,
 	socket, dir, tab, label string,
+	explicit bool,
 	seq func() uint64,
 	call func(context.Context, string, ...[]byte) ([]json.RawMessage, error),
 ) error {
@@ -110,17 +218,29 @@ func writeSoleTabLabel(
 		if err != nil {
 			return err
 		}
-		if info.TabID != tab || info.PaneCount != 1 {
-			return nil
+		if info.TabID != tab {
+			return fmt.Errorf("tab.get for %s returned tab %s", tab, info.TabID)
+		}
+		if info.PaneCount != 1 {
+			return fmt.Errorf("tab %s holds %d panes: %w", tab, info.PaneCount, ErrTabNotSole)
 		}
 		record, err := readTabLabel(path)
 		if err != nil {
 			return err
 		}
+		settled := record.settlePending(info.Label)
+		if !explicit && (record.UserSet || record.Rendered != "" && info.Label != record.Rendered) {
+			// An unchanged name re-announced is no rename: the user's label stays.
+			if settled {
+				return writeTabLabel(path, record)
+			}
+			return nil
+		}
 		if info.Label != record.Rendered {
 			record = tabLabelRecord{}
 		}
-		record.Base = TabLabel(label)
+		// An explicit rename: the name is pfm's again, whoever set the label before.
+		record.Base, record.UserSet = TabLabel(label), false
 		want := DecoratedTabLabel(record.Base, record.State, record.Mode, record.On)
 		if info.Label != want {
 			rename, err := (TabRename{Tab: tab, Label: want, Seq: seq()}).Line()
@@ -128,7 +248,7 @@ func writeSoleTabLabel(
 				return err
 			}
 			if _, err := call(ctx, socket, rename); err != nil {
-				return fmt.Errorf("relabel %q: %w", label, err)
+				return renameFailed(path, record, want, fmt.Errorf("relabel %q: %w", label, err))
 			}
 		}
 		record.Rendered = want

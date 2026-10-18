@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"slices"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -68,11 +72,41 @@ func ProveHerdrPane(ctx context.Context, socket, pane string) error {
 	return proveHerdrPaneOrBridge(ctx, socket, pane, ProveHerdrBridge)
 }
 
-// ProveHerdrSeatPane is ProveHerdrPane without the bridge: only a durable seat
-// proves the pane. A caller that closes the pane uses it, since a pfm tmux
-// client in a pane's foreground proves a view of a chat, not a pane to close.
-func ProveHerdrSeatPane(ctx context.Context, socket, pane string) error {
-	return proveHerdrPaneOrBridge(ctx, socket, pane, nil)
+// ProveHerdrOwnPane proves the pane this very process runs in, for closing
+// or reusing that one pane alone: Herdr's pane.process_info for it must name
+// this process among its foreground processes. A live process's pid names no
+// other process while it runs, so this process is its own start identity;
+// no other pane is proved by it.
+func ProveHerdrOwnPane(ctx context.Context, socket, pane string) error {
+	foreground := bridgeForeground(herdr.Call, func() uint64 { return uint64(clock.Real.Now().UnixNano()) })
+	return proveOwnPane(ctx, socket, pane, os.Getpid(), foreground)
+}
+
+// ErrHerdrPaneNotOwn is ProveHerdrOwnPane's answer for a pane Herdr read
+// whose foreground does not hold this process (a stale or inherited
+// HERDR_PANE_ID): the pane is not this process's, and no read failed.
+var ErrHerdrPaneNotOwn = errors.New("the pane's foreground does not hold this process")
+
+func proveOwnPane(
+	ctx context.Context,
+	socket, pane string,
+	pid int,
+	foreground func(context.Context, string, string) ([]int, error),
+) error {
+	pids, err := foreground(ctx, socket, pane)
+	if err != nil {
+		return fmt.Errorf("herdr pane %s ownership unproved: %w", pane, err)
+	}
+	if !slices.Contains(pids, pid) {
+		return fmt.Errorf(
+			"herdr pane %s ownership unproved: its foreground processes %v do not hold this process %d: %w",
+			pane,
+			pids,
+			pid,
+			ErrHerdrPaneNotOwn,
+		)
+	}
+	return nil
 }
 
 func proveHerdrPaneOrBridge(
@@ -81,9 +115,6 @@ func proveHerdrPaneOrBridge(
 	bridge func(context.Context, string, string) (HerdrBridge, error),
 ) error {
 	proved, err := ProveHerdrTarget(ctx, Target{SocketPath: socket, Pane: pane})
-	if err != nil && bridge == nil {
-		return err
-	}
 	if err != nil {
 		if _, bridgeErr := bridge(ctx, socket, pane); bridgeErr != nil {
 			return errors.Join(err, bridgeErr)

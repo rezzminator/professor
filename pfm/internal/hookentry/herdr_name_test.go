@@ -187,6 +187,44 @@ func TestHerdrStateNameSyncLabelsTheAgentsTab(t *testing.T) {
 	}
 }
 
+// A chat name no user chose (a Codex first-prompt fallback, an OpenCode
+// title: the writer marks it in herdr.ChatNameAutoOption) is re-announced, so
+// a label the user set in Herdr since pfm labelled the tab stays; a name a user
+// chose (pfm chat name, a Claude /rename) replaces it. A tab still showing
+// pfm's label follows either.
+func TestHerdrStateNameSyncKeepsAUserLabelAgainstAnAutomaticName(t *testing.T) {
+	for _, test := range []struct {
+		name, userLabel, auto, wantLabel string
+	}{
+		{"an automatic name keeps the user's label", "Mine", "Fix It", "Mine"},
+		{"a user's name replaces the user's label", "Mine", "", "Fix It"},
+		{"a user's name beside a stale automatic mark is the user's", "Mine", "Old", "Fix It"},
+		{"an automatic name follows a tab showing pfm's label", "", "Fix It", "Fix It"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			rig := namedRig(t, "Old")
+			rig.herdr.setAgents(fakeAgent{"", "w1:p1"})
+			rig.herdr.putAgentInTab("w1:p1", "w1:t1", "1", 1)
+			rig.wantQuiet(rig.hook("name"))
+			if label := rig.herdr.tabLabel("w1:t1"); label != "Old" {
+				t.Fatalf("tab label after the first name = %q, want pfm's %q", label, "Old")
+			}
+			if test.userLabel != "" {
+				rig.herdr.putAgentInTab("w1:p1", "w1:t1", test.userLabel, 1)
+			}
+			rig.tmux.chatName, rig.tmux.chatNameAuto = "Fix It", test.auto
+			rig.wantQuiet(rig.hook("name"))
+			if label := rig.herdr.tabLabel("w1:t1"); label != test.wantLabel {
+				t.Fatalf("tab label = %q, want %q", label, test.wantLabel)
+			}
+			if state := rig.tmux.storedState(t); state.Name != "Fix It" {
+				t.Fatalf("stored name = %q, want the new name stored", state.Name)
+			}
+		})
+	}
+}
+
 func TestHerdrStateNameSyncErrorsAreNamedNeverSilent(t *testing.T) {
 	t.Run("agent.list failing: no rename, stderr names it", func(t *testing.T) {
 		rig := namedRig(t, "Fix It")
@@ -260,6 +298,20 @@ func TestHerdrStateSessionStartNamesThePanes(t *testing.T) {
 			)
 		})
 	}
+	// A session start re-announces a name the panes already carry: no rename,
+	// so a label the user gave the tab since stays.
+	t.Run("a session start keeps the label the user gave the tab", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		rig := namedRig(t, "Fix It")
+		rig.herdr.setAgents(fakeAgent{"", "w1:p1"})
+		rig.herdr.putAgentInTab("w1:p1", "w1:t1", "1", 1)
+		rig.wantQuiet(rig.hook("name"))
+		rig.herdr.putAgentInTab("w1:p1", "w1:t1", "Mine", 1)
+		rig.wantQuiet(rig.engine("start", `{"session_id":"s1","source":"clear"}`))
+		if label := rig.herdr.tabLabel("w1:t1"); label != "Mine" {
+			t.Fatalf("tab label after a session start = %q, want the user's %q", label, "Mine")
+		}
+	})
 	t.Run("compaction restarts mid-turn: nothing", func(t *testing.T) {
 		rig := namedRig(t, "Fix It")
 		rig.wantQuiet(rig.engine("start", `{"session_id":"s1","source":"compact"}`))
@@ -338,10 +390,11 @@ func TestHerdrStateTitleEventStoresTheChatName(t *testing.T) {
 		rig.env["TMUX_PANE"] = "%3"
 		return rig.run([]string{"--engine", "opencode", "title"}, stdin)
 	}
-	t.Run("the exact tmux command: window name and @pfm_chat_name in one call", func(t *testing.T) {
+	t.Run("the exact tmux command: window name, @pfm_chat_name and the automatic mark in one call", func(t *testing.T) {
 		rig := newChatRig(t)
 		rig.wantQuiet(run(rig, `{"session_id":"s1","title":"Fix: auth.go bug"}`))
-		want := "socket=" + rigSocket + " set-option -t cc-1 @pfm_chat_name Fix: auth.go bug ; rename-window -t %3 " +
+		want := "socket=" + rigSocket + " set-option -t cc-1 @pfm_chat_name Fix: auth.go bug" +
+			" ; set-option -t cc-1 @pfm_chat_name_auto Fix: auth.go bug ; rename-window -t %3 " +
 			spawn.WindowName("Fix: auth.go bug")
 		calls := rig.tmux.allCalls()
 		if len(calls) != 2 || calls[1] != want {
@@ -355,8 +408,8 @@ func TestHerdrStateTitleEventStoresTheChatName(t *testing.T) {
 	t.Run("a title ending in ; keeps its ; escaped from tmux's command separator", func(t *testing.T) {
 		rig := newChatRig(t)
 		rig.wantQuiet(run(rig, `{"session_id":"s1","title":"Fix it;"}`))
-		want := "socket=" + rigSocket + ` set-option -t cc-1 @pfm_chat_name Fix it\; ; rename-window -t %3 ` +
-			spawn.WindowName("Fix it;")
+		want := "socket=" + rigSocket + ` set-option -t cc-1 @pfm_chat_name Fix it\; ` +
+			`; set-option -t cc-1 @pfm_chat_name_auto Fix it\; ; rename-window -t %3 ` + spawn.WindowName("Fix it;")
 		if calls := rig.tmux.allCalls(); len(calls) != 2 || calls[1] != want {
 			t.Fatalf("tmux calls = %q, want the session lookup, then %q", calls, want)
 		}

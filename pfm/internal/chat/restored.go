@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -135,7 +136,7 @@ func restoreNative(
 	if err := json.Unmarshal(body, &pane); err != nil {
 		return fmt.Errorf("decode restored caller pane: %w", err)
 	}
-	if pane.Type != "pane_info" || pane.Pane.ID != choice.HerdrPane || pane.Pane.Terminal == "" ||
+	if pane.Type != nativePaneInfo || pane.Pane.ID != choice.HerdrPane || pane.Pane.Terminal == "" ||
 		pane.Pane.Workspace != choice.HerdrWorkspace ||
 		pane.Pane.Tab == "" {
 		return fmt.Errorf("invalid restored caller identity: %s", body)
@@ -166,6 +167,19 @@ func restoreNative(
 
 	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
+	// A caller pane hosting another live chat is never rebound: its process is
+	// that chat's, so nothing would exec the seat host, and the rebound seat
+	// would name a pane another chat owns.
+	host, hosts, err := db.SeatByPane(ctx, choice.HerdrSocket, choice.HerdrPane)
+	if err != nil {
+		return fmt.Errorf("read the chat Herdr pane %s hosts: %w", choice.HerdrPane, err)
+	}
+	if hosts && host.SeatID != seat.SeatID {
+		return fmt.Errorf(
+			"herdr pane %s hosts chat %s: resume chat %s from a pane of its own; nothing was rebound",
+			choice.HerdrPane, cmp.Or(host.Name, host.SessionID), cmp.Or(seat.Name, seat.SessionID),
+		)
+	}
 	run, err := db.ReadSeatRun(seat.SeatID)
 	if err != nil {
 		return fmt.Errorf("read restored recipe: %w", err)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The Herdr plugin that paints the sidebar indicators: a manifest pfm writes
@@ -105,14 +106,20 @@ func (s *session) herdrPluginCommand(ctx context.Context, verb, arg string) (def
 	return false, fmt.Errorf("themesync: %s exited %d: %s", strings.Join(argv[1:], " "), result.ExitCode, text)
 }
 
-// applyHerdrPlugin writes the manifest and links it: when the registry lacks
-// the plugin, or the manifest just changed, so the registry's entry is taken
-// again from the manifest on disk (Herdr re-reads every linked manifest before
-// it runs the hooks). A link that cannot run yet (no herdr on PATH) is a note;
-// any other failure is an error naming the command.
+// applyHerdrPlugin retires every theme off's indicator stop marker, then
+// writes the manifest and links it: when the registry lacks the plugin, or the
+// manifest just changed, so the registry's entry is taken again from the
+// manifest on disk (Herdr re-reads every linked manifest before it runs the
+// hooks). A link that cannot run yet (no herdr on PATH) is a note; any other
+// failure is an error naming the command.
 func (s *session) applyHerdrPlugin(ctx context.Context) (note string, err error) {
 	if s.env.PfmBinary == "" {
 		return "", errors.New("themesync: no pfm binary to run the herdr indicator hooks")
+	}
+	// The theme off's markers outlive it, so a painter that starts after it
+	// stands down; the theme on is their only remover.
+	if err := herdr.RetireIndicatorStops(paths.HerdrLockDir(s.env.Home)); err != nil {
+		return "", fmt.Errorf("themesync: %w", err)
 	}
 	path := s.herdrPluginPath()
 	manifest := herdrPluginRender(s.env.PfmBinary)

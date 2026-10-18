@@ -6,10 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -23,6 +28,8 @@ import (
 
 const (
 	nativePaneIDKey = "pane_id"
+	// nativePaneInfo is the type of Herdr's answer naming one pane.
+	nativePaneInfo  = "pane_info"
 	nativeTargetKey = "target"
 )
 
@@ -120,7 +127,7 @@ func viewNative(ctx context.Context, seat fleetdb.Seat, stdout, stderr io.Writer
 			return fmt.Errorf("decode Herdr focus: %w", err)
 		}
 		valid := ack.Type == "pane_focused" && ack.Pane == seat.HerdrPane
-		if ack.Type == "pane_info" {
+		if ack.Type == nativePaneInfo {
 			valid = ack.Info != nil && ack.Info.Pane == seat.HerdrPane && ack.Info.Focused
 		}
 		if ack.Type == "agent_info" {
@@ -152,6 +159,145 @@ func viewNative(ctx context.Context, seat fleetdb.Seat, stdout, stderr io.Writer
 		return fmt.Errorf("attach Herdr pane %s: %w", seat.HerdrPane, err)
 	}
 	return nil
+}
+
+// nativePane is the identity pane.get answers for one Herdr pane.
+type nativePane struct {
+	ID        string `json:"pane_id"`
+	Workspace string `json:"workspace_id"`
+	Tab       string `json:"tab_id"`
+}
+
+func readNativePane(ctx context.Context, socket, pane string) (nativePane, error) {
+	body, err := herdr.SeatRequest(ctx, socket, "pane.get", map[string]string{nativePaneIDKey: pane})
+	if err != nil {
+		return nativePane{}, fmt.Errorf("read Herdr pane %s: %w", pane, err)
+	}
+	var reply struct {
+		Type string     `json:"type"`
+		Pane nativePane `json:"pane"`
+	}
+	if err := json.Unmarshal(body, &reply); err != nil {
+		return nativePane{}, fmt.Errorf("decode Herdr pane %s: %w", pane, err)
+	}
+	if reply.Type != nativePaneInfo || reply.Pane.ID != pane || reply.Pane.Workspace == "" || reply.Pane.Tab == "" {
+		return nativePane{}, fmt.Errorf("herdr pane.get for %s returned unexpected identity: %s", pane, body)
+	}
+	return reply.Pane, nil
+}
+
+// moveNativeHere brings a live native chat to the caller's place when the
+// caller runs in a Herdr pane of the chat's own server and hosts no chat of
+// its own: from the caller's tab the chat's pane trades places with the
+// caller's (pane.swap), from another tab of the workspace it moves in beside
+// it (pane.move, which keeps its pane id, terminal and agent), and closeHere
+// then closes the caller's own proved pane, so the chat sits where the caller
+// was. A chat in another workspace is refused with nothing moved: a move
+// across workspaces gives its pane a new id the running chat does not know.
+// here is false when the rule does not apply (outside Herdr, another server,
+// a caller pane hosting a chat): the caller views the chat instead.
+func moveNativeHere(
+	ctx context.Context,
+	runtime config.Runtime,
+	seat fleetdb.Seat,
+) (here bool, closeHere func() error, returnErr error) {
+	env := paths.OSEnv{}
+	caller := env.Get(herdr.EnvPane)
+	// A caller inside tmux (a shell of a tmux chat shown in a Herdr pane) is
+	// not in this pane: it views the chat.
+	if env.Get(herdr.EnvMarker) != "1" || env.Get(herdr.EnvSocket) != seat.HerdrSocket || caller == "" ||
+		env.Get("TMUX") != "" {
+		return false, nil, nil
+	}
+	if caller == seat.HerdrPane {
+		return true, nil, nil
+	}
+	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	_, hosts, err := db.SeatByPane(ctx, seat.HerdrSocket, caller)
+	if err = errors.Join(err, db.Close()); err != nil {
+		return false, nil, fmt.Errorf("read the chat this Herdr pane %s hosts: %w", caller, err)
+	}
+	if hosts {
+		return false, nil, nil
+	}
+	socket := seat.HerdrSocket
+	callerPane, err := readNativePane(ctx, socket, caller)
+	if err != nil {
+		return false, nil, err
+	}
+	chatPane, err := readNativePane(ctx, socket, seat.HerdrPane)
+	if err != nil {
+		return false, nil, err
+	}
+	if callerPane.Workspace != chatPane.Workspace {
+		return false, nil, fmt.Errorf(
+			"chat %s lives in Herdr workspace %s and this pane in workspace %s: a pane moved across workspaces "+
+				"takes a new id its chat does not know, so the chat stays where it is",
+			seat.Name, chatPane.Workspace, callerPane.Workspace,
+		)
+	}
+	// Proved before anything moves: a pane this process cannot close is never
+	// left with the chat squeezed in beside it.
+	if err := call.ProveHerdrOwnPane(ctx, socket, caller); err != nil {
+		return false, nil, fmt.Errorf("bring chat %s into this pane: %w", seat.Name, err)
+	}
+	method, want := methodPaneMove, "pane_move"
+	var params any = map[string]any{
+		nativePaneIDKey: seat.HerdrPane,
+		"destination": map[string]any{
+			"type": "tab", "tab_id": callerPane.Tab, "target_pane_id": caller, "split": "right",
+		},
+		"focus": true,
+	}
+	if callerPane.Tab == chatPane.Tab {
+		method, want = methodPaneSwap, "pane_swap"
+		params = map[string]string{"source_pane_id": seat.HerdrPane, "target_pane_id": caller}
+	}
+	body, err := herdr.SeatRequest(ctx, socket, method, params)
+	if err != nil {
+		return false, nil, fmt.Errorf("bring chat %s into this pane: %w", seat.Name, err)
+	}
+	if err := checkMoveReply(method, want, body, seat.HerdrPane, caller, callerPane.Tab); err != nil {
+		if errors.Is(err, errMoveApplied) {
+			return false, nil, fmt.Errorf("herdr %s moved chat %s, but %w", method, seat.Name, err)
+		}
+		return false, nil, fmt.Errorf("herdr %s left chat %s where it is: %w", method, seat.Name, err)
+	}
+	return true, func() error {
+		_, err := herdr.SeatRequest(ctx, socket, "pane.close", map[string]string{nativePaneIDKey: caller})
+		if err != nil {
+			return fmt.Errorf("chat %s is in this tab, but this Herdr pane %s stayed open: %w", seat.Name, caller, err)
+		}
+		return nil
+	}, nil
+}
+
+// moveLiveNativeHere is moveNativeHere under the seat's lock, on the seat as
+// it stands once the lock is held: the account offer ran unlocked, and a
+// reboot it ran may have replaced the seat; a seat that died meanwhile moves
+// nowhere and names it.
+func moveLiveNativeHere(
+	ctx context.Context,
+	runtime config.Runtime,
+	seat fleetdb.Seat,
+) (here bool, closeHere func() error, returnErr error) {
+	current, unlock, err := lockNativeSeat(ctx, runtime, seat)
+	if err != nil {
+		return false, nil, err
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("unlock native conversation: %w", err))
+		}
+	}()
+	current, alive, err := nativeAlive(ctx, current, runtime.Paths)
+	if err != nil {
+		return false, nil, err
+	}
+	if !alive {
+		return false, nil, fmt.Errorf("native seat %s died before it moved into this pane", current.SeatID)
+	}
+	return moveNativeHere(ctx, runtime, current)
 }
 
 func openNativeRow(
@@ -193,26 +339,16 @@ func openNativeRow(
 			case choiceErr != nil:
 				err = choiceErr
 			case choice.Backend == spawn.BackendHerdr:
-				result, openErr := detachedNativeLocked(ctx, seat, stderr, runtime, true)
-				err = openErr
-				if err == nil && result.State == liveState {
-					seat, alive, err = nativeAlive(ctx, seat, runtime.Paths)
-					if err == nil && !alive {
-						err = fmt.Errorf("native seat %s died before view", seat.SeatID)
-					}
-					if err == nil {
-						err = unlock()
-						unlock = nil
-						if err == nil {
-							err = viewNative(ctx, seat, stdout, stderr)
-						}
-					}
-				}
+				// The chat resumes in the caller's own pane: the seat is rebound
+				// to this pane, whose process then execs the seat host.
+				// On a terminal restoreNative execs the seat host and never
+				// returns, so the unseen flag clears before it.
+				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+				err = restoreNative(ctx, runtime, seat, choice, false, stdout, stderr)
 				if err != nil {
 					fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 					return true, 1
 				}
-				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
 				return true, 0
 			default:
 				if choice.Warning != "" {
@@ -252,8 +388,28 @@ func openNativeRow(
 			// replacement/restore lock while viewing the already proved live seat.
 			err = unlock()
 			unlock = nil
+			// The account offer comes first, wherever the chat opens: a reboot
+			// it runs takes the seat's lock itself and may name a new seat.
 			if err == nil {
 				seat, err = offerNativeAccount(ctx, seat, primary, cache1H, stderr, runtime)
+			}
+			// Inside a Herdr pane on the chat's server the chat comes to this
+			// pane's place; the lock is held again while it moves.
+			var here bool
+			var closeHere func() error
+			if err == nil {
+				here, closeHere, err = moveLiveNativeHere(ctx, runtime, seat)
+			}
+			if err == nil && here {
+				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+				if closeHere != nil {
+					// Last: closing this pane ends this process.
+					if err := closeHere(); err != nil {
+						fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
+						return true, 1
+					}
+				}
+				return true, 0
 			}
 			if err == nil {
 				err = viewNative(ctx, seat, stdout, stderr)
@@ -273,34 +429,13 @@ func detachedNative(
 	seat fleetdb.Seat,
 	stderr io.Writer,
 	runtime config.Runtime,
-	focus bool,
 ) (result action.OpenResult, returnErr error) {
 	current, unlock, err := lockNativeSeat(ctx, runtime, seat)
 	if err != nil {
 		return result, err
 	}
-	defer func() {
-		if unlock != nil {
-			returnErr = errors.Join(returnErr, unlock())
-		}
-	}()
-	result, returnErr = detachedNativeLocked(ctx, current, stderr, runtime, focus)
-	if returnErr == nil && result.State == liveState && focus {
-		var alive bool
-		current, alive, returnErr = nativeAlive(ctx, current, runtime.Paths)
-		if returnErr != nil {
-			return result, returnErr
-		}
-		if !alive {
-			return result, fmt.Errorf("native seat %s died before view", current.SeatID)
-		}
-		returnErr = unlock()
-		unlock = nil
-		if returnErr == nil {
-			returnErr = viewNative(ctx, current, io.Discard, stderr)
-		}
-	}
-	return result, returnErr
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	return detachedNativeLocked(ctx, current, stderr, runtime)
 }
 
 func detachedNativeLocked(
@@ -308,7 +443,6 @@ func detachedNativeLocked(
 	seat fleetdb.Seat,
 	stderr io.Writer,
 	runtime config.Runtime,
-	focus bool,
 ) (result action.OpenResult, returnErr error) {
 	seat, alive, err := nativeAlive(ctx, seat, runtime.Paths)
 	if err != nil {
@@ -358,8 +492,6 @@ func detachedNativeLocked(
 				Seat:   next,
 				Run:    run,
 				Paths:  runtime.Paths,
-				Focus:  focus,
-				Stderr: stderr,
 			},
 		)
 		if err != nil {
@@ -472,6 +604,191 @@ func retireNative(ctx context.Context, values paths.Values, seat fleetdb.Seat) (
 	}
 	if err := db.DeleteSeatRun(seat.SeatID); err != nil {
 		return fmt.Errorf("retire replaced native recipe %s: %w", seat.SeatID, err)
+	}
+	return nil
+}
+
+// herdrViewRetirer is retireHerdrViews' reach: the chat session's Herdr
+// record, the bridge proof and Herdr's pane.close.
+type herdrViewRetirer struct {
+	// session is the chat's tmux session: a client the proof finds attached
+	// to another session of the same server is not this chat's view.
+	session string
+	stored  func(ctx context.Context) (string, error)
+	prove   func(ctx context.Context, socket, pane string) (call.HerdrBridge, error)
+	close   func(ctx context.Context, socket, pane string) error
+}
+
+// retireOtherHerdrViews runs before a live tmux chat's attach in a Herdr
+// pane: the chat ends in this pane alone, its other Herdr views on this
+// server retired by retireHerdrViews. Only a caller whose attach runs in its
+// own proved Herdr pane retires: a caller inside tmux or a caller pane hosting
+// a chat of its own (an agent's pfm call) retires nothing, and an unproved
+// pane is named.
+func retireOtherHerdrViews(ctx context.Context, row compose.Row, runtime config.Runtime, stderr io.Writer) {
+	env := paths.OSEnv{}
+	socket, pane := env.Get(herdr.EnvSocket), env.Get(herdr.EnvPane)
+	if env.Get(herdr.EnvMarker) != "1" || socket == "" || pane == "" || row.Socket == "" || row.PaneID == "" ||
+		row.Backend == spawn.BackendHerdr || env.Get("TMUX") != "" {
+		return
+	}
+	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	_, hosts, err := db.SeatByPane(ctx, socket, pane)
+	if err = errors.Join(err, db.Close()); err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: other Herdr views of %s stay: read this pane's chat: %v\n", row.Name, err)
+		return
+	}
+	if hosts {
+		return
+	}
+	if err := call.ProveHerdrOwnPane(ctx, socket, pane); err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: other Herdr views of %s stay: %v\n", row.Name, err)
+		return
+	}
+	tmuxSocket, err := runtime.Paths.SocketUnder(row.Socket)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: other Herdr views of %s stay: resolve tmux socket %q: %v\n",
+			row.Name, row.Socket, err)
+		return
+	}
+	retireHerdrViews(ctx, tmuxSocket, socket, pane, herdrViewRetirer{
+		session: row.SessionName,
+		stored: func(ctx context.Context) (string, error) {
+			return runTmux(ctx, tmuxSocket, "show-options", "-qv", "-t", row.PaneID, herdr.StoredOption)
+		},
+		prove: call.ProveHerdrBridge,
+		close: func(ctx context.Context, socket, pane string) error {
+			_, err := herdr.SeatRequest(ctx, socket, "pane.close", map[string]string{nativePaneIDKey: pane})
+			return err
+		},
+	}, stderr)
+}
+
+// retireHerdrViews closes every other Herdr view of a tmux chat about to be
+// attached in the caller's Herdr pane: each client the chat session's Herdr
+// record lists in another pane of the caller's server is closed only when the
+// bridge proof names that very client of this chat's tmux server (its pane
+// closing hangs up the client, which detaches; a pane already gone is no
+// failure). An unproved view is left alone with a named line, and one failure
+// never stops the others.
+func retireHerdrViews(
+	ctx context.Context,
+	tmuxSocket, callerSocket, callerPane string,
+	reach herdrViewRetirer,
+	stderr io.Writer,
+) {
+	raw, err := reach.stored(ctx)
+	if err != nil {
+		fmt.Fprintf(
+			stderr, "pfm chat open: other Herdr views of this chat stay: read %s: %v\n", herdr.StoredOption, err,
+		)
+		return
+	}
+	if strings.TrimSpace(raw) == "" {
+		return
+	}
+	var stored herdr.Stored
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &stored); err != nil {
+		fmt.Fprintf(
+			stderr, "pfm chat open: other Herdr views of this chat stay: decode %s: %v\n", herdr.StoredOption, err,
+		)
+		return
+	}
+	clients := slices.Sorted(maps.Keys(stored.Clients))
+	for _, key := range clients {
+		client := stored.Clients[key]
+		if client.Socket != callerSocket || client.Pane == "" || client.Pane == callerPane {
+			continue
+		}
+		proof, err := reach.prove(ctx, callerSocket, client.Pane)
+		if err == nil && (strconv.Itoa(proof.ClientPID) != key ||
+			filepath.Clean(proof.TmuxSocket) != filepath.Clean(tmuxSocket) || proof.Session != reach.session) {
+			err = fmt.Errorf("its foreground client %d of %s session %q is not this chat's client %s of %s session %q",
+				proof.ClientPID, proof.TmuxSocket, proof.Session, key, tmuxSocket, reach.session)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat open: Herdr pane %s still shows this chat: %v\n", client.Pane, err)
+			continue
+		}
+		if err := reach.close(ctx, callerSocket, client.Pane); err != nil {
+			var refusal *herdr.Refusal
+			if errors.As(err, &refusal) && refusal.Code == "pane_not_found" {
+				continue
+			}
+			fmt.Fprintf(stderr, "pfm chat open: Herdr pane %s still shows this chat: close: %v\n", client.Pane, err)
+		}
+	}
+}
+
+// The Herdr methods that bring a live native chat into the caller's tab.
+const (
+	methodPaneMove = "pane.move"
+	methodPaneSwap = "pane.swap"
+)
+
+// paneMoveReply is the body of a pane.move or pane.swap answer: the fields
+// Herdr's PaneMoveResult and PaneSwapResult carry (src/api/schema/panes.rs
+// L521-L530 and L541-L560), Pane only on a move.
+type paneMoveReply struct {
+	Changed      bool   `json:"changed"`
+	Reason       string `json:"reason"`
+	SourcePane   string `json:"source_pane_id"`
+	TargetPane   string `json:"target_pane_id"`
+	PreviousPane string `json:"previous_pane_id"`
+	Pane         *struct {
+		ID  string `json:"pane_id"`
+		Tab string `json:"tab_id"`
+	} `json:"pane"`
+}
+
+// checkMoveReply checks the answer to a pane.move (want pane_move) or a
+// pane.swap (want pane_swap) against what Herdr's handlers return. The wire
+// nests the body under the variant's field, `swap` or `move_result`
+// (src/api/schema/response.rs L126-L131; docs/next/api/herdr-api.schema.json,
+// and a live pane.swap answers {"type":"pane_swap","swap":{"changed":…}}); the
+// socket-api prose describes the same fields at the top level, so both shapes
+// are read. A swap answers changed:false with a reason, never an error, for a
+// pair in different tabs or workspaces (cross_tab, src/app/api/panes.rs
+// L860-L891) and echoes the source and target ids it resolved
+// (src/app/api/panes.rs L902-L925): a changed answer must name this request's
+// own two panes. A move must have put the chat's own pane into the caller's tab.
+// errMoveApplied marks a reply that says Herdr changed the layout but not into
+// the place asked for: the chat moved, so it never reads as left where it is.
+var errMoveApplied = errors.New("its answer does not confirm where it went")
+
+func checkMoveReply(method, want string, body json.RawMessage, chatPane, caller, callerTab string) error {
+	var envelope struct {
+		Type       string         `json:"type"`
+		Swap       *paneMoveReply `json:"swap"`
+		MoveResult *paneMoveReply `json:"move_result"`
+		paneMoveReply
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return fmt.Errorf("decode Herdr %s: %w", method, err)
+	}
+	if envelope.Type != want {
+		return fmt.Errorf("answered %q, not %q: %s", envelope.Type, want, body)
+	}
+	reply := envelope.paneMoveReply
+	switch {
+	case method == methodPaneSwap && envelope.Swap != nil:
+		reply = *envelope.Swap
+	case method == methodPaneMove && envelope.MoveResult != nil:
+		reply = *envelope.MoveResult
+	}
+	if !reply.Changed {
+		return fmt.Errorf("changed false (reason %q): %s", reply.Reason, body)
+	}
+	switch method {
+	case methodPaneSwap:
+		if reply.SourcePane != chatPane || reply.TargetPane != caller {
+			return fmt.Errorf("%w: swapped %q with %q, not %s with %s: %s",
+				errMoveApplied, reply.SourcePane, reply.TargetPane, chatPane, caller, body)
+		}
+	case methodPaneMove:
+		if reply.Pane == nil || reply.Pane.ID != chatPane || reply.Pane.Tab != callerTab {
+			return fmt.Errorf("%w: the chat's pane %s is not in tab %s: %s", errMoveApplied, chatPane, callerTab, body)
+		}
 	}
 	return nil
 }

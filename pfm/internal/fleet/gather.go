@@ -86,10 +86,10 @@ func Gather(
 	gatherer, err := gather.New(gather.Dependencies{
 		Tmux:       tmuxClient,
 		TmuxTmpDir: filepath.Dir(env.Paths.TmuxDir),
-		CodexName: func(rolloutPath string) string {
+		CodexName: func(rolloutPath string) naming.CodexName {
 			return codexNamesByPath[filepath.Clean(rolloutPath)]
 		},
-		CodexIDName: func(threadID string) string {
+		CodexIDName: func(threadID string) naming.CodexName {
 			return codexNamesByID[threadID]
 		},
 		CodexThread: store.NewCodexThreadResolverRoots(

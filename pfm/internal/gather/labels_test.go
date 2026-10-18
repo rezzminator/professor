@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // captureStub answers pane captures from a table, and can fail one pane the
@@ -208,7 +210,7 @@ func TestBothEnginesConvergeInOnePass(t *testing.T) {
 		panes,
 		[]LiveCodex{{Socket: "cx-4-5-6", PaneID: "%1", RolloutPath: "/r.jsonl"}},
 		labels,
-		func(string) string { return "CODEX_SIDE" },
+		func(string) naming.CodexName { return naming.CodexName{Name: "CODEX_SIDE", User: true} },
 		nil,
 	)
 	if len(renames) != 2 {

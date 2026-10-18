@@ -2,6 +2,7 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -442,5 +443,69 @@ func TestHerdrShellADoneWhoseSendErrorsStillHoldsThePaneTitle(t *testing.T) {
 	server.foreground("wT:p1")
 	if got := run("release", "--pid", "4242", "--at", "1760000012.1"); slices.Contains(got, untitle) {
 		t.Fatalf("an older release after a done whose send errored = %q, want no %q", got, untitle)
+	}
+}
+
+func TestHerdrShellMovedAliasUsesCanonicalIdentity(t *testing.T) {
+	server := newFakeHerdr(t)
+	server.addShellPane("wT:p1", "t1", 7, 4242)
+	server.move("wT:p1", "wU:p3")
+	server.aliases = map[string]string{"wT:p1": "wU:p3"}
+	jail := newHerdrJail(t)
+	clock := int64(1_000_000)
+	deps := jail.deps(herdrPaneEnv(server, "wT:p1"), &clock)
+	for _, step := range []struct {
+		args       []string
+		foreground int
+		wantTitle  string
+	}{
+		{
+			[]string{"done", "--pid", "4242", "--at", "100", "--command", "make test", "--exit", "0", "--seconds", "12"},
+			4242, "make test exit 0 · 12s",
+		},
+		{[]string{"release", "--pid", "4242", "--at", "101"}, 5000, ""},
+	} {
+		server.foreground("wU:p3", step.foreground)
+		var stderr bytes.Buffer
+		if rc := reportShellRun(step.args, &stderr, deps); rc != 0 || stderr.Len() != 0 {
+			t.Fatalf("%q: rc=%d stderr=%q", step.args, rc, stderr.String())
+		}
+		var lastTitle struct {
+			Params struct {
+				Pane  string `json:"pane_id"`
+				Title string
+			}
+		}
+		for _, line := range server.requests() {
+			if strings.Contains(line, `"method":"pane.report_metadata"`) {
+				lastTitle.Params.Title = ""
+				if err := json.Unmarshal([]byte(line), &lastTitle); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if lastTitle.Params.Pane != "wU:p3" || lastTitle.Params.Title != step.wantTitle {
+			t.Fatalf("%q: title pane=%q text=%q, want canonical wU:p3 and %q",
+				step.args, lastTitle.Params.Pane, lastTitle.Params.Title, step.wantTitle)
+		}
+		if step.foreground == 4242 {
+			data, err := os.ReadFile(filepath.Join(jail.lockDir, "pfm-shell-4242.pane"))
+			if err != nil {
+				t.Fatalf("canonical terminal record: %v", err)
+			}
+			if !strings.Contains(string(data), `"PaneID":"wU:p3"`) ||
+				!strings.Contains(string(data), `"TerminalID":"t1"`) {
+				t.Fatalf("terminal record=%s, want canonical pane wU:p3 and terminal t1", data)
+			}
+			if _, err := os.Stat(shellTitlePath(jail.lockDir, "wU:p3")); err != nil {
+				t.Fatalf("canonical title record: %v", err)
+			}
+		}
+	}
+	server.move("wU:p3", "wV:p5")
+	err := recordShellPane(context.Background(), server.path,
+		filepath.Join(jail.lockDir, "pfm-shell-4242.pane"), "wU:p3", func() uint64 { return 300 })
+	if err == nil || !strings.Contains(err.Error(), "no longer contains the canonical pane") {
+		t.Fatalf("record after a second move: %v, want a visible canonical-pane race error", err)
 	}
 }

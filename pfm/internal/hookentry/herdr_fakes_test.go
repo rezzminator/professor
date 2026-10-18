@@ -52,6 +52,7 @@ type fakeHerdr struct {
 	refuseRename map[string]string
 	panes        []fakePane
 	vacated      map[string]bool
+	aliases      map[string]string
 	agents       []fakeAgent
 	// tabOf is the tab agent.list names for an agent's pane; tabs answers
 	// tab.get, and tab.rename relabels one.
@@ -194,6 +195,9 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 	}
 	if refused := server.refuseRename[name]; method == "agent.rename" && refused != "" {
 		return refused, ""
+	}
+	if canonical := server.aliases[pane]; canonical != "" {
+		pane = canonical
 	}
 	for _, id := range []string{pane, target} {
 		if id != "" && server.vacated[id] {

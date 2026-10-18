@@ -114,7 +114,31 @@ func TestResolveNamesAClientInNoPane(t *testing.T) {
 				panes:      resolvePanes,
 				foreground: map[string][]int{"w1:p2": {4100}, "w1:p3": {4099}},
 			},
-			want: "client 4101 runs in no pane of " + resolveSocket,
+			want: "client 4101 runs in no pane of " + resolveSocket +
+				"; nested tmux is unsupported: Herdr exposes only the outer foreground process group; " +
+				"attach the pfm client directly in Herdr",
+		},
+		{
+			name: "nested tmux with one outer attachment",
+			fake: &resolveFake{
+				environ:    map[int]map[string]string{4101: inHerdr("w1:p2")},
+				panes:      resolvePanes,
+				foreground: map[string][]int{"w1:p2": {7101}, "w1:p3": {7201}},
+			},
+			want: "client 4101 runs in no pane of " + resolveSocket +
+				"; nested tmux is unsupported: Herdr exposes only the outer foreground process group; " +
+				"attach the pfm client directly in Herdr",
+		},
+		{
+			name: "nested tmux with two outer attachments",
+			fake: &resolveFake{
+				environ:    map[int]map[string]string{4101: inHerdr("w1:p2")},
+				panes:      resolvePanes,
+				foreground: map[string][]int{"w1:p2": {7101}, "w1:p3": {7102}},
+			},
+			want: "client 4101 runs in no pane of " + resolveSocket +
+				"; nested tmux is unsupported: Herdr exposes only the outer foreground process group; " +
+				"attach the pfm client directly in Herdr",
 		},
 		{
 			name: "marker without a socket",
@@ -147,7 +171,7 @@ func TestResolveNamesAClientInNoPane(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			location, found, err := tc.fake.resolver().Resolve(context.Background(), 4101)
-			if err == nil || found {
+			if err == nil || found || location != (Location{}) {
 				t.Fatalf("Resolve = %+v, %v, %v; want the error %q", location, found, err, tc.want)
 			}
 			if err.Error() != tc.want {

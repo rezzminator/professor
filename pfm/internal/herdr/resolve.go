@@ -94,7 +94,11 @@ func (resolver Resolver) Resolve(ctx context.Context, pid int) (Location, bool, 
 		return Location{}, false, err
 	}
 	if !found {
-		return Location{}, false, fmt.Errorf("client %d runs in no pane of %s", pid, socket)
+		return Location{}, false, fmt.Errorf(
+			"client %d runs in no pane of %s; nested tmux is unsupported: "+
+				"Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr",
+			pid, socket,
+		)
 	}
 	return Location{Socket: socket, Pane: pane.PaneID, Terminal: pane.TerminalID}, true, nil
 }

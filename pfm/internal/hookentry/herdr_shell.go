@@ -287,7 +287,7 @@ func recordShellPane(ctx context.Context, socket, record, pane string, next func
 		}
 		return nil
 	}
-	return nil
+	return fmt.Errorf("record pane %s of a nested shell: pane.list no longer contains the canonical pane", pane)
 }
 
 // recordedShellPane is the current pane of the terminal a nested shell's done
@@ -448,12 +448,12 @@ func shellTitlePath(lockDir, pane string) string {
 // pane that closed between the listing and its question is skipped.
 func shellPane(ctx context.Context, socket string, pid int, born string, next func() uint64) (string, bool, error) {
 	if born != "" {
-		runs, nested, err := paneRunsShell(ctx, socket, born, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, socket, born, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
-		if runs {
-			return born, nested, nil
+		if canonical != "" {
+			return canonical, nested, nil
 		}
 	}
 	panes, err := listShellPanes(ctx, socket, next)
@@ -464,39 +464,53 @@ func shellPane(ctx context.Context, socket string, pid int, born string, next fu
 		if pane.PaneID == born {
 			continue
 		}
-		runs, nested, err := paneRunsShell(ctx, socket, pane.PaneID, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, socket, pane.PaneID, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
-		if runs {
-			return pane.PaneID, nested, nil
+		if canonical != "" {
+			return canonical, nested, nil
 		}
 	}
 	return "", false, errNoShellPane{pid: pid}
 }
 
-// paneRunsShell reports whether the pane's own shell, or one of its foreground
-// processes (a nested shell, nested true), is pid.
-func paneRunsShell(ctx context.Context, socket, pane string, pid int, seq uint64) (runs, nested bool, err error) {
+// paneRunsShell returns the producer's canonical pane id when its own shell,
+// or one of its foreground processes (nested true), is pid. A moved pane's
+// inherited id may be an alias that pane.list never emits.
+func paneRunsShell(ctx context.Context, socket, pane string, pid int, seq uint64) (string, bool, error) {
 	line, err := herdr.ProcessInfo{Pane: pane, Seq: seq}.Line()
 	if err != nil {
-		return false, false, err
+		return "", false, err
 	}
 	results, err := herdr.Call(ctx, socket, line)
 	if err != nil {
-		return false, false, err
+		return "", false, err
 	}
 	shell, err := herdr.ParseShellPID(results[0])
 	if err != nil {
-		return false, false, err
+		return "", false, err
+	}
+	var identity struct {
+		ProcessInfo struct {
+			Pane string `json:"pane_id"`
+		} `json:"process_info"`
+	}
+	if err := json.Unmarshal(results[0], &identity); err != nil {
+		return "", false, fmt.Errorf("read canonical identity of shell pane %s: %w", pane, err)
+	}
+	if identity.ProcessInfo.Pane == "" {
+		return "", false, fmt.Errorf("read canonical identity of shell pane %s: process_info.pane_id is empty", pane)
 	}
 	if shell == pid {
-		return true, false, nil
+		return identity.ProcessInfo.Pane, false, nil
 	}
 	foreground, err := herdr.ParseProcessInfo(results[0])
 	if err != nil {
-		return false, false, err
+		return "", false, err
 	}
-	runs = slices.Contains(foreground, pid)
-	return runs, runs, nil
+	if slices.Contains(foreground, pid) {
+		return identity.ProcessInfo.Pane, true, nil
+	}
+	return "", false, nil
 }

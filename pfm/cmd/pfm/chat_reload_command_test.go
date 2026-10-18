@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
@@ -774,5 +777,113 @@ func TestReloadWorkerReportsSuppressedNativeNotification(t *testing.T) {
 	if got := stderr.String(); !strings.Contains(got, "native failure notification:") ||
 		!strings.Contains(got, "not shown (disabled)") {
 		t.Fatalf("notification suppression was hidden: %q", got)
+	}
+}
+
+func TestChatEndWorkerUsesExactDurableSeatWithoutRoster(t *testing.T) {
+	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
+	db := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() { _ = db.Close() }()
+	seat := fleetdb.Seat{SeatID: "end-exact", SessionID: "session", Backend: "herdr", State: "live"}
+	if err := db.PutSeat(context.Background(), seat); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runChatEnd([]string{"--native-end-worker", seat.SeatID}, &stdout, &stderr, commandRuntime{Paths: values})
+	if code != 1 || !strings.Contains(stderr.String(), "no pending end intent") {
+		t.Fatalf("worker scanned names instead of exact durable seat: code=%d out=%s err=%s", code, &stdout, &stderr)
+	}
+}
+
+func TestChatEndRetryPendingIntentRunsRealDetachedCLIWorker(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(testjail.ShortRoot(t), "h.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(conn).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				reply := map[string]any{"id": req.ID, "result": map[string]any{"type": "pane_list", "panes": []any{}}}
+				if req.Method != "pane.list" {
+					t.Errorf("unexpected pending reconciliation method %s", req.Method)
+					return
+				}
+				if err := json.NewEncoder(conn).Encode(reply); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+	}()
+
+	seat := fleetdb.Seat{
+		SeatID:          "pending-cli",
+		SessionID:       "57c427ee-9946-472b-b0e1-c038d98e7ae8",
+		Name:            "PENDING",
+		Backend:         "herdr",
+		State:           "live",
+		EndPending:      true,
+		HerdrSocket:     socket,
+		HerdrPane:       "w6:p3",
+		HerdrTerminalID: "old-terminal",
+		SeatHostPID:     900001,
+		SeatHostStart:   100,
+	}
+	db := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+	defer func() { _ = db.Close() }()
+	if err := db.PutSeat(context.Background(), seat); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WriteSeatRun(seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/engine"}); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(testPFMBinary, "chat", "end", seat.SessionID)
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	if err := command.Run(); err != nil || !strings.Contains(stdout.String(), "end scheduled") {
+		t.Fatalf("real initiating CLI failed: err=%v out=%s stderr=%s", err, &stdout, &stderr)
+	}
+
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		_, found, err := db.Seat(context.Background(), seat.SeatID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			if _, err := os.Stat(
+				filepath.Join(filepath.Dir(runtime.Paths.StateDB), "seats", seat.SeatID+".json"),
+			); !os.IsNotExist(
+				err,
+			) {
+				t.Fatalf("pending recipe remains: %v", err)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			body, _ := os.ReadFile(filepath.Join(runtime.Paths.SIDDir, "end-"+seat.SeatID+".log"))
+			t.Fatalf("real detached CLI worker did not reconcile: %s", body)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -1,4 +1,4 @@
-package gather
+package gather_test
 
 import (
 	"context"

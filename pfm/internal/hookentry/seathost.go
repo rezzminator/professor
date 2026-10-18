@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -22,13 +24,17 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
-const nativeSeatLive = "live"
+const (
+	nativeSeatLive  = "live"
+	internalCommand = "internal"
+)
 
 // SeatHost supervises a native engine without a shell or a tmux intermediary.
 
@@ -52,19 +58,24 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 	if (paths.OSEnv{}).Get("TMUX") != "" || (paths.OSEnv{}).Get(herdr.EnvMarker) != "1" ||
 		(paths.OSEnv{}).Get(herdr.EnvSocket) == "" ||
 		(paths.OSEnv{}).Get(herdr.EnvPane) == "" {
-		return failedSeatStart(ctx, db, seat, errors.New("current Herdr pane identity is required"), stderr)
+		fmt.Fprintln(stderr, "pfm internal seat-host: current Herdr pane identity is required")
+		return 1
 	}
-	before := seat
-	seat.HerdrSocket = (paths.OSEnv{}).Get(herdr.EnvSocket)
-	seat.HerdrPane = (paths.OSEnv{}).Get(herdr.EnvPane)
-	seat.HerdrWorkspace, _, _ = strings.Cut(seat.HerdrPane, ":")
-	if err := db.UpdateSeat(ctx, before, seat); err != nil {
+	seat, err = bindNativeHost(ctx, db, seat, runtime.Paths)
+	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal seat-host: bind current pane: %v\n", err)
 		return 1
 	}
+
 	descriptor, lookupErr := pfmengine.Lookup(pfmengine.ID(seat.Engine))
 	if lookupErr != nil {
-		return failedSeatStart(ctx, db, seat, fmt.Errorf("engine %q has no native seat support", seat.Engine), stderr)
+		return failedSeatStart(
+			ctx,
+			db,
+			seat,
+			fmt.Errorf("engine %q has no native seat support", seat.Engine),
+			stderr,
+		)
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR|syscall.O_NOCTTY, 0)
 	if err != nil {
@@ -82,7 +93,13 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 	}
 	terminal, err := os.OpenFile(terminalPath, os.O_RDWR|syscall.O_NOCTTY, 0)
 	if err != nil {
-		return failedSeatStart(ctx, db, seat, fmt.Errorf("open pane terminal %s: %w", terminalPath, err), stderr)
+		return failedSeatStart(
+			ctx,
+			db,
+			seat,
+			fmt.Errorf("open pane terminal %s: %w", terminalPath, err),
+			stderr,
+		)
 	}
 	defer func() {
 		if err := terminal.Close(); err != nil {
@@ -101,8 +118,12 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		if runErr == nil {
 			options.Env = seatEnvironment(
 				options.Env,
-				[]string{paths.EnvStateDB + "=" + runtime.Paths.StateDB},
-				[]string{paths.EnvStateDB},
+				[]string{
+					paths.EnvStateDB + "=" + runtime.Paths.StateDB,
+					herdr.EnvPane + "=" + seat.HerdrPane,
+					herdr.EnvWorkspace + "=" + seat.HerdrWorkspace,
+				},
+				[]string{paths.EnvStateDB, herdr.EnvPane, herdr.EnvWorkspace, herdr.EnvTab},
 			)
 			options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
 			acknowledge := seat.ReloadPending
@@ -111,8 +132,12 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 				if err != nil {
 					return fmt.Errorf("read started seat: %w", err)
 				}
-				if !found || current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane {
-					return errors.New("started seat binding changed")
+				if !found {
+					return errors.New("started seat disappeared")
+				}
+				current, err = proveRunningHost(ctx, db, current, seat, runtime.Paths)
+				if err != nil {
+					return fmt.Errorf("prove started seat: %w", err)
 				}
 				before := current
 				if current.State == "failed" {
@@ -126,6 +151,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 				if err := db.UpdateSeat(ctx, before, current); err != nil {
 					return fmt.Errorf("record started seat: %w", err)
 				}
+				seat = current
 				return nil
 			})
 		}
@@ -140,7 +166,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 				}
 				choice := strings.TrimSpace(line)
 				if choice == "q" {
-					return closeSeat(ctx, db, seat, 0, stderr)
+					return closeSeat(ctx, db, seat, 0, stderr, runtime)
 				}
 				if choice == "" {
 					break
@@ -151,8 +177,9 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 				fmt.Fprintf(stderr, "pfm internal seat-host: read retry seat: found=%t: %v\n", found, err)
 				return 1
 			}
-			if current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane {
-				fmt.Fprintln(stderr, "pfm internal seat-host: retry seat binding changed")
+			current, err = proveRunningHost(ctx, db, current, seat, runtime.Paths)
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm internal seat-host: prove retry seat: %v\n", err)
 				return 1
 			}
 			seat = current
@@ -170,48 +197,125 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			seat = next
 			continue
 		}
-		return closeSeat(ctx, db, seat, status, stderr)
+		return closeSeat(ctx, db, seat, status, stderr, runtime)
 	}
 }
 
-// closeSeat verifies the current binding before deleting its row and closing its pane.
-func closeSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat, status int, stderr io.Writer) int {
-	// Losing the terminal is not an intentional chat end. Herdr restoration
-	// needs this owner and recipe, possibly already rebound by the new host.
+// A canonical pane move never replaces the running supervisor identity.
+func proveRunningHost(
+	ctx context.Context,
+	db *fleetdb.Store,
+	current, host fleetdb.Seat,
+	values paths.Values,
+) (fleetdb.Seat, error) {
+	if current.SeatHostPID != host.SeatHostPID || current.SeatHostStart != host.SeatHostStart ||
+		current.SeatHostBirth != host.SeatHostBirth {
+		return current, errors.New("running supervisor binding changed")
+	}
+	canonical, owned, err := gather.ProveHerdrSeat(ctx, db, gather.NewProcFS(values.ProcRoot), current)
+	if err != nil {
+		return current, err
+	}
+	if !owned {
+		return current, errors.New("running supervisor is dead")
+	}
+	if canonical.SeatHostPID != host.SeatHostPID || canonical.SeatHostStart != host.SeatHostStart ||
+		canonical.SeatHostBirth != host.SeatHostBirth {
+		return current, errors.New("proved supervisor binding changed")
+	}
+	return canonical, nil
+}
+
+// closeSeat keeps the supervisor alive while an independent worker closes the
+// pane. HUP is restoration, not end; an already pending worker owns cleanup.
+func closeSeat(
+	ctx context.Context,
+	db *fleetdb.Store,
+	seat fleetdb.Seat,
+	status int,
+	stderr io.Writer,
+	runtimes ...config.Runtime,
+) int {
 	if status == 128+int(syscall.SIGHUP) {
 		return status
 	}
 	current, found, err := db.Seat(ctx, seat.SeatID)
-	if err != nil || (found && (current.HerdrSocket != seat.HerdrSocket || current.HerdrPane != seat.HerdrPane)) {
-		fmt.Fprintf(stderr, "pfm internal seat-host: ended seat binding changed: %v\n", err)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal seat-host: read ended seat: %v\n", err)
 		return 1
 	}
 	if !found {
 		return status
 	}
-	if err := errors.Join(db.DeleteSeatRun(seat.SeatID), db.DeleteSeat(ctx, seat.SeatID)); err != nil {
-		fmt.Fprintf(stderr, "pfm internal seat-host: clean ended seat: %v\n", err)
+	if current.SeatHostPID != seat.SeatHostPID || current.SeatHostStart != seat.SeatHostStart ||
+		current.SeatHostBirth != seat.SeatHostBirth {
+		fmt.Fprintln(stderr, "pfm internal seat-host: ended supervisor binding changed")
 		return 1
 	}
-	if _, err := herdr.SeatRequest(
-		ctx,
-		seat.HerdrSocket,
-		"pane.close",
-		map[string]string{"pane_id": seat.HerdrPane},
-	); err != nil &&
-		!isHerdrNotFound(err) {
-		fmt.Fprintf(stderr, "pfm internal seat-host: close ended pane: %v\n", err)
-		if status == 0 {
+	runtime, err := config.OptionalRuntime(runtimes)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal seat-host: end runtime: %v\n", err)
+		return 1
+	}
+	if !current.EndPending {
+		if err := pfmchat.ScheduleHerdrEnd(
+			ctx,
+			headless.Chat{Backend: current.Backend, SeatID: current.SeatID, ID: current.SessionID},
+			runtime,
+		); err != nil {
+			fmt.Fprintf(stderr, "pfm internal seat-host: schedule ended seat: %v\n", err)
 			return 1
 		}
 	}
-	return status
+	deadline := clock.Real.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	tick := clock.Real.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Fprintf(stderr, "pfm internal seat-host: wait for retirement: %v\n", ctx.Err())
+			return 1
+		case <-deadline.C():
+			fmt.Fprintln(stderr, "pfm internal seat-host: retirement unconfirmed; pending owner retained")
+			return 1
+		case <-tick.C():
+			_, found, err := db.Seat(ctx, seat.SeatID)
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm internal seat-host: retirement state: %v\n", err)
+				return 1
+			}
+			if !found {
+				return status
+			}
+		}
+	}
 }
 
 // failedSeatStart preserves the durable row and recipe for diagnosis. It is not
 // the normal engine-exit path: the pane remains available to show the failure.
-func failedSeatStart(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat, cause error, stderr io.Writer) int {
+func failedSeatStart(
+	ctx context.Context,
+	db *fleetdb.Store,
+	seat fleetdb.Seat,
+	cause error,
+	stderr io.Writer,
+) int {
 	fmt.Fprintf(stderr, "pfm internal seat-host: seat %s: %v\n", seat.SeatID, cause)
+	// Reload retains conversation exclusion while awaiting this report. Publish
+	// through UpdateSeat's binding-guarded lifecycle CAS, never wait on its lock.
+	current, found, err := db.Seat(ctx, seat.SeatID)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal seat-host: read failed seat: %v\n", err)
+		return 1
+	}
+	if !found || current.EndPending || current.Backend != seat.Backend || current.HerdrSocket != seat.HerdrSocket ||
+		current.HerdrTerminalID != seat.HerdrTerminalID || current.Engine != seat.Engine ||
+		current.SeatHostPID != seat.SeatHostPID || current.SeatHostStart != seat.SeatHostStart || current.SeatHostBirth != seat.SeatHostBirth {
+		fmt.Fprintln(stderr, "pfm internal seat-host: failed supervisor binding changed")
+		return 1
+	}
+	seat = current
 	before := seat
 	seat.State = "failed"
 	seat.LostNote = cause.Error()
@@ -238,7 +342,7 @@ func seatCommand(
 	}
 	options := deps.StartOptions{
 		Argv0: argv0, Dir: run.CWD,
-		Env:   seatEnvironment(run.Env, os.Environ(), append(herdr.Env(), "TMUX", "TMUX_PANE")),
+		Env:   seatEnvironment(run.Env, os.Environ(), append(herdr.PaneEnv(), "TMUX", "TMUX_PANE")),
 		Stdin: tty, Stdout: tty, Stderr: tty,
 		ProcessGroup: true, Foreground: true, Ctty: int(tty.Fd()),
 	}

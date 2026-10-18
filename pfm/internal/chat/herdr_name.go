@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -24,9 +25,35 @@ func renameHerdr(ctx context.Context, target headless.Chat, name string, values 
 		return fmt.Errorf("read rename seat: %w", err)
 	}
 	if !found || seat.Backend != spawn.BackendHerdr || seat.HerdrSocket != target.Socket ||
-		seat.HerdrPane != target.Pane {
+		(target.ID != "" && seat.SessionID != target.ID) {
 		return fmt.Errorf("native rename target %s no longer matches its durable seat", target.SeatID)
 	}
+	unlock, err := fleetdb.LockSeat(ctx, values, fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID))
+	if err != nil {
+		return fmt.Errorf("lock rename seat: %w", err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	seat, found, err = state.Seat(ctx, target.SeatID)
+	if err != nil {
+		return fmt.Errorf("reread rename seat: %w", err)
+	}
+	if !found || seat.EndPending {
+		return fmt.Errorf("native rename seat %s ownership changed or end is pending", target.SeatID)
+	}
+	seat, owned, err := gather.ProveHerdrSeat(ctx, state, gather.NewProcFS(values.ProcRoot), seat)
+	if err != nil {
+		return fmt.Errorf("prove rename seat: %w", err)
+	}
+	if !owned {
+		return fmt.Errorf("native rename seat %s supervisor is dead", seat.SeatID)
+	}
+	return renameNativeOwned(ctx, state, seat, name)
+}
+
+// renameNativeOwned also serves explicit restore, whose authority is the checked
+// new caller pane after positive old-host death, before its new host can start.
+func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.Seat, name string) error {
+	target := headless.Chat{SeatID: seat.SeatID, Socket: seat.HerdrSocket, Pane: seat.HerdrPane}
 	body, err := herdr.SeatRequest(
 		ctx,
 		target.Socket,

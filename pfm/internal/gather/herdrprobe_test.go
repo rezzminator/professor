@@ -3,15 +3,19 @@ package gather
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -59,7 +63,7 @@ func TestProbeHerdrSeatsKeepsHealthyAndUnreachable(t *testing.T) {
 		{SeatID: "tmux", Backend: "tmux", State: "live"},
 		{SeatID: "lost", Backend: "herdr", State: "lost"},
 	}
-	got := ProbeHerdrSeats(context.Background(), seats)
+	got := probeHerdrSeatRows(context.Background(), seats)
 	if len(got) != 2 {
 		t.Fatalf("native seats=%+v; want both healthy and unreachable", got)
 	}
@@ -93,7 +97,7 @@ func TestProbeHerdrSeatsReusesSocketFailure(t *testing.T) {
 		}
 	}()
 	defer func() { _ = listener.Close(); <-done; close(release); peers.Wait() }()
-	rows := ProbeHerdrSeats(context.Background(), []fleetdb.Seat{
+	rows := probeHerdrSeatRows(context.Background(), []fleetdb.Seat{
 		{SeatID: "one", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w1:p1"},
 		{SeatID: "two", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w1:p2"},
 	})
@@ -117,7 +121,7 @@ func TestProbeHerdrSeatsDistinguishesAnsweredErrors(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			socket, count := herdrProbeListSocket(t, test.response)
-			rows := ProbeHerdrSeats(context.Background(), []fleetdb.Seat{
+			rows := probeHerdrSeatRows(context.Background(), []fleetdb.Seat{
 				{SeatID: "failed", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w6:p3"},
 				{SeatID: "also-failed", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w6:p4"},
 			})
@@ -241,7 +245,7 @@ func TestProbeHerdrSeatsListsOncePerSocket(t *testing.T) {
 		},
 		fleetdb.Seat{SeatID: "lost", Backend: "herdr", State: "lost"},
 	)
-	rows := ProbeHerdrSeats(context.Background(), seats)
+	rows := probeHerdrSeatRows(context.Background(), seats)
 	if len(rows) != 82 {
 		t.Fatalf("healthy plus failed rows=%d; want 82", len(rows))
 	}
@@ -261,5 +265,515 @@ func TestProbeHerdrSeatsListsOncePerSocket(t *testing.T) {
 	}
 	if ac.Load() != 1 || bc.Load() != 1 {
 		t.Fatalf("enumeration multiplied by seats: a=%d b=%d; want 1 each", ac.Load(), bc.Load())
+	}
+}
+
+func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		terminal    string
+		host        bool
+		stamp       uint64
+		owned, dead bool
+	}{
+		{"starting", "terminal-one", true, 9, true, false},
+		{"retrying-empty-foreground", "terminal-one", true, 9, true, false},
+		{"moved", "terminal-one", true, 9, true, false},
+		{"recycled-terminal", "terminal-other", true, 9, false, false},
+		{"dead", "terminal-one", false, 9, false, true},
+		{"reused-pid", "terminal-one", true, 10, false, true},
+		{"recycled-during-proof", "terminal-one", true, 9, false, false},
+		{"legacy-exact-host", "", true, 0, true, false},
+		{"legacy-launch", "", true, 0, true, false},
+		{"ambiguous-legacy-launch", "", true, 0, false, false},
+		{"historical-lost-launch", "", true, 0, true, false},
+		{"historical-failed-launch", "", true, 0, true, false},
+		{"failed-live-host-launch", "", true, 0, false, false},
+		{"legacy-engine-only", "", false, 0, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			values := paths.Values{StateDB: filepath.Join(dir, "pfm.db")}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			canonical := "w1:p1"
+			if test.name == "moved" {
+				canonical = "w8:p4"
+			}
+			response := fmt.Sprintf(
+				`{"result":{"type":"pane_list","panes":[{"pane_id":%q,"workspace_id":%q,"terminal_id":"terminal-one","tab_id":"w1:t1","focused":true}]}}`,
+				canonical,
+				strings.Split(canonical, ":")[0],
+			)
+			socket, _ := herdrOwnershipSocket(t, response, canonical)
+			seat := fleetdb.Seat{
+				SeatID:          "owner",
+				Backend:         "herdr",
+				State:           "live",
+				HerdrSocket:     socket,
+				HerdrPane:       "w1:p1",
+				HerdrWorkspace:  "w1",
+				HerdrTerminalID: test.terminal,
+			}
+			if test.stamp > 0 {
+				seat.SeatHostPID = 20
+				seat.SeatHostStart = 9
+			}
+			if err := db.PutSeat(context.Background(), seat); err != nil {
+				t.Fatal(err)
+			}
+			proc := &fakeProcFS{processes: map[int]fakeProcess{10: {stat: ProcStat{ParentPID: 1, StartTime: 3}}}}
+			if test.host {
+				proc.processes[20] = fakeProcess{
+					cmdline: []string{"/jail/pfm", "internal", "seat-host", "owner"},
+					stat:    ProcStat{ParentPID: 10, StartTime: test.stamp},
+				}
+				if test.stamp == 0 {
+					p := proc.processes[20]
+					p.stat.StartTime = 9
+					proc.processes[20] = p
+				}
+			}
+
+			if test.name == "legacy-launch" || test.name == "ambiguous-legacy-launch" ||
+				(strings.HasPrefix(test.name, "historical-") || test.name == "failed-live-host-launch") {
+				p := proc.processes[20]
+				p.cmdline = []string{"/jail/pfm", "internal", "launch", "--engine", "cc"}
+				proc.processes[20] = p
+			}
+			if test.name == "ambiguous-legacy-launch" ||
+				(strings.HasPrefix(test.name, "historical-") || test.name == "failed-live-host-launch") {
+				other := seat
+				other.SeatID = "other"
+				other.State = "live"
+				other.HerdrPane = "w1:p9"
+				other.HerdrTerminalID = "terminal-one"
+				if test.name == "historical-lost-launch" {
+					other.State = "lost"
+					other.HerdrPane = seat.HerdrPane
+				}
+				if test.name == "historical-failed-launch" {
+					other.State = "failed"
+					other.HerdrPane = seat.HerdrPane
+				}
+				if test.name == "failed-live-host-launch" {
+					other.State = "failed"
+					other.SeatHostPID = 20
+					other.SeatHostStart = 9
+				}
+				if err := db.PutSeat(context.Background(), other); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var reader ProcFS = proc
+			if test.name == "recycled-during-proof" {
+				reader = &recyclingHerdrProofProc{ProcFS: proc}
+			}
+			got, owned, err := ProveHerdrSeat(context.Background(), db, reader, seat)
+			if owned != test.owned || (err == nil) != (test.owned || test.dead) {
+				t.Fatalf("proof owned=%v err=%v; want owned=%v dead=%v", owned, err, test.owned, test.dead)
+			}
+			if owned &&
+				(got.HerdrPane != canonical || got.HerdrTerminalID != "terminal-one" || got.SeatHostPID != 20 || got.SeatHostStart != 9) {
+				t.Fatalf("canonical proof=%+v", got)
+			}
+			stored, _, readErr := db.Seat(context.Background(), seat.SeatID)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if owned && stored.HerdrPane != canonical {
+				t.Fatalf("move not persisted: %+v", stored)
+			}
+		})
+	}
+}
+
+func herdrOwnershipSocket(t *testing.T, list, pane string, beforeInfo ...func()) (string, *atomic.Int32) {
+	t.Helper()
+	return herdrOwnershipSocketShell(t, list, pane, 10, beforeInfo...)
+}
+
+func herdrOwnershipSocketShell(
+	t *testing.T,
+	list, pane string,
+	shell int,
+	beforeInfo ...func(),
+) (string, *atomic.Int32) {
+	t.Helper()
+	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+				}
+				if json.NewDecoder(conn).Decode(&req) != nil {
+					return
+				}
+				calls.Add(1)
+				var body map[string]any
+				if req.Method == "pane.list" {
+					_ = json.Unmarshal([]byte(list), &body)
+				} else {
+					for _, before := range beforeInfo {
+						before()
+					}
+					body = map[string]any{
+						"result": map[string]any{
+							"type":         "pane_process_info",
+							"process_info": map[string]any{"pane_id": pane, "shell_pid": shell},
+						},
+					}
+				}
+				body["id"] = req.ID
+				_ = json.NewEncoder(conn).Encode(body)
+			}()
+		}
+	}()
+	t.Cleanup(func() { _ = listener.Close(); <-done })
+	return socket, &calls
+}
+
+func TestProvedListingKeepsMovedSupervisor(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(readOnly), func(t *testing.T) {
+			ctx := context.Background()
+			dbPath := filepath.Join(t.TempDir(), "pfm.db")
+			db := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: dbPath})
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			socket, _ := herdrOwnershipSocket(
+				t,
+				`{"result":{"type":"pane_list","panes":[{"pane_id":"w8:p4","workspace_id":"w8","terminal_id":"stable","cwd":"/jail/project"}]}}`,
+				"w8:p4",
+			)
+			seat := fleetdb.Seat{
+				SeatID:          "owner",
+				Backend:         "herdr",
+				State:           "live",
+				HerdrSocket:     socket,
+				HerdrPane:       "w1:p1",
+				HerdrWorkspace:  "w1",
+				HerdrTerminalID: "stable",
+				SeatHostPID:     20,
+				SeatHostStart:   9,
+			}
+			if err := db.PutSeat(ctx, seat); err != nil {
+				t.Fatal(err)
+			}
+			proc := &fakeProcFS{
+				processes: map[int]fakeProcess{
+					10: {stat: ProcStat{ParentPID: 1, StartTime: 3}},
+					20: {
+						cmdline: []string{"pfm", "internal", "seat-host", "owner"},
+						stat:    ProcStat{ParentPID: 10, StartTime: 9},
+					},
+				},
+			}
+			proofDB := db
+			if readOnly {
+				proofDB = fleetdb.OpenSharedStateReadOnly(ctx, paths.Values{StateDB: dbPath})
+				defer func() {
+					if err := proofDB.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+			}
+			rows := proveHerdrSeats(ctx, proofDB, proc, probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}), readOnly)
+			if len(rows) != 1 || rows[0].Err != nil || rows[0].Seat.HerdrPane != "w8:p4" ||
+				rows[0].CWD != "/jail/project" {
+				t.Fatalf("moved listing=%+v", rows)
+			}
+			stored, _, err := db.Seat(ctx, seat.SeatID)
+			wantPane := "w8:p4"
+			if readOnly {
+				wantPane = "w1:p1"
+			}
+			if err != nil || stored.HerdrPane != wantPane {
+				t.Fatalf("durable moved listing=%+v err=%v", stored, err)
+			}
+		})
+	}
+}
+
+func TestProveHerdrSeatReadOnlyUnchangedOwnership(t *testing.T) {
+	for _, scenario := range []struct {
+		name            string
+		moved, metadata bool
+		write, pending  bool
+	}{
+		{name: "unchanged"},
+		{name: "moved", moved: true},
+		{name: "concurrent-metadata", metadata: true},
+		{name: "moved-concurrent-metadata", moved: true, metadata: true, write: true},
+		{name: "moved-concurrent-end", moved: true, pending: true, write: true},
+		{name: "unchanged-concurrent-end", pending: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			ctx := context.Background()
+			values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
+			writer := fleetdb.OpenSharedState(ctx, values)
+			defer func() {
+				if err := writer.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			pane := "w1:p1"
+			if scenario.moved {
+				pane = "w9:p2"
+			}
+			var seat fleetdb.Seat
+			socket, _ := herdrOwnershipSocket(
+				t,
+				fmt.Sprintf(
+					`{"result":{"type":"pane_list","panes":[{"pane_id":%q,"workspace_id":%q,"terminal_id":"stable"}]}}`,
+					pane,
+					strings.Split(pane, ":")[0],
+				),
+				pane,
+				func() {
+					if scenario.metadata || scenario.pending {
+						next := seat
+						if scenario.metadata {
+							next.State = "failed"
+							next.ReloadPending = true
+						}
+						next.EndPending = scenario.pending
+						if err := writer.UpdateSeat(ctx, seat, next); err != nil {
+							t.Error(err)
+						}
+					}
+				},
+			)
+			seat = fleetdb.Seat{
+				SeatID:          "owner",
+				Backend:         "herdr",
+				State:           "live",
+				HerdrSocket:     socket,
+				HerdrPane:       "w1:p1",
+				HerdrWorkspace:  "w1",
+				HerdrTerminalID: "stable",
+				SeatHostPID:     20,
+				SeatHostStart:   9,
+			}
+			if err := writer.PutSeat(ctx, seat); err != nil {
+				t.Fatal(err)
+			}
+			reader := fleetdb.OpenSharedStateReadOnly(ctx, values)
+			defer func() {
+				if err := reader.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			proc := &fakeProcFS{
+				processes: map[int]fakeProcess{
+					10: {stat: ProcStat{ParentPID: 1, StartTime: 3}},
+					20: {
+						cmdline: []string{"pfm", "internal", "seat-host", "owner"},
+						stat:    ProcStat{ParentPID: 10, StartTime: 9},
+					},
+				},
+			}
+			proofDB := reader
+			if scenario.write {
+				proofDB = writer
+			}
+			got, owned, err := ProveHerdrSeat(ctx, proofDB, proc, seat)
+			if scenario.pending {
+				if err == nil || owned {
+					t.Fatalf(
+						"concurrent end intent accepted as proved owner: owned=%t seat=%+v err=%v",
+						owned,
+						got,
+						err,
+					)
+				}
+				return
+			}
+			want := seat
+			if scenario.metadata {
+				want.State = "failed"
+				want.ReloadPending = true
+			}
+			if scenario.write {
+				want.HerdrPane = pane
+				want.HerdrWorkspace = strings.Split(pane, ":")[0]
+			}
+			if (!scenario.moved || scenario.write) && (err != nil || !owned || got != want) {
+				t.Fatalf(
+					"unchanged ownership rejected or metadata lost: owned=%t seat=%+v want=%+v err=%v",
+					owned,
+					got,
+					want,
+					err,
+				)
+			}
+			if scenario.moved && !scenario.write && (!errors.Is(err, ErrHerdrProofPersistence) || owned) {
+				t.Fatalf("unpersisted move accepted through read-only state: owned=%t seat=%+v err=%v", owned, got, err)
+			}
+		})
+	}
+}
+
+type recyclingHerdrProofProc struct {
+	ProcFS
+	hostReads int
+}
+
+func (proc *recyclingHerdrProofProc) Stat(pid int) (ProcStat, error) {
+	stat, err := proc.ProcFS.Stat(pid)
+	if pid == 20 {
+		proc.hostReads++
+		if proc.hostReads >= 3 {
+			stat.StartTime++
+		}
+	}
+	return stat, err
+}
+
+func TestProveHerdrSeatClosure(t *testing.T) {
+	for _, mode := range []string{"shell-negative", "shell-zero", "shell-one", "valid", "socket-rebind"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			db := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")})
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			shell := 10
+			switch mode {
+			case "shell-negative":
+				shell = -1
+			case "shell-zero":
+				shell = 0
+			case "shell-one":
+				shell = 1
+			}
+			list := `{"type":"pane_list","panes":[{"pane_id":"w8:p4","workspace_id":"w8","tab_id":"w8:t1","terminal_id":"stable","focused":true}]}`
+			socket, _ := herdrOwnershipSocketShell(t, `{"result":`+list+`}`, "w8:p4", shell)
+			seat := fleetdb.Seat{
+				SeatID:          "owner",
+				Backend:         "herdr",
+				State:           "live",
+				HerdrSocket:     socket,
+				HerdrPane:       "w8:p4",
+				HerdrWorkspace:  "w8",
+				HerdrTerminalID: "stable",
+				SeatHostPID:     20,
+				SeatHostStart:   9,
+			}
+			if err := db.PutSeat(ctx, seat); err != nil {
+				t.Fatal(err)
+			}
+			proc := &fakeProcFS{
+				processes: map[int]fakeProcess{
+					10: {stat: ProcStat{ParentPID: 1, StartTime: 3}},
+					20: {
+						cmdline: []string{"pfm", "internal", "seat-host", "owner"},
+						stat:    ProcStat{ParentPID: 10, StartTime: 9},
+					},
+				},
+			}
+			current := seat
+			var got fleetdb.Seat
+			var owned bool
+			var err error
+			if mode == "socket-rebind" {
+				current.HerdrSocket, _ = herdrOwnershipSocket(t, `{"result":`+list+`}`, "w8:p4")
+				current.HerdrPane, current.HerdrWorkspace = "w9:p2", "w9"
+				if err := db.UpdateSeat(ctx, seat, current); err != nil {
+					t.Fatal(err)
+				}
+				got, owned, err = proveHerdrSeatSnapshot(ctx, db, proc, seat, json.RawMessage(list), false)
+			} else {
+				got, owned, err = ProveHerdrSeat(ctx, db, proc, seat)
+			}
+			if mode == "valid" {
+				if err != nil || !owned || got != seat {
+					t.Fatalf("valid proof=%+v owned=%t err=%v", got, owned, err)
+				}
+				return
+			}
+			stored, found, readErr := db.Seat(ctx, seat.SeatID)
+			if err == nil || owned || readErr != nil || !found || stored != current {
+				t.Fatalf(
+					"unsafe %s proof=%+v owned=%t err=%v stored=%+v want=%+v read=%v",
+					mode,
+					got,
+					owned,
+					err,
+					stored,
+					current,
+					readErr,
+				)
+			}
+		})
+	}
+}
+
+// procargs2 returns EINVAL for both foreign and vanished processes on Darwin.
+// The independent kill and kinfo identity probes decide which evidence it is.
+type unreadableSupervisorProc struct {
+	*fakeProcFS
+	probeErr, identityErr error
+	uid                   uint32
+}
+
+func (p unreadableSupervisorProc) Cmdline(pid int) ([]string, error) {
+	return nil, processReadError(pid, syscall.EINVAL, p.probeErr)
+}
+
+func (p unreadableSupervisorProc) ProcessIdentity(_ int) (ProcessIdentity, error) {
+	return ProcessIdentity{EffectiveUID: p.uid}, p.identityErr
+}
+
+func TestHerdrSupervisorAbsenceDistinguishesDarwinUnreadability(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		uid             uint32
+		probe, identity error
+		absent          bool
+	}{
+		{"foreign EINVAL", uint32(os.Geteuid()) + 1, syscall.EPERM, nil, true},
+		{"same uid EINVAL", uint32(os.Geteuid()), nil, nil, false},
+		{"vanished EINVAL", uint32(os.Geteuid()), syscall.ESRCH, nil, true},
+		{"unknown identity", uint32(os.Geteuid()) + 1, syscall.EPERM, syscall.EIO, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proc := unreadableSupervisorProc{
+				fakeProcFS:  &fakeProcFS{processes: map[int]fakeProcess{42: {}}},
+				uid:         tc.uid,
+				probeErr:    tc.probe,
+				identityErr: tc.identity,
+			}
+			absent, err := HerdrSupervisorAbsent(
+				proc,
+				fleetdb.Seat{SeatID: "restored", HerdrSocket: "fixture", HerdrPane: "w1:p1"},
+			)
+			if absent != tc.absent || (err == nil) != tc.absent {
+				t.Fatalf("absence=%t err=%v want absence=%t", absent, err, tc.absent)
+			}
+		})
 	}
 }

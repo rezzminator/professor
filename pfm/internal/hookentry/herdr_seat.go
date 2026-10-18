@@ -8,9 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // nativeSeat routes only a matching durable native seat. Legacy environment-only
@@ -34,13 +38,44 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if err := db.Degraded(); err != nil {
 		return false, fmt.Errorf("resolve native seat state: %w", err)
 	}
-	seat, found, err := db.SeatByPane(ctx, env(herdr.EnvSocket), env(herdr.EnvPane))
+	values := *reporter.deps.seatPaths
+	if values.ProcRoot == "" {
+		values.ProcRoot = env(paths.EnvProcRoot)
+	}
+	proc := gather.NewProcFS(values.ProcRoot)
+	seat, found, err := reporter.nativeReporterSeat(ctx, db, proc)
 	if err != nil {
 		return true, fmt.Errorf("resolve native seat: %w", err)
 	}
 	if !found {
 		return false, nil
 	}
+	unlock, err := reporter.lockNativeReport(ctx, seat)
+	if err != nil {
+		return true, err
+	}
+	defer unlock()
+	source := seat
+	// Read-only hooks must not queue behind an unrelated database writer.
+	// Only a proved canonicalization that could not persist may retry writable.
+	var owned bool
+	seat, owned, err = gather.ProveHerdrSeat(ctx, db, proc, seat)
+	if errors.Is(err, gather.ErrHerdrProofPersistence) {
+		writable := fleetdb.OpenSharedState(ctx, values)
+		seat, owned, err = gather.ProveHerdrSeat(ctx, writable, proc, seat)
+		err = errors.Join(err, writable.Close())
+	}
+	if err != nil {
+		return true, fmt.Errorf("prove native reporter seat: %w", err)
+	}
+	if !owned {
+		return true, fmt.Errorf("native reporter seat %s supervisor is dead", seat.SeatID)
+	}
+	if source.SeatHostPID > 0 &&
+		(seat.SeatHostPID != source.SeatHostPID || seat.SeatHostStart != source.SeatHostStart || seat.SeatHostBirth != source.SeatHostBirth) {
+		return true, fmt.Errorf("native reporter supervisor changed during proof")
+	}
+
 	if seat.Engine != string(reporter.options.engine) {
 		return true, fmt.Errorf(
 			"native seat %s engine %s does not match reporter %s",
@@ -90,12 +125,72 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if seq == 0 {
 		seq = reporter.nextSent()
 	}
+	if err := reporter.reserveNativeOwnership(seat, seq); err != nil {
+		return true, err
+	}
 	return true, reporter.send(
 		ctx,
 		herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane},
 		action,
 		seq,
 	)
+}
+
+// nativeReporterSeat treats inherited pane context as a hint only. The saved
+// supervisor must be in this hook's kernel ancestry, even after pane moves.
+func (reporter *herdrReporter) nativeReporterSeat(
+	ctx context.Context,
+	db *fleetdb.Store,
+	proc gather.ProcFS,
+) (fleetdb.Seat, bool, error) {
+	seats, err := db.Seats(ctx)
+	if err != nil {
+		return fleetdb.Seat{}, true, fmt.Errorf("enumerate native reporter seats: %w", err)
+	}
+	socket, pane := reporter.deps.getenv(herdr.EnvSocket), reporter.deps.getenv(herdr.EnvPane)
+	var candidates []*fleetdb.Seat
+	hinted := false
+	for i := range seats {
+		seat := &seats[i]
+		if seat.Backend == spawn.BackendHerdr && seat.HerdrSocket == socket {
+			candidates = append(candidates, seat)
+			hinted = hinted || seat.HerdrPane == pane
+		}
+	}
+	if len(candidates) == 0 {
+		return fleetdb.Seat{}, false, nil
+	}
+	seen := map[int]bool{}
+	for pid, depth := reporter.deps.getpid(), 0; pid > 1 && depth < herdrMaxProcessDepth; depth++ {
+		if seen[pid] {
+			return fleetdb.Seat{}, true, fmt.Errorf("native reporter ancestry cycle at %d", pid)
+		}
+		seen[pid] = true
+		for _, seat := range candidates {
+			if seat.SeatHostPID == pid {
+				return *seat, true, nil
+			}
+			if seat.SeatHostPID == 0 && seat.HerdrPane == pane {
+				argv, err := proc.Cmdline(pid)
+				if err != nil {
+					return fleetdb.Seat{}, true, fmt.Errorf("read legacy reporter ancestor %d: %w", pid, err)
+				}
+				// This only locates a legacy candidate; shared proof validates full argv.
+				if gather.HerdrSupervisorArgv(argv, seat.SeatID) {
+					return *seat, true, nil
+				}
+			}
+		}
+		stat, err := proc.Stat(pid)
+		if err != nil {
+			return fleetdb.Seat{}, true, fmt.Errorf("read native reporter ancestor %d: %w", pid, err)
+		}
+		pid = stat.ParentPID
+	}
+	if hinted {
+		return fleetdb.Seat{}, true, fmt.Errorf("native reporter is outside its saved supervisor ancestry")
+	}
+	return fleetdb.Seat{}, false, nil
 }
 
 func (reporter *herdrReporter) resumeArgv(sessionID string) ([]string, error) {
@@ -173,4 +268,66 @@ type herdrPayload struct {
 	IsInterrupt      bool            `json:"is_interrupt"`
 	Title            string          `json:"title"`
 	TranscriptPath   string          `json:"transcript_path"`
+}
+
+// Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs.
+func (reporter *herdrReporter) lockNativeReport(ctx context.Context, seat fleetdb.Seat) (func(), error) {
+	identity := fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID)
+	unlockSession, err := reporter.lock(ctx, identity)
+	if err != nil {
+		return nil, fmt.Errorf("lock native reporter session: %w", err)
+	}
+	deps := reporter.deps
+	deps.lockDir = filepath.Join(deps.lockDir, "pfm-herdr-bridge")
+	unlockBridge, err := (&herdrReporter{deps: deps}).lock(ctx, "transaction")
+	if err != nil {
+		unlockSession()
+		return nil, fmt.Errorf("lock native reporter bridge: %w", err)
+	}
+	return func() { unlockBridge(); unlockSession() }, nil
+}
+
+// This is the existing bridge owner-record protocol, not another ledger. A native
+// owner has more identity components than any legacy socket/session/client tuple.
+func (reporter *herdrReporter) reserveNativeOwnership(seat fleetdb.Seat, seq uint64) error {
+	if seat.HerdrTerminalID == "" || seat.SeatHostPID <= 1 || seat.SeatHostStart == 0 || seq == 0 {
+		return fmt.Errorf("reserve native seat %s: incomplete proved identity", seat.SeatID)
+	}
+	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
+	current, err := reporter.paneOwner(target)
+	if err != nil {
+		return err
+	}
+	if current.Seq > seq {
+		return fmt.Errorf("reserve native seat %s: older ownership sequence", seat.SeatID)
+	}
+	client := nativeOwnerClient(seat)
+	if current.Client == client {
+		return nil
+	}
+	owner := herdrPaneOwner{Client: client, Seq: seq}
+
+	data, err := json.Marshal(owner)
+	if err != nil {
+		return fmt.Errorf("encode native seat %s ownership: %w", seat.SeatID, err)
+	}
+	path := reporter.paneOwnerPath(target)
+	if err := atomicfile.Write(path, data, 0o600); err != nil {
+		return fmt.Errorf("reserve native seat %s ownership: %w", seat.SeatID, err)
+	}
+	return nil
+}
+
+func nativeOwnerClient(seat fleetdb.Seat) string {
+	return fmt.Sprintf(
+		"native\x00%s\x00%s\x00%d\x00%d\x00%d\x00%s\x00%s\x00%s",
+		seat.SeatID,
+		seat.HerdrTerminalID,
+		seat.SeatHostPID,
+		seat.SeatHostStart,
+		seat.SeatHostBirth,
+		seat.Engine,
+		seat.HerdrPane,
+		seat.HerdrWorkspace,
+	)
 }

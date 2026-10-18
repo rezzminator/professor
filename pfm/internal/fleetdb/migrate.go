@@ -324,3 +324,27 @@ func BackupBeforeMigration(
 	}
 	return nil
 }
+
+// addSeatOwnership preserves old readers while adding live native ownership.
+func addSeatOwnership(ctx context.Context, db *sql.DB, path string) error {
+	const integerDefault = "INTEGER NOT NULL DEFAULT 0"
+	for _, column := range []struct{ name, ddl string }{
+		{seatHerdrTerminalIDColumn, "TEXT NOT NULL DEFAULT ''"},
+		{seatHostPIDColumn, integerDefault},
+		{seatHostStartColumn, integerDefault},
+		{seatHostBirthColumn, integerDefault},
+		{seatEndPendingColumn, "INTEGER NOT NULL DEFAULT 0 CHECK(end_pending IN (0,1))"},
+	} {
+		if err := addColumnAtOpen(
+			ctx,
+			db,
+			path,
+			"seat",
+			column.name,
+			"ALTER TABLE seat ADD COLUMN "+column.name+" "+column.ddl,
+		); err != nil {
+			return fmt.Errorf("add native ownership: %w", err)
+		}
+	}
+	return nil
+}

@@ -485,6 +485,10 @@ func applyChatName(
 func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	defer func() { pfmchat.RecordVerb(context.Background(), "end", code) }()
 	flags := cli.NewFlagSet("chat end", "usage: pfm chat end <target>", stderr)
+	worker := len(args) > 0 && args[0] == "--native-end-worker"
+	if worker {
+		args = args[1:]
+	}
 	if parseCode, ok := cli.ParseFlags(flags, args); !ok {
 		return parseCode
 	}
@@ -492,15 +496,16 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		flags.Usage()
 		return 2
 	}
-	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtimes...)
-	if code != 0 {
-		return code
+	resolveTarget := func(ctx context.Context) (headless.Chat, int) {
+		chat, code := headlessTarget(ctx, flags.Arg(0), stdout, stderr, false, runtimes...)
+		if code == 0 && !chat.Live && chat.Backend != "herdr" {
+			fmt.Fprintf(stderr, "pfm chat end: %q is not running\n", chat.Name)
+			return chat, codeDeadChat
+		}
+		return chat, code
 	}
-	if !chat.Live {
-		fmt.Fprintf(stderr, "pfm chat end: %q is not running\n", chat.Name)
-		return codeDeadChat
-	}
-	return pfmchat.EndResolved(context.Background(), chat, stdout, stderr, firstRuntime(runtimes))
+	ctx := context.Background()
+	return pfmchat.EndTarget(ctx, flags.Arg(0), worker, stdout, stderr, firstRuntime(runtimes), resolveTarget)
 }
 
 func renameChatWindow(ctx context.Context, socket, target, name string) error {

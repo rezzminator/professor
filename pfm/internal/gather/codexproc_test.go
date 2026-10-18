@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/resolve"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // A Codex session that writes no rollout file holds no rollout descriptor
@@ -25,7 +25,7 @@ func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
 			cmdline: []string{"/usr/bin/codex"},
-			environ: map[string]string{resolve.CodexThreadEnv: "paginated"},
+			environ: map[string]string{pfmengine.MustLookup(pfmengine.Codex).SessionEnv: "paginated"},
 			stat:    ProcStat{ParentPID: 100},
 			birth:   1700,
 		},
@@ -130,7 +130,7 @@ func TestDetectCodexThreadsPrefersResumeArgvOverAnInheritedEnvironment(t *testin
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
 			cmdline: []string{"/opt/codex", "resume", resumed},
-			environ: map[string]string{resolve.CodexThreadEnv: "the-parent-thread"},
+			environ: map[string]string{pfmengine.MustLookup(pfmengine.Codex).SessionEnv: "the-parent-thread"},
 			stat:    ProcStat{ParentPID: 100},
 		},
 	}}
@@ -224,7 +224,7 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
 			cmdline: []string{"/usr/bin/codex"},
-			environ: map[string]string{resolve.CodexThreadEnv: "live-thread"},
+			environ: map[string]string{pfmengine.MustLookup(pfmengine.Codex).SessionEnv: "live-thread"},
 			fdLinks: []FDLink{{FD: 3, Target: rollout}},
 			stat:    ProcStat{ParentPID: 100},
 		},
@@ -280,7 +280,7 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 		101: {stat: ProcStat{ParentPID: 1}},
 		401: {
 			cmdline: []string{"/usr/bin/codex"},
-			environ: map[string]string{resolve.CodexThreadEnv: "paginated"},
+			environ: map[string]string{pfmengine.MustLookup(pfmengine.Codex).SessionEnv: "paginated"},
 			stat:    ProcStat{ParentPID: 101},
 		},
 	}}

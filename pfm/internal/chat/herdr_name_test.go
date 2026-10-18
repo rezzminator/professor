@@ -5,120 +5,110 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
-	testjail.Fleet(t)
-	values, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	requests := make(chan string, 4)
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
+	for _, mode := range []string{"same", "moved", "recycled", "unlearned"} {
+		t.Run(mode, func(t *testing.T) {
+			testjail.Fleet(t)
+			pane := "w6:p3"
+			if mode == "moved" {
+				pane = "w9:p2"
+			}
+			var mutations []string
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if req.Method == "pane.list" && mode == "recycled" {
+					return map[string]any{
+						"type":  "pane_list",
+						"panes": []any{testjail.HerdrPaneInfo("w6:p9")["pane"]},
+					}, ""
+				}
+				if value, code, ok := nativeChatProof(req, pane); ok {
+					return value, code
+				}
+				switch req.Method {
+				case "pane.rename":
+					mutations = append(mutations, req.Method)
+					if string(req.Params["pane_id"]) != fmt.Sprintf("%q", pane) {
+						t.Errorf("noncanonical pane rename %s", req.Params["pane_id"])
+					}
+					return map[string]any{"pane": map[string]any{"pane_id": pane, "label": "INTEGRATION"}}, ""
+				case "agent.rename":
+					mutations = append(mutations, req.Method)
+					if string(req.Params["target"]) != fmt.Sprintf("%q", pane) {
+						t.Errorf("noncanonical agent target %s", req.Params["target"])
+					}
+					if string(req.Params["name"]) == `"integration"` {
+						return nil, "agent_name_taken"
+					}
+					return map[string]any{"agent": map[string]any{"pane_id": pane, "name": "integration-2"}}, ""
+				case "pane.get":
+					return testjail.HerdrPaneInfo(pane), ""
+				case "tab.get":
+					return map[string]any{
+						"type": "tab_info",
+						"tab": map[string]any{
+							"tab_id":     strings.Split(pane, ":")[0] + ":t1",
+							"label":      "INTEGRATION",
+							"pane_count": 1,
+						},
+					}, ""
+				default:
+					return nil, "unexpected_method"
+				}
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			if mode == "unlearned" {
+				seat.SessionID = ""
+			}
+			seat = nativeChatHost(t, db, seat, true)
+			err := renameHerdr(
+				context.Background(),
+				headless.Chat{SeatID: seat.SeatID, ID: seat.SessionID, Socket: socket, Pane: seat.HerdrPane},
+				"INTEGRATION",
+				runtime.Paths,
+			)
+			if mode == "recycled" {
+				if err == nil || len(mutations) != 0 {
+					t.Fatalf("recycled occupant mutated: err=%v calls=%v", err, mutations)
+				}
 				return
 			}
-			func() {
-				defer func() { _ = conn.Close() }()
-				var req struct {
-					ID     string `json:"id"`
-					Method string `json:"method"`
-					Params struct {
-						Name   string `json:"name"`
-						Label  string `json:"label"`
-						Pane   string `json:"pane_id"`
-						Target string `json:"target"`
-					} `json:"params"`
-				}
-				if json.NewDecoder(conn).Decode(&req) != nil {
-					return
-				}
-				requests <- req.Method + ":" + req.Params.Name + req.Params.Label
-				if req.Method == "agent.rename" && req.Params.Name == "integration" {
-					_, _ = fmt.Fprintf(
-						conn,
-						`{"id":%q,"ok":false,"error":{"code":"agent_name_taken","message":"already used"}}`+"\n",
-						req.ID,
-					)
-					return
-				}
-				result := `{"pane":{"pane_id":"w6:p3","label":"INTEGRATION"}}`
-				if req.Method == "agent.rename" {
-					result = `{"agent":{"pane_id":"w6:p3","name":"integration-2"}}`
-				}
-				_, _ = fmt.Fprintf(conn, `{"id":%q,"ok":true,"result":%s}`+"\n", req.ID, result)
-			}()
-		}
-	}()
-	state := fleetdb.OpenSharedState(context.Background(), values)
-	defer func() {
-		if err := state.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	if err := state.PutSeat(
-		context.Background(),
-		fleetdb.Seat{
-			SeatID:         "seat1",
-			SessionID:      "sid1",
-			Engine:         "cc",
-			Backend:        "herdr",
-			HerdrSocket:    socket,
-			HerdrPane:      "w6:p3",
-			HerdrWorkspace: "w6",
-			Name:           "OLD",
-			State:          "live",
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := renameHerdr(
-		context.Background(),
-		headless.Chat{Backend: "herdr", SeatID: "seat1", ID: "sid1", Engine: "cc", Socket: socket, Pane: "w6:p3"},
-		"INTEGRATION",
-		values,
-	); err != nil {
-		t.Fatal(err)
-	}
-	seat, found, err := state.Seat(context.Background(), "seat1")
-	if err != nil || !found || seat.Name != "INTEGRATION" {
-		t.Fatalf("seat=%+v found=%v err=%v", seat, found, err)
-	}
-	got := []string{<-requests, <-requests, <-requests}
-	want := []string{"pane.rename:INTEGRATION", "agent.rename:integration", "agent.rename:integration-2"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("requests=%v want=%v", got, want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"pane.rename", "agent.rename", "agent.rename"}
+			if !reflect.DeepEqual(mutations, want) {
+				t.Fatalf("mutations=%v", mutations)
+			}
+			current, found, err := db.Seat(context.Background(), seat.SeatID)
+			if err != nil || !found || current.Name != "INTEGRATION" || current.HerdrPane != pane {
+				t.Fatalf("seat=%+v found=%v err=%v", current, found, err)
+			}
+		})
 	}
 }
 
 func TestRenameHerdrRequiresExistingAgent(t *testing.T) {
 	testjail.Fleet(t)
 	socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+		if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+			return value, code
+		}
 		if req.Method == "pane.rename" {
 			return map[string]any{"pane": map[string]any{"pane_id": "w6:p3", "label": "INTEGRATION"}}, ""
 		}
 		return nil, "agent_not_found"
 	})
-	runtime, _, seat := nativeChatSeat(t, socket, "lost")
+	runtime, db, seat := nativeChatSeat(t, socket, "lost")
+	seat = nativeChatHost(t, db, seat, true)
 	err := renameHerdr(
 		context.Background(),
 		headless.Chat{SeatID: seat.SeatID, Socket: socket, Pane: seat.HerdrPane},
@@ -158,6 +148,9 @@ func TestRenameHerdrLabelsTheSeatsSoleTab(t *testing.T) {
 			testjail.Fleet(t)
 			renamed := make(chan string, 4)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
 				if req.Method == "tab.rename" {
 					var label string
 					_ = json.Unmarshal(req.Params["label"], &label)
@@ -188,6 +181,7 @@ func TestRenameHerdrLabelsTheSeatsSoleTab(t *testing.T) {
 				}
 			})
 			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, db, seat, true)
 			old := seat
 			old.Name = "OLD"
 			if err := db.UpdateSeat(context.Background(), seat, old); err != nil {

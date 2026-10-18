@@ -49,7 +49,14 @@ func ChooseBackend(
 		TMUX:      values["TMUX"],
 		Requester: requester,
 	}
-	return selectBackend(env, func(socket, pane string) error {
+	var canonical struct {
+		Type string `json:"type"`
+		Pane struct {
+			ID        string `json:"pane_id"`
+			Workspace string `json:"workspace_id"`
+		} `json:"pane"`
+	}
+	choice, err := selectBackend(env, func(socket, pane string) error {
 		probe, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		defer cancel()
 		body, err := herdr.SeatRequest(probe, socket, "pane.get", map[string]string{"pane_id": pane})
@@ -60,19 +67,20 @@ func ChooseBackend(
 		if err != nil {
 			return err
 		}
-		var result struct {
-			Pane struct {
-				ID string `json:"pane_id"`
-			} `json:"pane"`
-		}
-		if err := json.Unmarshal(body, &result); err != nil {
+		if err := json.Unmarshal(body, &canonical); err != nil {
 			return fmt.Errorf("decode Herdr pane probe: %w", err)
 		}
-		if result.Pane.ID != pane {
-			return fmt.Errorf("herdr pane probe for %s returned %q", pane, result.Pane.ID)
+		if canonical.Type != "pane_info" || canonical.Pane.ID == "" || canonical.Pane.Workspace == "" ||
+			!strings.HasPrefix(canonical.Pane.ID, canonical.Pane.Workspace+":") {
+			return fmt.Errorf("herdr pane probe for %s returned malformed identity: %s", pane, body)
 		}
 		return nil
 	})
+	if err == nil && choice.Backend == BackendHerdr {
+		choice.HerdrPane = canonical.Pane.ID
+		choice.HerdrWorkspace = canonical.Pane.Workspace
+	}
+	return choice, err
 }
 
 func selectBackend(env backendEnvironment, probe func(string, string) error) (BackendChoice, error) {

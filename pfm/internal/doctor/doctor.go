@@ -341,6 +341,7 @@ func Run(
 	tally.warnings += backendWarnings
 	tally.failures += backendFailures
 	tally.warnings += printHerdrReporterErrors(stdout, paths.HerdrLockDir(resolved.Home), dependencies.Clock.Now())
+	tally.warnings += printHerdrSeatOwnership(ctx, stdout, resolved)
 	hostWarnings, hostFailures := printHostChecks(stdout, runtime, dependencies.Clock.Now())
 	tally.warnings += hostWarnings
 	tally.failures += hostFailures + printClaudeStoreChecks(stdout, runtime)

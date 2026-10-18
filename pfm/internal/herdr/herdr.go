@@ -34,10 +34,12 @@ const (
 
 // Herdr's environment contract: a process inside a Herdr pane carries these.
 const (
-	EnvMarker = "HERDR_ENV"
-	EnvPane   = "HERDR_PANE_ID"
-	EnvSocket = "HERDR_SOCKET_PATH"
-	EnvBin    = "HERDR_BIN_PATH"
+	EnvMarker    = "HERDR_ENV"
+	EnvPane      = "HERDR_PANE_ID"
+	EnvSocket    = "HERDR_SOCKET_PATH"
+	EnvBin       = "HERDR_BIN_PATH"
+	EnvWorkspace = "HERDR_WORKSPACE_ID"
+	EnvTab       = "HERDR_TAB_ID"
 )
 
 // The tmux names a reporter hook resolves its pane through.
@@ -52,14 +54,17 @@ const (
 // created the server.
 func Env() []string { return []string{EnvMarker, EnvPane, EnvSocket, EnvBin} }
 
+// PaneEnv includes all pane identity, not only the bridge update keys.
+func PaneEnv() []string { return append(Env(), EnvWorkspace, EnvTab) }
+
 // StripPane returns environ without the Herdr names: a child that is no chat
 // bound to the parent's pane never reports as it.
-func StripPane(environ []string) []string { return without(environ, Env()) }
+func StripPane(environ []string) []string { return without(environ, PaneEnv()) }
 
 // StripReporter returns environ without the Herdr names and the tmux pane
 // names: a child that can fire a reporter hook finds its pane through either.
 func StripReporter(environ []string) []string {
-	return without(environ, append(Env(), EnvTmux, EnvTmuxPane))
+	return without(environ, append(PaneEnv(), EnvTmux, EnvTmuxPane))
 }
 
 func without(environ, names []string) []string {

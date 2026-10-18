@@ -48,6 +48,8 @@ type reloadHerdrFixture struct {
 	submitted bool
 	processes int
 	mode      string
+	canonical string
+	terminal  string
 	onRead    func()
 	onExit    func()
 	prompted  string
@@ -68,7 +70,30 @@ func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 		}
 	})
 	socket := filepath.Join(testjail.ShortRoot(t), "h.sock")
-	f := &reloadHerdrFixture{t: t, db: db, text: "❯ "}
+	f := &reloadHerdrFixture{t: t, db: db, text: "❯ ", canonical: "w6:p3", terminal: "reload-terminal"}
+	proc := t.TempDir()
+	t.Setenv(paths.EnvProcRoot, proc)
+	if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("btime 1000000000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(proc, "90")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "stat"),
+		[]byte("90 (pfm) S 1 "+strings.Repeat("0 ", 17)+"9 0\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "cmdline"),
+		[]byte("pfm\x00internal\x00seat-host\x00reload-seat\x00"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	f.request = Request{
 		Engine:       pfmengine.Claude,
 		SocketPath:   socket,
@@ -94,14 +119,17 @@ func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 		ThenTries:      5,
 	}
 	f.seat = fleetdb.Seat{
-		SeatID:      "reload-seat",
-		Engine:      string(pfmengine.Claude),
-		Backend:     "herdr",
-		HerdrSocket: socket,
-		HerdrPane:   f.request.Pane,
-		SessionID:   f.request.SessionID,
-		State:       "live",
-		Name:        "REVIEW",
+		SeatID:          "reload-seat",
+		Engine:          string(pfmengine.Claude),
+		Backend:         "herdr",
+		HerdrSocket:     socket,
+		HerdrPane:       f.request.Pane,
+		HerdrWorkspace:  "w6",
+		HerdrTerminalID: f.terminal,
+		SeatHostPID:     90, SeatHostStart: 9,
+		SessionID: f.request.SessionID,
+		State:     "live",
+		Name:      "REVIEW",
 	}
 	descriptor := pfmengine.MustLookup(pfmengine.Claude)
 	f.old = fleetdb.SeatRun{
@@ -159,12 +187,22 @@ func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 }
 
 func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage) (any, string) {
+	if method == "pane.list" {
+		info := testjail.HerdrPaneInfo(f.canonical)["pane"].(map[string]any)
+		info["terminal_id"] = f.terminal
+		return map[string]any{"type": "pane_list", "panes": []any{info}}, ""
+	}
+	if method == "pane.get" {
+		info := testjail.HerdrPaneInfo(f.canonical)
+		info["pane"].(map[string]any)["terminal_id"] = f.terminal
+		return info, ""
+	}
 	var pane string
 	_ = json.Unmarshal(p["pane_id"], &pane)
 	if method == "agent.get" || method == "agent.prompt" {
 		_ = json.Unmarshal(p["target"], &pane)
 	}
-	if pane != f.request.Pane {
+	if pane != f.canonical {
 		return nil, "wrong target pane " + pane
 	}
 	switch method {
@@ -181,6 +219,12 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		if f.mode == "empty-process" || f.mode == "failed-retry-failed" ||
 			strings.HasPrefix(f.mode, "failed-retry") && !f.submitted {
 			return f.processResult([]any{}), ""
+		}
+		if f.mode == "omitted-process" {
+			return map[string]any{
+				"type":         "pane_process_info",
+				"process_info": map[string]any{"pane_id": f.canonical, "shell_pid": 90},
+			}, ""
 		}
 		if f.mode == "null-argv" {
 			return f.processResult(
@@ -251,8 +295,8 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		return map[string]any{
 			"type": "pane_read",
 			"read": map[string]any{
-				"pane_id":      f.request.Pane,
-				"workspace_id": "w6",
+				"pane_id":      f.canonical,
+				"workspace_id": strings.Split(f.canonical, ":")[0],
 				"text":         text,
 				"truncated":    false,
 				"format":       format,
@@ -265,7 +309,7 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		}
 		return map[string]any{
 			"type":  "agent_info",
-			"agent": map[string]any{"pane_id": f.request.Pane, "terminal_id": f.request.Pane, "agent_status": status},
+			"agent": map[string]any{"pane_id": f.canonical, "terminal_id": f.terminal, "agent_status": status},
 		}, ""
 	case "pane.send_text":
 		var text string
@@ -330,8 +374,8 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		return map[string]any{
 			"type": "agent_prompted",
 			"agent": map[string]any{
-				"pane_id":      f.request.Pane,
-				"terminal_id":  f.request.Pane,
+				"pane_id":      f.canonical,
+				"terminal_id":  f.terminal,
 				"agent_status": "working",
 			},
 		}, ""
@@ -343,7 +387,7 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 func (f *reloadHerdrFixture) processResult(processes []any) any {
 	return map[string]any{
 		"type":         "pane_process_info",
-		"process_info": map[string]any{"pane_id": f.request.Pane, "foreground_processes": processes},
+		"process_info": map[string]any{"pane_id": f.canonical, "shell_pid": 90, "foreground_processes": processes},
 	}
 }
 
@@ -362,9 +406,10 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "old-process-is-not-success", mode: "old-process", want: "new engine"},
 		{name: "new-process-wrong-model", mode: "wrong-model", want: "new engine"},
 		{name: "process-error", mode: "process-error", want: "process unavailable"},
-		{name: "malformed-process", mode: "malformed-process", want: "process"},
-		{name: "wrong-pane", mode: "wrong-pane", want: "pane"},
+		{name: "malformed-process", mode: "malformed-process", want: "shell identity"},
+		{name: "wrong-pane", mode: "wrong-pane", want: "shell identity"},
 		{name: "empty-process", mode: "empty-process", want: "engine"},
+		{name: "omitted-process", mode: "omitted-process", want: "engine"},
 		{name: "null-argv", mode: "null-argv", want: "argv"},
 		{name: "snapshot-error", mode: "read-error", want: "snapshot unavailable"},
 		{name: "blocked", mode: "blocked", want: "blocked"},
@@ -582,9 +627,14 @@ func TestRunHerdrUnsafePublication(t *testing.T) {
 				want = "current recipe"
 			case "binding-changes-during-idle":
 				f.onRead = func() {
-					before := f.seat
+					before, found, err := f.db.Seat(context.Background(), f.seat.SeatID)
+					if err != nil || !found {
+						t.Errorf("read before rebind: %v", err)
+						return
+					}
 					after := before
 					after.HerdrPane = "w9:p9"
+					after.HerdrTerminalID = "rebound-terminal"
 					if err := f.db.UpdateSeat(context.Background(), before, after); err != nil {
 						t.Error(err)
 					}

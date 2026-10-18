@@ -56,7 +56,7 @@ func launchNative(
 	choice spawn.BackendChoice,
 	request claudelaunch.Request,
 	cwd string,
-	stdout, stderr io.Writer,
+	_, stderr io.Writer,
 	runtime config.Runtime,
 ) int {
 	accountID := request.Account
@@ -148,7 +148,21 @@ func launchNative(
 			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, err)
 		}
 	}
-	return SeatHost([]string{id}, stdout, stderr, runtime)
+	executable, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal launch: resolve running executable: %v\n", err)
+		return 1
+	}
+	argv := []string{os.Args[0]}
+	if runtime.Config.Path != "" {
+		argv = append(argv, "--config", runtime.Config.Path)
+	}
+	argv = append(argv, "internal", "seat-host", id)
+	if err := LaunchExec(executable, argv, os.Environ()); err != nil {
+		fmt.Fprintf(stderr, "pfm internal launch: exec native supervisor: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func nativeLaunchEnvironment(launch claudelaunch.Launch) []string {

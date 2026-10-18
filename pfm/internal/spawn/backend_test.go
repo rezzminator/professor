@@ -93,3 +93,42 @@ func TestChooseBackendRejectsMalformedPane(t *testing.T) {
 		})
 	}
 }
+
+func TestChooseBackendResolvesMovedCaller(t *testing.T) {
+	for _, requested := range []string{"auto", "herdr"} {
+		t.Run(requested, func(t *testing.T) {
+			socket := filepath.Join(testjail.ShortRoot(t), "moved.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID string `json:"id"`
+				}
+				if json.NewDecoder(conn).Decode(&req) == nil {
+					_, _ = fmt.Fprintf(
+						conn,
+						`{"id":%q,"ok":true,"result":{"type":"pane_info","pane":{"pane_id":"w9:p4","workspace_id":"w9","tab_id":"w9:t2","terminal_id":"terminal-survives-move"}}}`+"\n",
+						req.ID,
+					)
+				}
+			}()
+			got, err := ChooseBackend(
+				context.Background(),
+				requested,
+				[]string{"HERDR_ENV=1", "HERDR_SOCKET_PATH=" + socket, "HERDR_PANE_ID=w1:p2"},
+				nil,
+			)
+			if err != nil || got.Backend != "herdr" || got.HerdrPane != "w9:p4" || got.HerdrWorkspace != "w9" {
+				t.Fatalf("moved caller choice=%+v err=%v; want canonical w9:p4 in w9", got, err)
+			}
+		})
+	}
+}

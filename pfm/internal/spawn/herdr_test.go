@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -500,6 +501,132 @@ func TestHerdrSpawnTabLabelIsNeverEmpty(t *testing.T) {
 			params := (<-requests)["params"].(map[string]any)
 			if got := params["tab_label"]; got != test.want {
 				t.Fatalf("tab_label = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHerdrFocusedBirthExplicitlyFocusesClients(t *testing.T) {
+	for _, mode := range []string{"focused", "unfocused", "refused", "malformed", "wrong-pane", "negative"} {
+		t.Run(mode, func(t *testing.T) {
+			focus := mode != "unfocused"
+			focusFailed := focus && mode != "focused"
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(values.Home, "native-claude")
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(testjail.ShortRoot(t), "focus.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan struct{})
+			// layout focus changes only the default; attached clients keep their old tab.
+			clientPane := "w6:p3"
+			events := make(chan string, 8)
+			go func() {
+				defer close(done)
+				for {
+					conn, req, err := acceptBirthRequest(listener)
+					if err != nil {
+						return
+					}
+					method := req["method"].(string)
+					events <- method
+					result := any(map[string]any{"type": "ok"})
+					switch method {
+					case "layout.apply":
+						result = map[string]any{
+							"layout": map[string]any{
+								"workspace_id": "w6",
+								"root":         map[string]any{"type": "pane", "pane_id": "w6:p9"},
+							},
+						}
+					case "pane.focus":
+						if mode == "refused" {
+							_ = json.NewEncoder(conn).Encode(map[string]any{
+								"id": req["id"],
+								"ok": false,
+								"error": map[string]string{
+									"code":    "permission_denied",
+									"message": "fixture focus refusal",
+								},
+							})
+							_ = conn.Close()
+							continue
+						}
+						pane := req["params"].(map[string]any)["pane_id"].(string)
+						if !focusFailed {
+							clientPane = pane
+						}
+						if mode == "wrong-pane" {
+							pane = "w6:p8"
+						}
+						result = map[string]any{
+							"type": "pane_info",
+							"pane": map[string]any{
+								"pane_id":      pane,
+								"workspace_id": "w6",
+								"terminal_id":  "new-terminal",
+								"tab_id":       "w6:t2",
+								"focused":      mode != "negative",
+							},
+						}
+						if mode == "malformed" {
+							result = "not a pane response"
+						}
+					}
+					_ = json.NewEncoder(conn).Encode(map[string]any{"id": req["id"], "ok": true, "result": result})
+					_ = conn.Close()
+				}
+			}()
+			var stderr bytes.Buffer
+			born, err := SpawnHerdr(context.Background(), HerdrRequest{
+				Paths: values, Focus: focus, Stderr: &stderr,
+				Choice: BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6"},
+				Seat:   fleetdb.Seat{SeatID: "focus-seat", SessionID: "sid1", Engine: "cc"},
+				Run:    fleetdb.SeatRun{Binary: binary, CWD: values.Home},
+			})
+			_ = listener.Close()
+			<-done
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotWarning := strings.Contains(stderr.String(), "opened, but focus failed"); gotWarning != focusFailed {
+				t.Fatalf("focus warning=%q, want failure=%t", stderr.String(), focusFailed)
+			}
+			state := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() { _ = state.Close() }()
+			saved, found, err := state.Seat(context.Background(), born.Seat.SeatID)
+			if err != nil || !found || saved.HerdrPane != "w6:p9" || saved.SessionID != "sid1" {
+				t.Fatalf("completed birth lost: seat=%+v found=%t err=%v", saved, found, err)
+			}
+			if _, err := state.ReadSeatRun(saved.SeatID); err != nil {
+				t.Fatalf("completed birth recipe lost: %v", err)
+			}
+			want := "w6:p3"
+			if mode == "focused" {
+				want = "w6:p9"
+			}
+			close(events)
+			var methods []string
+			for method := range events {
+				methods = append(methods, method)
+			}
+			if clientPane != want {
+				t.Fatalf("attached client still on %s, want %s; requests=%v", clientPane, want, methods)
+			}
+			wantCalls := 1
+			if focus {
+				wantCalls++
+			}
+			if len(methods) != wantCalls {
+				t.Fatalf("requests=%v, want %d", methods, wantCalls)
 			}
 		})
 	}

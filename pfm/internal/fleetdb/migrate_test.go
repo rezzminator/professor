@@ -107,7 +107,7 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 		{name: "missing column waits for the lock", seed: v3Schema, waits: true},
 		{
 			name: "a current file opens without it",
-			seed: v3Schema + migrationV5 + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion) + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
+			seed: v3Schema + migrationV5 + migrationV6 + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion) + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -115,6 +115,12 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pfm.db")
 			seedSharedState(t, path, test.seed)
+			if !test.waits {
+				current := OpenSharedState(ctx, paths.Values{StateDB: path})
+				if err := errors.Join(current.Degraded(), current.Close()); err != nil {
+					t.Fatal(err)
+				}
+			}
 			release, err := LockMigration(ctx, path)
 			if err != nil {
 				t.Fatal(err)

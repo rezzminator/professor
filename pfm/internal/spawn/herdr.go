@@ -28,6 +28,9 @@ type HerdrRequest struct {
 	Run    fleetdb.SeatRun
 	Paths  paths.Values
 	Focus  bool
+	// TabLabel is the requester's label for a new tab (a launch or resumed
+	// chat's name), ahead of the seat's own name; it never names the seat.
+	TabLabel string
 }
 
 type HerdrResult struct {
@@ -114,6 +117,20 @@ func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (resul
 	return HerdrResult{Seat: seat, Eval: "exec pfm internal seat-host " + seat.SeatID}, nil
 }
 
+// birthTabLabel is the label a new seat's tab is born with, never empty: the
+// requester's label, else the seat's name, else the base name of the seat's
+// working directory (the project folder an unnamed chat runs in), each as
+// Herdr would show it.
+func birthTabLabel(request HerdrRequest) string {
+	folder := filepath.Base(request.Run.CWD)
+	for _, label := range []string{request.TabLabel, request.Seat.Name, folder} {
+		if cleaned := herdr.TabLabel(label); cleaned != "" {
+			return cleaned
+		}
+	}
+	return folder
+}
+
 // SpawnHerdr creates one tab in the requester's workspace, unfocused by default.
 func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
 	result, err := reserveHerdr(ctx, request, "")
@@ -131,7 +148,7 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 	}
 	params := map[string]any{
 		"workspace_id": request.Choice.HerdrWorkspace,
-		"tab_label":    request.Seat.Name,
+		"tab_label":    birthTabLabel(request),
 		"focus":        request.Focus,
 		"root": map[string]any{
 			"type":    "pane",

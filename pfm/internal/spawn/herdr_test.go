@@ -443,3 +443,64 @@ func birthPingSocket(t *testing.T) string {
 	}()
 	return socket
 }
+
+// A new Herdr tab is never unlabelled: the requester's label first, then the
+// seat's name, then the project folder the chat runs in; a label Herdr would
+// show as empty falls through to the next.
+func TestHerdrSpawnTabLabelIsNeverEmpty(t *testing.T) {
+	for _, test := range []struct {
+		name, tabLabel, seatName, want string
+	}{
+		{"the requester's label wins", "LAUNCH", "SEAT", "LAUNCH"},
+		{"the seat's name", "", "SEAT", "SEAT"},
+		{"an unnamed chat takes its folder", "", "", "professor"},
+		{"blank labels fall through to the folder", " \t", "\n", "professor"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			requests := make(chan map[string]any, 1)
+			go func() {
+				conn, req, err := acceptBirthRequest(listener)
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				requests <- req
+				_, _ = fmt.Fprintf(
+					conn,
+					`{"id":%q,"ok":true,"result":{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}}`+"\n",
+					req["id"],
+				)
+			}()
+			binary := filepath.Join(values.Home, "native-claude")
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			choice := BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6"}
+			_, err = SpawnHerdr(context.Background(), HerdrRequest{
+				Paths:    values,
+				Choice:   choice,
+				Seat:     fleetdb.Seat{SessionID: "sid1", Engine: "cc", Name: test.seatName},
+				Run:      fleetdb.SeatRun{Binary: binary, CWD: "/fixture/professor"},
+				TabLabel: test.tabLabel,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			params := (<-requests)["params"].(map[string]any)
+			if got := params["tab_label"]; got != test.want {
+				t.Fatalf("tab_label = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

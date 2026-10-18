@@ -14,7 +14,8 @@ import (
 )
 
 // renameHerdr follows successful engine /rename delivery. Persist only after
-// both visible labels agree; every partial failure is returned to the caller.
+// the pane label and the agent name agree, then label the pane's tab under
+// herdr.LabelSoleTab's rule; every partial failure is returned to the caller.
 func renameHerdr(ctx context.Context, target headless.Chat, name string, values paths.Values) (returnErr error) {
 	state := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
@@ -81,7 +82,37 @@ func renameHerdr(ctx context.Context, target headless.Chat, name string, values 
 		if err := state.UpdateSeat(ctx, before, seat); err != nil {
 			return fmt.Errorf("persist name after Herdr pane and agent rename: %w", err)
 		}
+		if err := labelNativeTab(ctx, target, name); err != nil {
+			return fmt.Errorf("label Herdr tab after pane and agent rename: %w", err)
+		}
 		return nil
 	}
 	return errors.New("herdr agent rename exhausted 100 unique name attempts; pane label changed, seat name unchanged")
+}
+
+// labelNativeTab finds the tab the seat's pane sits in (pane.get) and labels
+// it with the chat's name when the pane sits in it alone.
+func labelNativeTab(ctx context.Context, target headless.Chat, name string) error {
+	body, err := herdr.SeatRequest(ctx, target.Socket, "pane.get", map[string]string{nativePaneIDKey: target.Pane})
+	if err != nil {
+		return fmt.Errorf("read Herdr pane %s: %w", target.Pane, err)
+	}
+	var pane struct {
+		Pane struct {
+			ID  string `json:"pane_id"`
+			Tab string `json:"tab_id"`
+		} `json:"pane"`
+	}
+	if err := json.Unmarshal(body, &pane); err != nil {
+		return fmt.Errorf("decode Herdr pane %s: %w", target.Pane, err)
+	}
+	if pane.Pane.ID != target.Pane {
+		return fmt.Errorf("herdr pane.get for %s returned unexpected identity: %s", target.Pane, body)
+	}
+	var seq uint64
+	next := func() uint64 { seq++; return seq }
+	if err := herdr.LabelSoleTab(ctx, target.Socket, pane.Pane.Tab, name, next); err != nil {
+		return fmt.Errorf("tab %s of pane %s: %w", pane.Pane.Tab, target.Pane, err)
+	}
+	return nil
 }

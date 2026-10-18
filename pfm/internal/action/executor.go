@@ -1,6 +1,7 @@
 package action
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -182,10 +183,11 @@ func (executor *Executor) Open(
 			_, prepareErr := spawn.SpawnHerdr(
 				ctx,
 				spawn.HerdrRequest{
-					Choice: choice,
-					Focus:  true,
-					Paths:  values,
-					Run:    *plan.SeatRun,
+					Choice:   choice,
+					Focus:    true,
+					Paths:    values,
+					Run:      *plan.SeatRun,
+					TabLabel: cmp.Or(request.LaunchName, request.Row.Name),
 					Seat: fleetdb.Seat{
 						SessionID: sessionID,
 						Engine:    string(engineID),

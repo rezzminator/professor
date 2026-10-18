@@ -2533,10 +2533,27 @@ class StoreTest(unittest.TestCase):
         self.edit("b.py", changed)
         _, out = self.new(ASK_BOTH)
         self.assertRegex(out, r"(?m)^TRACE Q1 · none$")
-        self.assertRegex(out, r"(?m)^REWALK Q2 · " + os.path.basename(earlier) + r" node 2 · FROM b\.py:1 · b\.py$")
+        self.assertRegex(out, r"(?m)^REWALK Q2 · " + os.path.basename(earlier) + r" node 2 · FROM b\.py:1 · changed: b\.py$")
         rewalks = re.findall(r"(?m)^REWALK .*$", out)
         self.assertEqual(len(rewalks), 1, out)
         self.assertNotIn("a.py", rewalks[0])
+
+    def test_a_node_walked_again_with_its_files_unchanged_names_why_never_a_changed_path(self):
+        earlier, _ = self.new("1. What falls back in a.py?\n")
+        got = tt(["start", earlier, "1", "a.py:1", "Q1"])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        got = tt(["write", earlier, "1"], input=hops("1", ["- `load_alpha` falls back to its default [a.py:2]",
+                                                          "- Nothing else falls back here [a.py:2]"],
+                                                    ["@ a.py:2", "> " + ALPHA[1], "= the fallback"],
+                                                    ["END returned @ a.py:2"]))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        _, out = self.new("1. What falls back in a.py?\n")
+        rid = os.path.basename(earlier)
+        self.assertRegex(out, rf"(?m)^FRESH {rid} node 1: .*`load_alpha` falls back to its default \[a\.py:2\]$")
+        self.assertRegex(out, r"(?m)^GAP Q1 · a closed-world claim .*Nothing else falls back here")
+        self.assertRegex(out, rf"(?m)^REWALK Q1 · {rid} node 1 · FROM a\.py:1 · files unchanged; re-walk for: "
+                              r"closed-world claim$")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 1 rows · a\.py$")
 
     def walked_twice(self):
         """Two earlier runs answering Q1 with different lines, the first started before the second."""
@@ -2627,7 +2644,8 @@ class StoreTest(unittest.TestCase):
         _, out = self.new(ASK_ALPHA)
         self.assertRegex(out, rf"(?m)^UNREADABLE {re.escape(earlier)}: cannot use .*1\.write\.json: JSONDecodeError")
         self.assertNotRegex(out, r"(?m)^FRESH ")
-        self.assertRegex(out, r"(?m)^REWALK Q1 · " + os.path.basename(earlier) + r" node 1 · FROM a\.py:1 · a\.py$")
+        self.assertRegex(out, r"(?m)^REWALK Q1 · " + os.path.basename(earlier) + r" node 1 · FROM a\.py:1 · "
+                              r"files not hashed; re-walk for: no BASE to check against$")
 
     def test_an_empty_store_says_so_and_new_without_questions_recalls_nothing(self):
         _, out = self.new(ASK_ALPHA)
@@ -2871,13 +2889,63 @@ class RecallTest(unittest.TestCase):
         return run
 
     def cut(self, out):
-        """(stale, delta, fresh, collapsed, markers) of the RECALL CUT line."""
-        m = re.search(r"(?m)^RECALL CUT (\d+) lines past the 12 KB cap · (\d+) stale, (\d+) delta, (\d+) fresh · "
-                      r"(\d+) collapsed to (\d+) CHANGED", out)
+        """(stale, delta, fresh, collapsed, markers) of the RECALL CUT line; its rewalk count through `folded`."""
+        m = re.search(r"(?m)^RECALL CUT (\d+) lines past the 12 KB cap · (\d+) stale, (\d+) delta, (\d+) rewalk, "
+                      r"(\d+) fresh · (\d+) collapsed to (\d+) CHANGED", out)
         self.assertIsNotNone(m, out)
-        n, s, d, f, c, k = map(int, m.groups())
-        self.assertEqual((n, c), (s + d + f, s + d), m.group(0))
+        n, s, d, w, f, c, k = map(int, m.groups())
+        self.assertEqual((n, c), (s + d + w + f, s + d), m.group(0))
+        self.folded = w
         return s, d, f, c, k
+
+    def test_rewalk_lines_past_the_cap_fold_before_any_fresh_row_goes(self):
+        fresh = self.run_with(self.repo, hops("1", ["- `Handle` refuses the empty target before `kill.Run` "
+                                                    "[app/srv/server.go:5]"], self.H5, ["END returned @ app/srv/server.go:5"]))
+        premise = ["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)", "= the premise"]
+        for r in range(6):
+            run = self.run_with(self.repo, "")
+            for x in range(1, 6):
+                with open(os.path.join(run, f"{x}.hops"), "w") as f:
+                    f.write(hops(str(x), [f"- `Handle` reaches the pane through premise {r}.{x} [app/kill/kill.go:6] "
+                                          "[app/srv/server.go:7]"], premise + self.H7, ["END returned @ app/kill/kill.go:6"]))
+                with open(os.path.join(run, f"{x}.started"), "w") as f:
+                    f.write("app/kill/kill.go:6\tQ1\n")
+        changed = list(KILL)
+        changed[5] = "\t\treturn nil"
+        self.edit("app/kill/kill.go", changed)
+        out = self.recall("".join(f"{n}. Where does `Handle` refuse, and is `kill.Run` reached?\n" for n in range(1, 7)))
+        self.assertEqual(len(re.findall(rf"(?m)^FRESH {os.path.basename(fresh)} node 1: ", out)), 6, out)
+        self.assertEqual(len(re.findall(r"(?m)^TRACE Q\d · 29 rows · app/kill/kill\.go, app/srv/server\.go$", out)), 6, out)
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        self.assertEqual(self.cut(out), (174, 0, 0, 174, 6), out)
+        folds = re.findall(r"(?m)^REWALK Q(\d) · (\d+) nodes cut by the cap · thread the rest of the TRACE Q\1 scope$", out)
+        self.assertEqual([q for q, _ in folds], [str(n) for n in range(1, 7)], out)
+        self.assertEqual(sum(int(k) for _, k in folds), self.folded, out)
+        for q, k in folds:
+            kept = re.findall(rf"(?m)^REWALK Q{q} · \d{{8}}-\d{{6}}-[0-9a-f]{{4}} node \d · FROM app/kill/kill\.go:6 · "
+                              r"files not hashed; re-walk for: stale cite$", out)
+            self.assertEqual(len(kept) + int(k), 29, out)
+
+    def test_past_the_cap_fresh_lines_go_first_from_the_question_least_served(self):
+        mixed = [f"- `kill.Run` closes the pane, case {i}: " + "word " * 300 + "[app/srv/server.go:7]" for i in range(4)]
+        run = self.run_with(self.repo, hops("1", mixed, self.H7, ["END returned @ app/srv/server.go:7"]))
+        with open(os.path.join(run, "2.hops"), "w") as f:
+            f.write(hops("2", [f"- `kill.Run` reaches the pane through premise {i} [app/kill/kill.go:6]" for i in range(20)],
+                         ["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                          "= the premise"], ["END returned @ app/kill/kill.go:6"]))
+        served = [f"- `Handle` refuses case {i}: " + "word " * 300 + "[app/srv/server.go:5]" for i in range(4)]
+        self.run_with(self.repo, hops("1", served, self.H5, ["END returned @ app/srv/server.go:5"]))
+        changed = list(KILL)
+        changed[5] = "\t\treturn nil"
+        self.edit("app/kill/kill.go", changed)
+        out = self.recall("1. Who calls `kill.Run`?\n2. Where does `Handle` refuse?\n")
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        self.assertGreater(self.cut(out)[2], 0, out)
+        self.assertRegex(out, r"(?m)^TRACE Q2 · none$")
+        self.assertEqual(len(re.findall(r"(?m)^FRESH .*`Handle` refuses case", out)), 4, out)
+        self.assertRegex(out, r"(?m)^REWALK Q1 · (?:1 nodes and )?[1-4] fresh lines cut by the cap · thread the rest of "
+                              r"the TRACE Q1 scope$")
+        self.assertNotRegex(out, r"(?m)^REWALK Q2 ")
 
     def test_past_the_cap_a_delta_line_collapses_to_one_changed_marker_per_question_and_path(self):
         self.crowded(fresh=12, words=150, delta=6)

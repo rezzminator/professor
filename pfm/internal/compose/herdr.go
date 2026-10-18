@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // herdrRows joins native seats before the shared kill and view eligibility pass.
@@ -45,10 +46,17 @@ func (current *composer) herdrRows() []Row {
 		row.LostNote = seat.LostNote
 		row.HerdrWorkspace = seat.HerdrWorkspace
 		row.ID = seat.SessionID
-		if seat.Name != "" {
+		switch {
+		case row.UserName != "" && !naming.LabelKilled(seat.Name):
+			// The engine's own user name (a Claude /rename's custom title, a
+			// Codex thread rename) is the newest a user chose: pfm chat name
+			// delivers its /rename to the engine before it renames the seat.
+			// A "_KILL…" seat label is a kill the user wrote: it names the row
+			// over any engine title.
+		case seat.Name != "":
 			// A seat's name is the user's (launch --name, pfm chat name) and
-			// names the row over the transcript's own.
-			row.Name, row.UserName = seat.Name, seat.Name
+			// names the row over the transcript's automatic one.
+			row.Name, row.UserName, row.UserNameKnown = seat.Name, seat.Name, true
 		}
 		row.Socket = seat.HerdrSocket
 		row.PaneID = seat.HerdrPane

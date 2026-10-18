@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -271,6 +274,81 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 					handled, code, stderr.String(), stdout.String(), mutations, tc.want)
 			}
 		})
+	}
+}
+
+// A live native chat born on another account than the picker's offers the
+// reboot before it moves into the picker's tab, as a view does: the gate is
+// asked once with the chat's birth account, and a refused offer moves the chat
+// as it is.
+func TestOpenNativeMoveHereOffersAccountChange(t *testing.T) {
+	testjail.Fleet(t)
+	var mutations []string
+	socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+		var pane string
+		_ = json.Unmarshal(req.Params["pane_id"], &pane)
+		switch req.Method {
+		case "pane.get":
+			info := testjail.HerdrPaneInfo(pane)
+			if pane == "w6:p5" {
+				info["pane"].(map[string]any)["tab_id"] = "w6:t2"
+			}
+			return info, ""
+		case "pane.process_info":
+			if pane == "w6:p5" {
+				return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+					"pane_id": pane, "shell_pid": 1,
+					"foreground_processes": []any{map[string]any{"pid": os.Getpid(), "name": "pfm"}},
+				}}, ""
+			}
+		}
+		if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+			return value, code
+		}
+		mutations = append(mutations, req.Method)
+		switch req.Method {
+		case "pane.move":
+			return map[string]any{"type": "pane_move", "move_result": map[string]any{
+				"changed": true, "previous_pane_id": "w6:p3", "previous_tab_id": "w6:t1",
+				"pane": map[string]any{"pane_id": "w6:p3", "tab_id": "w6:t2"},
+			}}, ""
+		case "pane.close":
+			return map[string]any{"type": "ok"}, ""
+		}
+		return nil, "unexpected_method"
+	})
+	runtime, db, seat := nativeChatSeat(t, socket, "live")
+	seat = nativeChatHost(t, db, seat, true)
+	runtime.Config = config.Config{
+		Accounts: []config.Account{{ID: 1, ConfigDir: "/fixture/cc/1"}, {ID: 2, ConfigDir: "/fixture/cc/2"}},
+	}
+	if err := db.WriteSeatRun(seat.SeatID, fleetdb.SeatRun{
+		Binary: "/fixture/claude", Env: []string{"CLAUDE_CONFIG_DIR=/fixture/cc/1"}, CWD: runtime.Paths.Home,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var gateRequests []action.GateRequest
+	previousGate := nativeAccountGate
+	t.Cleanup(func() { nativeAccountGate = previousGate })
+	nativeAccountGate = gateFunc(func(_ context.Context, request action.GateRequest) (bool, error) {
+		gateRequests = append(gateRequests, request)
+		return false, nil
+	})
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p5")
+	t.Setenv("TMUX", "")
+	var stdout, stderr bytes.Buffer
+	handled, code := openNativeRow(
+		context.Background(),
+		compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
+		2, false, &stdout, &stderr, runtime,
+	)
+	want := action.GateRequest{Name: seat.Name, BirthAccount: 1, PrimaryAccount: 2}
+	if !handled || code != 0 || len(gateRequests) != 1 || gateRequests[0] != want ||
+		strings.Join(mutations, " ") != "pane.move pane.close" {
+		t.Fatalf("handled=%v code=%d stderr=%q gate=%+v (want %+v) mutations=%q",
+			handled, code, stderr.String(), gateRequests, want, mutations)
 	}
 }
 

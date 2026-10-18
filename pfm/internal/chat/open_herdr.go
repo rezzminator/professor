@@ -272,6 +272,34 @@ func moveNativeHere(
 	}, nil
 }
 
+// moveLiveNativeHere is moveNativeHere under the seat's lock, on the seat as
+// it stands once the lock is held: the account offer ran unlocked, and a
+// reboot it ran may have replaced the seat; a seat that died meanwhile moves
+// nowhere and names it.
+func moveLiveNativeHere(
+	ctx context.Context,
+	runtime config.Runtime,
+	seat fleetdb.Seat,
+) (here bool, closeHere func() error, returnErr error) {
+	current, unlock, err := lockNativeSeat(ctx, runtime, seat)
+	if err != nil {
+		return false, nil, err
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("unlock native conversation: %w", err))
+		}
+	}()
+	current, alive, err := nativeAlive(ctx, current, runtime.Paths)
+	if err != nil {
+		return false, nil, err
+	}
+	if !alive {
+		return false, nil, fmt.Errorf("native seat %s died before it moved into this pane", current.SeatID)
+	}
+	return moveNativeHere(ctx, runtime, current)
+}
+
 func openNativeRow(
 	ctx context.Context,
 	row compose.Row,
@@ -356,16 +384,21 @@ func openNativeRow(
 			}
 		}
 		if err == nil {
+			// A terminal attach may last the whole interactive session; do not hold the
+			// replacement/restore lock while viewing the already proved live seat.
+			err = unlock()
+			unlock = nil
+			// The account offer comes first, wherever the chat opens: a reboot
+			// it runs takes the seat's lock itself and may name a new seat.
+			if err == nil {
+				seat, err = offerNativeAccount(ctx, seat, primary, cache1H, stderr, runtime)
+			}
 			// Inside a Herdr pane on the chat's server the chat comes to this
-			// pane's place; the lock is held while it moves.
+			// pane's place; the lock is held again while it moves.
 			var here bool
 			var closeHere func() error
-			here, closeHere, err = moveNativeHere(ctx, runtime, seat)
 			if err == nil {
-				// A terminal attach may last the whole interactive session; do not hold the
-				// replacement/restore lock while viewing the already proved live seat.
-				err = unlock()
-				unlock = nil
+				here, closeHere, err = moveLiveNativeHere(ctx, runtime, seat)
 			}
 			if err == nil && here {
 				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
@@ -377,9 +410,6 @@ func openNativeRow(
 					}
 				}
 				return true, 0
-			}
-			if err == nil {
-				seat, err = offerNativeAccount(ctx, seat, primary, cache1H, stderr, runtime)
 			}
 			if err == nil {
 				err = viewNative(ctx, seat, stdout, stderr)

@@ -452,6 +452,29 @@ func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
 				t.Fatalf("native resume=%+v", result)
 			}
 			assertNativeReloadFilesGone(t, reloadFiles)
+			if backend != "herdr" {
+				return
+			}
+			// A stale exact row fails closed; the refreshed row finds the
+			// completed birth and lays out no second tab.
+			stale := headless.Chat{
+				ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr",
+				Socket: seat.HerdrSocket, Pane: seat.HerdrPane,
+			}
+			if _, err := OpenDetachedTarget(ctx, stale, io.Discard, &runtime); err == nil {
+				t.Fatal("stale exact row unexpectedly resolved")
+			}
+			current, found, err := db.SeatBySession(ctx, seat.SessionID)
+			if err != nil || !found || current.HerdrPane != "w6:p9" {
+				t.Fatalf("replacement ownership lost: seat=%+v found=%t err=%v", current, found, err)
+			}
+			current = nativeChatHost(t, db, current, true)
+			stale.SeatID = current.SeatID
+			stale.Socket, stale.Pane = current.HerdrSocket, current.HerdrPane
+			result, err = OpenDetachedTarget(ctx, stale, io.Discard, &runtime)
+			if err != nil || result.State != "live" || len(layouts) != 1 {
+				t.Fatalf("retry duplicated birth: result=%+v err=%v layouts=%d", result, err, len(layouts))
+			}
 		})
 	}
 }

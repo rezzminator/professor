@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -208,24 +209,48 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 // is reserved for the caller's own pane, the line the shell runs is the
 // seat-host exec that makes the pane's process the chat, no new tab is laid
 // out, and the caller's sole tab takes the chat's label (a named launch its
-// name, a resume its row's name, an unnamed chat its project folder). A tab
-// Herdr will not read keeps its label, named on stderr, and the birth proceeds.
+// name, a resume its row's name, an unnamed chat its project folder); a label
+// the user set on the tab stays against every name but one a user chose (a
+// launch name, a resumed chat's user name). A tab Herdr will not read keeps
+// its label, named on stderr, and the birth proceeds; a pane this process
+// does not front is left alone and the chat is born in a new tab.
 func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 	const resumeID = "abcdef12-1234-1234-1234-123456789abc"
 	for _, test := range []struct {
 		name, launchName, label, refuse string
 		row                             compose.Row
+		// handLabel: pfm labelled the tab "PFM" before, then the user set
+		// "work" on it in Herdr; label "work" says it stays.
+		handLabel bool
 	}{
-		{"a named new claude chat", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}},
-		{"an unnamed new claude chat", "", "", "", compose.Row{Kind: compose.NewClaude}},
-		{"a new codex chat", "", "", "", compose.Row{Kind: compose.NewCodex}},
-		{"a new opencode chat", "", "", "", compose.Row{Kind: compose.NewOpenCode}},
-		{"a named claude resume", "", "OLD CHAT", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "OLD CHAT"}},
-		{"an unnamed claude resume", "", "", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID}},
-		{"a codex resume", "", "", "", compose.Row{Kind: compose.ResumeCodex, ID: resumeID}},
-		{"an opencode resume", "", "", "", compose.Row{Kind: compose.ResumeOpenCode, ID: resumeID}},
-		{"a tab Herdr will not read", "", "", "tab.get", compose.Row{Kind: compose.NewClaude}},
-		{"a pane this process does not front", "", "", "stale", compose.Row{Kind: compose.NewClaude}},
+		{"a named new claude chat", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}, false},
+		{"an unnamed new claude chat", "", "", "", compose.Row{Kind: compose.NewClaude}, false},
+		{"a new codex chat", "", "", "", compose.Row{Kind: compose.NewCodex}, false},
+		{"a new opencode chat", "", "", "", compose.Row{Kind: compose.NewOpenCode}, false},
+		{
+			"a named claude resume", "", "OLD CHAT", "",
+			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "OLD CHAT"},
+			false,
+		},
+		{"an unnamed claude resume", "", "", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID}, false},
+		{"a codex resume", "", "", "", compose.Row{Kind: compose.ResumeCodex, ID: resumeID}, false},
+		{"an opencode resume", "", "", "", compose.Row{Kind: compose.ResumeOpenCode, ID: resumeID}, false},
+		{"a tab Herdr will not read", "", "", "tab.get", compose.Row{Kind: compose.NewClaude}, false},
+		{"a pane this process does not front", "", "", "stale", compose.Row{Kind: compose.NewClaude}, false},
+		{
+			"a hand-set label against an AI title", "", "work", "",
+			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "AI TITLE"},
+			true,
+		},
+		{
+			"a hand-set label against the project folder", "", "work", "", compose.Row{Kind: compose.NewClaude}, true,
+		},
+		{"a hand-set label against a launch name", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}, true},
+		{
+			"a hand-set label against a resumed chat's user name", "", "MINE", "",
+			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "MINE", UserName: "MINE"},
+			true,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -257,22 +282,36 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 			row := test.row
 			row.CWD = home
 			label := cmp.Or(test.label, filepath.Base(home))
+			if test.handLabel {
+				var seq uint64
+				next := func() uint64 { seq++; return seq }
+				if err := herdr.LabelSoleTab(context.Background(), fake.socket, "w6:t1", "PFM", next); err != nil {
+					t.Fatal(err)
+				}
+				fake.mu.Lock()
+				fake.label, fake.renames = "work", nil
+				fake.mu.Unlock()
+			}
 			line, err := executor.Open(context.Background(), Request{
 				Row: row, LaunchName: test.launchName, Home: home, PrimaryAccount: 2,
 				FreshSocket: "unused", Config: machine,
 			})
 			if test.refuse == "stale" {
-				// A stale or inherited HERDR_PANE_ID: nothing reserved, nothing relabelled.
+				// A stale or inherited HERDR_PANE_ID: that pane is neither reserved
+				// nor relabelled, and the chat is born in a new tab, named on stderr.
 				db := fleetdb.OpenSharedState(context.Background(), values)
-				_, found, readErr := db.SeatByPane(context.Background(), fake.socket, "w6:p3")
+				_, here, hereErr := db.SeatByPane(context.Background(), fake.socket, "w6:p3")
+				tabbed, found, readErr := db.SeatByPane(context.Background(), fake.socket, "w6:p9")
 				if closeErr := db.Close(); closeErr != nil {
 					t.Error(closeErr)
 				}
-				_, renames := fake.seen()
-				if err == nil || !strings.Contains(err.Error(), "ownership unproved") || line != "" || found ||
-					readErr != nil || len(renames) != 0 {
-					t.Fatalf("stale pane open line=%q err=%v seat found=%v (%v) renames=%q",
-						line, err, found, readErr, renames)
+				methods, renames := fake.seen()
+				if err != nil || line != "" || here || hereErr != nil || !found || readErr != nil ||
+					tabbed.Backend != "herdr" || !slices.Contains(methods, "layout.apply") || len(renames) != 0 ||
+					!strings.Contains(stderr.String(), "does not front Herdr pane w6:p3") {
+					t.Fatalf("stale pane open line=%q err=%v caller seat=%v (%v) new tab seat=%+v found=%v (%v) "+
+						"methods=%q renames=%q stderr=%q",
+						line, err, here, hereErr, tabbed, found, readErr, methods, renames, stderr.String())
 				}
 				return
 			}
@@ -309,7 +348,11 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 				}
 				return
 			}
-			if want := []string{"w6:t1=" + label}; !slices.Equal(renames, want) {
+			want := []string{"w6:t1=" + label}
+			if label == "work" {
+				want = nil
+			}
+			if !slices.Equal(renames, want) {
 				t.Fatalf("tab renames = %q, want %q (methods %q)", renames, want, methods)
 			}
 		})
@@ -325,6 +368,7 @@ type pickerHerdr struct {
 	methods []string
 	renames []string
 	refuse  string // the one method answered with a refusal
+	label   string // the tab's label, "2" until a rename or a test sets it
 }
 
 func (fake *pickerHerdr) seen() (methods, renames []string) {
@@ -369,9 +413,11 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 				fake.mu.Lock()
 				refused, stale := req.Method == fake.refuse, fake.refuse == "stale"
 				fake.methods = append(fake.methods, req.Method)
-				if req.Method == "tab.rename" {
+				if req.Method == "tab.rename" && !refused {
 					fake.renames = append(fake.renames, req.Params.TabID+"="+req.Params.Label)
+					fake.label = req.Params.Label
 				}
+				label := cmp.Or(fake.label, "2")
 				fake.mu.Unlock()
 				if refused {
 					_, _ = fmt.Fprintf(
@@ -386,10 +432,6 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 				case "pane.get", "pane.focus":
 					result = testjail.HerdrPaneInfo(req.Params.PaneID)
 				case "tab.get", "tab.rename":
-					label := "2"
-					if req.Method == "tab.rename" {
-						label = req.Params.Label
-					}
 					result = map[string]any{
 						"type": "tab_info",
 						"tab":  map[string]any{"tab_id": req.Params.TabID, "label": label, "pane_count": 1},

@@ -135,9 +135,12 @@ func (tmux TmuxSpawner) NewSession(
 	}
 	arguments = append(arguments, launch.Command)
 	// An exact chat name rides in the same tmux command as the session, so the
-	// Herdr reporter reads it from the first client attach; an unnamed chat
-	// sets nothing.
-	if spec.ChatName != "" {
+	// Herdr reporter reads it from the first client attach; a name no user
+	// chose is marked automatic too, and an unnamed chat sets nothing.
+	switch {
+	case spec.ChatName != "" && spec.ChatNameAutomatic:
+		arguments = append(append(arguments, ";"), gather.AutomaticChatNameCommand(spec.Session, spec.ChatName)...)
+	case spec.ChatName != "":
 		arguments = append(append(arguments, ";"), gather.ChatNameCommand(spec.Session, spec.ChatName)...)
 	}
 	command, err := tmux.newSessionCommand(

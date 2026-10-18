@@ -273,14 +273,16 @@ func TestTabStatusChatRenameReachesTheTab(t *testing.T) {
 // (an AI title, a first prompt), never against a name the user chose later: a
 // Claude /rename (its custom title) or a Codex thread rename replaces it, and
 // the tab follows the chat's name again. A record written before the painter
-// saw user names starts following them without a rename.
+// saw user names, or one only rows not yet read from their source reached (a
+// booting chat), starts following them without a rename.
 func TestTabStatusUserRenameReplacesAUserLabel(t *testing.T) {
 	f := newTabStatusFixture()
 	dir := t.TempDir()
 	d := tabObservation("blocked")
+	known := true
 	tick := func(name, user, want string) {
 		t.Helper()
-		d.Name, d.UserName = name, user
+		d.Name, d.UserName, d.UserKnown = name, user, known
 		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
 			t.Fatal(err)
 		}
@@ -324,6 +326,18 @@ func TestTabStatusUserRenameReplacesAUserLabel(t *testing.T) {
 	f, dir = legacy, legacyDir
 	tick("Named", "Named", "Mine")
 	tick("Named again", "Named again", "Named again")
+
+	// A resumed chat booting in a tab: its rows carry no user name until its
+	// transcript is read, and the user labels the tab meanwhile. The custom
+	// title the chat already had, first read then, is no rename.
+	f, dir = newTabStatusFixture(), t.TempDir()
+	known = false
+	tick("Chat", "", "Chat")
+	f.label = "Mine"
+	tick("Chat", "", "Mine")
+	known = true
+	tick("Old title", "Old title", "Mine")
+	tick("New title", "New title", "New title")
 }
 
 func TestTabStatusTopologyAndGeneration(t *testing.T) {

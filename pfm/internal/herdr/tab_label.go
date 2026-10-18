@@ -45,8 +45,10 @@ func labelTabByPolicy(ctx context.Context, socket, tab, label string, explicit b
 }
 
 // LabelPaneTab labels the tab pane sits in, found by pane.get, through
-// LabelSoleTab: a tab the pane shares with another answers ErrTabNotSole.
-func LabelPaneTab(ctx context.Context, socket, pane, label string) error {
+// LabelSoleTab when explicit says a user chose the name, else through
+// ReannounceSoleTab, so a label the user set in Herdr stays: a tab the pane
+// shares with another answers ErrTabNotSole.
+func LabelPaneTab(ctx context.Context, socket, pane, label string, explicit bool) error {
 	body, err := SeatRequest(ctx, socket, "pane.get", map[string]string{"pane_id": pane})
 	if err != nil {
 		return fmt.Errorf("read Herdr pane %s: %w", pane, err)
@@ -65,7 +67,11 @@ func LabelPaneTab(ctx context.Context, socket, pane, label string) error {
 	}
 	var seq uint64
 	next := func() uint64 { seq++; return seq }
-	if err := LabelSoleTab(ctx, socket, reply.Pane.Tab, label, next); err != nil {
+	write := ReannounceSoleTab
+	if explicit {
+		write = LabelSoleTab
+	}
+	if err := write(ctx, socket, reply.Pane.Tab, label, next); err != nil {
 		return fmt.Errorf("tab %s of pane %s: %w", reply.Pane.Tab, pane, err)
 	}
 	return nil
@@ -87,9 +93,10 @@ type tabLabelRecord struct {
 	// (LabelSoleTab) or a change of the chat's user name (SeenUser).
 	UserSet bool
 	// SeenUser is the chat's user name (TabDecoration.UserName) the status
-	// painter last saw, UserSeen whether it saw one at all: a record written
-	// before the painter followed user names starts following without a
-	// rename.
+	// painter last saw on a row read from its source (UserKnown), UserSeen
+	// whether it saw such a row at all: a record written before the painter
+	// followed user names, or one only booting rows reached, starts following
+	// without a rename.
 	SeenUser string
 	UserSeen bool
 	// Pending is the label of a tab.rename whose answer was lost: Herdr may

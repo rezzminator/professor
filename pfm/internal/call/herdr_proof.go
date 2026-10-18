@@ -82,6 +82,11 @@ func ProveHerdrOwnPane(ctx context.Context, socket, pane string) error {
 	return proveOwnPane(ctx, socket, pane, os.Getpid(), foreground)
 }
 
+// ErrHerdrPaneNotOwn is ProveHerdrOwnPane's answer for a pane Herdr read
+// whose foreground does not hold this process (a stale or inherited
+// HERDR_PANE_ID): the pane is not this process's, and no read failed.
+var ErrHerdrPaneNotOwn = errors.New("the pane's foreground does not hold this process")
+
 func proveOwnPane(
 	ctx context.Context,
 	socket, pane string,
@@ -94,10 +99,11 @@ func proveOwnPane(
 	}
 	if !slices.Contains(pids, pid) {
 		return fmt.Errorf(
-			"herdr pane %s ownership unproved: its foreground processes %v do not hold this process %d",
+			"herdr pane %s ownership unproved: its foreground processes %v do not hold this process %d: %w",
 			pane,
 			pids,
 			pid,
+			ErrHerdrPaneNotOwn,
 		)
 	}
 	return nil

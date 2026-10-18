@@ -34,9 +34,14 @@ type TabDecoration struct {
 	// change of it replaces a label the user set in Herdr, a change of Name
 	// alone does not.
 	UserName string
-	Revision uint64
-	Session  json.RawMessage
-	Validate func(context.Context) (bool, error)
+	// UserKnown says UserName was read from the chat's indexed source
+	// (compose.Row.UserNameKnown): only such a row is a name the painter
+	// follows, so a row whose source is not read yet (a booting chat) never
+	// reads as the chat's first user name.
+	UserKnown bool
+	Revision  uint64
+	Session   json.RawMessage
+	Validate  func(context.Context) (bool, error)
 	// Retained marks a view whose live owner is gone (a bridge tab whose tmux
 	// client exited): it carries no Validate and is acted on only while pfm's
 	// own label record for the tab names its Identity and the tab still shows
@@ -252,7 +257,8 @@ func reconcileTab(
 			case record.Seen == "":
 				// A record no painter followed yet: follow the chat's name from here.
 				record.Seen = d.Name
-			case record.UserSet && record.UserSeen && d.UserName != "" && d.UserName != record.SeenUser:
+			case record.UserSet && record.UserSeen && d.UserKnown && d.UserName != "" &&
+				d.UserName != record.SeenUser:
 				// The user chose a new name for the chat (a Claude /rename, a
 				// Codex thread rename): newer than the label the user set.
 				record.Base, record.Seen, record.UserSet = d.Name, d.Name, false
@@ -265,9 +271,10 @@ func reconcileTab(
 				record.Base, record.Seen = d.Name, d.Name
 			}
 		}
-		if d.Mode != TabStatusOff {
-			// A row that carries no user name (a booting chat) is no rename:
-			// the last user name seen stays the one a change is told by.
+		if d.Mode != TabStatusOff && d.UserKnown {
+			// Only a row read from its source is followed: the first one seen
+			// is the baseline a later user rename is told by, never a rename
+			// itself; a known row with no user name keeps the last one seen.
 			if d.UserName != "" {
 				record.SeenUser = d.UserName
 			}

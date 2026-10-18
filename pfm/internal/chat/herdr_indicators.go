@@ -95,7 +95,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		}
 		for i := range views {
 			view := views[i]
-			view.Name, view.UserName = target.Name, row.UserName
+			view.Name, view.UserName, view.UserKnown = target.Name, row.UserName, row.UserNameKnown
 			view.State = state
 			view.Mode = mode
 			decorations = append(decorations, view)

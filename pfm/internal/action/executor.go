@@ -182,10 +182,30 @@ func (executor *Executor) Open(
 					return "", err
 				}
 			}
+			seat := fleetdb.Seat{
+				SessionID: sessionID,
+				Engine:    string(engineID),
+				Name:      request.LaunchName,
+			}
 			// Born in place only in a pane this process provably fronts: a stale
 			// or inherited HERDR_PANE_ID (a shell inside tmux, an agent's tool
-			// call) names a pane pfm neither reserves nor relabels.
-			if proveErr := pfmcall.ProveHerdrOwnPane(ctx, choice.HerdrSocket, choice.HerdrPane); proveErr != nil {
+			// call) names a pane pfm neither reserves nor relabels, so the chat
+			// is born in a new tab of the workspace instead.
+			proveErr := pfmcall.ProveHerdrOwnPane(ctx, choice.HerdrSocket, choice.HerdrPane)
+			if errors.Is(proveErr, pfmcall.ErrHerdrPaneNotOwn) {
+				spawned, spawnErr := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
+					Choice: choice, Paths: values, Run: *plan.SeatRun, Seat: seat,
+				})
+				if spawnErr != nil {
+					return "", spawnErr
+				}
+				fmt.Fprintf(executor.stderr, "pfm: this process does not front Herdr pane %s (%v); "+
+					"the chat opened in a new tab, pane %s\n", choice.HerdrPane, proveErr, spawned.Seat.HerdrPane)
+				executor.recordLaunch(ctx, plan.Record)
+				launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
+				return "", nil
+			}
+			if proveErr != nil {
 				return "", fmt.Errorf("open in this Herdr pane: %w", proveErr)
 			}
 			// The chat is born in the caller's own pane: the reservation names
@@ -197,18 +217,22 @@ func (executor *Executor) Open(
 					Choice: choice,
 					Paths:  values,
 					Run:    *plan.SeatRun,
-					Seat: fleetdb.Seat{
-						SessionID: sessionID,
-						Engine:    string(engineID),
-						Name:      request.LaunchName,
-					},
+					Seat:   seat,
 				},
 			)
 			if prepareErr != nil {
 				return "", prepareErr
 			}
-			label := spawn.BirthTabLabel(cmp.Or(request.LaunchName, request.Row.Name), plan.SeatRun.CWD)
-			if labelErr := herdr.LabelPaneTab(ctx, choice.HerdrSocket, choice.HerdrPane, label); labelErr != nil &&
+			// Only a name a user chose (launch --name, a resumed chat's own
+			// user name) replaces a label the user set on this tab; an AI
+			// title, a first prompt or the project folder is re-announced.
+			name := cmp.Or(request.LaunchName, request.Row.Name)
+			userChose := request.LaunchName != "" ||
+				request.Row.UserName != "" && request.Row.Name == request.Row.UserName
+			label := spawn.BirthTabLabel(name, plan.SeatRun.CWD)
+			if labelErr := herdr.LabelPaneTab(
+				ctx, choice.HerdrSocket, choice.HerdrPane, label, userChose,
+			); labelErr != nil &&
 				!errors.Is(labelErr, herdr.ErrTabNotSole) {
 				// The birth proceeds: the tab keeps its label until the chat's
 				// name reaches it.

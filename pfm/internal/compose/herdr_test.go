@@ -208,20 +208,29 @@ func TestHerdrSeatsSuppressOnlyMatchingProcessAgents(t *testing.T) {
 
 // A row's UserName is the part of its name a user chose: a Claude chat's
 // custom title (its /rename), a Codex thread's indexed name, a native seat's
-// name (launch --name, pfm chat name), which names the row over the custom
-// title; a chat named by its AI title or first prompt has none.
+// name (launch --name, pfm chat name) when the engine carries none, so a
+// /rename inside a named seat names its row; a chat named by its AI title or
+// first prompt has none. Every row read from its indexed source says so.
 func TestRowUserNameIsTheNameAUserChose(t *testing.T) {
 	renamed := transcript("cc-renamed", "/claude/cc-renamed.jsonl", "/work", "Mine", 100, 1, 1000)
 	renamed.AITitle = "AI title"
 	titled := transcript("cc-titled", "/claude/cc-titled.jsonl", "/work", "", 100, 1, 1000)
 	titled.AITitle, titled.FirstPrompt = "AI title", "first prompt"
 	seated := transcript("cc-seated", "/claude/cc-seated.jsonl", "/work", "Custom", 100, 1, 1000)
+	named := transcript("cc-named", "/claude/cc-named.jsonl", "/work", "", 100, 1, 1000)
+	named.AITitle = "AI title"
 	output := Compose(Input{
-		Transcripts: []store.Transcript{renamed, titled, seated},
-		HerdrSeats: []gather.HerdrSeat{{Seat: fleetdb.Seat{
-			SeatID: "native", SessionID: "cc-seated", Engine: "cc", Backend: "herdr", State: "live",
-			Name: "Seat name", HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
-		}}},
+		Transcripts: []store.Transcript{renamed, titled, seated, named},
+		HerdrSeats: []gather.HerdrSeat{
+			{Seat: fleetdb.Seat{
+				SeatID: "renamed-seat", SessionID: "cc-seated", Engine: "cc", Backend: "herdr", State: "live",
+				Name: "Seat name", HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
+			}},
+			{Seat: fleetdb.Seat{
+				SeatID: "named-seat", SessionID: "cc-named", Engine: "cc", Backend: "herdr", State: "live",
+				Name: "Seat name", HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p4",
+			}},
+		},
 		Rollouts: []store.Rollout{
 			userNameRollout("cx-named"),
 			userNameRollout("cx-prompt"),
@@ -236,7 +245,7 @@ func TestRowUserNameIsTheNameAUserChose(t *testing.T) {
 		{"cx-prompt", "fp", ""},
 	} {
 		row, found := rowByID(output.Rows, test.id)
-		if !found || row.Name != test.name || row.UserName != test.user {
+		if !found || row.Name != test.name || row.UserName != test.user || !row.UserNameKnown {
 			t.Fatalf(
 				"row %s = %#v (found %v), want name %q and user name %q",
 				test.id,
@@ -247,12 +256,18 @@ func TestRowUserNameIsTheNameAUserChose(t *testing.T) {
 			)
 		}
 	}
-	native := slices.IndexFunc(output.Rows, func(row Row) bool { return row.SeatID == "native" })
-	if native < 0 {
-		t.Fatalf("rows = %#v, want the native seat's row", output.Rows)
-	}
-	if row := output.Rows[native]; row.Name != "Seat name" || row.UserName != "Seat name" {
-		t.Fatalf("native seat row name %q user name %q, want both the seat's %q", row.Name, row.UserName, "Seat name")
+	for _, test := range []struct{ seat, name string }{
+		{"renamed-seat", "Custom"},
+		{"named-seat", "Seat name"},
+	} {
+		native := slices.IndexFunc(output.Rows, func(row Row) bool { return row.SeatID == test.seat })
+		if native < 0 {
+			t.Fatalf("rows = %#v, want the native seat %s's row", output.Rows, test.seat)
+		}
+		if row := output.Rows[native]; row.Name != test.name || row.UserName != test.name || !row.UserNameKnown {
+			t.Fatalf("native seat %s row name %q user name %q (known %v), want both %q",
+				test.seat, row.Name, row.UserName, row.UserNameKnown, test.name)
+		}
 	}
 }
 

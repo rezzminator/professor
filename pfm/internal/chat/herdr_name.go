@@ -120,7 +120,7 @@ func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.S
 // labelNativeTab labels the tab the seat's pane sits in with the chat's name
 // when the pane sits in it alone.
 func labelNativeTab(ctx context.Context, target headless.Chat, name string) error {
-	err := herdr.LabelPaneTab(ctx, target.Socket, target.Pane, name)
+	err := herdr.LabelPaneTab(ctx, target.Socket, target.Pane, name, true)
 	if errors.Is(err, herdr.ErrTabNotSole) {
 		// A tab the chat shares keeps the user's label: the pane title carries the name.
 		return nil

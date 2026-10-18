@@ -27,14 +27,15 @@ func TestHerdrTabProviderNativeAndMultipleTmuxViews(t *testing.T) {
 		scan: func(context.Context) (FleetScan, error) {
 			return FleetScan{Rows: []compose.Row{
 				{
-					Backend:  "herdr",
-					SeatID:   "seat",
-					ID:       "s1",
-					Socket:   "endpoint",
-					PaneID:   "w1:p1",
-					Name:     "Native",
-					UserName: "Native",
-					Kind:     compose.LiveClaude,
+					Backend:       "herdr",
+					SeatID:        "seat",
+					ID:            "s1",
+					Socket:        "endpoint",
+					PaneID:        "w1:p1",
+					Name:          "Native",
+					UserName:      "Native",
+					UserNameKnown: true,
+					Kind:          compose.LiveClaude,
 				},
 				{ID: "s2", Socket: "tmux", Name: "Tmux", Kind: compose.LiveClaude},
 			}}, nil
@@ -60,8 +61,9 @@ func TestHerdrTabProviderNativeAndMultipleTmuxViews(t *testing.T) {
 		}
 		// The chat's user name rides with its name: the painter tells a
 		// /rename from an automatic name by it.
-		if want := map[string]string{"native": "Native", "tmux": ""}[d.Identity]; d.UserName != want {
-			t.Fatalf("decoration %s user name = %q, want %q", d.Identity, d.UserName, want)
+		want := map[string]string{"native": "Native", "tmux": ""}[d.Identity]
+		if d.UserName != want || d.UserKnown != (d.Identity == "native") {
+			t.Fatalf("decoration %s user name = %q (known %v), want %q", d.Identity, d.UserName, d.UserKnown, want)
 		}
 	}
 }

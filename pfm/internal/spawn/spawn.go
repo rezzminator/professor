@@ -133,12 +133,13 @@ func Run(
 		Session: request.Socket,
 		Window:  window,
 		// The exact name; WindowName above is its clipped, tmux-safe form.
-		ChatName: request.Name,
-		CWD:      request.CWD,
-		Run:      request.Run,
-		Binary:   request.Binary,
-		Width:    request.Width,
-		Height:   request.Height,
+		ChatName:          request.Name,
+		ChatNameAutomatic: request.NameAutomatic,
+		CWD:               request.CWD,
+		Run:               request.Run,
+		Binary:            request.Binary,
+		Width:             request.Width,
+		Height:            request.Height,
 	}
 	if spec.Width <= 0 {
 		spec.Width = 220

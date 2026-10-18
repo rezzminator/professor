@@ -202,16 +202,21 @@ type Row struct {
 	WindowName  string
 	Name        string
 	// UserName is the part of Name a user chose: a Claude chat's custom title
-	// (its /rename), a Codex thread's indexed name; empty when Name is
-	// automatic (an AI title, a first prompt).
-	UserName    string
-	LastPrompt  string
-	Workbench   string
-	Engines     []pfmengine.ID
-	Project     string
-	CWD         string
-	Size        int64
-	PromptCount int64
+	// (its /rename), a Codex thread's indexed name, a native seat's name when
+	// the engine carries none; empty when Name is automatic (an AI title, a
+	// first prompt).
+	UserName string
+	// UserNameKnown says UserName was read from an indexed source (the
+	// transcript, the rollout, the seat): an empty UserName then means the
+	// chat has none, never that its source was not read yet.
+	UserNameKnown bool
+	LastPrompt    string
+	Workbench     string
+	Engines       []pfmengine.ID
+	Project       string
+	CWD           string
+	Size          int64
+	PromptCount   int64
 	// AssistantCount is set only for a ResumeOpenCode row: an OpenCode
 	// session has no file size, so its reality signal is prompts answered,
 	// not bytes on disk. A session with prompts but no assistant reply is

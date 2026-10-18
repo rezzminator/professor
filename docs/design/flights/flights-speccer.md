@@ -8,6 +8,7 @@ The agent that writes the spec for novel, large work the codebase has no pattern
 - [Why a context of its own](#why-a-context-of-its-own)
 - [Cost per worth leads](#cost-per-worth-leads)
 - [The flavour it carries](#the-flavour-it-carries)
+- [Why it designs toward the objective](#why-it-designs-toward-the-objective)
 - [How it learns what it decides on](#how-it-learns-what-it-decides-on)
 - [spec.md and its readers](#specmd-and-its-readers)
 - [Return](#return)
@@ -44,8 +45,15 @@ Precision and elegance, never grandeur:
 - Sized to the ask: a section that does not apply is omitted, never filled; `## How it is met` exists only where a real user or operator meets the built thing.
 - Shown running early: a spec too big for one flight splits into phases, each its own flight, the first ending at something the user can see working.
 - Every fork closed, the user's kept the user's: every open technical fork is decided; one only the user can settle (scope, money, an outward-facing or legal step) returns `BLOCKED` with its question, unless the brief carries the user's authority to decide forks (a "god speed" ruling), and only then is decided and marked `USER` with what flips it, so nothing returns `BLOCKED` with a question under that authority; a paid service, or data sent to an outside processor not already in use, that the request neither names nor plainly entails is never chosen under it: the option needing neither is taken and marked `USER`, the service or processor named in `## Open` as left for the user, and where every option needs one the rest is specced and that requested element left in `## Open` as `UNBUILT {element}`.
+- Aimed at the objective, bounded by the request: the `## Objective` of `requirements.md` (inferred from the request and marked `inferred` in `## Order` when the brief carries none) steers every choice the words leave open; `## The idea` says how the design serves it, and each place the request falls short of it or works against it is a question in `## Open`. What the objective needs to hold without a human (access, a verification tool, a reproduction harness) is designed and priced as its own element, and put to the user as a question when the request does not ask for it.
 - Scope stays the request's, fixed values bind as given, and the target's real limits bind.
 - Plain return: seven fixed lines.
+
+## Why it designs toward the objective
+
+A design that meets only the literal request can be correct and still miss what the user is after. Felix Rieseberg's essay *How to be more ambitious: A tutorial for humans with models* puts it as "considering the outcome rather than the individual task", and its example of an outcome is "Eventually I asked Claude to simply keep our apps crash-free." An outcome like that holds only once the agent can work without a person in the loop. The essay: "in order to let Claude make sure our app is crash-free, I first had to make sure it can easily fetch crash reports, understand which app version maps to what git commit, and give it access to Windows, macOS, and Linux computers so it can actually independently reproduce and verify fixes." So the speccer names these enablers as elements of the design, each priced and judged like any other, rather than leaving them for the user to find later.
+
+The objective never widens the flight on its own. The stated request bounds the scope, which `/flights:spec` keeps from narrowing or widening silently; an enabler or a gap the request does not cover reaches the user as an `## Open` question, because building it would be a scope the user never ruled.
 
 ## How it learns what it decides on
 
@@ -58,7 +66,7 @@ Precision and elegance, never grandeur:
 
 | Section | Read by |
 | --- | --- |
-| `## Order`, `## Requirements`, `## Decisions` | the foreman, as rulings; its design file (`design.md`, a child's `design-{unit}.md`) cites the `D` ids, and each child's brief carries the `spec.md` path and the `D` ids its rows rest on |
+| `## Order`, `## Requirements`, `## Decisions` | the foreman, as rulings, the objective in `## Order` as intent that binds nothing; its design file (`design.md`, a child's `design-{unit}.md`) cites the `D` ids, and each child's brief carries the `spec.md` path and the `D` ids its rows rest on |
 | `## Phases` | the caller, which runs one foreman and landing per phase; the foreman builds the phase its brief names, else the first, and its return names the next |
 | `## Layout`, `## Tests` | the foreman, for the homes and the tiers |
 | `## Dependencies`, `## Connectivity`, `## What the material holds` | the foreman, as evidence for its door list |

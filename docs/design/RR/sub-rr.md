@@ -1,6 +1,6 @@
 # sub-rr
 
-`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and returns a quote-anchored finding per sub-query plus every rabbit hole its sources raised. It is spawned only by `rr`, `rr-pro` and `rr-pro-max`, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
+`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and returns a quote-anchored finding per sub-query, each read through its sub-area's lens, plus every rabbit hole its sources raised. It is spawned only by `rr`, `rr-pro`, `rr-pro-max` and their `gpt-` twins, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
 
 ## Contents
 
@@ -19,24 +19,31 @@
 | --- | --- |
 | Kind | original agent, `templates/global/agents/sub-rr.md`, linked by `pfm install` |
 | Class | `RR-ONLY` |
-| Model, effort | `sonnet`, `low` |
+| Model, effort | `haiku`, `medium` |
 | Tools | `WebSearch, WebFetch, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` |
 | Spawns | nothing — it holds no `Agent` |
 | Writes | nothing — it holds no `Write`, `Edit` or `Bash` |
 
-Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro and rr-pro-max, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
+Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro, rr-pro-max and their gpt- twins, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
 
 ## The brief it receives
 
-The lead writes each brief from one group of its frontier (one unsettled sub-area):
+The lead writes each brief from one group of its frontier (one unsettled sub-area, or several merged past the cap), one block per sub-area:
 
-- a numbered list of self-contained sub-queries, one subject each, named in full;
-- the pages already read for that group, each with what it lacked — the digger skips them;
+- its plan line, `{sub-area} — settled when {evidence}`;
+- its lens line, `Lens: {field} — method: {how that field settles the question}; sources: {the raw material it starts from}`;
+- its sub-queries, numbered on across the brief, self-contained, one subject each, named in full; each is answered through the `Lens:` line above it, a positional match a `haiku` digger makes without judgment;
+
+then, once for the brief:
+
+- the pages already read for its groups, each with what it lacked — the digger skips them;
 - one `Goal:` line, the query in one line, identical in every brief of the run, which fills the footer's `{goal}` slot so rabbit holes serve the run and not the page in general.
+
+A red-team brief is just another lens: its `Lens:` line, then the facts to attack as numbered sub-queries, their sources as the pages already read, and the `Goal:` line (`rr.md` in this directory, § The red team). The digger needs no rule of its own for it; a fact with nothing against it comes back `NOTHING FOUND`. No brief casts the digger as anyone: the lens names methods and sources, never a voice.
 
 ## The fetch path
 
-1. WebSearch each sub-query, then read the 2-3 best sources; a source serving two sub-queries is read once.
+1. WebSearch each sub-query, the first query aimed at a `sources:` item of its lens, then wider; read the 2-3 best sources, a `sources:` item before a page reporting on one; a source serving two sub-queries is read once. One aimed query, not one per listed item, keeps a seven-item red-team list from multiplying the searches.
 2. `read` with `publications` for a paper, book chapter, PDF or document identifier, `search_literature` first when only a title is known. WebFetch is the default for a page.
 3. `read` with `urls` when a WebFetch fails or returns an encoded or empty body.
 4. Every WebFetch prompt asks the key question first, asks for the exact sentence behind every figure and date, then appends the rabbit-hole footer with the `Goal:` line in its slot. A harvester-read document carries no footer; the digger lists the rabbit holes it raises itself.
@@ -46,6 +53,8 @@ The harvester tools cover what WebFetch cannot: a PDF WebFetch returns as an enc
 ## The return
 
 - One finding per sub-query, under its number, in 2-4 sentences; the message opens with finding 1.
+- A finding that cites sources opens with a bracket naming each one's class: the `sources:` item of its lens it is, else `other: {what it is}`, as in `2. [court filings, other: news article] …`. The class is a match against the lens line, not a judgment, so the `haiku` digger can make it, and the lead sees at a glance whether a finding rests on raw material or on a page about it. A finding carrying no source (`DIG FAILED`, `NOTHING FOUND`) has no bracket.
+- A finding states what the lens's `method:`, done on those sources, shows. When no cited source is a `sources:` item, its last sentence names the one that would settle it, and that search goes under `Rabbit holes`.
 - Every figure and date, and the claim the finding turns on, sits inside a verbatim quote: a sentence the fetch result presents as the page's own words, never the fetch model's own prose. A fact it could not quote is marked `unquoted`.
 - Sources that disagree are both given, each with its quote, marked `DISPUTED`.
 - One `Rabbit holes` list follows, every rabbit hole the sources surfaced, each a concrete next web-search query and one line on why it matters. The lead decides which to follow; the digger drops none.
@@ -73,5 +82,5 @@ Digger returns across the family's runs, counted by script over the transcripts 
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/sub-rr.md` |
-| The briefs it receives | `templates/global/agents/rr.md`, step 4 |
+| The briefs it receives | `templates/global/agents/rr.md`, step 2 (the lens line), step 4 and § Red team |
 | The family doc | `docs/design/RR/rr.md` |

@@ -127,9 +127,6 @@ func shareKey(env fleet.Env) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// Path is the snapshot file the share reads and publishes.
-func (share *ScanShare) Path() string { return share.path }
-
 // Scan returns a fleet scan begun at or after since: the shared snapshot when
 // one qualifies, else scan's own result, published for the other watches. A
 // scan error is returned as it is and never published.

@@ -27,8 +27,14 @@ const (
 	SIDEffortPrefix = "statusline-effort-"
 	// SIDKillExitLogPrefix names the detached kill-exit finisher's log,
 	// SIDKillExitLogPrefix+socketName+".log", beside reload's worker logs
-	// (reload-{socket}.log); the doctor's crumb audit accepts both.
+	// (reload-{socket}.log for a tmux chat, SIDReloadHerdrPrefix+seat+".log"
+	// for a native one); the doctor's crumb audit accepts all of them.
 	SIDKillExitLogPrefix = "kill-exit-"
+	// SIDReloadHerdrPrefix names a native Herdr chat's reload schedule,
+	// SIDReloadHerdrPrefix+seat+".pid" (the scheduled worker's record) and
+	// SIDReloadHerdrPrefix+seat+".log" (its log); the doctor's crumb audit
+	// accepts both, and ending the seat removes both.
+	SIDReloadHerdrPrefix = "reload-herdr-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
 	// a crash can leave one behind, so the crumb audit accepts it.
@@ -146,12 +152,6 @@ var (
 	ErrNoSourceRepoMarker = errors.New("no source repository recorded")
 	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
 )
-
-// CallCapTallyDir holds `pfm internal call-cap`'s request tallies, one per
-// transcript, so each hook run reads only what its agent appended since.
-func CallCapTallyDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "call-cap")
-}
 
 // PricesStampPath is the record of the last price check that confirmed the
 // clone's prices.json, kept outside the clone so a check never dirties it.

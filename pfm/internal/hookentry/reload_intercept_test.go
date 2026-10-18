@@ -2,6 +2,7 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ func TestRunReloadIntercept(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls [][]string
-			front := func(args []string, stdout, _ io.Writer, _ config.Runtime) int {
+			front := func(_ context.Context, args []string, stdout, _ io.Writer, _ config.Runtime) int {
 				if !test.frontWanted {
 					t.Fatalf("front called unexpectedly with %v", args)
 				}
@@ -90,7 +91,7 @@ func TestRunReloadIntercept(t *testing.T) {
 }
 
 func TestRunReloadInterceptMalformedJSONNeverBlocks(t *testing.T) {
-	front := func(args []string, _, _ io.Writer, _ config.Runtime) int {
+	front := func(_ context.Context, args []string, _, _ io.Writer, _ config.Runtime) int {
 		t.Fatalf("front called on malformed JSON: %v", args)
 		return 0
 	}

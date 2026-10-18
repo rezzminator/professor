@@ -17,8 +17,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
-// nativeSeat routes only a matching durable native seat. Legacy environment-only
-// reporters and tmux-in-Herdr keep their existing bridge path.
+// nativeSeat routes a proved durable native seat. Unproved native launchers
+// must use the explicit restored repair route; tmux-in-Herdr retains its bridge.
 func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayload) (handled bool, returnErr error) {
 	env := reporter.deps.getenv
 	if reporter.deps.seatPaths == nil || env("TMUX") != "" || env(herdr.EnvMarker) != "1" ||
@@ -33,10 +33,15 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		}
 	}()
 	if errors.Is(db.Degraded(), fleetdb.ErrAbsent) {
-		return false, nil // No durable seats exist; retain the environment-only reporter.
+		return true, fmt.Errorf(
+			"native seat ownership unproved: no durable seat state; repair: restore the intended pane with pfm chat open --restored",
+		)
 	}
 	if err := db.Degraded(); err != nil {
-		return false, fmt.Errorf("resolve native seat state: %w", err)
+		return true, fmt.Errorf(
+			"native seat ownership unproved: resolve native seat state: %w; repair: restore the intended pane with pfm chat open --restored",
+			err,
+		)
 	}
 	values := *reporter.deps.seatPaths
 	if values.ProcRoot == "" {
@@ -48,7 +53,9 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		return true, fmt.Errorf("resolve native seat: %w", err)
 	}
 	if !found {
-		return false, nil
+		return true, fmt.Errorf(
+			"native seat ownership unproved: no matching durable owner; repair: restore the intended pane with pfm chat open --restored",
+		)
 	}
 	unlock, err := reporter.lockNativeReport(ctx, seat)
 	if err != nil {
@@ -268,6 +275,7 @@ type herdrPayload struct {
 	IsInterrupt      bool            `json:"is_interrupt"`
 	Title            string          `json:"title"`
 	TranscriptPath   string          `json:"transcript_path"`
+	Prompt           string          `json:"prompt"`
 }
 
 // Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs.

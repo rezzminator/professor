@@ -1,16 +1,12 @@
 package tokens
 
 import (
-	"math"
 	"strings"
 )
 
 // countContext counts one non-call event inside the window: the tool, Bash and
 // injection tallies the report reads.
-func (a *auditor) countContext(r *run, e event, project string, cmdCount *object, lastToolTS *float64) {
-	if e.tool != "" && !math.IsNaN(e.ts) {
-		*lastToolTS = e.ts
-	}
+func (a *auditor) countContext(r *run, e event, project string, cmdCount *object) {
 	if e.ts >= a.since && e.tool != "" {
 		tool := r.tools.childWith(e.tool, "n", "chars", "err")
 		tool.bump("n", 1)

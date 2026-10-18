@@ -218,3 +218,11 @@ func BashGuard(name string, input io.Reader, stdout, stderr io.Writer) int {
 	}
 	return GitGuard(input, stdout, stderr)
 }
+
+// preToolUseDenyResponse builds the PreToolUse deny hookSpecificOutput
+// payload shared by every PreToolUse deny hook in this package.
+func preToolUseDenyResponse(reason string) map[string]any {
+	return map[string]any{"hookSpecificOutput": map[string]any{
+		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
+	}}
+}

@@ -35,13 +35,10 @@ func TestReadFlagsRefusals(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--timeline"}, "--timeline wants a transcript path"},
 		{[]string{"--since", "5x"}, "--since wants a number plus h or d"},
 		{[]string{"--top", "-1"}, "--top wants a whole number of rows"},
 		{[]string{"stray"}, `unexpected argument "stray"`},
 		{[]string{"--family-rx", "("}, "--family-rx (: "},
-		{[]string{"--timeline", "t.jsonl", "--since", "24h"}, "--timeline reads whole files"},
-		{[]string{"--timeline", "t.jsonl", "--codex"}, "--timeline reads whole files"},
 		{[]string{"--nope"}, "nope"},
 	}
 	for _, c := range cases {

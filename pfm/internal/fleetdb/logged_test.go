@@ -102,7 +102,7 @@ func TestPrimaryAccountAbsenceIsNotAnErrorRecord(t *testing.T) {
 			if len(records) != 1 {
 				t.Fatalf("records=%v: %s", records, recorder.Raw())
 			}
-			want := "INFO"
+			want := "DEBUG" // a fast first-try success is routine; only a failure is louder
 			if broken {
 				want = "ERROR"
 			}

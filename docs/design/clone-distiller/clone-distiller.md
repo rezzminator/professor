@@ -40,9 +40,9 @@ Any caller with a question about code outside this repository: a spec writer lea
 The override text, the shared file `shared/repo-lane.md` both declarations extend:
 
 - A sub-area whose answer lives in a public repository's code (how a project implements something, not what a page says about it) goes to `clone-distiller`: one digger per repository, never two on one repository in a round, counted in the round's cap. A sub-area spanning several repositories gets one `clone-distiller` per named repository: a `sub-rr` sent to read several repositories' code guessed raw file URLs that did not exist in a trial run. A later question about a repository a `clone-distiller` already dug goes to a `clone-distiller` on that repository, never to a `sub-rr`, which would re-derive it from web pages.
-- Its brief carries `Repository:`, `Ref:` when the query names one, `History: yes` when a sub-query asks how the code changed over time, the numbered sub-queries, the `Goal:` line and `OUT-DIR: {the RR directory}`.
+- Its brief carries `Repository:`, `Ref:` when the query names one, `History: yes` when a sub-query asks how the code changed over time, the numbered sub-queries, the `Goal:` line and `OUT-DIR: {the run directory}`, so its result file lands in `{run dir}/clone-distiller/`, and no `Lens:` line: the agent's own method is the sub-area's lens, and it holds no web tool to search a lens's sources.
 - Its findings are read from the clone, not through a fetch model, so they carry no paraphrase to catch: each such fact takes its `clone-distiller` link inline in the map, counts as fetched, and is not re-fetched at VERIFY, whose pages go to web facts, `unquoted` ones first.
-- The document's `Coverage` section lists each result file a `clone-distiller` returned by its path relative to the RR directory, `clone-distiller/{file}`: the document may be tracked, and an absolute path would carry the machine's home directory into it.
+- The synthesis's `Coverage` section lists each result file a `clone-distiller` returned by its path relative to the run directory, `clone-distiller/{file}`: the document may be tracked, and an absolute path would carry the machine's home directory into it.
 
 ## The brief it receives
 
@@ -93,7 +93,7 @@ The file holds:
 - per question: the finding, 2-4 sentences, then the detail (lists, commit histories) and its evidence, each `{absolute path}:{A-B}` (or `{sha12}:{path}:{A-B}` for a `git show` read) with its link beside it and the copied lines in a `~~~~` fence below;
 - `Not read`, then `Rabbit holes`.
 
-The file is for whoever opens the code after the run: the user following a claim into the clone, and `agent-optimizer` auditing the dig. The caller does not need to read it; an RR lead's document lists its path.
+The file is for whoever opens the code after the run: the user following a claim into the clone, and `agent-investigator` auditing the dig. The caller does not need to read it; an RR lead's document lists its path.
 
 ## The return
 
@@ -115,7 +115,7 @@ The return carries links, not absolute paths: a caller's document cites web URLs
 
 ## Why it writes a file
 
-`sub-rr` never writes because its findings would race for the run's one document. `clone-distiller`'s file is its own: one name per repository and day, claimed atomically so a second dig of the same repository that day takes the next suffix instead of erasing the first. The file carries what the lead does not need in its context (absolute paths, fenced excerpts), so the lead's context grows by the finding alone while the evidence stays on disk.
+`sub-rr` writes its own report too, to the one path its brief names, so no two diggers of a run share a file. `clone-distiller`'s file is its own: one name per repository and day, claimed atomically so a second dig of the same repository that day takes the next suffix instead of erasing the first. The file carries what the lead does not need in its context (absolute paths, fenced excerpts), so the lead's context grows by the finding alone while the evidence stays on disk.
 
 ## Untrusted code
 

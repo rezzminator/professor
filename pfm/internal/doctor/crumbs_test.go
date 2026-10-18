@@ -265,3 +265,37 @@ func TestDoctorCrumbsAcceptHeadlessScratchFiles(t *testing.T) {
 		)
 	}
 }
+
+// TestDoctorCrumbsAcceptNativeReloadSchedule: one row per file name of a
+// native seat's reload schedule — the record and the log the scheduler writes
+// are known crumbs, a stray form of either stays rot.
+func TestDoctorCrumbsAcceptNativeReloadSchedule(t *testing.T) {
+	for _, row := range []struct {
+		name        string
+		wantInvalid int
+	}{
+		{name: paths.SIDReloadHerdrPrefix + "restore-seat.pid"},
+		{name: paths.SIDReloadHerdrPrefix + "restore-seat.log"},
+		{name: paths.SIDReloadHerdrPrefix + "6fafd8a7-5059-4288-bf58-23e60c5fdb88.log"},
+		{name: paths.SIDReloadHerdrPrefix + ".pid", wantInvalid: 1},
+		{name: paths.SIDReloadHerdrPrefix + ".log", wantInvalid: 1},
+		{name: paths.SIDReloadHerdrPrefix + "restore-seat.txt", wantInvalid: 1},
+		{name: paths.SIDReloadHerdrPrefix + "restore-seat.pid.bak", wantInvalid: 1},
+		{name: paths.SIDReloadHerdrPrefix + "restore-seat", wantInvalid: 1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			root := jailTest(t)
+			sidDir := filepath.Join(root, "sid")
+			if err := os.WriteFile(filepath.Join(sidDir, row.name), []byte("1234 5678\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			entries, invalid, err := crumbHealth(sidDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entries != 1 || invalid != row.wantInvalid {
+				t.Fatalf("crumbHealth() entries=%d invalid=%d, want 1 and %d", entries, invalid, row.wantInvalid)
+			}
+		})
+	}
+}

@@ -80,12 +80,12 @@ var fixedCommands = []Entry{
 	// minimum version, so none is pinned here.
 	{
 		Name:        "python3",
-		Purpose:     "the tracer's tracetree kit and its launch hook",
+		Purpose:     "the tracer's tracetree kit",
 		Required:    true,
 		Platforms:   []string{platformLinux, platformDarwin},
 		VersionArgs: []string{versionFlag},
 		Parse:       prefixedVersion("Python"),
-		InstallHint: "install python3; the tracer's tracetree kit and its launch hook run on it",
+		InstallHint: "install python3; the tracer's tracetree kit runs on it",
 	},
 	{Name: "sh", Purpose: "portable shell command execution", Required: true, InstallHint: "install a POSIX shell"},
 	{

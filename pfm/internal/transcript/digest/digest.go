@@ -4,8 +4,7 @@
 // renderer prints one compact line per event, its transcript line number
 // first. Every record not rendered is counted by type and named in the
 // SKIPPED line: an unparsed record never disappears. Verbs: show (the
-// digest), counts (per-tool table), types (every record type and its
-// disposition), locate (the resolved path), agents (a session's sub-agents).
+// digest), locate (the resolved path), agents (a session's sub-agents).
 //
 // Its bytes are the Python reader's it replaced (testdata/cases holds that
 // reader's captured runs); each deliberate difference is a {label}.intended golden
@@ -120,15 +119,7 @@ func DigestTranscript(ctx context.Context, args []string, env Env) (Output, erro
 	if err != nil {
 		return out, err
 	}
-	var text string
-	switch req.verb {
-	case "show":
-		text, err = showDigest(parsed, &req, env.Home)
-	case "counts":
-		text, err = countsDigest(parsed, &req)
-	default:
-		text, err = typesDigest(parsed, &req)
-	}
+	text, err := showDigest(parsed, &req, env.Home)
 	if err != nil {
 		return out, err
 	}

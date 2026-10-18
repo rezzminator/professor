@@ -85,7 +85,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
-		"    scripts/legacy.sh:2   /wave — retired command, now /flights:spec\n",
+		"    scripts/legacy.sh:2   /wave — retired command, now the flights-foreman agent\n",
 		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__chat-professor__*\n",
 	} {
 		if !strings.Contains(stdout.String(), want) {

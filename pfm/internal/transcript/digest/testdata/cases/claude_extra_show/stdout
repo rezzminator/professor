@@ -1,5 +1,5 @@
 TRANSCRIPT claude · cccccccc-1111-2222-3333-444444444444 · claude-fable-5-1
-FILE {HOME}/.claude/projects/-work-repo/cccccccc-1111-2222-3333-444444444444.jsonl · 5982 bytes · 22 records · cwd /work/repo (shown as ./)
+FILE {HOME}/.claude/projects/-work-repo/cccccccc-1111-2222-3333-444444444444.jsonl · 5984 bytes · 22 records · cwd /work/repo (shown as ./)
 NAME Extra Desk
 SPAN 2026-09-29 18:00:27Z → 20:00:30Z · 7203s wall
 CALLS 10, 1 err, 1 without result: Read 2 · Edit 1 · Agent 1 · Skill 1 · WebFetch 1 (1 err) · mcp__x__y 1 · Write 1 · Glob 1 · Bash 1
@@ -10,7 +10,7 @@ L3 20:00:01 SAY plain string reply
 L4 20:00:02 Read ./a.go @10+20 → ok 69B · 6s
 L4 20:00:02 Edit ./a.go (-2 +1 lines) → ok 6B · 6s
 L4 20:00:02 Agent tracer: Map it → ok 6B · 6s
-L4 20:00:02 Skill flights:spec --fast → ok 9B · 6s
+L4 20:00:02 Skill flights:doctor --fast → ok 9B · 6s
 L4 20:00:02 WebFetch https://example.com/x → ERR 13B · 6s
     | 404 Not Found
 L4 20:00:02 mcp__x__y {"n": 1.5, "big": 1e+20, "small": 1e-05, "flag": true, "none": null, "text": "naïve — \"q\" <tag> & \t", "list": [1, 2.0, "x"], "nested": {"k": []}} → ok 12B · 6s

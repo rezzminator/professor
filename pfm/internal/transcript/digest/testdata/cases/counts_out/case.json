@@ -1,9 +1,0 @@
-{
- "args": [
-  "counts",
-  "{CLAUDE}",
-  "--out",
-  "{HOME}/c.txt"
- ],
- "dirs": []
-}

@@ -255,10 +255,14 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || die "no image $IMAGE after the 
 # shellcheck source=container.sh
 . "$HERE/container.sh"
 FENCE_CALLER=lanes-run lane_fence_env "$ROOT"
-CNAME="pfm-lane-$STAMP"
-docker rm -f "$CNAME" >/dev/null 2>&1
-lane_run "$CNAME" "$IMAGE" none || die "the lane container would not start from $IMAGE" 1
+# This run's own name — worktree, stamp, pid and a random part — so two runs started in the same
+# second never share one; the only container a run removes is the one it started.
+wt_tag="$(basename "$ROOT" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.\n-' '-')"; wt_tag="${wt_tag#[.-]}"
+rand="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+[ "${#rand}" -eq 8 ] || die "no random part for the lane container's name from /dev/urandom" 1
+CNAME="pfm-lane-${wt_tag:-wt}-$STAMP-$$-$rand"
 trap 'docker rm -f "$CNAME" >/dev/null 2>&1' EXIT
+lane_run "$CNAME" "$IMAGE" none || die "the lane container would not start from $IMAGE" 1
 scan="$(docker exec "$CNAME" bash /worktree/infra/fence/lanes/cred-scan.sh 2>&1)" ||
   die "✗ CREDENTIAL-REFUSED — $scan" 1
 

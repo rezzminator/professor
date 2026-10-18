@@ -216,6 +216,17 @@ func statusFromHerdr(
 	status headless.Status,
 	observations ...*nativeStatusObservation,
 ) (headless.Status, error) {
+	target, err := pfmcall.ProveHerdrTarget(ctx, pfmcall.Target{
+		Backend:    chat.Backend,
+		SeatID:     chat.SeatID,
+		SocketPath: chat.Socket,
+		Pane:       chat.Pane,
+		Engine:     string(chat.Engine),
+	})
+	if err != nil {
+		return status, fmt.Errorf("read %s Herdr state: %w", chat.Name, err)
+	}
+	chat.Socket, chat.Pane = target.SocketPath, target.Pane
 	body, err := herdr.SeatRequest(ctx, chat.Socket, "agent.get", map[string]string{"target": chat.Pane})
 	if err != nil {
 		return status, fmt.Errorf("read %s Herdr state: %w", chat.Name, err)

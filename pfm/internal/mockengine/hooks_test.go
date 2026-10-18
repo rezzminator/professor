@@ -76,7 +76,7 @@ case "$event" in
       printf '%s\n' '{"decision":"block","reason":"reload scheduled — this chat reboots when the current turn ends","suppressOriginalPrompt":true}'
     fi ;;
   PreToolUse)
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Explore is disabled"}}' ;;
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"FIXTURE-DENY"}}' ;;
 esac
 `
 	if err := testjail.WriteExecutable(recorder, []byte(script), 0o700); err != nil {
@@ -783,12 +783,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	if envelope := decodeEnvelope(t, pre); envelope.Event != "PreToolUse" || envelope.ToolName != "Agent" {
 		t.Fatalf("PreToolUse payload = %+v", envelope)
 	}
-	var denied, denyErr bytes.Buffer
-	if code := hookentry.ExploreDeny(strings.NewReader(pre), &denied, &denyErr); code != 0 ||
-		!strings.Contains(denied.String(), `"permissionDecision":"deny"`) {
-		t.Fatalf("pfm's explore-deny read the payload as exit=%d out=%q: %s", code, denied.String(), pre)
-	}
-	if frame := session.out.frame(); !strings.Contains(frame, "Explore is disabled") {
+	if frame := session.out.frame(); !strings.Contains(frame, "FIXTURE-DENY") {
 		t.Fatalf("the deny reason never reached the pane:\n%s", frame)
 	}
 	entries := parsedEntries(t, transcriptPath)
@@ -807,7 +802,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	)
 	reload := fix.waitRecorded("UserPromptSubmit", 2)[1]
 	var blocked, blockErr bytes.Buffer
-	front := func(args []string, _, _ io.Writer, _ config.Runtime) int {
+	front := func(_ context.Context, args []string, _, _ io.Writer, _ config.Runtime) int {
 		if len(args) != 2 || args[0] != "--model" || args[1] != "opus" {
 			t.Errorf("reload front got %q", args)
 		}
@@ -838,7 +833,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	})
 	exitWord := fix.waitRecorded("UserPromptSubmit", 3)[2]
 	killed := false
-	kill := func(args []string, _, _ io.Writer, _ ...config.Runtime) int {
+	kill := func(_ context.Context, args []string, _, _ io.Writer, _ ...config.Runtime) int {
 		killed = len(args) == 2 && args[0] == "--self" && args[1] == "--exit"
 		return 0
 	}

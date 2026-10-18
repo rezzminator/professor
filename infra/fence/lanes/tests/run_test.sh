@@ -346,9 +346,16 @@ mv "$T/map.tsv.bak" "$LANES/map.tsv"
 STUB_REFUSE=1 run_sut --lanes E1
 if [ "$RC" -eq 1 ] && grep -q 'run: ✗ CREDENTIAL-REFUSED' <<<"$OUT" &&
   ! grep -q '/lanes/E1.sh' "$T/docker.log" &&
-  [ "$(grep -c '^rm -f pfm-lane-' "$T/docker.log")" -eq 2 ]; then
+  [ "$(grep -c '^rm -f pfm-lane-' "$T/docker.log")" -eq 1 ]; then
   ok "credential refusal stops before the first lane and removes the container"
 else bad "run credential gate" "rc=$RC" "$OUT" "$(cat "$T/docker.log")"; fi
+# The container's name is this run's own (worktree, pid, a random part): two runs started in the same
+# second never share one, and the only name a run removes is the one it started.
+started="$(sed -n 's/^run -d --init --name \([^ ]*\) .*/\1/p' "$T/docker.log" | head -1)"
+removed="$(sed -n 's/^rm -f \(pfm-lane-[^ ]*\)$/\1/p' "$T/docker.log")"
+if [[ "$started" =~ ^pfm-lane-[a-z0-9_.-]+-[0-9]{8}-[0-9]{6}-[0-9]+-[0-9a-f]{8}$ ]] && [ "$removed" = "$started" ]; then
+  ok "the lane container's name carries the worktree, the stamp, the pid and a random part, and the run removes only it"
+else bad "lane container name" "started=$started" "removed=$removed"; fi
 # ---- 19: profile copies each lane's waits and prints the longest first ---
 
 printf 'E1\t12\t3\t0\t0\t0\n' >"$T/row.fixture.tsv"

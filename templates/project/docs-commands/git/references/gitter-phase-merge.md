@@ -16,7 +16,7 @@ If another pipeline is actively merging, wait and retry.
 
 ## 1. Validate preconditions
 
-- The REPORT_PATH the brief names must exist ON DISK with every `F{n}` finding `status: resolved @sha` or `waived — {ruling}` — file absent (the merge-gating review never ran) or any `open` finding → refuse and name which. The dispatch brief's own verdict text never substitutes for the file — a merge validated against an in-brief claim is ungated.
+- The REPORT_PATH the brief names must exist ON DISK with every `F{n}` finding `status: resolved @sha`, `resolved in {file:line}` or `waived — {ruling}` — file absent (the merge-gating review never ran) or any `open` finding → refuse and name which. The dispatch brief's own verdict text never substitutes for the file — a merge validated against an in-brief claim is ungated.
 - Confirm worktree exists: `./.claude/scripts/worktree.sh list $PIPELINE`
 
 ## 2. Commit all worktree changes
@@ -66,8 +66,6 @@ git branch --list "pipeline/$PIPELINE"  # VERIFY: must print nothing unless the 
 ```
 
 When the brief says to keep the branch, run `./.claude/scripts/worktree.sh remove $PIPELINE` instead. A branch still listed when deletion was required means the MERGE is unfinished: report the failure, even if the script printed "Branch deleted".
-
-Once `git worktree list` verifies the merged worktree gone, scan `$HOME/.local/state/pfm/flights/{project}/*/UNLANDED.md` even when the brief omits the flight directory; delete only markers whose worktree line names that removed path, and report each deletion. An unreadable or malformed marker stays, with its path and cause reported; retain the flight directory and audit trail. Report deletions before the final line.
 
 The completion report's final line states `worktree removed: {name} · branch {deleted|kept}` — the orchestrator treats a MERGE report without it as unfinished.
 

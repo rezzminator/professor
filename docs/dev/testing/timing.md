@@ -21,7 +21,7 @@ From the worktree root:
 .claude/scripts/dev.sh iso gate
 ```
 
-Use `.claude/scripts/dev.sh iso gate pfm` for pfm alone. The source mount stays read-only. Generated artifacts go to `/tmp/{project}/timing/` through a separate writable mount. Each invocation gets its own `run.*` directory containing `gate.tsv`, `gate.meta`, `steps/<name>.log`, `steps/<name>.prof.tsv`, `resources.tsv`, `profile/`, `profile.tsv`, and, for the pfm steps, `unit.json`, `unit.tsv`, `unit.load`, `unit-shards/`, `bin/`, `e2e.json`, `e2e.tsv` and `e2e.load`. What each profiling artifact holds, and how to read a red gate from them, is in [profiling.md](profiling.md).
+`.claude/scripts/test.sh --full` runs the same gate. The source mount stays read-only. Generated artifacts go to `/tmp/{project}/fence/shared/{worktree}/timing/` on the host, the run's `/pfm-timing`, through a separate writable mount. Each invocation gets its own `run.*` directory containing `gate.tsv`, `gate.meta`, `steps/<name>.log`, `steps/<name>.prof.tsv`, `resources.tsv`, `profile/`, `profile.tsv`, and, for the pfm steps, `unit.json`, `unit.tsv`, `unit.load`, `unit-shards/`, `bin/`, `e2e.json`, `e2e.tsv` and `e2e.load`. What each profiling artifact holds, and how to read a red gate from them, is in [profiling.md](profiling.md).
 
 **Phases.** `gate_run` registers every test step in phase 0: `pfm.unit` and `pfm.e2e` (heavy), the `pfm.self.*`, `templates.lanes.*` and `templates.demo.*` suites, and the `fixture.*` steps under `PFM_GATE_FIXTURES=1`. `steps_barrier` then opens phase 1, the static checks, which starts only when every phase-0 step has ended. Phase 1 registers its heavy Go steps longest first: `pfm.lint-new`, `pfm.fmt-check`, `pfm.vet`, `pfm.vet-darwin`, then `pfm.arch` and `pfm.testplan` (light) and `templates.check-map` (heavy), then the light `templates.*` checks. A step starts as soon as a slot is free, in registration order: at most `STEPS_JOBS` steps run at once (default: the CPU count), and at most `STEPS_HEAVY_JOBS` heavy steps (default: 2; three slots OOM-killed `pfm.lint-new` on a cold lint cache, see the speed table).
 
@@ -34,7 +34,7 @@ Use `.claude/scripts/dev.sh iso gate pfm` for pfm alone. The source mount stays 
 
 The printed table adds pointers to each non-PASS row: the step log, the hang tree of a `TIMEOUT`, the ERR records. It is followed by the `PROFILE` block. A failed step keeps its log for diagnosis.
 
-The gate reports test execution and timing checks as separate rows. Unit tests use the Makefile's `TESTFLAGS` (`-p 6 -parallel 4`); tagged e2e tests use `-p 1`. `pfm.e2e` samples the VM's busy and the container's own CPU into `e2e.load` for the whole e2e run, the record the e2e timing check corrects for other load with, as the unit check does with `unit.load`. `dev.sh iso` passes `TESTFLAGS` and the knobs `STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES` into the container when they are set. `make timing` prints the newest unit or e2e TSV. CI retains the JSON and TSV files even after failure.
+The gate reports test execution and timing checks as separate rows. Unit tests use the Makefile's `TESTFLAGS` (`-p` the fence's CPU cap, `-parallel 4`); tagged e2e tests use `-p 1`. `pfm.e2e` samples the VM's busy and the container's own CPU into `e2e.load` for the whole e2e run, the record the e2e timing check corrects for other load with, as the unit check does with `unit.load`. `dev.sh iso` passes `TESTFLAGS` and the knobs `STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES` into the container when they are set. `make timing` prints the newest unit or e2e TSV. CI retains the JSON and TSV files even after failure.
 
 ## Critical path
 
@@ -46,7 +46,7 @@ Reading it from one run:
 2. **`steps/<name>.prof.tsv`**: `start_epoch` and `finish_epoch` place every step on one clock. Subtract the earliest `start_epoch` and sort by finish: the last phase-0 finish is where phase 1 opens (every phase-1 `start_epoch` is at or after it); the last finish overall is the end of `STEPS`.
 3. **Heavy-slot waits**: a heavy phase-1 step whose `start_epoch` is later than phase 1's opening waited that long for a slot (`STEPS_HEAVY_JOBS` and the registration order decide which). A light step waits only when `STEPS_JOBS` steps are already running.
 4. **Inside a Go step**: `unit.json` and `e2e.json` are `go test -json` streams; per package, the first event's `Time` and the terminal `pass`/`fail` event's `Time` and `Elapsed` give its start and end. The package ending last is what holds its step open; a package whose `Elapsed` far exceeds its CPU (`profile/<label>.<pid>/summary.json` `user_s` + `sys_s`) is waiting, not working.
-5. **`resources.tsv`**: Δ`cg_cpu_s` ÷ (Δ`epoch_s` × `cpus`) over a window is the container's CPU use; a long stretch well under the CPU count is idle time a reordering could fill. The maximum `cg_mem_peak_mb` is the run's memory peak against the 2 GiB cap; `cg_swap_mb` above zero means the run was memory-bound.
+5. **`resources.tsv`**: Δ`cg_cpu_s` ÷ (Δ`epoch_s` × `cpus`) over a window is the container's CPU use; a long stretch well under the CPU count is idle time a reordering could fill. The maximum `cg_mem_peak_mb` is the run's memory peak against the container's memory cap (5g by default, `PFM_FENCE_MEM`); `cg_swap_mb` above zero means the run was memory-bound.
 
 ## TSV
 
@@ -101,7 +101,7 @@ The unit runner writes `unit.load` beside `unit.json`, sampling the VM's busy CP
 
 The steady-state ratchet uses three independent successful captures with identical package sets and flags. Record host load and uptime before and after each capture. A failed run cannot establish or lower a budget. For the sharded unit re-baseline above, an `iso gate` run whose only red is package timing against the superseded unit block is an eligible capture when its tests and skip checks pass and it has no `SHARD-LOST`. Preserve all raw captures beside the measurement log so each budget can be traced back to evidence.
 
-At `-p 6 -parallel 4`, the unit block, tagged e2e block, and gate walls use one rule: take the maximum of three eligible captures, round up to whole seconds (with a one-second floor), then double each package, suite, and gate target budget. Unit, tagged e2e, and `all` use `iso gate all` captures; `templates` uses `iso gate templates` captures. `pfm` takes the `all` gate budget because it runs a subset of its steps. Every budget is checked at budget × `tolerance` (`1.25`); a gate wall over that limit warns through `fail_factor` × limit and fails beyond it. The doubling absorbs shared-host load: clean `all` walls of one tree spanned 61.3–115.6 s on 2026-10-01; the slowest was the first gate after a merge, with cold build and lint caches.
+At `-p 6 -parallel 4`, the unit block, tagged e2e block, and gate walls use one rule: take the maximum of three eligible captures, round up to whole seconds (with a one-second floor), then double each package, suite, and gate target budget. Unit, tagged e2e, and `all` use captures of the full gate; `templates` uses captures of the templates-only gate (`dev.sh gate templates`, run in the fence). `pfm` takes the `all` gate budget because it runs a subset of its steps. Every budget is checked at budget × `tolerance` (`1.25`); a gate wall over that limit warns through `fail_factor` × limit and fails beyond it. The doubling absorbs shared-host load: clean `all` walls of one tree spanned 61.3–115.6 s on 2026-10-01; the slowest was the first gate after a merge, with cold build and lint caches.
 
 ## Concurrency sweep
 
@@ -109,7 +109,7 @@ At `-p 6 -parallel 4`, the unit block, tagged e2e block, and gate walls use one 
 
 The target enables `--wait-quiet`, which prefers load below 4 before each capture. The wait is outside the timed command and capped at five minutes; sustained load emits a warning and proceeds with high-load evidence. The raw TSV records each result; its sibling `.load.log` records capture identity and dated uptime before and after, including failed captures. Unreadable load probes fail explicitly.
 
-The unit gate is pinned at `-p 6 -parallel 4` by the [2026-10 hermetic sweep](concurrency-sweep.md#hermetic--p-sweep-2026-10). The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `/tmp/{project}/timing/`.
+The unit gate is pinned at `-p 6 -parallel 4` by the [2026-10 hermetic sweep](concurrency-sweep.md#hermetic--p-sweep-2026-10). The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `/tmp/{project}/fence/shared/{worktree}/timing/`.
 
 ## Accepted measurements
 

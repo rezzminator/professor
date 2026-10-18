@@ -69,7 +69,7 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 			Path: ".codex/config.toml", Line: 2, Name: "mcp__harvester__", Kind: "tool",
 			Successor: "mcp__harvester-professor__*",
 		},
-		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
+		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
 		{Path: "scripts/legacy.sh", Line: 3, Name: "JC-COMMIT", Kind: "phase", Successor: "COMMIT"},
 	}
 	if !reflect.DeepEqual(scan.Hits, want) {
@@ -264,20 +264,41 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"type /close-out when done", "/close-out", "command", "/done-herewith"},
 	{"see .claude/skills/close-out/SKILL.md", "skills/close-out", "skill", "/done-herewith"},
 	{"run pfm price --json", "pfm price", "command", "pfm model-cost"},
+	{"run pfm transcript counts {path}", "pfm transcript counts", "command", chatlogSuccessor},
+	{"run pfm transcript types {path} --lines 4-9", "pfm transcript types", "command", chatlogSuccessor},
+	{"cost it with pfm tokens --timeline {path}", "pfm tokens --timeline", "command", chatlogSuccessor},
 	{"see docs/agents/_index.md", "docs/agents", "path", "docs/_index.md and docs/standards.md"},
-	{"type /ultimate-spec to spec first", "/ultimate-spec", "command", "/imagine:build"},
-	{`Agent(subagent_type: "ultimate", prompt: "spec it")`, `subagent_type: "ultimate"`, "agent", "imagine"},
-	{"subagent_type: ultimate", "subagent_type: ultimate", "agent", "imagine"},
-	{`{"subagent_type": "ultimate"}`, `subagent_type": "ultimate"`, "agent", "imagine"},
-	{`{"subagent_type":"ultimate"}`, `subagent_type":"ultimate"`, "agent", "imagine"},
-	{"see .claude/agents/ultimate.md", "agents/ultimate.md", "agent", "imagine"},
-	{"an `ultimate` agent specs it", "`ultimate` agent", "agent", "imagine"},
-	{`Agent({subagent_type:"ultimate"})`, `subagent_type:"ultimate"`, "agent", "imagine"},
-	{`subagent_type: 'ultimate'`, `subagent_type: 'ultimate'`, "agent", "imagine"},
-	{`Task(subagent_type="ultimate")`, `subagent_type="ultimate"`, "agent", "imagine"},
-	{"the `ultimate` sub-agent specs it", "`ultimate` sub-agent", "agent", "imagine"},
-	{"the `ultimate` subagent specs it", "`ultimate` subagent", "agent", "imagine"},
-	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine:callmeter"},
+	{"type /ultimate-spec to spec first", "/ultimate-spec", "command", "/imagine"},
+	{`Agent(subagent_type: "ultimate", prompt: "spec it")`, `subagent_type: "ultimate"`, "agent", "imagination"},
+	{"subagent_type: ultimate", "subagent_type: ultimate", "agent", "imagination"},
+	{`{"subagent_type": "ultimate"}`, `subagent_type": "ultimate"`, "agent", "imagination"},
+	{`{"subagent_type":"ultimate"}`, `subagent_type":"ultimate"`, "agent", "imagination"},
+	{"see .claude/agents/ultimate.md", "agents/ultimate.md", "agent", "imagination"},
+	{"an `ultimate` agent specs it", "`ultimate` agent", "agent", "imagination"},
+	{`Agent({subagent_type:"ultimate"})`, `subagent_type:"ultimate"`, "agent", "imagination"},
+	{`subagent_type: 'ultimate'`, `subagent_type: 'ultimate'`, "agent", "imagination"},
+	{`Task(subagent_type="ultimate")`, `subagent_type="ultimate"`, "agent", "imagination"},
+	{"the `ultimate` sub-agent specs it", "`ultimate` sub-agent", "agent", "imagination"},
+	{"the `ultimate` subagent specs it", "`ultimate` subagent", "agent", "imagination"},
+	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine"},
+	{"type /imagine:build to build it", "/imagine:build", "command", "/imagine"},
+	{"type /imagine:build-fast to build it", "/imagine:build-fast", "command", "/imagine"},
+	{"type /imagine:build-spec to spec it", "/imagine:build-spec", "command", flightsSuccessor},
+	{"run /imagine:callmeter on the data", "/imagine:callmeter", "command", "/imagine"},
+	{`Agent(subagent_type: "imagine", prompt: "build it")`, `subagent_type: "imagine"`, "agent", "imagination"},
+	{`Agent({subagent_type:"imagine"})`, `subagent_type:"imagine"`, "agent", "imagination"},
+	{`subagent_type: 'imagine'`, `subagent_type: 'imagine'`, "agent", "imagination"},
+	{"subagent_type: imagine", "subagent_type: imagine", "agent", "imagination"},
+	{`Task(subagent_type="imagine")`, `subagent_type="imagine"`, "agent", "imagination"},
+	{`{"subagent_type": "imagine"}`, `subagent_type": "imagine"`, "agent", "imagination"},
+	{`{"subagent_type":"imagine"}`, `subagent_type":"imagine"`, "agent", "imagination"},
+	{"see .claude/agents/imagine.md", "agents/imagine.md", "agent", "imagination"},
+	{"an `imagine` agent builds it", "`imagine` agent", "agent", "imagination"},
+	{"the `imagine` sub-agent builds it", "`imagine` sub-agent", "agent", "imagination"},
+	{"the `imagine` subagent builds it", "`imagine` subagent", "agent", "imagination"},
+	{"load the imagine-core skill", "imagine-core", "skill", "the imagination agent"},
+	{"run /imagine:evolve weekly", "/imagine:evolve", "command", ""},
+	{"spawn imagine-historian to mine it", "imagine-historian", "agent", ""},
 }
 
 // TestRetiredNamesPinEveryNameThisReleaseRetires: a project file naming any
@@ -312,6 +333,7 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 		"engine-sync codex build . and engine-sync opencode check; the pfm codexes and pfm codex-sync",
 		"the price of the plan; a price list",
 		"pfm tokens --since 1d and pfm transcript show",
+		"pfm tokens --flight {dir} and pfm transcript agents {path}; pfm transcript locate {id}",
 		"the transcript of the chat; read the transcript",
 		"a close-out checklist for the week",
 		"/pfm:schedule weekly and /done-herewith",
@@ -326,13 +348,30 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 		"templates/global/skills/ultimate/SKILL.md and .claude/skills/ultimate/SKILL.md",
 		"/ultimate-visualization and /imagine/ultimate.md and commands/ultimate.md",
 		"https://example.com/ultimate and https://example.com/ultimate-spec",
-		"/imagine:build-fast, /imagine:build, /imagine:callmeter and the imagine agent",
-		`subagent_type: "imagine" and subagent_type: "ultimate-pro" and subagent_type: ultimately`,
+		"run /imagine to make it; /imagine: with a colon; /imagine:ultimate and /imagine/build.md",
+		"templates/global/commands/imagine.md and https://example.com/imagine:build",
+		"/imagine:builder, /imagine:build-fasts, /imagine:build-specs and /imagine:callmeters",
+		"the imagination agent and imagination-core and imagine-cores and imagine-core2",
+		`subagent_type: "imagination" and subagent_type: "imagine-pro" and subagent_type: imagined`,
+		"agents/imagination.md and `imagination` agent and `imagination` sub-agent and imagine agents",
+		`subagent_type: "ultimate-pro" and subagent_type: ultimately`,
 		"agents/ultimate-pro.md and `ultimate-pro` agent and ultimate agents",
 	} {
 		if hits := retiredNameHits("f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
 		}
+	}
+
+	// The removed /imagine:build-spec description, as an adopter copied it: the
+	// first /imagine:build sits inside /imagine:build-spec, and the scan goes on
+	// past it to the one that ends the line.
+	line := "/imagine:build-spec → imagine; building it → /imagine:build."
+	var names []string
+	for _, hit := range retiredNameHits("f", line) {
+		names = append(names, hit.Name)
+	}
+	if want := []string{"/imagine:build", "/imagine:build-spec"}; !slices.Equal(names, want) {
+		t.Errorf("line %q hit %q, want %q", line, names, want)
 	}
 }
 
@@ -578,7 +617,7 @@ func TestRetiredNameInACurrentPinnedFileIsReported(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  1\n",
-		"    .claude/current.md:2   /wave — retired command, now /flights:spec\n",
+		"    .claude/current.md:2   /wave — retired command, now the flights-foreman agent\n",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report missing %q:\n%s", want, report)
@@ -631,11 +670,13 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		".claude/skills/wave-builder/x": "mine\n",
 		"docs/agents/API.md":            "kept hub\n",
 		".claude/agents/ultimate.md":    "mine\n",
+		".claude/agents/imagine.md":     "mine\n",
 		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc JC-UPDATE\n" +
 			"subagent_type: \"ultimate\" subagent_type:\"ultimate\" subagent_type: 'ultimate' " +
 			"subagent_type: ultimate subagent_type=\"ultimate\" {\"subagent_type\": \"ultimate\"} " +
 			"{\"subagent_type\":\"ultimate\"} .claude/agents/ultimate.md the `ultimate` agent, " +
-			"the `ultimate` sub-agent, the `ultimate` subagent\n",
+			"the `ultimate` sub-agent, the `ultimate` subagent\n" +
+			"subagent_type: \"imagine\" subagent_type=\"imagine\" .claude/agents/imagine.md the `imagine` agent\n",
 		"docs/other.md": "mcp__chat__chat_ls\n",
 	})
 	// The live ultimate skill is not the retired agent: its own files leave the
@@ -647,7 +688,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 	})
 	bare := t.TempDir()
 	writeRetiredFixture(t, bare, map[string]string{
-		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc subagent_type: \"ultimate\"\n",
+		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc subagent_type: \"ultimate\" subagent_type: \"imagine\"\n",
 	})
 
 	names := func(scan professor.RetiredNameScan) []string {
@@ -687,6 +728,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		"/qa:live",
 		"docs/agents",
 		"rndier",
+		"subagent_type: \"imagine\"",
 		"subagent_type: \"ultimate\"",
 		"wave-builder",
 	}; !slices.Equal(
@@ -768,7 +810,7 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	for _, row := range []struct{ line, name, successor, definition string }{
 		{"spawn gpt-foreman", "gpt-foreman", "gpt-flights-foreman", ""},
 		{"spawn gpt-lander", "gpt-lander", "gpt-flights-lander", ""},
-		{"spawn gpt-executor", "gpt-executor", "gpt-flights-mechanical-executor", ""},
+		{"spawn gpt-executor", "gpt-executor", "flights-worker", ""},
 		{`subagent_type: "terra"`, `subagent_type: "terra"`, "", ""},
 		{`subagent_type:"terra"`, `subagent_type:"terra"`, "", ""},
 		{`subagent_type: 'terra'`, `subagent_type: 'terra'`, "", ""},
@@ -805,6 +847,39 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	}
 }
 
+// TestRetiredNamesReportTheFlightsCut: every agent and command the flights
+// family cut retires is a hit with its successor, and the live names beside
+// them — the successors, the longer twin names, /flights:doctor — are none.
+func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
+	t.Parallel()
+	rows := []struct{ line, name, kind, successor string }{
+		{"spawn foreman-pro for it", "foreman-pro", "agent", "flights-foreman-pro"},
+		{"spawn gpt-foreman-pro for it", "gpt-foreman-pro", "agent", "gpt-flights-foreman-pro"},
+		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", "flights-worker"},
+		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", "flights-worker"},
+		{"flights-speccer writes the spec", "flights-speccer", "agent", "flights-foreman-pro"},
+		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", "flights-foreman-pro"},
+		{"run /flights:spec first", "/flights:spec", "command", ""},
+		{"run /flights:init once", "/flights:init", "command", ""},
+		{"run /flights:orchestrate-cross-harness on codex", "/flights:orchestrate-cross-harness", "command", ""},
+	}
+	root := t.TempDir()
+	var content strings.Builder
+	var want []professor.RetiredNameHit
+	for index, row := range rows {
+		content.WriteString(row.line + "\n")
+		want = append(want, professor.RetiredNameHit{
+			Path: "notes.md", Line: index + 1, Name: row.name, Kind: row.kind, Successor: row.successor,
+		})
+	}
+	content.WriteString("spawn flights-foreman-pro, gpt-flights-foreman-pro or flights-worker; run /flights:doctor\n")
+	writeRetiredFixture(t, root, map[string]string{"notes.md": content.String()})
+	scan := ScanRetiredNames(root, nil)
+	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
+		t.Fatalf("flights cut scan =\n%+v\nwant\n%+v", scan, want)
+	}
+}
+
 func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	t.Parallel()
 	root := newUpdateGitFixture(t)
@@ -819,14 +894,14 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	gitTemp(t, root, "add", "large.txt")
 	scan := ScanRetiredNames(root, nil)
 	want := []professor.RetiredNameHit{
-		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
+		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
 		{Path: "large.txt", Line: 4, Name: "/jc", Kind: "command"},
 		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/quality:md-forlint"},
 	}
 	if len(scan.Failures) != 0 || len(scan.Incomplete) != 0 || !reflect.DeepEqual(scan.Hits, want) {
 		t.Errorf("large tracked scan = %+v, want complete hits %+v", scan, want)
 	}
-	clean := strings.NewReplacer("/wave", "/flights:spec", "/jc", "/pcm", "/quality:forlint", "/quality:md-forlint").
+	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/pcm", "/quality:forlint", "/quality:md-forlint").
 		Replace(content)
 	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
 	scan = ScanRetiredNames(root, nil)
@@ -871,29 +946,5 @@ func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) 
 				t.Fatalf("partial scan = %+v, want the completed hit and contextual %s failure", scan, operation)
 			}
 		})
-	}
-}
-
-func TestRetiredRegistryNames(t *testing.T) {
-	t.Parallel()
-	names := RetiredRegistryNames()
-	for kind, want := range map[string][]string{
-		"agent":   {"rndier", "tracer-pro", "ultimate", "terra"},
-		"command": {"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint", "chat"},
-		"skill":   {"wave-builder", "transcript", "close-out"},
-	} {
-		set := map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills}[kind]
-		for _, name := range want {
-			if !set[name] {
-				t.Errorf("%s %q is not a retired registry name: %v", kind, name, set)
-			}
-		}
-	}
-	for _, phrase := range []string{`subagent_type="ultimate"`, "pfm chat inject", "transcript skill", "mcp__professor__", "JC-COMMIT", "/wave", "mono-architect/"} {
-		for kind, set := range map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills} {
-			if set[phrase] {
-				t.Errorf("%s set holds %q, which is not one registry entry", kind, phrase)
-			}
-		}
 	}
 }

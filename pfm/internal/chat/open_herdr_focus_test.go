@@ -19,7 +19,7 @@ import (
 
 func TestOpenNativeFocusAcknowledgement(t *testing.T) {
 	// Pinned pane.focus producer envelope with its required identity fields.
-	const producer = `{"type":"pane_info","pane":{"terminal_id":"fixture-w1:p2","workspace_id":"w1","tab_id":"w1:t2","pane_id":"w1:p2","focused":true}}`
+	const producer = `{"type":"pane_info","pane":{"terminal_id":"fixture-w6:p3","workspace_id":"w1","tab_id":"w1:t2","pane_id":"w1:p2","focused":true}}`
 	const agentProducer = `{"type":"agent_info","agent":{"terminal_id":"fixture-w6:p3","agent_status":"idle","workspace_id":"w1","tab_id":"w1:t2","pane_id":"w1:p2","focused":true,"state_change_seq":0,"revision":1}}`
 	for _, tc := range []struct {
 		name, body, refusal, diagnostic string

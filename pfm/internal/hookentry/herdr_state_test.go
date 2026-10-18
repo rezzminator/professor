@@ -69,6 +69,15 @@ func TestHerdrStateReportsTheExactRequestLines(t *testing.T) {
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"idle",` + resume + `,"seq":1001000}}`},
 		},
 		{
+			// Only a prompt an intercept blocks leaves the pane as it is; a
+			// near miss starts a turn like any other prompt.
+			"a prompt no intercept blocks reports working",
+			[]string{"--engine", "claude", "working"},
+			`{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/reloaded e"}`,
+			"",
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"working",` + resume + `,"seq":1001000}}`},
+		},
+		{
 			"blocked carries its message",
 			[]string{"--engine", "claude", "blocked"},
 			`{"session_id":"` + session + `","message":"needs approval"}`,
@@ -135,6 +144,12 @@ func TestHerdrStateSendsNothingForEventsThatDoNotChangeThePane(t *testing.T) {
 		{"unmapped notification", []string{"--engine", "claude", "notification"}, `{"session_id":"` + session + `","notification_type":"auth_success"}`},
 		// A compaction restarts the session mid-turn: the pane stays working.
 		{"compaction restart", []string{"--engine", "claude", "start"}, `{"session_id":"` + session + `","source":"compact"}`},
+		// reload-intercept and exit-intercept block these prompts, so no turn
+		// starts and no Stop would ever report the pane idle again.
+		{"a /reload prompt", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/reload"}`},
+		{"a /reload prompt with options", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":" /reload --account 2 "}`},
+		{"an exit word", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"e"}`},
+		{"a slash exit word", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/e"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newFakeHerdr(t)
@@ -644,28 +659,17 @@ func TestHerdrStateReportsOnlyForThePanesOwnEngine(t *testing.T) {
 	}
 }
 
-// One dispatch branch in cmd/pfm serves both stdin-payload hooks.
+// One dispatch branch in cmd/pfm serves both Herdr reporter entries.
 func TestPayloadHookRoutesEachVerbToItsEntry(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if rc := PayloadHook(
-		[]string{"herdr-state", "bogus"},
-		strings.NewReader(""),
-		&stdout,
-		&stderr,
-	); rc != 1 ||
+	var stderr bytes.Buffer
+	if rc := PayloadHook([]string{"herdr-state", "bogus"}, strings.NewReader(""), &stderr); rc != 1 ||
 		!strings.Contains(stderr.String(), "herdr-state") {
 		t.Fatalf("herdr-state: rc=%d stderr=%q, want its usage error", rc, stderr.String())
 	}
 	stderr.Reset()
-	payload := `{"tool_input":{"subagent_type":"Explore","model":"sonnet"}}`
-	if rc := PayloadHook(
-		[]string{"explore-deny"},
-		strings.NewReader(payload),
-		&stdout,
-		&stderr,
-	); rc != 0 ||
-		!strings.Contains(stdout.String(), "deny") {
-		t.Fatalf("explore-deny: rc=%d stdout=%q, want its deny answer", rc, stdout.String())
+	if rc := PayloadHook([]string{"herdr-shell", "bogus"}, strings.NewReader(""), &stderr); rc != 2 ||
+		!strings.Contains(stderr.String(), "herdr-shell") {
+		t.Fatalf("herdr-shell: rc=%d stderr=%q, want its usage error", rc, stderr.String())
 	}
 }
 

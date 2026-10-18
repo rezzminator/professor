@@ -37,7 +37,7 @@ func TestHerdrKeysCapabilities(t *testing.T) {
 				t,
 				func(nativeRequest) (any, string) { return map[string]string{"type": "ok"}, "" },
 			)
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2"}
 			if err := nativeEngine(t, target).SendKey(context.Background(), target, key); err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +53,7 @@ func TestHerdrKeysCapabilities(t *testing.T) {
 				t,
 				func(nativeRequest) (any, string) { return map[string]string{"type": "ok"}, "" },
 			)
-			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "p2"}
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2"}
 			err := nativeEngine(t, target).SendKey(context.Background(), target, key)
 			if err == nil || !strings.Contains(err.Error(), "Herdr") {
 				t.Fatalf("unsupported key %s: %v", key, err)

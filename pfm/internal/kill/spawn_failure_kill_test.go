@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -196,4 +197,110 @@ func stubLauncher(t *testing.T, root string, code int) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// gateSpawner records what the finisher launch saw: whether its context was
+// alive, whether any deadline could still cancel it, and whether the commit
+// section was still open.
+type gateSpawner struct {
+	launches    int
+	ctxErr      error
+	cancellable bool
+	endedSeen   int
+	ended       *int
+	fail        error
+}
+
+func (spawner *gateSpawner) Prepare(ExitArgs) error { return nil }
+
+func (spawner *gateSpawner) Spawn(ctx context.Context, _ ExitArgs) error {
+	spawner.launches++
+	spawner.ctxErr = ctx.Err()
+	spawner.cancellable = ctx.Done() != nil
+	spawner.endedSeen = *spawner.ended
+	if spawner.ctxErr != nil {
+		return spawner.ctxErr
+	}
+	return spawner.fail
+}
+
+// The hook deadline closes the commit gate. Once Kill opens its section the
+// kill row is written under the deadline (a deadline before it commits leaves
+// no row and starts nothing), then the finisher launch and any rollback run
+// to the end on a context the deadline cannot cancel, and the section closes
+// after the last of them; a gate that refuses leaves no row and starts nothing.
+func TestKillRunsRowAndFinisherInsideOneCommitSection(t *testing.T) {
+	const id = "81818181-8181-4181-8181-818181818181"
+	for _, test := range []struct {
+		name         string
+		refuse       bool
+		cancelAfter  bool
+		launchFails  bool
+		wantErr      string
+		wantRow      bool
+		wantLaunches int
+	}{
+		{name: "open gate", wantRow: true, wantLaunches: 1},
+		{name: "refused gate", refuse: true, wantErr: "deadline", wantLaunches: 0},
+		{
+			name: "a deadline before the row commits writes nothing", cancelAfter: true,
+			wantErr: "context canceled", wantLaunches: 0,
+		},
+		{name: "a failed launch rolls its row back", launchFails: true, wantErr: "launch failed", wantLaunches: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			jail := newKillJail(t)
+			database := jail.open(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			ended := 0
+			spawner := &gateSpawner{ended: &ended}
+			if test.launchFails {
+				spawner.fail = errors.New("launch failed")
+			}
+			gated := deps.WithCommitGate(ctx, func() (func(), bool) {
+				if test.refuse {
+					return func() {}, false
+				}
+				if test.cancelAfter {
+					cancel()
+				}
+				return func() { ended++ }, true
+			})
+			manager, err := New(
+				database,
+				Dependencies{Spawner: spawner, Now: func() time.Time { return time.Unix(700, 0) }},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = manager.Kill(gated, Request{
+				ID: id, Engine: pfmengine.Codex, Exit: true, SocketName: "gate-codex-self", PaneID: "%7",
+			})
+			if test.wantErr == "" && err != nil {
+				t.Fatalf("Kill() = %v", err)
+			}
+			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
+				t.Fatalf("Kill() = %v; want an error naming %q", err, test.wantErr)
+			}
+			if _, found, err := database.Killed(context.Background(), id); err != nil || found != test.wantRow {
+				t.Fatalf("kill row found=%t err=%v; want found=%t", found, err, test.wantRow)
+			}
+			if spawner.launches != test.wantLaunches {
+				t.Fatalf("finisher launches = %d, want %d", spawner.launches, test.wantLaunches)
+			}
+			if test.wantLaunches > 0 && (spawner.ctxErr != nil || spawner.cancellable || spawner.endedSeen != 0) {
+				t.Fatalf(
+					"finisher launch saw ctx error %v, cancellable=%t and %d ended sections; "+
+						"want a context no deadline cancels, inside the open section",
+					spawner.ctxErr,
+					spawner.cancellable,
+					spawner.endedSeen,
+				)
+			}
+			if wantEnded := map[bool]int{true: 0, false: 1}[test.refuse]; ended != wantEnded {
+				t.Fatalf("commit sections ended = %d, want %d", ended, wantEnded)
+			}
+		})
+	}
 }

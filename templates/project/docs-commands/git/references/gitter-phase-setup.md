@@ -2,11 +2,11 @@
 
 Gitter phase card — every core `gitter.md` rule (Remote Publication Boundary, Scoped-commit discipline, BANNED commands, commit convention) binds here.
 
-Creates the worktree a flight runs in, before its first task file is dispatched.
+Creates the worktree a flight runs in, before its first foreman is dispatched.
 
 ## 1. Validate preconditions
 
-- Confirm the brief names the task file(s) (exists on disk) and the residue dir (the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`).
+- Confirm the brief names the residue dir.
 - Confirm no leftover worktree: `./.claude/scripts/worktree.sh list $PIPELINE`. If it exists, warn and stop — never overwrite.
 - **Uncommitted changes on main** — handle per the orchestrator's `CarryWIP` directive (`commit` | `leave`, default `leave`). Run only when `git status --porcelain` is non-empty:
   - `commit` — commit main's WIP (untracked included) so the branch inherits it as a shared ancestor:

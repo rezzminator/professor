@@ -249,7 +249,12 @@ func TestHerdrWatchAccumulatesNativeIdle(t *testing.T) {
 		Backend: "herdr",
 		Live:    true,
 		Pane:    "w6:p3",
-		Socket:  herdrStatusSocketReplies(t, func() string { return reply.Load().(string) }),
+		Socket: herdrStatusSocketReplies(
+			t,
+			func() string { return reply.Load().(string) },
+			"w6:p3",
+			string(pfmengine.OpenCode),
+		),
 	}
 	inspector := NewSeatInspector(nil)
 	now := time.Now()
@@ -315,6 +320,7 @@ func TestHerdrWatchFreshTranscriptCapsNativeIdle(t *testing.T) {
 	socket := herdrStatusSocket(
 		t,
 		`{"agent":{"pane_id":"w1:p1","agent_status":"idle","terminal_id":"one","state_change_seq":4}}`,
+		"w1:p1",
 	)
 	target.Socket = socket
 	nativeStatus := headless.Status{State: headless.StateIdle, IdleSeconds: 3}

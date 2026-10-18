@@ -30,11 +30,17 @@ if [[ -n "$candidate" && -x "$candidate" ]]; then
 else
   JSCPD="$(command -v jscpd || true)"
 fi
-[[ -n "$JSCPD" ]] || { echo "CLONES ERROR TOOLCHAIN-MISSING — jscpd not installed; run infra/fence/tools.sh (make -C pfm tools)"; exit 2; }
+# The remedy: in the fence the tool is the image's (no host install reaches a fenced check).
+if [[ "${PFM_DEV_FENCE:-}" == 1 ]]; then
+  REMEDY="the fence image lacks it — infra/fence/pfm-dev.Dockerfile installs it from infra/fence/tools.env"
+else
+  REMEDY="run infra/fence/tools.sh (make -C pfm tools)"
+fi
+[[ -n "$JSCPD" ]] || { echo "CLONES ERROR TOOLCHAIN-MISSING — jscpd not installed; $REMEDY"; exit 2; }
 found="$("$JSCPD" --version 2>/dev/null)" || found="unreadable"
 found="${found#jscpd }"
 [[ "$found" == "$JSCPD_VERSION" || "$found" == "v$JSCPD_VERSION" ]] \
-  || { echo "CLONES ERROR TOOLCHAIN-MISSING — jscpd $found is not JSCPD_VERSION $JSCPD_VERSION; run infra/fence/tools.sh (make -C pfm tools)"; exit 2; }
+  || { echo "CLONES ERROR TOOLCHAIN-MISSING — jscpd $found is not JSCPD_VERSION $JSCPD_VERSION; $REMEDY"; exit 2; }
 [[ "$MODE" == --resolve ]] && { echo "$JSCPD"; exit 0; }
 LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
 run() { (cd "$ROOT" && "$JSCPD" --config .jscpd.json --fail-on-empty --baseline "$BASELINE" "$@") >"$LOG" 2>&1; }

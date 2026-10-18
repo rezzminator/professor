@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -73,8 +75,9 @@ func EndTarget(
 		return 1
 	}
 	if worker {
-		if err := EndNativeWorker(ctx, target, effective.Paths); err != nil {
-			fmt.Fprintf(stderr, "pfm chat end worker: %v\n", err)
+		// stderr is the worker's end-{seat}.log, so its steps land there,
+		// the failure line included: it is written once, by the steps.
+		if err := endNativeWorkerSteps(ctx, target, effective.Paths, stderr); err != nil {
 			return 1
 		}
 		return 0
@@ -193,24 +196,56 @@ func ScheduleHerdrEnd(ctx context.Context, chat headless.Chat, runtime pfmconfig
 }
 
 // EndNativeWorker consumes only an exact durable seat id, never ambient pane identity.
-func EndNativeWorker(ctx context.Context, id string, values paths.Values) (returnErr error) {
+func EndNativeWorker(ctx context.Context, id string, values paths.Values) error {
+	return endNativeWorkerSteps(ctx, id, values, io.Discard)
+}
+
+// endNativeWorkerSteps is EndNativeWorker that writes each step it takes to steps.
+func endNativeWorkerSteps(ctx context.Context, id string, values paths.Values, steps io.Writer) error {
 	db := fleetdb.OpenSharedState(ctx, values)
 	seat, found, err := db.Seat(ctx, id)
 	closeErr := db.Close()
 	if err != nil || closeErr != nil {
-		return fmt.Errorf("read end worker seat: %w", errors.Join(err, closeErr))
+		err = fmt.Errorf("read end worker seat: %w", errors.Join(err, closeErr))
+		endStep(steps, "failed: %v", err)
+		return err
 	}
 	if !found {
+		endStep(steps, "seat %s not found: nothing to end", id)
 		return nil
 	}
 	if !seat.EndPending {
-		return fmt.Errorf("seat %s has no pending end intent", id)
+		err := fmt.Errorf("seat %s has no pending end intent", id)
+		endStep(steps, "failed: %v", err)
+		return err
 	}
-	return endHerdr(ctx, headless.Chat{Backend: seat.Backend, SeatID: id, ID: seat.SessionID}, values)
+	return endHerdrSteps(ctx, headless.Chat{Backend: seat.Backend, SeatID: id, ID: seat.SessionID}, values, steps)
 }
 
 // endHerdr closes only a proved canonical owner, and retires only after close.
-func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (returnErr error) {
+func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) error {
+	return endHerdrSteps(ctx, chat, values, io.Discard)
+}
+
+// endStep writes one timestamped line of the end worker's progress; the worker
+// points steps at its end-{seat}.log, so the log is never empty after a run.
+func endStep(steps io.Writer, format string, args ...any) {
+	fmt.Fprintf(
+		steps,
+		"%s pfm chat end worker: %s\n",
+		clock.Real.Now().UTC().Format(time.RFC3339),
+		fmt.Sprintf(format, args...),
+	)
+}
+
+// endHerdrSteps is endHerdr that writes each step it takes to steps, and the
+// error it returns.
+func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values, steps io.Writer) (returnErr error) {
+	defer func() {
+		if returnErr != nil {
+			endStep(steps, "failed: %v", returnErr)
+		}
+	}()
 	identity := fleetdb.ConversationIdentity(chat.ID, chat.SeatID)
 	unlock, err := fleetdb.LockSeat(ctx, values, identity)
 	if err != nil {
@@ -224,8 +259,10 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 		return fmt.Errorf("read end seat %s: %w", chat.SeatID, err)
 	}
 	if !found {
+		endStep(steps, "seat %s not found: nothing to end", chat.SeatID)
 		return nil
 	}
+	endStep(steps, "seat read: %s pane %s", seat.SeatID, seat.HerdrPane)
 	if seat.Backend != spawn.BackendHerdr || seat.SessionID != chat.ID {
 		return fmt.Errorf("native end target %s no longer matches its durable seat", chat.SeatID)
 	}
@@ -239,6 +276,7 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 				errors.Join(proofErr, errors.New("supervisor ownership unproved")),
 			)
 		}
+		endStep(steps, "owner unproved (pending end): confirming the terminal is gone")
 		absent, err := endedTerminalAbsent(ctx, seat, values)
 		if err != nil || !absent {
 			return fmt.Errorf(
@@ -247,7 +285,9 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 				errors.Join(proofErr, err, errors.New("terminal disappearance unconfirmed")),
 			)
 		}
+		endStep(steps, "terminal absent confirmed")
 	} else {
+		endStep(steps, "owner proved")
 		if !seat.EndPending {
 			before := seat
 			seat.EndPending = true
@@ -255,6 +295,7 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 				return fmt.Errorf("record end intent: %w", err)
 			}
 		}
+		endStep(steps, "pane.close sending: %s", seat.HerdrPane)
 		body, err := herdr.SeatRequest(
 			ctx,
 			seat.HerdrSocket,
@@ -262,6 +303,7 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 			map[string]string{nativePaneIDKey: seat.HerdrPane},
 		)
 		if err != nil {
+			endStep(steps, "pane.close failed: %v", err)
 			absent, confirmErr := endedTerminalAbsent(ctx, seat, values)
 			if confirmErr != nil || !absent {
 				return fmt.Errorf(
@@ -270,6 +312,7 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 					errors.Join(err, confirmErr),
 				)
 			}
+			endStep(steps, "terminal absent confirmed after the close failure")
 		} else {
 			var ack struct {
 				Type string `json:"type"`
@@ -281,7 +324,12 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 			if ack.Type != "ok" && (ack.Type != "pane_closed" || ack.Pane != seat.HerdrPane) {
 				return fmt.Errorf("unexpected Herdr pane close acknowledgement: %s", body)
 			}
+			endStep(steps, "pane.close acknowledged")
 		}
+	}
+	// Before the seat row goes, so a failure here leaves the seat retryable.
+	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
+		return fmt.Errorf("remove ended seat reload files: %w", err)
 	}
 	if err := state.DeleteSeatRun(seat.SeatID); err != nil {
 		return fmt.Errorf("remove ended seat recipe: %w", err)
@@ -289,6 +337,7 @@ func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) (ret
 	if err := state.DeleteSeat(ctx, seat.SeatID); err != nil {
 		return fmt.Errorf("remove ended seat: %w", err)
 	}
+	endStep(steps, "seat retired: %s", seat.SeatID)
 	return nil
 }
 

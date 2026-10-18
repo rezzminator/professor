@@ -448,7 +448,7 @@ func TestProjectUpdatesReportsRetiredNamesAsReviewAndAScanFailureAsFailed(t *tes
 	hits := func(root string, pinned map[string]bool) RetiredNameScan {
 		gotRoot, gotPinned = root, pinned
 		return RetiredNameScan{Hits: []RetiredNameHit{
-			{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
+			{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: "/flights:doctor"},
 			{Path: ".claude/codex-build.json", Line: 3, Name: "/jc", Kind: "command"},
 		}}
 	}
@@ -462,7 +462,7 @@ func TestProjectUpdatesReportsRetiredNamesAsReviewAndAScanFailureAsFailed(t *tes
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
-		"    scripts/legacy.sh:2   /wave — retired command, now /flights:spec\n",
+		"    scripts/legacy.sh:2   /wave — retired command, now /flights:doctor\n",
 		"    .claude/codex-build.json:3   /jc — retired command, no successor\n",
 		"REVIEW REQUIRED — 3 items; nothing was written.\n",
 	} {

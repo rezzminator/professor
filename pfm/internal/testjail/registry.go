@@ -95,17 +95,17 @@ func globalAgentFixtures() ([]globalAgentFixture, error) {
 	return agentFixtureCache.rows, agentFixtureCache.err
 }
 
-// stageTracerIntakeKit stages what the tracer-intake launch hook needs on a
+// stageTracetreeKit stages what the tracer's tracetree kit needs on a
 // healthy host: the checkout's tracetree skill linked at
 // {home}/.claude/skills/tracetree, the link pfm install makes, and a python3 in
 // shimDir, the one directory beyond the canonical bin the jail's PATH holds.
 // The shim runs the interpreter the test process resolved; a host without one
 // fails the test here, as the doctor check would fail it later.
-func stageTracerIntakeKit(t *testing.T, home, shimDir string) {
+func stageTracetreeKit(t *testing.T, home, shimDir string) {
 	t.Helper()
 	python, err := deps.Resolve("python3")
 	if err != nil {
-		t.Fatalf("the jail's healthy HOME needs python3 for the tracer-intake hook: %v", err)
+		t.Fatalf("the jail's healthy HOME needs python3 for the tracetree kit: %v", err)
 	}
 	if err := WriteExecutable(
 		filepath.Join(shimDir, "python3"), []byte("#!/bin/sh\nexec '"+python+"' \"$@\"\n"), 0o700,

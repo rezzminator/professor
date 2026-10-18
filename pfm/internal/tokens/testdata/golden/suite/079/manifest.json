@@ -1,5 +1,5 @@
 {
- "test": "--timeline: ownership across project directories matches aggregate within --root",
+ "test": "ownership across project directories within --root",
  "now": "2026-10-09T10:28:46.000Z",
  "args": [
   "--since",

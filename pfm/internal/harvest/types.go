@@ -550,12 +550,6 @@ func (h *Harvester) Fetch(ctx context.Context, source string) Result {
 	return h.FetchWithOptions(ctx, source, FetchOptions{})
 }
 
-// NewChromeClient exposes the production uTLS rung to adapters without
-// exposing its transport internals. A nil resolver uses the system resolver.
-func NewChromeClient(resolve func(context.Context, string) ([]net.IP, error)) *http.Client {
-	return safeHTTPClient(true, resolve)
-}
-
 // NewDirectClient is the pinned direct (non-Chrome) client for an adapter
 // that needs its own timeout, proxy, or User-Agent but must still dial only
 // the addresses the DoH resolver returned. proxy may be nil. An empty ua

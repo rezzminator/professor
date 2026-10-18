@@ -1,5 +1,5 @@
 {
- "test": "--timeline: a fork or resumed file prices only its own call, like the default report",
+ "test": "a fork or resumed file prices only its own call",
  "now": "2026-10-09T10:28:46.000Z",
  "args": [
   "--since",

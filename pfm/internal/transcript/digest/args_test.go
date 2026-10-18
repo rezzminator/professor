@@ -25,10 +25,8 @@ func TestArgsReadTheArgparseForms(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"list", "x"}, "argument verb: invalid choice: 'list' (choose from 'show', 'counts', 'types', " +
-			"'locate', 'agents')"},
-		{[]string{"--", "list", "x"}, "argument verb: invalid choice: 'list' (choose from 'show', 'counts', " +
-			"'types', 'locate', 'agents')"},
+		{[]string{"list", "x"}, "argument verb: invalid choice: 'list' (choose from 'show', 'locate', 'agents')"},
+		{[]string{"--", "list", "x"}, "argument verb: invalid choice: 'list' (choose from 'show', 'locate', 'agents')"},
 		{[]string{"show"}, "the following arguments are required: target"},
 		{[]string{"show", "x", "--grep", "-v"}, "argument --grep: expected one argument"},
 		{[]string{"show", "x", "--width", "nope"}, "argument --width: invalid int value: 'nope'"},

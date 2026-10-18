@@ -397,13 +397,19 @@ func TestHerdrStatusNativeFallback(t *testing.T) {
 	})
 }
 
-func herdrStatusSocket(t *testing.T, result string) string {
+func herdrStatusSocket(t *testing.T, result string, panes ...string) string {
 	t.Helper()
-	return herdrStatusSocketReplies(t, func() string { return result })
+	return herdrStatusSocketReplies(t, func() string { return result }, panes...)
 }
 
-func herdrStatusSocketReplies(t *testing.T, result func() string) string {
+func herdrStatusSocketReplies(t *testing.T, result func() string, panes ...string) string {
 	t.Helper()
+	t.Setenv("PFM_STATE_DB", filepath.Join(t.TempDir(), "state.db"))
+	t.Setenv("PFM_PROC_ROOT", t.TempDir())
+	pane := "w6:p3"
+	if len(panes) != 0 {
+		pane = panes[0]
+	}
 	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -429,10 +435,40 @@ func herdrStatusSocketReplies(t *testing.T, result func() string) string {
 				if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&request); err != nil {
 					return
 				}
-				response := fmt.Sprintf(`{"id":%q,"ok":true,"result":%s}`+"\n", request.ID, result())
+				body := result()
+				if proof, _, ok := nativeChatProof(nativeChatRequest{Method: request.Method}, pane); ok {
+					raw, err := json.Marshal(proof)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					body = string(raw)
+				}
+				response := fmt.Sprintf(`{"id":%q,"ok":true,"result":%s}`+"\n", request.ID, body)
 				_, _ = io.WriteString(conn, response)
 			}()
 		}
 	}()
+	_, db, seat := nativeChatSeat(t, socket, "live")
+	seat.HerdrPane, seat.HerdrWorkspace = pane, strings.Split(pane, ":")[0]
+	if len(panes) > 1 {
+		seat.Engine = panes[1]
+	}
+	_ = nativeChatHost(t, db, seat, true)
 	return socket
+}
+
+func TestHerdrStatusRequiresDurableOwnership(t *testing.T) {
+	testjail.Fleet(t)
+	socket := nativeChatSocket(t, func(nativeChatRequest) (any, string) {
+		return json.RawMessage(`{"agent":{"pane_id":"w6:p3","agent_status":"idle"}}`), ""
+	})
+	_, err := statusFromHerdr(
+		context.Background(),
+		headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Engine: pfmengine.Claude},
+		headless.Status{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "ownership unproved") {
+		t.Fatalf("status without owner=%v; want explicit ownership unproved", err)
+	}
 }

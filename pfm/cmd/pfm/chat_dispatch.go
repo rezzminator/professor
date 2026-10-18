@@ -120,7 +120,7 @@ func runChatWithRuntime(
 	case "schedule":
 		return runChatSchedule(rest, stdout, stderr, runtime)
 	case "reload":
-		return runChatReloadWithRuntime(rest, stdout, stderr, runtime, paths.OSEnv{})
+		return runChatReloadWithRuntime(ctx, rest, stdout, stderr, runtime, paths.OSEnv{})
 	case whoamiCommand:
 		// Compatibility alias for the public `pfm whoami` command.
 		return runWhoami(rest, stdout, stderr, runtime)

@@ -1,57 +1,43 @@
 ---
 name: flights:doctor
-description: 'USER-ONLY — /flights:doctor [directory], default the newest under $HOME/.local/state/pfm/flights/{project}/: checks every DONE, check, gate and commit claim of a running or landed flight against run.md, the spec, git and the transcripts; routes findings, fixes nothing. flights-lander → here. Writes {directory}/doctor.md.'
+description: 'USER-ONLY — /flights:doctor [session or agent id] [--worktree DIR --base SHA]: measures a flight — landed lines per million input tokens, written / read per agent, the silent share — then where the reading went; routes findings, fixes nothing. flights-lander → main chat → here. Writes /tmp/{project}/doctor/{target}.md.'
+argument-hint: '[session or agent id] [--worktree DIR --base SHA]'
 disable-model-invocation: true
 ---
 
-# Doctor — doubt the flight
+# Doctor — the meter
 
-Ground truth only: `run.md`, the statement of intent (`spec.md` when the flight has one, else `requirements.md`, else the root's `GOAL` line), git, the transcripts, the checks' own output, the seats' state. Never a return, a recap, a message, or your own earlier picture. You find defects and inefficiencies and route them; you fix nothing. Input: $ARGUMENTS — the flight directory, else the newest under `$HOME/.local/state/pfm/flights/{project}/`.
+Measure what a flight wrote per token it read, then show where the reading went. Believe transcripts and git, never a return, a recap or your own earlier picture. You find and route; you fix nothing.
 
-## The anchors
+Input: $ARGUMENTS — a main-chat session id or a foreman's agent id, and for landed lines the worktree and its base sha; no id given: this chat's own session. The tree is walked from transcripts: each sub-agent's `.meta.json` `toolUseId` links it to its parent's Agent `tool_use`. Load the `chatlog` skill for the transcript verbs. `{project}` is the checkout's directory name minus any leading dot.
 
-An anchor you cannot read is a finding ("failed to look"), never an absence ("nothing there").
+## 1 The measure, first
 
-| Anchor | Where | Proves |
-| --- | --- | --- |
-| `requirements.md` | the directory | The rulings and the requirement rows, each naming the unit that owns it; absent for a flight with no spec, whose intent is the root's `GOAL` line |
-| `spec.md` | the directory | A `flights-speccer` spec: every `requirements.md` row verbatim plus its `## Decisions`, binding as rulings; when present, the intent every claim is read against |
-| `run.md` | the directory | The header's baseline sha and date; `BASE`, `GOAL`, `SPEC`, `DECIDE`, `CUT`, `FROZEN`, `CLAIMED`, verdict, `gate` and `RETRO` lines |
-| `briefs/{unit}-r{round}.md`, `briefs/{id}-r{round}.md`, `briefs/speccer-r{round}.md`, `briefs/gate-r{round}.md`, `agents.tsv` | the directory | What each child, executor, speccer and lander was told; a spawn in `agents.tsv` without its brief file is a finding |
-| `cut-kit.txt`, `cut-kit-{unit}.txt` | the directory | The root's and each child's cut kit output; a `CUT` line in `run.md` without `cut-kit.txt`, or a child's `CUT` return row without its `cut-kit-{unit}.txt`, is a finding |
-| `design.md`, `design-{unit}.md` | the directory | The root's and each child's design, written before its first code edit; a `DECIDE` line without its file is a finding |
-| `tasks/{id}.md` | the directory | Each mechanical bulk edit the foreman fixed, and the `Files` its executor's diff must stay inside |
-| `returns/{unit}-r{round}.md`, `returns/speccer-r{round}.md`, `returns/gate-r{round}.md` | the directory | Each child's, seat's, speccer's and lander's return as written; a verdict line in `run.md` without its return file is a finding |
-| `doctor.md`, else `audit.md` | the directory | The previous report, for a delta |
-| Git | `~/.claude/agents/flights-foreman.md` § Change inventory, `git log {baseline}..HEAD`, `git status --porcelain` | Tracked and untracked content and line counts per unit, with strays named |
-| Transcripts | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-*.jsonl`, default `~/.claude`, one flat directory whatever the depth; the `.meta.json` beside each names its `agentType` and `spawnDepth`; a seat's through `mcp__chat-professor__read` | Calls per agent against its cap, peak context, what each foreman read and when, waits, children spawned |
-| The gate | `gate.md` and the `flights-lander` transcript of each round: each project's full runs (a second only after a failed one), the review run — its tier against the sink count `gate.md` records — and its `review-r{round}/review.md`, the attack map, the tests it wrote; the return's `GATE` row is the claim checked against them | Every changed hunk mapped; findings and their terminal state |
-| `REVIEW.md` | the directory, for a flight that merged | Every `gate.md` finding as `F{n}` with its status; one missing or contradicted is a finding |
-| Spend | your own run of `pfm tokens --flight {directory} --metrics-out {a scratch file}`; `metrics.md` and the `COST` row are claims compared against it | Per agent: calls, context, tokens, price, failed commands, poll calls, re-reads, compactions, over cap; an `UNMATCHED` row is a finding |
+Run `pfm tokens --tree {target} [--worktree DIR --base SHA]`, then the same with `--json` for the rows you rank. Per agent it gives type, model, input, cache-read and cache-write tokens, bytes written (Edit and Write on files under the worktree or repo, `/tmp` excluded), bytes read (tool results) and USD; per tree, landed code lines (`git diff --numstat BASE`, tests, docs, generated and lock files excluded), landed lines per million input tokens, and the silent share (the input taken by agents that wrote no code). A failed run is the report's first finding, never a zero.
 
-## The examination, piece by piece
+The report opens with those three tree numbers, then written / read per agent type.
 
-1. Before the first edit, per foreman, from its transcript: the base gate ran on the untouched tree; a `GOAL` line and the door searches came before the first edit; every door hit was built or ruled out by its own `path:line`; each data shape the work relies on was read from its producer, not only a consumer or one sample; a `DECIDE` line exists where no ruling decided the design.
-2. The split: each child is a build unit, an unrelated problem, or a `CHILD` segment of the foreman's step 4 — the `CUT` ran on the door list before any of the segment's code was read (its transcript); a `CHILD` segment the parent built itself is a finding unless an `OVERRIDE` line names a fact that checks out (a `path:line`, a row, a spine contract; a need to read its code never does), and so is a `KEEP` segment spawned. Foremen go at most three deep (a `DEPTH 3` foreman spawned no foreman) and only the root spawned a speccer or a lander; `FROZEN` with its check line, a signature or compiling stub with its test and never a prose contract, precedes the first child's spawn; each `ESCALATE` was answered by a re-frozen spine before the child resumed; each child's brief carries its own requirement rows verbatim (with a spec, the `spec.md` path and the `D` ids they rest on), a segment's `SEGMENT`, `ORDER`, `ESCALATE` and `DECIDE` lines verbatim, the interface's or spine's paths and acceptance, and no steps or beliefs about code the parent did not read.
-3. Ledger truth: a `SPEC` line has its `spec.md`, its speccer brief and return file, and no `USER` decision without the user's authority to decide forks in the brief; a `DONE` flight whose spec `## Open` holds an `UNBUILT` item is a finding; every `DONE` line's unit shows its tracked and owned untracked changes in § Change inventory; name every stray and verify the gate's inventory and sizing include the untracked files; each requirement row has its case or assertion in the owning unit's test, read by you, its red and green runs in a log or a transcript; a `CLAIMED` line without its `DONE|FAILED|BLOCKED` line is in flight (a live agent) or lost (named); an `agents.tsv` row that is no spawn is a finding.
-4. Repairs: a red went back to the child that built it; a second red of one child is `BLOCKED` in the return; the parent edited a child's unit only when the cause was the frozen interface; a mechanical executor's `SPEC-DRIFT` was answered by a changed task file; a `D` the code refused went back to the speccer, never amended in a design file.
-5. Conformance spot-check on the highest-stakes rows (protected-data channels, contracts): each row against the code and its test, mechanically where it can be, by reading where it cannot.
-6. Cost and cadence: calls per foreman against its 250 cap, the speccer against 150, the lander against 200; a cap reached that returned `DONE` or `SPEC`; poll chains (`sleep`, `echo idle`, a repeated log peek, a watcher on a sub-agent's return); a turn ended while a child, a watch or a gate still ran; any per-step report.
-7. Liveness, in flight only: a transcript still growing, a seat's watch lines, a pane captured full-screen and judged from process evidence; an empty capture is a failed probe, never a quiet seat.
-8. Landing: one lander for the flight; `gate.md` holds every project's last full run, passed; each new lander test was watched failing; every finding is terminal; the commit sha exists and its diff matches the flight's; a landed sha is on the integration branch it names.
+## 2 Where the reading went
 
-## Report
+Each row names its transcript `path:line` (`pfm transcript show {id}`).
 
-One table — `unit · claimed · evidence found · gaps` — then findings ranked most severe first, each with its artifact quoted and its prescription: the owning foreman, `gitter`, or the user when only the user can. All clear: the table plus its coverage line, what was probed and what would have failed the probe.
+| Check | Finding |
+| --- | --- |
+| Tier fit | a foreman tier above or below its brief's difficulty (the fleet prompt's foreman rubric: difficulty and ambiguity, never size); a lander or reviewer tier off its code-line bar |
+| Re-reads | a file an agent read again after a tracer answer citing it reached that agent |
+| Store hits | tracer questions answered `TRACE Q{n} · none` from the store, and questions walked again whose cited files were unchanged |
+| Full suites outside the lander | any full suite or gate a foreman or worker ran |
+| Gate repeats | a lander full gate run again with no red gate between, or a red gate's fix checked by rerunning the gate instead of its failing tests |
+| Idle gaps | a gap over 5 minutes between an agent's records, with who waited on what |
+| Greedy foreman | a foreman that wrote pieces a worker could have taken: its written bytes against its workers' |
+| Silent agents | agents that wrote nothing, ranked by input tokens |
 
-## Writes
+## 3 The report
 
-`{directory}/doctor.md`, this report, overwritten each run. Nothing else.
+Write `/tmp/{project}/doctor/{target}.md`, overwritten each run: the measure, the checks ranked by the input tokens they cost, and a NOT READ line for every transcript, file or command you could not read. Route each finding: a prompt defect to `pcm`, a code defect named with its file. Your reply is the measure's three numbers, the top findings and the report path.
 
 ## Rules
 
-- The judge is never the thing being judged: read the artifact, never the verdict asserted about it.
-- A clean grep proves the pattern absent, never the flight clean; scope every claim to what was measured.
+- A return's claim is checked against the tool calls and results that back it.
+- Each number names the method that counted it; nothing is estimated.
 - An error is never reported as absence: "could not read the transcripts" and "no transcripts" are two findings.
-- Findings are defects to route, never fixes to make by hand.
-- User contact only for the physically user-only, opening with why it is.

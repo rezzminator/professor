@@ -157,9 +157,6 @@ func TestCodexPricesLastObservedModelAfterSwitchBack(t *testing.T) {
 	if !strings.Contains(stdout.String(), "$4.00") || !strings.Contains(stdout.String(), `priced entirely at "gpt-a"`) {
 		t.Errorf("row is not priced at the last observed model:\n%s", stdout.String())
 	}
-	if r := a.codexAuditRun(file, nil); r.model != "gpt-a" || math.Abs(r.usd-4) > 1e-12 {
-		t.Errorf("flight model %s, cost %v; want gpt-a, 4", r.model, r.usd)
-	}
 }
 
 // A Codex home whose only rollout subtree cannot be read holds no rollout the
@@ -188,45 +185,6 @@ func TestCodexRefusesAnEmptyHome(t *testing.T) {
 	code, _, stderr := auditWith(t, Options{}, "--codex", "--prices", fixture(t, "model-cost.json"))
 	if code != 1 || !strings.Contains(stderr, "READ ERRORS: no Codex home is configured; pass --codex-root DIR") {
 		t.Fatalf("exit %d stderr %q, want 1 naming the missing home", code, stderr)
-	}
-}
-
-// TestCodexFailedCallIsTheSharedPredicate: a Codex tool call fails by
-// transcript.CodexToolOutput (INTENDED: a nonzero exit code and an apply_patch
-// verification failure count; "Script failed" counts only at the head).
-func TestCodexFailedCallIsTheSharedPredicate(t *testing.T) {
-	output := func(text string) string {
-		quoted, err := json.Marshal(text)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return `{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":` +
-			string(quoted) + "}}\n"
-	}
-	tests := []struct {
-		name   string
-		output string
-		failed float64
-	}{
-		{"exit code", "Process exited with code 2\nOutput:\nboom", 1},
-		{"exit zero", "Process exited with code 0\nOutput:\nfine", 0},
-		{"wrapped metadata", `{"output":"x","metadata":{"exit_code":1}}`, 1},
-		{"apply_patch", "apply_patch verification failed: no match", 1},
-		{"script failed at the head", "Script failed: oops", 1},
-		{"script failed deep in the text", "ok\n" + strings.Repeat("x", 500) + "\nScript failed", 0},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "rollout.jsonl")
-			call := `{"type":"response_item","payload":{"type":"function_call","call_id":"c1","name":"exec","arguments":"{}"}}` + "\n"
-			if err := os.WriteFile(path, []byte(call+output(test.output)), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a := &auditor{scan: newScanState(), loc: testZone, prices: bookOf(fixtureDocument(t))}
-			if r := a.codexAuditRun(path, nil); r.failedCmds != test.failed {
-				t.Fatalf("failedCmds = %v, want %v", r.failedCmds, test.failed)
-			}
-		})
 	}
 }
 

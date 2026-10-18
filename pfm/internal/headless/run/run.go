@@ -637,9 +637,11 @@ func arguments(request Request) ([]string, error) {
 		}
 	case pfmengine.Codex:
 		args = append(args, "exec")
-		if request.Model != "" {
-			args = append(args, "--model", request.Model)
+		modelArgs, err := codexExecModelArgs(request.Model)
+		if err != nil {
+			return nil, err
 		}
+		args = append(args, modelArgs...)
 		if request.Effort != "" {
 			args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(request.Effort))
 		}

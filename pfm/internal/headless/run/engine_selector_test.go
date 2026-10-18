@@ -1,11 +1,14 @@
 package run
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func selectorConfig() pfmconfig.Config {
@@ -71,5 +74,31 @@ func TestApplyEngineSelectorReportsAnUnknownSelectorAndAnEmptyRoster(t *testing.
 	err := ApplyEngineSelector(&empty, "")
 	if err == nil || !strings.Contains(err.Error(), "no engines configured") {
 		t.Fatalf("empty roster default error = %v, want the configured-engines refusal", err)
+	}
+}
+
+// `pfm headless --engine cx --model astra` runs on OpenCode: the bare tier resolves to the astra
+// persona's Codex id before the switch, so OpenCode is handed openai/gpt-6-astra, never astra.
+func TestApplyEngineSelectorResolvesBareCodexTier(t *testing.T) {
+	home := t.TempDir()
+	agents := filepath.Join(home, ".claude", "agents")
+	if err := os.MkdirAll(agents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	persona := "---\nname: astra\nmodel: gpt-6-astra[1m]\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(agents, "astra.md"), []byte(persona), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvHome, home)
+	request := Request{Config: selectorConfig(), Model: "astra"}
+	if err := ApplyEngineSelector(&request, "cx"); err != nil {
+		t.Fatal(err)
+	}
+	if request.Model != "gpt-6-astra" || openCodeModel(request.Model) != "openai/gpt-6-astra" {
+		t.Fatalf("--engine cx --model astra resolved to %q", request.Model)
+	}
+	args, err := codexExecModelArgs("astra")
+	if err != nil || strings.Join(args, " ") != "--model gpt-6-astra" {
+		t.Fatalf("codex exec model args = %q, %v", args, err)
 	}
 }

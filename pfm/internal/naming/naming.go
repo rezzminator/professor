@@ -41,6 +41,13 @@ type CodexThread struct {
 	FirstPrompt  string
 }
 
+// CodexName is a Codex thread's indexed name and whether a user chose it
+// (a thread or session_index name) rather than its first prompt.
+type CodexName struct {
+	Name string
+	User bool
+}
+
 // CodexNameIndex builds the two lookups a live Codex pane can be named
 // through: by the rollout file it holds, and by the thread id it was
 // identified by. A resumed or paginated session writes no rollout file and has
@@ -49,28 +56,26 @@ type CodexThread struct {
 func CodexNameIndex(
 	threads []CodexThread,
 	cxNames map[string]string,
-) (byPath, byID map[string]string) {
-	byPath = make(map[string]string, len(threads))
-	byID = make(map[string]string, len(threads)+len(cxNames))
+) (byPath, byID map[string]CodexName) {
+	byPath = make(map[string]CodexName, len(threads))
+	byID = make(map[string]CodexName, len(threads)+len(cxNames))
 	for _, thread := range threads {
-		name := CxName(
-			thread.ID,
-			thread.SessionID,
-			thread.ParentThread,
-			cxNames,
-			thread.FirstPrompt,
-		)
+		// A lineage name is the user's; the first-prompt fallback is not.
+		name := CodexName{Name: CxName(thread.ID, thread.SessionID, thread.ParentThread, cxNames, ""), User: true}
+		if name.Name == "" {
+			name = CodexName{Name: CxName("", "", "", nil, thread.FirstPrompt)}
+		}
 		byPath[filepath.Clean(thread.Path)] = name
-		if name != "" {
+		if name.Name != "" {
 			byID[thread.ID] = name
 		}
 	}
 	for id := range cxNames {
-		if byID[id] != "" {
+		if byID[id].Name != "" {
 			continue
 		}
 		if name := CxName(id, "", "", cxNames, ""); name != "" {
-			byID[id] = name
+			byID[id] = CodexName{Name: name, User: true}
 		}
 	}
 	return byPath, byID

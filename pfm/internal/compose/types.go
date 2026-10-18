@@ -201,6 +201,10 @@ type Row struct {
 	SessionName string
 	WindowName  string
 	Name        string
+	// UserName is the part of Name a user chose: a Claude chat's custom title
+	// (its /rename), a Codex thread's indexed name; empty when Name is
+	// automatic (an AI title, a first prompt).
+	UserName    string
 	LastPrompt  string
 	Workbench   string
 	Engines     []pfmengine.ID

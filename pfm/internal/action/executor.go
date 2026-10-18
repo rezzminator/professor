@@ -11,11 +11,13 @@ import (
 	"strconv"
 	"strings"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -180,14 +182,21 @@ func (executor *Executor) Open(
 					return "", err
 				}
 			}
-			_, prepareErr := spawn.SpawnHerdr(
+			// Born in place only in a pane this process provably fronts: a stale
+			// or inherited HERDR_PANE_ID (a shell inside tmux, an agent's tool
+			// call) names a pane pfm neither reserves nor relabels.
+			if proveErr := pfmcall.ProveHerdrOwnPane(ctx, choice.HerdrSocket, choice.HerdrPane); proveErr != nil {
+				return "", fmt.Errorf("open in this Herdr pane: %w", proveErr)
+			}
+			// The chat is born in the caller's own pane: the reservation names
+			// this pane and the shell execs the seat host in place, so the pane
+			// and its tab stay the user's (no new tab, nothing left to close).
+			prepared, prepareErr := spawn.PrepareHerdr(
 				ctx,
 				spawn.HerdrRequest{
-					Choice:   choice,
-					Focus:    true,
-					Paths:    values,
-					Run:      *plan.SeatRun,
-					TabLabel: cmp.Or(request.LaunchName, request.Row.Name),
+					Choice: choice,
+					Paths:  values,
+					Run:    *plan.SeatRun,
 					Seat: fleetdb.Seat{
 						SessionID: sessionID,
 						Engine:    string(engineID),
@@ -198,9 +207,18 @@ func (executor *Executor) Open(
 			if prepareErr != nil {
 				return "", prepareErr
 			}
+			label := spawn.BirthTabLabel(cmp.Or(request.LaunchName, request.Row.Name), plan.SeatRun.CWD)
+			if labelErr := herdr.LabelPaneTab(ctx, choice.HerdrSocket, choice.HerdrPane, label); labelErr != nil &&
+				!errors.Is(labelErr, herdr.ErrTabNotSole) {
+				// The birth proceeds: the tab keeps its label until the chat's
+				// name reaches it.
+				fmt.Fprintf(
+					executor.stderr, "pfm: Herdr tab of pane %s keeps its label: %v\n", choice.HerdrPane, labelErr,
+				)
+			}
 			executor.recordLaunch(ctx, plan.Record)
 			launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
-			return "", nil
+			return prepared.Eval, nil
 		}
 	}
 	if plan.ChatServer != nil {

@@ -17,13 +17,13 @@ import (
 )
 
 // CodexNameResolver resolves the indexed display name for a rollout path.
-type CodexNameResolver func(rolloutPath string) string
+type CodexNameResolver func(rolloutPath string) naming.CodexName
 
 // CodexIDNameResolver resolves the indexed display name for a Codex thread id.
 // It is the only naming rung a session that writes no rollout file has, and
 // the index behind it owns the precedence: the thread's own name, then the
 // session_index name, then its first prompt.
-type CodexIDNameResolver func(threadID string) string
+type CodexIDNameResolver func(threadID string) naming.CodexName
 
 // Dependencies supplies probe interfaces and process-local policy.
 type Dependencies struct {
@@ -284,7 +284,7 @@ func computeWindowRenames(
 			continue
 		}
 		chatName := codexWindowName(live, resolveRollout, resolveID)
-		target := WindowNameFor(chatName)
+		target := WindowNameFor(chatName.Name)
 		if target == "" || pane.WindowName == target || pane.WindowID == "" {
 			continue
 		}
@@ -299,7 +299,8 @@ func computeWindowRenames(
 			WindowID:    pane.WindowID,
 			CurrentName: pane.WindowName,
 			TargetName:  target,
-			ChatName:    chatName,
+			ChatName:    chatName.Name,
+			Automatic:   !chatName.User,
 		})
 	}
 	planned = append(
@@ -410,16 +411,16 @@ func codexWindowName(
 	live LiveCodex,
 	resolveRollout CodexNameResolver,
 	resolveID CodexIDNameResolver,
-) string {
+) naming.CodexName {
 	if resolveRollout != nil && live.RolloutPath != "" {
-		if name := resolveRollout(live.RolloutPath); name != "" {
+		if name := resolveRollout(live.RolloutPath); name.Name != "" {
 			return name
 		}
 	}
 	if resolveID != nil && live.ThreadID != "" {
 		return resolveID(live.ThreadID)
 	}
-	return ""
+	return naming.CodexName{}
 }
 
 // WindowNameRunes bounds a tmux window name. A tab is a handful of columns

@@ -172,12 +172,24 @@ func (prover bridgeProver) client(ctx context.Context, pid int) (HerdrBridge, er
 	if session == "" {
 		return HerdrBridge{}, fmt.Errorf("not attached to tmux server %s", socketPath)
 	}
-	raw, err := prover.tmux(ctx, socketPath, "show-options", "-qv", "-t", "="+session, herdr.StoredOption)
+	// "=name:" is tmux's exact-session target: a bare "=name" reads as no
+	// session at all, and a bare "name" may match another session by prefix.
+	// No -q: a failed read carries tmux's reason, never an empty record; tmux
+	// refuses an unset user option as "invalid option: @name", the one
+	// refusal that means the session holds no record.
+	raw, err := prover.tmux(ctx, socketPath, "show-options", "-v", "-t", "="+session+":", herdr.StoredOption)
+	if err != nil && strings.Contains(err.Error(), "invalid option: "+herdr.StoredOption) {
+		raw, err = "", nil
+	}
 	if err != nil {
 		return HerdrBridge{}, fmt.Errorf("read %s of session %s: %w", herdr.StoredOption, session, err)
 	}
 	if strings.TrimSpace(raw) == "" {
-		return HerdrBridge{}, fmt.Errorf("session %s on %s holds no pfm Herdr record", session, socketPath)
+		return HerdrBridge{}, fmt.Errorf(
+			"session %s on %s holds no pfm Herdr record: re-attach the chat in its Herdr tab to record it",
+			session,
+			socketPath,
+		)
 	}
 	var stored herdr.Stored
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &stored); err != nil {

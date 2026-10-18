@@ -1,20 +1,21 @@
 package action
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -203,65 +204,144 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 	}
 }
 
-func TestHerdrPickerSpawnsNewTab(t *testing.T) {
-	testjail.Fleet(t)
-	socket := herdrPickerSocket(t)
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_SOCKET_PATH", socket)
-	t.Setenv("HERDR_PANE_ID", "w6:p3")
-	t.Setenv("TMUX", "")
-	home := t.TempDir()
-	machine := configuredMachinePolicy(home)
-	machine.Claude.Binary = filepath.Join(home, "native-claude")
-	if err := testjail.WriteExecutable(machine.Claude.Binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
+// A picker inside a Herdr pane starts or resumes a chat IN that pane: the seat
+// is reserved for the caller's own pane, the line the shell runs is the
+// seat-host exec that makes the pane's process the chat, no new tab is laid
+// out, and the caller's sole tab takes the chat's label (a named launch its
+// name, a resume its row's name, an unnamed chat its project folder). A tab
+// Herdr will not read keeps its label, named on stderr, and the birth proceeds.
+func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
+	const resumeID = "abcdef12-1234-1234-1234-123456789abc"
+	for _, test := range []struct {
+		name, launchName, label, refuse string
+		row                             compose.Row
+	}{
+		{"a named new claude chat", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}},
+		{"an unnamed new claude chat", "", "", "", compose.Row{Kind: compose.NewClaude}},
+		{"a new codex chat", "", "", "", compose.Row{Kind: compose.NewCodex}},
+		{"a new opencode chat", "", "", "", compose.Row{Kind: compose.NewOpenCode}},
+		{"a named claude resume", "", "OLD CHAT", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "OLD CHAT"}},
+		{"an unnamed claude resume", "", "", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID}},
+		{"a codex resume", "", "", "", compose.Row{Kind: compose.ResumeCodex, ID: resumeID}},
+		{"an opencode resume", "", "", "", compose.Row{Kind: compose.ResumeOpenCode, ID: resumeID}},
+		{"a tab Herdr will not read", "", "", "tab.get", compose.Row{Kind: compose.NewClaude}},
+		{"a pane this process does not front", "", "", "stale", compose.Row{Kind: compose.NewClaude}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := newPickerHerdr(t)
+			fake.mu.Lock()
+			fake.refuse = test.refuse
+			fake.mu.Unlock()
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", fake.socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			t.Setenv("TMUX", "")
+			home := values.Home
+			machine := testMachineConfig(home)
+			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
+			binary := filepath.Join(home, "engine")
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			machine.Claude.Binary, machine.Codex.Binary, machine.OpenCode.Binary = binary, binary, binary
+			var stderr strings.Builder
+			executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := test.row
+			row.CWD = home
+			label := cmp.Or(test.label, filepath.Base(home))
+			line, err := executor.Open(context.Background(), Request{
+				Row: row, LaunchName: test.launchName, Home: home, PrimaryAccount: 2,
+				FreshSocket: "unused", Config: machine,
+			})
+			if test.refuse == "stale" {
+				// A stale or inherited HERDR_PANE_ID: nothing reserved, nothing relabelled.
+				db := fleetdb.OpenSharedState(context.Background(), values)
+				_, found, readErr := db.SeatByPane(context.Background(), fake.socket, "w6:p3")
+				if closeErr := db.Close(); closeErr != nil {
+					t.Error(closeErr)
+				}
+				_, renames := fake.seen()
+				if err == nil || !strings.Contains(err.Error(), "ownership unproved") || line != "" || found ||
+					readErr != nil || len(renames) != 0 {
+					t.Fatalf("stale pane open line=%q err=%v seat found=%v (%v) renames=%q",
+						line, err, found, readErr, renames)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("picker open: %v", err)
+			}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			seat, found, err := db.SeatByPane(context.Background(), fake.socket, "w6:p3")
+			if err != nil || !found || seat.Backend != "herdr" || seat.HerdrPane != "w6:p3" ||
+				seat.Engine != string(compose.EngineForKind(row.Kind)) || seat.SessionID == "" {
+				t.Fatalf("caller pane seat=%+v found=%v err=%v", seat, found, err)
+			}
+			if want := "exec pfm internal seat-host " + seat.SeatID; line != want {
+				t.Fatalf("line = %q, want %q", line, want)
+			}
+			if row.ID != "" {
+				run, err := db.ReadSeatRun(seat.SeatID)
+				if err != nil || seat.SessionID != row.ID || !slices.Contains(run.Args, row.ID) {
+					t.Fatalf("resumed seat=%+v run=%+v err=%v", seat, run, err)
+				}
+			}
+			methods, renames := fake.seen()
+			if slices.Contains(methods, "layout.apply") {
+				t.Fatalf("a picker open laid out a new Herdr tab: %q", methods)
+			}
+			if test.refuse != "" {
+				if len(renames) != 0 || !strings.Contains(stderr.String(), "Herdr tab of pane w6:p3 keeps its label") {
+					t.Fatalf("refused tab renames = %q, stderr = %q", renames, stderr.String())
+				}
+				return
+			}
+			if want := []string{"w6:t1=" + label}; !slices.Equal(renames, want) {
+				t.Fatalf("tab renames = %q, want %q (methods %q)", renames, want, methods)
+			}
+		})
 	}
-	executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	line, err := executor.Open(
-		context.Background(),
-		Request{
-			Row:            compose.Row{Kind: compose.NewClaude, CWD: "/work/project"},
-			Home:           home,
-			PrimaryAccount: 42,
-			FreshSocket:    "cc-unused",
-			Config:         machine,
-		},
-	)
-	if err != nil || line != "" {
-		t.Fatalf("line=%q err=%v", line, err)
-	}
-	values, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := fleetdb.OpenSharedState(context.Background(), values)
-	defer func() {
-		if err := state.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	seat, found, err := state.SeatByPane(context.Background(), socket, "w6:p9")
-	if err != nil || !found || seat.Backend != "herdr" || seat.HerdrPane != "w6:p9" {
-		t.Fatalf("seat=%+v found=%v err=%v", seat, found, err)
-	}
+}
+
+// pickerHerdr is a Herdr socket for a picker running in pane w6:p3, alone in
+// tab w6:t1 (labelled "2"); it records every method asked of it and every tab
+// rename as "{tab}={label}".
+type pickerHerdr struct {
+	socket  string
+	mu      sync.Mutex
+	methods []string
+	renames []string
+	refuse  string // the one method answered with a refusal
+}
+
+func (fake *pickerHerdr) seen() (methods, renames []string) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return slices.Clone(fake.methods), slices.Clone(fake.renames)
 }
 
 func herdrPickerSocket(t *testing.T) string {
 	t.Helper()
-	socket, _ := herdrPickerLabels(t)
-	return socket
+	return newPickerHerdr(t).socket
 }
 
-// herdrPickerLabels is herdrPickerSocket that also hands back the tab_label
-// of every layout.apply it answers.
-func herdrPickerLabels(t *testing.T) (string, <-chan string) {
+func newPickerHerdr(t *testing.T) *pickerHerdr {
 	t.Helper()
-	labels := make(chan string, 8)
-	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
-	listener, err := net.Listen("unix", socket)
+	fake := &pickerHerdr{socket: filepath.Join(testjail.ShortRoot(t), "herdr.sock")}
+	listener, err := net.Listen("unix", fake.socket)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,166 +358,68 @@ func herdrPickerLabels(t *testing.T) (string, <-chan string) {
 					ID     string `json:"id"`
 					Method string `json:"method"`
 					Params struct {
-						TabLabel *string `json:"tab_label"`
-						PaneID   string  `json:"pane_id"`
+						PaneID string `json:"pane_id"`
+						TabID  string `json:"tab_id"`
+						Label  string `json:"label"`
 					} `json:"params"`
 				}
 				if json.NewDecoder(conn).Decode(&req) != nil {
 					return
 				}
-				// Herdr answers pane.get and pane.focus with the canonical PaneInfo
-				// the backend probe and the post-birth focus both prove.
-				if req.Method == "pane.get" || req.Method == "pane.focus" {
-					body, err := json.Marshal(map[string]any{
-						"id": req.ID, "ok": true, "result": testjail.HerdrPaneInfo(req.Params.PaneID),
-					})
-					if err != nil {
-						t.Errorf("encode Herdr %s reply: %v", req.Method, err)
-						return
-					}
-					_, _ = fmt.Fprintf(conn, "%s\n", body)
-					return
+				fake.mu.Lock()
+				refused, stale := req.Method == fake.refuse, fake.refuse == "stale"
+				fake.methods = append(fake.methods, req.Method)
+				if req.Method == "tab.rename" {
+					fake.renames = append(fake.renames, req.Params.TabID+"="+req.Params.Label)
 				}
-				if req.Method == "layout.apply" {
-					if req.Params.TabLabel != nil {
-						labels <- *req.Params.TabLabel
-					} else {
-						labels <- "<absent>"
-					}
+				fake.mu.Unlock()
+				if refused {
 					_, _ = fmt.Fprintf(
 						conn,
-						`{"id":%q,"ok":true,"result":{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}}`+"\n",
+						`{"id":%q,"ok":false,"error":{"code":"unknown_method","message":"fixture refusal"}}`+"\n",
 						req.ID,
 					)
 					return
 				}
-				if req.Method == "ping" {
-					_, _ = fmt.Fprintf(
-						conn,
-						`{"id":%q,"ok":true,"result":{"type":"pong","version":"0.9.5","protocol":22}}`+"\n",
-						req.ID,
-					)
+				var result any
+				switch req.Method {
+				case "pane.get", "pane.focus":
+					result = testjail.HerdrPaneInfo(req.Params.PaneID)
+				case "tab.get", "tab.rename":
+					label := "2"
+					if req.Method == "tab.rename" {
+						label = req.Params.Label
+					}
+					result = map[string]any{
+						"type": "tab_info",
+						"tab":  map[string]any{"tab_id": req.Params.TabID, "label": label, "pane_count": 1},
+					}
+				case "pane.process_info":
+					foreground := os.Getpid()
+					if stale {
+						foreground = 1
+					}
+					result = map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+						"pane_id": req.Params.PaneID, "shell_pid": 1,
+						"foreground_processes": []any{map[string]any{"pid": foreground, "name": "pfm"}},
+					}}
+				case "ping":
+					result = map[string]any{"type": "pong", "version": "0.9.5", "protocol": 22}
+				case "layout.apply":
+					result = map[string]any{"layout": map[string]any{
+						"workspace_id": "w6", "root": map[string]any{"type": "pane", "pane_id": "w6:p9"},
+					}}
+				default:
+					result = map[string]any{"pane": map[string]any{"pane_id": "w6:p3"}}
+				}
+				body, err := json.Marshal(map[string]any{"id": req.ID, "ok": true, "result": result})
+				if err != nil {
+					t.Errorf("encode Herdr %s reply: %v", req.Method, err)
 					return
 				}
-				_, _ = fmt.Fprintf(conn, `{"id":%q,"ok":true,"result":{"pane":{"pane_id":"w6:p3"}}}`+"\n", req.ID)
+				_, _ = fmt.Fprintf(conn, "%s\n", body)
 			}()
 		}
 	}()
-	return socket, labels
-}
-
-func TestHerdrPickerRawEnginesSpawnNewTab(t *testing.T) {
-	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
-		t.Run(kind.String(), func(t *testing.T) {
-			testjail.Fleet(t)
-			socket := herdrPickerSocket(t)
-			t.Setenv("HERDR_ENV", "1")
-			t.Setenv("HERDR_SOCKET_PATH", socket)
-			t.Setenv("HERDR_PANE_ID", "w6:p3")
-			t.Setenv("TMUX", "")
-			home := t.TempDir()
-			machine := testMachineConfig(home)
-			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
-			binary := filepath.Join(home, "raw-engine")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			machine.Codex.Binary = binary
-			machine.OpenCode.Binary = binary
-			executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
-			if err != nil {
-				t.Fatal(err)
-			}
-			line, err := executor.Open(
-				context.Background(),
-				Request{
-					Row:            compose.Row{Kind: kind, CWD: home},
-					Home:           home,
-					PrimaryAccount: 2,
-					FreshSocket:    "unused",
-					Config:         machine,
-				},
-			)
-			if err != nil || line != "" {
-				t.Fatalf("raw picker line=%q err=%v", line, err)
-			}
-			values, err := paths.Resolve()
-			if err != nil {
-				t.Fatal(err)
-			}
-			db := fleetdb.OpenSharedState(context.Background(), values)
-			defer func() { _ = db.Close() }()
-			seat, found, err := db.SeatByPane(context.Background(), socket, "w6:p9")
-			id := compose.EngineForKind(kind)
-			if err != nil || !found || seat.Engine != string(id) || seat.SessionID == "" || seat.HerdrPane != "w6:p9" ||
-				pfmengine.MustLookup(id).HerdrNativePrompt {
-				t.Fatalf("raw picker seat=%+v found=%v err=%v", seat, found, err)
-			}
-		})
-	}
-}
-
-// A picker-born Herdr tab is never unlabelled: a named launch carries its
-// name, a resume its row's name, and an unnamed chat its project folder.
-func TestHerdrPickerTabLabelIsNeverEmpty(t *testing.T) {
-	for _, test := range []struct {
-		name, launchName, want string
-		row                    compose.Row
-	}{
-		{"a named launch", "REVIEW", "REVIEW", compose.Row{Kind: compose.NewClaude, CWD: "/work/professor"}},
-		{"an unnamed new chat", "", "professor", compose.Row{Kind: compose.NewClaude, CWD: "/work/professor"}},
-		{
-			"a named resume", "", "OLD CHAT",
-			compose.Row{
-				Kind: compose.ResumeClaude, ID: "11111111-1111-4111-8111-111111111111",
-				Name: "OLD CHAT", CWD: "/work/professor",
-			},
-		},
-		{
-			"an unnamed resume", "", "professor",
-			compose.Row{Kind: compose.ResumeClaude, ID: "11111111-1111-4111-8111-111111111111", CWD: "/work/professor"},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			testjail.Fleet(t)
-			socket, labels := herdrPickerLabels(t)
-			t.Setenv("HERDR_ENV", "1")
-			t.Setenv("HERDR_SOCKET_PATH", socket)
-			t.Setenv("HERDR_PANE_ID", "w6:p3")
-			t.Setenv("TMUX", "")
-			home := t.TempDir()
-			machine := configuredMachinePolicy(home)
-			machine.Claude.Binary = filepath.Join(home, "native-claude")
-			script := []byte("#!/bin/sh\nexit 0\n")
-			if err := testjail.WriteExecutable(machine.Claude.Binary, script, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
-			if err != nil {
-				t.Fatal(err)
-			}
-			line, err := executor.Open(
-				context.Background(),
-				Request{
-					Row:            test.row,
-					LaunchName:     test.launchName,
-					Home:           home,
-					PrimaryAccount: 42,
-					FreshSocket:    "cc-unused",
-					Config:         machine,
-				},
-			)
-			if err != nil || line != "" {
-				t.Fatalf("line=%q err=%v", line, err)
-			}
-			select {
-			case got := <-labels:
-				if got != test.want {
-					t.Fatalf("tab_label = %q, want %q", got, test.want)
-				}
-			default:
-				t.Fatal("no layout.apply reached Herdr")
-			}
-		})
-	}
+	return fake
 }

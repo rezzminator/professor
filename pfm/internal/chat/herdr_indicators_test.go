@@ -27,13 +27,14 @@ func TestHerdrTabProviderNativeAndMultipleTmuxViews(t *testing.T) {
 		scan: func(context.Context) (FleetScan, error) {
 			return FleetScan{Rows: []compose.Row{
 				{
-					Backend: "herdr",
-					SeatID:  "seat",
-					ID:      "s1",
-					Socket:  "endpoint",
-					PaneID:  "w1:p1",
-					Name:    "Native",
-					Kind:    compose.LiveClaude,
+					Backend:  "herdr",
+					SeatID:   "seat",
+					ID:       "s1",
+					Socket:   "endpoint",
+					PaneID:   "w1:p1",
+					Name:     "Native",
+					UserName: "Native",
+					Kind:     compose.LiveClaude,
 				},
 				{ID: "s2", Socket: "tmux", Name: "Tmux", Kind: compose.LiveClaude},
 			}}, nil
@@ -56,6 +57,11 @@ func TestHerdrTabProviderNativeAndMultipleTmuxViews(t *testing.T) {
 	for _, d := range got {
 		if d.State != "working" || d.Mode != "emoji" || d.Name == "" {
 			t.Fatalf("decoration=%+v", d)
+		}
+		// The chat's user name rides with its name: the painter tells a
+		// /rename from an automatic name by it.
+		if want := map[string]string{"native": "Native", "tmux": ""}[d.Identity]; d.UserName != want {
+			t.Fatalf("decoration %s user name = %q, want %q", d.Identity, d.UserName, want)
 		}
 	}
 }
@@ -379,6 +385,88 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 			if valid, err := got[0].Validate(ctx); err != nil || valid ||
 				!strings.Contains(warnings.String(), "supervisor birth changed") {
 				t.Fatalf("unproved at validation valid=%t err=%v warnings=%q", valid, err, warnings)
+			}
+		})
+	}
+}
+
+// Herdr emits no agent_session for a pfm-native pane, so a native tab is
+// painted when the proved seat's own Herdr terminal is the pane's terminal; a
+// pane naming another chat, a seat with no recorded terminal, or another
+// terminal leaves the tab untouched, and a terminal changed since discovery
+// fails the final validation.
+func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
+	for _, tc := range []struct {
+		name, seatTerminal string
+		session            string
+		views              int
+	}{
+		{name: "the seat's terminal proves the pane", seatTerminal: "term1", views: 1},
+		{name: "a seat with no recorded terminal", seatTerminal: "", views: 0},
+		{name: "another terminal", seatTerminal: "term2", views: 0},
+		{
+			name: "an agent_session naming another chat", seatTerminal: "term1", views: 0,
+			session: `{"source":"pfm","agent":"claude","kind":"id","value":"s2"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			putSeat := func(terminal string) {
+				t.Helper()
+				db := fleetdb.OpenSharedState(ctx, values)
+				if err := db.PutSeat(ctx, fleetdb.Seat{
+					SeatID: "seat1", SessionID: "s1", Engine: "cc", Backend: "herdr", HerdrSocket: "endpoint",
+					HerdrPane: "w1:p1", HerdrWorkspace: "w1", HerdrTerminalID: terminal, State: "live",
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			putSeat(tc.seatTerminal)
+			pane := herdr.TabPane{Pane: "w1:p1", Terminal: "term1", Tab: "w1:t1", Workspace: "w1"}
+			if tc.session != "" {
+				pane.Session = []byte(tc.session)
+			}
+			target := headless.Chat{
+				ID:      "s1",
+				SeatID:  "seat1",
+				Backend: "herdr",
+				Socket:  "endpoint",
+				Pane:    "w1:p1",
+				Live:    true,
+			}
+			warnings := &bytes.Buffer{}
+			reader := tabViewReader{
+				runtime: &config.Runtime{Paths: values},
+				warn:    warnings,
+				prove: func(_ context.Context, seat fleetdb.Seat, _ paths.Values) (fleetdb.Seat, bool, error) {
+					return seat, true, nil
+				},
+				engine: func(context.Context, fleetdb.Seat) (bool, error) { return true, nil },
+			}
+			got, err := reader.views(ctx, target, "endpoint", []herdr.TabPane{pane})
+			if err != nil || len(got) != tc.views {
+				t.Fatalf("views=%+v err=%v warnings=%q", got, err, warnings)
+			}
+			if tc.views == 0 {
+				return
+			}
+			if got[0].Identity != "seat1:s1" || got[0].Terminal != "term1" {
+				t.Fatalf("decoration=%+v", got[0])
+			}
+			if valid, err := got[0].Validate(ctx); err != nil || !valid {
+				t.Fatalf("proved native pane valid=%t err=%v", valid, err)
+			}
+			putSeat("term9")
+			if valid, err := got[0].Validate(ctx); err != nil || valid {
+				t.Fatalf("a seat moved to another terminal must invalidate: valid=%t err=%v", valid, err)
 			}
 		})
 	}

@@ -117,29 +117,13 @@ func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.S
 	return errors.New("herdr agent rename exhausted 100 unique name attempts; pane label changed, seat name unchanged")
 }
 
-// labelNativeTab finds the tab the seat's pane sits in (pane.get) and labels
-// it with the chat's name when the pane sits in it alone.
+// labelNativeTab labels the tab the seat's pane sits in with the chat's name
+// when the pane sits in it alone.
 func labelNativeTab(ctx context.Context, target headless.Chat, name string) error {
-	body, err := herdr.SeatRequest(ctx, target.Socket, "pane.get", map[string]string{nativePaneIDKey: target.Pane})
-	if err != nil {
-		return fmt.Errorf("read Herdr pane %s: %w", target.Pane, err)
+	err := herdr.LabelPaneTab(ctx, target.Socket, target.Pane, name)
+	if errors.Is(err, herdr.ErrTabNotSole) {
+		// A tab the chat shares keeps the user's label: the pane title carries the name.
+		return nil
 	}
-	var pane struct {
-		Pane struct {
-			ID  string `json:"pane_id"`
-			Tab string `json:"tab_id"`
-		} `json:"pane"`
-	}
-	if err := json.Unmarshal(body, &pane); err != nil {
-		return fmt.Errorf("decode Herdr pane %s: %w", target.Pane, err)
-	}
-	if pane.Pane.ID != target.Pane {
-		return fmt.Errorf("herdr pane.get for %s returned unexpected identity: %s", target.Pane, body)
-	}
-	var seq uint64
-	next := func() uint64 { seq++; return seq }
-	if err := herdr.LabelSoleTab(ctx, target.Socket, pane.Pane.Tab, name, next); err != nil {
-		return fmt.Errorf("tab %s of pane %s: %w", pane.Pane.Tab, target.Pane, err)
-	}
-	return nil
+	return err
 }

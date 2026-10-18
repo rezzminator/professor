@@ -4,16 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -75,6 +70,8 @@ func TestOpenNativeFocusAcknowledgement(t *testing.T) {
 			t.Setenv("HERDR_ENV", "1")
 			t.Setenv("HERDR_SOCKET_PATH", socket)
 			t.Setenv("HERDR_PANE_ID", "w1:p9")
+			// A caller pane hosting a chat views a live chat by focus.
+			nativeChatCallerHostsChat(t, db, socket, "w1:p9")
 			var stdout, stderr bytes.Buffer
 			code := OpenID(context.Background(), seat.SessionID, &stdout, &stderr, &runtime)
 			if tc.diagnostic == "" {
@@ -93,58 +90,278 @@ func TestOpenNativeFocusAcknowledgement(t *testing.T) {
 	}
 }
 
-func TestDetachedNativeLiveViewReleasesConversationLock(t *testing.T) {
-	testjail.Fleet(t)
-	socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
-		value, code, _ := nativeChatProof(req, "w6:p3")
-		return value, code
-	})
-	runtime, db, seat := nativeChatSeat(t, socket, "live")
-	seat = nativeChatHost(t, db, seat, true)
-	t.Setenv("HERDR_ENV", "")
-	t.Setenv("HERDR_SOCKET_PATH", "")
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "view-ready")
-	fifo := filepath.Join(dir, "view-release")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatal(err)
+// A live native chat opened from a Herdr pane on its server ends where that
+// pane was: from another tab of the workspace it moves in beside the caller
+// (pane.move), from the caller's own tab it trades places (pane.swap), and
+// then the caller's own proved pane closes. Another workspace, a refused move
+// or an unproved own pane move and close nothing; a caller pane hosting a chat
+// views by focus.
+func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
+	for _, tc := range []struct {
+		name, caller, callerTab, moveReason, diagnostic string
+		tmux                                            string
+		swapReason, swapSource, moveTab                 string
+		flat, unproved, callerHostsChat                 bool
+		want                                            []string
+	}{
+		{
+			name: "another tab", caller: "w6:p5", callerTab: "w6:t2",
+			want: []string{
+				`pane.move {"destination":{"split":"right","tab_id":"w6:t2","target_pane_id":"w6:p5","type":"tab"},"focus":true,"pane_id":"w6:p3"}`,
+				`pane.close {"pane_id":"w6:p5"}`,
+			},
+		},
+		{
+			name: "the same tab", caller: "w6:p5", callerTab: "w6:t1",
+			want: []string{
+				`pane.swap {"source_pane_id":"w6:p3","target_pane_id":"w6:p5"}`,
+				`pane.close {"pane_id":"w6:p5"}`,
+			},
+		},
+		{
+			name:   "the same tab, answered at the top level as the socket-api prose describes",
+			caller: "w6:p5", callerTab: "w6:t1", flat: true,
+			want: []string{
+				`pane.swap {"source_pane_id":"w6:p3","target_pane_id":"w6:p5"}`,
+				`pane.close {"pane_id":"w6:p5"}`,
+			},
+		},
+		{
+			name: "a swap Herdr answers cross_tab", caller: "w6:p5", callerTab: "w6:t1",
+			swapReason: "cross_tab", diagnostic: `where it is: changed false (reason "cross_tab")`,
+			want: []string{`pane.swap {"source_pane_id":"w6:p3","target_pane_id":"w6:p5"}`},
+		},
+		{
+			name: "a swap answered for another pane", caller: "w6:p5", callerTab: "w6:t1",
+			swapSource: "w6:p9", diagnostic: `does not confirm where it went: swapped "w6:p9"`,
+			want: []string{`pane.swap {"source_pane_id":"w6:p3","target_pane_id":"w6:p5"}`},
+		},
+		{name: "another workspace", caller: "w7:p1", callerTab: "w7:t1", diagnostic: "workspace"},
+		{
+			name: "a zoomed tab", caller: "w6:p5", callerTab: "w6:t2", moveReason: "zoomed_tab", diagnostic: `where it is: changed false (reason "zoomed_tab")`,
+			want: []string{
+				`pane.move {"destination":{"split":"right","tab_id":"w6:t2","target_pane_id":"w6:p5","type":"tab"},"focus":true,"pane_id":"w6:p3"}`,
+			},
+		},
+		{
+			name: "a move Herdr answers into another tab", caller: "w6:p5", callerTab: "w6:t2",
+			moveTab: "w6:t9", diagnostic: "does not confirm where it went: the chat's pane",
+			want: []string{
+				`pane.move {"destination":{"split":"right","tab_id":"w6:t2","target_pane_id":"w6:p5","type":"tab"},"focus":true,"pane_id":"w6:p3"}`,
+			},
+		},
+		{name: "an unproved own pane", caller: "w6:p5", callerTab: "w6:t2", unproved: true, diagnostic: "ownership unproved"},
+		{
+			name: "a caller pane hosting a chat", caller: "w6:p5", callerTab: "w6:t2", callerHostsChat: true,
+			want: []string{`agent.focus {"target":"w6:p3"}`},
+		},
+		{
+			name: "a caller inside tmux", caller: "w6:p5", callerTab: "w6:t2", tmux: "/tmp/tmux-1/default,1,0",
+			want: []string{`agent.focus {"target":"w6:p3"}`},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			var mutations []string
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				var pane string
+				_ = json.Unmarshal(req.Params["pane_id"], &pane)
+				switch req.Method {
+				case "pane.get":
+					info := testjail.HerdrPaneInfo(pane)
+					if pane == tc.caller {
+						info["pane"].(map[string]any)["tab_id"] = tc.callerTab
+					}
+					return info, ""
+				case "pane.process_info":
+					if pane == tc.caller {
+						foreground := []any{map[string]any{"pid": os.Getpid(), "name": "pfm"}}
+						if tc.unproved {
+							foreground = []any{map[string]any{"pid": 1, "name": "zsh"}}
+						}
+						return map[string]any{
+							"type": "pane_process_info",
+							"process_info": map[string]any{
+								"pane_id": pane, "shell_pid": 1, "foreground_processes": foreground,
+							},
+						}, ""
+					}
+				}
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
+				params, err := json.Marshal(req.Params)
+				if err != nil {
+					t.Errorf("encode %s params: %v", req.Method, err)
+				}
+				mutations = append(mutations, req.Method+" "+string(params))
+				switch req.Method {
+				case "pane.move":
+					// PaneMoveResult nested under move_result, as Herdr's
+					// ResponseResult::PaneMove serializes it (src/api/schema/response.rs L129-L131).
+					movedTo := tc.callerTab
+					if tc.moveTab != "" {
+						movedTo = tc.moveTab
+					}
+					result := map[string]any{
+						"changed": tc.moveReason == "", "previous_pane_id": "w6:p3", "previous_tab_id": "w6:t1",
+						"pane": map[string]any{"pane_id": "w6:p3", "tab_id": movedTo},
+					}
+					if tc.moveReason != "" {
+						result["reason"] = tc.moveReason
+					}
+					return map[string]any{"type": "pane_move", "move_result": result}, ""
+				case "pane.swap":
+					// PaneSwapResult (src/api/schema/panes.rs L521-L530) nested under swap
+					// (response.rs L126-L128), as a live Herdr 0.9.5 answers; the source and
+					// target echo the request's ids (src/app/api/panes.rs L902-L925).
+					source := "w6:p3"
+					if tc.swapSource != "" {
+						source = tc.swapSource
+					}
+					result := map[string]any{
+						"changed":         tc.swapReason == "",
+						"source_pane_id":  source,
+						"target_pane_id":  tc.caller,
+						"focused_pane_id": source,
+						"layout": map[string]any{
+							"workspace_id": "w6",
+							"tab_id":       tc.callerTab,
+							"zoomed":       false,
+						},
+					}
+					if tc.swapReason != "" {
+						result["reason"] = tc.swapReason
+					}
+					if tc.flat {
+						result["type"] = "pane_swap"
+						return result, ""
+					}
+					return map[string]any{"type": "pane_swap", "swap": result}, ""
+				case "pane.close":
+					return map[string]any{"type": "ok"}, ""
+				case "agent.focus":
+					agent := map[string]any{"pane_id": "w6:p3", "focused": true}
+					return map[string]any{"type": "agent_info", "agent": agent}, ""
+				}
+				return nil, "unexpected_method"
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, db, seat, true)
+			if tc.callerHostsChat {
+				nativeChatCallerHostsChat(t, db, socket, tc.caller)
+			}
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", tc.caller)
+			t.Setenv("TMUX", tc.tmux)
+			var stdout, stderr bytes.Buffer
+			handled, code := openNativeRow(
+				context.Background(),
+				compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
+				&stdout, &stderr, runtime,
+			)
+			wantCode := 0
+			if tc.diagnostic != "" {
+				wantCode = 1
+			}
+			if !handled || code != wantCode || !strings.Contains(stderr.String(), tc.diagnostic) ||
+				stdout.Len() != 0 || strings.Join(mutations, "\n") != strings.Join(tc.want, "\n") {
+				t.Fatalf("handled=%v code=%d stderr=%q stdout=%q\nmutations=%q\nwant %q",
+					handled, code, stderr.String(), stdout.String(), mutations, tc.want)
+			}
+		})
 	}
-	script := fmt.Sprintf("#!/bin/sh\nprintf ready > %q\nread line < %q\n", marker, fifo)
-	if err := testjail.WriteExecutable(filepath.Join(dir, "herdr"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { _, err := detachedNative(ctx, seat, io.Discard, runtime, true); done <- err }()
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("view never attached")
-		case <-ticker.C:
-		}
-	}
-	lockctx, lockcancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	unlock, lockerr := fleetdb.LockSeat(lockctx, runtime.Paths, seat.SessionID)
-	lockcancel()
-	if lockerr == nil {
-		if err := unlock(); err != nil {
-			t.Error(err)
-		}
-	}
-	if err := os.WriteFile(fifo, []byte("done\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if lockerr != nil {
-		t.Fatalf("live attach held the recovery lock: %v", lockerr)
+}
+
+// A dead native chat opened from a Herdr pane resumes in that pane: the seat is
+// rebound to the caller's pane and the line its shell runs execs the seat host,
+// with no new tab laid out. A caller pane hosting another live chat (an
+// agent's own pfm call) is refused with nothing rebound.
+func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		callerHostsChat bool
+	}{
+		{name: "a plain caller pane"},
+		{name: "a caller pane hosting a chat", callerHostsChat: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := testjail.Fleet(t)
+			var methods, unexpected []string
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				methods = append(methods, req.Method)
+				var pane string
+				_ = json.Unmarshal(req.Params["pane_id"], &pane)
+				switch req.Method {
+				case "ping":
+					return map[string]any{"type": "pong", "protocol": 22, "version": "fixture"}, ""
+				case "pane.get":
+					if pane == "w6:p3" {
+						return nil, "pane_not_found"
+					}
+					return testjail.HerdrPaneInfo(pane), ""
+				case "pane.process_info":
+					return map[string]any{
+						"type":         "pane_process_info",
+						"process_info": map[string]any{"pane_id": pane, "shell_pid": 700001},
+					}, ""
+				case "pane.rename":
+					var label string
+					_ = json.Unmarshal(req.Params["label"], &label)
+					return map[string]any{"pane": map[string]any{"pane_id": pane, "label": label}}, ""
+				case "agent.rename":
+					return nil, "agent_not_found"
+				case "tab.get", "tab.rename":
+					return map[string]any{
+						"type": "tab_info",
+						"tab":  map[string]any{"tab_id": "w6:t1", "label": "INTEGRATION", "pane_count": 1},
+					}, ""
+				case "notification.show":
+					return map[string]any{"type": "ok"}, ""
+				}
+				unexpected = append(unexpected, req.Method)
+				return nil, "unexpected_method"
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "lost")
+			seat = nativeChatHost(t, db, seat, false)
+			seedClaudeChat(t, root, seat.SessionID)
+			if tc.callerHostsChat {
+				nativeChatCallerHostsChat(t, db, socket, "w6:p9")
+			}
+			nativeChatRestoredCaller(t, true)
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p9")
+			t.Setenv("TMUX", "")
+			var stdout, stderr bytes.Buffer
+			handled, code := openNativeRow(
+				context.Background(),
+				compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
+				&stdout, &stderr, runtime,
+			)
+			current, found, err := db.Seat(context.Background(), seat.SeatID)
+			if err != nil || !found {
+				t.Fatalf("seat found=%t err=%v", found, err)
+			}
+			if len(unexpected) != 0 {
+				t.Fatalf("unexpected Herdr methods %q (no new tab is laid out); stderr=%q",
+					unexpected, stderr.String())
+			}
+			if tc.callerHostsChat {
+				if !handled || code != 1 || stdout.Len() != 0 || current.HerdrPane != "w6:p3" ||
+					!strings.Contains(stderr.String(), "hosts chat") ||
+					strings.Contains(strings.Join(methods, " "), "rename") {
+					t.Fatalf("handled=%v code=%d stdout=%q stderr=%q seat=%+v methods=%q",
+						handled, code, stdout.String(), stderr.String(), current, methods)
+				}
+				return
+			}
+			if !handled || code != 0 || stdout.String() != "exec pfm internal seat-host "+seat.SeatID+"\n" ||
+				current.HerdrPane != "w6:p9" || current.HerdrTerminalID != "fixture-w6:p9" {
+				t.Fatalf("handled=%v code=%d stdout=%q stderr=%q seat=%+v methods=%q",
+					handled, code, stdout.String(), stderr.String(), current, methods)
+			}
+		})
 	}
 }

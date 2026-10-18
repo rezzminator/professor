@@ -326,8 +326,10 @@ type fakeTmux struct {
 	panePID  string
 	stored   string
 	chatName string
-	window   string
-	clients  []string
+	// chatNameAuto is the server's herdr.ChatNameAutoOption.
+	chatNameAuto string
+	window       string
+	clients      []string
 	// panes are the server's pane ids list-panes -a answers; nil is the
 	// chat's one pane, %0.
 	panes  []string
@@ -386,14 +388,23 @@ func (tmux *fakeTmux) command(args []string) (string, error) {
 				value = value[:len(value)-2] + ";"
 			}
 			tmux.chatName = value
+		case herdr.ChatNameAutoOption:
+			value := args[len(args)-1]
+			if strings.HasSuffix(value, `\;`) {
+				value = value[:len(value)-2] + ";"
+			}
+			tmux.chatNameAuto = value
 		}
 		return "", nil
 	case "rename-window":
 		tmux.window = args[3]
 		return "", nil
 	case "show-options":
-		if args[len(args)-1] == herdr.ChatNameOption {
+		switch args[len(args)-1] {
+		case herdr.ChatNameOption:
 			return tmux.chatName + "\n", nil
+		case herdr.ChatNameAutoOption:
+			return tmux.chatNameAuto + "\n", nil
 		}
 		return tmux.stored + "\n", nil
 	case "list-clients":

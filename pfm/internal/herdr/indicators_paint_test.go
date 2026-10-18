@@ -1,6 +1,7 @@
 package herdr
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -432,5 +433,56 @@ func TestAnUnprovedPaneIsNamedOnceAndReprovedOnlyOnChange(t *testing.T) {
 	paint()
 	if proofs != 3 || len(server.paneWrites("w1:p1")) != 1 {
 		t.Fatalf("past the interval a proved pane is painted: proofs=%d writes=%v", proofs, server.writes)
+	}
+}
+
+// TestAnUnprovedPaneIsNamedOncePerServerStart pins the naming across
+// processes: each hook-fired painter is a new process, so the memo of the
+// panes already named lives in the lock directory per socket, keyed by the
+// Herdr server's start. A later painter of the same server re-proves the pane
+// past the interval without naming it again; a restarted server names it anew.
+func TestAnUnprovedPaneIsNamedOncePerServerStart(t *testing.T) {
+	server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: "blocked"}}}
+	first, stepping, firstErr := newTestPainter(t, server, phaseOn)
+	proofs := 0
+	unproved := func(context.Context, string, string) error {
+		proofs++
+		return errors.New("no durable owner")
+	}
+	painterOf := func(start int64, at time.Time) (*indicatorPainter, *bytes.Buffer) {
+		painter, clock, stderr := newTestPainter(t, server, at)
+		painter.lockDir, painter.provePane = first.lockDir, unproved
+		painter.serverStart = func() (int64, error) { return start, nil }
+		clock.now = at
+		return painter, stderr
+	}
+	first.provePane = unproved
+	first.serverStart = func() (int64, error) { return 1, nil }
+	if _, _, err := first.paint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	later := stepping.now.Add(unprovedReprove)
+	second, secondErr := painterOf(1, later)
+	if _, _, err := second.paint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if proofs != 2 || strings.Count(firstErr.String()+secondErr.String(), "ownership unproved") != 1 {
+		t.Fatalf("a second painter of the same server must re-prove, not re-name: proofs=%d stderr=%q+%q",
+			proofs, firstErr, secondErr)
+	}
+	// A whole period on: the blink's on-phase again, so the pane wants a write.
+	soon, soonErr := painterOf(1, later.Add(2*blinkHalfPeriod))
+	if _, _, err := soon.paint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if proofs != 2 || soonErr.Len() != 0 {
+		t.Fatalf("within the interval another painter skips the pane: proofs=%d stderr=%q", proofs, soonErr)
+	}
+	restarted, restartedErr := painterOf(2, later.Add(2*blinkHalfPeriod))
+	if _, _, err := restarted.paint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if proofs != 3 || strings.Count(restartedErr.String(), "ownership unproved") != 1 {
+		t.Fatalf("a restarted server names the pane anew: proofs=%d stderr=%q", proofs, restartedErr)
 	}
 }

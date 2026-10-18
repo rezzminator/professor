@@ -609,6 +609,7 @@ func (current *composer) liveClaudeRow(
 		transcript.AITitle,
 		transcript.FirstPrompt,
 	)
+	row.UserName = transcript.CustomTitle
 	row.Name = naming.LiveFallback(
 		indexed, pane.WindowName,
 		pane.PaneTitle,
@@ -880,6 +881,7 @@ func (current *composer) transcriptRow(
 			transcript.AITitle,
 			transcript.FirstPrompt,
 		),
+		UserName:    transcript.CustomTitle,
 		LastPrompt:  transcript.LastPrompt,
 		Project:     current.projects.of(transcript.CWD),
 		CWD:         transcript.CWD,
@@ -907,11 +909,21 @@ func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
 		newest.FirstPrompt,
 		current.input.CxNames,
 	)
+	// The lineage's indexed name alone, no first prompt: the name a user chose.
+	userName := naming.CodexRowName(
+		newest.ID,
+		newest.SessionID,
+		newest.ParentThread,
+		root,
+		"",
+		current.input.CxNames,
+	)
 	return Row{
 		Kind:        kind,
 		ID:          root,
 		Path:        newest.Path,
 		Name:        name,
+		UserName:    userName,
 		Project:     current.projects.of(newest.CWD),
 		CWD:         newest.CWD,
 		Size:        newest.Size,

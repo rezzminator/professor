@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -522,8 +523,11 @@ func TestRunRecordsItsSocketForClearIndicators(t *testing.T) {
 		}
 	}
 	names, err := filepath.Glob(filepath.Join(painter.lockDir, "*"))
-	if err != nil || len(names) != 1 || filepath.Base(names[0]) != "indicators-"+socketKey(painter.socket)+".socket" {
-		t.Fatalf("lock dir holds %v, %v, want only the socket's record", names, err)
+	// The record, and the stop lock that ordered its write (never held across a run).
+	if err != nil || len(names) != 2 ||
+		filepath.Base(names[0]) != "indicators-"+socketKey(painter.socket)+".socket" ||
+		filepath.Base(names[1]) != "indicators-"+socketKey(painter.socket)+".stoplock" {
+		t.Fatalf("lock dir holds %v, %v, want the socket's record and its stop lock", names, err)
 	}
 	if content, err := os.ReadFile(names[0]); err != nil || string(content) != painter.socket {
 		t.Fatalf("record = %q, %v, want the socket path %q", content, err, painter.socket)
@@ -585,7 +589,7 @@ func TestClearIndicatorsClearsEveryRecordedSocketAndForgetsTheGoneOnes(t *testin
 			socket: socket, lockDir: lockDir, stderr: &bytes.Buffer{}, call: route,
 			clock: &steppingClock{now: phaseOn}, reported: map[string]bool{}, provePane: allowPaneProof,
 		}
-		if err := painter.record(); err != nil {
+		if err := painter.record(context.Background()); err != nil {
 			t.Fatalf("record %s: %v", socket, err)
 		}
 		if socket == "/fake/live.sock" {
@@ -722,6 +726,68 @@ func TestTabMonitorKeepsPollingAndTakesSingletonBeforePaint(t *testing.T) {
 	}
 }
 
+// TestBlinkerStopsAtThemeOffWhileAClearIsRetried pins the blinker's own stop
+// signal: theme off whose clear fails on a pane pfm cannot prove keeps the
+// socket's record for the retry, and still stops the running blinker at its
+// next tick; the failure, naming the pane left holding its tokens, is kept in
+// the lock directory's indicators log. A later plugin-fired run (theme on
+// again) clears the stop and blinks.
+func TestBlinkerStopsAtThemeOffWhileAClearIsRetried(t *testing.T) {
+	server := blockedHerdr()
+	painter, stepping, stderr := newTestPainter(t, server, phaseOn)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	unproved := func(context.Context, string, string) error { return errors.New("no durable owner") }
+	stepping.onSleep = func(ctx context.Context) error {
+		if len(stepping.sleeps) > 4 {
+			cancel() // a blinker that never stops ends here
+			return ctx.Err()
+		}
+		if len(stepping.sleeps) == 1 {
+			// The on-phase token is still on the pane: its clear needs a proof.
+			if err := clearRecordedIndicators(ctx, painter.lockDir, io.Discard, server.call, unproved); err == nil {
+				t.Errorf("a clear of an unproved pane must fail")
+			}
+		}
+		return nil
+	}
+	if err := painter.run(ctx); err != nil {
+		t.Fatalf("run = %v; stderr %q", err, stderr)
+	}
+	if len(stepping.sleeps) != 1 {
+		t.Fatalf("sleeps %v, want the blinker stopped at the tick after theme off: 1 sleep", stepping.sleeps)
+	}
+	if _, err := os.Stat(painter.recordPath()); err != nil {
+		t.Fatalf("the retry record must stay: %v", err)
+	}
+	logged, err := os.ReadFile(filepath.Join(painter.lockDir, "indicators"+ErrorLogSuffix))
+	if err != nil || !strings.Contains(string(logged), "clear socket /fake/herdr.sock") ||
+		!strings.Contains(string(logged), "pane w1:p1") {
+		t.Fatalf("indicators log = %q, %v; want the clear failure naming pane w1:p1", logged, err)
+	}
+	// The theme on retires the stop marker; a run after it blinks again.
+	if err := RetireIndicatorStops(painter.lockDir); err != nil {
+		t.Fatal(err)
+	}
+	next, nextStepping, _ := newTestPainter(t, server, phaseOn)
+	next.lockDir = painter.lockDir
+	server.setStatus("blocked")
+	ticks := 0
+	nextStepping.onSleep = func(context.Context) error {
+		ticks++
+		if ticks > 2 {
+			server.setStatus("idle")
+		}
+		return nil
+	}
+	if err := next.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ticks < 3 {
+		t.Fatalf("a theme-on run after the stop must blink again: %d ticks", ticks)
+	}
+}
+
 func TestClearIndicatorsRetainsOwnershipFailuresForRetry(t *testing.T) {
 	for _, cause := range []error{syscall.ENOENT, syscall.ECONNREFUSED} {
 		t.Run(cause.Error(), func(t *testing.T) {
@@ -729,7 +795,7 @@ func TestClearIndicatorsRetainsOwnershipFailuresForRetry(t *testing.T) {
 				panes: []*fakeTarget{{ID: "w1:p1", Tokens: map[string]string{IndicatorWorking: GlyphWorking}}},
 			}
 			painter, _, stderr := newTestPainter(t, server, phaseOn)
-			if err := painter.record(); err != nil {
+			if err := painter.record(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			proof := func(context.Context, string, string) error { return fmt.Errorf("read supervisor identity: %w", cause) }

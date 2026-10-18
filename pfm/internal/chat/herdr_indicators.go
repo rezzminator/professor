@@ -50,7 +50,8 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	}
 	var decorations []herdr.TabDecoration
 	for i := range scan.Rows {
-		target := FromRow(scan.Rows[i])
+		row := scan.Rows[i]
+		target := FromRow(row)
 		views, err := provider.views(ctx, target, socket)
 		if errors.Is(err, errTabPaneList) {
 			return nil, fmt.Errorf("locate tab views of %s: %w", target.ID, err)
@@ -94,7 +95,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		}
 		for i := range views {
 			view := views[i]
-			view.Name = target.Name
+			view.Name, view.UserName = target.Name, row.UserName
 			view.State = state
 			view.Mode = mode
 			decorations = append(decorations, view)
@@ -479,18 +480,22 @@ func (reader *tabViewReader) nativeView(
 	socket string,
 	pane herdr.TabPane,
 ) ([]herdr.TabDecoration, error) {
+	// Herdr emits no agent_session for a pfm-native pane: absent, the seat's
+	// own recorded terminal must be the pane's; present, it must name the chat.
+	sessionNamed := len(pane.Session) != 0 && string(pane.Session) != "null"
 	matches, err := tabPaneSession(pane, target)
 	if err != nil {
 		return nil, err
 	}
-	if !matches {
+	if sessionNamed && !matches {
 		return nil, nil
 	}
 	seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
 	if err != nil {
 		return nil, fmt.Errorf("read native tab seat: %w", err)
 	}
-	if !found || seat.ReloadPending || seat.HerdrSocket != socket || seat.HerdrPane != pane.Pane {
+	if !found || seat.ReloadPending || seat.HerdrSocket != socket || seat.HerdrPane != pane.Pane ||
+		!sessionNamed && (seat.HerdrTerminalID == "" || seat.HerdrTerminalID != pane.Terminal) {
 		return nil, nil
 	}
 	state, proved, err := reader.liveness(ctx, target, seat)
@@ -506,7 +511,7 @@ func (reader *tabViewReader) nativeView(
 			return false, fmt.Errorf("read native tab owner: %w", err)
 		}
 		if !found || seat.SessionID != target.ID || seat.HerdrSocket != socket || seat.HerdrPane != target.Pane ||
-			seat.ReloadPending {
+			seat.ReloadPending || !sessionNamed && seat.HerdrTerminalID != pane.Terminal {
 			return false, nil
 		}
 		currentState, proved, err := reader.liveness(ctx, target, seat)

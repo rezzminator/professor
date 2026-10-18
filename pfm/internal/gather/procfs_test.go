@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -203,7 +204,7 @@ func TestWindowConvergenceClipsRunesOnlyHere(t *testing.T) {
 		panes,
 		codex,
 		nil,
-		func(string) string { return longName },
+		func(string) naming.CodexName { return naming.CodexName{Name: longName, User: true} },
 		nil,
 	)
 	if len(renames) != 1 {

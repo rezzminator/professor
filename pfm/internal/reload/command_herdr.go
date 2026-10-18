@@ -14,8 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -225,31 +223,11 @@ func lockNativeReload(ctx context.Context, request Request, options Options) (*o
 	if err := os.MkdirAll(options.SIDDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create native reload mutex directory: %w", err)
 	}
-	directory, err := os.OpenFile(options.SIDDir, os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return nil, fmt.Errorf("open native reload mutex directory: %w", err)
-	}
-	if err := nativeReloadLockOwner(directory, true); err != nil {
-		return nil, errors.Join(err, directory.Close())
-	}
 	key := fmt.Sprintf("herdr-%x", sha256.Sum256([]byte(request.SocketPath+"\x00"+request.Pane)))
 	path := LockPath(options.SIDDir, key, "seat")
-	fd, openErr := unix.Openat(
-		int(directory.Fd()),
-		filepath.Base(path),
-		unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK,
-		0o600,
-	)
-	closeErr := directory.Close()
-	if openErr != nil {
-		return nil, errors.Join(fmt.Errorf("open native reload mutex: %w", openErr), closeErr)
-	}
-	lock := os.NewFile(uintptr(fd), path)
-	if closeErr != nil {
-		return nil, errors.Join(fmt.Errorf("close native reload mutex directory: %w", closeErr), lock.Close())
-	}
-	if err := nativeReloadLockOwner(lock, false); err != nil {
-		return nil, errors.Join(err, lock.Close())
+	lock, err := herdr.OpenStateFile(options.SIDDir, filepath.Base(path), os.O_CREATE|os.O_RDWR, "native reload mutex")
+	if err != nil {
+		return nil, err
 	}
 	for attempt := 0; attempt < options.IdleTries; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -267,25 +245,6 @@ func lockNativeReload(ctx context.Context, request Request, options Options) (*o
 		}
 	}
 	return nil, errors.Join(errors.New("another reload of this pane is already in flight"), lock.Close())
-}
-
-func nativeReloadLockOwner(file *os.File, directory bool) error {
-	info, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("stat native reload mutex: %w", err)
-	}
-	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || owner.Uid != uint32(os.Geteuid()) {
-		return errors.New("native reload mutex ownership is not the effective user")
-	}
-	if directory {
-		if !info.IsDir() || info.Mode().Perm()&0o022 != 0 {
-			return errors.New("native reload mutex directory is not a protected directory")
-		}
-	} else if !info.Mode().IsRegular() {
-		return errors.New("native reload mutex is not a regular file")
-	}
-	return nil
 }
 
 func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun) (Request, fleetdb.SeatRun, error) {

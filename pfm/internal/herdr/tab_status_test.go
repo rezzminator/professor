@@ -167,7 +167,7 @@ func TestTabStatusNewNameWins(t *testing.T) {
 	nameDone, pulseDone := make(chan error, 1), make(chan error, 1)
 	go func() {
 		first := true
-		nameDone <- writeSoleTabLabel(context.Background(), "endpoint", dir, d.Tab, "Newest", func() uint64 { return 1 }, func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
+		nameDone <- writeSoleTabLabel(context.Background(), "endpoint", dir, d.Tab, "Newest", true, func() uint64 { return 1 }, func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
 			if first {
 				first = false
 				close(locked)
@@ -191,6 +191,139 @@ func TestTabStatusNewNameWins(t *testing.T) {
 	if f.label != "⬜ Newest" {
 		t.Fatalf("stale name restored: %q", f.label)
 	}
+}
+
+// A chat renamed after its tab was decorated reaches the tab at the next
+// tick: the chat name the painter last saw is kept with the label, so a new
+// one is newer than any earlier label. A label the user set in Herdr belongs
+// to the user: no later automatic change of the composed name (an AI title,
+// the first prompt) replaces it, nor does a re-announce of an unchanged name
+// (ReannounceSoleTab); a name the user chose does: an explicit pfm rename
+// (LabelSoleTab, the writer of `pfm chat name` and of a user's name change the
+// rename hook carries) or a change of the chat's user name the painter sees
+// (TestTabStatusUserRenameReplacesAUserLabel), after which the tab follows the
+// chat's name again. A record written before the painter followed names (no
+// seen name) starts following without a rename.
+func TestTabStatusChatRenameReachesTheTab(t *testing.T) {
+	f := newTabStatusFixture()
+	dir := t.TempDir()
+	d := tabObservation("blocked")
+	tick := func(name, want string) {
+		t.Helper()
+		d.Name = name
+		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
+			t.Fatal(err)
+		}
+		if want := DecoratedTabLabel(want, "blocked", "emoji", true); f.label != want {
+			t.Fatalf("after a tick seeing chat name %q the tab reads %q, want %q", name, f.label, want)
+		}
+	}
+	tick("Chat", "Chat")
+	tick("Renamed", "Renamed")
+	tick("Renamed", "Renamed")
+	// A tab Herdr reports with no label holds no label the user set: pfm's name stays.
+	f.label = ""
+	tick("Renamed", "Renamed")
+	f.label = "Mine"
+	tick("Renamed", "Mine")
+	tick("Renamed", "Mine")
+	// The composed name drifts (a first prompt becomes an AI title): the user's label stays.
+	tick("Third", "Mine")
+	tick("Fourth", "Mine")
+	// A session start re-announcing the chat's name is no rename: the user's label stays.
+	if err := writeSoleTabLabel(
+		context.Background(), "endpoint", dir, d.Tab, "Fourth", false, func() uint64 { return 1 }, f.call,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if want := DecoratedTabLabel("Mine", "blocked", "emoji", true); f.label != want {
+		t.Fatalf("after a re-announce the tab reads %q, want the user's %q", f.label, want)
+	}
+	// An explicit pfm rename wins over the user's label ...
+	if err := writeSoleTabLabel(
+		context.Background(), "endpoint", dir, d.Tab, "Explicit", true, func() uint64 { return 1 }, f.call,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if want := DecoratedTabLabel("Explicit", "blocked", "emoji", true); f.label != want {
+		t.Fatalf("after an explicit rename the tab reads %q, want %q", f.label, want)
+	}
+	// ... without the painter's next tick, still seeing the older composed name, undoing it ...
+	tick("Fourth", "Explicit")
+	// ... and the tab follows the chat's name again.
+	tick("Fifth", "Fifth")
+
+	legacy := newTabStatusFixture()
+	legacyDir := t.TempDir()
+	rendered := DecoratedTabLabel("Old", "blocked", "emoji", true)
+	legacy.label = rendered
+	if err := withTabLabelLock(context.Background(), legacyDir, "endpoint", d.Tab, func(path string) error {
+		return writeTabLabel(path, tabLabelRecord{
+			Base: "Old", Rendered: rendered, Identity: d.Identity, State: "blocked", Mode: "emoji", On: true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f, dir = legacy, legacyDir
+	tick("New", "Old")
+	tick("Newer", "Newer")
+}
+
+// A label the user set in Herdr stands against the chat's automatic names
+// (an AI title, a first prompt), never against a name the user chose later: a
+// Claude /rename (its custom title) or a Codex thread rename replaces it, and
+// the tab follows the chat's name again. A record written before the painter
+// saw user names starts following them without a rename.
+func TestTabStatusUserRenameReplacesAUserLabel(t *testing.T) {
+	f := newTabStatusFixture()
+	dir := t.TempDir()
+	d := tabObservation("blocked")
+	tick := func(name, user, want string) {
+		t.Helper()
+		d.Name, d.UserName = name, user
+		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
+			t.Fatal(err)
+		}
+		if want := DecoratedTabLabel(want, "blocked", "emoji", true); f.label != want {
+			t.Fatalf(
+				"after a tick seeing chat name %q (user name %q) the tab reads %q, want %q",
+				name,
+				user,
+				f.label,
+				want,
+			)
+		}
+	}
+	tick("Chat", "", "Chat")
+	f.label = "Mine"
+	tick("Chat", "", "Mine")
+	// An AI title is automatic: the user's label stays.
+	tick("AI title", "", "Mine")
+	// A /rename is the user's: newer than the user's label.
+	tick("Renamed", "Renamed", "Renamed")
+	tick("Renamed", "Renamed", "Renamed")
+	f.label = "Mine again"
+	tick("Renamed", "Renamed", "Mine again")
+	tick("Renamed", "Renamed", "Mine again")
+	// A row that carries no user name is no rename.
+	tick("Renamed", "", "Mine again")
+	tick("Renamed twice", "Renamed twice", "Renamed twice")
+
+	legacy := newTabStatusFixture()
+	legacyDir := t.TempDir()
+	rendered := DecoratedTabLabel("Mine", "blocked", "emoji", true)
+	legacy.label = rendered
+	if err := withTabLabelLock(context.Background(), legacyDir, "endpoint", d.Tab, func(path string) error {
+		return writeTabLabel(path, tabLabelRecord{
+			Base: "Mine", Rendered: rendered, Identity: d.Identity, State: "blocked", Mode: "emoji", On: true,
+			Seen: "Chat", UserSet: true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f, dir = legacy, legacyDir
+	tick("Named", "Named", "Mine")
+	tick("Named again", "Named again", "Named again")
 }
 
 func TestTabStatusTopologyAndGeneration(t *testing.T) {
@@ -481,5 +614,49 @@ func TestRetainedTabActsOnlyOnOwnRecord(t *testing.T) {
 				t.Fatalf("restored label=%q want %q", f.label, tc.restored)
 			}
 		})
+	}
+}
+
+// A tab.rename Herdr applied but whose answer was lost leaves a pending
+// rename in the tab's label record: the next tick knows the label as pfm's own
+// and decorates the chat's name once, never the decorated label again.
+func TestTabStatusLostRenameReplyNeverStacksThePrefix(t *testing.T) {
+	f := newTabStatusFixture()
+	dir := t.TempDir()
+	d := tabObservation("blocked")
+	d.Name = "Chat"
+	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
+		t.Fatal(err)
+	}
+	lost := func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
+		results, err := f.call(ctx, socket, lines...)
+		if err == nil && strings.Contains(string(lines[0]), `"tab.rename"`) {
+			return nil, errors.New("read herdr reply: i/o timeout")
+		}
+		return results, err
+	}
+	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, false, lost); err == nil {
+		t.Fatal("a rename whose answer was lost must be an error")
+	}
+	for _, on := range []bool{true, false} {
+		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, on, f.call); err != nil {
+			t.Fatal(err)
+		}
+		if want := DecoratedTabLabel("Chat", "blocked", "emoji", on); f.label != want {
+			t.Fatalf("after a lost rename answer the tab reads %q, want one prefix: %q", f.label, want)
+		}
+	}
+	// The same holds for a name writer's rename.
+	if err := writeSoleTabLabel(
+		context.Background(), "endpoint", dir, d.Tab, "Named", true, func() uint64 { return 1 }, lost,
+	); err == nil {
+		t.Fatal("a name writer's rename whose answer was lost must be an error")
+	}
+	d.Name = "Named"
+	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
+		t.Fatal(err)
+	}
+	if want := DecoratedTabLabel("Named", "blocked", "emoji", true); f.label != want {
+		t.Fatalf("after a name writer's lost rename answer the tab reads %q, want one prefix: %q", f.label, want)
 	}
 }

@@ -46,7 +46,9 @@ func (current *composer) herdrRows() []Row {
 		row.HerdrWorkspace = seat.HerdrWorkspace
 		row.ID = seat.SessionID
 		if seat.Name != "" {
-			row.Name = seat.Name
+			// A seat's name is the user's (launch --name, pfm chat name) and
+			// names the row over the transcript's own.
+			row.Name, row.UserName = seat.Name, seat.Name
 		}
 		row.Socket = seat.HerdrSocket
 		row.PaneID = seat.HerdrPane

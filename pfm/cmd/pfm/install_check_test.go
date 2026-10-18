@@ -236,7 +236,7 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				}
 			case "python3 missing":
 				want := "doctor: dep python3 path=(none) MISSING required — install: install python3; " +
-					"the tracer's tracetree kit and its launch hook run on it\n"
+					"the tracer's tracetree kit runs on it\n"
 				if !strings.Contains(out.String(), want) ||
 					errOut.String() != "pfm install: required dependency preflight failed\n" {
 					t.Fatalf("stdout=%q stderr=%q, want stdout holding %q", out.String(), errOut.String(), want)

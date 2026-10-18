@@ -1,13 +1,13 @@
 # pfm tokens
 
-One read-only pfm verb over all three engines' transcripts, one pricing table: **where did the tokens go?** No report is written outside `--out` / `--view` / `--briefs` / `--metrics-out` / a flight's own `metrics.md`; the daily price refresh it shares with `pfm model-cost` may rewrite the clone's `prices.json` and its check stamp.
+One read-only pfm verb over all three engines' transcripts, one pricing table: **where did the tokens go?** No report is written outside `--out` / `--view` / `--briefs`; the daily price refresh it shares with `pfm model-cost` may rewrite the clone's `prices.json` and its check stamp.
 
 ```bash
 pfm tokens            # last 24h, every project
 pfm tokens --since 3d --project <substr>
 pfm tokens --codex    # Codex CLI threads
 pfm tokens --opencode # OpenCode sessions
-pfm tokens --flight $HOME/.local/state/pfm/flights/{project}/<name>
+pfm tokens --tree <session-or-agent-id> --worktree <dir> --base <sha>
 ```
 
 A RUN is one transcript file: one main chat loop, one sub-agent, one Codex rollout thread, or one OpenCode session. A FAMILY is a main chat plus every sub-agent it spawned.
@@ -26,10 +26,11 @@ A RUN is one transcript file: one main chat loop, one sub-agent, one Codex rollo
 | `--out <file>` | Full JSON dataset. |
 | `--codex` | Read Codex rollouts instead of Claude transcripts. |
 | `--codex-root <dir>` | Read this one Codex home in place of every Codex home pfm resolves (one per configured Codex account). |
-| `--opencode` | Read OpenCode sessions instead; refused beside `--codex`, `--flight`, `--root`, `--family`, `--family-rx`, `--session`, `--out`, `--view`, `--briefs` or `--metrics-out` (exit 2). |
+| `--opencode` | Read OpenCode sessions instead; refused beside `--codex`, `--tree`, `--root`, `--family`, `--family-rx`, `--session`, `--out`, `--view` or `--briefs` (exit 2). |
 | `--opencode-root <dir>` | Read the `opencode.db` in this directory in place of pfm's OpenCode roots; refused without `--opencode` (exit 2). |
-| `--flight <dir>` | Per-flight metrics report (below). |
-| `--metrics-out <file>` | Write the flight report here instead of `<dir>/metrics.md`. |
+| `--tree <id>` | One Claude spawn tree's written-per-read measure (below). |
+| `--worktree <dir>` / `--base <sha>` | `--tree`: count the code lines the checkout landed against the base; the pair goes together. |
+| `--json` | `--tree`: print the JSON document instead of the text. |
 | `--view <file>` / `--briefs <file>` | Compact per-project page data / the briefs-and-behaviour dataset. |
 | `--host-label <name>` | `--view`: the host name the page shows (default: this host's name). |
 | `--prices <file>` | Price from a saved table instead of pfm's current one (below). |
@@ -49,7 +50,7 @@ Without `--root`, the Claude roots are pfm's resolved roots (`PFM_CLAUDE_ROOTS`,
 
 - Line 1 is `session_meta`: `id` (thread), `session_id` / `parent_thread_id` (the parent thread), `context_window.window_id`, `cwd`, `thread_source`, and `source.subagent` (the role) for a sub-agent thread. A Codex sub-agent writes its **own** rollout, so it is attributed individually.
 - `turn_context` carries the model; `token_count` carries the counters; `custom_tool_call` / `function_call` and their `*_output` carry the tools, their output size and their failures.
-- For the `--codex` table only matching lines are decoded (rollouts reach 110 MB); `--flight` decodes the few matched rollouts in full.
+- For the `--codex` table only matching lines are decoded (rollouts reach 110 MB).
 
 **OpenCode.** `opencode.db` under each of pfm's OpenCode roots (or `--opencode-root`), opened read-only through pfm's one OpenCode store reader (`pfm/internal/index`): every session, each with its messages created inside the window, in one statement; a message older than the window is not counted, though its session was updated inside it. When no store can be read the run exits 1 (`no OpenCode store could be read: {db} is missing`, or `{db}: {error}`), as it does with no configured root (`no OpenCode root is configured; pass --opencode-root DIR`).
 
@@ -73,30 +74,17 @@ Without `--root`, the Claude roots are pfm's resolved roots (`PFM_CLAUDE_ROOTS`,
 - **A read error is a failure to look, not an empty result.** It is named in the gaps line and the process exits 1 (a usage error exits 2); an unresolvable `--root` is a hard error before anything is reported.
 - **`CROSS-CHECK`** compares the estimate against the harness's own `cost-state` line for chats wholly inside the window, and prints the estimate with published context tiers applied. When no chat qualifies it says the estimate is UNCHECKED on this host.
 
-## `--flight <dir>`
+## `--tree <id>`
 
-Writes `<dir>/metrics.md` (or `--metrics-out FILE`) and prints it; `--out FILE` adds JSON. The window comes from the flight, not from `--since`. Bounded: the text stays under ~200 lines whatever the flight's size.
+One Claude spawn tree: a session id takes the main session and every sub-agent of it; an agent id (an `agent-` prefix is accepted) takes that sub-agent and its descendants, each placed through its `agent-{id}.meta.json` `parentAgentId`. The id matches exactly under every `--root`, else `$CLAUDE_CONFIG_DIR/projects` and pfm's resolved Claude roots; two matching transcripts are an error. No window applies: every call in the tree counts. `--tree` refuses `--since`, `--project`, `--family`, `--family-rx`, `--session`, `--top`, `--codex`, `--codex-root`, `--opencode`, `--opencode-root`, `--view`, `--briefs` and `--host-label` (exit 2).
 
-One row per agent — task id, agent type, engine, model, calls, wall time, start context, peak context, growth per call, input / cached / output tokens, cache TTL (`5m`, `1h`, `1h N%` when it wrote both, or `—` for no cache writes or an engine that reports no split, as Codex), price, failed commands, poll calls, re-reads, contract-file reads (`CLAUDE.md` / `AGENTS.md`), compactions, over cap, matched — then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line.
-
-The join key is `<dir>/agents.tsv`, append-only, tab-separated, one row per spawn, header optional:
-
-```text
-task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
-1-a	flights-mechanical-executor	a1b2c3	1	2026-09-20T09:01:00Z	claude
-2-b	flights-mechanical-executor	01a0…f302	2	2026-09-20T09:40:00Z	codex
-```
-
-- `engine` is `claude`, `codex` or `seat` (a seat is tried on both).
-- Claude rows resolve to `…/subagents/agent-{agent-id}.jsonl` under any discovered root.
-- Codex rows match `{agent-id}` against the rollout's own `session_meta` — `id`, `context_window.window_id`, or the id in the filename — never `session_id` / `parent_thread_id`, which name the parent on a sub-agent thread.
-- A Codex `{agent-id}` starting with `/` is an agent path (`/root/fix_1a`), the only handle a Codex orchestrator holds: it matches `session_meta.agent_path`, the spawn nearest the row's time winning when a path repeats, and the row is marked `matched: path`.
-- A row whose id form cannot be matched falls back to **that row's** spawn time plus its agent type, and the row is marked `matched: window`. A spawn time without a clock (`2026-09-20`) never opens a window: the row matches by id or path, or is `UNMATCHED`.
-- With no `agents.tsv` at all, `run.md`'s header instant and its `{id} CLAIMED · {agent} · {time}` lines are the fallback and every row is marked `window`. A header with no parseable instant is a hard error — the tool never invents a window.
-- A ledger row with no transcript, and a transcript inside the window under this flight's parent with no ledger row, are both listed under `UNMATCHED`. Neither is dropped: each unmatched transcript carries its price, and the flight total adds an `unledgered` line — their count, their dollars and the flight's whole spend — so a child foreman, a lander or a skill-spawned review missing from `agents.tsv` never halves the headline.
-- A poll is a Bash call repeated 8 or more times in one run, or a `sleep` / `wait` / `tail -f`, counted on the call its result triggers; a harness attachment written after a tool result (`total_tokens_reminder`) is never the trigger.
-- The call cap comes from the agent type name: a `foreman` is capped at 250, otherwise a `lander` at 200, everything else at 150.
+- Per agent: depth from the tree root, type (`main` for the session), model, input tokens (uncached, cache read, cache write), dollars, written bytes, read bytes and their ratio `W/R`. Written bytes are Write content, Edit and MultiEdit `new_string` and NotebookEdit `new_source` whose target is under the write scope and never under `/tmp` or `/private/tmp`; read bytes are the text of every `tool_result` the agent received. One unpriced call renders the agent's dollars `n/a`.
+- Write scope: `--worktree`, else the first `cwd` the session transcript records, else the root agent's.
+- Per agent type: agents, input tokens, written and read bytes, `W/R`.
+- Per tree: the totals, the silent share (the input-token share of agents that wrote nothing under the scope), and with `--worktree DIR --base SHA` the landed code lines — `git diff --numstat -z BASE` plus untracked files, with test, doc, generated, lock and binary files counted apart (rules `landed-rules/1`, `pfm/internal/tokens/landed.go`) — and landed lines per million input tokens. Without the pair both read `NOT MEASURED`.
+- An agent whose meta cannot be read stays a row marked unreadable, counts in `notRead` and in no total, and the run exits 1.
+- `--json` prints the document instead of the text; `--out FILE` writes it and adds a `full data →` line. Its keys, in order: `excluded`, `tree`, `types[]`, `agents[]` (`pfm/internal/tokens/tree.go` lists every field).
 
 ## Tests
 
-The tests live in `pfm/internal/tokens/` and run the verb over the synthetic JSONL under `testdata/fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, an OpenCode store seeded at test time (`opencode_test.go`: per-message pricing, `--project`, a missing or unreadable store), and a flight ledger exercising an id match, a window match and a row with no transcript. `testdata/golden/` holds every mode's recorded output, which each run reproduces byte for byte. Every run reads the synthetic saved document `testdata/fixtures/model-cost.json`; no network is used by tests. Id resolution is tested in `pfm/internal/pricing` against its shared cases (`testdata/resolve-cases.json`).
+The tests live in `pfm/internal/tokens/` and run the verb over the synthetic JSONL under `testdata/fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, an OpenCode store seeded at test time (`opencode_test.go`: per-message pricing, `--project`, a missing or unreadable store), and a spawn tree (`testdata/fixtures/tree/`: a session, a foreman, two workers and a tracer) for `--tree`. `testdata/golden/` and `testdata/tree/` hold every mode's recorded output, which each run reproduces byte for byte. Every run reads the synthetic saved document `testdata/fixtures/model-cost.json`; no network is used by tests. Id resolution is tested in `pfm/internal/pricing` against its shared cases (`testdata/resolve-cases.json`).

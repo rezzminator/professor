@@ -19,6 +19,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 - [WARNINGS](#warnings)
 - [The wait printout](#the-wait-printout)
 - [The component map](#the-component-map)
+- [The swatch book](#the-swatch-book)
 
 ## Files
 
@@ -31,9 +32,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `loom.html`, `book.html` | The two page shells: title, tabs or header, and the `/*LOOM_STYLE*/`, `<!--LOOM_PARTS-->` and data slots |
 | `loom_wall.html`, `loom_custody.html`, `loom_hourglass.html`, `loom_key.html`, `book_view.html` | The views, one template and one component each, mounted by the runtime on first show |
 | `loom_dc.html`, `loom.css` | The small component runtime and the style every view shares |
-| `segment.py` | The segment command's cut — blast, cells, spine, segments, ORDER, ESCALATE and DECIDE; imported only by the segment dispatch |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
-| `segment_test.py` | segment's suite, run by the templates skill-tests gate step |
 | `SKILL.md` | The agents' command table and the check, visible to `tracer` and `sub-tracer` only |
 
 ## The run directory
@@ -44,14 +43,14 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | --- | --- | --- |
 | `ROOT` | `new` | The repository root, absolute |
 | `BASE` | `new`, in a git work tree with a commit | The commit `HEAD` was at |
-| `questions` | `new --questions`, or `intake` | The brief's numbered questions: as read from stdin, or as `intake` parsed them from the brief, one `{n}. {text}` each |
+| `questions` | `new --questions` | The brief's numbered questions, as read from stdin |
 | `{ID}.started` | `start` | `{PATH:LINE}<tab>{QUESTION}`, a line per `start`: the node is running; the map page reads its question and its time |
 | `{ID}.refused` | `write`, at its refusal | Nothing: the node's first write was refused |
 | `{ID}.hops` | `write`, once | The node's file, each placed hop's `@` rewritten to its real `path:line` |
 | `{ID}.write.json` | `write`, with the store | One entry per hop: `given`, `path`, `line`, `end`, `how`, `status`, `sha256` |
 | `answers.txt` | `wait` | The full wait view |
 | `map.txt` | `wait` | The text map |
-| `recall.txt` | `intake` | The [recall](#recall) of the brief's questions over the earlier runs, or `RECALL FAILED — {reason}` |
+| `recall.txt` | `new --questions` | The [recall](#recall) of the brief's questions over the earlier runs, or `RECALL FAILED — {reason}: trace every question` |
 | `.reads` | `read` | The round's one read; `wait` removes it |
 
 A node ID is dotted numbers, `3` or `3.1`. `.started` with no `.hops` is a node still running; a `.refused` node is still running until its second write.
@@ -77,32 +76,29 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 
 ### new
 
-**Function:** `cmd_new` — **Run by:** the lead, in its first call, when the brief carries no `RUN:`
+**Function:** `cmd_new` — **Run by:** the lead, in its one Bash call before it spawns
 
-`new ROOT [--seek REGEX] [--questions]` creates the run directory, writes `ROOT` and prints the run's path. `--questions` reads stdin to EOF and fails unless it finds a question numbered `1.`, `1)` or `Q1`; it stores the text as `questions`. In a git work tree with a commit it writes `BASE`; a git that cannot answer is named on stderr, never fatal.
+`new ROOT [--seek REGEX] [--questions [--recall RUN]…]` creates the run directory, writes `ROOT` and prints the run's path. `--questions` reads stdin to EOF and fails unless it finds a question numbered `1.`, `1)` or `Q1`; it stores the text as `questions`. `--recall` needs `--questions`. In a git work tree with a commit it writes `BASE`; a git that cannot answer is named on stderr, never fatal.
 
-`--seek` then lists every verified hop of an earlier run on the same ROOT, modified within the last 6 hours, running runs included, whose path or current line matches REGEX: `PRIOR {run} node {ID}: {path}:{line}  {text}`, newest run first, at most 30; a text past 160 characters is cut to 157 and ends `...`. The last line is `PRIOR: {n} hops in {k} runs — tt check {run} --hops {ID}`, naming any not shown and any run it could not read, or `PRIOR: none in {k} earlier runs on this root`, or `PRIOR: could not look — {reason}`.
+`--seek` then lists every verified hop of every earlier run on the same ROOT, running runs included, whose path or current line matches REGEX: `PRIOR {run} node {ID}: {path}:{line}  {text}`, newest run first, at most 30; a text past 160 characters is cut to 157 and ends `...`. The last line is `PRIOR: {n} hops in {k} runs — tt check {run} --hops {ID}`, naming how many it did not show and how many runs it could not read, or `PRIOR: none in {k} earlier runs on this root`, or `PRIOR: could not look — {reason}`.
 
-### seek
-
-**Function:** `cmd_seek` — **Run by:** the lead, in its first call, on a brief carrying `RUN:`
-
-`seek RUN REGEX` prints the run's path, then the `PRIOR` lines `new --seek` prints, for a run that already exists: the run [intake](#intake) opened at the spawn. A RUN with no `ROOT` file, or a REGEX that does not compile, fails.
+With `--questions`, the [recall](#recall) of those questions follows (`recall_into`), this run excluded and each `--recall RUN` read first, in order: written whole to `RECALL: RUN/recall.txt`, that line printed, then the recall. A recall that raises is `RECALL FAILED — {reason}: trace every question`, the run left open; a `recall.txt` it cannot write prints `RECALL NOT SAVED — {reason}` and the recall still prints.
 
 ### recall
 
-**Function:** `cmd_recall`, `recall` — **Run by:** the caller, and [intake](#intake) at every spawn it opens a run for
+**Function:** `cmd_recall`, `recall` — **Run by:** `new --questions`, and the caller
 
-`recall ROOT [--since-hours N]` reads numbered questions on stdin and serves each from earlier runs' answer lines, every one re-checked against ROOT now. No age limit unless `--since-hours` sets one. `--before RUN` keeps only runs started strictly before RUN (each run's start is its `ROOT` file's time, the measure a BASE-less run is dated by) and never RUN itself, for replaying a run against what existed when it began.
+`recall ROOT [--before RUN] [--recall RUN]…` reads numbered questions on stdin and serves each from earlier runs' answer lines, every one re-checked against ROOT now, whatever the run's age. `--recall RUN` reads those runs first, in the order given; a path that is no run, or a run on another repository root, is an `UNREADABLE` line. `--before RUN` keeps only runs started strictly before RUN (each run's start is its `ROOT` file's time, the measure a BASE-less run is dated by) and never RUN itself, for replaying a run against what existed when it began.
 
 - Candidates: every run under `/tmp/{project}/tracer/` whose ROOT shares ROOT's git common dir, asked from the ROOT's nearest existing directory so a removed worktree's run still qualifies; outside git, the runs on this exact ROOT. Newest start first.
 - Anchors per question: backticked text, path-like tokens, and identifiers (CamelCase, snake_case, dotted, a file name excepted). A matched line is a node's ANSWER line naming an anchor, identifiers as whole words; one text is kept once, lines naming more anchors and newer runs first, at most 30 checked per question (`· {k} more matched lines not checked`).
+- File hash first: a line whose node's walked files and cited files all still have the sha256 its `{ID}.write.json` recorded at `write`, and which is no closed-world claim, is FRESH with its cites as written, no git asked. Every other line goes through the checks below.
 - Each cite's span text is the quote of the hop that backs it, else `git show {BASE}:{path}` lines A–B, placed by [the resolver](#the-resolver) against ROOT now: at its line it is FRESH; at another line the line is DELTA, its cites re-addressed, with `- {path}:{old} {text}` and `+ {path}:{new} {text}` rows, counted delta; nowhere (or broken after its first lines) it is STALE. A cite no hop backs in a run with no BASE, or whose BASE git cannot show, is STALE naming the run.
 - Premise: a line rests on every hop its node walked, not only the hops it cites. A node hop that held at BASE and no longer holds makes the line STALE; a hop that did not hold at BASE either changed nothing.
 - Symbol witness: every identifier (CamelCase, snake_case, dotted), `$VAR`, backticked single token and path the line names in its prose, and each cite's path, is checked as a whole word against `git diff -U0 {BASE}` of ROOT's working tree plus every untracked file, one diff per BASE. Occurrences count as a multiset of (path, line text), so a line removed and added back unchanged is no change. Any change makes the line DELTA; a git that cannot answer, or a run with no BASE, makes it STALE. So an "only caller of X" line is served only while X's occurrence set is unchanged, whether or not the question names X.
 - Closed-world claims: a line whose prose outside backticks says nothing, no, none, only, every, never, all callers or N callers is served only with at least one name of its prose witnessed; naming none, it is a GAP row.
-- Output: `RECALL {root} · {runs} earlier runs · {unreadable} unreadable` heads the report; a bounded recall appends `· runs of the last {hours} hours, {older} older not read` (intake uses six hours). Then `UNREADABLE {run}: {reason}` per run that cannot be read, never dropped; per question `RECALL Q{n} · {fresh}/{total} lines fresh · runs {ids}`, then its TRACE line, each `FRESH` line, each `DELTA` line with `· moved` and `· changed since {BASE}: {names}` as they apply and at most 5 `+ path:N text` / `- path:N text` rows, the moved spans' first, then `+{k} more`, each STALE line as `STALE Q{n} · {reason}`, each unwitnessed closed-world line as `GAP Q{n} · {why}: {line}`, or `GAP Q{n} · {why}` for the whole question. A DELTA line lists each changed line once, however many of its names that line carries. Past 12 KB, fewest anchor hits first and the later line first on a tie within each step: STALE lines collapse, then each DELTA line's occurrence rows shrink to `+{k} rows` indented by two spaces, then DELTA lines collapse, then FRESH lines go. A collapsed line becomes `CHANGED Q{n} · {path}`, path its first cite's (`uncited` without one), one marker per question and path, so the cap never hides a changed fact. Heads, TRACE lines, GAP questions and rows, STALE rows naming a git failure, CHANGED markers and UNREADABLE lines always stay, even past the cap; `RECALL CUT {k} lines past the 12 KB cap · {s} stale, {d} delta, {f} fresh · {s+d} collapsed to {m} CHANGED` (` · {t} delta lines cut to their head` when any shrank) names the cut.
-- Work line: `TRACE Q{n} · {k} rows · {scope}` follows each head once the cap is settled. Its k rows are the question's DELTA, STALE, CHANGED and GAP lines and the FRESH lines the cap cut; the scope lists their cite paths, a DELTA line's changed names backticked, a moved span's old path, and each anchor of the question no checked line hits, backticked. `TRACE Q{n} · none` when there is none of them: every line is a kept FRESH one; `TRACE Q{n} · whole question` under a `GAP Q{n}` question. [intake](#intake) holds sub-tracer cards to it. Last `RECALL COVER {served}/{questions} · {stale} stale · {delta} delta`, with ` · {k} unwitnessed` when GAP rows exist, a question served when one line is fresh. A git that cannot place ROOT prints `RECALL GIT FAILED — {reason}` and falls back to the exact ROOT.
+- Output: `RECALL {root} · {runs} earlier runs · {unreadable} unreadable` heads the report. Then `UNREADABLE {run}: {reason}` per run that cannot be read, never dropped; per question `RECALL Q{n} · {fresh}/{total} lines fresh · runs {ids}`, then its TRACE line, each `FRESH` line, each `DELTA` line with `· moved` and `· changed since {BASE}: {names}` as they apply and at most 5 `+ path:N text` / `- path:N text` rows, the moved spans' first, then `+{k} more`, each STALE line as `STALE Q{n} · {reason}`, each unwitnessed closed-world line as `GAP Q{n} · {why}: {line}`, or `GAP Q{n} · {why}` for the whole question. A DELTA line lists each changed line once, however many of its names that line carries. Past 12 KB, fewest anchor hits first and the later line first on a tie within each step: STALE lines collapse, then each DELTA line's occurrence rows shrink to `+{k} rows` indented by two spaces, then DELTA lines collapse, then FRESH lines go. A collapsed line becomes `CHANGED Q{n} · {path}`, path its first cite's (`uncited` without one), one marker per question and path, so the cap never hides a changed fact. Heads, TRACE lines, GAP questions and rows, STALE rows naming a git failure, CHANGED markers and UNREADABLE lines always stay, even past the cap; `RECALL CUT {k} lines past the 12 KB cap · {s} stale, {d} delta, {f} fresh · {s+d} collapsed to {m} CHANGED` (` · {t} delta lines cut to their head` when any shrank) names the cut.
+- Work line: `TRACE Q{n} · {k} rows · {scope}` follows each head once the cap is settled. Its k rows are the question's DELTA, STALE, CHANGED and GAP lines and the FRESH lines the cap cut; the scope lists their cite paths, a DELTA line's changed names backticked, a moved span's old path, and each anchor of the question no checked line hits, backticked. `TRACE Q{n} · none` when there is none of them: every line is a kept FRESH one; `TRACE Q{n} · whole question` under a `GAP Q{n}` question. A `REWALK Q{n} · {run} node {ID} · FROM {its FROM} · {changed paths}` line follows per earlier node holding a line not FRESH: the lead threads only those, from that FROM, and serves a `none` question's FRESH rows without a thread. Last `RECALL COVER {served}/{questions} · {stale} stale · {delta} delta`, with ` · {k} unwitnessed` when GAP rows exist, a question served when one line is fresh. A git that cannot place ROOT prints `RECALL GIT FAILED — {reason}` and falls back to the exact ROOT.
 
 ### start
 
@@ -123,14 +119,6 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 `wait RUN ID… [--timeout S] [--grace S] [--start S]`, defaults 540, 15 and 120 seconds. It removes `.reads`, then polls until every node it waits for has written and no `.hops` or `.started` file changed for `--grace` seconds. It waits for the named nodes and every node that ran `start`. A named node with neither `.started` nor `.hops` after `--start` seconds never ran and is reported `never started`, never waited for.
 
 The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s — started but never wrote: {IDs}` or `WAIT ended after {t}s: no node started`, each ending `— never started: {IDs}` when one did not. The rest is [the wait printout](#the-wait-printout).
-
-### answer
-
-**Function:** `cmd_answer` — **Run by:** the caller, when a step of its work rests on a question before the final arrives; what it prints is facts to start work on, never a ruling: the final is the caller's answer
-
-`answer RUN [Q…] [--timeout S] [--grace S] [--start S]`, defaults 300, 5 and 90 seconds; a question is `3` or `Q3`, and no number means every question in `questions`. A node serves question n when a line of its `.started` names `Q{n}`; a child whose card names none takes its dotted parent's; every child of a serving node serves too. It polls until every serving node has written and none of their `.hops` changed for `--grace` seconds. A question no node took `--start` seconds after the first `.started` appeared is `NO THREAD Q{n}`, never waited for; a question whose nodes still walk at `--timeout` is `STILL WALKING Q{n}: nodes {IDs} …`; one no node has taken while that window is open is `NOT STARTED Q{n}`.
-
-The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, the answered questions and the trust note (`ANSWER_TRUST`): every cite was re-read from disk just now, so an unflagged line is evidence; with none answered it ends `no question answered yet`. Then the status lines, the WARNINGS lines of the answered questions' nodes and the run, then per answered question `Q{n} · nodes {IDs} · {its text}` and those nodes' blocks of the answers view, each node once, then their [OPEN block](#the-wait-printout). At 28000 characters (`CEILING`) or more the whole printout goes to `answer-Q{n}-{m}….txt`, named by the questions asked, and the answers are trimmed to a `+{k} answer lines: {path} — ask fewer questions per call` line, the status, WARNINGS and first 40 OPEN lines kept; a file that cannot be written prints `ANSWER FILE FAILED — …` and the whole printout.
 
 ### read
 
@@ -161,51 +149,6 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 **Function:** `cmd_book` — **Run by:** the caller
 
 `book [--html OUT]`: [the swatch book](#the-swatch-book). It takes no run: it reads every run under `/tmp/{project}/tracer`.
-
-### intake
-
-**Function:** `cmd_intake` — **Run by:** pfm's launch hook `tracer-intake` (`claudelaunch.HookTemplates`, [hooks.md](../hooks/hooks.md#launch-time-claude-hooks-pfm-owned)): a PreToolUse hook on `Agent|Task`, running `python3 {home}/.claude/skills/tracetree/tracetree.py intake` in every Claude session pfm launches, wrapped so any failure is a non-blocking exit 1 that names the hook and the kit
-
-`intake` reads the hook payload on stdin. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets its run opened, with ROOT taken from the brief's `Repo root:` line or else the hook's cwd, and its questions stored.
-
-- The brief is rewritten to carry `RUN: {run}` after that line (`updatedInput`, `permissionDecision: allow`).
-- [recall](#recall) runs on the questions, the new run excluded; its whole printout goes to `{RUN}/recall.txt`, the brief carries `RECALL: {RUN}/recall.txt` under the RUN line and the caller is told the path. A recall that raises writes `RECALL FAILED — {reason}: trace every question` there; a file that cannot be written leaves no RECALL line, logs to `intake.log` and says why. The tracer spawn is never denied.
-- The caller is told, through `additionalContext`, that the tracer's final is its answer. It is also told that `answer RUN n…` prints a question's raw reader answers once its threads are walked: facts to start work on, never a ruling, since a verdict waits for the final.
-- A `sub-tracer` spawn is held to the `TRACE Q{n}` lines of `{RUN}/recall.txt` (`permissionDecision: deny`): a card whose `QUESTION:` names only `TRACE Q{n} · none` questions is denied, the reason telling the tracer to quote their FRESH rows and leave the node out of `wait`; a card naming a question with TRACE rows whose other lines (THREAD, FROM) name none of that scope, a path whole or by its file name, a name as a whole word, is denied with the scope to respawn it on. A question with no TRACE line or a `whole question` one passes the card, as does a child card (an ID with a dot), scoped by its parent's. A card carrying `REASON: {why}` passes, the override logged to `intake.log` beside the run. A missing recall.txt passes the card; an unreadable one passes it and is logged.
-- Every other call passes untouched and the hook prints nothing.
-- A root that is not a directory, or a run that cannot be opened, passes the spawn on unchanged and says why.
-- An unreadable payload is logged to `/tmp/{project}/tracer/intake.log`, `{project}` taken from the hook's own working directory, and to stderr when that log cannot be written.
-- python3 is a required install dependency (`deps.Registry`): a missing one stops `pfm install`'s pre-change check with `install python3; the tracer's tracetree kit and its launch hook run on it`.
-- `pfm doctor`'s `doctor: tracer-intake:` rows prove the hook on the host: python3, the kit file, a non-tracer smoke that passes silently and a tracer smoke that returns a `RUN:` line, a FAIL row and exit 3 on any broken need ([hooks.md](../hooks/hooks.md#launch-hook-tracer-intake)).
-
-### segment
-
-**Function:** `segment.main` — **Run by:** `flights-foreman`, step 4, on its doors file
-
-`segment ROOT [--rev SHA] --seeds FILE` cuts the doors' blast area, before any code is read, into a `SPINE` the parent freezes first and child segments, each with its `ORDER`, `ESCALATE` and `DECIDE` lines; the seed forms and the output are in its module docstring and the skill's command table.
-
-- A seed `new=NAME` is a symbol, field, type or file the change creates, tied to its row like any other. It is never searched (a name that does not exist yet can only collide) and never `NOTFOUND`: a file is placed where it will live; anything else sits beside its row's other seeds, owned by the one segment they land in, or listed under `SPINE` as `NEW {name} · rows {r…} · freeze as a compiling stub` when they land in two or more.
-- `DECIDE S{n} CHILD · {reason}` when the segment builds a `new=` seed or its seeds carry three or more distinct rows; `DECIDE S{n} KEEP · {reason}` otherwise, the reason `call-site swaps only` (no definition among its sites), `one function ({name})` (every site in one component) or `{k} row(s), no new symbol`. The foreman spawns every `CHILD` and keeps every `KEEP` ([the cut](../flights/flights-foreman.md#the-cut)).
-- The `VERDICT` line ends `· CHILD n`; `--json` carries `decide` (`cut`, `reason`) per segment and `child` in the result.
-
-### cutgate
-
-**Function:** `cmd_cutgate` — **Run by:** `flights-foreman`'s frontmatter, carried into its rendered twins: a PreToolUse hook on `Bash|Edit|Write|MultiEdit|NotebookEdit`, beside the `Bash` entry running `pfm internal orchestrator-wait`, running `python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate` ([hooks.md](../hooks/hooks.md))
-
-`cutgate` makes step 4 of the foreman's manual, the cut, a mechanism: a code edit, by an edit tool or by Bash, is denied until the agent ran `segment` itself.
-
-- Any other tool passes untouched and the hook prints nothing.
-- The transcript read is the agent's own, resolved as pfm's `call-cap` hook does (`callCapCount`): a payload naming an `agent_id` whose `transcript_path` is not `agent-{id}.jsonl` reads `agent-{id}.jsonl` in that session's `subagents/` directory. An `agent_id` outside `[A-Za-z0-9_-]+` never becomes a path.
-- The edit passes silently once that transcript holds a Bash call whose command runs `tracetree.py segment` and whose result has a non-`EMPTY` `VERDICT` line carrying `· stamp {hash}`; the saved `$HOME/.local/state/pfm/cutgate/segment-{hash}` record must hold that line verbatim. Echoed or altered verdict text is no cut. The transcript is streamed and the read stops at that proof. An `EMPTY` cut counts only once a later run printed a recorded verdict.
-- A target under `$HOME/.local/state/pfm/` (the flight directory: `run.md`, the doors file, briefs), `/tmp/` or `/private/tmp/`, its path resolved through symlinks first, passes silently.
-- A child whose parent already cut passes silently: the agent's first message, or a brief file it names under `$HOME/.local/state/pfm/`, holds `SEGMENT` followed by a space at the start of a line, or the line `DEPTH 3`. A child's brief is a file whose path is its spawn message, so the file is read as well.
-- Otherwise it denies with `permissionDecision: deny`, its reason naming step 4's `segment` call and that flight-directory writes stay open.
-- Bash (`cutgate_bash`) is denied before the cut, with the same reason plus what it found, in two ways:
-  - Parsed writes: the command is tokenized (quotes, heredoc bodies, `$(…)` kept apart) and split into simple commands; a redirect `>`, `>>`, `>|`, `&>`, `&>>` (a `>&N` duplication is none), `sed -i` and `perl -i` (their files), `tee`, `rm`, `touch`, `truncate`, `dd of=`, the destination of `cp`, `mv`, `install`, `ln`, `rsync`, `git apply` (not `--check` or `--stat`) and `patch` (not `--dry-run`) name a write. Each path resolves against the payload's `cwd` as the command's own `cd`s and `git -C`s move it, `$HOME` and `~` expanded; a write under the flight's state directory, `/tmp/`, `/private/tmp/` or `/dev/` passes. A path naming any other variable, or relative to a `cd` that does, is left to the backstop.
-  - Backstop for what parsing misses (`python3 - <<EOF`, `find -exec`): every git work tree the call runs in or names — its `cwd`, its `cd` and `git -C` targets, the nearest existing directory of each absolute path in its text, at most 16 — is read with `git status --porcelain`, submodules ignored. The first Bash call that sees a tree records its entries as that agent's baseline, so dirt present before the agent is not its write; an entry the baseline lacks denies the call, naming the paths. The kit's own call is exempt, so the foreman can still cut.
-  - The baselines and the cut, once seen, are cached per agent under `$HOME/.local/state/pfm/cutgate/` (week-old caches and verdict records pruned). Saves merge under a lock, retaining each tree's first baseline and any recorded cut across concurrent hooks; after the cut every Bash call costs one cache read and passes silently.
-  - A git call that fails other than on a directory outside any repository, and a cache it cannot save, allow the call with the unchecked context below, never as a clean tree.
-- A payload, agent id, transcript, VERDICT record, Bash command or git state it cannot read, and a cache it cannot save, allows the call with `additionalContext` `cut-gate: could not check the cut ({cause}); run step 4's segment before editing` and the cause on stderr, never a silent pass. A cache it cannot read is named on stderr and rebuilt empty, then the call is checked as on the agent's first look. It always exits 0.
 
 ## The check
 

@@ -3,6 +3,7 @@ mechanical rows (TOTALS, MODEL-WAIT, COSTLIEST) read from it."""
 import re
 
 from . import claude as claude_cost, prices
+from .claude import Shared  # noqa: F401  (a census builds one)
 from .fmt import NOT_PRICED, num
 
 ROW = re.compile(r"^  #\d+ \S+ after (\S+) · ctx \S+ · out \d+ · (\$[0-9.]+|n/a)")
@@ -53,12 +54,14 @@ class Gaps:
         return [book.line(), "data gaps: " + (" · ".join(loud) if loud else "none")]
 
 
-def timeline(path, p, kit_dir):
-    """(timeline lines, state): the lines `timeline.txt` holds, the state one word or the first line's reason."""
-    book = prices.load(kit_dir)
+def timeline(path, p, kit_dir, shared=None, book=None):
+    """(timeline lines, state): the lines `timeline.txt` holds, the state one word or the first line's reason.
+    `shared` is a claude_cost.Shared and `book` a prices.load(kit_dir) a census passes for all its transcripts."""
+    if book is None:
+        book = prices.load(kit_dir)
     try:
         if p.engine == "claude":
-            head, rows, scan = claude_cost.run(path, book)
+            head, rows, scan = claude_cost.run(path, book, shared)
             body = None if head is None else [head] + claude_cost.render(rows)
             extra = ()
         else:

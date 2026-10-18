@@ -69,21 +69,6 @@ func BookmarkLabelFor(capture string, configured []string) string {
 	return label
 }
 
-// ContainsMedal reports whether a captured line carries an account medal, the
-// marker that tells a 🔖 label line apart from ordinary transcript text.
-//
-// It is a heuristic over untrusted text, not a proof of provenance: any line
-// that happens to render a medal beside a 🔖 passes it. That is tolerable
-// only because the one systematic source of foreign 🔖 lines — this fleet's
-// own delivered footer — is now excluded above by its own marker. A pane's
-// identity ultimately has authoritative sources (its SID crumb, its socket,
-// its window name); screen text is not one of them. 🍀 is
-// the retired account-4 medal: the account is gone, but chats labelled while it
-// was live still render it, and without it here those chats are unresolvable.
-func ContainsMedal(value string) bool {
-	return ContainsMedalFor(value, nil)
-}
-
 // ContainsMedalFor recognizes configured account emoji plus the historical
 // medals so labels from retired rosters remain resolvable.
 func ContainsMedalFor(value string, configured []string) bool {

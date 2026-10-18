@@ -3,6 +3,7 @@
 Every transcript here is invented: a Claude jsonl, a Codex rollout and an OpenCode store the tests build in a
 temp directory, then read through the entry point (`python3 -I chatlog.py {verb}`) exactly as an agent does.
 Prices come from a fixture table seeded in the kit directory, so no test calls pfm."""
+import copy
 import json
 import os
 import shutil
@@ -12,11 +13,13 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 ENTRY = os.path.join(HERE, "chatlog.py")
 sys.path.insert(0, HERE)
 
+from chatlogkit.cost import claude as cost_claude, prices as cost_prices  # noqa: E402
 from chatlogkit.engines import opencode as oc_engine  # noqa: E402
 from chatlogkit.model import parse_stamp  # noqa: E402
 
@@ -129,6 +132,26 @@ def claude_records():
     return r
 
 
+SID_A = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+SID_B = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
+SID_C = "c3b2a190-8d7c-4b6a-9f5e-4d3c2b1a0f9e"
+
+
+def session_records(sid, tag):
+    """claude_records() as one session wrote them: its sessionId and message ids (msg_...) and request ids of its own."""
+    recs = copy.deepcopy(claude_records())
+    for r in recs:
+        r["sessionId"] = sid
+        if r["type"] == "assistant":
+            r["requestId"] = tag + r["requestId"]
+            r["message"]["id"] = "msg_" + tag + r["message"]["id"]
+    return recs
+
+
+def call_keys(recs):
+    return ["message:" + r["message"]["id"] for r in recs if r["type"] == "assistant"]
+
+
 class ClaudeKit(Fixture):
     def write_claude(self, records=None, name="s1.jsonl"):
         path = self.path("projects", "p", name)
@@ -217,6 +240,282 @@ class ClaudeKit(Fixture):
             tl = f.read().splitlines()
         self.assertIn("· 6 calls ·", tl[0])
         self.assertIn("1 calls copied from another transcript", tl[-1])
+
+    def test_shared_census_walks_and_reads_the_tree_once_with_identical_results(self):
+        """One Shared across a census: same owners and same timeline as a fresh read per transcript, the domain
+        walked once and each other transcript's bytes read once."""
+        recs = claude_records()
+        fork = copy.deepcopy(recs)
+        for r in fork:
+            r["sessionId"] = "fk1"
+            if r["type"] == "assistant":
+                r["forkedFrom"] = {"sessionId": "s1", "messageUuid": "u1"}
+        orig = self.write_claude(recs, name="s1.jsonl")
+        copy_ = self.write_claude(fork, name="s2.jsonl")
+        keys = ["message:" + r["message"]["id"] for r in recs if r["type"] == "assistant"]
+        book = cost_prices.load(self.kit)
+
+        def census(shared_for_all):
+            walks, opens, results = [], {}, []
+            real_walk = cost_claude._walk
+
+            def counting_walk(d, out, scan):
+                walks.append(d)
+                return real_walk(d, out, scan)
+
+            def counting_open(path, mode="r", *a, **kw):
+                if mode == "rb" and str(path).endswith(".jsonl"):
+                    opens.setdefault(self.current, []).append(path)
+                return open(path, mode, *a, **kw)
+
+            shared = cost_claude.Shared() if shared_for_all else None
+            with mock.patch.object(cost_claude, "_walk", counting_walk), \
+                    mock.patch.object(cost_claude, "open", counting_open, create=True):
+                for path in (orig, copy_, orig, copy_):
+                    self.current = path
+                    scan = cost_claude.Scan()
+                    owned = cost_claude.owners(path, keys, scan, shared)
+                    head, rows, run_scan = cost_claude.run(path, book, shared)
+                    results.append((owned, scan.read_errors, head, cost_claude.render(rows), run_scan.copied,
+                                    run_scan.read_errors))
+            others = {}
+            for me, paths in opens.items():
+                for p in paths:
+                    if p != me:
+                        others[p] = others.get(p, 0) + 1
+            return results, len(walks), others
+
+        fresh, fresh_walks, fresh_reads = census(False)
+        shared, shared_walks, shared_reads = census(True)
+        self.assertEqual(shared, fresh)
+        self.assertEqual(set(fresh[1][0].values()), {orig}, "the fixture must exercise an owner")
+        self.assertEqual(fresh_walks, 8)
+        self.assertEqual(shared_walks, 1, "a shared census walks the domain once")
+        self.assertEqual(shared_reads, {orig: 1, copy_: 1}, "each other transcript's bytes are read once")
+        self.assertEqual(fresh_reads, {orig: 4, copy_: 4})
+
+    def counted_reads(self, work):
+        """work() under a count of the bytes opens of .jsonl files: {asker path: {file path: opens}}, the asker
+        being self.current; an asker's own file is left out."""
+        opens = {}
+
+        def counting_open(path, mode="r", *a, **kw):
+            if mode == "rb" and str(path).endswith(".jsonl") and path != self.current:
+                per = opens.setdefault(self.current, {})
+                per[path] = per.get(path, 0) + 1
+            return open(path, mode, *a, **kw)
+
+        with mock.patch.object(cost_claude, "open", counting_open, create=True):
+            work()
+        return opens
+
+    def census_of(self, askers, shared):
+        """owners() of each (path, keys) in order, with the one Shared (None: a fresh read per ask)."""
+        out = []
+
+        def work():
+            for path, keys in askers:
+                self.current = path
+                scan = cost_claude.Scan()
+                out.append((cost_claude.owners(path, keys, scan, shared), scan.read_errors))
+
+        return out, self.counted_reads(work)
+
+    def test_shared_census_reads_each_other_file_once_across_different_sessions(self):
+        """Two transcripts of different sessions have different session ids; one Shared still reads every other
+        file of the domain once, whatever ids the next transcript brings."""
+        recs_a, recs_b = session_records(SID_A, "a"), session_records(SID_B, "b")
+        a = self.write_claude(recs_a, name=SID_A + ".jsonl")
+        b = self.write_claude(recs_b, name=SID_B + ".jsonl")
+        copy_a = self.write_claude(recs_a, name="copy-of-a.jsonl")
+        # a third session's file fails the ids gate for both; a file naming A only in its text fails B's ids
+        # gate and A's tokens gate
+        c = self.write_claude(session_records(SID_C, "c"), name=SID_C + ".jsonl")
+        mention = session_records(SID_C, "z") + [c_user(f"see /projects/p/{SID_A}.jsonl", 200)]
+        mentions = self.write_claude(mention, name="mentions-a.jsonl")
+        # a file of session B that holds none of B's calls: fails A's ids gate, passes B's, fails B's msg gate
+        sibling_b = self.write_claude(session_records(SID_B, "bz"), name="sibling-of-b.jsonl")
+        askers = [(a, call_keys(recs_a)), (b, call_keys(recs_b))]
+        fresh, fresh_reads = self.census_of(askers, None)
+        shared = cost_claude.Shared()
+        got, reads = self.census_of(askers, shared)
+        self.assertEqual(got, fresh)
+        self.assertEqual(set(got[0][0].values()), {min(a, copy_a)}, "the fixture must exercise an owner")
+        self.assertEqual(got[1][0], {}, "B's calls are held by no other transcript")
+        others = {a: {copy_a, b, c, mentions, sibling_b}, b: {a, copy_a, c, mentions, sibling_b}}
+        self.assertEqual({p: set(per) for p, per in fresh_reads.items()}, others)
+        every = {}
+        for per in reads.values():
+            for f, n in per.items():
+                every[f] = every.get(f, 0) + n
+        self.assertEqual(every, {copy_a: 1, b: 1, c: 1, mentions: 1, a: 1, sibling_b: 1}, "each other file is opened once")
+        self.assertEqual(shared.reads, 6)
+        self.assertLess(shared.index_bytes, shared.read_bytes, "the index is smaller than the bytes it answers for")
+
+    def test_a_file_skipped_for_one_session_and_admitted_for_the_next_is_read_twice_at_most(self):
+        """The index is built on the first read; the tokens and the holders are read on the first ask that passes
+        the ids gate, which may come after an ask that failed it: a second read, never a third."""
+        recs_a, recs_b = session_records(SID_A, "a"), session_records(SID_B, "b")
+        a = self.write_claude(recs_a, name=SID_A + ".jsonl")
+        b = self.write_claude(recs_b, name=SID_B + ".jsonl")
+        copy_b = self.write_claude(recs_b, name="copy-of-b.jsonl")
+        askers = [(a, call_keys(recs_a)), (b, call_keys(recs_b)), (a, call_keys(recs_a)), (b, call_keys(recs_b))]
+        fresh, _ = self.census_of(askers, None)
+        got, reads = self.census_of(askers, cost_claude.Shared())
+        self.assertEqual(got, fresh)
+        self.assertEqual(set(got[1][0].values()), {min(b, copy_b)}, "the fixture must exercise an owner")
+        total = sum(per.get(copy_b, 0) for per in reads.values())
+        self.assertEqual(total, 2)
+
+    def test_the_session_id_gate_is_the_substring_gate(self):
+        """Whatever surrounds a session id in another transcript's bytes, the Shared gate admits the file exactly
+        when `any(id in bytes)` does: a path, a glued run, the file start, case, a split, a short id."""
+        u, other = SID_A.encode(), SID_B.encode()
+        needle = b'"needle-1"\n'
+        cases = [
+            ("a path in text", b'{"text":"see /p/' + u + b'.jsonl"}\n', [u], True),
+            ("glued hex before", b'{"text":"cafebabe' + u + b'"}\n', [u], True),
+            ("glued run after", b'{"text":"' + u + b'deadbeef-0"}\n', [u], True),
+            ("two ids glued", b'{"text":"' + other + u + b'"}\n', [u], True),
+            ("the file start", u + b"\n", [u], True),
+            ("upper case in both", u.upper() + b"\n", [u.upper()], True),
+            ("upper case data, lower id", u.upper() + b"\n", [u], False),
+            ("lower case data, upper id", u + b"\n", [u.upper()], False),
+            ("one char off", u[:-1] + b"0\n", [u], False),
+            ("split by a newline", u[:20] + b"\n" + u[20:] + b"\n", [u], False),
+            ("an absent id and a present one", u + b"\n", [other, u], True),
+            ("two absent ids", b"nothing here\n", [other, u], False),
+            ("a short id inside a word", b'{"text":"xs1y"}\n', [b"s1"], True),
+            ("a short id absent", b'{"text":"xs2y"}\n', [b"s1"], False),
+            ("a short id and an absent long one", b'{"text":"s1"}\n', [other, b"s1"], True),
+            ("a long id present and a short one absent", u + b"\n", [b"zz", u], True),
+            ("a truncated id", b'{"text":"' + u[:-1] + b'"}\n', [u[:-1]], True),
+        ]
+        for name, body, ids, want in cases:
+            with self.subTest(name):
+                path = self.path("projects", "p", "case.jsonl")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(body + needle)
+                self.assertEqual(any(i in body + needle for i in ids), want, "the case itself")
+                shared = cost_claude.Shared()
+                got = shared.calls(path, set(ids), False, cost_claude.Needles({b"needle-1"}), cost_claude.Scan())
+                self.assertEqual(got is not None, want)
+                self.assertEqual(shared.reads, 1, "one read answers the gate, the tokens and the holders")
+
+    def test_the_msg_gate_is_the_token_gate(self):
+        """Message-id needles are told from the index, and the index never hides a file the token gate admits:
+        whatever surrounds a msg_ string, the file is admitted exactly when TOKEN reads it as a quoted token."""
+        needle = b"msg_abc"
+        cases = [
+            ("a quoted id", b'{"id":"msg_abc","type":"x"}\n', True),
+            ("two quoted ids", b'"msg_abc""msg_abc"\n', True),
+            ("after a stray quote", b'""msg_abc"\n', True),
+            ("a name in text", b'{"text":"see msg_abc here"}\n', False),
+            ("an escaped quote", b'{"text":"{\\"id\\":\\"msg_abc\\"}"}\n', False),
+            ("a longer id", b'{"id":"msg_abcd"}\n', False),
+            ("a glued prefix", b'{"id":"xmsg_abc"}\n', False),
+            ("no closing quote", b'{"id":"msg_abc\n', False),
+            ("hidden by the token before it", b'"x"msg_abc"\n', False),
+        ]
+        for name, body, want in cases:
+            with self.subTest(name):
+                path = self.path("projects", "p", "msg.jsonl")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(body)
+                self.assertEqual(needle in cost_claude.TOKEN.findall(body), want, "the case itself")
+                shared = cost_claude.Shared()
+                needles = cost_claude.Needles({needle})
+                self.assertTrue(needles.by_msg)
+                got = shared.calls(path, set(), False, needles, cost_claude.Scan())
+                self.assertEqual(got is not None, want)
+                self.assertEqual(shared.reads, 1)
+                self.assertEqual(bool(shared.tokens), needle in cost_claude.MSG_RUNS.findall(body),
+                                 "the token set is built only when the index cannot tell")
+
+    def test_a_short_session_id_reads_the_file_again_only_for_an_id_it_has_not_answered(self):
+        path = self.path("projects", "p", "short.jsonl")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b'{"text":"s1 and s2"}\n"needle-1"\n')
+        shared = cost_claude.Shared()
+        for ids, want, reads in (({b"s1"}, True, 1), ({b"s1"}, True, 1), ({b"s3"}, False, 2), ({b"s3"}, False, 2),
+                                 ({b"s3", b"s2"}, True, 3), ({b"s3", b"s4"}, False, 4)):
+            got = shared.calls(path, ids, False, cost_claude.Needles({b"needle-1"}), cost_claude.Scan())
+            self.assertEqual((got is not None, shared.reads), (want, reads), ids)
+
+    def test_a_session_id_only_inside_a_longer_string_still_makes_the_file_a_holder(self):
+        """End to end: another transcript that holds the calls and names the session only in a path of its text
+        is a holder of them, as the substring gate always made it; the same file one character off is not."""
+        recs = session_records(SID_A, "a")
+        a = self.write_claude(recs, name=SID_A + ".jsonl")
+        mention = copy.deepcopy(recs)
+        for r in mention:
+            r["sessionId"] = "other-session"
+        near = copy.deepcopy(mention)
+        mention.append(c_user(f"see /projects/p/{SID_A}.jsonl", 200))
+        near.append(c_user(f"see /projects/p/{SID_A[:-1]}0.jsonl", 200))
+        held = self.write_claude(mention, name="holds-a.jsonl")
+        not_held = self.write_claude(near, name="near-a.jsonl")
+        got, _ = self.census_of([(a, call_keys(recs))], cost_claude.Shared())
+        self.assertEqual(got[0][0], {k: min(a, held) for k in set(call_keys(recs))})
+        self.assertNotIn(not_held, got[0][0].values())
+
+    def test_a_file_that_changes_mid_census_loses_its_facts(self):
+        """A Shared fact lives only while its file is unchanged: a file rewritten with a copy of A's calls after its
+        first read is read again, and holds them as a fresh read finds."""
+        recs_a, recs_b = session_records(SID_A, "a"), session_records(SID_B, "b")
+        a = self.write_claude(recs_a, name=SID_A + ".jsonl")
+        b = self.write_claude(recs_b, name=SID_B + ".jsonl")
+        live = self.write_claude(session_records(SID_C, "c"), name=SID_C + ".jsonl")
+        shared = cost_claude.Shared(fresh_s=0)
+        first, _ = self.census_of([(b, call_keys(recs_b)), (a, call_keys(recs_a))], shared)
+        self.assertEqual(first[1][0], {}, "no other file holds A's calls yet")
+        self.write_claude(session_records(SID_C, "c") + recs_a, name=SID_C + ".jsonl")
+        got, reads = self.census_of([(a, call_keys(recs_a))], shared)
+        fresh, _ = self.census_of([(a, call_keys(recs_a))], None)
+        self.assertEqual(got, fresh)
+        self.assertEqual(got[0][0], {k: min(a, live) for k in set(call_keys(recs_a))})
+        self.assertEqual(reads[a].get(live), 1, "the changed file is read again")
+
+    def test_a_stat_is_reused_within_fresh_s_and_taken_again_after(self):
+        path = self.write_claude(session_records(SID_A, "a"), name=SID_A + ".jsonl")
+        shared, clock = cost_claude.Shared(fresh_s=5), [100.0]
+        with mock.patch.object(cost_claude.time, "monotonic", lambda: clock[0]), \
+                mock.patch.object(cost_claude.os, "stat", wraps=os.stat) as stat:
+            shared.stat(path)
+            clock[0] += 4.9
+            shared.stat(path)
+            self.assertEqual(stat.call_count, 1, "a stat younger than fresh_s answers")
+            clock[0] += 0.2
+            shared.stat(path)
+            self.assertEqual(stat.call_count, 2, "an older one is taken again")
+
+    def test_one_session_census_builds_the_uuid_index_only_when_a_second_id_asks(self):
+        """Without eager_index the first read answers the ids by substring and leaves no windows; a new id on an
+        unchanged file reads it again and leaves them, so a third id is answered with no read; every answer is
+        a fresh read's."""
+        recs_a, recs_b = session_records(SID_A, "a"), session_records(SID_B, "b")
+        a = self.write_claude(recs_a, name=SID_A + ".jsonl")
+        b = self.write_claude(recs_b, name=SID_B + ".jsonl")
+        copy_a = self.write_claude(recs_a, name="copy-of-a.jsonl")
+        c = self.write_claude(session_records(SID_C, "c"), name=SID_C + ".jsonl")
+        askers = [(a, call_keys(recs_a)), (a, call_keys(recs_a))]
+        shared = cost_claude.Shared(eager_index=False)
+        got, reads = self.census_of(askers, shared)
+        fresh, _ = self.census_of(askers, None)
+        self.assertEqual(got, fresh)
+        self.assertEqual(set(got[0][0].values()), {min(a, copy_a)}, "the fixture must exercise an owner")
+        self.assertEqual((shared.uuids, reads[a].get(c)), ({}, 1), "one id: no windows, one read")
+        got, reads = self.census_of([(b, call_keys(recs_b))], shared)
+        self.assertEqual(got, self.census_of([(b, call_keys(recs_b))], None)[0])
+        self.assertEqual(reads[b].get(c), 1, "a second id reads the file again")
+        self.assertIn(c, shared.uuids, "and leaves its windows")
+        before = shared.reads
+        self.assertFalse(shared.calls(c, {SID_A.upper().encode()}, False, cost_claude.Needles({b"x"}),
+                                      cost_claude.Scan()))
+        self.assertEqual(shared.reads, before, "a third id is told from the windows")
 
     def test_claude_config_dir_adds_to_pfm_roots(self):
         """With no PFM_CLAUDE_ROOTS the kit searches pfm's ~/.claude/projects, and CLAUDE_CONFIG_DIR's projects too."""

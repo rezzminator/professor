@@ -35,14 +35,14 @@ Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — incl
 
 ## `pipeline` — Walk the flight chain end-to-end
 
-Files: `~/.claude/commands/flights/*.md` (machine-global: init, spec, orchestrate-cross-harness, audit), all agents they reference
+Files: `~/.claude/agents/flights-*.md` and `~/.claude/commands/flights/doctor.md` (machine-global), the fleet prompt § Orchestration, all agents they reference
 
 - **Reference resolution:** every "Read and follow" path → target file exists
 - **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, or `~/.claude/agents/`
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
-- **Verdict tokens ↔ their writers:** every token a command cites (`CLAIMED`, `DONE`, `PARTIAL`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `COMA`) is one `flights-foreman`, `flights-mechanical-executor` or `/flights:orchestrate-cross-harness` writes
+- **Return tokens ↔ their writers:** every token a `flights-*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** spec → `flights-foreman` (→ `flights-speccer` on novel, large work) → `flights-lander` → gitter; cross-harness substitutes child seats — no step references an agent from a later phase
+- **Flow integrity:** main chat → a `flights-foreman` tier → `flights-worker` → main chat → a `flights-lander` tier → gitter; no step references an agent from a later phase
 
 ## `scripts` — Walk each script
 

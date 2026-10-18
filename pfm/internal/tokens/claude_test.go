@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 func TestBashCategoryNamesRunsNotMentions(t *testing.T) {
@@ -125,23 +123,19 @@ func TestCollectCountsMalformedUndatedAndSyntheticLines(t *testing.T) {
 	}
 }
 
-// TestCollectCountsTheRequestsTheCallCapHookCounts: collect keeps one call per
-// request the call-cap hook counts with transcript.RequestCount in the same
-// agent transcript; the flight report's later drops (undated, copied,
-// advisor-only, before the window) only lower its count below the hook's.
-func TestCollectCountsTheRequestsTheCallCapHookCounts(t *testing.T) {
-	file := filepath.Join("..", "transcript", "testdata", "compacted-agent.jsonl")
-	hook, err := transcript.RequestCount(file)
-	if err != nil {
-		t.Fatalf("RequestCount: %v", err)
-	}
+// TestCollectCountsOneCallPerRequestAcrossACompaction: the fixture is one
+// agent transcript across a compaction — msg_A split over two lines, msg_B, a
+// <synthetic> line, an unbilled line, the compact_boundary and its summary,
+// msg_C, req_D carrying only a request id, a malformed line and an undated
+// tail. collect keeps four calls: A, B, C, D.
+func TestCollectCountsOneCallPerRequestAcrossACompaction(t *testing.T) {
 	a, _, _ := testAuditor(t)
-	c, err := a.collect(file, nil)
+	c, err := a.collect(fixture(t, "compacted-agent.jsonl"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.order != hook || len(c.usage) != hook {
-		t.Fatalf("collect counts %d calls (%d keys), RequestCount %d; want one count", c.order, len(c.usage), hook)
+	if c.order != 4 || len(c.usage) != 4 {
+		t.Fatalf("collect counts %d calls (%d keys); want 4 (msg_A, msg_B, msg_C, req_D)", c.order, len(c.usage))
 	}
 }
 

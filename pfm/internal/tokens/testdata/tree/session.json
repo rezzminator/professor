@@ -1,0 +1,142 @@
+{
+  "excluded": "landed-rules/1",
+  "tree": {
+    "target": "5e55a0a1-7ee0-4000-8000-00000000c0de",
+    "root": "session",
+    "session": "5e55a0a1-7ee0-4000-8000-00000000c0de",
+    "writeScope": "/work/repo",
+    "agents": 5,
+    "notRead": 0,
+    "inputTokens": 162100,
+    "uncachedInputTokens": 5600,
+    "cacheReadTokens": 142000,
+    "cacheWriteTokens": 14500,
+    "usd": 0.097875,
+    "unpricedAgents": 0,
+    "writtenBytes": 39,
+    "readBytes": 205,
+    "silentShare": 0.8593460826650215,
+    "worktree": null,
+    "base": null,
+    "landedLines": null,
+    "landedPerMillionInput": null,
+    "landedExcluded": null,
+    "landedNotMeasured": "NOT MEASURED — pass --worktree DIR --base SHA"
+  },
+  "types": [
+    {
+      "type": "flights-foreman",
+      "agents": 1,
+      "inputTokens": 74100,
+      "writtenBytes": 0,
+      "readBytes": 48,
+      "writtenReadRatio": 0
+    },
+    {
+      "type": "main",
+      "agents": 1,
+      "inputTokens": 48500,
+      "writtenBytes": 0,
+      "readBytes": 29,
+      "writtenReadRatio": 0
+    },
+    {
+      "type": "flights-worker",
+      "agents": 2,
+      "inputTokens": 32900,
+      "writtenBytes": 39,
+      "readBytes": 96,
+      "writtenReadRatio": 0.40625
+    },
+    {
+      "type": "tracer",
+      "agents": 1,
+      "inputTokens": 6600,
+      "writtenBytes": 0,
+      "readBytes": 32,
+      "writtenReadRatio": 0
+    }
+  ],
+  "agents": [
+    {
+      "id": "a0f0000000000001",
+      "type": "flights-foreman",
+      "parent": "5e55a0a1-7ee0-4000-8000-00000000c0de",
+      "depth": 1,
+      "model": "claude-opus-5-5",
+      "inputTokens": 74100,
+      "uncachedInputTokens": 2300,
+      "cacheReadTokens": 66000,
+      "cacheWriteTokens": 5800,
+      "usd": 0.0546,
+      "writtenBytes": 0,
+      "readBytes": 48,
+      "writtenReadRatio": 0,
+      "unreadable": null
+    },
+    {
+      "id": "5e55a0a1-7ee0-4000-8000-00000000c0de",
+      "type": "main",
+      "parent": null,
+      "depth": 0,
+      "model": "claude-sonnet-5",
+      "inputTokens": 48500,
+      "uncachedInputTokens": 1500,
+      "cacheReadTokens": 43000,
+      "cacheWriteTokens": 4000,
+      "usd": 0.0225,
+      "writtenBytes": 0,
+      "readBytes": 29,
+      "writtenReadRatio": 0,
+      "unreadable": null
+    },
+    {
+      "id": "a0f0000000000002",
+      "type": "flights-worker",
+      "parent": "a0f0000000000001",
+      "depth": 2,
+      "model": "claude-sonnet-5",
+      "inputTokens": 22800,
+      "uncachedInputTokens": 500,
+      "cacheReadTokens": 20000,
+      "cacheWriteTokens": 2300,
+      "usd": 0.011250000000000001,
+      "writtenBytes": 39,
+      "readBytes": 71,
+      "writtenReadRatio": 0.5492957746478874,
+      "unreadable": null
+    },
+    {
+      "id": "a0f0000000000003",
+      "type": "flights-worker",
+      "parent": "a0f0000000000001",
+      "depth": 2,
+      "model": "claude-sonnet-5",
+      "inputTokens": 10100,
+      "uncachedInputTokens": 600,
+      "cacheReadTokens": 8000,
+      "cacheWriteTokens": 1500,
+      "usd": 0.0068,
+      "writtenBytes": 0,
+      "readBytes": 25,
+      "writtenReadRatio": 0,
+      "unreadable": null
+    },
+    {
+      "id": "a0f0000000000004",
+      "type": "tracer",
+      "parent": "a0f0000000000001",
+      "depth": 2,
+      "model": "claude-haiku-4-5",
+      "inputTokens": 6600,
+      "uncachedInputTokens": 700,
+      "cacheReadTokens": 5000,
+      "cacheWriteTokens": 900,
+      "usd": 0.002725,
+      "writtenBytes": 0,
+      "readBytes": 32,
+      "writtenReadRatio": 0,
+      "unreadable": null
+    }
+  ]
+}

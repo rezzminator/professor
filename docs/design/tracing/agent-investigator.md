@@ -29,7 +29,7 @@
 | Line | Holds |
 | --- | --- |
 | `Mission:` | the question |
-| `Targets:` | optional: names, session or agent ids, paths, a flight directory, a project, a time window |
+| `Targets:` | optional: names, session or agent ids, paths, a project, a time window |
 | `Agent:` | optional: an agent type to audit, which turns on AUDIT |
 | `Prompt:` | optional: the audited prompt file, overriding the lookup |
 | `Caller:` | optional: the sender's session id; its own transcript is never a target |
@@ -38,7 +38,7 @@
 
 `LOCATE -> READ (one transcript-reader per target, all in one message) -> chatlog.py verify -> AUDIT (when Agent: is set) -> LIVE STATE (only when asked about now) -> JUDGE -> final message`
 
-- LOCATE resolves each target through `pfm transcript locate`, `pfm transcript agents` or `chatlog.py runs` (the kit resolves the same targets natively); an `AMBIGUOUS` name lists every candidate and the ones left out are named.
+- LOCATE resolves each target through `pfm transcript locate`, `pfm transcript agents` or `chatlog.py runs` (the kit resolves the same targets natively), and takes a count, cost or spawn tree across many runs from `chatlog.py census`; an `AMBIGUOUS` name lists every candidate and the ones left out are named.
 - READ hands each reader a card: `Target:`, `Dir:` (`{run dir}/{id}`), optional `Lines:` and numbered `Orders:` that name lines, never conclusions. A reader returning `SPLIT` gets one reader per range in round two.
 - `verify` checks every reader row against its source line in one call and prints the rows that held; a `BAD` row is dropped, a `FAILED` report goes in `NOT READ`.
 - AUDIT walks the run against the prompt in force (the run's own prompt snapshot when it carries one), classes each finding `friction`, `repetition`, `hang`, `mistake` or `waste` with its cost and cause, and writes the report once. It identifies, never prescribes.
@@ -52,7 +52,7 @@ The reader runs `prep`, reads every window in order, and adds only the rows that
 
 `chatlog.py` (stdlib Python, run `python3 -I`) owns every mechanical step: the digest with noise collapsed, the timeline and its costs, compactions, spawns, errors, denials, waits, writes, repeats, reading windows, the split of a transcript too large for one reader, row checking, and the state on disk of every file a run wrote. It is a package (`chatlog.py` entry, `chatlogkit/` modules per concern) that reads Claude, Codex and OpenCode stores natively into one event model, so every mechanical label is computed the same way on every engine and an engine without a concept says so in the digest header; costs are priced per call from each record's usage against `pfm model-cost --json --all`, the one price table. Its verbs, modules and per-engine label mapping are documented in `templates/global/skills/chatlog/SKILL.md` § The reader kit. A `--dir` already holding another target's digest gets a fresh subdirectory, so two readers handed one `Dir:` never overwrite each other's rows.
 
-The investigator owns the kit. Reading raw transcript data — any shell tool or script over a `.jsonl`, an `opencode.db` or a `tool-results/` file, or `pfm transcript show --results full` — is forbidden to both agents, with one exception: the investigator diagnosing a kit fault, which it then fixes at the kit's source and re-runs before answering, naming the fix under `KIT FIXED` for its caller to commit. The reader never works around a fault; it names it as `KIT WRONG` on its return line. The rule exists because an audit of one heavy investigation chat found about 177 hand-written census calls over raw JSONL, roughly $34, where the kit lacked a verb: a missing count becomes a kit verb, never a hand script.
+The investigator owns the kit. Reading raw transcript data — any shell tool or script over a `.jsonl`, an `opencode.db` or a `tool-results/` file, or `pfm transcript show --results full` — is forbidden to both agents, with one exception: the investigator diagnosing a kit fault, which it then fixes at the kit's source and re-runs before answering, naming the fix under `KIT FIXED` for its caller to commit. The reader never works around a fault; it names it as `KIT WRONG` on its return line. The rule exists because an audit of one heavy investigation chat found about 177 hand-written census calls over raw JSONL, roughly $34, where the kit lacked a verb: a missing count becomes a kit verb, never a hand script. `chatlog.py census` is the verb that answers that audit: one row per transcript across an agent type's runs, a session and its sub-agents, or named paths, with a `TOTAL` row, a `FAILED` line per transcript it could not read, and on `--tree` the spawn tree with calls and USD rolled up per branch.
 
 ## Why its spawning is capped
 
@@ -67,5 +67,5 @@ Run on real transcripts on this host: a `tracer` audit, a 56 MB main chat (diges
 | Surface | File |
 | --- | --- |
 | The agents | `templates/global/agents/agent-investigator.md`, `templates/global/agents/transcript-reader.md` |
-| The kit | `templates/global/skills/chatlog/chatlog.py`, `templates/global/skills/chatlog/chatlogkit/`, `templates/global/skills/chatlog/chatlog_test.py`, `templates/global/skills/chatlog/SKILL.md` |
+| The kit | `templates/global/skills/chatlog/chatlog.py`, `templates/global/skills/chatlog/chatlogkit/`, `templates/global/skills/chatlog/chatlog_test.py`, `templates/global/skills/chatlog/census_test.py`, `templates/global/skills/chatlog/SKILL.md` |
 | The report timestamp metavariable | `docs/PLACEHOLDERS.md` (`{HHMMSS}`) |

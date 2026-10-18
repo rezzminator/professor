@@ -105,7 +105,7 @@ $HOME/.local/state/pfm/releases/{project}/v{NEW}/
   published.md      what GitHub serves, checked                                 written by releaser (VERIFY)
 ```
 
-- `{project}` is the repo directory's basename with any leading dot stripped, as for flights. The directory is kept across reboots and outlives the release branch: `prepare` resumes from it, and an audit reads it after the tag.
+- `{project}` is the repo directory's basename with any leading dot stripped. The directory is kept across reboots and outlives the release branch: `prepare` resumes from it, and an audit reads it after the tag.
 - One writer per file; nobody edits another writer's file. The single exception is the reviewer contract's own: the main chat marks a finding `waived` in its report, with the reason, which is the orchestrator's mark by that contract.
 - The note and the index line live in the candidate worktree, because they ship; everything else lives here, because it does not.
 

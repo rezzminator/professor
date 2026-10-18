@@ -24,12 +24,6 @@ import (
 var (
 	headerStyle = lipgloss.NewStyle().
 			Bold(true)
-	groupStyleA = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#5eead4"))
-	groupStyleB = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#7dd3fc"))
 	borderStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#64748b"))
 	selectedStyle = lipgloss.NewStyle().
@@ -40,8 +34,6 @@ var (
 			Foreground(lipgloss.Color("#94a3b8"))
 	codexStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#e879f9"))
-	openCodeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#60a5fa"))
 	agentStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#fb923c"))
 	statsHeaderStyle = lipgloss.NewStyle().
@@ -83,8 +75,6 @@ func configureStyles(palette theme.Palette) {
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Header)).
 		Background(lipgloss.Color(palette.HeaderBg))
-	groupStyleA = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupA))
-	groupStyleB = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupB))
 	borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Border))
 	selectedStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -92,7 +82,6 @@ func configureStyles(palette theme.Palette) {
 		Background(lipgloss.Color(palette.Selected))
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
-	openCodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.OpenCode]))
 	agentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.AgentRow))
 	statsHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.StatsHeader))
 	statsClaudeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.StatsEngine[pfmengine.Claude]))
@@ -732,14 +721,6 @@ func codexAccountMedal(account int) string {
 		return "·"
 	}
 	return pfmconfig.DefaultEmoji(account)
-}
-
-func fixedDisplayColumn(value string, width int) string {
-	value = ansi.Truncate(value, maxInt(0, width), "…")
-	if padding := width - lipgloss.Width(value); padding > 0 {
-		value += strings.Repeat(" ", padding)
-	}
-	return value
 }
 
 func clipRunesEllipsis(value string, limit int) string {

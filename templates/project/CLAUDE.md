@@ -16,7 +16,6 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 - child CLAUDE.md: a roster entry's own conventions and code placement, beside its agents and skills · `{project}/CLAUDE.md`, `{project}/.claude/`
 - fleet prompt: the main chat's system layer — voice, § Model Selection, § Orchestration — composed at build time by `make -C pfm prompts` into the clone's tracked `composed/`; `pfm install` stages none of it · `{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`
 - permanent docs: the reference docs the main loop or the `documenter` agent writes · `docs/_index.md` and the clusters it links, each roster entry's `{project}/docs/`
-- flight directory: a flight's task files and audit trail, kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
 
 <!-- OPTIONAL docs map: add entries like these if the project keeps clustered reference docs, or delete the block.
 - docs hub: links every architecture, API, system-map, feature and child-project doc; a cluster is read `_index.md` first, then grepped for the exact code/DB symbol — doc identifiers match code verbatim · `docs/_index.md`
@@ -61,14 +60,12 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 ## Your first move as a sub-agent
 
 - Before your first tool call, count the tasks in your brief: a task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
-- A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
-- A brief carrying the user's ruling to skip the ceremony (no `flights-foreman`, no spawn): do it yourself, start to finish, whatever its size.
-- A sub-agent without a role of its own stops at 80 calls; at the cap, return what landed, what is left and the next step.
+- A brief carrying the user's ruling to skip the ceremony (no foreman, no spawn): do it yourself, start to finish, whatever its size.
 - Otherwise take the lowest rung that fits; a higher rung needs its named reason.
   1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish.
-  2. Anything larger, or work crossing build units: your first tool call spawns `flights-foreman` (Agent tool, `subagent_type: flights-foreman`), handing it the work, everything you already hold, acceptance and the testing manual paths; it reads, designs, builds, splits by ownership or its own cut and lands through one lander, and returns once.
+  2. Anything larger, or work crossing build units: your first tool call spawns a foreman, its tier by difficulty and ambiguity, never size — `flights-foreman-mini` a clear path with a pattern, `flights-foreman` design choices, ambiguity or several modules, `flights-foreman-pro` the toughest — handing it the work, everything you already hold, acceptance, where to work and the testing manual paths; pass its return up, landing stays with the main chat.
 - ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Take the four failing test lanes to green": one `flights-foreman`, whose own cut decides any split. ✗ A planner writing task files for executors that read the same code again.
+- ✓ "Take the four failing test lanes to green": one foreman, whose own split decides any division. ✗ A planner writing briefs for workers that read the same code again.
 - Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — not a no-op command, a repeated log peek or a `sleep` chain.
 
 ## Dispatch

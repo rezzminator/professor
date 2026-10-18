@@ -989,31 +989,31 @@
     <div class="pklegend"><span><b>CLAUDE.md</b> → AGENTS.md the same way</span><span><b>.claude/commands/*</b> → .codex/skills · .opencode/command</span><span><b>never hand-edited</b> — every mirror file opens with "do not edit"</span></div>
   </section>
   <section class="wavex" id="wavex" data-slide="The flight">
-    <div class="chainhead"><h2>A flight: one feature, spec to merge</h2></div>
+    <div class="chainhead"><h2>A flight: one feature, request to merge</h2></div>
     <div class="pwh">
       <div class="prob"><span class="k">Problem</span><p>One big chat building a feature drifts from what you asked — by the end it has built something else.</p></div>
-      <div class="what"><span class="k"><b>Professor</b></span><p>A flight: the agent that reads the code builds it, one per project, against an interface frozen first.</p></div>
+      <div class="what"><span class="k"><b>Professor</b></span><p>A flight: the agent that reads the code builds it — one foreman, its tier picked by difficulty, never size.</p></div>
       <div class="why"><span class="k">Why</span><p>Zero gap at every step — so what comes out the other end is <b>exactly</b> what you refined and asked for.</p></div>
-      <div class="how"><span class="k">How</span><p><code>/flights:spec</code> → flights-foreman freezes the interface and builds → one child foreman per project → <code>/flights:doctor</code> walks the landed flight against the requirements.</p></div>
+      <div class="how"><span class="k">How</span><p>main chat → a <code>flights-foreman</code> tier reads and builds → <code>flights-worker</code> pieces → main chat → a <code>flights-lander</code> tier reviews, fixes and gates → <code>gitter</code> commits; <code>/flights:doctor</code> meters it.</p></div>
     </div>
-    <div class="cue"><code>/flights:spec</code> → flights-foreman builds → child foremen in parallel → <code>/flights:doctor</code> conformance walk</div>
+    <div class="cue">main chat → foreman tier → workers → main chat → lander tier → <code>gitter</code> · <code>/flights:doctor</code> meters it</div>
     <div class="wtrack"><div class="wline"></div><div class="wpkt" id="wPkt"></div></div>
     <div class="wvgrid" id="wgrid">
-      <div class="wst" data-i="0"><div class="wsh"><span class="wsn">1</span><b>Specify</b><code>/flights:spec</code></div></div>
-      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Read</b><code>flights-foreman · doors · data shapes</code></div></div>
-      <div class="wst" data-i="2"><div class="wsh"><span class="wsn">3</span><b>Freeze</b><code>the interface · inside-out</code></div></div>
-      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Split</b><code>one child foreman per project</code></div></div>
-      <div class="wst" data-i="4"><div class="wsh"><span class="wsn">5</span><b>Build</b><code>the cycle, per unit ↓</code></div></div>
-      <div class="wst" data-i="5"><div class="wsh"><span class="wsn">6</span><b>Doctor</b><code>/flights:doctor</code></div></div>
+      <div class="wst" data-i="0"><div class="wsh"><span class="wsn">1</span><b>Ask</b><code>main chat · intent · acceptance</code></div></div>
+      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Tier</b><code>a foreman: mini · standard · pro</code></div></div>
+      <div class="wst" data-i="2"><div class="wsh"><span class="wsn">3</span><b>Read</b><code>the foreman reads the code</code></div></div>
+      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Brief</b><code>defined pieces → workers</code></div></div>
+      <div class="wst" data-i="4"><div class="wsh"><span class="wsn">5</span><b>Build</b><code>the cycle, per piece ↓</code></div></div>
+      <div class="wst" data-i="5"><div class="wsh"><span class="wsn">6</span><b>Land</b><code>lander tier → gitter</code></div></div>
     </div>
     <div class="wlife vz" id="wlife">
       <button class="btn rp" id="waveReplay" type="button">Replay</button>
-      <div class="wq"><span class="lbl">tasks from the flight</span><div id="wQueue"></div></div>
+      <div class="wq"><span class="lbl">pieces from the foreman</span><div id="wQueue"></div></div>
       <div class="wring">
         <svg id="wRing" viewBox="0 0 760 300" aria-hidden="true"></svg>
         <div class="wcenter"><b id="wcTask">—</b><span id="wcStage">waiting for the flight</span></div>
       </div>
-      <div class="wq"><span class="lbl">landed on develop</span><div id="wLanded"></div><div class="wconf" id="wConf">◇ conformance walk</div></div>
+      <div class="wq"><span class="lbl">done in the worktree</span><div id="wLanded"></div><div class="wconf" id="wConf">◇ /flights:doctor</div></div>
     </div>
   </section>
 
@@ -1839,15 +1839,15 @@
     var cT = document.getElementById('wcTask'), cS = document.getElementById('wcStage');
     var NS = 'http://www.w3.org/2000/svg';
     var TASKS = [['T1', 'contracts'], ['T2', 'migration_v7'], ['T3', 'CLI surface'], ['T4', 'docs § Updating'], ['T5', 'golden renders']];
-    var SHAS = ['a66c690d', '3f1e0b27', 'c904d1aa', '7be2f5c0', 'e12a9d4b'];
+    var SHAS = ['DONE', 'DONE', 'DONE', 'DONE', 'DONE'];
     // six stations of the cycle, clockwise from the top-left
     var ST = [
-      ['hand-off', 'goal · boundary · anchors'],
-      ['build', 'one task, its files only'],
+      ['hand-off', 'files · change · acceptance'],
+      ['build', 'one piece, its files only'],
       ['verify', 'build · typecheck'],
-      ['report', 'back to the orchestrator'],
-      ['test', 'watched failing → green'],
-      ['commit', 'one commit → develop']
+      ['test', 'affected tests → green'],
+      ['report', 'back to the foreman'],
+      ['next', 'the foreman briefs the next piece']
     ];
     var CX = 380, CY = 150, RX = 230, RY = 105, ang0 = -Math.PI * 0.72;
     var path = document.createElementNS(NS, 'path'); path.setAttribute('class', 'path');
@@ -1875,7 +1875,7 @@
     function reset() {
       sts.forEach(function (st) { st.classList.remove('on', 'done'); }); pkt.style.left = '0%';
       Q.innerHTML = ''; L.innerHTML = ''; TASKS.forEach(function (t) { Q.appendChild(chip(t)); });
-      light(-1); tok.classList.remove('ok'); place(lenAt(0)); conf.classList.remove('on'); conf.textContent = '◇ conformance walk';
+      light(-1); tok.classList.remove('ok'); place(lenAt(0)); conf.classList.remove('on'); conf.textContent = '◇ /flights:doctor';
       cT.textContent = '—'; cS.textContent = 'waiting for the flight';
     }
     reset();
@@ -1907,13 +1907,13 @@
         }
         tok.classList.add('ok');
         var landed = chip(TASKS[t], 'land'); landed.innerHTML += '<i>' + SHAS[t] + '</i>'; L.appendChild(landed);
-        cS.textContent = 'landed · ' + (t + 1) + ' of ' + TASKS.length;
+        cS.textContent = 'done · ' + (t + 1) + ' of ' + TASKS.length;
         if (!(await sc.wait(320, my))) return;
       }
-      light(-1); cT.textContent = 'flight complete'; cS.textContent = TASKS.length + ' tasks · same cycle each time';
+      light(-1); cT.textContent = 'landed'; cS.textContent = TASKS.length + ' pieces · one review · the gate · gitter commits';
       sts.forEach(function (st, k) { st.classList.toggle('on', k === 5); if (k < 5) st.classList.add('done'); }); pkt.style.left = '100%';
       if (!(await sc.wait(500, my))) return;
-      conf.classList.add('on'); conf.textContent = '✓ conformance walk · every changed flow walked to its terminal · matches the refined spec';
+      conf.classList.add('on'); conf.textContent = '✓ /flights:doctor · landed lines per million input tokens, from transcripts and git';
       if (!(await sc.wait(900, my))) return;
       sts[5].classList.add('done');
     }

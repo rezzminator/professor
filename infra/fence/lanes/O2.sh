@@ -587,18 +587,6 @@ sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},
 [ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
 sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
 [ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
-# X29 explore-deny: denies a non-haiku Explore by name, lets haiku and every other agent through.
-deny="$(printf '{"tool_input":{"subagent_type":"Explore","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
-rc=$?
-[ "$rc" -eq 0 ] || bad="$bad explore-deny exited $rc: $(one_line "$deny");"
-[ "$(printf '%s' "$deny" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)" = deny ] ||
-  bad="$bad explore-deny did not deny a sonnet Explore: $(one_line "$deny");"
-grep -qF 'tracer' <<<"$(printf '%s' "$deny" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null)" ||
-  bad="$bad the Explore denial does not point at the tracer agent;"
-allow="$(printf '{"tool_input":{"subagent_type":"Explore","model":"haiku"}}' | pfm internal explore-deny 2>&1)"
-[ -z "$allow" ] || bad="$bad explore-deny blocked a haiku Explore: $(one_line "$allow");"
-other="$(printf '{"tool_input":{"subagent_type":"tracer","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
-[ -z "$other" ] || bad="$bad explore-deny blocked a tracer dispatch: $(one_line "$other");"
 # herdr-state: outside a Herdr pane (HERDR_ENV unset) every event is a silent exit-0 no-op, whatever arrives on stdin.
 for hs_event in start working blocked idle end notification attach sync; do
   hs_out="$(printf '{"session_id":"lane-no-such-session","hook_event_name":"Stop","message":"x"}' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine claude "$hs_event" 2>"$int_err")"
@@ -721,7 +709,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · herdr-state outside Herdr exits 0 silent on every event and on garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · herdr-state outside Herdr exits 0 silent on every event and on garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────

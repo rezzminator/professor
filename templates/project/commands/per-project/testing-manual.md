@@ -1,6 +1,6 @@
 ---
 name: {project}-testing-manual
-description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test homes, lanes, mocks, run commands, gates and floors, bug classes, traps. Read by flights-foreman and flights-mechanical-executor before testing, flights-speccer for tiers, homes and gates, flights-lander whole; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
+description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test homes, lanes, mocks, run commands, gates and floors, bug classes, traps. Read by the flights workers and foremen for the affected tests, the flights lander whole for the full gate; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
 ---
 
 # {project} testing manual

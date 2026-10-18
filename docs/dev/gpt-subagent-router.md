@@ -120,7 +120,7 @@ This settles former open question 2 (where the router lives).
 A GPT agent exists only in a session started through the router. pfm's launch line sets `ANTHROPIC_BASE_URL` and passes `--agents` with the GPT definitions (W10). Each definition is compiled at launch from the Claude file it twins: the prompt body comes from the file and only `model` is swapped, so no hand-kept copy can drift.
 
 - **General workers:** `sol`, `luna`, `astra`, pinned to the catalog's current Sol, Luna and Astra IDs.
-- **Fleet roles:** a same-named GPT twin (for example `flights-mechanical-executor`) replaces the file definition, in that session only.
+- **Fleet roles:** a GPT twin (for example `gpt-flights-foreman`) replaces the file definition, in that session only.
 - **Not an ungated file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails. The shipped twins are therefore machine-source `{name}.md` declarations with `from:` that require the `gpt-agents` capability, installed only on a host that sets `claude.gptAgents` ([GPT twins](../design/gpt-twins/gpt-twins.md)).
 - **Not an alias remap:** see W2 and W8.
 
@@ -128,7 +128,7 @@ A GPT agent exists only in a session started through the router. pfm's launch li
 
 `Agent(subagent_type: "sol", description: …, prompt: …)`, with no `model`. A spawn-time `model` silently overrides the GPT definition back to Claude (W9).
 
-- **The foreman needs no change.** `flights-foreman` already spawns its children and `flights-mechanical-executor` with no model override (`templates/global/agents/flights-foreman.md`).
+- **The foreman needs no change.** `flights-foreman` already spawns `flights-worker` and `flights-worker-pro` by name with no model override (`templates/global/agents/flights-foreman.md`).
 - **The fleet prompt needs an exception.** It names a tier alias at each spawn site (`pfm/harness-prompts/claude/professor.md`, § Claude Code: "The tiers, by model alias, named inline at each spawn site"). A GPT-pinned agent must be spawned with no `model`.
 
 ## Translator
@@ -361,7 +361,6 @@ Ruled on 2026-10-09:
 
 ## Alternatives
 
-- **Cross-harness seat, available today.** `/flights:orchestrate-cross-harness {dir} engine codex` runs a task file on GPT in its native Codex harness. It is a chat seat briefed by `pfm chat call`, not an `Agent` call.
 - **`codex exec` wrapper agent.** A thin Claude sub-agent runs `codex exec` and returns its output verbatim. GPT stays in its own harness and there is no traffic routing, but every GPT call is wrapped in a Claude call.
 - **Whole-session GPT.** claude-code-proxy alone. It loses the Claude main thread.
 

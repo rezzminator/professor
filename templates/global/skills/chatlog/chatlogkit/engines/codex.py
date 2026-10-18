@@ -18,6 +18,7 @@ EXIT_CODE = re.compile(r"(?:Process exited with code|Exit code:?)[\s\x85\xa0\x1c
 SHELL_TOOLS = ("exec_command", "shell", "local_shell")
 SPAWN_TOOLS = ("spawn_agent",)
 NA = {"NOTICE": "Codex has no task-notification record",
+      "HOOK": "the kit renders no Codex hook record",
       "COMPACT-SUMMARY": "the summary a Codex `compacted` record carries is not rendered (pfm's digest "
                          "shows the COMPACTED note only)"}
 

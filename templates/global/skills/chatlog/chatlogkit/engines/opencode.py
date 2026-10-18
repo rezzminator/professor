@@ -12,7 +12,8 @@ from ..model import (CALL, COMPACTED_NOTE, FINAL, HEADER, NOTE, PROMPT, REPLY, S
 
 STORE_FILE = "opencode.db"
 SESSION_PREFIX = "ses_"
-NA = {"NOTICE": "OpenCode has no task-notification record"}
+NA = {"NOTICE": "OpenCode has no task-notification record",
+      "HOOK": "the kit renders no OpenCode hook record"}
 FILE_TOOLS = ("write", "edit", "multiedit")
 
 

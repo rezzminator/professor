@@ -17,15 +17,20 @@ const usage = `usage: pfm tokens [--since 24h|3d] [--root DIR]... [--project SUB
                   [--host-label NAME] [--prices FILE]
        pfm tokens --codex [--since 24h|3d] [--project SUBSTR] [--codex-root DIR] [--top N] [--prices FILE]
        pfm tokens --opencode [--since 24h|3d] [--project SUBSTR] [--opencode-root DIR] [--top N] [--prices FILE]
-       pfm tokens --flight DIR [--metrics-out FILE] [--out FILE] [--prices FILE]
+       pfm tokens --tree SESSION|AGENT [--worktree DIR --base SHA] [--root DIR]... [--json] [--out FILE]
+                  [--prices FILE]
 
 Audits agent transcripts: where did the tokens go? Claude Code transcripts,
 Codex rollouts (--codex) and OpenCode sessions (--opencode, from each message's
 own token record; OpenCode's recorded cost is shown beside the estimate, never
 in its place), priced from the one table pfm model-cost serves (or a saved
 ` + "`pfm model-cost --json --all`" + ` document / prices.json via --prices). A text report on
-stdout; --out, --view and --briefs write JSON. Exit 2 on a usage error, 1 when
-the table cannot load or anything could not be read.`
+stdout; --out, --view and --briefs write JSON. --tree measures one Claude spawn
+tree (a session and every sub-agent, or one agent and its descendants): per
+agent its tokens, dollars and the bytes it wrote and read, per tree the code
+lines --worktree landed against --base; --json prints its JSON document.
+Exit 2 on a usage error, 1 when the table cannot load or anything could not be
+read.`
 
 // flags are the parsed command line.
 type flags struct {
@@ -39,8 +44,6 @@ type flags struct {
 	briefs         string
 	familyRx       *regexp.Regexp
 	familyRxSource string
-	flight         string
-	metricsOut     string
 	codex          bool
 	codexHome      string
 	opencode       bool
@@ -48,6 +51,10 @@ type flags struct {
 	hostLabel      string
 	roots          []string
 	prices         string
+	tree           string
+	worktree       string
+	base           string
+	json           bool
 }
 
 var sinceForm = regexp.MustCompile(`^(\d+(?:\.\d+)?)([hd])$`)
@@ -83,8 +90,6 @@ func readFlags(args []string, host string) (flags, error) {
 	set.StringVar(&parsed.out, "out", "", "write the full data as JSON")
 	set.StringVar(&parsed.view, "view", "", "write the per-project page dataset as JSON")
 	set.StringVar(&parsed.briefs, "briefs", "", "write every brief and what its agent did as JSON")
-	set.StringVar(&parsed.flight, "flight", "", "per-agent metrics for one flight directory")
-	set.StringVar(&parsed.metricsOut, "metrics-out", "", "--flight: where metrics.md goes")
 	set.BoolVar(&parsed.codex, pricing.EngineCodex, false, "one row per Codex thread")
 	set.StringVar(&parsed.codexHome, "codex-root", "", "the Codex home to read")
 	set.BoolVar(&parsed.opencode, engineOpenCode, false, "one row per OpenCode session")
@@ -92,6 +97,10 @@ func readFlags(args []string, host string) (flags, error) {
 	set.StringVar(&parsed.hostLabel, "host-label", host, "--view: the host name the page shows")
 	set.StringVar(&parsed.prices, "prices", "", "a saved price document or prices.json instead of the served table")
 	set.Var((*listFlag)(&parsed.roots), "root", "a transcript root (repeatable)")
+	set.StringVar(&parsed.tree, "tree", "", "measure the spawn tree a session or agent id roots")
+	set.StringVar(&parsed.worktree, "worktree", "", "--tree: the checkout whose landed lines count")
+	set.StringVar(&parsed.base, "base", "", "--tree: the commit --worktree's landed lines count against")
+	set.BoolVar(&parsed.json, "json", false, "--tree: print the JSON document instead of the text report")
 	positional, code, ok := cli.ParseFlagsAnywhere(set, args)
 	if !ok {
 		if code == 0 {
@@ -124,21 +133,54 @@ func readFlags(args []string, host string) (flags, error) {
 	if parsed.opencode {
 		for _, name := range openCodeRefuses {
 			if given[name] {
-				return flags{}, usageError("--opencode is its own mode: it takes no --codex, --flight, " +
-					"--root, --family, --family-rx, --session, --out, --view, --briefs or --metrics-out")
+				return flags{}, usageError("--opencode is its own mode: it takes no --codex, --tree, " +
+					"--root, --family, --family-rx, --session, --out, --view or --briefs")
 			}
 		}
 	} else if given["opencode-root"] {
 		return flags{}, usageError("--opencode-root reads OpenCode only: pass --opencode with it")
 	}
-	return parsed, nil
+	return parsed, treeFlags(parsed, given)
+}
+
+// treeFlags refuses what --tree cannot honour: another mode, a window or
+// filter it never applies, --worktree without --base or the reverse, and a
+// --tree flag without --tree.
+func treeFlags(parsed flags, given map[string]bool) error {
+	if !given["tree"] {
+		for _, name := range []string{"worktree", "base", "json"} {
+			if given[name] {
+				return usageError("--%s measures a spawn tree: pass --tree with it", name)
+			}
+		}
+		return nil
+	}
+	if strings.TrimPrefix(parsed.tree, "agent-") == "" {
+		return usageError("--tree wants a session id or an agent id")
+	}
+	for _, name := range treeRefuses {
+		if given[name] {
+			return usageError("--tree is its own mode: it takes no --codex, --opencode, --since, --project, " +
+				"--family, --family-rx, --session, --top, --view, --briefs, --host-label, --codex-root or " +
+				"--opencode-root")
+		}
+	}
+	if given["worktree"] != given["base"] || (given["worktree"] && (parsed.worktree == "" || parsed.base == "")) {
+		return usageError("--worktree and --base go together: pass both, each with a value, or neither")
+	}
+	return nil
+}
+
+// treeRefuses are the flags --tree cannot honour.
+var treeRefuses = []string{
+	pricing.EngineCodex, engineOpenCode, "since", "project", "family", "family-rx", "session", "top", "view",
+	"briefs", "host-label", "codex-root", "opencode-root",
 }
 
 // openCodeRefuses are the flags --opencode cannot honour: another mode, or a
 // Claude root, filter or output its table never reads or writes.
 var openCodeRefuses = []string{
-	pricing.EngineCodex, "flight", "root", "family", "family-rx", "session", "out", "view", "briefs",
-	"metrics-out",
+	pricing.EngineCodex, "tree", "root", "family", "family-rx", "session", "out", "view", "briefs",
 }
 
 func usageLine(text string) string {

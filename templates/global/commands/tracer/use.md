@@ -9,19 +9,18 @@ description: 'MANDATORY for a tracer caller — before sending tracer questions,
 
 ## Sending
 
-1. Code you will change, judge or brief on goes to tracer before you read its bodies, at intake or any later step, however small the change. A brief carrying `TRACE {RUN} · nodes {IDs}` hands you a run: drill those nodes (`tt check {RUN} --hops {ID}`) before you trace more.
+1. Read the code you will change. Understanding an area beyond about 10 files or 2,000 lines you will not edit goes to tracer before you read its bodies. A brief carrying `TRACE {RUN} · nodes {IDs}` hands you a run: drill those nodes (`tt check {RUN} --hops {ID}`) before you trace more.
 2. Ask in the request's own terms: tracer finds the code. An overview, when you take one, is `ls` and `grep -n` on names — never a function body.
-3. One spawn, `subagent_type: "tracer"`: `Repo root: {path}`, then numbered questions, one fact each, in the terms of what you will do with the answer — where each change lands, with the function you will change quoted whole, so `--full` is your read of it; every caller or reader of what it changes and what each does with the new, absent or failing value; the test and fixture a new case copies. Ask for facts; you judge.
+3. One spawn, `subagent_type: "tracer"`: `Repo root: {path}`, then numbered questions, one fact each, in the terms of what you will do with the answer — where each change lands, with the function you will change quoted whole, so `--full` is your read of it; every caller or reader of what it changes and what each does with the new, absent or failing value; the test and fixture a new case copies. Ask for facts; you judge. Add a `RECALL: {run}` line per tracer run you hold: tracer reads those runs first, and a question whose cited files are unchanged since they were walked comes back from its store with no walk.
    - ✓ `1. Where does install replace an entry under ~/.claude/skills/, and what happens to a real directory already there? 2. Which test pins that replacement, and which fixture does it build?`
    - ✗ `How does the installer work?` — a survey: every thread, none deep.
    - ✗ `Every place that writes ~/.claude/`, when your change must hold at each — a closed-world list is your own chained `grep`; a run is evidence of what it walked, never proof that nothing else exists.
-4. While it walks, do the work its questions leave untouched — the testing manual, a base check, a doc; a file it is walking, read now, is paid for twice. The tracer's final is your answer: it drills the readers' threads, fills their gaps and names what they leave unsafe, so a verdict, a SAFE or a closing claim waits for it. When the spawn's hook names a run, `tt answer {RUN} {n…}` prints a question's raw reader answers once its threads are walked, most within three minutes: facts to start work on, never a ruling — ✗ a review written from pulled answers while the final, still out, names the gap.
+4. While it walks, do the work its questions leave untouched — the testing manual, a base check, a doc; a file it is walking, read now, is paid for twice. The tracer's final is your answer: it drills the readers' threads, fills their gaps and names what they leave unsafe, so a verdict, a SAFE or a closing claim waits for it.
 
 ## The run
 
 | Command | Gives |
 | --- | --- |
-| `tt answer {RUN} {n…}` | the readers' raw answers to questions `n…` once their threads are walked, blocking until then, every cite re-read from disk: an unflagged line is evidence to cite, never to re-read; the final still drills them and names their gaps |
 | `tt check {RUN}` | each node's ANSWER lines, every cite checked against the verified hops |
 | `tt check {RUN} --hops {ID}` | node `{ID}` and the children it split off, one line per hop: `path:line  the line as it is now` |
 | `tt check {RUN} --full {ID}` | the same, with every line of each hop's quoted range numbered `NNN\|` |
@@ -32,7 +31,6 @@ description: 'MANDATORY for a tracer caller — before sending tracer questions,
 | `tt map {RUN} --json [--from NAME] [--to NAME]` | the map, or that part of it, as data: `components`, `edges`, and `threads` with each thread's `walk` |
 | `tt map {RUN} --html OUT` | the Tracer Loom page: the traced files with every reader's hops, a replay of the run, the chain of custody per question, the hourglass of `--to` / `--from` — only when the user asks to see it |
 | `tt book [--html OUT]` | one line per past run under the runs root, newest first, and with `--html` the swatch book — only when the user asks for the history |
-| `tt segment {worktree} --seeds {doors file} [--max 4]` | with a door list, when the work may split inside one build unit, before reading any segment's code: `SPLIT k` → freeze the `SPINE` contracts, then hand each child its `SEGMENT` row, `ORDER` and `ESCALATE` lines verbatim; `SOLO` → build alone; `EMPTY` → fix the `NOTFOUND` seeds and run again |
 
 NAME is a component id (`path::name`), a function or section name, a file, or a piece of an id; a name matching nothing, or too many, exits 2 and says which. `--all` adds walk-order links.
 
@@ -46,7 +44,7 @@ NAME is a component id (`path::name`), a function or section name, a file, or a 
 2. The answer answers the questions; go to the run for what it leaves open. Grep the map (`grep -n '::Render' {RUN}/map.txt`) or ask `--from`/`--to` rather than reading it whole; `--full` only for the node you copy from.
 3. Read code through the run: `tt show {RUN} {file}:{A}-{B}`, every block of a step in one call, in place of `sed -n` or `cat`. A line marked `[{ID}]` is a verified hop of node `{ID}` — evidence as it stands, never re-read to confirm it; the block's `held N/M` says how much of it the run already held; after your edits the marks follow the quoted lines.
 4. The reads a unit needs, as a list: `tt map {RUN} --json --from NAME | python3 -c 'import json,sys; [print(c["file"] + ":" + str(c["line"] or c["hops"][0])) for c in json.load(sys.stdin)["components"]]'`.
-5. Lines and commands a task file or a child's brief quotes come from `--full {ID}`, never from the answer as its notification shows it — the notification escapes `<`, `>` and `&` as `&lt;`, `&gt;`, `&amp;`: every line of the range, each `NNN|` prefix stripped, `path:A-B` on the line above the block.
+5. Lines and commands a child's brief quotes come from `--full {ID}`, never from the answer as its notification shows it — the notification escapes `<`, `>` and `&` as `&lt;`, `&gt;`, `&amp;`: every line of the range, each `NNN|` prefix stripped, `path:A-B` on the line above the block.
 6. A child gets the run, never a re-trace: its brief carries `TRACE {RUN} · nodes {IDs}`, the node IDs covering its unit, and `tt check {RUN} --hops {ID}` gives it the evidence in one call.
 7. Each NOT READ item names its next step: `run: node {ID}` is `tt check {RUN} --hops {ID}` first; `ask: …` goes to tracer as written; a `path:line` marked `(grep only — read it)` no hop holds, so it is one `tt show` block; a range marked `(held: node {ID} verified {path}:{lines})` is held there, so `tt check {RUN} --full {ID}` before calling it unread. A question the run does not settle — a LEAD, a NOT READ, a component absent from the map — goes back to tracer as a new numbered question before it goes into your output as unsettled; a fact the answer already cites is never re-asked.
 8. A hop address `{rev}:{path}:{line}` pins a git revision of ROOT: the line is `git -C ROOT show {rev}:./{path}` as it is, a commit never drifts, and nothing is checked out. When the run's ROOT is the tree you are editing, `tt check {RUN} --hops` after an edit shows each traced line that moved (`re-addressed`) or changed since the walk (`≈ DRIFTED`).

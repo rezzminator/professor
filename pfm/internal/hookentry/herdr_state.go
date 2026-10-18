@@ -324,6 +324,9 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 		if payload.IsInterrupt {
 			return nil
 		}
+		if interceptedSubmit(reporter.options.engine, payload) {
+			return nil
+		}
 		return report(herdr.StateWorking, "")
 	case herdr.EventBlocked:
 		return reporter.toolBlock(payload, report(herdr.StateBlocked, blockedMessage(payload)))

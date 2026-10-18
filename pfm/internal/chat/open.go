@@ -115,7 +115,20 @@ func OpenID(
 		return 1
 	}
 	if found && ctx.Value(restoredOpenKey{}) != true {
-		_, code := openNativeRow(ctx, nativeRow(seat), stdout, stderr, effective)
+		primary, primaryErr := fleet.PrimaryAccount(effective.Paths, effective.Config)
+		if primaryErr != nil {
+			fmt.Fprintf(stderr, "pfm chat open: read primary account: %v\n", primaryErr)
+			return 1
+		}
+		_, code := openNativeRow(
+			ctx,
+			nativeRow(seat),
+			primary,
+			effective.Config.EffectiveClaude(primary).Cache1H,
+			stdout,
+			stderr,
+			effective,
+		)
 		return code
 	}
 	database, err := store.Open(store.WithWarningWriter(stderr))
@@ -377,7 +390,7 @@ func OpenRow(
 		row.Socket = ""
 		row.PaneID = ""
 		row.SeatID = ""
-	} else if handled, code := openNativeRow(ctx, row, stdout, stderr, effective); handled {
+	} else if handled, code := openNativeRow(ctx, row, primary, cache1H, stdout, stderr, effective); handled {
 		return code
 	}
 	relocated := ""

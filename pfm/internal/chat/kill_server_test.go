@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -122,6 +123,23 @@ func TestEndHerdrClosesOnlyItsSeat(t *testing.T) {
 			if err := db.PutSeat(context.Background(), other); err != nil {
 				t.Fatal(err)
 			}
+			// The ended seat's reload schedule files go with it; another
+			// seat's, a sibling name and an unrelated file stay.
+			ended := []string{
+				paths.SIDReloadHerdrPrefix + seat.SeatID + ".pid",
+				paths.SIDReloadHerdrPrefix + seat.SeatID + ".log",
+			}
+			kept := []string{
+				paths.SIDReloadHerdrPrefix + other.SeatID + ".pid",
+				paths.SIDReloadHerdrPrefix + other.SeatID + ".log",
+				paths.SIDReloadHerdrPrefix + seat.SeatID + "-2.log",
+				"kill-exit-unrelated.log",
+			}
+			for _, name := range append(append([]string{}, ended...), kept...) {
+				if err := os.WriteFile(filepath.Join(runtime.Paths.SIDDir, name), []byte("1 2\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			code := 0
 			if err := endHerdr(
 				context.Background(),
@@ -150,6 +168,17 @@ func TestEndHerdrClosesOnlyItsSeat(t *testing.T) {
 			if scenario.want == 0 {
 				if _, err := db.ReadSeatRun(seat.SeatID); err == nil {
 					t.Fatal("ended seat recipe still present")
+				}
+			}
+			for _, name := range ended {
+				_, err := os.Stat(filepath.Join(runtime.Paths.SIDDir, name))
+				if gone := os.IsNotExist(err); gone != (scenario.want == 0) {
+					t.Fatalf("%s gone=%v (stat err=%v), want gone=%v", name, gone, err, scenario.want == 0)
+				}
+			}
+			for _, name := range kept {
+				if _, err := os.Stat(filepath.Join(runtime.Paths.SIDDir, name)); err != nil {
+					t.Fatalf("%s must stay: %v", name, err)
 				}
 			}
 			select {
@@ -308,6 +337,89 @@ func TestNativePendingEndReprovesDowngradedBinding(t *testing.T) {
 			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
 			if readErr != nil || !found || current != seat {
 				t.Fatalf("stale owner not retained: %+v %v", current, readErr)
+			}
+		})
+	}
+}
+
+// The native end worker's log (end-{seat}.log) is the only trace of a detached
+// end: every step it takes lands in the steps writer, and a refusal lands as an
+// error line, so an empty log never means "nothing happened".
+func TestEndHerdrStepsLogEachStepAndTheFailure(t *testing.T) {
+	for _, scenario := range []struct {
+		name, refusal string
+		want          []string
+	}{
+		{
+			name: "success",
+			want: []string{
+				"seat read",
+				"owner proved",
+				"pane.close sending",
+				"pane.close acknowledged",
+				"seat retired",
+			},
+		},
+		{
+			name:    "refused close",
+			refusal: "permission_denied",
+			want: []string{
+				"seat read",
+				"owner proved",
+				"pane.close sending",
+				"pane.close failed",
+			},
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
+				return map[string]any{"type": "ok"}, scenario.refusal
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, db, seat, true)
+			var steps bytes.Buffer
+			err := endHerdrSteps(
+				context.Background(),
+				headless.Chat{
+					Backend: "herdr",
+					SeatID:  seat.SeatID,
+					ID:      seat.SessionID,
+					Socket:  socket,
+					Pane:    seat.HerdrPane,
+				},
+				runtime.Paths,
+				&steps,
+			)
+			if (err != nil) != (scenario.refusal != "") {
+				t.Fatalf("endHerdrSteps err=%v refusal=%q", err, scenario.refusal)
+			}
+			log := steps.String()
+			last := -1
+			for _, want := range scenario.want {
+				index := strings.Index(log, want)
+				if index < 0 || index < last {
+					t.Fatalf("step %q missing or out of order in log:\n%s", want, log)
+				}
+				last = index
+			}
+			if scenario.refusal != "" && !strings.Contains(log, "permission_denied") {
+				t.Fatalf("failure line lacks the refusal:\n%s", log)
+			}
+			if scenario.refusal != "" && strings.Contains(log, "seat retired") {
+				t.Fatalf("a refused close logged retirement:\n%s", log)
+			}
+			if scenario.refusal != "" {
+				// The retained intent makes the end worker's door retry the
+				// close; its log names the failure once.
+				var workerLog bytes.Buffer
+				code := EndTarget(context.Background(), seat.SeatID, true, &bytes.Buffer{}, &workerLog, &runtime, nil)
+				if code != 1 || strings.Count(workerLog.String(), "(intent retained)") != 1 {
+					t.Fatalf("end worker code=%d, want 1 and one failure line:\n%s", code, &workerLog)
+				}
 			}
 		})
 	}

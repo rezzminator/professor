@@ -31,8 +31,10 @@ func SQL(ctx context.Context, kind, query string) *SQLOp {
 	return &SQLOp{ctx: ctx, kind: kind, op: op, table: table, started: current(ctx).timing.Now()}
 }
 
-// End writes db.statement: INFO with rows (omitted when the layer does not
-// know them, rows < 0) and retries when any happened; ERROR with err.
+// End writes db.statement with rows (omitted when the layer does not know
+// them, rows < 0) and retries when any happened: ERROR with err, INFO when
+// the statement was retried or took SlowCall or longer, else DEBUG —
+// a routine success is the bulk of a busy fleet's lines and not evidence.
 func (op *SQLOp) End(rows int64, err error) {
 	attrs := []slog.Attr{slog.String("op", op.op), slog.String("kind", op.kind)}
 	if op.table != "" {
@@ -44,16 +46,20 @@ func (op *SQLOp) End(rows int64, err error) {
 	if op.Retries > 0 {
 		attrs = append(attrs, slog.Int("retries", op.Retries))
 	}
-	record(op.ctx, compDB, "db.statement", errorLevel(err), op.started, err, attrs...)
+	elapsed := current(op.ctx).timing.Now().Sub(op.started)
+	level := RoutineLevel(err, slog.LevelError, op.Retries, elapsed)
+	record(op.ctx, compDB, "db.statement", level, op.started, err, attrs...)
 }
 
 // SQLOpen is the record of one sqlitedb open: call it before the open with
 // the database kind (store, readonly, readwrite) and the path, and the
-// returned function once with the open's error.
+// returned function once with the open's error. db.open is ERROR with err,
+// INFO when it took SlowCall or longer, else DEBUG.
 func SQLOpen(ctx context.Context, kind, path string) func(err error) {
 	started := current(ctx).timing.Now()
 	return func(err error) {
-		record(ctx, compDB, "db.open", errorLevel(err), started, err,
+		elapsed := current(ctx).timing.Now().Sub(started)
+		record(ctx, compDB, "db.open", RoutineLevel(err, slog.LevelError, 0, elapsed), started, err,
 			slog.String("kind", kind), slog.String("path", path))
 	}
 }

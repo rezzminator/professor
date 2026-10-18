@@ -108,27 +108,30 @@ func (command *Cmd) begin() {
 	command.started = command.clock.Now()
 }
 
-// finish writes the one record: INFO with the exit code when tmux ran (a
-// non-zero exit is tmux answering, err carried), ERROR with exit -1 when it
-// never started. A second completion of the same Cmd writes nothing.
+// finish writes the one record with the exit code: a non-zero exit is tmux
+// answering (INFO, err carried), exit -1 is a tmux that never started (ERROR),
+// and a clean exit is DEBUG unless it took obs.SlowCall or longer (INFO) —
+// obs.RoutineLevel, the rule db.statement follows too. A second completion of
+// the same Cmd writes nothing.
 func (command *Cmd) finish(err error) {
 	if command.done {
 		return
 	}
 	command.done = true
-	exit, level := 0, slog.LevelInfo
+	exit, failure := 0, slog.LevelInfo
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:
 	case errors.As(err, &exitErr):
 		exit = exitErr.ExitCode()
 	default:
-		exit, level = -1, slog.LevelError
+		exit, failure = -1, slog.LevelError
 	}
+	elapsed := command.clock.Now().Sub(command.started)
 	attrs := []slog.Attr{
 		slog.String("subcmd", command.subcmd),
 		slog.Int(obs.FieldExit, exit),
-		slog.Int64(obs.FieldDur, command.clock.Now().Sub(command.started).Milliseconds()),
+		slog.Int64(obs.FieldDur, elapsed.Milliseconds()),
 	}
 	if command.target != "" {
 		attrs = append(attrs, slog.String("target", command.target))
@@ -137,5 +140,5 @@ func (command *Cmd) finish(err error) {
 		attrs = append(attrs, slog.String(obs.FieldErr, err.Error()))
 	}
 	scoped := obs.Component(command.ctx, comp)
-	obs.Logger(scoped).LogAttrs(scoped, level, "tmux.exec", attrs...)
+	obs.Logger(scoped).LogAttrs(scoped, obs.RoutineLevel(err, failure, 0, elapsed), "tmux.exec", attrs...)
 }

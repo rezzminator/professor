@@ -126,6 +126,7 @@ func crumbHealthWith(
 		if filepath.Ext(name) == ".lock" ||
 			nonFleetServerCrumb(name) ||
 			knownSIDMetadata(name) ||
+			nativeReloadScheduleFile(name) ||
 			agentrole.IsSeatPromptPath(name) ||
 			agentrole.IsHarnessPromptRecordPath(name) ||
 			sidScratchFile(name) {
@@ -154,6 +155,24 @@ func sidScratchFile(name string) bool {
 	for _, pattern := range []string{paths.SIDExchangeScratchPattern, paths.SIDCaptureScratchPattern} {
 		if matched, err := filepath.Match(pattern, name); err == nil && matched {
 			return true
+		}
+	}
+	return false
+}
+
+// nativeReloadScheduleFile reports whether name is a native seat's reload
+// schedule file, paths.SIDReloadHerdrPrefix+seat+".pid" (the worker's record)
+// or ".log" (its log). The seat id is whatever reload.LockWorkerSchedule built
+// from the seat row, so any non-empty one is accepted; ending the seat removes
+// both files.
+func nativeReloadScheduleFile(name string) bool {
+	rest, ok := strings.CutPrefix(name, paths.SIDReloadHerdrPrefix)
+	if !ok {
+		return false
+	}
+	for _, suffix := range []string{".pid", ".log"} {
+		if seat, ok := strings.CutSuffix(rest, suffix); ok {
+			return seat != "" && seat != "." && seat != ".."
 		}
 	}
 	return false

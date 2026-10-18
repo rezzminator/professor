@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -26,6 +27,16 @@ const (
 // herdrTarget resolves ownership before the index fallback: a new native engine
 // can be live before it has flushed any transcript. Environment is not routing.
 func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Target, bool, error) {
+	// A native chat names itself by the address its process inherited. The
+	// saved owner is looked up by that pane first; a pane the chat has moved
+	// from still resolves through its session, and both go through the same
+	// supervisor and alias proof as an explicit address.
+	nativeSelf := request.Self && request.Environment.native()
+	owner := request.ID
+	if nativeSelf {
+		request.SocketName, request.PaneID = request.Environment.HerdrSocket, request.Environment.HerdrPane
+		owner = request.Environment.ClaudeSessionID
+	}
 	if (request.SocketName == "") != (request.PaneID == "") {
 		return Target{}, false, fmt.Errorf("resolved live address requires socket and pane")
 	}
@@ -48,8 +59,8 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 		target := Target{SocketPath: filepath.Join(manager.paths.tmuxDir, request.SocketName), PaneID: request.PaneID}
 		return Target{}, false, warnTmuxSeatFallback(manager.paths.tmuxDir, target, manager.log, lookupErr)
 	}
-	if !found && request.ID != "" && request.SocketName != "" {
-		candidate, ok, lookupErr := manager.database.Shared().SeatBySession(ctx, request.ID)
+	if !found && owner != "" && request.SocketName != "" {
+		candidate, ok, lookupErr := manager.database.Shared().SeatBySession(ctx, owner)
 		if lookupErr != nil {
 			return Target{}, false, fmt.Errorf("resolve moved native kill owner: %w", lookupErr)
 		}
@@ -96,6 +107,13 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 		}
 	}
 	if !found || seat.Backend != herdrBackend || seat.State != "live" {
+		if nativeSelf {
+			return Target{}, false, fmt.Errorf(
+				"could not identify this native chat: no live seat for Herdr pane %s on %s",
+				request.PaneID,
+				request.SocketName,
+			)
+		}
 		return Target{}, false, nil
 	}
 	if request.ID != "" && request.ID != seat.SessionID && request.ID != seat.SeatID {
@@ -142,7 +160,7 @@ func targetClient(
 	ctx context.Context,
 	database *store.Store,
 	fallback TmuxClient,
-	tmuxDir string,
+	tmuxDir, sidDir string,
 	target Target,
 	log io.Writer,
 ) (TmuxClient, bool, error) {
@@ -182,7 +200,14 @@ func targetClient(
 		if _, lookupErr := pfmengine.Lookup(engine); lookupErr != nil {
 			return nil, false, fmt.Errorf("kill seat %s has unknown engine %q", seat.SeatID, seat.Engine)
 		}
-		return herdrKiller{TmuxClient: fallback, engine: engine, database: database, seat: seat}, true, nil
+		return herdrKiller{
+			TmuxClient: fallback,
+			engine:     engine,
+			database:   database,
+			seat:       seat,
+			sidDir:     sidDir,
+			log:        log,
+		}, true, nil
 	}
 	if filepath.Dir(target.SocketPath) != filepath.Clean(tmuxDir) {
 		return nil, false, fmt.Errorf("kill pane %s: no durable owner for socket %q", target.PaneID, target.SocketPath)
@@ -223,6 +248,10 @@ type herdrKiller struct {
 	engine   pfmengine.ID
 	database *store.Store
 	seat     fleetdb.Seat
+	// sidDir holds the seat's reload schedule files, retired with its row.
+	sidDir string
+	// log receives the warnings of a close that succeeded around a failure.
+	log io.Writer
 }
 
 // prove re-reads by stable seat identity; stale wire addresses never confer ownership.
@@ -472,6 +501,19 @@ func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) err
 	}
 	// A forced pane close also kills its supervisor, so it cannot retire the
 	// durable address itself. Keep the independent kill ledger untouched.
+	// The pane is gone now: a reload file that will not go is named, never a
+	// reason to keep a closed pane's row live, which no retry could retire.
+	if err := herdr.RemoveReloadFiles(client.sidDir, client.seat.SeatID); err != nil {
+		warning := fmt.Errorf("closed Herdr seat %s: its reload files stay behind: %w", client.seat.SeatID, err)
+		obs.Logger(ctx).WarnContext(ctx, "kill: reload files of a closed native seat not removed",
+			"seat", client.seat.SeatID, "err", err)
+		if client.log == nil {
+			return errors.Join(warning, errors.New("kill warning writer is unavailable"))
+		}
+		if _, writeErr := fmt.Fprintf(client.log, "pfm chat kill: warning: %v\n", warning); writeErr != nil {
+			return errors.Join(warning, fmt.Errorf("write kill warning: %w", writeErr))
+		}
+	}
 	if err := client.database.Shared().DeleteSeatRun(client.seat.SeatID); err != nil {
 		return fmt.Errorf("remove closed Herdr seat recipe %s: %w", client.seat.SeatID, err)
 	}

@@ -275,6 +275,7 @@ type herdrPayload struct {
 	IsInterrupt      bool            `json:"is_interrupt"`
 	Title            string          `json:"title"`
 	TranscriptPath   string          `json:"transcript_path"`
+	Prompt           string          `json:"prompt"`
 }
 
 // Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs.

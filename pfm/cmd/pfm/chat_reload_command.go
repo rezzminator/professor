@@ -40,14 +40,14 @@ const (
 	reloadAccountFlag = "--account"
 )
 
-// startReloadWorker launches the detached worker (Detach: true) and releases
-// it; a test overrides this var to script the launch.
-var startReloadWorker = func(argv []string, opts deps.StartOptions) error {
+// startReloadWorker launches the detached worker (Detach: true), releases it
+// and returns its pid; a test overrides this var to script the launch.
+var startReloadWorker = func(argv []string, opts deps.StartOptions) (int, error) {
 	process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, opts)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return process.Release()
+	return process.Pid(), process.Release()
 }
 
 var displayReloadWorkerFailure = reload.CommandTmux{}.Display
@@ -55,6 +55,7 @@ var displayReloadWorkerFailure = reload.CommandTmux{}.Display
 var runHerdrReload = reload.RunHerdr
 
 func runChatReloadWithRuntime(
+	ctx context.Context,
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
@@ -103,8 +104,16 @@ func runChatReloadWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: create worker log directory: %v\n", err)
 		return 1
 	}
-	logPath := filepath.Join(resolved.SIDDir, "reload-"+filepath.Base(socketPath)+".log")
-	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logPath, schedule, err := reload.LockWorkerSchedule(ctx, resolved, socketPath, pane)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
+		if errors.As(err, new(*reload.ScheduledError)) {
+			return 2
+		}
+		return 1
+	}
+	defer schedule.Close(stderr)
+	log, err := reload.OpenWorkerLog(logPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: open worker log: %v\n", err)
 		return 1
@@ -125,7 +134,9 @@ func runChatReloadWithRuntime(
 		workerArgs = append(workerArgs, reloadPaneFlag, pane)
 	}
 	argv := append([]string{os.Args[0]}, workerArgs...) // Stdin unset: a detached Start child defaults to /dev/null.
-	if err := startReloadWorker(argv, deps.StartOptions{Stdout: log, Stderr: log, Detach: true}); err != nil {
+	if err := reload.StartWorker(ctx, schedule, stderr, func() (int, error) {
+		return startReloadWorker(argv, deps.StartOptions{Stdout: log, Stderr: log, Detach: true})
+	}); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: schedule worker: %v\n", err)
 		return 1
 	}
@@ -145,6 +156,7 @@ func runChatReloadWorker(args []string, stdout, stderr io.Writer) int {
 func announceReloadWorkerFailure(
 	args []string,
 	workerLog string,
+	native bool,
 	display func(context.Context, string, string, string) error,
 	stderr io.Writer,
 ) {
@@ -163,7 +175,7 @@ func announceReloadWorkerFailure(
 		fmt.Fprintf(stderr, "pfm chat reload: worker failure paths: %v\n", err)
 		return
 	}
-	handled, err := reload.NotifyWorkerFailure(context.Background(), resolved, socketPath, pane, workerLog)
+	handled, err := reload.NotifyWorkerFailure(context.Background(), resolved, socketPath, pane, workerLog, native)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: native failure notification: %v\n", err)
 	}
@@ -180,7 +192,7 @@ func announceReloadWorkerFailure(
 func reloadWorkerConfigFailure(args []string, err error, stderr io.Writer) int {
 	line := fmt.Sprintf("pfm: config: %v", err)
 	fmt.Fprintln(stderr, line)
-	announceReloadWorkerFailure(normalizeReloadArgs(args), line, displayReloadWorkerFailure, stderr)
+	announceReloadWorkerFailure(normalizeReloadArgs(args), line, false, displayReloadWorkerFailure, stderr)
 	return 1
 }
 
@@ -192,6 +204,9 @@ func runChatReloadWorkerWithRuntime(
 ) (code int) {
 	var workerLog bytes.Buffer
 	paneTold := false
+	// nativeWorker: the target resolved to a native seat, so a failure is
+	// shown by Herdr even once that seat row is retired.
+	nativeWorker := false
 	workerStderr := io.MultiWriter(stderr, &workerLog)
 	stderr = workerStderr
 	defer func() {
@@ -201,7 +216,7 @@ func runChatReloadWorkerWithRuntime(
 		if workerLog.Len() == 0 {
 			fmt.Fprintf(workerStderr, "pfm chat reload: detached worker failed (exit %d)\n", code)
 		}
-		announceReloadWorkerFailure(args, workerLog.String(), displayReloadWorkerFailure, stderr)
+		announceReloadWorkerFailure(args, workerLog.String(), nativeWorker, displayReloadWorkerFailure, stderr)
 	}()
 	env = defaultEnv(env)
 	args = normalizeReloadArgs(args)
@@ -239,6 +254,7 @@ func runChatReloadWorkerWithRuntime(
 		return 1
 	}
 	if native != nil {
+		nativeWorker = true
 		request, err := reload.NativeRequest(runtime, *native, parsed)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)

@@ -16,6 +16,19 @@ type SelfEnvironment struct {
 	TMUX            string
 	TMUXPane        string
 	ClaudeSessionID string
+	// HerdrMarker, HerdrSocket and HerdrPane are the Herdr variables a native
+	// chat process inherits. They name a seat to look up, never prove it.
+	HerdrMarker string
+	HerdrSocket string
+	HerdrPane   string
+}
+
+// native reports a chat running directly in a Herdr pane: Herdr's marker and
+// address with no tmux client around it. A tmux-in-Herdr chat keeps its tmux
+// identity.
+func (environment SelfEnvironment) native() bool {
+	return environment.TMUX == "" && environment.HerdrMarker == "1" &&
+		environment.HerdrSocket != "" && environment.HerdrPane != ""
 }
 
 // Target is one kill identity and its optional live tmux address.

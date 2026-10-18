@@ -150,7 +150,10 @@ func RunHerdr(
 	if err != nil {
 		return Result{}, fmt.Errorf("recheck native reload seat: %w", err)
 	}
-	if !found || current.HerdrSocket != seat.HerdrSocket || current.HerdrTerminalID != seat.HerdrTerminalID ||
+	if !found || current.EndPending {
+		return Result{}, errChatEnded
+	}
+	if current.HerdrSocket != seat.HerdrSocket || current.HerdrTerminalID != seat.HerdrTerminalID ||
 		current.SeatHostPID != seat.SeatHostPID || current.SeatHostStart != seat.SeatHostStart || current.SeatHostBirth != seat.SeatHostBirth ||
 		current.Engine != seat.Engine ||
 		current.State != seat.State ||
@@ -163,7 +166,7 @@ func RunHerdr(
 		return Result{}, fmt.Errorf("reprove native reload before publication: %w", err)
 	}
 	if !owned {
-		return Result{}, errors.New("native reload supervisor is dead")
+		return Result{}, n.supervisorGone(ctx, seat.SeatID)
 	}
 	n.target.Pane = current.HerdrPane
 	n.request.Pane = current.HerdrPane
@@ -353,32 +356,13 @@ func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun)
 // an explicit earlier reload may have changed the account or cache in-place.
 func nativeReloadDefaults(request Request, old fleetdb.SeatRun) (Request, error) {
 	if !request.AccountGiven {
-		directory := claudelaunch.ConfigDirFromEnv(old.Env)
-		accounts := make(map[int]string)
-		if request.Engine == pfmengine.Codex {
-			directory = nativeReloadEnv(old.Env, "CODEX_HOME")
-			for _, account := range request.Machine.CodexAccounts {
-				accounts[account.ID] = account.Home
-			}
-		} else {
-			for _, account := range request.Machine.Accounts {
-				accounts[account.ID] = account.ConfigDir
-			}
-		}
-		matches := 0
-		if filepath.IsAbs(directory) {
-			for id, candidate := range accounts {
-				if filepath.Clean(candidate) == filepath.Clean(directory) {
-					request.Account = id
-					matches++
-				}
-			}
-		}
-		if matches != 1 {
+		account, found := RecipeAccount(request.Machine, request.Engine, old.Env)
+		if !found {
 			return request, errors.New(
 				"native reload current recipe account is missing, ambiguous, or no longer configured; specify --account",
 			)
 		}
+		request.Account = account
 	}
 	if !request.CacheGiven && request.Engine == pfmengine.Claude {
 		key := ""

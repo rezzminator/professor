@@ -69,6 +69,15 @@ func TestHerdrStateReportsTheExactRequestLines(t *testing.T) {
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"idle",` + resume + `,"seq":1001000}}`},
 		},
 		{
+			// Only a prompt an intercept blocks leaves the pane as it is; a
+			// near miss starts a turn like any other prompt.
+			"a prompt no intercept blocks reports working",
+			[]string{"--engine", "claude", "working"},
+			`{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/reloaded e"}`,
+			"",
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"working",` + resume + `,"seq":1001000}}`},
+		},
+		{
 			"blocked carries its message",
 			[]string{"--engine", "claude", "blocked"},
 			`{"session_id":"` + session + `","message":"needs approval"}`,
@@ -135,6 +144,12 @@ func TestHerdrStateSendsNothingForEventsThatDoNotChangeThePane(t *testing.T) {
 		{"unmapped notification", []string{"--engine", "claude", "notification"}, `{"session_id":"` + session + `","notification_type":"auth_success"}`},
 		// A compaction restarts the session mid-turn: the pane stays working.
 		{"compaction restart", []string{"--engine", "claude", "start"}, `{"session_id":"` + session + `","source":"compact"}`},
+		// reload-intercept and exit-intercept block these prompts, so no turn
+		// starts and no Stop would ever report the pane idle again.
+		{"a /reload prompt", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/reload"}`},
+		{"a /reload prompt with options", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":" /reload --account 2 "}`},
+		{"an exit word", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"e"}`},
+		{"a slash exit word", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/e"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newFakeHerdr(t)

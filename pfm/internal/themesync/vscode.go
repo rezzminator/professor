@@ -20,9 +20,12 @@ import (
 const (
 	vscodeContractFile = "current.json"
 	vscodeAckFile      = "vscode-ack.json"
-	vscodeGrace        = 10 * time.Second
-	vscodeDeferred     = "applies when VS Code starts"
-	backupStampLayout  = "20060102-150405"
+	// vscodeChromeRecordFile is the extension's record of the chrome it wrote
+	// into each local workspace file (theme.js CHROME_RECORD); pfm only reads it.
+	vscodeChromeRecordFile = "vscode-chrome.json"
+	vscodeGrace            = 10 * time.Second
+	vscodeDeferred         = "applies when VS Code starts"
+	backupStampLayout      = "20060102-150405"
 )
 
 // wallClock is the time seam for backup stamps and the VS Code ack grace window.
@@ -171,8 +174,8 @@ func vscodeVerdict(
 	switch {
 	case haveAck && ack.Error != "":
 		return VerdictError, "extension reported: " + ack.Error
-	case haveAck && chromeFailure(ack) != "":
-		return VerdictError, chromeFailure(ack)
+	case haveAck && chromeFailure(ack, generation) != "":
+		return VerdictError, chromeFailure(ack, generation)
 	case haveAck && ack.Generation == generation:
 		return VerdictInSync, chromeDetail(ack, generation)
 	case !running:
@@ -187,25 +190,40 @@ func vscodeVerdict(
 	}
 }
 
-// chromeFailure lists each local workspace whose chrome the extension could
-// not apply, by path order, as one ERROR detail; empty when none failed.
-func chromeFailure(ack vscodeAck) string {
+// chromeErrors lists, by path order, each local workspace whose chrome the
+// extension could not apply, current or not; empty when none failed.
+func chromeErrors(ack vscodeAck, current bool, generation int) string {
 	var paths []string
 	for path, entry := range ack.Chrome {
-		if entry.Error != "" {
+		if entry.Error != "" && (entry.Generation == generation) == current {
 			paths = append(paths, path)
 		}
 	}
 	sort.Strings(paths)
 	parts := make([]string, 0, len(paths))
 	for _, path := range paths {
-		parts = append(parts, "window chrome "+filepath.Base(path)+": "+ack.Chrome[path].Error)
+		entry := ack.Chrome[path]
+		part := "window chrome " + filepath.Base(path) + ": " + entry.Error
+		if !current {
+			part = fmt.Sprintf("window chrome %s failed at generation %d (%s); retried when it next opens",
+				filepath.Base(path), entry.Generation, entry.Error)
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, "; ")
 }
 
-// chromeDetail names the local workspaces holding this generation's chrome;
-// empty when there are none.
+// chromeFailure is the ERROR detail of the local workspaces whose chrome the
+// extension could not apply at the generation in force; an entry of an
+// earlier generation is a window that has not opened since, never a current
+// failure. Empty when none failed.
+func chromeFailure(ack vscodeAck, generation int) string {
+	return chromeErrors(ack, true, generation)
+}
+
+// chromeDetail names the local workspaces holding this generation's chrome
+// and each earlier-generation failure still waiting for its window; empty
+// when there are none.
 func chromeDetail(ack vscodeAck, generation int) string {
 	count := 0
 	for _, entry := range ack.Chrome {
@@ -213,13 +231,28 @@ func chromeDetail(ack vscodeAck, generation int) string {
 			count++
 		}
 	}
+	var parts []string
 	switch count {
 	case 0:
-		return ""
 	case 1:
-		return "window chrome in 1 local workspace"
+		parts = append(parts, "window chrome in 1 local workspace")
 	default:
-		return fmt.Sprintf("window chrome in %d local workspaces", count)
+		parts = append(parts, fmt.Sprintf("window chrome in %d local workspaces", count))
+	}
+	if stale := chromeErrors(ack, false, generation); stale != "" {
+		parts = append(parts, stale)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// dropGoneWorkspaces removes the chrome entries whose workspace file no
+// longer exists: no window can open it again, so its outcome no longer
+// counts. A workspace file whose stat fails otherwise keeps its entry.
+func dropGoneWorkspaces(ack *vscodeAck) {
+	for path := range ack.Chrome {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			delete(ack.Chrome, path)
+		}
 	}
 }
 
@@ -344,6 +377,7 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceVscode, path, err)
 	}
+	dropGoneWorkspaces(&ack)
 	result, err := s.env.Runner.Run(ctx, []string{"ps", "-axo", "args="}, deps.RunOptions{})
 	if err != nil || result.ExitCode != 0 {
 		return s.failed(
@@ -380,16 +414,59 @@ func (s *session) readAck() (ack vscodeAck, found bool, err error) {
 	return ack, true, nil
 }
 
+// paintedWorkspaces lists, by path order, the local workspace files the
+// extension's chrome record says still carry chrome: each one is restored only
+// by a window that opens it. A workspace file that no longer exists is left
+// out; an absent record is none, an unreadable one an error.
+func (s *session) paintedWorkspaces() ([]string, error) {
+	recordPath := filepath.Join(s.store.dir, vscodeChromeRecordFile)
+	raw, err := os.ReadFile(recordPath)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("themesync: read %s: %w", recordPath, err)
+	}
+	var records map[string]struct {
+		Keys map[string]json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(raw, &records); err != nil {
+		return nil, fmt.Errorf("themesync: parse %s: %w", recordPath, err)
+	}
+	var painted []string
+	for workspace, record := range records {
+		if len(record.Keys) == 0 {
+			continue
+		}
+		if _, err := os.Stat(workspace); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		painted = append(painted, workspace)
+	}
+	sort.Strings(painted)
+	return painted, nil
+}
+
 func (s *session) restoreVscode(_ context.Context) SurfaceResult {
 	if err := s.writeVscodeContract(vscodeOffContract(s.state.Generation)); err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
 	}
+	painted, err := s.paintedWorkspaces()
+	if err != nil {
+		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
+	}
 	for _, settings := range s.vscodeSettings() {
-		if _, err := os.Stat(settings); err == nil {
-			s.state.VSCode = nil
-			return s.result(surfaceVscode, VerdictApplied, s.vscodeContractPath(),
-				"the extension clears the colours when it next reads "+vscodeContractFile)
+		if _, err := os.Stat(settings); err != nil {
+			continue
 		}
+		s.state.VSCode = nil
+		detail := "the extension clears the colours when it next reads " + vscodeContractFile
+		if len(painted) == 0 {
+			return s.result(surfaceVscode, VerdictApplied, s.vscodeContractPath(), detail)
+		}
+		detail += "; window chrome stays in " + strings.Join(painted, ", ") +
+			" until a VS Code window on each workspace applies the off"
+		return s.result(surfaceVscode, VerdictPending, s.vscodeContractPath(), detail)
 	}
 	return s.vscodeAbsent()
 }

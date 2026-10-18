@@ -151,8 +151,14 @@ func (report Report) OK() bool {
 	return true
 }
 
+// ErrTmuxOptionUnset is what a TmuxServers Show wraps when tmux answered that
+// the server holds no value for the option: the one read failure that means
+// "unset". Any other failed read is a read that could not run.
+var ErrTmuxOptionUnset = errors.New("tmux option unset")
+
 // TmuxServers is the tmux seam: the live pfm chat servers, one global option
-// read, and an option-vector apply in config.ChatServerOptions' shape.
+// read (an unset option wraps ErrTmuxOptionUnset), and an option-vector apply
+// in config.ChatServerOptions' shape.
 type TmuxServers interface {
 	Sockets(ctx context.Context) ([]string, error)
 	Show(ctx context.Context, socket, name string) (string, error)

@@ -106,7 +106,8 @@ async function chooseTheme() {
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `Setting Claude Code theme ${picked.label}…` },
     async () => {
-      const result = await runPfm(['theme', 'use', picked.theme.name], USE_TIMEOUT_MS);
+      // The value, never the name: a custom theme whose stem is a built-in id shares that id's name.
+      const result = await runPfm(['theme', 'use', picked.theme.value], USE_TIMEOUT_MS);
       if (result.ok) {
         vscode.window.showInformationMessage(`Theme ${picked.label} set: new chats follow; run /theme in open chats`);
       } else {

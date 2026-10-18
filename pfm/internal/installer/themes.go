@@ -151,6 +151,22 @@ func (installer *engine) installThemes(ctx context.Context) {
 					continue
 				}
 			}
+			if source.bundled {
+				profile := themeFile{
+					key:   profileLedgerKey(name),
+					label: " profile copy",
+					path:  themesync.ProfilePath(installer.options.Home, name),
+				}
+				if skip := profile.inspect(name, ownership); skip != "" {
+					installer.skip(skip)
+					continue
+				}
+				if profile.exists && !profile.owned {
+					installer.ok("theme " + name + " profile copy exists at " + profile.path +
+						" and is not installer-owned; apply adopts it only when byte-identical to the install," +
+						" else skips the theme")
+				}
+			}
 			switch {
 			case claude.owned && claude.exists:
 				installer.ok("theme " + name + " currently installed; apply checks its source for updates")

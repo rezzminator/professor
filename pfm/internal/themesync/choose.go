@@ -252,6 +252,10 @@ func ListThemes(env Env) (ThemeList, error) {
 	return list, nil
 }
 
+// Typed is the name `pfm theme use` resolves to exactly this choice: its
+// Name, or its Value when a custom stem shares its Name with a built-in.
+func (choice ThemeChoice) Typed() string { return typedName(choice) }
+
 // typedName is how a user names a theme: its Name, or its Value when a
 // custom stem shares its Name with a built-in (that one needs `custom:`).
 func typedName(choice ThemeChoice) string {

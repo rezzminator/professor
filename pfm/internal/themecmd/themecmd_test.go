@@ -462,6 +462,24 @@ func TestListDrawsTheRowsErrorsAndMissingAccountsExactly(t *testing.T) {
 	}
 }
 
+func TestListNamesACustomThemeSharingABuiltinsNameByItsValue(t *testing.T) {
+	fake := fakeThemesync{list: themesync.ThemeList{
+		Current: "dark",
+		Themes: []themesync.ThemeChoice{
+			{Name: "dark", Value: "dark", Title: "dark", Kind: themesync.KindBuiltin, Current: true},
+			{Name: "dark", Value: "custom:dark", Title: "Dark Custom", Kind: themesync.KindCustom},
+		},
+	}}
+	var stdout, stderr bytes.Buffer
+	code := RunVerb(context.Background(), []string{"list"}, fake.deps(false), &stdout, &stderr)
+	want := "  NAME         VALUE        TITLE\n" +
+		"* dark         dark         dark\n" +
+		"  custom:dark  custom:dark  Dark Custom\n"
+	if code != 0 || stdout.String() != want {
+		t.Fatalf("exit %d\nstdout:\n%s\nwant:\n%s\nstderr: %s", code, stdout.String(), want, stderr.String())
+	}
+}
+
 // decodeObject is stdout decoded as a JSON object, its values left raw.
 func decodeObject(t *testing.T, stdout string) map[string]json.RawMessage {
 	t.Helper()

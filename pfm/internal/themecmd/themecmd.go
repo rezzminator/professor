@@ -350,7 +350,7 @@ func (run runner) list(args []string) int {
 func drawList(out io.Writer, list themesync.ThemeList) {
 	nameWidth, valueWidth, titleWidth := utf8.RuneCountInString("NAME"), utf8.RuneCountInString("VALUE"), 0
 	for _, choice := range list.Themes {
-		nameWidth = max(nameWidth, utf8.RuneCountInString(choice.Name))
+		nameWidth = max(nameWidth, utf8.RuneCountInString(choice.Typed()))
 		valueWidth = max(valueWidth, utf8.RuneCountInString(choice.Value))
 		titleWidth = max(titleWidth, utf8.RuneCountInString(choice.Title))
 	}
@@ -370,7 +370,7 @@ func drawList(out io.Writer, list themesync.ThemeList) {
 		if len(choice.Missing) > 0 {
 			note = "missing in " + strings.Join(choice.Missing, ", ")
 		}
-		row(mark, choice.Name, choice.Value, choice.Title, note)
+		row(mark, choice.Typed(), choice.Value, choice.Title, note)
 	}
 	for _, failure := range list.Errors {
 		fmt.Fprintf(out, "ERROR %s: %s\n", failure.Path, pyvalue.OneLine(failure.Error))

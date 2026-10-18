@@ -98,6 +98,12 @@ const chooseThemeList = `{"current":"dark","themes":[
  {"name":"dark","value":"dark","title":"dark","kind":"builtin","current":true},
  {"name":"light","value":"light","title":"light","kind":"builtin","current":false}],"errors":[]}`
 
+// chooseThemeListColliding has a custom theme whose stem is a built-in id:
+// only its value names it, the bare name being the built-in.
+const chooseThemeListColliding = `{"current":"dark","themes":[
+ {"name":"dark","value":"custom:dark","title":"Dark Custom","kind":"custom","current":false},
+ {"name":"dark","value":"dark","title":"dark","kind":"builtin","current":true}],"errors":[]}`
+
 const chooseThemeListWithErrors = `{"current":"dark","themes":[
  {"name":"dark","value":"dark","title":"dark","kind":"builtin","current":true}],
  "errors":[{"path":"~/.claude-b/themes","error":"permission denied"},
@@ -105,11 +111,12 @@ const chooseThemeListWithErrors = `{"current":"dark","themes":[
 
 // TestVSCodeChooseThemeRunsPfmListThenUseInALocalWindow: the command lists the
 // themes through `pfm theme list --json`, sets the picked one through
-// `pfm theme use {name}` and says so; a cancel runs nothing more; every
+// `pfm theme use {value}` (the one token naming exactly the picked theme)
+// and says so; a cancel runs nothing more; every
 // failure reaches the user in pfm's own words, never silently.
 func TestVSCodeChooseThemeRunsPfmListThenUseInALocalWindow(t *testing.T) {
 	t.Parallel()
-	const listCall, useCall = "theme list --json", "theme use dusk"
+	const listCall, useCall = "theme list --json", "theme use custom:dusk"
 	for _, tc := range []struct {
 		name      string
 		pick      string
@@ -123,6 +130,12 @@ func TestVSCodeChooseThemeRunsPfmListThenUseInALocalWindow(t *testing.T) {
 			name: "picking a theme sets it", pick: "Dusk", pfm: fakePfm{list: chooseThemeList},
 			calls: []string{listCall, useCall}, quickPick: true, kind: "info",
 			fragments: []string{"Theme Dusk set: new chats follow; run /theme in open chats"},
+		},
+		{
+			name: "a custom theme sharing a built-in's name is set by its value", pick: "Dark Custom",
+			pfm:   fakePfm{list: chooseThemeListColliding},
+			calls: []string{listCall, "theme use custom:dark"}, quickPick: true, kind: "info",
+			fragments: []string{"Theme Dark Custom set"},
 		},
 		{name: "a cancel runs nothing more", pfm: fakePfm{list: chooseThemeList}, calls: []string{listCall}, quickPick: true},
 		{

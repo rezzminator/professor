@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -181,6 +182,98 @@ func TestVscodeVerdictJudgesWindowChrome(t *testing.T) {
 	if verdict != VerdictInSync || detail != "" {
 		t.Errorf("only an old-generation chrome entry = %s %q, want IN-SYNC with no detail", verdict, detail)
 	}
+
+	// A window that failed at an earlier generation and has not opened since
+	// is no current failure: the row stays IN-SYNC and names it as waiting.
+	staleError := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{
+		"/w/a/a.code-workspace":     {Generation: 4, Keys: []string{"statusBar.background"}},
+		"/w/old/old.code-workspace": {Generation: 3, Error: "Peacock repaints"},
+	}}
+	verdict, detail = vscodeVerdict(staleError, true, 4, true, stale, "/s/vscode-ack.json")
+	wantDetail := "window chrome in 1 local workspace; window chrome old.code-workspace failed at generation 3 " +
+		"(Peacock repaints); retried when it next opens"
+	if verdict != VerdictInSync || detail != wantDetail {
+		t.Errorf("an old-generation error = %s %q, want IN-SYNC %q", verdict, detail, wantDetail)
+	}
+
+	// A new generation not yet acknowledged reads PENDING, never the old error.
+	verdict, _ = vscodeVerdict(staleError, true, 5, true, time.Second, "/s/vscode-ack.json")
+	if verdict != VerdictPending {
+		t.Errorf("an old error under a new generation = %s, want PENDING", verdict)
+	}
+}
+
+func TestVscodeChromeOfAGoneWorkspaceNoLongerCounts(t *testing.T) {
+	h := newHarness(t)
+	h.on()
+	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.rearm()
+	present := h.path("work/kept.code-workspace")
+	h.write("work/kept.code-workspace", "{}\n")
+	gone := h.path("work/moved.code-workspace")
+	ack := map[string]any{
+		"generation": 1, "appliedAt": "2026-10-16T03:00:00Z", "keys": []string{"terminal.background"}, "error": "",
+		"chrome": map[string]any{
+			present: map[string]any{"generation": 1, "keys": []string{"statusBar.background"}, "error": ""},
+			gone: map[string]any{
+				"generation": 1, "keys": []string{"statusBar.background"}, "error": "Peacock repaints",
+			},
+		},
+	}
+	raw, err := json.Marshal(ack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.write(".local/state/pfm/theme/vscode-ack.json", string(raw))
+	wantVerdict(t, h.status(), "vscode", VerdictInSync, "window chrome in 1 local workspace")
+
+	h.write("work/moved.code-workspace", "{}\n")
+	wantVerdict(t, h.status(), "vscode", VerdictError, "window chrome moved.code-workspace: Peacock repaints")
+}
+
+func TestOffNamesTheWorkspacesStillCarryingChrome(t *testing.T) {
+	h := newHarness(t)
+	h.on()
+	painted := h.path("work/painted.code-workspace")
+	h.write("work/painted.code-workspace", "{}\n")
+	gone := h.path("work/gone.code-workspace")
+	record := map[string]any{
+		painted: map[string]any{"generation": 1, "keys": map[string]any{
+			"statusBar.background": map[string]any{"value": "#1a1b26", "prior": nil},
+		}},
+		gone: map[string]any{"generation": 1, "keys": map[string]any{
+			"statusBar.background": map[string]any{"value": "#1a1b26", "prior": nil},
+		}},
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.write(".local/state/pfm/theme/vscode-chrome.json", string(raw))
+	off, err := Off(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, off, "vscode", VerdictPending, "window chrome stays in "+painted+" until")
+	if strings.Contains(row(t, off, "vscode").Detail, "gone.code-workspace") {
+		t.Errorf("off named a workspace file that no longer exists: %q", row(t, off, "vscode").Detail)
+	}
+
+	h.on()
+	h.write(".local/state/pfm/theme/vscode-chrome.json", "{}\n")
+	off, err = Off(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, off, "vscode", VerdictApplied, "the extension clears the colours")
+
+	h.on()
+	h.write(".local/state/pfm/theme/vscode-chrome.json", "not json")
+	off, err = Off(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, off, "vscode", VerdictError, "vscode-chrome.json")
 }
 
 func TestVscodeContractWithoutChromeReadsDriftUntilTheNextSync(t *testing.T) {

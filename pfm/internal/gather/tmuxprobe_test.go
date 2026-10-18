@@ -40,6 +40,42 @@ func TestShowGlobalOptionAndIdentityNudgeClassifyGoneServer(t *testing.T) {
 	}
 }
 
+func TestShowGlobalOptionTellsAnUnsetOptionFromAFailedRead(t *testing.T) {
+	for _, tc := range []struct {
+		name, stderr string
+		unset        bool
+	}{
+		{name: "tmux 3 refuses an unset user option", stderr: "invalid option: @host_accent", unset: true},
+		{name: "an older tmux says unknown", stderr: "unknown option: @host_accent", unset: true},
+		{name: "another option is not this one", stderr: "invalid option: @host_accent_x", unset: false},
+		{name: "any other failure", stderr: "lost server", unset: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binary := filepath.Join(t.TempDir(), "tmux")
+			script := "#!/bin/sh\necho '" + tc.stderr + "' >&2\nexit 1\n"
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			client := TmuxProbe{Binary: binary, TmuxTmpDir: t.TempDir()}
+			_, err := client.ShowGlobalOption(context.Background(), "cc-opt-1", "@host_accent")
+			if err == nil {
+				t.Fatal("ShowGlobalOption = nil error, want the failure")
+			}
+			if errors.Is(err, ErrOptionUnset) != tc.unset {
+				t.Fatalf(
+					"ShowGlobalOption error = %v, ErrOptionUnset %v, want %v",
+					err,
+					errors.Is(err, ErrOptionUnset),
+					tc.unset,
+				)
+			}
+			if !tc.unset && !strings.Contains(err.Error(), tc.stderr) {
+				t.Fatalf("ShowGlobalOption error = %q, want tmux's reason %q in it", err, tc.stderr)
+			}
+		})
+	}
+}
+
 func TestNudgeTitlesStringRoundTripsExplicitIdentity(t *testing.T) {
 	client, state, commands := newTitlesProbeFixture(t)
 	const socket = "cc-explicit-identity"

@@ -79,7 +79,7 @@ func (fake *fakeTmux) Show(_ context.Context, socket, name string) (string, erro
 	}
 	value, ok := options[name]
 	if !ok {
-		return "", fmt.Errorf("invalid option: %s", name)
+		return "", fmt.Errorf("invalid option: %s: %w", name, ErrTmuxOptionUnset)
 	}
 	return value, nil
 }
@@ -696,6 +696,35 @@ func TestChipsAreThemedOnAndRestoredExactlyOff(t *testing.T) {
 		if strings.HasPrefix(name, "@") {
 			t.Errorf("cc-b kept %s after off, want a server that carried no chip options clean", name)
 		}
+	}
+}
+
+func TestAChipReadThatFailsCapturesNoPriorSoOffNeverErasesTheValue(t *testing.T) {
+	h := newHarness(t)
+	for name, value := range userChips {
+		h.tmux.servers["cc-a"][name] = value
+	}
+	original := copyOptions(h.tmux.servers["cc-a"])
+	flaky := h.env
+	flaky.Tmux = flakyPriorTmux{fakeTmux: h.tmux, option: "@host_accent"}
+	report, err := On(context.Background(), flaky)
+	if err != nil {
+		t.Fatalf("On: %v", err)
+	}
+	wantVerdict(t, report, "tmux", VerdictError, "read @host_accent: tmux: server timed out")
+	if got, held := h.tmux.servers["cc-a"]["@pfm-theme-prior-@host_accent"]; held {
+		t.Errorf("a failed read of @host_accent captured the prior %q, want none", got)
+	}
+
+	h.sync(false)
+	if got := h.tmux.servers["cc-a"]["@pfm-theme-prior-@host_accent"]; got != "v:#00e5ff" {
+		t.Errorf("host accent prior once the read answers = %q, want v:#00e5ff", got)
+	}
+	if off, err := Off(context.Background(), h.env); err != nil || !off.OK() {
+		t.Fatalf("Off = %+v, %v, want every surface restored", off.Surfaces, err)
+	}
+	if got := h.tmux.servers["cc-a"]; !reflect.DeepEqual(got, original) {
+		t.Errorf("cc-a after off = %v, want its original %v", got, original)
 	}
 }
 

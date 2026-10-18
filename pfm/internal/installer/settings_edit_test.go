@@ -2,6 +2,7 @@ package installer
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +143,49 @@ func TestEditSettingsKeepsAKeyAnotherWriterAddedBetweenTheReadAndTheRename(t *te
 	if runs != 2 || !strings.Contains(string(content), `"chat": "wrote this"`) ||
 		!strings.Contains(string(content), `"theme": "custom:gold"`) {
 		t.Fatalf("apply ran %d times, file:\n%s\nwant the other writer's key kept and apply re-run once", runs, content)
+	}
+}
+
+func TestEditSettingsCreatesNothingWhenTheFileIsRemovedBeforeTheRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"theme":"dark","model":"opus"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := editSettingsRereading(path, func(document map[string]any) error {
+		document["theme"] = "custom:gold"
+		return nil
+	}, func(string) ([]byte, error) {
+		if err := os.Remove(path); err != nil { // the account is deleted while the edit is planned
+			return nil, err
+		}
+		return nil, os.ErrNotExist
+	})
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "was removed") {
+		t.Fatalf("err = %v, want one naming %s as removed during the edit", err, path)
+	}
+	if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("the edit recreated %s: stat err = %v", path, statErr)
+	}
+}
+
+func TestEditSettingsGivingUpOnABusyFileAsksForTheEditAgain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"theme":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rereads := 0
+	err := editSettingsRereading(path, func(document map[string]any) error {
+		document["theme"] = "custom:gold"
+		return nil
+	}, func(string) ([]byte, error) {
+		rereads++
+		return fmt.Appendf(nil, `{"theme":"dark","write":%d}`, rereads), nil
+	})
+	want := path + " changed under the edit 4 times in a row; nothing written, run it again"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	if content, _ := os.ReadFile(path); string(content) != `{"theme":"dark"}` {
+		t.Errorf("the busy file was rewritten:\n%s", content)
 	}
 }

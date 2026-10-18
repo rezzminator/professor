@@ -244,12 +244,39 @@ func (installer *engine) retireThemes(
 ) map[string]themeOwnershipRecord {
 	for _, key := range sortedThemeOwnershipNames(ownership) {
 		name, isProfile := themeLedgerOwner(key)
-		if source, listed := sources[name]; listed && (!isProfile || source.bundled) {
+		source, listed := sources[name]
+		if listed && (!isProfile || source.bundled) {
+			continue
+		}
+		if !listed && installer.retireBlockedBySelection(key, ownership[key].Path) {
 			continue
 		}
 		ownership = installer.removeOwnedTheme(ownershipPath, ownership, key, themeRetire)
 	}
 	return ownership
+}
+
+// retireBlockedBySelection reports, and so keeps, a retiring theme file some
+// account's settings.json still selects (`custom:{stem}`): deleting it would
+// leave that account on a theme that no longer exists. An account it cannot
+// read keeps the file too, reported. true when the file stays.
+func (installer *engine) retireBlockedBySelection(key, path string) bool {
+	label := themeLedgerLabel(key)
+	stem := strings.TrimSuffix(filepath.Base(path), ".json")
+	selecting, err := themesync.AccountsSelecting(installer.options.Home, themesync.CustomValue(stem))
+	if err != nil {
+		installer.skip("theme " + label + " retire check failed, left in place: " + err.Error())
+		return true
+	}
+	if len(selecting) == 0 {
+		return false
+	}
+	installer.skip(
+		"theme " + label + " is no longer in the manifest but " + strings.Join(selecting, ", ") +
+			" still selects " + themesync.CustomValue(stem) +
+			"; left in place: select another theme with `pfm theme use`, then install again to retire it",
+	)
+	return true
 }
 
 // removeOwnedTheme removes one ledger record and its file. A file modified

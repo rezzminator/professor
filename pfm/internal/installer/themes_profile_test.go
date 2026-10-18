@@ -258,6 +258,71 @@ func TestStaleOwnedThemeIsRetiredAndAnEditedOneStaysReported(t *testing.T) {
 	}
 }
 
+func TestRetiringAThemeAnAccountStillSelectsKeepsItAndNamesTheAccount(t *testing.T) {
+	t.Parallel()
+	host := newProfileHost(t)
+	host.seed(map[string]string{"plain-lagoon": plainProfile})
+	host.run(ModeApply)
+	copyOf := func(name string) string { return themesync.ProfilePath(host.home, name) }
+	host.own("chosen", host.claudeFile("chosen"), "chosen palette\n")
+	host.own("profile:chosen", copyOf("chosen"), "chosen profile\n")
+	host.own("unchosen", host.claudeFile("unchosen"), "unchosen palette\n")
+	settings := filepath.Join(host.home, ".cc", "1", "settings.json")
+	writeFixture(t, filepath.Join(host.home, ".claude", "settings.json"), `{"theme":"dark"}`+"\n")
+	writeFixture(t, settings, `{"theme":"custom:chosen"}`+"\n")
+	settings, err := filepath.EvalSymlinks(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "skip    theme chosen is no longer in the manifest but " + settings + " still selects custom:chosen;" +
+		" left in place: select another theme with `pfm theme use`, then install again to retire it"
+
+	_, preview := host.run(ModeDryRun)
+	if !strings.Contains(preview, want) || strings.Contains(preview, "retire theme chosen ") {
+		t.Fatalf("the preview must name the selecting account and preview no retirement of chosen:\n%s", preview)
+	}
+
+	_, output := host.run(ModeApply)
+
+	for _, path := range []string{host.claudeFile("chosen"), copyOf("chosen")} {
+		if absent(t, path) {
+			t.Errorf("a theme an account selects was retired: %s removed", path)
+		}
+	}
+	if !strings.Contains(output, want) {
+		t.Fatalf("the kept theme was not reported naming the selecting account:\n%s", output)
+	}
+	if !absent(t, host.claudeFile("unchosen")) {
+		t.Errorf("an unselected stale theme was kept")
+	}
+	ledger := host.ledger()
+	for _, key := range []string{"chosen", "profile:chosen"} {
+		if _, owned := ledger[key]; !owned {
+			t.Errorf("ledger dropped %s while its file stays", key)
+		}
+	}
+}
+
+func TestRetireKeepsTheThemeWhenAnAccountCannotBeRead(t *testing.T) {
+	t.Parallel()
+	host := newProfileHost(t)
+	host.seed(map[string]string{"plain-lagoon": plainProfile})
+	host.run(ModeApply)
+	host.own("stale", host.claudeFile("stale"), "stale palette\n")
+	if err := os.MkdirAll(filepath.Join(host.home, ".cc", "9", "settings.json"), 0o700); err != nil {
+		t.Fatal(err) // a settings.json that is a directory: no read of it can succeed
+	}
+
+	_, output := host.run(ModeApply)
+
+	if absent(t, host.claudeFile("stale")) {
+		t.Fatalf("a theme was retired although an account could not be read:\n%s", output)
+	}
+	if !strings.Contains(output, "skip    theme stale retire check failed, left in place: ") {
+		t.Fatalf("the failed selection check was not reported:\n%s", output)
+	}
+}
+
 func TestByteIdenticalUnownedThemeIsAdoptedAndADifferingOneIsKept(t *testing.T) {
 	t.Parallel()
 	host := newProfileHost(t)
@@ -299,6 +364,46 @@ func TestByteIdenticalUnownedThemeIsAdoptedAndADifferingOneIsKept(t *testing.T) 
 	}
 	if _, second := host.run(ModeApply); !strings.Contains(second, "theme plain-lagoon unchanged at") {
 		t.Fatalf("an adopted theme is not unchanged on the next run:\n%s", second)
+	}
+}
+
+func TestPreviewNamesAnUnownedProfileCopyTheApplySkipsOver(t *testing.T) {
+	t.Parallel()
+	host := newProfileHost(t)
+	host.seed(map[string]string{"plain-lagoon": plainProfile})
+	copyPath := themesync.ProfilePath(host.home, "plain-lagoon")
+	writeFixture(t, copyPath, "somebody else's profile\n")
+
+	_, preview := host.run(ModeDryRun)
+
+	if !strings.Contains(preview, "ok      theme plain-lagoon profile copy exists at "+copyPath+
+		" and is not installer-owned; apply adopts it only when byte-identical to the install, else skips the theme") {
+		t.Fatalf("the preview did not name the unowned profile copy the apply will skip over:\n%s", preview)
+	}
+	_, output := host.run(ModeApply)
+	if !strings.Contains(output, "skip    theme plain-lagoon profile copy already exists but is not installer-owned;"+
+		" left in place at "+copyPath) {
+		t.Fatalf("the apply did not skip the theme its preview warned about:\n%s", output)
+	}
+	if got := readFixture(t, copyPath); got != "somebody else's profile\n" {
+		t.Fatalf("the unowned profile copy was overwritten: %q", got)
+	}
+}
+
+func TestPreviewSkipsAThemeWhoseOwnedProfileCopyWasEdited(t *testing.T) {
+	t.Parallel()
+	host := newProfileHost(t)
+	host.seed(map[string]string{"plain-lagoon": plainProfile})
+	host.run(ModeApply)
+	copyPath := themesync.ProfilePath(host.home, "plain-lagoon")
+	writeFixture(t, copyPath, "the user's own edit\n")
+	want := "skip    theme plain-lagoon profile copy locally modified; left in place at " + copyPath
+
+	_, preview := host.run(ModeDryRun)
+	_, output := host.run(ModeApply)
+
+	if !strings.Contains(preview, want) || !strings.Contains(output, want) {
+		t.Fatalf("preview and apply must both skip the edited profile copy\npreview:\n%s\napply:\n%s", preview, output)
 	}
 }
 

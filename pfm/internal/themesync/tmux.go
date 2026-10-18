@@ -138,7 +138,10 @@ func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 	for _, option := range options {
 		if isTmuxChip(option.Name) {
 			if !chipped {
-				commands = s.tmuxCaptureChip(ctx, socket, option.Name, commands)
+				var err error
+				if commands, err = s.tmuxCaptureChip(ctx, socket, option.Name, commands); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -167,17 +170,29 @@ func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 }
 
 // tmuxCaptureChip appends the command keeping one chip option's value, unless
-// a prior of it is already held. A failed read of the option, the server
-// having proved alive, is the option unset.
-func (s *session) tmuxCaptureChip(ctx context.Context, socket, name string, commands [][]string) [][]string {
-	if prior, err := s.servers.Show(ctx, socket, tmuxPriorName(name)); err == nil && prior != "" {
-		return commands
+// a prior of it is already held. Only tmux's answer that the option is unset
+// (ErrTmuxOptionUnset) captures the unset prior; any other failed read, of the
+// option or of its prior, captures nothing and is the server's error, so an
+// off never unsets a value it failed to read.
+func (s *session) tmuxCaptureChip(
+	ctx context.Context, socket, name string, commands [][]string,
+) ([][]string, error) {
+	prior, err := s.servers.Show(ctx, socket, tmuxPriorName(name))
+	switch {
+	case err == nil && prior != "":
+		return commands, nil
+	case err != nil && !errors.Is(err, ErrTmuxOptionUnset):
+		return commands, fmt.Errorf("tmux %s: read %s: %w", socket, tmuxPriorName(name), err)
 	}
 	captured := tmuxPriorUnset
-	if current, err := s.servers.Show(ctx, socket, name); err == nil {
+	current, err := s.servers.Show(ctx, socket, name)
+	switch {
+	case err == nil:
 		captured = tmuxPriorValue(current)
+	case !errors.Is(err, ErrTmuxOptionUnset):
+		return commands, fmt.Errorf("tmux %s: read %s: %w", socket, name, err)
 	}
-	return append(commands, []string{tmuxSetOption, tmuxGlobal, tmuxPriorName(name), captured})
+	return append(commands, []string{tmuxSetOption, tmuxGlobal, tmuxPriorName(name), captured}), nil
 }
 
 const (

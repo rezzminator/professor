@@ -157,3 +157,56 @@ func TestStepLineKeepsAnErrorOnOneLine(t *testing.T) {
 		t.Fatalf("stepLine = %q", got)
 	}
 }
+
+// printAndRun prints a plan of units, then executes it: the dry-run text, the
+// result lines and the exit code.
+func printAndRun(t *testing.T, units []Unit) (printed, executed string, code int) {
+	t.Helper()
+	plan := Plan{Units: units, Last: "the worker"}
+	var plain, run bytes.Buffer
+	plan.Print(&plain)
+	code = plan.Execute(context.Background(), &run)
+	return plain.String(), run.String(), code
+}
+
+// assertStaysStopped proves the plan and the result lines both name unit as
+// staying stopped, with the state it was found in.
+func assertStaysStopped(t *testing.T, printed, executed, unit, state string) {
+	t.Helper()
+	want := unit + "  stays stopped (was not running before: " + state + ")"
+	if !strings.Contains(printed, want) {
+		t.Fatalf("the plan does not name %q:\n%s", want, printed)
+	}
+	if !strings.Contains(executed, want) {
+		t.Fatalf("the result lines do not name %q:\n%s", want, executed)
+	}
+}
+
+func TestPrintMarksEachStartAsARestartOfAUnitThatWasUp(t *testing.T) {
+	var order []string
+	unit := recordedUnit(&order, FamilyServices, "service", true, nil, nil)
+	unit.Before = "ActiveState=active"
+	printed, _, _ := printAndRun(t, []Unit{unit})
+	if !strings.Contains(printed, "service  restart (was up: ActiveState=active)") {
+		t.Fatalf("the start line does not say the unit was up:\n%s", printed)
+	}
+}
+
+func TestExecuteNeverStopsOrStartsAUnitThatWasDown(t *testing.T) {
+	never := func(context.Context) (string, error) {
+		t.Fatal("a unit that was down before was stopped or started")
+		return "", nil
+	}
+	down := Unit{
+		Family: FamilyServices, Name: "systemd pfm-x.service", FoundBy: "test", Before: "ActiveState=inactive",
+		StaysStopped: true, Stop: never, Start: never,
+	}
+	printed, executed, code := printAndRun(t, []Unit{down})
+	if code != 0 {
+		t.Fatalf("Execute = %d, want 0:\n%s", code, executed)
+	}
+	assertStaysStopped(t, printed, executed, "systemd pfm-x.service", "ActiveState=inactive")
+	if strings.Contains(printed, "stop   1") || strings.Contains(printed, "start  1") {
+		t.Fatalf("the plan numbers a unit that stays stopped as a step:\n%s", printed)
+	}
+}

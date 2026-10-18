@@ -1,8 +1,9 @@
 // Package restart owns `pfm restart`: it finds every live chat, every helper a
 // chat carries, Herdr, every service pfm installs or relies on and every other
-// pfm process on this host, stops them downstream first, then starts everything
-// except the chats back up upstream first. Every step is verified and reported
-// on its own line; a failed step is named and the rest still run.
+// pfm process on this host, stops them downstream first, then starts back up,
+// upstream first, only what was running before: never a chat, never a unit
+// found stopped. Every step is verified and reported on its own line; a
+// failed step is named and the rest still run.
 package restart
 
 import (
@@ -36,7 +37,7 @@ type EndedChat struct {
 }
 
 // Unit is one process or service the restart stops and, unless Start is nil,
-// starts again. Stop and Start each verify their own outcome: the detail they
+// starts again; one that StaysStopped it does neither. Stop and Start each verify their own outcome: the detail they
 // return is what was seen, never what was hoped.
 type Unit struct {
 	Family   string
@@ -47,7 +48,22 @@ type Unit struct {
 	Stop     func(context.Context) (string, error)
 	Start    func(context.Context) (string, error)
 	Chat     *EndedChat
+	// Before is the unit's state when the plan was built, as its manager
+	// answered it.
+	Before string
+	// StaysStopped marks a unit that was not running when the plan was
+	// built: the restart neither stops nor starts it, and names it.
+	StaysStopped bool
 }
+
+// staysStopped is the line that names a unit the restart leaves stopped, in
+// the plan and in the result lines alike.
+func (unit *Unit) staysStopped() string {
+	return "stays stopped (was not running before: " + unit.Before + ")"
+}
+
+// restarts reports whether the start phase starts unit again.
+func (unit *Unit) restarts() bool { return unit.Start != nil && !unit.StaysStopped }
 
 // Finding is how one family was looked for: what the enumerator saw, or why
 // it could not look. A failed look is never "nothing to stop".
@@ -68,7 +84,8 @@ type Plan struct {
 
 // Print writes the whole ordered plan and changes nothing.
 func (plan Plan) Print(w io.Writer) {
-	fmt.Fprintln(w, "restart plan: stop downstream first, then start upstream first; chats are not brought back")
+	fmt.Fprintln(w, "restart plan: stop downstream first, then start upstream first only what was running before; "+
+		"chats are not brought back")
 	for _, finding := range plan.Findings {
 		if finding.Err != nil {
 			fmt.Fprintf(w, "find   %-14s FAILED  %v\n", finding.Family, finding.Err)
@@ -76,27 +93,46 @@ func (plan Plan) Print(w io.Writer) {
 		}
 		fmt.Fprintf(w, "find   %-14s ok      %s\n", finding.Family, finding.Detail)
 	}
-	for index, unit := range plan.Units {
-		fmt.Fprintf(w, "stop  %2d  %-14s %s\n", index+1, unit.Family, unit.Name)
-		fmt.Fprintf(w, "          found: %s\n          stop:  %s\n", unit.FoundBy, unit.StopHow)
-	}
 	step := 0
-	for index := len(plan.Units) - 1; index >= 0; index-- {
-		unit := plan.Units[index]
-		if unit.Start == nil {
+	for index := range plan.Units {
+		unit := &plan.Units[index]
+		if unit.StaysStopped {
 			continue
 		}
 		step++
-		fmt.Fprintf(w, "start %2d  %-14s %s\n          start: %s\n", step, unit.Family, unit.Name, unit.StartHow)
+		fmt.Fprintf(w, "stop  %2d  %-14s %s\n", step, unit.Family, unit.Name)
+		fmt.Fprintf(w, "          found: %s\n          stop:  %s\n", unit.FoundBy, unit.StopHow)
+	}
+	step = 0
+	for index := len(plan.Units) - 1; index >= 0; index-- {
+		unit := &plan.Units[index]
+		if !unit.restarts() {
+			continue
+		}
+		step++
+		was := "restart (was up)"
+		if unit.Before != "" {
+			was = "restart (was up: " + unit.Before + ")"
+		}
+		fmt.Fprintf(w, "start %2d  %-14s %s  %s\n          start: %s\n",
+			step, unit.Family, unit.Name, was, unit.StartHow)
 	}
 	if step == 0 {
 		fmt.Fprintln(w, "start     nothing found to start again")
+	}
+	for index := range plan.Units {
+		unit := &plan.Units[index]
+		if unit.StaysStopped {
+			fmt.Fprintf(w, "keep      %-14s %s  %s\n          found: %s\n",
+				unit.Family, unit.Name, unit.staysStopped(), unit.FoundBy)
+		}
 	}
 	fmt.Fprintf(w, "last      %-14s %s\n", FamilyPFM, plan.Last)
 }
 
 // Execute runs the plan: every stop in order, then every start in reverse,
-// one result line each, then the chats it ended and the exit marker. It
+// one result line each, one line per unit that stays stopped, untouched, then
+// the chats it ended and the exit marker. It
 // returns 1 when any finding or step failed, 0 otherwise.
 func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 	failed := 0
@@ -107,7 +143,11 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 		}
 	}
 	var ended []EndedChat
-	for _, unit := range plan.Units {
+	for index := range plan.Units {
+		unit := &plan.Units[index]
+		if unit.StaysStopped {
+			continue
+		}
 		detail, err := unit.Stop(ctx)
 		if !plan.report(w, "stop ", unit, detail, err) {
 			failed++
@@ -118,13 +158,19 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 		}
 	}
 	for index := len(plan.Units) - 1; index >= 0; index-- {
-		unit := plan.Units[index]
-		if unit.Start == nil {
+		unit := &plan.Units[index]
+		if !unit.restarts() {
 			continue
 		}
 		detail, err := unit.Start(ctx)
 		if !plan.report(w, "start", unit, detail, err) {
 			failed++
+		}
+	}
+	for index := range plan.Units {
+		unit := &plan.Units[index]
+		if unit.StaysStopped {
+			fmt.Fprintf(w, "keep   %-14s %s  %s\n", unit.Family, unit.Name, unit.staysStopped())
 		}
 	}
 	fmt.Fprintf(w, "restart: ended %d chat(s)\n", len(ended))
@@ -144,7 +190,7 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 }
 
 // report writes one step's result line and says whether it succeeded.
-func (plan Plan) report(w io.Writer, phase string, unit Unit, detail string, err error) bool {
+func (plan Plan) report(w io.Writer, phase string, unit *Unit, detail string, err error) bool {
 	if err != nil {
 		fmt.Fprintf(w, "%s  %-14s %s  FAILED  %s\n", phase, unit.Family, unit.Name, stepLine(err.Error()))
 		return false

@@ -11,7 +11,8 @@ import (
 
 func unitNames(units []Unit) []string {
 	names := make([]string, 0, len(units))
-	for _, unit := range units {
+	for index := range units {
+		unit := &units[index]
 		names = append(names, unit.Family+": "+unit.Name)
 	}
 	return names

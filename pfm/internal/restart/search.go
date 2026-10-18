@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -156,7 +157,9 @@ func (finder *discoverer) searchUnits(
 	return append(units, containers...), append(details, detail), nil
 }
 
-// dockerUnits lists every Docker container whose name holds searxng.
+// dockerUnits lists every Docker container whose name holds searxng, each
+// with its state read by docker inspect: a stopped one stays stopped, and one
+// whose state cannot be read fails the find.
 func (finder *discoverer) dockerUnits(ctx context.Context, probe func(context.Context) error) ([]Unit, string, error) {
 	binary, err := finder.deps.Runner.LookPath("docker")
 	if errors.Is(err, exec.ErrNotFound) {
@@ -176,15 +179,25 @@ func (finder *discoverer) dockerUnits(ctx context.Context, probe func(context.Co
 	var units []Unit
 	for _, name := range strings.Fields(string(result.Stdout)) {
 		container := dockerContainer{serviceTools: tools, binary: binary, name: name, probe: probe}
-		units = append(units, Unit{
+		running, err := container.running(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		before := "State.Running=" + strconv.FormatBool(running)
+		unit := Unit{
 			Family:   FamilySearch,
 			Name:     "docker container " + name,
-			FoundBy:  "docker ps --all --filter name=" + searchName,
+			FoundBy:  "docker ps --all --filter name=" + searchName + ", docker inspect " + before,
 			StopHow:  "docker stop " + name + "; verified: State.Running=false",
 			StartHow: "docker start " + name + "; verified: State.Running=true and the search URL answers",
 			Stop:     container.stop,
 			Start:    container.start,
-		})
+			Before:   before,
+		}
+		if !running {
+			unit.StaysStopped, unit.Stop, unit.Start = true, nil, nil
+		}
+		units = append(units, unit)
 	}
 	return units, fmt.Sprintf("docker ps: %d container(s) named %s", len(units), searchName), nil
 }

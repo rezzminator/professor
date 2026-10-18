@@ -1,9 +1,0 @@
-{
- "args": [
-  "counts",
-  "{CLAUDE}",
-  "--last",
-  "2"
- ],
- "dirs": []
-}

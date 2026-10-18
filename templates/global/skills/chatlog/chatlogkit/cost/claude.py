@@ -1,5 +1,5 @@
 """The timeline of a Claude Code transcript: one row per model call, priced from the usage block the
-transcript records (the replay `pfm tokens --timeline` made, native)."""
+transcript records."""
 import json
 import math
 import os

@@ -16,7 +16,7 @@ func TestTokensCLIEntry(t *testing.T) {
 	jailTest(t)
 	var out, errs bytes.Buffer
 	if code := run([]string{"tokens", "--help"}, &out, &errs); code != 0 ||
-		!strings.Contains(out.String(), "--codex") || !strings.Contains(out.String(), "--timeline") {
+		!strings.Contains(out.String(), "--codex") || !strings.Contains(out.String(), "--flight") {
 		t.Fatalf("tokens --help code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
 	}
 	out.Reset()

@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: chatlog
-description: 'Digests and prices agent runs, and is the transcript readers'' kit — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, chat name or flight: `pfm transcript show|counts|types|locate|agents`, `pfm tokens`, `pfm model-cost`, and `chatlog.py prep|read|find|note|report|verify|prompts|writes|runs`. Returns a digest, a spend report or a verified row report. Faults, an audit or "did it really do Y" → transcript-investigator; static context → /context-meter.'
+description: 'Digests and prices agent runs, and is the transcript readers'' kit — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, chat name or flight: `pfm transcript show|locate|agents`, `pfm tokens`, `pfm model-cost`, and `chatlog.py prep|read|find|note|report|verify|prompts|writes|runs`. Returns a digest, a spend report or a verified row report. Faults, an audit or "did it really do Y" → transcript-investigator; static context → /context-meter.'
 ---
 
 # chatlog
@@ -25,8 +25,6 @@ Name lookup reads the last 256 KiB of each session; a title outside that tail is
 | Verb | Returns |
 | --- | --- |
 | `show` | The digest: a header, one line per event, then the `SKIPPED` line |
-| `counts` | The header, then per tool for the calls kept by the filters: calls, errors, total and largest result, calls without a result |
-| `types` | Record types and dispositions (rendered, header, skipped) inside `--lines`, counted; the three counts sum to `RECORDS`. Other filters are refused |
 | `locate` | The resolved path |
 | `agents` | A session's sub-agents, including nested `subagents/workflows/wf_*/` files, oldest first: id · agent type · description · first → last UTC timestamp · records · size · calls; `META ERROR {reason}` where its `.meta.json` is missing or unreadable; `AGENTS 0 — no subagents directory at {path}` for a missing directory; a failed stat or enumeration exits 1 |
 
@@ -36,7 +34,6 @@ An OpenCode session is rows in its store, not a file, and the digest names what 
 
 - `STORE {db}#{session id} · N records: M messages, P parts (L = record number in store order; no file lines or bytes)` replaces `FILE`.
 - `L{n}` and `--lines` are record numbers: each message in creation order, then its parts; a part with no message comes last as `part (no message)`. No record carries a byte size.
-- `types` counts `message.user` and `message.assistant` (header records), `message.assistant (error)`, `part.{type}` and `part.text (synthetic)`.
 - `agents` lists its child sessions, every depth: id · agent · title · span · records · calls; `AGENTS 0 — no child session of {id} in {store}` when it has none.
 - A failed assistant message reads `NOTE ENGINE ERROR — {name}: {message}`; an attached file reads `[file {name}]` in its prompt.
 - A locator whose store is missing fails as `cannot read {locator}: no opencode store at {db}`, one whose store lacks the session as `cannot read {locator}: no such opencode session {id} in {db}` (`locate` included), a session with no records as `empty transcript: {locator}`, each exit 1. An id or title with no store to search is `NOT FOUND`.
@@ -81,9 +78,9 @@ Shape: `--text N` caps a prompt or reply (500 by default; 0 prints it whole), `-
 - Heaviest single runs: section `9 · TOP {N} SINGLE RUNS`; heaviest agent groups: section `8`; both carry each row's cache TTL (legend in the README's `--flight` section).
 - One chat and its agents: `--family <title|agent-type|session-id-prefix>`, or `--session <sid-prefix>` when a sub-agent orchestrated the work and no chat title exists.
 - Codex threads: `--codex` — one row per rollout thread, sub-agents attributed from `session_meta.source`.
-- OpenCode sessions: `--opencode` — one row per session, each assistant message priced from its own token record; `OC USD`, OpenCode's own recorded cost, stands beside `EST USD`, never in its place. It refuses every Claude-only flag and mode (`--codex`, `--flight`, `--timeline`, `--root`, `--family`, `--session`, `--out`, `--view`, `--briefs` and kin, exit 2); a session's messages count only when created inside the window.
+- OpenCode sessions: `--opencode` — one row per session, each assistant message priced from its own token record; `OC USD`, OpenCode's own recorded cost, stands beside `EST USD`, never in its place. It refuses every Claude-only flag and mode (`--codex`, `--flight`, `--root`, `--family`, `--session`, `--out`, `--view`, `--briefs` and kin, exit 2); a session's messages count only when created inside the window.
 - One flight's agents: `--flight <dir>` — see below.
-- One agent run call by call: `--timeline <transcript.jsonl>` (repeatable) — Claude transcripts only, a Codex rollout prints `NO CALLS`; whole file, no window; a header (agent type, models, effort, calls, wall, peak context, output, tool errors, results over 20 KB, USD) then one row per model call with its clock, wait since the last tool result, context, output, price and each tool it issued (`name: target`, result chars, `ERR`, wait).
+- One agent run call by call: `chatlog.py prep TARGET` and its `timeline.txt` (the kit, below): a clock, the wait since the last tool result, context, output and price per model call, with the `TOTALS`, `MODEL-WAIT` and `COSTLIEST` rows.
 - The full dataset for a page or a diff: `--out FILE` (JSON); the per-project page data: `--view FILE` (`--host-label NAME` sets the host it shows); every brief and what its agent did: `--briefs FILE` (`--family-rx RE` keeps the families whose titles match, case ignored).
 - `--root DIR` (repeatable) reads these Claude roots in place of pfm's; `--codex-root DIR` reads this one Codex home in place of every Codex home pfm resolves; `--opencode-root DIR` reads the `opencode.db` in this directory in place of pfm's OpenCode roots; `--top N` sets the rows per section (12).
 

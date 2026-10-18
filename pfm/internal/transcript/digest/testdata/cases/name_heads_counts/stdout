@@ -1,8 +1,0 @@
-TRANSCRIPT claude · aaaaaaaa-1111-2222-3333-444444444444 · model ?
-FILE {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444.jsonl · 406 bytes · 3 records · cwd /work/repo (shown as ./)
-NAME Audit Desk
-SPAN 2026-09-29 20:00:00Z → 20:00:00Z · 0s wall
-CALLS 0, 0 err, 0 without result: none
-TOOL | CALLS | ERR | RESULT TOTAL | RESULT MAX | NO RESULT
-EVENTS prompt 1
-SKIPPED 0 records | HEADER 2: agent-name 1 · custom-title 1

@@ -1,4 +1,0 @@
-TIMELINE main · sonnet-5 · effort medium · 1 calls · wall 60s · peak ctx 2.0K · out 0 tok · tool errors 0 · results >20KB 0 · $0.0040 · {TMP}/price-fork-6Erkhj/-tmp-price-proj/sess-a.jsonl
-  #1 09:01:00 after - · ctx 2.0K · out 0 · $0.0040 · (no tools)
-pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
-data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once within the ownership scan (named origin, else first unmarked holder in path order)

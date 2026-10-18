@@ -9,7 +9,7 @@ ROW = re.compile(r"^  #\d+ \S+ after (\S+) · ctx \S+ · out \d+ · (\$[0-9.]+|n
 
 
 class Gaps:
-    """The data gaps one timeline run found, printed as `pfm tokens --timeline` prints them."""
+    """The data gaps one timeline run found."""
 
     def __init__(self, book, scan, extra=()):
         self.book, self.scan, self.extra = book, scan, list(extra)

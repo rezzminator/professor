@@ -1,4 +1,4 @@
-"""Number and text forms the timeline prints, those of `pfm tokens --timeline`."""
+"""Number and text forms the timeline prints."""
 import math
 import re
 from datetime import datetime, timezone

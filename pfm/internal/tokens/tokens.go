@@ -111,7 +111,6 @@ type auditor struct {
 	now          float64
 	since        float64
 	hours        float64
-	timelineMode bool
 	claudeRoots  []string
 	codexHomes   []string
 	openCodeRoot []string
@@ -151,7 +150,7 @@ func newAuditor(opts Options, parsed flags, host string) *auditor {
 	now := float64(opts.Clock.Now().UnixMilli())
 	a := &auditor{
 		opts: parsed, stdout: opts.Stdout, stderr: opts.Stderr, loc: opts.Location, host: host, now: now,
-		since: now - float64(parsed.hours*3600e3), hours: parsed.hours, timelineMode: len(parsed.timeline) != 0,
+		since: now - float64(parsed.hours*3600e3), hours: parsed.hours,
 		claudeRoots: opts.ClaudeRoots, codexHomes: opts.CodexHomes, openCodeRoot: opts.OpenCodeRoots,
 		ledgerDir: opts.LedgerDir,
 		scan:      newScanState(), global: newGlobals(),
@@ -164,9 +163,6 @@ func newAuditor(opts Options, parsed flags, host string) *auditor {
 	}
 	if parsed.opencodeRoot != "" {
 		a.openCodeRoot = []string{parsed.opencodeRoot}
-	}
-	if a.timelineMode {
-		a.since = 0
 	}
 	return a
 }
@@ -200,9 +196,6 @@ func run0(ctx context.Context, opts Options) (int, error) {
 	}
 	if parsed.opencode {
 		return a.runOpenCode(ctx)
-	}
-	if a.timelineMode {
-		return a.runTimeline()
 	}
 	if err := a.collectRuns(); err != nil {
 		return 1, err

@@ -54,7 +54,8 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 	}{
 		{name: "auto at medium", payload: withSession, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰ medium AUTO │ ", colour: cEffort, barColour: cGood},
 		{name: "auto at low", payload: withSession, file: sess1, content: state("auto", `"low"`), want: "◆ Opus 4·▰ low AUTO │ ", colour: cEffort, barColour: cWindow},
-		{name: "auto before the first request", payload: withSession, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·effort AUTO │ ", colour: cEffort},
+		{name: "auto before the first request shows the session's level", payload: withSession, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·▰▰▰ high AUTO │ ", colour: cEffort, barColour: cWarn},
+		{name: "auto before the first request with no session level", payload: withoutEffort, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·effort AUTO │ ", colour: cEffort},
 		{name: "the main chat's own level", payload: withSession, file: sess1, content: state("model", `"high"`), want: "◆ Opus 4·▰▰▰ high · model's pick │ ", colour: cEffort, barColour: cWarn},
 		{name: "the main chat at max", payload: withSession, file: sess1, content: state("model", `"max"`), want: "◆ Opus 4·▰▰▰▰▰ max · model's pick │ ", colour: cEffort, barColour: cBad},
 		{name: "the user's pin", payload: withSession, file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·▰▰▰▰ xhigh · your /effort │ ", colour: cEffort, barColour: cElapsed},

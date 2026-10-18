@@ -109,7 +109,7 @@ When the auto-effort-control plugin keeps a state file for the session, the main
 | State | Effort reads |
 | --- | --- |
 | `auto` with `reason` exactly `{N} failing test runs`, N a positive integer without leading zeros: the plugin's escalation | `▰▰▰▰ xhigh AUTO · raised: 2 failing tests` |
-| `auto` with any other `reason`: the plugin's automatic rules | `▰▰▰ high AUTO`, the file's level; `effort AUTO` before the session's first request |
+| `auto` with any other `reason`: the plugin's automatic rules | `▰▰▰ high AUTO`, the file's level; before the first request (a fresh session or a `/reload-plugins`) the file holds no level, so the level Claude Code reports for the session shows instead; `effort AUTO` only when neither has one |
 | `model`: the main chat's own `set_effort` level | `▰▰▰ high · model's pick` |
 | `pin`: the user's `/effort` | `▰▰▰ high · your /effort` |
 | `off`: auto-effort-control off, or the model not steered | `effort off`, no bar and no level |

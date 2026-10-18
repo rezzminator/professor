@@ -49,7 +49,14 @@ func effortSuffix(data input, state autoEffortState) string {
 	case state.mode == "off":
 		return joint + cEffort + "effort off" + reset
 	case state.mode == "auto":
-		label := paintedEffort(state.level, cEffort)
+		// Before auto-effort-control's first request (a fresh session or a
+		// /reload-plugins) its state holds no level: the level Claude Code
+		// reports for the session is the one in effect, so it shows instead.
+		level := state.level
+		if level == "" {
+			level = data.Effort.Level
+		}
+		label := paintedEffort(level, cEffort)
 		if label == "" {
 			label = cEffort + "effort"
 		}

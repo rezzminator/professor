@@ -6,14 +6,14 @@ import tempfile
 import time
 import traceback
 
-from . import cost, locate, rows
+from . import census, cost, locate, rows
 from .digest import EVENT_LINE, Request, build, clean
 from .engines import Failure, load as load_jsonl, opencode
 from .labels import MECH, mechanical
 from .rows import die, opt
 
 KIT_DIR = os.environ.get("CHATLOG_KIT_DIR") or os.path.join(tempfile.gettempdir(), "chatlog-kit")
-USAGE = """chatlog kit: the mechanics of reading one transcript, so a reader only reads.
+USAGE = """chatlog kit: the mechanics of reading transcripts, so a reader only reads and a count is code.
 
   prep TARGET [--lines A-B] [--dir DIR] [--window BYTES] [--reader-max BYTES]
       digest, clean, label every mechanical line, plan the windows; prints the plan
@@ -27,6 +27,11 @@ USAGE = """chatlog kit: the mechanics of reading one transcript, so a reader onl
   writes DIR              every file the run wrote, and its state on disk now
   runs --type T [--since 7d] [--project SUBSTR] | --session S
                           runs of one agent type across projects, or a session's sub-agents
+  census --type T [--since 30d] [--project SUBSTR] | --session S | PATH...  [--tree] [--out F]
+                          one TSV row per transcript (calls, errors, denials, compactions,
+                          spawns, USD, final line), a TOTAL row, FAILED per unreadable one,
+                          GAPS per transcript whose dollars carry data gaps;
+                          --tree the spawn tree with calls and USD rolled up per branch
 
 TARGET is anything the locator resolves: a path, a session id or prefix, an agent id, a chat name,
 a Codex agent path, an OpenCode id, title or {store}#{session}. Rows are tab-separated:
@@ -144,7 +149,7 @@ def split_plan(dig, rmax):
 
 def main(argv):
     verbs = {"prep": prep, "read": rows.read, "find": rows.find, "note": rows.note, "report": rows.report,
-             "verify": rows.verify, "prompts": rows.prompts, "writes": rows.writes, "runs": locate.runs}
+             "verify": rows.verify, "prompts": rows.prompts, "writes": rows.writes, "runs": locate.runs, "census": census.census}
     if len(argv) < 2 or argv[1] not in verbs:
         die(USAGE, 2)
     try:

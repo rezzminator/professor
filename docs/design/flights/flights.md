@@ -36,7 +36,7 @@ Four agents, four commands. Project law reaches them through the project contrac
 ## The lifecycle
 
 1. Ready. `/flights:init`, once per project: the project map, and each unit's testing manual, test command and static-check command. Re-run, it builds only what is missing and aligns what is stale.
-2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request; a chat that wants only the spec of novel, large work spawns `flights-speccer` on its own.
+2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the user's objective, the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request; a chat that wants only the spec of novel, large work spawns `flights-speccer` on its own.
 3. Build. One root `flights-foreman`: for novel, large work with no pattern in the codebase, first one `flights-speccer`, whose `spec.md` becomes the request; the base gate, the doors; the cut; the data shapes, the decision; the interface frozen in the innermost unit, or the spine inside one; the producer built by the foreman that read it; one child foreman per other unit or segment, in parallel against it; every return verified; the owner repairs its own reds.
 4. Land. One `flights-lander` for the whole flight, then, when the caller ordered it, the commit and, for a worktree flight, the merge through the repository's git writer, the lander's `PASS` or `FIXED` being the merge nod.
 5. Doctor. `/flights:doctor` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
@@ -45,7 +45,7 @@ Four agents, four commands. Project law reaches them through the project contrac
 
 ```text
 $HOME/.local/state/pfm/flights/{project}/{flight}/
-  requirements.md the binding rulings and requirement rows   written by /flights:spec
+  requirements.md the objective, rulings, requirement rows   written by /flights:spec
   spec.md         the spec of novel, large work              written by flights-speccer
   run.md          the ledger of the run                      written by the root flights-foreman
   agents.tsv      one row per spawn: unit, type, agent id, round, time, engine   appended by the root flights-foreman

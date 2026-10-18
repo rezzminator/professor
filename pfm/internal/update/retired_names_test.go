@@ -265,19 +265,37 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"see .claude/skills/close-out/SKILL.md", "skills/close-out", "skill", "/done-herewith"},
 	{"run pfm price --json", "pfm price", "command", "pfm model-cost"},
 	{"see docs/agents/_index.md", "docs/agents", "path", "docs/_index.md and docs/standards.md"},
-	{"type /ultimate-spec to spec first", "/ultimate-spec", "command", "/imagine:build"},
-	{`Agent(subagent_type: "ultimate", prompt: "spec it")`, `subagent_type: "ultimate"`, "agent", "imagine"},
-	{"subagent_type: ultimate", "subagent_type: ultimate", "agent", "imagine"},
-	{`{"subagent_type": "ultimate"}`, `subagent_type": "ultimate"`, "agent", "imagine"},
-	{`{"subagent_type":"ultimate"}`, `subagent_type":"ultimate"`, "agent", "imagine"},
-	{"see .claude/agents/ultimate.md", "agents/ultimate.md", "agent", "imagine"},
-	{"an `ultimate` agent specs it", "`ultimate` agent", "agent", "imagine"},
-	{`Agent({subagent_type:"ultimate"})`, `subagent_type:"ultimate"`, "agent", "imagine"},
-	{`subagent_type: 'ultimate'`, `subagent_type: 'ultimate'`, "agent", "imagine"},
-	{`Task(subagent_type="ultimate")`, `subagent_type="ultimate"`, "agent", "imagine"},
-	{"the `ultimate` sub-agent specs it", "`ultimate` sub-agent", "agent", "imagine"},
-	{"the `ultimate` subagent specs it", "`ultimate` subagent", "agent", "imagine"},
-	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine:callmeter"},
+	{"type /ultimate-spec to spec first", "/ultimate-spec", "command", "/imagine"},
+	{`Agent(subagent_type: "ultimate", prompt: "spec it")`, `subagent_type: "ultimate"`, "agent", "imagination"},
+	{"subagent_type: ultimate", "subagent_type: ultimate", "agent", "imagination"},
+	{`{"subagent_type": "ultimate"}`, `subagent_type": "ultimate"`, "agent", "imagination"},
+	{`{"subagent_type":"ultimate"}`, `subagent_type":"ultimate"`, "agent", "imagination"},
+	{"see .claude/agents/ultimate.md", "agents/ultimate.md", "agent", "imagination"},
+	{"an `ultimate` agent specs it", "`ultimate` agent", "agent", "imagination"},
+	{`Agent({subagent_type:"ultimate"})`, `subagent_type:"ultimate"`, "agent", "imagination"},
+	{`subagent_type: 'ultimate'`, `subagent_type: 'ultimate'`, "agent", "imagination"},
+	{`Task(subagent_type="ultimate")`, `subagent_type="ultimate"`, "agent", "imagination"},
+	{"the `ultimate` sub-agent specs it", "`ultimate` sub-agent", "agent", "imagination"},
+	{"the `ultimate` subagent specs it", "`ultimate` subagent", "agent", "imagination"},
+	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine"},
+	{"type /imagine:build to build it", "/imagine:build", "command", "/imagine"},
+	{"type /imagine:build-fast to build it", "/imagine:build-fast", "command", "/imagine"},
+	{"type /imagine:build-spec to spec it", "/imagine:build-spec", "command", "/flights:spec"},
+	{"run /imagine:callmeter on the data", "/imagine:callmeter", "command", "/imagine"},
+	{`Agent(subagent_type: "imagine", prompt: "build it")`, `subagent_type: "imagine"`, "agent", "imagination"},
+	{`Agent({subagent_type:"imagine"})`, `subagent_type:"imagine"`, "agent", "imagination"},
+	{`subagent_type: 'imagine'`, `subagent_type: 'imagine'`, "agent", "imagination"},
+	{"subagent_type: imagine", "subagent_type: imagine", "agent", "imagination"},
+	{`Task(subagent_type="imagine")`, `subagent_type="imagine"`, "agent", "imagination"},
+	{`{"subagent_type": "imagine"}`, `subagent_type": "imagine"`, "agent", "imagination"},
+	{`{"subagent_type":"imagine"}`, `subagent_type":"imagine"`, "agent", "imagination"},
+	{"see .claude/agents/imagine.md", "agents/imagine.md", "agent", "imagination"},
+	{"an `imagine` agent builds it", "`imagine` agent", "agent", "imagination"},
+	{"the `imagine` sub-agent builds it", "`imagine` sub-agent", "agent", "imagination"},
+	{"the `imagine` subagent builds it", "`imagine` subagent", "agent", "imagination"},
+	{"load the imagine-core skill", "imagine-core", "skill", "the imagination agent"},
+	{"run /imagine:evolve weekly", "/imagine:evolve", "command", ""},
+	{"spawn imagine-historian to mine it", "imagine-historian", "agent", ""},
 }
 
 // TestRetiredNamesPinEveryNameThisReleaseRetires: a project file naming any
@@ -326,13 +344,30 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 		"templates/global/skills/ultimate/SKILL.md and .claude/skills/ultimate/SKILL.md",
 		"/ultimate-visualization and /imagine/ultimate.md and commands/ultimate.md",
 		"https://example.com/ultimate and https://example.com/ultimate-spec",
-		"/imagine:build-fast, /imagine:build, /imagine:callmeter and the imagine agent",
-		`subagent_type: "imagine" and subagent_type: "ultimate-pro" and subagent_type: ultimately`,
+		"run /imagine to make it; /imagine: with a colon; /imagine:ultimate and /imagine/build.md",
+		"templates/global/commands/imagine.md and https://example.com/imagine:build",
+		"/imagine:builder, /imagine:build-fasts, /imagine:build-specs and /imagine:callmeters",
+		"the imagination agent and imagination-core and imagine-cores and imagine-core2",
+		`subagent_type: "imagination" and subagent_type: "imagine-pro" and subagent_type: imagined`,
+		"agents/imagination.md and `imagination` agent and `imagination` sub-agent and imagine agents",
+		`subagent_type: "ultimate-pro" and subagent_type: ultimately`,
 		"agents/ultimate-pro.md and `ultimate-pro` agent and ultimate agents",
 	} {
 		if hits := retiredNameHits("f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
 		}
+	}
+
+	// The removed /imagine:build-spec description, as an adopter copied it: the
+	// first /imagine:build sits inside /imagine:build-spec, and the scan goes on
+	// past it to the one that ends the line.
+	line := "/imagine:build-spec → imagine; building it → /imagine:build."
+	var names []string
+	for _, hit := range retiredNameHits("f", line) {
+		names = append(names, hit.Name)
+	}
+	if want := []string{"/imagine:build", "/imagine:build-spec"}; !slices.Equal(names, want) {
+		t.Errorf("line %q hit %q, want %q", line, names, want)
 	}
 }
 
@@ -631,11 +666,13 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		".claude/skills/wave-builder/x": "mine\n",
 		"docs/agents/API.md":            "kept hub\n",
 		".claude/agents/ultimate.md":    "mine\n",
+		".claude/agents/imagine.md":     "mine\n",
 		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc JC-UPDATE\n" +
 			"subagent_type: \"ultimate\" subagent_type:\"ultimate\" subagent_type: 'ultimate' " +
 			"subagent_type: ultimate subagent_type=\"ultimate\" {\"subagent_type\": \"ultimate\"} " +
 			"{\"subagent_type\":\"ultimate\"} .claude/agents/ultimate.md the `ultimate` agent, " +
-			"the `ultimate` sub-agent, the `ultimate` subagent\n",
+			"the `ultimate` sub-agent, the `ultimate` subagent\n" +
+			"subagent_type: \"imagine\" subagent_type=\"imagine\" .claude/agents/imagine.md the `imagine` agent\n",
 		"docs/other.md": "mcp__chat__chat_ls\n",
 	})
 	// The live ultimate skill is not the retired agent: its own files leave the
@@ -647,7 +684,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 	})
 	bare := t.TempDir()
 	writeRetiredFixture(t, bare, map[string]string{
-		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc subagent_type: \"ultimate\"\n",
+		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc subagent_type: \"ultimate\" subagent_type: \"imagine\"\n",
 	})
 
 	names := func(scan professor.RetiredNameScan) []string {
@@ -687,6 +724,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		"/qa:live",
 		"docs/agents",
 		"rndier",
+		"subagent_type: \"imagine\"",
 		"subagent_type: \"ultimate\"",
 		"wave-builder",
 	}; !slices.Equal(
@@ -878,9 +916,12 @@ func TestRetiredRegistryNames(t *testing.T) {
 	t.Parallel()
 	names := RetiredRegistryNames()
 	for kind, want := range map[string][]string{
-		"agent":   {"rndier", "tracer-pro", "ultimate", "terra"},
-		"command": {"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint", "chat"},
-		"skill":   {"wave-builder", "transcript", "close-out"},
+		"agent": {"rndier", "tracer-pro", "ultimate", "terra", "imagine", "imagine-historian"},
+		"command": {
+			"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint", "chat",
+			"imagine/build", "imagine/build-fast", "imagine/build-spec", "imagine/callmeter", "imagine/evolve",
+		},
+		"skill": {"wave-builder", "transcript", "close-out", "imagine-core"},
 	} {
 		set := map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills}[kind]
 		for _, name := range want {

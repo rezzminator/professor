@@ -109,6 +109,19 @@
       "homepage": "https://github.com/rezzminator/engine-sync",
       "license": "MIT",
       "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"]
+    },
+    {
+      "name": "cache-keepwarm",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/cache-keepwarm.git",
+        "path": "plugins/cache-keepwarm",
+        "ref": "main"
+      },
+      "description": "Keeps the main chat's prompt cache warm while it waits on background agents, shells, Monitors and workflows: one invisible replay before expiry, admitted only while the forecast spend stays under the rewrite it saves.",
+      "homepage": "https://github.com/rezzminator/cache-keepwarm",
+      "license": "MIT",
+      "keywords": ["claude-code", "prompt-cache", "keep-warm", "function-hooks", "professor"]
     }
   ]
 }

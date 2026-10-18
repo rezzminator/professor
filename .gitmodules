@@ -43,3 +43,8 @@
 	url = https://github.com/rezzminator/gpt-gateway.git
 	branch = develop
 	ignore = dirty
+[submodule "cache-keepwarm"]
+	path = plugins/cache-keepwarm
+	url = https://github.com/rezzminator/cache-keepwarm.git
+	branch = develop
+	ignore = dirty

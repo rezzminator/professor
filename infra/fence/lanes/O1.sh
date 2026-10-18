@@ -566,4 +566,40 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "status and sync with no state print the off line (exit 0), bare theme is status; the retired ls and set verbs and an unknown verb exit 2"
 fi
 
+# ─── O1.19 — restart plan, read-only ───────────────────────────────────────
+# The dry run only: it finds every family, prints the ordered plan and starts
+# no worker. The real restart ends every chat, so no lane runs it, nor the
+# internal worker past its usage refusal.
+beat O1.19-restart-dry-run
+spends none
+bad=""
+plan_out="$(pfm restart --dry-run 2>&1)"; plan_rc=$?
+if [ "$plan_rc" -ne 0 ] && [ "$plan_rc" -ne 1 ]; then
+  bad="$bad pfm restart --dry-run exited $plan_rc, want 0 (every family found) or 1 (a find named FAILED): $(one_line "$plan_out");"
+fi
+[ "$(printf '%s\n' "$plan_out" | head -n 1)" = "restart plan: stop downstream first, then start upstream first; chats are not brought back" ] ||
+  bad="$bad the dry run does not open with the plan header: $(one_line "$plan_out");"
+for family in chats chat-helpers herdr services mcp-daemon search-backend pfm; do
+  grep -qE "^find +$family +(ok|FAILED) " <<<"$plan_out" || bad="$bad the plan has no find line for $family;"
+done
+if [ "$plan_rc" -eq 1 ] && ! grep -qE '^find +[a-z-]+ +FAILED ' <<<"$plan_out"; then
+  bad="$bad the dry run exited 1 without naming a failed find;"
+fi
+grep -qE '^last +pfm +the restart worker a plain pfm restart detaches' <<<"$plan_out" ||
+  bad="$bad the plan does not name its last pfm process;"
+if ls "$(dirname "${PFM_STATE_DB:-$HOME/.local/state/pfm/pfm.db}")/restart"/restart-*.log >/dev/null 2>&1; then
+  bad="$bad the dry run spawned a restart worker (a restart-*.log exists);"
+fi
+usage_out="$(pfm restart now 2>&1)"; usage_rc=$?
+if [ "$usage_rc" -ne 2 ] || ! grep -qF 'usage: pfm restart [--dry-run]' <<<"$usage_out"; then
+  bad="$bad pfm restart now exited $usage_rc, want 2 and the usage line: $(one_line "$usage_out");"
+fi
+worker_out="$(pfm internal restart-run 2>&1)"; worker_rc=$?
+if [ "$worker_rc" -ne 2 ] || ! grep -qF 'usage: pfm internal restart-run --front PID' <<<"$worker_out"; then
+  bad="$bad pfm internal restart-run with no --front exited $worker_rc, want 2 and its usage: $(one_line "$worker_out");"
+fi
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "the dry run opens with the plan header, finds all seven families (exit $plan_rc), names its last process and starts no worker; an argument exits 2 with the usage, and so does the internal worker without --front"
+fi
+
 lane_end

@@ -84,6 +84,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/reload: 8
       github.com/rezzminator/professor/pfm/internal/schedule: 2
       github.com/rezzminator/professor/pfm/internal/resolve: 16
+      github.com/rezzminator/professor/pfm/internal/restart: 4
       github.com/rezzminator/professor/pfm/internal/rowfacts: 2
       github.com/rezzminator/professor/pfm/internal/semver: 2
       github.com/rezzminator/professor/pfm/internal/sky: 2

@@ -25,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
 	modelcostcmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
+	"github.com/rezzminator/professor/pfm/internal/restart"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -54,6 +55,7 @@ const (
 	statuslineCommand = "statusline"
 	staleCommand      = "stale"
 	transcriptCommand = "transcript"
+	restartCommand    = "restart"
 )
 
 var version = config.DevelopmentVersion
@@ -65,7 +67,7 @@ var topLevelSubcommands = []string{
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
-	"model-cost", "tokens", transcriptCommand, "theme",
+	"model-cost", "tokens", transcriptCommand, "theme", restartCommand,
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
@@ -73,7 +75,7 @@ var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-launch", "codex-transport", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
 	"exit-close", "exit-intercept", "git-guard", "herdr-indicators", "herdr-shell", "herdr-state",
-	"kill-exit", "launch", "seat-host",
+	"kill-exit", "launch", "seat-host", "restart-run",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
 	reloadRunCommand, staleCommand, statuslineCommand, "store-guard", thenAction, "tmux-title-renudge",
 	"update-check",
@@ -190,6 +192,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runUninstall(args[1:], stdout, stderr, runtime)
 	case "update":
 		return update.Run(args[1:], stdout, stderr, runtime)
+	case "restart":
+		return restart.Main(args[1:], stdout, stderr, runtime)
 	case "init":
 		return runInit(args[1:], stdout, stderr, runtime)
 	case "whoami":
@@ -229,6 +233,7 @@ func printUsage(w io.Writer) {
 		"  uninstall remove the self-contained host integration",
 		"  update    update the binary; check, adopt, pin, ignore, drop or accept project template baselines",
 		"  init      scaffold project templates once and pin their baselines",
+		"  restart   end every chat, then restart Herdr and every pfm service, each verified up: --dry-run",
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
@@ -484,6 +489,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "reload-run" {
 		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime, paths.OSEnv{})
 	}
+	if len(args) != 0 && args[0] == "restart-run" {
+		return restart.Worker(args[1:], stdout, stderr, runtime)
+	}
 	if len(args) != 0 && args[0] == "schedule-fire" {
 		return runScheduleFire(args[1:], os.Stdout, stderr, runtime)
 	}
@@ -538,7 +546,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

@@ -23,10 +23,10 @@ type SelfEnvironment struct {
 	HerdrPane   string
 }
 
-// native reports a chat running directly in a Herdr pane: Herdr's marker and
+// Native reports a chat running directly in a Herdr pane: Herdr's marker and
 // address with no tmux client around it. A tmux-in-Herdr chat keeps its tmux
 // identity.
-func (environment SelfEnvironment) native() bool {
+func (environment SelfEnvironment) Native() bool {
 	return environment.TMUX == "" && environment.HerdrMarker == "1" &&
 		environment.HerdrSocket != "" && environment.HerdrPane != ""
 }

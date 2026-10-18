@@ -260,7 +260,9 @@ func Run(
 	cache1H := outcome.Cache1H
 	switch outcome.Kind {
 	case ui.OutcomeProfessorUpdate:
-		return openProfessorUpdate(ctx, outcome, stdout, stderr, runtime)
+		return closePickerPaneAfter(ctx, stdout, stderr, func(out io.Writer) int {
+			return openProfessorUpdate(ctx, outcome, out, stderr, runtime)
+		})
 	case ui.OutcomeDeactivate:
 		if outcome.Row.Socket == "" {
 			fmt.Fprintf(stderr, "pfm ls: deactive %s: no live server\n", outcome.Row.Name)
@@ -282,7 +284,9 @@ func Run(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
-		return pfmchat.OpenRow(ctx, row, outcome.PrimaryAccount, cache1H, "", stdout, stderr, &runtime)
+		return closePickerPaneAfter(ctx, stdout, stderr, func(out io.Writer) int {
+			return pfmchat.OpenRow(ctx, row, outcome.PrimaryAccount, cache1H, "", out, stderr, &runtime)
+		})
 	case ui.OutcomeSelected:
 		selectedRow, err := resolveSelectedRow(ctx, database, outcome.Row, &runtime, stderr)
 		if err != nil {
@@ -290,16 +294,18 @@ func Run(
 			return 1
 		}
 		return openAndRemember(ctx, sharedState, outcome, stderr, func() int {
-			return pfmchat.OpenRow(
-				ctx,
-				selectedRow,
-				outcome.PrimaryAccount,
-				cache1H,
-				"",
-				stdout,
-				stderr,
-				&runtime,
-			)
+			return closePickerPaneAfter(ctx, stdout, stderr, func(out io.Writer) int {
+				return pfmchat.OpenRow(
+					ctx,
+					selectedRow,
+					outcome.PrimaryAccount,
+					cache1H,
+					"",
+					out,
+					stderr,
+					&runtime,
+				)
+			})
 		})
 	case ui.OutcomeCancelled, ui.OutcomeNone:
 		return 0

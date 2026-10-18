@@ -28,7 +28,8 @@ func (services *fakeServices) Units(
 	verify Verifier,
 ) ([]Unit, string, error) {
 	var units []Unit
-	for _, unit := range services.units {
+	for index := range services.units {
+		unit := services.units[index]
 		name := strings.TrimPrefix(strings.TrimPrefix(unit.Name, "launchd "), "systemd ")
 		if match(name) {
 			unit.Family = family
@@ -136,7 +137,7 @@ func TestDryRunChangesNothing(t *testing.T) {
 	}
 	for _, argv := range runner.ran() {
 		verb := strings.Join(argv[1:], " ")
-		if verb != "status --json" && !strings.HasPrefix(verb, "ps ") {
+		if verb != "status --json" && !strings.HasPrefix(verb, "ps ") && !strings.HasPrefix(verb, "inspect ") {
 			t.Fatalf("the dry run ran a command that is not a read: %v", argv)
 		}
 	}
@@ -186,7 +187,8 @@ func TestAHerdrLaunchingChatEndsLastOfTheChats(t *testing.T) {
 	dependencies.LaunchedFrom = launchingChat()
 	plan := BuildPlan(context.Background(), dependencies)
 	var chats []string
-	for _, unit := range plan.Units {
+	for index := range plan.Units {
+		unit := &plan.Units[index]
 		if unit.Family == FamilyChats {
 			chats = append(chats, unit.Chat.SessionID)
 		}
@@ -280,7 +282,8 @@ func TestASupervisedDaemonBelongsToItsServiceUnit(t *testing.T) {
 			t.Fatalf("a supervised daemon is stopped by pid too: %v", names)
 		}
 	}
-	for _, unit := range plan.Units {
+	for index := range plan.Units {
+		unit := &plan.Units[index]
 		if unit.Name == "systemd pfm-mcp.service" && !strings.HasSuffix(unit.StartHow, "+ probe") {
 			t.Fatalf("the supervised daemon starts without its status probe: %q", unit.StartHow)
 		}
@@ -291,7 +294,9 @@ func TestFindServicesAFailedManagerIsAFailedFind(t *testing.T) {
 	dependencies := testDeps(t, &hostRunner{}, newKernel(), &fakeFleet{})
 	dependencies.Services = &fakeServices{err: errors.New("systemctl --user: no bus")}
 	finder := &discoverer{deps: dependencies}
-	finder.findServices(context.Background())
+	if _, err := finder.findServices(context.Background()); err == nil {
+		t.Fatal("a failed service manager returned no error")
+	}
 	if finder.plan.Findings[0].Err == nil {
 		t.Fatalf("a failed service manager = %+v", finder.plan.Findings)
 	}
@@ -333,5 +338,47 @@ func TestStartDaemonVerifiesItsStatusDocument(t *testing.T) {
 	); err == nil ||
 		!strings.Contains(err.Error(), "mcp-serve.log") {
 		t.Fatalf("a daemon that never answers = %v, want its log named", err)
+	}
+}
+
+// TestADaemonUnitThatStaysStoppedSupervisesNothing: when the MCP daemon's
+// service unit was not up, a daemon run by hand beside it is restarted by
+// pid, never left to a unit the restart does not start.
+func TestADaemonUnitThatStaysStoppedSupervisesNothing(t *testing.T) {
+	var order []string
+	dependencies, _, _, _ := fullHost(t, &order)
+	down := Unit{
+		Name: "systemd " + mcpSystemdUnit, FoundBy: "fake", Before: "ActiveState=inactive", StaysStopped: true,
+	}
+	dependencies.Services = &fakeServices{units: []Unit{down}}
+	plan := BuildPlan(context.Background(), dependencies)
+	names := unitNames(plan.Units)
+	if !slices.Contains(names, "mcp-daemon: pfm mcp serve pid 11") {
+		t.Fatalf("a hand-run daemon beside a stopped daemon unit is not restarted by pid: %v", names)
+	}
+}
+
+// TestAnUnknownSupervisorLeavesTheDaemonRunning: when the services find
+// fails, whether a service unit supervises the MCP daemon is unknown; the
+// daemon is neither stopped by pid nor started by hand, and the mcp-daemon
+// find fails, named.
+func TestAnUnknownSupervisorLeavesTheDaemonRunning(t *testing.T) {
+	var order []string
+	dependencies, _, _, _ := fullHost(t, &order)
+	dependencies.Services = &fakeServices{err: errors.New("systemctl --user: no bus")}
+	plan := BuildPlan(context.Background(), dependencies)
+	for _, name := range unitNames(plan.Units) {
+		if strings.Contains(name, "pid 11") {
+			t.Fatalf("a daemon whose supervisor is unknown is in the plan: %v", unitNames(plan.Units))
+		}
+	}
+	var daemonErr error
+	for _, finding := range plan.Findings {
+		if finding.Family == FamilyMCPDaemon && finding.Err != nil {
+			daemonErr = finding.Err
+		}
+	}
+	if daemonErr == nil || !strings.Contains(daemonErr.Error(), "1 pfm mcp serve process(es) left running") {
+		t.Fatalf("mcp-daemon find with its supervisor unknown = %v, want a failed find naming the daemon", daemonErr)
 	}
 }

@@ -577,7 +577,7 @@ plan_out="$(pfm restart --dry-run 2>&1)"; plan_rc=$?
 if [ "$plan_rc" -ne 0 ] && [ "$plan_rc" -ne 1 ]; then
   bad="$bad pfm restart --dry-run exited $plan_rc, want 0 (every family found) or 1 (a find named FAILED): $(one_line "$plan_out");"
 fi
-[ "$(printf '%s\n' "$plan_out" | head -n 1)" = "restart plan: stop downstream first, then start upstream first; chats are not brought back" ] ||
+[ "$(printf '%s\n' "$plan_out" | head -n 1)" = "restart plan: stop downstream first, then start upstream first only what was running before; chats are not brought back" ] ||
   bad="$bad the dry run does not open with the plan header: $(one_line "$plan_out");"
 for family in chats chat-helpers herdr services mcp-daemon search-backend pfm; do
   grep -qE "^find +$family +(ok|FAILED) " <<<"$plan_out" || bad="$bad the plan has no find line for $family;"

@@ -124,8 +124,8 @@ func TestLaunchdStopAndStartVerifyEachState(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if detail, err := units[0].Stop(ctx); err != nil || !strings.HasPrefix(detail, "not loaded") {
-		t.Fatalf("stop of an unloaded agent = %q, %v", detail, err)
+	if !units[0].StaysStopped || units[0].Stop != nil || units[0].Start != nil {
+		t.Fatalf("an agent not loaded before is stopped or started: %+v", units[0])
 	}
 	if detail, err := units[1].Stop(ctx); err != nil || !strings.HasPrefix(detail, "booted out") {
 		t.Fatalf("stop = %q, %v", detail, err)
@@ -158,7 +158,7 @@ func answersOnThirdProbe(want string) Verifier {
 }
 
 func TestLaunchdStartWaitsForTheHealthProbe(t *testing.T) {
-	manager, _, _ := newLaunchd(t)
+	manager, _, _ := newLaunchd(t, "com.professor.pfm.mcp")
 	units, _, err := manager.Units(
 		context.Background(), FamilyServices, pfmService, answersOnThirdProbe("com.professor.pfm.mcp"))
 	if err != nil {
@@ -182,7 +182,7 @@ func TestSystemdStartWaitsForTheHealthProbe(t *testing.T) {
 }
 
 func TestLaunchdFailuresAreNamed(t *testing.T) {
-	manager, model, _ := newLaunchd(t, "com.professor.pfm.mcp")
+	manager, model, _ := newLaunchd(t, "com.professor.pfm.mcp", "com.professor.pfm.schedule")
 	model.sticky["com.professor.pfm.mcp"] = true
 	model.stuck["com.professor.pfm.schedule"] = true
 	units, _, err := manager.Units(
@@ -199,6 +199,9 @@ func TestLaunchdFailuresAreNamed(t *testing.T) {
 	ctx := context.Background()
 	if _, err := units[1].Stop(ctx); err == nil || !strings.Contains(err.Error(), "still loaded") {
 		t.Fatalf("a bootout that did not take = %v", err)
+	}
+	if _, err := units[0].Stop(ctx); err != nil {
+		t.Fatalf("stop = %v", err)
 	}
 	if _, err := units[0].Start(ctx); err == nil || !strings.Contains(err.Error(), "Input/output error") {
 		t.Fatalf("a bootstrap that did not take = %v", err)
@@ -276,7 +279,9 @@ func newSystemd(t *testing.T) (SystemdManager, *systemd) {
 }
 
 func TestSystemdUnitsOrderTriggersFirstAndStartTheDaemonFirst(t *testing.T) {
-	manager, _ := newSystemd(t)
+	manager, model := newSystemd(t)
+	model.state["pfm-name-sync.path"] = "active"
+	model.state["pfm-name-sync.service"] = "active"
 	units, detail, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -305,6 +310,7 @@ func TestSystemdUnitsOrderTriggersFirstAndStartTheDaemonFirst(t *testing.T) {
 
 func TestSystemdStopAndStartVerifyActiveState(t *testing.T) {
 	manager, model := newSystemd(t)
+	model.state["pfm-schedule.timer"] = "active"
 	units, _, err := manager.Units(
 		context.Background(),
 		FamilyServices,
@@ -368,4 +374,141 @@ func TestNativeServiceManagerIsLaunchdOnMacOSAndSystemdOnLinux(t *testing.T) {
 	if manager := nativeServiceManager("freebsd", &hostRunner{}, newTickClock(), home, 501); manager != nil {
 		t.Fatalf("freebsd manager = %#v, want none", manager)
 	}
+}
+
+// TestLaunchdAnAgentNotLoadedBeforeStaysStopped: an agent that was not loaded
+// when the plan was built is neither booted out nor bootstrapped, and both
+// the plan and the result lines name it; the loaded one restarts.
+func TestLaunchdAnAgentNotLoadedBeforeStaysStopped(t *testing.T) {
+	manager, model, runner := newLaunchd(t, "com.professor.pfm.mcp")
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	printed, executed, code := printAndRun(t, units)
+	if code != 0 {
+		t.Fatalf("Execute = %d, want 0:\n%s", code, executed)
+	}
+	for _, argv := range runner.ran() {
+		if argv[1] != "print" && strings.Contains(strings.Join(argv, " "), "com.professor.pfm.schedule") {
+			t.Fatalf("an agent that was not loaded before was touched: %v", argv)
+		}
+	}
+	if model.loaded["com.professor.pfm.schedule"] {
+		t.Fatal("an agent that was not loaded before is loaded after the restart")
+	}
+	if !model.loaded["com.professor.pfm.mcp"] {
+		t.Fatal("the agent that was loaded before is not loaded after the restart")
+	}
+	assertStaysStopped(t, printed, executed, "launchd com.professor.pfm.schedule", "not loaded")
+	if !strings.Contains(printed, "launchd com.professor.pfm.mcp  restart (was up: loaded)") {
+		t.Fatalf("the loaded agent is not planned as a restart:\n%s", printed)
+	}
+}
+
+// TestSystemdAUnitInactiveBeforeStaysStopped: a timer, path or service unit
+// that was not active when the plan was built is neither stopped nor started.
+func TestSystemdAUnitInactiveBeforeStaysStopped(t *testing.T) {
+	manager, model := newSystemd(t)
+	model.state["pfm-name-sync.path"] = "active"
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := manager.runner.(*hostRunner)
+	printed, executed, code := printAndRun(t, units)
+	if code != 0 {
+		t.Fatalf("Execute = %d, want 0:\n%s", code, executed)
+	}
+	for _, argv := range runner.ran() {
+		if argv[2] != "show" &&
+			slices.Contains([]string{"pfm-schedule.timer", "pfm-name-sync.timer"}, argv[len(argv)-1]) {
+			t.Fatalf("a unit that was inactive before was touched: %v", argv)
+		}
+	}
+	if model.state["pfm-schedule.timer"] == "active" || model.state["pfm-name-sync.timer"] == "active" {
+		t.Fatalf("a timer that was inactive before is active after the restart: %v", model.state)
+	}
+	if model.state["pfm-mcp.service"] != "active" || model.state["pfm-name-sync.path"] != "active" {
+		t.Fatalf("a unit that was active before is not active after the restart: %v", model.state)
+	}
+	assertStaysStopped(t, printed, executed, "systemd pfm-schedule.timer", "ActiveState=inactive")
+	assertStaysStopped(t, printed, executed, "systemd pfm-name-sync.timer", "ActiveState=inactive")
+}
+
+// TestSystemdAnUnreadableActiveStateFailsThePlan: a state word systemd's
+// documentation does not list is a failed read, never "stopped".
+func TestSystemdAnUnreadableActiveStateFailsThePlan(t *testing.T) {
+	manager, model := newSystemd(t)
+	model.state["pfm-schedule.timer"] = "bewildered"
+	if _, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil); err == nil ||
+		!strings.Contains(err.Error(), `"bewildered"`) {
+		t.Fatalf("an unknown ActiveState = %v, want the plan failed with the word named", err)
+	}
+}
+
+// TestSystemdATriggeredServiceThatWasUpComesBack: a triggered service that was
+// up beside a trigger that stays stopped starts directly, or nothing would
+// bring it back; one whose trigger was up is left to that trigger.
+func TestSystemdATriggeredServiceThatWasUpComesBack(t *testing.T) {
+	manager, model := newSystemd(t)
+	model.state["pfm-schedule.service"] = "active"
+	model.state["pfm-name-sync.path"] = "active"
+	model.state["pfm-name-sync.service"] = "active"
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := manager.runner.(*hostRunner)
+	printed, executed, code := printAndRun(t, units)
+	if code != 0 {
+		t.Fatalf("Execute = %d, want 0:\n%s", code, executed)
+	}
+	if model.state["pfm-schedule.service"] != "active" {
+		t.Fatalf("a service that was up beside a trigger that stays stopped is down after the restart:\n%s", executed)
+	}
+	if model.state["pfm-schedule.timer"] == "active" {
+		t.Fatalf("a timer that was inactive before is active after the restart:\n%s", executed)
+	}
+	if !strings.Contains(printed, "systemd pfm-name-sync.service") ||
+		!strings.Contains(printed, "(its timer or path unit starts it again)") {
+		t.Fatalf("a service whose trigger was up is not left to it:\n%s", printed)
+	}
+	for _, argv := range runner.ran() {
+		if argv[2] == "start" && argv[len(argv)-1] == "pfm-name-sync.service" {
+			t.Fatalf("a service whose trigger was up is started directly: %v", argv)
+		}
+	}
+}
+
+// TestSystemdATriggeredServiceInactiveBeforeStaysStopped: a triggered service
+// that was not up is neither stopped nor started, whatever its trigger.
+func TestSystemdATriggeredServiceInactiveBeforeStaysStopped(t *testing.T) {
+	manager, model := newSystemd(t)
+	model.state["pfm-schedule.timer"] = "active"
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := manager.runner.(*hostRunner)
+	printed, executed, _ := printAndRun(t, units)
+	for _, argv := range runner.ran() {
+		if argv[2] != "show" && argv[len(argv)-1] == "pfm-schedule.service" {
+			t.Fatalf("a triggered service that was inactive before was touched: %v", argv)
+		}
+	}
+	assertStaysStopped(t, printed, executed, "systemd pfm-schedule.service", "ActiveState=inactive")
+}
+
+// TestSystemdAUnitInMaintenanceStaysStopped: maintenance is a documented
+// ActiveState of a unit not running (a clean in progress), never a failed read.
+func TestSystemdAUnitInMaintenanceStaysStopped(t *testing.T) {
+	manager, model := newSystemd(t)
+	model.state["pfm-schedule.timer"] = "maintenance"
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatalf("a unit in maintenance failed the plan: %v", err)
+	}
+	printed, executed, _ := printAndRun(t, units)
+	assertStaysStopped(t, printed, executed, "systemd pfm-schedule.timer", "ActiveState=maintenance")
 }

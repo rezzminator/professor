@@ -195,6 +195,14 @@ var retiredNames = []retiredName{
 	{name: "/tokens", kind: retiredCommand, successor: chatlogSuccessor, match: matchFamily},
 	{name: "skills/transcript", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
 	{name: "transcript skill", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
+	// Commit 3fb6eda4 "retire pfm transcript counts|types and pfm tokens --timeline":
+	// the chatlog kit's prep reads Claude, Codex and OpenCode itself (TOOLS rows,
+	// timeline.txt). pfm transcript show|locate|agents and pfm tokens stay live.
+	// Known gap: the scan matches the exact phrase `pfm tokens --timeline`; the flag split from
+	// `pfm tokens` by other flags is not flagged.
+	{name: "pfm transcript counts", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
+	{name: "pfm transcript types", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
+	{name: "pfm tokens --timeline", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
 	// Commit 8bde61ab "/close-out is /done-herewith"; the skill by its path
 	// too, the bare word "close-out" being prose.
 	{name: "/close-out", kind: retiredCommand, successor: "/done-herewith", match: matchFamily},

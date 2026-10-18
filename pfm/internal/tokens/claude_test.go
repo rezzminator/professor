@@ -80,21 +80,7 @@ func TestRawValuesReadAsJavaScript(t *testing.T) {
 	}
 }
 
-func TestToolTargetAndInputString(t *testing.T) {
-	long := strings.Repeat("x", 120)
-	cases := map[string]string{
-		`{"file_path":"/w/a.go","command":"ignored"}`: "/w/a.go",
-		`{"command":"go   test\n ./..."}`:             "go test ./...",
-		`{"subagent_type":"flights-lander"}`:          "flights-lander",
-		`{"n":1,"note":"first string member"}`:        "first string member",
-		`{"query":"` + long + `"}`:                    strings.Repeat("x", 99) + "…",
-		`{}`:                                          "",
-	}
-	for input, want := range cases {
-		if got := toolTarget(json.RawMessage(input)); got != want {
-			t.Errorf("toolTarget(%s) = %q, want %q", input, got, want)
-		}
-	}
+func TestInputString(t *testing.T) {
 	input := json.RawMessage(`{"a":"","b":7,"c":"x"}`)
 	if got := inputString(input, "a", "b", "c"); got != "7" {
 		t.Errorf("inputString = %q, want 7: the first truthy field", got)

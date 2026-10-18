@@ -138,7 +138,7 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 - `O1.12-doc-vs-code` · doc-vs-code confirmed behaviors (settings-global merge, project hooks, git-bridge skill, themes, MCP) · spends none
 - `O1.13-misc-ops` · misc ops CLI: version, config, issues, whoami, usage-hook · spends none
 - `O1.15-model-cost` · `pfm model-cost` help names `--all`, `--force` and `--check`; a model plus `--all` and `--check` plus `--json` exit 2; `--check` under `PFM_PRICES_OFFLINE=1` prints the `prices:` summary and exits 0; an unknown id exits 1 naming `pfm model-cost --all` · spends none
-- `O1.16-tokens` · `pfm tokens` help names `--codex`, `--flight` and `--timeline`; `--since 3x` exits 2 naming `--since`; under `PFM_PRICES_OFFLINE=1` an unreadable `--root` exits 1 naming `--root`, and an empty root prints its `TOKEN AUDIT` report and exits 0 · spends none
+- `O1.16-tokens` · `pfm tokens` help names `--codex`, `--flight` and `--metrics-out`; `--since 3x` exits 2 naming `--since`; under `PFM_PRICES_OFFLINE=1` an unreadable `--root` exits 1 naming `--root`, and an empty root prints its `TOKEN AUDIT` report and exits 0 · spends none
 - `O1.17-transcript` · `pfm transcript` help names its verbs; an unknown verb exits 2 naming the invalid choice; a fixture transcript's `show` prints its `TRANSCRIPT claude` header and its prompt; `locate` of an id nothing holds exits 1 naming `NOT FOUND` · spends none
 - `O1.18-theme` · `pfm theme status` (and bare `pfm theme`) and `pfm theme sync` in a home that never ran `on` print the off line and exit 0; the retired `ls` and `set` verbs and an unknown verb exit 2 naming the unknown subcommand · spends none
 

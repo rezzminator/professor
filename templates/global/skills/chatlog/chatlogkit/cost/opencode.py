@@ -1,5 +1,5 @@
 """The timeline of an OpenCode session: one row per assistant message (one model call), priced from the token
-record the message carries. `pfm tokens --timeline` could not read a store session (UNREADABLE); this is native.
+record the message carries.
 
 Each message's tokens: uncached `input`, `output`, `reasoning` (outside output), `cache.read`, `cache.write`. A
 Claude row bills the write at the 5-minute rate (OpenCode records no TTL); a Codex row bills every input token

@@ -18,7 +18,6 @@ const usage = `usage: pfm tokens [--since 24h|3d] [--root DIR]... [--project SUB
        pfm tokens --codex [--since 24h|3d] [--project SUBSTR] [--codex-root DIR] [--top N] [--prices FILE]
        pfm tokens --opencode [--since 24h|3d] [--project SUBSTR] [--opencode-root DIR] [--top N] [--prices FILE]
        pfm tokens --flight DIR [--metrics-out FILE] [--out FILE] [--prices FILE]
-       pfm tokens --timeline FILE [--timeline FILE]... [--root DIR]... [--prices FILE]
 
 Audits agent transcripts: where did the tokens go? Claude Code transcripts,
 Codex rollouts (--codex) and OpenCode sessions (--opencode, from each message's
@@ -48,7 +47,6 @@ type flags struct {
 	opencodeRoot   string
 	hostLabel      string
 	roots          []string
-	timeline       []string
 	prices         string
 }
 
@@ -73,9 +71,6 @@ func readFlags(args []string, host string) (flags, error) {
 	if len(args) == 1 && args[0] == "help" {
 		return flags{}, errHelp
 	}
-	if n := len(args); n != 0 && args[n-1] == "--timeline" {
-		return flags{}, usageError("--timeline wants a transcript path")
-	}
 	var stderr bytes.Buffer
 	set := cli.NewFlagSet("tokens", usage, &stderr)
 	since := set.String("since", "24h", "the window: a number plus h or d")
@@ -97,7 +92,6 @@ func readFlags(args []string, host string) (flags, error) {
 	set.StringVar(&parsed.hostLabel, "host-label", host, "--view: the host name the page shows")
 	set.StringVar(&parsed.prices, "prices", "", "a saved price document or prices.json instead of the served table")
 	set.Var((*listFlag)(&parsed.roots), "root", "a transcript root (repeatable)")
-	set.Var((*listFlag)(&parsed.timeline), "timeline", "one transcript, one row per model call (repeatable)")
 	positional, code, ok := cli.ParseFlagsAnywhere(set, args)
 	if !ok {
 		if code == 0 {
@@ -130,21 +124,12 @@ func readFlags(args []string, host string) (flags, error) {
 	if parsed.opencode {
 		for _, name := range openCodeRefuses {
 			if given[name] {
-				return flags{}, usageError("--opencode is its own mode: it takes no --codex, --flight, --timeline, " +
+				return flags{}, usageError("--opencode is its own mode: it takes no --codex, --flight, " +
 					"--root, --family, --family-rx, --session, --out, --view, --briefs or --metrics-out")
 			}
 		}
 	} else if given["opencode-root"] {
 		return flags{}, usageError("--opencode-root reads OpenCode only: pass --opencode with it")
-	}
-	if len(parsed.timeline) != 0 {
-		sinceGiven := false
-		set.Visit(func(f *flag.Flag) { sinceGiven = sinceGiven || f.Name == "since" })
-		if parsed.flight != "" || parsed.codex || parsed.project != "" || sinceGiven {
-			return flags{}, usageError(
-				"--timeline reads whole files: it takes no --flight, --codex, --project or --since",
-			)
-		}
 	}
 	return parsed, nil
 }
@@ -152,7 +137,7 @@ func readFlags(args []string, host string) (flags, error) {
 // openCodeRefuses are the flags --opencode cannot honour: another mode, or a
 // Claude root, filter or output its table never reads or writes.
 var openCodeRefuses = []string{
-	pricing.EngineCodex, "flight", "timeline", "root", "family", "family-rx", "session", "out", "view", "briefs",
+	pricing.EngineCodex, "flight", "root", "family", "family-rx", "session", "out", "view", "briefs",
 	"metrics-out",
 }
 

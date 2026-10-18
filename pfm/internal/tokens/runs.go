@@ -43,19 +43,8 @@ func (a *auditor) roots() ([]string, error) {
 // ownership is the domain a call's owner is decided in and its transcripts,
 // one per session path (a file is the same transcript under every root that
 // holds it: the last three path segments name it).
-func (a *auditor) ownership(file string) (domain, files []string, err error) {
-	if file != "" && len(a.opts.roots) == 0 {
-		// A timeline uses its enclosing transcript root: Claude encodes a cwd as a
-		// dash-prefixed directory immediately below projects/.
-		projectDir := filepath.Dir(file)
-		if session, inside := transcript.SessionDir(file); inside {
-			projectDir = filepath.Dir(session)
-		}
-		domain = []string{projectDir}
-		if strings.HasPrefix(filepath.Base(projectDir), "-") {
-			domain = []string{filepath.Dir(projectDir)}
-		}
-	} else if domain, err = a.roots(); err != nil {
+func (a *auditor) ownership() (domain, files []string, err error) {
+	if domain, err = a.roots(); err != nil {
 		return nil, nil, err
 	}
 	var all []string
@@ -194,7 +183,7 @@ func (a *auditor) audit(file string, owners map[string]string) (*run, error) {
 // collectRuns replays every transcript in the window once, the session
 // selected, then folds sub-folder chats onto their shortest enclosing project.
 func (a *auditor) collectRuns() error {
-	domain, files, err := a.ownership("")
+	domain, files, err := a.ownership()
 	if err != nil {
 		return err
 	}

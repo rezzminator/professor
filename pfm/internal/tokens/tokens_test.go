@@ -47,7 +47,7 @@ var nodeOps = map[string]string{
 // usageRefusals are the Node exit-2 messages that stay usage errors; every
 // other Node exit 2 is a runtime failure, exit 1 in pfm (R2).
 var usageRefusals = []string{
-	"--since wants", "--timeline reads whole files", "--timeline wants a transcript path", "matched none of the",
+	"--since wants", "matched none of the",
 	"is not a directory",
 }
 
@@ -90,9 +90,9 @@ func intendedExit(code int, stderr string) int {
 
 func TestAuditReplaysTheNodeGoldens(t *testing.T) {
 	dirs := goldenDirs(t)
-	// 18 A1 modes and 78 suite runs: fewer means the enumerator lost some.
-	if len(dirs) != 96 {
-		t.Fatalf("found %d golden runs, want 96", len(dirs))
+	// 11 A1 modes and 57 suite runs: fewer means the enumerator lost some.
+	if len(dirs) != 68 {
+		t.Fatalf("found %d golden runs, want 68", len(dirs))
 	}
 	for _, dir := range dirs {
 		t.Run(filepath.Base(filepath.Dir(dir))+"/"+filepath.Base(dir), func(t *testing.T) {
@@ -193,7 +193,6 @@ func openScenario(t *testing.T, dir string) scenario {
 	if !ok {
 		t.Fatalf("%s names no saved price table: the replay never fetches", manifest.Test)
 	}
-	// first, so a trailing variadic flag (--timeline) never swallows it
 	args := []string{"--prices", expand(prices)}
 	for _, arg := range manifest.Args {
 		args = append(args, expand(arg))

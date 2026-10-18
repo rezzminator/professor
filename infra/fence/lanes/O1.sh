@@ -473,8 +473,8 @@ beat O1.16-tokens
 spends none
 bad=""
 help_out="$(pfm tokens --help 2>&1)"; help_rc=$?
-if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--flight' <<<"$help_out" || ! grep -q -- '--timeline' <<<"$help_out"; then
-  bad="$bad pfm tokens --help lacks --codex, --flight or --timeline (exit $help_rc): $(one_line "$help_out");"
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--flight' <<<"$help_out" || ! grep -q -- '--metrics-out' <<<"$help_out"; then
+  bad="$bad pfm tokens --help lacks --codex, --flight or --metrics-out (exit $help_rc): $(one_line "$help_out");"
 fi
 since_out="$(pfm tokens --since 3x 2>&1)"; since_rc=$?
 if [ "$since_rc" -ne 2 ] || ! grep -qF -- '--since wants' <<<"$since_out"; then
@@ -492,7 +492,7 @@ fi
 rm -rf "$tokens_root"
 # The report's numbers are proven by the golden replay of internal/tokens.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "tokens help names --codex/--flight/--timeline; a bad --since exits 2; an unreadable --root exits 1; an empty root prints its report"
+  pass "tokens help names --codex/--flight/--metrics-out; a bad --since exits 2; an unreadable --root exits 1; an empty root prints its report"
 fi
 
 # ─── O1.17 — transcript offline surface ────────────────────────────────────
@@ -501,7 +501,7 @@ beat O1.17-transcript
 spends none
 bad=""
 help_out="$(pfm transcript --help 2>&1)"; help_rc=$?
-if [ "$help_rc" -ne 0 ] || ! grep -q -- 'show,counts,types,locate,agents' <<<"$help_out"; then
+if [ "$help_rc" -ne 0 ] || ! grep -q -- 'show,locate,agents' <<<"$help_out"; then
   bad="$bad pfm transcript --help lacks its verbs (exit $help_rc): $(one_line "$help_out");"
 fi
 verb_out="$(pfm transcript list x 2>&1)"; verb_rc=$?

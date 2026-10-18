@@ -43,7 +43,7 @@ func TestOwnershipDedupesTheSameSessionUnderTwoRoots(t *testing.T) {
 	first := writeTranscript(t, filepath.Join(one, "-w-demo", "s1.jsonl"), line)
 	writeTranscript(t, filepath.Join(two, "-w-demo", "s1.jsonl"), line)
 	a, _, _ := testAuditor(t, "--since", "99999d", "--root", one, "--root", two)
-	_, files, err := a.ownership("")
+	_, files, err := a.ownership()
 	if err != nil || len(files) != 1 || files[0] != realPath(t, first) || a.scan.dupFiles != 1 {
 		t.Errorf("ownership = %v, %v, dupFiles %d; want the first copy once", files, err, a.scan.dupFiles)
 	}

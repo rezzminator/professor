@@ -1,5 +1,5 @@
 """The timeline of a Codex rollout: one row per model call, priced from the token_count events the rollout
-records. `pfm tokens --timeline` read only Claude transcripts and printed NO CALLS for a rollout; this is native.
+records.
 
 COUNTING RULE (the rule `pfm tokens --codex` keeps): a token_count carries a CUMULATIVE total_token_usage that
 resets on resume and on compaction, and a duplicate event re-emits an identical cumulative. So an event whose

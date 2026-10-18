@@ -8,7 +8,6 @@ pfm tokens --since 3d --project <substr>
 pfm tokens --codex    # Codex CLI threads
 pfm tokens --opencode # OpenCode sessions
 pfm tokens --flight $HOME/.local/state/pfm/flights/{project}/<name>
-pfm tokens --timeline <…/subagents/agent-{id}.jsonl>
 ```
 
 A RUN is one transcript file: one main chat loop, one sub-agent, one Codex rollout thread, or one OpenCode session. A FAMILY is a main chat plus every sub-agent it spawned.
@@ -27,11 +26,10 @@ A RUN is one transcript file: one main chat loop, one sub-agent, one Codex rollo
 | `--out <file>` | Full JSON dataset. |
 | `--codex` | Read Codex rollouts instead of Claude transcripts. |
 | `--codex-root <dir>` | Read this one Codex home in place of every Codex home pfm resolves (one per configured Codex account). |
-| `--opencode` | Read OpenCode sessions instead; refused beside `--codex`, `--flight`, `--timeline`, `--root`, `--family`, `--family-rx`, `--session`, `--out`, `--view`, `--briefs` or `--metrics-out` (exit 2). |
+| `--opencode` | Read OpenCode sessions instead; refused beside `--codex`, `--flight`, `--root`, `--family`, `--family-rx`, `--session`, `--out`, `--view`, `--briefs` or `--metrics-out` (exit 2). |
 | `--opencode-root <dir>` | Read the `opencode.db` in this directory in place of pfm's OpenCode roots; refused without `--opencode` (exit 2). |
 | `--flight <dir>` | Per-flight metrics report (below). |
 | `--metrics-out <file>` | Write the flight report here instead of `<dir>/metrics.md`. |
-| `--timeline <file>` | One run's per-call timeline and price (below); repeatable. |
 | `--view <file>` / `--briefs <file>` | Compact per-project page data / the briefs-and-behaviour dataset. |
 | `--host-label <name>` | `--view`: the host name the page shows (default: this host's name). |
 | `--prices <file>` | Price from a saved table instead of pfm's current one (below). |
@@ -99,14 +97,6 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 - A poll is a Bash call repeated 8 or more times in one run, or a `sleep` / `wait` / `tail -f`, counted on the call its result triggers; a harness attachment written after a tool result (`total_tokens_reminder`) is never the trigger.
 - The call cap comes from the agent type name: a `foreman` is capped at 250, otherwise a `lander` at 200, everything else at 150.
 
-## `--timeline <file>`
-
-One transcript, the whole file — no window applies, and `--flight`, `--codex`, `--project` or `--since` beside it is refused. `<file>` is a sub-agent's `…/subagents/agent-{id}.jsonl` (its agent type comes from the `.meta.json` beside it) or a main session file; repeat the flag for several. The file goes through the same replay and price table as the default report, so the header's price equals that run's price there when both use the same `--root` ownership domain. Without `--root`, a timeline indexes the enclosing Claude transcript root, including project and subagent directories; a standalone file uses its own directory.
-
-Per file, one header line — agent type, model(s), effort, calls, wall seconds from the first to the last timestamped record, peak context, output tokens, tool errors, tool results over 20 KB, USD — then one row per model call (a call written as several assistant lines sharing one `message.id` is one row): call number, clock time (UTC), seconds since the previous tool result, context (input + cache read + cache write), output tokens, the call's USD, and each tool the call issued as `name: target` (target cut to 100 chars) with its result chars, `ERR` when `is_error`, and the tool's wait; `(no result)` when none came back. Then the file's own `data gaps:` line.
-
-An unpriced model renders `n/a` in the header and on every row, never `$0`. A path that does not exist, cannot be read, or has no line that parses as JSON prints `UNREADABLE — {path}: {error}` and the command exits 1; an empty or zero-call file prints `NO CALLS — {path}`.
-
 ## Tests
 
-The tests live in `pfm/internal/tokens/` and run the verb over the synthetic JSONL under `testdata/fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, an OpenCode store seeded at test time (`opencode_test.go`: per-message pricing, `--project`, a missing or unreadable store), and a flight ledger exercising an id match, a window match and a row with no transcript; `testdata/fixtures/timeline/` holds five sub-agent runs for `--timeline` (calls split across several assistant lines, a failed Bash, a result over 20 KB, an unpriced model, an all-malformed transcript, an empty transcript, and a valid transcript with no `.meta.json` beside it). `testdata/golden/` holds every mode's recorded output, which each run reproduces byte for byte. Every run reads the synthetic saved document `testdata/fixtures/model-cost.json`; no network is used by tests. Id resolution is tested in `pfm/internal/pricing` against its shared cases (`testdata/resolve-cases.json`).
+The tests live in `pfm/internal/tokens/` and run the verb over the synthetic JSONL under `testdata/fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, an OpenCode store seeded at test time (`opencode_test.go`: per-message pricing, `--project`, a missing or unreadable store), and a flight ledger exercising an id match, a window match and a row with no transcript. `testdata/golden/` holds every mode's recorded output, which each run reproduces byte for byte. Every run reads the synthetic saved document `testdata/fixtures/model-cost.json`; no network is used by tests. Id resolution is tested in `pfm/internal/pricing` against its shared cases (`testdata/resolve-cases.json`).

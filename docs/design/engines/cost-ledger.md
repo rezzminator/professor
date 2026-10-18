@@ -222,7 +222,7 @@ callmeter names the same difference as `PRE-LEDGER USD` in `report cost`, from t
 
 ## pfm tokens
 
-`pfm tokens`, `pfm tokens --session SID` and `pfm tokens --flight DIR` (`pfm/internal/tokens/costreport.go`) read each Claude chat's ledger beside its transcripts and print what the status line's markers point at. The ledger directory is `paths.CostLedgerDir`, so `PFM_COST_LEDGER_DIR` redirects it. Codex, OpenCode and `--timeline` runs have no Claude ledger and are unchanged.
+`pfm tokens`, `pfm tokens --session SID` and `pfm tokens --flight DIR` (`pfm/internal/tokens/costreport.go`) read each Claude chat's ledger beside its transcripts and print what the status line's markers point at. The ledger directory is `paths.CostLedgerDir`, so `PFM_COST_LEDGER_DIR` redirects it. Codex and OpenCode runs have no Claude ledger and are unchanged.
 
 A chat with a ledger gets a block under `== COST LEDGER` (the flight report: `## cost ledger`), the chats dearest first:
 

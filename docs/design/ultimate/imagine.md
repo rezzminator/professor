@@ -83,7 +83,7 @@ The family shipped as a larger imagine family: a spec path (`/imagine:build-spec
 
 The pieces nobody ran were removed, and the used ones were made the whole:
 
-- The spec path is gone. Specs go to `flights-speccer`; a second spec path in this family was dead weight.
+- The spec path is gone; a second spec path in this family was dead weight.
 - `/imagine:build-fast` became `/imagine`, the one entry point, because it was the only build command in use.
 - `imagine-core` was folded into its two readers: the law into the `imagination` agent, and the dispatch plus the chat's half of delivery into `/imagine`. Each reader now holds exactly what it uses, and nothing is loaded for the other's half.
 - `ultimate-ultimate`'s raise-the-ask was folded into `ultimate`, which is why the skill now opens with it.

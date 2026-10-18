@@ -29,7 +29,7 @@
 | Line | Holds |
 | --- | --- |
 | `Mission:` | the question |
-| `Targets:` | optional: names, session or agent ids, paths, a flight directory, a project, a time window |
+| `Targets:` | optional: names, session or agent ids, paths, a project, a time window |
 | `Agent:` | optional: an agent type to audit, which turns on AUDIT |
 | `Prompt:` | optional: the audited prompt file, overriding the lookup |
 | `Caller:` | optional: the sender's session id; its own transcript is never a target |

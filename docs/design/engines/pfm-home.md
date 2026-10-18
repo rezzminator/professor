@@ -76,7 +76,7 @@ Tracked at the repo root. It holds every key pfm reads, each at its default, wit
 
 ## Other state
 
-All under `~/.local/state/pfm/`: `log/pfm.jsonl`, generated assets under `generated/`, and flight directories under `flights/`.
+All under `~/.local/state/pfm/`: `log/pfm.jsonl`, and generated assets under `generated/`.
 
 ## pfm doctor checks
 

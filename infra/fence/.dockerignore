@@ -1,0 +1,8 @@
+# The build context docker sends, and the only inputs infra/fence/image-key.sh keys the image by:
+# an allow-list, so a check script edited beside the Dockerfile neither rebuilds the image nor
+# forks the shared fence container (infra/fence/shared.sh).
+*
+!pfm-dev.Dockerfile
+!tools.env
+!tools.sh
+!jscpd

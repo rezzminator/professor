@@ -609,7 +609,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stageTracerIntakeKit(t, home, hostShimDir)
+	stageTracetreeKit(t, home, hostShimDir)
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)

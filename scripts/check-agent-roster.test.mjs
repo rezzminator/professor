@@ -340,10 +340,8 @@ for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
 const CAPABILITY = 'gpt-agents';
 const twins = [
   ['gpt-flights-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
-  ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],
+  ['gpt-flights-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman', 'gpt-flights-foreman'],
   ['gpt-flights-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
-  ['gpt-flights-speccer', 'gpt-6.1-sol', 'xhigh', 'flights-speccer'],
-  ['gpt-flights-mechanical-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
   ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
   ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
   ['gpt-rr', 'gpt-6.1-sol', 'low', 'rr'],
@@ -353,7 +351,8 @@ const twins = [
   ['luna', 'gpt-6-luna', 'medium'],
   ['astra', 'gpt-6-astra', 'high'],
 ];
-const otherVariants = ['foreman-pro', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
+const otherVariants = ['flights-foreman-mini', 'flights-foreman-pro', 'flights-worker-pro', 'flights-lander-mini', 'flights-lander-pro',
+  'rr-pro', 'rr-pro-max', 'reviewer-nt'];
 const configDir = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}';
 const renderErrors = /SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING|FRONTMATTER-INVALID/;
 
@@ -472,7 +471,7 @@ for (const [name, model, effort, role, base] of twins) {
       new RegExp(`(^|[^A-Za-z0-9_./:-])(${names})(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`, 'g'),
       (_, before, agent) => `${before}gpt-${agent}`);
     const renamed = role === 'flights-foreman'
-      ? renameStandalone('flights-mechanical-executor|flights-foreman|flights-lander|flights-speccer')
+      ? renameStandalone('flights-foreman|flights-foreman-pro')
       : role === 'flights-lander'
         ? renameStandalone('reviewer-pro|reviewer')
         : original;
@@ -480,13 +479,9 @@ for (const [name, model, effort, role, base] of twins) {
     assert.ok(manual, `${name}: its base ${base} was not rendered`);
     assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(manual).trimEnd()), `${name}: the rendered body is not the full ${base ?? role} manual`);
     if (role.startsWith('flights-')) {
-      assert.ok(text.includes('your parent hears from you only by that return'), `${name}: the return law is not prepended`);
-      // Each role's return law names only the files that role owns: the speccer writes its spec, never a builder's files.
-      const [owned, foreign] = role === 'flights-speccer'
-        ? ['write spec.md and the research and calibration files your manual names in the flight directory', 'run.md, briefs, returns/*.md, gate.md, red/*']
-        : ['run.md, briefs, returns/*.md, gate.md, red/*', 'write spec.md and the research'];
-      assert.ok(text.includes(owned), `${name}: the return law lost its file list`);
-      assert.ok(!text.includes(foreign), `${name}: the return law names files another role owns`);
+      assert.ok(text.includes('Your parent hears your result only through your final return'), `${name}: the return law is not prepended`);
+      assert.deepEqual(fm.visibility?.['visible-to']?.include, role === 'flights-lander' ? ['main'] : undefined,
+        `${name}: a GPT lander is the main chat's alone, a GPT foreman keeps the foreman's open visibility`);
     } else if (role === 'rr') {
       // The research leads keep their diggers on Claude: no rename, and sub-rr admits each twin.
       assert.doesNotMatch(text, /gpt-sub-rr|gpt-clone-distiller/, `${name}: its diggers must remain Claude agents`);
@@ -500,22 +495,17 @@ for (const [name, model, effort, role, base] of twins) {
     }
     if (role === 'flights-lander') {
       assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),
-        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent',
-         'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back', 'Skill'],
-        `${name}: tools must match the GPT engine's supported role contract (Agent: the lander's review dispatch)`);
+        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent', 'SendMessage',
+         'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'],
+        `${name}: tools must match the lander's (Agent: its review dispatch; SendMessage: a critical decision to main)`);
       for (const reviewer of ['gpt-reviewer', 'gpt-reviewer-pro'])
         assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
     }
     if (role === 'flights-foreman') {
-      for (const spawned of ['gpt-flights-foreman', 'gpt-flights-mechanical-executor', 'gpt-flights-lander', 'gpt-flights-speccer'])
-        assert.ok(text.includes(`subagent_type: "${spawned}"`), `${name}: rename to ${spawned} not applied`);
-      assert.doesNotMatch(text, /subagent_type: "flights-/, `${name}: a flights-* spawn survived the renames`);
-      const commands = (event) => fm.hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));
-      assert.deepEqual(commands('PreToolUse'),
-        ['pfm internal orchestrator-wait', 'pfm internal call-cap', 'python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate']);
-      // the cut gate holds Bash as well as the edit tools: a pre-cut `sed -i` is a code edit
-      assert.deepEqual(fm.hooks.PreToolUse.map((entry) => entry.matcher), ['Bash', '*', 'Bash|Edit|Write|MultiEdit|NotebookEdit']);
-      assert.deepEqual(commands('Stop'), [`python3 -I "${configDir}/hooks/gpt-agent-stop.py" foreman`]);
+      // A GPT foreman splits to GPT foremen and to the Claude workers: workers are Sonnet only.
+      for (const child of ['`gpt-flights-foreman`', '`gpt-flights-foreman-pro`', '`flights-foreman-mini`', '`flights-worker`', '`flights-worker-pro`'])
+        assert.ok(text.includes(child), `${name}: its split table does not name ${child}`);
+      assert.doesNotMatch(text, /gpt-flights-worker|gpt-flights-foreman-mini/, `${name}: a worker or the mini foreman was renamed to GPT`);
     }
   });
 }
@@ -523,11 +513,12 @@ for (const [name, model, effort, role, base] of twins) {
 // auto-effort-control steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
 // its buttons: exactly these Claude roles hold both; every other rendered agent, each GPT twin, pcm and releaser neither.
 const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort-control__${tool}`);
+const landerEffort = { floor: 'medium', ceiling: 'xhigh', tripwires: 'redispatch' };
 const effortSteered = new Map([
-  ['flights-foreman', true], ['flights-mechanical-executor', true], ['flights-speccer', true],
+  ['flights-foreman', true], ['flights-foreman-mini', true], ['flights-foreman-pro', { floor: 'high', ceiling: 'xhigh' }],
+  ['flights-worker', true], ['flights-worker-pro', { floor: 'high', ceiling: 'xhigh' }],
+  ['flights-lander', landerEffort], ['flights-lander-mini', landerEffort], ['flights-lander-pro', landerEffort],
   ['reviewer', true], ['reviewer-pro', true], ['reviewer-nt', true], ['documenter', true],
-  ['flights-lander', { floor: 'medium', ceiling: 'xhigh', tripwires: 'redispatch' }],
-  ['foreman-pro', { floor: 'medium', ceiling: 'xhigh', landing: 'flights-lander gpt-flights-lander' }],
 ]);
 test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pcm or releaser', () => {
   const render = renderShipped([CAPABILITY]);
@@ -555,9 +546,9 @@ test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pc
       assert.equal(tools.filter((tool) => tool === button).length, 1, `${name}: must hold ${button} once; tools ${fm.tools}`);
   }
   assert.deepEqual(steered.sort(), [...effortSteered.keys()].sort(), 'an approved steered role was not rendered');
-  // A twin pins its own tools to drop the buttons: the rest stays its role's list (the lander's differs by contract).
+  // A twin pins its own tools to drop the buttons: the rest stays its role's list.
   const toolsOf = (name) => parseFrontmatter(name, renderedText(render, name)).tools.split(',').map((tool) => tool.trim());
-  for (const [name, , , role] of twins.filter(([, , , role]) => effortSteered.has(role) && role !== 'flights-lander'))
+  for (const [name, , , role] of twins.filter(([, , , role]) => effortSteered.has(role)))
     assert.deepEqual(toolsOf(name), toolsOf(role).filter((tool) => !effortButtons.includes(tool)), `${name}: tools drifted from ${role}`);
 });
 

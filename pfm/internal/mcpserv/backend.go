@@ -15,7 +15,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
@@ -46,8 +45,6 @@ type backend struct {
 	warnings             io.Writer
 	allowAmbientIdentity bool
 	runtimeIdentity      string
-	// runner is the exec seam digest crosses; nil is the real one.
-	runner deps.Runner
 	// digestTimeout bounds one digest run; zero is digestRunTimeout.
 	digestTimeout time.Duration
 }

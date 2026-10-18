@@ -14,8 +14,8 @@ import (
 func TestRunInternalRecordsEveryDispatchUnderTheHooksComponent(t *testing.T) {
 	_, recorder := obs.Test(t)
 	var stdout, stderr bytes.Buffer
-	if code := runInternal([]string{"explore-deny"}, &stdout, &stderr, commandRuntime{}); code != 0 {
-		t.Fatalf("explore-deny exit = %d, stderr=%q", code, stderr.String())
+	if code := runInternal([]string{"store-guard"}, &stdout, &stderr, commandRuntime{}); code != 0 {
+		t.Fatalf("store-guard exit = %d, stderr=%q", code, stderr.String())
 	}
 	if code := runInternal([]string{"hook-from-a-newer-pfm"}, &stdout, &stderr, commandRuntime{}); code != 1 {
 		t.Fatalf("unknown exit = %d", code)
@@ -35,13 +35,13 @@ func TestRunInternalRecordsEveryDispatchUnderTheHooksComponent(t *testing.T) {
 			t.Fatalf("no dur_ms: %v", record.Fields)
 		}
 	}
-	if hook, _ := records[0].Field("hook"); hook != "explore-deny" {
+	if hook, _ := records[0].Field("hook"); hook != "store-guard" {
 		t.Fatalf("hook = %v", hook)
 	}
 	// With no payload on stdin the fail-open hook answers nothing and exits
 	// 0, which the door reads as allow.
 	if decision, _ := records[0].Field("decision"); decision != "allow" {
-		t.Fatalf("explore-deny decision = %v, want allow", decision)
+		t.Fatalf("store-guard decision = %v, want allow", decision)
 	}
 	if decision, _ := records[1].Field("decision"); decision != "error" {
 		t.Fatalf("unknown subcommand decision = %v, want error", decision)

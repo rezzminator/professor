@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // Level is the activity log's record level: slog's, plus LevelOff above every
@@ -64,4 +65,24 @@ func LevelName(level Level) string {
 		}
 	}
 	return name
+}
+
+// SlowCall is the elapsed time at which a successful call stops being routine:
+// a door that records every call (db, tmux) writes it at INFO from here up.
+const SlowCall = 100 * time.Millisecond
+
+// RoutineLevel is the level a door that records every call writes one at: the
+// failure level when err is non-nil; INFO for a success that was retried or
+// took SlowCall or longer; DEBUG for every other success — the bulk of a busy
+// fleet's lines, and not evidence. The one rule behind db.statement, db.open
+// and tmux.exec.
+func RoutineLevel(err error, failure slog.Level, retries int, elapsed time.Duration) slog.Level {
+	switch {
+	case err != nil:
+		return failure
+	case retries > 0 || elapsed >= SlowCall:
+		return slog.LevelInfo
+	default:
+		return slog.LevelDebug
+	}
 }

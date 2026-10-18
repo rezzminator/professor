@@ -872,28 +872,57 @@ func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer func() {
+			done := make(chan struct{})
+			t.Cleanup(func() {
 				if err := listener.Close(); err != nil {
 					t.Error(err)
 				}
-			}()
+				<-done
+			})
 			got := make(chan map[string]any, 1)
 			go func() {
-				conn, err := listener.Accept()
-				if err != nil {
-					return
+				defer close(done)
+				for {
+					conn, err := listener.Accept()
+					if err != nil {
+						return
+					}
+					func() {
+						defer func() {
+							if err := conn.Close(); err != nil {
+								t.Error(err)
+							}
+						}()
+						var request map[string]any
+						if err := json.NewDecoder(conn).Decode(&request); err != nil {
+							t.Error(err)
+							return
+						}
+						var result any
+						switch request["method"] {
+						case "pane.list":
+							result = map[string]any{
+								"type":  "pane_list",
+								"panes": []any{testjail.HerdrPaneInfo("w6:p3")["pane"]},
+							}
+						case "pane.process_info":
+							result = map[string]any{
+								"type":         "pane_process_info",
+								"process_info": map[string]any{"pane_id": "w6:p3", "shell_pid": 41},
+							}
+						default:
+							got <- request
+							result = map[string]any{"type": "ok"}
+						}
+						if err := json.NewEncoder(conn).
+							Encode(map[string]any{"id": request["id"], "result": result}); err != nil {
+							t.Error(err)
+						}
+					}()
 				}
-				defer func() { _ = conn.Close() }()
-				var request map[string]any
-				if err := json.NewDecoder(conn).Decode(&request); err != nil {
-					t.Error(err)
-					return
-				}
-				got <- request
-				_ = json.NewEncoder(conn).
-					Encode(map[string]any{"id": request["id"], "result": map[string]any{"type": "ok"}})
 			}()
 			service := newFixtureService(t)
+			seedKeysHerdrOwner(t, socket)
 			service.backend.callEngine = resolveGateCaller{
 				target: pfmcall.Target{Backend: "herdr", SocketPath: socket, Pane: "w6:p3"},
 			}

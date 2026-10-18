@@ -18,7 +18,7 @@ func TestTranscriptCLIEntry(t *testing.T) {
 	}
 	var out, errs bytes.Buffer
 	if code := run([]string{"transcript", "--help"}, &out, &errs); code != 0 ||
-		!strings.Contains(out.String(), "{show,counts,types,locate,agents}") {
+		!strings.Contains(out.String(), "{show,locate,agents}") {
 		t.Fatalf("transcript --help code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
 	}
 	out.Reset()

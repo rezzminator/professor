@@ -144,6 +144,8 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 								processes,
 								map[string]any{"pid": 42, "name": "claude", "argv0": "claude"},
 							)
+						} else {
+							processes = append(processes, map[string]any{"pid": shellPID, "name": "sh", "argv0": "sh"})
 						}
 						result = map[string]any{
 							"type": "pane_process_info",

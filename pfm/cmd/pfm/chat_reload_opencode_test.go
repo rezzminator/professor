@@ -43,9 +43,9 @@ func TestChatReloadRefusesAnOpenCodeSocketUpFront(t *testing.T) {
 	old := startReloadWorker
 	t.Cleanup(func() { startReloadWorker = old })
 	started := 0
-	startReloadWorker = func([]string, deps.StartOptions) error {
+	startReloadWorker = func([]string, deps.StartOptions) (int, error) {
 		started++
-		return nil
+		return 0, nil
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"--config", configPath, "chat", "reload", "--sock", socket, "1"}, &stdout, &stderr)
@@ -96,9 +96,9 @@ func TestChatReloadRefusesAnUnknownAccountUpFront(t *testing.T) {
 	old := startReloadWorker
 	t.Cleanup(func() { startReloadWorker = old })
 	started := 0
-	startReloadWorker = func([]string, deps.StartOptions) error {
+	startReloadWorker = func([]string, deps.StartOptions) (int, error) {
 		started++
-		return nil
+		return 0, nil
 	}
 	var stdout, stderr bytes.Buffer
 	code := run(

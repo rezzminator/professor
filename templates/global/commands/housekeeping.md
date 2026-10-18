@@ -7,7 +7,7 @@ argument-hint: "[repo]"
 
 # Housekeeping
 
-Repository: $ARGUMENTS — with none, the main checkout of the current one. This chat only reads and deletes stale `UNLANDED.md` markers (§ 4); every git write goes to `gitter`.
+Repository: $ARGUMENTS — with none, the main checkout of the current one. This chat only reads; every git write goes to `gitter`.
 
 ## 1. Inventory
 
@@ -17,7 +17,6 @@ One read-only shell call gathers:
 - every linked worktree (`git worktree list --porcelain`): branch, tip, ahead and behind `{base}`, dirty count, last commit age and subject
 - local branches `git branch --no-merged {base}`, and the remote branch of each
 - `git stash list`, each entry with `git stash show --include-untracked --stat`
-- every `$HOME/.local/state/pfm/flights/{project}/*/UNLANDED.md`: a flight that passed its gate and never landed; its worktree is WAITING, and a successfully enumerated but gone worktree makes the file stale, deleted in § 4
 
 `{base}`, the release branch and branches sharing no history with `{base}` (`gh-pages`-like) are not work branches: list them under left alone.
 
@@ -43,8 +42,6 @@ One `gitter` dispatch carries every local removal. Per item: the path, the branc
 - `git branch -d` for MERGED; `git branch -D` for LANDED, its landing commit named
 - `git worktree prune` last
 
-After a successful final `git worktree list` enumeration, this chat deletes markers whose worktree line names a gone worktree, including markers whose worktrees were already gone at inventory. An unreadable or malformed marker stays, with its path and cause reported. Delete only `UNLANDED.md`, retaining the flight directory and audit trail; these files lie outside the repository, so no `gitter` dispatch carries them. A failed or empty enumeration authorizes no deletion.
-
 Out of scope in that brief: pushes, remote branches, stashes, `{base}` and the main checkout's untracked files. A refusal `gitter` returns is traced to its cause; a cause the evidence clears goes back with that evidence, any other cause makes the item WAITING.
 
 ## 5. Remote branches and stashes
@@ -56,12 +53,11 @@ Both are listed for the user before anything happens: a remote branch with its t
 
 ## 6. WAITING work
 
-WAITING work stays. Report what it holds and what finishing it takes; when the user asked for the work to be done, dispatch `flights-foreman` with the branch, the worktree and what is left.
+WAITING work stays. Report what it holds and what finishing it takes; when the user asked for the work to be done, dispatch the foreman tier its difficulty calls for with the branch, the worktree and what is left.
 
 ## Report
 
 - a table: item · state · evidence (landing commit, file comparison, where moved tests live)
 - what was left alone, and why
 - recovery lines for dropped stashes
-- the `UNLANDED.md` files deleted, one line each
 - the final `git worktree list`, `git branch --list` and `git stash list`, read by this chat, never relayed from `gitter`

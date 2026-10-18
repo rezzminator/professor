@@ -143,3 +143,54 @@ func TestRunHerdrTracksMoveDuringStartup(t *testing.T) {
 		t.Fatalf("moved row=%+v err=%v", row, err)
 	}
 }
+
+// TestRunHerdrNamesAnEndedChatApartFromADeadSupervisor: a chat ended while the
+// reload waited for it to go idle says so; only a supervisor that died under a
+// live seat is reported dead.
+func TestRunHerdrNamesAnEndedChatApartFromADeadSupervisor(t *testing.T) {
+	for _, test := range []struct{ mode, want string }{
+		{"end pending", "native reload: the chat was ended while reload waited"},
+		{"seat retired", "native reload: the chat was ended while reload waited"},
+		{"supervisor dead", "native reload supervisor is dead"},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			f := newReloadHerdrFixture(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fired := false
+			f.onRead = func() {
+				if fired {
+					return
+				}
+				fired = true
+				ctx := context.Background()
+				switch test.mode {
+				case "end pending":
+					row, found, err := f.db.Seat(ctx, f.seat.SeatID)
+					if err != nil || !found {
+						t.Errorf("read seat: found=%v err=%v", found, err)
+						return
+					}
+					ending := row
+					ending.EndPending = true
+					if err := f.db.UpdateSeat(ctx, row, ending); err != nil {
+						t.Error(err)
+					}
+				case "seat retired":
+					if err := f.db.DeleteSeat(ctx, f.seat.SeatID); err != nil {
+						t.Error(err)
+					}
+				}
+				if err := os.RemoveAll(filepath.Join(values.ProcRoot, "90")); err != nil {
+					t.Error(err)
+				}
+			}
+			_, err = RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			if !fired || err == nil || !strings.Contains(err.Error(), test.want) || f.submitted {
+				t.Fatalf("fired=%v submitted=%v err=%v, want %q", fired, f.submitted, err, test.want)
+			}
+		})
+	}
+}

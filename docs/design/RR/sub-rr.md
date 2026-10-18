@@ -1,6 +1,6 @@
 # sub-rr
 
-`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and returns a quote-anchored finding per sub-query plus every rabbit hole its sources raised. It is spawned only by `rr`, `rr-pro` and `rr-pro-max`, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
+`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and writes its full report to the path its brief names, and returns that path, a quote-anchored finding per sub-query, each read through its sub-area's lens, plus every rabbit hole its sources raised. It is spawned only by `rr`, `rr-pro`, `rr-pro-max` and their `gpt-` twins, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
 
 ## Contents
 
@@ -9,7 +9,8 @@
 - [The fetch path](#the-fetch-path)
 - [The return](#the-return)
 - [Sources and marks](#sources-and-marks)
-- [Why it never writes](#why-it-never-writes)
+- [The report](#the-report)
+- [Why it writes its own report](#why-it-writes-its-own-report)
 - [What the runs measured](#what-the-runs-measured)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 
@@ -19,24 +20,32 @@
 | --- | --- |
 | Kind | original agent, `templates/global/agents/sub-rr.md`, linked by `pfm install` |
 | Class | `RR-ONLY` |
-| Model, effort | `sonnet`, `low` |
-| Tools | `WebSearch, WebFetch, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` |
+| Model, effort | `haiku`, `medium` |
+| Tools | `WebSearch, WebFetch, Write, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` |
 | Spawns | nothing — it holds no `Agent` |
-| Writes | nothing — it holds no `Write`, `Edit` or `Bash` |
+| Writes | one file, the `Report:` path in its brief, by one `Write` as its last call; it holds no `Edit`, `Read` or `Bash` |
 
-Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro and rr-pro-max, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
+Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro, rr-pro-max and their gpt- twins, never delegated to directly; writes its full cited report to the brief's Report path. Returns that path, a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
 
 ## The brief it receives
 
-The lead writes each brief from one group of its frontier (one unsettled sub-area):
+The lead writes each brief from one group of its frontier (one unsettled sub-area, or several merged past the cap), one block per sub-area:
 
-- a numbered list of self-contained sub-queries, one subject each, named in full;
-- the pages already read for that group, each with what it lacked — the digger skips them;
-- one `Goal:` line, the query in one line, identical in every brief of the run, which fills the footer's `{goal}` slot so rabbit holes serve the run and not the page in general.
+- its plan line, `{sub-area} — settled when {evidence}`;
+- its lens line, `Lens: {field} — method: {how that field settles the question}; sources: {the raw material it starts from}`;
+- its sub-queries, numbered on across the brief, self-contained, one subject each, named in full; each is answered through the `Lens:` line above it, a positional match a `haiku` digger makes without judgment;
+
+then, once for the brief:
+
+- the pages already read for its groups, each with what it lacked — the digger skips them;
+- one `Goal:` line, the query in one line, identical in every brief of the run, which fills the footer's `{goal}` slot so rabbit holes serve the run and not the page in general;
+- last, `Report: {run dir}/sub-rr/{nn}-{group-slug}.md`, absolute, or `Report: none — {reason}` when the run has no directory.
+
+No brief casts the digger as anyone: the lens names methods and sources, never a voice.
 
 ## The fetch path
 
-1. WebSearch each sub-query, then read the 2-3 best sources; a source serving two sub-queries is read once.
+1. WebSearch each sub-query, the first query aimed at a `sources:` item of its lens, then wider; read the 2-3 best sources, a `sources:` item before a page reporting on one; a source serving two sub-queries is read once. One aimed query, not one per listed item, keeps a lens with a long `sources:` list from multiplying the searches.
 2. `read` with `publications` for a paper, book chapter, PDF or document identifier, `search_literature` first when only a title is known. WebFetch is the default for a page.
 3. `read` with `urls` when a WebFetch fails or returns an encoded or empty body.
 4. Every WebFetch prompt asks the key question first, asks for the exact sentence behind every figure and date, then appends the rabbit-hole footer with the `Goal:` line in its slot. A harvester-read document carries no footer; the digger lists the rabbit holes it raises itself.
@@ -45,7 +54,9 @@ The harvester tools cover what WebFetch cannot: a PDF WebFetch returns as an enc
 
 ## The return
 
-- One finding per sub-query, under its number, in 2-4 sentences; the message opens with finding 1.
+- The first line is the report's absolute path; then one finding per sub-query, under its number, in 2-4 sentences. With no `Report:` path to write, the message opens with finding 1. A refused or failed Write makes the first line `NOT SAVED — {the Write error}`, the full report following inline in place of the short findings. A compaction or summary never cancels the Write: a digger whose large harvester reads trigger auto-compaction can take the summary for a text-only instruction and return that its Write is still pending, so the prompt rules such a return never valid; the Write lands or the return opens `NOT SAVED`.
+- A finding that cites sources opens with a bracket naming each one's class: the `sources:` item of its lens it is, else `other: {what it is}`, as in `2. [court filings, other: news article] …`. The class is a match against the lens line, not a judgment, so the `haiku` digger can make it, and the lead sees at a glance whether a finding rests on raw material or on a page about it. A finding carrying no source (`DIG FAILED`, `NOTHING FOUND`) has no bracket.
+- A finding states what the lens's `method:`, done on those sources, shows. When no cited source is a `sources:` item, its last sentence names the one that would settle it, and that search goes under `Rabbit holes`.
 - Every figure and date, and the claim the finding turns on, sits inside a verbatim quote: a sentence the fetch result presents as the page's own words, never the fetch model's own prose. A fact it could not quote is marked `unquoted`.
 - Sources that disagree are both given, each with its quote, marked `DISPUTED`.
 - One `Rabbit holes` list follows, every rabbit hole the sources surfaced, each a concrete next web-search query and one line on why it matters. The lead decides which to follow; the digger drops none.
@@ -53,12 +64,23 @@ The harvester tools cover what WebFetch cannot: a PDF WebFetch returns as an enc
 ## Sources and marks
 
 - A finding links only pages the digger fetched for it. A WebSearch result's title or snippet is a lead to fetch, never a source, and never one side of a `DISPUTED`. The prompt carries one contrastive example at the return step: ✗ an arXiv link seen in search results, cited without a fetch — ✓ fetch it first, or list it under `Rabbit holes`.
-- Only a web URL or a document identifier is a source, never a local path.
+- Only a web URL or a document identifier is a source, never a local path; the report's path line is no citation.
 - A sub-query whose search errors or whose every fetch fails opens with `DIG FAILED — {the error}`; one whose searches ran and answered nothing opens with `NOTHING FOUND — {the queries tried}`.
 
-## Why it never writes
+## The report
 
-Up to eight diggers run at once, and any design where they write into the run's one document is a race or costs lead calls: a `Write` from each digger erases the others, an `Edit` from each is a read-modify-write that collides, part files need a merger. The findings must reach the lead's context anyway, because the lead steers and synthesizes from them, and the digger's return already does that at no extra call. So the return is the only channel, and the `tools:` line enforces it.
+The return carries what the lead steers from; the report carries everything the digger knows, for the caller who investigates past the synthesis. The lead never reads it. It holds:
+
+- the `Goal:` line and the numbered sub-queries;
+- under each sub-query's number, everything found: each fact, figure, date, table, command or code excerpt with its verbatim quote and URL, as long as the material needs, not bound to 2-4 sentences, both sides with their quotes where sources disagree;
+- a `Sources` list: every page fetched and every search run, each with its URL or query, what it gave and what it lacked, and every failed fetch with its error;
+- the `Rabbit holes` list, each with where it surfaced.
+
+The quote and source rules of the return bind the report too: a figure sits in a verbatim quote or is marked `unquoted`, and only a fetched web URL or document identifier is cited.
+
+## Why it writes its own report
+
+Up to eight diggers run at once. Each writes one file no other agent holds, so nothing races; the Write is its last call, so the report holds the whole dig; it costs the lead no call and no tokens. The digger holds no `Read`, so the harness refuses its Write over an existing file, and a taken path turns into `NOT SAVED` with the report inline instead of a silent overwrite. `rr.md` in this directory, § Why each digger writes its own report, weighs the alternatives.
 
 ## What the runs measured
 
@@ -73,5 +95,5 @@ Digger returns across the family's runs, counted by script over the transcripts 
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/sub-rr.md` |
-| The briefs it receives | `templates/global/agents/rr.md`, step 4 |
+| The briefs it receives | `templates/global/agents/rr.md`, step 2 (the lens line and the run directory) and step 4 (the `Report:` line) |
 | The family doc | `docs/design/RR/rr.md` |

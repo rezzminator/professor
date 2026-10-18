@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-//go:embed assets/converter.py assets/pyproject.toml assets/uv.lock assets/targets.json assets/size-report.json
+//go:embed assets/converter.py assets/pyproject.toml assets/uv.lock assets/targets.json
 //go:embed assets/browser/browser.py assets/browser/pyproject.toml assets/browser/uv.lock
 var embeddedAssets embed.FS
 
@@ -158,17 +158,6 @@ func BrowserLockMetadata() []byte {
 	body, err := embeddedAssets.ReadFile("assets/browser/uv.lock")
 	if err != nil {
 		panic(fmt.Sprintf("read embedded browser lock: %v", err))
-	}
-	return append([]byte(nil), body...)
-}
-
-// SizeReportMetadata returns measured shipping/runtime sizes.  Unknown fields
-// are intentionally recorded as unknown rather than inferred from another
-// target's wheel closure.
-func SizeReportMetadata() []byte {
-	body, err := embeddedAssets.ReadFile("assets/size-report.json")
-	if err != nil {
-		panic(fmt.Sprintf("read embedded harvestpy size report: %v", err))
 	}
 	return append([]byte(nil), body...)
 }

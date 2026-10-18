@@ -5,7 +5,21 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
+
+// writeOutput replaces path whole, its directory created; the bytes written.
+func writeOutput(path, content string) (int, error) {
+	absolute, err := filepath.Abs(path)
+	if err == nil {
+		err = atomicfile.Write(absolute, []byte(content), 0o644)
+	}
+	if err != nil {
+		return 0, failure("write %s: %v", path, err)
+	}
+	return len(content), nil
+}
 
 // project is one project's totals.
 type project struct {

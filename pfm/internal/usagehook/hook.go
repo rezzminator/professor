@@ -738,24 +738,6 @@ func resetPassed(raw string, now time.Time) bool {
 	return err == nil && !resetAt.After(now)
 }
 
-// cacheAge measures payload age, not a backoff writer's newer file mtime.
-// Legacy or future-dated records fall back to mtime, matching existing hook
-// behavior; the statusline rejects explicit future stamps instead.
-func cacheAge(record CacheRecord, path string, now time.Time) time.Duration {
-	if record.FetchedAt != nil && !record.FetchedAt.After(now) {
-		return now.Sub(*record.FetchedAt)
-	}
-	return fileAge(path, now)
-}
-
-func fileAge(path string, now time.Time) time.Duration {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 100 * 365 * 24 * time.Hour
-	}
-	return now.Sub(info.ModTime())
-}
-
 // recoveredWindowPhrase distinguishes an expired reading from measured zero.
 func recoveredWindowPhrase(label string, window usageWindow, percent int, now time.Time) string {
 	if resetPassed(window.ResetsAt, now) {

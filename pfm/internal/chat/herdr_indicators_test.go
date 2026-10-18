@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -162,7 +163,11 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 	}
 	generation := `{"session_id":"s1","seq":1,"clients":{"10":{"pane":"stale","socket":"endpoint"}}}`
 	reader := tabViewReader{
-		tmux: func(_ context.Context, _ string, args ...string) (string, error) {
+		runtime: &config.Runtime{Paths: paths.Values{TmuxDir: "/fixture/tmux"}},
+		tmux: func(_ context.Context, socket string, args ...string) (string, error) {
+			if socket != "/fixture/tmux/tmux" {
+				return "", fmt.Errorf("tmux -S %s %s: exit status 1", socket, args[0])
+			}
 			if args[0] == "list-clients" {
 				return "10\n11\n12", nil
 			}
@@ -177,6 +182,16 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 			default:
 				return herdr.Location{Socket: "other", Pane: "w1:p1", Terminal: "term1"}, true, nil
 			}
+		},
+		bridge: func(_ context.Context, socket, pane string) (call.HerdrBridge, error) {
+			if socket != "endpoint" {
+				return call.HerdrBridge{}, fmt.Errorf("bridge asked on %s", socket)
+			}
+			return call.HerdrBridge{
+				TmuxSocket: "/fixture/tmux/tmux",
+				Session:    "Chat",
+				ClientPID:  map[string]int{"w1:p1": 10, "w2:p2": 11}[pane],
+			}, nil
 		},
 	}
 	target := headless.Chat{ID: "s1", Live: true, Socket: "tmux", Session: "Chat"}
@@ -194,10 +209,19 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 	if got, err := reader.views(context.Background(), target, "endpoint", panes); err != nil || len(got) != 0 {
 		t.Fatalf("replacement views=%+v err=%v", got, err)
 	}
+	noServer := headless.Chat{ID: "s3", Live: true, Session: "Chat"}
+	if got, err := reader.views(context.Background(), noServer, "endpoint", panes); err != nil || len(got) != 0 {
+		t.Fatalf("a live row with no tmux socket has no tab: views=%+v err=%v", got, err)
+	}
 	target.Live = false
 	got, err = reader.views(context.Background(), target, "endpoint", panes)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("original retained dead views=%+v err=%v", got, err)
+	}
+	for i := range got {
+		if !got[i].Retained || got[i].Validate != nil || got[i].Identity != "tmux:Chat:s1" {
+			t.Fatalf("dead view %d must be retained, revalidated only by pfm's label record: %+v", i, got[i])
+		}
 	}
 	panes[0].Terminal = "replacement"
 	panes[1].Session = []byte(`{"source":"pfm","agent":"claude","kind":"id","value":"s2"}`)
@@ -268,26 +292,29 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		owned, engine bool
+		engineErr     error
 		proof         error
 		views         int
 		state         string
 	}{
-		{"proved owner, engine in foreground", true, true, nil, 1, ""},
+		{"proved owner, engine in foreground", true, true, nil, nil, 1, ""},
 		// A supervisor outlives an abruptly dead engine until it retires the seat.
-		{"proved owner, engine gone", true, false, nil, 1, "dead"},
-		{"proved supervisor death", false, true, nil, 1, "dead"},
-		{"ownership unproved", false, true, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
+		{"proved owner, engine gone", true, false, nil, nil, 1, "dead"},
+		{"proved supervisor death", false, true, nil, nil, 1, "dead"},
+		{"proved owner, foreground unavailable", true, false, errors.New("foreground evidence unavailable"), nil, 1, "unknown"},
+		{"ownership unproved", false, true, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warnings := &bytes.Buffer{}
 			proof := tc.proof
+			engineErr := tc.engineErr
 			reader := tabViewReader{
 				runtime: &config.Runtime{Paths: values},
 				warn:    warnings,
 				prove: func(_ context.Context, seat fleetdb.Seat, _ paths.Values) (fleetdb.Seat, bool, error) {
 					return seat, tc.owned, proof
 				},
-				engine: func(context.Context, fleetdb.Seat) (bool, error) { return tc.engine, nil },
+				engine: func(context.Context, fleetdb.Seat) (bool, error) { return tc.engine, engineErr },
 			}
 			got, err := reader.views(ctx, target, "endpoint", []herdr.TabPane{pane})
 			if err != nil || len(got) != tc.views {
@@ -299,11 +326,54 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 				}
 				return
 			}
-			if got[0].State != tc.state || got[0].Identity != "seat1:s1" || warnings.Len() != 0 {
+			if got[0].State != tc.state || got[0].Identity != "seat1:s1" ||
+				(tc.engineErr == nil && warnings.Len() != 0) {
 				t.Fatalf("decoration=%+v warnings=%q", got[0], warnings)
+			}
+			if tc.engineErr != nil {
+				if !strings.Contains(warnings.String(), tc.engineErr.Error()) {
+					t.Fatalf("missing foreground diagnostic: %s", warnings)
+				}
+				provider := herdrTabProvider{
+					scan: func(context.Context) (FleetScan, error) {
+						return FleetScan{
+							Rows: []compose.Row{
+								{
+									Backend: "herdr",
+									SeatID:  "seat1",
+									ID:      "s1",
+									Socket:  "endpoint",
+									PaneID:  "w1:p1",
+									Kind:    compose.LiveClaude,
+								},
+							},
+						}, nil
+					},
+					views: func(ctx context.Context, c headless.Chat, socket string) ([]herdr.TabDecoration, error) {
+						return reader.views(ctx, c, socket, []herdr.TabPane{pane})
+					},
+					inspect: func(context.Context, headless.Chat, time.Time) (headless.Status, error) {
+						return headless.Status{State: "idle"}, nil
+					},
+					mode: func() (string, error) { return "emoji", nil }, warn: warnings,
+				}
+				if tabs, err := provider.tabs(
+					ctx,
+					"endpoint",
+				); err != nil || len(tabs) != 1 ||
+					tabs[0].State != "unknown" {
+					t.Fatalf("unavailable evidence became known state: tabs=%+v err=%v", tabs, err)
+				}
 			}
 			if valid, err := got[0].Validate(ctx); err != nil || !valid {
 				t.Fatalf("proved owner valid=%t err=%v", valid, err)
+			}
+			if tc.engineErr != nil {
+				engineErr = nil
+				if valid, err := got[0].Validate(ctx); err != nil || valid {
+					t.Fatalf("changed foreground evidence must invalidate unknown: valid=%t err=%v", valid, err)
+				}
+				engineErr = tc.engineErr
 			}
 			proof = errors.New("seat seat1 supervisor birth changed during proof")
 			if valid, err := got[0].Validate(ctx); err != nil || valid ||
@@ -311,5 +381,121 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 				t.Fatalf("unproved at validation valid=%t err=%v warnings=%q", valid, err, warnings)
 			}
 		})
+	}
+}
+
+// A live bridge tab is acted on only while the bridge proof names the very
+// tmux client and chat session the view was built from.
+func TestHerdrTabBridgeProofGatesLiveViews(t *testing.T) {
+	focused := false
+	panes := []herdr.TabPane{{
+		Pane: "w1:p1", Terminal: "term1", Tab: "w1:t1", Workspace: "w1", Focused: &focused,
+		Session: []byte(`{"source":"pfm","agent":"claude","kind":"id","value":"s1"}`),
+	}}
+	for _, tc := range []struct {
+		name    string
+		proof   call.HerdrBridge
+		err     error
+		valid   bool
+		wantErr string
+	}{
+		{name: "proved", proof: call.HerdrBridge{TmuxSocket: "/fixture/tmux/cc-1", Session: "cc-1", ClientPID: 10}, valid: true},
+		{name: "unproved", err: errors.New("herdr pane w1:p1 bridge ownership unproved: not attached"), wantErr: "not attached"},
+		{name: "other-client", proof: call.HerdrBridge{TmuxSocket: "/fixture/tmux/cc-1", Session: "cc-1", ClientPID: 99}},
+		{name: "other-chat", proof: call.HerdrBridge{TmuxSocket: "/fixture/tmux/cc-2", Session: "cc-2", ClientPID: 10}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := tabViewReader{
+				runtime: &config.Runtime{Paths: paths.Values{TmuxDir: "/fixture/tmux"}},
+				tmux: func(_ context.Context, socket string, args ...string) (string, error) {
+					if socket != "/fixture/tmux/cc-1" {
+						return "", fmt.Errorf("tmux -S %s %s: exit status 1", socket, args[0])
+					}
+					if args[0] == "list-clients" {
+						return "10\n", nil
+					}
+					return `{"session_id":"s1","seq":1}`, nil
+				},
+				resolve: func(context.Context, int) (herdr.Location, bool, error) {
+					return herdr.Location{Socket: "endpoint", Pane: "w1:p1", Terminal: "term1"}, true, nil
+				},
+				bridge: func(_ context.Context, socket, pane string) (call.HerdrBridge, error) {
+					if socket != "endpoint" || pane != "w1:p1" {
+						t.Errorf("bridge proof of %s %s", socket, pane)
+					}
+					return tc.proof, tc.err
+				},
+			}
+			// headless.Chat carries the tmux socket NAME, as the fleet scan
+			// produces it; the reader resolves it under the runtime's TmuxDir.
+			target := headless.Chat{ID: "s1", Live: true, Socket: "cc-1", Session: "cc-1"}
+			got, err := reader.views(context.Background(), target, "endpoint", panes)
+			if err != nil || len(got) != 1 {
+				t.Fatalf("views=%+v err=%v", got, err)
+			}
+			valid, err := got[0].Validate(context.Background())
+			if valid != tc.valid || (tc.wantErr == "") != (err == nil) ||
+				err != nil && !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("bridge validation = %t, %v; want %t naming %q", valid, err, tc.valid, tc.wantErr)
+			}
+		})
+	}
+}
+
+// One chat's view failure is named and skipped; a socket-wide pane listing
+// failure still fails the tick.
+func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
+	warnings := &bytes.Buffer{}
+	listErr := error(nil)
+	provider := herdrTabProvider{
+		scan: func(context.Context) (FleetScan, error) {
+			return FleetScan{Rows: []compose.Row{
+				{ID: "s1", Name: "Broken", Kind: compose.LiveClaude},
+				{ID: "s2", Name: "Bridge", Kind: compose.LiveClaude},
+			}}, nil
+		},
+		inspect: func(context.Context, headless.Chat, time.Time) (headless.Status, error) {
+			return headless.Status{State: "blocked"}, nil
+		},
+		views: func(_ context.Context, target headless.Chat, _ string) ([]herdr.TabDecoration, error) {
+			if listErr != nil {
+				return nil, listErr
+			}
+			if target.ID == "s1" {
+				return nil, errors.New("list tab tmux clients: server gone")
+			}
+			return []herdr.TabDecoration{{Pane: "w1:p2", Identity: "s2"}}, nil
+		},
+		mode: func() (string, error) { return "emoji", nil }, warn: warnings,
+	}
+	got, err := provider.tabs(context.Background(), "endpoint")
+	if err != nil || len(got) != 1 || got[0].Identity != "s2" || !strings.Contains(warnings.String(), "server gone") {
+		t.Fatalf("tabs=%+v err=%v warnings=%s", got, err, warnings)
+	}
+	// A chat failing tick after tick is named once while it lasts, and afresh
+	// once it recurs after a tick it was readable.
+	persisted := warnings.String()
+	provider.warn = &tickWarnings{out: warnings}
+	broken := true
+	views := provider.views
+	provider.views = func(ctx context.Context, target headless.Chat, socket string) ([]herdr.TabDecoration, error) {
+		if target.ID == "s1" && !broken {
+			return nil, nil
+		}
+		return views(ctx, target, socket)
+	}
+	for _, failing := range []bool{true, true, true, false, true} {
+		broken = failing
+		if _, err := provider.tabs(context.Background(), "endpoint"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if named := strings.Count(strings.TrimPrefix(warnings.String(), persisted), "server gone"); named != 2 {
+		t.Fatalf("a recurring chat failure was named %d times over 5 ticks, want 2: %s", named, warnings)
+	}
+	listErr = fmt.Errorf("%w: socket refused", errTabPaneList)
+	_, err = provider.tabs(context.Background(), "endpoint")
+	if err == nil || !strings.Contains(err.Error(), "socket refused") {
+		t.Fatalf("pane listing failure=%v", err)
 	}
 }

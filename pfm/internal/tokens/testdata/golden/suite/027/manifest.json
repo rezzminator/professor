@@ -1,11 +1,11 @@
 {
- "test": "--timeline: the header's USD equals the default report's USD for the same file, and the rows sum to it",
+ "test": "sub-agent runs with malformed lines, an empty transcript and no .meta.json: the default report names the gaps and prices the rest",
  "now": "2026-10-09T10:28:46.000Z",
  "args": [
   "--since",
   "99999d",
   "--root",
-  "{FIX}/timeline",
+  "{FIX}/subagent-gaps",
   "--out",
   "{TMP}/tl-default.json"
  ],

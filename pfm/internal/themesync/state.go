@@ -51,11 +51,6 @@ type stateStore struct{ dir string }
 
 func (store stateStore) statePath() string { return filepath.Join(store.dir, StateFileName) }
 
-// backupPath is a file under the state dir's backups/ tree.
-func (store stateStore) backupPath(parts ...string) string {
-	return filepath.Join(append([]string{store.dir, "backups"}, parts...)...)
-}
-
 // load reads state.json. A missing file is (zero, false, nil); an unreadable
 // or unparseable one is an error, never an empty state.
 func (store stateStore) load() (themeState, bool, error) {

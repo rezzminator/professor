@@ -554,23 +554,8 @@ func routeForKind(kind compose.Kind) (Route, error) {
 	}
 }
 
-func claudeCommand(
-	purpose Purpose,
-	home string,
-	account int,
-	cache1H bool,
-	machine pfmconfig.Config,
-	name string,
-	args ...string,
-) (string, error) {
-	return claudeCommandWith(purpose, claudelaunch.Hygiene(), home, account, cache1H, machine, name, args...)
-}
-
-// claudeCommandWith is claudeCommand over a caller-chosen environment strip,
-// so the headless route can widen the strip without owning a second copy of
-// the account, cache and autonomy decisions. Both are now thin wrappers over
-// ClaudeSpawn — the one door — and exist only because the synthesis routes
-// read better as one expression inside Synthesize.
+// claudeCommandWith renders one Claude launch command through ClaudeSpawn —
+// the one door; the caller-chosen environment strip is accepted and ignored.
 func claudeCommandWith(
 	purpose Purpose,
 	strip []string,

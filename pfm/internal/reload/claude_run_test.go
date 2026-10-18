@@ -68,13 +68,19 @@ type claimedReloadTmux struct {
 }
 
 func (tmux *claimedReloadTmux) Respawn(ctx context.Context, socket, pane, cwd, command string) error {
-	guard, err := gather.AcquireAccountGuard(tmux.account, false)
+	// One non-blocking flock of the account directory, the lock the guard
+	// takes: AcquireAccountGuard would retry a held lock for accountBusyGrace.
+	probe, err := os.Open(tmux.account)
+	if err != nil {
+		tmux.t.Fatal(err)
+	}
+	err = syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err == nil {
 		tmux.crossed = true
-		if err := guard.Close(); err != nil {
-			tmux.t.Fatal(err)
-		}
 	} else if !errors.Is(err, syscall.EWOULDBLOCK) {
+		tmux.t.Fatal(err)
+	}
+	if err := probe.Close(); err != nil {
 		tmux.t.Fatal(err)
 	}
 	if command == "exit 1" {

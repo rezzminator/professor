@@ -52,8 +52,8 @@ func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
 		t.Fatalf("Output = %q, %v — the wrapper changed the command's result", output, err)
 	}
 	record := oneRecord(t, recorder)
-	if record.Message != "tmux.exec" || record.Level != slog.LevelInfo.String() {
-		t.Fatalf("record = %s at %s, want tmux.exec at INFO", record.Message, record.Level)
+	if record.Message != "tmux.exec" || record.Level != slog.LevelDebug.String() {
+		t.Fatalf("record = %s at %s, want tmux.exec at DEBUG (a routine success)", record.Message, record.Level)
 	}
 	want := map[string]any{
 		obs.FieldComp: "tmux", "subcmd": "send-keys", "target": "%7",
@@ -66,6 +66,37 @@ func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
 	}
 	if strings.Contains(recorder.Raw(), "PLANTED") {
 		t.Fatalf("a send-keys body reached the file: %s", recorder.Raw())
+	}
+}
+
+// TestExecRecordsAtTheLevelOfItsOutcome: a clean, fast tmux call is DEBUG (it
+// was the bulk of every log line); one that took obs.SlowCall or longer, and
+// a tmux that answered with a non-zero exit, are INFO; a tmux that never
+// started is ERROR.
+func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		binary  func(t *testing.T) string
+		elapsed time.Duration
+		want    string
+	}{
+		{"fast success", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, "DEBUG"},
+		{"slow success", func(t *testing.T) string { return fakeTmux(t, 0) }, obs.SlowCall, "INFO"},
+		{"tmux answers non-zero", func(t *testing.T) string { return fakeTmux(t, 1) }, time.Millisecond, "INFO"},
+		{"never started", func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-tmux") }, time.Millisecond, "ERROR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := clock.NewFake(time.Unix(1700000000, 0))
+			ctx, recorder := obs.Test(t, obs.WithTestClock(fake))
+			command := Exec(ctx, tc.binary(t), "/sockets/cc-1", "list-panes", "-a")
+			if err := command.Start(); err == nil {
+				fake.Advance(tc.elapsed)
+				_ = command.Wait() // a non-zero exit is the case under test, recorded by Wait
+			}
+			if got := oneRecord(t, recorder).Level; got != tc.want {
+				t.Fatalf("level = %s, want %s: %s", got, tc.want, recorder.Raw())
+			}
+		})
 	}
 }
 

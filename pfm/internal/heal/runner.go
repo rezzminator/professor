@@ -42,11 +42,6 @@ func New(codexHome string, now func() time.Time) (*Runner, error) {
 	return &Runner{stores: stores, now: now}, nil
 }
 
-// Stores reports the files this runner reads and writes.
-func (runner *Runner) Stores() Stores {
-	return runner.stores
-}
-
 // Run sweeps, and with Apply (or Thread) heals what the sweep found broken.
 //
 // A LIVE thread is never healed: Codex holds its writer lock and carries the

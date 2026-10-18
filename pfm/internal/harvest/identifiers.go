@@ -178,10 +178,6 @@ func ClassifyIdentifier(input string) IdentifierKind {
 	return IdentifierNone
 }
 
-// ExtractDOI is the exported spelling used by adapters that only need lexical
-// DOI extraction and must not start network discovery.
-func ExtractDOI(text string) string { return DOIFrom(text) }
-
 func extractPMCID(raw string) string {
 	match := regexp.MustCompile(`(?i)(PMC\d+)`).FindString(raw)
 	return strings.ToUpper(match)

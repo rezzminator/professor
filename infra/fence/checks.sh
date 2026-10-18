@@ -326,7 +326,7 @@ checks_templates_mirrors_generate() {
   rm -f "$tree.built"
   if ! need_tool go templates || ! need_tool node templates || ! need_tool git templates || ! need_tool tar templates; then
     fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
-  elif ! engine_sync_build "$es_bin"; then
+  elif ! engine_sync_build_once "$es_bin"; then
     fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
   elif ! checks_engine_sync_policy "$home"; then
     fail_step "mirror generation could not run — the machine policy could not be staged (see above); no mirror gate below is a verdict on the tree"
@@ -373,7 +373,7 @@ checks_templates_generated_agents() {
   if ! need_tool go templates || ! need_tool python3 templates; then
     fail_step "generated agents NOT RENDERED — the toolchain is missing"
     return
-  elif ! engine_sync_build "$es_bin"; then
+  elif ! engine_sync_build_once "$es_bin"; then
     fail_step "generated agents NOT RENDERED — the engine-sync binary could not be built (see above)"
     return
   elif [[ ! -d "$sources" ]]; then
@@ -586,7 +586,7 @@ checks_templates_mirrors_opencode() {
   head_ "templates — native opencode mirror"
   # engine-sync built from its mounted source checks and doctors the mirror
   # under a scratch home; verification never depends on or installs a host binary.
-  if ! need_tool go templates || ! engine_sync_build "$es_bin"; then
+  if ! need_tool go templates || ! engine_sync_build_once "$es_bin"; then
     fail_step "opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)"
   elif ! checks_engine_sync_policy "$opencode_home"; then
     fail_step "opencode mirror NOT CHECKED — the machine policy could not be staged (see above)"
@@ -658,7 +658,7 @@ PY
 
 checks_templates_skill_tests() {
   local skill cp_out
-  for skill in codeprobe tracetree; do
+  for skill in codeprobe tracetree chatlog; do
     head_ "templates — $skill skill tests"
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
@@ -707,7 +707,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
     generated-agents release-check refresh-scope worktree-script dev-report \
     format-md flight-templates
-  for name in check-pfm check-templates test-pfm test-templates unit-path; do
+  for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name"
   done
   checks_named_template_steps "$add" engine-sync-action-tests skill-tests
@@ -1072,6 +1072,9 @@ gate_write_meta() {
     printf 'started\t%s\nfinished\t%s\n' "$started" "$finished"
     printf 'fixtures\t%s\nsteps_bound_s\t%s\n' "$([[ "${PFM_GATE_FIXTURES:-}" == 1 ]] && echo 1 || echo 0)" "${STEPS_BOUND_S:-1500}"
     printf 'steps_jobs\t%s\nsteps_heavy_jobs\t%s\n' "$jobs" "$heavy_jobs"
+    # The live runs in the shared fence container when this one started, itself included
+    # (infra/fence/shared-run.sh); NA outside it.
+    printf 'concurrent_runs\t%s\n' "${PFM_FENCE_CONCURRENT:-NA not in the shared fence}"
   } > "$run_dir/gate.meta"
 }
 

@@ -191,7 +191,9 @@ PY
 run() {
   local recorder="${EGRESS_TCPDUMP:-tcpdump}" stamp dir pcap log filter pid rc i limit ready reason verdict end_limit
   dir="${PFM_TEST_TIMING_DIR:-/tmp}/egress"
-  stamp="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"
+  # A shared fence run's pid namespace starts its pids at 1, so $$ repeats across concurrent runs:
+  # the run id (infra/fence/shared-run.sh) keeps every recording's name its own.
+  stamp="$(date -u +%Y%m%dT%H%M%S)-${PFM_FENCE_RUN_ID:+$PFM_FENCE_RUN_ID-}$$-$RANDOM"
   pcap="$dir/$stamp.pcap"
   log="$dir/$stamp.log"
   if ! command -v "$recorder" >/dev/null 2>&1; then

@@ -12,7 +12,8 @@ func TestDenyModalNativeOrderedKeys(t *testing.T) {
 	for _, down := range []int{0, 1, 2} {
 		t.Run(string(rune('0'+down)), func(t *testing.T) {
 			socket := newNativeSocket(t, func(nativeRequest) (any, string) { return map[string]any{"type": "ok"}, "" })
-			target := Target{Backend: HerdrBackend, SocketPath: socket.path, Pane: "w6:p3"}
+			target := Target{Backend: HerdrBackend, SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
+			seedNativeOwner(t, target)
 			if err := DenyModal(context.Background(), target, down, clock.Real); err != nil {
 				t.Fatal(err)
 			}
@@ -26,7 +27,7 @@ func TestDenyModalNativeOrderedKeys(t *testing.T) {
 				t.Fatalf("requests=%+v want keys=%v", calls, want)
 			}
 			for i, call := range calls {
-				if call.Method != "pane.send_keys" || call.Params["pane_id"] != "w6:p3" ||
+				if call.Method != "pane.send_keys" || call.Params["pane_id"] != "w1:p2" ||
 					!reflect.DeepEqual(call.Params["keys"], []any{want[i]}) {
 					t.Fatalf("request=%+v want=%s", call, want[i])
 				}

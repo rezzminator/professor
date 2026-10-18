@@ -219,7 +219,7 @@ func newTestPainter(
 	stderr := &bytes.Buffer{}
 	return &indicatorPainter{
 		socket: "/fake/herdr.sock", lockDir: filepath.Join(t.TempDir(), "locks"), stderr: stderr,
-		call: herdr.call, clock: stepping, reported: map[string]bool{},
+		call: herdr.call, clock: stepping, reported: map[string]bool{}, provePane: allowPaneProof,
 	}, stepping, stderr
 }
 
@@ -403,7 +403,7 @@ func TestCancelledContextEndsTheBlinkerCleanly(t *testing.T) {
 
 func TestPaintWithoutASocketNamesTheEnvironmentVariable(t *testing.T) {
 	stderr := &bytes.Buffer{}
-	err := PaintIndicators(context.Background(), "", t.TempDir(), stderr)
+	err := PaintIndicators(context.Background(), "", t.TempDir(), stderr, allowPaneProof)
 	if err == nil || !strings.Contains(err.Error(), EnvSocket) {
 		t.Fatalf("PaintIndicators with no socket = %v, want an error naming %s", err, EnvSocket)
 	}
@@ -414,7 +414,7 @@ func TestPaintWithoutASocketNamesTheEnvironmentVariable(t *testing.T) {
 
 func TestPaintWithoutALockDirIsRefusedAtEntry(t *testing.T) {
 	stderr := &bytes.Buffer{}
-	err := PaintIndicators(context.Background(), "/fake/herdr.sock", "", stderr)
+	err := PaintIndicators(context.Background(), "/fake/herdr.sock", "", stderr, allowPaneProof)
 	if err == nil || !strings.Contains(err.Error(), "lock") || !strings.Contains(stderr.String(), "lock") {
 		t.Fatalf("PaintIndicators with no lock dir = %v, stderr %q, want a lock-directory error on both", err, stderr)
 	}
@@ -423,7 +423,7 @@ func TestPaintWithoutALockDirIsRefusedAtEntry(t *testing.T) {
 func TestPaintReportsAnUnreachableSocketWithItsContext(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "missing.sock")
 	stderr := &bytes.Buffer{}
-	err := PaintIndicators(context.Background(), socket, t.TempDir(), stderr)
+	err := PaintIndicators(context.Background(), socket, t.TempDir(), stderr, allowPaneProof)
 	if err == nil {
 		t.Fatal("PaintIndicators on a missing socket = nil, want the dial error")
 	}
@@ -450,7 +450,7 @@ func TestPaintIndicatorsOverTheRealSocket(t *testing.T) {
 		return `{"id":"x","result":{"type":"ok"}}`
 	})
 	stderr := &bytes.Buffer{}
-	if err := PaintIndicators(context.Background(), socket, t.TempDir(), stderr); err != nil {
+	if err := PaintIndicators(context.Background(), socket, t.TempDir(), stderr, allowPaneProof); err != nil {
 		t.Fatalf("PaintIndicators = %v; stderr %q", err, stderr)
 	}
 	want := []string{
@@ -472,7 +472,7 @@ func TestPaintIndicatorsOnAnEmptyHerdrWritesNothing(t *testing.T) {
 		}
 		return `{"id":"x","result":{"type":"workspace_list","workspaces":[]}}`
 	})
-	if err := PaintIndicators(context.Background(), socket, t.TempDir(), nil); err != nil {
+	if err := PaintIndicators(context.Background(), socket, t.TempDir(), nil, allowPaneProof); err != nil {
 		t.Fatalf("PaintIndicators on an empty Herdr = %v, want nil", err)
 	}
 	if len(requests) != 2 {
@@ -583,7 +583,7 @@ func TestClearIndicatorsClearsEveryRecordedSocketAndForgetsTheGoneOnes(t *testin
 	for socket := range sockets {
 		painter := &indicatorPainter{
 			socket: socket, lockDir: lockDir, stderr: &bytes.Buffer{}, call: route,
-			clock: &steppingClock{now: phaseOn}, reported: map[string]bool{},
+			clock: &steppingClock{now: phaseOn}, reported: map[string]bool{}, provePane: allowPaneProof,
 		}
 		if err := painter.record(); err != nil {
 			t.Fatalf("record %s: %v", socket, err)
@@ -598,7 +598,7 @@ func TestClearIndicatorsClearsEveryRecordedSocketAndForgetsTheGoneOnes(t *testin
 		t.Fatalf("setup: live tokens %v / %v, want painted indicators", live.panes[0].Tokens, live.spaces[0].Tokens)
 	}
 	stderr := &bytes.Buffer{}
-	err := clearRecordedIndicators(context.Background(), lockDir, stderr, route)
+	err := clearRecordedIndicators(context.Background(), lockDir, stderr, route, allowPaneProof)
 	if err == nil || !strings.Contains(err.Error(), "/fake/broken.sock") ||
 		!strings.Contains(stderr.String(), "protocol garbage") {
 		t.Fatalf("clear = %v, stderr %q, want the broken socket's failure named and written", err, stderr)
@@ -612,7 +612,7 @@ func TestClearIndicatorsClearsEveryRecordedSocketAndForgetsTheGoneOnes(t *testin
 		t.Fatalf("records left = %v, want only the failed socket's %s", names, want)
 	}
 	absent := filepath.Join(t.TempDir(), "absent")
-	if err := clearRecordedIndicators(context.Background(), absent, nil, route); err != nil {
+	if err := clearRecordedIndicators(context.Background(), absent, nil, route, allowPaneProof); err != nil {
 		t.Fatalf("clear over a missing lock directory = %v, want nil", err)
 	}
 }
@@ -721,3 +721,46 @@ func TestTabMonitorKeepsPollingAndTakesSingletonBeforePaint(t *testing.T) {
 		t.Fatalf("competing painter did work: lists %d -> %d polls=%d", before, fake.lists, polls)
 	}
 }
+
+func TestClearIndicatorsRetainsOwnershipFailuresForRetry(t *testing.T) {
+	for _, cause := range []error{syscall.ENOENT, syscall.ECONNREFUSED} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			server := &fakeIndicatorHerdr{
+				panes: []*fakeTarget{{ID: "w1:p1", Tokens: map[string]string{IndicatorWorking: GlyphWorking}}},
+			}
+			painter, _, stderr := newTestPainter(t, server, phaseOn)
+			if err := painter.record(); err != nil {
+				t.Fatal(err)
+			}
+			proof := func(context.Context, string, string) error { return fmt.Errorf("read supervisor identity: %w", cause) }
+			err := clearRecordedIndicators(context.Background(), painter.lockDir, stderr, server.call, proof)
+			if !errors.Is(err, errIndicatorOwnership) || !errors.Is(err, cause) ||
+				!strings.Contains(stderr.String(), "read supervisor identity") {
+				t.Fatalf("ownership failure must remain visible: err=%v stderr=%s", err, stderr)
+			}
+			if _, err := os.Stat(
+				painter.recordPath(),
+			); err != nil ||
+				server.panes[0].Tokens[IndicatorWorking] != GlyphWorking {
+				t.Fatalf("failed clear lost retry record/tokens: err=%v tokens=%v", err, server.panes[0].Tokens)
+			}
+			if err := clearRecordedIndicators(
+				context.Background(),
+				painter.lockDir,
+				stderr,
+				server.call,
+				allowPaneProof,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(
+				painter.recordPath(),
+			); !errors.Is(err, os.ErrNotExist) ||
+				len(server.panes[0].Tokens) != 0 {
+				t.Fatalf("retry did not clear and retire record: err=%v tokens=%v", err, server.panes[0].Tokens)
+			}
+		})
+	}
+}
+
+func allowPaneProof(context.Context, string, string) error { return nil }

@@ -109,56 +109,6 @@ func toolAttrs(name string, input any, started time.Time, timing clock.Clock) []
 	return attrs
 }
 
-// Prompt is Tool for a Server.AddPrompt callback — the harvester's prompt
-// door is not an unlogged side entrance. The record carries kind=prompt, the
-// prompt name under tool, the argument shape (name and byte size per prompt
-// argument), the result size and err. A panicking handler is recovered the
-// same way Tool's is: one ERROR record, an error returned to the SDK, the
-// daemon survives.
-func Prompt(name string, handler mcp.PromptHandler) mcp.PromptHandler {
-	return func(ctx context.Context, request *mcp.GetPromptRequest) (result *mcp.GetPromptResult, err error) {
-		timing := current(ctx).timing
-		started := timing.Now()
-		var arguments map[string]string
-		if request != nil && request.Params != nil {
-			arguments = request.Params.Arguments
-		}
-		defer func() {
-			recovered := recover()
-			if recovered == nil {
-				return
-			}
-			err = Recovered("prompt "+name, recovered)
-			result = nil
-			attrs := append(promptAttrs(name, arguments, started, timing), slog.String(FieldErr, err.Error()))
-			Logger(Component(ctx, compMCP)).LogAttrs(ctx, slog.LevelError, "mcp.call", attrs...)
-		}()
-		result, err = handler(ctx, request)
-		attrs := promptAttrs(name, arguments, started, timing)
-		level := slog.LevelInfo
-		if err != nil {
-			level = slog.LevelError
-			attrs = append(attrs, slog.String(FieldErr, err.Error()))
-		} else {
-			attrs = append(attrs, slog.Int("bytes", encodedSize(result)))
-		}
-		Logger(Component(ctx, compMCP)).LogAttrs(ctx, level, "mcp.call", attrs...)
-		return result, err
-	}
-}
-
-// promptAttrs is toolAttrs's Prompt-shaped sibling: kind=prompt, no target
-// (no registered prompt takes one today).
-func promptAttrs(name string, arguments map[string]string, started time.Time, timing clock.Clock) []slog.Attr {
-	return []slog.Attr{
-		slog.String("op", "call"),
-		slog.String("kind", "prompt"),
-		slog.String("tool", name),
-		slog.String("args", argumentShape(arguments)),
-		slog.Int64(FieldDur, timing.Now().Sub(started).Milliseconds()),
-	}
-}
-
 // argumentShape renders the SHAPE of a tool input — `target:4,message:27` —
 // the exported fields of a struct (json names, declaration order) or the keys
 // of a map (sorted), each with its byte size; a scalar is `bytes:N`; nil is

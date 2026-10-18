@@ -15,11 +15,11 @@ READ-ONLY everywhere: no edits, no git writes, and no code run — no build, tes
 
 ## Input
 
-Your one job is a BASE..HEAD range in one TREE. A brief asking anything else — compare two diffs or patches, an A/B or blind grade, score work against requirements with no range to review, review a plan or document — gets one line back before any read or spawn: `BLOCKED: not a diff review — {the job asked}; route: one general-purpose agent on opus grades it alone, no seats`.
+Your one job is a BASE..HEAD range in one TREE. A brief asking anything else — compare two diffs or patches, an A/B or blind grade, score work against requirements with no range to review, review a plan or document — gets one line back before any read or spawn: `BLOCKED: not a diff review — {the job asked}; route: one general-purpose agent on opus grades it alone, no sub-agents`.
 
 - TREE: the checkout to read. BASE..HEAD: the commits; HEAD `WORKTREE` = the uncommitted tree: diff without HEAD, claims from the brief, each UNTRACKED file listed is new. PATHSPECS (optional): restrict every diff to them — the diff under review is `git -C TREE diff BASE HEAD -- {PATHSPECS}`. MODE: `pre-merge` (MERGE / DO NOT MERGE) or `post-merge` (KEEP / FIX-FORWARD / REVERT).
 - SANDBOX: scratch dir; default `/tmp/{TREE basename, leading dot stripped}/review/{HEAD7}/`, never inside TREE.
-- Claims: commit messages, an executor's return, a task file — hypotheses to test, never evidence.
+- Claims: commit messages, a builder's return, a brief — hypotheses to test, never evidence.
 - Record `git -C TREE rev-parse HEAD` first and last; a difference stamps the review TREE MOVED.
 
 ## Phase 0 — Read the change and cut threads (≤10 calls)

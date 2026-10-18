@@ -147,6 +147,31 @@ command -v docker >/dev/null || fatal "TOOLCHAIN-MISSING — docker"
 docker info >/dev/null 2>&1 || fatal "TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed)"
 
 T0="$(date +%s)"
+PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
+LANE_TMP="/tmp/$PROJECT/lanes"
+mkdir -p "$LANE_TMP" || fatal "the lane scratch directory could not be created: $LANE_TMP"
+# One root build per hash at a time on the machine: the lock covers the inspect and the whole build,
+# so two concurrent builds — from any worktree of this repo — never race on one tag or on the shared
+# cache volumes; a waiter re-inspects and reuses what the holder made. The image tag and the cache
+# volumes are machine-global, so the lock lives under the main checkout's /tmp/{project}/lanes
+# (its {project} from the git common dir), never the worktree's. mkdir_lock_try
+# (infra/fence/mkdir-lock.sh) breaks a stale lock without ever making two holders.
+# shellcheck source=../mkdir-lock.sh
+. "$HERE/../mkdir-lock.sh" || fatal "the lock helper could not be sourced: $HERE/../mkdir-lock.sh"
+MAIN_PROJECT="$(basename "$(dirname "$PFM_DEV_GIT_COMMON")")"; MAIN_PROJECT="${MAIN_PROJECT#.}"
+[ -n "$MAIN_PROJECT" ] || fatal "no project name in the git common dir $PFM_DEV_GIT_COMMON"
+LOCK_DIR="/tmp/$MAIN_PROJECT/lanes"
+mkdir -p "$LOCK_DIR" || fatal "the root build lock directory could not be created: $LOCK_DIR"
+LOCK="$LOCK_DIR/root-build-$HASH.lock" LOCKED=0
+root_unlock() { [ "$LOCKED" -eq 0 ] || rm -rf "$LOCK"; LOCKED=0; }
+told=0
+for ((i = 0; i < 18000; i++)); do
+  if mkdir_lock_try "$LOCK" "$$"; then LOCKED=1; break; fi
+  [ "$told" -eq 1 ] || { say "waiting for the root build of $HASH held by pid ${MKDIR_LOCK_HOLDER:-?} ($LOCK)"; told=1; }
+  sleep 0.2
+done
+[ "$LOCKED" -eq 1 ] || fatal "the root build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after 3600 s"
+trap root_unlock EXIT
 if [ "$REBUILD" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
   say "reusing $IMAGE (same hash: no root build input changed) · $(( $(date +%s) - T0 ))s"
   printf '%s\n' "$IMAGE"
@@ -154,9 +179,6 @@ if [ "$REBUILD" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 
 say "building $IMAGE — no image for this hash yet$( [ "$REBUILD" -eq 1 ] && printf ' (--rebuild)')"
-PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
-LANE_TMP="/tmp/$PROJECT/lanes"
-mkdir -p "$LANE_TMP" || fatal "the lane scratch directory could not be created: $LANE_TMP"
 STEP_LOG="$LANE_TMP/root-step-$SUFFIX.log"
 : >"$STEP_LOG" || fatal "the step output file could not be written: $STEP_LOG"
 
@@ -167,7 +189,7 @@ fence_volumes_ensure
 # The build container goes first, then the pin it held — on every exit path
 # (commit, step failure, fatal, Ctrl-C), so this build's base pin never outlives
 # its build.
-cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; lane_base_release "$PIN"; rm -f "$STEP_LOG"; }
+cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; lane_base_release "$PIN"; rm -f "$STEP_LOG"; root_unlock; }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM

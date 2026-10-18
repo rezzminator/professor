@@ -1,9 +1,0 @@
-{
- "args": [
-  "types",
-  "{CLAUDE}",
-  "--out",
-  "{HOME}/t.txt"
- ],
- "dirs": []
-}

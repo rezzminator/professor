@@ -1,4 +1,0 @@
-TIMELINE agent (type unknown: no .meta.json) · sonnet-5 · effort high · 1 calls · wall 2s · peak ctx 10 · out 50 tok · tool errors 0 · results >20KB 0 · $0.0005 · {FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t5.jsonl
-  #1 10:03:02 after - · ctx 10 · out 50 · $0.0005 · (no tools)
-pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
-data gaps: none

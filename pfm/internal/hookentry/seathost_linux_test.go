@@ -803,8 +803,17 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 						}
 					case "agent.get":
 						result = map[string]any{
-							"type":  "agent_info",
-							"agent": map[string]any{"pane_id": currentPane, "agent_status": "idle"},
+							"type": "agent_info",
+							"agent": map[string]any{
+								"pane_id":          currentPane,
+								"terminal_id":      "stable-terminal",
+								"agent_status":     "idle",
+								"workspace_id":     strings.Split(currentPane, ":")[0],
+								"tab_id":           strings.Split(currentPane, ":")[0] + ":t1",
+								"focused":          true,
+								"state_change_seq": 0,
+								"revision":         1,
+							},
 						}
 					case "pane.read":
 						result = map[string]any{

@@ -61,6 +61,7 @@ import io
 import json
 from html import escape as html_escape
 import os.path
+import select
 import shlex
 import shutil
 import signal
@@ -223,13 +224,44 @@ def chrome_launcher_main(argv, spawn=spawn_disclaimed, execute=os.execve, wait=o
         _record_status(status_path, f"{STATUS_DISCLAIMED} pid={child['pid']}")
         for signum in child["pending"]:
             forward(signum, None)
-        _, wait_status = wait(child["pid"], 0)
+        _, wait_status = _wait_forwarding(child["pid"], wait)
     finally:
         for signum, handler in (*forwarded.items(), *defaulted.items()):
             signal.signal(signum, handler)
     if os.WIFSIGNALED(wait_status):
         return ("signal", os.WTERMSIG(wait_status))
     return ("exit", os.WEXITSTATUS(wait_status))
+
+
+def _wait_forwarding(pid, wait):
+    """wait(pid) for Chrome's end, letting the forwarding handlers run whenever
+    their signal lands. Python runs a handler only between bytecodes, so a
+    signal landing just before a blocking waitpid would wait for Chrome to end
+    on its own, never forwarded. The wakeup fd records every handled signal
+    whenever it lands, and a SIGCHLD handler makes Chrome's end one of them,
+    so the wait blocks on that fd instead: each wake runs the pending handlers
+    and polls Chrome without blocking. Restores the wakeup fd and SIGCHLD."""
+    read_end, write_end = os.pipe()
+    os.set_blocking(read_end, False)
+    os.set_blocking(write_end, False)
+    previous_fd = signal.set_wakeup_fd(write_end)
+    previous_child = signal.signal(signal.SIGCHLD, lambda signum, frame: None)
+    try:
+        while True:
+            ended, wait_status = wait(pid, os.WNOHANG)
+            if ended:
+                return ended, wait_status
+            select.select([read_end], [], [])
+            try:
+                while os.read(read_end, 512):
+                    pass
+            except BlockingIOError:
+                pass  # drained: the next wake is a new signal
+    finally:
+        signal.signal(signal.SIGCHLD, previous_child)
+        signal.set_wakeup_fd(previous_fd)
+        os.close(read_end)
+        os.close(write_end)
 
 
 def exit_like_chrome(how, kill=os.kill, finish=sys.exit):

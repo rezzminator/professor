@@ -96,7 +96,8 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(string(content), ".local/bin/pfm") {
+		if !strings.Contains(string(content), ".local/bin/pfm") &&
+			!strings.Contains(string(content), agentLauncherMarker) {
 			return nil
 		}
 		units++

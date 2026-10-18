@@ -14,7 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
@@ -83,6 +82,9 @@ func (installer *engine) mcpLaunchAgentPath() string {
 func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 	path := installer.launchAgentPath()
 	installer.say("launchd user agent -> %s", path)
+	if err := installer.ensureAgentLauncher(); err != nil {
+		return err
+	}
 
 	template, err := readAsset(launchdAsset)
 	if err != nil {
@@ -92,9 +94,10 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 	// at load time. The poll comes from the machine config's nameSync.interval
 	// through the same renderer the systemd timer uses, so the two schedulers
 	// cannot drift.
-	wanted, err := renderNameSyncLaunchAgent([]byte(strings.ReplaceAll(
-		string(template), "__PFM_HOME__", installer.options.Home,
-	)), installer.options)
+	wanted, err := renderLaunchAgentTemplate(template, installer.options.Home)
+	if err == nil {
+		wanted, err = renderNameSyncLaunchAgent(wanted, installer.options)
+	}
 	if err == nil {
 		wanted, err = renderServicePath(wanted, installer.options.Home)
 	}
@@ -146,10 +149,13 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read embedded MCP launch agent: %w", err)
 	}
-	wanted, err := renderServicePath(
-		[]byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home)),
-		installer.options.Home,
-	)
+	if err := installer.ensureAgentLauncher(); err != nil {
+		return err
+	}
+	wanted, err := renderLaunchAgentTemplate(template, installer.options.Home)
+	if err == nil {
+		wanted, err = renderServicePath(wanted, installer.options.Home)
+	}
 	if err != nil {
 		return fmt.Errorf("render MCP launch agent: %w", err)
 	}
@@ -253,11 +259,15 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 const launchdSpawnFailed = 78
 
 // launchAgentStale names why a loaded agent whose plist did not change must
-// still be reloaded, or returns "" for a healthy one. A pfm binary swap leaves
-// two such states: launchd wedged on a job it can no longer spawn (`spawn
-// failed`, last exit 78, not running), and a job still running the binary the
-// swap replaced, which exits for its restart moments later and can wedge the
-// same way. An error means the state could not be read, never "healthy".
+// still be reloaded, or returns "" for a healthy one. Only a wedged job
+// qualifies: launchd could not spawn it (`spawn failed`, last exit 78, not
+// running). A job running a pfm build the latest install replaced is NOT stale:
+// every agent runs through the stable launcher, so a rebuild changes nothing
+// launchd or Background Task Management registered, and a reload — a bootout
+// and bootstrap — would itself re-register the item. The MCP daemon restarts on
+// the new build by itself (binwatch exits it, KeepAlive relaunches it), and the
+// interval agents start the new build on their next tick. An error means the
+// state could not be read, never "healthy".
 func (installer *engine) launchAgentStale(ctx context.Context, target string) (string, error) {
 	reader, ok := installer.options.Runner.(OutputRunner)
 	if !ok {
@@ -267,7 +277,7 @@ func (installer *engine) launchAgentStale(ctx context.Context, target string) (s
 	if err != nil {
 		return "", fmt.Errorf("launchctl print %s: %w", target, err)
 	}
-	running, spawnFailed, pid := false, false, 0
+	running, spawnFailed := false, false
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
 		switch {
@@ -276,47 +286,12 @@ func (installer *engine) launchAgentStale(ctx context.Context, target string) (s
 		case line == "job state = spawn failed",
 			strings.HasPrefix(line, "last exit code = "+strconv.Itoa(launchdSpawnFailed)+":"):
 			spawnFailed = true
-		case strings.HasPrefix(line, "pid = "):
-			if value, err := strconv.Atoi(strings.TrimPrefix(line, "pid = ")); err == nil {
-				pid = value
-			}
 		}
 	}
-	if !running {
-		if spawnFailed {
-			return "launchd could not spawn it (spawn failed, last exit 78)", nil
-		}
-		return "", nil
-	}
-	if pid <= 0 {
-		return "", fmt.Errorf("launchctl print %s shows it running with no pid", target)
-	}
-	birth := installer.processBirth
-	if birth == nil {
-		birth = nativeProcessBirth
-	}
-	started, err := birth(pid)
-	if err != nil {
-		return "", fmt.Errorf("start time of pid %d: %w", pid, err)
-	}
-	binary := installer.mcpChatCommand()
-	info, err := os.Stat(binary)
-	if err != nil {
-		return "", fmt.Errorf("stat %s: %w", binary, err)
-	}
-	if started < info.ModTime().Unix() {
-		return fmt.Sprintf("pid %d runs the pfm binary %s replaced since it started", pid, binary), nil
+	if !running && spawnFailed {
+		return "launchd could not spawn it (spawn failed, last exit 78)", nil
 	}
 	return "", nil
-}
-
-// nativeProcessBirth reads a process's start time in epoch seconds.
-func nativeProcessBirth(pid int) (int64, error) {
-	proc, ok := gather.NewProcFS("").(gather.ProcBirth)
-	if !ok {
-		return 0, errors.New("this platform's process table reports no start time")
-	}
-	return proc.Birth(pid)
 }
 
 // pause waits, through the Options seam when one was supplied. Options is

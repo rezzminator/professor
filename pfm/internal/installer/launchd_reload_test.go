@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -276,39 +277,31 @@ func (r *printRunner) Output(_ context.Context, name string, args ...string) ([]
 	return []byte(r.output), r.err
 }
 
-// TestReloadLaunchAgentLoadedUnchangedReloadsAStaleJob: a loaded agent whose
-// plist did not change is still reloaded when a pfm binary swap left it wedged
-// (launchd could not spawn it) or running the replaced build; a healthy or idle
-// one is left alone, and an unreadable state is reported, never read as healthy.
-func TestReloadLaunchAgentLoadedUnchangedReloadsAStaleJob(t *testing.T) {
+// TestReloadLaunchAgentLoadedUnchangedReloadsOnlyAWedgedJob: a loaded agent whose
+// plist did not change is reloaded only when launchd wedged on it (could not
+// spawn it). Running — whatever build it started from — and idle agents are left
+// alone, since a bootout and bootstrap re-registers the item with macOS, and a
+// rebuild already refreshes the daemon through binwatch. An unreadable state is
+// reported, never read as healthy.
+func TestReloadLaunchAgentLoadedUnchangedReloadsOnlyAWedgedJob(t *testing.T) {
 	t.Parallel()
-	built := time.Unix(1_800_000_000, 0)
 	for _, test := range []struct {
-		name    string
-		output  string
-		err     error
-		started int64
-		reload  bool
-		says    string
+		name   string
+		output string
+		err    error
+		reload bool
+		says   string
 	}{
 		{
-			name:   "spawn failed after a swap",
+			name:   "spawn failed",
 			output: "\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n\tjob state = spawn failed\n",
 			reload: true,
 			says:   "launchd could not spawn it",
 		},
 		{
-			name:    "running the replaced binary",
-			output:  "\tstate = running\n\tpid = 4242\n",
-			started: built.Unix() - 60,
-			reload:  true,
-			says:    "pid 4242 runs the pfm binary",
-		},
-		{
-			name:    "running the current binary",
-			output:  "\tstate = running\n\tpid = 4242\n",
-			started: built.Unix() + 60,
-			says:    "left running",
+			name:   "running, started before the latest pfm build",
+			output: "\tstate = running\n\tpid = " + strconv.Itoa(os.Getpid()) + "\n",
+			says:   "left running",
 		},
 		{
 			name:   "idle between runs",
@@ -324,9 +317,12 @@ func TestReloadLaunchAgentLoadedUnchangedReloadsAStaleJob(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			home := t.TempDir()
+			// A pfm build newer than every running process: the state a rebuild
+			// leaves behind a daemon that has not yet restarted.
 			binary := filepath.Join(home, ".local", "bin", "pfm")
 			writeFixture(t, binary, "pfm\n")
-			if err := os.Chtimes(binary, built, built); err != nil {
+			future := time.Now().Add(time.Hour)
+			if err := os.Chtimes(binary, future, future); err != nil {
 				t.Fatal(err)
 			}
 			runner := &printRunner{output: test.output, err: test.err}
@@ -334,12 +330,6 @@ func TestReloadLaunchAgentLoadedUnchangedReloadsAStaleJob(t *testing.T) {
 			installer := engine{
 				options: Options{Home: home, Runner: runner, Stdout: &out, Sleep: func(time.Duration) {}},
 				apply:   true,
-				processBirth: func(pid int) (int64, error) {
-					if pid != 4242 {
-						return 0, errors.New("unexpected pid")
-					}
-					return test.started, nil
-				},
 			}
 			if err := installer.reloadLaunchAgentWithLabel(
 				context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, false,

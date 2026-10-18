@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -17,8 +18,8 @@ import (
 )
 
 const (
-	// fixtureGold is a custom Claude theme: base dark, Tokyo Night overrides.
-	fixtureGold = `{"name":"Professor Gold · Tokyo Night","base":"dark","overrides":{"claude":"#7aa2f7",` +
+	// fixtureHibiscus is a custom Claude theme: base dark, Tokyo Night overrides.
+	fixtureHibiscus = `{"name":"Hibiscus Night","base":"dark","overrides":{"claude":"#7aa2f7",` +
 		`"inverseText":"#1a1b26","userMessageBackground":"#1f2335","selectionBg":"#283457","subtle":"#292e42",` +
 		`"inactive":"#565f89","inactiveShimmer":"#7b84af","text":"#c0caf5","permission":"#bb9af7","success":"#9ece6a",` +
 		`"red_FOR_SUBAGENTS_ONLY":"#f7768e","green_FOR_SUBAGENTS_ONLY":"#9ece6a","yellow_FOR_SUBAGENTS_ONLY":"#e0af68",` +
@@ -29,7 +30,7 @@ const (
 	fixtureVscode = "{\n  \"workbench.colorTheme\": \"Sonar\"\n}\n"
 	herdrBinary   = "/opt/bin/herdr"
 	settingsRel   = ".claude/settings.json"
-	goldRel       = ".claude/themes/professor-gold.json"
+	hibiscusRel   = ".claude/themes/hibiscus-night.json"
 
 	herdrRegistryRel = ".config/herdr/plugins.json"
 	herdrManifestRel = ".config/herdr/pfm-indicators/herdr-plugin.toml"
@@ -78,7 +79,7 @@ func (fake *fakeTmux) Show(_ context.Context, socket, name string) (string, erro
 	}
 	value, ok := options[name]
 	if !ok {
-		return "", fmt.Errorf("invalid option: %s", name)
+		return "", fmt.Errorf("invalid option: %s: %w", name, ErrTmuxOptionUnset)
 	}
 	return value, nil
 }
@@ -142,8 +143,8 @@ func newHarness(t *testing.T) *harness {
 			Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
 		},
 	}
-	harness.write(goldRel, fixtureGold)
-	harness.write(settingsRel, `{"theme":"custom:professor-gold","model":"opus"}`)
+	harness.write(hibiscusRel, fixtureHibiscus)
+	harness.write(settingsRel, `{"theme":"custom:hibiscus-night","model":"opus"}`)
 	harness.write(".config/herdr/config.toml", fixtureHerdr)
 	harness.write(herdrRegistryRel, `[{"plugin_id":"professor.indicators","name":"x"}]`)
 	harness.write("Library/Application Support/Code/User/settings.json", fixtureVscode)
@@ -278,7 +279,7 @@ func wantVerdict(t *testing.T, report Report, surface string, want Verdict, deta
 
 func TestOnReadBackOffRoundTrip(t *testing.T) {
 	h := newHarness(t)
-	claudeBefore := h.read(settingsRel) + h.read(goldRel)
+	claudeBefore := h.read(settingsRel) + h.read(hibiscusRel)
 	herdrBefore, vscodeBefore := h.read(
 		".config/herdr/config.toml",
 	), h.read(
@@ -290,11 +291,11 @@ func TestOnReadBackOffRoundTrip(t *testing.T) {
 		t.Fatalf("On = enabled %v gen %d changed %v servers %d, want enabled gen 1 changed 2 servers",
 			report.Enabled, report.Generation, report.Changed, report.Servers)
 	}
-	if report.Source == nil || report.Source.Value != "custom:professor-gold" ||
-		report.Source.Title != "Professor Gold · Tokyo Night" || report.Source.Side != Dark {
-		t.Fatalf("On source = %+v, want custom:professor-gold titled Professor Gold · Tokyo Night", report.Source)
+	if report.Source == nil || report.Source.Value != "custom:hibiscus-night" ||
+		report.Source.Title != "Hibiscus Night" || report.Source.Side != Dark {
+		t.Fatalf("On source = %+v, want custom:hibiscus-night titled Hibiscus Night", report.Source)
 	}
-	wantVerdict(t, report, "claude", VerdictSource, "custom:professor-gold · Professor Gold · Tokyo Night")
+	wantVerdict(t, report, "claude", VerdictSource, "custom:hibiscus-night · Hibiscus Night")
 	wantVerdict(t, report, "tmux", VerdictInSync, "2 servers")
 	for _, surface := range []string{"herdr", "follower"} {
 		wantVerdict(t, report, surface, VerdictInSync, "")
@@ -307,7 +308,7 @@ func TestOnReadBackOffRoundTrip(t *testing.T) {
 		got := h.tmux.servers[socket]
 		for name, want := range map[string]string{
 			"@pfm-c-bg": "#1a1b26", "@pfm-state-working": "#7aa2f7", "@pfm-state-blocked": "#e0af68",
-			"@pfm-state-done": "#9ece6a", "@pfm-state-idle": "#7b84af", "@pfm-theme": "custom:professor-gold",
+			"@pfm-state-done": "#9ece6a", "@pfm-state-idle": "#7b84af", "@pfm-theme": "custom:hibiscus-night",
 		} {
 			if got[name] != want {
 				t.Errorf("%s %s = %q, want %q", socket, name, got[name], want)
@@ -329,7 +330,7 @@ func TestOnReadBackOffRoundTrip(t *testing.T) {
 		t.Fatalf("Off = %+v, want every surface restored", off)
 	}
 	wantVerdict(t, off, "claude", VerdictSource, "never written")
-	if got := h.read(settingsRel) + h.read(goldRel); got != claudeBefore {
+	if got := h.read(settingsRel) + h.read(hibiscusRel); got != claudeBefore {
 		t.Error("the Claude settings or theme file changed across on and off")
 	}
 	if h.read(".config/herdr/config.toml") != herdrBefore {
@@ -466,7 +467,7 @@ func (c *scriptedClock) Now() time.Time {
 func TestLastFlipRecordsEverySurfaceOffsetFromTheSourceMtime(t *testing.T) {
 	h := newHarness(t)
 	origin := time.Date(2026, 10, 16, 21, 0, 0, 0, time.UTC)
-	for _, rel := range []string{settingsRel, goldRel} {
+	for _, rel := range []string{settingsRel, hibiscusRel} {
 		if err := os.Chtimes(h.path(rel), origin.Add(-time.Hour), origin.Add(-time.Hour)); err != nil {
 			t.Fatal(err)
 		}
@@ -523,7 +524,7 @@ func TestApplyTmuxServerIsInertUntilOnThenThemesOneSocket(t *testing.T) {
 	if err := ApplyTmuxServer(context.Background(), h.tmux, h.stateDir, "cc-late"); err != nil {
 		t.Fatal(err)
 	}
-	if got := h.tmux.servers["cc-late"]; got["@pfm-theme"] != "custom:professor-gold" ||
+	if got := h.tmux.servers["cc-late"]; got["@pfm-theme"] != "custom:hibiscus-night" ||
 		got["@pfm-c-bg"] != "#1a1b26" ||
 		got["@pfm-theme-generation"] != "1" {
 		t.Errorf("a server born after on = %v, want the applied theme at generation 1 with no source read", got)
@@ -538,7 +539,7 @@ func TestSurfaceFailuresNameThemselvesAndNeverReadInSync(t *testing.T) {
 	report := h.on()
 	wantVerdict(t, report, "tmux", VerdictError, "1 of 2 servers failed")
 	wantVerdict(t, report, "herdr", VerdictError, "bad config")
-	if got := h.tmux.servers["cc-a"]["@pfm-theme"]; got != "custom:professor-gold" {
+	if got := h.tmux.servers["cc-a"]["@pfm-theme"]; got != "custom:hibiscus-night" {
 		t.Errorf("one dead tmux server stopped the others: cc-a @pfm-theme = %q", got)
 	}
 	if report.OK() {
@@ -635,5 +636,153 @@ func TestAnOldShapedEnabledStateIsAppliedByTheNextSync(t *testing.T) {
 			report.Changed,
 			h.state().Applied,
 		)
+	}
+}
+
+// hibiscusChips is the hibiscus theme's dark host-chip render, the values the follower
+// paints over the user's own @host_accent and @p_* options.
+var hibiscusChips = map[string]string{
+	"@host_accent": "#7aa2f7", "@p_g0": "#1f2335", "@p_g3": "#1a1b26", "@p_fg": "#c0caf5",
+	"@p_fg1": "#565f89", "@p_fg2": "#565f89", "@p_red": "#f7768e", "@p_amber": "#e0af68",
+}
+
+// userChips are the host-chip values a user's tmux config sets: @p_red is not
+// among them, so the theme's paint of it has no prior value to return to.
+var userChips = map[string]string{
+	"@host_accent": "#00e5ff", "@p_g0": "#0e1c20", "@p_g3": "#1d3238", "@p_fg": "#e6f1f3", "@p_fg1": "#9fb6bb",
+}
+
+func copyOptions(options map[string]string) map[string]string {
+	out := make(map[string]string, len(options))
+	for name, value := range options {
+		out[name] = value
+	}
+	return out
+}
+
+func wantChips(t *testing.T, label string, options map[string]string) {
+	t.Helper()
+	for name, want := range hibiscusChips {
+		if got := options[name]; got != want {
+			t.Errorf("%s: %s = %q, want the render's %q", label, name, got, want)
+		}
+	}
+}
+
+func TestChipsAreThemedOnAndRestoredExactlyOff(t *testing.T) {
+	h := newHarness(t)
+	for name, value := range userChips {
+		h.tmux.servers["cc-a"][name] = value
+	}
+	original := copyOptions(h.tmux.servers["cc-a"])
+
+	h.on()
+	wantChips(t, "cc-a after on", h.tmux.servers["cc-a"])
+	wantChips(t, "cc-b after on", h.tmux.servers["cc-b"])
+	if got := h.tmux.servers["cc-a"]["@pfm-theme-prior-@host_accent"]; got != "v:#00e5ff" {
+		t.Errorf("host accent prior = %q, want v:#00e5ff", got)
+	}
+	if got := h.tmux.servers["cc-a"]["@pfm-theme-prior-@p_red"]; got != "u:" {
+		t.Errorf("unset @p_red prior = %q, want the unset sentinel u:", got)
+	}
+
+	if off, err := Off(context.Background(), h.env); err != nil || !off.OK() {
+		t.Fatalf("Off = %+v, %v, want every surface restored", off.Surfaces, err)
+	}
+	if got := h.tmux.servers["cc-a"]; !reflect.DeepEqual(got, original) {
+		t.Errorf("cc-a after off = %v, want its original %v (no @p_red, no @pfm-* left)", got, original)
+	}
+	for name := range h.tmux.servers["cc-b"] {
+		if strings.HasPrefix(name, "@") {
+			t.Errorf("cc-b kept %s after off, want a server that carried no chip options clean", name)
+		}
+	}
+}
+
+func TestAChipReadThatFailsCapturesNoPriorSoOffNeverErasesTheValue(t *testing.T) {
+	h := newHarness(t)
+	for name, value := range userChips {
+		h.tmux.servers["cc-a"][name] = value
+	}
+	original := copyOptions(h.tmux.servers["cc-a"])
+	flaky := h.env
+	flaky.Tmux = flakyPriorTmux{fakeTmux: h.tmux, option: "@host_accent"}
+	report, err := On(context.Background(), flaky)
+	if err != nil {
+		t.Fatalf("On: %v", err)
+	}
+	wantVerdict(t, report, "tmux", VerdictError, "read @host_accent: tmux: server timed out")
+	if got, held := h.tmux.servers["cc-a"]["@pfm-theme-prior-@host_accent"]; held {
+		t.Errorf("a failed read of @host_accent captured the prior %q, want none", got)
+	}
+
+	h.sync(false)
+	if got := h.tmux.servers["cc-a"]["@pfm-theme-prior-@host_accent"]; got != "v:#00e5ff" {
+		t.Errorf("host accent prior once the read answers = %q, want v:#00e5ff", got)
+	}
+	if off, err := Off(context.Background(), h.env); err != nil || !off.OK() {
+		t.Fatalf("Off = %+v, %v, want every surface restored", off.Surfaces, err)
+	}
+	if got := h.tmux.servers["cc-a"]; !reflect.DeepEqual(got, original) {
+		t.Errorf("cc-a after off = %v, want its original %v", got, original)
+	}
+}
+
+func TestAServerThemedBeforeChipsGetsThemCapturedOnTheNextSync(t *testing.T) {
+	h := newHarness(t)
+	original := copyOptions(h.tmux.servers["cc-a"])
+	for name, value := range userChips {
+		original[name] = value
+	}
+	h.on()
+	// Shape cc-a as the previous follower left it: styles themed with their
+	// priors and the generation marker, no chip marker, chips at the user values.
+	legacy := h.tmux.servers["cc-a"]
+	for name := range hibiscusChips {
+		delete(legacy, name)
+		delete(legacy, "@pfm-theme-prior-"+name)
+	}
+	delete(legacy, "@pfm-theme-chips")
+	for name, value := range userChips {
+		legacy[name] = value
+	}
+
+	h.sync(false)
+	wantChips(t, "cc-a after the sync", legacy)
+	if got := legacy["@pfm-theme-prior-@host_accent"]; got != "v:#00e5ff" {
+		t.Errorf("host accent prior after the sync = %q, want v:#00e5ff", got)
+	}
+	if got := legacy["@pfm-theme-prior-@p_red"]; got != "u:" {
+		t.Errorf("@p_red prior after the sync = %q, want u:", got)
+	}
+	if got := legacy["@pfm-theme-prior-status-style"]; got != "v:bg=green,fg=black" {
+		t.Errorf("the sync recaptured status-style's prior as %q, want v:bg=green,fg=black", got)
+	}
+
+	if off, err := Off(context.Background(), h.env); err != nil || !off.OK() {
+		t.Fatalf("Off = %+v, %v, want every surface restored", off.Surfaces, err)
+	}
+	if got := h.tmux.servers["cc-a"]; !reflect.DeepEqual(got, original) {
+		t.Errorf("cc-a after off = %v, want its original %v", got, original)
+	}
+}
+
+func TestAConfigResourceResetsAChipAndTheSyncHealsItKeepingThePrior(t *testing.T) {
+	h := newHarness(t)
+	for name, value := range userChips {
+		h.tmux.servers["cc-a"][name] = value
+	}
+	h.on()
+	wantVerdict(t, h.status(), "tmux", VerdictInSync, "2 servers")
+
+	h.tmux.servers["cc-a"]["@host_accent"] = "#00e5ff" // a user `tmux source-file`
+	wantVerdict(t, h.status(), "tmux", VerdictDrift, "@host_accent")
+	report := h.sync(false)
+	wantVerdict(t, report, "tmux", VerdictInSync, "2 servers")
+	if got := h.tmux.servers["cc-a"]["@host_accent"]; got != "#7aa2f7" {
+		t.Errorf("@host_accent after the sync = %q, want the accent #7aa2f7", got)
+	}
+	if got := h.tmux.servers["cc-a"]["@pfm-theme-prior-@host_accent"]; got != "v:#00e5ff" {
+		t.Errorf("host accent prior after the heal = %q, want v:#00e5ff kept", got)
 	}
 }

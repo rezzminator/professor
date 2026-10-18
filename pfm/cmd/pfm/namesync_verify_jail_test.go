@@ -162,8 +162,8 @@ func readProbe(t *testing.T, socketPath string, arguments ...string) string {
 
 // namesyncThemeState is a state.json a `pfm theme on` left: enabled, one
 // derived dark theme applied at generation 1.
-const namesyncThemeState = `{"enabled":true,"appearance":"dark","generation":1,"applied":{"value":"custom:professor-gold",` +
-	`"title":"Professor Gold","side":"dark","primary":{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#c0caf5",` +
+const namesyncThemeState = `{"enabled":true,"appearance":"dark","generation":1,"applied":{"value":"custom:hibiscus-night",` +
+	`"title":"Hibiscus Night","side":"dark","primary":{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#c0caf5",` +
 	`"selectionBackground":"#283457","selectionForeground":"#c0caf5","surface":"#1f2335","overlay":"#292e42",` +
 	`"muted":"#565f89","accent":"#7aa2f7","orange":"#ec937b","ansi":["#1a1b26","#f7768e","#9ece6a","#e0af68","#7aa2f7",` +
 	`"#bb9af7","#7dcfff","#c0caf5","#565f89","#f7768e","#9ece6a","#e0af68","#7aa2f7","#bb9af7","#7dcfff","#c0caf5"],` +
@@ -235,7 +235,7 @@ func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
 		"show",
 		"-gv",
 		"@pfm-theme",
-	); got != "custom:professor-gold" {
-		t.Fatalf("server @pfm-theme = %q, want custom:professor-gold", got)
+	); got != "custom:hibiscus-night" {
+		t.Fatalf("server @pfm-theme = %q, want custom:hibiscus-night", got)
 	}
 }

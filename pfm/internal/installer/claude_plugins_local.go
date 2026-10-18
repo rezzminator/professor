@@ -548,6 +548,17 @@ func encodeSettingsDocument(document map[string]any) ([]byte, error) {
 	return content.Bytes(), nil
 }
 
+// settingsKeptChangingError is writeWhileUnchanged giving up on a file another
+// writer changed on every one of its edits; its text names install's repair.
+type settingsKeptChangingError struct {
+	path  string
+	edits int
+}
+
+func (err *settingsKeptChangingError) Error() string {
+	return fmt.Sprintf("%s changed under pfm's edit %d times in a row — rerun pfm install", err.path, err.edits)
+}
+
 // writeWhileUnchanged publishes content over resolved, path's physical file,
 // only while reread finds it still holding read (nil: absent). Bytes another
 // writer wrote, created or removed since go to replan (nil for a file now
@@ -581,7 +592,7 @@ func writeWhileUnchanged(
 			return err
 		}
 		if retry == settingsEditRetries {
-			return fmt.Errorf("%s changed under pfm's edit %d times in a row — rerun pfm install", path, retry+1)
+			return &settingsKeptChangingError{path: path, edits: retry + 1}
 		}
 		read = current
 		next, write, err := replan(current)

@@ -99,9 +99,14 @@ func (servers Servers) Sockets(ctx context.Context) ([]string, error) {
 	return live, errors.Join(faults...)
 }
 
-// Show reads one global option of socket's server.
+// Show reads one global option of socket's server; tmux's answer that the
+// option is unset wraps themesync.ErrTmuxOptionUnset.
 func (servers Servers) Show(ctx context.Context, socket, name string) (string, error) {
-	return servers.Probe.ShowGlobalOption(ctx, socket, name)
+	value, err := servers.Probe.ShowGlobalOption(ctx, socket, name)
+	if errors.Is(err, gather.ErrOptionUnset) {
+		return "", fmt.Errorf("%w: %w", themesync.ErrTmuxOptionUnset, err)
+	}
+	return value, err
 }
 
 // Apply runs each set-option vector against socket's server.

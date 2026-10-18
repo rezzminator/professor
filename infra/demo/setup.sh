@@ -69,7 +69,7 @@ install)
 }
 EOF
   # 2. pfm install exactly as a user runs it from the clone, Claude Code themes included: the
-  #    seats wear the professor palettes the presenter's machines wear.
+  #    seats wear the theme profile the presenter's machines wear.
   #    ~/.professor is where pfm expects the blueprint clone (pfm doctor --project-updates,
   #    the global fan-out); on a real host it IS the checkout, here it links to the mount.
   [ -e "$HOME/.professor" ] || ln -s "$SRC" "$HOME/.professor"
@@ -82,9 +82,8 @@ EOF
   fi
   [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
     { echo "setup: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
-  # Shared settings use the primary seat's theme and the presenter's defaults.
-  primary_emoji="$(jq -r '.accounts[] | select(.id == 1) | .emoji' "$CONFIG")"
-  case "$primary_emoji" in 🥇) theme=professor-gold ;; 🥈) theme=professor-silver ;; 🥉) theme=professor-bronze ;; *) theme=tokyo-night ;; esac
+  # Shared settings use one theme profile for every seat and the presenter's defaults.
+  theme=hibiscus-night
   settings_tmp="$(mktemp)"
   jq --arg t "custom:$theme" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
   cat "$settings_tmp" >"$HOME/.claude/settings.json"

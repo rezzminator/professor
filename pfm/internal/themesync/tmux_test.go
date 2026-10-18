@@ -6,13 +6,13 @@ import (
 )
 
 func TestTmuxOptionsRenderStylesAndUserOptions(t *testing.T) {
-	options := tmuxOptions(goldApplied(t), Dark, 3)
+	options := tmuxOptions(hibiscusApplied(t), Dark, 3)
 	byName := map[string]string{}
 	for _, option := range options {
 		byName[option.Name] = option.Value
 	}
-	if len(options) != len(byName) || len(options) != 21 {
-		t.Fatalf("got %d options (%d unique), want 21", len(options), len(byName))
+	if len(options) != len(byName) || len(options) != 30 {
+		t.Fatalf("got %d options (%d unique), want 30", len(options), len(byName))
 	}
 	format := "#{?#{==:#{@pfm-state},blocked},#e0af68,#{?#{==:#{@pfm-state},working},#7aa2f7," +
 		"#{?#{==:#{@pfm-state},done},#9ece6a,#7b84af}}}"
@@ -25,7 +25,16 @@ func TestTmuxOptionsRenderStylesAndUserOptions(t *testing.T) {
 		"message-style":               "bg=#292e42,fg=#c0caf5",
 		"message-command-style":       "bg=#1f2335,fg=#7aa2f7",
 		"mode-style":                  "bg=#283457,fg=#c0caf5",
-		"@pfm-theme":                  "custom:professor-gold",
+		"@host_accent":                "#7aa2f7",
+		"@p_g0":                       "#1f2335",
+		"@p_g3":                       "#1a1b26",
+		"@p_fg":                       "#c0caf5",
+		"@p_fg1":                      "#565f89",
+		"@p_fg2":                      "#565f89",
+		"@p_red":                      "#f7768e",
+		"@p_amber":                    "#e0af68",
+		"@pfm-theme-chips":            "1",
+		"@pfm-theme":                  "custom:hibiscus-night",
 		"@pfm-theme-generation":       "3",
 		"@pfm-c-bg":                   "#1a1b26",
 		"@pfm-c-accent":               "#7aa2f7",

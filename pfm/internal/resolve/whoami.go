@@ -25,12 +25,15 @@ const (
 
 // ErrNoTmux is the whoami failure chat.sh reports on stderr (chat.sh:94).
 var ErrNoTmux = errors.New(
-	"ERROR: this chat is not inside tmux ($TMUX unset, and no ancestor carries it)",
+	"ERROR: this chat is not inside tmux ($TMUX unset, and no ancestor carries it) nor a pfm Herdr seat",
 )
 
 // Identity is who the CALLING process is: the tmux handle another chat calls
 // to, plus whatever engine identity the environment carries.
 type Identity struct {
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
 	// Session is chat.sh whoami's stdout — this chat's own tmux session name.
 	Session    string `json:"session"`
 	SocketPath string `json:"socket_path,omitempty"`
@@ -46,6 +49,8 @@ type Identity struct {
 // WhoamiEnvironment is the caller environment whoami reads. It is a value so a
 // jail can state it outright instead of mutating the process environment.
 type WhoamiEnvironment struct {
+	HerdrSocket     string
+	HerdrPane       string
 	TMUX            string
 	TMUXPane        string
 	ClaudeSessionID string
@@ -150,6 +155,8 @@ func CallerEnvironment() WhoamiEnvironment {
 func CallerEnvironmentFrom(env paths.Env) WhoamiEnvironment {
 	return WhoamiEnvironment{
 		TMUX:            env.Get("TMUX"),
+		HerdrSocket:     env.Get("HERDR_SOCKET_PATH"),
+		HerdrPane:       env.Get("HERDR_PANE_ID"),
 		TMUXPane:        env.Get("TMUX_PANE"),
 		ClaudeSessionID: env.Get(ClaudeSessionEnv),
 		CodexThreadID:   env.Get(CodexThreadEnv),
@@ -191,6 +198,13 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		pane = identifier.environment.TMUXPane
 	}
 	if socketPath == "" {
+		native, found, err := identifier.identifyHerdr(ctx)
+		if err != nil {
+			return identity, err
+		}
+		if found {
+			return native, nil
+		}
 		recoveredSocket, recoveredPane, ok := identifier.recoverFromAncestry(ctx)
 		if !ok {
 			return identity, ErrNoTmux

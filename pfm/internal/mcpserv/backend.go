@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -238,10 +239,25 @@ func (current *backend) listProjected(
 			account = row.Accounts[0]
 		}
 		rows = append(rows, ChatRow{
-			Session: session, ID: row.ID, Engine: compose.EngineForKind(row.Kind),
-			State: chatRowState(*row), Dir: row.CWD, Project: row.Project, Name: row.Name,
-			Account: account, Kind: row.Kind.String(), Killed: row.Killed,
-			Socket: row.Socket, Pane: row.PaneID, Herdr: listed.PresenceOf(index), transcriptPath: row.Path,
+			Backend:        row.Backend,
+			SeatID:         row.SeatID,
+			HerdrWorkspace: row.HerdrWorkspace,
+			BackendError:   row.BackendError,
+			LostNote:       row.LostNote,
+			Session:        session,
+			ID:             row.ID,
+			Engine:         compose.EngineForKind(row.Kind),
+			State:          chatRowState(*row),
+			Dir:            row.CWD,
+			Project:        row.Project,
+			Name:           row.Name,
+			Account:        account,
+			Kind:           row.Kind.String(),
+			Killed:         row.Killed,
+			Socket:         row.Socket,
+			Pane:           row.PaneID,
+			Herdr:          listed.PresenceOf(index),
+			transcriptPath: row.Path,
 		})
 	}
 	scope := "all repos"
@@ -249,7 +265,8 @@ func (current *backend) listProjected(
 		scope = repo
 	}
 	return LSOutput{
-		Rows: rows, Count: len(rows), Matched: listed.Matched,
+		Errors: listed.Errors,
+		Rows:   rows, Count: len(rows), Matched: listed.Matched,
 		Truncated: listed.Truncated, KilledCount: listed.KilledCount,
 		Filter: input.Project, Scope: scope, Elsewhere: listed.Elsewhere,
 	}, nil
@@ -263,6 +280,12 @@ func (current *backend) listProjected(
 // and no caller could tell a real kill from a de-listing. A contradiction is
 // reported as a contradiction, never smoothed into one of its two halves.
 func chatRowState(row compose.Row) string {
+	if row.BackendError != "" {
+		return "error"
+	}
+	if row.Backend == "herdr" && row.LostNote != "" && !row.Kind.IsAddressable() {
+		return "lost"
+	}
 	switch {
 	case row.Killed && row.Kind.IsAddressable():
 		return "killed-but-live"
@@ -319,7 +342,8 @@ func (current *backend) proxySocketMatches(proxy ProxyIdentity, row ChatRow) (se
 	}
 	conflicts := make([]string, 0, 2)
 	if proxy.SocketName != "" {
-		if row.Socket == proxy.SocketName {
+		if row.Socket == proxy.SocketName ||
+			(row.Backend == spawn.BackendHerdr && filepath.Base(row.Socket) == proxy.SocketName) {
 			selected = true
 		} else {
 			conflicts = append(conflicts, fmt.Sprintf(
@@ -334,7 +358,7 @@ func (current *backend) proxySocketMatches(proxy ProxyIdentity, row ChatRow) (se
 		// a trusted tmux directory. Package tests also build deliberately partial
 		// backends around fake verbs; retain their basename-only fixture seam
 		// without making it reachable from the configured server.
-		if current.paths.TmuxDir == "" {
+		if current.paths.TmuxDir == "" && row.Backend != spawn.BackendHerdr {
 			pathSocket := filepath.Base(proxy.SocketPath)
 			if row.Socket == pathSocket {
 				selected = true
@@ -347,7 +371,7 @@ func (current *backend) proxySocketMatches(proxy ProxyIdentity, row ChatRow) (se
 			}
 			return selected, strings.Join(conflicts, "; ")
 		}
-		rowSocketPath, err := current.paths.SocketUnder(row.Socket)
+		rowSocketPath, err := current.rowSocketPath(row)
 		switch {
 		case err != nil:
 			conflicts = append(conflicts, fmt.Sprintf(
@@ -442,7 +466,7 @@ func (current *backend) callerForRequest(
 		conflictDetail := ""
 		for index := range listed.Rows {
 			row := &listed.Rows[index]
-			if row.Killed || (row.State != "idle" && row.State != "booting") {
+			if row.Killed || (row.State != "idle" && row.State != "booting" && row.BackendError == "") {
 				continue
 			}
 			matched, rowDetail := current.proxySessionMatches(proxy, proxyEngine, *row)
@@ -451,6 +475,10 @@ func (current *backend) callerForRequest(
 			}
 			if !matched {
 				continue
+			}
+			if row.BackendError != "" {
+				caller.detail = fmt.Sprintf("MCP caller backend failed: %s", row.BackendError)
+				return caller, nil
 			}
 			matches = append(matches, *row)
 		}
@@ -561,6 +589,9 @@ func (current *backend) callerForRequest(
 			caller.row.Pane = proxy.Pane
 		}
 		caller.identity = proxy.callerIdentity()
+		caller.identity.Backend = caller.row.Backend
+		caller.identity.SeatID = caller.row.SeatID
+		caller.identity.HerdrWorkspace = caller.row.HerdrWorkspace
 		if caller.identity.ID == "" {
 			// OpenCode currently supplies no engine conversation id through
 			// whoami. The matched live row still has the stable target that
@@ -571,7 +602,7 @@ func (current *backend) callerForRequest(
 			caller.identity.SocketName = caller.row.Socket
 		}
 		if caller.identity.SocketPath == "" {
-			socketPath, socketErr := current.paths.SocketUnder(caller.row.Socket)
+			socketPath, socketErr := current.rowSocketPath(caller.row)
 			if socketErr != nil {
 				return caller, fmt.Errorf(
 					"resolve MCP proxy session %q matched socket %q: %w",

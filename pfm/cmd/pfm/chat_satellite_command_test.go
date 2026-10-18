@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -729,5 +730,42 @@ func TestWaitForBranchSessionIDReturnsAnIDThatAppearsAtTenSeconds(t *testing.T) 
 	}
 	if elapsed := clk.Now().Sub(start); elapsed < 10*time.Second || elapsed > 11*time.Second {
 		t.Fatalf("resolved after %s of fake time, want about 10s", elapsed)
+	}
+}
+
+func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
+	jailTest(t)
+	values := jailPaths(t)
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := state.PutSeat(
+		context.Background(),
+		fleetdb.Seat{
+			SeatID:         "native-offline",
+			SessionID:      "native-offline-session",
+			Engine:         "cc",
+			Backend:        "herdr",
+			State:          "live",
+			Name:           "OFFLINE",
+			LostNote:       "your last message was not answered — re-send it",
+			HerdrSocket:    filepath.Join(t.TempDir(), "dead.sock"),
+			HerdrPane:      "w6:p3",
+			HerdrWorkspace: "w6",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"chat", "ls", "--all"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stdout.String(), "OFFLINE") ||
+		!strings.Contains(
+			stderr.String(),
+			"HERDR UNREACHABLE",
+		) || !strings.Contains(stdout.String(), "loss note: your last message was not answered — re-send it") {
+		t.Fatalf("unreachable list code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

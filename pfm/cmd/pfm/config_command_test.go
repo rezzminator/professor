@@ -145,3 +145,29 @@ func TestConfigShowDoctorIgnoreWarnings(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigShowChatBackendSources(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"absent", `{"version":2}`, "config chat.backend=auto (default)\n"},
+		{"explicit auto", `{"version":2,"chat":{"backend":"auto"}}`, "config chat.backend=auto (file)\n"},
+		{"tmux", `{"version":2,"chat":{"backend":"tmux"}}`, "config chat.backend=tmux (file)\n"},
+		{"herdr", `{"version":2,"chat":{"backend":"herdr"}}`, "config chat.backend=herdr (file)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, pfmconfig.FileName)
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			machine, err := pfmconfig.Load(path, home, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
+			if !strings.Contains(stdout.String(), tc.want) {
+				t.Fatalf("config show missing %q:\n%s", tc.want, stdout.String())
+			}
+		})
+	}
+}

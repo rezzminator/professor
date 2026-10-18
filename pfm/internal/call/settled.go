@@ -17,10 +17,13 @@ import (
 // rather than an Engine, and neither surface grows a second copy of the
 // turn-identification rules below.
 type SettledTurn struct {
-	// Capture takes ONE reading of the pane, history included
+	// Capture reads the pane with history included
 	// (paneScrollbackLines). Its error is a failure to look, never an
 	// observation — see samplePane.
 	Capture func(ctx context.Context) (string, error)
+	// captureVisible separates the live footer from retained screen redraws.
+	// Nil preserves the single-capture contract of other SettledTurn callers.
+	captureVisible func(ctx context.Context) (string, error)
 	// Sleep is the clock seam every wait in the loop crosses.
 	Sleep func(ctx context.Context, duration time.Duration)
 	// Pane names the target in the baseline error; nothing else reads it.
@@ -120,8 +123,15 @@ func (wait SettledTurn) samplePane(ctx context.Context) (paneSample, error) {
 	if err != nil {
 		return paneSample{}, err
 	}
+	visible := capture
+	if wait.captureVisible != nil {
+		visible, err = wait.captureVisible(ctx)
+		if err != nil {
+			return paneSample{}, fmt.Errorf("capture visible pane %q: %w", wait.Pane, err)
+		}
+	}
 	return paneSample{
-		busy:     IsFooterBusy(wait.Engine, capture),
+		busy:     IsFooterBusy(wait.Engine, visible),
 		receipts: countCompactionReceipts(capture),
 	}, nil
 }
@@ -247,6 +257,9 @@ func (engine *Engine) waitForSettledTurn(
 		Engine: engineID,
 		Capture: func(ctx context.Context) (string, error) {
 			return engine.tmux.Capture(ctx, socketPath, target, false, paneScrollbackLines)
+		},
+		captureVisible: func(ctx context.Context) (string, error) {
+			return engine.tmux.Capture(ctx, socketPath, target, false, 0)
 		},
 		Sleep:      engine.sleepContext,
 		Pane:       target,

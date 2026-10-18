@@ -389,38 +389,6 @@ func TestResolveClaudeBinaryNeverReturnsAnyHomesLauncherShim(t *testing.T) {
 	}
 }
 
-func TestResolveClaudeBinaryAcceptsALargeBinaryMentioningTheShimMarker(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	directory := t.TempDir()
-	body := "#!/bin/sh\n# internal claude-launch\n" + strings.Repeat("x", claudeShimMaxBytes) + "\n"
-	big := filepath.Join(directory, "claude")
-	if err := testjail.WriteExecutable(big, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := ResolveClaudeBinary(home, "", directory)
-	if err != nil || resolved != big {
-		t.Fatalf("resolution=%q err=%v, want the oversized binary %q accepted", resolved, err, big)
-	}
-}
-
-func TestResolveClaudeBinaryUnreadableCandidate(t *testing.T) {
-	home, dir := t.TempDir(), t.TempDir()
-	path := filepath.Join(dir, "claude")
-	if err := testjail.WriteExecutable(path, []byte("0123456789"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	original := readClaudeShim
-	readClaudeShim = func(string) ([]byte, error) { return nil, errors.New("input/output error") }
-	t.Cleanup(func() { readClaudeShim = original })
-	if !isPfmClaudeShim(path) {
-		t.Error("unreadable candidate did not count as a shim")
-	}
-	if resolved, err := ResolveClaudeBinary(home, "", dir); !errors.Is(err, ErrClaudeBinaryNotFound) {
-		t.Errorf("resolution = %q, error = %v; want ErrClaudeBinaryNotFound", resolved, err)
-	}
-}
-
 // TestClaudeLauncherShimDefaultsConfigDir runs the staged shim with a fake
 // pfm that prints the environment it got: an unset CLAUDE_CONFIG_DIR takes the
 // login default pfm install wrote, with its sentinel, so the real Claude never

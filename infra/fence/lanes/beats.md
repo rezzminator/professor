@@ -2,7 +2,7 @@
 
 Per-lane ordered beat list. Each beat names what it asserts and the fixture seat or engine it uses (`cc:$SEAT`, `cx`, `oc`, or none); `map.tsv` names the pfm commands and MCP tools each beat tests. `$SEAT` is the primary seat selected by `--seats`; fixture seats 1 and 2 always exist. A beat marked `known-gap` reports `known` and does not fail the suite — see `infra/fence/lanes/known-gaps.yml`. A behavior that needs a service manager gets a beat that asserts the named container advisory.
 
-The canonical order is **O1 → E1 → E2 → E3 → F → M → A → O2**, run in ONE container over accumulating pfm state (`run.sh`); any lane also runs alone from a fresh root, its `need` prelude making what the sequence would have made. Lane O is one area with two entry points: **O1** before any chat exists (install idempotence, host assets, hooks, seats, credentials, dropped seat, symlinked home, doctor, heal) and **O2** the destructive tail (reap over F's storm, archive/index over a real history, headless, harvester, and `uninstall` LAST, since it tears the machine down). The four beats marked **cross-lane** are the spec's planned overlap: they assert the state ANOTHER lane built, so `map.tsv` may name their command a second time, under their own lane.
+The canonical order is **O1 → E1 → E2 → E3 → F → M → A → H → O2**, run in ONE container over accumulating pfm state (`run.sh`); any lane also runs alone from a fresh root, its `need` prelude making what the sequence would have made. Lane O is one area with two entry points: **O1** before any chat exists (install idempotence, host assets, hooks, seats, credentials, dropped seat, symlinked home, doctor, heal) and **O2** the destructive tail (reap over F's storm, archive/index over a real history, headless, harvester, and `uninstall` LAST, since it tears the machine down). The four beats marked **cross-lane** are the spec's planned overlap: they assert the state ANOTHER lane built, so `map.tsv` may name their command a second time, under their own lane.
 
 ## Lane R — root
 
@@ -64,7 +64,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 
 ## Lane F — fleet
 
-- `F.01-new-engine` · `chat new` across every engine: cc/cx/oc, resolved by flag/fallback/socket-prefix · spends cc:$SEAT+cx
+- `F.01-new-engine` · `chat new` across every engine: cc/cx/oc, resolved by flag/fallback/socket-prefix; Claude explicitly exercises `--backend tmux` · spends cc:$SEAT+cx
 - `F.02-new-label-role` · `chat new` dimension: `{name}:{group}` label / hidden `_KILL`/`_HIDE` / role / prompt-file · spends cc:$SEAT
 - `F.03-new-account-1h-model` · `chat new` dimension: account / cache / model-effort · spends cc:$SEAT
 - `F.04-new-await-attach` · `chat new --await`/`--attach` mechanics · spends cc:$SEAT
@@ -151,7 +151,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives the fixture transcr
 - `O2.02-archive` · `pfm archive` (apply / subagents / restore / prune-orphans) over fixture transcript history · spends none
 - `O2.03-index` · `pfm index` · spends none
 - `O2.04-headless` · headless Claude selector returns a cc envelope; the codex selector runs through OpenCode's server and returns an ox envelope with usage · spends cc:$SEAT+cx
-- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, cost-launch and cost-sink usage and arming, git-guard, store-guard, epic-inject, herdr-state (a silent exit-0 no-op outside a Herdr pane, on a payload and on garbage), title-renudge · spends none
+- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, cost-launch and cost-sink usage and arming, git-guard, store-guard, epic-inject, seat-host (missing-seat rejection, exit 1), `chat new --backend` (unknown choice rejected, forced unreachable Herdr refuses birth), herdr-state (a silent exit-0 no-op outside a Herdr pane, on a payload and on garbage), title-renudge · spends none
 - `O2.05b-activity-log` · the activity-log reader: `pfm log` shows the lane's own records, a filter narrows, an unknown `--comp`/`--level` and a positional argument exit 2 · spends none
 - `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none
 - `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `call` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT
@@ -159,7 +159,31 @@ Runs LAST: it reaps the graveyard F's storm filled, archives the fixture transcr
 - `O2.09-harvester` · `pfm harvest` local content and named offline public-source errors, ask's usage line, and sidecar provisioning · spends cc:$SEAT · linux-arm64 `known-gap`
 - `O2.10-uninstall` · LAST beat of the run: `uninstall` removes everything owned, keeps a foreign hook planted before install, leaves no ledger · spends none
 
+## Lane H — real Herdr, fake engines
+
+Runs after the state-building lanes and before destructive O2. Its prelude creates its own workspace, server and four sender/target seats; existing lanes' assertions and budgets are unchanged. Every beat spends only fixture cc:$SEAT, with no credentials or providers. Current rows are executable coverage, not a claim of solo/sequence or mutation acceptance.
+
+- `H.birth` · `chat new --backend herdr` returns a real native pane · spends cc:$SEAT
+- `H.seat-host` · real Herdr detects the foreground native fake process · spends cc:$SEAT
+- `H.native-call` · unsigned operator prompt reaches the carried transcript; no unsigned steering claim · spends cc:$SEAT
+- `H.whoami` · actual fake descendant returns herdr-ancestry, backend and carried SID · spends cc:$SEAT
+- `H.discovery` · live fleet row carries SID, name and actual socket · spends cc:$SEAT
+- `H.status` · carried live SID is idle · spends cc:$SEAT
+- `H.keys` · literal keys plus Enter reach the carried transcript · spends cc:$SEAT
+- `H.capture` · actual pane contains the typed marker · spends cc:$SEAT
+- `H.tmux-to-tmux` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
+- `H.tmux-to-herdr` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
+- `H.herdr-to-tmux` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
+- `H.herdr-to-herdr` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
+- `H.watch` · actual native idle is reported · spends cc:$SEAT
+- `H.open-live` · BLOCKED: pinned agent.focus acknowledgement differs from product expectation · spends cc:$SEAT
+- `H.name` · durable name and actual Herdr pane label agree · spends cc:$SEAT
+- `H.reload` · BLOCKED: pinned pane.send_keys rejects product tmux key spelling C-s · spends cc:$SEAT
+- `H.open-restored` · automatic unattended real-server resume rebinds exact carried SID live · spends cc:$SEAT
+
 ## Coverage
 
 - `map.tsv` maps every pfm command (the `--help` tree, `pfm internal` verbs and hidden verbs included) and every MCP tool to the beat that tests it; `check-map.sh` is the gate and prints the live counts.
-- All eight lanes are written; `pending.txt` is empty. `O2.01b` reports its clock-door blocker by name.
+- All nine lanes have entry points; `pending.txt` is empty. `O2.01b` reports its clock-door blocker by name.
+- Existing lanes retain their tmux assertions. H uses real pinned Herdr 0.9.5/protocol 22 and explicitly credential-free fake engines, not responding providers. Native lifecycle coverage is partial: open-live and reload currently report named product blockers; raw/modal, busy refusal, launcher/picker/agent-start, branch, kill/unkill/end, doctor and loss remain unproved by H.
+- `H.open-restored` stops and restarts the real server. Herdr itself executes saved `pfm chat open --restored`; the driver sends no recovery keys. The assertion requires a new native PID, exact `--resume` SID and a live row bound to the carried session/pane. This is a flag exercised by the mapped `pfm chat open` verb, not a fictitious independent command-tree row.

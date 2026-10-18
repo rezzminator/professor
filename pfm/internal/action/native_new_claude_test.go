@@ -1,6 +1,11 @@
 package action
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,7 +14,10 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func mustProfessorPromptPath(t *testing.T, home string) string {
@@ -192,5 +200,148 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 				}
 			})
 		}
+	}
+}
+
+func TestHerdrPickerSpawnsNewTab(t *testing.T) {
+	testjail.Fleet(t)
+	socket := herdrPickerSocket(t)
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	t.Setenv("TMUX", "")
+	home := t.TempDir()
+	machine := configuredMachinePolicy(home)
+	machine.Claude.Binary = filepath.Join(home, "native-claude")
+	if err := testjail.WriteExecutable(machine.Claude.Binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := executor.Open(
+		context.Background(),
+		Request{
+			Row:            compose.Row{Kind: compose.NewClaude, CWD: "/work/project"},
+			Home:           home,
+			PrimaryAccount: 42,
+			FreshSocket:    "cc-unused",
+			Config:         machine,
+		},
+	)
+	if err != nil || line != "" {
+		t.Fatalf("line=%q err=%v", line, err)
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	seat, found, err := state.SeatByPane(context.Background(), socket, "w6:p9")
+	if err != nil || !found || seat.Backend != "herdr" || seat.HerdrPane != "w6:p9" {
+		t.Fatalf("seat=%+v found=%v err=%v", seat, found, err)
+	}
+}
+
+func herdrPickerSocket(t *testing.T) string {
+	t.Helper()
+	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+				}
+				if json.NewDecoder(conn).Decode(&req) != nil {
+					return
+				}
+				if req.Method == "layout.apply" {
+					_, _ = fmt.Fprintf(
+						conn,
+						`{"id":%q,"ok":true,"result":{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}}`+"\n",
+						req.ID,
+					)
+					return
+				}
+				if req.Method == "ping" {
+					_, _ = fmt.Fprintf(
+						conn,
+						`{"id":%q,"ok":true,"result":{"type":"pong","version":"0.9.5","protocol":22}}`+"\n",
+						req.ID,
+					)
+					return
+				}
+				_, _ = fmt.Fprintf(conn, `{"id":%q,"ok":true,"result":{"pane":{"pane_id":"w6:p3"}}}`+"\n", req.ID)
+			}()
+		}
+	}()
+	return socket
+}
+
+func TestHerdrPickerRawEnginesSpawnNewTab(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
+		t.Run(kind.String(), func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := herdrPickerSocket(t)
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			t.Setenv("TMUX", "")
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
+			binary := filepath.Join(home, "raw-engine")
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			machine.Codex.Binary = binary
+			machine.OpenCode.Binary = binary
+			executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
+			if err != nil {
+				t.Fatal(err)
+			}
+			line, err := executor.Open(
+				context.Background(),
+				Request{
+					Row:            compose.Row{Kind: kind, CWD: home},
+					Home:           home,
+					PrimaryAccount: 2,
+					FreshSocket:    "unused",
+					Config:         machine,
+				},
+			)
+			if err != nil || line != "" {
+				t.Fatalf("raw picker line=%q err=%v", line, err)
+			}
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() { _ = db.Close() }()
+			seat, found, err := db.SeatByPane(context.Background(), socket, "w6:p9")
+			id := compose.EngineForKind(kind)
+			if err != nil || !found || seat.Engine != string(id) || seat.SessionID == "" || seat.HerdrPane != "w6:p9" ||
+				pfmengine.MustLookup(id).HerdrNativePrompt {
+				t.Fatalf("raw picker seat=%+v found=%v err=%v", seat, found, err)
+			}
+		})
 	}
 }

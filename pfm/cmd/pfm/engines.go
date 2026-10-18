@@ -31,6 +31,7 @@ func registerEngines() {
 
 	action.RegisterPlanner(pfmengine.Claude, claudeengine.HeadlessPlanner{})
 	action.RegisterPlanner(pfmengine.Codex, codexengine.HeadlessPlanner{})
+	action.RegisterPlanner(pfmengine.OpenCode, opencodeengine.HeadlessPlanner{})
 
 	ask.RegisterRunner(pfmengine.Claude, claudeengine.AskRunner{})
 	ask.RegisterRunner(pfmengine.Codex, codexengine.AskRunner{})
@@ -39,9 +40,9 @@ func registerEngines() {
 func init() { registerEngines() }
 
 var engineCapabilityExceptions = map[pfmengine.ID]map[string]bool{
-	// OpenCode has a session index and a process matcher. It has no usage API,
-	// headless planner, ask runner, or managed launcher in this tree.
-	pfmengine.OpenCode: {indexCommand: true, "matcher": true},
+	// OpenCode has an index, process matcher and headless planner, but no
+	// usage API, ask runner or managed launcher.
+	pfmengine.OpenCode: {indexCommand: true, "matcher": true, "headless": true},
 }
 
 func expectedEngineCapabilities(id pfmengine.ID, all []string) map[string]bool {

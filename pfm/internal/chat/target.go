@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -24,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -107,6 +109,9 @@ func DeliverName(
 	name string,
 	runtime *pfmconfig.Runtime,
 ) (int, string, error) {
+	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\x00\r\n") {
+		return 1, "", errors.New("chat name must be nonempty and contain no NUL or newline")
+	}
 	engine, err := NewCallEngine(false, runtime)
 	if err != nil {
 		return 1, "", err
@@ -122,16 +127,23 @@ func DeliverName(
 	if err != nil {
 		return 1, "", err
 	}
-	socketPath, err := values.SocketUnder(chat.Socket)
+	socketPath, err := targetSocket(values, chat.Backend, chat.Socket)
 	if err != nil {
 		return 1, "", err
 	}
 	target := pfmcall.Target{
+		Backend: chat.Backend, SeatID: chat.SeatID, HerdrWorkspace: chat.HerdrWorkspace,
 		SocketPath: socketPath, Pane: chat.Pane, Engine: string(chat.Engine),
 		Name: chat.Name, ID: chat.ID, Session: chat.Session,
 	}
 	request.Target = chat.Pane
 	result, err := engine.CallTarget(ctx, target, request)
+	if err == nil && result.Code == 0 && chat.Backend == spawn.BackendHerdr {
+		err = renameHerdr(ctx, chat, name, values)
+		if err != nil {
+			return 1, result.Message, err
+		}
+	}
 	return result.Code, result.Message, err
 }
 
@@ -186,9 +198,13 @@ func ResolveIn(
 	var requestIdentity *resolve.Identity
 	if resolve.IsRawPane(normalized) {
 		if scoped, ok := ScopedSelf(ctx); ok {
-			identity := resolve.Identity{}
+			identity := resolve.Identity{
+				Backend:        scoped.Backend,
+				SeatID:         scoped.SeatID,
+				HerdrWorkspace: scoped.HerdrWorkspace,
+			}
 			if scoped.Socket != "" {
-				identity.SocketPath, err = values.SocketUnder(scoped.Socket)
+				identity.SocketPath, err = targetSocket(values, scoped.Backend, scoped.Socket)
 				if err != nil {
 					return headless.Chat{}, false, fmt.Errorf("resolve scoped caller socket: %w", err)
 				}
@@ -219,7 +235,7 @@ func ResolveIn(
 		rosterMatch = matched
 		socketPath := ""
 		if matched.Socket != "" {
-			socketPath, matchErr = values.SocketUnder(matched.Socket)
+			socketPath, matchErr = targetSocket(values, matched.Backend, matched.Socket)
 			if matchErr != nil {
 				return resolve.Seat{}, resolve.CodeUndelivered, "", matchErr
 			}
@@ -229,8 +245,15 @@ func ResolveIn(
 			pane = matched.Session
 		}
 		return resolve.Seat{
-			SocketPath: socketPath, Pane: pane, Engine: string(matched.Engine),
-			Name: matched.Name, ID: matched.ID, Session: matched.Session,
+			Backend:        matched.Backend,
+			SeatID:         matched.SeatID,
+			HerdrWorkspace: matched.HerdrWorkspace,
+			SocketPath:     socketPath,
+			Pane:           pane,
+			Engine:         string(matched.Engine),
+			Name:           matched.Name,
+			ID:             matched.ID,
+			Session:        matched.Session,
 		}, 0, "", nil
 	})
 	seat, code, detail, err := (resolve.Ladder{
@@ -248,8 +271,9 @@ func ResolveIn(
 			return rosterMatch, true, nil
 		}
 		resolved := headless.Chat{
+			Backend: seat.Backend, SeatID: seat.SeatID, HerdrWorkspace: seat.HerdrWorkspace,
 			Name: seat.Name, ID: seat.ID, Engine: pfmengine.ID(seat.Engine),
-			Socket: filepath.Base(seat.SocketPath), Session: seat.Session,
+			Socket: seatSocket(seat.Backend, seat.SocketPath), Session: seat.Session,
 			Pane: seat.Pane, Live: true,
 		}
 		if selfTarget {
@@ -401,6 +425,7 @@ func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 	for index := range rows {
 		row := rows[index]
 		candidates = append(candidates, resolve.RosterCandidate{
+			Backend: row.Backend, SeatID: row.SeatID, HerdrWorkspace: row.HerdrWorkspace,
 			Name: row.Name, ID: row.ID, Socket: row.Socket,
 			Session: row.SessionName, Pane: row.PaneID,
 			Engine: string(compose.EngineForKind(row.Kind)),
@@ -431,6 +456,7 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 // FromRow is a composed row in the shape every verb operates on.
 func FromRow(row compose.Row) headless.Chat {
 	return headless.Chat{
+		Backend: row.Backend, SeatID: row.SeatID, HerdrWorkspace: row.HerdrWorkspace,
 		Name:    row.Name,
 		ID:      row.ID,
 		Engine:  compose.EngineForKind(row.Kind),
@@ -501,4 +527,22 @@ func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Iden
 		}, true
 	}
 	return resolve.Identity{}, false
+}
+
+// targetSocket keeps native addresses absolute; only tmux sockets use the fleet root.
+func targetSocket(values paths.Values, backend, socket string) (string, error) {
+	if backend == spawn.BackendHerdr {
+		if !filepath.IsAbs(socket) {
+			return "", fmt.Errorf("herdr socket must be absolute: %q", socket)
+		}
+		return socket, nil
+	}
+	return values.SocketUnder(socket)
+}
+
+func seatSocket(backend, socket string) string {
+	if backend == spawn.BackendHerdr {
+		return socket
+	}
+	return filepath.Base(socket)
 }

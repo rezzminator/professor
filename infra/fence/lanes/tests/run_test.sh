@@ -22,6 +22,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 LANES="$T/infra/fence/lanes"
 mkdir -p "$LANES" "$T/infra/fence"
 cp "$SUT_DIR"/*.sh "$SUT_DIR"/*.yml "$SUT_DIR"/*.tsv "$SUT_DIR"/*.md "$SUT_DIR"/pending.txt "$LANES/" 2>/dev/null
+if [ ! -f "$LANES/H.sh" ]; then printf 'beat H.birth\n' >"$LANES/H.sh"; fi
 cat >"$LANES/budgets.yml" <<'YML'
 tolerance: 1.25
 
@@ -36,6 +37,7 @@ lanes:
   F: unpinned
   M: unpinned
   A: unpinned
+  H: unpinned
   O2: unpinned
 YML
 cp "$LANES/budgets.yml" "$T/budgets.fixture.yml"
@@ -457,4 +459,114 @@ if [ "$RC" -eq 0 ] && grep -q 'egress: could not copy recorder evidence' <<<"$OU
   ok "failed evidence copy is named without changing a PASS verdict"
 else bad "capture evidence copy failure" "rc=$RC" "$OUT"; fi
 
+# Real-Herdr lane is selectable and stays ahead of the destructive tail.
+run_sut --lanes O2,H,A --dry-run
+order="$(printf '%s' "$OUT" | sed -n 's/^run: lane order  //p')"
+if [ "$RC" -eq 0 ] && [ "$order" = "A → H → O2" ] &&
+  grep -qE 'lane H · [1-9][0-9]* beats · spends' <<<"$OUT"; then
+  ok "Herdr selection follows canonical order before the destructive tail"
+else
+  bad "Herdr canonical selection" "rc=$RC order=[$order]" "$OUT"
+fi
+
+# Focused native-birth runs and isolated product binaries are H-only.
+LANE_H_SCOPE=birth run_sut --lanes H,E1 --dry-run
+if [ "$RC" -eq 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; then
+  ok "focused native birth refuses mixed lanes"
+else bad "native birth scope guard" "rc=$RC" "$OUT"; fi
+LANE_H_SCOPE=unknown run_sut --lanes H --dry-run
+if [ "$RC" -eq 2 ] && grep -q 'LANE_H_SCOPE takes birth' <<<"$OUT"; then
+  ok "unknown H scope is refused by name"
+else bad "native birth scope value" "rc=$RC" "$OUT"; fi
+LANE_H_SCOPE=birth LANE_H_PFM="$T/missing-product" run_sut --lanes H --dry-run
+if [ "$RC" -eq 2 ] && grep -q 'LANE_H_PFM must be an executable regular file' <<<"$OUT"; then
+  ok "missing isolated product binary is refused visibly"
+else bad "native birth product input" "rc=$RC" "$OUT"; fi
+printf '#!/bin/sh\nexit 0\n' >"$T/product-pfm"
+chmod +x "$T/product-pfm"
+printf 'H\t1\t3\t0\t0\t0\n' >"$T/herdr-row.tsv"
+: >"$T/docker.log"
+LANE_H_SCOPE=birth LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes H
+if [ "$RC" -eq 0 ] &&
+  grep -qF -- "cp $T/product-pfm pfm-lane-" "$T/docker.log" &&
+  grep -qF -- '-e LANE_H_SCOPE=birth' "$T/docker.log" &&
+  grep -qE -- '-e H_PFM_OVERRIDE=/tmp/lanes/[^ ]+/pfm' "$T/docker.log"; then
+  ok "focused native birth stages the isolated product and forwards only its container path"
+else bad "native birth product staging" "rc=$RC" "$OUT"; fi
+
+# Discovery uses the same isolated H-only product staging, never mixed lanes.
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=discovery LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=discovery' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused discovery $selection has the isolated solo contract"
+  else bad "focused discovery $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=delivery LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=delivery' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused delivery $selection has the isolated solo contract"
+  else bad "focused delivery $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=delivery-tmux LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=delivery-tmux' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused delivery-tmux $selection has the isolated solo contract"
+  else bad "focused delivery-tmux $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=delivery-outcomes LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=delivery-outcomes' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused delivery-outcomes $selection has the isolated solo contract"
+  else bad "focused delivery-outcomes $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=delivery-status LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=delivery-status' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused delivery-status $selection has the isolated solo contract"
+  else bad "focused delivery-status $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+# Interactive controls reuse the isolated solo-H product contract.
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=controls LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=controls' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused controls $selection has the isolated solo contract"
+  else bad "focused controls $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+# Live-open reuses the isolated solo-H product contract.
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=open-live LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=open-live' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused open-live $selection has the isolated solo contract"
+  else bad "focused open-live $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+for scope in reload lifecycle restoration; do
+  for selection in H H,E1; do
+    : >"$T/docker.log"
+    LANE_H_SCOPE="$scope" LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+    if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- "-e LANE_H_SCOPE=$scope" "$T/docker.log"; } ||
+      { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+      ok "focused $scope $selection has the isolated solo contract"
+    else bad "focused $scope $selection solo contract" "rc=$RC" "$OUT"; fi
+  done
+done
+# The registered H lane must collect the complete journey without opt-in scopes.
+: >"$T/docker.log"
+STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes H
+if [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=all' "$T/docker.log"; then
+  ok "default H registers the complete rows 2-9 journey"
+else bad "default H omitted complete journey" "rc=$RC" "$(cat "$T/docker.log")"; fi
 shtest_end

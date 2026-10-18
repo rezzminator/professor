@@ -13,12 +13,15 @@ import (
 // Seat is one resolved live destination. It is deliberately independent of
 // chat and inject so both layers can use the same target ladder.
 type Seat struct {
-	SocketPath string `json:"socket_path"`
-	Pane       string `json:"pane"`
-	Engine     string `json:"engine"`
-	Name       string `json:"name,omitempty"`
-	ID         string `json:"id,omitempty"`
-	Session    string `json:"session,omitempty"`
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	SocketPath     string `json:"socket_path"`
+	Pane           string `json:"pane"`
+	Engine         string `json:"engine"`
+	Name           string `json:"name,omitempty"`
+	ID             string `json:"id,omitempty"`
+	Session        string `json:"session,omitempty"`
 }
 
 // LadderOptions select the raw namespaces and optional engine restriction.
@@ -195,6 +198,9 @@ func (ladder Ladder) resolveSelf(ctx context.Context) (Seat, int, string, error)
 		pane = identity.Session
 	}
 	seat := SeatFromParts(identity.SocketPath, pane, ladder.Env)
+	seat.Backend = identity.Backend
+	seat.SeatID = identity.SeatID
+	seat.HerdrWorkspace = identity.HerdrWorkspace
 	seat.ID = identity.ID
 	seat.Session = identity.Session
 	if identity.Engine != "" {

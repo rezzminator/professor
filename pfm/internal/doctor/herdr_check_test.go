@@ -37,7 +37,8 @@ func herdrStatus(claude, codex, opencode string) string {
 
 func herdrFailRow(engine, state string) string {
 	return herdrIntegrationRow + " FAIL need=no bundled " + engine + " integration checked=" + herdrStatusCommand +
-		` state="` + state + `" — fix: herdr integration uninstall ` + engine
+		` state="` + state + `" — fix: herdr integration uninstall ` + engine + "\n" +
+		"doctor: herdr integration " + engine + " installed — a second reporter on pfm panes; run herdr integration uninstall " + engine
 }
 
 const (
@@ -289,12 +290,15 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("HERDR_BIN_PATH", stub)
+			t.Setenv(herdr.EnvSocket, serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
+			t.Setenv("HERDR_CONFIG_PATH", filepath.Join(t.TempDir(), "config.toml"))
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
 
 			var rows []string
 			for _, line := range strings.Split(stdout.String(), "\n") {
-				if strings.HasPrefix(line, herdrIntegrationRow) {
+				if strings.HasPrefix(line, herdrIntegrationRow) ||
+					strings.HasPrefix(line, "doctor: herdr integration ") {
 					rows = append(rows, line)
 				}
 			}

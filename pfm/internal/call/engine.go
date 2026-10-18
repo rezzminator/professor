@@ -396,20 +396,6 @@ func (engine *Engine) resolveWithOptions(
 	return targetFromSeat(seat), code, detail, err
 }
 
-func seatFromTarget(target Target) resolve.Seat {
-	return resolve.Seat{
-		SocketPath: target.SocketPath, Pane: target.Pane, Engine: target.Engine,
-		Name: target.Name, ID: target.ID, Session: target.Session,
-	}
-}
-
-func targetFromSeat(seat resolve.Seat) Target {
-	return Target{
-		SocketPath: seat.SocketPath, Pane: seat.Pane, Engine: seat.Engine,
-		Name: seat.Name, ID: seat.ID, Session: seat.Session,
-	}
-}
-
 // Capture resolves and captures a pane without mutating it.
 func (engine *Engine) Capture(
 	ctx context.Context,
@@ -419,6 +405,19 @@ func (engine *Engine) Capture(
 	target, code, detail, err := engine.Resolve(ctx, name)
 	if err != nil || code != 0 {
 		return target, "", code, detail, err
+	}
+	if target.Backend == backendHerdr {
+		capture, note, captureErr := herdrCapture(ctx, target, tailLines)
+		if captureErr != nil {
+			return target, "", CodeCaptureFailed, captureErr.Error(), nil
+		}
+		if tailLines > 0 {
+			capture = lastNonEmptyLines(capture, tailLines)
+		}
+		return target, capture, 0, note, nil
+	}
+	if !supportedBackend(target.Backend) {
+		return target, "", CodeCaptureFailed, backendRefusal(target.Backend).Message, nil
 	}
 	// chat.sh:1215-1219 captures with -S - : the WHOLE retained scrollback, not
 	// just the visible fold, bounded only by tmux's history-limit. The caller's
@@ -570,6 +569,12 @@ func (engine *Engine) callResolved(
 		return base, nil
 	}
 	defer lock.release()
+	if target.Backend == backendHerdr {
+		return engine.callHerdr(ctx, request, target, base, lock)
+	}
+	if !supportedBackend(target.Backend) {
+		return backendRefusal(target.Backend), nil
+	}
 
 	capture, err := engine.capturePane(ctx, target, 0)
 	if err != nil {
@@ -1002,30 +1007,10 @@ func (engine *Engine) callResolved(
 	// never blocked by us; it takes its own per-target lock when it delivers.
 	if len(request.Then) > 0 {
 		lock.release()
-		base.SteerLog = engine.steerLogPath(target)
-		if err := engine.spawner.Spawn(ctx, SteerSpawn{
-			SocketPath: target.SocketPath,
-			Target:     target.Pane,
-			Engine:     target.Engine,
-			Steers:     request.Then,
-			LogPath:    base.SteerLog,
-			Append:     request.Chain,
-			// Resolved HERE, in the chat, because the waiter cannot: it is
-			// detached from us and derives nothing.
-			Sender: engine.sender(ctx),
-		}); err != nil {
-			base.Status = "delivered"
-			base.Code = CodeUndelivered
-			base.Message = fmt.Sprintf(
-				"delivered the primary into %q but could NOT arm the %d then steer(s): %v — deliver them yourself once the pane is idle",
-				target.Pane,
-				len(request.Then),
-				err,
-			)
+		if !engine.armSteers(ctx, request, target, &base, nil) {
 			base.Proof = lastNonEmptyLines(capture, engine.options.ProofLines)
 			return base, nil
 		}
-		base.Steers = len(request.Then)
 	}
 
 	engine.sleepContext(ctx, engine.options.ProofSettle)
@@ -1293,6 +1278,13 @@ func (engine *Engine) capturePane(
 	target Target,
 	scrollback int,
 ) (string, error) {
+	if target.Backend == backendHerdr {
+		capture, _, err := herdrCapture(ctx, target, scrollback)
+		return capture, err
+	}
+	if !supportedBackend(target.Backend) {
+		return "", fmt.Errorf("capture: unsupported seat backend %q", target.Backend)
+	}
 	return engine.tmux.Capture(
 		ctx,
 		target.SocketPath,
@@ -1531,19 +1523,15 @@ func (engine *Engine) senderLabel(
 	if identity.Pane != "" {
 		target = identity.Pane
 	}
-	capture, err := engine.tmux.Capture(
-		ctx,
-		identity.SocketPath,
-		target,
-		false,
-		0,
-	)
+	capture, err := engine.capturePane(ctx, Target{
+		Backend: identity.Backend, SocketPath: identity.SocketPath, Pane: target,
+	}, 0)
 	if err == nil {
 		if label := naming.BookmarkLabelFor(capture, engine.accountEmojis); label != "" {
 			return label
 		}
 	}
-	if identity.Engine != string(pfmengine.Codex) {
+	if identity.Engine != string(pfmengine.Codex) || identity.Backend == backendHerdr {
 		return ""
 	}
 	window, err := engine.tmux.WindowName(ctx, identity.SocketPath, target)

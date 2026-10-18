@@ -1,6 +1,9 @@
 {
   "version": 2,
   "theme": "default",
+  "chat": {
+    "backend": "auto"
+  },
   "state": {
     "db": "~/.local/state/pfm/pfm.db",
     "cacheDb": "~/.local/state/pfm/pfm-cache.db"

@@ -379,6 +379,12 @@ func (model Model) dossierDetails(row compose.Row, inner int, heat float64) []do
 		project = "?"
 	}
 	details := []dossierLine{{label("project"), value(project)}}
+	if row.LostNote != "" {
+		details = append(details, dossierLine{label("lost note"), value(cleanField(row.LostNote))})
+	}
+	if row.BackendError != "" {
+		details = append(details, dossierLine{label("error"), value(cleanField(row.BackendError))})
+	}
 	if row.Model != "" {
 		shown := modelglyph.ListSymbol(row.Model) + " " + shortModel(row.Model)
 		if row.Effort != "" {
@@ -429,7 +435,11 @@ func (model Model) dossierDetails(row compose.Row, inner int, heat float64) []do
 		if row.PaneID != "" {
 			where += " " + row.PaneID
 		}
-		details = append(details, dossierLine{label("tmux"), value(where)})
+		backend := "tmux"
+		if row.Backend == "herdr" {
+			backend = row.Backend
+		}
+		details = append(details, dossierLine{label(backend), value(where)})
 	}
 	if row.ID != "" {
 		details = append(details, dossierLine{label("session"), value(tailCells(row.ID, valueWidth))})

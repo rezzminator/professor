@@ -206,6 +206,7 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // Config is the fully materialized configuration. Sources records whether
 // each effective value came from the machine file or from a default.
 type Config struct {
+	Chat ChatConfig
 	// SeedContent carries the validated seed bytes into installation.
 	SeedContent      []byte `json:"-"`
 	Version          int
@@ -253,6 +254,7 @@ type rawState struct {
 }
 
 type rawConfig struct {
+	Chat     *rawChat      `json:"chat,omitempty"`
 	Version  *int          `json:"version"`
 	Theme    *string       `json:"theme,omitempty"`
 	State    *rawState     `json:"state,omitempty"`
@@ -478,6 +480,7 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.OpenCode, engineKeyBinary): SourceDefault,
 		"mcp.http.port":                                      SourceDefault,
 		"ask.engine":                                         SourceDefault,
+		"chat.backend":                                       SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,
@@ -503,6 +506,7 @@ func defaultsWithMCPServers(
 		sources[key] = SourceDefault
 	}
 	return Config{
+		Chat:             ChatConfig{Backend: DefaultChatBackend},
 		Version:          Version,
 		InputVersion:     Version,
 		Theme:            "default",
@@ -917,27 +921,8 @@ func loadWithMCPServers(
 		// so install can remove it, but it has no effective runtime value: the
 		// local MCP daemon is loopback-only and deliberately unauthenticated.
 	}
-	if raw.Ask != nil {
-		if raw.Ask.Engine != nil {
-			id, err := pfmengine.Parse(*raw.Ask.Engine)
-			if err != nil {
-				return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
-			}
-			result.Ask.Engine = id
-			result.Sources["ask.engine"] = SourceFile
-		}
-		for id, rawPrefs := range raw.Ask.Prefs {
-			prefs := result.Ask.Prefs[id]
-			applyEnginePrefs(&prefs, rawPrefs)
-			result.Ask.Prefs[id] = prefs
-			name := pfmengine.MustLookup(id).LongName
-			if rawPrefs.Model != nil {
-				result.Sources["ask."+name+".model"] = SourceFile
-			}
-			if rawPrefs.Effort != nil {
-				result.Sources["ask."+name+".effort"] = SourceFile
-			}
-		}
+	if err := applyChatAndAsk(&result, raw); err != nil {
+		return Config{}, err
 	}
 	// An explicit engine with an empty roster is refused. An absent key
 	// resolves through DefaultEngine, which falls back to an engine with accounts.
@@ -1452,6 +1437,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		keyTheme:   config.Theme,
 		"state":    map[string]any{"db": config.State.DB, "cacheDb": config.State.CacheDB},
 		"accounts": accounts,
+		"chat":     map[string]any{"backend": config.Chat.Backend},
 		claudeName: marshalClaude(config),
 		codexName:  codexValue,
 		"tmux": map[string]any{

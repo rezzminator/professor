@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -77,7 +78,12 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	if confirmAttempts == 0 {
 		confirmAttempts = defaultConfirmAttempts
 	}
+	log := dependencies.Log
+	if log == nil {
+		log = os.Stderr
+	}
 	return &Manager{
+		log:      log,
 		database: database,
 		proc:     proc,
 		tmux:     tmux,
@@ -139,16 +145,25 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 	if target.SocketPath == "" || target.PaneID == "" {
 		return nil
 	}
+	client, native, err := targetClient(ctx, manager.database, manager.tmux, manager.paths.tmuxDir, target, manager.log)
+	if err != nil {
+		return err
+	}
 	landed, probeErr, err := pollPaneGone(
-		ctx, manager.tmux, target.SocketPath, target.PaneID, manager.confirmAttempts, manager.confirmEvery, nil,
+		ctx, client, target.SocketPath, target.PaneID, manager.confirmAttempts, manager.confirmEvery, nil,
 	)
 	if err != nil {
 		return err
 	}
-	for _, escalate := range []func() error{
-		func() error { return manager.tmux.KillPane(ctx, target.SocketPath, target.PaneID) },
-		func() error { return manager.tmux.KillServerIfSolePane(ctx, target.SocketPath, target.PaneID) },
-	} {
+	escalations := []func() error{
+		func() error { return client.KillPane(ctx, target.SocketPath, target.PaneID) },
+	}
+	if !native {
+		escalations = append(escalations, func() error {
+			return client.KillServerIfSolePane(ctx, target.SocketPath, target.PaneID)
+		})
+	}
+	for _, escalate := range escalations {
 		if landed {
 			break
 		}
@@ -158,7 +173,7 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 		var stageErr error
 		var pollErr error
 		landed, pollErr, stageErr = pollPaneGone(
-			ctx, manager.tmux, target.SocketPath, target.PaneID,
+			ctx, client, target.SocketPath, target.PaneID,
 			min(manager.confirmAttempts, defaultEscalateAttempts), manager.confirmEvery, nil,
 		)
 		probeErr = errors.Join(probeErr, pollErr)
@@ -203,7 +218,13 @@ func (manager *Manager) Kill(
 ) (target Target, err error) {
 	trail := killTrail(ctx)
 	defer func() { killed(trail, requestShape(request), err) }()
+	target, native, err := manager.herdrTarget(ctx, request)
+	if err != nil {
+		return Target{}, err
+	}
 	switch {
+	case native:
+		// The durable seat supplies identity and address before the index exists.
 	case request.Self:
 		target, err = manager.IdentifySelf(ctx, request.Environment)
 	case request.ID != "":
@@ -219,7 +240,7 @@ func (manager *Manager) Kill(
 	if err != nil {
 		return Target{}, err
 	}
-	if request.SocketName != "" || request.PaneID != "" {
+	if !native && (request.SocketName != "" || request.PaneID != "") {
 		if request.SocketName == "" || request.PaneID == "" {
 			return Target{}, errors.New("resolved live address requires socket and pane")
 		}

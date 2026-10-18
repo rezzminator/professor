@@ -330,14 +330,20 @@ func TestLockMigrationSerializesOpenersAndRemovesItsFile(t *testing.T) {
 
 func TestSharedMigrationRenamesStoredCalls(t *testing.T) {
 	t.Parallel()
-	for _, version := range []int{3, 4} {
+	for _, version := range []int{3, 4, 5} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pfm.db")
-			seedSharedState(t, path, v3Schema+fmt.Sprintf("PRAGMA user_version=%d;", version)+`
+			seed := v3Schema + fmt.Sprintf("PRAGMA user_version=%d;", version) + `
 INSERT INTO comms(id,at_ns,kind,sender_session,sender_label,sender_uuid,target,receiver_socket,receiver_pane,group_name,members,message)
 VALUES(7,100,'inject','sender','Sender','uuid','target','socket','%1','group','members','full body');
-INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,102,'spawn','spawn body');`)
+INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,102,'spawn','spawn body');`
+			wantBackupVersion, wantOriginalKind := 5, "inject"
+			if version == 5 {
+				seed += migrationV5 + "\nPRAGMA user_version=5;"
+				wantBackupVersion, wantOriginalKind = 6, KindCall
+			}
+			seedSharedState(t, path, seed)
 			state := OpenSharedState(ctx, paths.Values{StateDB: path})
 			defer func() {
 				if err := state.Close(); err != nil {
@@ -378,14 +384,15 @@ INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,1
 				gotVersion != SchemaVersion {
 				t.Fatalf("version=%d err=%v", gotVersion, err)
 			}
-			backup, err := sqlitedb.OpenReadOnly(path+".bak-before-v"+strconv.Itoa(SchemaVersion), time.Second)
+			// The backup marks the first pending migration, not the latest schema version.
+			backup, err := sqlitedb.OpenReadOnly(path+".bak-before-v"+strconv.Itoa(wantBackupVersion), time.Second)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("open backup before migration %d: %v", wantBackupVersion, err)
 			}
 			var originalKind string
 			queryErr := backup.QueryRow("SELECT kind FROM comms WHERE id=7").Scan(&originalKind)
-			if err := errors.Join(queryErr, backup.Close()); err != nil || originalKind != "inject" {
-				t.Fatalf("original backup kind=%q err=%v", originalKind, err)
+			if err := errors.Join(queryErr, backup.Close()); err != nil || originalKind != wantOriginalKind {
+				t.Fatalf("original backup kind=%q want %q err=%v", originalKind, wantOriginalKind, err)
 			}
 		})
 	}

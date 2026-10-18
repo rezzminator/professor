@@ -34,11 +34,12 @@ var newThenWaiter = func(runtime *config.Runtime) (thenWaiter, error) {
 func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 	flags := cli.NewFlagSet(
 		"internal then",
-		"usage: pfm internal then --socket path --target name [--engine cc|cx] --steer text [--steer text]...",
+		"usage: pfm internal then --socket path --target name [--engine cc|cx] [--backend tmux|herdr] --steer text [--steer text]...",
 		stderr,
 	)
-	socket := flags.String("socket", "", "tmux socket path of the target")
-	target := flags.String("target", "", "tmux session name or pane id")
+	socket := flags.String("socket", "", "socket path of the target seat")
+	target := flags.String("target", "", "target session name or pane id")
+	backend := flags.String("backend", "", "target seat backend (empty means tmux)")
 	var steers cli.StringList
 	flags.Var(&steers, "steer", "follow-up steer; repeat for a chain")
 	engineName := flags.String("engine", "", "the target pane's engine id (cc|cx) as the spawning chat resolved it")
@@ -47,6 +48,14 @@ func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 	}
 	if flags.NArg() != 0 || *target == "" || len(steers) == 0 {
 		flags.Usage()
+		return 2
+	}
+	if *backend != "" && *backend != "tmux" && *backend != "herdr" {
+		fmt.Fprintf(stderr, "pfm internal then: unsupported seat backend %q\n", *backend)
+		return 2
+	}
+	if *backend == "herdr" && *socket == "" {
+		fmt.Fprintln(stderr, "pfm internal then: Herdr backend requires an explicit socket")
 		return 2
 	}
 	// DeliverThen's Codex guard compares the canonical id, so an engine's long name
@@ -78,6 +87,7 @@ func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 		return 1
 	}
 	result, err := waiter.DeliverThen(context.Background(), pfmcall.ThenWait{
+		Backend:    *backend,
 		SocketPath: *socket,
 		Target:     *target,
 		Steers:     steers,

@@ -611,6 +611,22 @@ hs_out="$(printf 'not json' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad herdr-state on garbage stdin exited $rc (want 0, a hook exit 2 blocks Claude): $(one_line "$(cat "$int_err")");"
 [ -z "$hs_out" ] && [ ! -s "$int_err" ] || bad="$bad herdr-state on garbage stdin outside Herdr was not silent: $(one_line "$hs_out$(cat "$int_err")");"
+# Native seat plumbing refuses malformed requests before touching any live pane.
+seat_out="$(pfm internal seat-host 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 1 ] && grep -qF 'expected one seat id' "$int_err" ||
+  bad="$bad seat-host missing-seat rejection rc=$rc: $(one_line "$(cat "$int_err")");"
+[ -z "$seat_out" ] || bad="$bad seat-host missing-seat printed success: $(one_line "$seat_out");"
+backend_out="$(pfm chat new --backend invalid --name LANE_BACKEND_INVALID 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 2 ] && grep -qF -- '--backend must be auto, tmux or herdr' "$int_err" ||
+  bad="$bad chat new invalid backend rc=$rc: $(one_line "$(cat "$int_err")");"
+[ -z "$backend_out" ] || bad="$bad invalid backend printed success: $(one_line "$backend_out");"
+backend_out="$(env -u TMUX HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH="$LANE_OUT_DIR/absent-herdr.sock" pfm chat new --backend herdr --name LANE_BACKEND_DEAD --engine cc --cwd "$CWD" 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 1 ] && grep -qF 'pane w1:p1 unreachable' "$int_err" ||
+  bad="$bad chat new forced dead Herdr rc=$rc: $(one_line "$(cat "$int_err")");"
+[ -z "$backend_out" ] || bad="$bad forced dead Herdr printed success: $(one_line "$backend_out");"
 # X30 kill-exit: the pane-death finisher refuses to run without its full address.
 pfm internal kill-exit >/dev/null 2>"$int_err"
 rc=$?

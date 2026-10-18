@@ -15,6 +15,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -96,7 +97,7 @@ func statusOutput(status headless.Status) StatusOutput {
 		Name: status.Name, State: status.State, IdleSeconds: status.IdleSeconds,
 		Engine: status.Engine, Model: status.Model, CWD: status.CWD,
 		SessionID: status.SessionID, Socket: status.Socket, ContextPct: status.ContextPct,
-		Last: status.Last, Error: status.Error, Summary: status.Summary,
+		Last: status.Last, Error: status.Error, LostNote: status.LostNote, Summary: status.Summary,
 		SummaryCached: status.SummaryCached, Ask: status.Ask,
 	}
 }
@@ -106,6 +107,7 @@ func (service *Service) chatNew(
 	request *mcp.CallToolRequest,
 	input NewInput,
 ) (result *mcp.CallToolResult, output ActionOutput, returnErr error) {
+	ctx = spawn.WithBackendEnvironment(ctx, nil)
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
 		return nil, ActionOutput{}, err
@@ -555,13 +557,25 @@ func (service *Service) resolvedSelf(ctx context.Context, caller callerIdentity)
 		}
 	}
 	socket := caller.identity.SocketName
+	if caller.identity.Backend == spawn.BackendHerdr {
+		socket = caller.identity.SocketPath
+	}
 	if socket == "" {
 		socket = filepath.Base(caller.identity.SocketPath)
 	}
 	return headless.Chat{
-		Name: caller.row.Name, ID: caller.identity.ID,
-		Engine: engine, Path: path, CWD: caller.row.Dir,
-		Socket: socket, Session: caller.identity.Session, Pane: caller.identity.Pane, Live: true,
+		Backend:        caller.identity.Backend,
+		SeatID:         caller.identity.SeatID,
+		HerdrWorkspace: caller.identity.HerdrWorkspace,
+		Name:           caller.row.Name,
+		ID:             caller.identity.ID,
+		Engine:         engine,
+		Path:           path,
+		CWD:            caller.row.Dir,
+		Socket:         socket,
+		Session:        caller.identity.Session,
+		Pane:           caller.identity.Pane,
+		Live:           true,
 	}, nil
 }
 

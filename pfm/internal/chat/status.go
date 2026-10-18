@@ -10,6 +10,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -94,13 +95,35 @@ func inspectTarget(
 		return headless.Status{}, err
 	}
 	switch {
+	case target.Backend == spawn.BackendHerdr && target.Live && status.State != headless.StateWorking:
+		// A finished transcript decides the turn, not whether its pane still exists.
+		// Preserve transcript state and duration only after validating this agent.
+		_, err = statusFromHerdr(ctx, target, status)
+	case target.Backend == spawn.BackendHerdr && target.Live && status.State == headless.StateWorking:
+		status, err = statusFromHerdr(ctx, target, status)
 	case pane:
 		status, err = statusFromPane(ctx, target, status, capture, runtime)
 	case awaitsPane(target, status):
 		status, err = blockedFromPane(ctx, target, status, capture, runtime)
 	}
 	if err != nil {
+		if target.Backend == spawn.BackendHerdr {
+			err = fmt.Errorf("read Herdr endpoint %s pane %s: %w", target.Socket, target.Pane, err)
+		}
 		return headless.Status{}, err
+	}
+	if target.Backend == spawn.BackendHerdr {
+		effective, runtimeErr := pfmconfig.RuntimeOrDefault(runtime)
+		if runtimeErr != nil {
+			return headless.Status{}, runtimeErr
+		}
+		seat, found, seatErr := nativeSeat(ctx, effective, target.ID, target.SeatID)
+		if seatErr != nil {
+			return headless.Status{}, fmt.Errorf("read status loss note: %w", seatErr)
+		}
+		if found {
+			status.LostNote = seat.LostNote
+		}
 	}
 	return status, nil
 }

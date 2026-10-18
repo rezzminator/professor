@@ -15,17 +15,16 @@ import (
 	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -239,80 +238,6 @@ func runChatSaveContext(
 		target,
 		info.Size(),
 	)
-	return 0
-}
-
-// runChatLS is `pfm chat ls`: chat.List's live, unkilled chats in the current
-// directory's repository, or with --all in every repository. MCP ls's
-// `all` differs: it adds killed and background rows as well.
-func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
-	clk = defaultClock(clk)
-	all := false
-	for _, arg := range args {
-		switch arg {
-		case "--all", "-a", "all":
-			all = true
-		default:
-			fmt.Fprintln(
-				stderr,
-				"usage: pfm chat ls [--all|--reap]  (--all: chats in every repo; --reap: end empty pfm tmux servers)",
-			)
-			return 2
-		}
-	}
-	request := pfmchat.ListRequest{View: compose.AllView, LiveOnly: true, ReadOnly: true}
-	if !all {
-		directory, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat ls: read the current directory: %v\n", err)
-			return 1
-		}
-		request.Repo = gitroot.RepoRoot(directory)
-	}
-	listed, err := pfmchat.List(context.Background(), firstRuntime(runtimes), request, stderr)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
-		return 1
-	}
-	if all {
-		fmt.Fprintln(stdout, "live chats everywhere (name · session · state · herdr · dir · last activity):")
-	} else {
-		fmt.Fprintln(stdout, "live chats in this repo (name · session · state · herdr · last activity):")
-	}
-	for index := range listed.Rows {
-		row := &listed.Rows[index]
-		chat := pfmchat.FromRow(*row)
-		status, inspectErr := pfmchat.InspectSeat(context.Background(), firstRuntime(runtimes), chat, clk.Now(), nil)
-		state := doctor.StateUnknown
-		if inspectErr != nil {
-			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)
-		} else {
-			state = status.State
-		}
-		// Name is the actionable identity; retain the raw tmux session second
-		// so parsers lose no information.
-		handle := row.Socket
-		if row.SessionName != "" {
-			handle = row.SessionName
-		}
-		location := listed.PresenceOf(index) + "  "
-		if all {
-			location += strings.Replace(row.CWD, listed.Home, "~", 1) + "  "
-		}
-		fmt.Fprintf(
-			stdout, "  %-28s %-24s %-7s %s%s\n",
-			transcript.Truncate(row.Name, 28), handle, state, location, transcript.Truncate(row.LastPrompt, 64),
-		)
-	}
-	if len(listed.Rows) == 0 {
-		fmt.Fprintln(stdout, "  (none)")
-	}
-	if listed.Elsewhere > 0 {
-		fmt.Fprintf(stdout, "  (+%d live in other dirs — pfm chat ls --all to see them)\n", listed.Elsewhere)
-	}
-	if listed.KilledCount > 0 {
-		fmt.Fprintf(stdout, "  (+%d killed — pfm ls --killed to manage)\n", listed.KilledCount)
-	}
 	return 0
 }
 
@@ -794,13 +719,33 @@ func historyPools(runtimes ...commandRuntime) ([]string, error) {
 func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int {
 	clk = defaultClock(clk)
 	if len(args) != 3 || args[1] != "deny" {
-		fmt.Fprintln(stderr, "usage: pfm chat modal <tmux-session> deny <down-count>")
+		fmt.Fprintln(stderr, "usage: pfm chat modal <target> deny <down-count>")
 		return 2
 	}
 	count, err := strconv.Atoi(args[2])
 	if err != nil || count < 0 {
-		fmt.Fprintln(stderr, "usage: pfm chat modal <tmux-session> deny <down-count>")
+		fmt.Fprintln(stderr, "usage: pfm chat modal <target> deny <down-count>")
 		return 2
+	}
+	chat, found, err := pfmchat.Resolve(context.Background(), args[0], io.Discard, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat modal: resolve target: %v\n", err)
+		return 1
+	}
+	if found && chat.Backend == pfmcall.HerdrBackend {
+
+		target := pfmcall.Target{
+			Backend:    chat.Backend,
+			SocketPath: chat.Socket,
+			Pane:       chat.Pane,
+			Engine:     string(chat.Engine),
+		}
+		if err := pfmcall.DenyModal(context.Background(), target, count, clk); err != nil {
+			fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "modal denied on %s\n", args[0])
+		return 0
 	}
 	socketPath, err := chatSocketPath(args[0])
 	if err != nil {

@@ -300,3 +300,30 @@ func TestTargetReportsAScanThatCouldNotLook(t *testing.T) {
 		t.Fatalf("Target(ghost) with an unopenable index = %v, want a *TargetError that is not ErrUnknownChat", err)
 	}
 }
+
+func TestHerdrRosterPreservesTargetOwnedAddress(t *testing.T) {
+	row := compose.Row{
+		Kind:           compose.LiveClaude,
+		Backend:        "herdr",
+		SeatID:         "seat1",
+		HerdrWorkspace: "w6",
+		Socket:         "/jail/herdr.sock",
+		PaneID:         "w6:p3",
+		ID:             "sid1",
+		Name:           "REVIEW",
+	}
+	chat := FromRow(row)
+	if chat.Backend != "herdr" || chat.SeatID != "seat1" || chat.HerdrWorkspace != "w6" {
+		t.Fatalf("native projection lost: %+v", chat)
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, code, _, err := seatTarget(values, []compose.Row{row}, "REVIEW")
+	if err != nil || code != 0 || target.Backend != "herdr" || target.SocketPath != row.Socket ||
+		target.SeatID != "seat1" ||
+		target.HerdrWorkspace != "w6" {
+		t.Fatalf("target=%+v code=%d err=%v", target, code, err)
+	}
+}

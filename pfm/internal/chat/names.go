@@ -106,7 +106,7 @@ func seatTarget(values paths.Values, seats []compose.Row, name string) (pfmcall.
 	if !found {
 		return pfmcall.Target{}, pfmcall.CodeUnknown, "", nil
 	}
-	socketPath, err := values.SocketUnder(chat.Socket)
+	socketPath, err := targetSocket(values, chat.Backend, chat.Socket)
 	if err != nil {
 		return pfmcall.Target{}, pfmcall.CodeUndelivered, "", fmt.Errorf("roster seat %q socket: %w", chat.Name, err)
 	}
@@ -115,6 +115,7 @@ func seatTarget(values paths.Values, seats []compose.Row, name string) (pfmcall.
 		pane = chat.Session
 	}
 	return pfmcall.Target{
+		Backend: chat.Backend, SeatID: chat.SeatID, HerdrWorkspace: chat.HerdrWorkspace,
 		SocketPath: socketPath,
 		Pane:       pane,
 		Engine:     string(chat.Engine),

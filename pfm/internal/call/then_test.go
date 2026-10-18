@@ -626,3 +626,57 @@ func TestCommandThenSpawnerStatesTheEngineAndArmsTheRecord(t *testing.T) {
 		t.Fatalf("a chain hop wrote its own armed record: exists=%t err=%v", exists, err)
 	}
 }
+
+func TestCommandThenSpawnerCarriesNativeBoundaryEvidence(t *testing.T) {
+	for _, backend := range []string{"", "tmux", "herdr"} {
+		t.Run("backend-"+backend, func(t *testing.T) {
+			t.Setenv(herdrTurnEnv, "inherited-other-target")
+			root := t.TempDir()
+			dump := filepath.Join(root, "argv-env")
+			stub := filepath.Join(root, "setsid-stub")
+			script := "#!/bin/sh\nprintf '%s\\n%s\\n' \"$*\" \"${CHAT_THEN_HERDR_TURN-}\" > " + dump + "\n"
+			if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			request := SteerSpawn{
+				Backend:    backend,
+				SocketPath: "/native/socket",
+				Target:     "p2",
+				Engine:     "cc",
+				Steers:     []string{"continue"},
+				LogPath:    filepath.Join(root, "then.log"),
+			}
+			if backend == "herdr" {
+				request.herdrTurn = &herdrTurn{
+					SocketPath:     request.SocketPath,
+					Pane:           request.Target,
+					StateChangeSeq: 4,
+					SawWorking:     true,
+				}
+			}
+			if err := (CommandThenSpawner{Executable: filepath.Join(root, "pfm"), Setsid: stub}).Spawn(
+				context.Background(),
+				request,
+			); err != nil {
+				t.Fatal(err)
+			}
+			body, err := os.ReadFile(dump)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.SplitN(string(body), "\n", 3)
+			if len(lines) != 3 || !strings.Contains(lines[0], "internal then --socket /native/socket --target p2") {
+				t.Fatalf("detached argv/env=%q", body)
+			}
+			if backend == "herdr" {
+				if !strings.Contains(lines[0], "--backend herdr") ||
+					!strings.Contains(lines[1], `"state_change_seq":4`) ||
+					!strings.Contains(lines[1], `"pane":"p2"`) {
+					t.Fatalf("native handoff=%q", body)
+				}
+			} else if strings.Contains(lines[0], "--backend") || lines[1] != "" {
+				t.Fatalf("legacy tmux handoff=%q", body)
+			}
+		})
+	}
+}

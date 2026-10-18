@@ -12,6 +12,9 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeCodex is a Codex TUI as far as this package can tell: it draws a
@@ -859,5 +862,32 @@ func TestSpawnCodexRequiresLogin(t *testing.T) {
 	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) ||
 		len(fake.sessions) != 0 {
 		t.Fatalf("spawn error=%v sessions=%d; want %q", err, len(fake.sessions), want)
+	}
+}
+
+func TestTmuxSpawnPersistsKnownSessionSeat(t *testing.T) {
+	testjail.Fleet(t)
+	request := codexRequest()
+	request.SessionID = "sid1"
+	_, err := Run(context.Background(), newFakeCodex(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	seat, found, err := state.SeatBySession(context.Background(), "sid1")
+	if err != nil || !found || seat.Backend != "tmux" ||
+		seat.TmuxSocket != filepath.Join(values.TmuxDir, request.Socket) ||
+		seat.Name != request.Name ||
+		seat.Engine != "cx" || seat.SeatID != request.Socket {
+		t.Fatalf("seat=%+v found=%v err=%v", seat, found, err)
 	}
 }

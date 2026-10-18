@@ -12,13 +12,16 @@ import (
 // to resolve a human target name. Callers keep composition in their own layer;
 // this package owns the matching judgment shared by CLI and MCP.
 type RosterCandidate struct {
-	Name       string
-	ID         string
-	Socket     string
-	SocketPath string
-	Session    string
-	Pane       string
-	Engine     string
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	Name           string
+	ID             string
+	Socket         string
+	SocketPath     string
+	Session        string
+	Pane           string
+	Engine         string
 	// Live is a seat that answers right now: addressable and not killed. A
 	// killed row has given its name up, so it never outranks a live one.
 	Live bool

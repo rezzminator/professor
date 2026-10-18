@@ -104,7 +104,7 @@ func launchStartsSession(arguments []string) bool {
 	return true
 }
 
-// armCostLedger decides the cost ledger of a session the pass-through is about to exec; a seam so
+// armCostLedger decides the ledger in the process owning the session lifetime; a seam so
 // the launcher tests never start a sink.
 var armCostLedger = costsink.PrepareCurrent
 
@@ -134,6 +134,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	)
 	realBinary := flags.String("real", "", "absolute path to the real Claude binary")
 	cwd := flags.String("cwd", "", "working directory for the Claude pane")
+	backend := flags.String("backend", runtime.Config.Chat.Backend, "chat backend: auto, tmux or herdr")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -230,6 +231,14 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintln(stderr, "pfm internal launch: --cwd must be an absolute path")
 		return 2
 	}
+	choice, err := launchBackend(context.Background(), *backend, env)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
+		return 1
+	}
+	if choice.Warning != "" {
+		fmt.Fprintln(stderr, choice.Warning)
+	}
 	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
 	if primaryErr != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: read primary account: %v\n", primaryErr)
@@ -273,6 +282,28 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		} else {
 			name = label
 		}
+	}
+	if choice.Backend == spawn.BackendHerdr {
+		return launchNative(
+			choice,
+			claudelaunch.Request{
+				Purpose:    claudelaunch.PurposeLauncher,
+				Home:       runtime.Paths.Home,
+				Account:    accountID,
+				Binary:     *realBinary,
+				ConfigDir:  configDir,
+				Args:       arguments,
+				SessionID:  freshID,
+				Name:       name,
+				PromptFile: persona.Prompt,
+				Effort:     persona.Effort,
+				Model:      persona.Model,
+			},
+			workingDir,
+			stdout,
+			stderr,
+			runtime,
+		)
 	}
 	realRun, promptWarning, err := action.LauncherLaunchAs(
 		persona,
@@ -345,6 +376,12 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
+	if err := recordLauncherTmuxSeat(ctx, runtime, socket, identity, name); err != nil {
+		fmt.Fprintf(stderr, "pfm internal launch: persist tmux seat: %v\n", err)
+		_ = launchTmuxCommand(ctx, tmuxBinary, socketPath, "kill-server").Run()
+		return 1
+	}
+	defer cleanupLauncherTmuxSeat(ctx, runtime, socket, stderr)
 	failed := true
 	defer func() {
 		if failed {
@@ -414,31 +451,6 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	return status
 }
 
-// attachArguments releases the gated pane and attaches this terminal to the
-// seat. Nested inside a tmux pfm does not own, the outer pane already keeps the
-// chat alive, so the seat also takes destroy-unattached: killing that pane or
-// its server ends the chat instead of leaving a detached seat holding a Claude
-// process nobody can see. The option is set after attach-session, so the seat
-// is never unattached while it is on.
-func attachArguments(socketPath, startChannel, session string, nested bool) []string {
-	arguments := []string{
-		pfmtmux.Binary,
-		"-S",
-		socketPath,
-		"wait-for",
-		"-S",
-		startChannel,
-		";",
-		"attach-session",
-		"-t",
-		session,
-	}
-	if nested {
-		arguments = append(arguments, ";", "set-option", "-t", session, "destroy-unattached", "on")
-	}
-	return arguments
-}
-
 func launcherStatusRun(startWait, realRun, tmuxBinary, socketPath, doneChannel, statusPath string) string {
 	signalDone := "TMUX= " + action.Quote(tmuxBinary) + " -S " + action.Quote(socketPath) +
 		" wait-for -S " + action.Quote(doneChannel)
@@ -464,29 +476,4 @@ func readLaunchStatus(path string) (int, error) {
 
 func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *pfmtmux.Cmd {
 	return pfmtmux.Exec(ctx, binary, socketPath, args...)
-}
-
-// launcherSeatAccount picks the config dir and account a bare `claude` seat
-// launches on: the ambient CLAUDE_CONFIG_DIR the shell exported, else the
-// fleet primary's dir; the account is the roster entry owning that dir, else
-// the primary. The login default is no choice of the operator's: it counts as
-// unset, so the fleet primary wins over it.
-func launcherSeatAccount(runtime config.Runtime, primary int, env paths.Env) (string, int) {
-	configDir := config.AmbientClaudeConfigDirFrom(env)
-	if claudelaunch.InheritedConfigDir(env.Get) {
-		configDir = ""
-	}
-	if configDir == "" {
-		if account, found := runtime.Config.AccountByID(primary); found {
-			configDir = account.ConfigDir
-		}
-	}
-	accountID := primary
-	for _, account := range runtime.Config.Accounts {
-		if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
-			accountID = account.ID
-			break
-		}
-	}
-	return configDir, accountID
 }

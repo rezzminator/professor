@@ -13,6 +13,8 @@ import (
 )
 
 const (
+	// No supported release is yet proven to contain the macOS lifetime fix.
+	herdrLifetimeUnverified = true
 	// serviceManagerDarwinName is the value printServiceManagerDoctor
 	// reports for the "manager=" field on Darwin.
 	serviceManagerDarwinName = "launchd"

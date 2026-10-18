@@ -131,8 +131,9 @@ type Dependencies struct {
 	// IdleAttempts bounds the finisher's wait, PollEvery apart, for the
 	// chat's running turn to end before it types the exit command.
 	IdleAttempts int
-	// Log takes the finisher's one line per run that typed no exit command,
-	// naming why; nil is the process's stderr, which CommandSpawner points
+	// Log takes visible degraded-seat lookup warnings and the finisher's one
+	// line per run that typed no exit command, naming why; nil is the process's
+	// stderr, which CommandSpawner points
 	// at the chat's kill-exit log.
 	Log       io.Writer
 	Refresher Refresher
@@ -145,6 +146,7 @@ type Dependencies struct {
 
 // Manager performs public kill operations.
 type Manager struct {
+	log             io.Writer
 	database        *store.Store
 	proc            gather.ProcFS
 	tmux            TmuxClient

@@ -167,6 +167,7 @@ type Input struct {
 	Workbenches      []workbench.Bench
 	WorkbenchErrors  []workbench.WalkError
 	Snapshot         gather.Snapshot
+	HerdrSeats       []gather.HerdrSeat
 	Transcripts      []store.Transcript
 	Rollouts         []store.Rollout
 	OpenCodeSessions []store.OpenCodeSession
@@ -182,12 +183,18 @@ type Input struct {
 
 // Row is one live, resumable, agent, or new-chat choice.
 type Row struct {
-	Kind      Kind
-	ID        string
-	Path      string
-	ConfigDir string
-	Socket    string
-	PaneID    string
+	Backend        string
+	SeatID         string
+	HerdrWorkspace string
+	// LostNote is the seat loss note from fleetdb seat.lost_note, empty unless the seat was lost.
+	LostNote     string
+	BackendError string
+	Kind         Kind
+	ID           string
+	Path         string
+	ConfigDir    string
+	Socket       string
+	PaneID       string
 	// PanePIDs are the roots of this live socket's process tree. They are
 	// presentation-neutral live facts used only by the lazy Stats sampler.
 	PanePIDs    []int

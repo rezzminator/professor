@@ -154,6 +154,18 @@ export const PfmHerdr = async ({ client } = {}) => {
   })
 
   return {
+    // OpenCode's chat.message is prompt creation, not history replay. Only
+    // session identity leaves this hook; output can contain private text.
+    "chat.message": async (input) => {
+      const sessionID = input?.sessionID
+      if (typeof sessionID !== "string" || !sessionID || children.has(sessionID)) return
+      if (!mains.has(sessionID) && !(await lookup(sessionID))) return
+      if (children.has(sessionID)) return
+      await start(sessionID)
+      // Submits are distinct even when consecutive state reports dedupe.
+      last = ""
+      await report("working", sessionID, { hook_event_name: "chat.message" })
+    },
     event: async ({ event }) => {
       const type = event?.type
       const properties = event?.properties ?? {}

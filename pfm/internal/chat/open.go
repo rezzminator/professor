@@ -109,6 +109,15 @@ func OpenID(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
+	seat, found, seatErr := nativeSeat(ctx, effective, id, "")
+	if seatErr != nil {
+		fmt.Fprintf(stderr, "pfm chat open: %v\n", seatErr)
+		return 1
+	}
+	if found && ctx.Value(restoredOpenKey{}) != true {
+		_, code := openNativeRow(ctx, nativeRow(seat), stdout, stderr, effective)
+		return code
+	}
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
@@ -166,6 +175,13 @@ func OpenDetachedID(
 	if err != nil {
 		return action.OpenResult{}, err
 	}
+	seat, found, seatErr := nativeSeat(ctx, effective, id, "")
+	if seatErr != nil {
+		return action.OpenResult{}, seatErr
+	}
+	if found {
+		return detachedNative(ctx, seat, stderr, effective, false)
+	}
 	rows, err := Rows(ctx, stderr, &effective)
 	if err != nil {
 		return action.OpenResult{}, err
@@ -192,6 +208,16 @@ func OpenDetachedTarget(
 	effective, err := config.RuntimeOrDefault(runtime)
 	if err != nil {
 		return action.OpenResult{}, err
+	}
+	if target.Backend == spawn.BackendHerdr {
+		seat, found, err := nativeSeat(ctx, effective, target.ID, target.SeatID)
+		if err != nil {
+			return action.OpenResult{}, err
+		}
+		if !found || seat.HerdrSocket != target.Socket || seat.HerdrPane != target.Pane {
+			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
+		}
+		return detachedNative(ctx, seat, stderr, effective, false)
 	}
 	if target.Engine == pfmengine.Claude && target.Live {
 		rows, rowsErr := Rows(ctx, stderr, &effective)
@@ -243,6 +269,16 @@ func openDetachedResolvedRow(
 	stderr io.Writer,
 	effective config.Runtime,
 ) (action.OpenResult, error) {
+	if row.Backend == spawn.BackendHerdr {
+		seat, found, err := nativeSeat(ctx, effective, row.ID, row.SeatID)
+		if err != nil {
+			return action.OpenResult{}, err
+		}
+		if !found {
+			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
+		}
+		return detachedNative(ctx, seat, stderr, effective, false)
+	}
 	fleetPrimary, err := fleet.PrimaryAccount(effective.Paths, effective.Config)
 	if err != nil {
 		return action.OpenResult{}, fmt.Errorf("read primary account: %w", err)
@@ -331,6 +367,15 @@ func OpenRow(
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
+	}
+	if ctx.Value(restoredOpenKey{}) == true && row.Backend == spawn.BackendHerdr {
+		row.Backend = ""
+		row.Kind = compose.ResumeKindFor(row.Kind)
+		row.Socket = ""
+		row.PaneID = ""
+		row.SeatID = ""
+	} else if handled, code := openNativeRow(ctx, row, stdout, stderr, effective); handled {
+		return code
 	}
 	relocated := ""
 	if !row.Kind.IsLiveSeat() {
@@ -427,7 +472,12 @@ func prepareOpen(
 	if account, found := effective.Config.CodexAccountByID(primary); found {
 		healCodexRoot = account.Home
 	}
+	var gate action.Gate
+	if ctx.Value(restoredOpenKey{}) == true {
+		gate = restoredGate{}
+	}
 	executor, err := newOpenExecutor(action.Dependencies{
+		Gate:   gate,
 		Stderr: stderr,
 		Heal: func(ctx context.Context, threadID string) string {
 			return heal.Thread(ctx, healCodexRoot, threadID)

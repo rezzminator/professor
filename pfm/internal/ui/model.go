@@ -821,12 +821,20 @@ func (model *Model) wakeSky() tea.Cmd {
 	return skyTickCmd(skyTickBaseInterval)
 }
 
+// liveSeatKey keeps native panes independent even when they share one server socket.
+func liveSeatKey(row compose.Row) string {
+	if row.Backend == "herdr" {
+		return row.Socket + "\x00" + row.PaneID
+	}
+	return row.Socket
+}
+
 func trackedChatSockets(rows []compose.Row) map[string]bool {
 	sockets := make(map[string]bool)
 	for index := range rows {
 		row := &rows[index]
 		if row.Socket != "" && isNameGroupRow(row.Kind) {
-			sockets[row.Socket] = true
+			sockets[liveSeatKey(*row)] = true
 		}
 	}
 	return sockets
@@ -991,7 +999,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		filtered := make([]compose.Row, 0, len(rows))
 		for index := range rows {
 			row := &rows[index]
-			if row.Kind.IsLiveSeat() && model.deactivatedSockets[row.Socket] {
+			if row.Kind.IsLiveSeat() && model.deactivatedSockets[liveSeatKey(*row)] {
 				rowsAdjusted = true
 				continue
 			}
@@ -1080,7 +1088,7 @@ func (model *Model) deactivate(row compose.Row) {
 		model.killStatus = fmt.Sprintf("deactive failed — %s: %v", row.Name, err)
 		return
 	}
-	model.deactivatedSockets[row.Socket] = true
+	model.deactivatedSockets[liveSeatKey(row)] = true
 	model.killStatus = "deactivated — " + row.Name + " — ready to resume"
 	key := compose.RowKey(row)
 	fallback := model.cursor

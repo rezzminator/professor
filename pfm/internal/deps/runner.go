@@ -65,8 +65,14 @@ type Runner interface {
 // takes), where its stdout/stderr are wired, and whether it detaches into
 // its own session.
 type StartOptions struct {
-	Env []string
-	Dir string
+	// Argv0 overrides the child-visible name, not the executable resolved from argv[0].
+	Argv0 string
+	// Foreground gives the child's process group terminal ownership on Ctty, a parent file descriptor.
+	// It requires a controlling terminal and cannot be combined with Detach.
+	Foreground bool
+	Ctty       int
+	Env        []string
+	Dir        string
 	// WaitDelay has the same meaning as RunOptions.WaitDelay. It is carried
 	// through the seam so streaming callers retain exec.Cmd's guarantee that
 	// inherited descriptors cannot strand Wait or its copy goroutines.
@@ -169,6 +175,9 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 	if len(argv) == 0 {
 		return nil, errors.New("deps: RealRunner.Start: empty argv")
 	}
+	if opts.Foreground && (opts.Detach || opts.Ctty < 0) {
+		return nil, errors.New("deps: foreground start requires a nonnegative terminal descriptor and cannot detach")
+	}
 	if opts.Detach && (opts.StdinPipe || opts.StdoutPipe) {
 		return nil, errors.New("deps: detached process cannot own input or output pipes")
 	}
@@ -183,12 +192,13 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 		// A detached child must outlive this call, so it is never wired to
 		// ctx's cancellation the way a streamed, waited-on child is.
 		command = exec.Command(argv[0], argv[1:]...)
-		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		command.SysProcAttr = startProcessAttributes(opts)
 	} else {
 		command = exec.CommandContext(ctx, argv[0], argv[1:]...)
-		if opts.ProcessGroup {
-			command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		}
+		command.SysProcAttr = startProcessAttributes(opts)
+	}
+	if opts.Argv0 != "" {
+		command.Args[0] = opts.Argv0
 	}
 	command.Env = opts.Env
 	command.Dir = opts.Dir
@@ -232,7 +242,22 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 		}
 		return &releasedProcess{pid: pid, argv0: argv[0]}, nil
 	}
-	return &realProcess{command: command, stdin: stdin, stdout: stdout, processGroup: opts.ProcessGroup}, nil
+	return &realProcess{
+		command:      command,
+		stdin:        stdin,
+		stdout:       stdout,
+		processGroup: opts.ProcessGroup || opts.Foreground,
+	}, nil
+}
+
+func startProcessAttributes(opts StartOptions) *syscall.SysProcAttr {
+	if opts.Detach {
+		return &syscall.SysProcAttr{Setsid: true}
+	}
+	if opts.ProcessGroup || opts.Foreground {
+		return &syscall.SysProcAttr{Setpgid: true, Foreground: opts.Foreground, Ctty: opts.Ctty}
+	}
+	return nil
 }
 
 // realProcess wraps a started, non-detached *exec.Cmd this Runner still

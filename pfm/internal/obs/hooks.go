@@ -41,6 +41,11 @@ func Hook(ctx context.Context, name string, stdout io.Writer) (io.Writer, func(e
 			default:
 				decision, level = "error", slog.LevelError
 			}
+			// Native lifetime owners propagate terminal hangup unchanged. It is
+			// an interruption (Herdr may restore it), not a failed hook decision.
+			if exitCode == 129 && (name == "seat-host" || name == "claude-launch" || name == "launch") {
+				decision, level = "interrupted", slog.LevelInfo
+			}
 		}
 		attrs := []slog.Attr{
 			slog.String("hook", name),

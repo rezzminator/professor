@@ -55,15 +55,18 @@ const (
 // Chat is one resolved seat: who it is, where its record lives, and whether a
 // server is still holding it up.
 type Chat struct {
-	Name    string
-	ID      string
-	Engine  pfmengine.ID
-	Path    string
-	CWD     string
-	Socket  string
-	Session string
-	Pane    string
-	Live    bool
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	Name           string
+	ID             string
+	Engine         pfmengine.ID
+	Path           string
+	CWD            string
+	Socket         string
+	Session        string
+	Pane           string
+	Live           bool
 	// PanePID is the process at the root of the seat's pane, as the fleet
 	// last listed it; 0 when unknown.
 	PanePID int
@@ -88,7 +91,9 @@ type Status struct {
 	Last        string       `json:"last,omitempty"`
 	// Error is the kind of the error the turn ended on (server_overloaded,
 	// server_error, ...), set only when State is error.
-	Error         string `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+	// LostNote is the seat loss note from fleetdb seat.lost_note, empty unless the seat was lost.
+	LostNote      string `json:"lost_note,omitempty"`
 	Summary       string `json:"summary,omitempty"`
 	SummaryCached bool   `json:"summary_cached,omitempty"`
 	Ask           string `json:"ask,omitempty"`
@@ -142,6 +147,9 @@ func (status Status) Line() string {
 	}
 	if status.Last != "" {
 		line += "\t" + status.Last
+	}
+	if status.LostNote != "" {
+		line += "\t" + status.LostNote
 	}
 	return line
 }

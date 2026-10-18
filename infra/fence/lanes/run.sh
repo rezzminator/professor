@@ -39,7 +39,7 @@ set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
-CANONICAL="O1 E1 E2 E3 F M A O2"
+CANONICAL="O1 E1 E2 E3 F M A H O2"
 BUDGETS="$HERE/budgets.yml"
 PENDING="$HERE/pending.txt"
 ROOT_SH="${LANE_ROOT_SH:-$HERE/root.sh}"
@@ -122,6 +122,17 @@ ORDER="$(printf '%s' "$KEPT" | sed 's/^ //')"
 COUNT="$(printf '%s\n' "$ORDER" | wc -w | tr -d ' ')"
 MODE=sequence
 [ "$COUNT" -eq 1 ] && MODE=solo
+
+case "${LANE_H_SCOPE:-}" in
+  "") ;;
+  birth|discovery|delivery|delivery-tmux|delivery-outcomes|delivery-status|controls|open-live|reload|lifecycle|restoration) [ "$ORDER" = H ] || die "LANE_H_SCOPE requires solo H" 2 ;;
+  *) die "LANE_H_SCOPE takes birth, discovery, delivery, delivery-tmux, delivery-outcomes, delivery-status, controls, open-live, reload, lifecycle or restoration" 2 ;;
+esac
+if [ -n "${LANE_H_PFM:-}" ]; then
+  [ -n "${LANE_H_SCOPE:-}" ] || die "LANE_H_PFM requires focused solo H scope" 2
+  [ -f "$LANE_H_PFM" ] && [ -x "$LANE_H_PFM" ] && [ ! -L "$LANE_H_PFM" ] ||
+    die "LANE_H_PFM must be an executable regular file" 2
+fi
 
 # ─── the known-gap ledger, before anything runs ─────────────────────────────
 
@@ -273,13 +284,19 @@ if docker exec "$CNAME" mkdir -p "$CONT_OUT" &&
     sleep 0.2
   done
 fi
+H_PFM_OVERRIDE=""
+if [ -n "${LANE_H_PFM:-}" ]; then
+  H_PFM_OVERRIDE="$CONT_OUT/pfm"
+  docker cp "$LANE_H_PFM" "$CNAME:$H_PFM_OVERRIDE" || die "isolated H product copy failed" 1
+fi
 failed_lanes="" missing_rows=""
 for l in $ORDER; do
   prior="$(prior_of "$l")"
   say "── lane $l${prior:+ (after $prior)}"
   docker exec -w /tmp \
     -e "LANE_MODE=$MODE" -e "LANE_PRIOR=$prior" -e "LANE_SEATS=$SEATS" \
-    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e "LANE_PROFILE=${LANE_PROFILE:-}" -e IS_SANDBOX=1 -e GOPROXY=off \
+    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e "LANE_PROFILE=${LANE_PROFILE:-}" \
+    -e "LANE_H_SCOPE=${LANE_H_SCOPE:-all}" -e "H_PFM_OVERRIDE=$H_PFM_OVERRIDE" -e IS_SANDBOX=1 -e GOPROXY=off \
     "$CNAME" bash "/worktree/infra/fence/lanes/$l.sh" 2>&1 | tee "$OUT/$l.stream.log"
   rc="${PIPESTATUS[0]}"
   for f in "$l.log" "$l.timeline.tsv" "$l.row.tsv" "$l.logstate" "$l.seats" "$l.waits.tsv"; do

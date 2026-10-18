@@ -447,7 +447,7 @@ func (run *fleetRun) finish(seat *watchedSeat) {
 // leave writes the EXIT or DEAD line, runs OnExit, and ends the seat.
 func (run *fleetRun) leave(seat *watchedSeat, word string) error {
 	run.finish(seat)
-	if err := run.say("%s %s", word, seat.name); err != nil {
+	if err := run.say("%s %s%s", word, seat.name, lostNoteSuffix(seat.status)); err != nil {
 		return err
 	}
 	if run.options.OnExit != nil {
@@ -536,7 +536,7 @@ func (run *fleetRun) idle(ctx context.Context, seat *watchedSeat) error {
 	if status.State == StateError {
 		suffix = " error=" + status.Error
 	}
-	suffix += run.answerSuffix(ctx, seat)
+	suffix += run.answerSuffix(ctx, seat) + lostNoteSuffix(status)
 	if err := run.say("IDLE %s idle_seconds=%d%s", seat.name, status.IdleSeconds, suffix); err != nil {
 		return err
 	}
@@ -616,7 +616,7 @@ func (run *fleetRun) snapshot(ctx context.Context, seat *watchedSeat) error {
 	if endedTurn(status) {
 		line += run.answerSuffix(ctx, seat)
 	}
-	if err := run.say("%s", line); err != nil {
+	if err := run.say("%s%s", line, lostNoteSuffix(status)); err != nil {
 		return err
 	}
 	if !status.Alive() {
@@ -638,7 +638,7 @@ func (run *fleetRun) announceTransition(ctx context.Context, seat *watchedSeat) 
 	// with a new last answer: say it worked, then judge the rest anew.
 	if endedTurn(status) && strings.HasPrefix(seat.announced, StateIdle+":") && status.Last != previous {
 		if !run.options.NoWorking {
-			if err := run.say("%s %s", strings.ToUpper(StateWorking), seat.name); err != nil {
+			if err := run.say("%s %s%s", strings.ToUpper(StateWorking), seat.name, lostNoteSuffix(status)); err != nil {
 				return err
 			}
 		}
@@ -657,10 +657,17 @@ func (run *fleetRun) announceTransition(ctx context.Context, seat *watchedSeat) 
 	}
 	seat.announced = key
 	if key == stateQuiet {
-		return run.say("QUIET %s quiet_seconds=%d", seat.name, status.QuietSeconds)
+		return run.say("QUIET %s quiet_seconds=%d%s", seat.name, status.QuietSeconds, lostNoteSuffix(status))
 	}
 	if run.options.NoWorking && key == StateWorking {
 		return nil
 	}
-	return run.say("%s %s", strings.ToUpper(status.State), seat.name)
+	return run.say("%s %s%s", strings.ToUpper(status.State), seat.name, lostNoteSuffix(status))
+}
+
+func lostNoteSuffix(status Status) string {
+	if status.LostNote == "" {
+		return ""
+	}
+	return fmt.Sprintf(" lost_note=%q", status.LostNote)
 }

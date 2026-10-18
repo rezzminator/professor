@@ -798,3 +798,39 @@ func TestTransitionsQuietMonitorWritesOneIdlePerTurnOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestWatchLostNoteRendering(t *testing.T) {
+	for _, tc := range []struct{ name, note, suffix string }{
+		{"empty", "", ""},
+		{"producer", "your last message was not answered — re-send it", ` lost_note="your last message was not answered — re-send it"`},
+		{"escaped", "say \"again\"\nIDLE forged\tend", ` lost_note="say \"again\"\nIDLE forged\tend"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, transitions := range []bool{false, true} {
+				steps := []fakeStep{idleFor(10, "y")}
+				want := []string{"IDLE a idle_seconds=10" + tc.suffix}
+				if transitions {
+					steps = []fakeStep{working("x"), blocked(), quietFor(20, "x"), idleFor(10, "y"), gone()}
+					want = []string{
+						"SEEN a working" + tc.suffix,
+						"BLOCKED a" + tc.suffix,
+						"QUIET a quiet_seconds=20" + tc.suffix,
+						"IDLE a idle_seconds=10" + tc.suffix,
+						"EXIT a" + tc.suffix,
+					}
+				}
+				for i := range steps {
+					steps[i].status.LostNote = tc.note
+				}
+				seats := newFakeSeats(map[string][]fakeStep{"a": steps})
+				lines, _, err := runFleet(t, namedFleet(seats, "a"), WatchOptions{
+					Once: !transitions, Transitions: transitions, QuietAfter: 10 * time.Second,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertLines(t, lines, want)
+			}
+		})
+	}
+}

@@ -74,6 +74,7 @@ type ChatServer struct {
 // Plan contains the pure run string and the one eval line. Line never carries
 // a trailing newline; the CLI writer owns the sole terminating newline.
 type Plan struct {
+	SeatRun    *fleetdb.SeatRun
 	Route      Route
 	Run        string
 	Line       string

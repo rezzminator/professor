@@ -28,19 +28,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
-// runSpawnTimings is zero in production, which makes spawn use its live
-// defaults. Package integration tests replace it with short timings because
-// their local TUI fixtures paint synchronously.
+// Tests shorten spawn timings for synchronous fixtures; zero uses production defaults.
 var runSpawnTimings spawn.Timings
 
 // spawnTraceEnv turns on the spawn choreography trace on stderr.
 const spawnTraceEnv = "PFM_SPAWN_TRACE"
 
-// runRun starts a chat with the fleet's whole launch ceremony — the
-// environment strip, the account's config dir, the cache mode, the autonomy
-// flags, its own tmux server on a fleet socket — and then walks away from it.
-// No terminal is attached and nothing is eval'd by the caller's shell, so it
-// works from a script, a cron job, or another chat's Bash tool.
+// runRun starts an unfocused chat through the selected backend, carrying the
+// fleet's environment, account, cache, autonomy, and prompt policy.
 func runRun(
 	ctx context.Context,
 	args []string,
@@ -54,7 +49,7 @@ func runRun(
 	flags := cli.NewFlagSet(
 		"chat new",
 		"usage: pfm chat new [--name NAME] [--engine cc|cx] [--cwd DIR] "+
-			"[--account N] [--cache 1h|5m] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
+			"[--backend auto|tmux|herdr] [--account N] [--cache 1h|5m] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
 			"[--harness-prompt PATH] [--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
 		stderr,
 	)
@@ -68,6 +63,7 @@ func runRun(
 		"",
 		"engine: cc|claude or cx|codex (default: the calling chat's engine, else config)",
 	)
+	backend := flags.String("backend", "", "birth backend: auto|tmux|herdr (default: chat.backend)")
 	cwd := flags.String("cwd", "", "project directory (default: the current one)")
 	account := flags.Int("account", 0, "Claude account (default: the primary one)")
 	cache := flags.String("cache", "", "prompt cache for this launch: 1h or 5m")
@@ -84,6 +80,23 @@ func runRun(
 	positional, parseCode, ok := cli.ParseFlagsAroundName(flags, name, args)
 	if !ok {
 		return parseCode
+	}
+	if *backend != "" && *backend != spawn.BackendAuto && *backend != spawn.BackendTmux &&
+		*backend != spawn.BackendHerdr {
+		fmt.Fprintln(stderr, "pfm chat new: --backend must be auto, tmux or herdr")
+		return 2
+	}
+	requestedBackend := *backend
+	if requestedBackend == "" {
+		requestedBackend = runtime.Config.Chat.Backend
+	}
+	birth, birthErr := pfmchat.BirthBackend(ctx, requestedBackend, env)
+	if birthErr != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", birthErr)
+		return 1
+	}
+	if birth.Warning != "" {
+		fmt.Fprintln(stderr, birth.Warning)
 	}
 	if *timeout < 0 || *settle < 0 || (*attach && *await) {
 		flags.Usage()
@@ -104,20 +117,6 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
 	}
-	if *name == "" {
-		auto, found, nameErr := pfmchat.ReserveWorkbenchName(ctx, directory, stderr, &runtime)
-		if nameErr != nil {
-			fmt.Fprintf(stderr, "pfm chat new: %v\n", nameErr)
-			return 1
-		}
-		if !found {
-			flags.Usage()
-			return 2
-		}
-		*name = auto.Name
-		ctx = pfmchat.WithWorkbenchNameReservation(ctx, auto)
-	}
-	defer pfmchat.ReleaseUnusedWorkbenchName(ctx, *name, stderr)
 	requestedEngine, _ := pfmengine.Parse(*engine)
 	if *role != "" && requestedEngine == pfmengine.OpenCode {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", agentrole.ValidateSeatPromptPolicy(requestedEngine, ""))
@@ -136,13 +135,16 @@ func runRun(
 			return 2
 		}
 		if found && bench.Err == nil {
-			// An engine with an account but no headless planner is passed over,
-			// and taken only when nothing else is left, so its own refusal names it.
+			// Prefer a configured planner, retaining the unplanned engine's own refusal.
 			var unplanned pfmengine.ID
 			unplannedAccount := 0
 			picked, ok := workbench.PickEngine(bench, engineName, func(id pfmengine.ID) bool {
 				_, candidate, accountErr := resolveRunEngineIDAccount(id, *account, runtime.Config, fleetPrimary)
 				if accountErr != nil {
+					return false
+				}
+				if id == pfmengine.OpenCode && birth.Backend != spawn.BackendHerdr {
+					unplanned = id
 					return false
 				}
 				if _, plannerErr := action.PlannerFor(id); plannerErr != nil {
@@ -177,6 +179,24 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
+	if engineName == pfmengine.OpenCode && birth.Backend != spawn.BackendHerdr {
+		fmt.Fprintln(stderr, "pfm chat new: OpenCode does not support headless chat")
+		return 2
+	}
+	if *name == "" {
+		auto, found, nameErr := pfmchat.ReserveWorkbenchName(ctx, directory, stderr, &runtime)
+		if nameErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", nameErr)
+			return 1
+		}
+		if !found {
+			flags.Usage()
+			return 2
+		}
+		*name = auto.Name
+		ctx = pfmchat.WithWorkbenchNameReservation(ctx, auto)
+	}
+	defer pfmchat.ReleaseUnusedWorkbenchName(ctx, *name, stderr)
 	persona, err := workbench.ForLaunch(directory, engineName, workbench.New)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
@@ -267,15 +287,42 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
+	var progressOut io.Writer
+	if *progress && *await {
+		progressOut = stderr
+	}
+	awaitOptions := headless.AwaitOptions{
+		Grace:    launchGrace,
+		Settle:   time.Duration(*settle) * time.Second,
+		Timeout:  time.Duration(*timeout) * time.Second,
+		Progress: progressOut,
+	}
+	if birth.Backend == spawn.BackendHerdr {
+		born, code := pfmchat.BirthHerdr(
+			ctx,
+			birth,
+			plan,
+			&runtime,
+			*name,
+			prompt,
+			*await,
+			*attach,
+			stdout,
+			stderr,
+			awaitOptions,
+		)
+		if born {
+			seatStateWritten = false
+		}
+		return code
+	}
 	if plan.Record != nil {
 		if err := fleetdb.RecordLaunch(ctx, resolved, *plan.Record, clk.Now().Unix()); err != nil {
 			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", plan.Record.SessionID, err)
 		}
 	}
 
-	// PFM_SPAWN_TRACE turns on a step-by-step log of the TUI
-	// choreography: what was typed, which screen came back, which overlay was
-	// dismissed. A chat driven blind is a chat debugged blind.
+	// PFM_SPAWN_TRACE records TUI input, screens, and dismissed overlays.
 	var trace io.Writer
 	if env.Get(spawnTraceEnv) != "" {
 		trace = stderr
@@ -285,13 +332,14 @@ func runRun(
 		TmuxDir: resolved.TmuxDir,
 		Titles:  &titles,
 	}, spawn.Request{
-		Trace:  trace,
-		Engine: engineName,
-		Name:   *name,
-		Socket: socket,
-		CWD:    directory,
-		Run:    plan.Run,
-		Binary: plan.Binary, CodexHome: plan.CodexHome,
+		SessionID: pfmchat.LaunchSessionID(plan.Record),
+		Trace:     trace,
+		Engine:    engineName,
+		Name:      *name,
+		Socket:    socket,
+		CWD:       directory,
+		Run:       plan.Run,
+		Binary:    plan.Binary, CodexHome: plan.CodexHome,
 		Prompt:              prompt,
 		PromptOnCommandLine: plan.PromptOnCommandLine,
 		Width:               action.HeadlessWidth,
@@ -337,15 +385,9 @@ func runRun(
 			)
 		}
 	}
-	// result.Socket is the bare session name spawn.Run was asked to create
-	// (spawn.FreshSocket's own output), not a resolvable socket PATH — the
-	// call recorder (internal/call/engine.go) writes result.SocketPath,
-	// the full tmux -S argument. Recording the bare name here left the
-	// cosmos graph's receiver-side row lookup (paneKey(socket, pane)) unable
-	// to ever match a live row, because no live row's socket is a bare name.
-	// ReceiverPane is left unset: spawn.Result carries no pane id (a fresh
-	// session's first pane is conventionally "%0", but nothing here confirms
-	// that invariant, so it is not invented).
+	// Record the full socket path so paneKey matches live rows. Result.Socket
+	// is only a tmux session name; ReceiverPane stays unset because Result does
+	// not prove a pane id.
 	if err := state.RecordComms(context.Background(), fleetdb.CommsEvent{
 		AtNS: spawnedAt.UnixNano(), Kind: fleetdb.KindSpawn, SenderSession: parent,
 		Target: *name, ReceiverSocket: filepath.Join(resolved.TmuxDir, result.Socket), Message: prompt,
@@ -358,20 +400,11 @@ func runRun(
 	if prompt == "" {
 		return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
 	}
-	var progressOut io.Writer
-	if *progress && *await {
-		progressOut = stderr
-	}
 	code := awaitLaunch(
 		ctx,
 		*name,
 		*await,
-		headless.AwaitOptions{
-			Grace:    launchGrace,
-			Settle:   time.Duration(*settle) * time.Second,
-			Timeout:  time.Duration(*timeout) * time.Second,
-			Progress: progressOut,
-		},
+		awaitOptions,
 		result,
 		stdout,
 		stderr,

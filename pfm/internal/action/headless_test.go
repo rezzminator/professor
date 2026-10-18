@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -314,6 +316,235 @@ func TestHeadlessClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.
 					t.Fatalf("warnings = %q, want one naming %q", plan.Warnings, entry.want)
 				}
 			})
+		}
+	}
+}
+
+func TestHeadlessClaudeRetainsStructuredSeatRecipe(t *testing.T) {
+	request := HeadlessRequest{
+		Engine:         pfmengine.Claude,
+		Name:           "REVIEW",
+		CWD:            "/work/alpha",
+		Home:           t.TempDir(),
+		PrimaryAccount: 2,
+		Prompt:         "a prompt with 'quotes' and $(nope)",
+	}
+	plan, err := headlessWithTestConfig(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SeatRun == nil || plan.SeatRun.CWD != request.CWD || plan.SeatRun.Binary == "" ||
+		len(plan.SeatRun.Args) == 0 ||
+		!slices.Contains(plan.SeatRun.Args, request.Prompt) {
+		t.Fatalf("structured recipe=%+v", plan.SeatRun)
+	}
+	parsed := parsedShell(t, plan.Run)
+	if parsed.SessionID != plan.Record.SessionID {
+		t.Fatalf("recipe and launch identity diverged: %+v", plan)
+	}
+}
+
+func TestHeadlessCodexRetainsStructuredSeatRecipe(t *testing.T) {
+	for _, yolo := range []bool{false, true} {
+		t.Run(strconv.FormatBool(yolo), func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.Codex.Binary = "/opt/codex stable"
+			machine.Codex.Yolo = yolo
+			t.Setenv("CLAUDECODE", "stale")
+			t.Setenv("CODEX_HOME", "/stale")
+			request := HeadlessRequest{
+				Engine:         pfmengine.Codex,
+				Name:           "REVIEW",
+				CWD:            "/work/alpha",
+				Home:           home,
+				PrimaryAccount: 2,
+				Model:          "next-model",
+				Effort:         "high",
+				PromptChannel:  "developer 'text'",
+				Config:         machine,
+			}
+			plan, err := PlanCodex(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix := []string{pfmengine.CodexNoDaemon, "--sandbox", "workspace-write"}
+			if yolo {
+				prefix = []string{pfmengine.CodexNoDaemon, "--dangerously-bypass-approvals-and-sandbox"}
+			}
+			prefix = append(prefix, "--model", request.Model)
+			want := prefix
+			want = append(want, CodexEffortArg("high")...)
+			want = append(want, CodexDeveloperInstructionsArg(request.PromptChannel)...)
+			account, _ := machine.CodexAccountByID(2)
+			if plan.SeatRun == nil || plan.SeatRun.Binary != machine.Codex.Binary || plan.SeatRun.CWD != request.CWD ||
+				!reflect.DeepEqual(plan.SeatRun.Args, want) {
+				t.Fatalf("typed Codex recipe=%+v want args=%q", plan.SeatRun, want)
+			}
+			if lastEnvironmentValueNative(plan.SeatRun.Env, "CODEX_HOME") != account.Home ||
+				lastEnvironmentValueNative(plan.SeatRun.Env, "CLAUDECODE") != "" {
+				t.Fatalf("Codex environment=%v", plan.SeatRun.Env)
+			}
+		})
+	}
+}
+
+func lastEnvironmentValueNative(env []string, key string) string {
+	value := ""
+	for _, entry := range env {
+		if v, ok := strings.CutPrefix(entry, key+"="); ok {
+			value = v
+		}
+	}
+	return value
+}
+
+func TestHeadlessCanonicalEngineAndOpenCodeRecipe(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	machine.Claude.Binary = "/opt/custom-cc"
+	machine.Codex.Binary = "/opt/custom-cx"
+	machine.OpenCode.Binary = "/opt/custom-ox"
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/ox"}}
+	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode} {
+		t.Run(string(id), func(t *testing.T) {
+			request := HeadlessRequest{
+				Engine:         id,
+				Name:           "RAW",
+				CWD:            home,
+				Home:           home,
+				PrimaryAccount: 2,
+				Config:         machine,
+				Prompt:         "a\nb",
+			}
+			var plan HeadlessPlan
+			var err error
+			switch id {
+			case pfmengine.Claude:
+				plan, err = PlanClaude(request)
+			case pfmengine.Codex:
+				plan, err = PlanCodex(request)
+			case pfmengine.OpenCode:
+				plan, err = PlanOpenCode(request)
+			}
+			if err != nil {
+				t.Fatalf("canonical %s recipe: %v", id, err)
+			}
+			if plan.Engine != id || plan.SeatRun == nil {
+				t.Fatalf("canonical identity=%q recipe=%+v want=%s", plan.Engine, plan.SeatRun, id)
+			}
+			if id == pfmengine.OpenCode {
+				if plan.Record != nil || !plan.PromptOnCommandLine ||
+					!reflect.DeepEqual(plan.SeatRun.Args, []string{home, "--prompt", request.Prompt}) ||
+					plan.SeatRun.Binary != machine.OpenCode.Binary {
+					t.Fatalf("OpenCode typed plan=%+v recipe=%+v", plan, plan.SeatRun)
+				}
+			}
+		})
+	}
+}
+
+func TestPlanCodexPreservesResumeIdentity(t *testing.T) {
+	for _, sid := range []string{"", "thread 'safe'"} {
+		t.Run(sid, func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.Codex.Binary = "/opt/custom-cx"
+			plan, err := PlanCodex(
+				HeadlessRequest{
+					Name:            "RAW",
+					CWD:             home,
+					Home:            home,
+					PrimaryAccount:  2,
+					Config:          machine,
+					ResumeSessionID: sid,
+					Model:           "next",
+					Effort:          "high",
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := append(codexAutonomyArgs(machine.EffectiveCodex(2).Yolo), "--model", "next")
+			want = append(want, CodexEffortArg("high")...)
+			if sid != "" {
+				want = append(want, "resume", sid)
+			}
+			if !reflect.DeepEqual(plan.SeatRun.Args, want) || plan.Record != nil {
+				t.Fatalf("resume recipe args=%q want=%q record=%+v", plan.SeatRun.Args, want, plan.Record)
+			}
+			if sid != "" && !strings.Contains(plan.Run, Quote("resume")+" "+Quote(sid)) {
+				t.Fatalf("resume shell=%s", plan.Run)
+			}
+		})
+	}
+}
+
+func TestHeadlessForkRetainsTypedRecipe(t *testing.T) {
+	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		t.Run(string(id), func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			plan, err := HeadlessFork(
+				HeadlessForkRequest{
+					Engine:         id,
+					SessionID:      "session 'quoted'",
+					Name:           "FORK",
+					CWD:            home,
+					Home:           home,
+					PrimaryAccount: 2,
+					Config:         machine,
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.SeatRun == nil || plan.SeatRun.CWD != home || plan.Engine != id {
+				t.Fatalf("fork typed recipe=%+v identity=%s", plan.SeatRun, plan.Engine)
+			}
+			if !slices.Contains(plan.SeatRun.Args, "session 'quoted'") {
+				t.Fatalf("fork args=%q", plan.SeatRun.Args)
+			}
+		})
+	}
+}
+
+func TestHeadlessOpenCodeCarriesReporterAndRejectsUnsupportedPolicy(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: home}}
+	request := HeadlessRequest{
+		Name:           "RAW",
+		CWD:            home,
+		Home:           home,
+		PrimaryAccount: 1,
+		Config:         machine,
+		Model:          "provider/model",
+	}
+	plan, err := PlanOpenCode(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(
+		lastEnvironmentValueNative(plan.SeatRun.Env, "OPENCODE_CONFIG_CONTENT"),
+		"opencode-herdr-plugin.mjs",
+	) ||
+		!slices.Contains(plan.SeatRun.Args, request.Model) {
+		t.Fatalf(
+			"OpenCode native policy args=%q reporter=%q",
+			plan.SeatRun.Args,
+			lastEnvironmentValueNative(plan.SeatRun.Env, "OPENCODE_CONFIG_CONTENT"),
+		)
+	}
+	for _, field := range []string{"effort", "prompt channel"} {
+		test := request
+		if field == "effort" {
+			test.Effort = "high"
+		} else {
+			test.PromptChannel = "policy"
+		}
+		if _, err := PlanOpenCode(test); err == nil || !strings.Contains(err.Error(), "not supported") {
+			t.Fatalf("unsupported %s policy=%v", field, err)
 		}
 	}
 }

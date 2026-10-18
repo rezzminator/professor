@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -53,11 +54,13 @@ func followerWatchPaths(home string) []string {
 	return watch
 }
 
-// followerPlist is the launch agent that runs `pfm theme sync` whenever a
+// followerPlist is the launch agent that runs `pfm theme sync`, through the
+// stable launcher program (agentlauncher: macOS re-registers an agent that
+// names a rebuilt pfm), whenever a
 // Claude account's settings.json or themes dir changes or macOS rewrites its
 // global preferences, with a one-minute backstop and at load, on the one
 // service PATH (launchd's bare default holds neither tmux nor herdr).
-func followerPlist(pfm, home, stateDir string) string {
+func followerPlist(program, home, stateDir string) string {
 	stringItems := func(values ...string) string {
 		var out strings.Builder
 		for _, value := range values {
@@ -74,7 +77,7 @@ func followerPlist(pfm, home, stateDir string) string {
 	<string>` + followerLabel + `</string>
 	<key>ProgramArguments</key>
 	<array>
-` + stringItems(pfm, "theme", "sync") + `	</array>
+` + stringItems(program, "theme", "sync") + `	</array>
 	<key>WatchPaths</key>
 	<array>
 ` + stringItems(followerWatchPaths(home)...) + `	</array>
@@ -175,7 +178,10 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 			fmt.Errorf("themesync: Env.PfmBinary is empty; the follower cannot run pfm"),
 		)
 	}
-	want := followerPlist(s.env.PfmBinary, s.env.Home, s.store.dir)
+	if _, err := agentlauncher.Ensure(s.env.Home); err != nil {
+		return s.failed(surfaceFollower, path, err)
+	}
+	want := followerPlist(agentlauncher.Program(s.env.Home), s.env.Home, s.store.dir)
 	current, readErr := os.ReadFile(path)
 	changed := readErr != nil || string(current) != want
 	if changed {
@@ -217,8 +223,16 @@ func (s *session) readFollower(ctx context.Context) SurfaceResult {
 		return s.in(surfaceFollower, VerdictDrift, path, "launch agent plist is missing", 0)
 	case err != nil:
 		return s.failed(surfaceFollower, path, fmt.Errorf("themesync: read %s: %w", path, err))
-	case string(current) != followerPlist(s.env.PfmBinary, s.env.Home, s.store.dir):
+	case string(current) != followerPlist(agentlauncher.Program(s.env.Home), s.env.Home, s.store.dir):
 		return s.in(surfaceFollower, VerdictDrift, path, "launch agent plist differs from the render", 0)
+	}
+	launcher, err := agentlauncher.UpToDate(s.env.Home)
+	switch {
+	case err != nil:
+		return s.failed(surfaceFollower, path, err)
+	case !launcher:
+		return s.in(surfaceFollower, VerdictDrift, path,
+			"agent launcher "+agentlauncher.Program(s.env.Home)+" is missing or differs", 0)
 	}
 	loaded, err := s.followerLoaded(ctx)
 	switch {

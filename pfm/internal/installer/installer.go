@@ -39,14 +39,13 @@ type engine struct {
 	// nil and zero are the real process table and engineSyncGlobalTimeout.
 	engineSyncExec     deps.Runner
 	engineSyncDeadline time.Duration
-	// processBirth reads a pid's start time in epoch seconds; nil is the
-	// native process table. A launch agent started before the pfm binary's
-	// last write runs a replaced build.
-	processBirth func(pid int) (int64, error)
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).
 	removedPaths map[string]bool
+	// agentLauncherStaged is set once ensureAgentLauncher has staged (or
+	// planned) the launcher this pass, so three agents report it once.
+	agentLauncherStaged bool
 }
 
 type pinnedHarvestProvisioner struct{}
@@ -267,6 +266,7 @@ func (installer *engine) install(ctx context.Context) error {
 		installer.deferFailure(installer.wireLaunchAgent(ctx))
 		installer.deferFailure(installer.wireScheduleLaunchAgent(ctx))
 		installer.deferFailure(installer.wireMCPLaunchAgent(ctx))
+		installer.deferFailure(installer.refreshThemeFollower(ctx))
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
 			installer.skip(nameSyncGateUnprobedNote)
@@ -633,6 +633,11 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		if err := installer.unwireScheduleLaunchAgent(ctx); err != nil {
 			return err
 		}
+	}
+	// Last, on every OS: the theme follower's agent went with `pfm theme off`
+	// above, and `pfm theme` stages the launcher wherever it runs.
+	if err := installer.unwireAgentLauncher(); err != nil {
+		return err
 	}
 	managerAvailable := installer.userManagerAvailable(ctx)
 	if managerAvailable && installer.apply {

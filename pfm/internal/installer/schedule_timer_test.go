@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -106,11 +107,11 @@ func TestWireScheduleLaunchAgentWritesTheFiveMinuteAgent(t *testing.T) {
 	if strings.Contains(plist, "__PFM_") {
 		t.Errorf("schedule launch agent keeps an unrendered marker:\n%s", plist)
 	}
-	wantArgv := "<string>" + home + "/.local/bin/pfm</string>\n" +
+	wantArgv := "<string>" + agentlauncher.Program(home) + "</string>\n" +
 		"\t\t<string>internal</string>\n" +
 		"\t\t<string>schedule-fire</string>"
 	if !strings.Contains(plist, wantArgv) {
-		t.Errorf("schedule launch agent argv is not this home's pfm internal schedule-fire:\n%s", plist)
+		t.Errorf("schedule launch agent argv is not this home's launcher running internal schedule-fire:\n%s", plist)
 	}
 	if !strings.Contains(plist, "<key>StartInterval</key>\n\t<integer>300</integer>") {
 		t.Errorf("schedule launch agent does not tick every 300 s:\n%s", plist)

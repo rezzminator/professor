@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -57,7 +58,7 @@ func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantVerdict(t, report, "follower", VerdictError, "cannot reload itself from inside launchd")
-	if got, want := h.read(plist), followerPlist("/opt/bin/pfm", h.home, h.stateDir); got != want {
+	if got, want := h.read(plist), followerPlist(agentlauncher.Program(h.home), h.home, h.stateDir); got != want {
 		t.Errorf("plist not rewritten:\n%s", got)
 	}
 	for _, call := range h.runner.Calls()[calls:] {
@@ -193,4 +194,34 @@ func TestFollowerWatchesRealSettingsThemesDirsAndTheGlobalPreferences(t *testing
 			t.Errorf("plist does not watch %s:\n%s", path, plist)
 		}
 	}
+}
+
+// The follower's launch agent runs the stable launcher, never pfm itself: macOS
+// re-registers an agent whose program is a rebuilt, ad-hoc-signed binary and
+// posts a background-activity advisory per build. Turning the sync on stages the
+// launcher beside the plist, and a launcher that went missing reads as drift,
+// since launchd could not spawn the agent without it.
+func TestFollowerRunsThroughTheStableLauncher(t *testing.T) {
+	h := newHarness(t)
+	h.on()
+	plist := h.read("Library/LaunchAgents/com.professor.pfm.theme.plist")
+	launcher := agentlauncher.Program(h.home)
+	want := "<array>\n\t\t<string>" + launcher + "</string>\n\t\t<string>theme</string>\n\t\t<string>sync</string>"
+	if !strings.Contains(plist, want) {
+		t.Fatalf("follower plist does not run `theme sync` through the launcher %s:\n%s", launcher, plist)
+	}
+	if strings.Contains(plist, h.env.PfmBinary) {
+		t.Errorf("follower plist names pfm %s directly:\n%s", h.env.PfmBinary, plist)
+	}
+	if current, err := agentlauncher.UpToDate(h.home); err != nil || !current {
+		t.Fatalf("launcher after turning the sync on: current=%v err=%v", current, err)
+	}
+	if err := os.Remove(launcher); err != nil {
+		t.Fatal(err)
+	}
+	status, err := ReadBack(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, status, "follower", VerdictDrift, "launcher")
 }

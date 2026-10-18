@@ -72,6 +72,7 @@ const TIER1 = [
           "herdr",
           "themesync",
           "themetmux",
+          "agentlauncher",
         ],
       },
       {

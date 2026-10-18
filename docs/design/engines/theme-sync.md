@@ -222,7 +222,7 @@ Off: writes a disabled contract (`enabled` false, no colours, bumped generation)
 
 **Surface:** `follower` — **File:** `~/Library/LaunchAgents/com.professor.pfm.theme.plist` — **Live reload:** `launchctl`
 
-`pfm theme on` installs the launch agent `com.professor.pfm.theme`, which runs `~/.local/bin/pfm theme sync`. Its triggers:
+`pfm theme on` installs the launch agent `com.professor.pfm.theme`, which runs `pfm theme sync` through the stable launcher `~/.local/libexec/pfm/pfm-agent` (`internal/agentlauncher`: a fixed `exec` of `~/.local/bin/pfm`, shared by every pfm launch agent, because macOS re-registers an agent whose program is a rebuilt, ad-hoc-signed pfm and posts a background-activity advisory per build). Its triggers:
 
 - `WatchPaths`: the real path of each account's `settings.json`, each distinct real `themes/` directory, and `~/Library/Preferences/.GlobalPreferences.plist` (macOS rewrites it on an appearance flip);
 - `ThrottleInterval` 1 second;
@@ -239,7 +239,7 @@ In its own job (`XPC_SERVICE_NAME`, which themecmd passes as `Env.LaunchdJob`, e
 
 The agent never reloads itself: inside its own job a `bootout` would make launchd stop the running sync before `bootstrap`, leaving no agent. There a changed plist is written, the follower is marked `due`, and the row is ERROR (`launch agent plist rewritten; the agent cannot reload itself from inside launchd: run `pfm theme sync` in a shell`); the next run outside launchd boots it out, bootstraps it and clears `due`. An agent that is not loaded is bootstrapped even inside the job, since no bootout is needed. A failed `print`, `bootout` or `bootstrap` leaves the reload owed to the next run.
 
-Read-back: the plist equals the render and `launchctl print` finds it loaded, and no reload is `due`; a missing, differing or unloaded agent is DRIFT, and a `due` reload is ERROR. The row carries no generation (`-`). Off: `launchctl bootout`, delete the plist; RESTORED, or ABSENT when none was installed.
+Read-back: the plist equals the render, the launcher is current, `launchctl print` finds it loaded and no reload is `due`; a missing, differing or unloaded agent is DRIFT, and a `due` reload is ERROR. The row carries no generation (`-`). Off: `launchctl bootout`, delete the plist; RESTORED, or ABSENT when none was installed.
 
 ## tmux doors
 

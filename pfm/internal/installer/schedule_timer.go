@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
@@ -101,7 +100,10 @@ func renderScheduleLaunchAgent(home string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read embedded schedule launch agent: %w", err)
 	}
-	wanted, err := renderServicePath([]byte(strings.ReplaceAll(string(template), "__PFM_HOME__", home)), home)
+	wanted, err := renderLaunchAgentTemplate(template, home)
+	if err == nil {
+		wanted, err = renderServicePath(wanted, home)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("render schedule launch agent: %w", err)
 	}
@@ -117,6 +119,9 @@ func (installer *engine) wireScheduleLaunchAgent(ctx context.Context) error {
 	}
 	path := installer.scheduleLaunchAgentPath()
 	installer.say("launchd schedule agent -> %s", path)
+	if err := installer.ensureAgentLauncher(); err != nil {
+		return err
+	}
 
 	wanted, err := renderScheduleLaunchAgent(installer.options.Home)
 	if err != nil {

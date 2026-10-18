@@ -251,6 +251,15 @@ func TestHerdrPickerSpawnsNewTab(t *testing.T) {
 
 func herdrPickerSocket(t *testing.T) string {
 	t.Helper()
+	socket, _ := herdrPickerLabels(t)
+	return socket
+}
+
+// herdrPickerLabels is herdrPickerSocket that also hands back the tab_label
+// of every layout.apply it answers.
+func herdrPickerLabels(t *testing.T) (string, <-chan string) {
+	t.Helper()
+	labels := make(chan string, 8)
 	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -268,11 +277,19 @@ func herdrPickerSocket(t *testing.T) string {
 				var req struct {
 					ID     string `json:"id"`
 					Method string `json:"method"`
+					Params struct {
+						TabLabel *string `json:"tab_label"`
+					} `json:"params"`
 				}
 				if json.NewDecoder(conn).Decode(&req) != nil {
 					return
 				}
 				if req.Method == "layout.apply" {
+					if req.Params.TabLabel != nil {
+						labels <- *req.Params.TabLabel
+					} else {
+						labels <- "<absent>"
+					}
 					_, _ = fmt.Fprintf(
 						conn,
 						`{"id":%q,"ok":true,"result":{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}}`+"\n",
@@ -292,7 +309,7 @@ func herdrPickerSocket(t *testing.T) string {
 			}()
 		}
 	}()
-	return socket
+	return socket, labels
 }
 
 func TestHerdrPickerRawEnginesSpawnNewTab(t *testing.T) {
@@ -341,6 +358,71 @@ func TestHerdrPickerRawEnginesSpawnNewTab(t *testing.T) {
 			if err != nil || !found || seat.Engine != string(id) || seat.SessionID == "" || seat.HerdrPane != "w6:p9" ||
 				pfmengine.MustLookup(id).HerdrNativePrompt {
 				t.Fatalf("raw picker seat=%+v found=%v err=%v", seat, found, err)
+			}
+		})
+	}
+}
+
+// A picker-born Herdr tab is never unlabelled: a named launch carries its
+// name, a resume its row's name, and an unnamed chat its project folder.
+func TestHerdrPickerTabLabelIsNeverEmpty(t *testing.T) {
+	for _, test := range []struct {
+		name, launchName, want string
+		row                    compose.Row
+	}{
+		{"a named launch", "REVIEW", "REVIEW", compose.Row{Kind: compose.NewClaude, CWD: "/work/professor"}},
+		{"an unnamed new chat", "", "professor", compose.Row{Kind: compose.NewClaude, CWD: "/work/professor"}},
+		{
+			"a named resume", "", "OLD CHAT",
+			compose.Row{
+				Kind: compose.ResumeClaude, ID: "11111111-1111-4111-8111-111111111111",
+				Name: "OLD CHAT", CWD: "/work/professor",
+			},
+		},
+		{
+			"an unnamed resume", "", "professor",
+			compose.Row{Kind: compose.ResumeClaude, ID: "11111111-1111-4111-8111-111111111111", CWD: "/work/professor"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			socket, labels := herdrPickerLabels(t)
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			t.Setenv("TMUX", "")
+			home := t.TempDir()
+			machine := configuredMachinePolicy(home)
+			machine.Claude.Binary = filepath.Join(home, "native-claude")
+			script := []byte("#!/bin/sh\nexit 0\n")
+			if err := testjail.WriteExecutable(machine.Claude.Binary, script, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: io.Discard})
+			if err != nil {
+				t.Fatal(err)
+			}
+			line, err := executor.Open(
+				context.Background(),
+				Request{
+					Row:            test.row,
+					LaunchName:     test.launchName,
+					Home:           home,
+					PrimaryAccount: 42,
+					FreshSocket:    "cc-unused",
+					Config:         machine,
+				},
+			)
+			if err != nil || line != "" {
+				t.Fatalf("line=%q err=%v", line, err)
+			}
+			select {
+			case got := <-labels:
+				if got != test.want {
+					t.Fatalf("tab_label = %q, want %q", got, test.want)
+				}
+			default:
+				t.Fatal("no layout.apply reached Herdr")
 			}
 		})
 	}

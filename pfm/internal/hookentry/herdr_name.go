@@ -154,35 +154,11 @@ func (reporter *herdrReporter) namePane(ctx context.Context, target herdrTarget,
 	return nil
 }
 
-// labelTab gives the tab of the chat's agent the chat's name, when the agent
-// sits in it alone: a tab shared with other panes keeps its label, one already
-// carrying the name is left alone, and an agent Herdr lists in no tab labels
-// nothing.
+// labelTab gives the tab of the chat's agent the chat's name under
+// herdr.LabelSoleTab's rule (the agent alone in it, the label not yet there).
 func (reporter *herdrReporter) labelTab(ctx context.Context, target herdrTarget, tab, name string) error {
-	if tab == "" {
-		return nil
-	}
-	get, err := herdr.TabGet{Tab: tab, Seq: reporter.nextSent()}.Line()
-	if err != nil {
-		return err
-	}
-	results, err := herdr.Call(ctx, target.socket, get)
-	if err != nil {
+	if err := herdr.LabelSoleTab(ctx, target.socket, tab, name, reporter.nextSent); err != nil {
 		return fmt.Errorf("name tab %s of pane %s: %w", tab, target.pane, err)
-	}
-	info, err := herdr.ParseTab(results[0])
-	if err != nil {
-		return fmt.Errorf("name tab %s of pane %s: %w", tab, target.pane, err)
-	}
-	if info.PaneCount != 1 || info.Label == herdr.TabLabel(name) {
-		return nil
-	}
-	rename, err := herdr.TabRename{Tab: tab, Label: name, Seq: reporter.nextSent()}.Line()
-	if err != nil {
-		return err
-	}
-	if err := herdr.Send(ctx, target.socket, rename); err != nil {
-		return fmt.Errorf("name tab %s of pane %s %q: %w", tab, target.pane, name, err)
 	}
 	return nil
 }

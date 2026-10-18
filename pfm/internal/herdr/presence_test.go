@@ -471,7 +471,8 @@ func TestPresenceLiveClientCases(t *testing.T) {
 			},
 			hookless: unknownHookless(true, false),
 			want: "w6:p2 .professor unknown KEYS, herdr error: place tmux client 88001: client 88001 runs in no pane of " +
-				fake.path,
+				fake.path + "; nested tmux is unsupported: Herdr exposes only the outer foreground process group; " +
+				"attach the pfm client directly in Herdr",
 		},
 		{
 			name: "hookless unreadable leaves the detail out", clients: "66597\n",

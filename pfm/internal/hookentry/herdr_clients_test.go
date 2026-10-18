@@ -2,6 +2,7 @@ package hookentry
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -753,15 +754,6 @@ func TestHerdrStateEventAdoptsAnUnregisteredLiveClient(t *testing.T) {
 		}
 		rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_6")})
 	})
-	t.Run("a watch report adopts too", func(t *testing.T) {
-		rig := adopting(t)
-		state := rig.registered("blocked", nil)
-		state.Seq = 700
-		rig.seed(state)
-		rig.tmux.clients = []string{"67673"}
-		rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
-		rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_6")})
-	})
 	t.Run("the steady state adds no tmux call beyond list-clients", func(t *testing.T) {
 		rig := adopting(t)
 		rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
@@ -907,4 +899,92 @@ func TestHerdrStateReannounceReportsUnknownWithoutAnEngineEvent(t *testing.T) {
 			t.Fatal("want an error for a socket no engine owns")
 		}
 	})
+}
+
+// A release and an unsequenced title clear must belong to the client that last
+// claimed the terminal, not merely to another chat with the same engine label.
+func TestHerdrStateReplacementKeepsItsPane(t *testing.T) {
+	for _, test := range []struct {
+		name, verb                    string
+		extra                         []string
+		move, sameChat, stillAttached bool
+	}{
+		{name: "delayed explicit detach", verb: "detach", extra: []string{"--client", "4242"}},
+		{name: "delayed sweep", verb: "detach"},
+		{name: "delayed end", verb: "end"},
+		{name: "delayed name", verb: "name", stillAttached: true},
+		{name: "moved terminal", verb: "detach", move: true, extra: []string{"--client", "4242"}},
+		{name: "replacement client of same chat", verb: "detach", sameChat: true, extra: []string{"--client", "4242"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a := newChatRig(t)
+			a.seed(a.registered("working", map[string]herdrClient{"4242": a.client("w1:p1", "term_1")}))
+			a.tmux.chatName = "Old chat"
+			a.wantQuiet(a.engine("start", `{"session_id":"s1"}`))
+			b := newChatRig(t)
+			b.herdr, b.jail = a.herdr, a.jail
+			b.clock = a.clock + 1_000_000
+			b.env["HERDR_SOCKET_PATH"] = a.herdr.path
+			b.env["TMUX"] = rigSocket + "-replacement,1,0"
+			if test.sameChat {
+				b.env["TMUX"] = a.env["TMUX"]
+			}
+			b.clientEnv(5151, "w1:p1")
+			b.herdr.foreground("w1:p1", 5151)
+			b.seed(b.registered("working", map[string]herdrClient{"5151": b.client("w1:p1", "term_1")}))
+			b.tmux.chatName = "Replacement chat"
+			b.wantQuiet(b.engine("start", `{"session_id":"s2"}`))
+			if test.move {
+				b.herdr.move("w1:p1", "w2:p3")
+			}
+			a.tmux.clients = nil
+			if test.stillAttached {
+				a.tmux.clients = []string{"4242"}
+				a.tmux.chatName = "Stale retitle"
+			}
+			a.clock = b.clock + 1_000_000 // the delayed release gets the freshest wire seq
+			if test.verb == "end" {
+				a.wantQuiet(a.engine("end", `{"session_id":"s1"}`))
+			} else {
+				a.wantQuiet(a.hook(test.verb, test.extra...))
+			}
+			// Replay the actual wire mutations, including unsequenced metadata,
+			// rather than trusting the reporter to assert its own ownership.
+			state, title, name, session := "", "", "", ""
+			var resume []string
+			for _, line := range a.herdr.requests() {
+				var request struct {
+					Method string
+					Params struct {
+						State   string
+						Title   string
+						Name    string
+						Session string   `json:"agent_session_id"`
+						Resume  []string `json:"resume_argv"`
+					}
+				}
+				if err := json.Unmarshal([]byte(line), &request); err != nil {
+					t.Fatal(err)
+				}
+				switch request.Method {
+				case "pane.report_agent":
+					state, session, resume = request.Params.State, request.Params.Session, request.Params.Resume
+				case "pane.release_agent":
+					state, session, name, resume = "", "", "", nil
+				case "agent.rename":
+					name = request.Params.Name
+				case "pane.report_metadata":
+					title = request.Params.Title
+				}
+			}
+			if !slices.Equal(resume, []string{"pfm", "chat", "open", "s2"}) {
+				t.Fatalf("replacement resume argv=%q, want pfm chat open s2", resume)
+			}
+			got := []string{state, session, title, name}
+			want := []string{"idle", "s2", "Replacement chat", "replacement-chat"}
+			if !slices.Equal(got, want) {
+				t.Fatalf("replacement pane=%q, want %q", got, want)
+			}
+		})
+	}
 }

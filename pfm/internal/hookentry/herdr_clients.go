@@ -2,22 +2,156 @@ package hookentry
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
+
+type herdrTarget struct {
+	pane, socket string
+	// Only registered tmux clients participate in the legacy bridge's ownership
+	// ledger; native seats have their own ownership contract.
+	client, terminal string
+}
+
+func clientTarget(pid string, client herdrClient) herdrTarget {
+	return herdrTarget{pane: client.Pane, socket: client.Socket, client: pid, terminal: client.Terminal}
+}
+
+// lockBridge orders complete legacy report/name/release transactions across
+// chat servers. Holding all panes of a multi-client chat separately would risk
+// lock-order deadlocks. Each ownership record remains scoped to one terminal.
+func (reporter *herdrReporter) lockBridge(ctx context.Context) (func(), error) {
+	deps := reporter.deps
+	if deps.lockDir == "" {
+		return nil, errors.New("lock Herdr bridge: no pfm state directory")
+	}
+	// A separate directory cannot alias any user-created tmux session's lock.
+	deps.lockDir = filepath.Join(deps.lockDir, "pfm-herdr-bridge")
+	return (&herdrReporter{deps: deps}).lock(ctx, "transaction")
+}
+
+type herdrPaneOwner struct {
+	Client string `json:"client"`
+	Seq    uint64 `json:"seq"`
+}
+
+func (reporter *herdrReporter) paneOwnerPath(target herdrTarget) string {
+	terminal := target.terminal
+	if terminal == "" {
+		terminal = target.pane
+	}
+	key := sha256.Sum256([]byte(target.socket + "\x00" + terminal))
+	return filepath.Join(reporter.deps.lockDir, fmt.Sprintf("pfm-herdr-pane-%x.owner", key))
+}
+
+func (reporter *herdrReporter) clientOwner(target herdrTarget) string {
+	return reporter.options.socket + "\x00" + reporter.session + "\x00" + target.client
+}
+
+// paneOwner is read only under lockBridge. Missing records permit an older
+// chat server's first release; unreadable records never authorize a mutation.
+func (reporter *herdrReporter) paneOwner(target herdrTarget) (herdrPaneOwner, error) {
+	var owner herdrPaneOwner
+	path := reporter.paneOwnerPath(target)
+	// Do not follow a replaced leaf or block on a FIFO before checking its type.
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return owner, nil
+	}
+	if err != nil {
+		return owner, fmt.Errorf("read ownership of pane %s from %s: %w", target.pane, path, err)
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return owner, fmt.Errorf("inspect ownership of pane %s from %s: %w", target.pane, path, err)
+	}
+	const maxOwnerBytes = 4096
+	if !info.Mode().IsRegular() || info.Size() > maxOwnerBytes {
+		return owner, fmt.Errorf("read ownership of pane %s from %s: not a regular file of at most %d bytes",
+			target.pane, path, maxOwnerBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxOwnerBytes+1))
+	if err != nil {
+		return owner, fmt.Errorf("read ownership of pane %s from %s: %w", target.pane, path, err)
+	}
+	if len(data) > maxOwnerBytes {
+		return owner, fmt.Errorf(
+			"read ownership of pane %s from %s: exceeds %d bytes",
+			target.pane,
+			path,
+			maxOwnerBytes,
+		)
+	}
+	if err := json.Unmarshal(data, &owner); err != nil {
+		return owner, fmt.Errorf("decode ownership of pane %s from %s: %w", target.pane, path, err)
+	}
+	if owner.Client == "" || owner.Seq == 0 {
+		return owner, fmt.Errorf("read ownership of pane %s from %s: missing client or generation", target.pane, path)
+	}
+	return owner, nil
+}
+
+// reservePane precedes the wire send: a timeout may still have delivered the
+// report, so an older client must not clear its possible replacement's title.
+func (reporter *herdrReporter) reservePane(target herdrTarget) error {
+	owner := herdrPaneOwner{Client: reporter.clientOwner(target), Seq: reporter.seq}
+	data, err := json.Marshal(owner)
+	if err != nil {
+		return fmt.Errorf("encode ownership of pane %s: %w", target.pane, err)
+	}
+	if err := atomicfile.Write(reporter.paneOwnerPath(target), data, 0o600); err != nil {
+		return fmt.Errorf("reserve ownership of pane %s for client %s: %w", target.pane, target.client, err)
+	}
+	return nil
+}
+
+func (target herdrTarget) ok() bool { return target.pane != "" && target.socket != "" }
+
+// preparePane checks a release or reserves a report under the bridge lock.
+func (reporter *herdrReporter) preparePane(target herdrTarget, release bool) (bool, error) {
+	if target.client != "" {
+		owner, err := reporter.paneOwner(target)
+		if err != nil {
+			return false, err
+		}
+		// Seq fences a takeover, not events of the current owner. A watcher
+		// deliberately uses its blocked event's seq, even after a reannounce.
+		if owner.Client == reporter.clientOwner(target) {
+			return true, nil
+		}
+		if owner.Seq > reporter.seq {
+			return false, nil
+		}
+		if release {
+			if owner.Client != "" && owner.Client != reporter.clientOwner(target) {
+				return false, nil
+			}
+		} else {
+			if err := reporter.reservePane(target); err != nil {
+				return false, err
+			}
+		}
+	}
+	return true, nil
+}
 
 // clientSplit is the tmux clients of a chat session set against its registry.
 type clientSplit struct {
@@ -101,7 +235,12 @@ func (reporter *herdrReporter) liveClients(
 		if state.Clients == nil {
 			state.Clients = map[string]herdrClient{}
 		}
-		state.Clients[pid] = herdrClient{Pane: location.Pane, Terminal: location.Terminal, Socket: location.Socket}
+		client := herdrClient{Pane: location.Pane, Terminal: location.Terminal, Socket: location.Socket}
+		state.Clients[pid] = client
+		if reporter.verifiedClients == nil {
+			reporter.verifiedClients = map[string]herdrClient{}
+		}
+		reporter.verifiedClients[pid] = client
 		split.adopted = append(split.adopted, pid)
 	}
 	split.errs = errors.Join(errs...)
@@ -134,7 +273,7 @@ func (reporter *herdrReporter) releaseAll(ctx context.Context, engine string, cl
 		}
 		errs = append(errs, reporter.send(
 			ctx,
-			herdrTarget{pane: client.Pane, socket: client.Socket},
+			clientTarget(pid, client),
 			&herdrAction{release: true, stored: herdrStored{Engine: engine}},
 			reporter.nextSent(),
 		))
@@ -267,6 +406,14 @@ func (reporter *herdrReporter) resolveClients(ctx context.Context, state *herdrS
 			}
 			continue
 		}
+		allowed, err := reporter.clientMayReport(ctx, pid, client)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !allowed {
+			continue
+		}
 		if client != state.Clients[pid] {
 			state.Clients[pid] = client
 			changed = true
@@ -275,6 +422,42 @@ func (reporter *herdrReporter) resolveClients(ctx context.Context, state *herdrS
 		moved[pid] = panesDiffer
 	}
 	return resolved, moved, changed, errors.Join(errs...)
+}
+
+// clientMayReport prevents a retained registry entry from renaming or reporting
+// over another client's claim. A new foreground client may claim the terminal;
+// neither an inherited pane id nor a retained terminal proves that ownership.
+func (reporter *herdrReporter) clientMayReport(ctx context.Context, pid string, client herdrClient) (bool, error) {
+	target := clientTarget(pid, client)
+	owner, err := reporter.paneOwner(target)
+	if err != nil {
+		return false, err
+	}
+	if owner.Client == reporter.clientOwner(target) {
+		return true, nil
+	}
+	if owner.Seq > reporter.seq {
+		return false, nil
+	}
+	if owner.Client == "" {
+		return true, nil
+	}
+	if reporter.verifiedClients[pid] == client {
+		return true, reporter.reservePane(target)
+	}
+	number, err := strconv.Atoi(pid)
+	if err != nil {
+		return false, fmt.Errorf("verify replacement client %q of pane %s: %w", pid, client.Pane, err)
+	}
+	_, found, err := reporter.resolver().PaneRunning(ctx, client.Socket, number,
+		[]herdr.Pane{{PaneID: client.Pane, TerminalID: client.Terminal}}, client.Pane)
+	if err != nil {
+		return false, fmt.Errorf("verify replacement client %s of pane %s: %w", pid, client.Pane, err)
+	}
+	if found {
+		return true, reporter.reservePane(target)
+	}
+	return false, nil
 }
 
 func movedClients(clients map[string]herdrClient, moved map[string]bool) map[string]herdrClient {
@@ -342,6 +525,11 @@ func (reporter *herdrReporter) reconcile(
 	session string,
 	state herdrStored,
 ) error {
+	unlockBridge, err := reporter.lockBridge(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlockBridge()
 	split, err := reporter.liveClients(ctx, session, &state, true)
 	if err != nil {
 		return err
@@ -363,7 +551,7 @@ func (reporter *herdrReporter) reconcile(
 		if state.State != "" {
 			errs = append(errs, reporter.send(
 				ctx,
-				herdrTarget{pane: movedNow[pid].Pane, socket: movedNow[pid].Socket},
+				clientTarget(pid, movedNow[pid]),
 				&herdrAction{stored: state},
 				reporter.nextSent(),
 			))
@@ -378,6 +566,11 @@ func (reporter *herdrReporter) reconcile(
 // pid for a client that already left, so a detach hook without --client sweeps:
 // every registered client tmux no longer lists is released.
 func (reporter *herdrReporter) detach(ctx context.Context, session string, state herdrStored) error {
+	unlockBridge, err := reporter.lockBridge(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlockBridge()
 	if reporter.options.client == "" {
 		return reporter.sweep(ctx, session, state)
 	}
@@ -399,7 +592,7 @@ func (reporter *herdrReporter) detach(ctx context.Context, session string, state
 func clientTargets(clients map[string]herdrClient) []herdrTarget {
 	targets := make([]herdrTarget, 0, len(clients))
 	for _, pid := range sortedClientPIDs(clients) {
-		targets = append(targets, herdrTarget{pane: clients[pid].Pane, socket: clients[pid].Socket})
+		targets = append(targets, clientTarget(pid, clients[pid]))
 	}
 	return targets
 }
@@ -527,6 +720,13 @@ func (reporter *herdrReporter) reannounceSession(ctx context.Context, session st
 		return nil, err
 	}
 	defer unlock()
+	unlockBridge, err := reporter.lockBridge(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockBridge()
+	reporter.verifiedClients = nil
+	reporter.panes = nil
 	state, err := reporter.readState(ctx, session)
 	if err != nil {
 		return nil, err
@@ -554,7 +754,7 @@ func (reporter *herdrReporter) reannounceSession(ctx context.Context, session st
 	var reached []string
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]
-		target := herdrTarget{pane: client.Pane, socket: client.Socket}
+		target := clientTarget(pid, client)
 		if err := reporter.send(ctx, target, &herdrAction{stored: state}, reporter.nextSent()); err != nil {
 			errs = append(errs, err)
 			continue

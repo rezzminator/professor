@@ -2,7 +2,9 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestHerdrStateOutsideHerdrIsASilentNoOp(t *testing.T) {
@@ -426,9 +430,6 @@ func TestHerdrStateInsideTmuxFollowsTheSessionEnvironment(t *testing.T) {
 			if state := rig.tmux.storedState(t); state.State != "working" || state.SessionID != "s1" {
 				t.Fatalf("stored @pfm_herdr = %q, want the working state and session kept", rig.tmux.stored)
 			}
-			if files := rig.jail.lockFiles(); len(files) != 1 {
-				t.Fatalf("lock files = %q, want the session's lock", files)
-			}
 			rig.wantCalls()
 		})
 	}
@@ -729,4 +730,164 @@ func TestHerdrStateKeepsAToolNamedBlockedMessage(t *testing.T) {
 			t.Fatalf("requests = %q, want the Edit report last", got)
 		}
 	})
+}
+
+func TestHerdrStateBridgeLockDoesNotAliasAUserSession(t *testing.T) {
+	rig := newChatRig(t)
+	rig.tmux.session = "pfm-herdr-bridge"
+	rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
+	rig.wantCalls(listCall, reportCall("w1:p1", "idle", ""))
+}
+
+// A watcher is ordered by the blocked event, not the later reannouncement's
+// wall clock. Rebinding and reannouncing must not strand its pane as blocked.
+func TestHerdrStateWatcherSurvivesBridgeReconciliation(t *testing.T) {
+	for _, operation := range []string{"reannounce", "move", "adopt"} {
+		t.Run(operation, func(t *testing.T) {
+			rig := newChatRig(t)
+			clients := map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}
+			if operation == "adopt" {
+				clients = nil
+			}
+			state := rig.registered("blocked", clients)
+			state.Seq = 700
+			rig.seed(state)
+			rig.tmux.clients = []string{"4242"}
+			rig.clientEnv(4242, "w1:p1")
+			deps := rig.jail.deps(rig.env, &rig.clock)
+			deps.tmux = rig.tmux.run
+			pane := "w1:p1"
+			switch operation {
+			case "reannounce":
+				if _, err := reannounceOn(context.Background(), rigSocket, deps); err != nil {
+					t.Fatal(err)
+				}
+			case "move":
+				rig.herdr.move(pane, "w2:p3")
+				pane = "w2:p3"
+				rig.wantQuiet(rig.hook("sync", "--client", "4242"))
+			}
+			reporter := &herdrReporter{
+				deps: deps, session: "cc-1", stderr: io.Discard,
+				options: herdrOptions{engine: pfmengine.Claude, event: "idle", socket: rigSocket},
+			}
+			watch := &herdrWatch{reporter: reporter, seq: 700}
+			before := len(rig.herdr.calls())
+			if err := watch.report(); err != nil {
+				t.Fatal(err)
+			}
+			if calls := rig.herdr.calls()[before:]; !slices.Contains(calls, reportCall(pane, "idle", "")) {
+				t.Fatalf("watch after %s: wire=%q, want idle in %s", operation, calls, pane)
+			}
+			if got := rig.tmux.storedState(t); got.State != "idle" || got.Seq != 701 {
+				t.Fatalf("watch stored=%+v, want idle at 701", got)
+			}
+		})
+	}
+}
+
+func TestHerdrStateSteadyReportKeepsOwnershipGeneration(t *testing.T) {
+	rig := newChatRig(t)
+	client := rig.client("w1:p1", "term_1")
+	rig.seed(rig.registered("working", map[string]herdrClient{"4242": client}))
+	rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
+	reporter := &herdrReporter{deps: herdrDeps{lockDir: rig.jail.lockDir}}
+	target := clientTarget("4242", client)
+	before, err := reporter.paneOwner(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
+	after, err := reporter.paneOwner(target)
+	if err != nil || after != before {
+		t.Fatalf("steady report ownership=%+v err=%v, want generation kept %+v", after, err, before)
+	}
+	if calls := rig.herdr.calls(); calls[len(calls)-1] != reportCall("w1:p1", "idle", "") {
+		t.Fatalf("steady report wire=%q, want idle", calls)
+	}
+}
+
+func TestHerdrStateOwnerRejectsDamagedOrRedirectedRecords(t *testing.T) {
+	for _, kind := range []string{"garbage", "missing generation", "oversized", "symlink", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			rig := newChatRig(t)
+			client := rig.client("w1:p1", "term_1")
+			rig.seed(rig.registered("working", map[string]herdrClient{"4242": client}))
+			reporter := &herdrReporter{deps: herdrDeps{lockDir: rig.jail.lockDir}}
+			path := reporter.paneOwnerPath(clientTarget("4242", client))
+			if err := os.MkdirAll(rig.jail.lockDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			data := []byte(`{"client":"some-client","seq":1}`)
+			switch kind {
+			case "directory":
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				leaf := filepath.Join(t.TempDir(), "owner")
+				if err := os.WriteFile(leaf, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(leaf, path); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				switch kind {
+				case "garbage":
+					data = []byte("{")
+				case "missing generation":
+					data = []byte(`{"client":"some-client"}`)
+				default:
+					data = append(data, []byte(strings.Repeat(" ", 8192))...)
+				}
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := rig.hook("detach", "--client", "4242")
+			if got.rc != 0 || !strings.Contains(got.stderr, "ownership of pane w1:p1") {
+				t.Fatalf("%s owner: rc=%d stderr=%q, want contextual ownership error", kind, got.rc, got.stderr)
+			}
+		})
+	}
+}
+
+func TestHerdrStatePartialReplacementSendReservesOwnership(t *testing.T) {
+	rig := newChatRig(t)
+	a := &herdrReporter{
+		deps: rig.jail.deps(rig.env, &rig.clock), session: "cc-1", seq: 100,
+		options: herdrOptions{engine: pfmengine.Claude, socket: rigSocket},
+	}
+	ctx := context.Background()
+	unlock, err := a.lockBridge(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	target := clientTarget("4242", rig.client("w1:p1", "term_1"))
+	action := &herdrAction{stored: rig.registered("working", nil)}
+	if err := a.send(ctx, target, action, 100); err != nil {
+		t.Fatal(err)
+	}
+	b := *a
+	b.options.socket += "-replacement"
+	b.seq = 50
+	if allowed, err := b.preparePane(target, false); err != nil || allowed {
+		t.Fatalf("older foreign report allowed=%v err=%v, want suppressed", allowed, err)
+	}
+	b.seq = 200
+	rig.herdr.refuse["pane.report_agent"] = "internal"
+	if err := b.send(ctx, target, action, 200); err == nil {
+		t.Fatal("replacement send unexpectedly succeeded")
+	}
+	owner, err := b.paneOwner(target)
+	if err != nil || owner.Client != b.clientOwner(target) || owner.Seq != 200 {
+		t.Fatalf("failed-send reservation=%+v err=%v, want replacement generation 200", owner, err)
+	}
+	a.seq = 300
+	if allowed, err := a.preparePane(target, true); err != nil || allowed {
+		t.Fatalf("delayed old detach allowed=%v err=%v, want replacement protected", allowed, err)
+	}
 }

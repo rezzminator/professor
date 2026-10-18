@@ -120,7 +120,7 @@ This settles former open question 2 (where the router lives).
 A GPT agent exists only in a session started through the router. pfm's launch line sets `ANTHROPIC_BASE_URL` and passes `--agents` with the GPT definitions (W10). Each definition is compiled at launch from the Claude file it twins: the prompt body comes from the file and only `model` is swapped, so no hand-kept copy can drift.
 
 - **General workers:** `sol`, `luna`, `astra`, pinned to the catalog's current Sol, Luna and Astra IDs.
-- **Fleet roles:** a GPT twin (for example `gpt-flights-foreman`) replaces the file definition, in that session only.
+- **Fleet roles:** a GPT twin (for example `gpt-foreman`) replaces the file definition, in that session only.
 - **Not an ungated file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails. The shipped twins are therefore machine-source `{name}.md` declarations with `from:` that require the `gpt-agents` capability, installed only on a host that sets `claude.gptAgents` ([GPT twins](../design/gpt-twins/gpt-twins.md)).
 - **Not an alias remap:** see W2 and W8.
 
@@ -128,7 +128,7 @@ A GPT agent exists only in a session started through the router. pfm's launch li
 
 `Agent(subagent_type: "sol", description: …, prompt: …)`, with no `model`. A spawn-time `model` silently overrides the GPT definition back to Claude (W9).
 
-- **The foreman needs no change.** `flights-foreman` already spawns `flights-worker` and `flights-worker-pro` by name with no model override (`templates/global/agents/flights-foreman.md`).
+- **The foreman needs no change.** `flights-foreman` already spawns its child foremen (`flights-foreman-sonnet`, `flights-foreman`) by name with no model override (`templates/global/agents/flights-foreman.md`).
 - **The fleet prompt needs an exception.** It names a tier alias at each spawn site (`pfm/harness-prompts/claude/professor.md`, § Claude Code: "The tiers, by model alias, named inline at each spawn site"). A GPT-pinned agent must be spawned with no `model`.
 
 ## Translator

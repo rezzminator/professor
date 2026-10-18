@@ -42,7 +42,7 @@ Files: `~/.claude/agents/flights-*.md` and `~/.claude/commands/flights/doctor.md
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
 - **Return tokens ↔ their writers:** every token a `flights-*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** main chat → a `flights-foreman` tier → `flights-worker` → main chat → a `flights-lander` tier → gitter; no step references an agent from a later phase
+- **Flow integrity:** main chat → a `flights-foreman` tier → main chat → a `flights-lander` tier → gitter; no step references an agent from a later phase
 
 ## `scripts` — Walk each script
 

@@ -1,5 +1,5 @@
 ---
-name: gpt-flights-foreman
+name: gpt-foreman
 from: flights-foreman
 extends:
   - shared/gpt-flights.md
@@ -10,6 +10,11 @@ tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-
 unset:
   - effortControl
 rename:
-  flights-foreman: gpt-flights-foreman
-  flights-foreman-pro: gpt-flights-foreman-pro
+  flights-foreman: gpt-foreman
+pins:
+  Effort: sha256:6c24ca80368f54751bbc530f28bc89c61f8fff477bffbb671949a27914aece05
 ---
+
+## Effort
+
+Your effort is set by your definition; you hold no effort tools.

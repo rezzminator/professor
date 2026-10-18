@@ -37,13 +37,7 @@
     "global/agents/documenter.md": {
       "curated": true
     },
-    "global/agents/flights-foreman-mini.md": {
-      "curated": true
-    },
-    "global/agents/flights-foreman-pro.md": {
-      "curated": true
-    },
-    "global/agents/flights-worker-pro.md": {
+    "global/agents/flights-foreman-sonnet.md": {
       "curated": true
     },
     "global/agents/flights-lander-mini.md": {
@@ -52,10 +46,7 @@
     "global/agents/flights-lander-pro.md": {
       "curated": true
     },
-    "global/agents/gpt-flights-foreman-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-foreman.md": {
+    "global/agents/gpt-foreman.md": {
       "curated": true
     },
     "global/agents/gpt-flights-lander.md": {

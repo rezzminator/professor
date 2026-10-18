@@ -18,7 +18,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - fleet prompt: the main chat's system layer per engine, composed at build into the tracked `pfm/harness-prompts/composed/` by `make -C pfm prompts`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here · `pfm/harness-prompts/`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the only web and document harvester, over a pinned Python conversion sidecar · `pfm/internal/harvest/`, `pfm/internal/harvestmcp/`, sidecar `pfm/internal/harvestpy/`
-- flights: the foreman, worker and lander tiers that build and land work past the direct rung, and `/flights:doctor`, their meter · `templates/global/agents/flights-*.md`, `templates/global/commands/flights/` · design `docs/design/flights/`
+- flights: the foreman and lander tiers that build and land work past the direct rung, and `/flights:doctor`, their meter · `templates/global/agents/flights-*.md`, `templates/global/commands/flights/` · design `docs/design/flights/`
 - quality laws: the `/quality:*` family every prompt and orientation-file edit loads · `templates/global/commands/quality/` · design `docs/design/quality/`
 - fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - demo fence: for presentations · `infra/demo/`
@@ -93,9 +93,9 @@ Before your first tool call, count the tasks in your brief. A task is one delive
 - A brief carrying the user's ruling to skip the ceremony (no foreman, no spawn): do it yourself, start to finish, whatever its size.
 - Otherwise take the lowest rung that fits; a higher rung needs its named reason.
   1. The solution is in hand and fits about 80 calls, a small failure you can read to its cause included: do it yourself.
-  2. Anything larger, or work crossing build units: your first call spawns a foreman, its tier by difficulty and ambiguity, never size — `flights-foreman-mini` a clear path with a pattern, `flights-foreman` design choices, ambiguity or several modules, `flights-foreman-pro` the toughest — with the work, all you hold, acceptance, where to work and the testing manual paths; pass its return up, landing stays with the main chat.
+  2. Anything larger, or work crossing build units: your first call spawns a foreman by difficulty, never size — `flights-foreman-sonnet` the path is clear (the code has the pattern, the requirements are settled), `flights-foreman` design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules, or the toughest challenges where being wrong is costly — with the work, all you hold, acceptance, where to work and the testing manual paths; pass its return up, landing stays with the main chat.
 - ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Take the four failing test lanes to green": one foreman, whose own split decides any division. ✗ A planner writing briefs for workers that read the same code again.
+- ✓ "Take the four failing test lanes to green": one foreman. ✗ A planner writing briefs for workers that read the same code again.
 - Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
 
 ## Dispatch
@@ -133,7 +133,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - When `gitter` is unavailable, only the active main Codex chat performs scoped Git writes, and only after the user's explicit authorization in the current turn; publication still needs its own request under § Publication.
 - Commit only code whose tests pass.
 - Prompt files: a task touching `.claude/**`, any `CLAUDE.md` (the source of its `AGENTS.md`) or `templates/**` routes to the `pcm` agent (the user's `/pcm` dispatches it), which loads `/quality:prompt` before the first edit and `/quality:claude-md` before a `CLAUDE.md` edit.
-- Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build through `.claude/scripts/dev.sh iso`; a foreman or worker runs only its affected tests per `.claude/commands/pfm-testing-manual.md`; the full gate is the lander's.
+- Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build through `.claude/scripts/dev.sh iso`; a foreman runs only its affected tests per `.claude/commands/pfm-testing-manual.md`; the full gate is the lander's.
 - Dev and test runs target fence worktrees, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Template, doc, prompt and config-file changes land on `develop` directly, in the main checkout.
 - A fenced flight closes in order, run by the main chat: once every foreman on the worktree returned, one lander tier (fleet prompt § You hold a flight) — one reviewer, every finding fixed, the full gate once → the authorized Git writer commits to `develop` → the host mirror build under § Host.

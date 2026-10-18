@@ -144,7 +144,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 **Phase 2.6 — Host tooling probe (git-host bridge):** Check the install machine for `gh` and `glab` (`command -v`). For each present, write a one-file host command at `.claude/commands/h/{gh|glab}.md` (the `h:` host namespace) whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: an adopter on GitLab forks + releases professor through `/h:glab`, a GitHub adopter through `/h:gh`, and `/pfm:release` and gitter read this marker to target the right host. These host-local bridges are KEEP-LOCAL — excluded from the portable blueprint. Absent tools get no command. Then resolve the blueprint repo target: if the user has push access to the canonical repo, set `{BLUEPRINT_REPO}`/`{GH_USER}`/`{BLUEPRINT_CLONE_PATH}` to it; otherwise have them fork it and use the fork.
 
-**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `flights-foreman-mini` fix and watch its project checks.
+**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `flights-foreman-sonnet` fix and watch its project checks.
 
 ## 5. Public README
 

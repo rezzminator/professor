@@ -72,8 +72,8 @@ func printHerdrDoctor(
 			name, key string
 			homes     []string
 		}{
-			{"claude", "CLAUDE_CONFIG_DIR", machine.ClaudeConfigDirs()},
-			{"codex", "CODEX_HOME", machine.CodexHomes()},
+			{herdr.Label(pfmengine.Claude), "CLAUDE_CONFIG_DIR", machine.ClaudeConfigDirs()},
+			{herdr.Label(pfmengine.Codex), "CODEX_HOME", machine.CodexHomes()},
 		} {
 			for _, home := range engine.homes {
 				if seen[engine.key+"="+home] {

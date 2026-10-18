@@ -27,11 +27,13 @@ func TestLabelSoleTab(t *testing.T) {
 		{"no tab labels nothing", "", "1", 1, "", nil, ""},
 		{
 			"an unreadable tab is an error", "w1:t1", "1", 1, "tab.get",
-			[]string{"tab.get"}, "read: herdr refused tab.get",
+			[]string{"tab.get"},
+			"read: herdr refused tab.get",
 		},
 		{
 			"a refused relabel is an error", "w1:t1", "1", 1, "tab.rename",
-			[]string{"tab.get", "tab.rename:Fix It"}, `relabel "Fix It": herdr refused tab.rename`,
+			[]string{"tab.get", "tab.rename:Fix It"},
+			`relabel "Fix It": herdr refused tab.rename`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

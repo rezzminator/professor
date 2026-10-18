@@ -3,7 +3,6 @@ package call
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,45 +26,15 @@ const (
 	statusTypedUnconfirmed = "typed_unconfirmed"
 )
 
-// SendKey sends one named key to an already resolved seat. The target's address,
-// never the calling process's environment, selects the backend.
-func (engine *Engine) SendKey(ctx context.Context, target Target, key string) error {
-	if target.SocketPath == "" || target.Pane == "" || key == "" {
-		return fmt.Errorf("send key: socket, pane and key are required")
-	}
-	switch target.Backend {
-	case "", backendTmux:
-		return engine.tmux.SendKey(ctx, target.SocketPath, target.Pane, key)
-	case backendHerdr:
-		// The public keys grammar is tmux's; Herdr spells modifiers with pluses.
-		key = strings.NewReplacer("C-", "ctrl+", "M-", "alt+", "S-", "shift+").Replace(key)
-		result, err := herdr.SeatRequest(ctx, target.SocketPath, "pane.send_keys", struct {
-			Pane string   `json:"pane_id"`
-			Keys []string `json:"keys"`
-		}{target.Pane, []string{key}})
-		if err != nil {
-			return fmt.Errorf("herdr send key %q to %q: %w", key, target.Pane, err)
-		}
-		var ack struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(result, &ack); err != nil {
-			return fmt.Errorf("decode herdr send key to %q: %w", target.Pane, err)
-		}
-		if ack.Type != "ok" {
-			return fmt.Errorf("herdr send key to %q: unexpected result type %q", target.Pane, ack.Type)
-		}
-		return nil
-	default:
-		return fmt.Errorf("send key: unsupported seat backend %q", target.Backend)
-	}
-}
-
 func herdrCapture(ctx context.Context, target Target, lines int) (string, string, error) {
-	return herdrCaptureFormat(ctx, target, lines, "")
+	return herdrCaptureSource(ctx, target, lines, "recent", "")
 }
 
 func herdrCaptureFormat(ctx context.Context, target Target, lines int, format string) (string, string, error) {
+	return herdrCaptureSource(ctx, target, lines, "visible", format)
+}
+
+func herdrCaptureSource(ctx context.Context, target Target, lines int, source, format string) (string, string, error) {
 	if target.SocketPath == "" || target.Pane == "" {
 		return "", "", fmt.Errorf("herdr capture: socket and pane are required")
 	}
@@ -84,7 +53,7 @@ func herdrCaptureFormat(ctx context.Context, target Target, lines int, format st
 		Lines     int    `json:"lines"`
 		Format    string `json:"format,omitempty"`
 		StripANSI *bool  `json:"strip_ansi,omitempty"`
-	}{target.Pane, "recent", limit, format, stripANSI})
+	}{target.Pane, source, limit, format, stripANSI})
 	if err != nil {
 		return "", "", fmt.Errorf("herdr capture %q on %q: %w", target.Pane, target.SocketPath, err)
 	}
@@ -120,14 +89,22 @@ func herdrCaptureFormat(ctx context.Context, target Target, lines int, format st
 	return *response.Read.Text, detail, nil
 }
 
+type herdrAgentSession struct {
+	Source string `json:"source"`
+	Agent  string `json:"agent"`
+	Kind   string `json:"kind"`
+	Value  string `json:"value"`
+}
+
 type herdrAgentResult struct {
 	Type  string `json:"type"`
 	Agent *struct {
-		Pane           string  `json:"pane_id"`
-		Terminal       string  `json:"terminal_id"`
-		Status         string  `json:"agent_status"`
-		StateChangeSeq uint64  `json:"state_change_seq"`
-		CompletionSeq  *uint64 `json:"completion_seq"`
+		Pane           string             `json:"pane_id"`
+		Terminal       string             `json:"terminal_id"`
+		Status         string             `json:"agent_status"`
+		StateChangeSeq uint64             `json:"state_change_seq"`
+		AgentSession   *herdrAgentSession `json:"agent_session"`
+		CompletionSeq  *uint64            `json:"completion_seq"`
 	} `json:"agent"`
 }
 
@@ -153,6 +130,9 @@ func decodeHerdrAgent(result json.RawMessage, kind string, target Target) (herdr
 			response.Agent.Terminal,
 		)
 	}
+	if kind == "agent_prompted" && response.Agent.Terminal == "" {
+		return response, fmt.Errorf("herdr %s for %q: missing terminal identity", kind, target.Pane)
+	}
 	switch response.Agent.Status {
 	case herdrIdle, herdrWorking, herdrBlocked, herdrDone, herdrUnknown:
 		return response, nil
@@ -166,246 +146,8 @@ func decodeHerdrAgent(result json.RawMessage, kind string, target Target) (herdr
 	}
 }
 
-func (engine *Engine) callHerdr(
-	ctx context.Context,
-	request Request,
-	target Target,
-	base Result,
-	lock *targetLock,
-) (Result, error) {
-	if target.SocketPath == "" || target.Pane == "" {
-		base.Code = CodeUndelivered
-		base.Message = "ABORT: Herdr call requires an explicit socket and pane; nothing was typed"
-		return base, nil
-	}
-	id, err := pfmengine.Parse(target.Engine)
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf(
-			"ABORT: unsupported Herdr call engine %q",
-			target.Engine,
-		)
-		return base, nil
-	}
-	if !pfmengine.MustLookup(id).HerdrNativePrompt {
-		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
-	}
-	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
-	if err != nil {
-		return base, fmt.Errorf("herdr read target %q on %q: %w", target.Pane, target.SocketPath, err)
-	}
-	agent, err := decodeHerdrAgent(result, "agent_info", target)
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = err.Error()
-		return base, nil
-	}
-	switch agent.Agent.Status {
-	case herdrWorking:
-		base.Busy = true
-		base.Code = CodeBusy
-		base.Message = "ABORT: target pane is busy; nothing was typed"
-		return base, nil
-	case herdrBlocked, herdrUnknown:
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: target pane is %s; nothing was typed", agent.Agent.Status)
-		return base, nil
-	}
-	screen, _, err := herdrCapture(ctx, target, herdrRecentLines)
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: native composer could not be checked; nothing was typed: %v", err)
-		return base, nil
-	}
-	if !ComposerRowShown(screen) || SelectorLine(screen) != "" || pfmengine.ClaudeTrustDialog(screen) ||
-		ComposerDraftText(screen) != "" {
-		base.Code = CodeUndelivered
-		base.Status = statusUndelivered
-		base.Message = "ABORT: native composer is not empty and ready; nothing was typed, existing draft/menu preserved"
-		return base, nil
-	}
-	prepared, err := engine.prepareLiveMessage(ctx, target, request.Message, false)
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("prepare Herdr call: %v", err)
-		return base, nil
-	}
-	base.Unsigned = prepared.Unsigned
-	base.AutoFilePath = prepared.AutoFilePath
-	result, err = herdr.SeatRequest(ctx, target.SocketPath, "agent.prompt", struct {
-		Target string `json:"target"`
-		Text   string `json:"text"`
-	}{target.Pane, prepared.Message})
-	// Once prompt was attempted, neither a timeout nor a malformed response may
-	// authorize a retry: the producer may already have submitted the message.
-	base.Typed = true
-	if err != nil {
-		var refusal *herdr.Refusal
-		if errors.As(err, &refusal) && refusal.Code == "agent_not_ready" {
-			base.Typed = false
-		}
-		base.Status = statusTypedUnconfirmed
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("herdr agent.prompt for %q unconfirmed: %v", target.Pane, err)
-		return base, nil
-	}
-	prompted, err := decodeHerdrAgent(result, "agent_prompted", target)
-	if err != nil {
-		base.Status = statusTypedUnconfirmed
-		base.Code = CodeUndelivered
-		base.Message = err.Error()
-		return base, nil
-	}
-	turn := &herdrTurn{
-		SocketPath: target.SocketPath, Pane: target.Pane,
-		StateChangeSeq: agent.Agent.StateChangeSeq, CompletionSeq: agent.Agent.CompletionSeq,
-		SawWorking: prompted.Agent.Status == herdrWorking,
-	}
-	base.Status = statusDelivered
-	base.Message = fmt.Sprintf("called LIVE into %q — Herdr agent_prompted", target.Pane)
-	for _, warning := range prepared.Warnings {
-		base.Message += " — WARNING: " + warning
-	}
-	if len(request.Then) > 0 {
-		lock.release()
-		if engine.armSteers(ctx, request, target, &base, turn) {
-			base.Message += fmt.Sprintf(" — %d then steer(s) queued (log: %s)", base.Steers, base.SteerLog)
-		}
-	}
-	return base, nil
-}
-
 // callHerdrRaw preserves the existing composer guard and confirmation without
 // relying on native agent detection for an engine whose capability is unproven.
-func (engine *Engine) callHerdrRaw(
-	ctx context.Context,
-	request Request,
-	target Target,
-	base Result,
-	lock *targetLock,
-	id pfmengine.ID,
-) (Result, error) {
-	before, _, err := herdrRawCapture(ctx, target, "")
-	if err != nil {
-		base.Code, base.Message = CodeUndelivered, fmt.Sprintf(
-			"ABORT: Herdr composer could not be checked; nothing was typed: %v",
-			err,
-		)
-		return base, nil
-	}
-	if IsFooterBusy(id, before) {
-		base.Busy, base.Code, base.Message = true, CodeBusy, "ABORT: target pane is busy; nothing was typed"
-		return base, nil
-	}
-	if !ComposerRowShown(before) || SelectorLine(before) != "" {
-		base.Status, base.Code, base.Message = statusUndelivered, CodeUndelivered, "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
-		return base, nil
-	}
-	empty, _, err := ComposerEmpty(before, func() (string, error) {
-		styled, _, readErr := herdrRawCapture(ctx, target, "ansi")
-		if readErr != nil {
-			return "", readErr
-		}
-		if !ComposerRowShown(styled) || SelectorLine(styled) != "" || IsFooterBusy(id, styled) {
-			return "", fmt.Errorf("herdr composer changed while checking styling")
-		}
-		return styled, nil
-	})
-	if err != nil {
-		base.Code, base.Message = CodeUndelivered, fmt.Sprintf(
-			"ABORT: Herdr composer styling could not be checked; nothing was typed: %v", err,
-		)
-		return base, nil
-	}
-	if !empty {
-		base.Status, base.Code = statusUndelivered, CodeUndelivered
-		base.Message = "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
-		return base, nil
-	}
-	prepared, err := engine.prepareLiveMessage(ctx, target, request.Message, false)
-	if err != nil {
-		base.Code, base.Message = CodeUndelivered, fmt.Sprintf("prepare Herdr call: %v", err)
-		return base, nil
-	}
-	base.Unsigned, base.AutoFilePath = prepared.Unsigned, prepared.AutoFilePath
-	// A failed acknowledgement cannot prove the bytes were not admitted. Never
-	// retry the paste: it could already be waiting in the recipient's composer.
-	base.Typed = true
-	if err := engine.SendLiteral(ctx, target, "\x1b[200~"+prepared.Message+"\x1b[201~"); err != nil {
-		base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
-			"Herdr raw paste unconfirmed: %v",
-			err,
-		)
-		return base, nil
-	}
-	prefix := headRunes(normalizeSpace(prepared.Message), 24)
-	for attempt := 1; attempt <= engine.options.EnterTries; attempt++ {
-		if err := ctx.Err(); err != nil {
-			base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
-				"Herdr raw submit cancelled: %v",
-				err,
-			)
-			return base, nil
-		}
-		if err := lock.beat(); err != nil {
-			return lockLost(base, target.Pane, err), nil
-		}
-		base.SubmitRetries = attempt
-		if err := engine.SendKey(ctx, target, "Enter"); err != nil {
-			base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
-				"Herdr raw Enter unconfirmed: %v",
-				err,
-			)
-			return base, nil
-		}
-		engine.sleepContext(ctx, engine.options.EnterSettle)
-		after, _, err := herdrRawCapture(ctx, target, "")
-		if err != nil {
-			base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, fmt.Sprintf(
-				"Herdr raw confirmation failed: %v",
-				err,
-			)
-			return base, nil
-		}
-		input := composerLastLine(after)
-		if HasPastePlaceholder(input) || (input != "" && strings.Contains(normalizeSpace(input), prefix)) {
-			continue
-		}
-		if id == pfmengine.OpenCode && strings.Contains(before, "╹") &&
-			strings.Count(normalizeSpace(after), prefix) <= strings.Count(normalizeSpace(before), prefix) {
-			break
-		}
-		if !ComposerRowShown(after) && !deliveryProven(id, before, after, prepared.Message, false, request.FileBacked) {
-			break
-		}
-		base.Status, base.Code = statusDelivered, 0
-		base.Message = fmt.Sprintf("called LIVE into %q — Herdr raw composer confirmed", target.Pane)
-		base.Proof = lastNonEmptyLines(after, engine.options.ProofLines)
-		for _, warning := range prepared.Warnings {
-			base.Message += " — WARNING: " + warning
-		}
-		if len(request.Then) > 0 {
-			lock.release()
-			if engine.armSteers(
-				ctx,
-				request,
-				target,
-				&base,
-				&herdrTurn{
-					SocketPath: target.SocketPath,
-					Pane:       target.Pane,
-					Raw:        true,
-					SawWorking: IsFooterBusy(id, after),
-				},
-			) {
-				base.Message += fmt.Sprintf(" — %d then steer(s) queued (log: %s)", base.Steers, base.SteerLog)
-			}
-		}
-		return base, nil
-	}
-	base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, "typed Herdr raw text but could not confirm submission; do not retry blindly"
-	return base, nil
-}
 
 func supportedBackend(backend string) bool {
 	return backend == "" || backend == backendTmux || backend == backendHerdr
@@ -423,12 +165,14 @@ const herdrTurnEnv = "CHAT_THEN_HERDR_TURN"
 // herdrTurn is evidence for one submitted native turn, not a second address
 // source. The detached waiter validates its socket/pane against explicit argv.
 type herdrTurn struct {
-	SocketPath     string  `json:"socket_path"`
-	Pane           string  `json:"pane"`
-	StateChangeSeq uint64  `json:"state_change_seq"`
-	CompletionSeq  *uint64 `json:"completion_seq"`
-	SawWorking     bool    `json:"saw_working"`
-	Raw            bool    `json:"raw,omitempty"`
+	SocketPath     string             `json:"socket_path"`
+	Pane           string             `json:"pane"`
+	StateChangeSeq uint64             `json:"state_change_seq"`
+	CompletionSeq  *uint64            `json:"completion_seq"`
+	SawWorking     bool               `json:"saw_working"`
+	Raw            bool               `json:"raw,omitempty"`
+	Terminal       string             `json:"terminal_id,omitempty"`
+	AgentSession   *herdrAgentSession `json:"agent_session,omitempty"`
 }
 
 func (engine *Engine) armSteers(
@@ -516,7 +260,7 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("raw Herdr turn for %q: %w", target.Pane, err)
 			}
-			screen, _, err := herdrRawCapture(ctx, target, "")
+			screen, err := herdrRawCapture(ctx, target, "")
 			if err != nil {
 				return fmt.Errorf("raw Herdr turn capture: %w", err)
 			}
@@ -558,6 +302,11 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 		if err != nil {
 			return err
 		}
+		if (turn.Terminal != "" && agent.Agent.Terminal != turn.Terminal) ||
+			(turn.Terminal != "" || turn.AgentSession != nil) &&
+				!sameHerdrSession(turn.AgentSession, agent.Agent.AgentSession) {
+			return fmt.Errorf("herdr turn identity changed for %q", target.Pane)
+		}
 		state := agent.Agent.Status
 		if state == herdrBlocked || state == herdrUnknown {
 			return fmt.Errorf("herdr target %q is %s", target.Pane, state)
@@ -579,8 +328,9 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 			until = []string{herdrIdle, herdrDone, herdrBlocked}
 			continue
 		}
-		advanced := agent.Agent.StateChangeSeq > turn.StateChangeSeq ||
-			(turn.CompletionSeq != nil && agent.Agent.CompletionSeq != nil && *agent.Agent.CompletionSeq > *turn.CompletionSeq)
+		// completion_seq uses the producer's global event sequence. An old
+		// completion (even newer than another old completion) is not this turn.
+		advanced := agent.Agent.CompletionSeq != nil && *agent.Agent.CompletionSeq > turn.StateChangeSeq
 		if turn.SawWorking || advanced {
 			return nil
 		}
@@ -611,25 +361,7 @@ func (engine *Engine) SendLiteral(ctx context.Context, target Target, text strin
 	case "", backendTmux:
 		return engine.tmux.SendLiteral(ctx, target.SocketPath, target.Pane, text)
 	case backendHerdr:
-		result, err := herdr.SeatRequest(
-			ctx,
-			target.SocketPath,
-			"pane.send_text",
-			map[string]any{"pane_id": target.Pane, "text": text},
-		)
-		if err != nil {
-			return fmt.Errorf("send literal to Herdr pane %s: %w", target.Pane, err)
-		}
-		var ack struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(result, &ack); err != nil {
-			return fmt.Errorf("decode Herdr literal acknowledgement for %s: %w", target.Pane, err)
-		}
-		if ack.Type != "ok" {
-			return fmt.Errorf("herdr literal acknowledgement for %s: unexpected type %q", target.Pane, ack.Type)
-		}
-		return nil
+		return herdrSendText(ctx, target, text, "pane.send_text")
 	default:
 		return fmt.Errorf("unsupported seat backend %q", target.Backend)
 	}
@@ -651,4 +383,10 @@ func (engine *Engine) CaptureTarget(ctx context.Context, target Target, tailLine
 		return engine.tmux.Capture(ctx, target.SocketPath, target.Pane, true, FullScrollback)
 	}
 	return engine.capturePane(ctx, target, tailLines)
+}
+
+func sameHerdrSession(expected, actual *herdrAgentSession) bool {
+	// Older detached records may have no identity. New records preserve the
+	// complete validation snapshot, including a later disappearance of identity.
+	return (expected == nil && actual == nil) || (expected != nil && actual != nil && *expected == *actual)
 }

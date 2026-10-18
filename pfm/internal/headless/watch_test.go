@@ -3,6 +3,7 @@ package headless
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -833,4 +834,144 @@ func TestWatchLostNoteRendering(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWatchStateSourceRendering(t *testing.T) {
+	const source = "transcript (Herdr unknown)"
+	for _, transitions := range []bool{false, true} {
+		steps := []fakeStep{idleFor(10, "y")}
+		want := []string{`IDLE a idle_seconds=10 state_source="transcript (Herdr unknown)"`}
+		if transitions {
+			steps = []fakeStep{working("x"), blocked(), quietFor(20, "x"), idleFor(10, "y"), gone()}
+			want = []string{
+				`SEEN a working state_source="transcript (Herdr unknown)"`,
+				`BLOCKED a state_source="transcript (Herdr unknown)"`,
+				`QUIET a quiet_seconds=20 state_source="transcript (Herdr unknown)"`,
+				`IDLE a idle_seconds=10 state_source="transcript (Herdr unknown)"`,
+				`EXIT a state_source="transcript (Herdr unknown)"`,
+			}
+		}
+		for i := range steps {
+			data, err := json.Marshal(steps[i].status)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatal(err)
+			}
+			fields["state_source"] = source
+			data, err = json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &steps[i].status); err != nil {
+				t.Fatal(err)
+			}
+		}
+		seats := newFakeSeats(map[string][]fakeStep{"a": steps})
+		lines, _, err := runFleet(
+			t,
+			namedFleet(seats, "a"),
+			WatchOptions{Once: !transitions, Transitions: transitions, QuietAfter: 10 * time.Second},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertLines(t, lines, want)
+	}
+}
+
+// Native rest identity is independent of a transcript's last answer.
+func TestWatchNativeRestAndProvenance(t *testing.T) {
+	for _, transitions := range []bool{false, true} {
+		for _, test := range []struct {
+			name            string
+			fallback        bool
+			sameRest        bool
+			newAnswer       bool
+			noWorking       bool
+			interveningRest bool
+		}{
+			{name: "adjacent new rest"},
+			{name: "new rest after fallback", fallback: true},
+			{name: "same rest after fallback", fallback: true, sameRest: true},
+			{name: "adjacent new rest and answer", newAnswer: true},
+			{name: "consecutive unsettled rests and answer", newAnswer: true, interveningRest: true},
+			{name: "new rest and answer after fallback", fallback: true, newAnswer: true},
+			{name: "new rest and answer without working", fallback: true, newAnswer: true, noWorking: true},
+		} {
+			t.Run(fmt.Sprintf("%t/%s", transitions, test.name), func(t *testing.T) {
+				first, next := idleFor(10, ""), idleFor(1, "")
+				first.status.RestID, next.status.RestID = "terminal:4", "terminal:6"
+				if test.sameRest {
+					next.status.RestID = first.status.RestID
+				}
+				if test.newAnswer {
+					first.status.Last, next.status.Last = "old", "new"
+				}
+				steps := []fakeStep{first}
+				want := []string{"IDLE a idle_seconds=10"}
+				wantIdles := 1
+				if transitions {
+					want = []string{"SEEN a idle idle_seconds=10"}
+					wantIdles = 0
+				}
+				if test.fallback {
+					fallback := idleFor(10, first.status.Last)
+					fallback.status.StateSource = "transcript (Herdr unknown)"
+					steps = append(steps, fallback, fallback)
+				}
+				if transitions && test.newAnswer && !test.noWorking {
+					want = append(want, "WORKING a")
+				}
+				if test.interveningRest {
+					middle := idleFor(0, first.status.Last)
+					middle.status.RestID = "terminal:5"
+					steps = append(steps, middle)
+				}
+				settled := next
+				settled.status.IdleSeconds = 10
+				steps = append(steps, next, settled, gone())
+				if !test.sameRest {
+					want = append(want, "IDLE a idle_seconds=10")
+					wantIdles++
+				}
+				want = append(want, "EXIT a")
+				if test.noWorking {
+					for i, line := range want {
+						if strings.HasPrefix(line, "IDLE ") || strings.HasPrefix(line, "SEEN ") {
+							want[i] += ` answer="ready"`
+						}
+					}
+				}
+				seats := newFakeSeats(map[string][]fakeStep{"a": steps})
+				idles := 0
+				lines, _, err := runFleet(t, namedFleet(seats, "a"), WatchOptions{
+					Transitions: transitions, NoWorking: test.noWorking,
+					IdleAfter: 5 * time.Second, Once: transitions && test.sameRest,
+					OnIdle: func(Status) error { idles++; return nil },
+					Answer: func(context.Context, Chat) (string, error) { return "ready", nil },
+				})
+				if err != nil || idles != wantIdles {
+					t.Fatalf("watch rest idles=%d want=%d err=%v lines=%v", idles, wantIdles, err, lines)
+				}
+				assertLines(t, lines, want)
+			})
+		}
+	}
+	// Claim consumes a blocked snapshot until a genuine WORKING transition.
+	// Fallback/recovery alone must not inject a new event token into that stream.
+	t.Run("claim ignores provenance", func(t *testing.T) {
+		fallback := blocked()
+		fallback.status.StateSource = "transcript (Herdr unknown)"
+		seats := newFakeSeats(map[string][]fakeStep{
+			"a": {blocked(), fallback, fallback, blocked(), working("same answer"), gone()},
+		})
+		lines, _, err := runFleet(t, namedFleet(seats, "a"), WatchOptions{Transitions: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertLines(t, lines, []string{"SEEN a blocked", "WORKING a", "EXIT a"})
+	})
 }

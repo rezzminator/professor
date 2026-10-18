@@ -26,6 +26,7 @@ type killHerdr struct {
 	mu          sync.Mutex
 	socket      string
 	frame       string
+	styledFrame string
 	processes   any
 	probeError  string
 	closeError  string
@@ -108,9 +109,25 @@ func (server *killHerdr) serve(conn net.Conn) {
 			server.onRead()
 			server.onRead = nil
 		}
+		text, format := strings.NewReplacer("\x1b[2m", "", "\x1b[0m", "").Replace(server.frame), "text"
+		if request.Params["format"] == "ansi" {
+			text, format = server.frame, "ansi"
+			if server.styledFrame != "" {
+				text = server.styledFrame
+			}
+		}
+		if request.Params["source"] != "visible" {
+			server.t.Errorf("kill composer starts history collection: %+v", request.Params)
+		}
 		result = map[string]any{
 			"type": "pane_read",
-			"read": map[string]any{"pane_id": "p1", "workspace_id": "w1", "text": server.frame, "truncated": false},
+			"read": map[string]any{
+				"pane_id":      "p1",
+				"workspace_id": "w1",
+				"text":         text,
+				"truncated":    false,
+				"format":       format,
+			},
 		}
 	case "pane.send_text":
 		if request.Params["text"] != "/exit" {
@@ -211,20 +228,24 @@ func TestHerdrKillRoutesByDurableSeat(t *testing.T) {
 
 func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 	for _, test := range []struct {
-		name, frame        string
-		exitGone, wantExit bool
+		name, frame, styled string
+		exitGone, wantExit  bool
 	}{
-		{"empty", idleFrame, true, true},
-		{"draft", strings.Replace(idleFrame, "❯ ", "❯ unsent draft", 1), false, false},
-		{"busy", busyFrame, false, false},
-		{"missing composer", "unknown terminal content", false, false},
-		{"last resort", idleFrame, false, true},
+		{"empty", idleFrame, "", true, true},
+		{"dim hint", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), "", true, true},
+		{"same text draft", strings.Replace(idleFrame, "❯ ", "❯ Try running tests", 1), "", false, false},
+		{"draft", strings.Replace(idleFrame, "❯ ", "❯ unsent draft", 1), "", false, false},
+		{"busy", busyFrame, "", false, false},
+		{"missing composer", "unknown terminal content", "", false, false},
+		{"last resort", idleFrame, "", false, true},
+		{"styled busy", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1) + "\n" + busyFrame, false, false},
+		{"styled continuation", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), strings.Replace(strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), "\x1b[0m\n", "\x1b[0m\nprivate draft\n", 1), false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
 			server := newKillHerdr(t)
-			server.frame, server.exitGone = test.frame, test.exitGone
+			server.frame, server.styledFrame, server.exitGone = test.frame, test.styled, test.exitGone
 			seat := seedKillHerdr(t, database, server)
 			recipe := fleetdb.SeatRun{Binary: "fixture", Args: []string{"fixture"}}
 			if err := database.Shared().WriteSeatRun(seat.SeatID, recipe); err != nil {

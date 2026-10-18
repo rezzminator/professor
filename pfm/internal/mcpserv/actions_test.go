@@ -611,20 +611,61 @@ func TestResolvedSelfPathFallbacksAndIndexedPrecedence(t *testing.T) {
 // along, and the verb's summary comes back in the structured output.
 func TestChatStatusSummaryReachesTheVerbAndReturnsField(t *testing.T) {
 	t.Parallel()
-	verbs := &fakeChatVerbs{status: headless.Status{
-		Name: "seat", State: headless.StateIdle, IdleSeconds: 2, Engine: pfmengine.Claude,
-		Summary: "done", SummaryCached: true,
-	}}
-	protocol := connectInMemory(t, newService("test", &backend{chat: verbs}).Server())
-	output := callTool[StatusOutput](t, protocol.clientSession, "status", StatusInput{
-		Target: "seat", Summary: true, Engine: "codex", Model: "test-model",
-	})
-	want := []chat.StatusRequest{{Target: "seat", Summary: true, Engine: pfmengine.Codex, Model: "test-model"}}
-	if !reflect.DeepEqual(verbs.statuses, want) {
-		t.Fatalf("Status calls = %+v, want %+v", verbs.statuses, want)
-	}
-	if output.Summary != "done" || !output.SummaryCached || output.Engine != pfmengine.Claude {
-		t.Fatalf("status output=%+v", output)
+	for _, source := range []string{"transcript (Herdr unknown)", ""} {
+		t.Run(source, func(t *testing.T) {
+			verbs := &fakeChatVerbs{status: headless.Status{
+				Name: "seat", State: headless.StateIdle, IdleSeconds: 2, Engine: pfmengine.Claude,
+				Summary: "done", SummaryCached: true, StateSource: source, RestID: "private-rest",
+			}}
+			protocol := connectInMemory(t, newService("test", &backend{chat: verbs}).Server())
+			output := callTool[map[string]any](t, protocol.clientSession, "status", StatusInput{
+				Target: "seat", Summary: true, Engine: "codex", Model: "test-model",
+			})
+			want := []chat.StatusRequest{{Target: "seat", Summary: true, Engine: pfmengine.Codex, Model: "test-model"}}
+			if !reflect.DeepEqual(verbs.statuses, want) {
+				t.Fatalf("Status calls = %+v, want %+v", verbs.statuses, want)
+			}
+			if output["summary"] != "done" || output["summary_cached"] != true ||
+				output["engine"] != string(pfmengine.Claude) {
+				t.Fatalf("status output=%+v", output)
+			}
+			got, present := output["state_source"]
+			if (source != "" && got != source) || (source == "" && present) {
+				t.Errorf("state_source=%v present=%v, want %q", got, present, source)
+			}
+			if _, present := output["rest_id"]; present {
+				t.Errorf("private rest evidence leaked: %+v", output)
+			}
+			listed, err := protocol.clientSession.ListTools(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tool := range listed.Tools {
+				if tool.Name != "status" {
+					continue
+				}
+				encoded, err := json.Marshal(tool.OutputSchema)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var schema struct {
+					Properties map[string]struct {
+						Type string `json:"type"`
+					} `json:"properties"`
+				}
+				if err := json.Unmarshal(encoded, &schema); err != nil {
+					t.Fatal(err)
+				}
+				if schema.Properties["state_source"].Type != "string" {
+					t.Errorf("state_source schema=%s", encoded)
+				}
+				if _, present := schema.Properties["rest_id"]; present {
+					t.Errorf("private rest schema leaked: %s", encoded)
+				}
+				return
+			}
+			t.Fatal("status tool missing")
+		})
 	}
 }
 

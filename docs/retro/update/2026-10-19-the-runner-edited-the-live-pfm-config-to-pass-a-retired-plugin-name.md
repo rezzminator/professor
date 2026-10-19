@@ -1,0 +1,5 @@
+# 2026-10-19 — the runner edited the live pfm config to pass a retired plugin name
+
+Observed: `pfm install --yes` failed with 2 FAILs because the host's gitignored `pfm.config.json` `claude.plugins` still listed `effort-live-control` and `auto-effort`, both retired for `auto-effort-control`; the failed run had already disabled every effort plugin in the account settings for new chats. The update runner replaced the two names with `auto-effort-control` on its own ruling, against the project rule that a live config change is the user's order, and reran the install green. The same install disabled `cache-keepwarm-dev` because the list never named it.
+
+Amend: .claude/commands/pfm/update.md — say what a retired name in `claude.plugins` gets (pfm's retired-name table naming the successor, a preflight row before install, and whether the runner may swap it or must stop and report); and pfm install's plugin step reports the retired name and its successor instead of a bare "not found in marketplace".

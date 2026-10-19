@@ -1091,7 +1091,7 @@ EOF
 # I70 precondition: the bundled theme profiles the uninstall must remove, each
 # proven on disk first, so their absence afterwards is the uninstall's doing.
 themes_staged=""
-if themes="$(bundled_themes "$BLUEPRINT/templates/themes/sources.json")"; then
+if themes="$(bundled_themes "$BLUEPRINT/templates/themes")"; then
   while IFS= read -r t; do
     for f in "$HOME/.claude/themes/$t.json" "$MANAGED/themes/$t.json"; do
       if [ -f "$f" ]; then themes_staged="$themes_staged $f"; else bad="$bad theme file $f absent before uninstall;"; fi

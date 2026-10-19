@@ -393,27 +393,6 @@
     "themes/README.md": {
       "curated": true
     },
-    "themes/hibiscus-night.json": {
-      "curated": true
-    },
-    "themes/lagoon.json": {
-      "curated": true
-    },
-    "themes/mirrorball.json": {
-      "curated": true
-    },
-    "themes/neon-sunset.json": {
-      "curated": true
-    },
-    "themes/sources.json": {
-      "curated": true
-    },
-    "themes/ultrafunk.json": {
-      "curated": true
-    },
-    "themes/velvet-groove.json": {
-      "curated": true
-    },
     "global/agents/shared/gpt.md": {
       "curated": true
     },

@@ -96,10 +96,20 @@ func canonicalPins(pins *SurfacePins) (*SurfacePins, error) {
 	}
 	if pins.VSCode != nil {
 		code := &VSCodePins{}
-		if code.Colors, err = canonicalMap("vscode colors", pins.VSCode.Colors, keys.vscodeColors); err != nil {
+		colors, chrome := maps.Clone(pins.VSCode.Colors), maps.Clone(pins.VSCode.Chrome)
+		// The theme itself never reaches the result, so state.json stays the
+		// pins alone; only its colours for the contract's keys do.
+		if theme := pins.VSCode.Theme; theme != nil {
+			if err := validateVSCodeTheme(theme); err != nil {
+				return nil, err
+			}
+			colors = foldThemePins(colors, theme.Colors, keys.vscodeColors)
+			chrome = foldThemePins(chrome, theme.Colors, keys.vscodeChrome)
+		}
+		if code.Colors, err = canonicalMap("vscode colors", colors, keys.vscodeColors); err != nil {
 			return nil, err
 		}
-		if code.Chrome, err = canonicalMap("vscode chrome", pins.VSCode.Chrome, keys.vscodeChrome); err != nil {
+		if code.Chrome, err = canonicalMap("vscode chrome", chrome, keys.vscodeChrome); err != nil {
 			return nil, err
 		}
 		if len(code.Colors) > 0 || len(code.Chrome) > 0 {

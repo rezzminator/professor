@@ -88,7 +88,7 @@ if requires E1.01-open-seat1; then
     bad="$bad settings.json unreadable ($(one_line "$theme"));"
   # The theme is a bundled profile, `custom:{name}`, and the seat reads that
   # profile's palette through its linked themes dir.
-  if themes="$(bundled_themes "$HOME/.professor/templates/themes/sources.json")"; then
+  if themes="$(bundled_themes "$HOME/.professor/templates/themes")"; then
     stem="${theme#custom:}"
     if [ "$stem" = "$theme" ] || ! grep -qxF -- "$stem" <<<"$themes"; then
       bad="$bad theme=${theme:-<none>} (want custom:{name} of a bundled profile: $(one_line "$themes"));"

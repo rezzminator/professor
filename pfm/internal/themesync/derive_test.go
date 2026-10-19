@@ -219,21 +219,15 @@ const fixtureFunk = `{"name":"Fixture Funk","base":"dark","overrides":{"claude":
 	`"blue_FOR_SUBAGENTS_ONLY":"#8292f7","purple_FOR_SUBAGENTS_ONLY":"#c77dff","cyan_FOR_SUBAGENTS_ONLY":"#38d6f5",` +
 	`"orange_FOR_SUBAGENTS_ONLY":"#ff7a5c"}}` + "\n"
 
-// customTokens resolves a custom theme file the way resolveCustom does: its
-// base's tokens with the file's overrides on top.
+// customTokens resolves a custom theme file the way resolveCustom does,
+// through customPalette: its base's tokens with the file's overrides on top.
 func customTokens(t *testing.T, raw string) map[string]string {
 	t.Helper()
 	var file customFile
 	if err := json.Unmarshal([]byte(raw), &file); err != nil {
 		t.Fatal(err)
 	}
-	tokens := map[string]string{}
-	for token, colour := range builtinThemes[file.Base] {
-		tokens[token] = colour
-	}
-	for token, colour := range file.Overrides {
-		tokens[token] = colour
-	}
+	tokens, _ := customPalette(file.Base, file.Overrides)
 	return tokens
 }
 

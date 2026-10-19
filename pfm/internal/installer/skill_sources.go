@@ -70,7 +70,7 @@ func skillStoreRoot(home string) string {
 // {sourceRepo}/templates/global/skills/sources.json. present=false is an
 // absent file; any other read, placeholder or decode failure is an error
 // naming the path — never an empty registry.
-func loadSkillSources(sourceRepo, manifestURL string) ([]skillSource, bool, error) {
+func loadSkillSources(sourceRepo, releaseURL string) ([]skillSource, bool, error) {
 	path := filepath.Join(sourceRepo, filepath.FromSlash(skillSourcesRelative))
 	content, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -79,7 +79,7 @@ func loadSkillSources(sourceRepo, manifestURL string) ([]skillSource, bool, erro
 	if err != nil {
 		return nil, false, fmt.Errorf("read %s: %w", path, err)
 	}
-	content, err = resolveOwnerPlaceholder(content, sourceRepo, manifestURL)
+	content, err = resolveOwnerPlaceholder(content, sourceRepo, releaseURL)
 	if err != nil {
 		return nil, false, fmt.Errorf("%s: %w", path, err)
 	}
@@ -132,7 +132,7 @@ func loadSkillSources(sourceRepo, manifestURL string) ([]skillSource, bool, erro
 // them into {ConfigDir}/skills and ~/.agents/skills.
 func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 	registry := filepath.Join(sourceRepo, filepath.FromSlash(skillSourcesRelative))
-	sources, present, err := loadSkillSources(sourceRepo, installer.options.ThemeManifestURL)
+	sources, present, err := loadSkillSources(sourceRepo, installer.options.ThemeReleaseURL)
 	if err != nil {
 		installer.skip("SKILL-SOURCES-FAILED " + err.Error())
 		return nil

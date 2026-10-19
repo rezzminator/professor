@@ -333,7 +333,7 @@ func TestRunVerbs(t *testing.T) {
 		{
 			name: "the retired set verb is an unknown subcommand", args: []string{"set", "tokyo-night"},
 			fake: fakeThemesync{}, wantCode: 2,
-			wantStderr: []string{`unknown subcommand "set"`, "usage: pfm theme [status|sync|on|off|list|use]"},
+			wantStderr: []string{`unknown subcommand "set"`, "usage: pfm theme [status|sync|on|off|list|use|check]"},
 		},
 		{
 			name: "unknown verb is usage", args: []string{"paint"},

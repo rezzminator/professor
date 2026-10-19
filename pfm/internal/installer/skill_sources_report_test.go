@@ -148,7 +148,7 @@ func TestInspectSkillSourcesRecordedCloneGoneIsAFailure(t *testing.T) {
 }
 
 // TestInspectSkillSourcesResolvesTheOwnerLikeInstall pins F9: a clone without
-// a manifest owner resolves {GH_USER} through the release manifest URL, as
+// a manifest owner resolves {GH_USER} through the release theme URL, as
 // pfm install does, instead of reporting CHECK-FAILED.
 func TestInspectSkillSourcesResolvesTheOwnerLikeInstall(t *testing.T) {
 	t.Parallel()

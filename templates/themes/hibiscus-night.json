@@ -74,5 +74,55 @@
     "rainbow_blue_shimmer": "#c2e2ff",
     "rainbow_indigo_shimmer": "#dadaff",
     "rainbow_violet_shimmer": "#fccbfd"
+  },
+  "surfaces": {
+    "vscode": {
+      "theme": {
+        "colors": {
+          "editorCursor.foreground": "#ff6ba7",
+          "editorLineNumber.activeForeground": "#ff6ba7",
+          "editorBracketMatch.border": "#ff6ba7"
+        },
+        "tokenColors": [
+          {
+            "name": "Hibiscus stamen: types",
+            "scope": [
+              "entity.name.type",
+              "entity.name.class",
+              "entity.name.struct",
+              "entity.name.interface",
+              "entity.name.enum",
+              "support.class",
+              "support.type"
+            ],
+            "settings": {
+              "foreground": "#ffd479"
+            }
+          },
+          {
+            "name": "Petal dust: comments",
+            "scope": [
+              "comment",
+              "punctuation.definition.comment"
+            ],
+            "settings": {
+              "foreground": "#a87d90",
+              "fontStyle": "italic"
+            }
+          }
+        ],
+        "semanticTokenColors": {
+          "class": "#ffd479",
+          "interface": "#ffd479",
+          "enum": "#ffd479",
+          "struct": "#ffd479",
+          "type": "#ffd479",
+          "comment": {
+            "foreground": "#a87d90",
+            "italic": true
+          }
+        }
+      }
+    }
   }
 }

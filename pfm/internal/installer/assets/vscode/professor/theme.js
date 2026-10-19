@@ -235,7 +235,8 @@ async function applyChrome(dir, target, contract, generation, wantChrome) {
 
 // applyContract reads the contract and brings the user's settings to it; every outcome but an
 // absent contract ends in an ack, a failure carried in its `error`, never dropped. The ack is
-// written inside the lock, so two windows never drop each other's chrome entry.
+// written inside the lock, so two windows never drop each other's chrome entry. It returns the
+// contract it read, or undefined when there was none to read.
 async function applyContract(dir) {
   const contractPath = path.join(dir, CONTRACT);
   let contract;
@@ -280,19 +281,20 @@ async function applyContract(dir) {
     if (target) entry = { generation, keys: Object.keys(wantChrome).sort(), error: ack.error };
     writeAck(dir, ack, target, entry);
   }
+  return contract;
 }
 
 // startThemeSync watches the contract (polling: the file and its directory may not exist until
 // the first `pfm theme on`) and applies it at start and on every change, one apply at a time; an
 // edit of peacock.excludedSettings applies it again, so listing the chrome keys takes effect
-// without a reload. It returns the disposable for activate's subscriptions and syncTheme, the
-// extension's exported API.
-function startThemeSync() {
-  const dir = stateDir();
+// without a reload. Each applied contract then goes to onApplied (native.js's follow, which
+// switches the Color Theme). It returns the disposable for activate's subscriptions and
+// syncTheme, the extension's exported API.
+function startThemeSync(dir = stateDir(), onApplied = () => {}) {
   const contractPath = path.join(dir, CONTRACT);
   let chain = Promise.resolve();
   const syncTheme = () => {
-    chain = chain.then(() => applyContract(dir)).catch((err) => {
+    chain = chain.then(() => applyContract(dir)).then((contract) => contract && onApplied(contract)).catch((err) => {
       console.error(`Professor: pfm theme sync of ${contractPath} failed: ${err?.stack ?? err}`);
     });
     return chain;
@@ -314,4 +316,4 @@ function startThemeSync() {
   };
 }
 
-module.exports = { startThemeSync, planColors };
+module.exports = { startThemeSync, stateDir, planColors };

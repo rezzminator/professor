@@ -12,8 +12,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
-// themeProfileKeyPrefix keys a bundled profile's whole copy in the ownership
-// ledger, beside the record of the Claude theme file under the bare name.
+// themeProfileKeyPrefix keys a profile's whole copy in the ownership ledger,
+// beside the record of the Claude theme file under the bare name.
 const themeProfileKeyPrefix = "profile:"
 
 type themeAction int
@@ -25,7 +25,7 @@ const (
 )
 
 // themeRemoval is the wording of one ledger removal, shared by uninstall and
-// by retiring a theme the manifest no longer lists.
+// by retiring a theme install no longer ships (its profile file gone).
 type themeRemoval struct {
 	verb     string // the change line: "{verb} theme {label} {path}"
 	phase    string // the failure lines: "theme {label} {phase} failed: …"
@@ -35,12 +35,12 @@ type themeRemoval struct {
 var (
 	themeUninstall = themeRemoval{verb: "remove", phase: "uninstall", modified: "locally modified"}
 	themeRetire    = themeRemoval{
-		verb: "retire", phase: "retire", modified: "no longer in the manifest and locally modified",
+		verb: "retire", phase: "retire", modified: "no longer shipped and locally modified",
 	}
 )
 
-// themeFile is one file install writes for a theme: the Claude theme file and,
-// for a bundled profile, pfm's whole copy of it.
+// themeFile is one file install writes for a theme: the Claude theme file or
+// pfm's whole copy of the profile.
 type themeFile struct {
 	key     string // the ownership ledger key
 	label   string // names the file in a report: empty for the Claude theme file
@@ -57,8 +57,8 @@ type themeFile struct {
 
 func profileLedgerKey(name string) string { return themeProfileKeyPrefix + name }
 
-// themeLedgerOwner splits a ledger key into the manifest theme it belongs to
-// and whether it records the profile copy rather than the Claude theme file.
+// themeLedgerOwner splits a ledger key into the theme it belongs to and
+// whether it records the profile copy rather than the Claude theme file.
 func themeLedgerOwner(key string) (string, bool) {
 	if name, isProfile := strings.CutPrefix(key, themeProfileKeyPrefix); isProfile {
 		return name, true
@@ -74,8 +74,8 @@ func themeLedgerLabel(key string) string {
 	return key
 }
 
-// validateThemeName refuses a manifest theme name that could leave its
-// directory (the profile copy is named after it) or collide with a ledger key.
+// validateThemeName refuses a theme name that could leave its directory (the
+// profile copy is named after it) or collide with a ledger key.
 func validateThemeName(name string) error {
 	if name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
 		return errors.New("name must be a bare profile name: no path separator or ':'")
@@ -83,22 +83,17 @@ func validateThemeName(name string) error {
 	return nil
 }
 
-// themeFiles is what install writes for one theme whose content is final
-// (merged onto its base when an overlay). A bundled theme is a profile: the
-// Claude file is the palette alone and the profile copy keeps every byte; a
-// profile that does not parse is an error naming its file.
-func themeFiles(home, name string, source themeSource, claude themeFile, content []byte) ([]themeFile, error) {
-	claude.content = content
-	if !source.bundled {
-		return []themeFile{claude}, nil
-	}
+// themeFiles is what install writes for one theme, its profile file's bytes
+// content: the Claude file is the palette alone and the profile copy keeps
+// every byte; a profile that does not parse is an error naming its file.
+func themeFiles(home, name, file string, claude themeFile, content []byte) ([]themeFile, error) {
 	profile, err := themesync.ParseProfile(content)
 	if err != nil {
-		return nil, fmt.Errorf("profile %s rejected: %w", source.file, err)
+		return nil, fmt.Errorf("profile %s rejected: %w", file, err)
 	}
 	palette, err := profile.ClaudeFile(content)
 	if err != nil {
-		return nil, fmt.Errorf("profile %s rejected: %w", source.file, err)
+		return nil, fmt.Errorf("profile %s rejected: %w", file, err)
 	}
 	claude.content = palette
 	return []themeFile{claude, {
@@ -111,7 +106,7 @@ func themeFiles(home, name string, source themeSource, claude themeFile, content
 
 // inspect reads the file against the ledger and returns the skip line when
 // install must leave the theme alone: an unreadable file, a ledger path that
-// drifted from the manifest, or an owned file modified since install.
+// drifted from the install's, or an owned file modified since install.
 func (file *themeFile) inspect(name string, ownership map[string]themeOwnershipRecord) string {
 	existing, exists, err := readOptionalRegularFile(file.path)
 	if err != nil {
@@ -124,7 +119,7 @@ func (file *themeFile) inspect(name string, ownership map[string]themeOwnershipR
 	}
 	if filepath.Clean(file.record.Path) != filepath.Clean(file.path) {
 		return fmt.Sprintf(
-			"theme %s%s ownership target drift: ledger=%s manifest=%s", name, file.label, file.record.Path, file.path,
+			"theme %s%s ownership target drift: ledger=%s install=%s", name, file.label, file.record.Path, file.path,
 		)
 	}
 	if file.exists && contentSHA256(file.existing) != file.record.SHA256 {
@@ -233,22 +228,21 @@ func rollbackThemeFiles(written []*themeFile, cause error) error {
 	return cause
 }
 
-// retireThemes removes what the ledger owns for a theme the manifest no
-// longer lists (a profile copy also when its theme stopped being bundled):
-// the file when it is still the bytes install wrote, else it stays and is
+// retireThemes removes what the ledger owns for a theme no profile in
+// profiles ships, whatever once installed it: the file when it is still the
+// bytes install wrote and no account selects it, else it stays and is
 // reported. It returns the ledger as it stands afterwards.
 func (installer *engine) retireThemes(
 	ownershipPath string,
-	sources map[string]themeSource,
+	profiles map[string]themeProfile,
 	ownership map[string]themeOwnershipRecord,
 ) map[string]themeOwnershipRecord {
 	for _, key := range sortedThemeOwnershipNames(ownership) {
-		name, isProfile := themeLedgerOwner(key)
-		source, listed := sources[name]
-		if listed && (!isProfile || source.bundled) {
+		name, _ := themeLedgerOwner(key)
+		if _, listed := profiles[name]; listed {
 			continue
 		}
-		if !listed && installer.retireBlockedBySelection(key, ownership[key].Path) {
+		if installer.retireBlockedBySelection(key, ownership[key].Path) {
 			continue
 		}
 		ownership = installer.removeOwnedTheme(ownershipPath, ownership, key, themeRetire)
@@ -272,7 +266,7 @@ func (installer *engine) retireBlockedBySelection(key, path string) bool {
 		return false
 	}
 	installer.skip(
-		"theme " + label + " is no longer in the manifest but " + strings.Join(selecting, ", ") +
+		"theme " + label + " is no longer shipped but " + strings.Join(selecting, ", ") +
 			" still selects " + themesync.CustomValue(stem) +
 			"; left in place: select another theme with `pfm theme use`, then install again to retire it",
 	)
@@ -335,4 +329,64 @@ func (installer *engine) removeOwnedTheme(
 		installer.skip("theme " + label + " " + removal.phase + " report failed: " + changeErr.Error())
 	}
 	return next
+}
+
+// SourceProfiles are the profile files a source clone ships, the ones
+// `pfm install` discovers: every *.json in its templates/themes/, as absolute
+// paths, sorted.
+func SourceProfiles(sourceRepo string) ([]string, error) {
+	directory := filepath.Join(sourceRepo, filepath.FromSlash(themeProfilesRelative))
+	files, err := localProfileFiles(directory)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, filepath.Join(directory, file))
+	}
+	return paths, nil
+}
+
+// CheckProfile runs on one profile file every check `pfm install` runs on it
+// before writing anything — the file name, the profile schema (every unknown
+// key refused by name), the Claude palette and the VS Code theme rendered
+// from it — then the one install does not run, the rendered theme's
+// readability (themesync.CheckVSCodeReadability), and returns that VS Code
+// theme. The error names the file.
+func CheckProfile(path string) (themesync.VSCodeThemeFile, error) {
+	file := filepath.Base(path)
+	if !isProfileFile(file) {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf(
+			"%s: not a profile: a profile is a *.json file", path,
+		)
+	}
+	stem := strings.TrimSuffix(file, ".json")
+	if err := validateThemeName(stem); err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
+	}
+	// A FIFO or device named *.json would block the read below.
+	info, err := os.Stat(path)
+	if err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("read profile %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf(
+			"%s: not a profile: not a regular file (%s)", path, info.Mode().Type(),
+		)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("read profile %s: %w", path, err)
+	}
+	if _, err := themeFiles("", stem, file, themeFile{}, content); err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
+	}
+	rendered, err := themesync.RenderVSCodeTheme(stem, content)
+	if err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := themesync.CheckVSCodeReadability(rendered.Content); err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return rendered, nil
 }

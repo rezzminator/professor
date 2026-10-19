@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,8 +28,8 @@ const pinnedProfile = `{
 // no trailing space rules): a profile without pins reaches Claude as it is.
 const plainProfile = "{\n\t\"overrides\": {\"claude\": \"#40e0d0\"},\n\t\"base\": \"dark\",\n\t\"name\": \"Plain Lagoon\"\n}\n"
 
-// profileHost is a temp home beside a source clone whose manifest lists the
-// profiles it is seeded with.
+// profileHost is a temp home beside a source clone whose templates/themes/
+// holds the profiles it is seeded with.
 type profileHost struct {
 	t          *testing.T
 	home, repo string
@@ -43,27 +42,23 @@ func newProfileHost(t *testing.T) *profileHost {
 	return host
 }
 
-// seed rewrites the clone: the manifest lists exactly these bundled profiles
-// (name -> file body) and the clone holds exactly their files.
+// seed rewrites the clone: templates/themes/ holds exactly these profiles
+// (name -> file body), so discovery finds them and nothing else.
 func (host *profileHost) seed(profiles map[string]string) {
 	host.t.Helper()
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		names = append(names, name)
+	dir := filepath.Join(host.repo, "templates", "themes")
+	stale, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil {
+		host.t.Fatal(err)
 	}
-	sort.Strings(names)
-	entries := make([]string, 0, len(names))
-	for _, name := range names {
-		entries = append(entries, fmt.Sprintf(
-			`%q: {"file": %q, "target": "~/.claude/themes/%s.json", "activate": "/theme", "requires": "fixture"}`,
-			name, name+".json", name,
-		))
-		writeFixture(host.t, filepath.Join(host.repo, "templates", "themes", name+".json"), profiles[name])
+	for _, file := range stale {
+		if err := os.Remove(file); err != nil {
+			host.t.Fatal(err)
+		}
 	}
-	writeFixture(
-		host.t, filepath.Join(host.repo, themeManifestRelative),
-		`{"bundled": {`+strings.Join(entries, ",")+`}}`,
-	)
+	for name, body := range profiles {
+		writeFixture(host.t, filepath.Join(dir, name+".json"), body)
+	}
 }
 
 func (host *profileHost) run(mode Mode) (Report, string) {
@@ -245,7 +240,7 @@ func TestStaleOwnedThemeIsRetiredAndAnEditedOneStaysReported(t *testing.T) {
 	if got := readFixture(t, host.claudeFile("edited")); got != "the user's own edit\n" {
 		t.Fatalf("an edited retired theme was removed or rewritten: %q", got)
 	}
-	if !strings.Contains(output, "skip    theme edited no longer in the manifest and locally modified; left in place"+
+	if !strings.Contains(output, "skip    theme edited no longer shipped and locally modified; left in place"+
 		" and retained recovery ownership at "+host.claudeFile("edited")) {
 		t.Fatalf("an edited retired theme was not reported as a skip naming it:\n%s", output)
 	}
@@ -274,7 +269,7 @@ func TestRetiringAThemeAnAccountStillSelectsKeepsItAndNamesTheAccount(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "skip    theme chosen is no longer in the manifest but " + settings + " still selects custom:chosen;" +
+	want := "skip    theme chosen is no longer shipped but " + settings + " still selects custom:chosen;" +
 		" left in place: select another theme with `pfm theme use`, then install again to retire it"
 
 	_, preview := host.run(ModeDryRun)
@@ -407,35 +402,6 @@ func TestPreviewSkipsAThemeWhoseOwnedProfileCopyWasEdited(t *testing.T) {
 	}
 }
 
-func TestOverlayCarriesItsOwnSurfacesAndNeverTheBases(t *testing.T) {
-	t.Parallel()
-	base := `{"name":"Base","base":"dark","overrides":{"claude":"#111111"},"surfaces":{"tmux":{"status-style":"bg=#000000"}}}`
-	pinned := `{"name":"Pinned Night","overrides":{"promptBorder":"#ff8fc0"},` +
-		`"surfaces":{"vscode":{"colors":{"terminal.background":"#101820"}}}}`
-	merged, err := mergeThemeOverlay([]byte(base), []byte(pinned))
-	if err != nil {
-		t.Fatal(err)
-	}
-	profile, err := themesync.ParseProfile(merged)
-	if err != nil {
-		t.Fatalf("merged overlay is not a profile: %v\n%s", err, merged)
-	}
-	if profile.Surfaces == nil || profile.Surfaces.VSCode == nil ||
-		profile.Surfaces.VSCode.Colors["terminal.background"] != "#101820" || profile.Surfaces.Tmux != nil {
-		t.Fatalf("merged surfaces = %+v, want the overlay's vscode pin and none of the base's", profile.Surfaces)
-	}
-	if profile.Overrides["claude"] != "#111111" || profile.Overrides["promptBorder"] != "#ff8fc0" {
-		t.Fatalf("merged overrides = %v", profile.Overrides)
-	}
-	plain, err := mergeThemeOverlay([]byte(base), []byte(`{"overrides":{"promptBorder":"#ff8fc0"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(plain, []byte("surfaces")) {
-		t.Fatalf("a base's pins leaked into an overlay without any:\n%s", plain)
-	}
-}
-
 func TestUninstallRemovesTheProfileCopiesAndTheirDirectory(t *testing.T) {
 	t.Parallel()
 	host := newProfileHost(t)
@@ -455,80 +421,97 @@ func TestUninstallRemovesTheProfileCopiesAndTheirDirectory(t *testing.T) {
 	}
 }
 
-// The real clone's manifest, read the way pfm install reads it: six complete
-// bundled profiles that parse, and every file beside the manifest is listed.
-func TestSourceCloneManifestLoadsAllSixProfiles(t *testing.T) {
+// The real clone, read the way pfm install reads it: every *.json in its
+// templates/themes/ is discovered as a profile, parses, and installs as its
+// palette plus its whole copy. The list is the directory's, never a fixed one,
+// so a profile dropped there is covered the moment it lands.
+func TestSourceCloneInstallsEveryProfileInTemplatesThemes(t *testing.T) {
 	t.Parallel()
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test file")
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "..", "..", ".."))
-	sources, err := loadThemeSources(context.Background(), Options{
-		SourceRepo:       repoRoot,
-		ThemeManifestURL: "https://raw.githubusercontent.com/example/professor/main/" + themeManifestRelative,
-	})
-	if err != nil {
-		t.Fatalf("load the clone's theme manifest: %v", err)
-	}
-	profiles := []string{"hibiscus-night", "lagoon", "mirrorball", "neon-sunset", "ultrafunk", "velvet-groove"}
-	var bundled []string
-	for name, source := range sources {
-		if source.local != "" { // read from the clone: a bundled profile
-			bundled = append(bundled, name)
-		}
-	}
-	sort.Strings(bundled)
-	if strings.Join(bundled, ",") != strings.Join(profiles, ",") {
-		t.Fatalf("bundled themes = %v, want %v", bundled, profiles)
-	}
-	if tokyo := sources["tokyo-night"]; tokyo.local != "" || tokyo.Raw == "" {
-		t.Fatalf("tokyo-night = %+v, want it to stay a source-fetched theme", tokyo)
-	}
-	files, err := filepath.Glob(filepath.Join(repoRoot, "templates", "themes", "*.json"))
+	files, err := filepath.Glob(filepath.Join(repoRoot, filepath.FromSlash(themeProfilesRelative), "*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != len(profiles)+1 { // + sources.json
-		t.Errorf(
-			"templates/themes holds %d .json files, want the manifest and %d profiles: %v",
-			len(files),
-			len(profiles),
-			files,
-		)
+	if len(files) == 0 {
+		t.Fatalf("no *.json in %s: the enumeration found nothing to check", themeProfilesRelative)
+	}
+	var want []string
+	for _, file := range files {
+		want = append(want, strings.TrimSuffix(filepath.Base(file), ".json"))
+	}
+	sort.Strings(want)
+	profiles, err := loadThemeProfiles(context.Background(), Options{SourceRepo: repoRoot})
+	if err != nil {
+		t.Fatalf("load the clone's profiles: %v", err)
+	}
+	if got := profileKeys(profiles); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("discovered themes = %v, want every *.json in %s: %v", got, themeProfilesRelative, want)
 	}
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer := &engine{
 		options: Options{
-			Mode:             ModeApply,
-			Home:             home,
-			SourceRepo:       repoRoot,
-			Stdout:           &output,
-			InstallThemes:    true,
-			ThemesOffline:    true,
-			ThemeManifestURL: "https://raw.githubusercontent.com/example/professor/main/" + themeManifestRelative,
+			Mode: ModeApply, Home: home, SourceRepo: repoRoot, Stdout: &output, InstallThemes: true,
 		},
 		apply: true, managedRoot: managedRootForHome(home),
 	}
 	installer.installThemes(context.Background())
-	for _, name := range profiles {
-		source := sources[name]
-		if source.base != "" || filepath.Base(source.local) != name+".json" {
-			t.Errorf("%s = %+v, want a complete palette in %s.json", name, source, name)
+	for _, name := range want {
+		source := profiles[name]
+		if filepath.Base(source.local) != name+".json" || source.raw != "" {
+			t.Errorf("%s = %+v, want a profile read from the clone as %s.json", name, source, name)
+			continue
 		}
 		body := readFixture(t, source.local)
-		if _, err := themesync.ParseProfile([]byte(body)); err != nil {
+		profile, err := themesync.ParseProfile([]byte(body))
+		if err != nil {
 			t.Errorf("%s does not parse as a profile: %v", name, err)
+			continue
 		}
-		if got := contents(t, filepath.Join(home, ".claude", "themes", name+".json")); got != body {
-			t.Errorf("%s: installed Claude theme differs from the profile file", name)
+		palette, err := profile.ClaudeFile([]byte(body))
+		if err != nil {
+			t.Errorf("%s palette: %v", name, err)
+			continue
+		}
+		if got := contents(t, filepath.Join(home, ".claude", "themes", name+".json")); got != string(palette) {
+			t.Errorf("%s: installed Claude theme is not the profile's palette\n%s", name, output.String())
 		}
 		if got := contents(t, themesync.ProfilePath(home, name)); got != body {
 			t.Errorf("%s: installed profile copy differs from the profile file", name)
 		}
 	}
-	if strings.Contains(output.String(), "professor-") {
-		t.Errorf("a medal overlay is still named in the install report:\n%s", output.String())
+}
+
+// legacyPalette is the Claude file a removed source-fetched theme left behind:
+// a palette with no profile copy beside it in the ledger.
+const legacyPalette = `{"name":"Legacy","base":"dark","overrides":{"claude":"#7aa2f7"}}` + "\n"
+
+// TestARecordedThemeNoProfileShipsIsRetiredByAProfilesOnlyClone: a clone
+// whose templates/themes/ holds the profiles and the README alone still
+// retires a recorded theme no profile ships — the file goes when unmodified
+// and no account selects it, its ledger record with it.
+func TestARecordedThemeNoProfileShipsIsRetiredByAProfilesOnlyClone(t *testing.T) {
+	t.Parallel()
+	host := newProfileHost(t)
+	dir := filepath.Join(host.repo, "templates", "themes")
+	writeFixture(t, filepath.Join(dir, "plain-lagoon.json"), plainProfile)
+	writeFixture(t, filepath.Join(dir, "README.md"), "# Themes\n")
+	host.own("legacy-fetched", host.claudeFile("legacy-fetched"), legacyPalette)
+
+	_, output := host.run(ModeApply)
+
+	if !absent(t, host.claudeFile("legacy-fetched")) ||
+		!strings.Contains(output, "change  retire theme legacy-fetched "+host.claudeFile("legacy-fetched")) {
+		t.Fatalf("a recorded, unmodified theme no profile ships was not retired:\n%s", output)
+	}
+	if _, owned := host.ledger()["legacy-fetched"]; owned {
+		t.Fatalf("the retired theme's ledger record stayed: %v", profileKeys(host.ledger()))
+	}
+	if got := contents(t, host.claudeFile("plain-lagoon")); got != plainProfile {
+		t.Fatalf("the shipped profile was not installed beside the retirement: %q\n%s", got, output)
 	}
 }

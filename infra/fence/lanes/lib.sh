@@ -797,15 +797,20 @@ claude_registry_without_family_entries() {
   jq -cS '.mcpServers = ((.mcpServers // {}) | del(."chat-professor", ."harvester-professor"))' "$1"
 }
 
-# bundled_themes <sources.json> — the theme profiles the manifest bundles, one
-# name per line (each installs as ~/.claude/themes/{name}.json and
-# ~/.local/share/pfm/install/themes/{name}.json). Exit 1 with the reason on
-# stdout when the manifest is unreadable or bundles nothing, so a caller never
-# reads a failed lookup as "no themes".
+# bundled_themes <templates/themes dir> — the theme profiles the directory
+# ships, every *.json in it, one name per line (each installs as
+# ~/.claude/themes/{name}.json and ~/.local/share/pfm/install/themes/{name}.json).
+# Exit 1 with the reason on stdout when the directory is unreadable or holds
+# no profile, so a caller never reads a failed lookup as "no themes".
 bundled_themes() {
-  local names
-  if ! names="$(jq -er '.bundled | keys[]' "$1" 2>&1)" || [ -z "$names" ]; then
-    printf 'no bundled theme read from %s: %s' "$1" "$(one_line "${names:-jq printed nothing}")"
+  local listing names
+  if ! listing="$(ls -1 -- "$1" 2>&1)"; then
+    printf 'no bundled theme read from %s: %s' "$1" "$(one_line "$listing")"
+    return 1
+  fi
+  names="$(printf '%s\n' "$listing" | sed -n 's/\.json$//p')"
+  if [ -z "$names" ]; then
+    printf 'no bundled theme read from %s: no *.json profile there' "$1"
     return 1
   fi
   printf '%s\n' "$names"

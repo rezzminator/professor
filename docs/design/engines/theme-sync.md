@@ -8,6 +8,8 @@
 - [Source](#source)
 - [Derivation](#derivation)
 - [Profile pins](#profile-pins)
+  - [Profile check](#profile-check)
+  - [VS Code colour themes](#vs-code-colour-themes)
 - [State directory](#state-directory)
 - [Engine](#engine)
 - [Verdicts](#verdicts)
@@ -19,7 +21,7 @@
 
 ### RunVerb
 
-`pfm theme [status|sync [--force]|on|off] [--json]`. Bare `pfm theme` is `status`. `--json` prints the `themesync.Report` on every verb; `help` prints the usage. Any other subcommand is exit 2 (`pfm theme: unknown subcommand "x"` plus the usage).
+`pfm theme [status|sync [--force]|on|off|list|use {name}|check [file…]] [--json]`. Bare `pfm theme` is `status`. `--json` prints the `themesync.Report` on `status`, `sync`, `on` and `off` (`list`, `use` and `check` print their own shapes); `help` prints the usage. Any other subcommand is exit 2 (`pfm theme: unknown subcommand "x"` plus the usage).
 
 | Verb | Does |
 | --- | --- |
@@ -27,6 +29,8 @@
 | `sync` | `themesync.Sync`: follows the source now; `--force` re-applies every surface |
 | `on` | `themesync.On`: reads the source, writes `state.json`, installs the follower, applies every present surface; the first `on` snapshots each user file it edits |
 | `off` | `themesync.Off`: restores every surface from its snapshot, boots the follower out and disables the sync |
+| `list`, `use` | pick a theme ([List and use](#list-and-use)) |
+| `check` | runs install's profile checks ([Profile check](#profile-check)); writes nothing |
 
 Exit codes: `0` ok; `1` when any surface reads DRIFT or ERROR (`Report.OK`) or a run failed (error on stderr as `pfm theme: …`); `2` usage. PENDING, ABSENT, APPLIED, IN-SYNC, RESTORED and SOURCE never raise the exit code.
 
@@ -127,7 +131,11 @@ A theme profile is `templates/themes/{name}.json`: Claude Code's palette (`name`
 "surfaces": {
   "tmux": { "@host_accent": "#ff2e93", "status-style": "bg=#1a0a12,fg=#f5e6ee" },
   "herdr": { "accent": "#ff2e93" },
-  "vscode": { "colors": { "terminal.background": "#1a0a12" }, "chrome": { "titleBar.activeBackground": "#2a0a1a" } }
+  "vscode": {
+    "colors": { "terminal.background": "#1a0a12" },
+    "chrome": { "titleBar.activeBackground": "#2a0a1a" },
+    "theme": { "colors": { "editorCursor.foreground": "#ff6ba7" }, "tokenColors": [], "semanticTokenColors": {} }
+  }
 }
 ```
 
@@ -141,7 +149,17 @@ Pins are stored canonical (`canonicalPins`): tmux and Herdr colours as `#rrggbb`
 
 `resolveSource` reads `ProfilePath` after `resolveValue` and sets `Applied.Pins`. An absent profile file means no pins and renders as before. A file that exists but cannot be read, parsed or validated, or is not a regular file, is an `ERROR` source row naming the profile file, and nothing is written: pins never fall silently away. Each renderer replaces the value of the key a pin names and no value derived from it follows (pinning `@pfm-state-working` leaves `window-status-current-style`'s state format as derive built it); both sides of an `auto` theme take the same pins, Herdr in `[theme.custom]` and `[theme.custom.light]` alike. The read-back compares each surface against this same pinned render, so a pinned surface reads `IN-SYNC` and a reset one `DRIFT`.
 
+`surfaces.vscode.theme` is the profile's own VS Code colour theme layer (`VSCodeTheme`: `colors`, `tokenColors`, `semanticTokenColors`, each optional). `validateVSCodeTheme` refuses a colour id outside VS Code's registry (`vscode_color_ids.txt`, a snapshot of every `registerColor` id and every built-in extension's `contributes.colors`), a value that is not hex, a token rule without a scope array or a style, and a malformed semantic selector, each naming where it sits. Its colours for the contract's keys pin those keys wherever `colors` and `chrome` do not (`foldThemePins`), so the terminal and chrome pfm paints over any theme match the profile's own theme.
+
 `Applied.Pins` persists in `state.json`, so a tmux server born later renders the pins too, and a pin change is a changed `Applied`: it bumps the generation and applies every surface. The profile file joins `settings.json` and Claude's theme file as a candidate flip origin: the newest mtime of the three is the edit the latency is measured from.
+
+### Profile check
+
+`pfm theme check [file…] [--json]` runs `installer.CheckProfile` on each named file — the profile parse install runs, `RenderVSCodeTheme`, then `themesync.CheckVSCodeReadability` on the rendered theme, which install does not run — and writes nothing. The readability check holds the floors derive lifts to: `editor.foreground` at 7:1, and every `tokenColors` and `semanticTokenColors` foreground at 4.5:1 (comments, quotes and struck-through text 3.5:1), on the editor and the current line; and inputs, dropdowns, the side bar, the active tab, the active list row, the status and title bars, buttons, the suggest and hover widgets and the terminal at 4.5:1, each translucent colour measured over what it is drawn on; each place under its floor is named in the `FAIL` row. The selection is not measured: derive lifts its own syntax off it where a lightness can, and a profile's own rules answer for themselves there. A TextMate scope name is not checked against any grammar: a misspelled scope passes and colours nothing. With no file it checks every profile `installer.SourceProfiles` finds in the recorded source clone's `templates/themes/`; no recorded clone, a directory that cannot be read or one holding no profile is exit 1 naming why, never an empty pass. Text output is one `ok  {label}  {uiTheme}  {n} colours · {n} token rules · {n} semantic  {path}` row per pass, `FAIL {error}` per refusal (the error names the file and the key), then `{n} of {m} profile(s) pass`; `--json` prints `{"profiles": [{path, ok, id, label, uiTheme, colors, tokenColors, semanticTokenColors, error}]}`. Exit `0` only when every profile passes, `2` on usage.
+
+### VS Code colour themes
+
+`pfm install` renders one VS Code colour theme per profile the ownership ledger records, from its whole installed copy, so an edit made after install is what VS Code shows, with `themesync.RenderVSCodeTheme`: `deriveVSCodeTheme` builds the whole theme from the palette — layered workbench backgrounds, every syntax role in the palette's hues lifted to its contrast floor (7:1 body text, 4.5:1 tokens, 3.5:1 comments against the editor background, the current line and the selection, the selection given up first when no lightness clears all three), body text lifted before any tier is mixed from it, the deepest layer (tabs, inputs, code blocks) taking `clawd_background` only when body text reads on it at 7:1, symbol icons in the colours of the code they stand for — `mergeVSCodeTheme` lays `surfaces.vscode.theme` over it (colours and semantic selectors by key, a token rule's scopes moving to the profile's rule), and every contract key is set to what the contract renders. A theme that will not render is skipped by name and path; the rest still render. Each is written to the extension's `themes/professor-{stem}.json` (`name` the label, `type` `dark` or `light`), `themes/index.json` maps each `{id, label, uiTheme, path, value}`, and the embedded `package.json`'s `"themes": []` marker is filled with `contributes.themes` entries (`id` `professor-{stem}`, `label` `Professor · {profile name}`, `uiTheme` `vs-dark` or `vs` from `base`), so the Color Theme picker lists them as one group. A rendered theme no longer installed is pruned once `package.json` stops naming it; `pfm uninstall` removes them all. VS Code reads `contributes.themes` at window start: a new or removed theme shows after a window reload.
 
 ## State directory
 
@@ -238,6 +256,12 @@ Pfm never edits VS Code settings itself. It writes the contract `current.json` (
 
 The extension polls the contract every 2000 ms (`professor.theme.stateDir` overrides the directory; the setting is `machine`-scoped and only its user value is read, so no workspace can point it elsewhere), merges the contract's terminal colours (`terminal.*` and `terminalCursor.*` keys with hex values; any other key or value is dropped) into the user's global `workbench.colorCustomizations` touching no other key, and writes `vscode-ack.json` (`generation`, `appliedAt`, `keys`, `error`, `chrome`). A generation applies once: another window or a restart finds it recorded in `vscode-applied.json` and skips it, so a colour the user changed by hand since stays theirs until the next generation. Each key set is recorded with the value it replaced; a key the next generation drops, or every key when the contract is `enabled: false`, goes back to its prior value unless the user changed it since. Windows serialise on the `vscode-apply.lock` directory (stale after 30 s). With no contract file the extension writes nothing. The contract's `chrome` goes only to a local window on a saved workspace (`env.remoteName` undefined and `workspaceFile` a `file` URI), into that workspace's own `workbench.colorCustomizations`: the Workspace layer beats Global, and it is the layer Peacock writes. Only keys under `titleBar.`, `activityBar.`, `activityBarTop.`, `activityBarBadge.`, `commandCenter.`, `sash.`, `statusBar.` and `statusBarItem.` with hex values are written, and every other key of that workspace's customizations (Peacock's, the user's, `[Theme]` blocks) stays. A remote window, a folder-only window (its Workspace layer is a repo's `.vscode/settings.json`) and an untitled workspace get no chrome and add no ack entry. The record is `vscode-chrome.json`, `{workspace file: {generation, keys: {key: {value, prior}}}}` under the same lock, with its own once-per-generation guard per workspace: a window opening a workspace not yet painted at the generation paints it even when the Global colours are done, and the restore rules are the Global ones (an emptied layer drops the setting, an emptied record is removed). The ack's `chrome` map is `{workspace file: {generation, keys, error}}`; each window replaces its own entry and keeps the others' (read and written under the lock), and a Workspace write failure is that entry's `error`, never the top-level one. Peacock (`johnpapa.vscode-peacock`) rewrites its managed keys in the Workspace layer at every window start except those in `peacock.excludedSettings`, so with Peacock installed and a wanted chrome key missing from that setting the extension writes no chrome, advances no record and sets the entry's error `Peacock repaints {n} of {m} chrome keys at every window start: list them in this workspace's peacock.excludedSettings`; an edit of that setting re-runs the sync, and restoring (`enabled: false`) is never blocked. The extension's `Professor: Choose Theme` command (`choose.js`; palette entry hidden by `!remoteName`, the handler refusing in a remote window before it runs anything) lists with `pfm theme list --json` in a quick pick, current theme first, and sets the pick with `pfm theme use {name}`, run by execFile from `~/.local/bin/pfm`, so the Claude source theme changes and the usual sync follows; the extension writes no setting for it, and a failure of either run is shown with pfm's stderr.
 
+The VS Code Color Theme picker is a second door to `pfm theme use` (`native.js`), in a local window only (`env.remoteName` undefined); a remote window does neither direction, so its look stays its workspace's. Its one map is the install-rendered `themes/index.json` ([VS Code colour themes](#vs-code-colour-themes)); an unreadable index is logged and treated as no Professor themes, the rest of the extension running on.
+
+- Native → pfm: a `workbench.colorTheme` change to an indexed id, in the focused window, runs `pfm theme use {value}` (execFile, the same runner and 30 s timeout as `choose.js`), its success a status-bar message and its failure an error naming the theme and pfm's stderr. A pick whose value is already the contract's `palette` runs nothing. Picks run one at a time, each re-reading the setting, so the last pick wins. An id outside the index is the user's own theme, left alone; terminal colours and chrome still follow pfm over it.
+- pfm → native: after each applied contract, a `palette` that differs from the one recorded switches the Global `workbench.colorTheme` to its Professor theme; a palette with no Professor theme (a built-in Claude theme) records and switches nothing.
+- Loop guard: `{stateDir}/vscode-native.json`, `{palette, id}`, the last palette followed, written atomically. A pick records its palette before pfm runs, so the contract pfm then writes is already followed; a resync of the same palette at a new generation never takes a non-Professor theme the user chose away. The first contract the extension ever sees (no record) is recorded, not followed, so installing the extension never switches the user's theme.
+
 ### vscodeVerdict
 
 Read-back is ABSENT when no VS Code `User/settings.json` exists, and ERROR naming the path when one cannot be looked at. It judges the ack against the state's generation, in order:
@@ -295,4 +319,4 @@ The `pfm internal herdr-state` hook, with the sync on, sets `@pfm-state` on the 
 
 ## Uninstall
 
-`pfm uninstall` with a restore pending (`themesync.RestorePending`) runs `pfm theme off` (`themesync.Off`: every surface restored, `com.professor.pfm.theme` booted out, the state disabled) before it removes the themes; its plan pass prints `would run pfm theme off`, and an off that fails, or leaves a surface ERROR, stops the uninstall with `uninstall: pfm theme off: …`. `pfm install` writes the bundled Claude theme files and leaves a file the user edited after install in place (`locally modified; left in place`); the sync holds none of them.
+`pfm uninstall` with a restore pending (`themesync.RestorePending`) runs `pfm theme off` (`themesync.Off`: every surface restored, `com.professor.pfm.theme` booted out, the state disabled) before it removes the themes; its plan pass prints `would run pfm theme off`, and an off that fails, or leaves a surface ERROR, stops the uninstall with `uninstall: pfm theme off: …`. `pfm install` writes the profile and Claude theme files and the extension's VS Code colour themes, and leaves a theme file the user edited after install in place (`locally modified; left in place`); the sync holds none of them.

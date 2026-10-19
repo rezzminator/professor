@@ -91,7 +91,7 @@ professor/            ← this repo
 │   └── README.md, SETUP.md, RELEASE.md, ARCHITECTURE.md, PLACEHOLDERS.md, references/
 └── templates/
     ├── refresh-map.json
-    ├── themes/       (curated statusline themes — no live source)
+    ├── themes/       (curated Professor themes, one profile per {name}.json — no live source)
     ├── global/       (machine-global originals — agents/, commands/, skills/; `pfm install` symlinks them into engine registries; agent `.toml` twins are release-generated beside their originals and out of this map's scope)
     └── project/      (per-install templates — CLAUDE.md, agents/, commands/, skills/, scripts/, docs-hub/, docs-commands/, epics/, codex/)
 ```

@@ -147,7 +147,7 @@ func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
 		return []SkillSourceStatus{{Path: repo, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}
 	registry := filepath.Join(repo, filepath.FromSlash(skillSourcesRelative))
-	sources, present, err := loadSkillSources(repo, ThemeManifestURL(""))
+	sources, present, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil {
 		return []SkillSourceStatus{{Path: registry, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}

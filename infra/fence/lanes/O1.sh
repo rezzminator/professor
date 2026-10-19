@@ -79,9 +79,10 @@ check_path I7 "composed Codex prompt" "$clone/pfm/harness-prompts/composed/codex
 check_path I9 "composed Claude prompt" "$clone/pfm/harness-prompts/composed/claude.md"
 check_path I8 "harness-prompt baseline" "$clone/pfm/harness-prompts/claude/baselines/harness-original.sha256"
 # I15: every bundled theme profile, its palette in Claude's themes dir and its
-# whole profile in pfm's install dir, the names read from the clone's manifest —
-# an unreadable manifest is named, never read as "no themes to check".
-if themes="$(bundled_themes "$clone/templates/themes/sources.json")"; then
+# whole profile in pfm's install dir, the names read from the clone's
+# templates/themes/ — an unreadable directory is named, never read as "no
+# themes to check".
+if themes="$(bundled_themes "$clone/templates/themes")"; then
   while IFS= read -r t; do
     check_path I15 "Claude Code theme palette $t" "$HOME/.claude/themes/$t.json"
     check_path I15 "pfm theme profile $t" "$MANAGED/themes/$t.json"
@@ -392,7 +393,7 @@ jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$settings_tmp" &&
 rm -f "$settings_tmp"
 # Themes: each bundled profile's Claude file carries the palette keys alone
 # (name, base, overrides — no surfaces pin reaches Claude); pfm's copy is whole.
-if themes="$(bundled_themes "$BLUEPRINT/templates/themes/sources.json")"; then
+if themes="$(bundled_themes "$BLUEPRINT/templates/themes")"; then
   while IFS= read -r t; do
     keys="$(jq -c 'keys' "$HOME/.claude/themes/$t.json" 2>&1)" ||
       { bad="$bad theme $t: $HOME/.claude/themes/$t.json unreadable ($(one_line "$keys"));"; continue; }

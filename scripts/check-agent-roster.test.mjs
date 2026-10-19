@@ -470,14 +470,18 @@ for (const [name, model, effort, role, base] of twins) {
       (_, before, agent) => `${before}${renameTo(agent)}`);
     // The twin holds no effort buttons: its declaration replaces the Effort section of the manual it renames.
     const noEffortTools = 'Your effort is set by your definition; you hold no effort tools.';
+    // A flight twin spawns on its own provider: shared/gpt-flights.md replaces the Provider section of both flight manuals.
+    const gptProvider = 'You are a GPT agent: spawn the GPT agent of the role you need, listed as `{role} on GPT …`, wherever one exists; a Claude agent only for a role with none.';
+    const onGpt = (body) => body.replace(/(^## Provider\n\n)[^\n]*(\n)/m, `$1${gptProvider}$2`);
     const renamed = role === 'flights-foreman'
-      ? renameStandalone('flights-foreman', () => 'gpt-foreman').replace(/(^## Effort\n\n)[^\n]*(\n)/m, `$1${noEffortTools}$2`)
-      : original;
+      ? onGpt(renameStandalone('flights-foreman|flights-foreman-sonnet', () => 'gpt-foreman').replace(/(^## Effort\n\n)[^\n]*(\n)/m, `$1${noEffortTools}$2`))
+      : role === 'flights-lander' ? onGpt(original) : original;
     const manual = base ? renderedText(render, base) : renamed;
     assert.ok(manual, `${name}: its base ${base} was not rendered`);
     assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(manual).trimEnd()), `${name}: the rendered body is not the full ${base ?? role} manual`);
     if (role.startsWith('flights-')) {
       assert.ok(text.includes('Your parent hears your result only through your final return'), `${name}: the return law is not prepended`);
+      assert.ok(text.includes(gptProvider) && !text.includes('You are a Claude agent'), `${name}: does not carry the GPT spawn rule alone`);
       assert.deepEqual(fm.visibility?.['visible-to']?.include, role === 'flights-lander' ? ['main'] : undefined,
         `${name}: a GPT lander is the main chat's alone, a GPT foreman keeps the foreman's open visibility`);
     } else if (role === 'rr') {
@@ -505,10 +509,9 @@ for (const [name, model, effort, role, base] of twins) {
       assert.doesNotMatch(text, /gpt-flights-(?:hunter|spec-walker|sub-lander)|gpt-reviewer/, `${name}: a child or reviewer was renamed`);
     }
     if (role === 'flights-foreman') {
-      // A GPT foreman splits to itself for design and judgment and to the Claude Sonnet foreman for clear work.
-      for (const child of ['`gpt-foreman`', '`flights-foreman-sonnet`'])
-        assert.ok(text.includes(child), `${name}: its split line does not name ${child}`);
-      assert.doesNotMatch(text, /gpt-foreman-sonnet|gpt-flights-fore/, `${name}: the Sonnet foreman or the old GPT name appears`);
+      // A GPT foreman's foreman children are GPT: both foreman tiers render as itself.
+      assert.ok(text.includes('`gpt-foreman` when the path is clear'), `${name}: its split line does not name gpt-foreman`);
+      assert.doesNotMatch(text, /flights-foreman-sonnet|gpt-foreman-sonnet|gpt-flights-fore/, `${name}: a Claude foreman tier or the old GPT name appears`);
     }
   });
 }

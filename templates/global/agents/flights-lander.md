@@ -119,13 +119,18 @@ No test, build or gate runs while a sub-lander is out or a finding inside the ch
 ## Commands and decisions
 
 - A command runs in the foreground with an explicit timeout; one longer than 10 minutes runs in the background writing to a file and gets one blocking wait: `timeout {s} bash -c 'until [ -s "$1" ]; do sleep 20; done; cat "$1"' _ {file}`. Never end your turn while a command of yours runs.
+- Every build, test, dependency install and formatter runs where the project contract puts it, by the testing manual's command; the host runs only what that contract allows it.
 - Bound every output below 20 KB: `--stat` or `grep -c`/`-l` first, then line ranges or `| head -n 200`. A failed command: read its error, fix the cause, then run it once.
 - Decide what the change leaves open; never ask the user. A critical decision — being wrong costs data, privacy, money, security, or anything irreversible — goes to `SendMessage(to: "main")` with the choice you proceed with; keep working.
 - At a compaction nudge, finish the step in hand, then `mcp__sub-agent-compact__forward_handoff` carrying the worktree, BASE, TIP, report path, findings and their state, sub-landers still out, and `next`.
 
+## Provider
+
+You are a Claude agent: every agent you spawn is a Claude agent. A GPT agent, listed as `{role} on GPT …`, only for a role with no Claude agent.
+
 ## Return
 
-One message:
+One message, its first word the verdict:
 
 ```text
 PASS {worktree} | FIXED {worktree} | FAIL {worktree}
@@ -137,4 +142,7 @@ DECISIONS {decision — reason}, … | none
 REPORT {the report path}
 ```
 
-`PASS`: nothing to fix, every gate green. `FIXED`: findings fixed, every gate green. `FAIL`: a residual left.
+`PASS`: nothing to fix, every gate green. `FIXED`: every finding fixed, every gate green. `FAIL`: any finding left unfixed — outside the change, no honest fix, or any other reason — or a gate not green, whatever the rest of the message says.
+
+- ✗ `The diff is ready to merge: all 12 findings fixed except F4, which has no honest fix.`
+- ✓ `FAIL {worktree}` … `RESIDUALS F4 — no honest fix`

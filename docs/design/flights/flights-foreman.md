@@ -67,8 +67,11 @@ A child goes out only when both hold: the foreman is busy with its own part, and
 | --- | --- |
 | A clear path, the pattern is in the code | `flights-foreman-sonnet` |
 | Design, debugging, judgment | `flights-foreman` |
+| Docs | `documenter` |
+| Prompt files | `pcm` |
 
-- **Disjoint files.** No two children, and no child and the foreman, share a file.
+- **Disjoint files.** No two children, and no child and the foreman, share a file: the foreman lists both file sets before the spawn, and a file on both lists keeps the area its own.
+- **Own provider.** A Claude foreman spawns Claude agents; a GPT twin spawns a role's GPT twin wherever one exists.
 - **No caps.** No call or round cap exists; the foreman decides when its change is whole.
 
 ## Children's briefs
@@ -76,7 +79,7 @@ A child goes out only when both hold: the foreman is busy with its own part, and
 A child's brief carries:
 
 - the piece;
-- its files;
+- `OWNS`, the files it changes, and `NOT YOURS`, the foreman's files;
 - the exact change, or the problem for a `flights-foreman` child;
 - the acceptance;
 - the test command;
@@ -120,6 +123,7 @@ It never carries a file of its own: the brief is the message.
 One message:
 
 - **First line:** `DONE {name}`, or `PARTIAL {name}: {what is left}`.
+- **Acceptance:** each acceptance item of the brief, in its words, `met` with its evidence or `open`; one `open` row makes the return `PARTIAL`.
 - **Decisions:** each with its one-line reason.
 - **Changed files.**
 - **Tests:** the commands run and their result lines, quoted from what ran.
@@ -139,5 +143,5 @@ One message:
 
 - **Base:** `templates/global/agents/flights-foreman.md`, opus at effort high, `effortControl` floor medium and ceiling xhigh.
 - **Sonnet tier:** `flights-foreman-sonnet.md` is a `from: flights-foreman` declaration on sonnet, rendered into `templates/generated/agents/`. The base carries no `tools:` line, so every tool, the effort buttons included, is available as for `general-purpose`; the sonnet render inherits that and the `effortControl` band ([flights.md](flights.md#effort-buttons)).
-- **GPT twin:** `gpt-foreman` is a `from: flights-foreman` declaration over the same body at effort high. It unsets `effortControl`. Its rename map renames `flights-foreman` to `gpt-foreman`, so its children are `gpt-foreman` or `flights-foreman-sonnet`, which stays Claude.
+- **GPT twin:** `gpt-foreman` is a `from: flights-foreman` declaration over the same body at effort high. It unsets `effortControl`. Its rename map renames `flights-foreman` and `flights-foreman-sonnet` to `gpt-foreman`, so every foreman child it spawns is `gpt-foreman`.
 - **Tools:** every tool, no `tools:` line. The GPT twin keeps its own pinned `tools:` line, without the buttons.

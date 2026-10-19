@@ -292,7 +292,7 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 			}
 			t.Setenv("HERDR_BIN_PATH", stub)
 			t.Setenv(herdr.EnvSocket, serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
-			t.Setenv("HERDR_CONFIG_PATH", filepath.Join(t.TempDir(), "config.toml"))
+			stageDoctorHerdrShell(t, runtime.Paths.Home)
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
 
@@ -514,7 +514,7 @@ func TestHerdrDoctorChecksEveryManagedHome(t *testing.T) {
 			}
 			t.Setenv("HERDR_BIN_PATH", stub)
 			t.Setenv("HERDR_SOCKET_PATH", serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
-			t.Setenv("HERDR_CONFIG_PATH", filepath.Join(t.TempDir(), "config.toml"))
+			stageDoctorHerdrShell(t, runtime.Paths.Home)
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
 			if code != 3 || !strings.Contains(stdout.String(), "home="+second) ||

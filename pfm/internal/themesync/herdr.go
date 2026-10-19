@@ -255,35 +255,7 @@ func (s *session) herdrPath() (string, error) {
 		// Snapshots from before config overrides always edited this path.
 		return filepath.Join(s.env.Home, ".config", "herdr", "config.toml"), nil
 	}
-	if path, set := (paths.OSEnv{}).Lookup("HERDR_CONFIG_PATH"); set {
-		if path == "" {
-			return "", errors.New("themesync: HERDR_CONFIG_PATH is empty")
-		}
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			return path, fmt.Errorf("themesync: resolve Herdr config %s: %w", path, err)
-		}
-		return absolute, nil
-	}
-	directory, set := (paths.OSEnv{}).Lookup("XDG_CONFIG_HOME")
-	if !set {
-		directory = filepath.Join(s.env.Home, ".config")
-	}
-	debug := filepath.Join(directory, "herdr-dev", "config.toml")
-	if _, err := os.Stat(debug); err == nil {
-		return debug, fmt.Errorf(
-			"themesync: debug Herdr config exists at %s; set HERDR_CONFIG_PATH to identify the server's config",
-			debug,
-		)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return debug, fmt.Errorf("themesync: inspect debug Herdr config %s: %w", debug, err)
-	}
-	path := filepath.Join(directory, "herdr", "config.toml")
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return path, fmt.Errorf("themesync: resolve Herdr config %s: %w", path, err)
-	}
-	return absolute, nil
+	return paths.HerdrConfig(s.env.Home, paths.OSEnv{})
 }
 
 // herdrReload asks a running Herdr server to reread its config; a server that

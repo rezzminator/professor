@@ -465,6 +465,7 @@ func InstalledHome(t *testing.T) string {
 		t.Fatal(err)
 	}
 	StageGlobalAgents(t, jailedHome)
+	t.Setenv("HERDR_CONFIG_PATH", StageHerdrShell(t, jailedHome))
 	stageCloneZshrc(t, jailedHome)
 	return root
 }

@@ -9,6 +9,7 @@ Where pfm keeps its own configuration and state. Nothing here belongs to one eng
 - [example.pfm.config.json](#examplepfmconfigjson)
 - [State databases](#state-databases)
 - [Other state](#other-state)
+- [Herdr picker wiring](#herdr-picker-wiring)
 - [pfm doctor checks](#pfm-doctor-checks)
 
 ## Decisions
@@ -78,6 +79,18 @@ Tracked at the repo root. It holds every key pfm reads, each at its default, wit
 
 All under `~/.local/state/pfm/`: `log/pfm.jsonl`, and generated assets under `generated/`.
 
+## Herdr picker wiring
+
+`pfm install` wires a new interactive Herdr pane to open the pfm picker at its first prompt. The wiring is optional: with no Herdr (`HERDR_BIN_PATH` unset and `herdr` not on `PATH`) the installer skips with `herdr shell: herdr absent`. Code: `pfm/internal/installer/herdr_shell.go` (`wireHerdrShell`, `InspectHerdrShell`), `pfm/internal/paths/herdr.go`, `pfm/internal/installer/assets/shim/pfm-herdr-shell.sh`.
+
+- **Config file:** `paths.HerdrConfig` resolves `HERDR_CONFIG_PATH`, else `$XDG_CONFIG_HOME/herdr/config.toml`, else `~/.config/herdr/config.toml`. An existing `herdr-dev/config.toml` beside the production directory is ambiguous and is an error until `HERDR_CONFIG_PATH` names the server's file.
+- **What is written:** a `default_shell = "{home}/.local/share/pfm/install/bin/pfm-herdr-shell"` key under `[terminal]`, inside the block `# >>> pfm herdr shell >>>` / `# <<< pfm herdr shell <<<` (the table is created when absent). No other key and no keybinding is touched. A config the extended table would not parse as TOML is refused, not rewritten. A table header or marker inside a multiline string never counts as the real `[terminal]` table or as pfm's ownership; CRLF line endings are accepted.
+- **Write:** `wireHerdrShell` holds `themesync.LockState(home)` across the read and the write, serializing with `pfm theme` set, sync and off. The write goes through `writeRegistryFileIf` (`writeHerdrShellConfig`): it follows a symlinked config to its target, keeps the file's existing mode (a new file is 0600) and takes a backup first.
+- **User-owned key:** an existing `default_shell` outside pfm's block is never overwritten; install reports `herdr shell: user-owned default_shell="{value}" in {path}`.
+- **Wrapper:** `pfm-herdr-shell` is staged mode 0755 with the `SHELL` captured at install baked in. Herdr's login builder sets `SHELL` to the wrapper, so the wrapper then restores the captured real shell, forwards `-l`, exports the real `SHELL` and execs it with the original argv; any other launch execs the runtime `SHELL`. A `SHELL` that resolves to the wrapper itself falls back to `/bin/sh`; a `SHELL` that is missing or not executable at runtime prints `pfm herdr shell: shell {path} is not executable; using /bin/sh — rerun pfm install from your login shell` to stderr and execs `/bin/sh`.
+- **Picker arming:** the wrapper unsets inherited `PFM_AUTO_OPEN`, `CC_AUTO_OPEN` and `VSCODE_AUTO_CC`, then exports `PFM_AUTO_OPEN=pfm` and `PFM_HERDR_SHELL={pane}` only for an interactive launch of a zsh (a shell whose name is not `zsh` stays plain and inherits no `PFM_AUTO_OPEN`, since only the installed zsh shim consumes it): argv holds no `--` option other than `--login`/`--interactive`, no `-c`/`-s` cluster and no operand; stdin and stdout are TTYs; `PFM_HERDR_SHELL` does not already equal `{pane}`, `${HERDR_SOCKET_PATH:-}:${HERDR_PANE_ID:-1}` (socket and pane, the pane `1` outside Herdr), so a nested wrapper in the same pane skips but a new pane, or the same pane id on another Herdr server, inheriting an old guard still arms; `~/.local/bin/pfm` is executable (else a plain shell). The zsh shim reads and unsets the variable before it arms its one-shot first-prompt hook, so quitting the picker leaves a plain shell. A pane with an explicit command, such as an agent pane (`root.command` is `pfm internal seat-host {seatID}`, `pfm/internal/spawn/herdr.go`), never arms it.
+- **Uninstall:** removes the owned block when it is unchanged and the wrapper file; a user's keys stay.
+
 ## pfm doctor checks
 
 | Check | Broken state reports |
@@ -85,3 +98,4 @@ All under `~/.local/state/pfm/`: `log/pfm.jsonl`, and generated assets under `ge
 | config file | `doctor: config: missing {path} — run pfm install`, `doctor: config: unreadable {path} error=…` |
 | config keys | `doctor: config: missing key {key} (default {value})` per key the loader knows and the file lacks |
 | legacy state/cache paths | `host-check: BLOCK legacy-state-db` / `legacy-cache-db`, each with an operator fix |
+| `herdr-shell` | `doctor: herdr-shell: ok wired {path}`, `ok user-owned default_shell=… (picker wiring skipped)` or `ok herdr absent` when healthy; `WARN picker wiring missing or wrapper not executable in {path} — run pfm install --yes`, `WARN user-owned default_shell points to a missing or non-executable pfm wrapper in {path} — restore pfm's marker block or choose an executable shell` (an unmarked `default_shell` naming the pfm wrapper while it is absent or not executable; the key is never overwritten), or `WARN` with the config error (unreadable or unparsable file, ambiguous debug config), when broken |

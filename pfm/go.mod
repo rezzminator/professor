@@ -15,7 +15,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/google/jsonschema-go v0.4.3
-	github.com/klauspost/compress v1.20.1
+	github.com/klauspost/compress v1.20.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/sahilm/fuzzy v0.1.3

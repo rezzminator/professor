@@ -3,8 +3,9 @@
 # every path spelling through the one resolver (the outside, two-file, missing and deleted rules), the
 # derivation of each path's affected tests (a Go test file's Test and Fuzz funcs in -run or its
 # ::selector byte for byte, TestMain excluded, a test file with none or a non-test .go file running its
-# whole package, the e2e tag, shell, TAP and unittest runners, a script bringing its sibling test, a
-# file bringing none), the one fence call per run (PFM_FENCE_NET=private, the caller's pid watched), the
+# whole package, the e2e tag, shell, TAP, unittest and script-style Python runners, under pfm/ as
+# elsewhere, a script bringing its sibling test, a file bringing none named on its UNCOVERED line), the
+# one fence call per run (PFM_FENCE_NET=private, the caller's pid watched), the
 # TEST line verdicts (a red runner, a run that proved nothing, an unlisted skip, a skipped TAP or
 # unittest test), every check after one fails (fmt, typecheck's scope, lint-new's scope, arch,
 # launch-literals, rumdl, leak and the templates unit's checks), the install gap, the host's verdict
@@ -69,7 +70,7 @@ printf "$REC_BODY" >"$R/infra/fence/lanes/tests/iso-housekeeping_test.sh"
 echo 'print(1)' >"$R/scripts/z.py"
 echo 'print(1)' >"$R/scripts/test-z.py"
 echo 'print(1)' >"$R/tools/y.py"
-echo 'print(1)' >"$R/tools/y_test.py"
+echo 'import unittest' >"$R/tools/y_test.py"
 echo 'export {}' >"$R/templates/global/commands/x.mjs"
 echo 'export {}' >"$R/templates/global/commands/x.test.mjs"
 echo x >"$R/pfm/docs/x.md"
@@ -77,6 +78,14 @@ echo x >"$R/docs/x.md"
 echo x >"$R/docs/only.md"
 echo x >"$R/docs/gone.md"
 echo x >"$R/docs/plain.txt"
+mkdir -p "$R/pfm/internal/py" "$R/pfm/internal/js"
+echo 'print(1)' >"$R/pfm/internal/py/browser.py"
+echo 'from unittest import TestCase' >"$R/pfm/internal/py/browser_test.py"
+echo 'print("ok test_a")' >"$R/pfm/internal/py/plain_test.py"
+echo 'import os, unittest' >"$R/pfm/internal/py/multi_test.py"
+echo 'print(1)' >"$R/pfm/internal/py/lone.py"
+echo 'export {}' >"$R/pfm/internal/js/x.mjs"
+echo 'export {}' >"$R/pfm/internal/js/x.test.mjs"
 # The checks' own scripts: each records its argv and exits as a rule for its name says.
 stubscript() { # stubscript <path> <name>
   printf '#!/usr/bin/env bash\nsource "$STUBLIB"\nstub_record %s "$@"\nstub_rule %s "$@"\nexit "$RULE_RC"\n' "$2" "$2" >"$R/$1"
@@ -128,6 +137,7 @@ rec_has() { # rec_has <name> <tool> <arg>...
 rec_lacks() { # rec_lacks <name> <line prefix>
   if grep -q -- "^$2" "$REC"; then bad "$1" "recorded: $2" "$(cat "$REC")"; else ok "$1"; fi
 }
+env_has() { if grep -qxF -- "$2" "$REC.env"; then ok "$1"; else bad "$1" "no env line: $2" "$(cat "$REC.env")"; fi; }
 ran_has() { if grep -qxF -- "ran $2" "$REC"; then ok "$1"; else bad "$1" "no run of: $2" "$(cat "$REC")"; fi; }
 dev_calls() { grep -c '^dev.sh ' "$REC" || true; }
 no_dev() { if [ "$(dev_calls)" = 0 ]; then ok "$1"; else bad "$1" "dev.sh was called" "$(cat "$REC")"; fi; }
@@ -245,10 +255,46 @@ rec_has "a _test.py selector is -k" python3 -m unittest tools/y_test.py -k case
 run "$R" scripts/z.py
 rec_has "scripts/x.py brings scripts/test-x.py" python3 scripts/test-z.py
 rc_is "a green derived python run is green" 0
+run "$R" pfm/internal/py/browser_test.py
+rec_has "a pfm _test.py runs under unittest" python3 -m unittest pfm/internal/py/browser_test.py
+env_has "a _test.py runs with its own directory on PYTHONPATH" "python3 PYTHONPATH=pfm/internal/py -m unittest pfm/internal/py/browser_test.py"
+out_has "a pfm _test.py is its own TEST line" "TEST PASS pfm/internal/py/browser_test.py"
+run "$R" pfm/internal/py/browser_test.py::case
+rec_has "a pfm _test.py selector is -k" python3 -m unittest pfm/internal/py/browser_test.py -k case
+run "$R" pfm/internal/py/multi_test.py
+rec_has "a _test.py importing unittest in a comma list runs under unittest" python3 -m unittest pfm/internal/py/multi_test.py
+run "$R" pfm/internal/py/browser.py
+rec_has "a pfm .py file brings its _test.py sibling under unittest" python3 -m unittest pfm/internal/py/browser_test.py
+run "$R" pfm/internal/js/x.test.mjs
+rec_has "a pfm .test.mjs runs under node --test" node --test --test-reporter=tap pfm/internal/js/x.test.mjs
+run "$R" pfm/internal/js/x.test.mjs::'a case'
+rec_has "a pfm .test.mjs selector is --test-name-pattern" node --test --test-reporter=tap '--test-name-pattern=a case' pfm/internal/js/x.test.mjs
+run "$R" pfm/internal/js/x.mjs
+rec_has "a pfm .mjs file brings its .test.mjs sibling under node --test" node --test --test-reporter=tap pfm/internal/js/x.test.mjs
+reset; rule python3 'plain_test.py' 0 'ok test_a\nok test_b'
+run "$R" pfm/internal/py/plain_test.py
+rec_has "a script-style _test.py (no unittest import) runs whole under python3" python3 pfm/internal/py/plain_test.py
+out_has "a green script-style _test.py is TEST PASS" "TEST PASS pfm/internal/py/plain_test.py"
+reset; rule python3 'plain_test.py' 0 'nothing'
+run "$R" pfm/internal/py/plain_test.py
+expect "a script-style _test.py with no ok line is NO-TEST-RAN" 1 "TEST NO-TEST-RAN pfm/internal/py/plain_test.py"
+reset; rule python3 'plain_test.py' 1 'ok test_a\nFAIL test_b: boom'
+run "$R" pfm/internal/py/plain_test.py
+expect "a red script-style _test.py is TEST FAIL with its code" 1 "TEST FAIL pfm/internal/py/plain_test.py (exit 1)"
+run "$R" pfm/internal/py/plain_test.py::test_a
+expect "a script-style _test.py takes no selector, exit 2" 2 "$U"
+out_has "the script-style selector refusal names the file" "test.sh: pfm/internal/py/plain_test.py: a script-style Python test (no unittest import; it runs whole) takes no selector"
+reset
+run "$R" pfm/internal/py/lone.py
+rc_is "a pfm file no test covers runs its checks only, green" 0
+out_has "a pfm file no test covers is named on its UNCOVERED line" "TEST UNCOVERED pfm/internal/py/lone.py (no test file maps to it — its checks only)"
+run "$R" pfm/internal/py/lone.py::x
+expect "a selector on a pfm file that is no test file is the usage line, exit 2" 2 "$U"
 reset
 run "$R" docs/plain.txt
 rc_is "a file no test covers runs its checks only, green" 0
 out_has "a file no test covers prints TESTS NONE" "TESTS NONE (no test file covers the named paths)"
+out_has "a file no test covers is named on its UNCOVERED line" "TEST UNCOVERED docs/plain.txt (no test file maps to it — its checks only)"
 run "$R" docs/plain.txt::x
 expect "a selector on a file that is no test file is the usage line, exit 2" 2 "$U"
 
@@ -266,6 +312,10 @@ else bad "the tests run in the order named, then the checks" "$la $le $ls_ $lc" 
 out_has "a mixed selection runs the pfm checks" "CHECK PASS lint-new"
 out_has "a mixed selection runs the templates checks" "CHECK PASS codex-markers"
 out_has "a mixed green run counts every test" "TESTS PASS 3"
+out_has "a file no test covers beside covered ones is still named" "TEST UNCOVERED docs/only.md (no test file maps to it — its checks only)"
+run "$R" pfm/internal/a/a.go pfm/internal/a/a.go docs/plain.txt docs/plain.txt
+if [ "$(grep -c '^TEST UNCOVERED ' <<<"$OUT")" = 1 ]; then ok "a repeated covered file is never UNCOVERED, a repeated uncovered one named once"
+else bad "a repeated covered file is never UNCOVERED, a repeated uncovered one named once" "$OUT"; fi
 
 # --- the TEST verdicts ------------------------------------------------------------------------------
 reset; rule go './internal/a/' 3; rule go './e2e/' 0 '--- PASS: TestE2E (0.00s)'

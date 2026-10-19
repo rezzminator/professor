@@ -326,6 +326,12 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	if err != nil || len(pids) != 2 || pids[0] != 4242 || pids[1] != 7 {
 		t.Errorf("ParseProcessInfo = %v, %v", pids, err)
 	}
+	empty, err := ParseProcessInfo(
+		json.RawMessage(`{"type":"pane_process_info","process_info":{"foreground_processes":[]}}`),
+	)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("explicit empty foreground = %v, %v", empty, err)
+	}
 	// The shape a live Herdr answered for a plain zsh pane.
 	shellPID, err := ParseShellPID(json.RawMessage(
 		`{"type":"pane_process_info","process_info":{"foreground_process_group_id":51234,"foreground_processes":` +
@@ -358,6 +364,14 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 		"agents of another type": func() error { _, err := ParseAgentList(json.RawMessage(`{"type":"ok"}`)); return err },
 		"panes of another type":  func() error { _, err := ParsePanes(json.RawMessage(`{"type":"agent_list"}`)); return err },
 		"process info garbage":   func() error { _, err := ParseProcessInfo(json.RawMessage(`[1]`)); return err },
+		"missing foreground": func() error {
+			_, err := ParseProcessInfo(json.RawMessage(`{"type":"pane_process_info","process_info":{}}`))
+			return err
+		},
+		"null foreground": func() error {
+			_, err := ParseProcessInfo(json.RawMessage(`{"type":"pane_process_info","process_info":{"foreground_processes":null}}`))
+			return err
+		},
 		"process info of another type": func() error {
 			_, err := ParseProcessInfo(json.RawMessage(`{"type":"ok","process_info":{"foreground_processes":[{"pid":7,"name":"x"}]}}`))
 			return err

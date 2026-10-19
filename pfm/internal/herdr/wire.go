@@ -376,7 +376,7 @@ func ParseProcessInfo(result json.RawMessage) ([]int, error) {
 	var decoded struct {
 		Type        string `json:"type"`
 		ProcessInfo struct {
-			Foreground []struct {
+			Foreground *[]struct {
 				PID int `json:"pid"`
 			} `json:"foreground_processes"`
 		} `json:"process_info"`
@@ -387,8 +387,11 @@ func ParseProcessInfo(result json.RawMessage) ([]int, error) {
 	if decoded.Type != "pane_process_info" {
 		return nil, fmt.Errorf("herdr pane.process_info: result type %q, want pane_process_info", decoded.Type)
 	}
-	pids := make([]int, 0, len(decoded.ProcessInfo.Foreground))
-	for _, process := range decoded.ProcessInfo.Foreground {
+	if decoded.ProcessInfo.Foreground == nil {
+		return nil, fmt.Errorf("herdr pane.process_info: foreground_processes missing or null in result %q", result)
+	}
+	pids := make([]int, 0, len(*decoded.ProcessInfo.Foreground))
+	for _, process := range *decoded.ProcessInfo.Foreground {
 		pids = append(pids, process.PID)
 	}
 	return pids, nil

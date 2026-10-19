@@ -314,6 +314,104 @@ func TestTokenReportLinesAreExactlyHerdrsRequests(t *testing.T) {
 	}
 }
 
+func TestNonFleetPanesAreNotIndicatorCandidates(t *testing.T) {
+	for _, status := range []string{"unknown", "", "working", "blocked", "done", "idle"} {
+		for _, at := range []time.Time{phaseOn, phaseOff} {
+			t.Run(fmt.Sprint(status, "/", at.UnixMilli()), func(t *testing.T) {
+				server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: status}}}
+				painter, stepping, stderr := newTestPainter(t, server, at)
+				painter.provePane = func(context.Context, string, string) error { return ErrNotFleetPane }
+				for range 4 {
+					blocked, wrote, err := painter.paint(context.Background())
+					if err != nil || blocked || wrote || painter.hasDone || stderr.Len() != 0 {
+						t.Fatalf("non-fleet pane became a candidate: blocked=%t wrote=%t done=%t err=%v stderr=%q",
+							blocked, wrote, painter.hasDone, err, stderr)
+					}
+					stepping.now = stepping.now.Add(blinkHalfPeriod)
+				}
+				if len(server.writes) != 0 || len(painter.unproved) != 0 {
+					t.Fatalf("non-fleet pane was painted or memoized as unproved: writes=%v memo=%v",
+						server.writes, painter.unproved)
+				}
+				// A wrapper or picker that starts a chat is reconsidered, never
+				// permanently excluded by the earlier non-fleet observation.
+				painter.provePane = allowPaneProof
+				_, wrote, err := painter.paint(context.Background())
+				want, _ := wantedIndicators(status, TabTick(stepping.now.UnixMilli())%2 == 0)
+				if err != nil || wrote != (len(want) != 0) || !maps.Equal(server.panes[0].Tokens, want) {
+					t.Fatalf("newly proved fleet pane did not reconcile: wrote=%t err=%v tokens=%v want=%v",
+						wrote, err, server.panes[0].Tokens, want)
+				}
+			})
+		}
+	}
+}
+
+func TestNoOpPaintCachesProofButNeverAuthorizesWrites(t *testing.T) {
+	server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: "idle"}}}
+	painter, stepping, _ := newTestPainter(t, server, phaseOn)
+	proofs := 0
+	painter.provePane = func(context.Context, string, string) error { proofs++; return nil }
+	paint := func() {
+		t.Helper()
+		if _, _, err := painter.paint(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 4 {
+		paint()
+		stepping.now = stepping.now.Add(blinkHalfPeriod)
+	}
+	if proofs != 1 {
+		t.Fatalf("no-op paints repeatedly proved ownership: %d", proofs)
+	}
+	stepping.now = stepping.now.Add(unprovedReprove)
+	paint()
+	if proofs != 2 {
+		t.Fatalf("expired classification did not reprove: %d", proofs)
+	}
+	server.setStatus("working")
+	paint()
+	if proofs != 3 {
+		t.Fatalf("changed status did not reprove: %d", proofs)
+	}
+	// A token difference requires fresh proof even within the cache interval.
+	server.panes[0].Tokens = nil
+	paint()
+	if proofs != 4 || len(server.paneWrites("w1:p1")) != 2 {
+		t.Fatalf("cached proof authorized a write: proofs=%d writes=%v", proofs, server.writes)
+	}
+}
+
+func TestNonFleetClassificationRetainsPriorWarningWithoutSuppressingRetry(t *testing.T) {
+	server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: "working"}}}
+	painter, stepping, stderr := newTestPainter(t, server, phaseOn)
+	proofErr := errors.New("probe failed")
+	proofs := 0
+	painter.provePane = func(context.Context, string, string) error { proofs++; return proofErr }
+	paint := func() {
+		t.Helper()
+		if _, _, err := painter.paint(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paint()
+	stepping.now = stepping.now.Add(unprovedReprove)
+	proofErr = ErrNotFleetPane
+	paint()
+	proofErr = errors.New("probe failed again")
+	paint() // Positive absence must not defer a newly started chat's proof.
+	if proofs != 3 || strings.Count(stderr.String(), "ownership unproved") != 1 {
+		t.Fatalf("alternating absence relogged or suppressed proof: proofs=%d stderr=%s", proofs, stderr)
+	}
+	stepping.now = stepping.now.Add(unprovedReprove)
+	proofErr = nil
+	paint()
+	if len(painter.unproved) != 0 || len(server.paneWrites("w1:p1")) != 1 {
+		t.Fatalf("successful proof did not recover: memo=%v writes=%v", painter.unproved, server.writes)
+	}
+}
+
 func TestIndicatorsWithoutOwnershipLeavePanesUntouched(t *testing.T) {
 	for _, clearing := range []bool{false, true} {
 		t.Run(fmt.Sprint("clear=", clearing), func(t *testing.T) {
@@ -425,13 +523,18 @@ func TestAnUnprovedPaneIsNamedOnceAndReprovedOnlyOnChange(t *testing.T) {
 	}
 	server.setStatus("working")
 	paint()
-	if proofs != 2 || strings.Count(stderr.String(), "ownership unproved") != 1 {
-		t.Fatalf("a status change must re-prove, still named once: proofs=%d stderr=%s", proofs, stderr)
+	if proofs != 2 || strings.Count(stderr.String(), "ownership unproved") != 2 {
+		t.Fatalf("a status change must re-prove and name the new state once: proofs=%d stderr=%s", proofs, stderr)
+	}
+	stepping.now = stepping.now.Add(unprovedReprove)
+	paint()
+	if proofs != 3 || strings.Count(stderr.String(), "ownership unproved") != 2 {
+		t.Fatalf("a periodic failed proof must not re-name the same state: proofs=%d stderr=%s", proofs, stderr)
 	}
 	stepping.now = stepping.now.Add(unprovedReprove)
 	owned = true
 	paint()
-	if proofs != 3 || len(server.paneWrites("w1:p1")) != 1 {
+	if proofs != 4 || len(server.paneWrites("w1:p1")) != 1 {
 		t.Fatalf("past the interval a proved pane is painted: proofs=%d writes=%v", proofs, server.writes)
 	}
 }

@@ -107,6 +107,11 @@ func bridgeTmux(ctx context.Context, socketPath string, args ...string) (string,
 	return string(output), nil
 }
 
+var (
+	errNotTmuxClient = errors.New("not a tmux client")
+	errNoHerdrBridge = errors.New("no pfm tmux client in its foreground")
+)
+
 // prove returns the first foreground pid proved a pfm bridge client; every
 // refusal is joined into the error, so an unproved pane names each reason.
 func (prover bridgeProver) prove(ctx context.Context, socket, pane string) (HerdrBridge, error) {
@@ -116,22 +121,28 @@ func (prover bridgeProver) prove(ctx context.Context, socket, pane string) (Herd
 	}
 	if len(pids) == 0 {
 		return HerdrBridge{}, fmt.Errorf(
-			"herdr pane %s bridge ownership unproved: no pfm tmux client in its foreground",
+			"herdr pane %s bridge ownership unproved: %w",
 			pane,
+			errNoHerdrBridge,
 		)
 	}
 	var refusals []error
+	noBridge := true
 	for _, pid := range pids {
 		bridge, err := prover.client(ctx, pid)
 		if err == nil {
 			return bridge, nil
 		}
+		noBridge = noBridge && errors.Is(err, errNotTmuxClient)
 		refusals = append(refusals, fmt.Errorf(
 			"herdr pane %s bridge client %d ownership unproved: %w",
 			pane,
 			pid,
 			err,
 		))
+	}
+	if noBridge {
+		refusals = append(refusals, errNoHerdrBridge)
 	}
 	return HerdrBridge{}, errors.Join(refusals...)
 }
@@ -220,8 +231,11 @@ func (prover bridgeProver) client(ctx context.Context, pid int) (HerdrBridge, er
 // serverSocket reads the tmux server a client command line names: -S wins over
 // -L as in tmux, and only a server inside pfm's tmux directory is a pfm server.
 func (prover bridgeProver) serverSocket(argv []string) (string, error) {
-	if len(argv) == 0 || filepath.Base(argv[0]) != "tmux" {
-		return "", fmt.Errorf("not a tmux client: %q", argv)
+	if len(argv) == 0 || argv[0] == "" {
+		return "", fmt.Errorf("not a tmux client: empty command line %q", argv)
+	}
+	if filepath.Base(argv[0]) != "tmux" {
+		return "", fmt.Errorf("%w: %q", errNotTmuxClient, argv)
 	}
 	var label, socketPath string
 	for index := 1; index < len(argv); index++ {

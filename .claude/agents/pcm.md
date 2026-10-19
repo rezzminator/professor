@@ -1,6 +1,6 @@
 ---
 name: pcm
-description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/**, templates/** or the .codex/ mirror. `audit [scope|all]` reports framework consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI → /pfm; publishing the blueprint → /pfm:release; context budget → /context-meter.
+description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/**, templates/** or the .codex/ mirror. `audit [scope|all]` reports framework consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI → /pfm; publishing the blueprint → /pfm:release; context budget → /context-meter; theme work → themer.
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 skills: [quality:prompt]
 model: opus
@@ -52,7 +52,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ## What you own
 
 - `CLAUDE.md`; `.claude/agents/*.md`, `.claude/commands/**/*.md`, `.claude/skills/*/SKILL.md`, `.claude/scripts/*.{sh,mjs}`, `.claude/settings.json`
-- The shipped blueprint `templates/**` with its spec and `refresh-map.json`; `/pfm:release` publishes it, you edit it.
+- The shipped blueprint `templates/**` with its spec and `refresh-map.json`, except `templates/themes/` (the `themer` agent's); `/pfm:release` publishes it, you edit it.
 - The Codex and OpenCode mirrors (`.codex/`, `.opencode/`, `AGENTS.md`): generated from the Claude sources by `engine-sync codex build` and `engine-sync opencode build`, never edited by hand. The `Stop` hook recompiles after an Edit/Write; after a Bash-driven write run `engine-sync codex build . && engine-sync codex check .` and `engine-sync opencode build . && engine-sync opencode doctor .`. Hand-written keepers: `.codex/config.toml` (except its generated `mcp_servers` fence).
 - `docs/commands/pcm/references/`
 

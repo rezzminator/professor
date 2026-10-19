@@ -78,16 +78,17 @@ grep -Fq "$clone/pfm/internal/installer/assets/shim/pfm.zsh" "$HOME/.zshrc" 2>/d
 check_path I7 "composed Codex prompt" "$clone/pfm/harness-prompts/composed/codex.md"
 check_path I9 "composed Claude prompt" "$clone/pfm/harness-prompts/composed/claude.md"
 check_path I8 "harness-prompt baseline" "$clone/pfm/harness-prompts/claude/baselines/harness-original.sha256"
-# The assets whose destination the installer computes are SEARCHED, and the
-# roots searched are named on failure — "nothing there" is never "failed to look".
-ROOTS="$HOME/.local/share/pfm $HOME/.local/bin $SEAT_DIR $CODEX_HOME $HOME/.claude"
-# The glob is a PATH suffix, not a bare name.
-find_asset() { # find_asset <id> <what> <path-suffix-glob>
-  local hit
-  hit="$(find $ROOTS -maxdepth 6 -path "*/$3" 2>/dev/null | head -1)"
-  [ -n "$hit" ] || missing="$missing $1 ($2: no '*/$3' under $ROOTS);"
-}
-find_asset I15 "Claude Code professor theme" 'professor-*.json'
+# I15: every bundled theme profile, its palette in Claude's themes dir and its
+# whole profile in pfm's install dir, the names read from the clone's manifest —
+# an unreadable manifest is named, never read as "no themes to check".
+if themes="$(bundled_themes "$clone/templates/themes/sources.json")"; then
+  while IFS= read -r t; do
+    check_path I15 "Claude Code theme palette $t" "$HOME/.claude/themes/$t.json"
+    check_path I15 "pfm theme profile $t" "$MANAGED/themes/$t.json"
+  done <<<"$themes"
+else
+  missing="$missing I15 ($themes);"
+fi
 check_path I16 "harvestpy runtime" "$HOME/.local/state/pfm/harvest-python/env"
 check_path I14 "VS Code extension asset" "$MANAGED/vscode/professor/package.json"
 for registry in agents commands skills; do
@@ -95,7 +96,7 @@ for registry in agents commands skills; do
 done
 [ -d "$CODEX_HOME/agents" ] || missing="$missing I20 (no Codex agents mirror at $CODEX_HOME/agents);"
 if [ -n "$missing" ]; then fail "$missing"; else
-  pass "every contracted overlay, per-seat card, marker and registry is staged (searched: $ROOTS)"
+  pass "every contracted overlay, per-seat card, marker, registry and bundled theme profile is staged"
 fi
 
 # ─── O1.02a — install owns every account link ──────────────────────────────
@@ -389,8 +390,20 @@ settings_tmp="$(mktemp)"
 jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$settings_tmp" &&
   cat "$settings_tmp" >"$SEAT_DIR/settings.json" || bad="$bad could not remove the foreign settings key;"
 rm -f "$settings_tmp"
-[ -n "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
-  bad="$bad no professor-*.json theme under $HOME/.claude/themes;"
+# Themes: each bundled profile's Claude file carries the palette keys alone
+# (name, base, overrides — no surfaces pin reaches Claude); pfm's copy is whole.
+if themes="$(bundled_themes "$BLUEPRINT/templates/themes/sources.json")"; then
+  while IFS= read -r t; do
+    keys="$(jq -c 'keys' "$HOME/.claude/themes/$t.json" 2>&1)" ||
+      { bad="$bad theme $t: $HOME/.claude/themes/$t.json unreadable ($(one_line "$keys"));"; continue; }
+    [ "$keys" = '["base","name","overrides"]' ] || bad="$bad theme $t: Claude's file carries keys $keys, want [base,name,overrides];"
+    jq -e --slurpfile claude "$HOME/.claude/themes/$t.json" '{name, base, overrides} == ($claude[0] | {name, base, overrides})' \
+      "$MANAGED/themes/$t.json" >/dev/null 2>&1 ||
+      bad="$bad theme $t: pfm's profile $MANAGED/themes/$t.json is absent or its palette differs from Claude's file;"
+  done <<<"$themes"
+else
+  bad="$bad $themes;"
+fi
 mcp_list="$(pfm mcp ls 2>&1)"
 grep -q $'^chat\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report chat enabled;"
 grep -q $'^harvester\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report harvester enabled;"

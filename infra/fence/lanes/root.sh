@@ -18,7 +18,10 @@
 # fence-env.sh, engine-sync.sh), lane build files (root.sh, container.sh,
 # provision.sh, adopt.sh, cred-scan.sh, fixtures/, scenarios/), and the
 # engine-sync source fence-env.sh resolves (the binary provision.sh builds; an
-# absent source hashes as absent). It hashes on-disk content, identically
+# absent source hashes as absent), and each plugin checkout pfm install copies
+# into the image (plugins/{name}/plugins/{name}, every directory and file the
+# copy takes with its mode bits, ignored or untracked ones included; a missing
+# checkout hashes as absent). It hashes on-disk content, identically
 # whether dirty, staged or committed; test files, testdata and the pfm e2e tree
 # are excluded. Lane scripts, lib.sh and registries load from /worktree
 # at run time, so editing them reuses the root. Seats are lane inputs, not image inputs.
@@ -87,6 +90,46 @@ hash_tree() { # hash_tree <dir> <label prefix> <git ls-files pathspec…>
   done 3<<<"$hashes" <<<"$paths"
 }
 
+# Every plugin checkout an -alpha pfm install copies into the image's
+# ~/.local/share/{name}-dev, hashed as pfm's copy digest compares it: every
+# directory and file reached through symlinks, each file's content and every
+# permission bit of both, node_modules and .DS_Store left out at any depth,
+# ignored and untracked files counted. A copy baked from other content is
+# refreshed by the next in-lane install, and overlayfs refuses that directory
+# rename (EXDEV).
+hash_plugin_copies() {
+  local dir name checkout entries files hashes path blob bit
+  for dir in "$ROOT"/plugins/*/; do
+    [ -d "$dir" ] || continue
+    dir="${dir%/}" name="$(basename "$dir")"
+    checkout="$dir/plugins/$name"
+    if [ ! -f "$checkout/.claude-plugin/plugin.json" ]; then
+      printf 'plugin-copy/%s\tabsent\t0\n' "$name"
+      continue
+    fi
+    entries="$(cd "$checkout" && find -L . \( -name node_modules -o -name .DS_Store \) -prune -o \( -type d -o -type f \) -print |
+      LC_ALL=C sort)" || return 1
+    files="$(while IFS= read -r path; do [ -d "$checkout/$path" ] || printf '%s/%s\n' "$checkout" "${path#./}"; done <<<"$entries")"
+    hashes="$(printf '%s\n' "$files" | git -C "$ROOT" hash-object --no-filters --stdin-paths)" || return 1
+    while IFS= read -r path; do
+      if [ -d "$checkout/$path" ]; then
+        printf 'plugin-copy/%s/%s\tdir\n' "$name" "${path#./}"
+        continue
+      fi
+      IFS= read -r blob <&3 || return 1
+      printf 'plugin-copy/%s/%s\t%s\n' "$name" "${path#./}" "$blob"
+    done 3<<<"$hashes" <<<"$entries"
+    # The mode bits, one sorted path list per bit (find -perm is portable; stat is not).
+    for bit in 400 200 100 040 020 010 004 002 001; do
+      entries="$(cd "$checkout" && find -L . \( -name node_modules -o -name .DS_Store \) -prune -o \
+        \( -type d -o -type f \) -perm "-$bit" -print | LC_ALL=C sort)" || return 1
+      while IFS= read -r path; do
+        [ -z "$path" ] || printf 'plugin-copy/%s/%s\tmode-%s\n' "$name" "${path#./}" "$bit"
+      done <<<"$entries"
+    done
+  done
+}
+
 hash_inputs() {
   # shellcheck disable=SC2086 # HASH_PATHS is the fixed, space-delimited input roster.
   hash_tree "$ROOT" "" $HASH_PATHS \
@@ -95,6 +138,7 @@ hash_inputs() {
     ':(exclude)pfm/e2e/**' \
     ':(exclude)pfm/internal/harvestpy/assets/**/*_test.py' \
     ':(exclude)pfm/internal/harvestpy/assets/*_test.py' || return 1
+  hash_plugin_copies || return 1
   if [ -n "$PFM_DEV_ENGINE_SYNC_MISSING" ]; then
     printf 'engine-sync\tabsent\t0\n'
   else

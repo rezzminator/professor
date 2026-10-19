@@ -797,6 +797,20 @@ claude_registry_without_family_entries() {
   jq -cS '.mcpServers = ((.mcpServers // {}) | del(."chat-professor", ."harvester-professor"))' "$1"
 }
 
+# bundled_themes <sources.json> — the theme profiles the manifest bundles, one
+# name per line (each installs as ~/.claude/themes/{name}.json and
+# ~/.local/share/pfm/install/themes/{name}.json). Exit 1 with the reason on
+# stdout when the manifest is unreadable or bundles nothing, so a caller never
+# reads a failed lookup as "no themes".
+bundled_themes() {
+  local names
+  if ! names="$(jq -er '.bundled | keys[]' "$1" 2>&1)" || [ -z "$names" ]; then
+    printf 'no bundled theme read from %s: %s' "$1" "$(one_line "${names:-jq printed nothing}")"
+    return 1
+  fi
+  printf '%s\n' "$names"
+}
+
 # assert_opencode_mcp_registered <pfm-bin> — M.03 and E3.02 are the same
 # assertion body (OpenCode's opencode.jsonc carries both family local stdio
 # entries, and doctor's opencode rows report each family registration healthy): one shared beat body

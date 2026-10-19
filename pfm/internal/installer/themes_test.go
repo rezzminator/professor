@@ -229,6 +229,8 @@ func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing
 		{"path traversal", `{"bundled":{"x":{"file":"../secret.json","target":"~/.claude/themes/x.json"}}}`, `bundled theme "x" file "../secret.json" must be a bare file name beside the manifest`},
 		{"name clash", `{"source_fetched":{"x":{"repo":"https://e.test","raw":"https://e.test/x.json","target":"~/.claude/themes/x.json"}},"bundled":{"x":{"file":"x.json","target":"~/.claude/themes/x.json"}}}`, `names theme "x" as both source_fetched and bundled`},
 		{"missing file field", `{"bundled":{"x":{"target":"~/.claude/themes/x.json"}}}`, `bundled theme "x" is missing name, file, or target`},
+		{"profile name leaves its directory", `{"bundled":{"a/b":{"file":"x.json","target":"~/.claude/themes/x.json"}}}`, `bundled theme "a/b": name must be a bare profile name`},
+		{"profile name collides with a ledger key", `{"source_fetched":{"profile:x":{"repo":"https://e.test","raw":"https://e.test/x.json","target":"~/.claude/themes/x.json"}}}`, `theme "profile:x": name must be a bare profile name`},
 	} {
 		err := load(tc.manifest)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -265,7 +267,7 @@ func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing
 func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	t.Parallel()
 	baseBody := `{"name":"Tokyo Night","base":"dark","overrides":{"claude":"#c95cff","promptBorder":"#7c4dff","promptBorderShimmer":"#aa8bff"}}`
-	overlay := `{"name":"Professor Gold","overrides":{"promptBorder":"#ffd60a","promptBorderShimmer":"#fff7c2"}}`
+	overlay := `{"name":"Hibiscus Night","overrides":{"promptBorder":"#ffd60a","promptBorderShimmer":"#fff7c2"}}`
 	var baseStatus int
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/tokyo-night.json" {
@@ -282,9 +284,9 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	sourceRepo := t.TempDir()
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), fmt.Sprintf(`{
   "source_fetched": {"tokyo-night": {"repo": %q, "raw": %q, "target": "~/.claude/themes/tokyo-night.json", "activate": "/theme", "requires": "fixture"}},
-  "bundled": {"professor-gold": {"file": "professor-gold.json", "base": "tokyo-night", "target": "~/.claude/themes/professor-gold.json", "activate": "/theme", "requires": "fixture"}}
+  "bundled": {"hibiscus-night": {"file": "hibiscus-night.json", "base": "tokyo-night", "target": "~/.claude/themes/hibiscus-night.json", "activate": "/theme", "requires": "fixture"}}
 }`, server.URL, server.URL+"/tokyo-night.json"))
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "professor-gold.json"), overlay)
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "hibiscus-night.json"), overlay)
 	run := func() (string, error) {
 		var output bytes.Buffer
 		_, err := Run(context.Background(), Options{
@@ -309,12 +311,12 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 		Overrides map[string]string `json:"overrides"`
 	}
 	if err := json.Unmarshal(
-		[]byte(readFixture(t, filepath.Join(home, ".claude", "themes", "professor-gold.json"))),
+		[]byte(readFixture(t, filepath.Join(home, ".claude", "themes", "hibiscus-night.json"))),
 		&merged,
 	); err != nil {
 		t.Fatalf("merged overlay is not JSON: %v", err)
 	}
-	if merged.Name != "Professor Gold" || merged.Base != "dark" || merged.Overrides["claude"] != "#c95cff" ||
+	if merged.Name != "Hibiscus Night" || merged.Base != "dark" || merged.Overrides["claude"] != "#c95cff" ||
 		merged.Overrides["promptBorder"] != "#ffd60a" || merged.Overrides["promptBorderShimmer"] != "#fff7c2" {
 		t.Fatalf("merged overlay=%#v, want the base palette with the overlay's name and two prompt-border keys", merged)
 	}
@@ -324,14 +326,14 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("base fetch failure aborted host install: %v\n%s", err, failedOutput)
 	}
-	if !strings.Contains(failedOutput, "theme professor-gold base tokyo-night fetch failed") ||
+	if !strings.Contains(failedOutput, "theme hibiscus-night base tokyo-night fetch failed") ||
 		!strings.Contains(failedOutput, "503") {
 		t.Fatalf("base fetch failure was silent or vague:\n%s", failedOutput)
 	}
 
 	for _, tc := range []struct{ name, base, overlay, want string }{
 		{"blank base", `{"name":"Tokyo Night","base":"dark"}`, overlay, "base palette carries no overrides"},
-		{"blank overlay", baseBody, `{"name":"Professor Gold"}`, "overlay carries no overrides"},
+		{"blank overlay", baseBody, `{"name":"Hibiscus Night"}`, "overlay carries no overrides"},
 		{"non-JSON base", `{"name":`, overlay, "decode base palette"},
 	} {
 		if _, err := mergeThemeOverlay(
@@ -346,13 +348,13 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	writeFixture(
 		t,
 		filepath.Join(sourceRepo, "templates", "themes", "sources.json"),
-		`{"bundled":{"professor-gold":{"file":"professor-gold.json","base":"nope","target":"~/.claude/themes/professor-gold.json"}}}`,
+		`{"bundled":{"hibiscus-night":{"file":"hibiscus-night.json","base":"nope","target":"~/.claude/themes/hibiscus-night.json"}}}`,
 	)
 	if _, err := loadThemeSources(
 		context.Background(),
 		Options{SourceRepo: sourceRepo},
 	); err == nil ||
-		!strings.Contains(err.Error(), `bundled theme "professor-gold" base "nope" is not a source_fetched theme`) {
+		!strings.Contains(err.Error(), `bundled theme "hibiscus-night" base "nope" is not a source_fetched theme`) {
 		t.Fatalf("unknown base err=%v, want a named manifest refusal", err)
 	}
 }
@@ -575,7 +577,7 @@ func TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients(t *test
 	}
 }
 
-// TestThemeEditedAfterInstallIsLeftInPlace: a professor-gold.json whose SHA
+// TestThemeEditedAfterInstallIsLeftInPlace: a hibiscus-night.json whose SHA
 // differs from the ownership record is the user's now — install, whose source
 // changed, names it locally modified and never rewrites it. The theme is Claude
 // Code's own file, which pfm theme only reads: nothing holds it back.
@@ -585,9 +587,9 @@ func TestThemeEditedAfterInstallIsLeftInPlace(t *testing.T) {
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
 	writeFixture(t, filepath.Join(sourceRepo, themeManifestRelative),
-		`{"bundled":{"professor-gold":{"file":"professor-gold.json","target":"~/.claude/themes/professor-gold.json"}}}`)
-	sourceFile := filepath.Join(sourceRepo, "templates", "themes", "professor-gold.json")
-	target := filepath.Join(home, ".claude", "themes", "professor-gold.json")
+		`{"bundled":{"hibiscus-night":{"file":"hibiscus-night.json","target":"~/.claude/themes/hibiscus-night.json"}}}`)
+	sourceFile := filepath.Join(sourceRepo, "templates", "themes", "hibiscus-night.json")
+	target := filepath.Join(home, ".claude", "themes", "hibiscus-night.json")
 	first := `{"name":"Gold","base":"dark","overrides":{"claude":"#ffd60a"}}`
 	edited := `{"name":"Gold","base":"dark","overrides":{"claude":"#7aa2f7"}}`
 	second := `{"name":"Gold","base":"dark","overrides":{"claude":"#ffcc00"}}`
@@ -611,7 +613,7 @@ func TestThemeEditedAfterInstallIsLeftInPlace(t *testing.T) {
 	if got := readFixture(t, target); got != edited {
 		t.Fatalf("edited theme rewritten to %q, want it left at %q\n%s", got, edited, output)
 	}
-	if !strings.Contains(output, "theme professor-gold locally modified; left in place at "+target) {
+	if !strings.Contains(output, "theme hibiscus-night locally modified; left in place at "+target) {
 		t.Fatalf("locally modified row missing:\n%s", output)
 	}
 }

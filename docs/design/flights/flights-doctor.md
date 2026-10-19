@@ -41,13 +41,13 @@ Each row names its transcript `path:line`.
 
 | Check | Finding |
 | --- | --- |
-| Tier fit | a foreman tier above or below the work's difficulty; a lander or reviewer tier off its size bar |
+| Tier fit | a foreman tier above or below the work's difficulty; a lander spawn off its inventory PLAN — a child added, dropped or re-cut |
 | Re-reads | a file read again by an agent after a tracer answer covering it reached that agent |
 | Store hits | tracer questions answered fresh from the store, and questions walked again with unchanged files |
-| Full suites outside the lander | any full suite or gate run by a foreman or worker |
+| Full suites outside the lander | any full suite or gate run by a foreman |
 | Gate repeats | a lander full gate run again with no red gate between, or a red gate's fix checked by rerunning the gate |
 | Idle gaps | a gap over 5 minutes, with who waited on what |
-| Greedy foreman | a foreman that wrote pieces a worker could have taken: its written bytes against its workers' |
+| Needless children | a child spawned while the foreman was idle, or on files shared with the foreman's own: the foreman's written bytes against its children's |
 | Silent agents | agents that wrote nothing, ranked by input tokens |
 
 ## The report

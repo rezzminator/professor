@@ -144,7 +144,8 @@ func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
 
 // A chat born with a name carries that name EXACT in @pfm_chat_name, set in the
 // same tmux command that creates the session; the window name stays the clipped
-// WindowName form. A chat born unnamed carries no option (D6).
+// WindowName form; a name no user chose is also @pfm_chat_name_auto, a user's
+// is not. A chat born unnamed carries no option (D6).
 func TestNewSessionStoresTheExactChatNameInTheSameCommand(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -157,6 +158,8 @@ func TestNewSessionStoresTheExactChatNameInTheSameCommand(t *testing.T) {
 	for socket, spec := range map[string]SessionSpec{
 		"probe-cc-1800000015-1-1": {Window: "Herder window", ChatName: exact},
 		"probe-cc-1800000016-1-1": {Window: WindowName("")},
+		// A pool name or a branch's default name is no user's: marked automatic.
+		"probe-cc-1800000017-1-1": {Window: "Pool name", ChatName: "Pool name;", ChatNameAutomatic: true},
 	} {
 		spec.Socket, spec.Session, spec.CWD, spec.Run = socket, socket, root, "sleep 120"
 		if err := tmux.NewSession(context.Background(), spec); err != nil {
@@ -171,6 +174,10 @@ func TestNewSessionStoresTheExactChatNameInTheSameCommand(t *testing.T) {
 		got := showOption(t, socketPath, "show-options", "-qv", "-t", socket, "@pfm_chat_name")
 		if got != spec.ChatName {
 			t.Fatalf("%s: @pfm_chat_name = %q, want %q", socket, got, spec.ChatName)
+		}
+		auto := showOption(t, socketPath, "show-options", "-qv", "-t", socket, "@pfm_chat_name_auto")
+		if want := map[bool]string{true: spec.ChatName}[spec.ChatNameAutomatic]; auto != want {
+			t.Fatalf("%s: @pfm_chat_name_auto = %q, want %q", socket, auto, want)
 		}
 		name := showOption(t, socketPath, "display-message", "-p", "-t", socket, "#{window_name}")
 		if name != spec.Window {

@@ -1,1 +1,1 @@
-{"agentType": "flights-worker", "description": "demo flights-worker", "toolUseId": "tu-f-w2", "spawnDepth": 2, "parentAgentId": "a0f0000000000001"}
+{"agentType": "flights-foreman-sonnet", "description": "demo flights-foreman-sonnet", "toolUseId": "tu-f-w2", "spawnDepth": 2, "parentAgentId": "a0f0000000000001"}

@@ -37,25 +37,10 @@
     "global/agents/documenter.md": {
       "curated": true
     },
-    "global/agents/flights-foreman-mini.md": {
+    "global/agents/flights-foreman-sonnet.md": {
       "curated": true
     },
-    "global/agents/flights-foreman-pro.md": {
-      "curated": true
-    },
-    "global/agents/flights-worker-pro.md": {
-      "curated": true
-    },
-    "global/agents/flights-lander-mini.md": {
-      "curated": true
-    },
-    "global/agents/flights-lander-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-foreman-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-foreman.md": {
+    "global/agents/gpt-foreman.md": {
       "curated": true
     },
     "global/agents/gpt-flights-lander.md": {
@@ -106,7 +91,7 @@
     "global/agents/tracer.md": {
       "curated": true
     },
-    "global/agents/imagination.md": {
+    "global/agents/imaginator.md": {
       "curated": true
     },
     "global/codex/config.toml": {
@@ -408,16 +393,25 @@
     "themes/README.md": {
       "curated": true
     },
-    "themes/professor-bronze.json": {
+    "themes/hibiscus-night.json": {
       "curated": true
     },
-    "themes/professor-gold.json": {
+    "themes/lagoon.json": {
       "curated": true
     },
-    "themes/professor-silver.json": {
+    "themes/mirrorball.json": {
+      "curated": true
+    },
+    "themes/neon-sunset.json": {
       "curated": true
     },
     "themes/sources.json": {
+      "curated": true
+    },
+    "themes/ultrafunk.json": {
+      "curated": true
+    },
+    "themes/velvet-groove.json": {
       "curated": true
     },
     "global/agents/shared/gpt.md": {

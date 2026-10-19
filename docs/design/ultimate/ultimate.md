@@ -17,13 +17,13 @@
 | --- | --- |
 | Kind | skill, `templates/global/skills/ultimate/SKILL.md`, linked to `~/.claude/skills/ultimate/` by `pfm install` |
 | Entry | `/ultimate [work]`, on the named work or the work in hand; also whenever the ultimate of anything is asked for |
-| Loaded by | a user or chat directly; the `/imagine` command; the `imagination` agent, which takes it as its law |
+| Loaded by | a user or chat directly; the `/imagine` command; the `imaginator` agent, which takes it as its law |
 | Writes | nothing of its own; it shapes how the loader works |
 
 ## The flows
 
 - `/ultimate [work]` → the work is made where it stands, by whoever loaded it.
-- `/imagine [work]` → loads `ultimate` → the chat writes `$HOME/.local/state/imagine/{slug}/brief.md` → one `imagination` agent, which also loads `ultimate`, builds it → the parent chat looks and raises → delivers to the user. The full flow is in `imagine.md` in this directory.
+- `/imagine [work]` → loads `ultimate` → the chat writes `$HOME/.local/state/imagine/{slug}/brief.md` → one `imaginator` agent, which also loads `ultimate`, builds it → the parent chat looks and raises → delivers to the user. The full flow is in `imagine.md` in this directory.
 
 `ultimate` does not route visual work to `/imagine`. A user who wants a visual work built by the family runs `/imagine`; a chat that loaded `ultimate` makes its work itself, at the standard the skill sets.
 
@@ -74,7 +74,7 @@ The work shows what the running model and the machine can do at their limit: the
 
 ## Boundaries
 
-- It is not a builder. Whether one agent or the chat itself makes the work is decided by the loader (`/imagine` dispatches one `imagination`; a bare `/ultimate` makes the work in the chat).
+- It is not a builder. Whether one agent or the chat itself makes the work is decided by the loader (`/imagine` dispatches one `imaginator`; a bare `/ultimate` makes the work in the chat).
 - The skill is the shared law of the family: the command and the agent both load it rather than restating it, so a change to a pillar lands in one file.
 
 ## Surfaces that stay in sync
@@ -83,5 +83,5 @@ The work shows what the running model and the machine can do at their limit: the
 | --- | --- |
 | `templates/global/skills/ultimate/SKILL.md` | the skill itself |
 | `templates/global/commands/imagine.md` | step 1 loads the skill |
-| `templates/global/agents/imagination.md` | first line loads the skill; the Depth rule is cited from its § Before the first file |
+| `templates/global/agents/imaginator.md` | first line loads the skill; the Depth rule is cited from its § Before the first file |
 | `templates/refresh-map.json` | the skill's refresh-map entry |

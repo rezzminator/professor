@@ -31,7 +31,7 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 	// saved owner is looked up by that pane first; a pane the chat has moved
 	// from still resolves through its session, and both go through the same
 	// supervisor and alias proof as an explicit address.
-	nativeSelf := request.Self && request.Environment.native()
+	nativeSelf := request.Self && request.Environment.Native()
 	owner := request.ID
 	if nativeSelf {
 		request.SocketName, request.PaneID = request.Environment.HerdrSocket, request.Environment.HerdrPane

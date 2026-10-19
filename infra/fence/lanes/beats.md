@@ -18,7 +18,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 ## Lane E1 — Claude
 
 - `E1.01-open-seat1` · opens one cc chat through the managed Claude launcher (spawn ceremony, label converges) · spends cc:$SEAT
-- `E1.02-statusline-theme` · statusline (seat glyph/model/effort/context%) and theme `custom:professor-*` render · spends cc:$SEAT
+- `E1.02-statusline-theme` · statusline (seat glyph/model/effort/context%) and theme `custom:{name}` of a bundled profile, its palette readable through the seat's themes link, render · spends cc:$SEAT
 - `E1.03-reload-account` · `/reload --account 2` keeps the same session id and recalls a pre-reload token on the second fixture seat · spends cc:${ALT:-none}
 - `E1.04-reload-model-effort` · `/reload --model`/`--effort` reboot in place · spends cc:${ALT:-$SEAT}
 - `E1.05-reload-1h` · `/reload --cache 1h|5m` toggles the cache window · spends cc:${ALT:-$SEAT}
@@ -125,7 +125,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 Runs FIRST in the sequence: it asserts the machine the other lanes will live on, and every beat that mutates the install restores what it changed (a dropped seat is a spare, never the seat E1 runs on).
 
 - `O1.01-install-idempotent` · a second `pfm install --yes` is idempotent (changed=0) · spends none
-- `O1.02-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, themes, harness baseline) · spends none
+- `O1.02-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, every bundled theme profile's Claude palette and pfm profile copy, harness baseline) · spends none
 - `O1.02a-account-links` · every account links all 23 shared entries; doctor reports `account-links: ok` without a store, account or link finding · spends none
 - `O1.03-hooks-installed` · hooks are installed correctly per engine · spends none
 - `O1.04-seats` · seats configuration: configured accounts, fanout, Codex homes, OpenCode home absence · spends none
@@ -135,12 +135,13 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 - `O1.09-doctor-pass` · `pfm doctor` every row green or a named advisory (no systemd/launchd in the container is the named one) · spends none
 - `O1.10-doctor-exit-contract` · the top-level `pfm doctor` command contract (exit 0/1/2/3) · spends none
 - `O1.11-heal` · `pfm heal` reports/rebuilds wedged Codex thread-history · spends none
-- `O1.12-doc-vs-code` · doc-vs-code confirmed behaviors (settings-global merge, project hooks, git-bridge skill, themes, MCP) · spends none
+- `O1.12-doc-vs-code` · doc-vs-code confirmed behaviors (settings-global merge, project hooks, git-bridge skill, each bundled theme's Claude file carrying only name/base/overrides and matching pfm's profile copy, MCP) · spends none
 - `O1.13-misc-ops` · misc ops CLI: version, config, issues, whoami, usage-hook · spends none
 - `O1.15-model-cost` · `pfm model-cost` help names `--all`, `--force` and `--check`; a model plus `--all` and `--check` plus `--json` exit 2; `--check` under `PFM_PRICES_OFFLINE=1` prints the `prices:` summary and exits 0; an unknown id exits 1 naming `pfm model-cost --all` · spends none
 - `O1.16-tokens` · `pfm tokens` help names `--codex`, `--tree` and `--worktree`; `--since 3x` exits 2 naming `--since`, and `--tree ID --worktree DIR` without `--base` exits 2 naming the pair; under `PFM_PRICES_OFFLINE=1` an unreadable `--root` exits 1 naming `--root`, an empty root prints its `TOKEN AUDIT` report and exits 0, and `--tree` over that empty root exits 1 naming the id it could not find · spends none
 - `O1.17-transcript` · `pfm transcript` help names its verbs; an unknown verb exits 2 naming the invalid choice; a fixture transcript's `show` prints its `TRANSCRIPT claude` header and its prompt; `locate` of an id nothing holds exits 1 naming `NOT FOUND` · spends none
 - `O1.18-theme` · `pfm theme status` (and bare `pfm theme`) and `pfm theme sync` in a home that never ran `on` print the off line and exit 0; the retired `ls` and `set` verbs and an unknown verb exit 2 naming the unknown subcommand · spends none
+- `O1.19-restart-dry-run` · `pfm restart --dry-run` opens with the plan header, has a `find` line for every family (chats, chat-helpers, herdr, services, mcp-daemon, search-backend, pfm), exits 0 or 1 only with a `FAILED` find named, names its `last` pfm process (the restart worker a plain run detaches) and spawns no worker; `pfm restart now` exits 2 with the usage, and `pfm internal restart-run` without `--front` exits 2 with its own · spends none
 
 ## Lane O2 — ops & host, the destructive tail
 
@@ -157,7 +158,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives the fixture transcr
 - `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `call` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT
 - `O2.08-dropped-seat-with-live-chat` · **cross-lane** — a seat dropped while a chat lives on it: the chat keeps working and `pfm doctor` names the seat · spends cc:${SPARE:-none}
 - `O2.09-harvester` · `pfm harvest` local content and named offline public-source errors, ask's usage line, and sidecar provisioning · spends cc:$SEAT · linux-arm64 `known-gap`
-- `O2.10-uninstall` · LAST beat of the run: `uninstall` removes everything owned, keeps a foreign hook planted before install, leaves no ledger · spends none
+- `O2.10-uninstall` · LAST beat of the run: `uninstall` removes everything owned (every bundled theme profile, proven staged first, gone from Claude's themes dir, pfm's install dir and each seat's themes link), keeps a foreign hook planted before install, leaves no ledger · spends none
 
 ## Lane H — real Herdr, fake engines
 

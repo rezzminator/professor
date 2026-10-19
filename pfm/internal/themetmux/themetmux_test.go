@@ -14,10 +14,12 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 type fakeProbe struct {
-	pidErr map[string]error
+	pidErr  map[string]error
+	showErr error
 }
 
 func (probe *fakeProbe) ServerPID(_ context.Context, socket string) (int, error) {
@@ -27,7 +29,9 @@ func (probe *fakeProbe) ServerPID(_ context.Context, socket string) (int, error)
 	return 42, nil
 }
 
-func (*fakeProbe) ShowGlobalOption(context.Context, string, string) (string, error) { return "", nil }
+func (probe *fakeProbe) ShowGlobalOption(context.Context, string, string) (string, error) {
+	return "", probe.showErr
+}
 
 func (*fakeProbe) ApplyGlobalOptions(context.Context, string, [][]string) error { return nil }
 
@@ -120,5 +124,20 @@ func TestSocketsMissingDirectoryIsNoServers(t *testing.T) {
 	)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("Sockets over a missing directory = %v, %v; want none and no error", got, err)
+	}
+}
+
+// TestShowMarksOnlyTmuxsUnsetAnswerAsUnset: the probe's unset answer reaches
+// themesync as ErrTmuxOptionUnset; any other failed read does not.
+func TestShowMarksOnlyTmuxsUnsetAnswerAsUnset(t *testing.T) {
+	unset := &fakeProbe{showErr: fmt.Errorf("read tmux option cc-1 @host_accent: %w", gather.ErrOptionUnset)}
+	_, err := Servers{Probe: unset}.Show(context.Background(), "cc-1", "@host_accent")
+	if !errors.Is(err, themesync.ErrTmuxOptionUnset) || !strings.Contains(err.Error(), "@host_accent") {
+		t.Fatalf("Show of an unset option = %v, want themesync.ErrTmuxOptionUnset naming @host_accent", err)
+	}
+	timedOut := &fakeProbe{showErr: errors.New("read tmux option cc-1 @host_accent: signal: killed")}
+	_, err = Servers{Probe: timedOut}.Show(context.Background(), "cc-1", "@host_accent")
+	if err == nil || errors.Is(err, themesync.ErrTmuxOptionUnset) {
+		t.Fatalf("Show of a read that failed = %v, want its error, never ErrTmuxOptionUnset", err)
 	}
 }

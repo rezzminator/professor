@@ -16,7 +16,10 @@
                                         whose node's walked files and cited files all hash as at its `write` (sidecar
                                         sha256) is FRESH with no git asked; else placed and witnessed against git. Per
                                         question a TRACE line, and a REWALK line per earlier node with a line not
-                                        FRESH: `REWALK Q{n} · {run} node {x} · FROM {its FROM} · {changed paths}`
+                                        FRESH: `REWALK Q{n} · {run} node {x} · FROM {its FROM} · changed: {paths}`,
+                                        or `· files unchanged; re-walk for: {why}` when none changed; past the 12 KB
+                                        cap REWALK lines fold into one `REWALK Q{n} · … cut by the cap` line per
+                                        question before any FRESH line goes
   tracetree.py start RUN ID PATH:LINE [QUESTION]
                                         register node ID as running (RUN/ID.started holds `PATH:LINE<tab>QUESTION`),
                                         print PATH from LINE-3 to LINE+40, numbered; a QUESTION of the form Q{n}
@@ -2561,30 +2564,43 @@ TRACED = ("FRESH", "DELTA", "STALE", "GAP")
 
 
 def recall_unit(kind, lines, q=None, **more):
-    """One block of recall output: kind None (a head, a GAP question, UNREADABLE, REWALK, the cover), TRACE (the question's
-    work line, written after the cut) or a checked line's kind; hits (negated anchor hits), carries (the anchors it
-    hits), scope (what tracing it covers), marker (its first cite path), rows (a DELTA line's occurrence rows),
-    pinned (a STALE row naming a git failure: never cut)."""
+    """One block of recall output: kind None (a head, a GAP question, UNREADABLE, the cover), TRACE (the question's
+    work line, written after the cut), REWALK (one node's line), FOLD (the question's fold line, empty until the cap
+    folds) or a checked line's kind; hits (anchor hits; a REWALK line's negated place among its question's), carries
+    (the anchors it hits), scope (what tracing it covers), marker (its first cite path), rows (a DELTA line's
+    occurrence rows), pinned (a STALE row naming a git failure: never cut)."""
     return dict(dict(kind=kind, lines=lines, q=q, hits=0, carries=set(), scope=[], marker=None, rows=0, pinned=False),
                 **more)
 
 
 def recall_capped(units, anchors):
-    """The output lines of units within RECALL_CAP bytes. Kinds None (REWALK lines among them), TRACE and GAP and pinned
-    STALE rows always stay.
+    """The output lines of units within RECALL_CAP bytes. Kinds None, TRACE, FOLD and GAP and pinned STALE rows always
+    stay.
     Past the cap, fewest anchor hits first and the later unit first on a tie within each step: STALE lines collapse,
-    then each DELTA line's occurrence rows shrink to `  +{rows} rows`, then DELTA lines collapse, then FRESH lines go.
+    then each DELTA line's occurrence rows shrink to `  +{rows} rows`, then DELTA lines collapse, then REWALK lines
+    fold, each question's last first, then FRESH lines go, the question with the smallest share of FRESH lines first:
+    answers outlast the pointers to re-walk, and a question its FRESH lines nearly settle keeps them longest.
     A collapsed line becomes `CHANGED Q{q} · {its first cite path}`, one per (question, path), never cut, so the cap
-    never hides a changed fact. Each question with checked lines (anchors: {q: its anchors}) gets its TRACE line from
-    what stays: `none` when every line is a kept FRESH one and every anchor is hit by a line, else `{k} rows · {scope}`
-    over its DELTA, STALE, CHANGED and GAP lines and FRESH lines cut, plus each anchor no line hits. A `RECALL CUT`
-    line names what went, before the last unit."""
+    never hides a changed fact. Folded REWALK lines and cut FRESH lines become the question's one fold line,
+    `REWALK Q{q} · {w} nodes and {f} fresh lines cut by the cap · thread the rest of the TRACE Q{q} scope` (either
+    part alone when the other is 0). Each question with checked lines (anchors: {q: its anchors}) gets its TRACE line
+    from what stays: `none` when every line is a kept FRESH one and every anchor is hit by a line, else
+    `{k} rows · {scope}` over its DELTA, STALE, CHANGED and GAP lines and FRESH lines cut, plus each anchor no line
+    hits. A `RECALL CUT` line names what went, before the last unit."""
     def size(lines):
         return sum(len(x.encode()) + 1 for x in lines)
 
     shown, keep, markers = [list(u["lines"]) for u in units], [True] * len(units), {}
-    cut = {"STALE": 0, "trim": 0, "DELTA": 0, "FRESH": 0}
+    cut = {"STALE": 0, "trim": 0, "DELTA": 0, "REWALK": 0, "FRESH": 0}
     of = {q: [i for i, u in enumerate(units) if u["q"] == q and u["kind"] in TRACED] for q in anchors}
+    fold = {u["q"]: [i, 0, 0] for i, u in enumerate(units) if u["kind"] == "FOLD"}
+
+    def folded(q, part):
+        """Count one more folded REWALK line (part 1) or cut FRESH line (part 2) on q's fold line."""
+        at = fold[q]
+        at[part] += 1
+        what = [f"{at[1]} nodes"] * (at[1] > 0) + [f"{at[2]} fresh lines"] * (at[2] > 0)
+        shown[at[0]] = [f"REWALK Q{q} · {' and '.join(what)} cut by the cap · thread the rest of the TRACE Q{q} scope"]
 
     def trace(q):
         rows = of[q]
@@ -2595,21 +2611,31 @@ def recall_capped(units, anchors):
             return f"TRACE Q{q} · none"
         return f"TRACE Q{q} · {len(todo)} rows · {', '.join(scope)}"
 
-    def total():
-        return sum(size([trace(u["q"])]) if u["kind"] == "TRACE" else size(shown[i])
-                   for i, u in enumerate(units) if keep[i])
+    def cut_line():
+        s, d, w, f = cut["STALE"], cut["DELTA"], cut["REWALK"], cut["FRESH"]
+        trim = f" · {cut['trim']} delta lines cut to their head" if cut["trim"] else ""
+        return (f"RECALL CUT {s + d + w + f} lines past the {RECALL_CAP // 1024} KB cap · {s} stale, {d} delta, "
+                f"{w} rewalk, {f} fresh · {s + d} collapsed to {len(markers)} CHANGED{trim}")
 
-    for step, kind in (("STALE", "STALE"), ("trim", "DELTA"), ("DELTA", "DELTA"), ("FRESH", "FRESH")):
+    def fits():
+        kept = sum(size([trace(u["q"])]) if u["kind"] == "TRACE" else size(shown[i])
+                   for i, u in enumerate(units) if keep[i])
+        return kept + (size([cut_line()]) if any(cut.values()) else 0) <= RECALL_CAP
+
+    share = {q: sum(units[i]["kind"] == "FRESH" for i in rows) / len(rows) for q, rows in of.items() if rows}
+    for step, kind in (("STALE", "STALE"), ("trim", "DELTA"), ("DELTA", "DELTA"), ("REWALK", "REWALK"),
+                       ("FRESH", "FRESH")):
         for i in sorted((i for i, u in enumerate(units) if u["kind"] == kind and not u["pinned"]),
-                        key=lambda i: (units[i]["hits"], -i)):
-            if total() + 128 <= RECALL_CAP:
+                        key=lambda i: (share[units[i]["q"]] if step == "FRESH" else 0, units[i]["hits"], -i)):
+            if fits():
                 break
             if step == "trim":
                 if len(shown[i]) < 2:
                     continue
                 shown[i] = shown[i][:1] + [f"  +{units[i]['rows']} rows"]
-            elif step == "FRESH":
+            elif step in ("REWALK", "FRESH"):
                 keep[i] = False
+                folded(units[i]["q"], 1 if step == "REWALK" else 2)
             else:
                 at = (units[i]["q"], units[i]["marker"])
                 if at in markers:
@@ -2620,10 +2646,7 @@ def recall_capped(units, anchors):
     out = [x for i, u in enumerate(units) if keep[i]
            for x in ([trace(u["q"])] if u["kind"] == "TRACE" else shown[i])]
     if any(cut.values()):
-        s, d, f = cut["STALE"], cut["DELTA"], cut["FRESH"]
-        trim = f" · {cut['trim']} delta lines cut to their head" if cut["trim"] else ""
-        out.insert(len(out) - 1, f"RECALL CUT {s + d + f} lines past the {RECALL_CAP // 1024} KB cap · {s} stale, "
-                   f"{d} delta, {f} fresh · {s + d} collapsed to {len(markers)} CHANGED{trim}")
+        out.insert(len(out) - 1, cut_line())
     return out
 
 
@@ -2639,13 +2662,35 @@ def node_from(run, node):
     return first.rstrip("\n").split("\t", 1)[0].strip() or f"unknown ({path} names no FROM)"
 
 
+def rewalk_why(kind, notes, failed, scope):
+    """What a line not FRESH needs its node re-walked for, in the words a REWALK line gives when no walked file
+    changed."""
+    if kind == "GAP":
+        return ["closed-world claim"]
+    if kind == "STALE":
+        return ["git could not check" if failed else "no BASE to check against" if "no BASE" in notes[0] else
+                "stale cite"]
+    names = [s for s in scope if s.startswith("`")]
+    return ["moved span"] * ("moved" in notes) + [f"changed occurrences of {', '.join(names)}"] * bool(names)
+
+
+def rewalk_line(n, run, node, changed, hashed, why):
+    """`REWALK Q{n} · {run id} node {node} · FROM {its FROM}`, then `· changed: {paths}` naming the walked files whose
+    sha256 changed since its write, else `· files unchanged` (or `· files not hashed`, the node without a usable
+    sidecar) `; re-walk for: {why}`."""
+    head = f"REWALK Q{n} · {os.path.basename(run)} node {node} · FROM {node_from(run, node)}"
+    if changed:
+        return f"{head} · changed: {', '.join(changed)}"
+    return f"{head} · files {'unchanged' if hashed else 'not hashed'}; re-walk for: {', '.join(why)}"
+
+
 def recall(root, asked, exclude=None, before=None, recalls=()):
     """The recall of ROOT's questions over every earlier run of ROOT (the recalls runs first) as output lines: per
-    question a RECALL head, its TRACE line, a REWALK line per earlier node with a line not FRESH — its run, its FROM and
-    the paths it walked that changed (else the paths that line cites) — then each matched prior answer line FRESH (cites
-    re-addressed), DELTA (a moved span or changed occurrences, with its rows) or STALE (with its reason), or GAP, as
-    `recall_capped` keeps them; a GAP question's TRACE line is `whole question`; first a line per run or sidecar that
-    could not be read, last the RECALL COVER line."""
+    question a RECALL head, its TRACE line, a `rewalk_line` per earlier node with a line not FRESH, most anchor hits and
+    newest run first, its fold line once the cap folds, then each matched prior answer line FRESH (cites re-addressed),
+    DELTA (a moved span or changed occurrences, with its rows) or STALE (with its reason), or GAP, as `recall_capped`
+    keeps them; a GAP question's TRACE line is `whole question`; first a line per run or sidecar that could not be
+    read, last the RECALL COVER line."""
     rc, out = Recall(root), []
     try:
         runs, unreadable = recall_runs(rc, root, exclude, before, recalls)
@@ -2693,9 +2738,8 @@ def recall(root, asked, exclude=None, before=None, recalls=()):
             paths = cite_paths(new, theirs)
             if kind != "FRESH":
                 changed = [p for p, moved in (walked or {}).items() if moved]
-                rewalk.setdefault((run, x), dict.fromkeys(changed))
-                if not changed:
-                    rewalk[(run, x)].update(dict.fromkeys(paths))
+                why = rewalk.setdefault((run, x), (changed, walked is not None, {}))[2]
+                why.update(dict.fromkeys(rewalk_why(kind, notes, failed, scope)))
             more = dict(hits=-hits, carries=hit, marker=paths[0] if paths else "uncited", pinned=failed,
                         scope=paths + scope if paths or scope else [f"`{a}`" for a in sorted(hit)])
             if kind == "STALE":
@@ -2713,10 +2757,9 @@ def recall(root, asked, exclude=None, before=None, recalls=()):
         cut = f" · {len(matched) - len(shown)} more matched lines not checked" if len(matched) > len(shown) else ""
         units.append(recall_unit(None, [f"RECALL Q{n} · {fresh}/{len(shown)} lines fresh · runs {', '.join(ids)}{cut}"]))
         units.append(recall_unit("TRACE", [], n))
-        if rewalk:
-            units.append(recall_unit(None, [f"REWALK Q{n} · {os.path.basename(run)} node {x} · FROM {node_from(run, x)}"
-                                            f" · {', '.join(changed) or 'no path recorded'}"
-                                            for (run, x), changed in rewalk.items()]))
+        units += [recall_unit("REWALK", [rewalk_line(n, run, x, *node)], n, hits=-k)
+                  for k, ((run, x), node) in enumerate(rewalk.items())]
+        units.append(recall_unit("FOLD", [], n))
         units += rows
         checked[n] = anchors
         served += fresh > 0

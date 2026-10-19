@@ -59,6 +59,30 @@ func KillServer(ctx context.Context, resolved paths.Values, socket string) (err 
 	return nil
 }
 
+// EndNow ends one live chat in this process and confirms it is gone: a Herdr
+// seat through the same proved pane close the native end worker runs, a tmux
+// chat by ending its server, removing its role prompt and confirming the socket
+// no longer answers. Its caller already runs outside every chat (pfm restart's
+// detached worker), so nothing here waits for a turn to end.
+func EndNow(ctx context.Context, chat headless.Chat, values paths.Values) error {
+	if chat.Backend == spawn.BackendHerdr {
+		return endHerdr(ctx, chat, values)
+	}
+	if chat.Socket == "" {
+		return fmt.Errorf("chat %s has neither a Herdr seat nor a tmux socket to end", chat.ID)
+	}
+	if err := KillServer(ctx, values, chat.Socket); err != nil {
+		return fmt.Errorf("end tmux server %s: %w", chat.Socket, err)
+	}
+	if (action.TmuxExecutor{TmuxDir: values.TmuxDir}).SocketAlive(ctx, chat.Socket) {
+		return fmt.Errorf("tmux server %s still answers after kill-server", chat.Socket)
+	}
+	if err := agentrole.RemoveSeatPrompt(values.SIDDir, chat.Socket, chat.Pane); err != nil {
+		return fmt.Errorf("chat %s ended, but its role prompt stays: %w", chat.ID, err)
+	}
+	return nil
+}
+
 // EndTarget handles durable native worker/retry paths before asking the caller
 // to resolve its normal target. The CLI retains target-error exit-code mapping.
 func EndTarget(

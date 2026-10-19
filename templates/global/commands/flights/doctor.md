@@ -23,13 +23,13 @@ Each row names its transcript `path:line` (`pfm transcript show {id}`).
 
 | Check | Finding |
 | --- | --- |
-| Tier fit | a foreman tier above or below its brief's difficulty (the fleet prompt's foreman rubric: difficulty and ambiguity, never size); a lander or reviewer tier off its code-line bar |
+| Tier fit | a foreman tier above or below its brief's difficulty (the fleet prompt's foreman rubric: difficulty and ambiguity, never size); a lander spawn off its inventory PLAN — a child added, dropped or re-cut |
 | Re-reads | a file an agent read again after a tracer answer citing it reached that agent |
 | Store hits | tracer questions answered `TRACE Q{n} · none` from the store, and questions walked again whose cited files were unchanged |
-| Full suites outside the lander | any full suite or gate a foreman or worker ran |
+| Full suites outside the lander | any full suite or gate a foreman ran |
 | Gate repeats | a lander full gate run again with no red gate between, or a red gate's fix checked by rerunning the gate instead of its failing tests |
 | Idle gaps | a gap over 5 minutes between an agent's records, with who waited on what |
-| Greedy foreman | a foreman that wrote pieces a worker could have taken: its written bytes against its workers' |
+| Shared-file children | a child a foreman spawned for an area sharing a file with the foreman's own or a sibling's |
 | Silent agents | agents that wrote nothing, ranked by input tokens |
 
 ## 3 The report

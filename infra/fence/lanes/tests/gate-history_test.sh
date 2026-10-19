@@ -126,6 +126,7 @@ b=$T/wt-conc/timing
 mkdir -p "$b/run.PFM"
 printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.PFM/gate.tsv"
 printf 'target\tpfm\ncommit\tdef5678\nstarted\t2026-10-02T09:00:00Z\nfixtures\t0\nconcurrent_runs\t3\n' > "$b/run.PFM/gate.meta"
+TS 202610020900.00 "$b/run.PFM/gate.tsv" # mtimes pinned: ingest orders runs oldest first by gate.tsv mtime
 out=$(gh ingest "$b" --project p 2>&1)
 L=$LD/p/ledger.tsv C=$LD/p/concurrent.tsv
 eq 'pfm-only gate (gate.meta, no templates.leak row): ingested' "gate-history: ingested 1 run(s) → $L" "$out"
@@ -135,6 +136,7 @@ eq 'pfm-only gate: the sidecar holds the run once with the concurrent runs from 
 mkdir -p "$b/run.BADC"
 printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.BADC/gate.tsv"
 printf 'target\tpfm\nstarted\t2026-10-02T10:00:00Z\nconcurrent_runs\tNA not in the shared fence\n' > "$b/run.BADC/gate.meta"
+TS 202610021000.00 "$b/run.BADC/gate.tsv"
 gh ingest "$b" --project p > /dev/null 2>&1
 eq 'a gate with no recorded count: concurrent_runs NA' 'NA' "$(awk -F'\t' '$2 == "run.BADC" { print $3; exit }' "$C")"
 
@@ -150,8 +152,8 @@ eq 'split: ingest into an interim ledger exits 0 and names the split' '0 yes' \
 eq 'split: the 15-column header, the old row cut to 15 fields, no row short or long' \
   "$HEADER|2026-09-01T00:00:00Z${TAB}run.OLD${TAB}wtU${TAB}abc${TAB}all${TAB}GATE${TAB}PASS${TAB}9.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}CODE${TAB}0.5|" \
   "$(head -n 1 "$L")|$(sed -n 2p "$L")|$(awk -F'\t' 'NF != 15' "$L")"
-eq 'split: the sidecar holds the old run once with its count, then the new runs' \
-  "$CONC_HEADER|wtU${TAB}run.OLD${TAB}2|wt-conc${TAB}run.BADC${TAB}NA|wt-conc${TAB}run.PFM${TAB}3" "$(paste -sd'|' "$C")"
+eq 'split: the sidecar holds the old run once with its count, then the new runs oldest first' \
+  "$CONC_HEADER|wtU${TAB}run.OLD${TAB}2|wt-conc${TAB}run.PFM${TAB}3|wt-conc${TAB}run.BADC${TAB}NA" "$(paste -sd'|' "$C")"
 { printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$L"
 printf '%s\nwtU\trun.OLD\t2\n' "$CONC_HEADER" > "$C"
 mkdir -p "$T/empty-base"

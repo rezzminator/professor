@@ -106,6 +106,7 @@ pfm internal primary-get	O2	O2.05-internal-plumbing
 pfm internal primary-set	O2	O2.05-internal-plumbing
 pfm internal reload-intercept	E1	E1.09-reload-while-busy
 pfm internal reload-run	E1	E1.09-reload-while-busy
+pfm internal restart-run	O1	O1.19-restart-dry-run
 pfm internal schedule-fire	E1	E1.27-schedule
 pfm internal seat-host	O2	O2.05-internal-plumbing
 pfm internal stale	O2	O2.05-internal-plumbing
@@ -129,6 +130,7 @@ pfm theme	O1	O1.18-theme
 pfm tokens	O1	O1.16-tokens
 pfm transcript	O1	O1.17-transcript
 pfm reap	O2	O2.01-reap
+pfm restart	O1	O1.19-restart-dry-run
 pfm statusline	E1	E1.02-statusline-theme
 pfm statusline	E2	E2.02-statusline
 pfm statusline	E3	E3.01-open-seat

@@ -6,11 +6,10 @@ Requirements not yet settled are settled with the user before any dispatch. Then
 
 1. Direct: the solution is in hand and the work fits about 80 calls — do it yourself, or one sub-agent.
 2. A foreman: anything larger, or work crossing build units. Its tier follows difficulty and ambiguity, never size:
-   - `flights-foreman-mini`: the path is clear — the codebase has the pattern, the requirements are settled, little is left to decide.
-   - `flights-foreman`: real design choices or ambiguity, unfamiliar code, a bug with a known symptom and an unknown cause, or work across several modules.
-   - `flights-foreman-pro`: the toughest challenges — no pattern to follow, deep ambiguity, a root cause earlier attempts missed, or concurrency, data integrity or security where being wrong is costly.
+   - `flights-foreman-sonnet`: the path is clear (the code has the pattern, the requirements are settled, little is left to decide).
+   - `flights-foreman`: design choices or ambiguity, unfamiliar code, a bug with a known symptom and an unknown cause, work across several modules, or the toughest challenges where being wrong is costly.
 
-✗ A 3,000-line rename sent to `flights-foreman-pro` because it is large. ✓ `flights-foreman-mini`: the pattern is plain. ✓ A 40-line race fix that two attempts missed: `flights-foreman-pro`.
+✗ A 3,000-line rename sent to `flights-foreman` because it is large. ✓ `flights-foreman-sonnet`: the pattern is plain. ✓ A 40-line race fix that two attempts missed: `flights-foreman`, raising its own effort.
 
 A brief relays the user's intent, never their words: read what they mean from their message and the whole conversation, and state it as the precise outcome they want, with its acceptance. A value they fixed — a name, a quoted string, a number, a path — travels verbatim; a fork only the user can settle is asked before the dispatch, never guessed into the brief.
 
@@ -20,10 +19,9 @@ A manual — an agent role, a flights command — runs step by step as written: 
 
 You dispatched a foreman, or you are one with children. Agents pass messages, never files.
 
-- The main chat owns the place, the landing and git. It has `gitter` make the worktree, or names `develop`, and passes the path in each foreman's brief. Once every foreman on a worktree has returned, it spawns one lander for that worktree; on the lander's `PASS` or `FIXED`, `gitter` commits and merges with the lander's report path as REPORT_PATH. A sub-agent that dispatched a foreman passes its return up; landing stays with the main chat.
-- The lander tier follows the change's size, its code lines from `git -C {worktree} diff --numstat {base}` with tests, docs, generated and lock files excluded, its modules the project map's build units: `flights-lander-mini` under 150 code lines in one module · `flights-lander-pro` at 1,000+ code lines or 4+ modules · `flights-lander` otherwise.
+- The main chat owns the place, the landing and git. It has `gitter` make the worktree, or names `develop`, and passes the path in each foreman's brief. Once every foreman on a worktree has returned, it spawns one `flights-lander` for that worktree; on the lander's `PASS` or `FIXED`, `gitter` commits and merges with the lander's report path as REPORT_PATH. A sub-agent that dispatched a foreman passes its return up; landing stays with the main chat.
 - Hold the verdicts, never a file you are not editing: a child reads its own piece.
-- A child's brief carries the work and its acceptance, where to work, the testing manual path, the tracer run paths, and for a child of a foreman the interface it must fit — never steps, never beliefs about code you did not read.
+- A child's brief carries the work and its acceptance, where to work, the testing manual path, any tracer run paths, and for a child of a foreman the interface it must fit — never steps, never beliefs about code you did not read.
 - Waiting is one call or none: end the turn; the return arrives. No poll, no sleep chain, no log peek, no status check.
 - A return is a claim: match its first-line token and verify `DONE` against the diff of the child's piece and its covering tests. A red goes back to the child that built it, with the cause; nothing is re-run unchanged.
 - A critical question arrives as a message while its sender keeps working: answer it by `SendMessage`, or ask the user, then answer.

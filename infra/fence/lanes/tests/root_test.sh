@@ -358,6 +358,39 @@ rm "$ES/cmd/engine-sync/extra.go"
 if [ "$es_untracked" != "$es_base" ] && [ "$es_base" != "$base" ]; then
   ok "an untracked engine-sync source file and the source's presence both change the hash"
 else bad "engine-sync source presence" "base=$base es_base=$es_base es_untracked=$es_untracked"; fi
+# 6c — each plugin checkout pfm install copies into the image is a hash input, as the
+# copy takes it: ignored files count, node_modules does not, a missing checkout is absent.
+PC="$H/plugins/demo/plugins/demo"
+pc_none="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+mkdir -p "$H/plugins/demo"
+pc_empty="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+mkdir -p "$PC/.claude-plugin" "$PC/node_modules/dep"
+printf '{"name":"demo"}\n' >"$PC/.claude-plugin/plugin.json"
+pc_base="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+printf 'dep\n' >"$PC/node_modules/dep/index.js"
+pc_nm="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+printf 'types/\n' >"$PC/.gitignore"
+pc_gi="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+mkdir -p "$PC/types"; printf 'generated\n' >"$PC/types/index.d.ts"
+pc_ignored="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+printf 'edit\n' >>"$PC/.claude-plugin/plugin.json"
+pc_edit="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+# pfm's copy digest counts every directory and every permission bit, so an empty
+# directory or a mode change the exec bit does not show is a difference too.
+mkdir -p "$PC/empty"
+pc_dir="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+chmod 600 "$PC/.claude-plugin/plugin.json"
+pc_mode="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+chmod 700 "$PC/empty"
+pc_dirmode="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+rm -rf "$H/plugins"
+if [ "$pc_dir" != "$pc_edit" ] && [ "$pc_mode" != "$pc_dir" ] && [ "$pc_dirmode" != "$pc_mode" ]; then
+  ok "a plugin checkout's empty directory, a file's non-exec mode bits and a directory's mode change the hash"
+else bad "plugin checkout directories and modes" "edit=$pc_edit dir=$pc_dir mode=$pc_mode dirmode=$pc_dirmode"; fi
+if [ "$pc_empty" != "$pc_none" ] && [ "$pc_base" != "$pc_empty" ] && [ "$pc_nm" = "$pc_base" ] &&
+  [ "$pc_ignored" != "$pc_gi" ] && [ "$pc_edit" != "$pc_ignored" ]; then
+  ok "a plugin checkout's copied files, ignored ones included, change the hash; node_modules does not; a missing checkout hashes as absent"
+else bad "plugin checkout hash input" "none=$pc_none empty=$pc_empty base=$pc_base nm=$pc_nm gi=$pc_gi ignored=$pc_ignored edit=$pc_edit"; fi
 HASH_BIN="$T/hash-bin"; mkdir -p "$HASH_BIN"
 cat >"$HASH_BIN/git" <<'EOF'
 #!/usr/bin/env bash

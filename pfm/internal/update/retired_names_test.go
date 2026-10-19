@@ -269,34 +269,34 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"cost it with pfm tokens --timeline {path}", "pfm tokens --timeline", "command", chatlogSuccessor},
 	{"see docs/agents/_index.md", "docs/agents", "path", "docs/_index.md and docs/standards.md"},
 	{"type /ultimate-spec to spec first", "/ultimate-spec", "command", "/imagine"},
-	{`Agent(subagent_type: "ultimate", prompt: "spec it")`, `subagent_type: "ultimate"`, "agent", "imagination"},
-	{"subagent_type: ultimate", "subagent_type: ultimate", "agent", "imagination"},
-	{`{"subagent_type": "ultimate"}`, `subagent_type": "ultimate"`, "agent", "imagination"},
-	{`{"subagent_type":"ultimate"}`, `subagent_type":"ultimate"`, "agent", "imagination"},
-	{"see .claude/agents/ultimate.md", "agents/ultimate.md", "agent", "imagination"},
-	{"an `ultimate` agent specs it", "`ultimate` agent", "agent", "imagination"},
-	{`Agent({subagent_type:"ultimate"})`, `subagent_type:"ultimate"`, "agent", "imagination"},
-	{`subagent_type: 'ultimate'`, `subagent_type: 'ultimate'`, "agent", "imagination"},
-	{`Task(subagent_type="ultimate")`, `subagent_type="ultimate"`, "agent", "imagination"},
-	{"the `ultimate` sub-agent specs it", "`ultimate` sub-agent", "agent", "imagination"},
-	{"the `ultimate` subagent specs it", "`ultimate` subagent", "agent", "imagination"},
+	{`Agent(subagent_type: "ultimate", prompt: "spec it")`, `subagent_type: "ultimate"`, "agent", "imaginator"},
+	{"subagent_type: ultimate", "subagent_type: ultimate", "agent", "imaginator"},
+	{`{"subagent_type": "ultimate"}`, `subagent_type": "ultimate"`, "agent", "imaginator"},
+	{`{"subagent_type":"ultimate"}`, `subagent_type":"ultimate"`, "agent", "imaginator"},
+	{"see .claude/agents/ultimate.md", "agents/ultimate.md", "agent", "imaginator"},
+	{"an `ultimate` agent specs it", "`ultimate` agent", "agent", "imaginator"},
+	{`Agent({subagent_type:"ultimate"})`, `subagent_type:"ultimate"`, "agent", "imaginator"},
+	{`subagent_type: 'ultimate'`, `subagent_type: 'ultimate'`, "agent", "imaginator"},
+	{`Task(subagent_type="ultimate")`, `subagent_type="ultimate"`, "agent", "imaginator"},
+	{"the `ultimate` sub-agent specs it", "`ultimate` sub-agent", "agent", "imaginator"},
+	{"the `ultimate` subagent specs it", "`ultimate` subagent", "agent", "imaginator"},
 	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine"},
 	{"type /imagine:build to build it", "/imagine:build", "command", "/imagine"},
 	{"type /imagine:build-fast to build it", "/imagine:build-fast", "command", "/imagine"},
 	{"type /imagine:build-spec to spec it", "/imagine:build-spec", "command", flightsSuccessor},
 	{"run /imagine:callmeter on the data", "/imagine:callmeter", "command", "/imagine"},
-	{`Agent(subagent_type: "imagine", prompt: "build it")`, `subagent_type: "imagine"`, "agent", "imagination"},
-	{`Agent({subagent_type:"imagine"})`, `subagent_type:"imagine"`, "agent", "imagination"},
-	{`subagent_type: 'imagine'`, `subagent_type: 'imagine'`, "agent", "imagination"},
-	{"subagent_type: imagine", "subagent_type: imagine", "agent", "imagination"},
-	{`Task(subagent_type="imagine")`, `subagent_type="imagine"`, "agent", "imagination"},
-	{`{"subagent_type": "imagine"}`, `subagent_type": "imagine"`, "agent", "imagination"},
-	{`{"subagent_type":"imagine"}`, `subagent_type":"imagine"`, "agent", "imagination"},
-	{"see .claude/agents/imagine.md", "agents/imagine.md", "agent", "imagination"},
-	{"an `imagine` agent builds it", "`imagine` agent", "agent", "imagination"},
-	{"the `imagine` sub-agent builds it", "`imagine` sub-agent", "agent", "imagination"},
-	{"the `imagine` subagent builds it", "`imagine` subagent", "agent", "imagination"},
-	{"load the imagine-core skill", "imagine-core", "skill", "the imagination agent"},
+	{`Agent(subagent_type: "imagine", prompt: "build it")`, `subagent_type: "imagine"`, "agent", "imaginator"},
+	{`Agent({subagent_type:"imagine"})`, `subagent_type:"imagine"`, "agent", "imaginator"},
+	{`subagent_type: 'imagine'`, `subagent_type: 'imagine'`, "agent", "imaginator"},
+	{"subagent_type: imagine", "subagent_type: imagine", "agent", "imaginator"},
+	{`Task(subagent_type="imagine")`, `subagent_type="imagine"`, "agent", "imaginator"},
+	{`{"subagent_type": "imagine"}`, `subagent_type": "imagine"`, "agent", "imaginator"},
+	{`{"subagent_type":"imagine"}`, `subagent_type":"imagine"`, "agent", "imaginator"},
+	{"see .claude/agents/imagine.md", "agents/imagine.md", "agent", "imaginator"},
+	{"an `imagine` agent builds it", "`imagine` agent", "agent", "imaginator"},
+	{"the `imagine` sub-agent builds it", "`imagine` sub-agent", "agent", "imaginator"},
+	{"the `imagine` subagent builds it", "`imagine` subagent", "agent", "imaginator"},
+	{"load the imagine-core skill", "imagine-core", "skill", "the imaginator agent"},
 	{"run /imagine:evolve weekly", "/imagine:evolve", "command", ""},
 	{"spawn imagine-historian to mine it", "imagine-historian", "agent", ""},
 }
@@ -351,9 +351,9 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 		"run /imagine to make it; /imagine: with a colon; /imagine:ultimate and /imagine/build.md",
 		"templates/global/commands/imagine.md and https://example.com/imagine:build",
 		"/imagine:builder, /imagine:build-fasts, /imagine:build-specs and /imagine:callmeters",
-		"the imagination agent and imagination-core and imagine-cores and imagine-core2",
-		`subagent_type: "imagination" and subagent_type: "imagine-pro" and subagent_type: imagined`,
-		"agents/imagination.md and `imagination` agent and `imagination` sub-agent and imagine agents",
+		"the imaginator agent and imaginator-core and imagine-cores and imagine-core2",
+		`subagent_type: "imaginator" and subagent_type: "imagine-pro" and subagent_type: imagined`,
+		"agents/imaginator.md and `imaginator` agent and `imaginator` sub-agent and imagine agents",
 		`subagent_type: "ultimate-pro" and subagent_type: ultimately`,
 		"agents/ultimate-pro.md and `ultimate-pro` agent and ultimate agents",
 	} {
@@ -808,9 +808,9 @@ func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct{ line, name, successor, definition string }{
-		{"spawn gpt-foreman", "gpt-foreman", "gpt-flights-foreman", ""},
+		{"spawn gpt-foreman", "", "", ""},
 		{"spawn gpt-lander", "gpt-lander", "gpt-flights-lander", ""},
-		{"spawn gpt-executor", "gpt-executor", "flights-worker", ""},
+		{"spawn gpt-executor", "gpt-executor", "", ""},
 		{`subagent_type: "terra"`, `subagent_type: "terra"`, "", ""},
 		{`subagent_type:"terra"`, `subagent_type:"terra"`, "", ""},
 		{`subagent_type: 'terra'`, `subagent_type: 'terra'`, "", ""},
@@ -848,17 +848,17 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 }
 
 // TestRetiredNamesReportTheFlightsCut: every agent and command the flights
-// family cut retires is a hit with its successor, and the live names beside
-// them — the successors, the longer twin names, /flights:doctor — are none.
+// family cut retires is a hit with no successor, and the live names beside
+// them — the current foremen, gpt-foreman, /flights:doctor — are none.
 func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 	t.Parallel()
 	rows := []struct{ line, name, kind, successor string }{
-		{"spawn foreman-pro for it", "foreman-pro", "agent", "flights-foreman-pro"},
-		{"spawn gpt-foreman-pro for it", "gpt-foreman-pro", "agent", "gpt-flights-foreman-pro"},
-		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", "flights-worker"},
-		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", "flights-worker"},
-		{"flights-speccer writes the spec", "flights-speccer", "agent", "flights-foreman-pro"},
-		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", "flights-foreman-pro"},
+		{"spawn foreman-pro for it", "foreman-pro", "agent", ""},
+		{"spawn gpt-foreman-pro for it", "gpt-foreman-pro", "agent", ""},
+		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", ""},
+		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", ""},
+		{"flights-speccer writes the spec", "flights-speccer", "agent", ""},
+		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", ""},
 		{"run /flights:spec first", "/flights:spec", "command", ""},
 		{"run /flights:init once", "/flights:init", "command", ""},
 		{"run /flights:orchestrate-cross-harness on codex", "/flights:orchestrate-cross-harness", "command", ""},
@@ -872,11 +872,27 @@ func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 			Path: "notes.md", Line: index + 1, Name: row.name, Kind: row.kind, Successor: row.successor,
 		})
 	}
-	content.WriteString("spawn flights-foreman-pro, gpt-flights-foreman-pro or flights-worker; run /flights:doctor\n")
+	content.WriteString("spawn flights-foreman, flights-foreman-sonnet or gpt-foreman; run /flights:doctor\n")
 	writeRetiredFixture(t, root, map[string]string{"notes.md": content.String()})
 	scan := ScanRetiredNames(root, nil)
 	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
 		t.Fatalf("flights cut scan =\n%+v\nwant\n%+v", scan, want)
+	}
+}
+
+func TestRetiredNamesReportTheLanderTiers(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRetiredFixture(t, root, map[string]string{"notes.md": "spawn flights-lander-mini for a small change\n" +
+		"spawn flights-lander-pro for a large one\n" +
+		"spawn flights-lander or gpt-flights-lander; it spawns flights-hunter and flights-sub-lander\n"})
+	want := []professor.RetiredNameHit{
+		{Path: "notes.md", Line: 1, Name: "flights-lander-mini", Kind: "agent", Successor: "flights-lander"},
+		{Path: "notes.md", Line: 2, Name: "flights-lander-pro", Kind: "agent", Successor: "flights-lander"},
+	}
+	scan := ScanRetiredNames(root, nil)
+	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
+		t.Fatalf("lander tiers scan =\n%+v\nwant\n%+v", scan, want)
 	}
 }
 

@@ -994,21 +994,21 @@
       <div class="prob"><span class="k">Problem</span><p>One big chat building a feature drifts from what you asked — by the end it has built something else.</p></div>
       <div class="what"><span class="k"><b>Professor</b></span><p>A flight: the agent that reads the code builds it — one foreman, its tier picked by difficulty, never size.</p></div>
       <div class="why"><span class="k">Why</span><p>Zero gap at every step — so what comes out the other end is <b>exactly</b> what you refined and asked for.</p></div>
-      <div class="how"><span class="k">How</span><p>main chat → a <code>flights-foreman</code> tier reads and builds → <code>flights-worker</code> pieces → main chat → a <code>flights-lander</code> tier reviews, fixes and gates → <code>gitter</code> commits; <code>/flights:doctor</code> meters it.</p></div>
+      <div class="how"><span class="k">How</span><p>main chat → <code>flights-foreman</code> (Opus) or <code>flights-foreman-sonnet</code> reads and builds by its own hand → main chat → a <code>flights-lander</code> tier reviews, fixes and gates → <code>gitter</code> commits; <code>/flights:doctor</code> meters it.</p></div>
     </div>
-    <div class="cue">main chat → foreman tier → workers → main chat → lander tier → <code>gitter</code> · <code>/flights:doctor</code> meters it</div>
+    <div class="cue">main chat → a foreman, Opus or Sonnet, builds by its own hand → main chat → <code>flights-lander</code> → <code>gitter</code> · <code>/flights:doctor</code> meters it</div>
     <div class="wtrack"><div class="wline"></div><div class="wpkt" id="wPkt"></div></div>
     <div class="wvgrid" id="wgrid">
       <div class="wst" data-i="0"><div class="wsh"><span class="wsn">1</span><b>Ask</b><code>main chat · intent · acceptance</code></div></div>
-      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Tier</b><code>a foreman: mini · standard · pro</code></div></div>
+      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Tier</b><code>a foreman: Opus · Sonnet</code></div></div>
       <div class="wst" data-i="2"><div class="wsh"><span class="wsn">3</span><b>Read</b><code>the foreman reads the code</code></div></div>
-      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Brief</b><code>defined pieces → workers</code></div></div>
+      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Plan</b><code>defined pieces, in order</code></div></div>
       <div class="wst" data-i="4"><div class="wsh"><span class="wsn">5</span><b>Build</b><code>the cycle, per piece ↓</code></div></div>
-      <div class="wst" data-i="5"><div class="wsh"><span class="wsn">6</span><b>Land</b><code>lander tier → gitter</code></div></div>
+      <div class="wst" data-i="5"><div class="wsh"><span class="wsn">6</span><b>Land</b><code>flights-lander → gitter</code></div></div>
     </div>
     <div class="wlife vz" id="wlife">
       <button class="btn rp" id="waveReplay" type="button">Replay</button>
-      <div class="wq"><span class="lbl">pieces from the foreman</span><div id="wQueue"></div></div>
+      <div class="wq"><span class="lbl">pieces of the work</span><div id="wQueue"></div></div>
       <div class="wring">
         <svg id="wRing" viewBox="0 0 760 300" aria-hidden="true"></svg>
         <div class="wcenter"><b id="wcTask">—</b><span id="wcStage">waiting for the flight</span></div>
@@ -1846,8 +1846,8 @@
       ['build', 'one piece, its files only'],
       ['verify', 'build · typecheck'],
       ['test', 'affected tests → green'],
-      ['report', 'back to the foreman'],
-      ['next', 'the foreman briefs the next piece']
+      ['report', 'noted by the foreman'],
+      ['next', 'the foreman takes the next piece']
     ];
     var CX = 380, CY = 150, RX = 230, RY = 105, ang0 = -Math.PI * 0.72;
     var path = document.createElementNS(NS, 'path'); path.setAttribute('class', 'path');

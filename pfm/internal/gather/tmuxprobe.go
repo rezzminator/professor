@@ -43,6 +43,26 @@ type PaneCapturer interface {
 // permission failure) under a wall of "exit status 1" after every picker close.
 var ErrServerGone = errors.New("no tmux server on socket")
 
+// ErrOptionUnset marks a read of a global option the server holds no value
+// for: tmux refuses an unset user option as "invalid option: @name" (an older
+// tmux says "unknown option"). It is tmux's definitive answer that the option
+// is unset, never a read that could not run.
+var ErrOptionUnset = errors.New("tmux option unset")
+
+// optionUnset reads tmux's refusal of an unset option named name.
+func optionUnset(err error, name string) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	for _, line := range strings.Split(string(exit.Stderr), "\n") {
+		if line = strings.TrimSpace(line); line == "invalid option: "+name || line == "unknown option: "+name {
+			return true
+		}
+	}
+	return false
+}
+
 // serverGone reads tmux's own words for a socket with nothing behind it. The
 // exit status alone cannot say it — tmux exits 1 for every failure and writes
 // the reason to stderr, which exec keeps on the ExitError rather than in the
@@ -360,13 +380,17 @@ func (tmux TmuxProbe) CapturePane(
 // A writer that knows the chat's exact name (rename.ChatName) states it in the
 // SAME tmux command, set BEFORE the rename: the window-renamed hook that the
 // rename fires reads herdr.ChatNameOption, and the window name is only the
-// clipped form. A writer that does not know it sets nothing.
+// clipped form. A writer that does not know it sets nothing; a name no user
+// chose (rename.Automatic) is marked in herdr.ChatNameAutoOption too.
 func (tmux TmuxProbe) RenameWindow(
 	ctx context.Context,
 	rename WindowRename,
 ) error {
 	var arguments []string
-	if rename.ChatName != "" {
+	switch {
+	case rename.ChatName != "" && rename.Automatic:
+		arguments = append(AutomaticChatNameCommand(rename.WindowID, rename.ChatName), ";")
+	case rename.ChatName != "":
 		arguments = append(ChatNameCommand(rename.WindowID, rename.ChatName), ";")
 	}
 	arguments = append(arguments,
@@ -407,6 +431,14 @@ func ChatNameCommand(target, chatName string) []string {
 	return []string{tmuxSetOption, "-t", target, herdr.ChatNameOption, chatName}
 }
 
+// AutomaticChatNameCommand is ChatNameCommand for a name no user chose: the
+// same command, chained with `;` to the setting of herdr.ChatNameAutoOption
+// to the same name, its final `;` escaped the same way.
+func AutomaticChatNameCommand(target, chatName string) []string {
+	command := ChatNameCommand(target, chatName)
+	return append(command, ";", tmuxSetOption, "-t", target, herdr.ChatNameAutoOption, command[len(command)-1])
+}
+
 // ChatRenameCommand is ChatNameCommand followed, in the same tmux command, by
 // the rename of target's window to the chat name's clipped WindowNameFor form.
 func ChatRenameCommand(target, chatName string) []string {
@@ -431,7 +463,10 @@ func (tmux TmuxProbe) ShowGlobalOption(
 		if serverGone(err) {
 			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrServerGone)
 		}
-		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, err)
+		if optionUnset(err, name) {
+			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrOptionUnset)
+		}
+		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, withStderr(err))
 	}
 	return strings.TrimRight(string(output), "\n"), nil
 }

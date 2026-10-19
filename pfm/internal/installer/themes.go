@@ -23,6 +23,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
@@ -54,11 +55,17 @@ type themeSource struct {
 	// base names the source_fetched theme a bundled overlay is merged onto;
 	// empty for a complete palette.
 	base string
+	// bundled marks a profile the blueprint ships under templates/themes/;
+	// file is its name beside the manifest.
+	bundled bool
+	file    string
 }
 
-// bundledTheme is a palette the blueprint ships itself under templates/themes/:
+// bundledTheme is a profile the blueprint ships itself under templates/themes/:
 // File names it beside sources.json, so it is read from the source clone
 // when the manifest is, or downloaded from beside the release manifest.
+// Install writes Claude Code the palette alone (name, base, overrides) and
+// keeps the whole profile, per-surface pins included, in themesync.ProfileDir.
 // With Base set the file is an overlay — only `name` and the `overrides`
 // keys that differ — written merged onto the fetched base, so the base is
 // never vendored and cannot drift.
@@ -70,11 +77,13 @@ type bundledTheme struct {
 	Requires string `json:"requires"`
 }
 
-// themePalette is the Claude Code theme file shape both kinds share.
+// themePalette is the Claude Code theme file shape both kinds share; Surfaces
+// carries an overlay's per-surface pins through the merge untouched.
 type themePalette struct {
 	Name      string            `json:"name"`
 	Base      string            `json:"base,omitempty"`
 	Overrides map[string]string `json:"overrides"`
+	Surfaces  json.RawMessage   `json:"surfaces,omitempty"`
 }
 
 type themeOwnershipRecord struct {
@@ -97,6 +106,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 		installer.skip("themes NOT installed: read ownership " + ownershipPath + ": " + err.Error())
 		return
 	}
+	ownership = installer.retireThemes(ownershipPath, sources, ownership)
 
 	type themeLoad struct {
 		content []byte
@@ -124,25 +134,9 @@ func (installer *engine) installThemes(ctx context.Context) {
 			installer.skip("theme " + name + " manifest target invalid: " + targetErr.Error())
 			continue
 		}
-		existing, exists, readErr := readOptionalRegularFile(target)
-		if readErr != nil {
-			installer.skip("theme " + name + " inspect failed: " + readErr.Error())
-			continue
-		}
-		record, owned := ownership[name]
-		if owned {
-			if filepath.Clean(record.Path) != filepath.Clean(target) {
-				installer.skip(
-					fmt.Sprintf("theme %s ownership target drift: ledger=%s manifest=%s", name, record.Path, target),
-				)
-				continue
-			}
-			if exists && contentSHA256(existing) != record.SHA256 {
-				installer.skip("theme " + name + " locally modified; left in place at " + target)
-				continue
-			}
-		} else if exists {
-			installer.skip("theme " + name + " already exists but is not installer-owned; left in place at " + target)
+		claude := themeFile{key: name, path: target}
+		if skip := claude.inspect(name, ownership); skip != "" {
+			installer.skip(skip)
 			continue
 		}
 
@@ -157,9 +151,29 @@ func (installer *engine) installThemes(ctx context.Context) {
 					continue
 				}
 			}
-			if owned && exists {
+			if source.bundled {
+				profile := themeFile{
+					key:   profileLedgerKey(name),
+					label: " profile copy",
+					path:  themesync.ProfilePath(installer.options.Home, name),
+				}
+				if skip := profile.inspect(name, ownership); skip != "" {
+					installer.skip(skip)
+					continue
+				}
+				if profile.exists && !profile.owned {
+					installer.ok("theme " + name + " profile copy exists at " + profile.path +
+						" and is not installer-owned; apply adopts it only when byte-identical to the install," +
+						" else skips the theme")
+				}
+			}
+			switch {
+			case claude.owned && claude.exists:
 				installer.ok("theme " + name + " currently installed; apply checks its source for updates")
-			} else {
+			case claude.exists:
+				installer.ok("theme " + name + " exists at " + target +
+					" and is not installer-owned; apply adopts it only when byte-identical to the install")
+			default:
 				verb := "fetch theme"
 				if source.local != "" {
 					verb = "read bundled theme"
@@ -190,34 +204,12 @@ func (installer *engine) installThemes(ctx context.Context) {
 			}
 			content = merged
 		}
-		digest := contentSHA256(content)
-		if exists && bytes.Equal(existing, content) && owned && record.SHA256 == digest {
-			installer.ok("theme " + name + " unchanged at " + target)
+		files, filesErr := themeFiles(installer.options.Home, name, source, claude, content)
+		if filesErr != nil {
+			installer.skip("theme " + name + " " + filesErr.Error())
 			continue
 		}
-
-		next := cloneThemeOwnership(ownership)
-		next[name] = themeOwnershipRecord{Path: target, SHA256: digest}
-		if err := func() error {
-			if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
-				return fmt.Errorf("write %s: %w", target, writeErr)
-			}
-			if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
-				rollbackErr := rollbackTheme(target, existing, exists)
-				if rollbackErr != nil {
-					return fmt.Errorf("record ownership: %w; rollback failed: %v", ledgerErr, rollbackErr)
-				}
-				return fmt.Errorf("record ownership: %w", ledgerErr)
-			}
-			return nil
-		}(); err != nil {
-			installer.skip("theme " + name + " install failed: " + err.Error())
-			continue
-		}
-		ownership = next
-		if changeErr := installer.change("write theme "+name+" -> "+target, nil); changeErr != nil {
-			installer.skip("theme " + name + " report failed after install: " + changeErr.Error())
-		}
+		ownership = installer.installThemeFiles(name, ownershipPath, ownership, files)
 	}
 }
 
@@ -236,58 +228,20 @@ func (installer *engine) uninstallThemes() {
 		return
 	}
 
-	for _, name := range sortedThemeOwnershipNames(ownership) {
-		record := ownership[name]
-		content, exists, readErr := readOptionalRegularFile(record.Path)
-		if readErr != nil {
-			installer.skip("theme " + name + " uninstall inspect failed: " + readErr.Error())
-			continue
-		}
-		if exists && contentSHA256(content) != record.SHA256 {
-			installer.skip(
-				"theme " + name + " locally modified; left in place and retained recovery ownership at " + record.Path,
-			)
-			continue
-		}
-		if !installer.apply {
-			if changeErr := installer.change("remove theme "+name+" "+record.Path, nil); changeErr != nil {
-				installer.skip("theme " + name + " uninstall preview failed: " + changeErr.Error())
-			}
-			continue
-		}
-
-		next := cloneThemeOwnership(ownership)
-		delete(next, name)
-		if exists {
-			if removeErr := os.Remove(record.Path); removeErr != nil {
-				installer.skip("theme " + name + " uninstall failed: remove " + record.Path + ": " + removeErr.Error())
-				continue
-			}
-		}
-		if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
-			var rollbackErr error
-			if exists {
-				rollbackErr = atomicfile.Write(record.Path, content, 0o644)
-			}
-			message := "theme " + name + " uninstall failed: update ownership: " + ledgerErr.Error()
-			if rollbackErr != nil {
-				message += "; rollback failed: " + rollbackErr.Error()
-			}
-			installer.skip(message)
-			continue
-		}
-		ownership = next
-		if changeErr := installer.change("remove theme "+name+" "+record.Path, nil); changeErr != nil {
-			installer.skip("theme " + name + " uninstall report failed: " + changeErr.Error())
-		}
+	for _, key := range sortedThemeOwnershipNames(ownership) {
+		ownership = installer.removeOwnedTheme(ownershipPath, ownership, key, themeUninstall)
 	}
 	if installer.apply {
-		themesDir := filepath.Join(installer.options.Home, ".claude", "themes")
-		if removeErr := os.Remove(
-			themesDir,
-		); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) &&
-			!errors.Is(removeErr, fs.ErrExist) {
-			installer.skip("leave theme directory " + themesDir + ": " + removeErr.Error())
+		for _, directory := range []string{
+			filepath.Join(installer.options.Home, ".claude", "themes"),
+			themesync.ProfileDir(installer.options.Home),
+		} {
+			if removeErr := os.Remove(
+				directory,
+			); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) &&
+				!errors.Is(removeErr, fs.ErrExist) {
+				installer.skip("leave theme directory " + directory + ": " + removeErr.Error())
+			}
 		}
 	}
 }
@@ -324,6 +278,7 @@ func loadThemeContent(ctx context.Context, client *http.Client, source themeSour
 
 // mergeThemeOverlay writes the base palette with the overlay's name (when set)
 // and its overrides on top; a key the overlay does not name keeps the base value.
+// The overlay's `surfaces` pins ride along, so a profile overlay keeps them.
 func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
 	var basePalette, overlayPalette themePalette
 	if err := json.Unmarshal(base, &basePalette); err != nil {
@@ -344,6 +299,7 @@ func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
 	if overlayPalette.Name != "" {
 		basePalette.Name = overlayPalette.Name
 	}
+	basePalette.Surfaces = overlayPalette.Surfaces // the overlay's pins only; a base never lends its own
 	content, err := json.MarshalIndent(basePalette, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode merged palette: %w", err)
@@ -468,6 +424,9 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			strings.TrimSpace(source.Target) == "" {
 			return nil, fmt.Errorf("manifest %s theme %q is missing name, raw, or target", origin, name)
 		}
+		if err := validateThemeName(name); err != nil {
+			return nil, fmt.Errorf("manifest %s theme %q: %w", origin, name, err)
+		}
 		if err := validateThemeURL(source.Raw); err != nil {
 			return nil, fmt.Errorf("manifest %s theme %q raw URL: %w", origin, name, err)
 		}
@@ -477,6 +436,9 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 		file := strings.TrimSpace(bundled.File)
 		if strings.TrimSpace(name) == "" || file == "" || strings.TrimSpace(bundled.Target) == "" {
 			return nil, fmt.Errorf("manifest %s bundled theme %q is missing name, file, or target", origin, name)
+		}
+		if err := validateThemeName(name); err != nil {
+			return nil, fmt.Errorf("manifest %s bundled theme %q: %w", origin, name, err)
 		}
 		if file != path.Base(file) || file == "." || file == ".." {
 			return nil, fmt.Errorf(
@@ -505,6 +467,8 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			Activate: bundled.Activate,
 			Requires: bundled.Requires,
 			base:     base,
+			bundled:  true,
+			file:     file,
 		}
 		if localThemes != "" {
 			source.local = filepath.Join(localThemes, file)

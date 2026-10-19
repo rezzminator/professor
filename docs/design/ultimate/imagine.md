@@ -1,6 +1,6 @@
 # imagine
 
-The imagine pair is the `/imagine` command and the `imagination` agent. Together they take a work, usually a visual one (a page, an Artifact, a scene, a terminal screen or picker), from the user's words to a delivered, looked-at result. The `ultimate` skill (`ultimate.md` in this directory) is the law both load.
+The imagine pair is the `/imagine` command and the `imaginator` agent. Together they take a work, usually a visual one (a page, an Artifact, a scene, a terminal screen or picker), from the user's words to a delivered, looked-at result. The `ultimate` skill (`ultimate.md` in this directory) is the law both load.
 
 ## Contents
 
@@ -10,16 +10,16 @@ The imagine pair is the `/imagine` command and the `imagination` agent. Together
 - [The brief and the dispatch](#the-brief-and-the-dispatch)
 - [Look and raise](#look-and-raise)
 - [Deliver](#deliver)
-- [The imagination agent](#the-imagination-agent)
+- [The imaginator agent](#the-imaginator-agent)
 - [Why the family is three pieces](#why-the-family-is-three-pieces)
 - [Boundaries](#boundaries)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 
 ## Identity
 
-| Field | `/imagine` | `imagination` |
+| Field | `/imagine` | `imaginator` |
 | --- | --- | --- |
-| Kind | command, `templates/global/commands/imagine.md` | agent, `templates/global/agents/imagination.md` |
+| Kind | command, `templates/global/commands/imagine.md` | agent, `templates/global/agents/imaginator.md` |
 | Entry | `/imagine [work]`, or asks like "go nuts" and "impress me"; with no argument, the work in hand | dispatched by `/imagine` only |
 | Model, effort | the chat's own | `sonnet`, `xhigh` |
 | Owns | the brief, the dispatch, the look, the raise rounds, delivery | the build, its checkpoint, its publish, the law of the work |
@@ -27,7 +27,7 @@ The imagine pair is the `/imagine` command and the `imagination` agent. Together
 
 ## The flow
 
-`/imagine [work]` → loads `ultimate` → the chat writes `$HOME/.local/state/imagine/{slug}/brief.md` → one `imagination` agent (loads `ultimate`) builds it → the parent chat looks and raises → delivers to the user.
+`/imagine [work]` → loads `ultimate` → the chat writes `$HOME/.local/state/imagine/{slug}/brief.md` → one `imaginator` agent (loads `ultimate`) builds it → the parent chat looks and raises → delivers to the user.
 
 1. The chat loads `ultimate`; a failed load stops the run and says so.
 2. It says in a few plain lines what will exist, where the user meets it, the material and its scope in the user's own words, and who builds it. A request that reads two ways on the surface or the scope gets one question first; under god speed the likelier reading is taken and named.
@@ -39,11 +39,11 @@ The imagine pair is the `/imagine` command and the `imagination` agent. Together
 
 The main chat used to build by hand, so the work was made under the chat's own habits instead of the law the agent carries. Now the chat writes no part of the work.
 
-- One `imagination` agent builds all of it, whatever its size and however many units it crosses. There is no foreman, no fork, no second builder and no hand-written brief: one maker means one conception, and a visual work is conceived whole.
+- One `imaginator` agent builds all of it, whatever its size and however many units it crosses. There is no foreman, no fork, no second builder and no hand-written brief: one maker means one conception, and a visual work is conceived whole.
 - A model, effort or budget the user names goes into the dispatch; otherwise the agent's own apply.
 - Raise passes go back to the same builder by message, because it holds the checkpoint and the idea; a fresh builder would re-conceive the work.
-- The user keeps one override. "Build it by hand" said in the run is honoured: the chat then builds the work itself, with `~/.claude/agents/imagination.md` read as the law, and the look is unchanged.
-- A session started before `imagination` was registered dispatches one `general-purpose` agent at the same model and effort, whose prompt opens with a read of the agent file as its protocol.
+- The user keeps one override. "Build it by hand" said in the run is honoured: the chat then builds the work itself, with `~/.claude/agents/imaginator.md` read as the law, and the look is unchanged.
+- A session started before `imaginator` was registered dispatches one `general-purpose` agent at the same model and effort, whose prompt opens with a read of the agent file as its protocol.
 
 ## The brief and the dispatch
 
@@ -63,7 +63,7 @@ The first line of the report is how to see it: the URL, the command, or a screen
 
 A reaction to the delivered work is read by its content, never its tone. An ambiguous reaction (a swearing "what is this?") keeps the boldest element and asks which way, one question: push it further or take it out. Only an explicit "take it out" removes it, with everything that existed only for it. This protects the boldest element from being deleted as a composition error when the user was reacting to its force.
 
-## The imagination agent
+## The imaginator agent
 
 The agent is the one maker. Its prompt carries the family's law in five parts:
 
@@ -79,13 +79,13 @@ Its run is bounded by a checkpoint: `CHECKPOINT.md` in the build directory is up
 
 ## Why the family is three pieces
 
-The family shipped as a larger imagine family: a spec path (`/imagine:build-spec`), a build command, a fast build command (`/imagine:build-fast`), a meter command (`/imagine:callmeter`), an `imagine` spec agent and an `imagine-core` skill. Measured usage on the user's machine over 13 to 18 October: `/ultimate` ran in 132 chats, `/imagine:build-fast` in 10, the `imagination` agent in 2, and `/imagine:build`, `/imagine:build-spec`, `/imagine:callmeter`, the `imagine` agent and a local `ultimate-ultimate` variant in none.
+The family shipped as a larger imagine family: a spec path (`/imagine:build-spec`), a build command, a fast build command (`/imagine:build-fast`), a meter command (`/imagine:callmeter`), an `imagine` spec agent and an `imagine-core` skill. Measured usage on the user's machine over 13 to 18 October: `/ultimate` ran in 132 chats, `/imagine:build-fast` in 10, the `imaginator` agent in 2, and `/imagine:build`, `/imagine:build-spec`, `/imagine:callmeter`, the `imagine` agent and a local `ultimate-ultimate` variant in none.
 
 The pieces nobody ran were removed, and the used ones were made the whole:
 
 - The spec path is gone; a second spec path in this family was dead weight.
 - `/imagine:build-fast` became `/imagine`, the one entry point, because it was the only build command in use.
-- `imagine-core` was folded into its two readers: the law into the `imagination` agent, and the dispatch plus the chat's half of delivery into `/imagine`. Each reader now holds exactly what it uses, and nothing is loaded for the other's half.
+- `imagine-core` was folded into its two readers: the law into the `imaginator` agent, and the dispatch plus the chat's half of delivery into `/imagine`. Each reader now holds exactly what it uses, and nothing is loaded for the other's half.
 - `ultimate-ultimate`'s raise-the-ask was folded into `ultimate`, which is why the skill now opens with it.
 
 The `imagine` agent name is registered as retired in `templates/global/engine-sync.json` so that mirrors drop it.
@@ -102,7 +102,7 @@ The `imagine` agent name is registered as retired in `templates/global/engine-sy
 | Surface | Holds |
 | --- | --- |
 | `templates/global/commands/imagine.md` | the command |
-| `templates/global/agents/imagination.md` | the agent and the law |
+| `templates/global/agents/imaginator.md` | the agent and the law |
 | `templates/global/skills/ultimate/SKILL.md` | the skill both load |
 | `templates/global/engine-sync.json` | `imagine` among the retired agents |
 | `templates/refresh-map.json` | the family's refresh-map entries |

@@ -135,6 +135,36 @@ func TestHerdrOffClearsTheIndicatorsOfEveryRecordedSocket(t *testing.T) {
 	}
 }
 
+// The theme off's stop marker outlives it, so a painter that starts later
+// stands down; the theme on retires it, on a first apply and on a forced apply
+// that finds the plugin linked and its manifest current.
+func TestHerdrOnRetiresTheThemeOffStopMarkers(t *testing.T) {
+	h := newHarness(t)
+	h.on()
+	h.write(".local/state/pfm/herdr/indicators-00000000.socket", filepath.Join(t.TempDir(), "gone.sock"))
+	wantVerdict(t, offReport(t, h), "herdr", VerdictRestored, "")
+	markers := func() []string {
+		t.Helper()
+		found, err := filepath.Glob(filepath.Join(h.path(".local/state/pfm/herdr"), "indicators-*.stop"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return found
+	}
+	if got := markers(); len(got) != 1 {
+		t.Fatalf("theme off left stop markers %v, want its one marker", got)
+	}
+	h.on()
+	if got := markers(); len(got) != 0 {
+		t.Fatalf("theme on left the theme off's stop markers %v", got)
+	}
+	h.write(".local/state/pfm/herdr/indicators-11111111.stop", "1 2")
+	h.sync(true)
+	if got := markers(); len(got) != 0 {
+		t.Fatalf("a forced apply with the plugin linked left the stop markers %v", got)
+	}
+}
+
 func TestHerdrOffThatCannotClearTheIndicatorsIsAFailedRow(t *testing.T) {
 	h := newHarness(t)
 	h.on()

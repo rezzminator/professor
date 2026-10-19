@@ -41,7 +41,7 @@
       "writtenReadRatio": 0
     },
     {
-      "type": "flights-worker",
+      "type": "flights-foreman-sonnet",
       "agents": 2,
       "inputTokens": 32900,
       "writtenBytes": 39,
@@ -92,7 +92,7 @@
     },
     {
       "id": "a0f0000000000002",
-      "type": "flights-worker",
+      "type": "flights-foreman-sonnet",
       "parent": "a0f0000000000001",
       "depth": 2,
       "model": "claude-sonnet-5",
@@ -108,7 +108,7 @@
     },
     {
       "id": "a0f0000000000003",
-      "type": "flights-worker",
+      "type": "flights-foreman-sonnet",
       "parent": "a0f0000000000001",
       "depth": 2,
       "model": "claude-sonnet-5",

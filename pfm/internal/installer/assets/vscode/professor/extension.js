@@ -1,6 +1,7 @@
 // Professor — the framework's assistant inside VS Code. pfm installs it (`pfm install --vscode`)
 // and links it into every VS Code extensions directory on the host. Its two surfaces: the
-// Professor terminal (below) and the `pfm theme` terminal colours (theme.js, started in activate).
+// Professor terminal (below) and `pfm theme`, which paints the terminal and a local window's title,
+// activity and status bars (theme.js, started in activate), and picks that theme (choose.js).
 //
 // Its first surface is the Professor terminal profile: a login shell that opens the pfm chat
 // fleet, whose tab carries the attached chat's live name, and which puts you in the terminal
@@ -15,6 +16,7 @@
 // icon/colour cycle and env. The onDidOpenTerminal focus hook covers every entry point too.
 const vscode = require('vscode');
 const { startThemeSync } = require('./theme');
+const { chooseTheme } = require('./choose');
 
 // Terminals this activation handed to VS Code and has not yet seen open, keyed by the marker
 // each one carries in its env. In-memory on purpose: a terminal revived by a window reload was
@@ -105,10 +107,12 @@ function activate(context) {
     vscode.commands.registerCommand('workbench.action.terminal.new', (args) =>
       openTerminal(args?.config ? args : { config: professorProfile(context), location: args?.location })),
   );
-  // Its second surface is `pfm theme`: the terminal follows Claude Code's theme (theme.js).
+  // Its second surface is `pfm theme`: the terminal, and a local window's title, activity and status
+  // bars, follow Claude Code's theme (theme.js); "Professor: Choose Theme" picks that theme through
+  // pfm (choose.js), which refuses in a remote window.
   // syncTheme is the extension's exported API: apply the contract now, resolved once applied.
   const theme = startThemeSync();
-  context.subscriptions.push(theme.disposable);
+  context.subscriptions.push(theme.disposable, vscode.commands.registerCommand('professor.chooseTheme', chooseTheme));
   return { syncTheme: theme.syncTheme };
 }
 function deactivate() {}

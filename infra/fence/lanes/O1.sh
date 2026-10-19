@@ -78,16 +78,17 @@ grep -Fq "$clone/pfm/internal/installer/assets/shim/pfm.zsh" "$HOME/.zshrc" 2>/d
 check_path I7 "composed Codex prompt" "$clone/pfm/harness-prompts/composed/codex.md"
 check_path I9 "composed Claude prompt" "$clone/pfm/harness-prompts/composed/claude.md"
 check_path I8 "harness-prompt baseline" "$clone/pfm/harness-prompts/claude/baselines/harness-original.sha256"
-# The assets whose destination the installer computes are SEARCHED, and the
-# roots searched are named on failure — "nothing there" is never "failed to look".
-ROOTS="$HOME/.local/share/pfm $HOME/.local/bin $SEAT_DIR $CODEX_HOME $HOME/.claude"
-# The glob is a PATH suffix, not a bare name.
-find_asset() { # find_asset <id> <what> <path-suffix-glob>
-  local hit
-  hit="$(find $ROOTS -maxdepth 6 -path "*/$3" 2>/dev/null | head -1)"
-  [ -n "$hit" ] || missing="$missing $1 ($2: no '*/$3' under $ROOTS);"
-}
-find_asset I15 "Claude Code professor theme" 'professor-*.json'
+# I15: every bundled theme profile, its palette in Claude's themes dir and its
+# whole profile in pfm's install dir, the names read from the clone's manifest —
+# an unreadable manifest is named, never read as "no themes to check".
+if themes="$(bundled_themes "$clone/templates/themes/sources.json")"; then
+  while IFS= read -r t; do
+    check_path I15 "Claude Code theme palette $t" "$HOME/.claude/themes/$t.json"
+    check_path I15 "pfm theme profile $t" "$MANAGED/themes/$t.json"
+  done <<<"$themes"
+else
+  missing="$missing I15 ($themes);"
+fi
 check_path I16 "harvestpy runtime" "$HOME/.local/state/pfm/harvest-python/env"
 check_path I14 "VS Code extension asset" "$MANAGED/vscode/professor/package.json"
 for registry in agents commands skills; do
@@ -95,7 +96,7 @@ for registry in agents commands skills; do
 done
 [ -d "$CODEX_HOME/agents" ] || missing="$missing I20 (no Codex agents mirror at $CODEX_HOME/agents);"
 if [ -n "$missing" ]; then fail "$missing"; else
-  pass "every contracted overlay, per-seat card, marker and registry is staged (searched: $ROOTS)"
+  pass "every contracted overlay, per-seat card, marker, registry and bundled theme profile is staged"
 fi
 
 # ─── O1.02a — install owns every account link ──────────────────────────────
@@ -389,8 +390,20 @@ settings_tmp="$(mktemp)"
 jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$settings_tmp" &&
   cat "$settings_tmp" >"$SEAT_DIR/settings.json" || bad="$bad could not remove the foreign settings key;"
 rm -f "$settings_tmp"
-[ -n "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
-  bad="$bad no professor-*.json theme under $HOME/.claude/themes;"
+# Themes: each bundled profile's Claude file carries the palette keys alone
+# (name, base, overrides — no surfaces pin reaches Claude); pfm's copy is whole.
+if themes="$(bundled_themes "$BLUEPRINT/templates/themes/sources.json")"; then
+  while IFS= read -r t; do
+    keys="$(jq -c 'keys' "$HOME/.claude/themes/$t.json" 2>&1)" ||
+      { bad="$bad theme $t: $HOME/.claude/themes/$t.json unreadable ($(one_line "$keys"));"; continue; }
+    [ "$keys" = '["base","name","overrides"]' ] || bad="$bad theme $t: Claude's file carries keys $keys, want [base,name,overrides];"
+    jq -e --slurpfile claude "$HOME/.claude/themes/$t.json" '{name, base, overrides} == ($claude[0] | {name, base, overrides})' \
+      "$MANAGED/themes/$t.json" >/dev/null 2>&1 ||
+      bad="$bad theme $t: pfm's profile $MANAGED/themes/$t.json is absent or its palette differs from Claude's file;"
+  done <<<"$themes"
+else
+  bad="$bad $themes;"
+fi
 mcp_list="$(pfm mcp ls 2>&1)"
 grep -q $'^chat\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report chat enabled;"
 grep -q $'^harvester\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report harvester enabled;"
@@ -564,6 +577,42 @@ if [ "$sync_rc" -ne 0 ] || [ "$sync_out" != "$status_out" ]; then
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "status and sync with no state print the off line (exit 0), bare theme is status; the retired ls and set verbs and an unknown verb exit 2"
+fi
+
+# ─── O1.19 — restart plan, read-only ───────────────────────────────────────
+# The dry run only: it finds every family, prints the ordered plan and starts
+# no worker. The real restart ends every chat, so no lane runs it, nor the
+# internal worker past its usage refusal.
+beat O1.19-restart-dry-run
+spends none
+bad=""
+plan_out="$(pfm restart --dry-run 2>&1)"; plan_rc=$?
+if [ "$plan_rc" -ne 0 ] && [ "$plan_rc" -ne 1 ]; then
+  bad="$bad pfm restart --dry-run exited $plan_rc, want 0 (every family found) or 1 (a find named FAILED): $(one_line "$plan_out");"
+fi
+[ "$(printf '%s\n' "$plan_out" | head -n 1)" = "restart plan: stop downstream first, then start upstream first only what was running before; chats are not brought back" ] ||
+  bad="$bad the dry run does not open with the plan header: $(one_line "$plan_out");"
+for family in chats chat-helpers herdr services mcp-daemon search-backend pfm; do
+  grep -qE "^find +$family +(ok|FAILED) " <<<"$plan_out" || bad="$bad the plan has no find line for $family;"
+done
+if [ "$plan_rc" -eq 1 ] && ! grep -qE '^find +[a-z-]+ +FAILED ' <<<"$plan_out"; then
+  bad="$bad the dry run exited 1 without naming a failed find;"
+fi
+grep -qE '^last +pfm +the restart worker a plain pfm restart detaches' <<<"$plan_out" ||
+  bad="$bad the plan does not name its last pfm process;"
+if ls "$(dirname "${PFM_STATE_DB:-$HOME/.local/state/pfm/pfm.db}")/restart"/restart-*.log >/dev/null 2>&1; then
+  bad="$bad the dry run spawned a restart worker (a restart-*.log exists);"
+fi
+usage_out="$(pfm restart now 2>&1)"; usage_rc=$?
+if [ "$usage_rc" -ne 2 ] || ! grep -qF 'usage: pfm restart [--dry-run]' <<<"$usage_out"; then
+  bad="$bad pfm restart now exited $usage_rc, want 2 and the usage line: $(one_line "$usage_out");"
+fi
+worker_out="$(pfm internal restart-run 2>&1)"; worker_rc=$?
+if [ "$worker_rc" -ne 2 ] || ! grep -qF 'usage: pfm internal restart-run --front PID' <<<"$worker_out"; then
+  bad="$bad pfm internal restart-run with no --front exited $worker_rc, want 2 and its usage: $(one_line "$worker_out");"
+fi
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "the dry run opens with the plan header, finds all seven families (exit $plan_rc), names its last process and starts no worker; an argument exits 2 with the usage, and so does the internal worker without --front"
 fi
 
 lane_end

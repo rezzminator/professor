@@ -1088,6 +1088,18 @@ done <<EOF
 $seat_dirs
 EOF
 
+# I70 precondition: the bundled theme profiles the uninstall must remove, each
+# proven on disk first, so their absence afterwards is the uninstall's doing.
+themes_staged=""
+if themes="$(bundled_themes "$BLUEPRINT/templates/themes/sources.json")"; then
+  while IFS= read -r t; do
+    for f in "$HOME/.claude/themes/$t.json" "$MANAGED/themes/$t.json"; do
+      if [ -f "$f" ]; then themes_staged="$themes_staged $f"; else bad="$bad theme file $f absent before uninstall;"; fi
+    done
+  done <<<"$themes"
+else
+  bad="$bad $themes;"
+fi
 un="$( (cd "$BLUEPRINT" && pfm uninstall 2>&1) )"
 un_rc=$?
 un_summary="$(printf '%s' "$un" | grep -E '^summary changed=' | tail -1)"
@@ -1122,7 +1134,9 @@ while IFS= read -r dir; do
   [ ! -e "$dir/commands/reload.md" ] || bad="$bad $dir/commands/reload.md still present;"
   [ ! -e "$dir/skills/handoff" ] && [ ! -L "$dir/skills/handoff" ] || bad="$bad $dir/skills/handoff still present;"
   [ -z "$(find "$dir/commands/chat" -maxdepth 1 -name '*.md' 2>/dev/null | head -1)" ] || bad="$bad /chat:* command remnants still under $dir/commands/chat;"
-  [ -z "$(find "$dir" -maxdepth 2 -name 'professor-*.json' 2>/dev/null | head -1)" ] || bad="$bad a staged professor-*.json theme still under $dir;"
+  while IFS= read -r t; do
+    [ -z "$t" ] || [ ! -e "$dir/themes/$t.json" ] || bad="$bad bundled theme $t still readable at $dir/themes/$t.json;"
+  done <<<"${themes:-}"
   if [ -f "$dir/settings.json" ]; then
     n_pfm="$(hook_commands "$dir/settings.json" | grep -c 'pfm')"
     [ "$n_pfm" -eq 0 ] || bad="$bad $dir/settings.json still carries $n_pfm pfm hook(s): $(one_line "$(hook_commands "$dir/settings.json" | grep pfm | head -1)");"
@@ -1147,9 +1161,11 @@ $seat_dirs
 EOF
 grep -qxF "$FOREIGN_HOOK" <<<"$(hook_commands "$SEAT_DIR/settings.json")" || bad="$bad the FOREIGN hook '$FOREIGN_HOOK' was stripped from $SEAT_DIR/settings.json;"
 [ -f "$own_cmd" ] || bad="$bad the operator's own command file $own_cmd was removed;"
-# The theme target is the shared Claude home, not an individual seat.
-[ -z "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
-  bad="$bad an installer-owned professor theme remains under $HOME/.claude/themes;"
+# The theme targets are the shared Claude home and pfm's install dir, not a seat:
+# every installer-owned profile file staged above is gone.
+for f in $themes_staged; do
+  [ ! -e "$f" ] || bad="$bad installer-owned theme file $f remains after uninstall;"
+done
 # I75/I78/I79: the Codex side — command mirror, hooks.json, config.toml.
 if [ -f "$CODEX_HOME/config.toml" ]; then
   grep -qE 'BEGIN pfm developer_instructions|mcp_servers\.chat|mcp_servers\.harvester' "$CODEX_HOME/config.toml" &&

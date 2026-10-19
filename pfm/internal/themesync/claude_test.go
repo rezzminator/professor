@@ -9,19 +9,19 @@ import (
 	"time"
 )
 
-// goldApplied is the custom Professor Gold theme resolved from fixtureGold
+// hibiscusApplied is the custom Hibiscus Night theme resolved from fixtureHibiscus
 // written into a temp account dir.
-func goldApplied(t *testing.T) Applied {
+func hibiscusApplied(t *testing.T) Applied {
 	t.Helper()
 	dir := t.TempDir()
 	themes := filepath.Join(dir, "themes")
 	if err := os.MkdirAll(themes, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(themes, "professor-gold.json"), []byte(fixtureGold), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(themes, "hibiscus-night.json"), []byte(fixtureHibiscus), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolveValue("custom:professor-gold", dir)
+	got, err := resolveValue("custom:hibiscus-night", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +34,8 @@ func TestResolveValueReadsTheThemeSettingLikeClaudeDoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(dir, "themes", "professor-gold.json"),
-		[]byte(fixtureGold),
+		filepath.Join(dir, "themes", "hibiscus-night.json"),
+		[]byte(fixtureHibiscus),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestResolveValueReadsTheThemeSettingLikeClaudeDoes(t *testing.T) {
 		auto                      bool
 	}{
 		{
-			name: "custom", value: "custom:professor-gold", title: "Professor Gold · Tokyo Night",
+			name: "custom", value: "custom:hibiscus-night", title: "Hibiscus Night",
 			accent: "#7aa2f7", background: "#1a1b26", side: Dark,
 		},
 		{name: "dark", value: "dark", title: "dark", accent: "#d77757", background: "#000000", side: Dark},
@@ -77,8 +77,8 @@ func TestResolveValueReadsTheThemeSettingLikeClaudeDoes(t *testing.T) {
 			if tc.auto && (applied.Alternate == nil || applied.Alternate.Background != "#ffffff") {
 				t.Fatalf("auto must carry the light alternate, got %+v", applied.Alternate)
 			}
-			if tc.value == "custom:professor-gold" &&
-				got.ThemeFile != filepath.Join(dir, "themes", "professor-gold.json") {
+			if tc.value == "custom:hibiscus-night" &&
+				got.ThemeFile != filepath.Join(dir, "themes", "hibiscus-night.json") {
 				t.Fatalf("theme file = %q", got.ThemeFile)
 			}
 		})
@@ -197,32 +197,32 @@ func TestAccountSettingsWithNoAccountIsAnError(t *testing.T) {
 
 func TestGoverningAccountIsTheLastThemeChange(t *testing.T) {
 	at := func(hour int) time.Time { return time.Date(2026, 5, 1, hour, 0, 0, 0, time.UTC) }
-	gold := "custom:professor-gold"
+	hibiscus := "custom:hibiscus-night"
 	a := func(value string, hour int) account {
 		return account{Path: "/a/settings.json", Value: value, ModTime: at(hour)}
 	}
 	b := func(value string, hour int) account {
 		return account{Path: "/b/settings.json", Value: value, ModTime: at(hour)}
 	}
-	memory := map[string]string{"/a/settings.json": gold, "/b/settings.json": gold}
+	memory := map[string]string{"/a/settings.json": hibiscus, "/b/settings.json": hibiscus}
 
-	got, next := govern(memory, "/a/settings.json", []account{a(gold, 10), b("light", 11)})
+	got, next := govern(memory, "/a/settings.json", []account{a(hibiscus, 10), b("light", 11)})
 	if got.Path != "/b/settings.json" || next["/b/settings.json"] != "light" {
 		t.Fatalf("B changed its value; governor = %s, memory %v", got.Path, next)
 	}
-	got, _ = govern(next, got.Path, []account{a(gold, 12), b("light", 11)})
+	got, _ = govern(next, got.Path, []account{a(hibiscus, 12), b("light", 11)})
 	if got.Path != "/b/settings.json" {
 		t.Fatalf("A rewrote the same value; B must keep governing, got %s", got.Path)
 	}
-	got, _ = govern(nil, "", []account{a(gold, 10), b("light", 11)})
+	got, _ = govern(nil, "", []account{a(hibiscus, 10), b("light", 11)})
 	if got.Path != "/b/settings.json" {
 		t.Fatalf("first run with disagreeing accounts follows the newest file, got %s", got.Path)
 	}
-	got, _ = govern(nil, "", []account{a(gold, 10), b(gold, 11)})
+	got, _ = govern(nil, "", []account{a(hibiscus, 10), b(hibiscus, 11)})
 	if got.Path != "/a/settings.json" {
 		t.Fatalf("first run with agreeing accounts follows the first, got %s", got.Path)
 	}
-	got, _ = govern(memory, "/gone/settings.json", []account{a(gold, 10), b("light", 11)})
+	got, _ = govern(memory, "/gone/settings.json", []account{a(hibiscus, 10), b("light", 11)})
 	if got.Path != "/b/settings.json" {
 		t.Fatalf("changed value wins even when the previous governor is gone, got %s", got.Path)
 	}

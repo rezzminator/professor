@@ -462,7 +462,7 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	if want := "1.0K/1.0M Σ$0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
-	if want := "1.0K/1.0M Σ$1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
+	if want := "176.5K/1.0M Σ$1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
 	}
 }
@@ -483,14 +483,14 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		lines []string
-		want  string // what follows the gauge, ANSI stripped
+		want  string // the gauge's tokens and what follows it, ANSI stripped
 	}{
 		{
 			// 100K+10K at $2, 150K read at $0.2, 1M out at $10: 0.22 + 0.03 + 10.
 			name: "the base tier, a cache write billed as input",
 			lines: gpt(`{"input_tokens":100000,"output_tokens":1000000,"cache_read_input_tokens":150000,` +
 				`"cache_creation_input_tokens":10000}`),
-			want: "Σ$10.25/260.0K/1.0M/0",
+			want: "260.0K/1.0M Σ$10.25/260.0K/1.0M/0",
 		},
 		{
 			name: "a model no row prices stays unpriced",
@@ -498,14 +498,14 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 				`{"type":"assistant","message":{"id":"g-1","model":"gpt-nonesuch-9","usage":` +
 					`{"input_tokens":1000,"output_tokens":100}}}`, turnEnded,
 			},
-			want: "Σ$?/1.0K/100/0",
+			want: "1.0K/1.0M Σ$?/1.0K/100/0",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
 			// the row is read inside the minute after the turn ended, before a finished row collapses
 			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
-			if !strings.Contains(got, "1.0K/1.0M "+tc.want+"│") {
+			if !strings.Contains(got, tc.want+"│") {
 				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
 			}
 		})

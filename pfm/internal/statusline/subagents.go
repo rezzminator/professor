@@ -82,6 +82,7 @@ type agentActivity struct {
 	turn agentTurn
 
 	noCacheWindow bool
+	context       int64 // newest completed call's input + cache read + cache creation; 0 until one lands
 }
 
 const (
@@ -385,13 +386,7 @@ func activeContent(
 	inherited sessionEffortRecord,
 	now time.Time,
 ) []rowPart {
-	gauge := cTokens + formatContextTokens(task.TokenCount) + reset
-	if task.ContextWindowSize > 0 {
-		percent := gaugePercent(float64(task.TokenCount) * 100 / float64(task.ContextWindowSize))
-		gauge = makeBar(percent, subagentBarWidth) + " " +
-			percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " +
-			gauge + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
-	}
+	gauge := agentContextGauge(task, activity)
 	var parts []rowPart
 	if activity != nil {
 		parts = append(parts, rowPart{text: nestingSegment(activity.nest)})
@@ -795,6 +790,9 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if usage.reportsCache {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
 			activity.cacheHit = hit
+		}
+		if size := usage.Input + usage.CacheRead + usage.CacheCreation; size > 0 {
+			activity.context = size
 		}
 	}
 }

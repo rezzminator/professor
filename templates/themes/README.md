@@ -48,11 +48,12 @@ From `tokyo-night/`, the pink reference theme, `theme.json`:
   "accent": "#ff3ddc",
   "panel_bg": "#23031e",
   "tabGlyphs": {
-    "blocked": ["💓", "💕"],
-    "dead": "🥀",
-    "idle": "🌸",
-    "unknown": "🎀",
-    "working": ["🩷", "💗", "💖", "💗"]
+    "blocked": ["⚡", "🔋"],
+    "dead": "🪫",
+    "error": "👾",
+    "idle": "📡",
+    "unknown": "🤖",
+    "working": ["🚀", "🌌", "🛸", "🌌"]
   },
   "text": "#ffb5e4"
 }

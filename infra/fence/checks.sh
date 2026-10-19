@@ -601,6 +601,11 @@ checks_templates_mirrors_opencode() {
 
 }
 
+checks_templates_theme_glyphs() {
+  head_ "templates — theme tab glyph tests"
+  node_test_suite "theme tab glyphs" "$TMP_BASE/templates/theme-glyphs.tap" scripts/theme-glyphs.test.mjs
+}
+
 checks_templates_engine_sync_action_tests() {
   head_ "templates — CI engine-sync action tests"
   node_test_suite "engine-sync action" "$TMP_BASE/templates/engine-sync-action.tap" scripts/engine-sync-action.test.mjs
@@ -706,7 +711,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   local add="$1" name
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
     generated-agents release-check refresh-scope worktree-script dev-report \
-    format-md flight-templates
+    format-md flight-templates theme-glyphs
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name"
   done

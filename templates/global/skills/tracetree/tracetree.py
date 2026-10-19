@@ -2787,6 +2787,11 @@ def cmd_recall(root, before_run=None, recalls=()):
 
 def main():
     a = sys.argv[1:]
+    if a and a[0] == "intake":
+        # Retired mode. The launch line (`--settings`) of a chat started before the upgrade still runs
+        # `tracetree.py intake` as a PreToolUse Agent|Task hook and cannot change until that chat
+        # relaunches: answer it with a silent success.
+        return 0
     if a and a[0] == "recall":
         usage = "usage: tracetree.py recall ROOT [--before RUN] [--recall RUN]... < numbered questions"
         before, recalls, roots, i = None, [], [], 1

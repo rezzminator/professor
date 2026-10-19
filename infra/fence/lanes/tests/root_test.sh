@@ -375,7 +375,18 @@ mkdir -p "$PC/types"; printf 'generated\n' >"$PC/types/index.d.ts"
 pc_ignored="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
 printf 'edit\n' >>"$PC/.claude-plugin/plugin.json"
 pc_edit="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+# pfm's copy digest counts every directory and every permission bit, so an empty
+# directory or a mode change the exec bit does not show is a difference too.
+mkdir -p "$PC/empty"
+pc_dir="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+chmod 600 "$PC/.claude-plugin/plugin.json"
+pc_mode="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+chmod 700 "$PC/empty"
+pc_dirmode="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
 rm -rf "$H/plugins"
+if [ "$pc_dir" != "$pc_edit" ] && [ "$pc_mode" != "$pc_dir" ] && [ "$pc_dirmode" != "$pc_mode" ]; then
+  ok "a plugin checkout's empty directory, a file's non-exec mode bits and a directory's mode change the hash"
+else bad "plugin checkout directories and modes" "edit=$pc_edit dir=$pc_dir mode=$pc_mode dirmode=$pc_dirmode"; fi
 if [ "$pc_empty" != "$pc_none" ] && [ "$pc_base" != "$pc_empty" ] && [ "$pc_nm" = "$pc_base" ] &&
   [ "$pc_ignored" != "$pc_gi" ] && [ "$pc_edit" != "$pc_ignored" ]; then
   ok "a plugin checkout's copied files, ignored ones included, change the hash; node_modules does not; a missing checkout hashes as absent"

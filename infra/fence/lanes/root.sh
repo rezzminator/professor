@@ -19,8 +19,9 @@
 # provision.sh, adopt.sh, cred-scan.sh, fixtures/, scenarios/), and the
 # engine-sync source fence-env.sh resolves (the binary provision.sh builds; an
 # absent source hashes as absent), and each plugin checkout pfm install copies
-# into the image (plugins/{name}/plugins/{name}, every file the copy takes,
-# ignored or untracked ones included; a missing checkout hashes as absent). It hashes on-disk content, identically
+# into the image (plugins/{name}/plugins/{name}, every directory and file the
+# copy takes with its mode bits, ignored or untracked ones included; a missing
+# checkout hashes as absent). It hashes on-disk content, identically
 # whether dirty, staged or committed; test files, testdata and the pfm e2e tree
 # are excluded. Lane scripts, lib.sh and registries load from /worktree
 # at run time, so editing them reuses the root. Seats are lane inputs, not image inputs.
@@ -90,12 +91,14 @@ hash_tree() { # hash_tree <dir> <label prefix> <git ls-files pathspec…>
 }
 
 # Every plugin checkout an -alpha pfm install copies into the image's
-# ~/.local/share/{name}-dev, hashed as the copy takes it: every file reached
-# through symlinks, node_modules and .DS_Store left out at any depth, ignored
-# and untracked files counted. A copy baked from other content is refreshed by
-# the next in-lane install, and overlayfs refuses that directory rename (EXDEV).
+# ~/.local/share/{name}-dev, hashed as pfm's copy digest compares it: every
+# directory and file reached through symlinks, each file's content and every
+# permission bit of both, node_modules and .DS_Store left out at any depth,
+# ignored and untracked files counted. A copy baked from other content is
+# refreshed by the next in-lane install, and overlayfs refuses that directory
+# rename (EXDEV).
 hash_plugin_copies() {
-  local dir name checkout files hashes path blob
+  local dir name checkout entries files hashes path blob bit
   for dir in "$ROOT"/plugins/*/; do
     [ -d "$dir" ] || continue
     dir="${dir%/}" name="$(basename "$dir")"
@@ -104,15 +107,26 @@ hash_plugin_copies() {
       printf 'plugin-copy/%s\tabsent\t0\n' "$name"
       continue
     fi
-    files="$(cd "$checkout" && find -L . \( -name node_modules -o -name .DS_Store \) -prune -o -type f -print |
+    entries="$(cd "$checkout" && find -L . \( -name node_modules -o -name .DS_Store \) -prune -o \( -type d -o -type f \) -print |
       LC_ALL=C sort)" || return 1
-    [ -n "$files" ] || continue
-    hashes="$(while IFS= read -r path; do printf '%s/%s\n' "$checkout" "${path#./}"; done <<<"$files" |
-      git -C "$ROOT" hash-object --no-filters --stdin-paths)" || return 1
+    files="$(while IFS= read -r path; do [ -d "$checkout/$path" ] || printf '%s/%s\n' "$checkout" "${path#./}"; done <<<"$entries")"
+    hashes="$(printf '%s\n' "$files" | git -C "$ROOT" hash-object --no-filters --stdin-paths)" || return 1
     while IFS= read -r path; do
+      if [ -d "$checkout/$path" ]; then
+        printf 'plugin-copy/%s/%s\tdir\n' "$name" "${path#./}"
+        continue
+      fi
       IFS= read -r blob <&3 || return 1
-      printf 'plugin-copy/%s/%s\t%s\t%s\n' "$name" "${path#./}" "$blob" "$([ -x "$checkout/$path" ] && echo 1 || echo 0)"
-    done 3<<<"$hashes" <<<"$files"
+      printf 'plugin-copy/%s/%s\t%s\n' "$name" "${path#./}" "$blob"
+    done 3<<<"$hashes" <<<"$entries"
+    # The mode bits, one sorted path list per bit (find -perm is portable; stat is not).
+    for bit in 400 200 100 040 020 010 004 002 001; do
+      entries="$(cd "$checkout" && find -L . \( -name node_modules -o -name .DS_Store \) -prune -o \
+        \( -type d -o -type f \) -perm "-$bit" -print | LC_ALL=C sort)" || return 1
+      while IFS= read -r path; do
+        [ -z "$path" ] || printf 'plugin-copy/%s/%s\tmode-%s\n' "$name" "${path#./}" "$bit"
+      done <<<"$entries"
+    done
   done
 }
 

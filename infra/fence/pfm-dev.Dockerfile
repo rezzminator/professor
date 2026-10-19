@@ -71,7 +71,11 @@ ENV HOME=/root \
 # installs on the host, so a lint verdict is the same on both sides of the fence.
 COPY tools.env tools.sh /opt/pfm-tools/
 COPY jscpd/ /opt/pfm-tools/jscpd/
-RUN TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
+# A network that blocks registry.npmjs.org names its mirror in PFM_NPM_REGISTRY;
+# npm rewrites the lockfile's registry.npmjs.org URLs to it, integrity unchanged.
+ARG PFM_NPM_REGISTRY=
+RUN if [ -n "$PFM_NPM_REGISTRY" ]; then export NPM_CONFIG_REGISTRY="$PFM_NPM_REGISTRY"; fi \
+ && TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
 # Every image built from this file, by any builder (compose, the rehearsals'
 # plain `docker build`, a lane root committed from a container of it), carries

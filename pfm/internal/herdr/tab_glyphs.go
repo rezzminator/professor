@@ -15,6 +15,7 @@ const (
 	TabGlyphWorking = "working"
 	TabGlyphIdle    = "idle"
 	TabGlyphBlocked = "blocked"
+	TabGlyphDone    = "done"
 	TabGlyphError   = "error"
 	TabGlyphDead    = "dead"
 	TabGlyphUnknown = "unknown"
@@ -76,20 +77,20 @@ type TabGlyphs struct {
 	Working TabFrames `json:"working,omitempty"`
 	Idle    TabFrames `json:"idle,omitempty"`
 	Blocked TabFrames `json:"blocked,omitempty"`
+	Done    TabFrames `json:"done,omitempty"`
 	Error   TabFrames `json:"error,omitempty"`
 	Dead    TabFrames `json:"dead,omitempty"`
 	Unknown TabFrames `json:"unknown,omitempty"`
 }
 
-// defaultTabGlyphs animate working through the moon's phases and pulse each
-// attention state between its filled shape and a hollow or lighter one of
-// the same red: blocked 🔴 ↔ ⭕, and error 🟥 ↔ ❌, since Unicode has no hollow
-// red square and ❌ keeps the hue and the error reading while staying
-// distinct from blocked's circle. The other states are still.
+// defaultTabGlyphs: colour carries status, only needs-you moves. Blocked and
+// error pulse in red; completion stays yellow. All other states stay still,
+// including in themes: only blocked and error may animate.
 var defaultTabGlyphs = TabGlyphs{
-	Working: TabFrames{"🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"},
-	Idle:    TabFrames{"🟢"},
+	Working: TabFrames{"🔵"},
+	Idle:    TabFrames{"⚪"},
 	Blocked: TabFrames{"🔴", "⭕"},
+	Done:    TabFrames{"🟡"},
 	Error:   TabFrames{"🟥", "❌"},
 	Dead:    TabFrames{"⬛"},
 	Unknown: TabFrames{"❔"},
@@ -98,8 +99,9 @@ var defaultTabGlyphs = TabGlyphs{
 func (glyphs *TabGlyphs) fields() map[string]*TabFrames {
 	return map[string]*TabFrames{
 		TabGlyphWorking: &glyphs.Working, TabGlyphIdle: &glyphs.Idle,
-		TabGlyphBlocked: &glyphs.Blocked, TabGlyphError: &glyphs.Error,
-		TabGlyphDead: &glyphs.Dead, TabGlyphUnknown: &glyphs.Unknown,
+		TabGlyphBlocked: &glyphs.Blocked, TabGlyphDone: &glyphs.Done,
+		TabGlyphError: &glyphs.Error, TabGlyphDead: &glyphs.Dead,
+		TabGlyphUnknown: &glyphs.Unknown,
 	}
 }
 
@@ -155,8 +157,20 @@ func ValidTabFrames(frames TabFrames) error {
 	return nil
 }
 
-// ParseTabGlyphs reads frames keyed by TabGlyphKeys, each ValidTabFrames: an
-// unknown key or invalid frames are an error naming the key. A key absent
+// ValidTabStateFrames checks frame content and requires one still frame for
+// every state except blocked and error, the only states allowed to animate.
+func ValidTabStateFrames(state string, frames TabFrames) error {
+	if err := ValidTabFrames(frames); err != nil {
+		return err
+	}
+	if state != TabGlyphBlocked && state != TabGlyphError && len(frames) != 1 {
+		return fmt.Errorf("tab state %q requires exactly one frame: only blocked and error may animate", state)
+	}
+	return nil
+}
+
+// ParseTabGlyphs reads frames keyed by TabGlyphKeys, each ValidTabStateFrames:
+// an unknown key or invalid frames are an error naming the key. A key absent
 // keeps its default.
 func ParseTabGlyphs(values map[string]TabFrames) (TabGlyphs, error) {
 	var glyphs TabGlyphs
@@ -166,7 +180,7 @@ func ParseTabGlyphs(values map[string]TabFrames) (TabGlyphs, error) {
 		if !known {
 			return TabGlyphs{}, fmt.Errorf("tab glyph %q: not a tab state (%v)", key, TabGlyphKeys())
 		}
-		if err := ValidTabFrames(values[key]); err != nil {
+		if err := ValidTabStateFrames(key, values[key]); err != nil {
 			return TabGlyphs{}, fmt.Errorf("tab glyph %q: %w", key, err)
 		}
 		*field = slices.Clone(values[key])

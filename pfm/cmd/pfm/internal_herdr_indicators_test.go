@@ -271,12 +271,8 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 			t.Error("indicator child failed to exit")
 		}
 	})
-	// await takes any of wants: a working tab is caught on whichever moon
-	// frame the wall clock plays when it lands.
-	var working []string
-	for _, moon := range []string{"🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"} {
-		working = append(working, moon+" Chat")
-	}
+	// Working and idle stay still; only the attention states pulse.
+	working := []string{"🔵 Chat"}
 	await := func(wants ...string) {
 		t.Helper()
 		for {
@@ -311,7 +307,7 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	status = "idle"
 	revision++
 	mu.Unlock()
-	await("🟢 Chat")
+	await("⚪ Chat")
 	// Observe several real monitor polls, rather than sleeping and inferring.
 	for i := 0; i < 12; i++ {
 		select {
@@ -331,7 +327,7 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 		}
 	}
 	mu.Lock()
-	if len(renames) != count || label != "🟢 Chat" {
+	if len(renames) != count || label != "⚪ Chat" {
 		t.Errorf("idle self-triggered rename loop: %v", renames)
 	}
 	mu.Unlock()

@@ -28,18 +28,21 @@ type priorityWaiting struct {
 type priorityTab struct {
 	Tab       string `json:"tab_id"`
 	Workspace string `json:"workspace_id"`
+	Focused   *bool  `json:"focused"`
 }
 
 type priorityMemo struct {
 	Server      int64                      `json:"server"`
 	Waiting     map[string]priorityWaiting `json:"waiting"`
 	Diagnostics map[string]bool            `json:"diagnostics,omitempty"`
+	Homes       map[string]priorityHome    `json:"homes,omitempty"`
+	Settled     map[string]priorityWaiting `json:"settled,omitempty"`
 	unavailable bool
 }
 
 // prioritize shares the indicator event/tick path and singleton, not a new
-// monitor. Only entering/changing a waiting state triggers a reconciliation:
-// working transitions and the user's manual reorder never trigger moves.
+// monitor. Waiting transitions promote unseen tabs; focus returns promoted tabs
+// home. Working transitions and the user's manual reorder never promote tabs.
 func (painter *indicatorPainter) prioritize(ctx context.Context) {
 	if painter.priority == nil {
 		return
@@ -111,6 +114,11 @@ func (painter *indicatorPainter) prioritize(ctx context.Context) {
 	}
 	removed := len(memo.Waiting) != len(waiting)
 	memo.Waiting = waiting
+	for tab, agent := range memo.Settled {
+		if waiting[tab] != agent {
+			delete(memo.Settled, tab)
+		}
+	}
 	if changed {
 		memo.Diagnostics = nil
 	}
@@ -119,21 +127,22 @@ func (painter *indicatorPainter) prioritize(ctx context.Context) {
 	if (changed || removed) && !painter.storePriority() {
 		return
 	}
-	if !changed {
+	if !changed && len(memo.Homes) == 0 {
 		return
 	}
-	body, err := painter.priorityRead(ctx, "tab.list", struct{}{})
+	tabs, focused, err := painter.readPriorityLayout(ctx)
 	if err != nil {
 		painter.priorityDiagnostic(err)
 		return
 	}
-	tabs, err := decodePriorityTabs(body)
-	if err != nil {
-		painter.priorityDiagnostic(err)
+	if !painter.returnPriorityTabs(ctx, tabs, focused) || !changed {
 		return
 	}
 	queue := make([]priorityWaiting, 0, len(waiting))
-	for _, agent := range waiting {
+	for tab, agent := range waiting {
+		if memo.Settled[tab] == agent {
+			continue
+		}
 		queue = append(queue, agent)
 	}
 	slices.SortFunc(queue, func(a, b priorityWaiting) int {
@@ -166,6 +175,14 @@ func (painter *indicatorPainter) prioritize(ctx context.Context) {
 					agent.Workspace,
 				),
 			)
+			continue
+		}
+		if focused[agent.Tab] {
+			positions[agent.Workspace]--
+			painter.settlePriority(agent)
+			if !painter.storePriority() {
+				return
+			}
 			continue
 		}
 		if current == index {
@@ -208,19 +225,43 @@ func (painter *indicatorPainter) prioritize(ctx context.Context) {
 			positions[agent.Workspace]--
 			continue
 		}
-		insert := index
-		if current < index {
-			insert++
-		}
-		moved, err := painter.movePriorityTab(ctx, agent, insert)
+		// Focus can change during ownership/state proof. Read it again at the
+		// mutation boundary; never promote a tab the user is already viewing.
+		fresh, focusNow, err := painter.readPriorityLayout(ctx)
 		if err != nil {
 			painter.priorityDiagnostic(err)
 			return
 		}
-		// Herdr's response is authoritative after each move, not our predicted
-		// ordering: another client may have reordered or closed a tab meanwhile.
-		for workspace, order := range moved {
-			tabs[workspace] = order
+		if focusNow[agent.Tab] {
+			positions[agent.Workspace]--
+			painter.settlePriority(agent)
+			if !painter.storePriority() {
+				return
+			}
+			continue
+		}
+		tabs = fresh
+		painter.cancelPriorityHomes(tabs)
+		if !painter.storePriority() {
+			return
+		}
+		order = tabs[agent.Workspace]
+		current = slices.Index(order, agent.Tab)
+		if current < 0 || memo.Settled[agent.Tab] == agent {
+			positions[agent.Workspace]--
+			continue
+		}
+		if current == index {
+			continue
+		}
+		if _, ok := memo.Homes[agent.Tab]; !ok && current > index {
+			if memo.Homes == nil {
+				memo.Homes = map[string]priorityHome{}
+			}
+			memo.Homes[agent.Tab] = priorityHome{Agent: agent, Left: order[current-1], Index: current, Placed: current}
+		}
+		if !painter.placePriorityTab(ctx, agent, tabs, current, index) {
+			return
 		}
 	}
 }
@@ -389,7 +430,12 @@ func (painter *indicatorPainter) loadPriority() *priorityMemo {
 		painter.priorityDiagnostic(fmt.Errorf("decode transition memo %s: missing waiting set", painter.priorityPath()))
 		return memo
 	}
-	if stored.Server == painter.server && stored.Waiting != nil {
+	if err := validatePriorityHomes(stored.Homes); err != nil {
+		memo.unavailable = true
+		painter.priorityDiagnostic(fmt.Errorf("decode transition memo %s: %w", painter.priorityPath(), err))
+		return memo
+	}
+	if stored.Server == painter.server {
 		painter.priorityState = &stored
 	}
 	return painter.priorityState

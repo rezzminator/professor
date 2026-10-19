@@ -59,7 +59,7 @@ type TabProvider func(context.Context, string) ([]TabDecoration, error)
 // tabMarkers are the prefixes state plays in mode, one per frame: emoji mode
 // the theme's frames (a zero TabGlyphs field keeps its default), text mode
 // three-rune markers, its blocked and error pulsing with "[ ]" and every
-// other state still. Each emoji frame is ValidTabGlyph, so cleaning never
+// steady state still. Each emoji frame is ValidTabGlyph, so cleaning never
 // rewrites the prefix, and a pulse's off phase is a glyph of its own, not
 // whitespace that TabRename's cleaning would strip.
 func tabMarkers(state, mode string, glyphs TabGlyphs) []string {
@@ -67,8 +67,10 @@ func tabMarkers(state, mode string, glyphs TabGlyphs) []string {
 	switch state {
 	case "working":
 		key, text = TabGlyphWorking, "[W]"
-	case "idle":
+	case TabGlyphIdle:
 		key, text = TabGlyphIdle, "[I]"
+	case priorityDone:
+		key, text = TabGlyphDone, "[C]"
 	case string(StateBlocked):
 		key, text = TabGlyphBlocked, "[B]"
 	case "error":
@@ -317,6 +319,15 @@ func reconcileTab(
 				record.SeenUser = d.UserName
 			}
 			record.UserSeen = true
+		}
+		// Herdr owns completion/seen state: Stop reports idle, exposed as done
+		// until focus marks its output seen (`herdr --skill`, idle vs done).
+		// This is the same focus observation used by priority return; a sole
+		// pane is the whole tab. Keep transcript errors/death authoritative.
+		if d.State == TabGlyphIdle && pane.State == priorityDone && !*pane.Focused {
+			d.State = priorityDone
+		} else if d.State == priorityDone && *pane.Focused {
+			d.State = TabGlyphIdle
 		}
 		record.Identity, record.State, record.Mode = d.Identity, d.State, d.Mode
 		record.Frame, record.Glyphs = tabFrame(d.State, d.Mode, tick, d.Glyphs), d.Glyphs

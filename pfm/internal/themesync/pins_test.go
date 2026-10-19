@@ -10,6 +10,67 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
+func TestProfileDoneGlyphPinsValidateAndLegacyProfilesKeepDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		glyphs string
+		want   herdr.TabFrames
+	}{
+		{"legacy", `{"working":"🔵"}`, herdr.TabFrames{"🟡"}},
+		{"still done", `{"done":"⭐"}`, herdr.TabFrames{"⭐"}},
+		{"single-frame done array", `{"done":["🟡"]}`, herdr.TabFrames{"🟡"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile, err := ParseProfile([]byte(profileJSON(`{"herdr":{"tabGlyphs":` + tc.glyphs + `}}`)))
+			if err != nil {
+				t.Fatalf("profile with %s glyphs: %v", tc.name, err)
+			}
+			glyphs, err := herdr.ParseTabGlyphs(profile.Surfaces.Herdr.TabGlyphs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for tick := range 4 {
+				want := tc.want[tick%len(tc.want)] + " Chat"
+				if got := herdr.DecoratedTabLabel("Chat", "done", "emoji", tick, glyphs); got != want {
+					t.Errorf("done frame %d = %q, want %q", tick, got, want)
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		frames string
+		want   string
+	}{
+		{`[]`, "no frames"},
+		{`["🟡"," "]`, "frame 1"},
+	} {
+		_, err := ParseProfile([]byte(profileJSON(`{"herdr":{"tabGlyphs":{"done":` + tc.frames + `}}}`)))
+		if err == nil || !strings.Contains(err.Error(), `herdr tabGlyphs pin "done"`) ||
+			!strings.Contains(err.Error(), tc.want) {
+			t.Errorf("done %s: error = %v, want done named with %q", tc.frames, err, tc.want)
+		}
+	}
+}
+
+func TestProfilePinsOnlyBlockedAndErrorMayAnimate(t *testing.T) {
+	for _, state := range []string{"working", "done", "idle", "dead", "unknown", "blocked", "error"} {
+		t.Run(state, func(t *testing.T) {
+			surfaces := `{"herdr":{"tabGlyphs":{"` + state + `":["🔵","⚪"]}}}`
+			_, err := ParseProfile([]byte(profileJSON(surfaces)))
+			if state == "blocked" || state == "error" {
+				if err != nil {
+					t.Errorf("animated %s: %v", state, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), state) ||
+				!strings.Contains(err.Error(), "only blocked and error") {
+				t.Errorf("animated %s: error = %v, want state named and only blocked and error may animate", state, err)
+			}
+		})
+	}
+}
+
 func TestPinnableKeysAreTheKeysTheRenderersEmit(t *testing.T) {
 	keys, err := renderedPinKeys()
 	if err != nil {
@@ -92,7 +153,7 @@ func TestValidatePinsAcceptsEveryRenderedKeyWithItsKindOfValue(t *testing.T) {
 	}
 	glyphs := map[string]herdr.TabFrames{}
 	for name := range keys.herdrGlyphs {
-		glyphs[name] = herdr.TabFrames{"⭕", "🔴"}
+		glyphs[name] = herdr.TabFrames{"⭕"}
 	}
 	all := &SurfacePins{
 		Tmux: fill(keys.tmux), Herdr: &HerdrPins{Tokens: fill(keys.herdr), TabGlyphs: glyphs},

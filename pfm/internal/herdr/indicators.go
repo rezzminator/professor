@@ -77,7 +77,7 @@ func IndicatorEvents() []string {
 // off for 500 ms (1 Hz). The phase is a function of the wall clock alone, so
 // concurrent painters agree without talking to each other. The same tick
 // (TabTick) picks each decorated tab's frame, so a tab state of several frames
-// (working's moon, blocked's and error's pulse) advances one frame per tick, a
+// (only blocked and error) advances one frame per tick, a
 // tab renamed only when its label differs from the tick's frame. A blinker that
 // meets maxPaintFailures failed repaints in a row gives up.
 const (

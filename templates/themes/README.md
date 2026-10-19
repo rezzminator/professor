@@ -26,7 +26,7 @@ A profile is one directory, `{name}/`, holding the whole theme on every surface 
 - `name`, `base` and `claude.json` are Claude Code's palette; everything else is derived from it.
 - Every other file is a surface's pins. A key it sets wins over what `pfm theme` derives; a key it omits stays derived:
   - `tmux.json`: tmux options by name (styles, `@host_accent` and the `@p_*` chips, `@pfm-c-*`, `@pfm-state-*`);
-  - `herdr.json`: Herdr custom tokens, plus `tabGlyphs`, the Herdr tab status glyphs in `emoji` mode, by state: `working`, `idle`, `blocked`, `error`, `dead`, `unknown`. Each takes a glyph string (one still frame) or an array of 1 to 12 frames played in order, one per half-second, every painter on the same frame at the same moment; the defaults are `working` the moon's phases 🌑🌒🌓🌔🌕🌖🌗🌘, `blocked` 🔴 ⭕, `error` 🟥 ❌, and the still `idle` 🟢, `dead` ⬛, `unknown` ❔. Each frame is non-empty, at most 8 code points, with no whitespace or control character; `pfm theme check` names the state and the index of a bad frame, and refuses an empty array. The tab painter draws a switched theme's glyphs on its next paint; `text` mode keeps its `[W]`-style markers;
+  - `herdr.json`: Herdr custom tokens, plus `tabGlyphs`, the Herdr tab status glyphs in `emoji` mode, by state: `working`, `idle`, `blocked`, `done`, `error`, `dead`, `unknown`. `done` is finished output the user has not seen: it holds until the tab's first focus, then turns `idle`. The colour carries the state, and only `blocked` and `error`, the states that need the user, may flash: each takes a glyph string (one still frame) or an array of 1 to 12 frames played in order, one per half-second, every painter on the same frame at the same moment. The steady states `working`, `done`, `idle`, `dead` and `unknown` never blink: each takes exactly one frame. The defaults are the still `working` 🔵, `done` 🟡, `idle` ⚪, `dead` ⬛ and `unknown` ❔, and the flashing `blocked` 🔴 ⭕ and `error` 🟥 ❌; a state a profile leaves unset takes its default. Each frame is non-empty, at most 8 code points, with no whitespace or control character; `pfm theme check` names the state and the index of a bad frame, refuses an empty array, and refuses a second frame on a steady state. The tab painter draws a switched theme's glyphs on its next paint; `text` mode keeps its `[W]`-style markers;
   - `terminal.json`: the terminal colours pfm paints into VS Code's Global settings;
   - `vscode/chrome.json`: the window chrome (title, activity and status bars) pfm paints into a local workspace;
   - `vscode/workbench/*.json`, `vscode/syntax/*.json` and `vscode/semantic.json`: the profile's VS Code colour theme — workbench colours (any VS Code colour id), TextMate rules (`scope` always an array) and semantic styles (a bare hex for a foreground-only style, else `{foreground, bold, italic, underline, strikethrough}`). Each colour and semantic selector named replaces the derived one; each scope a rule styles moves to that rule; the rest of the derived theme stays.
@@ -48,12 +48,13 @@ From `tokyo-night/`, the pink reference theme, `theme.json`:
   "accent": "#ff3ddc",
   "panel_bg": "#23031e",
   "tabGlyphs": {
-    "blocked": ["⚡", "🔋"],
+    "blocked": ["🚨", "🔴"],
     "dead": "🪫",
-    "error": "👾",
-    "idle": "📡",
+    "done": "⭐",
+    "error": ["👾", "💥"],
+    "idle": "🌑",
     "unknown": "🤖",
-    "working": ["🚀", "🌌", "🛸", "🌌"]
+    "working": "🚀"
   },
   "text": "#ffb5e4"
 }

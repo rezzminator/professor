@@ -381,6 +381,13 @@ def codex_child_records():
 
 
 class CensusCodex(World):
+    def test_runs_lists_native_children(self):
+        root, child = self.pair()
+        out = self.kitcmd("runs", "--session", root).stdout
+        self.assertIn("AGENTS 1", out)
+        self.assertIn("01bb · /root/ada · worker · parent 01aa", out)
+        self.assertIn(child, out)
+
     def rollout(self, name, records):
         return self.jsonl(self.path("codex", "sessions", "2026", "01", "01", name), records)
 

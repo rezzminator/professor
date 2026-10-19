@@ -686,6 +686,31 @@ def codex_records():
 
 
 class CodexKit(Fixture):
+    def test_header_uses_latest_turn_context(self):
+        recs = codex_records()
+        recs.insert(1, x_rec("turn_context", {"model": "parent-model", "effort": "medium"}, 0))
+        out = self.prep(self.write_rollout(recs))
+        self.assertIn("gpt-5.5 high", out)
+        self.assertNotIn("parent-model", out)
+
+    def test_image_view_records_are_rendered(self):
+        recs = codex_records()
+        recs[-1:-1] = [x_rec("event_msg", {"type": "item_completed", "item": {
+            "type": "ImageView", "path": "file:///fx/piece-01.png"}}, 15)]
+        self.prep(self.write_rollout(recs))
+        self.assertIn("view_image file://./piece-01.png", "\n".join(self.digest()))
+
+    def test_timeline_token_classes(self):
+        recs = codex_records()
+        for rec in recs:
+            if rec.get("payload", {}).get("type") == "token_count":
+                rec["payload"]["info"]["last_token_usage"]["reasoning_output_tokens"] = 10
+        self.prep(self.write_rollout(recs))
+        with open(os.path.join(self.dir, "timeline.txt")) as f:
+            timeline = f.read()
+        self.assertIn("TOKENS input=3400 cached_input=1500 uncached_input=1900 output=170 "
+                      "reasoning_output=30 nonreasoning_output=140", timeline)
+
     def write_rollout(self, records=None):
         path = self.path("codex", "sessions", "2026", "01", "01", "rollout-2026-01-01T10-00-00-01aa.jsonl")
         os.makedirs(os.path.dirname(path))

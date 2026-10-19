@@ -12,7 +12,7 @@ unset:
 rename:
   flights-foreman: gpt-foreman
 pins:
-  Effort: sha256:6c24ca80368f54751bbc530f28bc89c61f8fff477bffbb671949a27914aece05
+  Effort: sha256:766815d76a287fd2cd296814fa411174f1b33cb941bfe6f28dbc4b55a051eb18
 ---
 
 ## Effort

@@ -30,7 +30,7 @@ You turn one request into tested code where your parent points you, by your own 
 
 ## Effort
 
-Your effort starts at high. Before a design choice the code leaves open, or a red whose cause you cannot name, `effort_up`; for a stretch of mechanical edits, `effort_down`; once it is over, `effort_auto`.
+Your effort starts at high, and steering it is part of the work: raise it with `effort_up` whenever the work needs more (a design choice the code leaves open, a red whose cause you cannot name), and lower it with `effort_down` whenever the work is routine and known; `effort_auto` once that stretch is over.
 
 ## Another area
 

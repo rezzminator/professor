@@ -13,7 +13,10 @@
 #   pfm/**/*.go               go test -v of its whole package
 #   pfm/scripts/*_test.sh     bash; pfm/scripts/x.sh brings pfm/scripts/x_test.sh when it exists
 #   *.test.mjs                node --test (TAP); ::selector is --test-name-pattern; x.mjs brings x.test.mjs
-#   *_test.py                 python3 -m unittest; ::selector is -k; x.py brings x_test.py
+#   *_test.py                 importing unittest: python3 -m unittest, its own directory as PYTHONPATH
+#                             (the import root `python3 x_test.py` gives it), ::selector is -k; else a
+#                             script-style test: python3 x_test.py, no selector, its `ok <case>` lines
+#                             the proof; x.py brings x_test.py
 #   scripts/test-*.py         python3, no selector; scripts/x.{sh,py} brings scripts/test-x.{sh,py}
 #   *_test.sh, scripts/test-*.sh  bash, no selector; .claude/scripts/x.sh brings scripts/test-x.sh
 #                             (dev.sh: scripts/test-dev-report.sh and infra/fence/lanes/tests/
@@ -23,7 +26,9 @@
 #                             a sourced helper brings its users' tests: scripts/shtest.sh and
 #                             scripts/stub-root.sh every tracked test naming it, infra/fence/mkdir-lock.sh
 #                             its own and the shared, root and gate-history tests
-# Any other file brings no test, only checks. The checks, every one run even after one fails:
+# The rules hold under pfm/ as everywhere. Any other file brings no test, only checks, and is named on
+# its own `TEST UNCOVERED <file>` line, a gap that does not fail the run. The checks, every one run
+# even after one fails:
 #   pfm paths      fmt (golangci-lint fmt --diff, named .go files), typecheck (go vet of the named .go
 #                  files' packages plus every module package importing one, test imports included; with
 #                  no named .go file the whole module), lint-new (make lint-new LINT_PKGS=those packages:
@@ -38,8 +43,10 @@
 # run with no `--- PASS` line, `[no tests to run]` or `[no test files]`, or a `--- SKIP` for a test
 # pfm/scripts/known-skips.tsv does not list for that package (a subtest by its parent's row); a TAP
 # run with `# pass 0`, only the file itself as the passing test, or `# skipped|todo N`; a unittest run
-# with `Ran 0 tests`, `skipped=N`, or exit 5 `NO TESTS RAN`. A shell test is judged by its exit code.
+# with `Ran 0 tests`, `skipped=N`, or exit 5 `NO TESTS RAN`; a script-style Python test with no `ok `
+# line. A shell test is judged by its exit code.
 # Output: one `TEST <PASS|FAIL|NO-TEST-RAN|UNLISTED-SKIP|SKIPPED> …` line per test invocation, one
+# `TEST UNCOVERED …` line per named file no test maps to, one
 # `CHECK <PASS|FAIL|SKIP> …` line per check, then `TESTS …`, `STATIC …`, on red the log's last 40
 # other lines, `VERDICT PASS|FAIL`, and last `log: <path>` — /tmp/{project}/test/{UTC}-{pid}.log holds
 # the whole run, every runner's own output indented `  | ` so only this run's summary lines sit at
@@ -69,6 +76,9 @@ t_line() { # t_line <word> <label> [detail]
 t_done() { # t_done <label> <rc>
   T_TOTAL=$((T_TOTAL + 1))
   if [ "$2" = 0 ]; then t_line PASS "$1"; else T_FAILED=$((T_FAILED + 1)); fi
+}
+t_none() { # t_none <file>: a named file no test maps to — a gap, never counted as a test
+  t_line UNCOVERED "$1" '(no test file maps to it — its checks only)'
 }
 t_out() { # t_out <runner output>: into the log indented, so a nested run's TEST/CHECK/VERDICT lines
   # never read as this run's (the host takes only column-0 summary lines)
@@ -104,7 +114,7 @@ t_sh() { # t_sh <label> <command>...: the exit code alone
   [ "$c" = 0 ] || t_line FAIL "$label" "(exit $c)"
   t_done "$label" "$c"
 }
-t_proof() { # t_proof <label> <tap|unittest> <command>...
+t_proof() { # t_proof <label> <tap|unittest|script> <command>...
   local label=$1 kind=$2 out c=0; shift 2
   out="$("$@" 2>&1)" || c=$?
   t_out "$out"
@@ -114,6 +124,8 @@ t_proof() { # t_proof <label> <tap|unittest> <command>...
   elif [ "$kind" = tap ]; then
     if ! grep -Eq '^# pass [1-9]' <<<"$out" || grep -Fxq "ok 1 - ${label%%::*}" <<<"$out"; then t_line NO-TEST-RAN "$label"; c=1
     elif grep -Eq '^# (skipped|todo) [1-9]' <<<"$out"; then t_line SKIPPED "$label"; c=1; fi
+  elif [ "$kind" = script ]; then
+    if ! grep -Eq '^ok ' <<<"$out"; then t_line NO-TEST-RAN "$label"; c=1; fi
   else
     if ! grep -Eq '^Ran [1-9][0-9]* tests?' <<<"$out"; then t_line NO-TEST-RAN "$label"; c=1
     elif grep -Eq 'skipped=[1-9]' <<<"$out"; then t_line SKIPPED "$label"; c=1; fi
@@ -354,8 +366,9 @@ add_inv() { # add_inv <word>...: one invocation, its words quoted; a repeat is d
   local s
   printf -v s '%q ' "$@"; add_raw "${s% }"
 }
-add_raw() { # add_raw <invocation string>
+add_raw() { # add_raw <invocation string>: sets MAPPED, even for a repeat
   local e
+  MAPPED=1
   for e in "${INVS[@]+"${INVS[@]}"}"; do [ "$e" != "$1" ] || return 0; done
   INVS+=("$1")
 }
@@ -385,6 +398,18 @@ shell_test() { # shell_test <test file> [the one SUT]: a shell test, through its
     add_raw "$(printf '%q ' t_sh "$1 $s" bash "$1")\"\$PWD\"/$(printf '%q' "$s")"
   done <<<"$rows"
 }
+py_inv() { # py_inv <test file> <has selector 0|1> <selector>: unittest when the file imports it, the
+  # file's directory its import root; else the script-style test runs whole
+  local f="$1" has="$2" sel="$3" dir=.
+  # `import unittest`, `import os, unittest`, `from unittest import …`, `import unittest.mock`
+  if ! grep -qE '^[[:space:]]*(from[[:space:]]+|import[[:space:]]+([A-Za-z_][A-Za-z0-9_.]*([[:space:]]+as[[:space:]]+[A-Za-z_][A-Za-z0-9_]*)?[[:space:]]*,[[:space:]]*)*)unittest([[:space:].,]|$)' "$ROOT/$f"; then
+    no_sel "$f" "$has" "script-style Python test (no unittest import; it runs whole)"
+    add_inv t_proof "$f" script python3 "$f"; return
+  fi
+  case "$f" in */*) dir="${f%/*}" ;; esac
+  if [ "$has" = 1 ]; then add_inv t_proof "$f::$sel" unittest env "PYTHONPATH=$dir" python3 -m unittest "$f" -k "$sel"
+  else add_inv t_proof "$f" unittest env "PYTHONPATH=$dir" python3 -m unittest "$f"; fi
+}
 no_sel() { [ "$2" = 0 ] || { echo "test.sh: $1: a $3 takes no selector" >&2; usage; }; }
 derive() { # derive <repository-relative path> <has selector 0|1> <selector>
   local f="$1" has="$2" sel="$3" dir base names fn sib
@@ -406,13 +431,10 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
     pfm/scripts/*.sh)
       no_sel "$f" "$has" "script (its test runs)"; sib="${f%.sh}_test.sh"
       [ ! -f "$ROOT/$sib" ] || add_inv t_sh "$sib" bash "$sib" ;;
-    pfm/*) [ "$has" = 0 ] || { echo "test.sh: $f::$sel: only a test file takes a selector" >&2; usage; } ;;
     *.test.mjs)
       if [ "$has" = 1 ]; then add_inv t_proof "$f::$sel" tap node --test --test-reporter=tap "--test-name-pattern=$sel" "$f"
       else add_inv t_proof "$f" tap node --test --test-reporter=tap "$f"; fi ;;
-    *_test.py)
-      if [ "$has" = 1 ]; then add_inv t_proof "$f::$sel" unittest python3 -m unittest "$f" -k "$sel"
-      else add_inv t_proof "$f" unittest python3 -m unittest "$f"; fi ;;
+    *_test.py) py_inv "$f" "$has" "$sel" ;;
     scripts/test-*.py) no_sel "$f" "$has" "scripts/test-*.py"; add_inv t_proof "$f" unittest python3 "$f" ;;
     *_test.sh | scripts/test-*.sh) no_sel "$f" "$has" "shell test"; shell_test "$f" ;;
     *)
@@ -443,7 +465,7 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
         infra/demo/*.sh)
           sib="infra/demo/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
         *.mjs) sib="${f%.mjs}.test.mjs"; [ ! -f "$ROOT/$sib" ] || add_inv t_proof "$sib" tap node --test --test-reporter=tap "$sib" ;;
-        *.py) sib="${f%.py}_test.py"; [ ! -f "$ROOT/$sib" ] || add_inv t_proof "$sib" unittest python3 -m unittest "$sib" ;;
+        *.py) sib="${f%.py}_test.py"; [ ! -f "$ROOT/$sib" ] || py_inv "$sib" 0 '' ;;
       esac ;;
   esac
 }
@@ -452,7 +474,9 @@ for p in "${UNIT_PATHS[@]+"${UNIT_PATHS[@]}"}"; do
   if [[ "$p" == *::* ]]; then has=1; sel="${p#*::}"; fi
   FILES+=("$f")
   case "$f" in pfm/*) add_unit pfm ;; *) add_unit templates ;; esac
+  MAPPED=0
   derive "$f" "$has" "$sel"
+  [ "$MAPPED" = 1 ] || add_inv t_none "$f"
 done
 for d in "${UNIT_DROPPED[@]+"${UNIT_DROPPED[@]}"}"; do
   case "$d" in pfm/*) add_unit pfm ;; *) add_unit templates ;; esac

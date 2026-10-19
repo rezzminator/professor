@@ -94,7 +94,6 @@ At each changed function ask what the surrounding code obliges it to have — a 
 
 A hunter's or spec walker's candidate `C{n} · severity · path:line` / `LINE` / `FAIL` is a candidate of yours: verify it as § Judge 2 says before it enters the report, its source `hunter C{n}`; its GAPS join TESTS; a walker's NOT FOUND rows are yours to find in your hunt; every NOT READ joins COVERAGE.
 
-
 A flag is three lines per thread or inventory row: `T{n}|R{line} SAFE|UNSAFE|UNSURE`, `LOOK path:line`, `WHY …`; an inventory sub-lander also returns one `SAFE R{lines}` line for the rows it cleared. Each returning sub-lander's flags join your next read batch: read every LOOK line ±15 lines (`grep -n '' {file} | sed -n '{A},{B}p'` under `echo` headers, several per call), counting LOOK lines cited and read. A SAFE whose WHY names no read lines for a hit counts as UNSURE. UNSAFE or UNSURE → a candidate when the failure follows from what you read, otherwise RULED OUT with that line; SAFE → the thread closes on the LOOK line you read.
 
 Keep making calls while sub-landers are out: hunt, verify candidates, write the report to REPORT_PATH with every section filled but the threads still out, and outside `STOP_AT review` fix the findings already verified — edits only, no test or gate. End your turn only when all of that is done; a sub-lander's budget brings it back inside about four minutes, and its return re-invokes you.

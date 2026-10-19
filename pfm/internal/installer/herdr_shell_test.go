@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -30,6 +32,7 @@ func herdrShellInstaller(t *testing.T, original string, present bool) (*engine, 
 		t.Fatal(err)
 	}
 	runner := &deps.FakeRunner{}
+	scriptLoginShell(runner, "/bin/zsh", nil)
 	if present {
 		runner.ScriptLookPath("herdr", "/fixture/herdr", nil)
 	} else {
@@ -48,6 +51,80 @@ func herdrShellInstaller(t *testing.T, original string, present bool) (*engine, 
 		managedRoot: managedRootForHome(home),
 	}
 	return installer, config, output
+}
+
+// Both platform lookups use the injected process runner, never the host DB.
+func scriptLoginShell(runner *deps.FakeRunner, shell string, err error) {
+	uid := strconv.Itoa(os.Getuid())
+	runner.Script([]string{"getent", "passwd", uid}, deps.RunResult{
+		Stdout: []byte("fixture:x:" + uid + ":20:Fixture:/fixture:" + shell + "\n"),
+	}, err)
+	runner.Script([]string{"dscl", "/Search", "-search", "/Users", "UniqueID", uid}, deps.RunResult{
+		Stdout: []byte("fixture\t\tUniqueID = (\n    " + uid + "\n)\n"),
+	}, err)
+	runner.Script([]string{"dscl", "/Search", "-read", path.Join("/Users", "fixture"), "UserShell"}, deps.RunResult{
+		Stdout: []byte("UserShell: " + shell + "\n"),
+	}, err)
+}
+
+func TestHerdrShellUsesLoginShell(t *testing.T) {
+	installer, _, _ := herdrShellInstaller(t, "", true)
+	installer.options.Env = &paths.MapEnv{Values: map[string]string{"SHELL": "/opt/homebrew/bin/bash"}}
+	if err := installer.wireHerdrShell(false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(paths.HerdrShellWrapper(installer.options.Home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/herdr-login-shell.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if strings.HasPrefix(line, "pfm_real_shell=") {
+			if line+"\n" != string(want) {
+				t.Fatalf("captured shell = %q, want %q", line, strings.TrimSpace(string(want)))
+			}
+			return
+		}
+	}
+	t.Fatal("wrapper has no captured real shell")
+}
+
+func TestHerdrShellRefreshesOwnedWrapper(t *testing.T) {
+	installer, config, _ := herdrShellInstaller(t, "", true)
+	if err := installer.wireHerdrShell(false); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapper := paths.HerdrShellWrapper(installer.options.Home)
+	raw, err := os.ReadFile(wrapper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.Replace(string(raw), "pfm_real_shell='/bin/zsh'", "pfm_real_shell='/bin/sh'", 1)
+	if stale == string(raw) {
+		t.Fatal("fixture has no captured shell to replace")
+	}
+	if err := testjail.WriteExecutable(wrapper, []byte(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installer.options.Env = &paths.MapEnv{Values: map[string]string{"SHELL": "/bin/sh"}}
+	if err := installer.wireHerdrShell(false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(wrapper)
+	if err != nil || !bytes.Equal(after, raw) {
+		t.Fatalf("owned wrapper not refreshed: %s; error=%v", after, err)
+	}
+	after, err = os.ReadFile(config)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("refresh changed config: %s; error=%v", after, err)
+	}
 }
 
 func TestHerdrShellInstall(t *testing.T) {
@@ -318,8 +395,15 @@ func TestHerdrShellHoldsThemeLockWhileWriting(t *testing.T) {
 
 func TestHerdrShellMissingCapturedShellFallsBack(t *testing.T) {
 	installer, _, _ := herdrShellInstaller(t, "", true)
-	installer.options.Env = &paths.MapEnv{Values: map[string]string{"SHELL": filepath.Join(t.TempDir(), "gone")}}
+	shell := writeScript(t, t.TempDir(), "zsh", "#!/bin/sh\nexit 0\n")
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath("herdr", "/fixture/herdr", nil)
+	scriptLoginShell(runner, shell, nil)
+	installer.options.ProcessRunner = runner
 	if err := installer.wireHerdrShell(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(shell); err != nil {
 		t.Fatal(err)
 	}
 	wrapper := paths.HerdrShellWrapper(installer.options.Home)
@@ -329,6 +413,74 @@ func TestHerdrShellMissingCapturedShellFallsBack(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), "not executable; using /bin/sh") ||
 		!strings.Contains(string(out), "shell=/bin/sh auto=unset") {
 		t.Fatalf("missing shell did not leave a usable fallback: %s err=%v", out, err)
+	}
+}
+
+func TestHerdrShellLoginLookupFallback(t *testing.T) {
+	for _, name := range []string{
+		"executable", "unset", "missing", "nonexecutable", "directory", "relative", "wrapper", "wrapper symlink", "invalid login",
+	} {
+		t.Run(name, func(t *testing.T) {
+			installer, _, output := herdrShellInstaller(t, "", true)
+			wrapper := paths.HerdrShellWrapper(installer.options.Home)
+			fallback := ""
+			want := "/bin/sh"
+			login, lookupErr := "/bin/zsh", errors.New("account database unavailable")
+			switch name {
+			case "executable":
+				fallback = writeScript(t, t.TempDir(), "bash", "#!/bin/sh\nexit 0\n")
+				want = fallback
+			case "missing":
+				fallback = filepath.Join(t.TempDir(), "gone")
+			case "nonexecutable":
+				fallback = filepath.Join(t.TempDir(), "shell")
+				if err := os.WriteFile(fallback, []byte("not executable"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				fallback = t.TempDir()
+			case "relative":
+				fallback = "bash"
+			case "wrapper", "wrapper symlink":
+				if err := os.MkdirAll(filepath.Dir(wrapper), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := testjail.WriteExecutable(wrapper, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				fallback = wrapper
+				if name == "wrapper symlink" {
+					fallback = filepath.Join(t.TempDir(), "shell")
+					if err := os.Symlink(wrapper, fallback); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "invalid login":
+				login, lookupErr = filepath.Join(t.TempDir(), "gone"), nil
+			}
+			runner := &deps.FakeRunner{}
+			runner.ScriptLookPath("herdr", "/fixture/herdr", nil)
+			scriptLoginShell(runner, login, lookupErr)
+			installer.options.ProcessRunner = runner
+			installer.options.Env = &paths.MapEnv{Values: map[string]string{"SHELL": fallback}}
+			if err := installer.wireHerdrShell(false); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(wrapper)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), "pfm_real_shell='"+want+"'\n") {
+				t.Fatalf("wrong fallback, want %q: %s", want, raw)
+			}
+			if !strings.Contains(output.String(), "  warn    herdr shell: login shell lookup:") ||
+				!strings.Contains(output.String(), "; using "+want) {
+				t.Fatalf("lookup failure not visible: %s", output)
+			}
+			if lookupErr != nil && !strings.Contains(output.String(), lookupErr.Error()) {
+				t.Fatalf("lookup error lost: %s", output)
+			}
+		})
 	}
 }
 

@@ -1,17 +1,21 @@
 package installer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
@@ -122,10 +126,7 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 	if err != nil {
 		return fmt.Errorf("read Herdr shell wrapper asset: %w", err)
 	}
-	realShell := installer.env().Get("SHELL")
-	if realShell == "" || realShell == wrapper {
-		realShell = "/bin/sh"
-	}
+	realShell := installer.herdrRealShell(wrapper)
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'" }
 	content = []byte(
 		strings.NewReplacer("__PFM_REAL_SHELL__", quote(realShell), "__PFM_WRAPPER__", quote(wrapper)).
@@ -153,6 +154,65 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 		"wire herdr shell in "+status.Path,
 		func() error { return installer.writeHerdrShellConfig(status.Path, raw, []byte(updated), existed) },
 	)
+}
+
+// herdrRealShell discovers the account's shell through the injected runner.
+// A tool shell's SHELL is only a validated fallback, never the account truth.
+func (installer *engine) herdrRealShell(wrapper string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	shell, err := lookupLoginShell(ctx, installer.processRunner(), os.Getuid())
+	if err == nil {
+		err = validateHerdrShell(shell, wrapper)
+	}
+	if err == nil {
+		return shell
+	}
+	lookupErr := fmt.Errorf("herdr shell: login shell lookup: %w", err)
+	fallback := installer.env().Get("SHELL")
+	if fallbackErr := validateHerdrShell(fallback, wrapper); fallbackErr != nil {
+		lookupErr = errors.Join(lookupErr, fmt.Errorf("SHELL fallback: %w", fallbackErr))
+		fallback = "/bin/sh"
+	}
+	message := fmt.Sprintf("%v; using %s", lookupErr, fallback)
+	installer.say("  warn    %s", message)
+	installer.record("warn", message, lookupErr)
+	return fallback
+}
+
+func validateHerdrShell(shell, wrapper string) error {
+	if !filepath.IsAbs(shell) || strings.ContainsAny(shell, "\x00\r\n") {
+		return fmt.Errorf("shell %q is not an absolute executable path", shell)
+	}
+	if shell == wrapper {
+		return fmt.Errorf("shell %q is the Herdr wrapper", shell)
+	}
+	info, err := os.Stat(shell)
+	if err != nil {
+		return fmt.Errorf("inspect shell %q: %w", shell, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("shell %q is not executable", shell)
+	}
+	if wrapperInfo, statErr := os.Stat(wrapper); statErr == nil {
+		if os.SameFile(info, wrapperInfo) {
+			return fmt.Errorf("shell %q resolves to the Herdr wrapper", shell)
+		}
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return fmt.Errorf("inspect Herdr wrapper %q: %w", wrapper, statErr)
+	}
+	return nil
+}
+
+func loginShellOutput(ctx context.Context, runner deps.Runner, argv ...string) (string, error) {
+	result, err := runner.Run(ctx, argv, deps.RunOptions{})
+	if err != nil {
+		return "", fmt.Errorf("lookup login shell via %q: %w; stderr: %s", argv, err, result.Stderr)
+	}
+	if result.ExitCode != 0 {
+		return "", fmt.Errorf("lookup login shell via %q: exit %d; stderr: %s", argv, result.ExitCode, result.Stderr)
+	}
+	return strings.TrimSpace(string(result.Stdout)), nil
 }
 
 // extendHerdrShellConfig proves the new key is in the terminal table, not

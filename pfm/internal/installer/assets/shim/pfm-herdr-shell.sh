@@ -15,7 +15,7 @@ if [ "$SHELL" = "$pfm_wrapper" ] || [ "$SHELL" = "$0" ]; then
   SHELL=/bin/sh
 fi
 if [ ! -x "$SHELL" ]; then
-  printf 'pfm herdr shell: shell %s is not executable; using /bin/sh — rerun pfm install from your login shell\n' "$SHELL" >&2
+  printf 'pfm herdr shell: shell %s is not executable; using /bin/sh — check your account login shell and rerun pfm install\n' "$SHELL" >&2
   SHELL=/bin/sh
 fi
 export SHELL

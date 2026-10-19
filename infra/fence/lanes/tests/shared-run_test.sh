@@ -57,6 +57,27 @@ if [ ! -e "$TREE/x" ]; then ok "a run never writes its tree"; else bad "a run wr
 out="$(srun r-sig shared 'awk "/^SigIgn:/ { print \$2 }" /proc/self/status')"; rc=$?
 if [ "$rc" = 0 ] && [[ "$out" =~ ^[0-9a-f]+$ ]] && (( (16#$out & 6) == 0 )); then ok "a run's command has SIGINT and SIGQUIT at their defaults"; else bad "a run's command ignores SIGINT or SIGQUIT" "rc=$rc SigIgn=$out"; fi
 
+# --- capped, non-swappable scratch and explicit disk semantics ---------------------------------------------
+out="$(srun r-memory shared '
+for spec in /root:268435456:700 /tmp:1610612736:1777 /var/tmp:16777216:1777 /dev/shm:67108864:1777 /mnt/state:1048576:700 /mnt/host:1048576:700; do
+  path=${spec%%:*}; rest=${spec#*:}; bytes=${rest%%:*}; mode=${rest##*:}
+  [ "$(findmnt -bn -o FSTYPE -T "$path" | tail -n 1)" = tmpfs ] || { echo "$path is not tmpfs"; exit 1; }
+  [ "$(findmnt -bn -o SIZE -T "$path" | tail -n 1)" = "$bytes" ] || { echo "$path has the wrong cap"; exit 1; }
+  case ",$(findmnt -n -o OPTIONS -T "$path" | tail -n 1)," in *,noswap,*) ;; *) echo "$path can swap"; exit 1 ;; esac
+  [ "$(stat -c %a "$path")" = "$mode" ] || { echo "$path has the wrong mode"; exit 1; }
+done
+if cap_error=$(dd if=/dev/zero of=/var/tmp/over-cap bs=1M count=17 status=none 2>&1); then
+  echo "/var/tmp exceeded its cap"; exit 1
+fi
+grep -q "No space left on device" <<<"$cap_error" || { echo "/var/tmp cap did not report ENOSPC: $cap_error"; exit 1; }
+rm -f /var/tmp/over-cap
+[ "$PFM_FENCE_DISK_DIR" = /pfm-disk ] && [ "$(findmnt -n -o TARGET -T /pfm-disk | tail -n 1)" = /pfm-disk ] && echo disk > /pfm-disk/probe
+')"; rc=$?
+# This suite's STATE is on tmpfs itself; the explicit disk escape must bind the run's directory,
+# not silently claim that its backing device is always disk in nested harnesses.
+if [ "$rc" = 0 ]; then ok "all six scratch mounts are capped tmpfs, noswap, with private modes and a writable disk escape"
+else bad "scratch mount type, cap, noswap, mode or disk escape" "rc=$rc" "$out"; fi
+
 # --- per-run fixed paths ----------------------------------------------------------------------------------
 fixed='for d in /tmp /root /var/tmp /dev/shm; do echo "$ID" > "$d/fixed"; done; sleep 1.5
 for d in /tmp /root /var/tmp /dev/shm; do [ "$(cat "$d/fixed")" = "$ID" ] || { echo "$d/fixed is $(cat "$d/fixed"), not $ID"; exit 1; }; done'

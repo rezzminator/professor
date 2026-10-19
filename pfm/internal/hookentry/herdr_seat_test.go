@@ -570,6 +570,19 @@ func newNativeReporterHerdrCount(
 					server.lines = append(server.lines, string(line))
 					server.mu.Unlock()
 					result = map[string]any{"type": "ok"}
+					switch req.Method {
+					case "pane.rename":
+						result = map[string]any{"pane": map[string]any{"pane_id": pane, "label": req.Params["label"]}}
+					case "agent.rename":
+						result = map[string]any{"agent": map[string]any{"pane_id": pane, "name": req.Params["name"]}}
+					case "pane.get":
+						result = testjail.HerdrPaneInfo(pane)
+					case "tab.get":
+						result = map[string]any{
+							"type": "tab_info",
+							"tab":  map[string]any{"tab_id": "w6:t1", "label": "Previous", "pane_count": 1},
+						}
+					}
 				}
 				if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
 					t.Error(err)

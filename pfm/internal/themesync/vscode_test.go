@@ -3,6 +3,8 @@ package themesync
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +80,14 @@ func TestVscodeContractCarriesTheWindowChrome(t *testing.T) {
 		"activityBar.activeBackground":      variant.Surface,
 		"activityBarTop.activeBackground":   variant.Surface,
 		"statusBar.background":              variant.Surface,
+		"statusBar.noFolderBackground":      variant.Surface,
+		"statusBar.noFolderForeground":      variant.Foreground,
+		"statusBar.noFolderBorder":          variant.Overlay,
+		"window.activeBorder":               variant.Accent,
+		"window.inactiveBorder":             variant.Overlay,
+		"titleBar.border":                   variant.Overlay,
+		"activityBar.border":                variant.Overlay,
+		"statusBar.border":                  variant.Overlay,
 		"titleBar.activeForeground":         variant.Foreground,
 		"activityBar.foreground":            variant.Foreground,
 		"activityBarTop.foreground":         variant.Foreground,
@@ -98,12 +108,13 @@ func TestVscodeContractCarriesTheWindowChrome(t *testing.T) {
 		"activityBarBadge.background":       variant.Accent,
 		"sash.hoverBorder":                  variant.Accent,
 		"statusBar.debuggingBackground":     variant.Accent,
+		"statusBar.debuggingBorder":         variant.Accent,
 		"statusBarItem.remoteBackground":    variant.Accent,
 		"commandCenter.border":              variant.Overlay,
 		"statusBarItem.hoverBackground":     variant.Overlay,
 	}
-	if len(want) != 27 {
-		t.Fatalf("test table has %d chrome keys, want 27", len(want))
+	if len(want) != 36 {
+		t.Fatalf("test table has %d chrome keys, want 36", len(want))
 	}
 	if len(contract.Chrome) != len(want) {
 		t.Fatalf("chrome has %d keys, want %d: %v", len(contract.Chrome), len(want), contract.Chrome)
@@ -162,14 +173,14 @@ func TestVscodeVerdictJudgesWindowChrome(t *testing.T) {
 		"/w/c/c.code-workspace": {Generation: 3, Keys: []string{"statusBar.background"}},
 	}}
 	verdict, detail = vscodeVerdict(clean, true, 4, true, stale, "/s/vscode-ack.json")
-	if verdict != VerdictInSync || detail != "window chrome in 2 local workspaces" {
-		t.Errorf("two clean entries = %s %q, want IN-SYNC with 2 local workspaces", verdict, detail)
+	if verdict != VerdictInSync || detail != "window chrome in 2 workspaces" {
+		t.Errorf("two clean entries = %s %q, want IN-SYNC with 2 workspaces", verdict, detail)
 	}
 
 	one := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{"/w/a/a.code-workspace": {Generation: 4}}}
 	verdict, detail = vscodeVerdict(one, true, 4, true, stale, "/s/vscode-ack.json")
-	if verdict != VerdictInSync || detail != "window chrome in 1 local workspace" {
-		t.Errorf("one clean entry = %s %q, want IN-SYNC with 1 local workspace", verdict, detail)
+	if verdict != VerdictInSync || detail != "window chrome in 1 workspace" {
+		t.Errorf("one clean entry = %s %q, want IN-SYNC with 1 workspace", verdict, detail)
 	}
 
 	verdict, detail = vscodeVerdict(vscodeAck{Generation: 4}, true, 4, true, stale, "/s/vscode-ack.json")
@@ -190,7 +201,7 @@ func TestVscodeVerdictJudgesWindowChrome(t *testing.T) {
 		"/w/old/old.code-workspace": {Generation: 3, Error: "Peacock repaints"},
 	}}
 	verdict, detail = vscodeVerdict(staleError, true, 4, true, stale, "/s/vscode-ack.json")
-	wantDetail := "window chrome in 1 local workspace; window chrome old.code-workspace failed at generation 3 " +
+	wantDetail := "window chrome in 1 workspace; window chrome old.code-workspace failed at generation 3 " +
 		"(Peacock repaints); retried when it next opens"
 	if verdict != VerdictInSync || detail != wantDetail {
 		t.Errorf("an old-generation error = %s %q, want IN-SYNC %q", verdict, detail, wantDetail)
@@ -225,7 +236,7 @@ func TestVscodeChromeOfAGoneWorkspaceNoLongerCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.write(".local/state/pfm/theme/vscode-ack.json", string(raw))
-	wantVerdict(t, h.status(), "vscode", VerdictInSync, "window chrome in 1 local workspace")
+	wantVerdict(t, h.status(), "vscode", VerdictInSync, "window chrome in 1 workspace")
 
 	h.write("work/moved.code-workspace", "{}\n")
 	wantVerdict(t, h.status(), "vscode", VerdictError, "window chrome moved.code-workspace: Peacock repaints")
@@ -254,9 +265,12 @@ func TestOffNamesTheWorkspacesStillCarryingChrome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, off, "vscode", VerdictPending, "window chrome stays in "+painted+" until")
-	if strings.Contains(row(t, off, "vscode").Detail, "gone.code-workspace") {
-		t.Errorf("off named a workspace file that no longer exists: %q", row(t, off, "vscode").Detail)
+	wantVerdict(t, off, "vscode", VerdictPending, painted)
+	if !strings.Contains(row(t, off, "vscode").Detail, "gone.code-workspace") {
+		t.Errorf(
+			"off hid an ownership record merely because its workspace disappeared: %q",
+			row(t, off, "vscode").Detail,
+		)
 	}
 
 	h.on()
@@ -402,5 +416,92 @@ func TestVscodeRunningIsTheMainBinaryOnly(t *testing.T) {
 		if got := vscodeRunning(ps, vscodeAppMarkers); got != want {
 			t.Errorf("vscodeRunning(%q) = %v, want %v", ps, got, want)
 		}
+	}
+}
+
+// URI-addressed workspaces are not paths on this host and must remain visible, also during off.
+func TestVscodeRemoteChromeSurvivesLocalPruning(t *testing.T) {
+	const target = "vscode-remote://ssh-remote+fixture/project.code-workspace"
+	ack := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{target: {Generation: 4}}}
+	dropGoneWorkspaces(&ack)
+	if len(ack.Chrome) != 1 {
+		t.Fatalf("remote entry disappeared: %+v", ack)
+	}
+	h := newHarness(t)
+	h.on()
+	h.write(".local/state/pfm/theme/vscode-chrome.json", `{"`+target+`":{"keys":{"window.activeBorder":{}}}}`)
+	off, err := Off(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, off, "vscode", VerdictPending, target)
+}
+
+func TestShippedProfileFramesUseOnlyTheirDefinedColors(t *testing.T) {
+	entries, err := os.ReadDir(shippedThemesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		count++
+		t.Run(entry.Name(), func(t *testing.T) {
+			content, err := ReadProfileDir(filepath.Join(shippedThemesDir, entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile, err := ParseProfile(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokens, side := customPalette(profile.Base, profile.Overrides)
+			variant, err := deriveVariant(CustomValue(entry.Name()), tokens)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pins, err := canonicalPins(profile.Surfaces)
+			if err != nil {
+				t.Fatal(err)
+			}
+			contract := (Applied{Primary: variant, Side: side, Pins: pins}).vscodeContract(side, 1)
+			rendered, err := RenderVSCodeTheme(entry.Name(), content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document vscodeThemeDocument
+			if err := json.Unmarshal(rendered.Content, &document); err != nil {
+				t.Fatal(err)
+			}
+			for key, hex := range contract.Chrome {
+				if !strings.Contains(strings.ToLower(string(content)), strings.ToLower(`"`+hex+`"`)) {
+					t.Errorf("%s=%s is not a colour this profile defines", key, hex)
+				}
+				if document.Colors[key] != hex {
+					t.Errorf("%s: native theme=%s, frame contract=%s", key, document.Colors[key], hex)
+				}
+			}
+			if len(contract.Chrome) != 36 {
+				t.Fatalf("frame has %d keys, want 36", len(contract.Chrome))
+			}
+			raw, err := json.Marshal(contract.Chrome)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("FRAME %s %s", entry.Name(), raw)
+		})
+	}
+	if count == 0 {
+		t.Fatal("no shipped profiles were checked")
+	}
+}
+
+func TestVscodeEmptyWindowReportsGlobalFrameNotAWorkspace(t *testing.T) {
+	ack := vscodeAck{Generation: 4, Chrome: map[string]vscodeChromeAck{"global": {Generation: 4}}}
+	verdict, detail := vscodeVerdict(ack, true, 4, true, 0, "")
+	if verdict != VerdictInSync || detail != "global frame" {
+		t.Fatalf("got %s %q", verdict, detail)
 	}
 }

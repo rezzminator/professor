@@ -211,9 +211,18 @@ func TestRenameHerdrLabelsTheSeatsSoleTab(t *testing.T) {
 				t.Fatalf("tab renames = %v, want %v", got, want)
 			}
 			stored, found, readErr := db.Seat(context.Background(), seat.SeatID)
-			if readErr != nil || !found || stored.Name != "INTEGRATION" {
-				t.Fatalf("seat=%+v found=%v err=%v, want the name kept once pane and agent carry it",
-					stored, found, readErr)
+			wantName := "INTEGRATION"
+			if test.wantErr != "" {
+				wantName = "OLD"
+			}
+			if readErr != nil || !found || stored.Name != wantName {
+				t.Fatalf(
+					"seat=%+v found=%v err=%v, want %q so a failed tab rename remains retryable",
+					stored,
+					found,
+					readErr,
+					wantName,
+				)
 			}
 		})
 	}

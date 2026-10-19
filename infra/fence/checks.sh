@@ -853,7 +853,8 @@ internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
 internal/harvestmcp TestServiceChaos
 internal/installer TestClaudeMCPLockProtectsSlowBackup
 internal/installer TestMCPWritePreservesAnEditDuringBackup
-internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence'
+internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence
+internal/store TestClearNameReservationsAreUniqueAcrossCaches'
 
 # checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo
 # (the pfm-dev image carries gcc; CGO_ENABLED=1 for this command alone, every other build stays static),

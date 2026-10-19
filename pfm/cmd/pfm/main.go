@@ -72,7 +72,7 @@ var topLevelSubcommands = []string{
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
-	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
+	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill", "clear-name",
 	"codex-launch", "codex-transport", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
 	"exit-close", "exit-intercept", "git-guard", "herdr-indicators", "herdr-shell", "herdr-state",
 	"kill-exit", "launch", "seat-host", "restart-run",
@@ -423,11 +423,8 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	stdout, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout)
 	defer func() { finishHook(exitCode) }()
-	if len(args) != 0 && args[0] == "clear-kill" {
-		return hookentry.ClearKill(args[1:], os.Stdin, stderr, runtime)
-	}
-	if len(args) != 0 && args[0] == "resume-unkill" {
-		return hookentry.ResumeUnkill(args[1:], os.Stdin, stderr, runtime)
+	if len(args) != 0 && (args[0] == "clear-kill" || args[0] == "clear-name" || args[0] == "resume-unkill") {
+		return hookentry.ClearHook(args, os.Stdin, stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "agent-open" {
 		return hookentry.AgentOpen(args[1:], stderr, runtime)
@@ -546,7 +543,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|clear-name|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

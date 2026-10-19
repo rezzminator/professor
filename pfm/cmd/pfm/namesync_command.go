@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -118,7 +119,8 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if unverified != 0 {
 		fmt.Fprintf(stdout, "windows unverified: %d\n", unverified)
 	}
-	if titlesUnverified != 0 || unverified != 0 {
+	nativeOK := pfmchat.ConvergeHerdrNames(ctx, database, runtime.Paths, stderr)
+	if !nativeOK || titlesUnverified != 0 || unverified != 0 {
 		return 1
 	}
 	return 0

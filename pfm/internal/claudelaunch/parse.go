@@ -249,6 +249,12 @@ func parsedHookName(event, command string) string {
 			return "herdr-" + name
 		}
 	}
+	if name == "clear-name" {
+		if event == HookEventUserPromptSubmit {
+			return "clear-name-prompt"
+		}
+		return "clear-name-start"
+	}
 	if name == "usage-hook" {
 		return "usage"
 	}

@@ -135,12 +135,13 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if err := reporter.reserveNativeOwnership(seat, seq); err != nil {
 		return true, err
 	}
-	return true, reporter.send(
-		ctx,
-		herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane},
-		action,
-		seq,
-	)
+	if err := reporter.send(ctx, herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane}, action, seq); err != nil {
+		return true, err
+	}
+	if reporter.options.event != herdr.EventEnd {
+		return true, reporter.syncNativeEngineName(ctx, seat, payload)
+	}
+	return true, nil
 }
 
 // nativeReporterSeat treats inherited pane context as a hint only. The saved

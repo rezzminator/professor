@@ -671,6 +671,20 @@ d="$T/at/fail-code"; mkdir -p "$d"; pkg_events "$QUICK_PKG" 0 11 > "$d/unit.json
 attr_run "$d" "$attr_yml"
 if [ "$rc" -eq 1 ] && [ -n "$(first_line "$d/err" "^TIMING FAIL $QUICK_PKG .*$CODE_TAIL$")" ] && ! grep -q 'TIMING WARN\|GATE-WARN' "$d/out"; then ok attribution-fail-code; else bad "attribution-fail-code: rc=$rc" "$(cat "$d/out")" "$(cat "$d/err")"; fi
 
+# I/O pressure can belong to another package, another run, or the regressed code itself.
+# Keep fail-code's 11 s stream and budget: coincident I/O must never hide its failure.
+for pressure in cg vm; do
+  d="$T/at/fail-io-$pressure"; mkdir -p "$d"; pkg_events "$QUICK_PKG" 0 11 > "$d/unit.json"
+  res_code "$d/base.tsv"
+  awk -F'\t' -v OFS='\t' -v column="$([ "$pressure" = cg ] && echo 12 || echo 17)" \
+    'NR > 1 { $column = (NR - 2) * 0.18 } { print }' "$d/base.tsv" > "$d/resources.tsv"
+  attr_run "$d" "$attr_yml"
+  if [ "$rc" -eq 1 ] && [ -n "$(first_line "$d/err" "^TIMING FAIL $QUICK_PKG .* · attribution not measured \\(.*$pressure-io-psi \\+18\\.0% .*I/O pressure cannot distinguish external contention from code I/O\\)$")" ] \
+      && ! grep -q 'TIMING WARN\|GATE-WARN\|downgraded' "$d/out" "$d/err"; then
+    ok "attribution-fail-io-$pressure-cannot-hide-code"
+  else bad "attribution-fail-io-$pressure-cannot-hide-code: rc=$rc" "$(cat "$d/out")" "$(cat "$d/err")"; fi
+done
+
 # Unmeasured: no resources.tsv beside the stream. The FAIL stays a FAIL; a stream on stdin has none either.
 d="$T/at/unmeasured"; mkdir -p "$d"; pkg_events "$QUICK_PKG" 0 11 > "$d/unit.json"
 attr_run "$d" "$attr_yml"

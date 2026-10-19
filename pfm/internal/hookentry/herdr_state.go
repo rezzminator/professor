@@ -408,7 +408,7 @@ func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) (r
 
 // runTmux reports through the chat's tmux server, whose socket
 // options.socket names (tmux.Exec always names its socket).
-func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload) error {
+func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload) (returnErr error) {
 	// Only a pfm chat server carries the theme; an engine in the user's own
 	// tmux leaves that server unmarked.
 	themeOn := reporter.themeOn()
@@ -440,6 +440,9 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 		return err
 	}
 	defer unlock()
+	defer func() {
+		returnErr = errors.Join(returnErr, reporter.syncTmuxEngineName(ctx, payload))
+	}()
 	state, err := reporter.readState(ctx, session)
 	reporter.themeUnlessHeld(ctx, themeOn, payload, state)
 	if err != nil {

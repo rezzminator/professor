@@ -1,33 +1,8 @@
-// `pfm theme` inside VS Code. pfm (pfm/internal/themesync) renders Claude Code's theme into every surface
-// the user looks at; VS Code's are the integrated terminal and a local window's title, activity and
-// status bars. pfm writes the contract {stateDir}/current.json — {enabled, generation, palette,
-// title, mode, appearance, colors, chrome} — and this module merges `colors` (the terminal keys)
-// into the user's GLOBAL workbench.colorCustomizations, touching no other key, then acknowledges
-// in {stateDir}/vscode-ack.json — {generation, appliedAt, keys, error, chrome} — which `pfm theme
-// status` reads back, so a window that did not follow shows as out of sync instead of looking
-// themed. With no contract file nothing here writes anything.
-//
-// Every key it sets is recorded, with the value it replaced and the generation that set it, in
-// {stateDir}/vscode-applied.json; a key the next generation drops, or every key on
-// `pfm theme off` (enabled:false), goes back to that prior value — unless the user changed it
-// since, in which case the user's value stays.
-// Each window runs its own copy against one settings file, so the read-merge-write runs under a
-// lock directory in the state dir: a second window waits, then finds the work already done.
-//
-// `chrome` (title, activity and status bar keys) is per window and never Global: a LOCAL window
-// on a saved .code-workspace merges it into that workspace's own workbench.colorCustomizations,
-// where it beats the user's Global values and Peacock's (the workspace layer is the one Peacock
-// writes too). A remote window, a folder-only window (its Workspace layer is a repo's
-// .vscode/settings.json) and an untitled workspace get none. Its record is
-// {stateDir}/vscode-chrome.json — {workspace file: {generation, keys: {key: {value, prior}}}} —
-// kept per workspace, so a window opening a workspace not yet painted at the generation paints
-// it even when the Global colours are done; its ack is the chrome map of vscode-ack.json,
-// {workspace file: {generation, keys, error}}, each window replacing its own entry and keeping
-// the others'.
-// Peacock rewrites a workspace's colorCustomizations at every window start except the keys in
-// its peacock.excludedSettings, so chrome is written only once that list holds every key to
-// paint; until then the workspace's ack entry says which setting to edit, and the edit re-runs
-// the sync.
+// pfm writes current.json; this UI-host extension reads the LOCAL contract in every window,
+// including Remote-SSH. Terminal colours and the frame go into Global settings; Workspace
+// chrome overrides old workspace/Peacock colours, including folder-only and remote windows.
+// Owned keys (also inside existing [Theme] blocks) retain their prior values for theme off.
+// Windows serialize records and acknowledgements under vscode-apply.lock.
 const vscode = require('vscode');
 const fs = require('fs');
 const os = require('os');
@@ -56,8 +31,8 @@ function stateDir() {
 // chrome's (`chrome`); a contract key outside its map's keys, or a value that is not a hex colour,
 // is never written.
 const TERMINAL_KEY = /^terminal(Cursor)?\./;
-const CHROME_KEY = /^(titleBar|activityBar|activityBarTop|activityBarBadge|commandCenter|sash|statusBar|statusBarItem)\./;
-const COLOR_VALUE = /^#[0-9a-fA-F]{3,8}$/;
+const CHROME_KEY = /^(window|titleBar|activityBar|activityBarTop|activityBarBadge|commandCenter|sash|statusBar|statusBarItem)\./;
+const COLOR_VALUE = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 function hexColors(colors, keyPattern) {
   const out = {};
@@ -68,13 +43,12 @@ function hexColors(colors, keyPattern) {
   return out;
 }
 
-// chromeTarget is the saved workspace file this window's chrome goes into, or null: a remote window
-// has none, a folder-only window's Workspace layer is a repo's own .vscode/settings.json, and an
-// untitled workspace has no file to write.
+// Keep legacy local workspace paths; every other target uses the full URI, authority included.
+// The configuration API writes the Workspace layer even for a remote filesystem.
 function chromeTarget() {
-  if (vscode.env.remoteName !== undefined) return null;
   const file = vscode.workspace.workspaceFile;
-  return file && file.scheme === 'file' ? file.fsPath : null;
+  if (file) return file.scheme === 'file' ? file.fsPath : file.toString();
+  return vscode.workspace.workspaceFolders?.[0]?.uri.toString() || null;
 }
 
 // peacockUnlisted names the wanted chrome keys Peacock would overwrite or delete at the next window
@@ -104,7 +78,7 @@ function planColors(global, record, want) {
   const next = { ...global };
   const kept = {};
   for (const [key, entry] of Object.entries(record)) {
-    if (key in want || next[key] !== entry.value) continue;
+    if (key.startsWith('[') || key in want || next[key] !== entry.value) continue;
     if (entry.prior === null || entry.prior === undefined) delete next[key];
     else next[key] = entry.prior;
   }
@@ -114,12 +88,24 @@ function planColors(global, record, want) {
     next[key] = value;
     kept[key] = { value, prior };
   }
+  // A theme-scoped colour beats the unscoped setting even in a lower configuration layer.
+  // Replace only managed keys that already exist in each block, with per-key restore records.
+  for (const key of new Set([...Object.keys(global), ...Object.keys(record)])) {
+    if (!key.startsWith('[')) continue;
+    const block = global[key];
+    if (block !== undefined && (!block || typeof block !== 'object' || Array.isArray(block))) continue;
+    const scopedWant = Object.fromEntries(Object.entries(want).filter(([color]) => color in (block || {})));
+    const scoped = planColors(block || {}, record[key]?.keys || {}, scopedWant);
+    if (Object.keys(scoped.next).length) next[key] = scoped.next;
+    else delete next[key];
+    if (Object.keys(scoped.record).length) kept[key] = { keys: scoped.record };
+  }
   return { next, record: kept };
 }
 
 function sameColors(a, b) {
   const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every((key) => b[key] === a[key]);
+  return keys.length === Object.keys(b).length && keys.every((key) => JSON.stringify(b[key]) === JSON.stringify(a[key]));
 }
 
 async function withLock(dir, work) {
@@ -168,7 +154,7 @@ function writeAck(dir, ack, target, entry) {
   writeJSONAtomic(path.join(dir, ACK), { ...ack, appliedAt: new Date().toISOString(), chrome });
 }
 
-// applyGlobal brings the user's Global colorCustomizations to the contract's terminal colours, under
+// applyGlobal brings Global terminal and frame colours to the contract, under
 // the lock.
 async function applyGlobal(dir, contract, generation, want) {
   const recordPath = path.join(dir, RECORD);
@@ -180,7 +166,8 @@ async function applyGlobal(dir, contract, generation, want) {
   }
   // A generation applies once: another window, or this one restarting, finds it done, and a
   // colour the user set by hand since stays theirs until the next `pfm theme on` or sync.
-  if (contract.enabled && generation !== null && record.generation === generation) return;
+  if (contract.enabled && generation !== null && record.generation === generation &&
+      Object.keys(want).every((key) => record.keys[key]?.value === want[key])) return;
   const workbench = vscode.workspace.getConfiguration('workbench');
   const global = workbench.inspect('colorCustomizations')?.globalValue || {};
   const plan = planColors(global, record.keys, want);
@@ -214,7 +201,8 @@ async function applyChrome(dir, target, contract, generation, wantChrome) {
       if (err.code !== 'ENOENT') throw new Error(`read ${recordPath}: ${err.message}`);
     }
     const record = { generation: null, keys: {}, ...records[target] };
-    if (contract.enabled && generation !== null && record.generation === generation) return entry;
+    if (contract.enabled && generation !== null && record.generation === generation &&
+        Object.keys(wantChrome).every((key) => record.keys[key]?.value === wantChrome[key])) return entry;
     const workbench = vscode.workspace.getConfiguration('workbench');
     const workspace = workbench.inspect('colorCustomizations')?.workspaceValue || {};
     const plan = planColors(workspace, record.keys, wantChrome);
@@ -263,23 +251,28 @@ async function applyContract(dir) {
   const generation = Number.isInteger(contract.generation) ? contract.generation : null;
   const ack = { generation, appliedAt: '', keys: Object.keys(want).sort(), error: '' };
   const target = chromeTarget();
+  const chromeEntry = { generation, keys: Object.keys(wantChrome).sort(), error: '' };
   let entry = null;
   try {
     await withLock(dir, async () => {
       try {
-        await applyGlobal(dir, contract, generation, want);
+        await applyGlobal(dir, contract, generation, { ...want, ...wantChrome });
       } catch (err) {
         ack.error = `apply generation ${generation} to workbench.colorCustomizations: ${err?.message ?? err}`;
       }
       if (target) entry = await applyChrome(dir, target, contract, generation, wantChrome);
-      writeAck(dir, ack, target, entry);
+      if (!target) {
+        const unlisted = peacockUnlisted(wantChrome);
+        if (unlisted.length) chromeEntry.error = `Peacock repaints ${unlisted.length} frame keys: list them in peacock.excludedSettings`;
+      }
+      writeAck(dir, ack, target || 'global', target ? entry : chromeEntry);
     });
   } catch (err) {
     // The lock could not be taken (or the ack could not be written under it): still ack, with the
     // other windows' entries as the ack on disk last held them.
     ack.error = `apply generation ${generation} to workbench.colorCustomizations: ${err?.message ?? err}`;
     if (target) entry = { generation, keys: Object.keys(wantChrome).sort(), error: ack.error };
-    writeAck(dir, ack, target, entry);
+    writeAck(dir, ack, target || 'global', target ? entry : { ...chromeEntry, error: ack.error });
   }
   return contract;
 }

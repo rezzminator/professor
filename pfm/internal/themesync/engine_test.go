@@ -639,6 +639,35 @@ func TestAnOldShapedEnabledStateIsAppliedByTheNextSync(t *testing.T) {
 	}
 }
 
+func TestStatusOverAnOldShapedEnabledStateShowsTheResolvedSource(t *testing.T) {
+	h := newHarness(t)
+	h.write(
+		".local/state/pfm/theme/state.json",
+		`{"enabled":true,"palette":"tokyo-night","mode":"auto","generation":4}`,
+	)
+	status := h.status()
+	if !status.Enabled {
+		t.Fatalf("ReadBack over an old state = %+v, want it enabled", status)
+	}
+	wantVerdict(t, status, "claude", VerdictSource, "hibiscus-night")
+	if got := row(t, status, "claude"); got.Path != h.path(settingsRel) {
+		t.Errorf("claude row path = %q, want %q", got.Path, h.path(settingsRel))
+	}
+	if status.Source == nil || status.Source.Path != h.path(settingsRel) {
+		t.Errorf("report source = %+v, want the resolved %s", status.Source, h.path(settingsRel))
+	}
+	if h.state().Generation != 4 {
+		t.Error("status persisted a generation bump")
+	}
+
+	h.write(settingsRel, `{"theme":`)
+	failed := h.status()
+	wantVerdict(t, failed, "claude", VerdictError, h.path(settingsRel))
+	if failed.Source != nil {
+		t.Errorf("report source over an unresolvable old state = %+v, want none", failed.Source)
+	}
+}
+
 // hibiscusChips is the hibiscus theme's dark host-chip render, the values the follower
 // paints over the user's own @host_accent and @p_* options.
 var hibiscusChips = map[string]string{

@@ -322,6 +322,10 @@ h_tp_restore() {
   [ -z "$H_TP_FOCUS" ] || herdr --session lane-H tab focus "$H_TP_FOCUS" >>"$LANE_LOG" 2>&1 || rc=1
   return $rc
 }
+h_tp_tab_label() {
+  h_request tab.get "$(jq -nc --arg t "$H_TP_FLEET" '{tab_id:$t}')" >"$H_FIXTURE/tp-$1-tab.json" &&
+    jq -e --arg state "$1" '.result.tab.label | if $state == "done" then startswith("[C] ") else startswith("[I] ") end' "$H_FIXTURE/tp-$1-tab.json" >/dev/null
+}
 h_tab_priority() {
   beat H.tab-priority
   if ! requires H.seat-host; then return; fi
@@ -363,8 +367,40 @@ h_tab_priority() {
   jq '.chat.herdrTabStatus = "off" | .chat.herdrTabPriority = true' "$H_FIXTURE/tab-priority.config.orig" >"$PFM_CONFIG" || { h_tp_restore; fail "tab priority on config"; return; }
   timeout -s TERM 4 pfm internal herdr-indicators >"$H_FIXTURE/tp-on.out" 2>"$H_FIXTURE/tp-on.err"; on_rc=$?
   cat "$H_FIXTURE/tp-on.out" "$H_FIXTURE/tp-on.err" | tee -a "$LANE_LOG"
-  local on_order on_focus
+  local on_order on_focus seen_order seen_focus seen_rc
   on_order="$(h_tab_ids "$H_TP_WS")"; on_focus="$(h_tab_focused "$H_TP_WS")"
+  # A new painter must recover the persisted home, observe focus on any pane
+  # of the promoted tab, and return it without changing that pane's focus.
+  h_request pane.focus "$params" >>"$LANE_LOG" || { h_tp_restore; fail "tab priority seen focus"; return; }
+  timeout -s TERM 3 pfm internal herdr-indicators >"$H_FIXTURE/tp-seen.out" 2>"$H_FIXTURE/tp-seen.err"; seen_rc=$?
+  cat "$H_FIXTURE/tp-seen.out" "$H_FIXTURE/tp-seen.err" | tee -a "$LANE_LOG"
+  seen_order="$(h_tab_ids "$H_TP_WS")"; seen_focus="$(h_tab_focused "$H_TP_WS")"
+  h_request pane.get "$params" >"$H_FIXTURE/tp-pane-seen.json" || { h_tp_restore; fail "tab priority seen pane read"; return; }
+  printf 'H tab-priority seen_rc=%s seen=%s focus=%s pane=%s\n' "$seen_rc" "$seen_order" "$seen_focus" "$H_PANE" | tee -a "$LANE_LOG"
+  # Stop reports idle; the real server exposes that completion as done until
+  # focus. The exact same focus must clear its glyph and return its tab home.
+  local done_order done_focus done_rc idle_rc idle_order painter_pid
+  jq '.chat.herdrTabStatus = "text" | .chat.herdrTabPriority = true' "$H_FIXTURE/tab-priority.config.orig" >"$PFM_CONFIG" || { h_tp_restore; fail "tab priority done config"; return; }
+  herdr --session lane-H tab focus "$H_TP_SENTINEL" >>"$LANE_LOG" 2>&1 &&
+    h_tp_report working >>"$LANE_LOG" && h_tp_report idle >>"$LANE_LOG" || { h_tp_restore; fail "tab priority completion report"; return; }
+  h_request agent.get "$(jq -nc --arg p "$H_PANE" '{target:$p}')" >"$H_FIXTURE/tp-done-agent.json" || { h_tp_restore; fail "tab priority done agent read"; return; }
+  # Capture glyphs while the painter runs: TERM deliberately restores labels.
+  timeout -s TERM 4 pfm internal herdr-indicators >"$H_FIXTURE/tp-done.out" 2>"$H_FIXTURE/tp-done.err" & painter_pid=$!
+  if ! wait_for 3 'h_tp_tab_label done'; then
+    wait "$painter_pid"; h_tp_restore; fail "tab priority unseen done glyph absent: $LANE_WAIT_WHY"; return
+  fi
+  done_order="$(h_tab_ids "$H_TP_WS")"; done_focus="$(h_tab_focused "$H_TP_WS")"
+  wait "$painter_pid"; done_rc=$?
+  cat "$H_FIXTURE/tp-done.out" "$H_FIXTURE/tp-done.err" | tee -a "$LANE_LOG"
+  h_request pane.focus "$params" >>"$LANE_LOG" || { h_tp_restore; fail "tab priority completed focus"; return; }
+  timeout -s TERM 4 pfm internal herdr-indicators >"$H_FIXTURE/tp-idle.out" 2>"$H_FIXTURE/tp-idle.err" & painter_pid=$!
+  if ! wait_for 3 'h_tp_tab_label idle'; then
+    wait "$painter_pid"; h_tp_restore; fail "tab priority seen idle glyph absent: $LANE_WAIT_WHY"; return
+  fi
+  idle_order="$(h_tab_ids "$H_TP_WS")"
+  wait "$painter_pid"; idle_rc=$?
+  cat "$H_FIXTURE/tp-idle.out" "$H_FIXTURE/tp-idle.err" | tee -a "$LANE_LOG"
+  printf 'H tab-priority done_rc=%s done=%s focus=%s idle_rc=%s idle=%s\n' "$done_rc" "$done_order" "$done_focus" "$idle_rc" "$idle_order" | tee -a "$LANE_LOG"
   h_request pane.get "$params" >"$H_FIXTURE/tp-pane-after.json" || { h_tp_restore; fail "tab priority fleet pane after read"; return; }
   h_request tab.list "$(jq -nc --arg w "$H_TP_WS" '{workspace_id:$w}')" >"$H_FIXTURE/tp-tabs-after.json" || { h_tp_restore; fail "tab priority tabs after read"; return; }
   printf 'H tab-priority off_rc=%s off=%s focus=%s on_rc=%s on=%s focus=%s\n' "$off_rc" "$off_order" "$off_focus" "$on_rc" "$on_order" "$on_focus" | tee -a "$LANE_LOG"
@@ -372,12 +408,20 @@ h_tab_priority() {
   if [ "$off_rc" = 124 ] && [ "$on_rc" = 124 ] && [ "$rc" = 0 ] &&
     [ "$off_order" = "$order" ] && [ "$off_focus" = "$H_TP_SENTINEL" ] &&
     [ "${on_order%% *}" = "$H_TP_FLEET" ] && [ "$on_focus" = "$H_TP_SENTINEL" ] &&
+    [ "$seen_rc" = 124 ] && [ "$seen_order" = "$order" ] && [ "$seen_focus" = "$H_TP_FLEET" ] &&
+    [ "$done_rc" = 124 ] && [ "$idle_rc" = 124 ] && [ "${done_order%% *}" = "$H_TP_FLEET" ] &&
+    [ "$done_focus" = "$H_TP_SENTINEL" ] && [ "$idle_order" = "$order" ] &&
+    jq -e '.result.agent.agent_status == "done"' "$H_FIXTURE/tp-done-agent.json" >/dev/null &&
+    jq -e '.result.tab.label | startswith("[C] ")' "$H_FIXTURE/tp-done-tab.json" >/dev/null &&
+    jq -e '.result.tab.focused and (.result.tab.label | startswith("[I] "))' "$H_FIXTURE/tp-idle-tab.json" >/dev/null &&
+    jq -e '.result.pane.focused' "$H_FIXTURE/tp-pane-after.json" >/dev/null &&
+    jq -e --arg p "$H_PANE" '.result.pane.pane_id == $p and .result.pane.focused' "$H_FIXTURE/tp-pane-seen.json" >/dev/null &&
     [ "$(tr ' ' '\n' <<<"$on_order" | sort)" = "$(tr ' ' '\n' <<<"$order" | sort)" ] &&
     jq -e -s --arg t "$H_TP_FLEET" '.[0].result.pane.tab_id == $t and .[1].result.pane.tab_id == $t and .[0].result.pane.terminal_id == .[1].result.pane.terminal_id' "$H_FIXTURE/tp-pane-before.json" "$H_FIXTURE/tp-pane-after.json" >/dev/null &&
     jq -e --arg t "$H_TP_FLEET" '.result.tabs[] | select(.tab_id == $t) | .pane_count >= 1' "$H_FIXTURE/tp-tabs-after.json" >/dev/null &&
-    ! grep -q 'herdr tab priority:' "$H_FIXTURE/tp-off.err" "$H_FIXTURE/tp-on.err"; then
-    pass "chat.herdrTabPriority absent: zero tab movement; true: blocked fleet tab $H_TP_FLEET moved whole from last to first, user focus stayed on sentinel, config/tab order/focus restored; fixture agent reset to idle"
-  else fail "tab priority assertion off_rc=$off_rc on_rc=$on_rc restore_rc=$rc order=$order off=$off_order on=$on_order focus=$off_focus/$on_focus"; fi
+    ! grep -q 'herdr tab priority:' "$H_FIXTURE/tp-off.err" "$H_FIXTURE/tp-on.err" "$H_FIXTURE/tp-seen.err" "$H_FIXTURE/tp-done.err" "$H_FIXTURE/tp-idle.err"; then
+    pass "chat.herdrTabPriority absent: zero tab movement; true: blocked fleet tab $H_TP_FLEET moved whole from last to first with sentinel focus unchanged; first pane focus returned it home across painter restart; Stop idle became unseen done, focus returned it and cleared done to idle, tab/pane focus unchanged; config/order/focus restored and agent reset idle"
+  else fail "tab priority assertion off_rc=$off_rc on_rc=$on_rc seen_rc=$seen_rc restore_rc=$rc order=$order off=$off_order on=$on_order seen=$seen_order focus=$off_focus/$on_focus/$seen_focus"; fi
 }
 h_single=
 case "${LANE_H_SCOPE:-}" in

@@ -181,7 +181,7 @@ Runs after the state-building lanes and before destructive O2. Its prelude creat
 - `H.name` · durable name and actual Herdr pane label agree · spends cc:$SEAT
 - `H.reload` · BLOCKED: pinned pane.send_keys rejects product tmux key spelling C-s · spends cc:$SEAT
 - `H.open-restored` · automatic unattended real-server resume rebinds exact carried SID live · spends cc:$SEAT
-- `H.tab-priority` · `pfm internal herdr-indicators` over a blocked fleet pane in a far-right tab, user focused on a sentinel tab: `chat.herdrTabPriority` absent leaves tab order and focus untouched; `true` moves the whole tab to index 0 with focus unchanged, config, tab order and focus restored and the fixture agent reset to idle · spends cc:$SEAT
+- `H.tab-priority` · `pfm internal herdr-indicators` over a blocked fleet pane in a far-right tab, user focused on a sentinel tab: `chat.herdrTabPriority` absent leaves tab order and focus untouched; `true` moves the whole tab to index 0 with focus unchanged; first pane focus returns it beside its recorded neighbour across a painter restart, preserving tab and pane focus; Stop→idle is exposed as unseen `done`, and first focus both returns its tab and clears its done marker to idle; config, tab order and focus restored and the fixture agent reset to idle · spends cc:$SEAT
 
 ## Coverage
 

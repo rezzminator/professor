@@ -46,7 +46,7 @@ Tests: `themesync/*_test.go` (`profile_dir_test.go` and `vscode_theme_derive_tes
    - Target and publish route: the build written as the new directory `templates/themes/{name}/`, its full file set, in the main checkout. `{name}` is bare kebab-case, taken by no directory in `templates/themes/` and no file in `~/.claude/themes/`.
    - Build directory: `build/` beside `brief.md`.
    - Law, read whole: § Law above.
-   - Scope, every surface: `theme.json`, `claude.json`, `terminal.json`, a full VS Code theme (`vscode/workbench/*.json`, `vscode/syntax/*.json` one file per family, `vscode/semantic.json`, `vscode/chrome.json`), and the `tmux.json` and `herdr.json` pins, `tabGlyphs` included.
+   - Scope, every surface: `theme.json`, `claude.json`, `terminal.json`, a full VS Code theme (`vscode/workbench/*.json`, `vscode/syntax/*.json` one file per family, `vscode/semantic.json`, `vscode/chrome.json`), and the `tmux.json` and `herdr.json` pins, `tabGlyphs` included, moving only per § Restyle a profile.
    - Acceptance: § The check passes on the target.
    - Out: every other file, the README's theme list and `templates/refresh-map.json` included (install finds a profile by scanning); `pfm install`, `pfm theme use`, live settings and git.
 3. The look adds § The check on the target, read from disk: a `FAIL` row goes verbatim to the same builder (`SendMessage`), and the check reruns on its return until `ok`. Against step 1's record, `git status --porcelain` shows `?? templates/themes/{name}/` as the one new path; any other change is named in the return.
@@ -56,6 +56,7 @@ Tests: `themesync/*_test.go` (`profile_dir_test.go` and `vscode_theme_derive_tes
 
 - A hue every surface shares changes in `claude.json`, and derive carries it everywhere; a difference one surface alone wants is that surface's pin. A key left derived stays absent.
 - Each change lands in its owning file: a workbench colour in its group's file, a syntax rule in its family's file at its ordinal (a mid-order insert renumbers every later ordinal), every file canonical (`jq -S --indent 2 .`) and within the line cap.
+- Tab glyphs (`herdr.json` `tabGlyphs`): motion is reserved for "come here". Only the states that need the user, `blocked` and `error`, may take several frames; `working`, `done`, `idle`, `dead` and `unknown` are each one still glyph. Colour carries the status, the shape carries the theme. `pfm theme check` enforces it.
 - Acceptance: § The check `ok` on the profile.
 
 ## Fix a render defect

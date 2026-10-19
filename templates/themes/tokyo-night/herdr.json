@@ -14,19 +14,18 @@
   "surface_dim": "#3f0535",
   "tabGlyphs": {
     "blocked": [
-      "⚡",
-      "🔋"
+      "🚨",
+      "🔴"
     ],
     "dead": "🪫",
-    "error": "👾",
-    "idle": "📡",
+    "done": "⭐",
+    "error": [
+      "👾",
+      "💥"
+    ],
+    "idle": "🌑",
     "unknown": "🤖",
-    "working": [
-      "🚀",
-      "🌌",
-      "🛸",
-      "🌌"
-    ]
+    "working": "🚀"
   },
   "text": "#ffb5e4"
 }

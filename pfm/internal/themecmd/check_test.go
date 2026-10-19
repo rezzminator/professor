@@ -267,18 +267,22 @@ func TestCheckJudgesHerdrTabGlyphs(t *testing.T) {
 func TestCheckJudgesHerdrTabGlyphFrames(t *testing.T) {
 	dir := t.TempDir()
 	still := glyphTheme(t, dir, "still", map[string]string{"idle": "🌿"})
-	frames := glyphTheme(t, dir, "frames", map[string][]string{"working": {"🌑", "🌓", "🌕"}, "blocked": {"🔴", "⭕"}})
+	frames := glyphTheme(t, dir, "frames", map[string][]string{"blocked": {"🔴", "⭕"}})
 	code, stdout, stderr := runCheck(t, checkDeps(t.TempDir()), still, frames)
 	if code != 0 || strings.Contains(stdout, "FAIL") {
 		t.Fatalf("a glyph string and a frame array must both pass: code %d\n%s%s", code, stdout, stderr)
 	}
 	empty := glyphTheme(t, dir, "empty", map[string][]string{"working": {}})
 	bad := glyphTheme(t, dir, "bad", map[string][]string{"error": {"🟥", "❌ x"}})
-	code, stdout, _ = runCheck(t, checkDeps(t.TempDir()), empty, bad)
+	working := glyphTheme(t, dir, "animated-working", map[string][]string{"working": {"🌑", "🌓", "🌕"}})
+	code, stdout, _ = runCheck(t, checkDeps(t.TempDir()), empty, bad, working)
 	if code != 1 {
-		t.Fatalf("an empty array and a bad frame must exit 1: code %d\n%s", code, stdout)
+		t.Fatalf("an empty array, a bad frame and animated working must exit 1: code %d\n%s", code, stdout)
 	}
-	for theme, want := range map[string]string{empty: `"working": no frames`, bad: `"error": frame 1: glyph`} {
+	for theme, want := range map[string]string{
+		empty: `"working": no frames`, bad: `"error": frame 1: glyph`,
+		working: `"working": tab state "working" requires exactly one frame: only blocked and error may animate`,
+	} {
 		if !strings.Contains(stdout, "FAIL theme "+theme) || !strings.Contains(stdout, want) {
 			t.Errorf("%s must FAIL naming %q:\n%s", theme, want, stdout)
 		}

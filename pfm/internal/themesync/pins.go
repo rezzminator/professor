@@ -174,7 +174,7 @@ func canonicalMap(surface string, values map[string]string, allowed map[string]p
 }
 
 // canonicalGlyphs checks the tab glyph pins in key order, each state's
-// frames herdr.ValidTabFrames, an error naming the key and the frame index.
+// frames herdr.ValidTabStateFrames, an error naming the key and the frame index.
 func canonicalGlyphs(
 	surface string,
 	values map[string]herdr.TabFrames,
@@ -188,7 +188,7 @@ func canonicalGlyphs(
 		if !allowed[key] {
 			return nil, fmt.Errorf("%s pin %q: %s renders no such key", surface, key, surface)
 		}
-		if err := herdr.ValidTabFrames(values[key]); err != nil {
+		if err := herdr.ValidTabStateFrames(key, values[key]); err != nil {
 			return nil, fmt.Errorf("%s pin %q: %w", surface, key, err)
 		}
 		out[key] = slices.Clone(values[key])

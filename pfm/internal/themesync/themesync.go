@@ -244,5 +244,9 @@ func RestorePending(stateDir string) bool {
 	if err != nil {
 		return true // the off this gates surfaces the error
 	}
-	return found && (state.Enabled || state.OffPending || state.Herdr != nil || len(state.VSCode) > 0)
+	if found && (state.Enabled || state.OffPending || state.Herdr != nil || len(state.VSCode) > 0) {
+		return true
+	}
+	pending, err := VSCodePendingRestores(stateDir)
+	return err != nil || len(pending) > 0
 }

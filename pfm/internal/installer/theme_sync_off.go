@@ -35,6 +35,28 @@ func (installer *engine) themeSyncOff(ctx context.Context) error {
 	if err := off(ctx, home); err != nil {
 		return fmt.Errorf("uninstall: pfm theme off: %w", err)
 	}
+	pending, err := themesync.VSCodePendingRestores(themesync.DefaultStateDir(home))
+	if err != nil {
+		return fmt.Errorf("uninstall: verify VS Code restoration: %w", err)
+	}
+	if len(pending) > 0 {
+		var leftovers []string
+		for _, restore := range pending {
+			leftovers = append(
+				leftovers,
+				restore.Record+" target "+restore.Target+": "+strings.Join(restore.Keys, ", "),
+			)
+		}
+		detail := strings.Join(leftovers, "; ")
+		if !installer.options.LeaveVSCodeColors {
+			return fmt.Errorf("uninstall: VS Code colours not restored: %s; open VS Code and each named workspace "+
+				"with the Professor extension enabled to consume the disabled current.json, then retry pfm uninstall; "+
+				"if VS Code is unavailable, use --leave-vscode-colors to deliberately leave these keys and retain recovery records", detail)
+		}
+		installer.say("  leave   VS Code colours deliberately retained; recovery records preserved: " + detail)
+		installer.ok("pfm theme off: other surfaces restored and the follower booted out")
+		return nil
+	}
 	installer.ok("pfm theme off: every themed surface restored and the follower booted out")
 	return nil
 }

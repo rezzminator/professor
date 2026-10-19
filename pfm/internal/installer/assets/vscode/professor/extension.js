@@ -1,7 +1,7 @@
 // Professor — the framework's assistant inside VS Code. pfm installs it (`pfm install --vscode`)
 // and links it into every VS Code extensions directory on the host. Its two surfaces: the
-// Professor terminal (below) and `pfm theme`, which paints the terminal and a local window's title,
-// activity and status bars (theme.js, started in activate), picks that theme (choose.js), and
+// Professor terminal (below) and `pfm theme`, which paints the terminal and every window's title,
+// activity and status bars and borders (theme.js, started in activate), picks that theme (choose.js), and
 // lists every pfm theme in VS Code's own Color Theme picker, kept in step with it (native.js).
 //
 // Its first surface is the Professor terminal profile: a login shell that opens the pfm chat
@@ -109,7 +109,7 @@ function activate(context) {
     vscode.commands.registerCommand('workbench.action.terminal.new', (args) =>
       openTerminal(args?.config ? args : { config: professorProfile(context), location: args?.location })),
   );
-  // Its second surface is `pfm theme`: the terminal, and a local window's title, activity and status
+  // Its second surface is `pfm theme`: the terminal, and every window's title, activity and status
   // bars, follow Claude Code's theme (theme.js); "Professor: Choose Theme" picks that theme through
   // pfm (choose.js), which refuses in a remote window; and a Professor theme accepted in VS Code's
   // Color Theme picker is that same pick, while a theme picked anywhere else switches the Color

@@ -75,7 +75,10 @@ type OutputRunner interface {
 }
 
 type Options struct {
-	Mode                  Mode
+	Mode Mode
+	// LeaveVSCodeColors permits uninstall to leave known extension-owned keys;
+	// their recovery records remain on disk. Other restore failures still stop it.
+	LeaveVSCodeColors     bool
 	ManagedSettingsDir    string
 	CleanupPeriodDays     int
 	RequireManagedCleanup bool

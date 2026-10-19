@@ -55,7 +55,9 @@ const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   env: { remoteName: scenario.remoteName || undefined },
   workspace: {
-    workspaceFile: scenario.workspaceFile ? { scheme: scenario.workspaceScheme || 'file', fsPath: scenario.workspaceFile } : undefined,
+    workspaceFile: scenario.workspaceFile ? { scheme: scenario.workspaceScheme || 'file', fsPath: scenario.workspaceFile,
+      toString: () => (scenario.workspaceScheme || 'file') + '://' + (scenario.remoteName ? 'ssh-remote+fixture' : '') + scenario.workspaceFile } : undefined,
+    workspaceFolders: scenario.folder ? [{ uri: { toString: () => scenario.folder } }] : undefined,
     onDidChangeConfiguration: (listener) => {
       configListeners.push(listener);
       return { dispose() { configListeners.splice(configListeners.indexOf(listener), 1); } };
@@ -326,6 +328,9 @@ func TestVSCodeExtensionFollowsThePfmThemeContract(t *testing.T) {
 // chromeWanted is the chrome a contract carries for the tests below: invented
 // hex values under the eight prefixes the extension accepts.
 var chromeWanted = map[string]string{
+	"statusBar.debuggingBorder":      "#2aa198",
+	"window.activeBorder":            "#2aa198",
+	"window.inactiveBorder":          "#174a56",
 	"titleBar.activeBackground":      "#0b2a33",
 	"titleBar.activeForeground":      "#e6f4f1",
 	"activityBar.background":         "#102f38",
@@ -339,7 +344,9 @@ var chromeWanted = map[string]string{
 
 // chromeJunk is what the extension drops from a contract's chrome: a key
 // outside the eight prefixes and a value that is not a hex colour.
-var chromeJunk = map[string]string{"editor.background": "#ff0000", "statusBar.border": "red; url(x)"}
+var chromeJunk = map[string]string{
+	"editor.background": "#ff0000", "statusBar.border": "red; url(x)", "window.invalidBorder": "#12345",
+}
 
 var terminalWanted = map[string]string{"terminal.background": "#111111", "terminal.foreground": "#eeeeee"}
 
@@ -374,6 +381,7 @@ type vscodeScenario struct {
 	RemoteName      string                 `json:"remoteName,omitempty"`
 	WorkspaceFile   string                 `json:"workspaceFile,omitempty"`
 	WorkspaceScheme string                 `json:"workspaceScheme,omitempty"`
+	Folder          string                 `json:"folder,omitempty"`
 	Global          map[string]any         `json:"global,omitempty"`
 	Workspace       map[string]any         `json:"workspace,omitempty"`
 	Peacock         *vscodeScenarioPeacock `json:"peacock,omitempty"`
@@ -498,6 +506,52 @@ func assertChromeEntry(t *testing.T, step vscodeScenarioStep, workspace string, 
 	}
 }
 
+// Every window, including Remote-SSH, must read the local contract and receive its frame.
+func TestVSCodeEveryWindowFollowsTheFrameContract(t *testing.T) {
+	t.Parallel()
+	for _, window := range []vscodeScenario{
+		{},
+		{RemoteName: "ssh-remote", WorkspaceFile: "/remote/project.code-workspace", WorkspaceScheme: "vscode-remote"},
+		{WorkspaceFile: "/w/Untitled-1.code-workspace", WorkspaceScheme: "untitled"},
+	} {
+		window.Global = map[string]any{"editor.background": "#000000"}
+		window.Steps = []vscodeChromeStepSpec{
+			{Name: "set", Contract: chromeContract(1, true, terminalWanted, chromeWanted)},
+		}
+		got := runVSCodeScenario(t, t.TempDir(), window)[0]
+		if want := merged(window.Global, terminalWanted, chromeWanted); !reflect.DeepEqual(got.Colors, want) {
+			t.Errorf(
+				"remote=%q scheme=%q: Global frame = %v, want %v",
+				window.RemoteName,
+				window.WorkspaceScheme,
+				got.Colors,
+				want,
+			)
+		}
+		if window.WorkspaceFile != "" && !reflect.DeepEqual(got.Workspace, merged(nil, chromeWanted)) {
+			t.Errorf(
+				"remote=%q scheme=%q: Workspace frame = %v, want contract chrome",
+				window.RemoteName,
+				window.WorkspaceScheme,
+				got.Workspace,
+			)
+		}
+	}
+	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/package.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		ExtensionKind []string `json:"extensionKind"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(manifest.ExtensionKind, []string{"ui"}) {
+		t.Errorf("extensionKind = %v, want [ui] so Remote-SSH watches the local pfm contract", manifest.ExtensionKind)
+	}
+}
+
 // TestVSCodeExtensionPaintsALocalWindowsChromeIntoItsWorkspace: a local window
 // on a saved workspace takes the contract's chrome colours into that
 // workspace's colorCustomizations over what Peacock left there, touching no
@@ -522,7 +576,7 @@ func TestVSCodeExtensionPaintsALocalWindowsChromeIntoItsWorkspace(t *testing.T) 
 			{Name: "off", Contract: chromeContract(3, false, map[string]string{}, map[string]string{})},
 		},
 	})
-	globalSet := merged(globalStart, terminalWanted)
+	globalSet := merged(globalStart, terminalWanted, chromeWanted)
 	cases := []struct {
 		step       string
 		workspace  map[string]any
@@ -532,11 +586,19 @@ func TestVSCodeExtensionPaintsALocalWindowsChromeIntoItsWorkspace(t *testing.T) 
 		keys       []string
 		record     bool
 	}{
-		{"set", merged(original, chromeWanted), globalSet, 1, 1, sortedKeys(chromeWanted), true},
-		{"same-generation", merged(original, chromeWanted), globalSet, 1, 1, sortedKeys(chromeWanted), true},
+		{"set", frameMerged(original, chromeWanted), globalSet, 1, 1, sortedKeys(chromeWanted), true},
+		{"same-generation", frameMerged(original, chromeWanted), globalSet, 1, 1, sortedKeys(chromeWanted), true},
 		// Keys the new generation drops go back to what the workspace held before: Peacock's cyan,
 		// or nothing for a key it never held.
-		{"new-generation", merged(original, subset), globalSet, 2, 2, sortedKeys(subset), true},
+		{
+			"new-generation",
+			frameMerged(original, subset),
+			merged(globalStart, terminalWanted, subset),
+			2,
+			2,
+			sortedKeys(subset),
+			true,
+		},
 		{"off", original, globalStart, 3, 3, []string{}, false},
 	}
 	for i, want := range cases {
@@ -563,7 +625,7 @@ func TestVSCodeExtensionPaintsALocalWindowsChromeIntoItsWorkspace(t *testing.T) 
 	}
 	// The record holds each key's value and what it replaced, per workspace.
 	record := steps[0].ChromeRecord[workspace]
-	if record.Generation == nil || *record.Generation != 1 || len(record.Keys) != len(chromeWanted) {
+	if record.Generation == nil || *record.Generation != 1 || len(record.Keys) != len(chromeWanted)+1 {
 		t.Fatalf("set: chrome record = %+v, want generation 1 over %d keys", record, len(chromeWanted))
 	}
 	title := record.Keys["titleBar.activeBackground"]
@@ -576,57 +638,82 @@ func TestVSCodeExtensionPaintsALocalWindowsChromeIntoItsWorkspace(t *testing.T) 
 	}
 }
 
-// TestVSCodeExtensionGivesNoChromeToARemoteFolderOnlyOrUntitledWindow: chrome is
-// a local saved workspace's alone; any other window leaves every Workspace
-// value alone, adds no ack entry, keeps the entries other windows wrote, and
-// still themes the terminal in Global.
-func TestVSCodeExtensionGivesNoChromeToARemoteFolderOnlyOrUntitledWindow(t *testing.T) {
+// Global covers empty windows; the Workspace API paints saved, folder-only, untitled and remote windows.
+func TestVSCodeExtensionPaintsEveryWorkspaceKind(t *testing.T) {
 	t.Parallel()
-	other := map[string]any{"generation": 1, "keys": []string{"statusBar.background"}, "error": ""}
-	globalStart := map[string]any{"editor.background": "#000000", "terminal.background": "#abcdef"}
-	for _, window := range []struct {
-		name     string
-		scenario vscodeScenario
+	for _, tc := range []struct {
+		name, target string
+		window       vscodeScenario
 	}{
-		{"remote", vscodeScenario{RemoteName: "ssh-remote", WorkspaceFile: "/w/mac.code-workspace"}},
-		{"folder-only", vscodeScenario{}},
-		{"untitled", vscodeScenario{WorkspaceFile: "/w/Untitled-1.code-workspace", WorkspaceScheme: "untitled"}},
+		{"empty", "global", vscodeScenario{}},
+		{"remote", "vscode-remote://ssh-remote+fixture/w/project.code-workspace", vscodeScenario{RemoteName: "ssh-remote", WorkspaceFile: "/w/project.code-workspace", WorkspaceScheme: "vscode-remote"}},
+		{"folder-only", "file:///w/project", vscodeScenario{Folder: "file:///w/project"}},
+		{"remote-folder", "vscode-remote://ssh-remote+fixture/project", vscodeScenario{RemoteName: "ssh-remote", Folder: "vscode-remote://ssh-remote+fixture/project"}},
+		{"untitled", "untitled:///w/Untitled-1.code-workspace", vscodeScenario{WorkspaceFile: "/w/Untitled-1.code-workspace", WorkspaceScheme: "untitled"}},
 	} {
-		t.Run(window.name, func(t *testing.T) {
-			t.Parallel()
-			scenario := window.scenario
-			scenario.Global = globalStart
-			scenario.Workspace = vscodePainted()
-			scenario.PrevAck = map[string]any{
-				"generation": 1, "appliedAt": "2026-01-01T00:00:00Z", "keys": []string{}, "error": "",
-				"chrome": map[string]any{"/w/other.code-workspace": other},
+		t.Run(tc.name, func(t *testing.T) {
+			tc.window.Global = map[string]any{"editor.background": "#000000"}
+			tc.window.Workspace = vscodePainted()
+			tc.window.PrevAck = map[string]any{
+				"chrome": map[string]any{
+					"/w/other.code-workspace": map[string]any{"generation": 1, "keys": []string{}, "error": ""},
+				},
 			}
-			scenario.Steps = []vscodeChromeStepSpec{
+			tc.window.Steps = []vscodeChromeStepSpec{
 				{Name: "set", Contract: chromeContract(2, true, terminalWanted, chromeWanted)},
-				{Name: "off", Contract: chromeContract(3, false, map[string]string{}, map[string]string{})},
+				{Name: "off", Contract: chromeContract(3, false, nil, nil)},
 			}
-			steps := runVSCodeScenario(t, t.TempDir(), scenario)
-			for i, wantGlobal := range []map[string]any{merged(globalStart, terminalWanted), globalStart} {
-				got := steps[i]
-				if got.WorkspaceUpdates != 0 {
-					t.Errorf("%s: %d Workspace-target updates, want none", got.Step, got.WorkspaceUpdates)
+			steps := runVSCodeScenario(t, t.TempDir(), tc.window)
+			for i, got := range steps {
+				wantGlobal, wantWorkspace := tc.window.Global, vscodePainted()
+				if i == 0 {
+					wantGlobal = merged(wantGlobal, terminalWanted, chromeWanted)
+					if tc.target != "global" {
+						wantWorkspace = frameMerged(wantWorkspace, chromeWanted)
+					}
 				}
-				if !reflect.DeepEqual(got.Workspace, vscodePainted()) {
-					t.Errorf("%s: workspace colorCustomizations = %v, want it untouched", got.Step, got.Workspace)
+				if !reflect.DeepEqual(got.Colors, wantGlobal) || !reflect.DeepEqual(got.Workspace, wantWorkspace) {
+					t.Errorf(
+						"%s: global=%v workspace=%v, want global=%v workspace=%v",
+						got.Step,
+						got.Colors,
+						got.Workspace,
+						wantGlobal,
+						wantWorkspace,
+					)
 				}
-				if !reflect.DeepEqual(got.Colors, wantGlobal) {
-					t.Errorf("%s: global = %v, want terminal keys only: %v", got.Step, got.Colors, wantGlobal)
+				if tc.target == "global" && got.WorkspaceUpdates != 0 {
+					t.Errorf("empty window wrote Workspace settings")
 				}
-				if got.ChromeRecord != nil {
-					t.Errorf("%s: chrome record written: %v", got.Step, got.ChromeRecord)
+				keys := []string{}
+				if i == 0 {
+					keys = sortedKeys(chromeWanted)
 				}
-				if got.Ack == nil || len(got.Ack.Chrome) != 1 {
-					t.Fatalf("%s: ack chrome = %+v, want only the entry a previous window wrote", got.Step, got.Ack)
-				}
-				assertChromeEntry(t, got, "/w/other.code-workspace", 1, []string{"statusBar.background"})
+				assertChromeEntry(t, got, tc.target, 2+i, keys)
+				assertChromeEntry(t, got, "/w/other.code-workspace", 1, []string{})
 			}
 		})
 	}
+}
+
+// Existing theme-scoped overrides beat unscoped values: expected managed keys follow there too.
+func frameMerged(base map[string]any, over map[string]string) map[string]any {
+	out := merged(base, over)
+	for key, value := range base {
+		if !strings.HasPrefix(key, "[") {
+			continue
+		}
+		if block, ok := value.(map[string]any); ok {
+			cloned := merged(block)
+			for color, hex := range over {
+				if _, exists := block[color]; exists {
+					cloned[color] = hex
+				}
+			}
+			out[key] = cloned
+		}
+	}
+	return out
 }
 
 // TestVSCodeExtensionWithholdsChromePeacockWouldRepaint: Peacock rewrites a
@@ -669,10 +756,10 @@ func TestVSCodeExtensionWithholdsChromePeacockWouldRepaint(t *testing.T) {
 	if entry := chromeEntry(t, withheld, workspace); entry.Error != wantError {
 		t.Errorf("withheld: ack chrome error = %q, want %q", entry.Error, wantError)
 	}
-	if want := merged(globalStart, terminalWanted); !reflect.DeepEqual(withheld.Colors, want) {
+	if want := merged(globalStart, terminalWanted, chromeWanted); !reflect.DeepEqual(withheld.Colors, want) {
 		t.Errorf("withheld: global = %v, want the terminal keys applied regardless: %v", withheld.Colors, want)
 	}
-	wantPainted := merged(original, chromeWanted)
+	wantPainted := frameMerged(original, chromeWanted)
 	if !reflect.DeepEqual(painted.Workspace, wantPainted) || painted.WorkspaceUpdates != 1 {
 		t.Errorf("covered: workspace=%v updates=%d want %v", painted.Workspace, painted.WorkspaceUpdates, wantPainted)
 	}
@@ -736,7 +823,7 @@ func TestVSCodeExtensionKeepsEachWorkspaceAndTheGlobalRecordIndependent(t *testi
 	if failed.Ack.Error != "" {
 		t.Errorf("refused: ack error = %q, want the Workspace failure kept to its entry", failed.Ack.Error)
 	}
-	wantPainted := merged(vscodePainted(), chromeWanted)
+	wantPainted := frameMerged(vscodePainted(), chromeWanted)
 	if !reflect.DeepEqual(retried.Workspace, wantPainted) || retried.WorkspaceUpdates != failed.WorkspaceUpdates+1 {
 		t.Errorf("retried: workspace=%v updates=%d want %v", retried.Workspace, retried.WorkspaceUpdates, wantPainted)
 	}
@@ -828,4 +915,54 @@ func runVSCodeThemeDriver(t *testing.T, mode, stateDir string, env []string) []b
 		t.Fatalf("run theme driver (mode %s): %v: %s%s", mode, err, output, stderr)
 	}
 	return output
+}
+
+// Upgrading at the same generation still gains newly managed frame keys, Global and Workspace.
+func TestVSCodeFrameMigrationAtTheSameGeneration(t *testing.T) {
+	t.Parallel()
+	original := vscodePainted()
+	steps := runVSCodeScenario(t, t.TempDir(), vscodeScenario{
+		WorkspaceFile: "/w/migration.code-workspace", Workspace: original,
+		Steps: []vscodeChromeStepSpec{
+			{
+				Name: "old",
+				Contract: chromeContract(
+					1,
+					true,
+					terminalWanted,
+					map[string]string{"titleBar.activeBackground": chromeWanted["titleBar.activeBackground"]},
+				),
+			},
+			{Name: "upgrade", Contract: chromeContract(1, true, terminalWanted, chromeWanted)},
+			{Name: "off", Contract: chromeContract(2, false, nil, nil)},
+		},
+	})
+	if got := steps[1]; !reflect.DeepEqual(got.Workspace, frameMerged(original, chromeWanted)) ||
+		got.WorkspaceUpdates != 2 {
+		t.Errorf("upgrade: workspace=%v updates=%d", got.Workspace, got.WorkspaceUpdates)
+	}
+	if got := steps[2]; !reflect.DeepEqual(got.Workspace, original) || got.ChromeRecord != nil {
+		t.Errorf(
+			"off: workspace=%v record=%v, want original scoped and unscoped values",
+			got.Workspace,
+			got.ChromeRecord,
+		)
+	}
+}
+
+func TestVSCodeEmptyWindowAcknowledgesPeacockConflict(t *testing.T) {
+	t.Parallel()
+	steps := runVSCodeScenario(t, t.TempDir(), vscodeScenario{
+		Peacock: &vscodeScenarioPeacock{},
+		Steps: []vscodeChromeStepSpec{
+			{Name: "conflict", Contract: chromeContract(1, true, terminalWanted, chromeWanted)},
+		},
+	})
+	entry := chromeEntry(t, steps[0], "global")
+	if !strings.Contains(entry.Error, "peacock.excludedSettings") {
+		t.Errorf("error=%q, want actionable conflict", entry.Error)
+	}
+	if steps[0].Colors["window.activeBorder"] != chromeWanted["window.activeBorder"] {
+		t.Error("Global frame was not painted")
+	}
 }

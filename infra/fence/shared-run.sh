@@ -15,7 +15,10 @@
 # `unshare --fork --pid --mount-proc --mount` (plus --net for private): its own pid namespace and
 # /proc, so a process scan or a pkill sees this run alone; its own mounts — the caller's tree
 # read-only at /worktree, the engine-sync source read-only at /engine-sync; capped, noswap tmpfs
-# on /root, /tmp, /var/tmp and /dev/shm; the worktree's timing base on /pfm-timing and the run's
+# on /root, /tmp and /var/tmp when the container's cgroup v2 memory.max minus memory.current
+# covers all tmpfs caps plus 1024 MiB headroom, otherwise private disk binds with one stderr line
+# naming free/needed MiB (a failed read is explicit); /dev/shm stays capped, noswap tmpfs;
+# the worktree's timing base on /pfm-timing and the run's
 # host directory on /pfm-run; its disk-backed escape on /pfm-disk (PFM_FENCE_DISK_DIR), then
 # /var/fence and /pfm-fence hidden behind capped, noswap tmpfs — so no
 # fixed path under HOME or /tmp is shared with another run; and for private its own network
@@ -30,7 +33,7 @@
 # `shared-run: …` line on stderr and exit 1 — never a run outside its namespaces.
 # Seams for infra/fence/lanes/tests/shared-run_test.sh: FENCE_STATE_DIR (default /var/fence) and
 # FENCE_HOST_DIR (default /pfm-fence), each outside /root, /tmp and /var/tmp (the run binds over those
-# before it hides the two).
+# before it hides the two). PFM_FENCE_CGROUP_ROOT overrides /sys/fs/cgroup for admission tests.
 set -uo pipefail
 STATE="${FENCE_STATE_DIR:-/var/fence}"
 MNT="${FENCE_HOST_DIR:-/pfm-fence}"
@@ -130,6 +133,22 @@ cmd_run() {
   exit "$rc"
 }
 
+scratch_uses_ram() {
+  # This is a snapshot, not a reservation: simultaneous admissions can still race.
+  local cg="${PFM_FENCE_CGROUP_ROOT:-/sys/fs/cgroup}" limit current free
+  local needed_mib=$((256 + 1536 + 16 + 64 + 1 + 1 + 1024))
+  if ! { IFS= read -r limit < "$cg/memory.max" && IFS= read -r current < "$cg/memory.current"; } 2>/dev/null \
+    || [[ ! "$limit" =~ ^[0-9]{1,18}$ || ! "$current" =~ ^[0-9]{1,18}$ ]]; then
+    echo "shared-run: disk scratch: cgroup read failed ($cg/memory.max, $cg/memory.current); free unknown MiB, needed $needed_mib MiB" >&2
+    return 1
+  fi
+  free=$((10#$limit - 10#$current))
+  (( free >= 0 )) || free=0
+  (( free >= needed_mib * 1024 * 1024 )) && return 0
+  echo "shared-run: disk scratch: free $((free / 1024 / 1024)) MiB, needed $needed_mib MiB" >&2
+  return 1
+}
+
 cmd_inner() {
   local id="$1" mode="$2" tree="$3" es="$4" wt="$5" run
   shift 5
@@ -144,9 +163,18 @@ cmd_inner() {
   # RAM per mount. noswap is deliberate: an unsupported kernel fails closed, never spills
   # disposable scratch to the VM's swap. All pages also count against the container cap.
   scratch_mount() { mount -t tmpfs -o "size=$2,mode=$3,noswap" tmpfs "$1" || die "$1 could not be made capped, non-swappable scratch"; }
-  scratch_mount /root 256m 0700
-  scratch_mount /tmp 1536m 1777
-  scratch_mount /var/tmp 16m 1777
+  if scratch_uses_ram; then
+    scratch_mount /root 256m 0700
+    scratch_mount /tmp 1536m 1777
+    scratch_mount /var/tmp 16m 1777
+  else
+    mkdir -p "$run/home" "$run/tmp" "$run/vartmp" \
+      && chmod 0700 "$run/home" && chmod 1777 "$run/tmp" "$run/vartmp" \
+      || die "the run's disk scratch could not be made private"
+    mount --bind "$run/home" /root || die "the run home could not be bound on /root"
+    mount --bind "$run/tmp" /tmp || die "the run tmp could not be bound on /tmp"
+    mount --bind "$run/vartmp" /var/tmp || die "the run vartmp could not be bound on /var/tmp"
+  fi
   scratch_mount /dev/shm 64m 1777
   mount --bind "$run/disk" /pfm-disk || die "the run disk directory could not be bound on /pfm-disk"
   export PFM_FENCE_DISK_DIR=/pfm-disk

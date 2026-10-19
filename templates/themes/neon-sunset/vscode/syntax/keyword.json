@@ -1,0 +1,136 @@
+{
+  "0001": {
+    "name": "Doc tags",
+    "scope": [
+      "storage.type.class.jsdoc",
+      "storage.type.class.doxygen",
+      "punctuation.definition.block.tag.jsdoc",
+      "comment.block.documentation storage.type",
+      "comment keyword.codetag",
+      "keyword.other.phpdoc"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b494ff"
+    }
+  },
+  "0004": {
+    "name": "The sun: keywords",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.control.flow",
+      "keyword.control.conditional",
+      "keyword.control.loop",
+      "keyword.control.import",
+      "keyword.control.export",
+      "keyword.control.from",
+      "keyword.control.as",
+      "keyword.control.trycatch",
+      "keyword.control.exception",
+      "keyword.other",
+      "keyword.other.using",
+      "keyword.other.import",
+      "keyword.operator.new",
+      "keyword.operator.expression",
+      "keyword.operator.logical.python",
+      "keyword.operator.word",
+      "keyword.control.directive",
+      "punctuation.definition.directive",
+      "keyword.other.important.css",
+      "keyword.control.at-rule",
+      "punctuation.definition.keyword",
+      "keyword.package.go",
+      "keyword.import.go",
+      "keyword.control.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fd67ad"
+    }
+  },
+  "0005": {
+    "name": "Dusk sky: declarations",
+    "scope": [
+      "storage",
+      "storage.type",
+      "storage.modifier",
+      "keyword.storage",
+      "keyword.declaration",
+      "storage.type.function",
+      "storage.type.class",
+      "storage.type.interface",
+      "storage.type.enum",
+      "storage.type.type",
+      "storage.type.namespace",
+      "storage.type.struct",
+      "storage.type.trait",
+      "storage.type.function.python",
+      "storage.type.class.python",
+      "keyword.function.go",
+      "keyword.type.go",
+      "keyword.struct.go",
+      "keyword.interface.go",
+      "keyword.var.go",
+      "keyword.const.go",
+      "keyword.map.go",
+      "keyword.channel.go",
+      "keyword.other.fn.rust",
+      "keyword.other.rust",
+      "storage.type.rust",
+      "storage.modifier.async",
+      "keyword.control.async",
+      "storage.type.modifier.access.control"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b494ff"
+    }
+  },
+  "0006": {
+    "name": "The sun's glow: operators",
+    "scope": [
+      "keyword.operator",
+      "keyword.operator.assignment",
+      "keyword.operator.arithmetic",
+      "keyword.operator.logical",
+      "keyword.operator.comparison",
+      "keyword.operator.relational",
+      "keyword.operator.bitwise",
+      "keyword.operator.ternary",
+      "keyword.operator.spread",
+      "keyword.operator.rest",
+      "keyword.operator.type",
+      "keyword.operator.optional",
+      "keyword.operator.definiteassignment",
+      "keyword.operator.channel",
+      "keyword.operator.address",
+      "storage.type.function.arrow",
+      "punctuation.separator.key-value",
+      "punctuation.separator.annotation",
+      "keyword.operator.type.annotation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9bd2"
+    }
+  },
+  "0013": {
+    "name": "Regex operators",
+    "scope": [
+      "keyword.operator.quantifier.regexp",
+      "keyword.operator.or.regexp",
+      "keyword.control.anchor.regexp",
+      "punctuation.definition.group.regexp",
+      "punctuation.definition.character-class.regexp",
+      "constant.other.character-class.set.regexp",
+      "keyword.operator.negation.regexp",
+      "punctuation.definition.group.assertion.regexp",
+      "meta.assertion.look-ahead.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e48bff"
+    }
+  }
+}

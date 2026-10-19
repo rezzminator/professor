@@ -229,7 +229,7 @@ func TestVSCodeExtensionManifestMarkerIsFilledExactlyOnce(t *testing.T) {
 func TestVSCodeListsTheProfilesAloneNotAKeptClaudeFile(t *testing.T) {
 	t.Parallel()
 	host := newProfileHost(t)
-	writeFixture(t, filepath.Join(host.repo, "templates", "themes", "plain-lagoon.json"), plainProfile)
+	host.seed(map[string]string{"plain-lagoon": plainProfile})
 	host.own("legacy-fetched", host.claudeFile("legacy-fetched"), legacyPalette)
 	writeFixture(t, filepath.Join(host.home, ".cc", "1", "settings.json"), `{"theme":"custom:legacy-fetched"}`+"\n")
 

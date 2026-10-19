@@ -1,0 +1,92 @@
+{
+  "0000": {
+    "name": "Mirror: plain text and variables",
+    "scope": [
+      "variable",
+      "variable.other",
+      "variable.other.readwrite",
+      "meta.definition.variable.name",
+      "entity.name.variable",
+      "support.variable",
+      "meta.parameter",
+      "meta.attribute",
+      "meta.tag.sgml",
+      "meta.property-value.css",
+      "meta.decorator"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f8f0fa"
+    }
+  },
+  "0014": {
+    "name": "Orchid: self, this, super",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.parameter.function.language.special.self",
+      "variable.parameter.function.language.special.cls"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#e1afed"
+    }
+  },
+  "0015": {
+    "name": "Peach: parameters",
+    "scope": [
+      "variable.parameter",
+      "entity.name.variable.parameter",
+      "meta.function.parameters variable.other",
+      "meta.parameters variable.other.readwrite"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffc29e"
+    }
+  },
+  "0016": {
+    "name": "Sky beam: properties",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "entity.name.tag.yaml",
+      "variable.object.property",
+      "variable.other.member",
+      "entity.name.variable.field",
+      "support.variable.property"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0035": {
+    "name": "Sky beam: shell variables",
+    "scope": [
+      "variable.other.normal.shell",
+      "punctuation.definition.variable.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0037": {
+    "name": "Orchid: YAML anchors and aliases",
+    "scope": [
+      "variable.other.alias.yaml",
+      "variable.other.anchor.yaml",
+      "punctuation.definition.anchor.yaml",
+      "punctuation.definition.alias.yaml"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#e1afed"
+    }
+  }
+}

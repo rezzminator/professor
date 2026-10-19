@@ -1,0 +1,21 @@
+{
+  "activityBar.activeFocusBorder": "#15202b",
+  "activityBar.border": "#ff70e5",
+  "activityBar.dropBorder": "#15202b",
+  "activityBarTop.dropBorder": "#15202b",
+  "activityErrorBadge.background": "#15202b",
+  "activityErrorBadge.foreground": "#ff8aa8",
+  "activityWarningBadge.background": "#15202b",
+  "activityWarningBadge.foreground": "#ffd23f",
+  "modernActivityBar.activeBackground": "#ff70e5",
+  "modernActivityBar.activeForeground": "#15202b",
+  "modernActivityBar.background": "#ff70e5",
+  "modernActivityBar.border": "#ff70e5",
+  "modernActivityBar.hoverBackground": "#ff8aea",
+  "modernActivityBar.hoverForeground": "#15202b",
+  "modernActivityBar.inactiveBackground": "#ff70e5",
+  "modernActivityBarItem.activeBackground": "#ff8aea",
+  "modernActivityBarItem.activeForeground": "#15202b",
+  "modernActivityBarItem.hoverBackground": "#ff8aea",
+  "modernActivityBarItem.hoverForeground": "#15202b"
+}

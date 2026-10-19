@@ -1,0 +1,12 @@
+{
+  "@p_fg1": "#b7e2de",
+  "@p_g0": "#004a4a",
+  "@p_g3": "#7a3430",
+  "message-command-style": "bg=#7a3430,fg=#f7cd6c",
+  "message-style": "bg=#7a3430,fg=#eafefd",
+  "mode-style": "bg=#094261,fg=#eafefd",
+  "pane-border-style": "fg=#3a5f66",
+  "status-style": "bg=#004a4a,fg=#d2efec",
+  "window-status-current-style": "bg=#7a3430,fg=#{E:@pfm-state-colour},bold",
+  "window-status-style": "bg=#004a4a,fg=#99bec2"
+}

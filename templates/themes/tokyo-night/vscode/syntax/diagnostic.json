@@ -1,0 +1,57 @@
+{
+  "0011": {
+    "name": "Invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "foreground": "#ff5781"
+    }
+  },
+  "0012": {
+    "name": "Invalid deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0110": {
+    "name": "Token - Info",
+    "scope": [
+      "token.info-token"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  },
+  "0111": {
+    "name": "Token - Warn",
+    "scope": [
+      "token.warn-token"
+    ],
+    "settings": {
+      "foreground": "#ffd23f"
+    }
+  },
+  "0112": {
+    "name": "Token - Error",
+    "scope": [
+      "token.error-token"
+    ],
+    "settings": {
+      "foreground": "#ff5781"
+    }
+  },
+  "0113": {
+    "name": "Token - Debug",
+    "scope": [
+      "token.debug-token"
+    ],
+    "settings": {
+      "foreground": "#eb66ff"
+    }
+  }
+}

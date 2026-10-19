@@ -46,9 +46,10 @@ func parseClaudeTokens(source string) map[string]bool {
 	return ids
 }
 
-// Profile is one theme profile, templates/themes/{name}.json: Claude Code's
-// palette (name, base, overrides; the only keys Claude ever sees) and the
-// optional per-surface pins beside it, which win over what derive fills.
+// Profile is one theme profile, assembled from templates/themes/{name}/
+// (ReadProfileDir): Claude Code's palette (name, base, overrides; the only
+// keys Claude ever sees) and the optional per-surface pins beside it, which
+// win over what derive fills.
 type Profile struct {
 	Name      string            `json:"name"`
 	Base      string            `json:"base,omitempty"`

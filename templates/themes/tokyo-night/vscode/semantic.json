@@ -1,0 +1,62 @@
+{
+  "*.defaultLibrary": "#cb9eff",
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "attribute": "#ff3ddc",
+  "builtinConstant": "#ffd23f",
+  "builtinType": "#cb9eff",
+  "class": "#dc8aff",
+  "clsParameter": "#ff5c8a",
+  "comment": {
+    "foreground": "#bc62ab",
+    "italic": true
+  },
+  "decorator": "#ff70b8",
+  "enum": "#dc8aff",
+  "enumMember": "#ffd23f",
+  "event": "#ff5c8a",
+  "formatSpecifier": "#ff70e5",
+  "function": "#ff70b8",
+  "function.defaultLibrary": "#cb9eff",
+  "interface": "#dc8aff",
+  "keyword": "#ff3ddc",
+  "label": "#ffadff",
+  "lifetime": {
+    "foreground": "#ffd23f",
+    "italic": true
+  },
+  "macro": "#ff70b8",
+  "magicFunction": "#ff70b8",
+  "method": "#ff70b8",
+  "method.defaultLibrary": "#cb9eff",
+  "module": "#cb9eff",
+  "namespace": "#cb9eff",
+  "number": "#ffd23f",
+  "operator": "#ff70e5",
+  "parameter": "#ffb4a8",
+  "parameter.declaration": "#ffb4a8",
+  "property": "#ffadff",
+  "property.declaration": "#ffadff",
+  "property.declaration.readonly": "#ffadff",
+  "property.defaultLibrary": "#cb9eff",
+  "property.readonly": "#ffd23f",
+  "property.readonly.defaultLibrary": "#cb9eff",
+  "regexp": "#8ff0ff",
+  "selfKeyword": "#ff5c8a",
+  "selfParameter": "#ff5c8a",
+  "string": "#7dffd0",
+  "struct": "#dc8aff",
+  "type": "#dc8aff",
+  "typeAlias": "#dc8aff",
+  "typeParameter": {
+    "foreground": "#dc8aff",
+    "italic": true
+  },
+  "variable": "#ffbde3",
+  "variable.declaration": "#ff3ddc",
+  "variable.declaration.readonly": "#ff3ddc",
+  "variable.defaultLibrary": "#cb9eff",
+  "variable.readonly": "#ffd23f",
+  "variable.readonly.defaultLibrary": "#cb9eff"
+}

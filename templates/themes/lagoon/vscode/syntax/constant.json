@@ -1,0 +1,70 @@
+{
+  "0013": {
+    "name": "Bubbles: escapes and placeholders",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "string.regexp constant.character.escape",
+      "constant.other.placeholder",
+      "constant.character.format.placeholder",
+      "constant.character.entity",
+      "constant.character.string.escape",
+      "constant.other.character-class.regexp",
+      "constant.other.character-class.set.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#86f8cf"
+    }
+  },
+  "0016": {
+    "name": "Clownfish: numbers",
+    "scope": [
+      "constant.numeric",
+      "keyword.other.unit",
+      "constant.other.color.rgb-value",
+      "entity.other.keyframe-offset.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffab68"
+    }
+  },
+  "0017": {
+    "name": "Clownfish: constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other.caps",
+      "constant.other.option",
+      "support.constant.property-value.css",
+      "meta.property-value.css",
+      "support.constant.color",
+      "support.constant.font-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffab68"
+    }
+  },
+  "0018": {
+    "name": "Nudibranch: language constants",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.nil",
+      "support.variable.magic.python",
+      "constant.language.python",
+      "constant.language.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ccabff"
+    }
+  }
+}

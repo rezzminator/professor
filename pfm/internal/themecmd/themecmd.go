@@ -46,9 +46,10 @@ const usage = `usage: pfm theme [status|sync|on|off|list|use|check] [options]
   off                restore every surface exactly as it was and stop syncing (--json)
   list               the themes use accepts, * marking the current one (--json)
   use {name}         set the theme of every Claude account, then sync; new chats follow (--json)
-  check [file...]    run install's profile checks, render each VS Code theme and hold its text to the
-                     contrast floors, writing nothing; TextMate scope names are not checked against any
-                     grammar; no file: every profile in the source clone's templates/themes/ (--json)`
+  check [dir...]     run install's checks on each theme directory (its file set, each file's canonical form
+                     and grouping, the profile), render each VS Code theme and hold its text to the contrast
+                     floors, writing nothing; TextMate scope names are not checked against any grammar; no
+                     dir: every theme in the source clone's templates/themes/ (--json)`
 
 // Ops is themesync as the verb calls it; tests inject fakes.
 type Ops struct {

@@ -1,0 +1,102 @@
+{
+  "0000": {
+    "name": "Italics - Comments, Storage, Keyword Flow, Vue attributes, Decorators",
+    "scope": [
+      "comment",
+      "meta.var.expr storage.type",
+      "keyword.control.flow",
+      "keyword.control.return",
+      "meta.directive.vue punctuation.separator.key-value.html",
+      "meta.directive.vue entity.other.attribute-name.html",
+      "tag.decorator.js entity.name.tag.js",
+      "tag.decorator.js punctuation.definition.tag.js",
+      "storage.modifier",
+      "string.quoted.docstring.multi",
+      "string.quoted.docstring.multi.python punctuation.definition.string.begin",
+      "string.quoted.docstring.multi.python punctuation.definition.string.end",
+      "string.quoted.docstring.multi.python constant.character.escape"
+    ],
+    "settings": {
+      "fontStyle": "italic"
+    }
+  },
+  "0002": {
+    "name": "Comment",
+    "scope": [
+      "comment",
+      "comment.block.documentation",
+      "punctuation.definition.comment",
+      "comment.block.documentation punctuation"
+    ],
+    "settings": {
+      "foreground": "#bc62ab"
+    }
+  },
+  "0004": {
+    "name": "Comment Doc",
+    "scope": [
+      "comment.block.documentation variable",
+      "comment.block.documentation storage",
+      "comment.block.documentation keyword",
+      "comment.block.documentation support",
+      "comment.block.documentation markup",
+      "comment.block.documentation markup.inline.raw.string.markdown"
+    ],
+    "settings": {
+      "foreground": "#cd77bd"
+    }
+  },
+  "0006": {
+    "name": "Comment Doc Emphasized",
+    "scope": [
+      "comment.block.documentation storage.type",
+      "comment.block.documentation punctuation.definition.block.tag",
+      "comment.block.documentation entity.name.type.instance"
+    ],
+    "settings": {
+      "foreground": "#dd88cd"
+    }
+  },
+  "0125": {
+    "name": "Pink · keywords",
+    "scope": [
+      "comment keyword.codetag",
+      "keyword.declaration",
+      "keyword.storage",
+      "storage",
+      "storage.type.function.arrow",
+      "storage.type.primitive",
+      "storage.type.built-in",
+      "keyword.type",
+      "keyword.type.go"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0155": {
+    "name": "Pink · doc comment guard",
+    "scope": [
+      "comment.block.documentation variable.other",
+      "comment.block.documentation keyword.type",
+      "comment.block.documentation keyword.declaration",
+      "comment.block.documentation storage.type.primitive",
+      "comment.block.documentation support.type.primitive",
+      "comment.block.documentation support.type.property-name"
+    ],
+    "settings": {
+      "foreground": "#cd77bd"
+    }
+  },
+  "0156": {
+    "name": "Pink · doc comment punctuation guard",
+    "scope": [
+      "comment.block.documentation punctuation.accessor",
+      "comment.block.documentation punctuation.separator",
+      "comment.block.documentation punctuation.terminator"
+    ],
+    "settings": {
+      "foreground": "#bc62ab"
+    }
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "0041": {
+    "name": "Curtain ladder, rung 1 · headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown",
+      "markup.heading.setext",
+      "heading.1.markdown entity.name.section.markdown",
+      "heading.1.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#5cf0a8"
+    }
+  },
+  "0042": {
+    "name": "Curtain ladder, rung 2 · heading 2",
+    "scope": [
+      "heading.2.markdown entity.name.section.markdown",
+      "heading.2.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b49cff"
+    }
+  },
+  "0043": {
+    "name": "Curtain ladder, rung 3 · heading 3",
+    "scope": [
+      "heading.3.markdown entity.name.section.markdown",
+      "heading.3.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#6fd8ff"
+    }
+  },
+  "0044": {
+    "name": "Curtain ladder, rung 4 · heading 4",
+    "scope": [
+      "heading.4.markdown entity.name.section.markdown",
+      "heading.4.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f286d2"
+    }
+  },
+  "0045": {
+    "name": "Curtain ladder, rung 5 · heading 5",
+    "scope": [
+      "heading.5.markdown entity.name.section.markdown",
+      "heading.5.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f2d48c"
+    }
+  },
+  "0046": {
+    "name": "Curtain ladder, rung 6 · heading 6",
+    "scope": [
+      "heading.6.markdown entity.name.section.markdown",
+      "heading.6.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff9e8f"
+    }
+  },
+  "0047": {
+    "name": "Brightest stars · bold",
+    "scope": [
+      "markup.bold",
+      "punctuation.definition.bold.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f4f7ff"
+    }
+  },
+  "0048": {
+    "name": "N2+ faint top · italic",
+    "scope": [
+      "markup.italic",
+      "punctuation.definition.italic.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#d4c6ff"
+    }
+  },
+  "0049": {
+    "name": "Brightest stars · bold italic",
+    "scope": [
+      "markup.bold markup.italic",
+      "markup.italic markup.bold"
+    ],
+    "settings": {
+      "fontStyle": "bold italic",
+      "foreground": "#f4f7ff"
+    }
+  },
+  "0050": {
+    "name": "High haze · strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#7280aa"
+    }
+  },
+  "0051": {
+    "name": "H-beta 486.1 nm · links",
+    "scope": [
+      "markup.underline.link",
+      "string.other.link",
+      "constant.other.reference.link",
+      "markup.underline.link.markdown",
+      "markup.underline.link.image.markdown"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#6fd8ff"
+    }
+  },
+  "0053": {
+    "name": "Glacier · inline code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.fenced_code",
+      "markup.raw",
+      "markup.inline.raw.string.markdown",
+      "markup.raw.block",
+      "markup.raw.inline"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#74e2d2"
+    }
+  },
+  "0054": {
+    "name": "N2+ 427.8 nm · fenced code language",
+    "scope": [
+      "fenced_code.block.language",
+      "fenced_code.block.language.markdown",
+      "markup.fenced_code.block.markdown fenced_code.block.language"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b49cff"
+    }
+  },
+  "0055": {
+    "name": "High haze · quotes",
+    "scope": [
+      "markup.quote",
+      "markup.quote.markdown",
+      "punctuation.definition.quote.begin.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#7280aa"
+    }
+  },
+  "0058": {
+    "name": "O I 557.7 nm · inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted",
+      "meta.diff.header.to-file",
+      "punctuation.definition.to-file.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf0a8"
+    }
+  },
+  "0059": {
+    "name": "O I 630.0 nm · deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted",
+      "meta.diff.header.from-file",
+      "punctuation.definition.from-file.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff6b7d"
+    }
+  },
+  "0060": {
+    "name": "Moonlight · changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f2d48c"
+    }
+  }
+}

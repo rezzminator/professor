@@ -1,0 +1,80 @@
+{
+  "*.defaultLibrary": "#b4d6ef",
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "boolean": "#c195cf",
+  "builtinType": "#b4d6ef",
+  "class": "#83b6e8",
+  "class.defaultLibrary": "#b4d6ef",
+  "clsParameter": {
+    "foreground": "#c195cf",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#8a7869",
+    "italic": true
+  },
+  "decorator": "#c195cf",
+  "enum": "#83b6e8",
+  "enumMember": "#fee392",
+  "escapeSequence": "#8bd6de",
+  "event": "#c195cf",
+  "formatSpecifier": "#8bd6de",
+  "function": "#ffb75e",
+  "function.defaultLibrary": "#b4d6ef",
+  "interface": {
+    "foreground": "#83b6e8",
+    "italic": true
+  },
+  "interface.defaultLibrary": {
+    "foreground": "#b4d6ef",
+    "italic": true
+  },
+  "keyword": "#ff9044",
+  "label": {
+    "foreground": "#c195cf",
+    "italic": true
+  },
+  "lifetime": {
+    "foreground": "#c195cf",
+    "italic": true
+  },
+  "macro": "#c195cf",
+  "method": "#ffb75e",
+  "method.defaultLibrary": "#b4d6ef",
+  "namespace": "#d29f73",
+  "number": "#fee392",
+  "operator": "#ff9044",
+  "parameter": {
+    "foreground": "#ebd6b3",
+    "italic": true
+  },
+  "property": "#efbea7",
+  "property.readonly": "#fee392",
+  "regexp": "#e59b91",
+  "selfKeyword": {
+    "foreground": "#c195cf",
+    "italic": true
+  },
+  "selfParameter": {
+    "foreground": "#c195cf",
+    "italic": true
+  },
+  "string": "#d3d389",
+  "struct": "#83b6e8",
+  "type": "#83b6e8",
+  "type.defaultLibrary": "#b4d6ef",
+  "type.interface": {
+    "foreground": "#83b6e8",
+    "italic": true
+  },
+  "typeParameter": {
+    "foreground": "#83b6e8",
+    "italic": true
+  },
+  "variable": "#ece3d8",
+  "variable.defaultLibrary": "#b4d6ef",
+  "variable.readonly": "#fee392",
+  "variable.readonly.defaultLibrary": "#c195cf"
+}

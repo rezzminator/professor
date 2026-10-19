@@ -24,15 +24,16 @@ const pinnedProfile = `{
 }
 `
 
-// plainProfile is deliberately not in the encoder's shape (key order, tabs,
-// no trailing space rules): a profile without pins reaches Claude as it is.
-const plainProfile = "{\n\t\"overrides\": {\"claude\": \"#40e0d0\"},\n\t\"base\": \"dark\",\n\t\"name\": \"Plain Lagoon\"\n}\n"
+// plainProfile pins no surface: its assembled document reaches Claude whole.
+const plainProfile = `{"name": "Plain Lagoon", "base": "dark", "overrides": {"claude": "#40e0d0"}}`
 
 // profileHost is a temp home beside a source clone whose templates/themes/
-// holds the profiles it is seeded with.
+// holds the theme directories it is seeded with, and the document install
+// assembles from each (name -> document).
 type profileHost struct {
 	t          *testing.T
 	home, repo string
+	documents  map[string]string
 }
 
 func newProfileHost(t *testing.T) *profileHost {
@@ -42,23 +43,29 @@ func newProfileHost(t *testing.T) *profileHost {
 	return host
 }
 
-// seed rewrites the clone: templates/themes/ holds exactly these profiles
-// (name -> file body), so discovery finds them and nothing else.
+// seed rewrites the clone: templates/themes/ holds exactly these themes
+// (name -> profile, written as its directory), so discovery finds them and
+// nothing else.
 func (host *profileHost) seed(profiles map[string]string) {
 	host.t.Helper()
 	dir := filepath.Join(host.repo, "templates", "themes")
-	stale, err := filepath.Glob(filepath.Join(dir, "*.json"))
-	if err != nil {
+	if err := os.RemoveAll(dir); err != nil {
 		host.t.Fatal(err)
 	}
-	for _, file := range stale {
-		if err := os.Remove(file); err != nil {
-			host.t.Fatal(err)
-		}
+	host.documents = map[string]string{}
+	for name, profile := range profiles {
+		host.documents[name] = string(writeThemeDir(host.t, dir, name, profile))
 	}
-	for name, body := range profiles {
-		writeFixture(host.t, filepath.Join(dir, name+".json"), body)
+}
+
+// document is the profile document install assembles from the seeded theme name.
+func (host *profileHost) document(name string) string {
+	host.t.Helper()
+	document, seeded := host.documents[name]
+	if !seeded {
+		host.t.Fatalf("theme %s was never seeded", name)
 	}
+	return document
 }
 
 func (host *profileHost) run(mode Mode) (Report, string) {
@@ -149,8 +156,8 @@ func TestProfileWithSurfacesReachesClaudeAsThePaletteAloneAndKeepsTheWholeCopy(t
 		t.Fatalf("Claude theme file lost palette content: %s", claude)
 	}
 	copyPath := themesync.ProfilePath(host.home, "pinned-night")
-	if got := contents(t, copyPath); got != pinnedProfile {
-		t.Fatalf("profile copy = %q, want the whole profile %q", got, pinnedProfile)
+	if got := contents(t, copyPath); got != host.document("pinned-night") {
+		t.Fatalf("profile copy = %q, want the whole profile %q", got, host.document("pinned-night"))
 	}
 	ledger := host.ledger()
 	for key, path := range map[string]string{"pinned-night": host.claudeFile("pinned-night"), "profile:pinned-night": copyPath} {
@@ -165,30 +172,35 @@ func TestProfileWithSurfacesReachesClaudeAsThePaletteAloneAndKeepsTheWholeCopy(t
 	}
 }
 
-func TestProfileWithoutSurfacesIsWrittenVerbatim(t *testing.T) {
+func TestProfileWithoutSurfacesReachesClaudeAsItsWholeDocument(t *testing.T) {
 	t.Parallel()
 	host := newProfileHost(t)
 	host.seed(map[string]string{"plain-lagoon": plainProfile})
+	want := "{\n  \"name\": \"Plain Lagoon\",\n  \"base\": \"dark\",\n  \"overrides\": {\n    \"claude\": \"#40e0d0\"\n  }\n}\n"
 
 	host.run(ModeApply)
 
-	if got := contents(t, host.claudeFile("plain-lagoon")); got != plainProfile {
-		t.Fatalf("Claude theme file = %q, want the profile's own bytes %q", got, plainProfile)
+	if got := contents(t, host.claudeFile("plain-lagoon")); got != want {
+		t.Fatalf("Claude theme file = %q, want the assembled document %q", got, want)
 	}
-	if got := contents(t, themesync.ProfilePath(host.home, "plain-lagoon")); got != plainProfile {
-		t.Fatalf("profile copy = %q, want %q", got, plainProfile)
+	if got := contents(t, themesync.ProfilePath(host.home, "plain-lagoon")); got != want {
+		t.Fatalf("profile copy = %q, want %q", got, want)
 	}
 }
 
-func TestProfileWithAnUnknownTopLevelKeyIsSkippedByNameAndTheRestInstalls(t *testing.T) {
+func TestThemeWithAnUnknownKeyIsSkippedByNameAndTheRestInstalls(t *testing.T) {
 	t.Parallel()
 	host := newProfileHost(t)
-	sloppy := `{"name":"Sloppy","base":"dark","overrides":{"claude":"#ffffff"},"extra":1}` + "\n"
-	host.seed(map[string]string{"sloppy": sloppy, "plain-lagoon": plainProfile})
+	host.seed(map[string]string{
+		"sloppy": `{"name":"Sloppy","base":"dark","overrides":{"claude":"#ffffff"}}`, "plain-lagoon": plainProfile,
+	})
+	sloppy := filepath.Join(host.repo, "templates", "themes", "sloppy")
+	writeFixture(t, filepath.Join(sloppy, "theme.json"),
+		"{\n  \"base\": \"dark\",\n  \"extra\": 1,\n  \"name\": \"Sloppy\"\n}\n")
 
 	_, output := host.run(ModeApply)
 
-	if !strings.Contains(output, "skip    theme sloppy profile sloppy.json rejected:") ||
+	if !strings.Contains(output, "skip    theme sloppy read failed: theme "+sloppy+": theme.json:") ||
 		!strings.Contains(output, `unknown field "extra"`) {
 		t.Fatalf("a profile with an unknown key was not skipped by name:\n%s", output)
 	}
@@ -200,7 +212,7 @@ func TestProfileWithAnUnknownTopLevelKeyIsSkippedByNameAndTheRestInstalls(t *tes
 	if _, owned := host.ledger()["sloppy"]; owned {
 		t.Errorf("rejected profile was recorded in the ledger")
 	}
-	if got := readFixture(t, host.claudeFile("plain-lagoon")); got != plainProfile {
+	if got := readFixture(t, host.claudeFile("plain-lagoon")); got != host.document("plain-lagoon") {
 		t.Fatalf("a good profile beside the rejected one was not installed: %q", got)
 	}
 }
@@ -244,7 +256,7 @@ func TestStaleOwnedThemeIsRetiredAndAnEditedOneStaysReported(t *testing.T) {
 		" and retained recovery ownership at "+host.claudeFile("edited")) {
 		t.Fatalf("an edited retired theme was not reported as a skip naming it:\n%s", output)
 	}
-	if got := readFixture(t, host.claudeFile("plain-lagoon")); got != plainProfile {
+	if got := readFixture(t, host.claudeFile("plain-lagoon")); got != host.document("plain-lagoon") {
 		t.Fatalf("a listed theme was touched: %q", got)
 	}
 	want := []string{"edited", "plain-lagoon", "profile:plain-lagoon"}
@@ -322,15 +334,16 @@ func TestByteIdenticalUnownedThemeIsAdoptedAndADifferingOneIsKept(t *testing.T) 
 	t.Parallel()
 	host := newProfileHost(t)
 	host.seed(map[string]string{"plain-lagoon": plainProfile, "pinned-night": pinnedProfile, "stranger": plainProfile})
-	profile, err := themesync.ParseProfile([]byte(pinnedProfile))
+	pinned := []byte(host.document("pinned-night"))
+	profile, err := themesync.ParseProfile(pinned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	palette, err := profile.ClaudeFile([]byte(pinnedProfile))
+	palette, err := profile.ClaudeFile(pinned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, host.claudeFile("plain-lagoon"), plainProfile)
+	writeFixture(t, host.claudeFile("plain-lagoon"), host.document("plain-lagoon"))
 	writeFixture(t, host.claudeFile("pinned-night"), string(palette))
 	writeFixture(t, host.claudeFile("stranger"), "somebody else's theme\n")
 
@@ -421,35 +434,37 @@ func TestUninstallRemovesTheProfileCopiesAndTheirDirectory(t *testing.T) {
 	}
 }
 
-// The real clone, read the way pfm install reads it: every *.json in its
-// templates/themes/ is discovered as a profile, parses, and installs as its
+// The real clone, read the way pfm install reads it: every directory in its
+// templates/themes/ is discovered as a theme, assembles, and installs as its
 // palette plus its whole copy. The list is the directory's, never a fixed one,
-// so a profile dropped there is covered the moment it lands.
-func TestSourceCloneInstallsEveryProfileInTemplatesThemes(t *testing.T) {
+// so a theme dropped there is covered the moment it lands.
+func TestSourceCloneInstallsEveryThemeInTemplatesThemes(t *testing.T) {
 	t.Parallel()
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test file")
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "..", "..", ".."))
-	files, err := filepath.Glob(filepath.Join(repoRoot, filepath.FromSlash(themeProfilesRelative), "*.json"))
+	themes := filepath.Join(repoRoot, filepath.FromSlash(themeProfilesRelative))
+	entries, err := os.ReadDir(themes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) == 0 {
-		t.Fatalf("no *.json in %s: the enumeration found nothing to check", themeProfilesRelative)
-	}
 	var want []string
-	for _, file := range files {
-		want = append(want, strings.TrimSuffix(filepath.Base(file), ".json"))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			want = append(want, entry.Name())
+		}
 	}
-	sort.Strings(want)
+	if len(want) == 0 {
+		t.Fatalf("no theme directory in %s: the enumeration found nothing to check", themes)
+	}
 	profiles, err := loadThemeProfiles(context.Background(), Options{SourceRepo: repoRoot})
 	if err != nil {
-		t.Fatalf("load the clone's profiles: %v", err)
+		t.Fatalf("load the clone's themes: %v", err)
 	}
 	if got := profileKeys(profiles); strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("discovered themes = %v, want every *.json in %s: %v", got, themeProfilesRelative, want)
+		t.Fatalf("discovered themes = %v, want every directory in %s: %v", got, themeProfilesRelative, want)
 	}
 	home := t.TempDir()
 	var output bytes.Buffer
@@ -462,17 +477,21 @@ func TestSourceCloneInstallsEveryProfileInTemplatesThemes(t *testing.T) {
 	installer.installThemes(context.Background())
 	for _, name := range want {
 		source := profiles[name]
-		if filepath.Base(source.local) != name+".json" || source.raw != "" {
-			t.Errorf("%s = %+v, want a profile read from the clone as %s.json", name, source, name)
+		if source.local != filepath.Join(themes, name) || source.raw != "" {
+			t.Errorf("%s = %+v, want a theme read from the clone's %s/", name, source, name)
 			continue
 		}
-		body := readFixture(t, source.local)
-		profile, err := themesync.ParseProfile([]byte(body))
+		body, err := themesync.ReadProfileDir(source.local)
+		if err != nil {
+			t.Errorf("%s does not assemble: %v", name, err)
+			continue
+		}
+		profile, err := themesync.ParseProfile(body)
 		if err != nil {
 			t.Errorf("%s does not parse as a profile: %v", name, err)
 			continue
 		}
-		palette, err := profile.ClaudeFile([]byte(body))
+		palette, err := profile.ClaudeFile(body)
 		if err != nil {
 			t.Errorf("%s palette: %v", name, err)
 			continue
@@ -480,8 +499,8 @@ func TestSourceCloneInstallsEveryProfileInTemplatesThemes(t *testing.T) {
 		if got := contents(t, filepath.Join(home, ".claude", "themes", name+".json")); got != string(palette) {
 			t.Errorf("%s: installed Claude theme is not the profile's palette\n%s", name, output.String())
 		}
-		if got := contents(t, themesync.ProfilePath(home, name)); got != body {
-			t.Errorf("%s: installed profile copy differs from the profile file", name)
+		if got := contents(t, themesync.ProfilePath(home, name)); got != string(body) {
+			t.Errorf("%s: installed profile copy differs from the assembled theme", name)
 		}
 	}
 }
@@ -491,15 +510,14 @@ func TestSourceCloneInstallsEveryProfileInTemplatesThemes(t *testing.T) {
 const legacyPalette = `{"name":"Legacy","base":"dark","overrides":{"claude":"#7aa2f7"}}` + "\n"
 
 // TestARecordedThemeNoProfileShipsIsRetiredByAProfilesOnlyClone: a clone
-// whose templates/themes/ holds the profiles and the README alone still
+// whose templates/themes/ holds the theme directories and the README alone still
 // retires a recorded theme no profile ships — the file goes when unmodified
 // and no account selects it, its ledger record with it.
 func TestARecordedThemeNoProfileShipsIsRetiredByAProfilesOnlyClone(t *testing.T) {
 	t.Parallel()
 	host := newProfileHost(t)
-	dir := filepath.Join(host.repo, "templates", "themes")
-	writeFixture(t, filepath.Join(dir, "plain-lagoon.json"), plainProfile)
-	writeFixture(t, filepath.Join(dir, "README.md"), "# Themes\n")
+	host.seed(map[string]string{"plain-lagoon": plainProfile})
+	writeFixture(t, filepath.Join(host.repo, "templates", "themes", "README.md"), "# Themes\n")
 	host.own("legacy-fetched", host.claudeFile("legacy-fetched"), legacyPalette)
 
 	_, output := host.run(ModeApply)
@@ -511,7 +529,7 @@ func TestARecordedThemeNoProfileShipsIsRetiredByAProfilesOnlyClone(t *testing.T)
 	if _, owned := host.ledger()["legacy-fetched"]; owned {
 		t.Fatalf("the retired theme's ledger record stayed: %v", profileKeys(host.ledger()))
 	}
-	if got := contents(t, host.claudeFile("plain-lagoon")); got != plainProfile {
+	if got := contents(t, host.claudeFile("plain-lagoon")); got != host.document("plain-lagoon") {
 		t.Fatalf("the shipped profile was not installed beside the retirement: %q\n%s", got, output)
 	}
 }

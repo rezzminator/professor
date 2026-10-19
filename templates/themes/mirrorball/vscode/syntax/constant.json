@@ -1,0 +1,78 @@
+{
+  "0008": {
+    "name": "Glitter: escapes and placeholders",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "string.regexp constant.character.escape",
+      "constant.character.entity",
+      "constant.other.placeholder",
+      "constant.character.format.placeholder",
+      "meta.fstring constant.character.format"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#95e2f5"
+    }
+  },
+  "0011": {
+    "name": "Coral beam: numbers",
+    "scope": [
+      "constant.numeric",
+      "keyword.other.unit"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa07a"
+    }
+  },
+  "0012": {
+    "name": "Coral beam: constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa07a"
+    }
+  },
+  "0013": {
+    "name": "Orchid: language constants",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.import-export-all"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e1afed"
+    }
+  },
+  "0033": {
+    "name": "Gold beam: CSS colours",
+    "scope": [
+      "constant.other.color"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fce353"
+    }
+  },
+  "0036": {
+    "name": "Peach: command-line options",
+    "scope": [
+      "constant.other.option"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffc29e"
+    }
+  }
+}

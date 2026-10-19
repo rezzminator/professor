@@ -1,0 +1,178 @@
+{
+  "0023": {
+    "name": "Lagoon teal: functions",
+    "scope": [
+      "entity.name.function",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "support.function.any-method",
+      "meta.function-call.generic",
+      "entity.name.function.member",
+      "entity.name.method",
+      "entity.name.function.tagged-template",
+      "entity.name.command.shell",
+      "entity.name.function.target.makefile",
+      "support.function.git-rebase"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#39e5c9"
+    }
+  },
+  "0026": {
+    "name": "Sand: types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.other.inherited-class",
+      "support.type",
+      "support.class",
+      "storage.type.built-in",
+      "entity.name.type.alias",
+      "entity.name.type.class",
+      "entity.name.type.interface",
+      "entity.name.type.trait.rust",
+      "storage.type.core.rust",
+      "support.class.builtin",
+      "support.class.component",
+      "storage.type.numeric.go",
+      "storage.type.string.go",
+      "storage.type.boolean.go",
+      "storage.type.byte.go",
+      "storage.type.error.go",
+      "storage.type.rune.go",
+      "storage.type.uintptr.go",
+      "storage.type.built-in.primitive",
+      "entity.other.attribute-name.class.css",
+      "support.type.python",
+      "entity.name.type.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f7cd6c"
+    }
+  },
+  "0028": {
+    "name": "Sand: type parameters",
+    "scope": [
+      "entity.name.type.parameter"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f7cd6c"
+    }
+  },
+  "0029": {
+    "name": "Sea fan: namespaces and modules",
+    "scope": [
+      "entity.name.namespace",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "storage.modifier.import",
+      "support.other.namespace",
+      "entity.name.type.namespace",
+      "entity.name.package.go",
+      "entity.name.type.package.go",
+      "entity.name.import.go",
+      "support.other.module",
+      "keyword.other.crate.rust"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d0cafd"
+    }
+  },
+  "0030": {
+    "name": "Orchid dottyback: decorators, macros, attributes",
+    "scope": [
+      "entity.name.function.decorator",
+      "meta.decorator",
+      "meta.decorator entity.name.function",
+      "punctuation.decorator",
+      "meta.attribute",
+      "entity.name.function.macro",
+      "support.function.macro",
+      "storage.type.annotation",
+      "punctuation.definition.annotation",
+      "meta.attribute.rust",
+      "entity.name.function.preprocessor",
+      "keyword.control.directive",
+      "punctuation.definition.directive"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e8a7e9"
+    }
+  },
+  "0031": {
+    "name": "Orchid dottyback: lifetimes",
+    "scope": [
+      "entity.name.type.lifetime.rust",
+      "storage.modifier.lifetime.rust",
+      "entity.name.lifetime.rust",
+      "punctuation.definition.lifetime.rust"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#e8a7e9"
+    }
+  },
+  "0032": {
+    "name": "Parrotfish: markup tags",
+    "scope": [
+      "entity.name.tag",
+      "meta.tag.sgml",
+      "entity.name.tag.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#76c7ff"
+    }
+  },
+  "0033": {
+    "name": "Polyp: attributes",
+    "scope": [
+      "entity.other.attribute-name"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#fdd0b8"
+    }
+  },
+  "0034": {
+    "name": "Clownfish: CSS ids",
+    "scope": [
+      "entity.other.attribute-name.id.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffab68"
+    }
+  },
+  "0035": {
+    "name": "Bubbles: CSS pseudo-classes",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class.css",
+      "entity.other.attribute-name.pseudo-element.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#86f8cf"
+    }
+  },
+  "0037": {
+    "name": "Sand: TOML tables",
+    "scope": [
+      "entity.other.attribute-name.table.toml",
+      "entity.other.attribute-name.table.array.toml"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f7cd6c"
+    }
+  }
+}

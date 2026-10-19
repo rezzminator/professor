@@ -83,7 +83,7 @@ EOF
   [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
     { echo "setup: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
   # Shared settings use one theme profile for every seat and the presenter's defaults.
-  theme=hibiscus-night
+  theme=tokyo-night
   settings_tmp="$(mktemp)"
   jq --arg t "custom:$theme" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
   cat "$settings_tmp" >"$HOME/.claude/settings.json"

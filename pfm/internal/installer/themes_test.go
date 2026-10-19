@@ -13,20 +13,24 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
-// releaseThemeClient serves a release the way GitHub does: each profile as a
-// raw file, and the directory listing through the contents API. Any other URL
-// is a 404, so a fetch install should not make fails loud.
-func releaseThemeClient(t *testing.T, ref string, profiles map[string]string, listing string) *http.Client {
+// releaseThemeClient serves a release the way GitHub does: each theme's
+// files raw (theme -> file -> body), and the directory listing through the
+// contents API. Any other URL is a 404, so a fetch install should not make
+// fails loud.
+func releaseThemeClient(t *testing.T, ref string, themes map[string]map[string][]byte, listing string) *http.Client {
 	t.Helper()
 	raw := releaseThemeURL(ref)
 	served := map[string]string{
 		"https://api.github.com/repos/o/r/contents/templates/themes?ref=" + ref: listing,
 	}
-	for file, body := range profiles {
-		served[raw+file] = body
+	for theme, files := range themes {
+		for file, body := range files {
+			served[raw+theme+"/"+file] = string(body)
+		}
 	}
 	return &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		body, ok := served[request.URL.String()]
@@ -41,6 +45,34 @@ func releaseThemeClient(t *testing.T, ref string, profiles map[string]string, li
 	})}
 }
 
+// splitTheme is profile as the theme directory pfm install reads
+// (themesync.SplitProfile), file -> body, and the profile document install
+// assembles from it: what it writes to ~/.claude/themes/{name}.json when the
+// profile pins no surface.
+func splitTheme(t *testing.T, profile string) (map[string][]byte, []byte) {
+	t.Helper()
+	files, err := themesync.SplitProfile([]byte(profile))
+	if err != nil {
+		t.Fatalf("split fixture profile %s: %v", profile, err)
+	}
+	document, err := themesync.AssembleProfile(func(file string) ([]byte, error) { return files[file], nil })
+	if err != nil {
+		t.Fatalf("assemble fixture profile %s: %v", profile, err)
+	}
+	return files, document
+}
+
+// writeThemeDir writes profile as the theme directory themes/{name}/ and
+// returns the document install assembles from it (splitTheme).
+func writeThemeDir(t *testing.T, themes, name, profile string) []byte {
+	t.Helper()
+	files, document := splitTheme(t, profile)
+	for file, body := range files {
+		writeFixture(t, filepath.Join(themes, name, filepath.FromSlash(file)), string(body))
+	}
+	return document
+}
+
 // releaseThemeURL is the fixture release's templates/themes/ URL at ref.
 func releaseThemeURL(ref string) string {
 	return "https://raw.githubusercontent.com/o/r/" + ref + "/templates/themes/"
@@ -48,7 +80,8 @@ func releaseThemeURL(ref string) string {
 
 func TestProfileInstallsFromSourceCloneThenFromTheReleaseListing(t *testing.T) {
 	t.Parallel()
-	themeBody := []byte(`{"name":"Sonar Gold","base":"dark","overrides":{"claude":"#ffd60a"}}` + "\n")
+	const profile = `{"name":"Sonar Gold","base":"dark","overrides":{"claude":"#ffd60a"}}`
+	releaseFiles, themeBody := splitTheme(t, profile)
 	run := func(home, sourceRepo, releaseURL string, client *http.Client) (Report, string, error) {
 		var output bytes.Buffer
 		report, err := Run(context.Background(), Options{
@@ -66,11 +99,11 @@ func TestProfileInstallsFromSourceCloneThenFromTheReleaseListing(t *testing.T) {
 		return report, output.String(), err
 	}
 
-	// 1. the clone holds the profile beside its README: discovered, installed, idempotent.
+	// 1. the clone holds the theme directory beside its README: discovered, installed, idempotent.
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"), string(themeBody))
+	writeThemeDir(t, filepath.Join(sourceRepo, "templates", "themes"), "sonar-gold", profile)
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "README.md"), "not a profile\n")
 	target := filepath.Join(home, ".claude", "themes", "sonar-gold.json")
 	first, firstOutput, err := run(home, sourceRepo, "", nil)
@@ -91,10 +124,11 @@ func TestProfileInstallsFromSourceCloneThenFromTheReleaseListing(t *testing.T) {
 		t.Fatalf("second run err=%v report=%#v, want changed=0 and an unchanged row\n%s", err, second, secondOutput)
 	}
 
-	// 2. no templates/themes/ in the clone: the release's listing names the profiles, each fetched from there.
+	// 2. no templates/themes/ in the clone: the release's listing names the theme directories,
+	// each one's files fetched from there.
 	listing := `[{"name":"README.md","type":"file"},` +
-		`{"name":"sonar-gold.json","type":"file"},{"name":"nested.json","type":"dir"}]`
-	client := releaseThemeClient(t, "v1.0.0", map[string]string{"sonar-gold.json": string(themeBody)}, listing)
+		`{"name":"sonar-gold","type":"dir"},{"name":"linked","type":"symlink"}]`
+	client := releaseThemeClient(t, "v1.0.0", map[string]map[string][]byte{"sonar-gold": releaseFiles}, listing)
 	releaseHome := t.TempDir()
 	releaseURL := releaseThemeURL("v1.0.0")
 	_, releaseOutput, err := run(releaseHome, t.TempDir(), releaseURL, client)
@@ -102,8 +136,8 @@ func TestProfileInstallsFromSourceCloneThenFromTheReleaseListing(t *testing.T) {
 		t.Fatalf("release-listing profile install: %v\n%s", err, releaseOutput)
 	}
 	got := []byte(readFixture(t, filepath.Join(releaseHome, ".claude", "themes", "sonar-gold.json")))
-	if !bytes.Equal(got, themeBody) || strings.Contains(releaseOutput, "theme nested") {
-		t.Fatalf("release-listing profile=%q, want %q and no directory taken for a profile\n%s",
+	if !bytes.Equal(got, themeBody) || strings.Contains(releaseOutput, "theme linked") {
+		t.Fatalf("release-listing profile=%q, want %q and no symlink taken for a theme\n%s",
 			got, themeBody, releaseOutput)
 	}
 
@@ -118,6 +152,16 @@ func TestProfileInstallsFromSourceCloneThenFromTheReleaseListing(t *testing.T) {
 		!strings.Contains(brokenOutput,
 			"; list release profiles: decode https://api.github.com/repos/o/r/contents/templates/themes?ref=v1.0.0") {
 		t.Fatalf("an unreadable release listing was silent or vague:\n%s", brokenOutput)
+	}
+
+	// 4. the listing holds a single-file profile: refused by name, never skipped unseen.
+	flat := releaseThemeClient(t, "v1.0.0", nil, `[{"name":"sonar-gold.json","type":"file"}]`)
+	_, flatOutput, err := run(t.TempDir(), t.TempDir(), releaseURL, flat)
+	if err != nil {
+		t.Fatalf("single-file release profile aborted host install: %v\n%s", err, flatOutput)
+	}
+	if !strings.Contains(flatOutput, "sonar-gold.json in "+releaseURL+" is a single-file profile") {
+		t.Fatalf("a single-file release profile was not refused by name:\n%s", flatOutput)
 	}
 }
 
@@ -154,8 +198,8 @@ func TestOfflineThemesInstallTheCloneProfilesWithoutAFetch(t *testing.T) {
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
-	palette := `{"name":"Local","base":"dark","overrides":{"claude":"#ffd60a"}}`
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "local.json"), palette)
+	palette := string(writeThemeDir(t, filepath.Join(sourceRepo, "templates", "themes"), "local",
+		`{"name":"Local","base":"dark","overrides":{"claude":"#ffd60a"}}`))
 	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		t.Errorf("an offline install from the clone fetched %s", request.URL)
 		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
@@ -181,11 +225,8 @@ func TestThemesDryRunOffline(t *testing.T) {
 	for _, offline := range []bool{true, false} {
 		t.Run(fmt.Sprint("offline=", offline), func(t *testing.T) {
 			home, sourceRepo := t.TempDir(), t.TempDir()
-			writeFixture(
-				t,
-				filepath.Join(sourceRepo, "templates", "themes", "local.json"),
-				`{"name":"Local","base":"dark","overrides":{"claude":"#ffd60a"}}`,
-			)
+			writeThemeDir(t, filepath.Join(sourceRepo, "templates", "themes"), "local",
+				`{"name":"Local","base":"dark","overrides":{"claude":"#ffd60a"}}`)
 			var output bytes.Buffer
 			installer := &engine{options: Options{
 				Mode: ModeDryRun, Home: home, SourceRepo: sourceRepo, Stdout: &output,
@@ -232,31 +273,34 @@ func TestOfflineThemesWithoutCloneProfilesNameSkip(t *testing.T) {
 
 func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 	t.Parallel()
+	const profile = `{"name":"X","base":"dark","overrides":{"claude":"#ffd60a"}}`
 	for _, tc := range []struct {
-		name     string
-		profiles []string
-		symlink  string
-		want     string
+		name    string
+		themes  []string
+		files   []string
+		symlink string
+		want    string
 	}{
-		{"profile stem leaves the bare-name law", []string{"a:b.json"}, "", `profile a:b.json: name must be a bare profile name`},
-		{"profile name collides with a ledger key", []string{"profile:x.json"}, "", `profile profile:x.json: name must be a bare profile name`},
-		{"symlinked profile", nil, "linked.json", `profile linked.json in `},
-		{"nothing to install", []string{"README.md"}, "", `no profile in `},
+		{"name leaves the bare-name law", []string{"a:b"}, nil, "", `theme a:b: name must be a bare profile name`},
+		{"ledger key collision", []string{"profile:x"}, nil, "", `theme profile:x: name must be a bare profile name`},
+		{"symlinked theme", nil, nil, "linked", `linked in `},
+		{"single-file profile", []string{"x"}, []string{"y.json"}, "", `y.json in `},
+		{"nothing to install", nil, []string{"README.md"}, "", `no theme in `},
 	} {
 		sourceRepo := t.TempDir()
 		dir := filepath.Join(sourceRepo, "templates", "themes")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		for _, file := range tc.profiles {
-			writeFixture(t, filepath.Join(dir, file), `{"name":"X","overrides":{}}`)
+		for _, theme := range tc.themes {
+			writeThemeDir(t, dir, theme, profile)
+		}
+		for _, file := range tc.files {
+			writeFixture(t, filepath.Join(dir, file), profile)
 		}
 		if tc.symlink != "" {
-			writeFixture(t, filepath.Join(sourceRepo, "elsewhere.json"), `{"name":"X","overrides":{}}`)
-			if err := os.Symlink(
-				filepath.Join(sourceRepo, "elsewhere.json"),
-				filepath.Join(dir, tc.symlink),
-			); err != nil {
+			writeThemeDir(t, sourceRepo, "elsewhere", profile)
+			if err := os.Symlink(filepath.Join(sourceRepo, "elsewhere"), filepath.Join(dir, tc.symlink)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -266,9 +310,12 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 		}
 	}
 
+	// a theme whose theme.json is not JSON: that theme is a named skip, the install carries on.
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "x.json"), "not json\n")
+	themes := filepath.Join(sourceRepo, "templates", "themes")
+	writeThemeDir(t, themes, "x", profile)
+	writeFixture(t, filepath.Join(themes, "x", "theme.json"), "not json\n")
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
@@ -276,14 +323,14 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
 	})
 	if err != nil {
-		t.Fatalf("non-JSON profile aborted host install: %v\n%s", err, output.String())
+		t.Fatalf("non-JSON theme file aborted host install: %v\n%s", err, output.String())
 	}
 	if !strings.Contains(output.String(), "theme x read failed") ||
-		!strings.Contains(output.String(), "is not valid JSON") {
-		t.Fatalf("non-JSON profile was silent or vague:\n%s", output.String())
+		!strings.Contains(output.String(), "theme.json: not JSON") {
+		t.Fatalf("non-JSON theme file was silent or vague:\n%s", output.String())
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".claude", "themes", "x.json")); !os.IsNotExist(statErr) {
-		t.Fatalf("non-JSON profile was installed anyway: %v", statErr)
+		t.Fatalf("a theme with a non-JSON file was installed anyway: %v", statErr)
 	}
 }
 
@@ -356,11 +403,8 @@ func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
-	writeFixture(
-		t,
-		filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"),
-		`{"name":"Sonar Gold","overrides":{"accent":"#fff"}}`+"\n",
-	)
+	writeThemeDir(t, filepath.Join(sourceRepo, "templates", "themes"), "sonar-gold",
+		`{"name":"Sonar Gold","overrides":{"claude":"#ffd60a"}}`)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
@@ -394,7 +438,7 @@ func TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients(t *test
 	defer server.Close()
 	for _, client := range []*http.Client{nil, server.Client()} {
 		content, err := fetchTheme(
-			context.Background(), client, server.URL+"/themes/sonar-gold.json?token=THEMESECRET",
+			context.Background(), client, server.URL+"/themes/sonar-gold/theme.json?token=THEMESECRET",
 		)
 		if err != nil || string(content) != `{"name":"Sonar Gold"}` {
 			t.Fatalf("fetchTheme = %q, %v", content, err)
@@ -406,7 +450,7 @@ func TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients(t *test
 	}
 	for _, record := range records {
 		for key, want := range map[string]any{
-			obs.FieldComp: "http.out", "op": "request", "method": http.MethodGet, "path": "/themes/sonar-gold.json",
+			obs.FieldComp: "http.out", "op": "request", "method": http.MethodGet, "path": "/themes/sonar-gold/theme.json",
 			"status": float64(http.StatusOK), "bytes": float64(len(`{"name":"Sonar Gold"}`)),
 		} {
 			if got, _ := record.Field(key); got != want {
@@ -419,7 +463,7 @@ func TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients(t *test
 	}
 }
 
-// TestThemeEditedAfterInstallIsLeftInPlace: a hibiscus-night.json whose SHA
+// TestThemeEditedAfterInstallIsLeftInPlace: an installed gold.json whose SHA
 // differs from the ownership record is the user's now — install, whose source
 // changed, names it locally modified and never rewrites it. The theme is Claude
 // Code's own file, which pfm theme only reads: nothing holds it back.
@@ -428,8 +472,8 @@ func TestThemeEditedAfterInstallIsLeftInPlace(t *testing.T) {
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
-	sourceFile := filepath.Join(sourceRepo, "templates", "themes", "hibiscus-night.json")
-	target := filepath.Join(home, ".claude", "themes", "hibiscus-night.json")
+	themes := filepath.Join(sourceRepo, "templates", "themes")
+	target := filepath.Join(home, ".claude", "themes", "gold.json")
 	first := `{"name":"Gold","base":"dark","overrides":{"claude":"#ffd60a"}}`
 	edited := `{"name":"Gold","base":"dark","overrides":{"claude":"#7aa2f7"}}`
 	second := `{"name":"Gold","base":"dark","overrides":{"claude":"#ffcc00"}}`
@@ -444,16 +488,16 @@ func TestThemeEditedAfterInstallIsLeftInPlace(t *testing.T) {
 		}
 		return output.String()
 	}
-	writeFixture(t, sourceFile, first)
+	writeThemeDir(t, themes, "gold", first)
 	run()
 	writeFixture(t, target, edited)
-	writeFixture(t, sourceFile, second)
+	writeThemeDir(t, themes, "gold", second)
 
 	output := run()
 	if got := readFixture(t, target); got != edited {
 		t.Fatalf("edited theme rewritten to %q, want it left at %q\n%s", got, edited, output)
 	}
-	if !strings.Contains(output, "theme hibiscus-night locally modified; left in place at "+target) {
+	if !strings.Contains(output, "theme gold locally modified; left in place at "+target) {
 		t.Fatalf("locally modified row missing:\n%s", output)
 	}
 }

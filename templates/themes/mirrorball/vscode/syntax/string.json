@@ -1,0 +1,40 @@
+{
+  "0007": {
+    "name": "Mint beam: strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "punctuation.definition.string",
+      "string.unquoted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a6e7a7"
+    }
+  },
+  "0009": {
+    "name": "Magenta: regular expressions",
+    "scope": [
+      "string.regexp",
+      "source.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f29bf0"
+    }
+  },
+  "0045": {
+    "name": "Cyan beam: links",
+    "scope": [
+      "string.other.link",
+      "constant.other.reference.link",
+      "markup.underline.link.image",
+      "meta.link.reference.def"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72e5fd"
+    }
+  }
+}

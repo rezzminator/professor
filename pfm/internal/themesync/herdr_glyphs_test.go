@@ -79,7 +79,7 @@ func TestParseProfileRefusesABadTabGlyph(t *testing.T) {
 	} {
 		_, err := ParseProfile([]byte(profileJSON(`{"herdr":` + tc.herdr + `}`)))
 		if err == nil || !strings.Contains(err.Error(), tc.want) ||
-			tc.named && !strings.Contains(err.Error(), "profile Hibiscus Night") {
+			tc.named && !strings.Contains(err.Error(), "profile Tokyo Night · neon pink") {
 			t.Errorf("%s: err = %v, want one naming %q (and the profile: %t)", name, err, tc.want, tc.named)
 		}
 	}

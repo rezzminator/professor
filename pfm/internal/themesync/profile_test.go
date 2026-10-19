@@ -11,17 +11,17 @@ import (
 	"time"
 )
 
-// hibiscusName is the seeded profile the harness's Claude theme file and
+// tokyoNightName is the seeded profile the harness's Claude theme file and
 // settings.json name: its profile, when a test writes one, sits at ProfilePath.
-const hibiscusName = "hibiscus-night"
+const tokyoNightName = "tokyo-night"
 
-// profileJSON is a profile file for hibiscus-night carrying the given
+// profileJSON is a profile file for tokyo-night carrying the given
 // surfaces object; "" writes the palette alone.
 func profileJSON(surfaces string) string {
 	if surfaces == "" {
-		return `{"name":"Hibiscus Night","base":"dark","overrides":{}}`
+		return `{"name":"Tokyo Night · neon pink","base":"dark","overrides":{}}`
 	}
-	return `{"name":"Hibiscus Night","base":"dark","overrides":{},"surfaces":` + surfaces + `}`
+	return `{"name":"Tokyo Night · neon pink","base":"dark","overrides":{},"surfaces":` + surfaces + `}`
 }
 
 // pinnedSurfaces pins one key or two on every surface; every other key keeps
@@ -32,7 +32,7 @@ const pinnedSurfaces = `{"tmux":{"@host_accent":"#ff2e93","status-style":"bg=#11
 
 func (h *harness) writeProfile(content string) string {
 	h.t.Helper()
-	path := ProfilePath(h.home, hibiscusName)
+	path := ProfilePath(h.home, tokyoNightName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		h.t.Fatal(err)
 	}
@@ -72,22 +72,22 @@ func TestAPinnedProfileTakesOverTheRenderedKeysAndDeriveKeepsTheRest(t *testing.
 	for _, socket := range []string{"cc-a", "cc-b"} {
 		wantValues(t, "tmux "+socket, h.tmux.servers[socket], map[string]string{
 			"@host_accent": "#ff2e93", "status-style": "bg=#111111,fg=#eeeeee",
-			"@p_g0": "#1f2335", "@pfm-c-accent": "#7aa2f7", "message-style": "bg=#292e42,fg=#c0caf5",
+			"@p_g0": "#221634", "@pfm-c-accent": "#c95cff", "message-style": "bg=#4a3d6b,fg=#ff9ed6",
 		})
 	}
 	config := h.read(".config/herdr/config.toml")
-	if !strings.Contains(config, "\naccent = \"#ff2e93\"\n") || strings.Contains(config, "\naccent = \"#7aa2f7\"\n") {
+	if !strings.Contains(config, "\naccent = \"#ff2e93\"\n") || strings.Contains(config, "\naccent = \"#c95cff\"\n") {
 		t.Errorf("herdr config lacks the pinned accent #ff2e93:\n%s", config)
 	}
-	if !strings.Contains(config, "\npanel_bg = \"#1a1b26\"\n") {
-		t.Errorf("herdr config lost the derived panel_bg #1a1b26:\n%s", config)
+	if !strings.Contains(config, "\npanel_bg = \"#0f0f1a\"\n") {
+		t.Errorf("herdr config lost the derived panel_bg #0f0f1a:\n%s", config)
 	}
 	contract := h.contract()
 	wantValues(t, "vscode chrome", contract.Chrome, map[string]string{
-		"titleBar.activeBackground": "#2a0a1a", "statusBar.background": "#1f2335",
+		"titleBar.activeBackground": "#2a0a1a", "statusBar.background": "#221634",
 	})
 	wantValues(t, "vscode colors", contract.Colors, map[string]string{
-		"terminal.background": "#101010", "terminal.foreground": "#c0caf5",
+		"terminal.background": "#101010", "terminal.foreground": "#ff9ed6",
 	})
 	if pins := h.state().Applied.Pins; pins == nil || pins.Tmux["@host_accent"] != "#ff2e93" {
 		t.Errorf("state.json Applied.Pins = %+v, want the profile's pins persisted", pins)
@@ -105,13 +105,13 @@ func TestReadBackJudgesTheSurfacesAgainstThePinnedRender(t *testing.T) {
 	wantVerdict(t, status, "vscode", VerdictInSync, "")
 
 	// A server reset to derive's value is out of sync, and the sync heals it to the pin.
-	h.tmux.servers["cc-a"]["@host_accent"] = "#7aa2f7"
+	h.tmux.servers["cc-a"]["@host_accent"] = "#c95cff"
 	wantVerdict(t, h.status(), "tmux", VerdictDrift, "@host_accent")
 	wantVerdict(t, h.sync(false), "tmux", VerdictInSync, "2 servers")
 	wantValues(t, "healed cc-a", h.tmux.servers["cc-a"], map[string]string{"@host_accent": "#ff2e93"})
 
 	config := h.read(".config/herdr/config.toml")
-	h.write(".config/herdr/config.toml", strings.Replace(config, "\naccent = \"#ff2e93\"", "\naccent = \"#7aa2f7\"", 1))
+	h.write(".config/herdr/config.toml", strings.Replace(config, "\naccent = \"#ff2e93\"", "\naccent = \"#c95cff\"", 1))
 	wantVerdict(t, h.status(), "herdr", VerdictDrift, "differs from the render")
 	wantVerdict(t, h.sync(false), "herdr", VerdictInSync, "")
 	if got := h.read(".config/herdr/config.toml"); !strings.Contains(got, "\naccent = \"#ff2e93\"\n") {
@@ -123,7 +123,7 @@ func TestReadBackJudgesTheSurfacesAgainstThePinnedRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.write(".local/state/pfm/theme/current.json", strings.Replace(string(raw), "#2a0a1a", "#1f2335", 1))
+	h.write(".local/state/pfm/theme/current.json", strings.Replace(string(raw), "#2a0a1a", "#221634", 1))
 	wantVerdict(t, h.status(), "vscode", VerdictDrift, "differs from the render")
 	h.sync(false)
 	if got := h.contract().Chrome["titleBar.activeBackground"]; got != "#2a0a1a" {
@@ -172,7 +172,7 @@ func TestAPinChangeIsAChangedThemeAndAnUnchangedPinIsNot(t *testing.T) {
 	if report := h.sync(false); report.Generation != 3 {
 		t.Errorf("a sync after the pins were removed = generation %d, want 3", report.Generation)
 	}
-	wantValues(t, "cc-a unpinned", h.tmux.servers["cc-a"], map[string]string{"@host_accent": "#7aa2f7"})
+	wantValues(t, "cc-a unpinned", h.tmux.servers["cc-a"], map[string]string{"@host_accent": "#c95cff"})
 }
 
 func TestAServerBornLaterRendersThePins(t *testing.T) {
@@ -184,7 +184,7 @@ func TestAServerBornLaterRendersThePins(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantValues(t, "cc-late", h.tmux.servers["cc-late"], map[string]string{
-		"@host_accent": "#ff2e93", "status-style": "bg=#111111,fg=#eeeeee", "@p_g0": "#1f2335",
+		"@host_accent": "#ff2e93", "status-style": "bg=#111111,fg=#eeeeee", "@p_g0": "#221634",
 	})
 }
 
@@ -208,7 +208,7 @@ func TestAnUnreadableProfileIsASourceErrorNamingTheFile(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
-			path := ProfilePath(h.home, hibiscusName)
+			path := ProfilePath(h.home, tokyoNightName)
 			tc.write(t, path)
 			report := h.on()
 			claude := row(t, report, "claude")
@@ -266,7 +266,7 @@ func TestNoProfileFileRendersTheUnpinnedTheme(t *testing.T) {
 				h.writeProfile(profile)
 			}
 			h.on()
-			unpinned := hibiscusApplied(t)
+			unpinned := tokyoNightApplied(t)
 			if applied := h.state().Applied; applied == nil || !reflect.DeepEqual(*applied, unpinned) {
 				t.Fatalf("state Applied = %+v, want the unpinned %+v", applied, unpinned)
 			}
@@ -333,7 +333,7 @@ func TestParseProfileIsStrictAndChecksItsPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.Name != "Hibiscus Night" || profile.Base != "dark" || profile.Surfaces == nil ||
+	if profile.Name != "Tokyo Night · neon pink" || profile.Base != "dark" || profile.Surfaces == nil ||
 		profile.Surfaces.Tmux["@host_accent"] != "#ff2e93" ||
 		profile.Surfaces.VSCode.Chrome["titleBar.activeBackground"] != "#2a0a1a" {
 		t.Errorf("profile = %+v", profile)
@@ -387,7 +387,7 @@ func TestClaudeTokenRegistryParsesAndCoversEveryShippedProfile(t *testing.T) {
 }
 
 func TestClaudeFileIsThePaletteAlone(t *testing.T) {
-	palette := `{"name":"Hibiscus Night","base":"dark","overrides":{"claude":"#ff2e93"}}` + "\n"
+	palette := `{"name":"Tokyo Night · neon pink","base":"dark","overrides":{"claude":"#ff2e93"}}` + "\n"
 	profile, err := ParseProfile([]byte(palette))
 	if err != nil {
 		t.Fatal(err)
@@ -397,14 +397,14 @@ func TestClaudeFileIsThePaletteAlone(t *testing.T) {
 		t.Errorf("a palette-only file = %q, %v, want its bytes verbatim", got, err)
 	}
 
-	pinned := `{"name":"Hibiscus Night","base":"dark","overrides":{"claude":"#ff2e93"},` +
+	pinned := `{"name":"Tokyo Night · neon pink","base":"dark","overrides":{"claude":"#ff2e93"},` +
 		`"surfaces":{"tmux":{"@host_accent":"#ff2e93"}}}`
 	profile, err = ParseProfile([]byte(pinned))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err = profile.ClaudeFile([]byte(pinned))
-	want := "{\n  \"name\": \"Hibiscus Night\",\n  \"base\": \"dark\",\n  \"overrides\": {\n    \"claude\": \"#ff2e93\"\n  }\n}\n"
+	want := "{\n  \"name\": \"Tokyo Night · neon pink\",\n  \"base\": \"dark\",\n  \"overrides\": {\n    \"claude\": \"#ff2e93\"\n  }\n}\n"
 	if err != nil || string(got) != want {
 		t.Errorf("a pinned file = %q, %v, want name, base and overrides alone:\n%s", got, err, want)
 	}

@@ -1,0 +1,90 @@
+{
+  "0008": {
+    "name": "Dim lavender · punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "meta.brace.round",
+      "meta.brace.square",
+      "meta.brace.curly",
+      "punctuation.definition.parameters",
+      "punctuation.definition.arguments",
+      "punctuation.definition.block",
+      "punctuation.definition.array",
+      "punctuation.definition.dictionary",
+      "punctuation.separator.comma",
+      "punctuation.separator.period",
+      "punctuation.definition.tag",
+      "punctuation.definition.typeparameters",
+      "punctuation.definition.generic"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a582c4"
+    }
+  },
+  "0010": {
+    "name": "Chartreuse dim · quotes",
+    "scope": [
+      "punctuation.definition.string",
+      "punctuation.definition.string.begin",
+      "punctuation.definition.string.end",
+      "punctuation.definition.string.template"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a8d94a"
+    }
+  },
+  "0011": {
+    "name": "Corona Magenta · interpolation",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "punctuation.definition.template-expression.begin",
+      "punctuation.definition.template-expression.end",
+      "punctuation.section.interpolation",
+      "storage.type.format.python",
+      "constant.character.format.placeholder.other.python",
+      "punctuation.definition.interpolation",
+      "punctuation.section.embedded.begin",
+      "punctuation.section.embedded.end"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff2fc8"
+    }
+  },
+  "0015": {
+    "name": "Arc Yellow · regex groups",
+    "scope": [
+      "punctuation.definition.group.regexp",
+      "punctuation.definition.group.capture.regexp",
+      "punctuation.definition.group.no-capture.regexp",
+      "meta.group.regexp",
+      "constant.other.character-class.regexp",
+      "constant.other.character-class.set.regexp",
+      "punctuation.definition.character-class.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe14a"
+    }
+  },
+  "0059": {
+    "name": "Aurora Pink · list markers",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "beginning.punctuation.definition.list.markdown",
+      "punctuation.definition.list.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fe66b7"
+    }
+  }
+}

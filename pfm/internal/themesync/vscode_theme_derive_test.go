@@ -12,7 +12,8 @@ import (
 // shippedThemesDir is the blueprint's templates/themes/, every profile it ships.
 const shippedThemesDir = "../../../templates/themes"
 
-// shippedProfiles reads every profile the blueprint ships, keyed by stem.
+// shippedProfiles reads every theme the blueprint ships, keyed by its
+// directory's name: each one's profile as ReadProfileDir assembles it.
 func shippedProfiles(t *testing.T) map[string][]byte {
 	t.Helper()
 	entries, err := os.ReadDir(shippedThemesDir)
@@ -21,17 +22,17 @@ func shippedProfiles(t *testing.T) map[string][]byte {
 	}
 	profiles := map[string][]byte{}
 	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
+		if !entry.IsDir() {
 			continue
 		}
-		content, err := os.ReadFile(filepath.Join(shippedThemesDir, entry.Name()))
+		content, err := ReadProfileDir(filepath.Join(shippedThemesDir, entry.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
-		profiles[strings.TrimSuffix(entry.Name(), ".json")] = content
+		profiles[entry.Name()] = content
 	}
 	if len(profiles) == 0 {
-		t.Fatalf("no profile in %s: the gate below would judge nothing", shippedThemesDir)
+		t.Fatalf("no theme in %s: the gate below would judge nothing", shippedThemesDir)
 	}
 	return profiles
 }

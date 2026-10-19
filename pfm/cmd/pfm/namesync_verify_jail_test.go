@@ -162,12 +162,14 @@ func readProbe(t *testing.T, socketPath string, arguments ...string) string {
 
 // namesyncThemeState is a state.json a `pfm theme on` left: enabled, one
 // derived dark theme applied at generation 1.
-const namesyncThemeState = `{"enabled":true,"appearance":"dark","generation":1,"applied":{"value":"custom:hibiscus-night",` +
-	`"title":"Hibiscus Night","side":"dark","primary":{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#c0caf5",` +
-	`"selectionBackground":"#283457","selectionForeground":"#c0caf5","surface":"#1f2335","overlay":"#292e42",` +
-	`"muted":"#565f89","accent":"#7aa2f7","orange":"#ec937b","ansi":["#1a1b26","#f7768e","#9ece6a","#e0af68","#7aa2f7",` +
-	`"#bb9af7","#7dcfff","#c0caf5","#565f89","#f7768e","#9ece6a","#e0af68","#7aa2f7","#bb9af7","#7dcfff","#c0caf5"],` +
-	`"state":{"blocked":"#bb9af7","working":"#7aa2f7","done":"#9ece6a","idle":"#7b84af"}}}}`
+const namesyncThemeState = `{"enabled":true,"appearance":"dark","generation":1,"applied":{` +
+	`"value":"custom:tokyo-night","title":"Tokyo Night · neon pink","side":"dark","primary":{` +
+	`"background":"#0f0f1a","foreground":"#ff9ed6",` +
+	`"cursor":"#ff9ed6","selectionBackground":"#3a2d6b","selectionForeground":"#ff9ed6","surface":"#221634",` +
+	`"overlay":"#4a3d6b","muted":"#7a6fb0","accent":"#c95cff","orange":"#ff8c42","ansi":["#0f0f1a","#ff3d6e",` +
+	`"#00ffa3","#ffd23f","#2d9bff","#c95cff","#22e1ff","#ff9ed6","#7a6fb0","#ff3d6e","#00ffa3","#ffd23f","#2d9bff",` +
+	`"#c95cff","#22e1ff","#ff9ed6"],"state":{"blocked":"#ffd23f","working":"#2d9bff","done":"#00ffa3",` +
+	`"idle":"#9b8fd6","unknown":"#9289be"}}}}`
 
 // name-sync --apply carries the theme to every live chat server through the
 // theme's own door: nothing is said or touched while `pfm theme` has never
@@ -235,7 +237,7 @@ func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
 		"show",
 		"-gv",
 		"@pfm-theme",
-	); got != "custom:hibiscus-night" {
-		t.Fatalf("server @pfm-theme = %q, want custom:hibiscus-night", got)
+	); got != "custom:tokyo-night" {
+		t.Fatalf("server @pfm-theme = %q, want custom:tokyo-night", got)
 	}
 }

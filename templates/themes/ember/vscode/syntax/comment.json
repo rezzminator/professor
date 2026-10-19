@@ -1,0 +1,40 @@
+{
+  "0000": {
+    "name": "Ash · comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#8a7869"
+    }
+  },
+  "0001": {
+    "name": "Ash · doc-comment tags",
+    "scope": [
+      "comment keyword.codetag",
+      "storage.type.class.jsdoc",
+      "comment.block.documentation entity.name.type",
+      "comment.block.documentation storage.type",
+      "comment.block.documentation variable.other"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#d29f73"
+    }
+  },
+  "0053": {
+    "name": "Ember · front matter",
+    "scope": [
+      "comment.frontmatter",
+      "punctuation.definition.begin.frontmatter",
+      "punctuation.definition.end.frontmatter"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d29f73"
+    }
+  }
+}

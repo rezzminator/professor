@@ -1,0 +1,91 @@
+{
+  "0003": {
+    "name": "Ash-white · variables",
+    "scope": [
+      "variable",
+      "variable.other",
+      "meta.definition.variable.name",
+      "variable.other.readwrite",
+      "variable.other.assignment.go",
+      "variable.other.go",
+      "variable.other.normal.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ece3d8"
+    }
+  },
+  "0015": {
+    "name": "Temper violet · self and this",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.parameter.function.language.special.self.python",
+      "variable.language.special.self.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c195cf"
+    }
+  },
+  "0016": {
+    "name": "Pale amber · parameters",
+    "scope": [
+      "variable.parameter",
+      "meta.parameter",
+      "entity.name.variable.parameter",
+      "variable.parameter.go"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ebd6b3"
+    }
+  },
+  "0017": {
+    "name": "Peach ash · properties",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "entity.name.tag.yaml",
+      "variable.object.property",
+      "variable.other.property.go",
+      "variable.other.member",
+      "support.type.property-name.toml"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#efbea7"
+    }
+  },
+  "0024": {
+    "name": "Temper violet · labels and lifetimes",
+    "scope": [
+      "variable.other.label.go",
+      "entity.name.label",
+      "entity.name.type.lifetime.rust",
+      "punctuation.definition.lifetime.rust",
+      "storage.modifier.lifetime.rust"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c195cf"
+    }
+  },
+  "0035": {
+    "name": "Peach ash · shell variables",
+    "scope": [
+      "variable.other.normal.shell punctuation.definition.variable.shell",
+      "variable.other.special.shell",
+      "variable.other.positional.shell",
+      "punctuation.definition.variable.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#efbea7"
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "0007": {
+    "name": "Harvest gold: strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "string.unquoted",
+      "string.interpolated",
+      "string.quoted.raw",
+      "string.unquoted.plain.out.yaml",
+      "string.unquoted.plain.in.yaml"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f4c76c"
+    }
+  },
+  "0010": {
+    "name": "Mint: regular expressions",
+    "scope": [
+      "string.regexp",
+      "source.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#81e992"
+    }
+  },
+  "0011": {
+    "name": "Burnt orange: regex structure",
+    "scope": [
+      "string.regexp keyword.operator.quantifier",
+      "keyword.operator.quantifier.regexp",
+      "keyword.control.anchor.regexp",
+      "string.regexp punctuation.definition.group",
+      "punctuation.definition.group.regexp",
+      "punctuation.definition.character-class.regexp",
+      "keyword.operator.or.regexp",
+      "keyword.operator.negation.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9d5c"
+    }
+  },
+  "0041": {
+    "name": "Liner notes: link text",
+    "scope": [
+      "string.other.link",
+      "string.other.link.title.markdown",
+      "string.other.link.description.markdown",
+      "string.other.link.description.title.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b5d3ff"
+    }
+  }
+}

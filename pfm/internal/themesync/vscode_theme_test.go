@@ -105,18 +105,18 @@ func TestMergeVSCodeThemeReplacesOnlyWhatTheProfileNames(t *testing.T) {
 }
 
 func TestRenderVSCodeThemeNamesAndLayersTheTheme(t *testing.T) {
-	profile := `{"name":"Hibiscus Night · everything pink","base":"dark","overrides":{"claude":"#ff6ba7","inverseText":"#381b29"},` +
+	profile := `{"name":"Tokyo Night · neon pink","base":"dark","overrides":{"claude":"#ff6ba7","inverseText":"#381b29"},` +
 		`"surfaces":{"vscode":{"chrome":{"statusBar.background":"#112233"},"theme":{` +
 		`"colors":{"sideBar.background":"#2a0f1c","titleBar.activeBackground":"#445566","terminal.background":"#010203"},` +
 		`"tokenColors":[{"scope":["comment"],"settings":{"foreground":"#a87d90","fontStyle":"italic"}}]}}}}`
-	file, err := RenderVSCodeTheme("hibiscus-night", []byte(profile))
+	file, err := RenderVSCodeTheme("tokyo-night", []byte(profile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if file.ID != "professor-hibiscus-night" || file.Label != "Professor · Hibiscus Night" ||
+	if file.ID != "professor-tokyo-night" || file.Label != "Professor · Tokyo Night" ||
 		file.UITheme != "vs-dark" ||
-		file.Path != "./themes/professor-hibiscus-night.json" ||
-		file.Value != "custom:hibiscus-night" {
+		file.Path != "./themes/professor-tokyo-night.json" ||
+		file.Value != "custom:tokyo-night" {
 		t.Errorf("file = %+v", file)
 	}
 	var document renderedDocument

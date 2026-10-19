@@ -1,0 +1,105 @@
+{
+  "0036": {
+    "name": "Cherry · invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#f05656"
+    }
+  },
+  "0037": {
+    "name": "Cherry · deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#f05656"
+    }
+  },
+  "0059": {
+    "name": "Cherry · log errors",
+    "scope": [
+      "log.error",
+      "log.exception"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f05656"
+    }
+  },
+  "0060": {
+    "name": "Gold · log warnings",
+    "scope": [
+      "log.warning"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#face68"
+    }
+  },
+  "0061": {
+    "name": "Temper blue · log info",
+    "scope": [
+      "log.info"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#83b6e8"
+    }
+  },
+  "0062": {
+    "name": "Ash · log debug",
+    "scope": [
+      "log.debug",
+      "log.verbose"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9b8c7f"
+    }
+  },
+  "0063": {
+    "name": "Pale steel · log dates",
+    "scope": [
+      "log.date"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b4d6ef"
+    }
+  },
+  "0064": {
+    "name": "White heat · log constants",
+    "scope": [
+      "log.constant"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fee392"
+    }
+  },
+  "0065": {
+    "name": "Straw · log strings",
+    "scope": [
+      "log.string"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d3d389"
+    }
+  },
+  "0066": {
+    "name": "Ember · log exception types",
+    "scope": [
+      "log.exceptiontype"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f47550"
+    }
+  }
+}

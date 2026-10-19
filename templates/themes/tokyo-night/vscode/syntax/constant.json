@@ -1,0 +1,87 @@
+{
+  "0010": {
+    "name": "Colors",
+    "scope": [
+      "constant.other.color",
+      "constant.other.color.rgb-value.hex punctuation.definition.constant"
+    ],
+    "settings": {
+      "foreground": "#f49ad9"
+    }
+  },
+  "0026": {
+    "name": "Globals, PHP Constants, etc",
+    "scope": [
+      "constant.other.php",
+      "variable.other.global.safer",
+      "variable.other.global.safer punctuation.definition.variable",
+      "variable.other.global",
+      "variable.other.global punctuation.definition.variable",
+      "constant.other"
+    ],
+    "settings": {
+      "foreground": "#ffb4a8"
+    }
+  },
+  "0072": {
+    "name": "Regular Expressions - Character Class",
+    "scope": [
+      "constant.other.character-class.regexp"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0073": {
+    "name": "Regular Expressions - Character Class Set",
+    "scope": [
+      "constant.other.character-class.set.regexp",
+      "punctuation.definition.character-class.regexp"
+    ],
+    "settings": {
+      "foreground": "#ffb4a8"
+    }
+  },
+  "0075": {
+    "name": "Regular Expressions - Backslash",
+    "scope": [
+      "constant.character.escape.backslash"
+    ],
+    "settings": {
+      "foreground": "#ffbde3"
+    }
+  },
+  "0076": {
+    "name": "Escape Characters",
+    "scope": [
+      "constant.character.escape"
+    ],
+    "settings": {
+      "foreground": "#ff70e5"
+    }
+  },
+  "0130": {
+    "name": "Pink · constants",
+    "scope": [
+      "constant",
+      "entity.name.constant",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "support.constant.color",
+      "support.constant.property-value.css"
+    ],
+    "settings": {
+      "foreground": "#ffd23f"
+    }
+  },
+  "0145": {
+    "name": "Pink · links",
+    "scope": [
+      "constant.other.reference.link"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  }
+}

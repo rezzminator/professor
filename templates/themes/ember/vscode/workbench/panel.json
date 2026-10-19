@@ -1,0 +1,21 @@
+{
+  "outputView.background": "#171310",
+  "outputViewStickyScroll.background": "#171310",
+  "panel.background": "#171310",
+  "panel.border": "#312823",
+  "panel.dropBorder": "#ff9044",
+  "panelInput.border": "#312823",
+  "panelSection.border": "#312823",
+  "panelSection.dropBackground": "#ff904422",
+  "panelSectionHeader.background": "#120e0c",
+  "panelSectionHeader.border": "#312823",
+  "panelSectionHeader.foreground": "#d4c8bc",
+  "panelStickyScroll.background": "#171310",
+  "panelStickyScroll.border": "#312823",
+  "panelStickyScroll.shadow": "#00000099",
+  "panelTitle.activeBorder": "#ff9044",
+  "panelTitle.activeForeground": "#ece3d8",
+  "panelTitle.inactiveForeground": "#9b8c7f",
+  "panelTitleBadge.background": "#ff9044",
+  "panelTitleBadge.foreground": "#0d0a08"
+}

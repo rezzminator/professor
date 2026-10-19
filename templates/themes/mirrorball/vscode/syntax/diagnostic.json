@@ -1,0 +1,96 @@
+{
+  "0039": {
+    "name": "Red: invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#f26868"
+    }
+  },
+  "0040": {
+    "name": "Smoke: deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#8e7ea4"
+    }
+  },
+  "0059": {
+    "name": "Log: error",
+    "scope": [
+      "log.error",
+      "log.exception",
+      "log.exceptiontype"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f26868"
+    }
+  },
+  "0060": {
+    "name": "Log: warning",
+    "scope": [
+      "log.warning"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fce353"
+    }
+  },
+  "0061": {
+    "name": "Log: info",
+    "scope": [
+      "log.info"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0062": {
+    "name": "Log: debug",
+    "scope": [
+      "log.debug",
+      "log.verbose"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b294f5"
+    }
+  },
+  "0063": {
+    "name": "Log: date",
+    "scope": [
+      "log.date"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9284a8"
+    }
+  },
+  "0064": {
+    "name": "Log: constant",
+    "scope": [
+      "log.constant"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa07a"
+    }
+  },
+  "0065": {
+    "name": "Log: string",
+    "scope": [
+      "log.string"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a6e7a7"
+    }
+  }
+}

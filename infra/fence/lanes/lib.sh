@@ -797,23 +797,31 @@ claude_registry_without_family_entries() {
   jq -cS '.mcpServers = ((.mcpServers // {}) | del(."chat-professor", ."harvester-professor"))' "$1"
 }
 
-# bundled_themes <templates/themes dir> — the theme profiles the directory
-# ships, every *.json in it, one name per line (each installs as
+# bundled_themes <templates/themes dir> — the themes the directory ships,
+# every subdirectory, one name per line (each installs as
 # ~/.claude/themes/{name}.json and ~/.local/share/pfm/install/themes/{name}.json).
 # Exit 1 with the reason on stdout when the directory is unreadable or holds
-# no profile, so a caller never reads a failed lookup as "no themes".
+# no theme, so a caller never reads a failed lookup as "no themes".
 bundled_themes() {
-  local listing names
-  if ! listing="$(ls -1 -- "$1" 2>&1)"; then
+  local listing names entry
+  if ! listing="$(ls -1A -- "$1" 2>&1)"; then
     printf 'no bundled theme read from %s: %s' "$1" "$(one_line "$listing")"
     return 1
   fi
-  names="$(printf '%s\n' "$listing" | sed -n 's/\.json$//p')"
+  names=""
+  while IFS= read -r entry; do
+    [ -n "$entry" ] && [ -d "$1/$entry" ] || continue
+    if [ ! -f "$1/$entry/theme.json" ]; then
+      printf 'no bundled theme read from %s: %s/theme.json missing' "$1" "$entry"
+      return 1
+    fi
+    names="$names$entry"$'\n'
+  done <<<"$listing"
   if [ -z "$names" ]; then
-    printf 'no bundled theme read from %s: no *.json profile there' "$1"
+    printf 'no bundled theme read from %s: no theme directory there' "$1"
     return 1
   fi
-  printf '%s\n' "$names"
+  printf '%s' "$names"
 }
 
 # assert_opencode_mcp_registered <pfm-bin> — M.03 and E3.02 are the same

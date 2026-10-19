@@ -1,0 +1,109 @@
+{
+  "0027": {
+    "name": "Aquamarine · built-ins",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin",
+      "keyword.other.special-method",
+      "support.function.builtin.python",
+      "support.function.builtin.shell",
+      "support.function.console",
+      "support.function.dom",
+      "support.variable",
+      "support.variable.dom",
+      "support.variable.object",
+      "support.module.node",
+      "support.type.object.module",
+      "support.function.node",
+      "variable.language.arguments",
+      "support.function.builtin.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf5dc"
+    }
+  },
+  "0029": {
+    "name": "Amber · primitive types",
+    "scope": [
+      "support.type.primitive",
+      "storage.type.primitive",
+      "keyword.type",
+      "storage.type.built-in",
+      "storage.type.numeric.go",
+      "storage.type.string.go",
+      "storage.type.boolean.go",
+      "storage.type.byte.go",
+      "storage.type.rune.go",
+      "storage.type.error.go",
+      "storage.type.uintptr.go",
+      "entity.name.type.primitive",
+      "support.type.builtin",
+      "support.type.python",
+      "entity.name.type.numeric.rust",
+      "storage.type.core.rust",
+      "support.type.primitive.ts"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb347"
+    }
+  },
+  "0035": {
+    "name": "Arc Yellow · components",
+    "scope": [
+      "support.class.component",
+      "entity.name.tag.tsx.component",
+      "entity.name.tag.jsx.component",
+      "support.class.component.tsx",
+      "support.class.component.jsx"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe14a"
+    }
+  },
+  "0040": {
+    "name": "Pale periwinkle · CSS properties",
+    "scope": [
+      "support.type.property-name.css",
+      "meta.property-name.css",
+      "support.type.vendored.property-name.css",
+      "support.type.custom-property.css",
+      "variable.css",
+      "variable.scss",
+      "variable.other.less"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#bcc5ff"
+    }
+  },
+  "0041": {
+    "name": "Amber · CSS values",
+    "scope": [
+      "support.constant.property-value.css",
+      "meta.property-value.css",
+      "support.constant.color",
+      "support.constant.font-name",
+      "support.constant.media",
+      "support.constant.vendored.property-value.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb347"
+    }
+  },
+  "0071": {
+    "name": "Horizon Cyan · SQL functions",
+    "scope": [
+      "support.function.aggregate.sql",
+      "support.function.scalar.sql"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf5dc"
+    }
+  }
+}

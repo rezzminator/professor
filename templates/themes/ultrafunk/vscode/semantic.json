@@ -1,0 +1,110 @@
+{
+  "*.async": {
+    "italic": true
+  },
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "attribute": "#3cf29b",
+  "boolean": {
+    "bold": true,
+    "foreground": "#8b9aff"
+  },
+  "builtinAttribute": "#3cf29b",
+  "builtinType": "#ffb347",
+  "class": "#ffe14a",
+  "class.defaultLibrary": "#ffe14a",
+  "clsParameter": {
+    "foreground": "#ff7ad9",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#9070bb",
+    "italic": true
+  },
+  "comment.documentation": {
+    "foreground": "#9070bb",
+    "italic": true
+  },
+  "decorator": "#3cf29b",
+  "enum": "#ffe14a",
+  "enumMember": "#ffb347",
+  "escapeSequence": "#a6f6ff",
+  "event": "#3cf29b",
+  "formatSpecifier": "#ff2fc8",
+  "function": "#3ce8ff",
+  "function.declaration": {
+    "bold": true,
+    "foreground": "#3ce8ff"
+  },
+  "function.defaultLibrary": "#5cf5dc",
+  "interface": "#ffe14a",
+  "keyword": "#fe66b7",
+  "label": {
+    "foreground": "#ff8a3d",
+    "italic": true
+  },
+  "lifetime": {
+    "foreground": "#ff8a3d",
+    "italic": true
+  },
+  "macro": "#3cf29b",
+  "method": "#3ce8ff",
+  "method.declaration": {
+    "bold": true,
+    "foreground": "#3ce8ff"
+  },
+  "method.defaultLibrary": "#5cf5dc",
+  "module": "#e0b0ff",
+  "namespace": "#e0b0ff",
+  "number": "#ff8a3d",
+  "operator": "#ff8fcb",
+  "parameter": {
+    "foreground": "#ffbe8c",
+    "italic": true
+  },
+  "property": "#bcc5ff",
+  "property.readonly": "#ffb347",
+  "property.static": {
+    "foreground": "#bcc5ff",
+    "italic": true
+  },
+  "regexp": "#ff8a3d",
+  "selfKeyword": {
+    "foreground": "#ff7ad9",
+    "italic": true
+  },
+  "selfParameter": {
+    "foreground": "#ff7ad9",
+    "italic": true
+  },
+  "selfTypeKeyword": {
+    "foreground": "#ffe14a",
+    "italic": true
+  },
+  "string": "#c6ff4a",
+  "struct": "#ffe14a",
+  "type": "#ffe14a",
+  "type.defaultLibrary": "#ffb347",
+  "typeAlias": "#ffe14a",
+  "typeParameter": {
+    "foreground": "#ffe14a",
+    "italic": true
+  },
+  "unresolvedReference": {
+    "foreground": "#ff4040",
+    "underline": true
+  },
+  "variable": "#ffe3f5",
+  "variable.constant": "#ffb347",
+  "variable.defaultLibrary": "#5cf5dc",
+  "variable.mutable": {
+    "foreground": "#ffe3f5",
+    "underline": true
+  },
+  "variable.readonly": "#ffb347",
+  "variable.static": {
+    "foreground": "#ffe3f5",
+    "italic": true
+  }
+}

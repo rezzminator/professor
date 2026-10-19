@@ -1,0 +1,190 @@
+{
+  "0011": {
+    "name": "Pearl: code inside template strings",
+    "scope": [
+      "meta.template.expression",
+      "meta.embedded.line",
+      "meta.interpolation",
+      "meta.fstring.python meta.embedded"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e1f3f2"
+    }
+  },
+  "0036": {
+    "name": "Driftwood: doctype",
+    "scope": [
+      "meta.tag.sgml.doctype",
+      "meta.tag.metadata.doctype"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#89a8ae"
+    }
+  },
+  "0055": {
+    "name": "Lagoon teal: diff headers",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.header.from-file",
+      "meta.diff.header.to-file"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#39e5c9"
+    }
+  },
+  "0056": {
+    "name": "Nudibranch: diff ranges",
+    "scope": [
+      "meta.diff.range"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ccabff"
+    }
+  },
+  "0057": {
+    "name": "Driftwood: diff index",
+    "scope": [
+      "meta.diff.index"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#89a8ae"
+    }
+  },
+  "0068": {
+    "name": "Atoll depth 1 · beach sand: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#face68"
+    }
+  },
+  "0069": {
+    "name": "Atoll depth 2 · turquoise flat: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3ce5c7"
+    }
+  },
+  "0070": {
+    "name": "Atoll depth 3 · coral crest: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa28f"
+    }
+  },
+  "0071": {
+    "name": "Atoll depth 4 · drop-off blue: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#76c7ff"
+    }
+  },
+  "0072": {
+    "name": "Atoll depth 5 · twilight: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a7baff"
+    }
+  },
+  "0073": {
+    "name": "Atoll depth 6 · midnight violet: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ccabff"
+    }
+  },
+  "0074": {
+    "name": "Atoll depth 7 · beach sand: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#face68"
+    }
+  },
+  "0075": {
+    "name": "Atoll depth 8 · turquoise flat: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3ce5c7"
+    }
+  },
+  "0076": {
+    "name": "Atoll depth 9 · coral crest: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa28f"
+    }
+  },
+  "0077": {
+    "name": "Atoll depth 10 · drop-off blue: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#76c7ff"
+    }
+  },
+  "0078": {
+    "name": "Atoll depth 11 · twilight: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a7baff"
+    }
+  },
+  "0079": {
+    "name": "Atoll depth 12 · midnight violet: JSON keys",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ccabff"
+    }
+  }
+}

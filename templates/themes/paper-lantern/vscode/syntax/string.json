@@ -1,0 +1,72 @@
+{
+  "0012": {
+    "name": "Matcha · strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "string.quoted.single",
+      "string.quoted.double",
+      "string.quoted.triple",
+      "string.quoted.raw",
+      "string.unquoted",
+      "string.interpolated",
+      "string.other",
+      "meta.string",
+      "string.quoted.other.lt-gt.include",
+      "markup.raw.block.yaml",
+      "string.unquoted.plain.out.yaml",
+      "string.unquoted.plain.in.yaml",
+      "string.unquoted.block.yaml",
+      "string.quoted.docstring",
+      "string.unquoted.heredoc"
+    ],
+    "settings": {
+      "foreground": "#427231"
+    }
+  },
+  "0014": {
+    "name": "Nezumi-matcha · docstrings",
+    "scope": [
+      "string.quoted.docstring.multi.python",
+      "string.quoted.docstring.raw.multi.python",
+      "comment.block.documentation.python",
+      "string.quoted.multi.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#516d46"
+    }
+  },
+  "0016": {
+    "name": "Rokusho · regular expressions",
+    "scope": [
+      "string.regexp",
+      "source.regexp",
+      "string.regexp constant.character.escape",
+      "string.regexp punctuation.definition.string",
+      "keyword.operator.quantifier.regexp",
+      "keyword.control.anchor.regexp",
+      "keyword.operator.or.regexp",
+      "punctuation.definition.group.regexp",
+      "punctuation.definition.character-class.regexp",
+      "constant.other.character-class.regexp",
+      "constant.other.character-class.set.regexp",
+      "support.other.parenthesis.regexp"
+    ],
+    "settings": {
+      "foreground": "#29745a"
+    }
+  },
+  "0062": {
+    "name": "Ai · link text",
+    "scope": [
+      "string.other.link.title.markdown",
+      "string.other.link.description.markdown",
+      "meta.link.inline.markdown string.other.link"
+    ],
+    "settings": {
+      "foreground": "#2a409b"
+    }
+  }
+}

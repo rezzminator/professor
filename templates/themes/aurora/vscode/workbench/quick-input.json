@@ -1,0 +1,12 @@
+{
+  "pickerGroup.border": "#222d4b",
+  "pickerGroup.foreground": "#5cf0a8",
+  "quickInput.background": "#0b1121",
+  "quickInput.foreground": "#dce5fa",
+  "quickInput.list.focusBackground": "#2a2f68",
+  "quickInputList.focusBackground": "#2a2f68",
+  "quickInputList.focusForeground": "#f4f7ff",
+  "quickInputList.focusHighlightForeground": "#bdfde0",
+  "quickInputList.focusIconForeground": "#f4f7ff",
+  "quickInputTitle.background": "#04060d"
+}

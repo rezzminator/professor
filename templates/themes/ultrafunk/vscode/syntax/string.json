@@ -1,0 +1,46 @@
+{
+  "0009": {
+    "name": "Signal Chartreuse · strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "string.unquoted",
+      "string.quoted.single",
+      "string.quoted.double",
+      "string.quoted.triple",
+      "string.interpolated",
+      "string.other",
+      "meta.attribute-selector.css string",
+      "string.quoted.raw"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#c6ff4a"
+    }
+  },
+  "0014": {
+    "name": "Blaze Orange · regex",
+    "scope": [
+      "string.regexp",
+      "source.regexp",
+      "string.regexp.js"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8a3d"
+    }
+  },
+  "0055": {
+    "name": "Pale periwinkle · link text",
+    "scope": [
+      "string.other.link.title.markdown",
+      "string.other.link.description.markdown",
+      "meta.link.inline.markdown string.other.link"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#bcc5ff"
+    }
+  }
+}

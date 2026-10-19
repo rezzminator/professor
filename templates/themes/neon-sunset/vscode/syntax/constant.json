@@ -1,0 +1,79 @@
+{
+  "0009": {
+    "name": "String escapes and placeholders",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "constant.other.placeholder",
+      "string.regexp constant.character.escape",
+      "constant.character.format.placeholder",
+      "constant.other.symbol"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe8a3"
+    }
+  },
+  "0014": {
+    "name": "Coral: numbers",
+    "scope": [
+      "constant.numeric",
+      "keyword.other.unit",
+      "constant.numeric.decimal",
+      "constant.numeric.integer",
+      "constant.numeric.float",
+      "constant.numeric.hex",
+      "constant.other.color.rgb-value",
+      "punctuation.definition.constant.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff7b72"
+    }
+  },
+  "0015": {
+    "name": "Coral: constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other",
+      "support.constant.property-value.css",
+      "support.constant.color",
+      "support.constant.font-name",
+      "support.constant.math"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff7b72"
+    }
+  },
+  "0016": {
+    "name": "Orchid: language constants",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.nil",
+      "constant.language.python",
+      "constant.language.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e48bff"
+    }
+  },
+  "0062": {
+    "name": "Git rebase hashes",
+    "scope": [
+      "constant.sha.git-rebase"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffd866"
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "0018": {
+    "name": "Sumi · interpolated code",
+    "scope": [
+      "meta.template.expression",
+      "meta.embedded.line",
+      "meta.interpolation",
+      "source.python meta.fstring.python"
+    ],
+    "settings": {
+      "foreground": "#2a241f"
+    }
+  },
+  "0068": {
+    "name": "Ai-nezumi · rules & tables",
+    "scope": [
+      "meta.separator.markdown",
+      "punctuation.separator.table.markdown",
+      "markup.table punctuation.separator"
+    ],
+    "settings": {
+      "foreground": "#716658"
+    }
+  },
+  "0072": {
+    "name": "Ai · diff headers",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.header.from-file",
+      "meta.diff.header.to-file",
+      "punctuation.definition.from-file.diff",
+      "punctuation.definition.to-file.diff"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#2a409b"
+    }
+  },
+  "0073": {
+    "name": "Fuji · diff ranges",
+    "scope": [
+      "meta.diff.range",
+      "meta.diff.range.unified",
+      "punctuation.definition.range.diff"
+    ],
+    "settings": {
+      "foreground": "#853a93"
+    }
+  },
+  "0074": {
+    "name": "Nezumi · diff index",
+    "scope": [
+      "meta.diff.index",
+      "meta.diff.header.git"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#716658"
+    }
+  },
+  "0082": {
+    "name": "Ai-nezumi · type annotations",
+    "scope": [
+      "meta.type.annotation punctuation",
+      "keyword.operator.type.annotation",
+      "punctuation.separator.annotation"
+    ],
+    "settings": {
+      "foreground": "#4e597d"
+    }
+  }
+}

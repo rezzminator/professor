@@ -1,0 +1,75 @@
+{
+  "0007": {
+    "name": "Punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "meta.brace.round",
+      "meta.brace.square",
+      "meta.brace.curly",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "punctuation.accessor",
+      "punctuation.definition.parameters",
+      "punctuation.definition.block",
+      "punctuation.definition.array",
+      "punctuation.separator.comma",
+      "punctuation.separator.dictionary",
+      "punctuation.definition.dictionary"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a998cc"
+    }
+  },
+  "0010": {
+    "name": "Template interpolation",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "punctuation.definition.interpolation",
+      "punctuation.section.interpolation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fd67ad"
+    }
+  },
+  "0027": {
+    "name": "Tag brackets",
+    "scope": [
+      "punctuation.definition.tag",
+      "punctuation.definition.tag.begin",
+      "punctuation.definition.tag.end",
+      "punctuation.definition.tag.html",
+      "punctuation.definition.tag.xml"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#c788b8"
+    }
+  },
+  "0050": {
+    "name": "Markdown quote marks",
+    "scope": [
+      "punctuation.definition.quote.begin.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fd67ad"
+    }
+  },
+  "0051": {
+    "name": "Markdown list markers",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "punctuation.definition.list.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fd67ad"
+    }
+  }
+}

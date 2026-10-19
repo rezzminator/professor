@@ -969,4 +969,29 @@ else
   bad "profile unwritable" "rc=$RC" "$(cat "$LANE_DIR/TL.log" 2>&1)" "$OUT"
 fi
 
+# Theme enumeration must name a broken directory, not silently check only
+# the intact themes. Hidden directories count just as they do for install.
+themes_fixture="$T/bundled-themes"
+mkdir -p "$themes_fixture/valid"
+printf '{}\n' >"$themes_fixture/valid/theme.json"
+printf 'theme documentation\n' >"$themes_fixture/README.md"
+themes_out="$(bash -c '. "$1"; bundled_themes "$2"' _ "$LIB" "$themes_fixture" 2>&1)"
+themes_rc=$?
+if [ "$themes_rc" -eq 0 ] && [ "$themes_out" = valid ]; then
+  ok "bundled themes: names an intact directory and ignores documentation"
+else
+  bad "bundled themes intact" "rc=$themes_rc out=$themes_out"
+fi
+for broken in broken .hidden; do
+  mkdir -p "$themes_fixture/$broken"
+  themes_out="$(bash -c '. "$1"; bundled_themes "$2"' _ "$LIB" "$themes_fixture" 2>&1)"
+  themes_rc=$?
+  if [ "$themes_rc" -ne 0 ] && [[ "$themes_out" == *"$broken/theme.json missing"* ]]; then
+    ok "bundled themes: refuses $broken without theme.json"
+  else
+    bad "bundled themes missing manifest" "rc=$themes_rc out=$themes_out"
+  fi
+  rmdir "$themes_fixture/$broken"
+done
+
 shtest_end

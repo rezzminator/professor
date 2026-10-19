@@ -1,0 +1,56 @@
+{
+  "0001": {
+    "name": "Tiles: punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "punctuation.definition.tag",
+      "punctuation.definition.block",
+      "punctuation.definition.parameters",
+      "punctuation.definition.arguments",
+      "punctuation.definition.array",
+      "punctuation.definition.dictionary"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#aa9cbf"
+    }
+  },
+  "0010": {
+    "name": "Pink beam: template and interpolation",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "punctuation.definition.interpolation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fa7bc6"
+    }
+  },
+  "0038": {
+    "name": "Pink beam: YAML sequence dashes",
+    "scope": [
+      "punctuation.definition.block.sequence.item.yaml"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fa7bc6"
+    }
+  },
+  "0050": {
+    "name": "Pink beam: list markers and rules",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "meta.separator.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fa7bc6"
+    }
+  }
+}

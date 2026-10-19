@@ -1,0 +1,62 @@
+{
+  "0069": {
+    "name": "JSON keys, depth 1",
+    "scope": [
+      "source.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3ddffd"
+    }
+  },
+  "0070": {
+    "name": "JSON keys, depth 2",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b494ff"
+    }
+  },
+  "0071": {
+    "name": "JSON keys, depth 3",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e48bff"
+    }
+  },
+  "0072": {
+    "name": "JSON keys, depth 4",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fd67ad"
+    }
+  },
+  "0073": {
+    "name": "JSON keys, depth 5",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff7b72"
+    }
+  },
+  "0074": {
+    "name": "JSON keys, depth 6",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffd866"
+    }
+  }
+}

@@ -135,21 +135,21 @@ var builtinRows = []string{
 }
 
 func TestListThemesListsCustomThenBuiltinWithTheCurrentMarked(t *testing.T) {
-	h := newChooseHome(t, `{"theme":"custom:hibiscus-night"}`, `{"theme":"custom:hibiscus-night"}`)
+	h := newChooseHome(t, `{"theme":"custom:tokyo-night"}`, `{"theme":"custom:tokyo-night"}`)
 	for _, dir := range []string{h.claude, h.cc1} {
-		h.theme(dir, "hibiscus-night", "Hibiscus Night")
+		h.theme(dir, "tokyo-night", "Tokyo Night · neon pink")
 		h.theme(dir, "ember", "")
 	}
 	list := h.list()
 	want := append([]string{
 		"ember|custom:ember|custom|ember",
-		"*hibiscus-night|custom:hibiscus-night|custom|Hibiscus Night",
+		"*tokyo-night|custom:tokyo-night|custom|Tokyo Night · neon pink",
 	}, builtinRows...)
 	if got := rows(list); !reflect.DeepEqual(got, want) {
 		t.Fatalf("themes\n got %q\nwant %q", got, want)
 	}
-	if list.Current != "custom:hibiscus-night" {
-		t.Errorf("Current = %q, want custom:hibiscus-night", list.Current)
+	if list.Current != "custom:tokyo-night" {
+		t.Errorf("Current = %q, want custom:tokyo-night", list.Current)
 	}
 	if len(list.Errors) != 0 {
 		t.Errorf("Errors = %+v, want none", list.Errors)
@@ -188,12 +188,12 @@ func TestListThemesNamesTheAccountsLackingACustomTheme(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newChooseHome(t, `{}`, `{}`)
-			h.theme(h.claude, "hibiscus-night", "Hibiscus Night")
+			h.theme(h.claude, "tokyo-night", "Tokyo Night · neon pink")
 			tc.setup(h)
 			list := h.list()
-			offered := choiceOf(t, list, "hibiscus-night", themesync.KindCustom)
+			offered := choiceOf(t, list, "tokyo-night", themesync.KindCustom)
 			if want := []string{"~/.cc/1"}; !reflect.DeepEqual(offered.Missing, want) {
-				t.Errorf("hibiscus-night Missing = %v, want %v", offered.Missing, want)
+				t.Errorf("tokyo-night Missing = %v, want %v", offered.Missing, want)
 			}
 			if len(list.Errors) != 0 {
 				t.Errorf("a missing theme is no read failure: Errors = %+v", list.Errors)
@@ -221,16 +221,16 @@ func TestListThemesTurnsAThemesDirItCannotReadIntoAnErrorRow(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newChooseHome(t, `{}`, `{}`)
-			h.theme(h.cc1, "hibiscus-night", "Hibiscus Night")
+			h.theme(h.cc1, "tokyo-night", "Tokyo Night · neon pink")
 			themes := filepath.Join(h.claude, "themes")
 			tc.setup(t, themes)
 			list := h.list()
 			if len(list.Errors) != 1 || list.Errors[0].Path != themes || list.Errors[0].Error == "" {
 				t.Fatalf("Errors = %+v, want one row naming %s with its failure", list.Errors, themes)
 			}
-			offered := choiceOf(t, list, "hibiscus-night", themesync.KindCustom)
+			offered := choiceOf(t, list, "tokyo-night", themesync.KindCustom)
 			if want := []string{"~/.claude"}; !reflect.DeepEqual(offered.Missing, want) {
-				t.Errorf("hibiscus-night Missing = %v, want the unreadable account %v", offered.Missing, want)
+				t.Errorf("tokyo-night Missing = %v, want the unreadable account %v", offered.Missing, want)
 			}
 		})
 	}
@@ -319,16 +319,16 @@ func TestUseThemeWritesEveryAccountAndKeepsTheOtherKeys(t *testing.T) {
   "theme": "dark"
 }`
 	h := newChooseHome(t, original, original)
-	h.theme(h.claude, "hibiscus-night", "Hibiscus Night")
-	h.theme(h.cc1, "hibiscus-night", "Hibiscus Night")
-	result, err := h.use("hibiscus-night")
+	h.theme(h.claude, "tokyo-night", "Tokyo Night · neon pink")
+	h.theme(h.cc1, "tokyo-night", "Tokyo Night · neon pink")
+	result, err := h.use("tokyo-night")
 	if err != nil {
 		t.Fatalf("UseTheme: %v", err)
 	}
 	wantWritten := []string{h.settings(h.cc1), h.settings(h.claude)} // sorted by real path
-	if result.Value != "custom:hibiscus-night" || !reflect.DeepEqual(result.Written, wantWritten) ||
+	if result.Value != "custom:tokyo-night" || !reflect.DeepEqual(result.Written, wantWritten) ||
 		result.Refused == nil || len(result.Refused) != 0 {
-		t.Fatalf("result = %+v, want custom:hibiscus-night written to %v and no refusals", result, wantWritten)
+		t.Fatalf("result = %+v, want custom:tokyo-night written to %v and no refusals", result, wantWritten)
 	}
 	for _, dir := range []string{h.claude, h.cc1} {
 		content := h.read(h.settings(dir))
@@ -337,8 +337,8 @@ func TestUseThemeWritesEveryAccountAndKeepsTheOtherKeys(t *testing.T) {
 				t.Errorf("%s lost %s:\n%s", dir, kept, content)
 			}
 		}
-		if got := h.themeKey(dir); got != "custom:hibiscus-night" {
-			t.Errorf("%s theme = %q, want custom:hibiscus-night", dir, got)
+		if got := h.themeKey(dir); got != "custom:tokyo-night" {
+			t.Errorf("%s theme = %q, want custom:tokyo-night", dir, got)
 		}
 		var document map[string]any
 		if err := json.Unmarshal([]byte(content), &document); err != nil {
@@ -352,8 +352,8 @@ func TestUseThemeWritesEveryAccountAndKeepsTheOtherKeys(t *testing.T) {
 
 func TestUseThemeRefusesTheAccountLackingTheFileAndWritesTheOther(t *testing.T) {
 	h := newChooseHome(t, `{"theme":"dark"}`, `{"theme":"dark"}`)
-	h.theme(h.claude, "hibiscus-night", "Hibiscus Night")
-	result, err := h.use("custom:hibiscus-night")
+	h.theme(h.claude, "tokyo-night", "Tokyo Night · neon pink")
+	result, err := h.use("custom:tokyo-night")
 	if err != nil {
 		t.Fatalf("UseTheme: %v (one account was written)", err)
 	}
@@ -361,17 +361,17 @@ func TestUseThemeRefusesTheAccountLackingTheFileAndWritesTheOther(t *testing.T) 
 		t.Errorf("Written = %v, want only ~/.claude", result.Written)
 	}
 	if len(result.Refused) != 1 || result.Refused[0].Path != h.settings(h.cc1) ||
-		!strings.Contains(result.Refused[0].Error, "hibiscus-night.json") ||
+		!strings.Contains(result.Refused[0].Error, "tokyo-night.json") ||
 		!strings.Contains(result.Refused[0].Error, filepath.Join(h.cc1, "themes")) {
-		t.Fatalf("Refused = %+v, want ~/.cc/1 naming its themes dir and hibiscus-night.json", result.Refused)
+		t.Fatalf("Refused = %+v, want ~/.cc/1 naming its themes dir and tokyo-night.json", result.Refused)
 	}
-	if got := h.themeKey(h.claude); got != "custom:hibiscus-night" {
-		t.Errorf("~/.claude theme = %q, want custom:hibiscus-night", got)
+	if got := h.themeKey(h.claude); got != "custom:tokyo-night" {
+		t.Errorf("~/.claude theme = %q, want custom:tokyo-night", got)
 	}
 	if got := h.themeKey(h.cc1); got != "dark" {
 		t.Errorf("the refused account was written: theme = %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(h.cc1, "themes", "hibiscus-night.json")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(h.cc1, "themes", "tokyo-night.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a theme file was copied between accounts: stat err = %v", err)
 	}
 }
@@ -403,13 +403,13 @@ func TestUseThemeContinuesPastAnEditFailureAndErrorsWhenNothingWasWritten(t *tes
 
 func TestUseThemeUnknownNameErrorsListingTheValidNames(t *testing.T) {
 	h := newChooseHome(t, `{"theme":"dark"}`, `{"theme":"dark"}`)
-	h.theme(h.claude, "hibiscus-night", "Hibiscus Night")
+	h.theme(h.claude, "tokyo-night", "Tokyo Night · neon pink")
 	h.theme(h.claude, "light", "Shadowing Light") // collides with a builtin
 	_, err := h.use("nonsense")
 	if err == nil {
 		t.Fatal("an unknown name must error")
 	}
-	for _, want := range []string{`"nonsense"`, "hibiscus-night", "auto", "dark-daltonized", "light-ansi", "custom:light"} {
+	for _, want := range []string{`"nonsense"`, "tokyo-night", "auto", "dark-daltonized", "light-ansi", "custom:light"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error lacks %q: %v", want, err)
 		}
@@ -425,8 +425,8 @@ func TestUseThemeResolvesAStemCollidingWithABuiltinOnlyWithItsPrefix(t *testing.
 	cases := []struct{ name, want string }{
 		{"light", "light"},
 		{"custom:light", "custom:light"},
-		{"custom:hibiscus-night", "custom:hibiscus-night"},
-		{"hibiscus-night", "custom:hibiscus-night"},
+		{"custom:tokyo-night", "custom:tokyo-night"},
+		{"tokyo-night", "custom:tokyo-night"},
 		{"auto", "auto"},
 		{"dark-ansi", "dark-ansi"},
 	}
@@ -435,7 +435,7 @@ func TestUseThemeResolvesAStemCollidingWithABuiltinOnlyWithItsPrefix(t *testing.
 			h := newChooseHome(t, `{"theme":"dark"}`, `{"theme":"dark"}`)
 			for _, dir := range []string{h.claude, h.cc1} {
 				h.theme(dir, "light", "Shadowing Light")
-				h.theme(dir, "hibiscus-night", "Hibiscus Night")
+				h.theme(dir, "tokyo-night", "Tokyo Night · neon pink")
 			}
 			result, err := h.use(tc.name)
 			if err != nil {
@@ -464,7 +464,7 @@ func TestListThemesShowsAStemCollidingWithABuiltinNextToIt(t *testing.T) {
 
 func TestThemesDirsSymlinkedBetweenAccountsAreOneDirNoMissingAndOneErrorRow(t *testing.T) {
 	h := newChooseHome(t, `{"theme":"dark"}`, `{"theme":"dark"}`)
-	h.theme(h.claude, "hibiscus-night", "Hibiscus Night")
+	h.theme(h.claude, "tokyo-night", "Tokyo Night · neon pink")
 	h.write(filepath.Join(h.claude, "themes", "broken.json"), `{`)
 	if err := os.Symlink(filepath.Join(h.claude, "themes"), filepath.Join(h.cc1, "themes")); err != nil {
 		t.Fatal(err)
@@ -473,10 +473,10 @@ func TestThemesDirsSymlinkedBetweenAccountsAreOneDirNoMissingAndOneErrorRow(t *t
 	if len(list.Errors) != 1 {
 		t.Errorf("Errors = %+v, want the one broken file once", list.Errors)
 	}
-	if offered := choiceOf(t, list, "hibiscus-night", themesync.KindCustom); len(offered.Missing) != 0 {
-		t.Errorf("hibiscus-night Missing = %v, want none behind the shared dir", offered.Missing)
+	if offered := choiceOf(t, list, "tokyo-night", themesync.KindCustom); len(offered.Missing) != 0 {
+		t.Errorf("tokyo-night Missing = %v, want none behind the shared dir", offered.Missing)
 	}
-	result, err := h.use("hibiscus-night")
+	result, err := h.use("tokyo-night")
 	if err != nil || len(result.Written) != 2 || len(result.Refused) != 0 {
 		t.Fatalf("UseTheme = %+v, %v, want both accounts written", result, err)
 	}

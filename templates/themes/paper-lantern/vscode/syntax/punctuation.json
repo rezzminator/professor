@@ -1,0 +1,109 @@
+{
+  "0011": {
+    "name": "Ai-nezumi · punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "punctuation.definition.parameters",
+      "punctuation.definition.arguments",
+      "punctuation.definition.block",
+      "punctuation.definition.array",
+      "punctuation.definition.dictionary",
+      "punctuation.definition.typeparameters",
+      "punctuation.definition.generic",
+      "meta.brace.round",
+      "meta.brace.square",
+      "meta.brace.curly",
+      "punctuation.separator.comma",
+      "punctuation.separator.array",
+      "punctuation.separator.dictionary",
+      "punctuation.terminator.statement"
+    ],
+    "settings": {
+      "foreground": "#5e6681"
+    }
+  },
+  "0013": {
+    "name": "Matcha · string quotes",
+    "scope": [
+      "punctuation.definition.string",
+      "punctuation.definition.string.begin",
+      "punctuation.definition.string.end",
+      "punctuation.definition.string.template",
+      "string.quoted.docstring punctuation.definition.string"
+    ],
+    "settings": {
+      "foreground": "#4e6d41"
+    }
+  },
+  "0017": {
+    "name": "Kaki · interpolation",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "punctuation.section.embedded.begin",
+      "punctuation.section.embedded.end",
+      "punctuation.definition.interpolation",
+      "meta.interpolation punctuation",
+      "meta.fstring punctuation.definition",
+      "constant.character.format.placeholder.other.python",
+      "punctuation.section.interpolation"
+    ],
+    "settings": {
+      "foreground": "#9f5401"
+    }
+  },
+  "0040": {
+    "name": "Ai-nezumi · tag brackets",
+    "scope": [
+      "punctuation.definition.tag",
+      "punctuation.definition.tag.begin",
+      "punctuation.definition.tag.end",
+      "punctuation.definition.tag.html",
+      "punctuation.definition.tag.xml"
+    ],
+    "settings": {
+      "foreground": "#5e6681"
+    }
+  },
+  "0065": {
+    "name": "Ai-nezumi · fence markers",
+    "scope": [
+      "punctuation.definition.markdown",
+      "fenced_code.block.language",
+      "fenced_code.block.language.markdown",
+      "punctuation.definition.raw.markdown"
+    ],
+    "settings": {
+      "foreground": "#5e6681"
+    }
+  },
+  "0067": {
+    "name": "Shu · list bullets",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "punctuation.definition.list.markdown",
+      "beginning.punctuation.definition.list.markdown"
+    ],
+    "settings": {
+      "foreground": "#b43026"
+    }
+  },
+  "0078": {
+    "name": "Ai-nezumi · JSON structure",
+    "scope": [
+      "punctuation.support.type.property-name.json",
+      "punctuation.definition.dictionary.begin.json",
+      "punctuation.definition.dictionary.end.json",
+      "punctuation.definition.array.begin.json",
+      "punctuation.definition.array.end.json"
+    ],
+    "settings": {
+      "foreground": "#5e6681"
+    }
+  }
+}

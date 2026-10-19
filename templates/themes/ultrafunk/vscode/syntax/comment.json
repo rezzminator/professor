@@ -1,0 +1,48 @@
+{
+  "0000": {
+    "name": "Unlit ink · comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment",
+      "comment.line",
+      "comment.block",
+      "comment.block.documentation",
+      "comment.line.double-slash",
+      "comment.line.number-sign",
+      "comment.block.documentation punctuation.definition.comment"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#9070bb"
+    }
+  },
+  "0001": {
+    "name": "UV Violet · doc tags",
+    "scope": [
+      "comment keyword.codetag",
+      "storage.type.class.jsdoc",
+      "comment.block.documentation entity.name.type",
+      "comment.block.documentation storage.type",
+      "comment.block.documentation keyword",
+      "keyword.other.phpdoc",
+      "storage.type.class.doxygen"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c77dff"
+    }
+  },
+  "0002": {
+    "name": "Peach glow · doc params",
+    "scope": [
+      "comment.block.documentation variable",
+      "comment.block.documentation variable.other.jsdoc",
+      "variable.parameter.jsdoc"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffbe8c"
+    }
+  }
+}

@@ -15,7 +15,7 @@ func TestPinnableKeysAreTheKeysTheRenderersEmit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied := hibiscusApplied(t)
+	applied := tokyoNightApplied(t)
 	bookkeeping := []string{"@pfm-theme", "@pfm-theme-generation", "@pfm-theme-chips", "@pfm-state-colour"}
 	rendered := map[string]bool{}
 	for _, option := range tmuxOptions(applied, Dark, 1) {

@@ -15,8 +15,8 @@ func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
-	themeBody := []byte(`{"name":"Sonar Gold","base":"dark","overrides":{"claude":"#ffd60a"}}` + "\n")
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"), string(themeBody))
+	themeBody := writeThemeDir(t, filepath.Join(sourceRepo, "templates", "themes"), "sonar-gold",
+		`{"name":"Sonar Gold","base":"dark","overrides":{"claude":"#ffd60a"}}`)
 
 	run := func(mode Mode) (Report, string, error) {
 		var output bytes.Buffer
@@ -70,14 +70,14 @@ func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 	}
 }
 
-// TestReleaseProfileFetchFailureIsLoudAndNonFatal: with no profiles in the
-// clone, a profile the release listing names but will not serve is a named
-// skip, and the rest of the host install carries on.
+// TestReleaseProfileFetchFailureIsLoudAndNonFatal: with no themes in the
+// clone, a theme the release listing names but whose files it will not serve
+// is a named skip, and the rest of the host install carries on.
 func TestReleaseProfileFetchFailureIsLoudAndNonFatal(t *testing.T) {
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
-	client := releaseThemeClient(t, "v1.0.0", nil, `[{"name":"sonar-gold.json","type":"file"}]`)
+	client := releaseThemeClient(t, "v1.0.0", nil, `[{"name":"sonar-gold","type":"dir"}]`)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
@@ -88,8 +88,9 @@ func TestReleaseProfileFetchFailureIsLoudAndNonFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cosmetic theme fetch aborted host install: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "theme sonar-gold fetch failed: GET "+releaseThemeURL("v1.0.0")+
-		"sonar-gold.json: HTTP Not Found") {
+	theme := releaseThemeURL("v1.0.0") + "sonar-gold/"
+	if !strings.Contains(output.String(), "theme sonar-gold fetch failed: "+theme+": claude.json: GET "+theme+
+		"claude.json: HTTP Not Found") {
 		t.Fatalf("theme fetch failure was silent or vague:\n%s", output.String())
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".zshrc")); statErr != nil {
@@ -98,8 +99,8 @@ func TestReleaseProfileFetchFailureIsLoudAndNonFatal(t *testing.T) {
 }
 
 func TestThemeProfilesFallBackToReleaseWhenTheCloneHoldsNone(t *testing.T) {
-	listing := `[{"name":"README.md","type":"file"},{"name":"lagoon.json","type":"file"}]`
-	client := releaseThemeClient(t, "v1.0.0", map[string]string{"lagoon.json": "{}"}, listing)
+	listing := `[{"name":"README.md","type":"file"},{"name":"lagoon","type":"dir"}]`
+	client := releaseThemeClient(t, "v1.0.0", nil, listing)
 
 	profiles, err := loadThemeProfiles(context.Background(), Options{
 		SourceRepo:      t.TempDir(),
@@ -112,7 +113,7 @@ func TestThemeProfilesFallBackToReleaseWhenTheCloneHoldsNone(t *testing.T) {
 	if got := profileKeys(profiles); strings.Join(got, ",") != "lagoon" {
 		t.Fatalf("release profiles = %v, want lagoon alone", got)
 	}
-	if got := profiles["lagoon"].raw; got != releaseThemeURL("v1.0.0")+"lagoon.json" {
+	if got := profiles["lagoon"].raw; got != releaseThemeURL("v1.0.0")+"lagoon/" {
 		t.Fatalf("release profile lagoon raw=%q, want it in the release's templates/themes/", got)
 	}
 }

@@ -9,13 +9,13 @@ import (
 )
 
 func TestVscodeContractKeysAndValues(t *testing.T) {
-	applied := hibiscusApplied(t)
+	applied := tokyoNightApplied(t)
 	contract := applied.vscodeContract(Dark, 4)
-	if !contract.Enabled || contract.Generation != 4 || contract.Palette != "custom:hibiscus-night" ||
-		contract.Title != "Hibiscus Night" || contract.Mode != "dark" || contract.Appearance != "dark" {
+	if !contract.Enabled || contract.Generation != 4 || contract.Palette != "custom:tokyo-night" ||
+		contract.Title != "Tokyo Night · neon pink" || contract.Mode != "dark" || contract.Appearance != "dark" {
 		t.Fatalf("contract = %+v", contract)
 	}
-	if contract.Colors["terminal.background"] != "#1a1b26" || contract.Colors["terminal.ansiRed"] != "#f7768e" {
+	if contract.Colors["terminal.background"] != "#0f0f1a" || contract.Colors["terminal.ansiRed"] != "#ff3d6e" {
 		t.Fatalf("colors = %v", contract.Colors)
 	}
 	auto, err := resolveValue("auto", t.TempDir())
@@ -70,7 +70,7 @@ func TestVscodeContractKeysAndValues(t *testing.T) {
 }
 
 func TestVscodeContractCarriesTheWindowChrome(t *testing.T) {
-	applied := hibiscusApplied(t)
+	applied := tokyoNightApplied(t)
 	variant := applied.Primary
 	contract := applied.vscodeContract(Dark, 4)
 	want := map[string]string{
@@ -239,10 +239,10 @@ func TestOffNamesTheWorkspacesStillCarryingChrome(t *testing.T) {
 	gone := h.path("work/gone.code-workspace")
 	record := map[string]any{
 		painted: map[string]any{"generation": 1, "keys": map[string]any{
-			"statusBar.background": map[string]any{"value": "#1a1b26", "prior": nil},
+			"statusBar.background": map[string]any{"value": "#221634", "prior": nil},
 		}},
 		gone: map[string]any{"generation": 1, "keys": map[string]any{
-			"statusBar.background": map[string]any{"value": "#1a1b26", "prior": nil},
+			"statusBar.background": map[string]any{"value": "#221634", "prior": nil},
 		}},
 	}
 	raw, err := json.Marshal(record)

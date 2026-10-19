@@ -1,0 +1,204 @@
+{
+  "0044": {
+    "name": "Corona Magenta · heading 1",
+    "scope": [
+      "heading.1.markdown",
+      "heading.1.markdown entity.name.section",
+      "markup.heading.setext.1.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff2fc8"
+    }
+  },
+  "0045": {
+    "name": "Aurora Pink · heading 2",
+    "scope": [
+      "heading.2.markdown",
+      "heading.2.markdown entity.name.section",
+      "markup.heading.setext.2.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fe66b7"
+    }
+  },
+  "0046": {
+    "name": "Blaze Orange · heading 3",
+    "scope": [
+      "heading.3.markdown",
+      "heading.3.markdown entity.name.section"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff8a3d"
+    }
+  },
+  "0047": {
+    "name": "Arc Yellow · heading 4",
+    "scope": [
+      "heading.4.markdown",
+      "heading.4.markdown entity.name.section"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffe14a"
+    }
+  },
+  "0048": {
+    "name": "Signal Chartreuse · heading 5",
+    "scope": [
+      "heading.5.markdown",
+      "heading.5.markdown entity.name.section"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#c6ff4a"
+    }
+  },
+  "0049": {
+    "name": "Horizon Cyan · heading 6",
+    "scope": [
+      "heading.6.markdown",
+      "heading.6.markdown entity.name.section"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#3ce8ff"
+    }
+  },
+  "0050": {
+    "name": "Aurora Pink · headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown",
+      "markup.heading.markdown",
+      "entity.name.section.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fe66b7"
+    }
+  },
+  "0051": {
+    "name": "Peach glow · bold",
+    "scope": [
+      "markup.bold",
+      "punctuation.definition.bold.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffbe8c"
+    }
+  },
+  "0052": {
+    "name": "Lilac · italic",
+    "scope": [
+      "markup.italic",
+      "punctuation.definition.italic.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#e0b0ff"
+    }
+  },
+  "0053": {
+    "name": "Unlit ink · strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#9070bb"
+    }
+  },
+  "0054": {
+    "name": "Horizon Cyan · links",
+    "scope": [
+      "markup.underline.link",
+      "string.other.link",
+      "constant.other.reference.link",
+      "markup.underline.link.markdown",
+      "markup.underline.link.image.markdown"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#3ce8ff"
+    }
+  },
+  "0056": {
+    "name": "Aquamarine · inline code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.inline.raw.string.markdown",
+      "markup.raw",
+      "markup.fenced_code",
+      "markup.raw.block.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf5dc"
+    }
+  },
+  "0057": {
+    "name": "Unlit ink · fence language",
+    "scope": [
+      "fenced_code.block.language",
+      "fenced_code.block.language.markdown",
+      "punctuation.definition.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b78ad3"
+    }
+  },
+  "0058": {
+    "name": "Unlit ink · quotes",
+    "scope": [
+      "markup.quote",
+      "markup.quote.markdown",
+      "punctuation.definition.quote.begin.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#9070bb"
+    }
+  },
+  "0061": {
+    "name": "Signal Green · inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted",
+      "markup.inserted.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3cf29b"
+    }
+  },
+  "0062": {
+    "name": "Rocket Red · deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted",
+      "markup.deleted.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff7a7a"
+    }
+  },
+  "0063": {
+    "name": "Blaze Orange · changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed",
+      "markup.changed.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8a3d"
+    }
+  }
+}

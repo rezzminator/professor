@@ -1,0 +1,99 @@
+{
+  "0021": {
+    "name": "Text · variables",
+    "scope": [
+      "variable",
+      "variable.other",
+      "meta.definition.variable.name",
+      "variable.other.readwrite",
+      "variable.other.local",
+      "variable.other.object",
+      "variable.other.assignment",
+      "entity.name.variable",
+      "variable.other.declaration",
+      "variable.other.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe3f5"
+    }
+  },
+  "0022": {
+    "name": "Pink glow · self & this",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.parameter.function.language.special.self.python",
+      "variable.parameter.function.language.special.cls.python",
+      "variable.language.special.self.python",
+      "variable.language.cls.python",
+      "variable.language.self.rust"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ff7ad9"
+    }
+  },
+  "0023": {
+    "name": "Peach glow · parameters",
+    "scope": [
+      "variable.parameter",
+      "meta.parameter",
+      "entity.name.variable.parameter",
+      "variable.parameter.function",
+      "variable.parameter.function.python",
+      "variable.parameter.function-call.python",
+      "meta.function.parameters variable",
+      "variable.parameter.go"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffbe8c"
+    }
+  },
+  "0024": {
+    "name": "Pale periwinkle · properties",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "variable.object.property",
+      "support.variable.property",
+      "meta.object.member",
+      "variable.other.member",
+      "entity.name.field",
+      "variable.other.field",
+      "meta.field.declaration entity.name",
+      "support.type.property-name.json",
+      "support.type.property-name.toml",
+      "entity.name.tag.yaml",
+      "keyword.key.toml",
+      "support.type.property-name.table.toml",
+      "variable.other.property.go",
+      "variable.other.struct.field",
+      "entity.other.attribute-name.property"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#bcc5ff"
+    }
+  },
+  "0066": {
+    "name": "Peach glow · shell variables",
+    "scope": [
+      "variable.other.normal.shell",
+      "variable.other.special.shell",
+      "variable.other.positional.shell",
+      "punctuation.definition.variable.shell",
+      "variable.other.bracket.shell",
+      "variable.other.env"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffbe8c"
+    }
+  }
+}

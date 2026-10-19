@@ -25,7 +25,7 @@ const (
 )
 
 // themeRemoval is the wording of one ledger removal, shared by uninstall and
-// by retiring a theme install no longer ships (its profile file gone).
+// by retiring a theme install no longer ships (its theme directory gone).
 type themeRemoval struct {
 	verb     string // the change line: "{verb} theme {label} {path}"
 	phase    string // the failure lines: "theme {label} {phase} failed: …"
@@ -83,17 +83,18 @@ func validateThemeName(name string) error {
 	return nil
 }
 
-// themeFiles is what install writes for one theme, its profile file's bytes
-// content: the Claude file is the palette alone and the profile copy keeps
-// every byte; a profile that does not parse is an error naming its file.
-func themeFiles(home, name, file string, claude themeFile, content []byte) ([]themeFile, error) {
+// themeFiles is what install writes for one theme, content its assembled
+// profile document (loadThemeContent): the Claude file is the palette alone
+// and the profile copy keeps every byte; a profile that does not parse is an
+// error naming its theme.
+func themeFiles(home, name string, claude themeFile, content []byte) ([]themeFile, error) {
 	profile, err := themesync.ParseProfile(content)
 	if err != nil {
-		return nil, fmt.Errorf("profile %s rejected: %w", file, err)
+		return nil, fmt.Errorf("profile %s rejected: %w", name, err)
 	}
 	palette, err := profile.ClaudeFile(content)
 	if err != nil {
-		return nil, fmt.Errorf("profile %s rejected: %w", file, err)
+		return nil, fmt.Errorf("profile %s rejected: %w", name, err)
 	}
 	claude.content = palette
 	return []themeFile{claude, {
@@ -331,62 +332,47 @@ func (installer *engine) removeOwnedTheme(
 	return next
 }
 
-// SourceProfiles are the profile files a source clone ships, the ones
-// `pfm install` discovers: every *.json in its templates/themes/, as absolute
-// paths, sorted.
+// SourceProfiles are the theme directories a source clone ships, the ones
+// `pfm install` discovers: every subdirectory of its templates/themes/, as
+// absolute paths, sorted.
 func SourceProfiles(sourceRepo string) ([]string, error) {
 	directory := filepath.Join(sourceRepo, filepath.FromSlash(themeProfilesRelative))
-	files, err := localProfileFiles(directory)
+	names, err := localProfileDirs(directory)
 	if err != nil {
 		return nil, err
 	}
-	paths := make([]string, 0, len(files))
-	for _, file := range files {
-		paths = append(paths, filepath.Join(directory, file))
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		paths = append(paths, filepath.Join(directory, name))
 	}
 	return paths, nil
 }
 
-// CheckProfile runs on one profile file every check `pfm install` runs on it
-// before writing anything — the file name, the profile schema (every unknown
-// key refused by name), the Claude palette and the VS Code theme rendered
-// from it — then the one install does not run, the rendered theme's
+// CheckProfile runs on one theme directory every check `pfm install` runs on
+// it before writing anything — the theme name, the directory layout and each
+// file's canonical form (themesync.ReadProfileDir), the profile schema (every
+// unknown key refused by name), the Claude palette and the VS Code theme
+// rendered from it — then the one install does not run, the rendered theme's
 // readability (themesync.CheckVSCodeReadability), and returns that VS Code
-// theme. The error names the file.
-func CheckProfile(path string) (themesync.VSCodeThemeFile, error) {
-	file := filepath.Base(path)
-	if !isProfileFile(file) {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf(
-			"%s: not a profile: a profile is a *.json file", path,
-		)
+// theme. The error opens "theme {dir}: ", as ReadProfileDir's does.
+func CheckProfile(dir string) (themesync.VSCodeThemeFile, error) {
+	name := filepath.Base(dir)
+	if err := validateThemeName(name); err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("theme %s: %w", dir, err)
 	}
-	stem := strings.TrimSuffix(file, ".json")
-	if err := validateThemeName(stem); err != nil {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
-	}
-	// A FIFO or device named *.json would block the read below.
-	info, err := os.Stat(path)
+	content, err := themesync.ReadProfileDir(dir)
 	if err != nil {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf("read profile %s: %w", path, err)
+		return themesync.VSCodeThemeFile{}, err
 	}
-	if !info.Mode().IsRegular() {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf(
-			"%s: not a profile: not a regular file (%s)", path, info.Mode().Type(),
-		)
+	if _, err := themeFiles("", name, themeFile{}, content); err != nil {
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("theme %s: %w", dir, err)
 	}
-	content, err := os.ReadFile(path)
+	rendered, err := themesync.RenderVSCodeTheme(name, content)
 	if err != nil {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf("read profile %s: %w", path, err)
-	}
-	if _, err := themeFiles("", stem, file, themeFile{}, content); err != nil {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
-	}
-	rendered, err := themesync.RenderVSCodeTheme(stem, content)
-	if err != nil {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("theme %s: %w", dir, err)
 	}
 	if err := themesync.CheckVSCodeReadability(rendered.Content); err != nil {
-		return themesync.VSCodeThemeFile{}, fmt.Errorf("%s: %w", path, err)
+		return themesync.VSCodeThemeFile{}, fmt.Errorf("theme %s: %w", dir, err)
 	}
 	return rendered, nil
 }

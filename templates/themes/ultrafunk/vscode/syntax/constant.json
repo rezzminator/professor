@@ -1,0 +1,87 @@
+{
+  "0013": {
+    "name": "Pale cyan · escapes",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "string.regexp constant.character.escape",
+      "constant.character.escape.backslash",
+      "constant.character.string.escape",
+      "constant.other.placeholder",
+      "constant.character.format.placeholder"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a6f6ff"
+    }
+  },
+  "0017": {
+    "name": "Blaze Orange · numbers",
+    "scope": [
+      "constant.numeric",
+      "constant.numeric.integer",
+      "constant.numeric.float",
+      "constant.numeric.hex",
+      "constant.numeric.decimal",
+      "constant.numeric.binary",
+      "constant.numeric.octal",
+      "constant.other.color.rgb-value",
+      "constant.other.rgb-value"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8a3d"
+    }
+  },
+  "0019": {
+    "name": "Amber · constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other",
+      "variable.other.constant.property",
+      "constant.other.caps.python",
+      "constant.other.symbol"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb347"
+    }
+  },
+  "0020": {
+    "name": "Periwinkle · language constants",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.nil",
+      "constant.language.none",
+      "constant.language.python",
+      "constant.language.json",
+      "constant.language.go",
+      "support.constant.nil",
+      "constant.language.boolean.true",
+      "constant.language.boolean.false"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#8b9aff"
+    }
+  },
+  "0067": {
+    "name": "Blaze Orange · shell flags",
+    "scope": [
+      "constant.other.option",
+      "constant.other.option.dash",
+      "string.unquoted.argument.shell constant.other.option"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8a3d"
+    }
+  }
+}

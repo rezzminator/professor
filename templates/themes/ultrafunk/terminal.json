@@ -1,0 +1,23 @@
+{
+  "terminal.ansiBlack": "#2c0f3e",
+  "terminal.ansiBlue": "#8b9aff",
+  "terminal.ansiBrightBlack": "#9473bf",
+  "terminal.ansiBrightBlue": "#bcc5ff",
+  "terminal.ansiBrightCyan": "#a6f6ff",
+  "terminal.ansiBrightGreen": "#c6ff4a",
+  "terminal.ansiBrightMagenta": "#ff9ee0",
+  "terminal.ansiBrightRed": "#ff7a7a",
+  "terminal.ansiBrightWhite": "#fff6fb",
+  "terminal.ansiBrightYellow": "#fff08a",
+  "terminal.ansiCyan": "#3ce8ff",
+  "terminal.ansiGreen": "#3cf29b",
+  "terminal.ansiMagenta": "#fe66b7",
+  "terminal.ansiRed": "#ff4040",
+  "terminal.ansiWhite": "#efc6ea",
+  "terminal.ansiYellow": "#ffe14a",
+  "terminal.background": "#170822",
+  "terminal.foreground": "#ffe3f5",
+  "terminal.selectionBackground": "#4f1a70",
+  "terminal.tab.activeBorder": "#ff2fc8",
+  "terminalCursor.foreground": "#ff2fc8"
+}

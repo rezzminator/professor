@@ -1,0 +1,85 @@
+{
+  "0004": {
+    "name": "Molten · control keywords",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.other",
+      "keyword.control.import",
+      "keyword.control.flow",
+      "keyword.control.conditional",
+      "keyword.control.loop"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9044"
+    }
+  },
+  "0005": {
+    "name": "Ember · declarations",
+    "scope": [
+      "storage",
+      "storage.type",
+      "storage.modifier",
+      "keyword.storage",
+      "storage.type.function",
+      "keyword.declaration",
+      "storage.type.class",
+      "keyword.function.go",
+      "keyword.var.go",
+      "keyword.const.go",
+      "keyword.type.go",
+      "keyword.struct.go",
+      "keyword.interface.go",
+      "keyword.map.go",
+      "keyword.channel.go",
+      "keyword.package.go",
+      "keyword.other.fn.rust",
+      "keyword.other.rust"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f47550"
+    }
+  },
+  "0006": {
+    "name": "Molten · operators",
+    "scope": [
+      "keyword.operator",
+      "punctuation.separator.key-value",
+      "keyword.operator.assignment",
+      "storage.type.function.arrow",
+      "keyword.operator.channel.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9044"
+    }
+  },
+  "0007": {
+    "name": "Ash · word operators",
+    "scope": [
+      "keyword.operator.new",
+      "keyword.operator.expression",
+      "keyword.operator.logical.python",
+      "keyword.operator.sizeof",
+      "keyword.operator.typeof",
+      "keyword.operator.instanceof"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ff9044"
+    }
+  },
+  "0033": {
+    "name": "Ember · CSS at-rules",
+    "scope": [
+      "keyword.control.at-rule",
+      "punctuation.definition.keyword.css"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f47550"
+    }
+  }
+}

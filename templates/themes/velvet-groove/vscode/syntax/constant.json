@@ -1,0 +1,77 @@
+{
+  "0009": {
+    "name": "Aqua: escapes and placeholders",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "string.regexp constant.character.escape",
+      "constant.other.placeholder",
+      "constant.character.format.placeholder",
+      "constant.character.format.placeholder.other.python",
+      "constant.character.entity",
+      "constant.other.character-class.regexp",
+      "constant.other.character-class.escape"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#85e3e8"
+    }
+  },
+  "0012": {
+    "name": "Burnt orange: numbers",
+    "scope": [
+      "constant.numeric",
+      "keyword.other.unit",
+      "constant.numeric.integer",
+      "constant.numeric.float",
+      "constant.numeric.hex",
+      "constant.numeric.decimal"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9d5c"
+    }
+  },
+  "0013": {
+    "name": "Burnt orange: constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other",
+      "constant.other.symbol",
+      "constant.other.option",
+      "constant.sha.git-rebase",
+      "support.constant.property-value.css",
+      "meta.property-value.css",
+      "support.constant.color",
+      "constant.other.color.rgb-value",
+      "support.constant.font-name",
+      "entity.other.attribute-name.id.css",
+      "entity.other.attribute-name.id"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9d5c"
+    }
+  },
+  "0014": {
+    "name": "Disco violet: language constants",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.nil",
+      "constant.language.python",
+      "constant.language.json",
+      "constant.language.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#c192f0"
+    }
+  }
+}

@@ -9,19 +9,40 @@ import (
 	"time"
 )
 
-// hibiscusApplied is the custom Hibiscus Night theme resolved from fixtureHibiscus
-// written into a temp account dir.
-func hibiscusApplied(t *testing.T) Applied {
+// shippedClaudeTheme is the Claude theme file the blueprint's theme name
+// installs: its directory under shippedThemesDir assembled by ReadProfileDir,
+// parsed and rendered by ClaudeFile, read at test time so it never drifts.
+func shippedClaudeTheme(t testing.TB, name string) string {
+	t.Helper()
+	content, err := ReadProfileDir(filepath.Join(shippedThemesDir, name))
+	if err != nil {
+		t.Fatalf("read shipped theme %s: %v", name, err)
+	}
+	profile, err := ParseProfile(content)
+	if err != nil {
+		t.Fatalf("parse shipped theme %s: %v", name, err)
+	}
+	file, err := profile.ClaudeFile(content)
+	if err != nil {
+		t.Fatalf("render shipped theme %s as a Claude theme file: %v", name, err)
+	}
+	return string(file)
+}
+
+// tokyoNightApplied is the shipped tokyo-night theme resolved from its Claude
+// theme file written into a temp account dir.
+func tokyoNightApplied(t *testing.T) Applied {
 	t.Helper()
 	dir := t.TempDir()
 	themes := filepath.Join(dir, "themes")
 	if err := os.MkdirAll(themes, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(themes, "hibiscus-night.json"), []byte(fixtureHibiscus), 0o644); err != nil {
+	theme := []byte(shippedClaudeTheme(t, tokyoNightName))
+	if err := os.WriteFile(filepath.Join(themes, tokyoNightName+".json"), theme, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolveValue("custom:hibiscus-night", dir)
+	got, err := resolveValue("custom:"+tokyoNightName, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +55,8 @@ func TestResolveValueReadsTheThemeSettingLikeClaudeDoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(dir, "themes", "hibiscus-night.json"),
-		[]byte(fixtureHibiscus),
+		filepath.Join(dir, "themes", "tokyo-night.json"),
+		[]byte(shippedClaudeTheme(t, tokyoNightName)),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -47,8 +68,8 @@ func TestResolveValueReadsTheThemeSettingLikeClaudeDoes(t *testing.T) {
 		auto                      bool
 	}{
 		{
-			name: "custom", value: "custom:hibiscus-night", title: "Hibiscus Night",
-			accent: "#7aa2f7", background: "#1a1b26", side: Dark,
+			name: "custom", value: "custom:tokyo-night", title: "Tokyo Night · neon pink",
+			accent: "#c95cff", background: "#0f0f1a", side: Dark,
 		},
 		{name: "dark", value: "dark", title: "dark", accent: "#d77757", background: "#000000", side: Dark},
 		{name: "light", value: "light", title: "light", accent: "#d77757", background: "#ffffff", side: Light},
@@ -77,8 +98,8 @@ func TestResolveValueReadsTheThemeSettingLikeClaudeDoes(t *testing.T) {
 			if tc.auto && (applied.Alternate == nil || applied.Alternate.Background != "#ffffff") {
 				t.Fatalf("auto must carry the light alternate, got %+v", applied.Alternate)
 			}
-			if tc.value == "custom:hibiscus-night" &&
-				got.ThemeFile != filepath.Join(dir, "themes", "hibiscus-night.json") {
+			if tc.value == "custom:tokyo-night" &&
+				got.ThemeFile != filepath.Join(dir, "themes", "tokyo-night.json") {
 				t.Fatalf("theme file = %q", got.ThemeFile)
 			}
 		})
@@ -197,32 +218,32 @@ func TestAccountSettingsWithNoAccountIsAnError(t *testing.T) {
 
 func TestGoverningAccountIsTheLastThemeChange(t *testing.T) {
 	at := func(hour int) time.Time { return time.Date(2026, 5, 1, hour, 0, 0, 0, time.UTC) }
-	hibiscus := "custom:hibiscus-night"
+	tokyoNight := "custom:tokyo-night"
 	a := func(value string, hour int) account {
 		return account{Path: "/a/settings.json", Value: value, ModTime: at(hour)}
 	}
 	b := func(value string, hour int) account {
 		return account{Path: "/b/settings.json", Value: value, ModTime: at(hour)}
 	}
-	memory := map[string]string{"/a/settings.json": hibiscus, "/b/settings.json": hibiscus}
+	memory := map[string]string{"/a/settings.json": tokyoNight, "/b/settings.json": tokyoNight}
 
-	got, next := govern(memory, "/a/settings.json", []account{a(hibiscus, 10), b("light", 11)})
+	got, next := govern(memory, "/a/settings.json", []account{a(tokyoNight, 10), b("light", 11)})
 	if got.Path != "/b/settings.json" || next["/b/settings.json"] != "light" {
 		t.Fatalf("B changed its value; governor = %s, memory %v", got.Path, next)
 	}
-	got, _ = govern(next, got.Path, []account{a(hibiscus, 12), b("light", 11)})
+	got, _ = govern(next, got.Path, []account{a(tokyoNight, 12), b("light", 11)})
 	if got.Path != "/b/settings.json" {
 		t.Fatalf("A rewrote the same value; B must keep governing, got %s", got.Path)
 	}
-	got, _ = govern(nil, "", []account{a(hibiscus, 10), b("light", 11)})
+	got, _ = govern(nil, "", []account{a(tokyoNight, 10), b("light", 11)})
 	if got.Path != "/b/settings.json" {
 		t.Fatalf("first run with disagreeing accounts follows the newest file, got %s", got.Path)
 	}
-	got, _ = govern(nil, "", []account{a(hibiscus, 10), b(hibiscus, 11)})
+	got, _ = govern(nil, "", []account{a(tokyoNight, 10), b(tokyoNight, 11)})
 	if got.Path != "/a/settings.json" {
 		t.Fatalf("first run with agreeing accounts follows the first, got %s", got.Path)
 	}
-	got, _ = govern(memory, "/gone/settings.json", []account{a(hibiscus, 10), b("light", 11)})
+	got, _ = govern(memory, "/gone/settings.json", []account{a(tokyoNight, 10), b("light", 11)})
 	if got.Path != "/b/settings.json" {
 		t.Fatalf("changed value wins even when the previous governor is gone, got %s", got.Path)
 	}

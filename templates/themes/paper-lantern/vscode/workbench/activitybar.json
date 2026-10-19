@@ -1,0 +1,9 @@
+{
+  "activityBar.border": "#dccfb5",
+  "activityBar.dropBorder": "#b43026",
+  "activityBarTop.dropBorder": "#b43026",
+  "activityErrorBadge.background": "#cf3a2c",
+  "activityErrorBadge.foreground": "#fdfbf6",
+  "activityWarningBadge.background": "#936600",
+  "activityWarningBadge.foreground": "#fdfbf6"
+}

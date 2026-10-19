@@ -16,16 +16,15 @@ import (
 
 func TestTabStatusLabels(t *testing.T) {
 	for _, tc := range []struct {
-		state, glyph, text string
-		pulse              bool
+		state, glyph, off, text string
 	}{
-		{"working", "🟡", "[W]", false},
-		{"idle", "🟢", "[I]", false},
-		{"blocked", "🔴", "[B]", true},
-		{"error", "🟥", "[E]", true},
-		{"dead", "⬛", "[D]", false},
-		{"unknown", "❔", "[?]", false},
-		{"read failure", "❔", "[?]", false},
+		{"working", "🟡", "", "[W]"},
+		{"idle", "🟢", "", "[I]"},
+		{"blocked", "🔴", "⭕", "[B]"},
+		{"error", "🟥", "❌", "[E]"},
+		{"dead", "⬛", "", "[D]"},
+		{"unknown", "❔", "", "[?]"},
+		{"read failure", "❔", "", "[?]"},
 	} {
 		for _, mode := range []string{"emoji", "text"} {
 			for _, on := range []bool{true, false} {
@@ -34,13 +33,13 @@ func TestTabStatusLabels(t *testing.T) {
 					if mode == "text" {
 						marker = tc.text
 					}
-					if tc.pulse && !on {
-						marker = "⬜"
+					if tc.off != "" && !on {
+						marker = tc.off
 						if mode == "text" {
 							marker = "[ ]"
 						}
 					}
-					got := DecoratedTabLabel(" \x1b\n日本\t chat ", tc.state, mode, on)
+					got := DecoratedTabLabel(" \x1b\n日本\t chat ", tc.state, mode, on, TabGlyphs{})
 					if got != marker+" 日本 chat" {
 						t.Fatalf("label=%q want %q", got, marker+" 日本 chat")
 					}
@@ -51,7 +50,7 @@ func TestTabStatusLabels(t *testing.T) {
 					if ansi.StringWidth(marker) != wantWidth {
 						t.Fatalf("marker width=%d want %d", ansi.StringWidth(marker), wantWidth)
 					}
-					long := DecoratedTabLabel(strings.Repeat("界", 100), tc.state, mode, on)
+					long := DecoratedTabLabel(strings.Repeat("界", 100), tc.state, mode, on, TabGlyphs{})
 					if utf8.RuneCountInString(long) != MaxTitleRunes || !strings.HasPrefix(long, marker+" ") {
 						t.Fatalf("truncated label=%q", long)
 					}
@@ -188,7 +187,7 @@ func TestTabStatusNewNameWins(t *testing.T) {
 	if err := <-pulseDone; err != nil {
 		t.Fatal(err)
 	}
-	if f.label != "⬜ Newest" {
+	if f.label != "⭕ Newest" {
 		t.Fatalf("stale name restored: %q", f.label)
 	}
 }
@@ -214,7 +213,7 @@ func TestTabStatusChatRenameReachesTheTab(t *testing.T) {
 		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
 			t.Fatal(err)
 		}
-		if want := DecoratedTabLabel(want, "blocked", "emoji", true); f.label != want {
+		if want := DecoratedTabLabel(want, "blocked", "emoji", true, TabGlyphs{}); f.label != want {
 			t.Fatalf("after a tick seeing chat name %q the tab reads %q, want %q", name, f.label, want)
 		}
 	}
@@ -236,7 +235,7 @@ func TestTabStatusChatRenameReachesTheTab(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if want := DecoratedTabLabel("Mine", "blocked", "emoji", true); f.label != want {
+	if want := DecoratedTabLabel("Mine", "blocked", "emoji", true, TabGlyphs{}); f.label != want {
 		t.Fatalf("after a re-announce the tab reads %q, want the user's %q", f.label, want)
 	}
 	// An explicit pfm rename wins over the user's label ...
@@ -245,7 +244,7 @@ func TestTabStatusChatRenameReachesTheTab(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if want := DecoratedTabLabel("Explicit", "blocked", "emoji", true); f.label != want {
+	if want := DecoratedTabLabel("Explicit", "blocked", "emoji", true, TabGlyphs{}); f.label != want {
 		t.Fatalf("after an explicit rename the tab reads %q, want %q", f.label, want)
 	}
 	// ... without the painter's next tick, still seeing the older composed name, undoing it ...
@@ -255,7 +254,7 @@ func TestTabStatusChatRenameReachesTheTab(t *testing.T) {
 
 	legacy := newTabStatusFixture()
 	legacyDir := t.TempDir()
-	rendered := DecoratedTabLabel("Old", "blocked", "emoji", true)
+	rendered := DecoratedTabLabel("Old", "blocked", "emoji", true, TabGlyphs{})
 	legacy.label = rendered
 	if err := withTabLabelLock(context.Background(), legacyDir, "endpoint", d.Tab, func(path string) error {
 		return writeTabLabel(path, tabLabelRecord{
@@ -286,7 +285,7 @@ func TestTabStatusUserRenameReplacesAUserLabel(t *testing.T) {
 		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
 			t.Fatal(err)
 		}
-		if want := DecoratedTabLabel(want, "blocked", "emoji", true); f.label != want {
+		if want := DecoratedTabLabel(want, "blocked", "emoji", true, TabGlyphs{}); f.label != want {
 			t.Fatalf(
 				"after a tick seeing chat name %q (user name %q) the tab reads %q, want %q",
 				name,
@@ -313,7 +312,7 @@ func TestTabStatusUserRenameReplacesAUserLabel(t *testing.T) {
 
 	legacy := newTabStatusFixture()
 	legacyDir := t.TempDir()
-	rendered := DecoratedTabLabel("Mine", "blocked", "emoji", true)
+	rendered := DecoratedTabLabel("Mine", "blocked", "emoji", true, TabGlyphs{})
 	legacy.label = rendered
 	if err := withTabLabelLock(context.Background(), legacyDir, "endpoint", d.Tab, func(path string) error {
 		return writeTabLabel(path, tabLabelRecord{
@@ -461,7 +460,7 @@ func TestTabStatusActualSocketAndSidebar(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if strings.Join(f.renames, ",") != "🔴 Chat,⬜ Chat" {
+	if strings.Join(f.renames, ",") != "🔴 Chat,⭕ Chat" {
 		t.Fatalf("wire tab.rename requests=%v", f.renames)
 	}
 	// A bridge validation costs tmux execs and Herdr calls: one per tab per tick.
@@ -656,7 +655,7 @@ func TestTabStatusLostRenameReplyNeverStacksThePrefix(t *testing.T) {
 		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, on, f.call); err != nil {
 			t.Fatal(err)
 		}
-		if want := DecoratedTabLabel("Chat", "blocked", "emoji", on); f.label != want {
+		if want := DecoratedTabLabel("Chat", "blocked", "emoji", on, TabGlyphs{}); f.label != want {
 			t.Fatalf("after a lost rename answer the tab reads %q, want one prefix: %q", f.label, want)
 		}
 	}
@@ -670,7 +669,7 @@ func TestTabStatusLostRenameReplyNeverStacksThePrefix(t *testing.T) {
 	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, true, f.call); err != nil {
 		t.Fatal(err)
 	}
-	if want := DecoratedTabLabel("Named", "blocked", "emoji", true); f.label != want {
+	if want := DecoratedTabLabel("Named", "blocked", "emoji", true, TabGlyphs{}); f.label != want {
 		t.Fatalf("after a name writer's lost rename answer the tab reads %q, want one prefix: %q", f.label, want)
 	}
 }

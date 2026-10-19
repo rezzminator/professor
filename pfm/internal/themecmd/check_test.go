@@ -167,3 +167,25 @@ func TestCheckPassesEveryShippedProfile(t *testing.T) {
 		t.Fatalf("a shipped profile fails pfm theme check: code %d\n%s%s", code, stdout, stderr)
 	}
 }
+
+// A tab glyph the Herdr tab label cannot carry fails the check by file and
+// key; a valid one passes.
+func TestCheckJudgesHerdrTabGlyphs(t *testing.T) {
+	dir := t.TempDir()
+	profile := func(glyphs string) string {
+		return `{"name":"Glyphs","base":"dark","overrides":{},"surfaces":{"herdr":{"tabGlyphs":` + glyphs + `}}}`
+	}
+	good := writeProfile(t, dir, "good.json", profile(`{"blocked":"🔴","blockedOff":"⭕"}`))
+	empty := writeProfile(t, dir, "empty.json", profile(`{"blockedOff":""}`))
+	wide := writeProfile(t, dir, "wide.json", profile(`{"error":"🟥🟥🟥🟥🟥🟥🟥🟥🟥"}`))
+
+	code, stdout, _ := runCheck(t, checkDeps(t.TempDir()), good, empty, wide)
+	if code != 1 || !strings.Contains(stdout, "ok") || !strings.HasSuffix(strings.Split(stdout, "\n")[0], good) {
+		t.Fatalf("a valid glyph must pass and the bad ones exit 1: code %d\n%s", code, stdout)
+	}
+	for file, want := range map[string]string{empty: `"blockedOff": empty`, wide: `"error": glyph`} {
+		if !strings.Contains(stdout, "FAIL "+file) || !strings.Contains(stdout, want) {
+			t.Errorf("%s must FAIL naming %q:\n%s", file, want, stdout)
+		}
+	}
+}

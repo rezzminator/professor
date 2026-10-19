@@ -589,3 +589,68 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 		t.Fatalf("pane listing failure=%v", err)
 	}
 }
+
+// Every tab of a tick carries the theme's glyphs; a theme that cannot be read
+// is named and the tabs keep painting with the defaults.
+func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
+	themeGlyphs := herdr.TabGlyphs{Blocked: "🟣", BlockedOff: "🔘"}
+	var readErr error
+	warn := &bytes.Buffer{}
+	provider := herdrTabProvider{
+		scan: func(context.Context) (FleetScan, error) {
+			return FleetScan{
+				Rows: []compose.Row{{ID: "s1", Socket: "tmux", Name: "Chat", Kind: compose.LiveClaude}},
+			}, nil
+		},
+		inspect: func(context.Context, headless.Chat, time.Time) (headless.Status, error) {
+			return headless.Status{State: "blocked"}, nil
+		},
+		views: func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error) {
+			return []herdr.TabDecoration{{Pane: "w1:p2", Identity: "tmux"}, {Pane: "w1:p3", Identity: "tmux"}}, nil
+		},
+		mode:   func() (string, error) { return "emoji", nil },
+		glyphs: func() (herdr.TabGlyphs, error) { return themeGlyphs, readErr },
+		warn:   warn,
+	}
+	got, err := provider.tabs(context.Background(), "endpoint")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("tabs=%+v err=%v", got, err)
+	}
+	for _, d := range got {
+		if d.Glyphs != themeGlyphs {
+			t.Fatalf("decoration glyphs=%+v, want the theme's %+v", d.Glyphs, themeGlyphs)
+		}
+	}
+	readErr = errors.New("parse state.json: unexpected end")
+	got, err = provider.tabs(context.Background(), "endpoint")
+	if err != nil || len(got) != 2 || got[0].Glyphs != (herdr.TabGlyphs{}) {
+		t.Fatalf("an unreadable theme: tabs=%+v err=%v, want the tabs with the default glyphs", got, err)
+	}
+	if !strings.Contains(warn.String(), "Herdr tab glyphs of the theme: parse state.json") {
+		t.Fatalf("an unreadable theme was not named: %q", warn.String())
+	}
+}
+
+// Off and text modes draw no theme glyph, so they never read the theme nor
+// name its failure.
+func TestHerdrTabProviderReadsNoGlyphsOutsideEmojiMode(t *testing.T) {
+	for _, mode := range []string{herdr.TabStatusOff, "text"} {
+		warn := &bytes.Buffer{}
+		read := false
+		provider := herdrTabProvider{
+			scan: func(context.Context) (FleetScan, error) { return FleetScan{}, nil },
+			mode: func() (string, error) { return mode, nil },
+			glyphs: func() (herdr.TabGlyphs, error) {
+				read = true
+				return herdr.TabGlyphs{}, errors.New("parse state.json: unexpected end")
+			},
+			warn: warn,
+		}
+		if _, err := provider.tabs(context.Background(), "endpoint"); err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		if read || warn.Len() > 0 {
+			t.Fatalf("%s: glyphs read=%v warn=%q, want neither", mode, read, warn.String())
+		}
+	}
+}

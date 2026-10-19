@@ -139,7 +139,7 @@ A theme profile is `templates/themes/{name}.json`: Claude Code's palette (`name`
 }
 ```
 
-A pin is keyed by the name its renderer emits: tmux by option name (`tmuxOptions`), Herdr by custom token (`herdrTokens`), VS Code by contract key, `colors` and `chrome` apart (`vscodeContract`). `renderedPinKeys` collects the key sets by rendering a built-in dark theme through those renderers, so a key a renderer gains is pinnable with no second list. `ParseProfile` runs `validatePins` and refuses, naming the surface and the key:
+A pin is keyed by the name its renderer emits: tmux by option name (`tmuxOptions`), Herdr by custom token (`herdrTokens`) and, under `surfaces.herdr.tabGlyphs`, by tab state (`herdr.TabGlyphKeys`, each glyph `herdr.ValidTabGlyph`; the tab status painter reads them from `state.json` on every paint through `HerdrTabGlyphs`, and they never reach the Herdr config block), VS Code by contract key, `colors` and `chrome` apart (`vscodeContract`). `renderedPinKeys` collects the key sets by rendering a built-in dark theme through those renderers, so a key a renderer gains is pinnable with no second list. `ParseProfile` runs `validatePins` and refuses, naming the surface and the key:
 
 - a key its renderer does not emit, `vscode colors` and `vscode chrome` included, so a chrome key under `colors` is refused;
 - the four tmux bookkeeping options, `@pfm-theme`, `@pfm-theme-generation`, `@pfm-theme-chips` and `@pfm-state-colour`, which the follower keeps for its own bookkeeping;

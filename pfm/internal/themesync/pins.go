@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 // pinKind is what a pinned value must be.
@@ -23,6 +25,8 @@ const (
 	pinColour
 	// pinHex is a VS Code colour: #rgb, #rgba, #rrggbb or #rrggbbaa, kept as written.
 	pinHex
+	// pinGlyph is a Herdr tab status glyph herdr.ValidTabGlyph accepts, kept as written.
+	pinGlyph
 )
 
 // vscodeHexColour is a colour VS Code reads: 3, 4, 6 or 8 hex digits.
@@ -31,7 +35,7 @@ var vscodeHexColour = regexp.MustCompile(`^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-
 // pinKeys are the keys a profile may pin on each surface, each with the kind
 // of value it takes.
 type pinKeys struct {
-	tmux, herdr, vscodeColors, vscodeChrome map[string]pinKind
+	tmux, herdr, herdrGlyphs, vscodeColors, vscodeChrome map[string]pinKind
 }
 
 // tmuxBookkeeping are the options tmuxOptions renders for the follower's own
@@ -48,7 +52,7 @@ func renderedPinKeys() (pinKeys, error) {
 	}
 	sample := Applied{Value: "dark", Title: "dark", Side: side, Primary: variant}
 	keys := pinKeys{
-		tmux: map[string]pinKind{}, herdr: map[string]pinKind{},
+		tmux: map[string]pinKind{}, herdr: map[string]pinKind{}, herdrGlyphs: map[string]pinKind{},
 		vscodeColors: map[string]pinKind{}, vscodeChrome: map[string]pinKind{},
 	}
 	for _, option := range tmuxOptions(sample, side, 1) {
@@ -62,6 +66,9 @@ func renderedPinKeys() (pinKeys, error) {
 	}
 	for _, token := range variant.herdrTokens() {
 		keys.herdr[token.name] = pinColour
+	}
+	for _, key := range herdr.TabGlyphKeys() {
+		keys.herdrGlyphs[key] = pinGlyph
 	}
 	contract := sample.vscodeContract(side, 1)
 	for name := range contract.Colors {
@@ -91,8 +98,19 @@ func canonicalPins(pins *SurfacePins) (*SurfacePins, error) {
 	if out.Tmux, err = canonicalMap("tmux", pins.Tmux, keys.tmux); err != nil {
 		return nil, err
 	}
-	if out.Herdr, err = canonicalMap("herdr", pins.Herdr, keys.herdr); err != nil {
-		return nil, err
+	if pins.Herdr != nil {
+		herdrOut := &HerdrPins{}
+		if herdrOut.Tokens, err = canonicalMap("herdr", pins.Herdr.Tokens, keys.herdr); err != nil {
+			return nil, err
+		}
+		if herdrOut.TabGlyphs, err = canonicalMap(
+			"herdr "+herdrTabGlyphsKey, pins.Herdr.TabGlyphs, keys.herdrGlyphs,
+		); err != nil {
+			return nil, err
+		}
+		if len(herdrOut.Tokens) > 0 || len(herdrOut.TabGlyphs) > 0 {
+			out.Herdr = herdrOut
+		}
 	}
 	if pins.VSCode != nil {
 		code := &VSCodePins{}
@@ -116,7 +134,7 @@ func canonicalPins(pins *SurfacePins) (*SurfacePins, error) {
 			out.VSCode = code
 		}
 	}
-	if len(out.Tmux) == 0 && len(out.Herdr) == 0 && out.VSCode == nil {
+	if len(out.Tmux) == 0 && out.Herdr == nil && out.VSCode == nil {
 		return nil, nil
 	}
 	return out, nil
@@ -148,6 +166,10 @@ func canonicalMap(surface string, values map[string]string, allowed map[string]p
 			if !vscodeHexColour.MatchString(value) {
 				return nil, fmt.Errorf("%s pin %q: %q is not #rgb, #rgba, #rrggbb or #rrggbbaa", surface, key, value)
 			}
+		case pinGlyph:
+			if err := herdr.ValidTabGlyph(value); err != nil {
+				return nil, fmt.Errorf("%s pin %q: %w", surface, key, err)
+			}
 		case pinText:
 		}
 		out[key] = value
@@ -172,10 +194,10 @@ func tmuxPins(pins *SurfacePins) map[string]string {
 }
 
 func herdrPins(pins *SurfacePins) map[string]string {
-	if pins == nil {
+	if pins == nil || pins.Herdr == nil {
 		return nil
 	}
-	return pins.Herdr
+	return pins.Herdr.Tokens
 }
 
 func vscodePins(pins *SurfacePins) VSCodePins {

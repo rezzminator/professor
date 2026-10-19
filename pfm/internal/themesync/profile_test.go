@@ -293,7 +293,7 @@ func TestPinsApplyToBothSidesOfAnAutoTheme(t *testing.T) {
 	applied := auto.Applied
 	applied.Pins = &SurfacePins{
 		Tmux:   map[string]string{"@host_accent": "#ff2e93"},
-		Herdr:  map[string]string{"accent": "#ff2e93"},
+		Herdr:  &HerdrPins{Tokens: map[string]string{"accent": "#ff2e93"}},
 		VSCode: &VSCodePins{Chrome: map[string]string{"titleBar.activeBackground": "#2a0a1a"}},
 	}
 

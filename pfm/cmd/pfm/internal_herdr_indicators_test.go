@@ -293,7 +293,7 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	revision++
 	mu.Unlock()
 	seen := map[string]bool{}
-	for !seen["🔴 Chat"] || !seen["⬜ Chat"] {
+	for !seen["🔴 Chat"] || !seen["⭕ Chat"] {
 		select {
 		case label := <-changed:
 			seen[label] = true

@@ -39,9 +39,12 @@ type TabDecoration struct {
 	// follows, so a row whose source is not read yet (a booting chat) never
 	// reads as the chat's first user name.
 	UserKnown bool
-	Revision  uint64
-	Session   json.RawMessage
-	Validate  func(context.Context) (bool, error)
+	// Glyphs are the theme's tab status glyphs this tick (themesync
+	// HerdrTabGlyphs); the zero value draws the defaults.
+	Glyphs   TabGlyphs
+	Revision uint64
+	Session  json.RawMessage
+	Validate func(context.Context) (bool, error)
 	// Retained marks a view whose live owner is gone (a bridge tab whose tmux
 	// client exited): it carries no Validate and is acted on only while pfm's
 	// own label record for the tab names its Identity and the tab still shows
@@ -53,29 +56,35 @@ type TabDecoration struct {
 type TabProvider func(context.Context, string) ([]TabDecoration, error)
 
 // DecoratedTabLabel reserves prefix runes before truncating the clean base.
-// Every emoji occupies two columns; the off phase is a hollow square, not
+// Emoji mode draws the theme's glyphs (a zero TabGlyphs field keeps its
+// default); each glyph is ValidTabGlyph, so cleaning never rewrites the
+// prefix, and the off phase of blocked and error is a glyph of its own, not
 // whitespace that TabRename's cleaning would strip. Text markers use three.
-func DecoratedTabLabel(base, state, mode string, on bool) string {
+func DecoratedTabLabel(base, state, mode string, on bool, glyphs TabGlyphs) string {
 	base = strings.Join(strings.Fields(TabLabel(base)), " ")
 	if mode == TabStatusOff || state == "" {
 		return TabLabel(base)
 	}
-	glyph, text := "❔", "[?]"
+	key, text := TabGlyphUnknown, "[?]"
 	switch state {
 	case "working":
-		glyph, text = "🟡", "[W]"
+		key, text = TabGlyphWorking, "[W]"
 	case "idle":
-		glyph, text = "🟢", "[I]"
+		key, text = TabGlyphIdle, "[I]"
 	case string(StateBlocked):
-		glyph, text = "🔴", "[B]"
+		key, text = TabGlyphBlocked, "[B]"
 	case "error":
-		glyph, text = "🟥", "[E]"
+		key, text = TabGlyphError, "[E]"
 	case "dead":
-		glyph, text = "⬛", "[D]"
+		key, text = TabGlyphDead, "[D]"
 	}
-	if !on && (state == string(StateBlocked) || state == "error") {
-		glyph, text = "⬜", "[ ]"
+	if !on && key == TabGlyphBlocked {
+		key, text = TabGlyphBlockedOff, "[ ]"
 	}
+	if !on && key == TabGlyphError {
+		key, text = TabGlyphErrorOff, "[ ]"
+	}
+	glyph := glyphs.glyph(key)
 	if mode == "text" {
 		glyph = text
 	}
@@ -83,7 +92,9 @@ func DecoratedTabLabel(base, state, mode string, on bool) string {
 	runes := []rune(base)
 	limit := MaxTitleRunes - len([]rune(prefix))
 	if len(runes) > limit {
-		base = string(runes[:limit])
+		// A cut on a space would leave a trailing one the rename's cleaning
+		// strips, so the label shown would never equal the one rendered.
+		base = strings.TrimRight(string(runes[:limit]), " ")
 	}
 	return prefix + base
 }
@@ -281,7 +292,8 @@ func reconcileTab(
 			record.UserSeen = true
 		}
 		record.Identity, record.State, record.Mode, record.On = d.Identity, d.State, d.Mode, on
-		want := DecoratedTabLabel(record.Base, d.State, d.Mode, on)
+		record.Glyphs = d.Glyphs
+		want := DecoratedTabLabel(record.Base, d.State, d.Mode, on, d.Glyphs)
 		if tab.Label != want {
 			rename, err := (TabRename{Tab: d.Tab, Label: want, Seq: 2}).Line()
 			if err != nil {

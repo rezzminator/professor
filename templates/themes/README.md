@@ -13,7 +13,7 @@ A profile is one file, `{name}.json`, and holds the whole theme on every surface
   "overrides": { "background": "#1a0a12", "text": "#f5e6ee", "claude": "#ff2e93" },
   "surfaces": {
     "tmux": { "@host_accent": "#ff2e93" },
-    "herdr": { "accent": "#ff2e93" },
+    "herdr": { "accent": "#ff2e93", "tabGlyphs": { "blocked": "🔴", "blockedOff": "⭕" } },
     "vscode": {
       "colors": { "terminal.background": "#1a0a12" },
       "chrome": { "titleBar.activeBackground": "#2a0a1a" },
@@ -33,6 +33,7 @@ A profile is one file, `{name}.json`, and holds the whole theme on every surface
 - `surfaces` is optional, and so is every key under it. A key it sets wins over what `pfm theme` derives; a key it omits stays derived:
   - `tmux` — tmux options by name (styles, `@host_accent` and the `@p_*` chips, `@pfm-c-*`, `@pfm-state-*`);
   - `herdr` — Herdr custom tokens;
+  - `herdr.tabGlyphs` — the Herdr tab status glyphs in `emoji` mode, by state: `working` 🟡, `idle` 🟢, `blocked` 🔴, `error` 🟥, `dead` ⬛, `unknown` ❔, and the blink's off phase `blockedOff` ⭕ and `errorOff` ❌; each one non-empty, at most 8 code points, with no whitespace or control character. The tab painter draws a switched theme's glyphs on its next paint; `text` mode keeps its `[W]`-style markers;
   - `vscode.colors` — the terminal colours pfm paints into VS Code's Global settings;
   - `vscode.chrome` — the window chrome (title, activity and status bars) pfm paints into a local workspace;
   - `vscode.theme` — the profile's VS Code colour theme: `colors` (any VS Code colour id), `tokenColors` (TextMate rules, `scope` always an array) and `semanticTokenColors` (a hex or `{foreground, bold, italic, underline, strikethrough}`). Each colour and semantic selector named replaces the derived one; each scope a rule styles moves to that rule; the rest of the derived theme stays.

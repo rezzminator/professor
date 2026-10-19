@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 const tabStateUnknown = "unknown"
@@ -33,7 +34,9 @@ type herdrTabProvider struct {
 	inspect func(context.Context, headless.Chat, time.Time) (headless.Status, error)
 	views   func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
 	mode    func() (string, error)
-	warn    io.Writer
+	// glyphs reads the theme's tab glyphs each tick; nil draws the defaults.
+	glyphs func() (herdr.TabGlyphs, error)
+	warn   io.Writer
 }
 
 func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]herdr.TabDecoration, error) {
@@ -43,6 +46,23 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	mode, err := provider.mode()
 	if err != nil {
 		return nil, fmt.Errorf("read tab status configuration: %w", err)
+	}
+	var glyphs herdr.TabGlyphs
+	// Only emoji mode draws the theme's glyphs: off and text never read them,
+	// so a broken theme state is never named for a mode that ignores it.
+	if provider.glyphs != nil && mode != herdr.TabStatusOff && mode != "text" {
+		// An unreadable theme never stops the tabs' status: it is named, and
+		// the tabs keep painting with the default glyphs while it lasts.
+		if glyphs, err = provider.glyphs(); err != nil {
+			glyphs = herdr.TabGlyphs{}
+			if _, writeErr := fmt.Fprintf(
+				provider.warn,
+				"Herdr tab glyphs of the theme: %v (painting the default glyphs)\n",
+				err,
+			); writeErr != nil {
+				return nil, fmt.Errorf("persist tab glyph failure: %w", writeErr)
+			}
+		}
 	}
 	scan, err := provider.scan(ctx)
 	if err != nil {
@@ -98,6 +118,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			view.Name, view.UserName, view.UserKnown = target.Name, row.UserName, row.UserNameKnown
 			view.State = state
 			view.Mode = mode
+			view.Glyphs = glyphs
 			decorations = append(decorations, view)
 		}
 	}
@@ -124,6 +145,8 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		}
 		return latest.Config.Chat.HerdrTabStatus, nil
 	}
+	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)
+	provider.glyphs = func() (herdr.TabGlyphs, error) { return themesync.HerdrTabGlyphs(stateDir) }
 	var panes []herdr.TabPane
 	var loaded bool
 	provider.scan = func(ctx context.Context) (FleetScan, error) {

@@ -103,6 +103,9 @@ type tabLabelRecord struct {
 	// have applied it. The next writer settles it against the tab's label
 	// (settlePending) before it reads the label as anyone else's.
 	Pending string
+	// Glyphs are the tab glyphs the status painter last drew with, so a
+	// rename between its ticks keeps the theme's prefix.
+	Glyphs TabGlyphs `json:",omitzero"`
 }
 
 // settlePending resolves a rename whose answer was lost: a tab label equal to
@@ -241,7 +244,7 @@ func writeSoleTabLabel(
 		}
 		// An explicit rename: the name is pfm's again, whoever set the label before.
 		record.Base, record.UserSet = TabLabel(label), false
-		want := DecoratedTabLabel(record.Base, record.State, record.Mode, record.On)
+		want := DecoratedTabLabel(record.Base, record.State, record.Mode, record.On, record.Glyphs)
 		if info.Label != want {
 			rename, err := (TabRename{Tab: tab, Label: want, Seq: seq()}).Line()
 			if err != nil {

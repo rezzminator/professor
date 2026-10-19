@@ -348,6 +348,8 @@ const twins = [
   ['gpt-rr-pro-max', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro-max'],
   ['gpt-agent-investigator', 'gpt-6.1-sol', 'high', 'agent-investigator'],
   ['gpt-transcript-reader', 'gpt-6-luna', 'medium', 'transcript-reader'],
+  ['gpt-tracer', 'gpt-6.1-sol', 'high', 'tracer'],
+  ['gpt-sub-tracer', 'gpt-6-luna', 'medium', 'sub-tracer'],
   ['sol', 'gpt-6.1-sol', 'high'],
   ['luna', 'gpt-6-luna', 'medium'],
   ['astra', 'gpt-6-astra', 'high'],
@@ -479,6 +481,9 @@ for (const [name, model, effort, role, base] of twins) {
       ? onGpt(renameStandalone('flights-foreman|flights-foreman-sonnet', () => 'gpt-foreman').replace(/(^## Effort\n\n)[^\n]*(\n)/m, `$1${noEffortTools}$2`))
       : role === 'flights-lander' ? onGpt(original)
       : role === 'agent-investigator' ? renameStandalone('transcript-reader|Haiku', (word) => word === 'Haiku' ? 'GPT luna' : 'gpt-transcript-reader')
+      : role === 'tracer' ? renameStandalone('sub-tracer|Haiku', (word) => word === 'Haiku' ? 'GPT luna' : 'gpt-sub-tracer')
+      : role === 'sub-tracer' ? renameStandalone('sub-tracer|tracer')
+      : role.startsWith('reviewer') ? renameStandalone('tracer')
       : original;
     const manual = base ? renderedText(render, base) : renamed;
     assert.ok(manual, `${name}: its base ${base} was not rendered`);
@@ -507,9 +512,25 @@ for (const [name, model, effort, role, base] of twins) {
         assert.ok(bodyOf(text).includes('`gpt-transcript-reader`'), `${name}: does not spawn gpt-transcript-reader`);
         assert.doesNotMatch(bodyOf(text), /(?<!gpt-)transcript-reader|Haiku/, `${name}: still names the Haiku reader`);
       }
+    } else if (role === 'tracer' || role === 'sub-tracer') {
+      // The trace tree runs on GPT end to end: the GPT tracer spawns GPT sub-tracers, which split into GPT sub-tracers.
+      assert.equal(fm.tools, parseFrontmatter(role, renderedText(render, role)).tools, `${name}: tools differ from ${role}`);
+      assert.ok(bodyOf(text).includes('`subagent_type: "gpt-sub-tracer"`'), `${name}: does not spawn gpt-sub-tracer`);
+      assert.doesNotMatch(bodyOf(text), /(?<!gpt-)sub-tracer(?!s)|Haiku/, `${name}: still names the Haiku sub-tracer`);
+      const reader = parseFrontmatter('gpt-sub-tracer', renderedText(render, 'gpt-sub-tracer'));
+      assert.deepEqual(reader.visibility['visible-to'].include, ['gpt-tracer', 'gpt-sub-tracer'], 'gpt-sub-tracer: not the GPT tracers\' alone');
+      const claudeReader = parseFrontmatter('sub-tracer', renderedText(render, 'sub-tracer'));
+      assert.deepEqual(claudeReader.visibility['visible-to'].include, ['tracer', 'sub-tracer'], 'sub-tracer: not the Claude tracers\' alone');
+      if (role === 'tracer')
+        assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-reviewer', 'gpt-reviewer-pro', 'gpt-foreman', 'gpt-flights-lander'],
+          `${name}: visible beyond the main chat and the GPT agents that trace`);
     } else {
-      assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
+      // A GPT reviewer traces on GPT: its tracer runs are gpt-tracer runs, never the Claude tracer.
+      assert.ok(bodyOf(text).includes('subagent_type: gpt-tracer'), `${name}: does not spawn gpt-tracer`);
+      assert.doesNotMatch(bodyOf(text), /(?<![A-Za-z0-9_./:-])tracer(?![A-Za-z0-9_/-])/, `${name}: still names the Claude tracer`);
       assert.deepEqual(fm.visibility['visible-to'].include, ['main'], `${name}: a GPT reviewer is the main chat's alone`);
+      const tracer = parseFrontmatter('gpt-tracer', renderedText(render, 'gpt-tracer'));
+      assert.ok(tracer.visibility['visible-to'].include.includes(name), `${name}: gpt-tracer is not visible to it`);
     }
     if (role === 'flights-lander') {
       assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),

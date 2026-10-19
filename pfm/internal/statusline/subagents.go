@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
@@ -122,47 +120,6 @@ const (
 	dropEffort
 )
 
-// rowPart is one segment of a full row; short is what it becomes once its
-// drop rank is reached ("" removes it).
-type rowPart struct {
-	text, short string
-	drop        int
-}
-
-func appendRowSegment(line, segment string) string {
-	switch {
-	case segment == "":
-		return line
-	case line == "":
-		return segment
-	}
-	return line + rowSep + segment
-}
-
-// fitRow joins the parts and, while the row is wider than columns leaves for
-// it, gives parts up rank by rank. columns 0 (no width in the payload) keeps
-// the full row.
-func fitRow(parts []rowPart, columns int) string {
-	join := func() string {
-		line := ""
-		for _, part := range parts {
-			line = appendRowSegment(line, part.text)
-		}
-		return line
-	}
-	line := join()
-	budget := columns - rowPrefixWidth
-	for rank := dropCwd; columns > 0 && rank <= dropEffort && ansi.StringWidth(line) > budget; rank++ {
-		for index := range parts {
-			if parts[index].drop == rank {
-				parts[index].text = parts[index].short
-			}
-		}
-		line = join()
-	}
-	return line
-}
-
 // userAgentsDir is the user's agent definitions directory, where Claude Code
 // reads them: $CLAUDE_CONFIG_DIR/agents when that is set, else ~/.claude/agents.
 func userAgentsDir(home string) string {
@@ -193,18 +150,28 @@ func ServeSubagents(
 	env paths.Env,
 	pfmConfigPath string,
 ) int {
+	trace := startSubagentTrace(machine.Home, env, stderr)
+	if trace != nil {
+		stdout = subagentTraceOutput{next: stdout, trace: trace}
+		defer trace.finish()
+	}
 	raw, err := readSubagentInput(stdin)
+	trace.input(raw)
 	if err != nil {
 		return failSubagents("input", raw, err, stdout, stderr)
 	}
+	trace.step("render")
 	prices := LoadServedPrices(machine.Home, pfmConfigPath, stderr, "pfm statusline --subagents")
 	userAgents := userAgentsDir(machine.Home)
 	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, machine.Home, env, userAgents, stderr)
 	if err != nil {
 		return failSubagents("render", raw, err, stdout, stderr)
 	}
+	trace.step("output")
 	if _, err := io.WriteString(stdout, rows); err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: write output (fail-open): %v\n", err)
+	} else {
+		trace.step("done")
 	}
 	return 0
 }
@@ -233,8 +200,8 @@ func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) 
 }
 
 // RenderSubagents turns one subagentStatusLine payload into the JSON lines
-// Claude Code reads back, one per task that reports a model or a token count;
-// a task it omits keeps Claude Code's own row body. A sub-agent transcript
+// Claude Code reads back, one per task with an id, even before its model or
+// token counters arrive. Unknown context stays visible as "?". A sub-agent transcript
 // that cannot be read renders "?" in its row and its cause goes to warn. A nil
 // prices leaves every row's dollars unpriced. A session with a cost ledger prices each row from it:
 // the ledger rows of that agent and every agent below it (ledger_spend.go); an agent it holds no
@@ -266,7 +233,7 @@ func RenderSubagents(
 	ledger := loadLedgerView(data.SessionID, home, env, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
-		if task.ID == "" || (task.TokenCount <= 0 && task.ContextWindowSize <= 0) {
+		if task.ID == "" {
 			continue
 		}
 		var activity *agentActivity
@@ -385,12 +352,19 @@ func activeContent(
 	inherited sessionEffortRecord,
 	now time.Time,
 ) []rowPart {
-	gauge := cTokens + formatContextTokens(task.TokenCount) + reset
+	gauge := cTokens + "?" + reset
+	if task.TokenCount > 0 {
+		gauge = cTokens + formatContextTokens(task.TokenCount) + reset
+	}
 	if task.ContextWindowSize > 0 {
-		percent := gaugePercent(float64(task.TokenCount) * 100 / float64(task.ContextWindowSize))
-		gauge = makeBar(percent, subagentBarWidth) + " " +
-			percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " +
-			gauge + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
+		if task.TokenCount > 0 {
+			percent := gaugePercent(float64(task.TokenCount) * 100 / float64(task.ContextWindowSize))
+			gauge = makeBar(percent, subagentBarWidth) + " " +
+				percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " + gauge
+		}
+		gauge += cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
+	} else if task.TokenCount <= 0 {
+		gauge += cWindow + "/?" + reset
 	}
 	var parts []rowPart
 	if activity != nil {

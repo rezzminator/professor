@@ -37,6 +37,20 @@ func TestConfigShowDisplaysTheTmuxTitlesAndNameSyncKeys(t *testing.T) {
 	}
 }
 
+func TestConfigShowDisplaysTheSubagentStatuslineTraceSwitch(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		home := t.TempDir()
+		machine := pfmconfig.Defaults(home, nil)
+		machine.Claude.SubagentStatuslineTrace = enabled
+		var stdout bytes.Buffer
+		printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
+		want := fmt.Sprintf("config claude.subagentStatuslineTrace=%t (default)", enabled)
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("config show missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestConfigClaude(t *testing.T) {
 	home := t.TempDir()
 	machine := pfmconfig.Defaults(

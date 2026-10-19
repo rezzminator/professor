@@ -244,6 +244,9 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
+	if prefs.SubagentStatuslineTrace {
+		env[EnvSubagentStatuslineTrace] = "1"
+	}
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}

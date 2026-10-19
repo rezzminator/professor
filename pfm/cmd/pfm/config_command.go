@@ -192,8 +192,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	fmt.Fprintf(
 		stdout,
 		"config version=%d effective (input=%d %s)\n",
-		config.Version,
-		config.InputVersion,
+		config.Version, config.InputVersion,
 		config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
@@ -242,6 +241,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("plugins", strings.Join(plugins, ","))
 	printClaude("costLedger", config.Claude.CostLedger)
 	printClaude("gptAgents", config.Claude.GptAgents)
+	printClaude("subagentStatuslineTrace", config.Claude.SubagentStatuslineTrace)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

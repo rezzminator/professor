@@ -490,6 +490,14 @@ func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testi
 	}
 }
 
+func TestSubagentStatuslineTraceStaysInTheHomesLogDirectory(t *testing.T) {
+	got := SubagentStatuslineTrace("/jail/home")
+	want := "/jail/home/.local/state/pfm/log/subagent-statusline.jsonl"
+	if got != want {
+		t.Fatalf("SubagentStatuslineTrace = %q, want %q", got, want)
+	}
+}
+
 // The auto-effort-control state file is the plugin's own path rule, mirrored: its
 // variable (blank is unset, `~/` the home), else its default under the home's
 // state directory, the session id made file-safe and set before the name's last

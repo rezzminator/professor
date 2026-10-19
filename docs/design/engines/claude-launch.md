@@ -14,6 +14,7 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 - [The launch record](#the-launch-record)
 - [Config keys](#config-keys)
 - [The rendered launch](#the-rendered-launch)
+- [Sub-agent status line trace](#sub-agent-status-line-trace)
 - [The system prompt](#the-system-prompt)
 - [Doors](#doors)
 - [The managed launcher](#the-managed-launcher)
@@ -76,6 +77,7 @@ type Knob struct {
 | `shell` | env `CLAUDE_CODE_SHELL={absolute bash}` in the launch's process environment, so the Bash tool of the chat and, by inheritance, of its sub-agents runs under bash, not the login shell (zsh does not word-split an unquoted `$VAR` the bash idioms agents write rely on); every door carries it: `Render`, the passthrough launcher (`SessionEnv`), a headless run's environment. An inherited value Claude Code would accept (absolute, executable, its path naming bash or zsh) is kept and nothing is added; a refused one is warned and replaced. No bash on `PATH`: nothing is added, the launch goes ahead, the activity log warns, `pfm config claude` shows the reason and `pfm doctor` fails its required `bash` | host | `bash` on `PATH` |
 | `systemPrompt` | `professor`: flag `--system-prompt-file`; `lean`: settings `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`; `production`: nothing | config | `production` |
 | `nativeCursor` | settings `env.CLAUDE_CODE_NATIVE_CURSOR=1` | config | `false` |
+| `subagentStatuslineTrace` | settings `env.PFM_SUBAGENT_STATUSLINE_TRACE=1` (`EnvSubagentStatuslineTrace`) when `true`; nothing when `false` — [Sub-agent status line trace](#sub-agent-status-line-trace) | config (machine-wide) | `false` |
 | `maxSubagentSpawnDepth` | settings `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | config | `8` |
 | `maxConcurrentSubagents` | settings `env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | config | unset (Claude's own default) |
 | `webSearchesPerSession` | settings `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | config | `9007199254740991` |
@@ -150,6 +152,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `cache1h` | `true` | the cache-live-control handoff (`CACHE_LIVE_CONTROL_MAIN_TTL`) in the process environment |
 | `theme` | unset | `theme` |
 | `nativeCursor` | `false` | native cursor |
+| `subagentStatuslineTrace` | `false` | the sub-agent status line's trace switch; machine-wide, an account-level value is refused |
 | `maxSubagentSpawnDepth` | `8` | sub-agent depth |
 | `maxConcurrentSubagents` | unset | sub-agent concurrency |
 | `webSearchesPerSession` | `9007199254740991` | web-search cap |
@@ -170,6 +173,20 @@ env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={
   [--mcp-config ~/.local/state/pfm/mcp-config/claude-mcp-{random}.json] \
   [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions]
 ```
+
+## Sub-agent status line trace
+
+`claude.subagentStatuslineTrace` (machine-wide, default `false`) renders `PFM_SUBAGENT_STATUSLINE_TRACE=1` into the settings `env` block of a Claude launch; the registry source is `EnvSubagentStatuslineTrace` in `pfm/internal/claudelaunch/knobs.go`. Exporting `PFM_SUBAGENT_STATUSLINE_TRACE=1` by hand enables it too. Turn it on by setting `"subagentStatuslineTrace": true` inside the machine config's `claude` object; it takes effect at the next launch.
+
+Claude Code ignores the stderr of a `subagentStatusLine` command that succeeds, so the trace is a file the diagnostics can be read from afterwards:
+
+- **Path and bounds:** `paths.SubagentStatuslineTrace(home)` = `~/.local/state/pfm/log/subagent-statusline.jsonl`, beside `cost-sink.log`. `obs.OpenRotatingLog` keeps two generations of 4 MiB (8 MiB in all) under a cross-process lock, mode 0600. The writer is `pfm/internal/statusline/subagents_trace.go`.
+- **Records:** a `start` record before stdin is read; the input shape plus, per task, `id`, `type`, `status`, `model` and the pointer-typed `tokenCount` and `contextWindowSize`, so an absent value stays distinct from zero; the emitted ids; a final `result` record with stage, `elapsed_ms` and count. Each carries PID and timestamps.
+- **Never recorded:** raw stdin, labels, prompts, descriptions, cwd, transcript paths or bodies, rendered content.
+- **Failure:** a trace that cannot open or write reports the cause on stderr and rendering continues.
+- **Rendering independent of the trace:** the sub-agent renderer emits a `pfm` row for every task id. A task with zero tokens and an unknown window shows context `?/?`, and an unknown token count never prints `0%`.
+
+The trace records what the status line received and emitted; it does not by itself establish the cause of the transient sub-agent row symptom.
 
 ## The system prompt
 

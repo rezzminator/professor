@@ -643,6 +643,12 @@ func CostSinkLog(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "log", "cost-sink.log")
 }
 
+// SubagentStatuslineTrace is the opt-in structural trace beside the cost sink
+// and activity logs. It never holds prompts, labels or transcript bodies.
+func SubagentStatuslineTrace(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "log", "subagent-statusline.jsonl")
+}
+
 // LegacyHarnessPromptsDir identifies the former managed prompt directory.
 func LegacyHarnessPromptsDir(home string) string {
 	return filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")

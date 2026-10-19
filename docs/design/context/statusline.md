@@ -48,7 +48,7 @@ The command is rendered with `~` expanded to the home directory. `~/.local/bin/p
 | Field | Shows | Rule |
 | --- | --- | --- |
 | nested | `2/5` | agents below this one working right now (Claude Code's payload lists them with a status that is not over, and their own turn is open and was written within the last 15 minutes), in green, over every agent below it at any depth, in the tools colour; absent when it spawned none, so a row without agents below it opens on the gauge. It leads the row because a parent row is read for it |
-| gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize`, rounded to the nearest percent; a window not yet full stops at 99%, so `100%` always means full |
+| gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize`, rounded to the nearest percent; a window not yet full stops at 99%, so `100%` always means full. An unknown token count (absent or 0) shows `?` with no bar and no percent: `?/1.0M` when the window is known, `?/?` when it is not; a known count with no window shows the count alone |
 | spend | `Σ$1.24/3.1M/42K/12` | follows the gauge after a space, not a `│`, opened by a muted `Σ`: a lifetime sum, never a share of the context gauge beside it. USD, prompt tokens (uncached, cache read, cache write), output tokens, distinct `tool_use` calls, billed by this agent and every agent below it at any depth. With a cost ledger the dollars and tokens are the ledger's rows of those agents, their side calls included, and only the tool calls come from the transcripts ([cost-ledger.md](../engines/cost-ledger.md#sub-agent-row-numbers)); without one, the transcripts price them, over each whole transcript, so spend from before a compaction counts. A response counts once per `message.id`; a usage block whose counts sit only in `usage.iterations` is folded, and a cache write is priced by its TTL split, the uncovered part at the 5-minute rate. Rates come from pfm's price table (`pfm/internal/pricing/prices.json`, the newer of the clone file and the embedded copy, plus any `pfm.prices.json` override), read without a fetch; a row's long tier applies to a response whose context is above its threshold, as `pfm tokens` prices it. A floor carries a yellow `+?`: a model the table cannot price, or a transcript below it that cannot be read. `$?` when nothing could be priced, `Σ$?/?/?/?` when the agent's own transcript cannot be read |
 | identity | `scout·tracer` | the task name, then its role (`agentType`) |
 | model | the family, then the effort bar and level | the model family, then the effort (see [Effort](#effort)) |
@@ -177,7 +177,7 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 ## What it does not do
 
 - It does not decorate the `⏺ main` row: Claude Code 2.1.281 renders no decoration there.
-- It does not show a row for a task that has neither a token count nor a window.
+- It does not omit a task's row for unknown context: every task id in the payload gets its `pfm` row, `?/?` in the gauge when neither a token count nor a window is known, and never a `0%` for an unknown count. Optional diagnostics of what the line received and emitted: [claude-launch.md](../engines/claude-launch.md#sub-agent-status-line-trace).
 - It does not render anything for Codex or OpenCode: `subagentStatusLine` is Claude Code's.
 - It does not show the cache-keepwarm shield on a sub-agent row: the shield is the main line's.
 - It does not tell a hung child from a working one while Claude Code still lists it as running: its open turn counts for 15 minutes.

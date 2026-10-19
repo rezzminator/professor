@@ -219,9 +219,30 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			want: "10│haiku│running│x",
 		},
 		{
-			name: "a task with no tokens and no window keeps Claude Code's own row",
+			name: "a task with no tokens and no window still gets a row with unknown context",
 			task: `{"id":"a5","label":"shell","tokenCount":0}`,
-			want: "",
+			want: "?/?│shell",
+		},
+		{
+			name: "a gateway agent with zero counters keeps its rich row",
+			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x",` +
+				`"model":"gpt-6-sol","tokenCount":0,"contextWindowSize":0`),
+			want: "?/? Σ$0.00/0/0/0│general-purpose│sol-6│running 2m:0s│idle 2m0s│💾–│pfm│x",
+		},
+		{
+			name: "an adopted agent with missing counters and model still gets a rich row",
+			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x"`),
+			want: "?/? Σ$0.00/0/0/0│general-purpose│running 2m:0s│idle 2m0s│💾–│pfm│x",
+		},
+		{
+			name: "zero progress with a known window is unknown, not a zero percent gauge",
+			task: `{"id":"g0","name":"bot","model":"gpt-6-sol","tokenCount":0,"contextWindowSize":200000}`,
+			want: "?/200.0K│bot│sol-6",
+		},
+		{
+			name: "negative counters are unknown, not a reason to omit the row",
+			task: `{"id":"negative","tokenCount":-1,"contextWindowSize":-1}`,
+			want: "?/?",
 		},
 		{
 			name: "a task with no id is skipped",
@@ -500,7 +521,8 @@ func TestRenderSubagentsIdleOnlyWhileRunning(t *testing.T) {
 func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 	got, err := RenderSubagents([]byte(`{"tasks":[
 		{"id":"first","tokenCount":10,"contextWindowSize":100},
-		{"id":"skipped"},
+		{"id":"unknown"},
+		{"label":"no id"},
 		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", noEnv, "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
@@ -513,8 +535,8 @@ func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 		}
 		ids = append(ids, row.ID)
 	}
-	if strings.Join(ids, ",") != "first,second" {
-		t.Fatalf("row ids = %v, want [first second]", ids)
+	if strings.Join(ids, ",") != "first,unknown,second" {
+		t.Fatalf("row ids = %v, want [first unknown second]", ids)
 	}
 }
 

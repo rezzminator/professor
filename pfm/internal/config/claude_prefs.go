@@ -92,6 +92,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			KeyClaudeGptAgents,
 		)
 	}
+	if raw.SubagentStatuslineTrace != nil && index >= 0 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.subagentStatuslineTrace is machine-wide: set %s",
+			path,
+			configScope(scope, index),
+			KeyClaudeSubagentStatuslineTrace,
+		)
+	}
 	if raw.CostLedger != nil && index >= 0 {
 		return ClaudePrefs{}, fmt.Errorf(
 			"config %s: %s.costLedger is machine-wide: set %s",
@@ -180,6 +188,10 @@ func applyClaudeMachinePrefs(
 		target.CostLedger = *raw.CostLedger
 		sources[KeyClaudeCostLedger] = SourceFile
 	}
+	if raw.SubagentStatuslineTrace != nil {
+		target.SubagentStatuslineTrace = *raw.SubagentStatuslineTrace
+		sources[KeyClaudeSubagentStatuslineTrace] = SourceFile
+	}
 	return nil
 }
 
@@ -215,7 +227,7 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 }
 
 // marshalClaude is the machine claude block. The keys a pfm of the last release (v0.79.0) does
-// not know — helperModel, pluginCheckoutRoot, plugins, env, costLedger — are written only when the file
+// not know — helperModel, pluginCheckoutRoot, plugins, env, costLedger, subagentStatuslineTrace — are written only when the file
 // set them or the value differs from the default, so `pfm config init` writes a file that pfm still
 // decodes: its loader refuses an unknown key. An unset value loads as its default either way.
 func marshalClaude(config Config) map[string]any {
@@ -253,6 +265,9 @@ func marshalClaude(config Config) map[string]any {
 	}
 	if set(KeyClaudeGptAgents) || config.Claude.GptAgents {
 		value["gptAgents"] = config.Claude.GptAgents
+	}
+	if set(KeyClaudeSubagentStatuslineTrace) || config.Claude.SubagentStatuslineTrace {
+		value["subagentStatuslineTrace"] = config.Claude.SubagentStatuslineTrace
 	}
 	return value
 }

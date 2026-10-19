@@ -58,6 +58,31 @@ func TestRotatorCapsOneHomeAtKeepFiles(t *testing.T) {
 	}
 }
 
+func TestOpenRotatingLogKeepsDiagnosticAppendsBounded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagnostic.jsonl")
+	for run := range 3 {
+		writer, err := OpenRotatingLog(path, 2, 1, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(strings.Repeat("r", 600*1024))); err != nil {
+			t.Fatalf("run %d: %v", run, err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{path, path + ".1"} {
+		info, err := os.Stat(name)
+		if err != nil || info.Size() != 600*1024 || info.Mode().Perm() != 0o600 {
+			t.Fatalf("diagnostic generation %s: info=%v, err=%v", name, info, err)
+		}
+	}
+	if _, err := os.Stat(path + ".2"); !os.IsNotExist(err) {
+		t.Fatalf("diagnostic exceeded its two-file cap: %v", err)
+	}
+}
+
 func TestRotatorAppendsToAnExistingFileAndDefaultsItsCaps(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
 	writer, err := newRotator(path, 0, 0, 0, clock.Real, io.Discard)

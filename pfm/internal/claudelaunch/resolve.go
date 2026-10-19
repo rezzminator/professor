@@ -139,6 +139,8 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 		return helperModel(prefs)
 	case knobTmuxTruecolor:
 		return strconv.FormatBool(prefs.TmuxTruecolor)
+	case knobSubagentStatuslineTrace:
+		return strconv.FormatBool(prefs.SubagentStatuslineTrace)
 	case knobCostLedger:
 		return strconv.FormatBool(prefs.CostLedger)
 	case knobTheme:

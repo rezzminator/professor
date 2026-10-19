@@ -34,7 +34,8 @@
     ],
     "env": {},
     "costLedger": true,
-    "gptAgents": false
+    "gptAgents": false,
+    "subagentStatuslineTrace": false
   },
   "codex": {
     "yolo": true,

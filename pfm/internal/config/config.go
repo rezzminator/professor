@@ -104,6 +104,9 @@ type ClaudePrefs struct {
 	CostLedger bool
 	// GptAgents opts into gpt twins and their managed hook assets machine-wide.
 	GptAgents bool
+	// SubagentStatuslineTrace is claude.subagentStatuslineTrace: the machine-wide switch that
+	// launches Claude with the sub-agent status line's trace on. Off by default.
+	SubagentStatuslineTrace bool
 	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
 	// Machine-wide: an account may not set it.
 	Plugins []ClaudePlugin
@@ -306,11 +309,12 @@ type rawClaude struct {
 	// RetiredCompactNudge accepts old config files; it is never read or written.
 	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
-	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
-	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
-	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
-	CostLedger             *bool   `json:"costLedger,omitempty"`
-	GptAgents              *bool   `json:"gptAgents,omitempty"`
+	MaxSubagentSpawnDepth   *int    `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents  *int    `json:"maxConcurrentSubagents,omitempty"`
+	PluginCheckoutRoot      *string `json:"pluginCheckoutRoot,omitempty"`
+	CostLedger              *bool   `json:"costLedger,omitempty"`
+	GptAgents               *bool   `json:"gptAgents,omitempty"`
+	SubagentStatuslineTrace *bool   `json:"subagentStatuslineTrace,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
 	// Env is claude.env; decodeClaudeEnv validates each name and value.
@@ -472,6 +476,7 @@ func defaultsWithMCPServers(
 		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
 		KeyClaudeGptAgents:                                   SourceDefault,
+		KeyClaudeSubagentStatuslineTrace:                     SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,

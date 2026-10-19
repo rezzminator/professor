@@ -23,6 +23,14 @@ const (
 	DefaultMaxMB     = 8
 )
 
+// OpenRotatingLog opens a private append-only diagnostic sink using the activity
+// log's cross-process rotation and error reporting, without replacing the process
+// logger. keep includes the current file; maxMB caps each generation. Callers
+// bound each record below that cap and close the returned writer.
+func OpenRotatingLog(path string, keep, maxMB int, stderr io.Writer) (io.WriteCloser, error) {
+	return newRotator(path, keep, maxMB, 0, clock.Real, stderr)
+}
+
 // failureReportInterval rate-limits how often a write/rotate failure repeats
 // on stderr once OpenLog has already opened the file successfully: the first
 // failure after a healthy run is always reported, and after that at most

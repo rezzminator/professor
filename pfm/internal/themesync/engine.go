@@ -528,8 +528,9 @@ func ReadBack(ctx context.Context, env Env) (Report, error) {
 	}
 	sess := newSession(env, store, state)
 	source, srcErr := resolveSource(env, state)
-	sess.source = sourceResult(state.Source, srcErr)
-	if srcErr == nil {
+	if srcErr != nil {
+		sess.source = sourceResult(nil, srcErr)
+	} else {
 		sess.source = sourceResult(&source.info, nil)
 		sess.state.Source = &source.info
 		appearance, err := appearanceFor(ctx, env, source.applied)

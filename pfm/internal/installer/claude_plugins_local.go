@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 
@@ -653,9 +654,12 @@ var retiredClaudePlugins = map[string][]string{
 	},
 }
 
-// planRetiredPluginDisable plans the settings.json edit that sets every
-// retired id of target's name false in enabledPlugins when it is enabled. It
-// returns "" when none is enabled or the file is absent.
+// planRetiredPluginDisable plans the settings.json edit that retires every
+// retired id of target's name: each enabled one set false in enabledPlugins,
+// and the plugin's pluginConfigs settled on target.ID alone (retireConfigs).
+// It returns "" when none is enabled, no entry needs settling or the file is
+// absent. The edit writes through a settings.json symlink and keeps every
+// number exactly.
 func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, func() error, error) {
 	retired := retiredClaudePlugins[target.Name]
 	if len(retired) == 0 {
@@ -666,12 +670,23 @@ func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, 
 		return "", nil, err
 	}
 	disabled := disableRetiredPlugins(document, retired)
-	if len(disabled) == 0 {
+	carried, dropped := retireConfigs(document, target, retired)
+	if len(disabled) == 0 && len(dropped) == 0 {
 		return "", nil, nil
 	}
-	message := "disable " + strings.Join(disabled, ", ") + " in " + path + ": retired, " + target.ID + " replaces it"
+	message := "settle the pluginConfigs of " + target.Name + " on " + target.ID + " in " + path + ": one entry per plugin"
+	if len(disabled) != 0 {
+		message = "disable " + strings.Join(disabled, ", ") + " in " + path + ": retired, " + target.ID + " replaces it"
+	}
+	if carried != "" {
+		message += "; copy the pluginConfigs of " + carried + " to " + target.ID
+	}
+	if len(dropped) != 0 {
+		message += "; drop the pluginConfigs of " + strings.Join(dropped, ", ")
+	}
 	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
 		disableRetiredPlugins(fresh, retired)
+		retireConfigs(fresh, target, retired)
 		return nil
 	}), nil
 }
@@ -688,4 +703,51 @@ func disableRetiredPlugins(document map[string]any, retired []string) []string {
 		}
 	}
 	return disabled
+}
+
+// retiredConfigIDs are the ids holding a pluginConfigs entry that target's
+// retirement leaves to target.ID alone, in carry order: its other copies, then
+// the retired ids. Claude Code reads one options entry per plugin name and the
+// plugin warns on every further one ("consolidate duplicate entries"), so none
+// of them may remain beside target.ID's.
+func retiredConfigIDs(document map[string]any, target *ClaudePluginTarget, retired []string) []string {
+	configs, _ := document["pluginConfigs"].(map[string]any)
+	var ids []string
+	for _, id := range append(target.OtherIDs(), retired...) {
+		if _, ok := configs[id]; ok && id != target.ID {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// retireConfigs settles document's pluginConfigs of target's plugin on
+// target.ID: the first retiredConfigIDs entry is carried to target.ID when it
+// has none, never overwriting, and then every one of them is deleted. A user's
+// only copy is never lost: an entry goes only once target.ID holds one, and
+// each dropped entry that differs from it is named with "(differs)". It names
+// the id carried and the ids dropped.
+func retireConfigs(
+	document map[string]any,
+	target *ClaudePluginTarget,
+	retired []string,
+) (carried string, dropped []string) {
+	ids := retiredConfigIDs(document, target, retired)
+	if len(ids) == 0 {
+		return "", nil
+	}
+	configs, _ := document["pluginConfigs"].(map[string]any)
+	if _, kept := configs[target.ID]; !kept {
+		carried = ids[0]
+		configs[target.ID] = configs[carried]
+	}
+	for _, id := range ids {
+		name := id
+		if !reflect.DeepEqual(configs[id], configs[target.ID]) {
+			name += " (differs)"
+		}
+		delete(configs, id)
+		dropped = append(dropped, name)
+	}
+	return carried, dropped
 }

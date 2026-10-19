@@ -346,6 +346,8 @@ const twins = [
   ['gpt-rr', 'gpt-6.1-sol', 'low', 'rr'],
   ['gpt-rr-pro', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro'],
   ['gpt-rr-pro-max', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro-max'],
+  ['gpt-agent-investigator', 'gpt-6.1-sol', 'high', 'agent-investigator'],
+  ['gpt-transcript-reader', 'gpt-6-luna', 'medium', 'transcript-reader'],
   ['sol', 'gpt-6.1-sol', 'high'],
   ['luna', 'gpt-6-luna', 'medium'],
   ['astra', 'gpt-6-astra', 'high'],
@@ -475,7 +477,9 @@ for (const [name, model, effort, role, base] of twins) {
     const onGpt = (body) => body.replace(/(^## Provider\n\n)[^\n]*(\n)/m, `$1${gptProvider}$2`);
     const renamed = role === 'flights-foreman'
       ? onGpt(renameStandalone('flights-foreman|flights-foreman-sonnet', () => 'gpt-foreman').replace(/(^## Effort\n\n)[^\n]*(\n)/m, `$1${noEffortTools}$2`))
-      : role === 'flights-lander' ? onGpt(original) : original;
+      : role === 'flights-lander' ? onGpt(original)
+      : role === 'agent-investigator' ? renameStandalone('transcript-reader|Haiku', (word) => word === 'Haiku' ? 'GPT luna' : 'gpt-transcript-reader')
+      : original;
     const manual = base ? renderedText(render, base) : renamed;
     assert.ok(manual, `${name}: its base ${base} was not rendered`);
     assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(manual).trimEnd()), `${name}: the rendered body is not the full ${base ?? role} manual`);
@@ -491,6 +495,18 @@ for (const [name, model, effort, role, base] of twins) {
       assert.equal(fm.tools, parseFrontmatter(base ?? role, renderedText(render, base ?? role)).tools, `${name}: tools differ from ${base ?? role}`);
       const digger = parseFrontmatter('sub-rr', renderedText(render, 'sub-rr'));
       assert.ok(digger.visibility['visible-to'].include.includes(name), `${name}: sub-rr is not visible to it`);
+    } else if (role === 'agent-investigator' || role === 'transcript-reader') {
+      // The investigation pair runs on GPT end to end: the twin spawns the GPT reader, never the Haiku one.
+      assert.equal(fm.tools, parseFrontmatter(role, renderedText(render, role)).tools, `${name}: tools differ from ${role}`);
+      const reader = parseFrontmatter('gpt-transcript-reader', renderedText(render, 'gpt-transcript-reader'));
+      assert.deepEqual(reader.visibility['visible-to'].include, ['gpt-agent-investigator'], 'gpt-transcript-reader: not the GPT investigator\'s alone');
+      const claudeReader = parseFrontmatter('transcript-reader', renderedText(render, 'transcript-reader'));
+      assert.deepEqual(claudeReader.visibility['visible-to'].include, ['agent-investigator'], 'transcript-reader: not the Claude investigator\'s alone');
+      if (role === 'agent-investigator') {
+        assert.deepEqual(fm.visibility['visible-to'].include, ['main'], `${name}: a GPT investigator is the main chat's alone`);
+        assert.ok(bodyOf(text).includes('`gpt-transcript-reader`'), `${name}: does not spawn gpt-transcript-reader`);
+        assert.doesNotMatch(bodyOf(text), /(?<!gpt-)transcript-reader|Haiku/, `${name}: still names the Haiku reader`);
+      }
     } else {
       assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
       assert.deepEqual(fm.visibility['visible-to'].include, ['main'], `${name}: a GPT reviewer is the main chat's alone`);

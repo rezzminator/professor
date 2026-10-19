@@ -40,6 +40,9 @@
     "global/agents/flights-foreman-sonnet.md": {
       "curated": true
     },
+    "global/agents/gpt-agent-investigator.md": {
+      "curated": true
+    },
     "global/agents/gpt-foreman.md": {
       "curated": true
     },
@@ -59,6 +62,9 @@
       "curated": true
     },
     "global/agents/gpt-rr-pro-max.md": {
+      "curated": true
+    },
+    "global/agents/gpt-transcript-reader.md": {
       "curated": true
     },
     "global/agents/luna.md": {

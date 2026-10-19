@@ -17,6 +17,8 @@ Installation and mirror compilation are local file operations: they do not conta
 | `gpt-rr` | `rr` | `gpt-6.1-sol[1m]` | `low` | the full research-lead manual, Claude diggers unchanged |
 | `gpt-rr-pro` | `rr-pro` | `gpt-6.1-sol[1m]` | `medium` | as `rr-pro`: its budget and repository lane |
 | `gpt-rr-pro-max` | `rr-pro-max` | `gpt-6.1-sol[1m]` | `medium` | as `rr-pro-max`: its budget, repository lane and `Read` |
+| `gpt-agent-investigator` | `agent-investigator` | `gpt-6.1-sol[1m]` | `high` | the full investigation manual, its readers renamed to `gpt-transcript-reader` |
+| `gpt-transcript-reader` | `transcript-reader` | `gpt-6-luna[1m]` | `medium` | the full reader manual |
 | `sol` | `general-purpose` | `gpt-6.1-sol[1m]` | `high` | the `shared/gpt-worker.md` append text |
 | `luna` | `general-purpose` | `gpt-6-luna[1m]` | `medium` | the `shared/gpt-worker.md` append text |
 | `astra` | `general-purpose` | `gpt-6-astra[1m]` | `high` | the `shared/gpt-worker.md` append text |
@@ -28,6 +30,8 @@ A flight twin carries its original's whole manual, so an edit to the original re
 A twin never carries `effortControl`: the effort buttons of `auto-effort-control` belong to Claude agents ([flights.md](../flights/flights.md#effort-buttons)), so `gpt-foreman`, `gpt-reviewer` and `gpt-reviewer-pro` unset the key and pin a `tools:` line without the buttons, whatever their originals declare; `flights-lander` carries neither, and `gpt-flights-lander` pins its original's `tools:` line.
 
 The RR twins keep their original's effort, tools, save law and body; `gpt-rr-pro` and `gpt-rr-pro-max` derive from the rendered `rr-pro` and `rr-pro-max`, so they carry each tier's budget and `shared/repo-lane.md`. They rename nothing: their `sub-rr` diggers and `clone-distiller` stay Claude agents, and `sub-rr`'s visibility lists the three twins beside the three Claude leads. Each is stamped `role: rr`. Their `RR-DIR:` line comes from the same `rr-dir` SubagentStart hook, whose matcher `rr|rr-pro|rr-pro-max|gpt-rr|gpt-rr-pro|gpt-rr-pro-max` names all six (`HookRRDirMatcher`, `pfm/internal/claudelaunch/hooks.go`).
+
+The investigation pair runs on GPT end to end. `gpt-agent-investigator` keeps its original's effort and tools, is visible to `main` alone, and renames `transcript-reader` to `gpt-transcript-reader` and the reader's tier `Haiku` to `GPT luna`, so it never spawns the Claude reader; a source that drops either word fails the render `RENAME-UNUSED`. `gpt-transcript-reader` keeps its original's effort and tools on `gpt-6-luna[1m]`, the model the machine policy maps `haiku` to (`codex.modelMap`), and is visible to `gpt-agent-investigator` alone, while `transcript-reader` stays visible to `agent-investigator` alone. Both read through the same chatlog kit and write under the same run and report directories as their originals.
 
 ## Opt-in
 

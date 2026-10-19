@@ -64,6 +64,12 @@
     "global/agents/gpt-rr-pro-max.md": {
       "curated": true
     },
+    "global/agents/gpt-sub-tracer.md": {
+      "curated": true
+    },
+    "global/agents/gpt-tracer.md": {
+      "curated": true
+    },
     "global/agents/gpt-transcript-reader.md": {
       "curated": true
     },

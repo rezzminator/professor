@@ -196,7 +196,7 @@ func TestRunVerbs(t *testing.T) {
 			wantCode: 1, wantCalls: []call{{verb: "off"}}, wantStderr: []string{"pfm theme: snapshot missing"},
 		},
 		{
-			name: "use sets the theme, syncs once and tells new chats to follow",
+			name: "use sets the theme, syncs once and tells unpinned chats to follow live",
 			args: []string{"use", "tokyo-night"},
 			fake: fakeThemesync{
 				on:     true,
@@ -210,7 +210,7 @@ func TestRunVerbs(t *testing.T) {
 			wantCalls: []call{{verb: "use", name: "tokyo-night"}, {verb: "sync"}},
 			wantStdout: []string{
 				"wrote " + twoAccounts[0], "wrote " + twoAccounts[1], "IN-SYNC",
-				"new chats follow; run /theme in open chats",
+				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm reload",
 			},
 		},
 		{
@@ -224,7 +224,7 @@ func TestRunVerbs(t *testing.T) {
 			wantStdout: []string{
 				"wrote " + twoAccounts[0],
 				"theme sync is off: run pfm theme on to repaint tmux, herdr and VS Code",
-				"new chats follow; run /theme in open chats",
+				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm reload",
 			},
 		},
 		{
@@ -263,7 +263,7 @@ func TestRunVerbs(t *testing.T) {
 				"refused " + twoAccounts[0] + ": disk full",
 				"pfm theme: no account settings.json was written",
 			},
-			notStdout: []string{"new chats follow", "wrote"},
+			notStdout: []string{"open chats without a pinned theme follow live", "wrote"},
 		},
 		{
 			name: "an unknown name exits 1 with the valid names",
@@ -275,7 +275,7 @@ func TestRunVerbs(t *testing.T) {
 			wantCode:   1,
 			wantCalls:  []call{{verb: "use", name: "nonsense"}},
 			wantStderr: []string{`pfm theme: unknown theme "nonsense"; valid names: auto, dark`},
-			notStdout:  []string{"new chats follow"},
+			notStdout:  []string{"open chats without a pinned theme follow live"},
 		},
 		{
 			name: "a sync that errors exits 1 naming the cause, the written accounts still told",
@@ -286,7 +286,7 @@ func TestRunVerbs(t *testing.T) {
 			},
 			wantCode:   1,
 			wantCalls:  []call{{verb: "use", name: "dark"}, {verb: "sync"}},
-			wantStdout: []string{"wrote " + twoAccounts[0], "new chats follow"},
+			wantStdout: []string{"wrote " + twoAccounts[0], "open chats without a pinned theme follow live"},
 			wantStderr: []string{"pfm theme: sync: state unreadable"},
 		},
 		{
@@ -297,7 +297,7 @@ func TestRunVerbs(t *testing.T) {
 			},
 			wantCode:   1,
 			wantCalls:  []call{{verb: "use", name: "dark"}, {verb: "sync"}},
-			wantStdout: []string{"DRIFT", "new chats follow"},
+			wantStdout: []string{"DRIFT", "open chats without a pinned theme follow live"},
 			wantStderr: []string{"sync left surfaces out of sync: tmux DRIFT d-DRIFT"},
 		},
 		{

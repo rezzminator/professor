@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -365,6 +366,49 @@ func TestResumeNativeRecipePreservesEachRegisteredEngine(t *testing.T) {
 			}
 			if err != nil || !slices.Equal(run.Args, tc.want) || !slices.Equal(run.Env, []string{"ACCOUNT=3"}) {
 				t.Fatalf("recipe=%+v err=%v want=%q", run, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRestoredRecipeRechecksThemeSync(t *testing.T) {
+	for _, tc := range []struct {
+		name, state string
+		pinned      bool
+	}{
+		{"enabled", `{"enabled":true}`, false},
+		{"disabled", `{"enabled":false}`, true},
+		{"malformed", `{`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			statePath := filepath.Join(home, ".local", "state", "pfm", "theme", "state.json")
+			if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(statePath, []byte(tc.state), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			run, err := resumeNativeRun(
+				fleetdb.SeatRun{Binary: "fixture", Args: []string{
+					claudelaunch.SettingsFlag, `{"theme":"custom:launch-pin","counter":9007199254740993}`,
+				}},
+				fleetdb.Seat{Engine: string(pfmengine.Claude), SessionID: "same-session"},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var settings map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(run.Args[1]), &settings); err != nil {
+				t.Fatal(err)
+			}
+			if _, pinned := settings["theme"]; pinned != tc.pinned {
+				t.Fatalf("restored theme pin=%t, want %t: %s", pinned, tc.pinned, run.Args[1])
+			}
+			if string(settings["counter"]) != "9007199254740993" ||
+				!slices.Equal(run.Args[2:], []string{"--resume", "same-session"}) {
+				t.Fatalf("non-theme recipe changed: %q", run.Args)
 			}
 		})
 	}

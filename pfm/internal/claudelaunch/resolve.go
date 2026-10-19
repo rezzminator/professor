@@ -72,6 +72,19 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 				row.Won = "config"
 			}
 		}
+		if knob.Name == knobTheme {
+			theme, note := themeForLaunch(prefs.Theme)
+			if theme == "" {
+				row.Value = unsetWord
+			} else {
+				row.Value = theme
+			}
+			if note == themeSyncOwnsIt {
+				row.Won = note
+			} else if note != "" {
+				row.Won += " (" + note + ")"
+			}
+		}
 		rows = append(rows, row)
 	}
 	return rows

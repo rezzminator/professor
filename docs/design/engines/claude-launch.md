@@ -88,7 +88,7 @@ type Knob struct {
 | agent teams | settings `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` | constant | — |
 | function hooks | settings `env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` | constant | — |
 | output style | settings `outputStyle: "default"` | constant | — |
-| `theme` | settings `theme` | config | unset |
+| `theme` | settings `theme` only with theme sync off; omitted while sync owns it ([theme sync](theme-sync.md#themeforlaunch)) | config; account settings while synced | unset |
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
 | status lines | settings `statusLine`, `subagentStatusLine` — `docs/design/context/statusline.md` | constant | — |

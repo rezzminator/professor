@@ -254,8 +254,8 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 		env[envSimplePrompt] = "1"
 	}
 	settings["env"] = env
-	if prefs.Theme != "" {
-		settings[knobTheme] = prefs.Theme
+	if theme, _ := themeForLaunch(prefs.Theme); theme != "" {
+		settings[knobTheme] = theme
 	}
 	if request.Purpose != PurposeQuery {
 		settings[knobHooks] = hookSettings(HookTemplates(request.Home))

@@ -387,6 +387,11 @@ func resumeNativeRun(run fleetdb.SeatRun, seat fleetdb.Seat) (fleetdb.SeatRun, e
 	}
 	switch engineID {
 	case pfmengine.Claude:
+		var err error
+		args, err = claudelaunch.RefreshThemePin(args)
+		if err != nil {
+			return run, fmt.Errorf("refresh restored theme: %w", err)
+		}
 		args = append(args, resume, seat.SessionID)
 	case pfmengine.Codex:
 		args = append(args, "resume", seat.SessionID)

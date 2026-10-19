@@ -324,7 +324,14 @@ var Knobs = func() []Knob {
 			defaultWord,
 			"Use the managed output style.",
 		},
-		Knob{knobTheme, WireSettings, knobTheme, SourceConfig, nil, "Carry the selected Claude theme."},
+		Knob{
+			knobTheme,
+			WireSettings,
+			knobTheme,
+			SourceConfig,
+			nil,
+			"Carry the selected Claude theme unless theme sync owns it.",
+		},
 		Knob{
 			knobCleanupPeriodDays,
 			WireSettings,

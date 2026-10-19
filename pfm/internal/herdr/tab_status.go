@@ -8,6 +8,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
@@ -55,16 +56,13 @@ type TabDecoration struct {
 // TabProvider enumerates the chats displayed on one Herdr endpoint.
 type TabProvider func(context.Context, string) ([]TabDecoration, error)
 
-// DecoratedTabLabel reserves prefix runes before truncating the clean base.
-// Emoji mode draws the theme's glyphs (a zero TabGlyphs field keeps its
-// default); each glyph is ValidTabGlyph, so cleaning never rewrites the
-// prefix, and the off phase of blocked and error is a glyph of its own, not
-// whitespace that TabRename's cleaning would strip. Text markers use three.
-func DecoratedTabLabel(base, state, mode string, on bool, glyphs TabGlyphs) string {
-	base = strings.Join(strings.Fields(TabLabel(base)), " ")
-	if mode == TabStatusOff || state == "" {
-		return TabLabel(base)
-	}
+// tabMarkers are the prefixes state plays in mode, one per frame: emoji mode
+// the theme's frames (a zero TabGlyphs field keeps its default), text mode
+// three-rune markers, its blocked and error pulsing with "[ ]" and every
+// other state still. Each emoji frame is ValidTabGlyph, so cleaning never
+// rewrites the prefix, and a pulse's off phase is a glyph of its own, not
+// whitespace that TabRename's cleaning would strip.
+func tabMarkers(state, mode string, glyphs TabGlyphs) []string {
 	key, text := TabGlyphUnknown, "[?]"
 	switch state {
 	case "working":
@@ -78,25 +76,49 @@ func DecoratedTabLabel(base, state, mode string, on bool, glyphs TabGlyphs) stri
 	case "dead":
 		key, text = TabGlyphDead, "[D]"
 	}
-	if !on && key == TabGlyphBlocked {
-		key, text = TabGlyphBlockedOff, "[ ]"
+	if mode != "text" {
+		return glyphs.frames(key)
 	}
-	if !on && key == TabGlyphError {
-		key, text = TabGlyphErrorOff, "[ ]"
+	if key == TabGlyphBlocked || key == TabGlyphError {
+		return []string{text, "[ ]"}
 	}
-	glyph := glyphs.glyph(key)
-	if mode == "text" {
-		glyph = text
+	return []string{text}
+}
+
+// tabFrame is the frame state plays at the wall-clock tick (TabTick): the
+// tick modulo its frame count, so every painter draws the same frame at the
+// same moment; a still state is always frame 0.
+func tabFrame(state, mode string, tick int64, glyphs TabGlyphs) int {
+	if mode == TabStatusOff || state == "" {
+		return 0
 	}
-	prefix := glyph + " "
+	count := int64(len(tabMarkers(state, mode, glyphs)))
+	return int(((tick % count) + count) % count)
+}
+
+// DecoratedTabLabel prefixes the clean base with state's marker at frame
+// (taken modulo the state's frame count). The base is truncated against the
+// state's widest marker, so it never shifts between frames.
+func DecoratedTabLabel(base, state, mode string, frame int, glyphs TabGlyphs) string {
+	base = strings.Join(strings.Fields(TabLabel(base)), " ")
+	if mode == TabStatusOff || state == "" {
+		return TabLabel(base)
+	}
+	markers := tabMarkers(state, mode, glyphs)
+	widest := 0
+	for _, marker := range markers {
+		widest = max(widest, utf8.RuneCountInString(marker))
+	}
+	count := len(markers)
+	marker := markers[((frame%count)+count)%count]
 	runes := []rune(base)
-	limit := MaxTitleRunes - len([]rune(prefix))
+	limit := MaxTitleRunes - widest - 1
 	if len(runes) > limit {
 		// A cut on a space would leave a trailing one the rename's cleaning
 		// strips, so the label shown would never equal the one rendered.
 		base = strings.TrimRight(string(runes[:limit]), " ")
 	}
-	return prefix + base
+	return marker + " " + base
 }
 
 // TabPane is the producer's PaneInfo projection used for ownership checks.
@@ -192,7 +214,7 @@ func reconcileTab(
 	ctx context.Context,
 	socket, dir string,
 	d TabDecoration,
-	on bool,
+	tick int64,
 	call func(context.Context, string, ...[]byte) ([]json.RawMessage, error),
 ) (wrote bool, returnErr error) {
 	if d.Tab == "" || d.Terminal == "" || d.Identity == "" {
@@ -242,7 +264,7 @@ func reconcileTab(
 			return nil
 		}
 		record.settlePending(tab.Label)
-		if d.Retained && tab.Label != record.Rendered {
+		if d.Retained && !record.owns(tab.Label) {
 			return fmt.Errorf(
 				"%w: tab %s was renamed after pfm rendered %q",
 				errTabLabelForeign,
@@ -251,7 +273,7 @@ func reconcileTab(
 			)
 		}
 		if d.Mode == TabStatusOff {
-			if record.Identity != d.Identity || record.Rendered != tab.Label {
+			if record.Identity != d.Identity || !record.owns(tab.Label) {
 				return nil
 			}
 		} else {
@@ -260,7 +282,7 @@ func reconcileTab(
 				record = tabLabelRecord{Base: d.Name, Seen: d.Name}
 			case record.Base == "":
 				record.Base, record.Seen = d.Name, d.Name
-			case record.Rendered != tab.Label && tab.Label != record.Base && tab.Label != "":
+			case !record.owns(tab.Label) && tab.Label != record.Base && tab.Label != "":
 				// Treat an external label as literal text, never strip prefixes;
 				// it is the user's, and stands until an explicit pfm rename. A
 				// tab with no label holds none of the user's: pfm's name stays.
@@ -291,9 +313,9 @@ func reconcileTab(
 			}
 			record.UserSeen = true
 		}
-		record.Identity, record.State, record.Mode, record.On = d.Identity, d.State, d.Mode, on
-		record.Glyphs = d.Glyphs
-		want := DecoratedTabLabel(record.Base, d.State, d.Mode, on, d.Glyphs)
+		record.Identity, record.State, record.Mode = d.Identity, d.State, d.Mode
+		record.Frame, record.Glyphs = tabFrame(d.State, d.Mode, tick, d.Glyphs), d.Glyphs
+		want := DecoratedTabLabel(record.Base, d.State, d.Mode, record.Frame, d.Glyphs)
 		if tab.Label != want {
 			rename, err := (TabRename{Tab: d.Tab, Label: want, Seq: 2}).Line()
 			if err != nil {
@@ -305,7 +327,7 @@ func reconcileTab(
 			wrote = true
 		}
 		record.Rendered = want
-		if record == before {
+		if reflect.DeepEqual(record, before) {
 			return nil
 		}
 		return writeTabLabel(path, record)
@@ -374,7 +396,7 @@ func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
 		d.Revision = pane.Revision
 		d.AgentStatus = pane.State
 		d.Mode = TabStatusOff
-		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, true, painter.call); err != nil &&
+		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, 0, painter.call); err != nil &&
 			!errors.Is(err, errTabLabelForeign) {
 			failures = append(failures, err)
 		}

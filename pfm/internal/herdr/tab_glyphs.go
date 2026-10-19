@@ -1,6 +1,8 @@
 package herdr
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -8,70 +10,113 @@ import (
 	"unicode/utf8"
 )
 
-// The tab status glyph keys: one per state DecoratedTabLabel draws, and the
-// off phase of the two states that blink.
+// The tab status glyph keys: one per state DecoratedTabLabel draws.
 const (
-	TabGlyphWorking    = "working"
-	TabGlyphIdle       = "idle"
-	TabGlyphBlocked    = "blocked"
-	TabGlyphBlockedOff = "blockedOff"
-	TabGlyphError      = "error"
-	TabGlyphErrorOff   = "errorOff"
-	TabGlyphDead       = "dead"
-	TabGlyphUnknown    = "unknown"
+	TabGlyphWorking = "working"
+	TabGlyphIdle    = "idle"
+	TabGlyphBlocked = "blocked"
+	TabGlyphError   = "error"
+	TabGlyphDead    = "dead"
+	TabGlyphUnknown = "unknown"
 )
 
-// MaxTabGlyphRunes is the prefix budget one glyph may take: room for an emoji
+// MaxTabGlyphRunes is the prefix budget one frame may take: room for an emoji
 // with a variation selector or a short ZWJ sequence. DecoratedTabLabel
-// reserves the glyph's runes and a space before truncating the base.
+// reserves the state's widest frame and a space before truncating the base.
 const MaxTabGlyphRunes = 8
 
-// TabGlyphs are the emoji-mode tab status glyphs; an empty field keeps its
-// default (defaultTabGlyphs). The value is comparable, so a tab label record
-// holding it still compares with ==.
+// MaxTabFrames caps the frames one state may play.
+const MaxTabFrames = 12
+
+// TabFrames are one tab state's glyphs, played in order one per half-second
+// tick: a single frame is a still glyph, several an animation (a pulse, a
+// spinner). JSON takes a string (one frame) or an array of strings; a single
+// frame writes back as a string, so either spelling round-trips equal.
+type TabFrames []string
+
+// UnmarshalJSON reads a string as one frame or an array as its frames; any
+// other shape is an error. The frames are checked by ValidTabFrames.
+func (frames *TabFrames) UnmarshalJSON(content []byte) error {
+	trimmed := bytes.TrimSpace(content)
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var frame string
+		if err := json.Unmarshal(trimmed, &frame); err != nil {
+			return fmt.Errorf("a glyph string or an array of glyph frames: %w", err)
+		}
+		*frames = TabFrames{frame}
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(trimmed, &list); err != nil {
+		return fmt.Errorf("a glyph string or an array of glyph frames: %w", err)
+	}
+	if list == nil {
+		list = []string{}
+	}
+	*frames = list
+	return nil
+}
+
+// MarshalJSON writes one frame as a string, several as an array.
+func (frames TabFrames) MarshalJSON() ([]byte, error) {
+	var value any = []string(frames)
+	if len(frames) == 1 {
+		value = frames[0]
+	}
+	content, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode tab glyph frames: %w", err)
+	}
+	return content, nil
+}
+
+// TabGlyphs are the emoji-mode tab status glyphs; a nil field keeps its
+// default (defaultTabGlyphs).
 type TabGlyphs struct {
-	Working    string `json:"working,omitempty"`
-	Idle       string `json:"idle,omitempty"`
-	Blocked    string `json:"blocked,omitempty"`
-	BlockedOff string `json:"blockedOff,omitempty"`
-	Error      string `json:"error,omitempty"`
-	ErrorOff   string `json:"errorOff,omitempty"`
-	Dead       string `json:"dead,omitempty"`
-	Unknown    string `json:"unknown,omitempty"`
+	Working TabFrames `json:"working,omitempty"`
+	Idle    TabFrames `json:"idle,omitempty"`
+	Blocked TabFrames `json:"blocked,omitempty"`
+	Error   TabFrames `json:"error,omitempty"`
+	Dead    TabFrames `json:"dead,omitempty"`
+	Unknown TabFrames `json:"unknown,omitempty"`
 }
 
-// defaultTabGlyphs blink each attention state between its filled shape and
-// a hollow or lighter one of the same red: blocked 🔴 ↔ ⭕, and error 🟥 ↔ ❌,
-// since Unicode has no hollow red square and ❌ keeps the hue and the error
-// reading while staying distinct from blocked's circle.
+// defaultTabGlyphs animate working through the moon's phases and pulse each
+// attention state between its filled shape and a hollow or lighter one of
+// the same red: blocked 🔴 ↔ ⭕, and error 🟥 ↔ ❌, since Unicode has no hollow
+// red square and ❌ keeps the hue and the error reading while staying
+// distinct from blocked's circle. The other states are still.
 var defaultTabGlyphs = TabGlyphs{
-	Working: "🟡", Idle: "🟢", Blocked: "🔴", BlockedOff: "⭕",
-	Error: "🟥", ErrorOff: "❌", Dead: "⬛", Unknown: "❔",
+	Working: TabFrames{"🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"},
+	Idle:    TabFrames{"🟢"},
+	Blocked: TabFrames{"🔴", "⭕"},
+	Error:   TabFrames{"🟥", "❌"},
+	Dead:    TabFrames{"⬛"},
+	Unknown: TabFrames{"❔"},
 }
 
-func (glyphs *TabGlyphs) fields() map[string]*string {
-	return map[string]*string{
+func (glyphs *TabGlyphs) fields() map[string]*TabFrames {
+	return map[string]*TabFrames{
 		TabGlyphWorking: &glyphs.Working, TabGlyphIdle: &glyphs.Idle,
-		TabGlyphBlocked: &glyphs.Blocked, TabGlyphBlockedOff: &glyphs.BlockedOff,
-		TabGlyphError: &glyphs.Error, TabGlyphErrorOff: &glyphs.ErrorOff,
+		TabGlyphBlocked: &glyphs.Blocked, TabGlyphError: &glyphs.Error,
 		TabGlyphDead: &glyphs.Dead, TabGlyphUnknown: &glyphs.Unknown,
 	}
 }
 
-// TabGlyphKeys are the keys a theme may set a tab glyph for, sorted.
+// TabGlyphKeys are the keys a theme may set tab glyphs for, sorted.
 func TabGlyphKeys() []string {
 	return slices.Sorted(maps.Keys((&TabGlyphs{}).fields()))
 }
 
-// glyph is key's configured glyph, or its default when none is configured.
-func (glyphs TabGlyphs) glyph(key string) string {
-	if configured := *glyphs.fields()[key]; configured != "" {
+// frames is key's configured frames, or its default when none are configured.
+func (glyphs TabGlyphs) frames(key string) TabFrames {
+	if configured := *glyphs.fields()[key]; len(configured) > 0 {
 		return configured
 	}
 	return *defaultTabGlyphs.fields()[key]
 }
 
-// ValidTabGlyph refuses a glyph DecoratedTabLabel cannot render as written:
+// ValidTabGlyph refuses a frame DecoratedTabLabel cannot render as written:
 // empty, invalid UTF-8, over MaxTabGlyphRunes, or holding whitespace or a
 // control character, which the tab label cleaning (TabLabel) would rewrite,
 // so the label Herdr shows would never equal the one pfm rendered.
@@ -93,10 +138,27 @@ func ValidTabGlyph(glyph string) error {
 	return nil
 }
 
-// ParseTabGlyphs reads glyphs keyed by TabGlyphKeys, each one ValidTabGlyph:
-// an unknown key or an invalid glyph is an error naming the key. A key
-// absent keeps its default.
-func ParseTabGlyphs(values map[string]string) (TabGlyphs, error) {
+// ValidTabFrames refuses frames DecoratedTabLabel cannot play: none, over
+// MaxTabFrames, or a frame ValidTabGlyph refuses, named by its index.
+func ValidTabFrames(frames TabFrames) error {
+	if len(frames) == 0 {
+		return fmt.Errorf("no frames: a glyph string or an array of 1 to %d glyph frames", MaxTabFrames)
+	}
+	if len(frames) > MaxTabFrames {
+		return fmt.Errorf("%d frames, over the cap of %d", len(frames), MaxTabFrames)
+	}
+	for i, frame := range frames {
+		if err := ValidTabGlyph(frame); err != nil {
+			return fmt.Errorf("frame %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// ParseTabGlyphs reads frames keyed by TabGlyphKeys, each ValidTabFrames: an
+// unknown key or invalid frames are an error naming the key. A key absent
+// keeps its default.
+func ParseTabGlyphs(values map[string]TabFrames) (TabGlyphs, error) {
 	var glyphs TabGlyphs
 	fields := glyphs.fields()
 	for _, key := range slices.Sorted(maps.Keys(values)) {
@@ -104,10 +166,16 @@ func ParseTabGlyphs(values map[string]string) (TabGlyphs, error) {
 		if !known {
 			return TabGlyphs{}, fmt.Errorf("tab glyph %q: not a tab state (%v)", key, TabGlyphKeys())
 		}
-		if err := ValidTabGlyph(values[key]); err != nil {
+		if err := ValidTabFrames(values[key]); err != nil {
 			return TabGlyphs{}, fmt.Errorf("tab glyph %q: %w", key, err)
 		}
-		*field = values[key]
+		*field = slices.Clone(values[key])
 	}
 	return glyphs, nil
+}
+
+// TabTick is the wall clock's half-second count: every painter reads the
+// same tick at the same moment, so concurrent painters draw the same frame.
+func TabTick(unixMillis int64) int64 {
+	return unixMillis / blinkHalfPeriod.Milliseconds()
 }

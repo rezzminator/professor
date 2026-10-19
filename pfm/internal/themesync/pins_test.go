@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 func TestPinnableKeysAreTheKeysTheRenderersEmit(t *testing.T) {
@@ -81,8 +83,6 @@ func TestValidatePinsAcceptsEveryRenderedKeyWithItsKindOfValue(t *testing.T) {
 		for name, kind := range kinds {
 			out[name] = "bg=colour1,fg=#abcdef"
 			switch kind {
-			case pinGlyph:
-				out[name] = "⭕"
 			case pinColour, pinHex:
 				out[name] = "#abcdef"
 			case pinText:
@@ -90,8 +90,12 @@ func TestValidatePinsAcceptsEveryRenderedKeyWithItsKindOfValue(t *testing.T) {
 		}
 		return out
 	}
+	glyphs := map[string]herdr.TabFrames{}
+	for name := range keys.herdrGlyphs {
+		glyphs[name] = herdr.TabFrames{"⭕", "🔴"}
+	}
 	all := &SurfacePins{
-		Tmux: fill(keys.tmux), Herdr: &HerdrPins{Tokens: fill(keys.herdr), TabGlyphs: fill(keys.herdrGlyphs)},
+		Tmux: fill(keys.tmux), Herdr: &HerdrPins{Tokens: fill(keys.herdr), TabGlyphs: glyphs},
 		VSCode: &VSCodePins{Colors: fill(keys.vscodeColors), Chrome: fill(keys.vscodeChrome)},
 	}
 	if err := validatePins(all); err != nil {
@@ -166,18 +170,23 @@ func TestValidatePinsRejectsAnUnknownKeyOrABadValueNamingBoth(t *testing.T) {
 		},
 		{
 			"unknown herdr tab glyph state",
-			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]string{"blink": "⭕"}}},
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"blink": {"⭕"}}}},
 			[]string{"herdr tabGlyphs", "blink"},
 		},
 		{
 			"empty herdr tab glyph",
-			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]string{"blocked": ""}}},
-			[]string{"herdr tabGlyphs", "blocked", "empty"},
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🔴", ""}}}},
+			[]string{"herdr tabGlyphs", "blocked", "frame 1", "empty"},
+		},
+		{
+			"herdr tab glyph with no frames",
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"working": {}}}},
+			[]string{"herdr tabGlyphs", "working", "no frames"},
 		},
 		{
 			"herdr tab glyph over the prefix budget",
-			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]string{"blockedOff": "🔴🔴🔴🔴🔴🔴🔴🔴🔴"}}},
-			[]string{"herdr tabGlyphs", "blockedOff", "budget"},
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"error": {"🔴🔴🔴🔴🔴🔴🔴🔴🔴"}}}},
+			[]string{"herdr tabGlyphs", "error", "budget"},
 		},
 		{
 			"unknown vscode colour",
@@ -232,7 +241,7 @@ func TestCanonicalPinsWriteColoursAsHexAndDropEmptyMaps(t *testing.T) {
 		},
 		Herdr: &HerdrPins{
 			Tokens:    map[string]string{"accent": "ansi:red"},
-			TabGlyphs: map[string]string{"blocked": "🟣"},
+			TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🟣"}},
 		},
 		VSCode: &VSCodePins{Colors: map[string]string{}, Chrome: map[string]string{"sash.hoverBorder": "#FF2E9380"}},
 	})
@@ -245,7 +254,7 @@ func TestCanonicalPinsWriteColoursAsHexAndDropEmptyMaps(t *testing.T) {
 		},
 		Herdr: &HerdrPins{
 			Tokens:    map[string]string{"accent": "#cd0000"},
-			TabGlyphs: map[string]string{"blocked": "🟣"},
+			TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🟣"}},
 		},
 		VSCode: &VSCodePins{Chrome: map[string]string{"sash.hoverBorder": "#FF2E9380"}},
 	}

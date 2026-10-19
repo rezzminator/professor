@@ -271,23 +271,29 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 			t.Error("indicator child failed to exit")
 		}
 	})
-	await := func(want string) {
+	// await takes any of wants: a working tab is caught on whichever moon
+	// frame the wall clock plays when it lands.
+	var working []string
+	for _, moon := range []string{"🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"} {
+		working = append(working, moon+" Chat")
+	}
+	await := func(wants ...string) {
 		t.Helper()
 		for {
 			select {
 			case got := <-changed:
-				if got == want {
+				if slices.Contains(wants, got) {
 					return
 				}
 			case <-ctx.Done():
 				// Wait for the killed child so its output is complete and race-free.
 				exit := <-waited
 				waited <- exit
-				t.Fatalf("wanted tab label %q; painter timed out (exit %v): %s", want, exit, output.String())
+				t.Fatalf("wanted tab label %q; painter timed out (exit %v): %s", wants, exit, output.String())
 			}
 		}
 	}
-	await("🟡 Chat")
+	await(working...)
 	mu.Lock()
 	status = "blocked"
 	revision++
@@ -340,7 +346,7 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	status = "working"
 	revision++
 	mu.Unlock()
-	await("🟡 Chat")
+	await(working...)
 	appendTurn(
 		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool1","is_error":true,"content":"tool failed"}]}}`,
 	)

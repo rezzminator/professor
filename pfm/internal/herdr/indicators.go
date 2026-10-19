@@ -75,7 +75,10 @@ func IndicatorEvents() []string {
 
 // The blink: one half-second per phase, so a blocked token is on for 500 ms and
 // off for 500 ms (1 Hz). The phase is a function of the wall clock alone, so
-// concurrent painters agree without talking to each other. A blinker that
+// concurrent painters agree without talking to each other. The same tick
+// (TabTick) picks each decorated tab's frame, so a tab state of several frames
+// (working's moon, blocked's and error's pulse) advances one frame per tick, a
+// tab renamed only when its label differs from the tick's frame. A blinker that
 // meets maxPaintFailures failed repaints in a row gives up.
 const (
 	blinkHalfPeriod  = 500 * time.Millisecond
@@ -181,7 +184,10 @@ func (painter *indicatorPainter) nextSeq() uint64 {
 // it takes the socket's blinker lock and repaints on the half-second until
 // neither remains, or returns at once when another process holds the lock. After
 // the lock is released it lists once more and takes it again if a blocked
-// or done agent appeared meanwhile.
+// or done agent appeared meanwhile. With a tab provider it takes the lock
+// first and keeps ticking while any tab is decorated, so an animated frame
+// advances on every tick, and stops once no tab is decorated and nothing is
+// blocked or done.
 func (painter *indicatorPainter) run(ctx context.Context) error {
 	if painter.socket == "" {
 		err := fmt.Errorf("herdr indicators: no Herdr socket: %s is not set", EnvSocket)
@@ -261,7 +267,8 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 	}
 }
 
-// blink repaints on every half-second boundary until nothing is blocked or done. A
+// blink repaints on every half-second boundary until nothing is blocked or done
+// and no tab is decorated. A
 // cancelled context ends it cleanly; maxPaintFailures failed repaints in a row
 // end it with the last error. A tick that finds the socket's stop marker, or
 // its record gone (ClearIndicators: pfm's Herdr theme is off), clears the
@@ -328,7 +335,8 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		return false, false, err
 	}
 	painter.loadUnproved()
-	blinkOn := painter.clock.Now().UnixMilli()/blinkHalfPeriod.Milliseconds()%2 == 0
+	tick := TabTick(painter.clock.Now().UnixMilli())
+	blinkOn := tick%2 == 0
 	painter.hasDone = false
 	for _, target := range targets {
 		blocked = blocked || target.status == string(StateBlocked)
@@ -361,7 +369,7 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		if err != nil {
 			return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
 		}
-		accepted, err := painter.paintTabs(ctx, observations, blinkOn)
+		accepted, err := painter.paintTabs(ctx, observations, tick)
 		wrote = wrote || accepted
 		if errors.Is(err, errThemeOff) {
 			return blocked, wrote, nil
@@ -380,7 +388,7 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 func (painter *indicatorPainter) paintTabs(
 	ctx context.Context,
 	observations []TabDecoration,
-	blinkOn bool,
+	tick int64,
 ) (wrote bool, err error) {
 	painter.tabObservations = observations
 	painter.hasTabs = false
@@ -388,7 +396,7 @@ func (painter *indicatorPainter) paintTabs(
 	for i := range observations {
 		observation := observations[i]
 		painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
-		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.guardedCall)
+		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, tick, painter.guardedCall)
 		wrote = wrote || accepted
 		key := "tab\x00" + observation.Tab + "\x00" + observation.Identity
 		switch {

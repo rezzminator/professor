@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -593,7 +594,7 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 // Every tab of a tick carries the theme's glyphs; a theme that cannot be read
 // is named and the tabs keep painting with the defaults.
 func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
-	themeGlyphs := herdr.TabGlyphs{Blocked: "🟣", BlockedOff: "🔘"}
+	themeGlyphs := herdr.TabGlyphs{Blocked: herdr.TabFrames{"🟣", "🔘"}}
 	var readErr error
 	warn := &bytes.Buffer{}
 	provider := herdrTabProvider{
@@ -617,13 +618,13 @@ func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
 		t.Fatalf("tabs=%+v err=%v", got, err)
 	}
 	for _, d := range got {
-		if d.Glyphs != themeGlyphs {
+		if !reflect.DeepEqual(d.Glyphs, themeGlyphs) {
 			t.Fatalf("decoration glyphs=%+v, want the theme's %+v", d.Glyphs, themeGlyphs)
 		}
 	}
 	readErr = errors.New("parse state.json: unexpected end")
 	got, err = provider.tabs(context.Background(), "endpoint")
-	if err != nil || len(got) != 2 || got[0].Glyphs != (herdr.TabGlyphs{}) {
+	if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0].Glyphs, herdr.TabGlyphs{}) {
 		t.Fatalf("an unreadable theme: tabs=%+v err=%v, want the tabs with the default glyphs", got, err)
 	}
 	if !strings.Contains(warn.String(), "Herdr tab glyphs of the theme: parse state.json") {

@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 // claudeTokenSource is Claude Code's theme token ids, one per line, `#` lines
@@ -66,7 +68,8 @@ type SurfacePins struct {
 }
 
 // herdrTabGlyphsKey is the one key of surfaces.herdr that is not a custom
-// token: the tab status glyphs, an object of glyphs by tab state.
+// token: the tab status glyphs, an object of glyph frames by tab state, each
+// a string (one still frame) or an array of frames (herdr.TabFrames).
 const herdrTabGlyphsKey = "tabGlyphs"
 
 // HerdrPins are surfaces.herdr, one JSON object: Tokens, every key but
@@ -74,11 +77,11 @@ const herdrTabGlyphsKey = "tabGlyphs"
 // object, are the tab status painter's glyphs by herdr.TabGlyphKeys key.
 type HerdrPins struct {
 	Tokens    map[string]string
-	TabGlyphs map[string]string
+	TabGlyphs map[string]herdr.TabFrames
 }
 
 // UnmarshalJSON reads surfaces.herdr: every value a string but tabGlyphs, an
-// object of strings. An empty half stays nil, as canonicalPins writes it, so
+// object of glyph frames. An empty half stays nil, as canonicalPins writes it, so
 // a state.json round trip compares equal.
 func (pins *HerdrPins) UnmarshalJSON(content []byte) error {
 	var keys map[string]json.RawMessage
@@ -89,7 +92,7 @@ func (pins *HerdrPins) UnmarshalJSON(content []byte) error {
 	for key, raw := range keys {
 		if key == herdrTabGlyphsKey {
 			if err := json.Unmarshal(raw, &pins.TabGlyphs); err != nil {
-				return fmt.Errorf("herdr %s: an object of glyphs by tab state: %w", key, err)
+				return fmt.Errorf("herdr %s: an object of glyph frames by tab state: %w", key, err)
 			}
 			continue
 		}

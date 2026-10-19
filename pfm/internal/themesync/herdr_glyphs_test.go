@@ -19,7 +19,7 @@ import (
 // glyph pin never reads as a changed theme on every sync.
 func TestHerdrPinsCarryTokensAndTabGlyphsThroughTheStateRoundTrip(t *testing.T) {
 	profile, err := ParseProfile([]byte(profileJSON(
-		`{"herdr":{"accent":"#FF2E93","tabGlyphs":{"blocked":"🟣","blockedOff":"🔘"}}}`,
+		`{"herdr":{"accent":"#FF2E93","tabGlyphs":{"blocked":["🟣","🔘"],"idle":"🌿"}}}`,
 	)))
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +30,7 @@ func TestHerdrPinsCarryTokensAndTabGlyphsThroughTheStateRoundTrip(t *testing.T) 
 	}
 	want := &HerdrPins{
 		Tokens:    map[string]string{"accent": "#ff2e93"},
-		TabGlyphs: map[string]string{"blocked": "🟣", "blockedOff": "🔘"},
+		TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🟣", "🔘"}, "idle": {"🌿"}},
 	}
 	if pins == nil || !reflect.DeepEqual(pins.Herdr, want) {
 		t.Fatalf("canonical herdr pins = %+v, want %+v", pins, want)
@@ -46,7 +46,9 @@ func TestHerdrPinsCarryTokensAndTabGlyphsThroughTheStateRoundTrip(t *testing.T) 
 	if !reflect.DeepEqual(back.Pins, pins) {
 		t.Errorf("state round trip = %+v, want %+v (%s)", back.Pins, pins, content)
 	}
-	glyphsOnly, err := canonicalPins(&SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]string{"idle": "🌿"}}})
+	glyphsOnly, err := canonicalPins(
+		&SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"idle": {"🌿"}}}},
+	)
 	if err != nil || glyphsOnly == nil || glyphsOnly.Herdr.Tokens != nil {
 		t.Fatalf("glyph-only herdr pins = %+v, %v, want the glyphs with no tokens", glyphsOnly, err)
 	}
@@ -65,12 +67,14 @@ func TestParseProfileRefusesABadTabGlyph(t *testing.T) {
 		herdr, want string
 		named       bool
 	}{
-		"empty glyph":   {`{"tabGlyphs":{"blocked":""}}`, `herdr tabGlyphs pin "blocked": empty`, true},
-		"over budget":   {`{"tabGlyphs":{"blockedOff":"⭕⭕⭕⭕⭕⭕⭕⭕⭕"}}`, `"blockedOff": glyph`, true},
+		"empty glyph":   {`{"tabGlyphs":{"blocked":""}}`, `herdr tabGlyphs pin "blocked": frame 0: empty`, true},
+		"over budget":   {`{"tabGlyphs":{"blocked":["🔴","⭕⭕⭕⭕⭕⭕⭕⭕⭕"]}}`, `"blocked": frame 1: glyph`, true},
+		"no frames":     {`{"tabGlyphs":{"working":[]}}`, `herdr tabGlyphs pin "working": no frames`, true},
 		"whitespace":    {`{"tabGlyphs":{"error":"🟥 x"}}`, "whitespace", true},
 		"unknown state": {`{"tabGlyphs":{"blink":"⭕"}}`, `"blink": herdr tabGlyphs renders no such key`, true},
-		"not an object": {`{"tabGlyphs":"⭕"}`, "herdr tabGlyphs: an object of glyphs by tab state", false},
-		"number glyph":  {`{"tabGlyphs":{"idle":1}}`, "herdr tabGlyphs: an object of glyphs by tab state", false},
+		"not an object": {`{"tabGlyphs":"⭕"}`, "herdr tabGlyphs: an object of glyph frames by tab state", false},
+		"number glyph":  {`{"tabGlyphs":{"idle":1}}`, "herdr tabGlyphs: an object of glyph frames by tab state", false},
+		"number frame":  {`{"tabGlyphs":{"idle":["🟢",1]}}`, "a glyph string or an array of glyph frames", false},
 		"object token":  {`{"accent":{"fg":"#fff"}}`, `herdr pin "accent"`, false},
 	} {
 		_, err := ParseProfile([]byte(profileJSON(`{"herdr":` + tc.herdr + `}`)))
@@ -86,20 +90,20 @@ func TestParseProfileRefusesABadTabGlyph(t *testing.T) {
 // a sync that is off, or no glyph pins is the defaults.
 func TestHerdrTabGlyphsFollowTheAppliedTheme(t *testing.T) {
 	h := newHarness(t)
-	if glyphs, err := HerdrTabGlyphs(h.stateDir); err != nil || glyphs != (herdr.TabGlyphs{}) {
+	if glyphs, err := HerdrTabGlyphs(h.stateDir); err != nil || !reflect.DeepEqual(glyphs, herdr.TabGlyphs{}) {
 		t.Fatalf("before the sync is on: %+v, %v, want the defaults", glyphs, err)
 	}
-	h.writeProfile(profileJSON(`{"herdr":{"tabGlyphs":{"blocked":"🟣","blockedOff":"🔘"}}}`))
+	h.writeProfile(profileJSON(`{"herdr":{"tabGlyphs":{"blocked":["🟣","🔘"]}}}`))
 	h.on()
 	glyphs, err := HerdrTabGlyphs(h.stateDir)
-	if err != nil || glyphs != (herdr.TabGlyphs{Blocked: "🟣", BlockedOff: "🔘"}) {
+	if err != nil || !reflect.DeepEqual(glyphs, herdr.TabGlyphs{Blocked: herdr.TabFrames{"🟣", "🔘"}}) {
 		t.Fatalf("after on: %+v, %v, want the profile's glyphs", glyphs, err)
 	}
-	if got := herdr.DecoratedTabLabel("Chat", "blocked", "emoji", false, glyphs); got != "🔘 Chat" {
+	if got := herdr.DecoratedTabLabel("Chat", "blocked", "emoji", 1, glyphs); got != "🔘 Chat" {
 		t.Errorf("off phase drawn with the theme = %q", got)
 	}
 
-	path := h.writeProfile(profileJSON(`{"herdr":{"tabGlyphs":{"blockedOff":"⚪"}}}`))
+	path := h.writeProfile(profileJSON(`{"herdr":{"tabGlyphs":{"blocked":"⚪"}}}`))
 	later := time.Now().Add(time.Minute)
 	if err := os.Chtimes(path, later, later); err != nil {
 		t.Fatal(err)
@@ -107,14 +111,15 @@ func TestHerdrTabGlyphsFollowTheAppliedTheme(t *testing.T) {
 	if report := h.sync(false); !report.Changed {
 		t.Fatalf("a glyph change is no changed theme: %+v", report)
 	}
-	if glyphs, err := HerdrTabGlyphs(h.stateDir); err != nil || glyphs != (herdr.TabGlyphs{BlockedOff: "⚪"}) {
+	glyphs, err = HerdrTabGlyphs(h.stateDir)
+	if err != nil || !reflect.DeepEqual(glyphs, herdr.TabGlyphs{Blocked: herdr.TabFrames{"⚪"}}) {
 		t.Fatalf("after a glyph change: %+v, %v, want the new glyphs alone", glyphs, err)
 	}
 
 	if _, err := Off(context.Background(), h.env); err != nil {
 		t.Fatalf("Off: %v", err)
 	}
-	if glyphs, err := HerdrTabGlyphs(h.stateDir); err != nil || glyphs != (herdr.TabGlyphs{}) {
+	if glyphs, err := HerdrTabGlyphs(h.stateDir); err != nil || !reflect.DeepEqual(glyphs, herdr.TabGlyphs{}) {
 		t.Fatalf("after off: %+v, %v, want the defaults", glyphs, err)
 	}
 }

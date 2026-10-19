@@ -175,15 +175,41 @@ func TestCheckJudgesHerdrTabGlyphs(t *testing.T) {
 	profile := func(glyphs string) string {
 		return `{"name":"Glyphs","base":"dark","overrides":{},"surfaces":{"herdr":{"tabGlyphs":` + glyphs + `}}}`
 	}
-	good := writeProfile(t, dir, "good.json", profile(`{"blocked":"🔴","blockedOff":"⭕"}`))
-	empty := writeProfile(t, dir, "empty.json", profile(`{"blockedOff":""}`))
+	good := writeProfile(t, dir, "good.json", profile(`{"blocked":"🔴","error":"🟥"}`))
+	empty := writeProfile(t, dir, "empty.json", profile(`{"blocked":""}`))
 	wide := writeProfile(t, dir, "wide.json", profile(`{"error":"🟥🟥🟥🟥🟥🟥🟥🟥🟥"}`))
 
 	code, stdout, _ := runCheck(t, checkDeps(t.TempDir()), good, empty, wide)
 	if code != 1 || !strings.Contains(stdout, "ok") || !strings.HasSuffix(strings.Split(stdout, "\n")[0], good) {
 		t.Fatalf("a valid glyph must pass and the bad ones exit 1: code %d\n%s", code, stdout)
 	}
-	for file, want := range map[string]string{empty: `"blockedOff": empty`, wide: `"error": glyph`} {
+	for file, want := range map[string]string{empty: `"blocked": frame 0: empty`, wide: `"error": frame 0: glyph`} {
+		if !strings.Contains(stdout, "FAIL "+file) || !strings.Contains(stdout, want) {
+			t.Errorf("%s must FAIL naming %q:\n%s", file, want, stdout)
+		}
+	}
+}
+
+// A tab state takes a glyph string or an array of frames: both pass, an empty
+// array fails naming its key, and a bad frame fails naming its index.
+func TestCheckJudgesHerdrTabGlyphFrames(t *testing.T) {
+	dir := t.TempDir()
+	profile := func(glyphs string) string {
+		return `{"name":"Frames","base":"dark","overrides":{},"surfaces":{"herdr":{"tabGlyphs":` + glyphs + `}}}`
+	}
+	still := writeProfile(t, dir, "still.json", profile(`{"idle":"🌿"}`))
+	frames := writeProfile(t, dir, "frames.json", profile(`{"working":["🌑","🌓","🌕"],"blocked":["🔴","⭕"]}`))
+	code, stdout, stderr := runCheck(t, checkDeps(t.TempDir()), still, frames)
+	if code != 0 || strings.Contains(stdout, "FAIL") {
+		t.Fatalf("a glyph string and a frame array must both pass: code %d\n%s%s", code, stdout, stderr)
+	}
+	empty := writeProfile(t, dir, "empty.json", profile(`{"working":[]}`))
+	bad := writeProfile(t, dir, "bad.json", profile(`{"error":["🟥","❌ x"]}`))
+	code, stdout, _ = runCheck(t, checkDeps(t.TempDir()), empty, bad)
+	if code != 1 {
+		t.Fatalf("an empty array and a bad frame must exit 1: code %d\n%s", code, stdout)
+	}
+	for file, want := range map[string]string{empty: `"working": no frames`, bad: `"error": frame 1: glyph`} {
 		if !strings.Contains(stdout, "FAIL "+file) || !strings.Contains(stdout, want) {
 			t.Errorf("%s must FAIL naming %q:\n%s", file, want, stdout)
 		}

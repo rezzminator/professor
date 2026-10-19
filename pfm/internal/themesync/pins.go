@@ -25,17 +25,17 @@ const (
 	pinColour
 	// pinHex is a VS Code colour: #rgb, #rgba, #rrggbb or #rrggbbaa, kept as written.
 	pinHex
-	// pinGlyph is a Herdr tab status glyph herdr.ValidTabGlyph accepts, kept as written.
-	pinGlyph
 )
 
 // vscodeHexColour is a colour VS Code reads: 3, 4, 6 or 8 hex digits.
 var vscodeHexColour = regexp.MustCompile(`^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
 
 // pinKeys are the keys a profile may pin on each surface, each with the kind
-// of value it takes.
+// of value it takes; herdrGlyphs are the tab states, each taking glyph frames
+// (canonicalGlyphs).
 type pinKeys struct {
-	tmux, herdr, herdrGlyphs, vscodeColors, vscodeChrome map[string]pinKind
+	tmux, herdr, vscodeColors, vscodeChrome map[string]pinKind
+	herdrGlyphs                             map[string]bool
 }
 
 // tmuxBookkeeping are the options tmuxOptions renders for the follower's own
@@ -52,7 +52,7 @@ func renderedPinKeys() (pinKeys, error) {
 	}
 	sample := Applied{Value: "dark", Title: "dark", Side: side, Primary: variant}
 	keys := pinKeys{
-		tmux: map[string]pinKind{}, herdr: map[string]pinKind{}, herdrGlyphs: map[string]pinKind{},
+		tmux: map[string]pinKind{}, herdr: map[string]pinKind{}, herdrGlyphs: map[string]bool{},
 		vscodeColors: map[string]pinKind{}, vscodeChrome: map[string]pinKind{},
 	}
 	for _, option := range tmuxOptions(sample, side, 1) {
@@ -68,7 +68,7 @@ func renderedPinKeys() (pinKeys, error) {
 		keys.herdr[token.name] = pinColour
 	}
 	for _, key := range herdr.TabGlyphKeys() {
-		keys.herdrGlyphs[key] = pinGlyph
+		keys.herdrGlyphs[key] = true
 	}
 	contract := sample.vscodeContract(side, 1)
 	for name := range contract.Colors {
@@ -103,7 +103,7 @@ func canonicalPins(pins *SurfacePins) (*SurfacePins, error) {
 		if herdrOut.Tokens, err = canonicalMap("herdr", pins.Herdr.Tokens, keys.herdr); err != nil {
 			return nil, err
 		}
-		if herdrOut.TabGlyphs, err = canonicalMap(
+		if herdrOut.TabGlyphs, err = canonicalGlyphs(
 			"herdr "+herdrTabGlyphsKey, pins.Herdr.TabGlyphs, keys.herdrGlyphs,
 		); err != nil {
 			return nil, err
@@ -166,13 +166,32 @@ func canonicalMap(surface string, values map[string]string, allowed map[string]p
 			if !vscodeHexColour.MatchString(value) {
 				return nil, fmt.Errorf("%s pin %q: %q is not #rgb, #rgba, #rrggbb or #rrggbbaa", surface, key, value)
 			}
-		case pinGlyph:
-			if err := herdr.ValidTabGlyph(value); err != nil {
-				return nil, fmt.Errorf("%s pin %q: %w", surface, key, err)
-			}
 		case pinText:
 		}
 		out[key] = value
+	}
+	return out, nil
+}
+
+// canonicalGlyphs checks the tab glyph pins in key order, each state's
+// frames herdr.ValidTabFrames, an error naming the key and the frame index.
+func canonicalGlyphs(
+	surface string,
+	values map[string]herdr.TabFrames,
+	allowed map[string]bool,
+) (map[string]herdr.TabFrames, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]herdr.TabFrames, len(values))
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		if !allowed[key] {
+			return nil, fmt.Errorf("%s pin %q: %s renders no such key", surface, key, surface)
+		}
+		if err := herdr.ValidTabFrames(values[key]); err != nil {
+			return nil, fmt.Errorf("%s pin %q: %w", surface, key, err)
+		}
+		out[key] = slices.Clone(values[key])
 	}
 	return out, nil
 }

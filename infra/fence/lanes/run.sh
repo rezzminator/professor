@@ -125,8 +125,8 @@ MODE=sequence
 
 case "${LANE_H_SCOPE:-}" in
   "") ;;
-  birth|discovery|delivery|delivery-tmux|delivery-outcomes|delivery-status|controls|open-live|reload|lifecycle|restoration) [ "$ORDER" = H ] || die "LANE_H_SCOPE requires solo H" 2 ;;
-  *) die "LANE_H_SCOPE takes birth, discovery, delivery, delivery-tmux, delivery-outcomes, delivery-status, controls, open-live, reload, lifecycle or restoration" 2 ;;
+  birth|discovery|delivery|delivery-tmux|delivery-outcomes|delivery-status|controls|open-live|reload|lifecycle|restoration|tab-priority) [ "$ORDER" = H ] || die "LANE_H_SCOPE requires solo H" 2 ;;
+  *) die "LANE_H_SCOPE takes birth, discovery, delivery, delivery-tmux, delivery-outcomes, delivery-status, controls, open-live, reload, lifecycle, restoration or tab-priority" 2 ;;
 esac
 if [ -n "${LANE_H_PFM:-}" ]; then
   [ -n "${LANE_H_SCOPE:-}" ] || die "LANE_H_PFM requires focused solo H scope" 2

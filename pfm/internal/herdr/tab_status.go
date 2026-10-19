@@ -358,6 +358,7 @@ func PaintIndicatorsWithTabs(
 	stderr io.Writer,
 	tabs TabProvider,
 	proof PaneProof,
+	priority func() (bool, error),
 ) error {
 	if stderr == nil {
 		stderr = io.Discard
@@ -369,7 +370,7 @@ func PaintIndicatorsWithTabs(
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs, provePane: proof,
+		tabs:     tabs, provePane: proof, priority: priority,
 	}
 	return painter.run(ctx)
 }

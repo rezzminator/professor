@@ -512,6 +512,14 @@ for selection in H H,E1; do
 done
 for selection in H H,E1; do
   : >"$T/docker.log"
+  LANE_H_SCOPE=tab-priority STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=tab-priority' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused tab-priority $selection has the solo contract"
+  else bad "focused tab-priority $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+for selection in H H,E1; do
+  : >"$T/docker.log"
   LANE_H_SCOPE=delivery LANE_H_PFM="$T/product-pfm" STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
   if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=delivery' "$T/docker.log"; } ||
     { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then

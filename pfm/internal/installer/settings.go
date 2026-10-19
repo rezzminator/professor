@@ -53,6 +53,10 @@ var retiredHookCommands = []struct {
 	{Name: "dream-nudge", Subcommand: "dream hook nudge"},
 	{Name: "dream-codex-subagent-inject", Subcommand: "dream hook codex-subagent-inject"},
 	{Name: "group", Subcommand: "chat group hook"},
+	// explore-deny was the PreToolUse Agent|Task hook of the Explore-agent denial. The launch line
+	// (`--settings`) of a chat started before the upgrade still calls it on every Agent spawn and
+	// no install can rewrite that line, so RetiredInternalHook answers it as a silent no-op.
+	{Name: "explore-deny", Subcommand: "internal explore-deny"},
 }
 
 // retiredHookShimHints are legacy shell-script hook file substrings that

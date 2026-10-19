@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 type engine struct {
@@ -46,6 +47,10 @@ type engine struct {
 	// agentLauncherStaged is set once ensureAgentLauncher has staged (or
 	// planned) the launcher this pass, so three agents report it once.
 	agentLauncherStaged bool
+	// vscodeThemes are the VS Code color themes this pass wrote into the
+	// staged extension, one per installed theme (vscode_themes.go); stageAssets
+	// lists them in its package.json.
+	vscodeThemes []themesync.VSCodeThemeFile
 }
 
 type pinnedHarvestProvisioner struct{}
@@ -212,12 +217,18 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.installHarvest(ctx))
 	installer.deferFailure(installer.installMarkdownTool(ctx))
 	installer.installThemes(ctx)
+	vscodeThemes, err := installer.writeVSCodeThemes(installer.renderVSCodeThemes())
+	installer.deferFailure(err)
+	installer.vscodeThemes = vscodeThemes
 	assets, err := assetFiles()
 	if err != nil {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
 	systemdAssetChanged, err := installer.stageAssets(assets)
 	installer.deferFailure(err)
+	if err == nil {
+		installer.deferFailure(installer.pruneVSCodeThemes(installer.vscodeThemes, false))
+	}
 	installer.deferFailure(installer.retireGptHooks())
 	installer.deferFailure(installer.installManagedCleanup(ctx))
 	installer.deferFailure(installer.wireClaudeLauncher())
@@ -591,6 +602,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	installer.uninstallThemes()
+	if err := installer.uninstallVSCodeThemes(); err != nil {
+		return err
+	}
 	if err := installer.removeRumdlUserConfig(); err != nil {
 		return err
 	}
@@ -923,6 +937,8 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		switch {
 		case asset.path == "reload.command.md":
 			content, err = renderReloadCommandAsset(content)
+		case asset.path == vscodeExtensionSource+"/package.json":
+			content, err = renderVSCodeExtensionManifest(content, installer.vscodeThemes)
 		case asset.path == "systemd/"+nameSyncTimerUnit:
 			content, err = renderNameSyncTimerAsset(content, installer.options)
 		case strings.HasPrefix(asset.path, "systemd/"):

@@ -1,4 +1,4 @@
-// Package themecmd is the `pfm theme` verb (status, sync, on, off, list, use) and the
+// Package themecmd is the `pfm theme` verb (status, sync, on, off, list, use, check) and the
 // name-sync convergence door of the theme: it parses the verb, hands the work
 // to themesync, and draws the sync matrix the user looks at — the Claude
 // source and one row per surface with its verdict named, never a bare exit
@@ -36,15 +36,19 @@ const (
 	verbOff    = "off"
 	verbList   = "list"
 	verbUse    = "use"
+	verbCheck  = "check"
 )
 
-const usage = `usage: pfm theme [status|sync|on|off|list|use] [options]
+const usage = `usage: pfm theme [status|sync|on|off|list|use|check] [options]
   status             the sync matrix: the Claude source, one row per surface, its verdict and generation (default; --json)
   sync               follow Claude Code's theme now (--force re-applies; --json)
   on                 follow Claude Code's theme: install the follower and theme every surface (--json)
   off                restore every surface exactly as it was and stop syncing (--json)
   list               the themes use accepts, * marking the current one (--json)
-  use {name}         set the theme of every Claude account, then sync; new chats follow (--json)`
+  use {name}         set the theme of every Claude account, then sync; new chats follow (--json)
+  check [file...]    run install's profile checks, render each VS Code theme and hold its text to the
+                     contrast floors, writing nothing; TextMate scope names are not checked against any
+                     grammar; no file: every profile in the source clone's templates/themes/ (--json)`
 
 // Ops is themesync as the verb calls it; tests inject fakes.
 type Ops struct {
@@ -131,6 +135,8 @@ func RunVerb(ctx context.Context, args []string, d Deps, stdout, stderr io.Write
 		return run.list(args)
 	case verbUse:
 		return run.use(args)
+	case verbCheck:
+		return run.check(args)
 	case "help":
 		fmt.Fprintln(stdout, usage)
 		return 0

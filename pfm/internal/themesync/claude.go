@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -252,24 +253,10 @@ func resolveCustom(value, configDir string) (resolved, error) {
 	if err := json.Unmarshal(content, &file); err != nil {
 		return resolved{}, fmt.Errorf("custom theme %s: parse %s: %w", name, path, err)
 	}
-	base := file.Base
-	if _, ok := builtinThemes[base]; !ok {
-		base = builtinDefault
-	}
-	tokens := map[string]string{}
-	for token, colour := range builtinThemes[base] {
-		tokens[token] = colour
-	}
-	for token, colour := range file.Overrides {
-		tokens[token] = colour
-	}
+	tokens, side := customPalette(file.Base, file.Overrides)
 	variant, err := deriveVariant(value, tokens)
 	if err != nil {
 		return resolved{}, fmt.Errorf("custom theme %s: %w", name, err)
-	}
-	side := Dark
-	if strings.HasPrefix(base, string(Light)) {
-		side = Light
 	}
 	title := file.Name
 	if title == "" {
@@ -283,6 +270,22 @@ func resolveCustom(value, configDir string) (resolved, error) {
 		Applied:   Applied{Value: value, Title: title, Side: side, Primary: variant},
 		ThemeFile: path, ThemeTime: info.ModTime(),
 	}, nil
+}
+
+// customPalette is a custom theme's palette as Claude Code reads it: the base
+// built-in's tokens (the default built-in when base names none) with the
+// overrides laid over them, and the side that base sits on.
+func customPalette(base string, overrides map[string]string) (map[string]string, Appearance) {
+	if _, ok := builtinThemes[base]; !ok {
+		base = builtinDefault
+	}
+	tokens := maps.Clone(builtinThemes[base])
+	maps.Copy(tokens, overrides)
+	side := Dark
+	if strings.HasPrefix(base, string(Light)) {
+		side = Light
+	}
+	return tokens, side
 }
 
 // themesDir is the account's themes dir by real path when it exists.

@@ -2670,6 +2670,14 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(got.returncode, 2)
         self.assertIn("recall does not take '--since-hours'", got.stderr)
 
+    def test_the_retired_intake_mode_exits_zero_in_silence(self):
+        # A chat launched before the upgrade still runs `tracetree.py intake` on every Agent spawn.
+        for args in (["intake"], ["intake", self.root]):
+            with self.subTest(args=args):
+                got = tt(args, input="")
+                self.assertEqual(got.returncode, 0, got.stderr)
+                self.assertEqual((got.stdout, got.stderr), ("", ""))
+
 
 class RecallTest(unittest.TestCase):
     """`recall ROOT`: earlier runs' answer lines matching the questions' anchors, each cite re-checked against ROOT now

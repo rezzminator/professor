@@ -76,7 +76,7 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 // test for the 2026-09-14 retro finding: `pfm install --yes` run outside the
 // source checkout (cwd discovery finds nothing) must still resolve
 // options.SourceRepo from the recorded source-repo marker rather than
-// leaving it empty and falling through to the release manifest URL. FAILS on
+// leaving it empty and falling through to the release themes. FAILS on
 // unfixed code because newInstallerOptions sets SourceRepo from
 // discoverSourceRepo() alone, which returns "" outside a clone.
 func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {

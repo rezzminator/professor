@@ -61,7 +61,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	)
 	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
-	skipThemes := flags.Bool("skip-themes", false, "skip Claude Code themes, source-fetched and bundled")
+	skipThemes := flags.Bool("skip-themes", false, "skip the Professor themes")
 	adoptAgents := flags.Bool("adopt-agents", false, "adopt an unowned file at a declared agent's path")
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
@@ -134,7 +134,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		options.VSCode = *vscode
 		options.AdoptAgents = *adoptAgents
 		options.InstallThemes = !*skipThemes
-		options.ThemeManifestURL = installer.ThemeManifestURL(version)
+		options.ThemeReleaseURL = installer.ThemeReleaseURL(version)
 		options.ThemeHTTPClient = installThemeHTTPClientOverride
 		if skipCodex {
 			options.CodexHomes = []string{}
@@ -308,7 +308,7 @@ func newInstallerOptions(
 // under home, the same recorded clone `pfm update` prefers via
 // preferredUpdateSourceRepo. `pfm install --yes` run outside the source
 // checkout (a cron job, a different cwd) must still find its own clone
-// rather than falling through empty to the release manifest URL.
+// rather than falling through empty to the release themes.
 //
 // Both misses end in the same fallback, and only one of them is ordinary: no
 // marker at all is a first install and stays silent, while a marker naming a
@@ -329,7 +329,7 @@ func resolveInstallSourceRepo(home string, stderr io.Writer) string {
 		return ""
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm install: %v; falling back to the release manifest\n", err)
+		fmt.Fprintf(stderr, "pfm install: %v; falling back to the release themes\n", err)
 		return ""
 	}
 	return recorded

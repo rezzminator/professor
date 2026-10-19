@@ -29,7 +29,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 - **pfm never writes a project's `.claude/settings.json`.** The project tier is scaffolded once by `pfm init` (`pfm/internal/professor/scaffold.go:29`) and is the adopter's file from then on. Its hooks merge with the launch's; neither layer replaces the other.
 - **Every pfm hook command is the installed binary.** Each command is `$HOME/.local/bin/pfm` plus a subcommand (`pfm/internal/claudelaunch/hooks.go`). No pfm hook runs a shell script or an interpreter.
 - **An ownership ledger records hooks pfm wrote into a file.** `$HOME/.local/share/pfm/install/settings-hook-ownership.json` is keyed by physical file, event, matcher and command (`pfm/internal/installer/settings_ownership.go`). Its readers are the Codex `hooks.json` writer and the `pfm-settings` host check. That check combines ledger entries with pfm command shapes to name hooks and status lines an old install left in `settings.json`. It returns BLOCK rows with edits for the operator; it never strips the file.
-- **A retired hook is removed by the installer and reported by doctor.** One table names the retired subcommands (`pfm/internal/installer/settings.go:47-55`), with legacy shim hints at `:65-67`; the Codex writer strips them from every `hooks.json` event, and doctor flags any left behind as STALE.
+- **A retired hook is removed by the installer and reported by doctor.** One table names the retired subcommands (`pfm/internal/installer/settings.go:47-59`), with legacy shim hints at `:69-71`; the Codex writer strips them from every `hooks.json` event, and doctor flags any left behind as STALE.
 - **pfm hooks fail open.** A pfm hook that cannot do its job writes one stderr line and lets the chat continue. Only the two intercepts exit 2, and only for the prompt they were built to stop; `git-guard` alone also denies a git command it cannot read ([git-guard.md](git-guard.md#how-it-fails)).
 
 ## Count per engine
@@ -181,25 +181,26 @@ A hook can also be wired only into one agent's own frontmatter instead of every 
 
 | Name | Where | Shape | Source |
 | --- | --- | --- | --- |
-| bb | Claude, Codex | `pfm bb`, `pfm chat bb`, `bb-hook.sh` | `pfm/internal/installer/settings.go:47-48`, `:65` |
+| bb | Claude, Codex | `pfm bb`, `pfm chat bb`, `bb-hook.sh` | `pfm/internal/installer/settings.go:47-48`, `:69` |
 | callmeter | Claude, Codex | `pfm internal callmeter` | `pfm/internal/installer/settings.go:49` |
 | clear-hide | Claude, Codex | `pfm internal clear-hide` | `pfm/internal/installer/settings.go:50` |
 | compact-nudge | Claude, Codex | `pfm internal compact-nudge` | `pfm/internal/installer/settings.go:51` |
-| dream-agent-inject | Claude, Codex | `pfm dream hook agent-inject`, `dreamer-agent-inject.sh` | `pfm/internal/installer/settings.go:52`, `:66` |
-| dream-nudge | Claude, Codex | `pfm dream hook nudge`, `dreamer-nudge.sh` | `pfm/internal/installer/settings.go:53`, `:67` |
+| dream-agent-inject | Claude, Codex | `pfm dream hook agent-inject`, `dreamer-agent-inject.sh` | `pfm/internal/installer/settings.go:52`, `:70` |
+| dream-nudge | Claude, Codex | `pfm dream hook nudge`, `dreamer-nudge.sh` | `pfm/internal/installer/settings.go:53`, `:71` |
 | dream-codex-subagent-inject | Codex | `pfm dream hook codex-subagent-inject` | `pfm/internal/installer/settings.go:54` |
 | group | Claude, Codex | `pfm chat group hook` | `pfm/internal/installer/settings.go:55` |
+| explore-deny | Claude | `pfm internal explore-deny`, answered as a silent no-op for launch lines of chats started before the upgrade | `pfm/internal/installer/settings.go:59` |
 | Codex clear-kill | Codex `SessionStart`, matcher `startup\|resume\|clear` | `pfm internal clear-kill` with or without `--parent` | `pfm/internal/installer/codex_hooks.go:28`, `:189-193` |
 | Codex appendix | Codex `SessionStart` | `codexappendix.Command(home)` | `pfm/internal/installer/codex_hooks.go:194-195` |
-| unknown pfm subcommand | Claude, Codex | pfm's own shape naming a subcommand this binary does not implement | `unknownPFMHookCommand`, `pfm/internal/installer/settings.go:176-213` |
+| unknown pfm subcommand | Claude, Codex | pfm's own shape naming a subcommand this binary does not implement | `unknownPFMHookCommand`, `pfm/internal/installer/settings.go:180-217` |
 
-Each name matches from the `pfm` or `cc-fleet` binary, at any path (`retiredHookCommandName`, `pfm/internal/installer/settings.go:85-104`). In a Codex `hooks.json` the installer removes them and doctor reports them STALE. In a Claude account `settings.json` they exist only where an older install wrote them; the `pfm-settings` check blocks and names the leftovers for the operator to remove.
+Each name matches from the `pfm` or `cc-fleet` binary, at any path (`retiredHookCommandName`, `pfm/internal/installer/settings.go:89-108`). In a Codex `hooks.json` the installer removes them and doctor reports them STALE. In a Claude account `settings.json` they exist only where an older install wrote them; the `pfm-settings` check blocks and names the leftovers for the operator to remove.
 
 ## The ownership rule
 
 - **pfm owns** exactly the hooks in `claudelaunch.HookTemplates`, which live only in the launch payload, the Codex `resume-unkill` handler it writes into each `hooks.json`, and the retired shapes above. In a Codex `hooks.json` its record is the ownership ledger, and pfm removes exactly what the ledger records. In an account `settings.json` left by an older install, ledger-recorded commands count only when their first space-separated field is `~/.local/bin/pfm`; every hook whose command is a `claudelaunch.HookTemplates` command or a retired shape also counts. Doctor names these leftovers for the operator to remove.
 - **The operator owns** every other hook in a settings file: a notification script, a memory sync, anything hand-wired. pfm never rewrites, reorders or removes one, and doctor never reports one. The Codex writer's contract says the same (`pfm/internal/installer/codex_hooks.go:85`).
-- **An operator's hook that calls pfm stays the operator's.** A hook naming a subcommand this binary implements, such as `pfm doctor`, is never treated as residue (`pfm/internal/installer/settings.go:170-175`, `:209-211`). Only an unknown subcommand in pfm's own shape is.
+- **An operator's hook that calls pfm stays the operator's.** A hook naming a subcommand this binary implements, such as `pfm doctor`, is never treated as residue (`pfm/internal/installer/settings.go:174-179`, `:213-215`). Only an unknown subcommand in pfm's own shape is.
 - **Project-tier hooks are the adopter's.** pfm scaffolds them once; later changes flow through `pfm doctor --project-updates` and an upstream diff the project ports by judgment, never a rewrite.
 
 ## The pfm doctor checks

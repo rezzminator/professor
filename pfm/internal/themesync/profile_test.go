@@ -350,6 +350,9 @@ func TestParseProfileIsStrictAndChecksItsPins(t *testing.T) {
 		"no name":              {`{"overrides":{}}`, "no name"},
 		"unknown tmux pin":     {`{"name":"x","overrides":{},"surfaces":{"tmux":{"@nope":"#fff"}}}`, "@nope"},
 		"bad herdr pin colour": {`{"name":"x","overrides":{},"surfaces":{"herdr":{"accent":"purple"}}}`, "purple"},
+		"unknown claude token": {`{"name":"x","overrides":{"claude":"#fff","promptBordr":"#fff"}}`, `overrides "promptBordr": not a Claude Code theme token`},
+		"bad claude colour":    {`{"name":"x","overrides":{"claude":"pinkish"}}`, `overrides "claude"`},
+		"unknown base":         {`{"name":"x","base":"midnight","overrides":{}}`, `base "midnight": not a Claude Code built-in theme`},
 	} {
 		_, err := ParseProfile([]byte(tc.content))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -359,6 +362,27 @@ func TestParseProfileIsStrictAndChecksItsPins(t *testing.T) {
 	if _, err := ParseProfile([]byte(`{"name":"x","overrides":{},"surfaces":{"tmux":{"@nope":"#fff"}}}`)); err == nil ||
 		!strings.Contains(err.Error(), "profile x") || !strings.Contains(err.Error(), "tmux") {
 		t.Errorf("an invalid pin = %v, want an error naming the profile and the surface", err)
+	}
+}
+
+func TestClaudeTokenRegistryParsesAndCoversEveryShippedProfile(t *testing.T) {
+	if len(claudeTokens) < 70 || !claudeTokens["claude"] || !claudeTokens["rainbow_violet_shimmer"] {
+		t.Fatalf("claudeTokens holds %d ids, want Claude Code's whole token set", len(claudeTokens))
+	}
+	for _, bad := range []string{"claude\nclaude\n", "not a token\n"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("parseClaudeTokens(%q) did not panic", bad)
+				}
+			}()
+			parseClaudeTokens(bad)
+		}()
+	}
+	for token := range builtinThemes[builtinDefault] {
+		if !claudeTokens[token] {
+			t.Errorf("built-in token %q is missing from claude_token_ids.txt", token)
+		}
 	}
 }
 

@@ -50,7 +50,7 @@ templates/
 ├── project/              ← scaffolded rules, agents, commands, hooks, and engine adapters
 ├── global/               ← machine-global commands, agents, and skill source registry
 ├── prompts/              ← Claude replacement and the Codex fleet prompt
-└── themes/               ← source-fetched theme registry
+└── themes/               ← Professor themes, one {name}.json profile each
 ```
 
 Host fleet tooling has one source outside the template tree: the Go engine under `../pfm/`, with every staged host asset under `../pfm/internal/installer/assets/`. A fresh box gets the `pfm` binary, then runs `pfm install --yes`; no separate host template bundle is copied.

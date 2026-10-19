@@ -73,8 +73,8 @@ const (
 	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
 	// it so no test reaches a public repository.
 	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
-	// EnvThemesOffline=1 stops pfm install from fetching a release theme
-	// manifest or remote theme file; themes bundled in the source clone still install.
+	// EnvThemesOffline=1 stops pfm install from downloading the release
+	// profiles; the profiles in the source clone still install.
 	// The test harness sets it so no test fetches themes from a public repository.
 	EnvThemesOffline = "PFM_THEMES_OFFLINE"
 	// EnvPricesOffline=1 stops every price refresh — pfm model-cost, pfm
@@ -711,8 +711,8 @@ func SkillSourcesOfflineIn(env Env) bool {
 	return env.Get(EnvSkillSourcesOffline) == "1"
 }
 
-// ThemesOffline reports EnvThemesOffline=1: pfm install reads bundled themes
-// from the source clone but skips remote theme fetches.
+// ThemesOffline reports EnvThemesOffline=1: pfm install reads the profiles
+// in the source clone but downloads no release profile.
 func ThemesOffline() bool {
 	return ThemesOfflineIn(OSEnv{})
 }

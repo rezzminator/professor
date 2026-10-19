@@ -117,4 +117,4 @@ async function chooseTheme() {
   );
 }
 
-module.exports = { chooseTheme };
+module.exports = { chooseTheme, runPfm, why };

@@ -176,9 +176,9 @@ Each item is written once under the store. Every account sees the same agents, c
 | `skills/*` | `{clone}/templates/global/skills/` dirs with a `SKILL.md` |
 | `skills/{name}` | `~/.local/share/pfm/install/skills/{name}/` source clone |
 | `agents/*.md` | clone sources, or rendered declarations under the clone's tracked `templates/generated/agents/` |
-| `themes/*` | manifest-selected files; `theme-ownership.json` records ownership |
+| `themes/*` | one file per `templates/themes/*.json` profile; `theme-ownership.json` records ownership |
 
-Source-fetched skills also link under `~/.agents/skills/{name}`. `templates/global/skills/sources.json` registers their repos; `templates/global/agents/` supplies agents; `templates/themes/sources.json` supplies themes.
+Source-fetched skills also link under `~/.agents/skills/{name}`. `templates/global/skills/sources.json` registers their repos; `templates/global/agents/` supplies agents; `templates/themes/` supplies themes.
 
 A regular file in the way is backed up before replacement; an existing link can be replaced. Global registry inspection reports foreign targets as conflicts. The registry-ownership scan (`InspectRegistryOwnership`) walks store `agents`, `commands`, `skills` and `~/.agents/skills` without following directory links and classes each link by its target against the install plan (`PlanRegistryLinks`), never by name: `STORE` a link into a retired generated store, `ORPHAN` a live link into a recorded clone or the managed install root that the plan no longer writes, `DEAD` such a link whose target is gone, `RETIRED` an unmarked entry named for a retired agent, command or skill. Foreign links and any other unmarked entry are never listed. Unreadable paths return errors. Install retires `STORE`, `ORPHAN` and `DEAD`, uninstall every owned link; `RETIRED` stays in place. Doctor prints each as a `doctor: registry {CLASS} …` row, else `doctor: registry-ownership ok`. A retired path already absent prints nothing.
 

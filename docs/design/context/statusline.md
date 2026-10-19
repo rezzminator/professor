@@ -12,6 +12,7 @@ Decisions live in this file. A change lands here first, then in the code, then i
 - [Where each field comes from](#where-each-field-comes-from)
 - [Effort](#effort)
 - [The main statusline](#the-main-statusline)
+  - [cacheKeepwarmShield](#cachekeepwarmshield)
 - [Palette and glyphs](#palette-and-glyphs)
 - [What it does not do](#what-it-does-not-do)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
@@ -132,7 +133,40 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 - The cache window reads `💾1h✓59m:28s 94%`: the cache window, the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry.
 - The window (`1h` or `5m`) comes first from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). When the payload carries no expiry — no cached request yet, or an older build — pfm's launch record decides, never the statusline's own environment: `fleetdb.LaunchFor(ctx, session_id)`, keyed by the `session_id` in the statusline payload, returns the `cache1h` the chat was launched with ([claude-launch.md](../engines/claude-launch.md#the-launch-record)). A session pfm never launched (`ErrNoLaunch`) falls to the transcript (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else no cache marker. A failed launch read shows `💾⚠` and writes the cause to stderr, never a silent `5m`.
 - The countdown runs to the payload's `prompt_cache.expires_at` when it carries one; otherwise from the newest request record in the transcript, a user record that is not a local command's echo, plus the window; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
+- The cache-keepwarm plugin's shield follows the hit share inside the same segment ([cacheKeepwarmShield](#cachekeepwarmshield)); the sub-agent rows carry none.
 - The line uses the same palette as the rows (`pfm/internal/statusline/palette.go`).
+
+### cacheKeepwarmShield
+
+When the cache-keepwarm plugin keeps a state file for the session, the main line's cache segment ends with a shield after the countdown and the hit share: `💾1h✓59m:28s 94% 🛡 2/4 ⟳3m guards ≈329k`. The plugin writes the file and pfm only reads it, on every render, inside `cacheWindowSegment` (`pfm/internal/statusline/cache_window.go`). The record is one JSON object, schema `v` 1:
+
+| Field | Holds |
+| --- | --- |
+| `v` | `1` |
+| `sessionId` | the session the record belongs to |
+| `pid` | the Claude process's pid |
+| `updatedAt` | epoch ms |
+| `enabled` | bool |
+| `source` | `launch` or `session` |
+| `state` | `warming`, `on`, `stopped` or `off` |
+| `reason` | the plugin's stable `ReasonCode` |
+| `pokes` | `{count, max}`, or `null` |
+| `nextAt` | epoch ms of the next keep-warm poke, or `null` |
+| `protectingTokensEq` | tokens the cache guards, or `null` |
+
+The path is the resolver's (`paths.CacheKeepwarmStateFile(env, home, sessionID)`, `pfm/internal/paths/keepwarm.go`): `$CACHE_KEEPWARM_STATE_DIR` overrides the sessions directory, else `${XDG_STATE_HOME:-$HOME/.local/state}/cache-keepwarm/sessions/{sessionID}.json`. A session id holds only `A-Za-z0-9_-`; any other is refused with an error, never sanitized into a name.
+
+| State | Shield reads |
+| --- | --- |
+| no file | no shield |
+| `warming`, amber | `🛡 2/4 ⟳3m guards ≈329k`: pokes `count/max`, the time to `nextAt`, the tokens the cache guards |
+| `on`, muted | `🛡 on` |
+| `stopped`, red | `🛡 4/4 ✕` |
+| `off`, muted | `🛡 off` |
+| a valid record whose `pid` is dead, not a Claude process, a zombie, or a process started more than 2 s after `updatedAt` (a reused pid), muted | `🛡 ?` |
+| unreadable, unparsable, a `v` other than 1, an unknown `state`, a schema violation, or a probe that failed to run, red | `🛡 ERR`, and one stderr line naming the path and the cause |
+
+The payload's `session_id` selects the file; an empty session id names no file. State roots must be absolute. The time to `nextAt` floors to whole minutes (`⟳3m`) and reads `<1m` under a minute, including overdue times. The guarded tokens round to thousands (`≈329k`) and read in one-decimal `M` once that rounds to 1000k (`≈1.0M`, `≈1.3M`). A null measurement omits its own piece: null `pokes`, `nextAt` and `protectingTokensEq` produce just `🛡` while warming. A record never expires by age: a quiet session's record stays valid, so only the pid decides `🛡 ?`. A shield remains visible even when no cache countdown is available.
 
 ## Palette and glyphs
 
@@ -145,6 +179,7 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 - It does not decorate the `⏺ main` row: Claude Code 2.1.281 renders no decoration there.
 - It does not show a row for a task that has neither a token count nor a window.
 - It does not render anything for Codex or OpenCode: `subagentStatusLine` is Claude Code's.
+- It does not show the cache-keepwarm shield on a sub-agent row: the shield is the main line's.
 - It does not tell a hung child from a working one while Claude Code still lists it as running: its open turn counts for 15 minutes.
 
 ## Surfaces that stay in sync
@@ -157,5 +192,6 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 | The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the status-lines row: `statusLine` and `subagentStatusLine` in every launch's `--settings` payload |
 | The launch record | `fleetdb.LaunchFor` over `pfm.db` table `launch` | the cache window per `session_id` |
 | The account-file host check | `pfm/internal/hostcheck/owned.go` | `pfm-settings` BLOCK row for old pfm status lines, with the operator’s fix |
+| The cache-keepwarm shield | `pfm/internal/statusline/cache_window.go`, `cache_keepwarm.go`, `pfm/internal/paths/keepwarm.go` | the shield states and failures; `paths.CacheKeepwarmStateFile` |
 | The goldens | `pfm/internal/statusline/testdata/render-*.golden` | the main line byte for byte |
 | The lane map | `infra/fence/lanes/` | its beat and its map row |

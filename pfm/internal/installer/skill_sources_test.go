@@ -720,7 +720,7 @@ func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 		t.Fatal("find test source")
 	}
 	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
-	sources, present, err := loadSkillSources(repo, ThemeManifestURL(""))
+	sources, present, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil || !present || len(sources) == 0 {
 		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)
 	}

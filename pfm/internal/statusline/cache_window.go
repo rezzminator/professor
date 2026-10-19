@@ -30,7 +30,25 @@ import (
 // machine config that failed to load 💾⚠config: the launch record lives where
 // the config's state.db says. hit < 0 means the harness reported no usage yet,
 // and drops the tail; a lapsed window renders the hit as history, was 99%.
+// The cache-keepwarm shield (cacheKeepwarmShield) follows, even when no
+// countdown renders.
 func cacheWindowSegment(
+	runtime Runtime,
+	now time.Time,
+	transcriptPath string,
+	hit int,
+	harness *promptCache,
+	sessionID string,
+) string {
+	text := cacheWindowText(runtime, now, transcriptPath, hit, harness, sessionID)
+	shield := cacheKeepwarmShield(runtime, now, sessionID)
+	if text == "" && shield != "" {
+		return sep + strings.TrimPrefix(shield, " ")
+	}
+	return text + shield
+}
+
+func cacheWindowText(
 	runtime Runtime,
 	now time.Time,
 	transcriptPath string,

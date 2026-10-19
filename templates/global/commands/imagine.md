@@ -9,6 +9,8 @@ argument-hint: '[work]'
 
 The work: $ARGUMENTS — with none, the work in hand in this chat; with neither, one question asks what to make. One `imaginator` agent imagines it at full stretch, then past it, and builds it; this chat draws its edges and looks.
 
+Go deeper than the ask, never wider: interaction, motion, colour, the edge case, the detail found on a second look, all inside the asked-for work; nothing outside it changes.
+
 1. Load the `ultimate` skill first — the Skill tool, or a Read of `~/.claude/skills/ultimate/SKILL.md` where no Skill tool serves it; a load that fails stops here and says so.
 2. Say what it will make, in a few plain lines: what will exist and where the user meets it (an Artifact page, a menu over the prompt bar, a terminal screen), the material and its scope in the user's own words, who builds it. Where those words read two ways on the surface or the scope, one AskUserQuestion settles it first; under god speed the likelier reading is taken and named. Otherwise go on in the same turn.
 3. Write `$HOME/.local/state/imagine/{slug}/brief.md`, `{slug}` short kebab-case with `-v2` on a collision: the user's words verbatim; every edge they fixed — medium, target, scope, model, effort, budget; where the material lives and its read-only route; what the machine and the target run. The brief carries the vision and its hard edges only; the angle, metaphor, form and which data to use stay the maker's to discover.

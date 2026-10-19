@@ -350,7 +350,7 @@ const twins = [
   ['luna', 'gpt-6-luna', 'medium'],
   ['astra', 'gpt-6-astra', 'high'],
 ];
-const otherVariants = ['flights-foreman-sonnet', 'flights-lander-mini', 'flights-lander-pro', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
+const otherVariants = ['flights-foreman-sonnet', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
 const configDir = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}';
 const renderErrors = /SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING|FRONTMATTER-INVALID/;
 
@@ -472,9 +472,7 @@ for (const [name, model, effort, role, base] of twins) {
     const noEffortTools = 'Your effort is set by your definition; you hold no effort tools.';
     const renamed = role === 'flights-foreman'
       ? renameStandalone('flights-foreman', () => 'gpt-foreman').replace(/(^## Effort\n\n)[^\n]*(\n)/m, `$1${noEffortTools}$2`)
-      : role === 'flights-lander'
-        ? renameStandalone('reviewer-pro|reviewer')
-        : original;
+      : original;
     const manual = base ? renderedText(render, base) : renamed;
     assert.ok(manual, `${name}: its base ${base} was not rendered`);
     assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(manual).trimEnd()), `${name}: the rendered body is not the full ${base ?? role} manual`);
@@ -491,15 +489,20 @@ for (const [name, model, effort, role, base] of twins) {
       assert.ok(digger.visibility['visible-to'].include.includes(name), `${name}: sub-rr is not visible to it`);
     } else {
       assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
-      assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-flights-lander']);
+      assert.deepEqual(fm.visibility['visible-to'].include, ['main'], `${name}: a GPT reviewer is the main chat's alone`);
     }
     if (role === 'flights-lander') {
       assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),
         ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent', 'SendMessage',
          'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'],
         `${name}: tools must match the lander's (Agent: its review dispatch; SendMessage: a critical decision to main)`);
-      for (const reviewer of ['gpt-reviewer', 'gpt-reviewer-pro'])
-        assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
+      // The lander's children stay Claude agents, and each admits the twin beside the lander.
+      for (const child of ['flights-hunter', 'flights-spec-walker', 'flights-sub-lander']) {
+        assert.ok(text.includes(`subagent_type: ${child}`), `${name}: does not spawn ${child}`);
+        const kid = parseFrontmatter(child, renderedText(render, child));
+        assert.deepEqual(kid.visibility['visible-to'].include, ['flights-lander', name], `${child}: not visible to both landers`);
+      }
+      assert.doesNotMatch(text, /gpt-flights-(?:hunter|spec-walker|sub-lander)|gpt-reviewer/, `${name}: a child or reviewer was renamed`);
     }
     if (role === 'flights-foreman') {
       // A GPT foreman splits to itself for design and judgment and to the Claude Sonnet foreman for clear work.
@@ -514,10 +517,8 @@ for (const [name, model, effort, role, base] of twins) {
 // its buttons: exactly these Claude roles hold both; every other rendered agent, each GPT twin, pcm and releaser neither.
 const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort-control__${tool}`);
 const foremanEffort = { floor: 'medium', ceiling: 'xhigh' };
-const landerEffort = { floor: 'medium', ceiling: 'xhigh', tripwires: 'redispatch' };
 const effortSteered = new Map([
   ['flights-foreman', foremanEffort], ['flights-foreman-sonnet', foremanEffort],
-  ['flights-lander', landerEffort], ['flights-lander-mini', landerEffort], ['flights-lander-pro', landerEffort],
   ['reviewer', true], ['reviewer-pro', true], ['reviewer-nt', true], ['documenter', true],
 ]);
 test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pcm or releaser', () => {

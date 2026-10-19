@@ -33,7 +33,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ### Critical invariants
 
 - Path variables: agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- Pipeline flow lives in the fleet prompt § Orchestration and the `flights-*` descriptions (main chat → a `flights-foreman` tier → main chat → a `flights-lander` tier → gitter; `/flights:doctor` meters a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
+- Pipeline flow lives in the fleet prompt § Orchestration and the `flights-*` descriptions (main chat → a `flights-foreman` tier → main chat → `flights-lander` → gitter; `/flights:doctor` meters a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
 - Agent frontmatter matches behavior: `name`, `description`, `tools`.
 - Registry over tables: a command's or skill's `description:` is its routing, written to `/quality:description`; `disable-model-invocation: true` hides a command from the model and goes only on user-triggered-by-design commands.
 - No command over 35KB, no agent over 15KB. Every `general-purpose` spawn carries the full root `CLAUDE.md`, so a root line is the most expensive line; `@path` imports expand at launch, so cut content, never relocate it.

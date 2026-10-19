@@ -123,7 +123,7 @@ One message:
 - **Decisions:** each with its one-line reason.
 - **Changed files.**
 - **Tests:** the commands run and their result lines, quoted from what ran.
-- **`TRACER`:** the tracer run it made or used, so a lander can reuse it.
+- **`TRACER`:** the tracer run it made or used, so a later agent can reuse it.
 - **`OUTSIDE`:** any change beyond the request, named, never made.
 
 ## Never

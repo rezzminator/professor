@@ -32,7 +32,7 @@ Reading is the cost; writing is the product. The family raises the ratio three w
 
 - **One builder reads once.** The foreman reads what the build needs and writes the change itself; a child exists only for an area disjoint from its own.
 - **A big reading may go to a tracer once.** The answer is reused while its files are unchanged.
-- **Review and the full gate run once per worktree.** They happen at the very end, inside one lander.
+- **Review and the full gate run once per worktree.** They happen at the very end, inside one lander, whose cheap children read what it spawns them for.
 
 ## Why the foreman builds by its own hand
 
@@ -52,15 +52,13 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 | --- | --- | --- | --- |
 | `flights-foreman-sonnet` | agent | sonnet · high | Foreman for a clear path: the pattern is in the code; a `from:` render of `flights-foreman` |
 | `flights-foreman` | agent | opus · high | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules and the toughest work |
-| `flights-lander-mini` | agent | sonnet · high | Lands a small worktree change |
-| `flights-lander` | agent | opus · medium | Lands a worktree change |
-| `flights-lander-pro` | agent | opus · high | Lands a large worktree change |
+| `flights-lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
+| `flights-hunter`, `flights-spec-walker`, `flights-sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
 | `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
-- **GPT twins:** `gpt-foreman` (sol, high, no effort buttons) and `gpt-flights-lander` (sol, high) run the same protocols.
-  - `gpt-flights-lander` reviews through `gpt-reviewer` or `gpt-reviewer-pro`.
+- **GPT twins:** `gpt-foreman` (sol, high, no effort buttons) and `gpt-flights-lander` (sol, high) run the same protocols; `gpt-flights-lander` spawns the same Claude children.
 - **Landers are spawned only by the main chat.**
-- **`reviewer`, `reviewer-pro`, `tracer` and `gitter`** are fleet agents the family uses; they are not its members.
+- **`tracer` and `gitter`** are fleet agents the family uses; they are not its members.
 
 ## The life cycle
 
@@ -68,7 +66,7 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 main chat -> gitter worktree (or develop) -> foreman tier, worktree path in its brief
 foreman -> reads, writes the whole change, runs the affected tests once -> one return message
 (a child only for an area disjoint from the foreman's own, while the foreman is busy with its part)
-every foreman on the worktree returned -> main chat -> lander tier -> one reviewer
+every foreman on the worktree returned -> main chat -> flights-lander -> its own review, children in the background
 lander fixes all findings -> affected tests until green -> full gate once -> lander returns
 main chat -> gitter commits / merges
 ```
@@ -80,15 +78,16 @@ main chat -> gitter commits / merges
    - **Writes:** the whole change, then runs the affected tests once, never after each edit; a fix's regression test runs red first.
    - **Children:** a child only when both hold: the foreman is busy with its own part, and the other area has no file in common with its own.
    - **Returns:** one message; every item the brief names is built, or the return is `PARTIAL` naming it.
-4. **Land.** Once every foreman on a worktree has returned, the main chat spawns one lander. The lander:
-   1. spawns one reviewer over the whole change;
-   2. fixes every finding;
-   3. runs the affected tests until green;
-   4. runs the full gate once;
-   5. returns.
+4. **Land.** Once every foreman on a worktree has returned, the main chat spawns one `flights-lander`. The lander:
+   1. syncs the worktree to TARGET's tip;
+   2. reviews the whole change itself, spawning the children its inventory's PLAN computes;
+   3. fixes every finding;
+   4. runs the affected tests until green;
+   5. runs the full gate once;
+   6. returns.
 
-   One worktree gets one lander and one reviewer: no second round, no second lander.
-5. **Merge.** On `PASS` or `FIXED`, the main chat sends gitter to commit and merge, with the reviewer's report path as its REPORT_PATH.
+   One worktree gets one lander: no separate reviewer, no second round, no second lander.
+5. **Merge.** On `PASS` or `FIXED`, the main chat sends gitter to commit and merge, with the lander's report path as its REPORT_PATH.
 6. **Measure.** `/flights:doctor`, run by the user, reports the measure for the tree.
 
 ## Choosing a tier
@@ -99,11 +98,9 @@ The main chat chooses at dispatch; a foreman chooses for the rare child it spawn
 | --- | --- | --- |
 | Foreman tier | difficulty and ambiguity, never size | `flights-foreman-sonnet`: the path is clear, the pattern is in the code · `flights-foreman`: design choices, ambiguity, unfamiliar code, an unknown cause, several modules, the toughest work |
 | Child tier | what the area needs | `flights-foreman-sonnet`: a clear path, the pattern is in the code · `flights-foreman`: design, debugging, judgment |
-| Lander tier | size of the worktree change | mini: under 150 code lines in one module · pro: 1,000+ code lines or 4+ modules · base: everything else |
-| Reviewer | size of the worktree change | `reviewer-pro` at 10,000+ code lines; `reviewer` otherwise |
+| Lander children | the lander's inventory PLAN, computed from the diff and the spec files | hunters k = min(4, ceil(production diff lines / 600)) · spec walkers per spec with 10+ numbered rows · sub-landers by inventory row ranges |
 
-- **Code lines** are counted from `git diff --numstat` of the worktree against its base, with tests, docs, generated and lock files excluded.
-- **Modules** are the build units of the project map.
+The lander itself has no tiers: `flights-lander` lands every worktree.
 
 ## What passes between agents
 
@@ -119,15 +116,16 @@ The main chat chooses at dispatch; a foreman chooses for the rare child it spawn
 - **A foreman's return:**
   - first line `DONE {name}` or `PARTIAL {name}: {what is left}`;
   - then the decisions it made, the files it changed, and the tests it ran with their result lines;
-  - a `TRACER` line naming any tracer run it made or used, so a lander can reuse it;
+  - a `TRACER` line naming any tracer run it made or used, so a later agent can reuse it;
   - an `OUTSIDE` line naming any change beyond the request, which it never makes.
 - **A child's return** has a foreman's shape. It is a claim. The parent checks it against the diff and the test lines.
 - **A lander's return:**
   - first line `PASS`, `FIXED` or `FAIL {worktree}`;
   - then each finding, fixed or listed;
+  - the sync outcome;
   - each project's last full-gate verdict line;
-  - the residuals;
-  - the reviewer's report path.
+  - the residuals and decisions;
+  - the lander's report path.
 
 ## Reading and the trace store
 
@@ -139,7 +137,6 @@ The main chat chooses at dispatch; a foreman chooses for the rare child it spawn
   - An answer whose cited files all match their recorded hashes is fresh: it is returned with no walk.
   - An answer with changed files re-walks only the threads that cite them.
 - **No hook prepares, forces or gates a tracer.** The tracer opens its own run and recalls as its first command.
-- **Reviewers batch their questions.** `reviewer` puts every question into one tracer run; `reviewer-pro` uses at most three, grouped by area.
 
 ## Waiting
 
@@ -163,10 +160,9 @@ The `auto-effort-control` plugin gives an agent whose frontmatter carries `effor
 | Agent | `effortControl` |
 | --- | --- |
 | `flights-foreman`, `flights-foreman-sonnet` | `on` (floor medium, ceiling xhigh), both starting at high |
-| `flights-lander`, `flights-lander-mini`, `flights-lander-pro` | floor medium, ceiling xhigh, tripwires `redispatch` |
 | `reviewer`, `reviewer-pro`, `reviewer-nt`, `documenter` | `on` |
 
-A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. No `gpt-*` twin carries it: each GPT twin pins a `tools:` line without the buttons and unsets the key (see [gpt-twins.md](../gpt-twins/gpt-twins.md#declarations)); nor does `pcm` or `releaser`. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix ([flights-lander.md](flights-lander.md#declaration)); the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
+A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. No `gpt-*` twin carries it: each GPT twin pins a `tools:` line without the buttons and unsets the key (see [gpt-twins.md](../gpt-twins/gpt-twins.md#declarations)); nor does `pcm` or `releaser`. `flights-lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
 
 ## Decisions
 
@@ -183,7 +179,7 @@ A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set`
 | A call or round cap | the foreman decides when its change is whole |
 | Flight files and a run log | messages |
 | A lander or gitter spawned by a foreman | the main chat owns both |
-| Review lenses (a security seat, fixed tracers) | one reviewer over the whole change |
+| Review lenses (a security seat, fixed tracers) | the lander's hunt and the children its computed PLAN spawns |
 | A second gate round | fixes inside the one lander |
 | A spec writer or a requirements interview command | the main chat settles requirements; `flights-foreman` takes novel work |
 
@@ -195,10 +191,11 @@ The deepest chain is main → foreman → child foreman → tracer → sub-trace
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/flights-{foreman,lander}.md` and their `from:` tiers, GPT twins in `templates/global/agents/gpt-flights-*.md`, rendered into `templates/generated/agents/` | The protocols |
+| The agents | `templates/global/agents/flights-*.md` and the `from:` foreman tier, GPT twins in `templates/global/agents/gpt-*.md`, rendered into `templates/generated/agents/` | The protocols |
+| The lander's kit | `templates/global/skills/lander-inventory/` | The inventory and the computed spawn |
 | The command | `templates/global/commands/flights/doctor.md` | The meter |
 | The measurement | `pfm tokens --tree` in `pfm/internal/tokens/` | The measure's numbers |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The ladder, the tier rubrics, main-chat ownership of worktree, lander and gitter |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration and § You hold a flight | The ladder, the foreman rubric, main-chat ownership of worktree, lander and gitter |
 | The project contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The first move of a sub-agent |
 | The tracer | `templates/global/agents/tracer.md`, `templates/global/skills/tracetree/`, `docs/design/tracing/` | The store and its reuse |
 | This directory | `docs/design/flights/` | One file per member, this file for what they share |
@@ -206,4 +203,4 @@ The deepest chain is main → foreman → child foreman → tracer → sub-trace
 ## Open items
 
 - The baseline before this design: a median of 41 landed lines per million input tokens over 166 flights in the 14 days to 2026-10-18. Agents that wrote no code took 61% of the input. The first flights on this design are measured against it with `/flights:doctor`.
-- The lander and reviewer size bars are first values; tune them from `/flights:doctor` reports.
+- The lander's PLAN constants (600 lines per hunter, 10 rows per walker, the caps) are first values; tune them from `/flights:doctor` reports.

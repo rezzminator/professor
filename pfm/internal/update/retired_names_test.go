@@ -880,6 +880,22 @@ func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 	}
 }
 
+func TestRetiredNamesReportTheLanderTiers(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRetiredFixture(t, root, map[string]string{"notes.md": "spawn flights-lander-mini for a small change\n" +
+		"spawn flights-lander-pro for a large one\n" +
+		"spawn flights-lander or gpt-flights-lander; it spawns flights-hunter and flights-sub-lander\n"})
+	want := []professor.RetiredNameHit{
+		{Path: "notes.md", Line: 1, Name: "flights-lander-mini", Kind: "agent", Successor: "flights-lander"},
+		{Path: "notes.md", Line: 2, Name: "flights-lander-pro", Kind: "agent", Successor: "flights-lander"},
+	}
+	scan := ScanRetiredNames(root, nil)
+	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
+		t.Fatalf("lander tiers scan =\n%+v\nwant\n%+v", scan, want)
+	}
+}
+
 func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	t.Parallel()
 	root := newUpdateGitFixture(t)

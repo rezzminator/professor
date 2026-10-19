@@ -188,6 +188,10 @@ var retiredNames = []retiredName{
 	{name: "/flights:spec", kind: retiredCommand, match: matchExact},
 	{name: "/flights:init", kind: retiredCommand, match: matchExact},
 	{name: "/flights:orchestrate-cross-harness", kind: retiredCommand, match: matchExact},
+	// The one lander (docs/design/flights/flights-lander.md): its size tiers
+	// retire, flights-lander landing every worktree.
+	{name: "flights-lander-mini", kind: retiredAgent, successor: "flights-lander", match: matchExact},
+	{name: "flights-lander-pro", kind: retiredAgent, successor: "flights-lander", match: matchExact},
 	retiredAgentRow("terra", "", `subagent_type: "terra"`),
 	retiredAgentRow("terra", "", `subagent_type:"terra"`),
 	retiredAgentRow("terra", "", `subagent_type: 'terra'`),

@@ -41,7 +41,7 @@ Each row names its transcript `path:line`.
 
 | Check | Finding |
 | --- | --- |
-| Tier fit | a foreman tier above or below the work's difficulty; a lander or reviewer tier off its size bar |
+| Tier fit | a foreman tier above or below the work's difficulty; a lander spawn off its inventory PLAN — a child added, dropped or re-cut |
 | Re-reads | a file read again by an agent after a tracer answer covering it reached that agent |
 | Store hits | tracer questions answered fresh from the store, and questions walked again with unchanged files |
 | Full suites outside the lander | any full suite or gate run by a foreman |

@@ -40,12 +40,6 @@
     "global/agents/flights-foreman-sonnet.md": {
       "curated": true
     },
-    "global/agents/flights-lander-mini.md": {
-      "curated": true
-    },
-    "global/agents/flights-lander-pro.md": {
-      "curated": true
-    },
     "global/agents/gpt-foreman.md": {
       "curated": true
     },

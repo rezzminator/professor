@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Flight prompt contracts: the cast's tiers, the one long-command wait, review sizing and input, critical decisions to main.
+# Flight prompt contracts: the cast's tiers, the one long-command wait, the lander's computed review spawn and its kit, critical decisions to main.
 # BROKEN STATE: a missing template or a failed contract assertion exits nonzero.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -35,12 +35,16 @@ class FlightContracts(unittest.TestCase):
     def test_cast_tiers(self):
         cast = {
             'flights-foreman': ('opus', 'high'), 'flights-foreman-sonnet': ('sonnet', 'high'),
-            'flights-lander-mini': ('sonnet', 'high'), 'flights-lander': ('opus', 'medium'),
-            'flights-lander-pro': ('opus', 'high'),
+            'flights-lander': ('opus', 'medium'),
+            'flights-hunter': ('opus', None), 'flights-spec-walker': ('sonnet', None), 'flights-sub-lander': ('haiku', None),
         }
         for name, (model, effort) in cast.items():
             path = resolved(name)
-            self.assertEqual(frontmatter(path), {'model': model, 'effort': effort}, f'{path}: tier')
+            want = {'model': model, **({'effort': effort} if effort else {})}
+            self.assertEqual(frontmatter(path), want, f'{path}: tier')
+        for retired in ('flights-lander-mini', 'flights-lander-pro'):
+            for d in (AGENTS, GENERATED):
+                self.assertFalse((d / f'{retired}.md').exists(), f'{d}/{retired}.md: a retired lander tier ships')
 
     def test_the_two_foremen_share_one_manual(self):
         self.assertIn('\nfrom: flights-foreman\n', (AGENTS / 'flights-foreman-sonnet.md').read_text(), 'the Sonnet foreman derives from flights-foreman')
@@ -56,12 +60,22 @@ class FlightContracts(unittest.TestCase):
             self.assertIn('longer than 10 minutes', body, f'{name}: the long-command threshold')
             self.assertIn("timeout {s} bash -c 'until [ -s \"$1\" ]", body, f'{name}: the one blocking wait')
 
-    def test_review_sizing_and_input(self):
+    def test_the_lander_spawns_its_computed_plan(self):
         lander = text('flights-lander')
-        self.assertIn('`reviewer-pro` at 10,000+ code lines', lander, 'reviewer-pro only past 10,000 code lines')
-        self.assertIn('diff --numstat', lander, 'code lines are counted, not guessed')
-        self.assertIn('ls-files --others --exclude-standard', lander, 'the lander lists untracked source')
-        self.assertIn('UNTRACKED the untracked files', lander, 'the reviewer brief carries the untracked files')
+        kit = '$HOME/.claude/skills/lander-inventory/lander-inventory.py'
+        self.assertIn(f'python3 -I {kit} ', lander, 'the inventory runs from the installed kit')
+        self.assertTrue(Path('templates/global/skills/lander-inventory/lander-inventory.py').is_file(), 'the inventory kit ships')
+        self.assertTrue(Path('templates/global/skills/lander-inventory/SKILL.md').is_file(), 'pfm install links only a skill directory holding SKILL.md')
+        self.assertNotRegex(lander, r'/(Users|home)/', 'no machine-absolute path')
+        self.assertIn('ONE message spawning exactly the PLAN rows', lander, 'the spawn is the computed plan')
+        self.assertIn('ls-files --others --exclude-standard', lander, 'the lander reads untracked source')
+        for child in ('flights-hunter', 'flights-spec-walker', 'flights-sub-lander'):
+            self.assertIn(f'subagent_type: {child}', lander, f'the lander spawns {child}')
+            head = text(child).split('---\n', 2)[1]
+            self.assertIn('include: [flights-lander, gpt-flights-lander]', head, f'{child}: visible to both landers alone')
+            self.assertRegex(head, r'(?m)^tools: Read, Grep, Glob, Bash$', f'{child}: read-only tools')
+
+    def test_reviewers_size_untracked_source(self):
         for name in ('reviewer', 'reviewer-pro'):
             body = text(name)
             self.assertTrue('untracked line count' in body and 'WORKTREE' in body, f'{name}: untracked source sizes and joins the review')

@@ -21,4 +21,4 @@ written / read bytes       39 / 205
       2  a0f0000000000004                     tracer                   claude-haiku-4-5               6600         5000          900          0           32    0.000    $0.0027
 
 pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
-data gaps: none
+data gaps: transcript totals exclude background API calls (auto_mode, prompt_suggestion, hook_prompt, generate_session_title, agent_summary); captured telemetry is reported separately by pfm tokens (without --tree); missing telemetry and metadata-filtered background sessions cannot be quantified · Claude billing route/region not configured; default direct/global list prices may not match cloud billing — set billing in pfm.prices.json or override rates

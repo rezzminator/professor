@@ -48,30 +48,49 @@ func NewJoiner(wait time.Duration, emit func(costledger.Row)) *Joiner {
 
 // AddLog offers a log half.
 func (j *Joiner) AddLog(half LogHalf, now time.Time) {
-	j.add(half.RequestID, now, pendingLog, pendingSpan, flushedSpan, func(e *entry) { e.log = half })
+	row := logOnlyRow(half, now)
+	if row.Identity() == "" {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		j.emit(row)
+		return
+	}
+	j.add(row.Identity(), now, pendingLog, pendingSpan, flushedSpan, func(e *entry) { e.log = half })
 }
 
-// AddSpan offers a span half.
+// AddSpan offers a span half. No correlation means an observation, never a guessed pair.
 func (j *Joiner) AddSpan(half SpanHalf, now time.Time) {
-	j.add(half.RequestID, now, pendingSpan, pendingLog, flushedLog, func(e *entry) { e.span = half })
+	row := spanOnlyRow(half, now)
+	if row.Identity() == "" {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		j.emit(row)
+		return
+	}
+	j.add(row.Identity(), now, pendingSpan, pendingLog, flushedLog, func(e *entry) { e.span = half })
 }
 
 // add records a half (set stores it) of request id: a first half waits in state pending; a half
 // whose partner waits or was flushed alone joins it and emits the log+span row; a repeat is dropped.
-func (j *Joiner) add(id string, now time.Time, pending, partnerPending, partnerFlushed joinState, set func(*entry)) {
+func (j *Joiner) add(
+	id string,
+	now time.Time,
+	pending, partnerPending, partnerFlushed joinState,
+	set func(*entry),
+) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	e, seen := j.entries[id]
+	e := j.entries[id]
 	switch {
-	case !seen:
+	case e == nil:
 		e = &entry{state: pending, at: now, first: now}
 		set(e)
-		j.entries[id] = e
 	case e.state == partnerPending || e.state == partnerFlushed:
 		set(e)
 		e.state, e.at = joined, now
 		j.emit(logSpanRow(e.log, e.span, e.first))
 	}
+	j.entries[id] = e
 }
 
 // Flush emits every half that has waited longer than the wait and forgets finished requests older
@@ -127,7 +146,9 @@ func receiptStamp(at time.Time) string { return at.UTC().Format(timeLayoutMS) }
 
 func logSpanRow(l LogHalf, s SpanHalf, received time.Time) costledger.Row {
 	return costledger.Row{
-		RequestID: l.RequestID, TS: firstFilled(l.TS, s.EndTS, receiptStamp(received)), SessionID: l.SessionID,
+		RequestID: firstFilled(l.RequestID, s.RequestID), TS: firstFilled(l.TS, s.EndTS, receiptStamp(received)),
+		SessionID: firstFilled(l.SessionID, s.SessionID),
+		TraceID:   firstFilled(l.TraceID, s.TraceID), SpanID: firstFilled(l.SpanID, s.SpanID),
 		AgentID: s.AgentID, ParentAgentID: s.ParentAgentID,
 		QuerySource: firstFilled(l.QuerySource, s.QuerySource), Model: firstFilled(l.Model, s.Model),
 		InputTokens: l.InputTokens, OutputTokens: l.OutputTokens,
@@ -140,6 +161,7 @@ func logSpanRow(l LogHalf, s SpanHalf, received time.Time) costledger.Row {
 func logOnlyRow(l LogHalf, received time.Time) costledger.Row {
 	return costledger.Row{
 		RequestID: l.RequestID, TS: firstFilled(l.TS, receiptStamp(received)),
+		TraceID: l.TraceID, SpanID: l.SpanID,
 		SessionID: l.SessionID, AgentID: costledger.UnknownAgent,
 		QuerySource: l.QuerySource, Model: l.Model,
 		InputTokens: l.InputTokens, OutputTokens: l.OutputTokens,
@@ -150,7 +172,8 @@ func logOnlyRow(l LogHalf, received time.Time) costledger.Row {
 
 func spanOnlyRow(s SpanHalf, received time.Time) costledger.Row {
 	return costledger.Row{
-		RequestID:           s.RequestID,
+		RequestID: s.RequestID,
+		TraceID:   s.TraceID, SpanID: s.SpanID,
 		TS:                  firstFilled(s.EndTS, receiptStamp(received)),
 		SessionID:           s.SessionID,
 		AgentID:             s.AgentID,

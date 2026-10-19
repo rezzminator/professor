@@ -163,13 +163,27 @@ Toggled by `harvester.enabled`; the family server registration is `harvester-pro
 
 **CLI:** `pfm model-cost gpt-6.1-sol`, `pfm model-cost --json --all` or `pfm model-cost --check` · **Consumers:** `pfm tokens`, the `chatlog` skill and its `chatlog.py` kit (prices only), the status line, `pfm doctor`, `pfm install`
 
-One price source: `pfm/internal/pricing/prices.json` in the Professor clone — tracked, embedded into pfm, and the refresh target. Each row carries a model key, its engine and USD per million tokens: `in` and `out`, plus Claude `hit`/`w5m`/`w1h` or OpenAI `cached` where the publisher lists them (an absent rate is unpublished, never 0), and an optional `long` tier that applies when one call's context is above its `above`. `pfm.prices.json` beside `pfm.config.json` overrides rows by key.
+One price source: `pfm/internal/pricing/prices.json` in the Professor clone — tracked, embedded into pfm, and the refresh target. Each row carries a model key, its engine and USD per million tokens: `in` and `out`, plus Claude `hit`/`w5m`/`w1h` or OpenAI `cached` where the publisher lists them (an absent rate is unpublished, never 0), and an optional `long` tier that applies when one call's context is above its `above`. `pfm.prices.json` beside `pfm.config.json` overrides rows by key and may name the Claude billing route ([Billing route and region](#billing-route-and-region)).
 
 Every call refreshes first, at most once a day per pfm binary: the table is current while the check stamp `~/.local/state/pfm/prices-checked` (`{time} {sha256 of prices.json} {binary}`, the binary `exe-sha256:` and the sha256 of the executable the running pfm started from; one replaced on disk since is no binary) confirms the clone file, was written by this binary and is under 24 hours old; a stamp from another binary or one naming none is stale, so a refresh just before a host install never keeps the old parse, and a machine with no clone file keeps the embedded table while its `fetched_at` is under 24 hours old; otherwise both official pages ([Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing.md), [OpenAI pricing](https://developers.openai.com/api/docs/pricing.md)) are fetched and the rows derived, and the clone file is rewritten only when they change. `--force` refreshes regardless; `PFM_PRICES_OFFLINE=1` never fetches, `--force` included. A failed fetch serves the loaded table with a warning (exit 1 only under `--force`).
 
 The text output is one `prices:` summary line (rows, fetch time, where the table came from, the refresh status, the override) and a table; `--json` prints the document `pfm tokens --prices` reads, `--check` the summary line only, exit 1 when the table cannot load. An id resolves after normalization (case, provider prefix, Bedrock and Vertex suffixes, Claude dots) to its exact key, else to its key without a trailing snapshot date; any other id exits 1 naming `pfm model-cost --all`.
 
-Coverage is the direct API Standard list prices on these pages. Negotiated rates, account-specific discounts and other service modes are outside the table; `pfm.prices.json` carries a negotiated rate. `pfm tokens` estimates recorded usage at these current rates and reports missing prices as unavailable; it does not claim historical billing amounts.
+Coverage is the direct API Standard list prices on these pages, unless `pfm.prices.json` names another billing route. Negotiated rates, account-specific discounts and other service modes are outside the table; `pfm.prices.json` carries a negotiated rate. `pfm tokens` estimates recorded usage at these current rates and reports missing prices as unavailable; it does not claim historical billing amounts.
+
+### Billing route and region
+
+`pfm.prices.json` is `{"version":2,"billing":{"route":"bedrock","region":"geo"},"rows":[…]}`; `billing` is optional and strict (`pfm/internal/pricing/billing.go`). The pair is never inferred from the environment, and an unlisted pair is an error naming the file:
+
+| Route | Regions | Claude 4.5+ published rates |
+| --- | --- | --- |
+| `direct` | `global` | list price, the default |
+| `bedrock` | `global`, `geo` | `global` at list price, `geo` times 1.1 |
+| `vertex` | `global`, `regional` | `global` at list price, `regional` times 1.1 |
+
+- **Scope.** The premium applies only to published Claude rows of 4.5 and later (`regionalPremium`), long tier included; older and unversioned keys are not marked up. A `pfm.prices.json` row is a final billed rate and is never multiplied.
+- **Provenance.** A `bedrock` or `vertex` route adds that cloud's pricing page to the table's sources; `claude-sonnet-5-5` cache reads are set to 0.10 under those routes, the rate both partner lists carry.
+- **Surfaces.** `--json` carries `billing` (`route`, `region`, `configured`, `multiplier`), `--check` and the text summary line end `· billing: {route}/{region}` with `(default; cloud rates may differ)` when none is configured, and `pfm tokens` states the same in its pricing and data-gaps lines.
 
 ## pfm tokens
 

@@ -224,6 +224,7 @@ func PriceDocument(prices pricing.Prices, result Result, model string, rows []pr
 	doc := pricing.Document{
 		Version: prices.Version, FetchedAt: prices.FetchedAt, Sources: prices.Sources, ServedFrom: prices.From,
 		File: prices.File, FileError: errorText(prices.FileError), Override: prices.Override, Model: model, Rows: rows,
+		Billing: &prices.Billing,
 		Refresh: pricing.RefreshReport{
 			Status: result.Status, Reason: result.Reason, Error: errorText(result.Err),
 			StampError: errorText(result.StampErr),

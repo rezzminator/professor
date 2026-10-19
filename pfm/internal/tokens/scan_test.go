@@ -16,8 +16,9 @@ func TestGapsLineNamesEveryGapAndBoundsTheLists(t *testing.T) {
 	pricingLine := "pricing: saved table " + fixture(t, "model-cost.json") + "; Standard service, published " +
 		"prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from " +
 		"anthropic, openai; not historical billing\n"
-	if got := a.gapsLine(); got != pricingLine+"data gaps: none" {
-		t.Errorf("a clean scan:\n got %q\nwant %q", got, pricingLine+"data gaps: none")
+	coverageGaps := backgroundGap + " · " + billingGap
+	if got := a.gapsLine(); got != pricingLine+"data gaps: "+coverageGaps {
+		t.Errorf("a transcript scan must name its blind spots:\n got %q", got)
 	}
 	a.prices.refresh = &pricing.RefreshReport{Status: "failed"}
 	a.prices.override = &pricing.Override{Path: "/cfg/prices.json", Rows: 2}
@@ -34,7 +35,7 @@ func TestGapsLineNamesEveryGapAndBoundsTheLists(t *testing.T) {
 		"check exact IDs and available rates with pfm model-cost --json --all · 2 usage iterations of a type pfm " +
 		"does not price apart {\"fallback_message\":2} — the response's own counts stand · 4 transcripts hold only copied " +
 		"calls: 0123456789ab, b, c · 2 duplicate files skipped · n1 · n2 · n3 · n4 · " +
-		"2 further notes (see --out JSON scan.notes) · 4 READ ERRORS: e1 | e2 | e3"
+		"2 further notes (see --out JSON scan.notes) · 4 READ ERRORS: e1 | e2 | e3 · " + coverageGaps
 	if got := a.gapsLine(); got != want {
 		t.Errorf("every gap:\n got %q\nwant %q", got, want)
 	}

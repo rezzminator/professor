@@ -67,11 +67,33 @@ func TestDecodeReadsInt64FieldsAsNumbersOrStrings(t *testing.T) {
 	}
 }
 
-func TestDecodeLogsRefusesARecordWithoutAnIdentity(t *testing.T) {
-	missing := apiRequest(testSession, "", "repl_main_thread", 5)
+// The probe capture establishes the OTLP envelopes and alternate response-id attribute;
+// rejection logs establish that background calls can omit request/session attributes.
+func TestDecodeResourceIdentityAndResponseID(t *testing.T) {
+	body := mustJSON(map[string]any{"resourceLogs": []any{map[string]any{
+		"resource": map[string]any{"attributes": []any{str("session.id", testSession)}},
+		"scopeLogs": []any{map[string]any{"logRecords": []any{map[string]any{
+			"attributes": withoutKey(apiRequest("", "req_resource", "auto_mode", 5), "session.id"),
+		}}}},
+	}}})
+	halves, err := DecodeLogs(body)
+	if err != nil || len(halves) != 1 || halves[0].SessionID != testSession {
+		t.Fatalf("resource identity = %+v, %v; want one background call in its real session", halves, err)
+	}
+	span := llmSpan(testSession, "", "", "", "agent_summary")
+	span["attributes"] = append(withoutKey(span["attributes"].([]map[string]any), "request_id"),
+		str("gen_ai.response.id", "req_response"))
+	spans, err := DecodeSpans(spanBody(span))
+	if err != nil || len(spans) != 1 || spans[0].RequestID != "req_response" {
+		t.Fatalf("response identity = %+v, %v; want the provider's response id", spans, err)
+	}
+}
+
+func TestDecodeLogsKeepsARecordWithoutAnIdentity(t *testing.T) {
+	missing := apiRequest("", "", "auto_mode", 5)
 	halves, err := DecodeLogs(logBody(missing))
-	if err == nil || len(halves) != 0 {
-		t.Fatalf("DecodeLogs = %v, %v; want the record refused with an error", halves, err)
+	if err != nil || len(halves) != 1 || halves[0].RequestID != "" || halves[0].SessionID != "" {
+		t.Fatalf("DecodeLogs = %v, %v; want the observation kept without invented identity", halves, err)
 	}
 }
 

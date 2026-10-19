@@ -61,7 +61,10 @@ func TestSessionIDMustBeSafeBeforeAnyPathJoin(t *testing.T) {
 		if path, err := Path(t.TempDir(), id); err == nil {
 			t.Errorf("Path(%q) = %q, want an error", id, path)
 		}
-		if err := Append(t.TempDir(), Row{RequestID: "r", SessionID: id}); err == nil {
+		if _, err := ForSession(t.TempDir(), id); err == nil {
+			t.Errorf("ForSession(%q) must not return another scope's data", id)
+		}
+		if err := Append(t.TempDir(), Row{RequestID: "r", SessionID: id}); id != "" && err == nil {
 			t.Errorf("Append with session %q succeeded", id)
 		}
 	}
@@ -72,6 +75,78 @@ func TestSessionIDMustBeSafeBeforeAnyPathJoin(t *testing.T) {
 	}
 	if err := Append(t.TempDir(), Row{SessionID: sessionA}); err == nil {
 		t.Error("Append without a request_id succeeded")
+	}
+}
+
+func TestUnattributedKeepsObservationsAndDeduplicatesOnlyRealIdentity(t *testing.T) {
+	dir := t.TempDir()
+	for _, id := range []string{"", "", "req_bg", "req_bg"} {
+		r := row(id, JoinLog, micros(50))
+		r.SessionID = ""
+		if err := Append(dir, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ledger, err := Unattributed(dir)
+	if err != nil || ledger.Faults != 0 || len(ledger.Rows) != 3 || Sum(ledger.Rows).Micros != 150 {
+		t.Fatalf("unattributed ledger = %+v, %v; want two observations and one deduped request", ledger, err)
+	}
+	for _, ids := range [][2]string{{"", ""}, {strings.Repeat("0", 32), strings.Repeat("0", 16)}, {"bad", "bad"}} {
+		if got := (Row{TraceID: ids[0], SpanID: ids[1]}).Identity(); got != "" {
+			t.Errorf("invalid trace identity %v = %q", ids, got)
+		}
+	}
+}
+
+func TestSessionObservationsStayOutsideLegacyLedgers(t *testing.T) {
+	dir := t.TempDir()
+	if err := Append(dir, row("", JoinLog, micros(25))); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := SessionIDs(dir)
+	if err != nil || len(ids) != 1 || ids[0] != sessionA {
+		t.Fatalf("observation-only sessions = %v, %v", ids, err)
+	}
+	legacy, err := Path(dir, sessionA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("request-less observation reached legacy reader: %v", err)
+	}
+	if err := Append(dir, row("req_real", JoinLog, micros(50))); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := ForSession(dir, sessionA)
+	if err != nil || !ledger.Present || ledger.Faults != 0 || len(ledger.Rows) != 2 || Sum(ledger.Rows).Micros != 75 {
+		t.Fatalf("combined ledger = %+v, %v", ledger, err)
+	}
+	ids, err = SessionIDs(dir)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("duplicate session discovery = %v, %v", ids, err)
+	}
+	observation, err := Path(ObservationsDir(dir), sessionA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-100 * 24 * time.Hour)
+	if err := os.Chtimes(observation, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := Prune(dir, time.Now(), 90*24*time.Hour); err != nil || removed != 1 {
+		t.Fatalf("prune observations = %d, %v", removed, err)
+	}
+	if err := os.WriteFile(ObservationsDir(dir)+"-file", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(ObservationsDir(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(ObservationsDir(dir)+"-file", ObservationsDir(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SessionIDs(dir); err == nil {
+		t.Fatal("unreadable observations rendered as absent")
 	}
 }
 

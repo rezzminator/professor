@@ -116,6 +116,98 @@ func TestSinkAcceptsGzipAndCapsTheBody(t *testing.T) {
 	}
 }
 
+func TestSinkKeepsUnattributedObservationsWithoutFabricatingIDsOrSpamming(t *testing.T) {
+	sink, _, dir, logs := newTestSink(t)
+	body := logBody(apiRequest("", "", "auto_mode", 125))
+	for range 3 {
+		response := post(t, sink, http.MethodPost, "/v1/logs", body, nil)
+		if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != "{}" {
+			t.Fatalf(
+				"unattributed telemetry = %d %s; want accepted, not refused",
+				response.Code,
+				response.Body.String(),
+			)
+		}
+	}
+	sink.Drain()
+	raw, err := os.ReadFile(filepath.Join(dir, "unattributed", "records.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
+	if len(lines) != 3 || sink.Faults() != 0 || strings.Count(logs.String(), "unattributed") != 1 {
+		t.Fatalf(
+			"observations=%d faults=%d log=%q; want all three stored and one warning",
+			len(lines),
+			sink.Faults(),
+			logs.String(),
+		)
+	}
+	for _, line := range lines {
+		var row costledger.Row
+		if err := json.Unmarshal(line, &row); err != nil || row.RequestID != "" || row.SessionID != "" ||
+			row.QuerySource != "auto_mode" || row.CostUSDMicros == nil || *row.CostUSDMicros != 125 {
+			t.Fatalf("unattributed row = %+v, %v; identity must remain absent", row, err)
+		}
+	}
+}
+
+func TestSinkDoesNotTreatLogTraceContextAsCallIdentity(t *testing.T) {
+	for _, requestID := range []string{"", "req_from_log"} {
+		t.Run(requestID, func(t *testing.T) {
+			sink, clk, dir, _ := newTestSink(t)
+			trace, spanID := "000000000000000000000000000000a1", "00000000000000a1"
+			span := llmSpan(testSession, "", "", "", "auto_mode")
+			span["traceId"], span["spanId"] = trace, spanID
+			post(t, sink, http.MethodPost, "/v1/traces", spanBody(span), nil)
+			post(t, sink, http.MethodPost, "/v1/traces", spanBody(span), nil) // A real span id dedupes.
+			clk.now = clk.now.Add(time.Minute)
+			sink.Flush() // A log's enclosing context is not proof it belongs to this llm span.
+			body := mustJSON(map[string]any{"resourceLogs": []any{map[string]any{
+				"scopeLogs": []any{map[string]any{"logRecords": []any{map[string]any{
+					"traceId": trace, "spanId": spanID,
+					"attributes": apiRequest(testSession, requestID, "auto_mode", 125),
+				}}}},
+			}}})
+			post(t, sink, http.MethodPost, "/v1/logs", body, nil)
+			post(t, sink, http.MethodPost, "/v1/logs", body, nil)
+			for range 2 {
+				post(t, sink, http.MethodPost, "/v1/logs",
+					logBody(apiRequest(testSession, "", "prompt_suggestion", 50)), nil)
+			}
+			sink.Drain()
+			ledger, err := costledger.ForSession(dir, testSession)
+			wantRows, wantMicros := 4, int64(225)
+			if requestID == "" {
+				wantRows, wantMicros = 5, 350
+			}
+			spanRows := 0
+			for _, row := range ledger.Rows {
+				if row.Join == costledger.JoinSpan && row.RequestID == "" {
+					spanRows++
+				}
+			}
+			if err != nil || len(ledger.Rows) != wantRows || spanRows != 1 ||
+				costledger.Sum(ledger.Rows).Micros != wantMicros ||
+				costledger.Sum(ledger.Rows).UnknownCost != 1 {
+				t.Fatalf("independent observations must remain separate = %+v, %v", ledger, err)
+			}
+		})
+	}
+}
+
+func TestSinkAcceptsRequestScopedBackgroundWithoutSession(t *testing.T) {
+	sink, _, dir, _ := newTestSink(t)
+	post(t, sink, http.MethodPost, "/v1/logs", logBody(apiRequest("", "req_bg", "hook_prompt", 75)), nil)
+	post(t, sink, http.MethodPost, "/v1/traces", spanBody(llmSpan("", "req_bg", "", "", "hook_prompt")), nil)
+	sink.Drain()
+	ledger, err := costledger.Unattributed(dir)
+	if err != nil || len(ledger.Rows) != 1 || ledger.Rows[0].SessionID != "" ||
+		ledger.Rows[0].RequestID != "req_bg" || ledger.Rows[0].Join != costledger.JoinLogSpan {
+		t.Fatalf("request-scoped background = %+v, %v", ledger, err)
+	}
+}
+
 func TestSinkAnswers400ForABrokenBodyAndLogsWhy(t *testing.T) {
 	sink, _, _, logs := newTestSink(t)
 	if code := post(t, sink, http.MethodPost, "/v1/logs", []byte("{broken"), nil).Code; code != http.StatusBadRequest {
@@ -126,7 +218,7 @@ func TestSinkAnswers400ForABrokenBodyAndLogsWhy(t *testing.T) {
 	}
 }
 
-// A record without an identity is a fault, not a refused POST: the batch's other records are
+// A record with an unsafe session is a fault, not a refused POST: the batch's other records are
 // joined, the sink answers 200 with the OTLP partial success naming how many it refused, and each
 // refused record counts once.
 func TestSinkAnswers200ForAPartiallyRefusedBatchAndCountsTheRefusal(t *testing.T) {
@@ -137,12 +229,12 @@ func TestSinkAnswers200ForAPartiallyRefusedBatchAndCountsTheRefusal(t *testing.T
 	}{
 		{"logs", "/v1/logs", "rejectedLogRecords", logBody(
 			apiRequest(testSession, "req_good", "repl_main_thread", 100),
-			apiRequest(testSession, "", "repl_main_thread", 5),
-			apiRequest("", "req_anonymous", "repl_main_thread", 5),
+			apiRequest("../bad", "req_bad", "repl_main_thread", 5),
+			apiRequest("bad/path", "req_unsafe", "repl_main_thread", 5),
 		), 2},
 		{"traces", "/v1/traces", "rejectedSpans", spanBody(
 			llmSpan(testSession, "req_good", "", "", "repl_main_thread"),
-			llmSpan(testSession, "", "", "", "repl_main_thread"),
+			llmSpan("../bad", "req_bad", "", "", "repl_main_thread"),
 		), 1},
 	}
 	for _, c := range cases {
@@ -207,7 +299,7 @@ func withoutKey(attrs []map[string]any, key string) []map[string]any {
 func TestSinkNeverWritesOutsideTheLedgerDirForAnUnsafeSessionID(t *testing.T) {
 	sink, _, dir, logs := newTestSink(t)
 	parent := filepath.Dir(dir)
-	for _, session := range []string{"../escape", "a/b", "", "x y"} {
+	for _, session := range []string{"../escape", "a/b", "x y"} {
 		body := logBody(apiRequest(session, "req_"+strings.ReplaceAll(session, "/", "_"), "repl_main_thread", 100))
 		post(t, sink, http.MethodPost, "/v1/logs", body, nil)
 	}

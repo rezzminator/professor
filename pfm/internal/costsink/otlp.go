@@ -22,14 +22,14 @@ type LogHalf struct {
 	RequestID, SessionID, TS, QuerySource, Model                    string
 	InputTokens, OutputTokens, CacheReadTokens, CacheCreationTokens int64
 	CostMicros                                                      *int64
-	Speed, Effort                                                   string
+	Speed, Effort, TraceID, SpanID                                  string
 }
 
 // SpanHalf is the agent half of one API call: a claude_code.llm_request span.
 type SpanHalf struct {
 	RequestID, SessionID, AgentID, ParentAgentID, QuerySource, Model string
 	InputTokens, OutputTokens, CacheReadTokens, CacheCreationTokens  int64
-	Speed, Effort, EndTS                                             string
+	Speed, Effort, EndTS, TraceID, SpanID                            string
 }
 
 type otlpValue struct {
@@ -102,11 +102,19 @@ func (a attrs) count(key string) int64 {
 	return n
 }
 
+type otlpResource struct {
+	Attributes []otlpAttr `json:"attributes"`
+}
+
 type logsRequest struct {
 	ResourceLogs []struct {
+		Resource  otlpResource `json:"resource"`
 		ScopeLogs []struct {
 			LogRecords []struct {
-				Attributes []otlpAttr `json:"attributes"`
+				TraceID      string          `json:"traceId"`
+				SpanID       string          `json:"spanId"`
+				TimeUnixNano json.RawMessage `json:"timeUnixNano"`
+				Attributes   []otlpAttr      `json:"attributes"`
 			} `json:"logRecords"`
 		} `json:"scopeLogs"`
 	} `json:"resourceLogs"`
@@ -114,9 +122,12 @@ type logsRequest struct {
 
 type tracesRequest struct {
 	ResourceSpans []struct {
+		Resource   otlpResource `json:"resource"`
 		ScopeSpans []struct {
 			Spans []struct {
 				Name            string          `json:"name"`
+				TraceID         string          `json:"traceId"`
+				SpanID          string          `json:"spanId"`
 				EndTimeUnixNano json.RawMessage `json:"endTimeUnixNano"`
 				Attributes      []otlpAttr      `json:"attributes"`
 			} `json:"spans"`
@@ -124,29 +135,43 @@ type tracesRequest struct {
 	} `json:"resourceSpans"`
 }
 
-// DecodeLogs reduces an OTLP/HTTP JSON logs body to its api_request records. Every other event is
-// dropped. A body that is not JSON, or an api_request without a request_id or session.id, is an
-// error: the halves decoded before it are still returned.
+// scopedAttrs gives a record's attributes precedence over its resource defaults.
+func scopedAttrs(resource otlpResource, record []otlpAttr) attrs {
+	a := indexAttrs(resource.Attributes)
+	for _, item := range record {
+		a[item.Key] = item.Value
+	}
+	return a
+}
+
+func (a attrs) requestID() string {
+	return firstFilled(a.str("request_id"), a.str("gen_ai.response.id"))
+}
+
+func (a attrs) sessionID() string {
+	return firstFilled(a.str("session.id"), a.str("session_id"))
+}
+
+// DecodeLogs reduces an OTLP/HTTP JSON logs body to api_request records. Missing identity
+// remains empty: the sink accounts for these observations without inventing attribution.
 func DecodeLogs(body []byte) ([]LogHalf, error) {
 	var request logsRequest
 	if err := json.Unmarshal(body, &request); err != nil {
 		return nil, fmt.Errorf("decode OTLP logs: %w", err)
 	}
 	var halves []LogHalf
-	var refused []string
 	for _, resource := range request.ResourceLogs {
 		for _, scope := range resource.ScopeLogs {
 			for _, record := range scope.LogRecords {
-				a := indexAttrs(record.Attributes)
+				a := scopedAttrs(resource.Resource, record.Attributes)
 				if a.str("event.name") != apiRequestEvent {
 					continue
 				}
 				half := LogHalf{
-					RequestID: a.str(
-						"request_id",
-					),
-					SessionID: a.str("session.id"),
-					TS:        normalizeTimestamp(a.str("event.timestamp")),
+					RequestID: a.requestID(),
+					SessionID: a.sessionID(),
+					TraceID:   record.TraceID, SpanID: record.SpanID,
+					TS: firstFilled(normalizeTimestamp(a.str("event.timestamp")), nanoTimestamp(record.TimeUnixNano)),
 					QuerySource: a.str(
 						"query_source",
 					),
@@ -163,25 +188,15 @@ func DecodeLogs(body []byte) ([]LogHalf, error) {
 				if micros, ok := a.costMicros(); ok {
 					half.CostMicros = &micros
 				}
-				if half.RequestID == "" || half.SessionID == "" {
-					refused = append(refused, "an api_request record without a request_id or session.id")
-					continue
-				}
 				halves = append(halves, half)
 			}
-		}
-	}
-	if len(refused) > 0 {
-		return halves, &RefusedError{
-			Count:  len(refused),
-			Reason: fmt.Sprintf("decode OTLP logs: %d records refused: %s", len(refused), refused[0]),
 		}
 	}
 	return halves, nil
 }
 
-// RefusedError reports records a well-formed body held that were refused for want of an identity;
-// the halves returned beside it are valid and joined, so the POST is not a bad request.
+// RefusedError reports records refused by ingest for an unsafe session identity.
+// Accepted halves have already been joined; the POST is not a bad request.
 type RefusedError struct {
 	Count  int
 	Reason string
@@ -197,18 +212,18 @@ func DecodeSpans(body []byte) ([]SpanHalf, error) {
 		return nil, fmt.Errorf("decode OTLP traces: %w", err)
 	}
 	var halves []SpanHalf
-	refused := 0
 	for _, resource := range request.ResourceSpans {
 		for _, scope := range resource.ScopeSpans {
 			for _, span := range scope.Spans {
 				if span.Name != llmRequestSpan {
 					continue
 				}
-				a := indexAttrs(span.Attributes)
+				a := scopedAttrs(resource.Resource, span.Attributes)
 				half := SpanHalf{
-					RequestID: a.str("request_id"),
-					SessionID: a.str("session.id"),
-					AgentID:   a.str("agent_id"),
+					RequestID: a.requestID(),
+					SessionID: a.sessionID(),
+					TraceID:   span.TraceID, SpanID: span.SpanID,
+					AgentID: a.str("agent_id"),
 					ParentAgentID: a.str(
 						"parent_agent_id",
 					),
@@ -224,21 +239,8 @@ func DecodeSpans(body []byte) ([]SpanHalf, error) {
 					CacheCreationTokens: a.count("cache_creation_tokens"),
 					EndTS:               nanoTimestamp(span.EndTimeUnixNano),
 				}
-				if half.RequestID == "" || half.SessionID == "" {
-					refused++
-					continue
-				}
 				halves = append(halves, half)
 			}
-		}
-	}
-	if refused > 0 {
-		return halves, &RefusedError{
-			Count: refused,
-			Reason: fmt.Sprintf(
-				"decode OTLP traces: %d llm_request spans refused: no request_id or session.id",
-				refused,
-			),
 		}
 	}
 	return halves, nil

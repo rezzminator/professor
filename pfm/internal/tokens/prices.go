@@ -18,6 +18,7 @@ type priceBook struct {
 	servedFrom *string
 	refresh    *pricing.RefreshReport
 	override   *pricing.Override
+	billing    *pricing.Billing
 }
 
 // loadSaved reads a saved `pfm model-cost --json --all` document, or a bare
@@ -65,7 +66,13 @@ func loadServed(ctx context.Context, options modelcost.Options) (*priceBook, err
 
 func bookOf(doc pricing.Document) *priceBook {
 	served, refresh := doc.ServedFrom, doc.Refresh
-	return &priceBook{table: doc.Table(), servedFrom: &served, refresh: &refresh, override: doc.Override}
+	return &priceBook{
+		table:      doc.Table(),
+		servedFrom: &served,
+		refresh:    &refresh,
+		override:   doc.Override,
+		billing:    doc.Billing,
+	}
 }
 
 // catalog is the pricing provenance the report and its JSON carry.
@@ -81,6 +88,12 @@ func (book *priceBook) catalog() *object {
 		out.set("saved", nil)
 	}
 	out.set("fetched_at", book.table.FetchedAt).set("sources", sources)
+	if book.billing != nil {
+		out.set("billing", newObject().set("route", book.billing.Route).set("region", book.billing.Region).
+			set("configured", book.billing.Configured).set("multiplier", book.billing.Multiplier))
+	} else {
+		out.set("billing", nil)
+	}
 	if book.servedFrom != nil {
 		out.set("served_from", *book.servedFrom)
 	} else {

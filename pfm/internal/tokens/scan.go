@@ -67,6 +67,13 @@ func (scan *scanState) noteOnce(note string) {
 	scan.notes = append(scan.notes, note)
 }
 
+const billingGap = "Claude billing route/region not configured; default direct/global list prices may not " +
+	"match cloud billing — set billing in pfm.prices.json or override rates"
+
+const backgroundGap = "transcript totals exclude background API calls (auto_mode, prompt_suggestion, hook_prompt, " +
+	"generate_session_title, agent_summary); captured telemetry is reported separately by pfm tokens (without --tree);" +
+	" missing telemetry and metadata-filtered background sessions cannot be quantified"
+
 // gapsLine puts every dropped, unpriced or unreadable thing on ONE line, after
 // the pricing provenance line. A count that exists only in the JSON is a gap
 // the text report claims not to have.
@@ -128,6 +135,12 @@ func (a *auditor) gapsLine() string {
 		loud = append(loud, num(float64(len(scan.readErrors)))+" READ ERRORS: "+
 			strings.Join(scan.readErrors[:min(3, len(scan.readErrors))], " | "))
 	}
+	if !a.opts.codex && !a.opts.opencode {
+		loud = append(loud, backgroundGap)
+		if book.billing == nil || !book.billing.Configured {
+			loud = append(loud, billingGap)
+		}
+	}
 	providers := make([]string, len(book.table.Sources))
 	for i, source := range book.table.Sources {
 		providers[i] = source.Provider
@@ -138,7 +151,11 @@ func (a *auditor) gapsLine() string {
 	}
 	pricingLine := "pricing: " + saved + "; Standard service, published prompt/context tiers (Codex aggregates use " +
 		"the run peak tier); table fetched " + book.table.FetchedAt + " from " + strings.Join(providers, ", ") +
-		"; not historical billing\n"
+		"; not historical billing"
+	if book.billing != nil {
+		pricingLine += "; Claude " + book.billing.Route + "/" + book.billing.Region
+	}
+	pricingLine += "\n"
 	if len(loud) == 0 {
 		return pricingLine + "data gaps: none"
 	}

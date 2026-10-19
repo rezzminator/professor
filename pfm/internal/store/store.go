@@ -70,9 +70,10 @@ var migrations = [...]string{
 // fleet's shared store at ~/.local/state/pfm/pfm.db. It holds
 // operator decisions such as kills, teammates, and the primary account.
 type Store struct {
-	db    *sql.DB
-	state *fleetdb.Store
-	path  string
+	db       *sql.DB
+	state    *fleetdb.Store
+	path     string
+	readOnly bool
 
 	warnMu sync.Mutex
 	warn   io.Writer

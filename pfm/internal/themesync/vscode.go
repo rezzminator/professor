@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -31,10 +32,26 @@ const (
 // wallClock is the time seam for backup stamps and the VS Code ack grace window.
 var wallClock clock.Clock = clock.Real
 
-// vscodeProducts are the VS Code family user dirs whose settings.json is backed up.
+// vscodeProducts are the macOS VS Code family user dirs whose settings.json is
+// backed up; elsewhere the candidates are paths.VSCodeSettingsCandidates'.
 var vscodeProducts = []string{"Code", "Code - Insiders", "VSCodium", "Cursor"}
 
-// vscodeAppMarkers identify a running VS Code family main binary in `ps -axo args=`.
+// vscodeLinuxMarkers identify a running VS Code family main binary or VS Code
+// Server (the extension host of a Remote-SSH window) in `ps -axo args=`
+// outside macOS.
+var vscodeLinuxMarkers = []string{
+	"/.vscode-server/cli/servers/",
+	"/.vscode-server/bin/",
+	"/.vscode-server-insiders/cli/servers/",
+	"/.vscode-server-insiders/bin/",
+	"/usr/share/code/code",
+	"/usr/share/code-insiders/code-insiders",
+	"/usr/share/codium/codium",
+	"/opt/visual-studio-code/code",
+	"/snap/code/",
+}
+
+// vscodeAppMarkers identify a running VS Code family main binary in `ps -axo args=` on macOS.
 var vscodeAppMarkers = []string{
 	"/Visual Studio Code.app/Contents/MacOS/",
 	"/Code.app/Contents/MacOS/",
@@ -193,15 +210,15 @@ func vscodeVerdict(
 // chromeErrors lists, by path order, each local workspace whose chrome the
 // extension could not apply, current or not; empty when none failed.
 func chromeErrors(ack vscodeAck, current bool, generation int) string {
-	var paths []string
+	var failed []string
 	for path, entry := range ack.Chrome {
 		if entry.Error != "" && (entry.Generation == generation) == current {
-			paths = append(paths, path)
+			failed = append(failed, path)
 		}
 	}
-	sort.Strings(paths)
-	parts := make([]string, 0, len(paths))
-	for _, path := range paths {
+	sort.Strings(failed)
+	parts := make([]string, 0, len(failed))
+	for _, path := range failed {
 		entry := ack.Chrome[path]
 		part := "window chrome " + filepath.Base(path) + ": " + entry.Error
 		if !current {
@@ -256,10 +273,10 @@ func dropGoneWorkspaces(ack *vscodeAck) {
 	}
 }
 
-// vscodeRunning reports whether `ps -axo args=` lists a VS Code family main binary.
-func vscodeRunning(psOutput string) bool {
+// vscodeRunning reports whether `ps -axo args=` lists a process one of markers names.
+func vscodeRunning(psOutput string, markers []string) bool {
 	for _, line := range strings.Split(psOutput, "\n") {
-		for _, marker := range vscodeAppMarkers {
+		for _, marker := range markers {
 			if strings.Contains(line, marker) {
 				return true
 			}
@@ -268,54 +285,113 @@ func vscodeRunning(psOutput string) bool {
 	return false
 }
 
+// vscodeSettings are the settings.json files the vscode row looks for: on
+// macOS each product's under Application Support, elsewhere the one lookup
+// pfm install --vscode shares, the VS Code Server's Machine settings included.
 func (s *session) vscodeSettings() []string {
-	var paths []string
+	if !s.env.darwin() {
+		return paths.VSCodeSettingsCandidates(s.env.Home, false, paths.OSEnv{})
+	}
+	var settings []string
 	for _, product := range vscodeProducts {
-		paths = append(
-			paths,
+		settings = append(
+			settings,
 			filepath.Join(s.env.Home, "Library", "Application Support", product, "User", "settings.json"),
 		)
 	}
-	return paths
+	return settings
+}
+
+// vscodeServerRoots are the VS Code Server installs outside macOS: a
+// Remote-SSH window's extension host runs from one, and its Machine
+// settings.json exists only once a Remote setting was saved, so the root
+// alone already makes VS Code present (the installer links its extension
+// there on the same evidence).
+func (s *session) vscodeServerRoots() []string {
+	if s.env.darwin() {
+		return nil
+	}
+	return []string{filepath.Join(s.env.Home, ".vscode-server"), filepath.Join(s.env.Home, ".vscode-server-insiders")}
+}
+
+// vscodePresent says whether this host has a VS Code the contract serves: a
+// settings.json the row looks for, or a VS Code Server root. A path that
+// cannot be looked at is the error, naming it, never absence.
+func (s *session) vscodePresent() (bool, string, error) {
+	for _, settings := range s.vscodeSettings() {
+		_, err := os.Stat(settings)
+		if err == nil {
+			return true, "", nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return false, settings, fmt.Errorf("themesync: stat %s: %w", settings, err)
+		}
+	}
+	for _, root := range s.vscodeServerRoots() {
+		info, err := os.Stat(root)
+		if err == nil && info.IsDir() {
+			return true, "", nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, root, fmt.Errorf("themesync: stat %s: %w", root, err)
+		}
+	}
+	return false, "", nil
+}
+
+// vscodeMarkers are the process markers of a running VS Code on this platform.
+func (s *session) vscodeMarkers() []string {
+	if s.env.darwin() {
+		return vscodeAppMarkers
+	}
+	return vscodeLinuxMarkers
 }
 
 func (s *session) vscodeContractPath() string { return filepath.Join(s.store.dir, vscodeContractFile) }
+
+// vscodeServerNote names the VS Code Server roots an ABSENT row also looked
+// for, "" on macOS.
+func vscodeServerNote(roots []string) string {
+	if len(roots) == 0 {
+		return ""
+	}
+	return " and no VS Code Server at " + strings.Join(roots, ", ")
+}
 
 func (s *session) vscodeAbsent() SurfaceResult {
 	return s.absent(
 		surfaceVscode,
 		s.vscodeContractPath(),
-		"no VS Code settings.json at "+strings.Join(s.vscodeSettings(), ", "),
+		"no VS Code settings.json at "+strings.Join(s.vscodeSettings(), ", ")+vscodeServerNote(s.vscodeServerRoots()),
 	)
 }
 
 // vscodeEnsureBackups copies each existing settings.json beside itself once, before the first set.
-func (s *session) vscodeEnsureBackups() (present bool, err error) {
+func (s *session) vscodeEnsureBackups() error {
 	for _, settings := range s.vscodeSettings() {
 		content, readErr := os.ReadFile(settings)
 		if errors.Is(readErr, os.ErrNotExist) {
 			continue
 		}
 		if readErr != nil {
-			return present, fmt.Errorf("themesync: read %s: %w", settings, readErr)
+			return fmt.Errorf("themesync: read %s: %w", settings, readErr)
 		}
-		present = true
 		if s.state.VSCode[settings] != "" {
 			continue
 		}
 		backup, err := s.backupBeside(settings, content)
 		if err != nil {
-			return present, err
+			return err
 		}
 		if s.state.VSCode == nil {
 			s.state.VSCode = map[string]string{}
 		}
 		s.state.VSCode[settings] = backup
 		if err := s.persist(); err != nil {
-			return present, err
+			return err
 		}
 	}
-	return present, nil
+	return nil
 }
 
 func (s *session) writeVscodeContract(contract vscodeContract) error {
@@ -334,9 +410,12 @@ func (s *session) writeVscodeContract(contract vscodeContract) error {
 }
 
 func (s *session) applyVscode(_ context.Context) SurfaceResult {
-	present, err := s.vscodeEnsureBackups()
-	if err != nil {
+	if err := s.vscodeEnsureBackups(); err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
+	}
+	present, failedPath, err := s.vscodePresent()
+	if err != nil {
+		return s.failed(surfaceVscode, failedPath, err)
 	}
 	contract := s.theme().vscodeContract(s.state.Appearance, s.state.Generation)
 	if err := s.writeVscodeContract(contract); err != nil {
@@ -350,13 +429,9 @@ func (s *session) applyVscode(_ context.Context) SurfaceResult {
 
 func (s *session) readVscode(ctx context.Context) SurfaceResult {
 	path := s.vscodeContractPath()
-	present := false
-	for _, settings := range s.vscodeSettings() {
-		_, err := os.Stat(settings)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return s.failed(surfaceVscode, settings, fmt.Errorf("themesync: stat %s: %w", settings, err))
-		}
-		present = present || err == nil
+	present, failedPath, err := s.vscodePresent()
+	if err != nil {
+		return s.failed(surfaceVscode, failedPath, err)
 	}
 	if !present {
 		return s.vscodeAbsent()
@@ -390,8 +465,14 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceVscode, path, fmt.Errorf("themesync: stat %s: %w", path, err))
 	}
-	verdict, detail := vscodeVerdict(ack, haveAck, s.state.Generation, vscodeRunning(string(result.Stdout)),
-		wallClock.Now().Sub(info.ModTime()), filepath.Join(s.store.dir, vscodeAckFile))
+	verdict, detail := vscodeVerdict(
+		ack,
+		haveAck,
+		s.state.Generation,
+		vscodeRunning(string(result.Stdout), s.vscodeMarkers()),
+		wallClock.Now().Sub(info.ModTime()),
+		filepath.Join(s.store.dir, vscodeAckFile),
+	)
 	generation := 0
 	if verdict == VerdictInSync {
 		generation = ack.Generation
@@ -455,18 +536,19 @@ func (s *session) restoreVscode(_ context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
 	}
-	for _, settings := range s.vscodeSettings() {
-		if _, err := os.Stat(settings); err != nil {
-			continue
-		}
-		s.state.VSCode = nil
-		detail := "the extension clears the colours when it next reads " + vscodeContractFile
-		if len(painted) == 0 {
-			return s.result(surfaceVscode, VerdictApplied, s.vscodeContractPath(), detail)
-		}
-		detail += "; window chrome stays in " + strings.Join(painted, ", ") +
-			" until a VS Code window on each workspace applies the off"
-		return s.result(surfaceVscode, VerdictPending, s.vscodeContractPath(), detail)
+	present, failedPath, err := s.vscodePresent()
+	if err != nil {
+		return s.failed(surfaceVscode, failedPath, err)
 	}
-	return s.vscodeAbsent()
+	if !present {
+		return s.vscodeAbsent()
+	}
+	s.state.VSCode = nil
+	detail := "the extension clears the colours when it next reads " + vscodeContractFile
+	if len(painted) == 0 {
+		return s.result(surfaceVscode, VerdictApplied, s.vscodeContractPath(), detail)
+	}
+	detail += "; window chrome stays in " + strings.Join(painted, ", ") +
+		" until a VS Code window on each workspace applies the off"
+	return s.result(surfaceVscode, VerdictPending, s.vscodeContractPath(), detail)
 }

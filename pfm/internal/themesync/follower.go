@@ -32,9 +32,10 @@ func followerEscape(text string) string {
 
 // followerWatchPaths are the files whose change runs the follower: each
 // account's settings.json by real path, each distinct real themes dir once
-// and the macOS global preferences. An unlistable account set watches the
-// preferences alone; the one-minute backstop still runs.
-func followerWatchPaths(home string) []string {
+// and, on macOS, the global preferences. An unlistable account set watches
+// the preferences alone (nothing outside macOS); the one-minute backstop
+// still runs.
+func followerWatchPaths(home string, darwin bool) []string {
 	var watch []string
 	seen := map[string]bool{}
 	add := func(path string) {
@@ -50,7 +51,9 @@ func followerWatchPaths(home string) []string {
 			add(themesDir(filepath.Dir(path)))
 		}
 	}
-	add(globalPreferences(home))
+	if darwin {
+		add(globalPreferences(home))
+	}
 	return watch
 }
 
@@ -80,7 +83,7 @@ func followerPlist(program, home, stateDir string) string {
 ` + stringItems(program, "theme", "sync") + `	</array>
 	<key>WatchPaths</key>
 	<array>
-` + stringItems(followerWatchPaths(home)...) + `	</array>
+` + stringItems(followerWatchPaths(home, true)...) + `	</array>
 	<key>ThrottleInterval</key>
 	<integer>` + fmt.Sprint(followerThrottle) + `</integer>
 	<key>StartInterval</key>
@@ -170,6 +173,9 @@ var errFollowerReloadDue = errors.New(
 func (s *session) followerInOwnJob() bool { return s.env.LaunchdJob == followerLabel }
 
 func (s *session) applyFollower(ctx context.Context) SurfaceResult {
+	if !s.env.darwin() {
+		return s.applySystemdFollower(ctx)
+	}
 	path := s.followerPath()
 	if s.env.PfmBinary == "" {
 		return s.failed(
@@ -216,6 +222,9 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 }
 
 func (s *session) readFollower(ctx context.Context) SurfaceResult {
+	if !s.env.darwin() {
+		return s.readSystemdFollower(ctx)
+	}
 	path := s.followerPath()
 	current, err := os.ReadFile(path)
 	switch {
@@ -247,6 +256,9 @@ func (s *session) readFollower(ctx context.Context) SurfaceResult {
 }
 
 func (s *session) restoreFollower(ctx context.Context) SurfaceResult {
+	if !s.env.darwin() {
+		return s.restoreSystemdFollower(ctx)
+	}
 	existed, err := s.followerRetire(ctx)
 	switch {
 	case err != nil:

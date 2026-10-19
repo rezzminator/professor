@@ -19,8 +19,10 @@ import (
 // workbench.action.terminal.new (the + button, Ctrl+Shift+`) and prints every
 // command they executed; "choose" runs the professor.chooseTheme handler for
 // the window the JSON in PROFESSOR_CHOOSE_SCENARIO describes (its remote name,
-// the quick-pick label the user picks, if any) and prints whether the command
-// was registered, every quick pick shown and every message shown.
+// the extension host's kind, the quick-pick label the user picks, if any) and
+// prints whether the command was registered, every quick pick shown, every
+// message shown and every setContext activate ran. Activate's own commands
+// are cleared before a handler runs, so "route" prints the handlers' alone.
 const vscodeExtensionDriverJS = `
 const Module = require('module');
 const extensionPath = process.argv[2];
@@ -43,6 +45,7 @@ const registered = {};
 const executed = [];
 const vscodeStub = {
   env: { remoteName: scenario.remoteName || undefined },
+  ExtensionKind: { UI: 1, Workspace: 2 },
   ProgressLocation: { Notification: 15 },
   workspace: {
     getConfiguration() {
@@ -90,7 +93,7 @@ Module._load = function (request, parent, isMain) {
 const extension = require(extensionPath);
 const store = {};
 const context = {
-  extension: { id: 'professor.professor' },
+  extension: { id: 'professor.professor', extensionKind: scenario.extensionKind },
   subscriptions: [],
   globalState: {
     get: (key, def) => (key in store ? store[key] : def),
@@ -98,6 +101,8 @@ const context = {
   },
 };
 extension.activate(context);
+const contexts = executed.filter((call) => call[0] === 'setContext');
+executed.length = 0;
 if (mode === 'route') {
   for (const id of ['professor.newChatTerminal', 'workbench.action.terminal.new']) {
     if (!registered[id]) {
@@ -113,7 +118,7 @@ if (mode === 'route') {
   const handler = registered['professor.chooseTheme'];
   (async () => {
     if (handler) await handler();
-    process.stdout.write(JSON.stringify({ registered: Boolean(handler), quickPicks, messages }));
+    process.stdout.write(JSON.stringify({ registered: Boolean(handler), quickPicks, messages, contexts }));
   })().catch((err) => { process.stderr.write(String(err && err.stack || err)); process.exit(1); });
 } else {
   process.stdout.write(JSON.stringify(provider.provideTerminalProfile()));

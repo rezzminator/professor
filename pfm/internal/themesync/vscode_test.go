@@ -373,6 +373,23 @@ func TestVscodeVerdictMatrix(t *testing.T) {
 	}
 }
 
+func TestVscodeRunningOutsideMacOSSeesTheServerAndTheDesktopApp(t *testing.T) {
+	cases := map[string]bool{
+		"/h/.vscode-server/cli/servers/Stable-abc/server/node /h/.vscode-server/cli/servers/" +
+			"Stable-abc/server/out/server-main.js\n": true,
+		"/h/.vscode-server/bin/abc/node /h/.vscode-server/bin/abc/out/server-main.js\n": true,
+		"/usr/share/code/code --type=renderer\n":                                        true,
+		"/snap/code/180/usr/share/code/code\n":                                          true,
+		"/bin/zsh -l\n/usr/bin/vim /h/.vscode-server/data/Machine/settings.json\n":      false,
+		"/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n":                false,
+	}
+	for ps, want := range cases {
+		if got := vscodeRunning(ps, vscodeLinuxMarkers); got != want {
+			t.Errorf("vscodeRunning(%q, linux) = %v, want %v", ps, got, want)
+		}
+	}
+}
+
 func TestVscodeRunningIsTheMainBinaryOnly(t *testing.T) {
 	cases := map[string]bool{
 		"/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n":                                      true,
@@ -382,7 +399,7 @@ func TestVscodeRunningIsTheMainBinaryOnly(t *testing.T) {
 		"/bin/zsh -l\n/usr/bin/vim notes-on-Code.app.txt\n":                                                   false,
 	}
 	for ps, want := range cases {
-		if got := vscodeRunning(ps); got != want {
+		if got := vscodeRunning(ps, vscodeAppMarkers); got != want {
 			t.Errorf("vscodeRunning(%q) = %v, want %v", ps, got, want)
 		}
 	}

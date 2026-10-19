@@ -184,7 +184,7 @@ func TestFollowerWatchesRealSettingsThemesDirsAndTheGlobalPreferences(t *testing
 		canonical(".claude2/settings.json"), canonical(".claude2/themes"),
 		filepath.Join(home, "Library", "Preferences", ".GlobalPreferences.plist"),
 	}
-	got := followerWatchPaths(home)
+	got := followerWatchPaths(home, true)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("watch paths = %v, want %v", got, want)
 	}

@@ -3,11 +3,13 @@
 // (`pfm theme list --json`, themesync.ThemeList) and tells it the pick (`pfm theme use {name}`),
 // which sets `theme` in every Claude account's settings.json and runs one sync; the contract
 // theme.js follows does the rest. pfm is run by execFile with an argument array, never through a
-// shell, and only in a local window: a remote window's pfm is not the machine whose Claude settings
-// these are, so its handler refuses before it runs anything (package.json also hides the command
-// from a remote window's palette).
+// shell, and only where pfmHere holds: a local window, or a remote window whose extension host is
+// the machine pfm runs on (a Linux host driven through Remote-SSH, where pfm, Claude Code, tmux
+// and Herdr all live). Anywhere else the Claude settings are another machine's, so the handler
+// refuses before it runs anything (package.json also hides the command from that palette).
 const vscode = require('vscode');
 const { execFile } = require('child_process');
+const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
@@ -18,6 +20,22 @@ const MAX_BUFFER = 4 * 1024 * 1024;
 // themecmd's pfmLauncher: the installed pfm, the one door a host asset runs.
 function pfmBinary() {
   return path.join(os.homedir(), '.local', 'bin', 'pfm');
+}
+
+// pfmHere says whether this window's Claude settings are the ones the extension host's pfm sets:
+// always in a local window; in a remote window only when the extension runs on the remote side
+// (extensionKind Workspace) and that machine has the installed pfm. A remote window served from
+// the UI side, or whose remote host has no pfm, keeps out.
+function pfmHere(extensionKind) {
+  if (vscode.env.remoteName === undefined) return true;
+  if (extensionKind === undefined || extensionKind !== vscode.ExtensionKind?.Workspace) return false;
+  try {
+    fs.accessSync(pfmBinary(), fs.constants.X_OK);
+    return true;
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error(`Professor: ${pfmBinary()} is not runnable here, this ${vscode.env.remoteName} window keeps out of pfm: ${err?.message ?? err}`);
+    return false;
+  }
 }
 
 // runPfm resolves, never rejects: {ok, exited, code, stdout, stderr, cause}. `exited` tells a pfm that
@@ -71,10 +89,11 @@ function detail(theme) {
   return parts.length ? parts.join(' · ') : undefined;
 }
 
-async function chooseTheme() {
-  if (vscode.env.remoteName !== undefined) {
+// chooseTheme is the command's handler; here is pfmHere bound to this extension host.
+async function chooseTheme(here) {
+  if (!here()) {
     vscode.window.showWarningMessage(
-      `Professor: Choose Theme runs in a local window only: the Claude settings it sets are this machine's, not ${vscode.env.remoteName}'s.`,
+      `Professor: Choose Theme runs where pfm runs: this ${vscode.env.remoteName} window's extension host has no ${pfmBinary()} of its own, so the Claude settings it would set are not ${vscode.env.remoteName}'s.`,
     );
     return;
   }
@@ -117,4 +136,4 @@ async function chooseTheme() {
   );
 }
 
-module.exports = { chooseTheme, runPfm, why };
+module.exports = { chooseTheme, pfmHere, runPfm, why };

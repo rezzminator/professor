@@ -115,6 +115,11 @@ type harness struct {
 	herdrOnPath        bool
 	runner             *deps.FakeRunner
 	launchctlPrintFail bool
+	// goos is the platform the run serves: darwin unless a Linux test sets
+	// linux and rearms.
+	goos string
+	// unitsInactive scripts `systemctl --user is-active` answering inactive.
+	unitsInactive bool
 }
 
 func newHarness(t *testing.T) *harness {
@@ -132,6 +137,7 @@ func newHarness(t *testing.T) *harness {
 		tmux:          newFakeTmux("cc-a", "cc-b"),
 		appearanceOut: "Dark",
 		herdrOnPath:   true,
+		goos:          "darwin",
 		herdrReload: deps.RunResult{
 			Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
 		},
@@ -202,8 +208,16 @@ func (h *harness) rearm() {
 		printResult.ExitCode = 113
 	}
 	runner.Script([]string{"launchctl", "print"}, printResult, nil)
+	active := deps.RunResult{Stdout: []byte("active\nactive\n")}
+	if h.unitsInactive {
+		active = deps.RunResult{ExitCode: 3, Stdout: []byte("inactive\nactive\n")}
+	}
+	runner.Script([]string{"systemctl", "--user"}, deps.RunResult{}, nil)
+	runner.Script([]string{"systemctl", "--user", "is-active"}, active, nil)
 	h.runner = runner
-	h.env = Env{Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux}
+	h.env = Env{
+		Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux, GOOS: h.goos,
+	}
 }
 
 func (h *harness) on() Report {

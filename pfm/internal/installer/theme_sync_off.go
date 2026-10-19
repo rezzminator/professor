@@ -68,19 +68,23 @@ func themeSyncOffReal(ctx context.Context, home string) error {
 	return nil
 }
 
-// refreshThemeFollower brings the theme follower's launch agent onto the
-// stable launcher while the theme sync is on: the follower's plist is written
-// by `pfm theme`, not by install, so without this a plist naming pfm itself
-// stays loaded until someone runs `pfm theme sync` in a shell. Install runs
-// outside the follower's job, so the reload the follower refuses inside it
-// goes through here. A sync that is off has no agent to move.
+// refreshThemeFollower brings the theme follower onto its current render
+// while the theme sync is on — on macOS the launch agent onto the stable
+// launcher, elsewhere its systemd units: the follower is written by `pfm
+// theme`, not by install, so without this a plist naming pfm itself stays
+// loaded until someone runs `pfm theme sync` in a shell. Install runs outside
+// the follower's job, so the reload the follower refuses inside it goes
+// through here. A sync that is off has no follower to move.
 func (installer *engine) refreshThemeFollower(ctx context.Context) error {
 	home := installer.options.Home
 	if !themesync.SyncOn(themesync.DefaultStateDir(home)) {
 		return nil
 	}
 	if !installer.apply {
-		installer.say("  plan    would refresh the theme follower's launch agent: the theme sync is on")
+		installer.say(
+			"  plan    would refresh the " + strings.Replace(themeFollowerName(), "follower ", "follower's ", 1) +
+				": the theme sync is on",
+		)
 		return nil
 	}
 	refresh := installer.options.themeFollowerRefresh
@@ -89,14 +93,27 @@ func (installer *engine) refreshThemeFollower(ctx context.Context) error {
 	}
 	err := refresh(ctx, home)
 	if errors.Is(err, errThemeSyncInert) {
-		installer.skip("theme follower launch agent: the theme sync turned off before install reached it")
+		installer.skip(themeFollowerName() + ": the theme sync turned off before install reached it")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("refresh the theme follower launch agent: %w", err)
+		return fmt.Errorf("refresh the %s: %w", themeFollowerName(), err)
 	}
-	installer.ok("theme follower launch agent runs the stable launcher")
+	if schedulerIsLaunchd {
+		installer.ok("theme follower launch agent runs the stable launcher")
+	} else {
+		installer.ok("theme follower systemd units current")
+	}
 	return nil
+}
+
+// themeFollowerName is what install calls the follower on this platform: the
+// launch agent on macOS, its systemd units elsewhere (themesync's follower).
+func themeFollowerName() string {
+	if schedulerIsLaunchd {
+		return "theme follower launch agent"
+	}
+	return "theme follower systemd units"
 }
 
 // errThemeSyncInert is a refresh whose sync touched nothing: the state turned

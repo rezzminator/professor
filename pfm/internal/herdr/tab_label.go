@@ -93,6 +93,9 @@ type tabLabelRecord struct {
 	// replaces it, only a name the user chose does: an explicit pfm rename
 	// (LabelSoleTab) or a change of the chat's user name (SeenUser).
 	UserSet bool
+	// UnseenExplicit protects an explicit pfm rename before the painter's
+	// first source observation, which can still carry the pre-rename title.
+	UnseenExplicit bool `json:",omitzero"`
 	// SeenUser is the chat's user name (TabDecoration.UserName) the status
 	// painter last saw on a row read from its source (UserKnown), UserSeen
 	// whether it saw such a row at all: a record written before the painter
@@ -263,7 +266,16 @@ func writeSoleTabLabel(
 			record = tabLabelRecord{}
 		}
 		// An explicit rename: the name is pfm's again, whoever set the label before.
-		record.Base, record.UserSet = TabLabel(label), false
+		base := TabLabel(label)
+		switch {
+		case explicit:
+			record.UnseenExplicit = record.Seen == ""
+		case base != record.Base:
+			// Another name no user chose replaces the explicit one: nothing left to protect.
+			record.UnseenExplicit = false
+		}
+		// A re-announce of the same name keeps an unseen explicit rename protected.
+		record.Base, record.UserSet = base, false
 		want := DecoratedTabLabel(record.Base, record.State, record.Mode, record.Frame, record.Glyphs)
 		if info.Label != want {
 			rename, err := (TabRename{Tab: tab, Label: want, Seq: seq()}).Line()

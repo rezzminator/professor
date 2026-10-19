@@ -288,7 +288,12 @@ func reconcileTab(
 				// tab with no label holds none of the user's: pfm's name stays.
 				record.Base, record.Seen, record.UserSet = tab.Label, d.Name, true
 			case record.Seen == "":
-				// A record no painter followed yet: follow the chat's name from here.
+				// A launch/re-announce can predate the first user title. Follow
+				// that source-backed title now; a user's label or an unproved
+				// automatic name still starts from the existing baseline.
+				if !record.UserSet && !record.UnseenExplicit && d.UserKnown && d.UserName != "" && d.Name != "" {
+					record.Base = d.Name
+				}
 				record.Seen = d.Name
 			case record.UserSet && record.UserSeen && d.UserKnown && d.UserName != "" &&
 				d.UserName != record.SeenUser:

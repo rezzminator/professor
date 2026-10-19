@@ -338,6 +338,87 @@ func TestTabStatusUserRenameReplacesAUserLabel(t *testing.T) {
 	tick("New title", "New title", "New title")
 }
 
+// A launch writes the tab before the painter has seen a source name. A
+// /rename arriving before that first paint must replace the launch label,
+// not merely become Seen while Base stays stuck on the launch name forever.
+func TestTabStatusRenameBeforeFirstPaintAndWithoutEvent(t *testing.T) {
+	f := newTabStatusFixture()
+	f.state = "idle"
+	painter, step, _ := newTestPainter(t, &fakeIndicatorHerdr{}, phaseOn)
+	indicatorCall := painter.call
+	painter.call = func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
+		if bytes.Contains(lines[0], []byte(`"pane.list"`)) {
+			return indicatorCall(ctx, socket, lines...)
+		}
+		return f.call(ctx, socket, lines...)
+	}
+	var seq uint64
+	next := func() uint64 { seq++; return seq }
+	if err := writeSoleTabLabel(context.Background(), painter.socket, painter.lockDir,
+		"w1:t1", "Launch", false, next, f.call); err != nil {
+		t.Fatal(err)
+	}
+	name := "Renamed" // The first source row already carries the /rename.
+	polls := 0
+	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+		polls++
+		d := tabObservation("idle")
+		d.AgentStatus = "idle"
+		d.Name, d.UserName, d.UserKnown = name, name, true
+		return []TabDecoration{d}, nil
+	}
+	step.onSleep = func(context.Context) error {
+		want := "Renamed"
+		if polls > 1 {
+			want = "Renamed again"
+		}
+		if want := DecoratedTabLabel(want, "idle", "emoji", 0, TabGlyphs{}); f.label != want {
+			t.Errorf("paint %d label = %q, want %q", polls, f.label, want)
+		}
+		if polls == 1 {
+			// Only the source name changes: no Herdr status or focus event.
+			name = "Renamed again"
+			return nil
+		}
+		return context.Canceled
+	}
+	if err := painter.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if polls != 2 {
+		t.Fatalf("source polls = %d, want the first paint and one eventless tick", polls)
+	}
+}
+
+func TestTabStatusExplicitRenameBeforeFirstPaintWaitsForSource(t *testing.T) {
+	f := newTabStatusFixture()
+	dir := t.TempDir()
+	d := tabObservation("blocked")
+	if err := writeSoleTabLabel(context.Background(), "endpoint", dir, d.Tab,
+		"Chosen", true, func() uint64 { return 1 }, f.call); err != nil {
+		t.Fatal(err)
+	}
+	// A session start re-announces the same name before the first paint: the
+	// explicit rename stays protected from the stale source title.
+	if err := writeSoleTabLabel(context.Background(), "endpoint", dir, d.Tab,
+		"Chosen", false, func() uint64 { return 1 }, f.call); err != nil {
+		t.Fatal(err)
+	}
+	for _, tick := range []struct{ source, want string }{
+		{"Old source", "Chosen"}, // The engine has not flushed /rename yet.
+		{"Chosen", "Chosen"},
+		{"Later rename", "Later rename"},
+	} {
+		d.Name, d.UserName, d.UserKnown = tick.source, tick.source, true
+		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+			t.Fatal(err)
+		}
+		if want := DecoratedTabLabel(tick.want, "blocked", "emoji", 0, TabGlyphs{}); f.label != want {
+			t.Fatalf("source %q: label = %q, want %q", tick.source, f.label, want)
+		}
+	}
+}
+
 func TestTabStatusTopologyAndGeneration(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

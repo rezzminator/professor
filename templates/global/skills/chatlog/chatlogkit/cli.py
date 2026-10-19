@@ -19,7 +19,9 @@ USAGE = """chatlog kit: the mechanics of reading transcripts, so a reader only r
   prep TARGET [--lines A-B] [--dir DIR] [--window BYTES] [--reader-max BYTES]
       digest, clean, label every mechanical line, plan the windows; prints the plan
   read DIR N|A-B          window N (or digest lines A-B), each line D{n} with its labels
-  find DIR REGEX [-C N]   digest lines matching REGEX (case-insensitive), with context
+  find DIR REGEX [-C N] [--full]
+                          digest lines matching REGEX (case-insensitive), with context; --full also
+                          matches each event's whole text (a call's full input), past the digest's cut
   note DIR ROW...         add reader rows, validated; ROW = "D41 CLAIM" | "D37 BEARS D41"
                           | "D88 CORRECTION - exact words"; rows on stdin when none given
   report DIR [--out F]    the report: header, every row verbatim, counts
@@ -173,6 +175,43 @@ def entry(args):
             print(ev.text)
 
 
+def find(args):
+    """`find` over the digest; `--full` also matches each event line's whole text — a call's full input
+    as `entry` prints it — since the digest cuts a long command at 500 characters and a term past the
+    cut would read as absent."""
+    if "--full" not in args:
+        return rows.find(args)
+    args = [a for a in args if a != "--full"]
+    ctx = int(opt(args, "-C", "0"))
+    if len(args) != 2:
+        die("usage: chatlog.py find DIR REGEX [-C N] [--full]", 2)
+    kit, dig = rows.load(args[0])
+    try:
+        rx = re.compile(args[1], re.I)
+    except re.error as e:
+        die(f"KIT FAILED — bad regex: {e}")
+    try:
+        p = parse(kit["target"], kit["path"])
+    except Failure as e:
+        die(f"FAILED find --full {kit['path']} — {str(e)[:600]}")
+    full = {}
+    for ev in p.events:
+        if not ev.hidden:
+            full.setdefault(ev.line, []).append(str(ev.raw) if ev.kind == "call" and ev.raw else (ev.text or ""))
+    lab, last, hits = rows.labels_by_line(args[0]), 0, 0
+    for n, ln in enumerate(dig, 1):
+        lm = re.match(r"L(\d+) ", ln)
+        text = ln + ("\n" + "\n".join(full.get(int(lm.group(1)), [])) if lm else "")
+        if rx.search(text):
+            hits += 1
+            a = max(n - ctx, last + 1)
+            if ctx and a > last + 1 and last:
+                print("--")
+            rows.show(dig, lab, a, n + ctx)
+            last = n + ctx
+    print(f"# hits {hits}")
+
+
 def windows(dig, window):
     """Windows over the digest, cut at event lines: (first, last) digest line numbers."""
     wins, start, size = [], 1, 0
@@ -205,7 +244,7 @@ def split_plan(dig, rmax):
 
 
 def main(argv):
-    verbs = {"prep": prep, "read": rows.read, "find": rows.find, "note": rows.note, "report": rows.report,
+    verbs = {"prep": prep, "read": rows.read, "find": find, "note": rows.note, "report": rows.report,
              "verify": rows.verify, "prompts": rows.prompts, "writes": rows.writes, "entry": entry, "runs": locate.runs, "census": census.census,
              "waits": waits.waits}
     if len(argv) < 2 or argv[1] not in verbs:

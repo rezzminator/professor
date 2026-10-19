@@ -20,20 +20,24 @@ type keepwarmProcFixture struct {
 	argvErr     error
 	zombie      bool
 	identityErr error
+	born        int64
+	birthErr    error
 }
 
 func (proc keepwarmProcFixture) Cmdline(int) ([]string, error) { return proc.argv, proc.argvErr }
 func (proc keepwarmProcFixture) ProcessIdentity(int) (gather.ProcessIdentity, error) {
 	return gather.ProcessIdentity{Zombie: proc.zombie}, proc.identityErr
 }
+func (proc keepwarmProcFixture) Birth(int) (int64, error) { return proc.born, proc.birthErr }
 
 // Probe failures differ from negative liveness: unreadable is ERR, never ?.
 func TestCacheKeepwarmProbe(t *testing.T) {
 	for _, tc := range []struct {
-		name                                  string
-		signal, argvErr, identityErr          error
-		argv                                  []string
-		zombie, live, wantErr, exitDuringRead bool
+		name                                   string
+		signal, argvErr, identityErr, birthErr error
+		born                                   int64
+		argv                                   []string
+		zombie, live, wantErr, exitDuringRead  bool
 	}{
 		{name: "Claude", argv: []string{"claude"}, live: true},
 		{name: "native version", argv: []string{"/state/versions/2.1.302"}, live: true},
@@ -45,6 +49,10 @@ func TestCacheKeepwarmProbe(t *testing.T) {
 		{name: "argv unreadable", argvErr: syscall.EIO, wantErr: true},
 		{name: "identity unreadable", identityErr: syscall.EIO, wantErr: true},
 		{name: "exit race", argvErr: os.ErrNotExist, exitDuringRead: true},
+		{name: "writer within the birth slack", argv: []string{"claude"}, born: 1001, live: true},
+		{name: "pid reused by a newer Claude", argv: []string{"claude"}, born: 1003},
+		{name: "start time unreadable", argv: []string{"claude"}, birthErr: syscall.EIO, wantErr: true},
+		{name: "exit during start time read", argv: []string{"claude"}, birthErr: os.ErrNotExist, exitDuringRead: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			proc := keepwarmProcFixture{
@@ -52,6 +60,8 @@ func TestCacheKeepwarmProbe(t *testing.T) {
 				argvErr:     tc.argvErr,
 				zombie:      tc.zombie,
 				identityErr: tc.identityErr,
+				born:        tc.born,
+				birthErr:    tc.birthErr,
 			}
 			calls := 0
 			live, err := keepwarmProbe(proc, func(int) error {
@@ -60,7 +70,7 @@ func TestCacheKeepwarmProbe(t *testing.T) {
 					return syscall.ESRCH
 				}
 				return tc.signal
-			})(42)
+			})(42, 1000*1000)
 			if live != tc.live || (err != nil) != tc.wantErr {
 				t.Fatalf("live=%t err=%v, want live=%t error=%t", live, err, tc.live, tc.wantErr)
 			}
@@ -78,6 +88,7 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 		name, state, want, color, bad                    string
 		change                                           func(map[string]any)
 		absent, directory, fifo, oversized, otherProcess bool
+		reborn, relativeDir                              bool
 	}{
 		{name: "warming", state: "warming", want: "🛡 2/4 ⟳3m guards ≈329k", color: cWarn},
 		{name: "on remains valid while quiet", state: "on", want: "🛡 on", color: cMuted},
@@ -126,6 +137,15 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			change: func(r map[string]any) { r["pid"] = 2147483647 },
 		},
 		{name: "pid recycled into another program", state: "warming", want: "🛡 ?", color: cMuted, otherProcess: true},
+		{name: "pid recycled into a newer Claude", state: "warming", want: "🛡 ?", color: cMuted, reborn: true},
+		{
+			name:   "just under a million",
+			state:  "warming",
+			want:   "🛡 2/4 ⟳3m guards ≈1.0M",
+			color:  cWarn,
+			change: func(r map[string]any) { r["protectingTokensEq"] = 999600 },
+		},
+		{name: "relative state dir", state: "on", want: "🛡 ERR", color: cBad, relativeDir: true},
 		{name: "version", state: "on", want: "🛡 ERR", color: cBad, change: func(r map[string]any) { r["v"] = 2 }},
 		{name: "unknown state", state: "mystery", want: "🛡 ERR", color: cBad},
 		{name: "malformed", bad: "{", want: "🛡 ERR", color: cBad},
@@ -196,6 +216,18 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(procDir, "cmdline"), argv, 0o600); err != nil {
 				t.Fatal(err)
 			}
+			btime := int64(0)
+			if tc.reborn {
+				btime = now.Unix()
+			}
+			bootStat := []byte(fmt.Sprintf("cpu 0\nbtime %d\n", btime))
+			if err := os.WriteFile(filepath.Join(proc, "stat"), bootStat, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stat := fmt.Sprintf("%d (claude) S%s\n", os.Getpid(), strings.Repeat(" 0", 25))
+			if err := os.WriteFile(filepath.Join(procDir, "stat"), []byte(stat), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			record := map[string]any{
 				"v":                  1,
 				"sessionId":          "S",
@@ -241,10 +273,14 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 				}
 			}
 			var warn bytes.Buffer
+			stateDir := dir
+			if tc.relativeDir {
+				stateDir = "relative/state"
+			}
 			runtime := Runtime{
 				Home:     home,
 				ProcRoot: proc,
-				Env:      map[string]string{"CACHE_KEEPWARM_STATE_DIR": dir},
+				Env:      map[string]string{"CACHE_KEEPWARM_STATE_DIR": stateDir},
 				Warn:     &warn,
 			}
 			expires := now.Add(5 * time.Minute).Unix()
@@ -264,15 +300,18 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			} else if !strings.HasSuffix(got, tc.color+tc.want+reset) {
 				t.Fatalf("segment = %q, want suffix %q", got, tc.color+tc.want+reset)
 			}
-			if tc.want == "🛡 ERR" {
-				if lines := strings.Split(
-					strings.TrimSpace(warn.String()),
-					"\n",
-				); len(lines) != 1 || !strings.Contains(lines[0], path) ||
-					!strings.Contains(lines[0], ": ") {
+			lines := strings.Split(strings.TrimSpace(warn.String()), "\n")
+			switch {
+			case tc.relativeDir:
+				if len(lines) != 1 || !strings.Contains(lines[0], `"relative/state" is not absolute`) ||
+					strings.Contains(lines[0], "state  (") {
+					t.Fatalf("want one warning naming the unresolved directory, got %q", warn.String())
+				}
+			case tc.want == "🛡 ERR":
+				if len(lines) != 1 || !strings.Contains(lines[0], path) || !strings.Contains(lines[0], ": ") {
 					t.Fatalf("want one warning with path/cause, got %q", warn.String())
 				}
-			} else if warn.Len() != 0 {
+			case warn.Len() != 0:
 				t.Fatalf("unexpected warning %q", warn.String())
 			}
 		})

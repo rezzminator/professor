@@ -30,6 +30,8 @@ import (
 // machine config that failed to load 💾⚠config: the launch record lives where
 // the config's state.db says. hit < 0 means the harness reported no usage yet,
 // and drops the tail; a lapsed window renders the hit as history, was 99%.
+// The cache-keepwarm shield (cacheKeepwarmShield) follows, even when no
+// countdown renders.
 func cacheWindowSegment(
 	runtime Runtime,
 	now time.Time,

@@ -16,6 +16,10 @@ import (
 
 const keepwarmOff = "off"
 
+// keepwarmBirthSlackMS is how much later than the record's updatedAt the
+// writer's start time may read before the pid counts as reused.
+const keepwarmBirthSlackMS = 2000
+
 type keepwarmPokes struct {
 	Count int `json:"count"`
 	Max   int `json:"max"`
@@ -62,7 +66,12 @@ func cacheKeepwarmShield(runtime Runtime, now time.Time, sessionID string) strin
 		if warn == nil {
 			warn = os.Stderr
 		}
-		fmt.Fprintf(warn, "statusline: cache-keepwarm state %s (shield shows ERR): %v\n", path, state.err)
+		if path == "" {
+			// No path was resolved: the cause names the state file itself.
+			fmt.Fprintf(warn, "statusline: %v (shield shows ERR)\n", state.err)
+		} else {
+			fmt.Fprintf(warn, "statusline: cache-keepwarm state %s (shield shows ERR): %v\n", path, state.err)
+		}
 		return " " + cBad + "🛡 ERR" + reset
 	}
 	if state.stale {
@@ -88,8 +97,9 @@ func cacheKeepwarmShield(runtime Runtime, now time.Time, sessionID string) strin
 			text += " ⟳" + next
 		}
 		if record.Protecting != nil {
-			savings := fmt.Sprintf("%.0fk", math.Round(*record.Protecting/1000))
-			if *record.Protecting >= 1000000 {
+			thousands := math.Round(*record.Protecting / 1000)
+			savings := fmt.Sprintf("%.0fk", thousands)
+			if thousands >= 1000 {
 				savings = fmt.Sprintf("%.1fM", math.Round(*record.Protecting/100000)/10)
 			}
 			text += " guards ≈" + savings
@@ -107,7 +117,7 @@ func cacheKeepwarmShield(runtime Runtime, now time.Time, sessionID string) strin
 func readKeepwarmState(
 	path, sessionID string,
 	read func(string) ([]byte, error),
-	live func(int) (bool, error),
+	live func(pid int, updatedAt int64) (bool, error),
 ) keepwarmState {
 	body, err := read(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -123,7 +133,7 @@ func readKeepwarmState(
 	if err = record.validate(sessionID); err != nil {
 		return keepwarmState{err: err}
 	}
-	alive, err := live(record.PID)
+	alive, err := live(record.PID, record.UpdatedAt)
 	if err != nil {
 		return keepwarmState{err: err}
 	}
@@ -172,10 +182,12 @@ func (record keepwarmRecord) validate(sessionID string) error {
 }
 
 // keepwarmProbe uses the shared process classifier. A reused PID is not a live
-// Claude; a failed inspection is an error, not an absent plugin. signalZero
+// Claude: a process that is not Claude, a zombie, or one born after the record's
+// last write (so it cannot be the writer, even when it is another Claude) is
+// stale. A failed inspection is an error, not an absent plugin. signalZero
 // checks ownership/existence without sending a signal to the chat.
-func keepwarmProbe(proc gather.ProcFS, signal func(int) error) func(int) (bool, error) {
-	return func(pid int) (bool, error) {
+func keepwarmProbe(proc gather.ProcFS, signal func(int) error) func(int, int64) (bool, error) {
+	return func(pid int, updatedAt int64) (bool, error) {
 		err := signal(pid)
 		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
 			return false, nil
@@ -192,6 +204,19 @@ func keepwarmProbe(proc gather.ProcFS, signal func(int) error) func(int) (bool, 
 				return false, fmt.Errorf("inspect Claude pid %d: %w", pid, identityErr)
 			}
 			if who.Zombie {
+				return false, nil
+			}
+		}
+		if births, ok := proc.(gather.ProcBirth); ok {
+			born, birthErr := births.Birth(pid)
+			if birthErr != nil {
+				if errors.Is(signal(pid), syscall.ESRCH) {
+					return false, nil
+				}
+				return false, fmt.Errorf("read Claude pid %d start time: %w", pid, birthErr)
+			}
+			// Birth is whole seconds; the slack absorbs its rounding.
+			if born*1000 > updatedAt+keepwarmBirthSlackMS {
 				return false, nil
 			}
 		}

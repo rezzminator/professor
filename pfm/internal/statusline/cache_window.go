@@ -38,6 +38,22 @@ func cacheWindowSegment(
 	harness *promptCache,
 	sessionID string,
 ) string {
+	text := cacheWindowText(runtime, now, transcriptPath, hit, harness, sessionID)
+	shield := cacheKeepwarmShield(runtime, now, sessionID)
+	if text == "" && shield != "" {
+		return sep + strings.TrimPrefix(shield, " ")
+	}
+	return text + shield
+}
+
+func cacheWindowText(
+	runtime Runtime,
+	now time.Time,
+	transcriptPath string,
+	hit int,
+	harness *promptCache,
+	sessionID string,
+) string {
 	label := harness.ttlLabel()
 	var text string
 	var lapsed bool

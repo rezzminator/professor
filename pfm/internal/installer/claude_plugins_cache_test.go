@@ -56,12 +56,14 @@ func writeCacheRecord(t *testing.T, dir, id string, entries ...cacheFixtureEntry
 }
 
 // cacheFiles is the snapshot of writePluginFiles' tree at version, plus the
-// entries the cache compare leaves out.
+// entries the cache compare leaves out: among them the typings Claude Code
+// generates for its own build into the snapshot's .claude-plugin/types/.
 func cacheFiles(name, version, hook string) map[string]string {
 	return map[string]string{
-		filepath.Join(".claude-plugin", "plugin.json"): `{"name":"` + name + `","version":"` + version + `"}`,
-		filepath.Join("hooks", "hook.ts"):              hook,
-		filepath.Join("node_modules", "dep", "x.js"):   "cached dependency\n",
+		filepath.Join(".claude-plugin", "plugin.json"):                              `{"name":"` + name + `","version":"` + version + `"}`,
+		filepath.Join(".claude-plugin", "types", "claude-code-tools", "index.d.ts"): "declare module 'claude-code' {}\n",
+		filepath.Join("hooks", "hook.ts"):                                           hook,
+		filepath.Join("node_modules", "dep", "x.js"):                                "cached dependency\n",
 		".orphaned_at": "1760000000000",
 		".DS_Store":    "finder",
 	}

@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "fetched_at": "2026-10-10T22:50:50Z",
+  "fetched_at": "2026-10-20T21:09:34Z",
   "sources": [
     {"provider":"anthropic","url":"https://platform.claude.com/docs/en/about-claude/pricing.md"},
     {"provider":"openai","url":"https://developers.openai.com/api/docs/pricing.md"}
@@ -26,13 +26,9 @@
     {"key":"claude-sonnet-4-6","engine":"claude","in":3,"out":15,"hit":0.3,"w5m":3.75,"w1h":6},
     {"key":"claude-sonnet-5","engine":"claude","in":2,"out":10,"hit":0.2,"w5m":2.5,"w1h":4},
     {"key":"claude-sonnet-5-5","engine":"claude","in":2,"out":10,"hit":0.1,"w5m":2.5,"w1h":4},
-    {"key":"babbage-002","engine":"codex","in":0.4,"out":0.4},
     {"key":"chat-latest","engine":"codex","in":5,"out":30,"cached":0.5},
-    {"key":"davinci-002","engine":"codex","in":2,"out":2},
     {"key":"gpt-3.5-turbo","engine":"codex","in":0.5,"out":1.5},
     {"key":"gpt-3.5-turbo-0125","engine":"codex","in":0.5,"out":1.5},
-    {"key":"gpt-3.5-turbo-1106","engine":"codex","in":1,"out":2},
-    {"key":"gpt-3.5-turbo-instruct","engine":"codex","in":1.5,"out":2},
     {"key":"gpt-4-0613","engine":"codex","in":30,"out":60},
     {"key":"gpt-4-turbo-2024-04-09","engine":"codex","in":10,"out":30},
     {"key":"gpt-4.1","engine":"codex","in":2,"out":8,"cached":0.5},

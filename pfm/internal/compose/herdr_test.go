@@ -208,7 +208,7 @@ func TestHerdrSeatsSuppressOnlyMatchingProcessAgents(t *testing.T) {
 
 // A row's UserName is the part of its name a user chose: a Claude chat's
 // custom title (its /rename), a Codex thread's indexed name, a native seat's
-// name (launch --name, pfm chat name) when the engine carries none, so a
+// name (launch --name, pfm chat name) when the engine carries none. A Claude
 // /rename inside a named seat names its row; a chat named by its AI title or
 // first prompt has none. Every row read from its indexed source says so.
 func TestRowUserNameIsTheNameAUserChose(t *testing.T) {
@@ -268,6 +268,69 @@ func TestRowUserNameIsTheNameAUserChose(t *testing.T) {
 			t.Fatalf("native seat %s row name %q user name %q (known %v), want both %q",
 				test.seat, row.Name, row.UserName, row.UserNameKnown, test.name)
 		}
+	}
+}
+
+// Codex's indexed names include engine-generated titles: unlike a Claude
+// custom title, an indexed name cannot displace an explicit native seat name.
+func TestHerdrCodexSeatNamesOverrideIndexedTitles(t *testing.T) {
+	for _, tc := range []struct {
+		name, seatName, indexedName, state, wantName, wantUser string
+	}{
+		{
+			name: "live named seat", seatName: "PATHFINDER", indexedName: "Automatic engine title",
+			state: "live", wantName: "PATHFINDER", wantUser: "PATHFINDER",
+		},
+		{
+			name: "failed named seat", seatName: "PATHFINDER", indexedName: "Automatic engine title",
+			state: "failed", wantName: "PATHFINDER", wantUser: "PATHFINDER",
+		},
+		{
+			name: "seat name over first prompt", seatName: "PATHFINDER",
+			state: "live", wantName: "PATHFINDER", wantUser: "PATHFINDER",
+		},
+		{
+			name: "unnamed seat retains indexed title", indexedName: "Automatic engine title",
+			state: "live", wantName: "Automatic engine title", wantUser: "Automatic engine title",
+		},
+		{
+			name:  "unnamed seat retains first prompt",
+			state: "live", wantName: "fp",
+		},
+		{
+			name: "kill label stays authoritative", seatName: "_KILL_PATHFINDER", indexedName: "Automatic engine title",
+			state: "live", wantName: "_KILL_PATHFINDER", wantUser: "_KILL_PATHFINDER",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rollout := userNameRollout("cx-native")
+			output := Compose(Input{
+				Options:  Options{View: AllView},
+				Rollouts: []store.Rollout{rollout},
+				CxNames:  map[string]string{rollout.ID: tc.indexedName},
+				HerdrSeats: []gather.HerdrSeat{{Seat: fleetdb.Seat{
+					SeatID: "native-seat", SessionID: rollout.ID, Engine: "cx", Backend: "herdr", State: tc.state,
+					Name: tc.seatName, HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
+				}}},
+			})
+			if len(output.Rows) != 1 {
+				t.Fatalf("native rows=%+v, want one addressed seat", output.Rows)
+			}
+			row := output.Rows[0]
+			if row.Name != tc.wantName || row.UserName != tc.wantUser || !row.UserNameKnown ||
+				row.SessionName != tc.seatName {
+				t.Fatalf("native name=%q user=%q known=%v session=%q, want name=%q user=%q session=%q",
+					row.Name, row.UserName, row.UserNameKnown, row.SessionName, tc.wantName, tc.wantUser, tc.seatName)
+			}
+			wantKind := LiveCodex
+			if tc.state != "live" {
+				wantKind = ResumeCodex
+			}
+			if row.Kind != wantKind || row.Path != rollout.Path || row.PromptCount != rollout.PromptCount ||
+				row.SeatID != "native-seat" || row.PaneID != "w6:p3" {
+				t.Fatalf("native seat or transcript metadata lost: %+v", row)
+			}
+		})
 	}
 }
 

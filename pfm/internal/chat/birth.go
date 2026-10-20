@@ -12,6 +12,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -126,7 +127,16 @@ func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.Hea
 		}, options)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat new: native await: %v\n", err)
-			return true, 1
+			switch {
+			case errors.Is(err, headless.ErrTrustDialog):
+				return true, 6
+			case errors.Is(err, headless.ErrChatGone):
+				return true, 3
+			case errors.Is(err, headless.ErrAwaitTimeout):
+				return true, 5
+			default:
+				return true, 1
+			}
 		}
 		if turn.Error != "" {
 			fmt.Fprintf(stderr, "pfm chat new: native turn: %s\n", turn.Error)
@@ -168,45 +178,52 @@ func nativeBirthTarget(
 	if err != nil || !found {
 		return target, found, err
 	}
-	if pfmengine.ID(seat.Engine) == pfmengine.Claude {
+	seat, alive, err := nativeAlive(ctx, seat, runtime.Paths)
+	if errors.Is(err, gather.ErrHerdrProofPersistence) {
+		// The launching seat-host may publish its birth during our proof.
+		// Reprove the current row once; never turn a CAS refusal into death.
+		seat, alive, err = nativeAlive(ctx, seat, runtime.Paths)
+	}
+	if err != nil {
+		return target, false, fmt.Errorf("prove native await seat %s: %w", seat.SeatID, err)
+	}
+	target = headless.Chat{
+		ID: seat.SessionID, SeatID: seat.SeatID, Engine: pfmengine.ID(seat.Engine),
+		Backend: spawn.BackendHerdr, Name: seat.Name, Socket: seat.HerdrSocket,
+		Pane: seat.HerdrPane, Live: alive, HerdrWorkspace: seat.HerdrWorkspace,
+	}
+	if err := CheckAwait(ctx, target, runtime); err != nil {
+		return target, true, err
+	}
+	if !alive {
+		return target, true, nil
+	}
+	if target.Engine == pfmengine.Claude {
 		index, err := store.Open()
 		if err != nil {
-			return target, false, err
+			return target, true, err
 		}
 		defer func() { returnErr = errors.Join(returnErr, index.Close()) }()
-		record, found, err := index.Transcript(ctx, seat.SessionID)
+		record, indexed, err := index.Transcript(ctx, seat.SessionID)
 		if err != nil {
-			return target, false, err
+			return target, true, err
 		}
-		if !found {
-			rows, err := Rows(ctx, io.Discard, runtime)
-			if err != nil {
-				return target, false, err
-			}
-			for index := range rows {
-				row := &rows[index]
-				if row.ID == seat.SessionID && row.Path != "" {
-					return FromRow(*row), true, nil
-				}
-			}
-			return target, false, nil
+		if indexed {
+			target.Path, target.CWD = record.Path, record.CWD
+			return target, true, nil
 		}
-		return headless.Chat{
-			ID:      seat.SessionID,
-			SeatID:  seat.SeatID,
-			Engine:  pfmengine.Claude,
-			Backend: spawn.BackendHerdr,
-			Name:    seat.Name,
-			Socket:  seat.HerdrSocket,
-			Pane:    seat.HerdrPane,
-			Path:    record.Path,
-			CWD:     record.CWD,
-			Live:    seat.State == liveState,
-		}, true, nil
 	}
-	target, err = Target(ctx, seat.SessionID, runtime)
-	if errors.Is(err, ErrUnknownChat) {
-		return target, false, nil
+	rows, err := Rows(ctx, io.Discard, runtime)
+	if err != nil {
+		return target, true, err
 	}
-	return target, err == nil, err
+	for i := range rows {
+		row := &rows[i]
+		if row.SeatID == seat.SeatID {
+			target.Path, target.CWD = row.Path, row.CWD
+			break
+		}
+	}
+	// No transcript yet is a live startup seat, not an absent conversation.
+	return target, true, nil
 }

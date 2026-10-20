@@ -46,7 +46,11 @@ func chatResolver(
 	runtimes ...commandRuntime,
 ) func(context.Context) (headless.Chat, bool, error) {
 	return func(ctx context.Context) (headless.Chat, bool, error) {
-		return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
+		chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
+		if err == nil && found {
+			err = pfmchat.CheckAwait(ctx, chat, firstRuntime(runtimes))
+		}
+		return chat, found, err
 	}
 }
 

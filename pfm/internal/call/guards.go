@@ -350,10 +350,20 @@ func lastComposerRow(lines []string) int {
 // visible character at all: hasDraft's marker-row allowances (a lone spinner
 // frame, Codex's braille sparkle) are a typed "-" or text on these rows.
 func ComposerBoxEmpty(capture string) bool {
+	text, bounded := ComposerBoxText(capture)
+	return bounded && strings.IndexFunc(stripTerminalControl(text), func(character rune) bool {
+		return unicode.IsGraphic(character) && !unicode.IsSpace(character)
+	}) < 0
+}
+
+// ComposerBoxText returns the styled continuation rows beneath the active
+// composer marker, and whether a closing rule established their boundary.
+// A marker typed inside a bounded draft is content, never a new composer.
+func ComposerBoxText(capture string) (string, bool) {
 	lines := strings.Split(capture, "\n")
 	row := lastComposerRow(lines)
 	if row < 0 {
-		return false
+		return "", false
 	}
 	topWidth := 0
 	if row > 0 {
@@ -362,18 +372,13 @@ func ComposerBoxEmpty(capture string) bool {
 			topWidth = utf8.RuneCountInString(top)
 		}
 	}
-	for _, line := range lines[row+1:] {
-		clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
+	for end := row + 1; end < len(lines); end++ {
+		clean := stripTerminalControl(strings.TrimSuffix(lines[end], "\r"))
 		if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= topWidth {
-			return true
-		}
-		if strings.IndexFunc(clean, func(character rune) bool {
-			return unicode.IsGraphic(character) && !unicode.IsSpace(character)
-		}) >= 0 {
-			return false
+			return strings.Join(lines[row+1:end], "\n"), true
 		}
 	}
-	return false
+	return "", false
 }
 
 // ComposerBoxRule reports whether a captured line is one of the input box's

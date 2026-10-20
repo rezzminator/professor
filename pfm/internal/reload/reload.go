@@ -660,18 +660,25 @@ ready:
 	if !live {
 		return fmt.Errorf("reload --then: no live %s on the pane", engineLabel(request.Engine))
 	}
+	// Prove the reborn composer empty immediately before either engine's
+	// send. A resumed draft must never become part of the wake prompt.
+	baseline, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+	if err != nil {
+		return fmt.Errorf("reload --then: read composer before delivery: %w", err)
+	}
+	if !composerDrawn(baseline) || selectorOpen(baseline) || pfmengine.ClaudeTrustDialog(baseline) ||
+		pfmcall.IsFooterBusy(request.Engine, baseline) {
+		return errors.New("reload --then: composer changed before delivery; nothing was typed")
+	}
+	empty, draft, err := reloadComposerEmpty(baseline, styledCapture(ctx, request, tmux))
+	if err != nil {
+		return fmt.Errorf("reload --then: %w", err)
+	}
+	if !empty {
+		return fmt.Errorf("reload --then: %w", composerDraftError(draft))
+	}
 	if request.Engine == pfmengine.Codex {
 		return deliverCodexThen(ctx, request, options, tmux, stderr)
-	}
-	// A composer baseline captured BEFORE the send lets us tell a freshly
-	// typed paste placeholder from one left over from an earlier turn — a
-	// pre-existing placeholder must never count as proof. haveBaseline is
-	// tracked explicitly: a failed capture must never silently masquerade
-	// as an empty-but-legitimate baseline (an error is never absence).
-	baseline, baselineErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
-	haveBaseline := baselineErr == nil
-	if baselineErr != nil {
-		fmt.Fprintf(stderr, "pfm chat reload --then: capture composer baseline before typing prompt: %v\n", baselineErr)
 	}
 	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, request.Then); err != nil {
 		return fmt.Errorf("reload --then: type prompt: %w", err)
@@ -698,22 +705,6 @@ ready:
 		composer := composerText(capture)
 		hasTail := strings.Contains(squashSpace(composer), squashSpace(needle))
 		hasPlaceholder := pfmcall.HasPastePlaceholder(composer)
-		if !haveBaseline {
-			// No baseline means we cannot rule out a placeholder that was
-			// already sitting in the composer before we ever typed (e.g. a
-			// leftover unsent paste). A refusal here costs nothing —
-			// failThen preserves the prompt on disk — so require the tail
-			// needle, which is the human's own new prompt text and cannot
-			// come from a stale paste.
-			if hasTail {
-				typed = true
-				break
-			}
-			if err := options.Clock.Sleep(ctx, 200*time.Millisecond); err != nil {
-				return err
-			}
-			continue
-		}
 		// capture != baseline is a weak, supporting signal only: both TUIs
 		// animate every frame (spinners, token counters, clocks), so the
 		// pane differs from any baseline within a beat regardless of
@@ -732,7 +723,7 @@ ready:
 	}
 	if !typed {
 		return errors.New(
-			"reload --then: typed text never rendered in the composer — looked for the prompt's tail text and, when a pre-send baseline was captured, a paste placeholder there too, but neither appeared — refusing blind Enter",
+			"reload --then: typed text never rendered in the composer — looked for the prompt's tail text or a new paste placeholder there, but neither appeared — refusing blind Enter",
 		)
 	}
 	// The submit proof reuses the SAME tail needle the typed proof just saw

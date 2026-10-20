@@ -35,6 +35,9 @@ type StreamOptions struct {
 	// A stream that outlives its chat must END, not hang: silence is the one
 	// thing a dead chat and a thinking chat have in common.
 	Alive func() bool
+	// Check reports blocked, dead, or failed lookup distinctly. Unlike Alive,
+	// it must not collapse a failed probe into the chat's disappearance.
+	Check func() error
 	// Clock controls polling in tests; nil uses the wall clock.
 	Clock clock.Clock
 	// Raw prints the entry's full text instead of the condensed line.
@@ -51,6 +54,13 @@ func Stream(
 	options StreamOptions,
 	out io.Writer,
 ) (returnErr error) {
+	if options.Check != nil {
+		// A dead seat can still have a transcript to drain. Following reports
+		// death at EOF; a one-shot replay needs no live process at all.
+		if err := options.Check(); err != nil && (path == "" || !errors.Is(err, ErrChatGone)) {
+			return err
+		}
+	}
 	if path == "" {
 		return errors.New("this chat has no transcript to stream yet")
 	}
@@ -101,6 +111,11 @@ func Stream(
 		}
 		if !options.Follow {
 			return window.flush()
+		}
+		if options.Check != nil {
+			if err := options.Check(); err != nil {
+				return errors.Join(window.flush(), err)
+			}
 		}
 		if options.Alive != nil && !options.Alive() {
 			if err := window.flush(); err != nil {

@@ -474,13 +474,13 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 		if !composerDrawn(screen) || pfmcall.IsFooterBusy(n.request.Engine, screen) {
 			stable = 0
 		} else {
-			empty, _, err := pfmcall.ComposerEmpty(screen, func() (string, error) { return screen, nil })
+			empty, draft, err := reloadComposerEmpty(screen, func() (string, error) { return screen, nil })
 			if err != nil {
 				return err
 			}
 			if !empty {
 				if !stash {
-					return errors.New("native reload composer holds a draft")
+					return fmt.Errorf("native reload: %w", composerDraftError(draft))
 				}
 				if err := n.sendKey(ctx, "ctrl+s"); err != nil {
 					return fmt.Errorf("stash native reload draft: %w", err)

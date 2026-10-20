@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -223,6 +224,38 @@ func TestStreamFollowEndsWhenTheChatDies(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "A done") {
 		t.Fatalf("stream lost what it had already read: %q", out.String())
+	}
+}
+
+// An initial liveness check must not hide the transcript of an exited chat.
+// Only a follow reports death, after draining; trust and probe errors still
+// refuse before any transcript is emitted.
+func TestStreamCheckPreservesExitedTranscript(t *testing.T) {
+	probeErr := errors.New("pane read failed")
+	for _, tc := range []struct {
+		name   string
+		follow bool
+		check  error
+		want   error
+		output string
+	}{
+		{name: "replay exited chat", check: ErrChatGone, output: "A done\n"},
+		{name: "follow exited chat", follow: true, check: ErrChatGone, want: ErrChatGone, output: "A done\n"},
+		{name: "trust blocked", check: ErrTrustDialog, want: ErrTrustDialog},
+		{name: "probe failed", check: probeErr, want: probeErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeChat(t, assistantLine("done"))
+			var out bytes.Buffer
+			err := Stream(context.Background(), path, "cc", StreamOptions{
+				FromStart: true,
+				Follow:    tc.follow,
+				Check:     func() error { return tc.check },
+			}, &out)
+			if !errors.Is(err, tc.want) || out.String() != tc.output {
+				t.Fatalf("Stream() output=%q error=%v, want output=%q error=%v", out.String(), err, tc.output, tc.want)
+			}
+		})
 	}
 }
 

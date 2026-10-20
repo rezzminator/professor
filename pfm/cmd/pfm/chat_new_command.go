@@ -561,10 +561,10 @@ func awaitLaunch(
 	clk clock.Clock,
 	runtimes ...commandRuntime,
 ) int {
-	handle := chatHandle(result.Socket, name)
+	handle := (headless.Chat{Socket: result.Socket, Name: name}).Handle()
 	if await {
 		turn, err := headless.Await(ctx, chatResolver(handle, runtimes...), options)
-		if turnRefused(turn, err) {
+		if turn.Refused(err) {
 			fmt.Fprintf(stderr, "pfm chat new: %s\n", turnErrorMessage(name, turn, result))
 			return codeTurnError
 		}
@@ -575,6 +575,9 @@ func awaitLaunch(
 		chatResolver(handle, runtimes...),
 		deliveryProofOptions(options, launchProofWindow),
 	)
+	if errors.Is(err, headless.ErrTrustDialog) {
+		return reportTurn(turn, err, "new", name, options.Timeout, false, stdout, stderr)
+	}
 	if turn.Delivered {
 		return watchFirstReply(ctx, name, handle, options, result, stderr, runtimes...)
 	}
@@ -650,10 +653,12 @@ func replyWatchOptions(options headless.AwaitOptions) headless.AwaitOptions {
 // watch that could not read the chat is never a success.
 func firstReplyVerdict(name string, turn headless.Turn, err error, result spawn.Result) (int, string) {
 	switch {
-	case turnRefused(turn, err):
+	case turn.Refused(err):
 		return codeTurnError, turnErrorMessage(name, turn, result)
 	case err == nil, errors.Is(err, headless.ErrAwaitTimeout):
 		return 0, ""
+	case errors.Is(err, headless.ErrTrustDialog):
+		return codeUndelivered, err.Error()
 	case errors.Is(err, headless.ErrChatGone):
 		return codeDeadChat, fmt.Sprintf("%s received its prompt and died before replying", name)
 	default:
@@ -661,11 +666,6 @@ func firstReplyVerdict(name string, turn headless.Turn, err error, result spawn.
 			"%s received its prompt, but its first reply could not be read: %v", name, err,
 		)
 	}
-}
-
-// turnRefused says the wait ended on an API error rather than an answer.
-func turnRefused(turn headless.Turn, err error) bool {
-	return turn.Error != "" && (err == nil || errors.Is(err, headless.ErrChatGone))
 }
 
 func turnErrorMessage(name string, turn headless.Turn, result spawn.Result) string {

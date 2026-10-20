@@ -1,6 +1,7 @@
 package reload
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -20,6 +21,32 @@ import (
 // that a BOOTING Codex TUI reached its idle composer and footer.)
 func composerDrawn(capture string) bool {
 	return lastReloadComposerLine(capture) != ""
+}
+
+// reloadComposerEmpty also checks continuation rows in a bounded input box:
+// a newline-led draft leaves the marker row empty. Unbounded rows may be
+// status text, so only a closing box rule establishes continuation text.
+func reloadComposerEmpty(capture string, styled func() (string, error)) (bool, string, error) {
+	empty, draft, err := pfmcall.ComposerEmpty(capture, styled)
+	if err != nil || !empty {
+		return empty, draft, err
+	}
+	below, _ := pfmcall.ComposerBoxText(capture)
+	return pfmcall.ComposerEmpty("❯ "+strings.ReplaceAll(below, "\n", " "), func() (string, error) {
+		frame, err := styled()
+		if err != nil {
+			return "", err
+		}
+		below, _ := pfmcall.ComposerBoxText(frame)
+		return "❯ " + strings.ReplaceAll(below, "\n", " "), nil
+	})
+}
+
+func composerDraftError(draft string) error {
+	return fmt.Errorf(
+		"composer holds a draft: %q; nothing was typed and the draft is preserved (dim placeholder text is exempt)",
+		fmt.Sprintf("%.80s", draft),
+	)
 }
 
 // composerShowsExit reads the composer's own DRAFT, never the whole line: a

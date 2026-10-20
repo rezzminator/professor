@@ -72,6 +72,22 @@ type Chat struct {
 	PanePID int
 }
 
+// Handle preserves a resolved conversation across calls and waits. A native
+// socket hosts many seats, so only its thread id (or name before indexing)
+// identifies the conversation; a tmux socket is dedicated to one chat.
+func (chat Chat) Handle() string {
+	if chat.Backend == "herdr" {
+		if chat.ID != "" {
+			return chat.ID
+		}
+		return chat.Name
+	}
+	if chat.Socket != "" {
+		return chat.Socket
+	}
+	return chat.Name
+}
+
 // Status is the machine-readable verdict. Field names are a contract — a
 // consumer scripts against them.
 type Status struct {

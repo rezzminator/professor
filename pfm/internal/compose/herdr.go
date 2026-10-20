@@ -47,15 +47,16 @@ func (current *composer) herdrRows() []Row {
 		row.HerdrWorkspace = seat.HerdrWorkspace
 		row.ID = seat.SessionID
 		switch {
-		case row.UserName != "" && !naming.LabelKilled(seat.Name):
-			// The engine's own user name (a Claude /rename's custom title, a
-			// Codex thread rename) is the newest a user chose: pfm chat name
-			// delivers its /rename to the engine before it renames the seat.
-			// A "_KILL…" seat label is a kill the user wrote: it names the row
-			// over any engine title.
+		case row.UserName != "" && pfmengine.ID(seat.Engine) != pfmengine.Codex && !naming.LabelKilled(seat.Name):
+			// A Claude /rename's custom title is the newest a user chose:
+			// pfm chat name delivers its /rename before it renames the seat.
+			// Codex's indexed names also include automatic engine titles, so
+			// they cannot override an explicit seat name. A "_KILL…" seat
+			// label names the row over any engine title.
 		case seat.Name != "":
 			// A seat's name is the user's (launch --name, pfm chat name) and
-			// names the row over the transcript's automatic one.
+			// names the row over the transcript's automatic one. Keep the
+			// engine title in its indexed source, not in an address field.
 			row.Name, row.UserName, row.UserNameKnown = seat.Name, seat.Name, true
 		}
 		row.Socket = seat.HerdrSocket

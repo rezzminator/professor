@@ -14,6 +14,8 @@ visibility:
       - gpt-reviewer-pro
       - gpt-foreman
       - gpt-flights-lander
+      - gpt-clone-distiller
+      - gpt-changelogger
 rename:
   sub-tracer: gpt-sub-tracer
   Haiku: GPT luna

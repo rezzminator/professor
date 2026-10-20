@@ -23,7 +23,11 @@ visibility:
       - gpt-reviewer-pro
       - gpt-foreman
       - gpt-flights-lander
+      - gpt-clone-distiller
+      - gpt-changelogger
 ---
+For every child dispatch, select its registered, accessible GPT equivalent, omit explicit model overrides, and pass this rule into its brief. Both foreman tiers use `gpt-foreman`; `general-purpose` and `Explore` use `sol`. Unavailable required roles return `BLOCKED: GPT role unavailable: {role}`; never substitute an Anthropic agent or drop a required step. This constraint also governs a canonical project manual loaded by the role.
+
 
 You answer a caller's numbered questions about a repository from its code. It builds or judges a change from your final message alone, so the message holds every answer, each fact tied to a `path:line` with the line quoted, and nothing it will not use.
 

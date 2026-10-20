@@ -1,10 +1,10 @@
 {
   "_comment": [
-    "refresh-map.json — template → live-source map with the SHA-256 of each live source as of the last sync.",
+    "refresh-map.json \u2014 template \u2192 live-source map with the SHA-256 of each live source as of the last sync.",
     "Consumed by scripts/refresh-scope.sh (scan = incremental refresh scope; regen = re-baseline at release end).",
-    "Template keys are relative to templates/, every key carrying its scope prefix — project/ (per-install templates) or global/ (machine-global originals). curated: true = hand-curated, no live source (the global reviewer/tracer/rr originals are curated; other globals still refresh from their live sources). Source paths are relative to the source project root: the live project `/pfm:release prepare --from` names, never this clone's same-named files; each SHA-256 is that project's file as of the last sync, and a hand-authored template edit is no sync and restamps nothing;",
+    "Template keys are relative to templates/, every key carrying its scope prefix \u2014 project/ (per-install templates) or global/ (machine-global originals). curated: true = hand-curated, no live source (the global reviewer/tracer/rr originals are curated; other globals still refresh from their live sources). Source paths are relative to the source project root: the live project `/pfm:release prepare --from` names, never this clone's same-named files; each SHA-256 is that project's file as of the last sync, and a hand-authored template edit is no sync and restamps nothing;",
     "{project:ROLE} tokens resolve via the project's .professor/manifest.json .interview.projects[ROLE]; leading ~/ resolves to $HOME (host-level sources).",
-    "curated: true = hand-curated template with no live source — never auto-derived.",
+    "curated: true = hand-curated template with no live source \u2014 never auto-derived.",
     "Multi-source entries list every live file whose change forces re-derivation (representative-pattern templates).",
     "ignore_sources = live files deliberately not shipped (project-local); source_globs = the mined surfaces scanned for UNMAPPED-LIVE files."
   ],
@@ -28,7 +28,13 @@
     ".claude/commands/deploy.md",
     ".claude/commands/test.md",
     ".claude/commands/prod-deploy.md",
-    ".claude/scripts/prod-deploy-watch.sh"
+    ".claude/scripts/prod-deploy-watch.sh",
+    ".claude/agents/changelogger.md",
+    ".claude/agents/gpt-changelogger.md",
+    ".claude/agents/releaser.md",
+    ".claude/agents/gpt-releaser.md",
+    ".claude/agents/themer.md",
+    ".claude/agents/gpt-themer.md"
   ],
   "templates": {
     "global/agents/astra.md": {
@@ -415,6 +421,45 @@
       "curated": true
     },
     "global/agents/shared/repo-lane.md": {
+      "curated": true
+    },
+    "global/agents/gpt-clone-distiller.md": {
+      "curated": true
+    },
+    "global/agents/gpt-collector.md": {
+      "curated": true
+    },
+    "global/agents/gpt-conflict-resolver.md": {
+      "curated": true
+    },
+    "global/agents/gpt-documenter.md": {
+      "curated": true
+    },
+    "global/agents/gpt-flights-hunter.md": {
+      "curated": true
+    },
+    "global/agents/gpt-flights-spec-walker.md": {
+      "curated": true
+    },
+    "global/agents/gpt-flights-sub-lander.md": {
+      "curated": true
+    },
+    "global/agents/gpt-gitter.md": {
+      "curated": true
+    },
+    "global/agents/gpt-imaginator.md": {
+      "curated": true
+    },
+    "global/agents/gpt-sub-rr.md": {
+      "curated": true
+    },
+    "global/agents/gpt-reviewer-nt.md": {
+      "curated": true
+    },
+    "project/agents/gpt-gitter.md": {
+      "curated": true
+    },
+    "project/agents/gpt-pcm.md": {
       "curated": true
     }
   }

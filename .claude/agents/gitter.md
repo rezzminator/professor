@@ -1,13 +1,17 @@
 ---
 name: gitter
 description: The only agent that writes git — every other agent is read-only. Delegate each worktree setup, commit, merge, push, pull, tag or release by Phase (SETUP, COMMIT, MERGE, PUSH, PULL, TAG, RELEASE) or freeform. Returns the verified refs. Push, tag and release run only when the caller's brief orders them; main moves only via the release PR.
-model: sonnet
+model: gpt-6.1-sol[1m]
+effort: high
 tools: Read, Write, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 visibility:
   agents:
     include: [conflict-resolver]
 engines:
+  codex:
+    model: gpt-6-luna
   opencode:
+    model: openai/gpt-6.1-sol-fast
     permission:
       bash:
         "git *": allow

@@ -241,24 +241,26 @@ for (const [runtime, expected] of [["codex", codexExpected], ["opencode", openCo
     failures.push(`${runtime}: the sources under .claude/agents (root and child projects) define no registered agent — the comparison had nothing to compare`);
 }
 
-if (codexExpected.includes("gitter")) {
-  const path = join(ROOT, ".codex/agents/gitter.toml");
-  if (
-    existsSync(path) &&
-    /sandbox_mode\s*=\s*"read-only"/.test(readFileSync(path, "utf8"))
-  ) {
-    failures.push(
-      "codex: gitter.toml is registered read-only and cannot perform its source protocol",
-    );
+for (const writer of ["gitter", "gpt-gitter"]) {
+  if (codexExpected.includes(writer)) {
+    const path = join(ROOT, `.codex/agents/${writer}.toml`);
+    if (
+      existsSync(path) &&
+      /sandbox_mode\s*=\s*"read-only"/.test(readFileSync(path, "utf8"))
+    ) {
+      failures.push(
+        `codex: ${writer}.toml is registered read-only and cannot perform its source protocol`,
+      );
+    }
   }
-}
 
-if (openCodeExpected.includes("gitter")) {
-  const path = join(ROOT, ".opencode/agent/gitter.md");
-  if (existsSync(path) && !/"git \*": allow/.test(readFileSync(path, "utf8"))) {
-    failures.push(
-      "opencode: gitter.md lacks its per-agent git write permission",
-    );
+  if (openCodeExpected.includes(writer)) {
+    const path = join(ROOT, `.opencode/agent/${writer}.md`);
+    if (existsSync(path) && !/"git \*": allow/.test(readFileSync(path, "utf8"))) {
+      failures.push(
+        `opencode: ${writer}.md lacks its per-agent git write permission`,
+      );
+    }
   }
 }
 

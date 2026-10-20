@@ -68,6 +68,11 @@
     "agents": [
       "changelogger",
       "gitter",
+      "gpt-changelogger",
+      "gpt-gitter",
+      "gpt-pcm",
+      "gpt-releaser",
+      "gpt-themer",
       "pcm",
       "releaser",
       "themer"
@@ -94,7 +99,12 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "2b050225554d1143a8f219e57c8e478acf2ec7d740ac3e6ad8021f2f047fa62e",
-    ".claude/agents/gitter.md": "a99d321112d2fbc4d39500a9e94787ed2eac2e9145565e2b85112034e00ad34a",
+    ".claude/agents/gitter.md": "d7ac68eb58007d5837c4d2ac3ac688e31437dbdc137938e714f84e7023ff5b1d",
+    ".claude/agents/gpt-changelogger.md": "f6383197ebda4c0d9f8db11a0da7dcc5ee3218355511fc6188cfad5c537d09cc",
+    ".claude/agents/gpt-gitter.md": "fb39920cd9b0e1103750065357dff715fcfe6b15f7a1435d6d83e3ae304cbd95",
+    ".claude/agents/gpt-pcm.md": "416b2162318864272b881ddde92b1cd4b933e54d2ee8f4f0f6bef3b9f9c9f300",
+    ".claude/agents/gpt-releaser.md": "5f41db73850ad81bb215162f6cb8ebe1f74d49f8ccb5d6f0ed997b80d2d9de5d",
+    ".claude/agents/gpt-themer.md": "641a6fd5042151c4694c098b293ad986b4dff02c713bbdb895c56d2ec270bb47",
     ".claude/agents/pcm.md": "34dac75c733a5eb491710b2ad8ca3886a1e32acc801e958c836bfdb23a1474cb",
     ".claude/agents/releaser.md": "360b6343938bcde36496cd35e544e22203aa25f5d0c4c560b63df5b431e2d4dd",
     ".claude/agents/themer.md": "906e90b086ae8cd3a4ac38e220a7102d2bbde5ad1cb37643e08a47285d5bc25f",

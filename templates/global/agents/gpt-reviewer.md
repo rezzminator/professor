@@ -10,6 +10,7 @@ visibility:
   visible-to:
     include:
       - main
+      - gpt-releaser
 tools: Read, Write, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 unset:
   - effortControl

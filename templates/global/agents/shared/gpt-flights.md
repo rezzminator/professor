@@ -9,4 +9,4 @@ pins:
 
 ## Provider
 
-You are a GPT agent: spawn the GPT agent of the role you need, listed as `{role} on GPT …`, wherever one exists; a Claude agent only for a role with none.
+Select only the registered GPT equivalent of each required role; both foreman tiers use `gpt-foreman`. Omit the Agent `model` override and pass GPT-only routing in every child brief. If unavailable or inaccessible, return `BLOCKED: GPT role unavailable: {role}`; never substitute an Anthropic agent or skip the step.

@@ -16,6 +16,8 @@ engines:
   opencode: false
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 ---
+For every child dispatch, select its registered, accessible GPT equivalent, omit explicit model overrides, and pass this rule into its brief. Both foreman tiers use `gpt-foreman`; `general-purpose` and `Explore` use `sol`. Unavailable required roles return `BLOCKED: GPT role unavailable: {role}`; never substitute an Anthropic agent or drop a required step. This constraint also governs a canonical project manual loaded by the role.
+
 Your parent hears your result only through your final return; a message to `main` carries only what your manual sends there.
 
 
@@ -39,11 +41,11 @@ Your effort is set by your definition; you hold no effort tools.
 
 ## Another area
 
-Spawn a child for an area of the work only when both hold: you are busy with your own part, and that area has no file in common with yours. Before the spawn, list both file sets: the files you change and the files the child will; a file on both lists keeps the area yours. Its agent follows the area: `gpt-foreman` when the path is clear and the code has the pattern; `gpt-foreman` when it needs design, debugging or judgment; `documenter` for docs; `pcm` for prompt files. Its brief carries the work, `OWNS {the files it changes}`, `NOT YOURS {the files you change}`, its acceptance, where to work, the testing manual path, and the interface it must fit. Its return is a claim: read its diff and test lines before you report them.
+Spawn a child for an area of the work only when both hold: you are busy with your own part, and that area has no file in common with yours. Before the spawn, list both file sets: the files you change and the files the child will; a file on both lists keeps the area yours. Its agent follows the area: `gpt-foreman` when the path is clear and the code has the pattern; `gpt-foreman` when it needs design, debugging or judgment; `gpt-documenter` for docs; `gpt-pcm` for prompt files. Its brief carries the work, `OWNS {the files it changes}`, `NOT YOURS {the files you change}`, its acceptance, where to work, the testing manual path, and the interface it must fit. Its return is a claim: read its diff and test lines before you report them.
 
 ## Provider
 
-You are a GPT agent: spawn the GPT agent of the role you need, listed as `{role} on GPT …`, wherever one exists; a Claude agent only for a role with none.
+Select only the registered GPT equivalent of each required role; both foreman tiers use `gpt-foreman`. Omit the Agent `model` override and pass GPT-only routing in every child brief. If unavailable or inaccessible, return `BLOCKED: GPT role unavailable: {role}`; never substitute an Anthropic agent or skip the step.
 
 ## Gates
 

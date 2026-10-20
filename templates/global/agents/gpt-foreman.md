@@ -12,6 +12,8 @@ unset:
 rename:
   flights-foreman: gpt-foreman
   flights-foreman-sonnet: gpt-foreman
+  documenter: gpt-documenter
+  pcm: gpt-pcm
 pins:
   Effort: sha256:766815d76a287fd2cd296814fa411174f1b33cb941bfe6f28dbc4b55a051eb18
 ---

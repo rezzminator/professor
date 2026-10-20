@@ -40,11 +40,52 @@ func runGitGuard(t *testing.T, payload string) (int, string, string) {
 }
 
 func TestGitGuardAllowsGitterEverything(t *testing.T) {
-	for _, command := range []string{"git commit -m x", "git worktree add ../x"} {
-		t.Run(command, func(t *testing.T) {
-			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, "/tmp", "gitter"))
-			if code != 0 || stdout != "" {
-				t.Fatalf("code=%d stdout=%q stderr=%q, want allowed with no output", code, stdout, stderr)
+	for _, agentType := range []string{"gitter", "gpt-gitter"} {
+		for _, command := range []string{"git commit -m x", "git worktree add ../x"} {
+			t.Run(agentType+"/"+command, func(t *testing.T) {
+				code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, "/tmp", agentType))
+				if code != 0 || stdout != "" || stderr != "" {
+					t.Fatalf("code=%d stdout=%q stderr=%q, want allowed silently", code, stdout, stderr)
+				}
+			})
+		}
+	}
+}
+
+func TestGitGuardAllowsOnlyExactNativeWriterIdentities(t *testing.T) {
+	for _, test := range []struct {
+		name, metadata string
+		allow          bool
+	}{
+		{name: "gitter", metadata: `,"agent_type":"gitter"`, allow: true},
+		{name: "gpt-gitter", metadata: `,"agent_type":"gpt-gitter"`, allow: true},
+		{name: "omitted"},
+		{name: "empty", metadata: `,"agent_type":""`},
+		{name: "ordinary", metadata: `,"agent_type":"flights-foreman"`},
+		{name: "gitter lookalike", metadata: `,"agent_type":"gitter-api"`},
+		{name: "gpt-gitter lookalike", metadata: `,"agent_type":"gpt-gitter-extra"`},
+		{name: "canonical path", metadata: `,"agent_type":"agents/gitter"`},
+		{name: "native path", metadata: `,"agent_type":"agents/gpt-gitter"`},
+		{name: "native relative path", metadata: `,"agent_type":"./gpt-gitter"`},
+		{name: "native absolute path", metadata: `,"agent_type":"/agents/gpt-gitter"`},
+		{name: "native backslash path", metadata: `,"agent_type":"agents\\gpt-gitter"`},
+		{name: "whitespace", metadata: `,"agent_type":"gpt-gitter "`},
+		{name: "case", metadata: `,"agent_type":"Gpt-gitter"`},
+		{name: "role spoof", metadata: `,"agent_type":"flights-foreman","role":"gitter"`},
+		{name: "model spoof", metadata: `,"agent_type":"flights-foreman","model":"gpt-gitter"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload := `{"tool_name":"Bash","tool_input":{"command":"git commit -m x"}` + test.metadata + `}`
+			code, stdout, stderr := runGitGuard(t, payload)
+			if code != 0 || stderr != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want a silent successful hook", code, stdout, stderr)
+			}
+			if test.allow {
+				if stdout != "" {
+					t.Fatalf("stdout=%q, want allowed with no output", stdout)
+				}
+			} else if !strings.Contains(stdout, gitGuardDenied) {
+				t.Fatalf("stdout=%q, want a deny", stdout)
 			}
 		})
 	}

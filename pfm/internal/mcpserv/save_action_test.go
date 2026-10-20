@@ -245,7 +245,7 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 			name:        "invalid caller metadata",
 			request:     &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "missing"}}},
 			input:       SaveInput{Target: "./notes/chat.md", Transcript: "/transcripts/chat.jsonl"},
-			wantMessage: "has no live Codex tmux seat",
+			wantMessage: "has no live Codex seat",
 		},
 		{
 			name: "missing caller cwd",

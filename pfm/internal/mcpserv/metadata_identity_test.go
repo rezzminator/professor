@@ -546,7 +546,7 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 		context.Background(), mcp.Meta{"threadId": "thread-a"},
 	)
 	if err != nil || caller.valid || !caller.present ||
-		!strings.Contains(caller.detail, "matched 2 live Codex tmux seats") {
+		!strings.Contains(caller.detail, "matched 2 live Codex seats") {
 		t.Fatalf("duplicate caller resolution = %+v err=%v", caller, err)
 	}
 

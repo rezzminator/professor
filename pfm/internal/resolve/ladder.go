@@ -98,6 +98,9 @@ func (ladder Ladder) Resolve(
 	if options.RequiredEngine == "" && IsRawPane(name) {
 		socket := ""
 		if ladder.RequestIdentity != nil {
+			if ladder.RequestIdentity.Backend == nativeHerdrBackend {
+				return Seat{}, CodeUnknown, "raw tmux pane targets are unavailable to a Herdr caller; use a chat name or self", nil
+			}
 			socket = ladder.RequestIdentity.SocketPath
 			if socket == "" {
 				return Seat{}, CodeUnknown, "raw pane target request identity has no socket", nil

@@ -518,7 +518,14 @@ func (service *Service) chatCall(
 		ForceNow: input.ForceNow,
 		Then:     input.Then,
 	})
-	return nil, outputFromCall(result), err
+	output := outputFromCall(result)
+	if caller.present && !caller.valid && caller.detail != "" &&
+		strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) {
+		// The request did carry an identity that failed to bind: name why, so
+		// a binding failure never reads as "no identity was sent".
+		output.Message += " The request's own caller identity did not bind: " + caller.detail
+	}
+	return nil, output, err
 }
 
 // mcpUnsignedMessage restates pfmcall.ErrUnsigned's refusal for an MCP

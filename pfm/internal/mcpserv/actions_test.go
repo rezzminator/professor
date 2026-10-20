@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every
 // typed call and answers from its fields.
 type fakeChatVerbs struct {
+	listMu            sync.Mutex
 	lasts             []chat.LastRequest
 	statuses          []chat.StatusRequest
 	lists             []chat.ListRequest
@@ -69,6 +71,8 @@ func (fake *fakeChatVerbs) Status(ctx context.Context, request chat.StatusReques
 }
 
 func (fake *fakeChatVerbs) List(_ context.Context, request chat.ListRequest) (chat.ListResult, error) {
+	fake.listMu.Lock()
+	defer fake.listMu.Unlock()
 	fake.lists = append(fake.lists, request)
 	return fake.listed, fake.err
 }

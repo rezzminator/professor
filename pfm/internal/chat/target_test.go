@@ -279,6 +279,59 @@ func TestSeatIdentityIsOnlyTheLastRung(t *testing.T) {
 	}
 }
 
+func TestCodexSeatIdentityKeepsNativeAddressAndRejectsUnusableRows(t *testing.T) {
+	values := paths.Values{TmuxDir: "/jail/tmux"}
+	native := compose.Row{
+		Kind: compose.LiveCodex, ID: "thread-native", Name: "Native", SessionName: "Native",
+		Backend: "herdr", SeatID: "seat-cx", HerdrWorkspace: "w7",
+		Socket: "/jail/native/herdr.sock", PaneID: "w7:pW",
+	}
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*compose.Row)
+		duplicate bool
+		want      bool
+	}{
+		{name: "native", want: true},
+		{name: "unnamed", mutate: func(row *compose.Row) { row.SessionName = "" }, want: true},
+		{name: "relative", mutate: func(row *compose.Row) { row.Socket = "herdr.sock" }},
+		{name: "dead", mutate: func(row *compose.Row) { row.Kind = compose.ResumeCodex }},
+		{name: "killed", mutate: func(row *compose.Row) { row.Killed = true }},
+		{name: "backend failure", mutate: func(row *compose.Row) { row.BackendError = "HERDR UNREACHABLE" }},
+		{name: "wrong engine", mutate: func(row *compose.Row) { row.Kind = compose.LiveClaude }},
+		{name: "no pane", mutate: func(row *compose.Row) { row.PaneID = "" }},
+		{name: "ambiguous", duplicate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := native
+			if tc.mutate != nil {
+				tc.mutate(&row)
+			}
+			rows := []compose.Row{row}
+			if tc.duplicate {
+				rows = append(rows, row)
+			}
+			identity, found := codexSeatIdentity(rows, values, native.ID)
+			if found != tc.want {
+				t.Fatalf("identity = %+v found=%t, want found=%t", identity, found, tc.want)
+			}
+			if !found {
+				return
+			}
+			session := row.SessionName
+			if session == "" {
+				session = row.SeatID
+			}
+			if identity.Backend != row.Backend || identity.SeatID != row.SeatID ||
+				identity.HerdrWorkspace != row.HerdrWorkspace || identity.SocketPath != row.Socket ||
+				identity.SocketName != "herdr.sock" || identity.Pane != row.PaneID ||
+				identity.Session != session || identity.ID != row.ID || identity.Engine != "cx" {
+				t.Fatalf("native identity = %+v, want native row %+v", identity, row)
+			}
+		})
+	}
+}
+
 // TestTargetReportsAScanThatCouldNotLook drives the law through a real scan:
 // with the fleet's index database unopenable, Target returns a *TargetError
 // carrying the failure, not ErrUnknownChat — and a healthy scan that finds

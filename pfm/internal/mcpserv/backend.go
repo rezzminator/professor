@@ -637,27 +637,36 @@ func (current *backend) callerForRequest(
 		count++
 	}
 	if count == 0 {
-		caller.detail = fmt.Sprintf("MCP _meta.threadId %q has no live Codex tmux seat", threadID)
+		caller.detail = fmt.Sprintf("MCP _meta.threadId %q has no live Codex seat", threadID)
 		return caller, nil
 	}
 	if count != 1 {
-		caller.detail = fmt.Sprintf("MCP _meta.threadId %q matched %d live Codex tmux seats", threadID, count)
+		caller.detail = fmt.Sprintf("MCP _meta.threadId %q matched %d live Codex seats", threadID, count)
 		return caller, nil
 	}
-	socketPath, err := current.paths.SocketUnder(match.Socket)
+	if match.BackendError != "" {
+		caller.detail = fmt.Sprintf("MCP caller backend failed: %s", match.BackendError)
+		return caller, nil
+	}
+	// rowSocketPath keeps a native Herdr seat's absolute socket as it is; only
+	// a tmux row's socket is a name under the tmux directory.
+	socketPath, err := current.rowSocketPath(match)
 	if err != nil {
-		caller.detail = fmt.Sprintf("MCP _meta.threadId %q has an invalid tmux socket: %v", threadID, err)
+		caller.detail = fmt.Sprintf("MCP _meta.threadId %q has an invalid seat socket: %v", threadID, err)
 		return caller, nil
 	}
 	caller.row = match
 	caller.identity = resolve.Identity{
-		Session:    match.Session,
-		SocketPath: socketPath,
-		SocketName: filepath.Base(socketPath),
-		Pane:       match.Pane,
-		Engine:     string(match.Engine),
-		ID:         match.ID,
-		Source:     "mcp-thread-meta",
+		Backend:        match.Backend,
+		SeatID:         match.SeatID,
+		HerdrWorkspace: match.HerdrWorkspace,
+		Session:        match.Session,
+		SocketPath:     socketPath,
+		SocketName:     filepath.Base(socketPath),
+		Pane:           match.Pane,
+		Engine:         string(match.Engine),
+		ID:             match.ID,
+		Source:         "mcp-thread-meta",
 	}
 	caller.valid = true
 	return caller, nil

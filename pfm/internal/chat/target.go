@@ -512,24 +512,53 @@ func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Iden
 	if err != nil {
 		return resolve.Identity{}, false
 	}
-	for index := range scan.Output.Rows {
-		row := scan.Output.Rows[index]
-		if row.ID != thread || row.Socket == "" {
+	return codexSeatIdentity(scan.Output.Rows, scan.Env.Paths, thread)
+}
+
+func codexSeatIdentity(rows []compose.Row, values paths.Values, thread string) (resolve.Identity, bool) {
+	var match compose.Row
+	count := 0
+	for index := range rows {
+		row := rows[index]
+		if row.ID != thread || row.Kind != compose.LiveCodex || row.Killed || row.Socket == "" {
 			continue
 		}
-		// A seat with no live socket is no identity: better to say the sender
-		// is underivable than to hand back a handle nobody can reply to.
-		return resolve.Identity{
-			Session:    row.Socket,
-			SocketPath: filepath.Join(scan.Env.Paths.TmuxDir, row.Socket),
-			SocketName: row.Socket,
-			Engine:     string(pfmengine.Codex),
-			ID:         thread,
-			Source:     "codex-thread",
-			Recovered:  true,
-		}, true
+		match = row
+		count++
 	}
-	return resolve.Identity{}, false
+	if count != 1 || match.BackendError != "" {
+		return resolve.Identity{}, false
+	}
+	socketPath, err := targetSocket(values, match.Backend, match.Socket)
+	if err != nil {
+		return resolve.Identity{}, false
+	}
+	session := match.Socket
+	if match.Backend == spawn.BackendHerdr {
+		if match.PaneID == "" {
+			return resolve.Identity{}, false
+		}
+		session = match.SessionName
+		if session == "" {
+			session = match.SeatID
+		}
+		if session == "" {
+			return resolve.Identity{}, false
+		}
+	}
+	return resolve.Identity{
+		Backend:        match.Backend,
+		SeatID:         match.SeatID,
+		HerdrWorkspace: match.HerdrWorkspace,
+		Session:        session,
+		SocketPath:     socketPath,
+		SocketName:     filepath.Base(socketPath),
+		Pane:           match.PaneID,
+		Engine:         string(pfmengine.Codex),
+		ID:             thread,
+		Source:         "codex-thread",
+		Recovered:      true,
+	}, true
 }
 
 // targetSocket keeps native addresses absolute; only tmux sockets use the fleet root.

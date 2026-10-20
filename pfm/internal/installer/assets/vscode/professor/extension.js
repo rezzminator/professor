@@ -17,7 +17,7 @@
 // icon/colour cycle and env. The onDidOpenTerminal focus hook covers every entry point too.
 const vscode = require('vscode');
 const { startThemeSync, stateDir } = require('./theme');
-const { chooseTheme, pfmHere, runPfm, why } = require('./choose');
+const { chooseTheme, clientSide, notHere, pfmHere, runPfm, why } = require('./choose');
 const { startNativeThemes } = require('./native');
 
 // Terminals this activation handed to VS Code and has not yet seen open, keyed by the marker
@@ -114,19 +114,23 @@ function activate(context) {
   // pfm (choose.js); and a Professor theme accepted in VS Code's Color Theme picker is that same
   // pick, while a theme picked anywhere else switches the Color Theme to its Professor twin
   // (native.js). Both pick doors run only where pfm runs (pfmHere: a local window, or a remote one
-  // whose extension host has pfm); the professor.pfmHere context shows the command there alone.
+  // whose extension host has pfm); the professor.pfmHere context shows the command there alone, and
+  // a pick anywhere else says why (notHere). A remote window served from the client's side
+  // (clientSide) paints nothing either: the contract it would read is the client's.
   // syncTheme is the extension's exported API: apply the contract now, resolved once applied.
   const dir = stateDir();
-  const here = () => pfmHere(context.extension.extensionKind);
+  const kind = context.extension.extensionKind;
+  const here = () => pfmHere(kind);
+  const whyNot = () => notHere(kind);
   vscode.commands.executeCommand('setContext', 'professor.pfmHere', here()).then(undefined, (err) => {
     console.error(`Professor: setContext professor.pfmHere failed, Choose Theme stays hidden in a remote window: ${err?.message ?? err}`);
   });
-  const native = startNativeThemes({ dir, runPfm, why, here });
-  const theme = startThemeSync(dir, native.follow);
+  const native = startNativeThemes({ dir, runPfm, why, here, whyNot });
+  const theme = startThemeSync(dir, native.follow, clientSide(kind) ? whyNot() : '');
   context.subscriptions.push(
     native.disposable,
     theme.disposable,
-    vscode.commands.registerCommand('professor.chooseTheme', () => chooseTheme(here)),
+    vscode.commands.registerCommand('professor.chooseTheme', () => chooseTheme(here, whyNot)),
   );
   return { syncTheme: theme.syncTheme };
 }

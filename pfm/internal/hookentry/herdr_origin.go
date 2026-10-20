@@ -1,6 +1,7 @@
 package hookentry
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,45 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
+
+func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrDeps) int {
+	reporter := &herdrReporter{deps: deps, stderr: stderr, seq: uint64(deps.now().UnixNano())}
+	options, err := parseHerdrOptions(args)
+	if err != nil {
+		reporter.warn("pfm internal herdr-state: %v\n%s", err, herdrStateUsage)
+		return 1
+	}
+	reporter.options = options
+	reporter.session = options.session
+	var payload herdrPayload
+	if !options.event.FiredByTmux() {
+		// Read every identity field before reporting, even after a large response.
+		payload, err = readHerdrPayload(stdin)
+		if err != nil {
+			const decodeFailure = "pfm internal herdr-state %s engine=%s: decode hook payload (skipped): %v"
+			reporter.warn(decodeFailure, options.event, options.engine, err)
+			return 0
+		}
+		if threadWithoutRollout(options.engine, payload) {
+			return 0
+		}
+	}
+	if payload.AgentID != "" && options.event != herdr.EventAgentStart && options.event != herdr.EventAgentStop {
+		return 0
+	}
+	if options.event == herdr.EventAgentStart || options.event == herdr.EventAgentStop {
+		if options.engine != pfmengine.Claude || payload.SessionID == "" || payload.AgentID == "" {
+			reporter.warn("Claude subagent lifecycle requires session_id and agent_id (skipped)")
+			return 0
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	defer cancel()
+	if err := reporter.runActivity(ctx, payload); err != nil {
+		reporter.warn("pfm internal herdr-state %s: %v (fail-open)", options.event, err)
+	}
+	return 0
+}
 
 // tmuxOrigin settles the tmux server and pane this run reports through. A
 // tmux-fired verb names its socket; an engine-fired event reads $TMUX

@@ -17,6 +17,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/sky"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
@@ -243,6 +244,13 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		l3 = appendSegment(l3, codexLine)
 	}
 	l3 = appendRateSegments(l3, now, data)
+	if runtime.Engine == pfmengine.Claude {
+		weekly := codexWeeklyLine(runtime, now, l3)
+		if l3 != "" {
+			l3 += "\n" + reset
+		}
+		l3 += weekly
+	}
 
 	if l3 != "" {
 		return reset + l1 + "\n" + reset + l2 + "\n" + reset + l3 + "\n", nil
@@ -748,7 +756,9 @@ func statuslineFileAge(path string, now time.Time) time.Duration {
 }
 
 func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Duration) {
-	if runtime.Spawn == nil || statuslineFileAge(cachePath, runtime.now()) <= ttl {
+	attemptPath := cachePath + ".attempt"
+	if runtime.Spawn == nil || statuslineFileAge(cachePath, runtime.now()) <= ttl ||
+		statuslineFileAge(attemptPath, runtime.now()) <= ttl {
 		return
 	}
 	lockPath := strings.TrimSuffix(cachePath, ".json") + ".lock"
@@ -760,21 +770,24 @@ func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Du
 		return
 	}
 	_ = lock.Close()
+	// Bound failed/missing-Codex retries too; an absent cache must not spawn
+	// another app-server on every Claude statusline update after a failed fetch.
+	if err := atomicfile.Write(attemptPath, nil, 0o600); err != nil {
+		_ = os.Remove(lockPath)
+		obs.Logger(context.Background()).
+			Warn("record statusline refresh attempt", "kind", kind, "path", attemptPath, obs.FieldErr, err.Error())
+		return
+	}
+	if err := os.Chtimes(attemptPath, runtime.now(), runtime.now()); err != nil {
+		_ = os.Remove(lockPath)
+		obs.Logger(context.Background()).
+			Warn("timestamp statusline refresh attempt", "kind", kind, "path", attemptPath, obs.FieldErr, err.Error())
+		return
+	}
 	if err := runtime.Spawn(kind); err != nil {
 		_ = os.Remove(lockPath)
+		obs.Logger(context.Background()).Warn("start statusline refresh", "kind", kind, obs.FieldErr, err.Error())
 	}
-}
-
-type codexUsageCache struct {
-	Primary   *codexWindow `json:"primary"`
-	Secondary *codexWindow `json:"secondary"`
-	PlanType  string       `json:"planType"`
-}
-
-type codexWindow struct {
-	UsedPercent        float64 `json:"usedPercent"`
-	WindowDurationMins int64   `json:"windowDurationMins"`
-	ResetsAt           int64   `json:"resetsAt"`
 }
 
 func codexSegment(

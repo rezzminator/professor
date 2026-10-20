@@ -197,8 +197,8 @@ func TestHerdrWatchReportsIdleOnTheInterruptEntry(t *testing.T) {
 			if got := rig.herdr.calls()[sent:]; !slices.Equal(got, want) {
 				t.Fatalf("requests after the interrupt = %q, want %q", got, want)
 			}
-			if state := rig.tmux.storedState(t); state.State != "idle" || state.Seq != blocked.Seq+1 {
-				t.Fatalf("stored = %q, want idle at seq %d", rig.tmux.stored, blocked.Seq+1)
+			if state := rig.tmux.storedState(t); state.State != "idle" || state.Seq <= blocked.Seq {
+				t.Fatalf("stored = %q, want idle above blocked seq %d", rig.tmux.stored, blocked.Seq)
 			}
 			if _, err := os.Stat(rig.record()); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("watch record after the idle: %v, want it gone", err)

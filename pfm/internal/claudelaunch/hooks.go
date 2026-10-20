@@ -81,6 +81,8 @@ func HookTemplates(home string) []Hook {
 			Async:   true,
 		},
 		{Event: "Stop", Command: herdrCommand(binary, herdr.EventIdle), Name: "herdr-idle"},
+		{Event: "SubagentStart", Command: herdrCommand(binary, herdr.EventAgentStart), Name: "herdr-agent-start"},
+		{Event: "SubagentStop", Command: herdrCommand(binary, herdr.EventAgentStop), Name: "herdr-agent-stop"},
 		{Event: "SessionEnd", Command: herdrCommand(binary, herdr.EventEnd), Name: "herdr-end"},
 	}
 }

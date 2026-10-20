@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -545,6 +546,133 @@ func TestHerdrRawOwnershipRevokedBeforePaste(t *testing.T) {
 	if err != nil || got.Typed || got.Status != statusUndelivered || got.Code != CodeUndelivered ||
 		!strings.Contains(got.Message, "nothing was typed") || !strings.Contains(got.Message, "ownership unproved") {
 		t.Fatalf("pre-input revocation receipt=%+v err=%v", got, err)
+	}
+}
+
+// agent.prompt may acknowledge input before Claude's hooks publish a turn.
+// Only a new, same-agent working/completion event may upgrade that receipt.
+func TestHerdrNativeDeliveryWaitsForTurnEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name, status, detail string
+	}{
+		{"delayed-working", statusDelivered, "turn confirmed"},
+		{"delayed-completion", statusDelivered, "turn confirmed"},
+		{"unchanged", statusDeliveredUnproven, "no started turn within"},
+		{"idle-sequence-only", statusDeliveredUnproven, "no started turn within"},
+		{"stale-working", statusDeliveredUnproven, "no started turn within"},
+		{"stale-completion", statusDeliveredUnproven, "no started turn within"},
+		{"replaced-terminal", statusDeliveredUnproven, "identity changed"},
+		{"replaced-session", statusDeliveredUnproven, "identity changed"},
+		{"read-refused", statusDeliveredUnproven, "proof_read_failed"},
+		{"malformed", statusDeliveredUnproven, "unexpected result type"},
+		{"blocked", statusDeliveredUnproven, "blocked"},
+		{"unknown", statusDeliveredUnproven, "unknown"},
+		{"cancelled", statusDeliveredUnproven, "context canceled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			prompted, reads := false, 0
+			socket := newNativeSocket(t, func(req nativeRequest) (any, string) {
+				if req.Method == "pane.read" {
+					return nativePaneRead(req, "❯ "), ""
+				}
+				kind := "agent_info"
+				if req.Method == "agent.prompt" {
+					prompted, kind = true, "agent_prompted"
+				} else if prompted {
+					reads++
+				}
+				result := nativeAgent(kind, "idle")
+				agent := result["agent"].(map[string]any)
+				agent["state_change_seq"], agent["completion_seq"] = 8, 3
+				agent["agent_session"] = map[string]string{
+					"source": "hook", "agent": "claude", "kind": "session_id", "value": "one",
+				}
+				if reads > 0 {
+					switch test.name {
+					case "delayed-working":
+						if reads > 1 {
+							agent["agent_status"], agent["state_change_seq"] = "working", 9
+						}
+					case "delayed-completion":
+						if reads > 1 {
+							agent["state_change_seq"], agent["completion_seq"] = 10, 10
+						}
+					case "idle-sequence-only":
+						agent["state_change_seq"] = 9
+					case "stale-working":
+						agent["agent_status"] = "working"
+					case "stale-completion":
+						agent["completion_seq"] = 7 // Newer than 3, but before the pre-submit frontier 8.
+					case "replaced-terminal":
+						agent["terminal_id"], agent["agent_status"], agent["state_change_seq"] = "replacement", "working", 9
+					case "replaced-session":
+						agent["agent_session"].(map[string]string)["value"] = "two"
+						agent["agent_status"], agent["state_change_seq"] = "working", 9
+					case "read-refused":
+						return nil, "proof_read_failed"
+					case "malformed":
+						return map[string]any{"type": "surprise"}, ""
+					case "blocked", "unknown":
+						agent["agent_status"] = test.name
+					}
+				}
+				return result, ""
+			})
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
+			engine := nativeEngine(t, target)
+			engine.options.ProofSettle, engine.options.Poll = time.Second, 250*time.Millisecond
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			clk := &birthPublishClock{Clock: clock.Real, now: clock.Real.Now()}
+			if test.name == "cancelled" {
+				var cancelAfterPrompt func()
+				cancelAfterPrompt = func() {
+					for _, req := range socket.calls() {
+						if req.Method == "agent.prompt" {
+							cancel()
+							return
+						}
+					}
+					clk.publish = cancelAfterPrompt
+				}
+				clk.publish = cancelAfterPrompt
+			}
+			engine.options.Clock = clk
+			request := Request{Message: "hello"}
+			if test.status == statusDelivered {
+				request.Then = []string{"follow up"}
+			}
+			got, err := engine.CallTarget(ctx, target, request)
+			if err != nil || got.Code != 0 || !got.Typed || got.Status != test.status ||
+				!strings.Contains(got.Message, test.detail) {
+				t.Fatalf(
+					"post-ack evidence receipt=%+v err=%v; want %s containing %q",
+					got,
+					err,
+					test.status,
+					test.detail,
+				)
+			}
+			if test.status == statusDelivered {
+				spawned := engine.spawner.(*fakeSpawner).spawned()
+				if len(spawned) != 1 || spawned[0].herdrTurn == nil || !spawned[0].herdrTurn.SawWorking ||
+					spawned[0].herdrTurn.StateChangeSeq != 8 {
+					t.Fatalf("then waiter lost the acknowledged frontier or the observed turn: %+v", spawned)
+				}
+			}
+			// The receipt is refined by observation, never by re-submitting.
+			prompts, observations := 0, 0
+			for _, req := range socket.calls() {
+				if req.Method == "agent.prompt" {
+					prompts++
+				} else if req.Method == "agent.get" && prompts > 0 {
+					observations++
+				}
+			}
+			if prompts != 1 || observations == 0 {
+				t.Fatalf("want one prompt followed by proof reads; prompts=%d reads=%d", prompts, observations)
+			}
+		})
 	}
 }
 

@@ -22,13 +22,30 @@ function pfmBinary() {
   return path.join(os.homedir(), '.local', 'bin', 'pfm');
 }
 
+// clientSide says whether this is a remote window whose extension host is the client's (UI) side:
+// package.json's extensionKind ["workspace"] never puts Professor there, but a client copy older
+// than 0.6.0 ("ui", whose kind VS Code takes over the remote copy's) or a remote.extensionKind
+// override does, and there pfm, the contract and the Claude chats are the client's, not the window's.
+function clientSide(extensionKind) {
+  return vscode.env.remoteName !== undefined && extensionKind !== vscode.ExtensionKind?.Workspace;
+}
+
+// notHere is why a remote window keeps out of pfm, and what the user does about it.
+function notHere(extensionKind) {
+  const remote = vscode.env.remoteName;
+  if (clientSide(extensionKind)) {
+    return `this ${remote} window runs Professor on this computer, not on the ${remote} host its Claude chats live on: run pfm install on the ${remote} host, update Professor on this computer (pfm install) or drop its remote.extensionKind entry for professor.professor, then reload the window`;
+  }
+  return `the ${remote} host has no ${pfmBinary()}: run pfm install there, then reload the window`;
+}
+
 // pfmHere says whether this window's Claude settings are the ones the extension host's pfm sets:
 // always in a local window; in a remote window only when the extension runs on the remote side
 // (extensionKind Workspace) and that machine has the installed pfm. A remote window served from
-// the UI side, or whose remote host has no pfm, keeps out.
+// the client's side, or whose remote host has no pfm, keeps out.
 function pfmHere(extensionKind) {
   if (vscode.env.remoteName === undefined) return true;
-  if (extensionKind === undefined || extensionKind !== vscode.ExtensionKind?.Workspace) return false;
+  if (clientSide(extensionKind)) return false;
   try {
     fs.accessSync(pfmBinary(), fs.constants.X_OK);
     return true;
@@ -89,12 +106,10 @@ function detail(theme) {
   return parts.length ? parts.join(' · ') : undefined;
 }
 
-// chooseTheme is the command's handler; here is pfmHere bound to this extension host.
-async function chooseTheme(here) {
+// chooseTheme is the command's handler; here is pfmHere and whyNot notHere, bound to this extension host.
+async function chooseTheme(here, whyNot) {
   if (!here()) {
-    vscode.window.showWarningMessage(
-      `Professor: Choose Theme runs where pfm runs: this ${vscode.env.remoteName} window's extension host has no ${pfmBinary()} of its own, so the Claude settings it would set are not ${vscode.env.remoteName}'s.`,
-    );
+    vscode.window.showWarningMessage(`Professor: Choose Theme sets no Claude theme here — ${whyNot()}.`);
     return;
   }
   let list;
@@ -136,4 +151,4 @@ async function chooseTheme(here) {
   );
 }
 
-module.exports = { chooseTheme, pfmHere, runPfm, why };
+module.exports = { chooseTheme, clientSide, notHere, pfmHere, runPfm, why };

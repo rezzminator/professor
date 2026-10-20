@@ -99,14 +99,20 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, 
 		tools = cTools + strconv.Itoa(spend.tools) + reset
 	}
 	if books.ledger.Present {
-		booked := ledgerSpend(books.ledger.Rows)
+		native := ledgerSpend(books.ledger.Rows)
+		booked := spend.withLedger(native)
 		before := preLedgerUSD(books.ledger.Rows, spend)
+		if supplement := booked.usd - native.usd; supplement > 0 {
+			var ambiguous bool
+			before, ambiguous = beforeGatewayOverlap(books.ledger.Rows, spend, supplement)
+			booked.partial = booked.partial || ambiguous
+		}
 		one := completeSpend(booked.usd, before, total)
 		line := spendDollars(one, true) + spendTail(booked.in, booked.out, tools)
 		if booked.partial {
 			line += cWarn + "+?" + reset
 		}
-		return line + markerText(spendMarker(books, one, 0, false, before))
+		return line + markerText(spendMarker(books, one, 0, false, before)) + booked.gateway.note()
 	}
 	if !readable {
 		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset +
@@ -115,13 +121,16 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, 
 	logged := spend.priced > 0 || !spend.partial
 	line := spendDollars(spend.usd, logged)
 	if total > 0 {
+		if spend.gateway.present {
+			total = max(total, spend.usd)
+		}
 		line = spendDollars(total, true)
 	}
 	line += spendTail(spend.in, spend.out, tools)
 	if spend.partial && logged {
 		line += cWarn + "+?" + reset
 	}
-	return line + markerText(spendMarker(books, total, spend.usd, logged, 0))
+	return line + markerText(spendMarker(books, total, spend.usd, logged, 0)) + spend.gateway.note()
 }
 
 // spendTail is "1.0M/5.1K/46": prompt tokens, output tokens, tool calls.

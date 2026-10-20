@@ -90,6 +90,9 @@ const (
 	EventBlocked Event = "blocked"
 	// EventIdle is the agent ready for input.
 	EventIdle Event = "idle"
+	// Claude lifecycle hooks name the agent whose membership changed.
+	EventAgentStart Event = "agent-start"
+	EventAgentStop  Event = "agent-stop"
 	// EventEnd is the user quitting: the pane is released.
 	EventEnd Event = "end"
 	// EventNotification carries a Claude Notification payload and maps by its
@@ -123,7 +126,7 @@ func (event Event) FiredByTmux() bool {
 func Events() []Event {
 	return []Event{
 		EventStart, EventWorking, EventBlocked, EventIdle, EventEnd, EventNotification,
-		EventAttach, EventSync, EventDetach, EventName, EventTitle,
+		EventAttach, EventSync, EventDetach, EventName, EventTitle, EventAgentStart, EventAgentStop,
 	}
 }
 

@@ -155,8 +155,13 @@ func (engine *Engine) callHerdr(
 	base.Status = statusDelivered
 	base.Message = fmt.Sprintf("called LIVE into %q — Herdr agent_prompted", target.Pane)
 	if !started {
-		base.Status = statusDeliveredUnproven
-		base.Message += " — acknowledged input but proved no started turn"
+		if proofErr := engine.confirmHerdrTurn(ctx, target, prompted, boundary, lock); proofErr != nil {
+			base.Status = statusDeliveredUnproven
+			base.Message += fmt.Sprintf(" — acknowledged input but proved no started turn: %v", proofErr)
+		} else {
+			turn.SawWorking = true
+			base.Message += " — Herdr turn confirmed"
+		}
 	}
 	for _, warning := range prepared.Warnings {
 		base.Message += " — WARNING: " + warning
@@ -168,6 +173,69 @@ func (engine *Engine) callHerdr(
 		}
 	}
 	return base, nil
+}
+
+// CaptureHerdrVisible reads a proved pane's current frame, not its recent
+// output history. Dialog checks must not judge an already dismissed selector.
+func CaptureHerdrVisible(ctx context.Context, target Target) (string, error) {
+	return herdrRawCapture(ctx, target, "")
+}
+
+// confirmHerdrTurn observes the acknowledged agent without submitting again.
+// Hook publication can lag agent.prompt's snapshot; idle sequence changes alone
+// still cannot prove a turn. The existing proof-settle budget bounds all reads.
+func (engine *Engine) confirmHerdrTurn(
+	ctx context.Context, target Target, prompted herdrAgentResult, boundary uint64, lock *targetLock,
+) error {
+	ctx, cancel := context.WithTimeout(ctx, engine.options.ProofSettle)
+	defer cancel()
+	deadline := engine.options.Clock.Now().Add(engine.options.ProofSettle)
+	for {
+		if !engine.options.Clock.Now().Before(deadline) {
+			return fmt.Errorf("no started turn within %s", engine.options.ProofSettle)
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("confirm Herdr turn for %s: %w", target.Pane, err)
+		}
+		proved, err := ProveHerdrTarget(ctx, target)
+		if err != nil {
+			return fmt.Errorf("confirm Herdr turn ownership for %s: %w", target.Pane, err)
+		}
+		if proved.Pane != target.Pane || proved.SocketPath != target.SocketPath {
+			return fmt.Errorf("confirm Herdr turn for %s: acknowledged pane changed", target.Pane)
+		}
+		body, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
+		if err != nil {
+			return fmt.Errorf("confirm Herdr turn read for %s: %w", target.Pane, err)
+		}
+		observed, err := decodeHerdrAgent(body, "agent_info", target)
+		if err != nil {
+			return fmt.Errorf("confirm Herdr turn for %s: %w", target.Pane, err)
+		}
+		if observed.Agent.Terminal != prompted.Agent.Terminal ||
+			!sameHerdrSession(prompted.Agent.AgentSession, observed.Agent.AgentSession) {
+			return fmt.Errorf("confirm Herdr turn for %s: agent identity changed", target.Pane)
+		}
+		if observed.Agent.Status == herdrBlocked || observed.Agent.Status == herdrUnknown {
+			return fmt.Errorf("confirm Herdr turn for %s: agent is %s", target.Pane, observed.Agent.Status)
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("confirm Herdr turn for %s: %w", target.Pane, err)
+		}
+		if observed.Agent.Status == herdrWorking && observed.Agent.StateChangeSeq > boundary ||
+			observed.Agent.CompletionSeq != nil && *observed.Agent.CompletionSeq > boundary {
+			return nil
+		}
+		if err := lock.beat(); err != nil {
+			return fmt.Errorf("hold Herdr turn proof lock for %s: %w", target.Pane, err)
+		}
+		if err := engine.options.Clock.Sleep(
+			ctx,
+			min(engine.options.Poll, deadline.Sub(engine.options.Clock.Now())),
+		); err != nil {
+			return fmt.Errorf("no started turn within %s: %w", engine.options.ProofSettle, err)
+		}
+	}
 }
 
 func (engine *Engine) callHerdrRaw(

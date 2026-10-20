@@ -75,6 +75,76 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
   });
 }
 
+// Eligibility is read from source headers, never inferred from the emitted roster.
+for (const [scope, directory] of [
+  ['root', '.claude/agents'], ['child', 'demo-child/.claude/agents'],
+  ['nested', '.claude/agents/team'],
+]) {
+  for (const [name, header, capabilities, codexExtra, openCodeExtra] of [
+    ['Codex excluded', 'engines:\n  codex: false', [], 0, 1],
+    ['OpenCode excluded', 'engines:\n  opencode: false', [], 1, 0],
+    ['both excluded', 'engines:\n  codex: false\n  opencode: false', [], 0, 0],
+    ['engine settings stay eligible', 'engines:\n  codex:\n    model: gpt-6-luna\n  opencode:\n    model: openai/gpt-6-luna', [], 1, 1],
+    ['unmet requirement', 'requires: [gpt-agents]', [], 0, 0],
+    ['all requirements needed', 'requires: [gpt-agents, another]', ['gpt-agents'], 0, 0],
+    ['requirements met and trimmed', 'requires: [" gpt-agents ", another]', [' gpt-agents ', 'another'], 1, 1],
+    ['no requirements', 'requires: []', [], 1, 1],
+    ['requirements met but engine excluded', 'requires: [gpt-agents]\nengines:\n  codex: false\n  opencode: false', ['gpt-agents'], 0, 0],
+  ]) {
+    test(`source eligibility ${scope}: ${name}`, (t) => {
+      const f = fixture(t, {}, { version: 1 }, { targets: { capabilities } }, {
+        [`${directory}/eligible.md`]: `---\nname: eligible\ndescription: Eligibility fixture\nmodel: smart\n${header}\n---\nRead.\n`,
+      });
+      const result = check(f);
+      assert.equal(result.status, 0, result.out);
+      assert.ok(result.out.includes(`${2 + codexExtra} Codex and ${2 + (scope === 'nested' ? 0 : openCodeExtra)} OpenCode agents match source`), result.out);
+    });
+  }
+  for (const [runtime, extension, mirror] of [
+    ['codex', '.toml', '.codex/agents'], ['opencode', '.md', '.opencode/agent'],
+  ]) {
+    if (scope === 'nested' && runtime === 'opencode') continue;
+    test(`missing eligible ${runtime} ${scope} output fails despite clean compiler`, (t) => {
+      const f = fixture(t, {}, { version: 1 }, { targets: { capabilities: ['gpt-agents'] } }, {
+        [`${directory}/eligible.md`]: '---\nname: eligible\ndescription: Eligible role\nmodel: smart\nrequires: [gpt-agents]\nengines:\n  codex: {}\n  opencode: {}\n---\nRead.\n',
+      });
+      const name = `eligible${scope === 'child' ? '-demo-child' : ''}${extension}`;
+      unlinkSync(join(f.root, mirror, name));
+      cleanVerdictStub(f);
+      const result = check(f);
+      assert.equal(result.status, 1, result.out);
+      assert.ok(result.out.includes(`${runtime}: source agent missing from generated roster: ${name}`), result.out);
+      assert.doesNotMatch(result.out, /agent-roster: clean/);
+    });
+  }
+}
+
+for (const header of ['engines:\n  codex: false\n  opencode: false', 'requires: [gpt-agents]']) {
+  test(`enumerated sources can all be intentionally ineligible: ${header.split(':')[0]}`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, {
+      '.claude/agents/alpha.md': `---\nname: alpha\nmodel: smart\n${header}\n---\nRead.\n`,
+      'demo-child/.claude/agents/beta.md': `---\nname: beta\nmodel: smart\n${header}\n---\nRead.\n`,
+    });
+    mkdirSync(join(f.root, '.codex/agents'), { recursive: true });
+    mkdirSync(join(f.root, '.opencode/agent'), { recursive: true });
+    const result = check(f);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.out, /0 Codex and 0 OpenCode agents match source/);
+  });
+}
+
+for (const capabilities of [[], ['gpt-agents']]) {
+  test(`five shipped local GPT registrations respect engine and capability policy: ${capabilities.length ? 'enabled' : 'disabled'}`, (t) => {
+    const files = Object.fromEntries(['gpt-changelogger', 'gpt-gitter', 'gpt-pcm', 'gpt-releaser', 'gpt-themer'].map((name) => {
+      const path = `.claude/agents/${name}.md`;
+      return [path, readFileSync(join(ROOT, path), 'utf8')];
+    }));
+    const result = check(fixture(t, {}, { version: 1 }, { targets: { capabilities } }, files));
+    assert.equal(result.status, 0, result.out);
+    assert.ok(result.out.includes(`${2 + capabilities.length} Codex and ${2 + capabilities.length} OpenCode agents match source`), result.out);
+  });
+}
+
 for (const [name, path, header, status, message] of [
   ["project from", ".claude/agents/local.md", "from: general-purpose", 5, /SOURCE REJECTED — python3 .*machine scope only/],
   ["project abstract", ".claude/agents/local.md", "abstract: true", 5, /SOURCE REJECTED — python3 .*machine scope only/],

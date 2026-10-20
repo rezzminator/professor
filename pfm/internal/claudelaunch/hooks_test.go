@@ -9,8 +9,8 @@ import (
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
 	hooks := HookTemplates(home)
-	if len(hooks) != 21 {
-		t.Fatalf("registrations=%d, want 21", len(hooks))
+	if len(hooks) != 23 {
+		t.Fatalf("registrations=%d, want 23", len(hooks))
 	}
 	for _, hook := range hooks {
 		if !strings.HasPrefix(hook.Command, home+"/.local/bin/pfm ") {
@@ -56,6 +56,8 @@ func TestHerdrReporterRowsCoverTheClaudeLifecycle(t *testing.T) {
 			Command: binary + "notification", Name: "herdr-notification", Async: true,
 		},
 		{Event: "Stop", Command: binary + "idle", Name: "herdr-idle"},
+		{Event: "SubagentStart", Command: binary + "agent-start", Name: "herdr-agent-start"},
+		{Event: "SubagentStop", Command: binary + "agent-stop", Name: "herdr-agent-stop"},
 		{Event: "SessionEnd", Command: binary + "end", Name: "herdr-end"},
 	}
 	var got []Hook

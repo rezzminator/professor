@@ -447,3 +447,133 @@ func TestRenderContextLineReadsEachTranscriptOnce(t *testing.T) {
 		}
 	}
 }
+
+// A subscription-backed gateway response has no provider dollar charge in the native
+// ledger. Its published API-equivalent price must survive that ledger.
+func TestGatewaySpendSurvivesNativeLedger(t *testing.T) {
+	const final = `{"type":"assistant","message":{"id":"g","model":"gpt-6-sol-fast[1m]","usage":{"input_tokens":100000,"output_tokens":10000,"cache_read_input_tokens":50000}}}`
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte(final+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prices := testPrices(t)
+	scanned, err := readTranscriptSpend(path, prices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		rows []costledger.Row
+		want string
+	}{
+		{"native only", []costledger.Row{{Model: "claude-sonnet-5-5", CostUSDMicros: micros(1000000), InputTokens: 100}}, "💰$1.31/150.1K/10.0K/0 API-eq"},
+		{"zero gateway ledger", []costledger.Row{{Model: "gpt-6-sol", CostUSDMicros: micros(0), InputTokens: 100000, CacheReadTokens: 50000, OutputTokens: 10000}}, "💰$0.31/150.0K/10.0K/0 API-eq"},
+		{"already priced", []costledger.Row{{Model: "gpt-6-sol", CostUSDMicros: micros(310000), InputTokens: 100000, CacheReadTokens: 50000, OutputTokens: 10000}}, "💰$0.31/150.0K/10.0K/0 API-eq"},
+		{"no ledger", nil, "💰$0.31/150.0K/10.0K/0 API-eq"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			books := ledgerBooks{ledger: costledger.Ledger{Present: tc.rows != nil, Rows: tc.rows}}
+			got := styleANSI.ReplaceAllString(
+				sessionSpendSegment(input{TranscriptPath: path}, prices, books, &scanned),
+				"",
+			)
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+			if tc.rows != nil {
+				child := scanned.withLedger(ledgerSpend(tc.rows))
+				got = styleANSI.ReplaceAllString(spendSegment(agentActivity{spend: child}), "")
+				want := strings.Replace(tc.want, "💰", "Σ", 1)
+				if got != want {
+					t.Fatalf("subagent got %q, want %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestGatewayStreamingEstimateIsNotBilled(t *testing.T) {
+	scan := newSpendScan(testPrices(t))
+	scan.line(
+		[]byte(
+			`{"type":"assistant","message":{"id":"g","model":"gpt-6-sol","usage":{"input_tokens":900000,"output_tokens":0}}}`,
+		),
+	)
+	spend := scan.total()
+	if spend.usd != 0 || spend.in != 0 || !spend.partial {
+		t.Fatalf("opening estimate billed as spend: %+v", spend)
+	}
+	got := styleANSI.ReplaceAllString(spendSegment(agentActivity{spend: spend}), "")
+	if got != "Σ$?/0/0/0 API-eq" {
+		t.Fatalf("incomplete gateway must be explicit: %q", got)
+	}
+	scan.line(
+		[]byte(
+			`{"type":"assistant","message":{"id":"g","model":"gpt-6-sol","usage":{"input_tokens":100000,"output_tokens":10000,"cache_read_input_tokens":50000}}}`,
+		),
+	)
+	spend = scan.total()
+	if spend.usd != 0.31 || spend.in != 150000 || spend.out != 10000 || spend.partial {
+		t.Fatalf("final usage did not replace estimate: %+v", spend)
+	}
+}
+
+func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	const final = `{"type":"assistant","message":{"id":"g","model":"gpt-6-sol","usage":{"input_tokens":100000,"output_tokens":10000,"cache_read_input_tokens":50000}}}`
+	if err := os.WriteFile(path, []byte(final+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spend, err := readTranscriptSpend(path, testPrices(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spend.costStates = []costledger.CostState{{USD: 1.31}}
+	books := ledgerBooks{
+		ledger: costledger.Ledger{
+			Present: true,
+			Rows:    []costledger.Row{{Model: "claude-sonnet-5-5", CostUSDMicros: micros(1000000)}},
+		},
+	}
+	got := styleANSI.ReplaceAllString(
+		sessionSpendSegment(input{TranscriptPath: path}, testPrices(t), books, &spend),
+		"",
+	)
+	if !strings.HasPrefix(got, "💰$1.31/") || !strings.Contains(got, "+?") {
+		t.Fatalf("ambiguous restored gateway dollars must remain a labeled floor: %q", got)
+	}
+	var data input
+	data.TranscriptPath = path
+	data.Cost.TotalCostUSD = 0.01
+	spend.costStates = nil
+	got = styleANSI.ReplaceAllString(sessionSpendSegment(data, testPrices(t), ledgerBooks{}, &spend), "")
+	if !strings.HasPrefix(got, "💰$0.31/") {
+		t.Fatalf("harness side-call erased gateway price: %q", got)
+	}
+}
+
+func TestGatewayPostSnapshotSpendKeepsNativePreLedger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	body := `{"type":"assistant","timestamp":"2026-10-20T12:10:00Z","message":{"id":"g","model":"gpt-6-sol","usage":{"input_tokens":100000,"output_tokens":10000,"cache_read_input_tokens":50000}}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spend, err := readTranscriptSpend(path, testPrices(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	spend.costStates = []costledger.CostState{{USD: 5, At: at, Until: at.Add(time.Minute)}}
+	books := ledgerBooks{ledger: costledger.Ledger{Present: true, Rows: []costledger.Row{
+		{Model: "claude-sonnet-5-5", TS: "2026-10-20T12:05:00Z", CostUSDMicros: micros(1000000)},
+		{Model: "gpt-6-sol", TS: "2026-10-20T12:10:00Z", CostUSDMicros: micros(0)},
+	}}}
+	var data input
+	data.TranscriptPath = path
+	data.Cost.TotalCostUSD = 6
+	got := styleANSI.ReplaceAllString(sessionSpendSegment(data, testPrices(t), books, &spend), "")
+	if !strings.HasPrefix(got, "💰$6.31/") || strings.Contains(got, "+?") ||
+		!strings.Contains(got, "pre-ledger API-eq") {
+		t.Fatalf("new gateway call must add to known native history: %q", got)
+	}
+}

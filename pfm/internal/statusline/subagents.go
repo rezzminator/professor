@@ -761,7 +761,13 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, nil)
 		return
 	}
-	spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, &usage.UsageBlock)
+	spend.record(
+		entry.Message.ID,
+		entry.RequestID,
+		entry.Message.Model,
+		usage,
+		entry.Timestamp.Format(time.RFC3339Nano),
+	)
 	// A line that reports no cache counters is a call still streaming (the
 	// gateway's message_start carries its whole-prompt estimate in
 	// input_tokens and nothing else): reading it as a call would drop the

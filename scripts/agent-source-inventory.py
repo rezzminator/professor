@@ -73,7 +73,8 @@ def inventory(directory, project=False, codex=False):
         if codex and isinstance(engines, dict) and engines.get("codex") is False:
             continue
         rows.append({"name": path.stem, "path": str(path), "kind": kind,
-                     "from": parent, "model": front.get("model")})
+                     "from": parent, "model": front.get("model"),
+                     "engines": engines, "requires": front.get("requires", [])})
     by_name = {row["name"]: row for row in rows}
     for row in rows:
         root = row

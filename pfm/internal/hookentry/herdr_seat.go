@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -106,7 +107,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if payload.SessionID != "" {
 		seat.SessionID = payload.SessionID
 	}
-	promptSubmitted := payload.HookEventName == "UserPromptSubmit" ||
+	promptSubmitted := payload.HookEventName == claudelaunch.HookEventUserPromptSubmit ||
 		(reporter.options.engine == pfmengine.OpenCode && payload.HookEventName == "chat.message")
 	if reporter.options.event == herdr.EventWorking && promptSubmitted && !payload.IsInterrupt {
 		seat.LostNote = ""
@@ -135,7 +136,12 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if err := reporter.reserveNativeOwnership(seat, seq); err != nil {
 		return true, err
 	}
-	if err := reporter.send(ctx, herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane}, action, seq); err != nil {
+	if err := reporter.send(
+		ctx,
+		herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID},
+		action,
+		seq,
+	); err != nil {
 		return true, err
 	}
 	if reporter.options.event != herdr.EventEnd {

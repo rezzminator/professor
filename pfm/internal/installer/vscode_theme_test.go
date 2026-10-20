@@ -49,11 +49,13 @@ let refuseWorkspace = false;
 let excluded = scenario.peacock ? scenario.peacock.excluded : [];
 const configListeners = [];
 const watched = [];
+const messages = [];
 fs.watchFile = (file) => { watched.push(file); };
 fs.unwatchFile = () => {};
 const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   env: { remoteName: scenario.remoteName || undefined },
+  ExtensionKind: { UI: 1, Workspace: 2 },
   workspace: {
     workspaceFile: scenario.workspaceFile ? { scheme: scenario.workspaceScheme || 'file', fsPath: scenario.workspaceFile,
       toString: () => (scenario.workspaceScheme || 'file') + '://' + (scenario.remoteName ? 'ssh-remote+fixture' : '') + scenario.workspaceFile } : undefined,
@@ -99,6 +101,8 @@ const vscodeStub = {
   window: {
     onDidOpenTerminal: () => ({ dispose() {} }),
     registerTerminalProfileProvider: () => ({ dispose() {} }),
+    showErrorMessage: (message) => { messages.push({ kind: 'error', message }); return Promise.resolve(); },
+    showWarningMessage: (message) => { messages.push({ kind: 'warning', message }); return Promise.resolve(); },
   },
   extensions: { getExtension: (id) => (id === 'johnpapa.vscode-peacock' && scenario.peacock ? { id } : undefined) },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
@@ -114,7 +118,7 @@ Module._load = function (request) {
 
 const store = {};
 const context = {
-  extension: { id: 'professor.professor' },
+  extension: { id: 'professor.professor', extensionKind: scenario.extensionKind },
   subscriptions: [],
   globalState: { get: (key, def) => (key in store ? store[key] : def), update: (key, value) => { store[key] = value; } },
 };
@@ -135,6 +139,7 @@ const readJSONFile = (name) => {
 const snapshot = (name) => ({
   step: name, colors, workspace: workspaceColors === undefined ? null : workspaceColors, ack: readJSONFile('vscode-ack.json'),
   writes, workspaceUpdates, chromeRecord: readJSONFile('vscode-chrome.json'), record: fs.existsSync(path.join(stateDir, 'vscode-applied.json')),
+  messages: [...messages],
 });
 // A fired configuration change reaches the extension's own listener, which queues its own sync;
 // the driver calls none, and waits for the ack that run rewrites.
@@ -378,7 +383,10 @@ type vscodeChromeStepSpec struct {
 
 // vscodeScenario is one window: PFM_THEME_SCENARIO for the "scenario" driver mode.
 type vscodeScenario struct {
-	RemoteName      string                 `json:"remoteName,omitempty"`
+	RemoteName string `json:"remoteName,omitempty"`
+	// ExtensionKind is where the extension host runs (1 UI, 2 Workspace:
+	// vscode.ExtensionKind), 0 left unset as in a local window.
+	ExtensionKind   int                    `json:"extensionKind,omitempty"`
 	WorkspaceFile   string                 `json:"workspaceFile,omitempty"`
 	WorkspaceScheme string                 `json:"workspaceScheme,omitempty"`
 	Folder          string                 `json:"folder,omitempty"`
@@ -411,6 +419,10 @@ type vscodeScenarioStep struct {
 	WorkspaceUpdates int                `json:"workspaceUpdates"`
 	ChromeRecord     vscodeChromeRecord `json:"chromeRecord"`
 	Record           bool               `json:"record"`
+	Messages         []struct {
+		Kind    string `json:"kind"`
+		Message string `json:"message"`
+	} `json:"messages"`
 }
 
 func chromeContract(generation int, enabled bool, colors, chrome map[string]string) map[string]any {
@@ -511,7 +523,7 @@ func TestVSCodeEveryWindowFollowsTheFrameContract(t *testing.T) {
 	t.Parallel()
 	for _, window := range []vscodeScenario{
 		{},
-		{RemoteName: "ssh-remote", WorkspaceFile: "/remote/project.code-workspace", WorkspaceScheme: "vscode-remote"},
+		{RemoteName: "ssh-remote", ExtensionKind: 2, WorkspaceFile: "/remote/project.code-workspace", WorkspaceScheme: "vscode-remote"},
 		{WorkspaceFile: "/w/Untitled-1.code-workspace", WorkspaceScheme: "untitled"},
 	} {
 		window.Global = map[string]any{"editor.background": "#000000"}
@@ -519,7 +531,13 @@ func TestVSCodeEveryWindowFollowsTheFrameContract(t *testing.T) {
 			{Name: "set", Contract: chromeContract(1, true, terminalWanted, chromeWanted)},
 		}
 		got := runVSCodeScenario(t, t.TempDir(), window)[0]
-		if want := merged(window.Global, terminalWanted, chromeWanted); !reflect.DeepEqual(got.Colors, want) {
+		wantGlobal := merged(window.Global, terminalWanted, chromeWanted)
+		wantWorkspace := merged(nil, chromeWanted)
+		if window.RemoteName != "" {
+			wantGlobal = window.Global
+			wantWorkspace = merged(nil, terminalWanted, chromeWanted)
+		}
+		if want := wantGlobal; !reflect.DeepEqual(got.Colors, want) {
 			t.Errorf(
 				"remote=%q scheme=%q: Global frame = %v, want %v",
 				window.RemoteName,
@@ -528,7 +546,7 @@ func TestVSCodeEveryWindowFollowsTheFrameContract(t *testing.T) {
 				want,
 			)
 		}
-		if window.WorkspaceFile != "" && !reflect.DeepEqual(got.Workspace, merged(nil, chromeWanted)) {
+		if window.WorkspaceFile != "" && !reflect.DeepEqual(got.Workspace, wantWorkspace) {
 			t.Errorf(
 				"remote=%q scheme=%q: Workspace frame = %v, want contract chrome",
 				window.RemoteName,
@@ -547,9 +565,12 @@ func TestVSCodeEveryWindowFollowsTheFrameContract(t *testing.T) {
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(manifest.ExtensionKind, []string{"workspace", "ui"}) {
+	// VS Code takes the client copy's extensionKind when Professor is on both sides
+	// (extensionHostKind.ts ExtensionInfo.kind): any "ui" there lets a Remote-SSH window
+	// run Professor on the client, against the client's contract and the client's pfm.
+	if !slices.Equal(manifest.ExtensionKind, []string{"workspace"}) {
 		t.Errorf(
-			"extensionKind = %v, want [workspace ui]: a Remote-SSH window watches the contract of the host pfm runs on when the extension is installed there, the local one otherwise",
+			"extensionKind = %v, want [workspace]: a Remote-SSH window runs Professor on the remote host, where its pfm, contract and Claude chats are, or not at all",
 			manifest.ExtensionKind,
 		)
 	}
@@ -649,9 +670,9 @@ func TestVSCodeExtensionPaintsEveryWorkspaceKind(t *testing.T) {
 		window       vscodeScenario
 	}{
 		{"empty", "global", vscodeScenario{}},
-		{"remote", "vscode-remote://ssh-remote+fixture/w/project.code-workspace", vscodeScenario{RemoteName: "ssh-remote", WorkspaceFile: "/w/project.code-workspace", WorkspaceScheme: "vscode-remote"}},
+		{"remote", "vscode-remote://ssh-remote+fixture/w/project.code-workspace", vscodeScenario{RemoteName: "ssh-remote", ExtensionKind: 2, WorkspaceFile: "/w/project.code-workspace", WorkspaceScheme: "vscode-remote"}},
 		{"folder-only", "file:///w/project", vscodeScenario{Folder: "file:///w/project"}},
-		{"remote-folder", "vscode-remote://ssh-remote+fixture/project", vscodeScenario{RemoteName: "ssh-remote", Folder: "vscode-remote://ssh-remote+fixture/project"}},
+		{"remote-folder", "vscode-remote://ssh-remote+fixture/project", vscodeScenario{RemoteName: "ssh-remote", ExtensionKind: 2, Folder: "vscode-remote://ssh-remote+fixture/project"}},
 		{"untitled", "untitled:///w/Untitled-1.code-workspace", vscodeScenario{WorkspaceFile: "/w/Untitled-1.code-workspace", WorkspaceScheme: "untitled"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -670,7 +691,11 @@ func TestVSCodeExtensionPaintsEveryWorkspaceKind(t *testing.T) {
 			for i, got := range steps {
 				wantGlobal, wantWorkspace := tc.window.Global, vscodePainted()
 				if i == 0 {
-					wantGlobal = merged(wantGlobal, terminalWanted, chromeWanted)
+					if tc.window.RemoteName == "" {
+						wantGlobal = merged(wantGlobal, terminalWanted, chromeWanted)
+					} else {
+						wantWorkspace = frameMerged(wantWorkspace, terminalWanted)
+					}
 					if tc.target != "global" {
 						wantWorkspace = frameMerged(wantWorkspace, chromeWanted)
 					}

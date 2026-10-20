@@ -162,7 +162,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 21 {
+	if len(parsed.Hooks) != 23 {
 		t.Errorf("hooks=%d", len(parsed.Hooks))
 	}
 	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {

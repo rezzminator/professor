@@ -289,10 +289,18 @@ func CheckAwait(ctx context.Context, chat headless.Chat, runtime *pfmconfig.Runt
 			return fmt.Errorf("resolve %s wait socket: %w", chat.Name, err)
 		}
 	}
-	screen, err := engine.CaptureTarget(ctx, pfmcall.Target{
+	target := pfmcall.Target{
 		Backend: chat.Backend, SeatID: chat.SeatID, SocketPath: socket,
 		Pane: PaneTarget(chat), Engine: string(chat.Engine),
-	}, 1000)
+	}
+	var screen string
+	if chat.Backend == spawn.BackendHerdr {
+		// Recent output can retain a dismissed trust selector while Claude is
+		// already answering. Only the visible screen describes a live dialog.
+		screen, err = pfmcall.CaptureHerdrVisible(ctx, target)
+	} else {
+		screen, err = engine.CaptureTarget(ctx, target, 1000)
+	}
 	if err != nil {
 		return fmt.Errorf("read %s pane %s before waiting: %w", chat.Name, PaneTarget(chat), err)
 	}

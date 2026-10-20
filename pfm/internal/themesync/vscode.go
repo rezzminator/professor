@@ -70,7 +70,8 @@ type vscodeContract struct {
 	Appearance string            `json:"appearance"`
 	Colors     map[string]string `json:"colors"`
 	// Chrome is the frame, written to Global and every window's Workspace
-	// colorCustomizations by the local UI-host extension, remote windows too.
+	// colorCustomizations by the extension running on this machine: a local
+	// window's, or a Remote-SSH window's whose remote host this is.
 	Chrome map[string]string `json:"chrome"`
 }
 
@@ -199,7 +200,9 @@ func vscodeVerdict(
 	case age < vscodeGrace:
 		return VerdictPending, "waiting for the extension to apply generation " + fmt.Sprint(generation)
 	case haveAck:
-		return VerdictDrift, fmt.Sprintf("extension ack is at generation %d, want %d", ack.Generation, generation)
+		return VerdictDrift, fmt.Sprintf("extension ack is at generation %d, want %d: no VS Code window running "+
+			"Professor on this machine applied it; a Remote-SSH window runs Professor here only when the client's "+
+			"Professor is 0.6.0 or later: update it there and reload the window", ack.Generation, generation)
 	default:
 		return VerdictPending, fmt.Sprintf("reload a VS Code window once: no Professor extension has acknowledged "+
 			"a theme yet (%s absent)", ackPath)

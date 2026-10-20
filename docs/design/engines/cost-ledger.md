@@ -14,6 +14,7 @@ The pieces: the launch registry points Claude Code's OpenTelemetry exporters at 
 - [Identity](#identity)
 - [The ledger](#the-ledger)
 - [The status lines](#the-status-lines)
+- [Gateway GPT spend](#gateway-gpt-spend)
 - [Before the ledger](#before-the-ledger)
 - [pfm tokens](#pfm-tokens)
 - [Config and environment](#config-and-environment)
@@ -187,7 +188,7 @@ Every number on the main line and where it comes from:
 | `⏳ 5m32s` | session wall time | the payload's `cost.total_duration_ms` |
 | `5h-used:32%`, `7d-used:71%` | rate-limit windows | the payload's `rate_limits`, or pfm's refreshed copy |
 
-The main line renders exactly one `$` in every state; a test (`TestMainLineRendersOneDollarAmountInEveryState`) renders every state, resumed, pre-ledger and crashed launches among them, and counts. The invariant that keeps every surface on one figure: the complete total equals the main thread's own ledger rows plus every top-level sub-agent row plus the spend before the ledger (which no agent owns), and `pfm tokens`' session total; callmeter's `PRE-LEDGER USD` is the same before-ledger figure by the same rule. A chat that was resumed, or that began before the ledger, still shows its whole spend: Claude Code restores its total from the transcript on resume, so nothing about the figure depends on which launch armed a sink.
+The main line renders exactly one `$` in every state; a test (`TestMainLineRendersOneDollarAmountInEveryState`) renders every state, resumed, pre-ledger and crashed launches among them, and counts. The invariant that keeps every surface on one figure, for a chat with no gateway GPT supplement ([Gateway GPT spend](#gateway-gpt-spend) adds an `API-eq` amount the ledger lacks, so with one the line may exceed `pfm tokens`' native total by it, not always: a before-ledger overlap can cover the whole supplement): the complete total equals the main thread's own ledger rows plus every top-level sub-agent row plus the spend before the ledger (which no agent owns), and `pfm tokens`' session total; callmeter's `PRE-LEDGER USD` is the same before-ledger figure by the same rule. A chat that was resumed, or that began before the ledger, still shows its whole spend: Claude Code restores its total from the transcript on resume, so nothing about the figure depends on which launch armed a sink.
 
 ### Markers
 
@@ -218,7 +219,17 @@ A row's spend field `Σ$1.24/3.1M/42K/12` (`spendSegment`; the muted `Σ` marks 
 | `+?` | a floor: with a ledger, a row of the agent or below it whose cost never arrived; without one, a model the price table cannot price or a transcript below that cannot be read |
 | `Σ$?/?/?/?` | no ledger and the agent's own transcript cannot be read; with a ledger the row keeps its ledger dollars and shows `?` for tool calls |
 
-The invariant: the main thread's own rows plus every top-level row equal the ledger total. A row's gauge, status, cache and the other fields are in [statusline.md](../context/statusline.md#the-sub-agent-row).
+The invariant, native rows only: the main thread's own rows plus every top-level row equal the ledger total; a gateway GPT supplement ([Gateway GPT spend](#gateway-gpt-spend)) sits outside it. A row's gauge, status, cache and the other fields are in [statusline.md](../context/statusline.md#the-sub-agent-row).
+
+## Gateway GPT spend
+
+A GPT model routed through the gateway sends no Anthropic-priced telemetry, so the ledger can hold a zero-dollar row or none for it. The status lines price those calls from the agent's transcript, at pfm's price table, as an API-equivalent subtotal (`gatewaySpend`, `pfm/internal/statusline/ledger_spend.go`): what the calls would cost at published rates, never subscription dollars charged. It is kept apart from the ledger so native telemetry cannot erase it.
+
+- The subtotal supplements the ledger only by a positive missing amount: native or known dollars are never replaced, and a gateway subtotal the ledger already holds is never added twice. Token columns follow the same rule.
+- A main line or sub-agent row whose dollars include GPT ends them with a muted `API-eq`. A transcript-only main line (no ledger) takes the larger of the harness total and the transcript total for GPT.
+- A streaming GPT opening estimate (an input count with no cache counters) is not billed: the call is an unknown floor, and the final message with the same id replaces it. A call whose final usage the transcript never recorded stays unknown; no gateway database is read in production.
+- A restored `cost-state` figure in the [spend before the ledger](#before-the-ledger) is unattributed to any agent, so historical gateway calls can overlap it. `beforeGatewayOverlap` (`pfm/internal/statusline/ledger_spend.go`) considers each cost-state's native remainder separately. A timestamped gateway call is provably later when it is at or after that state's `Until` (the next launch's first stamped line), or, with no `Until`, strictly after its `At`; these calls add to native history. Calls with missing timestamps or not provably later remain possible overlap. For each state, overlap is bounded by the minimum of its native remainder, the missing gateway supplement (`booked.usd - native.usd`) and those possibly historical calls' subtotal; the largest remainder after that subtraction is kept. Any positive overlap is ambiguous and marks the combined amount as a `+?` floor, not an exact total.
+- Price resolution (`Table.Resolve`, `pfm/internal/pricing/pricing.go`): a `-fast` suffix on a normalized `gpt-` id resolves its published base row unless an exact `-fast` row exists; the `[1m]` long-context suffix is supported as before. Reasoning output is already inside the output count, so it adds no separate bill.
 
 ## Before the ledger
 
@@ -238,7 +249,7 @@ cutoff(c) = max( exit(c) + 2 s, until(c) ), or no bound when no timestamped line
 
 The one dollar amount is the ledger total plus `before`, shown unless Claude Code's payload is ahead of it by more than the tolerance. The payload therefore leads in the one or two seconds before a call's OTLP export reaches the ledger, and the ledger plus `before` leads after a crash that wrote no cost-state; in the ordinary case the line is exactly the sum of the rows `pfm tokens` prints. A gap trigger (payload against ledger) would flicker after every call and is not used.
 
-callmeter names the same difference as `PRE-LEDGER USD` in `report cost`, from the same rule over the latest cost-state it holds, because callmeter is standalone and keeps no earlier ones; it holds no transcript stamps, so its exit is the later of `session_costs.started + wall_ms` and the session's latest `SessionEnd` event, the hook that fires at the exit that wrote that cost-state ([callmeter's design](../../../plugins/callmeter/docs/design.md)).
+callmeter names the same difference as `PRE-LEDGER USD` in `report cost`, from the same rule over the latest cost-state it holds, because callmeter is standalone and keeps no earlier ones; it holds no transcript stamps, so its exit is the later of `session_costs.started + wall_ms` and the session's latest `SessionEnd` event, the hook that fires at the exit that wrote that cost-state ([callmeter's design](https://github.com/rezzminator/callmeter/blob/develop/docs/design.md)).
 
 ## pfm tokens
 

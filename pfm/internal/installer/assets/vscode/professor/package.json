@@ -2,10 +2,10 @@
   "name": "professor",
   "displayName": "Professor",
   "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked, paints the terminal, and every window's title, activity and status bars and borders (local and Remote-SSH), in Claude Code's theme, which `pfm theme` renders; and lists every pfm theme in VS Code's Color Theme picker as Professor · {name}, where picking one switches every surface to it.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "professor",
   "engines": { "vscode": "^1.90.0" },
-  "extensionKind": ["workspace", "ui"],
+  "extensionKind": ["workspace"],
   "main": "./extension.js",
   "activationEvents": ["onStartupFinished", "onTerminalProfile:professor.terminal", "onCommand:workbench.action.terminal.new"],
   "contributes": {

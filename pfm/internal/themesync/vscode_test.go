@@ -376,6 +376,17 @@ func TestVscodeVerdictMatrix(t *testing.T) {
 			VerdictDrift,
 			"generation 2, want 4",
 		},
+		{
+			// A Remote-SSH window can run Professor on the client's side, against the
+			// client's contract: the stale ack says where to look.
+			"older generation names the window that runs Professor elsewhere",
+			vscodeAck{Generation: 2},
+			true,
+			true,
+			stale,
+			VerdictDrift,
+			"no VS Code window running Professor on this machine applied it",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

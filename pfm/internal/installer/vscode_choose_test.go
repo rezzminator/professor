@@ -275,8 +275,20 @@ func TestVSCodeChooseThemeNeverRunsPfmInARemoteWindowPfmDoesNotRunIn(t *testing.
 				len(run.QuickPicks),
 			)
 		}
-		if len(run.Messages) != 1 || run.Messages[0].Kind != "warning" {
-			t.Errorf("%s: remote window messages = %+v, want exactly one warning saying why", name, run.Messages)
+		// A window served from the client's side also says once, at activation, that it paints
+		// nothing; the command's own refusal is the one naming Choose Theme.
+		var refusals int
+		for _, message := range run.Messages {
+			if message.Kind == "warning" && strings.Contains(message.Message, "Choose Theme") {
+				refusals++
+			}
+		}
+		if refusals != 1 {
+			t.Errorf(
+				"%s: remote window messages = %+v, want exactly one Choose Theme warning saying why",
+				name,
+				run.Messages,
+			)
 		}
 		if want := [][]any{{"setContext", "professor.pfmHere", false}}; !reflect.DeepEqual(run.Contexts, want) {
 			t.Errorf("%s: activate set contexts %v, want %v", name, run.Contexts, want)

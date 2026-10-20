@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	herdrStateUsage = "usage: pfm internal herdr-state [--engine claude|codex|opencode] start|working|blocked|idle|end|notification|title < hook-payload.json\n" +
+	herdrStateUsage = "usage: pfm internal herdr-state [--engine claude|codex|opencode] start|working|blocked|idle|end|notification|title|agent-start|agent-stop < hook-payload.json\n" +
 		"       pfm internal herdr-state attach|sync|detach --socket {tmux socket} --session {tmux session} [--client {tmux client pid}]\n" +
 		"       pfm internal herdr-state name --socket {tmux socket} --session {tmux session}"
 	// herdrStoredOption is the chat session's user option holding the last
@@ -165,39 +165,6 @@ func HerdrState(args []string, stdin io.Reader, stderr io.Writer) int {
 	return routeHerdrState(args, stdin, stderr, realHerdrDeps())
 }
 
-func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrDeps) int {
-	reporter := &herdrReporter{deps: deps, stderr: stderr, seq: uint64(deps.now().UnixNano())}
-	options, err := parseHerdrOptions(args)
-	if err != nil {
-		reporter.warn("pfm internal herdr-state: %v\n%s", err, herdrStateUsage)
-		return 1
-	}
-	reporter.options = options
-	reporter.session = options.session
-	var payload herdrPayload
-	if !options.event.FiredByTmux() {
-		// Read every identity field before reporting, even after a large response.
-		payload, err = readHerdrPayload(stdin)
-		if err != nil {
-			const decodeFailure = "pfm internal herdr-state %s engine=%s: decode hook payload (skipped): %v"
-			reporter.warn(decodeFailure, options.event, options.engine, err)
-			return 0
-		}
-		if threadWithoutRollout(options.engine, payload) {
-			return 0
-		}
-	}
-	if payload.AgentID != "" {
-		return 0
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
-	defer cancel()
-	if err := reporter.run(ctx, payload); err != nil {
-		reporter.warn("pfm internal herdr-state %s: %v (fail-open)", options.event, err)
-	}
-	return 0
-}
-
 func parseHerdrOptions(args []string) (herdrOptions, error) {
 	options := herdrOptions{engine: pfmengine.Claude}
 	var words []string
@@ -245,6 +212,8 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 }
 
 type herdrReporter struct {
+	activity         *herdrActivity
+	activityAction   *herdrAction
 	nativeSeatReport bool
 	options          herdrOptions
 	deps             herdrDeps
@@ -299,6 +268,9 @@ func (reporter *herdrReporter) nextSent() uint64 {
 
 // plan maps one event to its pane action. nil means the event changes nothing.
 func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
+	if reporter.activityAction != nil {
+		return reporter.activityAction
+	}
 	engine := herdr.Label(reporter.options.engine)
 	report := func(state herdr.State, message string) *herdrAction {
 		return &herdrAction{
@@ -326,6 +298,8 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 		if interceptedSubmit(reporter.options.engine, payload) {
 			return nil
 		}
+		return report(herdr.StateWorking, "")
+	case herdr.EventAgentStart, herdr.EventAgentStop:
 		return report(herdr.StateWorking, "")
 	case herdr.EventBlocked:
 		return reporter.toolBlock(payload, report(herdr.StateBlocked, blockedMessage(payload)))
@@ -737,6 +711,11 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 	allowed, err := reporter.preparePane(target, action.release)
 	if err != nil || !allowed {
 		return err
+	}
+	if !action.release {
+		if err := reporter.rememberActivityTarget(target, seq); err != nil {
+			return err
+		}
 	}
 	label := action.stored.Engine
 	if action.release {

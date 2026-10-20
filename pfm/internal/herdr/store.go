@@ -17,11 +17,15 @@ type Client struct {
 // time of the event that wrote it: a write never replaces a higher one. Clients
 // are the attached Herdr clients, keyed by tmux client pid.
 type Stored struct {
-	Engine    string `json:"engine"`
-	SessionID string `json:"session_id"`
-	State     string `json:"state"`
-	Message   string `json:"message"`
-	Seq       uint64 `json:"seq"`
+	// Agents is Claude's idempotent running-agent set; MainStoppedAt starts its
+	// bounded lease after Stop. Native transports persist this state on disk.
+	Agents        map[string]bool `json:"agents,omitempty"`
+	MainStoppedAt int64           `json:"main_stopped_at,omitempty"`
+	Engine        string          `json:"engine"`
+	SessionID     string          `json:"session_id"`
+	State         string          `json:"state"`
+	Message       string          `json:"message"`
+	Seq           uint64          `json:"seq"`
 	// Tool names the tool call a Claude permission request's block asks about:
 	// only that call's own working report leaves the block.
 	Tool string `json:"tool,omitempty"`

@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/costledger"
@@ -144,7 +145,7 @@ func spendMarker(books ledgerBooks, claudeTotal, loggedUSD float64, logged bool,
 // floor.
 func ledgerSpend(rows []costledger.Row) agentSpend {
 	sum := costledger.Sum(rows)
-	return agentSpend{
+	spend := agentSpend{
 		usd:        float64(sum.Micros) / 1e6,
 		in:         sum.InputTokens + sum.CacheReadTokens + sum.CacheCreationTokens,
 		out:        sum.OutputTokens,
@@ -152,11 +153,42 @@ func ledgerSpend(rows []costledger.Row) agentSpend {
 		partial:    sum.UnknownCost > 0,
 		fromLedger: true,
 	}
+	for index := range rows {
+		row := &rows[index]
+		if !gatewayModel(row.Model) {
+			continue
+		}
+		usd := 0.0
+		if row.CostUSDMicros != nil {
+			usd = float64(*row.CostUSDMicros) / 1e6
+		}
+		spend.gateway.add(
+			gatewaySpend{
+				present: true,
+				usd:     usd,
+				in:      row.InputTokens + row.CacheReadTokens + row.CacheCreationTokens,
+				out:     row.OutputTokens,
+				partial: row.CostUSDMicros == nil,
+			},
+		)
+	}
+	return spend
 }
 
-// withLedger is spend with its dollars and tokens taken from the ledger's. Tool calls and the
-// advisor's own spend are the transcripts' alone: the ledger records neither.
+// withLedger preserves native dollars and supplements missing gateway API-equivalent
+// spend. Tool calls and advisor spend come only from the transcripts.
 func (spend agentSpend) withLedger(ledger agentSpend) agentSpend {
+	// Native charges remain authoritative; a subscription-backed gateway row
+	// may be absent or explicitly zero. Supplement only its uncovered subtotal.
+	ledger.usd += max(0, spend.gateway.usd-ledger.gateway.usd)
+	ledger.in += max(int64(0), spend.gateway.in-ledger.gateway.in)
+	ledger.out += max(int64(0), spend.gateway.out-ledger.gateway.out)
+	ledger.partial = ledger.partial || spend.gateway.partial
+	ledger.gateway.present = ledger.gateway.present || spend.gateway.present
+	ledger.gateway.usd = max(ledger.gateway.usd, spend.gateway.usd)
+	ledger.gateway.in = max(ledger.gateway.in, spend.gateway.in)
+	ledger.gateway.out = max(ledger.gateway.out, spend.gateway.out)
+	ledger.gateway.partial = ledger.gateway.partial || spend.gateway.partial
 	ledger.tools = spend.tools
 	ledger.advisorUSD = spend.advisorUSD
 	ledger.advisorUnpriced = spend.advisorUnpriced
@@ -228,4 +260,59 @@ func loadLedgerView(sessionID, home string, env paths.Env, warn io.Writer) *ledg
 		return nil
 	}
 	return newLedgerView(ledger.Rows)
+}
+
+// gatewaySpend is the transcript's API-equivalent subtotal, not subscription
+// dollars charged. It stays separate so native telemetry cannot erase it.
+type gatewayCall struct {
+	at  time.Time
+	usd float64
+}
+
+type gatewaySpend struct {
+	calls   []gatewayCall
+	present bool
+	usd     float64
+	in, out int64
+	partial bool
+}
+
+func (g *gatewaySpend) add(other gatewaySpend) {
+	g.calls = append(g.calls, other.calls...)
+	g.present = g.present || other.present
+	g.usd += other.usd
+	g.in += other.in
+	g.out += other.out
+	g.partial = g.partial || other.partial
+}
+
+// beforeGatewayOverlap preserves each native exit's remainder. Only calls
+// that could precede that exit may overlap it; later API-equivalent calls are
+// additive. Historical overlap is unknowable and must leave an explicit floor.
+func beforeGatewayOverlap(rows []costledger.Row, spend agentSpend, supplement float64) (float64, bool) {
+	before := 0.0
+	ambiguous := false
+	for _, state := range spend.costStates {
+		remainder := float64(costledger.BeforeLedger(rows, []costledger.CostState{state})) / 1e6
+		possible := 0.0
+		for _, call := range spend.gateway.calls {
+			// Until is the next launch's first stamped line, not part of this exit.
+			later := !call.at.IsZero() && ((!state.Until.IsZero() && !call.at.Before(state.Until)) ||
+				(state.Until.IsZero() && !state.At.IsZero() && call.at.After(state.At)))
+			if !later {
+				possible += call.usd
+			}
+		}
+		overlap := min(remainder, supplement, possible)
+		ambiguous = ambiguous || overlap > 0
+		before = max(before, remainder-overlap)
+	}
+	return before, ambiguous
+}
+
+func (g gatewaySpend) note() string {
+	if !g.present {
+		return ""
+	}
+	return cMuted + " API-eq" + reset
 }

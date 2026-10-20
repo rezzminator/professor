@@ -1,6 +1,8 @@
-// pfm writes current.json; this UI-host extension reads the LOCAL contract in every window,
-// including Remote-SSH. Terminal colours and the frame go into Global settings; Workspace
-// chrome overrides old workspace/Peacock colours, including folder-only and remote windows.
+// pfm writes current.json; the extension reads the contract of the host it runs on, which is the
+// window's own: a local window's machine, or a Remote-SSH window's remote host (extensionKind
+// ["workspace"]); a remote window served from the client's side paints nothing. Terminal colours
+// and the frame go into Global settings; Workspace chrome overrides old workspace/Peacock colours,
+// including folder-only and remote windows.
 // Owned keys (also inside existing [Theme] blocks) retain their prior values for theme off.
 // Windows serialize records and acknowledgements under vscode-apply.lock.
 const vscode = require('vscode');
@@ -74,7 +76,7 @@ function writeJSONAtomic(file, value) {
 // a workspace's), `record` the keys a previous generation set ({key: {value, prior}}, prior null
 // = the key was absent), `want` the colours this generation asks for ({} when off). It returns
 // the next customizations and the record to keep.
-function planColors(global, record, want) {
+function planColors(global, record, want, inherited = {}) {
   const next = { ...global };
   const kept = {};
   for (const [key, entry] of Object.entries(record)) {
@@ -90,11 +92,13 @@ function planColors(global, record, want) {
   }
   // A theme-scoped colour beats the unscoped setting even in a lower configuration layer.
   // Replace only managed keys that already exist in each block, with per-key restore records.
-  for (const key of new Set([...Object.keys(global), ...Object.keys(record)])) {
+  for (const key of new Set([...Object.keys(global), ...Object.keys(record), ...Object.keys(inherited)])) {
     if (!key.startsWith('[')) continue;
     const block = global[key];
     if (block !== undefined && (!block || typeof block !== 'object' || Array.isArray(block))) continue;
-    const scopedWant = Object.fromEntries(Object.entries(want).filter(([color]) => color in (block || {})));
+    const lower = inherited[key];
+    const inheritedBlock = lower && typeof lower === 'object' && !Array.isArray(lower) ? lower : {};
+    const scopedWant = Object.fromEntries(Object.entries(want).filter(([color]) => color in (block || {}) || color in inheritedBlock));
     const scoped = planColors(block || {}, record[key]?.keys || {}, scopedWant);
     if (Object.keys(scoped.next).length) next[key] = scoped.next;
     else delete next[key];
@@ -183,7 +187,8 @@ async function applyGlobal(dir, contract, generation, want) {
 // it cannot hide the Global result. Every generation applies once per workspace; a workspace that
 // Peacock would repaint is left as it is, its record not advanced, so the next sync retries.
 // Restoring (nothing wanted) is never held back.
-async function applyChrome(dir, target, contract, generation, wantChrome) {
+async function applyChrome(dir, target, contract, generation, wantChrome, wantTerminal = {}) {
+  const want = { ...wantTerminal, ...wantChrome };
   const entry = { generation, keys: Object.keys(wantChrome).sort(), error: '' };
   try {
     const unlisted = peacockUnlisted(wantChrome);
@@ -202,10 +207,13 @@ async function applyChrome(dir, target, contract, generation, wantChrome) {
     }
     const record = { generation: null, keys: {}, ...records[target] };
     if (contract.enabled && generation !== null && record.generation === generation &&
-        Object.keys(wantChrome).every((key) => record.keys[key]?.value === wantChrome[key])) return entry;
+        Object.keys(want).every((key) => record.keys[key]?.value === want[key])) return entry;
     const workbench = vscode.workspace.getConfiguration('workbench');
-    const workspace = workbench.inspect('colorCustomizations')?.workspaceValue || {};
-    const plan = planColors(workspace, record.keys, wantChrome);
+    const layers = workbench.inspect('colorCustomizations');
+    const workspace = layers?.workspaceValue || {};
+    // Theme-scoped Global keys outrank unscoped Workspace keys. Shadow only
+    // managed inherited keys here, recording their true Workspace absence for off.
+    const plan = planColors(workspace, record.keys, want, layers?.globalValue || {});
     if (!sameColors(plan.next, workspace)) {
       // An emptied layer drops the setting instead of leaving `{}` in the user's workspace file.
       const next = Object.keys(plan.next).length ? plan.next : undefined;
@@ -255,12 +263,19 @@ async function applyContract(dir) {
   let entry = null;
   try {
     await withLock(dir, async () => {
+      const remote = vscode.env.remoteName !== undefined;
       try {
-        await applyGlobal(dir, contract, generation, { ...want, ...wantChrome });
+        // Global is the client's user settings even from a remote host. A remote
+        // contract must not repaint other hosts' windows or capture their prior values.
+        if (!remote) await applyGlobal(dir, contract, generation, { ...want, ...wantChrome });
+        else if (!target) throw new Error('remote window has no workspace; client settings left unchanged');
       } catch (err) {
         ack.error = `apply generation ${generation} to workbench.colorCustomizations: ${err?.message ?? err}`;
       }
-      if (target) entry = await applyChrome(dir, target, contract, generation, wantChrome);
+      if (target) {
+        entry = await applyChrome(dir, target, contract, generation, wantChrome, remote ? want : {});
+        if (remote && entry.error) ack.error = entry.error;
+      }
       if (!target) {
         const unlisted = peacockUnlisted(wantChrome);
         if (unlisted.length) chromeEntry.error = `Peacock repaints ${unlisted.length} frame keys: list them in peacock.excludedSettings`;
@@ -282,8 +297,15 @@ async function applyContract(dir) {
 // edit of peacock.excludedSettings applies it again, so listing the chrome keys takes effect
 // without a reload. Each applied contract then goes to onApplied (native.js's follow, which
 // switches the Color Theme). It returns the disposable for activate's subscriptions and
-// syncTheme, the extension's exported API.
-function startThemeSync(dir = stateDir(), onApplied = () => {}) {
+// syncTheme, the extension's exported API. A refusal (choose.js notHere, for a remote window
+// served from the client's side) applies nothing at all: the contract under this host's home is
+// the client's, whose theme is not the remote chats'; it is shown once, and no ack is written,
+// so the remote host's `pfm theme` keeps reporting the generation no window applied.
+function startThemeSync(dir = stateDir(), onApplied = () => {}, refusal = '') {
+  if (refusal) {
+    vscode.window.showWarningMessage(`Professor: this window's frame and terminal stay unpainted — ${refusal}.`);
+    return { disposable: { dispose: () => {} }, syncTheme: () => Promise.resolve() };
+  }
   const contractPath = path.join(dir, CONTRACT);
   let chain = Promise.resolve();
   const syncTheme = () => {

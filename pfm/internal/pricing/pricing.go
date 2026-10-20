@@ -570,8 +570,8 @@ func NormalizeID(modelID string) (string, bool) {
 }
 
 // Resolve returns the row that prices modelID: the row keyed by its normalized
-// id, else by that id without a trailing snapshot date. ok is false for an
-// unpriced model.
+// id, else by the gateway gpt- fast alias, then without a trailing snapshot
+// date. ok is false for an unpriced model.
 func (t Table) Resolve(modelID string) (Row, bool) {
 	id, ok := NormalizeID(modelID)
 	if !ok {
@@ -579,6 +579,13 @@ func (t Table) Resolve(modelID string) (Row, bool) {
 	}
 	if row, found := t.row(id); found {
 		return row, true
+	}
+	// The gateway fast suffix is a routing alias, not a separate published rate.
+	if strings.HasPrefix(id, "gpt-") {
+		id = strings.TrimSuffix(id, "-fast")
+		if row, found := t.row(id); found {
+			return row, true
+		}
 	}
 	if undated := snapshotDate.ReplaceAllString(id, ""); undated != id {
 		return t.row(undated)

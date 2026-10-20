@@ -43,7 +43,7 @@ func TestBirthBackendHonorsRequestBoundary(t *testing.T) {
 }
 
 func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
-	for _, mode := range []string{"await", "attach", "cancel", "timeout", "raw", "codex-prompt", "codex-dash-prompt", "trust"} {
+	for _, mode := range []string{"await", "attach", "cancel", "timeout", "raw", "codex-prompt", "codex-dash-prompt", "trust", "stale-trust", "stale-trust-working"} {
 		t.Run(mode, func(t *testing.T) {
 			root := testjail.Fleet(t)
 			const id = "ad8c2104-88c4-43df-86a9-cd7126949b44"
@@ -79,8 +79,11 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 					}, ""
 				case "pane.read":
 					screen := "❯ "
-					if mode == "trust" {
+					if mode == "trust" ||
+						strings.HasPrefix(mode, "stale-trust") && string(req.Params["source"]) == `"recent"` {
 						screen = unnumberedTrustCapture(t)
+					} else if mode == "stale-trust-working" {
+						screen = "Working (1s · 2 tokens)"
 					}
 					return map[string]any{
 						"type": "pane_read",
@@ -152,6 +155,9 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 			if mode == "timeout" {
 				options.Timeout = time.Nanosecond
 			}
+			if strings.HasPrefix(mode, "stale-trust") {
+				options.Poll, options.Settle = time.Millisecond, time.Millisecond
+			}
 			born, code := BirthHerdr(
 				ctx,
 				spawn.BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6"},
@@ -159,7 +165,8 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 				&config.Runtime{Paths: values},
 				"INTEGRATION",
 				prompt,
-				mode == "await" || mode == "cancel" || mode == "timeout" || mode == "trust",
+				mode == "await" || mode == "cancel" || mode == "timeout" || mode == "trust" ||
+					strings.HasPrefix(mode, "stale-trust"),
 				mode == "attach",
 				&stdout,
 				&stderr,
@@ -217,7 +224,7 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 			if mode == "raw" && !strings.HasPrefix(stdout.String(), string(pfmengine.OpenCode)+"\t") {
 				t.Fatalf("raw native engine=%q", stdout.String())
 			}
-			if mode == "await" && stdout.String() != "native answer\n" {
+			if (mode == "await" || strings.HasPrefix(mode, "stale-trust")) && stdout.String() != "native answer\n" {
 				t.Fatalf("await stdout=%q want only answer", stdout.String())
 			}
 			if mode == "attach" && (len(focused) != 1 || <-focused != "w6:p9") {

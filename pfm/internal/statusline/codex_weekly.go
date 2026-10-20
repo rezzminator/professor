@@ -25,7 +25,11 @@ type codexWindow struct {
 }
 
 // codexWeeklyLine shares the Codex renderer's cache and detached refresher.
-// Stretch the bar to the caller's available columns, even without Claude quotas.
+// Stretch the bar to the Claude footer's content width, even without Claude quotas.
+// Hook COLUMNS is the raw terminal width. The ordinary local Claude footer has
+// two outer cells per side; pfm's managed statusLine.padding is zero. The hook
+// exposes neither special remote layouts nor user padding overrides, so this
+// contract covers the managed local footer, not those unobservable layouts.
 // If columns are unknown, reuse the Claude row's width rather than inventing one.
 func codexWeeklyLine(runtime Runtime, now time.Time, claudeLine string) string {
 	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
@@ -45,11 +49,16 @@ func codexWeeklyLine(runtime Runtime, now time.Time, claudeLine string) string {
 		}
 	}
 	columns := runtime.Columns
-	if columns <= 0 {
+	if columns > 0 {
+		columns -= 2 * 2 // Claude's outer footer padding, left and right.
+		if columns <= 0 {
+			return ""
+		}
+	} else {
 		columns = ansi.StringWidth(claudeLine)
-	}
-	if columns <= 0 {
-		return label
+		if columns <= 0 {
+			return label
+		}
 	}
 	width := columns - ansi.StringWidth(label) - 1
 	if width <= 0 {

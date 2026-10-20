@@ -246,7 +246,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	l3 = appendRateSegments(l3, now, data)
 	if runtime.Engine == pfmengine.Claude {
 		weekly := codexWeeklyLine(runtime, now, l3)
-		if l3 != "" {
+		if l3 != "" && weekly != "" {
 			l3 += "\n" + reset
 		}
 		l3 += weekly

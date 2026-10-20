@@ -49,6 +49,24 @@ func weeklyLines(t *testing.T, runtime Runtime, payload string) []string {
 	return strings.Split(strings.TrimSuffix(got, "\n"), "\n")
 }
 
+func TestClaudeCodexWeeklyFitsNativeFooter(t *testing.T) {
+	runtime := weeklyRuntime(t)
+	runtime.Columns = 256 // Hook COLUMNS is the terminal, not the footer content box.
+	weeklyCache(t, runtime,
+		`{"primary":{"usedPercent":52,"windowDurationMins":10080,"resetsAt":1787122800},"secondary":null}`,
+		time.Minute)
+	lines := weeklyLines(t, runtime, `{}`)
+	weekly := ansi.Strip(lines[len(lines)-1])
+	const contentColumns = 252 // Claude 2.1.304: two outer cells on each side, pfm padding=0.
+	visible := ansi.Truncate(weekly, contentColumns, "…")
+	if !strings.HasSuffix(visible, "codex-7d-used:52% ↻3d7h") {
+		t.Errorf("native footer clips the complete weekly reset suffix: %q", visible)
+	}
+	if got := ansi.StringWidth(weekly); got != contentColumns {
+		t.Errorf("weekly content width = %d, want %d (terminal %d)", got, contentColumns, runtime.Columns)
+	}
+}
+
 func TestClaudeCodexWeeklyFillsAvailableWidth(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -76,8 +94,8 @@ func TestClaudeCodexWeeklyFillsAvailableWidth(t *testing.T) {
 			if !strings.Contains(claude, "5h-used:") || !strings.Contains(codex, "codex-7d-used:63% ↻3d7h") {
 				t.Fatalf("quota row order/value/reset mismatch: %q then %q", claude, codex)
 			}
-			if got := ansi.StringWidth(codex); got != test.columns {
-				t.Fatalf("Codex width %d != available width %d: %q", got, test.columns, codex)
+			if got := ansi.StringWidth(codex); got != test.columns-4 {
+				t.Fatalf("Codex width %d != footer content width %d: %q", got, test.columns-4, codex)
 			}
 			cells := strings.Count(codex, "▰") + strings.Count(codex, "▱")
 			if cells <= 5 || strings.Count(codex, "▰") != 63*cells/100 {
@@ -177,7 +195,7 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 			if !strings.Contains(last, test.want) {
 				t.Fatalf("weekly row must expose %q, got %q", test.want, last)
 			}
-			if len(lines) != 4 || ansi.StringWidth(last) != runtime.Columns {
+			if len(lines) != 4 || ansi.StringWidth(last) != runtime.Columns-4 {
 				t.Fatalf("unavailable/stale weekly row must fill available width: %q", lines)
 			}
 			if refreshes != test.refreshes {
@@ -196,8 +214,11 @@ func TestClaudeCodexWeeklyWithoutClaudeQuotas(t *testing.T) {
 	if len(lines) != 3 || !strings.Contains(lines[2], "codex-7d: no data") {
 		t.Fatalf("missing Claude quotas must not hide Codex data status: %q", lines)
 	}
-	if got := ansi.StringWidth(lines[2]); got != runtime.Columns {
-		t.Fatalf("missing Claude quotas must still fill %d columns, got %d: %q", runtime.Columns, got, lines[2])
+	if got := ansi.StringWidth(lines[2]); got != runtime.Columns-4 {
+		t.Fatalf(
+			"missing Claude quotas must still fill %d content columns, got %d: %q",
+			runtime.Columns-4, got, lines[2],
+		)
 	}
 }
 
@@ -220,8 +241,8 @@ func TestClaudeCodexWeeklySelectsDurationAcrossWindows(t *testing.T) {
 			if len(lines) != 3 || !strings.Contains(lines[2], test.want) {
 				t.Fatalf("weekly selection must expose %q without Claude quotas: %q", test.want, lines)
 			}
-			if got := ansi.StringWidth(lines[2]); got != runtime.Columns {
-				t.Fatalf("weekly row width %d != available width %d: %q", got, runtime.Columns, lines[2])
+			if got := ansi.StringWidth(lines[2]); got != runtime.Columns-4 {
+				t.Fatalf("weekly row width %d != footer content width %d: %q", got, runtime.Columns-4, lines[2])
 			}
 		})
 	}
@@ -233,19 +254,60 @@ func TestClaudeCodexWeeklyNarrowWidths(t *testing.T) {
 		`{`,
 		`{}`,
 	} {
-		for _, columns := range []int{1, 8, 16, 24, 40} {
+		for _, columns := range []int{1, 2, 3, 4, 5, 8, 16, 24, 40} {
 			t.Run(fmt.Sprintf("%s/%d", body, columns), func(t *testing.T) {
 				runtime := weeklyRuntime(t)
 				runtime.Columns = columns
 				var warnings bytes.Buffer
 				runtime.Warn = &warnings
 				weeklyCache(t, runtime, body, 2*time.Hour)
-				lines := weeklyLines(t, runtime, `{}`)
-				last := lines[len(lines)-1]
-				if got := ansi.StringWidth(last); got > columns || got == 0 {
-					t.Fatalf("weekly row width %d must fit %d columns: %q", got, columns, last)
+				last := codexWeeklyLine(runtime, runtime.now(), "Claude quota fallback")
+				contentColumns := max(0, columns-4)
+				if got := ansi.StringWidth(last); got > contentColumns || got == 0 && contentColumns > 0 {
+					t.Fatalf("weekly row width %d must fit %d content columns: %q", got, contentColumns, last)
 				}
 			})
+		}
+	}
+}
+
+func TestClaudeCodexWeeklyNoContentDoesNotAddBlankRow(t *testing.T) {
+	for _, columns := range []int{1, 2, 3, 4} {
+		for _, payload := range []string{`{}`, `{"rate_limits":{"five_hour":{"used_percentage":4}}}`} {
+			t.Run(fmt.Sprintf("%d/%s", columns, payload), func(t *testing.T) {
+				runtime := weeklyRuntime(t)
+				runtime.Columns = columns
+				lines := weeklyLines(t, runtime, payload)
+				want := 2
+				if payload != `{}` {
+					want = 3
+				}
+				if len(lines) != want || ansi.StringWidth(lines[len(lines)-1]) == 0 {
+					t.Fatalf("no weekly content must not add a blank row: %q", lines)
+				}
+			})
+		}
+	}
+}
+
+func TestClaudeCodexWeeklyUnknownWidth(t *testing.T) {
+	for _, columns := range []int{0, -1} {
+		for _, claudeLine := range []string{"", green + strings.Repeat("quota ", 10) + reset} {
+			runtime := weeklyRuntime(t)
+			runtime.Columns = columns
+			weeklyCache(t, runtime,
+				`{"primary":{"usedPercent":52,"windowDurationMins":10080,"resetsAt":1787122800}}`,
+				time.Minute)
+			line := codexWeeklyLine(runtime, runtime.now(), claudeLine)
+			if !strings.HasSuffix(ansi.Strip(line), "codex-7d-used:52% ↻3d7h") {
+				t.Fatalf("unknown width lost reset: %q", line)
+			}
+			if claudeLine != "" && ansi.StringWidth(line) != ansi.StringWidth(claudeLine) {
+				t.Fatalf("unknown width must reuse Claude content width without subtracting padding: %q", line)
+			}
+			if runtime.Columns != columns {
+				t.Fatalf("footer adjustment changed raw terminal width: %d", runtime.Columns)
+			}
 		}
 	}
 }

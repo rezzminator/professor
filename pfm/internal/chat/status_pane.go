@@ -297,8 +297,8 @@ func CheckAwait(ctx context.Context, chat headless.Chat, runtime *pfmconfig.Runt
 		return fmt.Errorf("read %s pane %s before waiting: %w", chat.Name, PaneTarget(chat), err)
 	}
 	// A normal composer below quoted dialog text proves those words are
-	// scrollback, not the active startup dialog. A selected numbered trust
-	// row is still a dialog; the delivery path keeps its own safety guards.
+	// scrollback, not the active startup dialog. Selected trust rows, numbered
+	// or not, are selectors rather than composers; delivery keeps its own guards.
 	if pfmcall.LastComposerLine(screen) != "" && pfmcall.SelectorLine(screen) == "" {
 		return nil
 	}

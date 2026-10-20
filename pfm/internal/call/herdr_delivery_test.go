@@ -75,6 +75,7 @@ func TestHerdrCallNative(t *testing.T) {
 				target.Engine = test.engine
 			}
 			engine := nativeEngine(t, target)
+			engine.options.ComposerWait, engine.options.Poll = 10*time.Millisecond, time.Millisecond
 			result, err := engine.CallTarget(
 				context.Background(),
 				target,

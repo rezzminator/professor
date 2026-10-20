@@ -327,3 +327,46 @@ func TestHerdrRosterPreservesTargetOwnedAddress(t *testing.T) {
 		t.Fatalf("target=%+v code=%d err=%v", target, code, err)
 	}
 }
+
+// A launch identity is provisional; a resolved handle must keep following the
+// same durable seat after a reporter publishes the real thread (for either engine).
+func TestResolvedHandleSurvivesNativeSessionReplacement(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.LiveCodex, compose.LiveClaude} {
+		t.Run(string(compose.EngineForKind(kind)), func(t *testing.T) {
+			testjail.Fleet(t)
+			t.Setenv("TMUX_TMPDIR", t.TempDir())
+			ctx := context.Background()
+			row := compose.Row{
+				Backend: "herdr", SeatID: "durable-seat", ID: "provisional-session",
+				Name: "new-chat", Kind: kind, Socket: filepath.Join(t.TempDir(), "herdr.sock"), PaneID: "w1:p2",
+			}
+			rows := []compose.Row{row}
+			scan := func(context.Context) ([]compose.Row, error) { return rows, nil }
+			initial, found, err := ResolveIn(ctx, row.Name, scan, io.Discard, nil)
+			if err != nil || !found {
+				t.Fatalf("initial resolution: found=%t err=%v", found, err)
+			}
+			rows[0].ID, rows[0].Name, rows[0].Path = "reported-thread", "renamed-chat", "/fixture/reported.jsonl"
+			current, found, err := ResolveIn(ctx, initial.Handle(), scan, io.Discard, nil)
+			if err != nil || !found || current.ID != "reported-thread" || current.Path != "/fixture/reported.jsonl" {
+				t.Fatalf("follow after identity swap: chat=%+v found=%t err=%v", current, found, err)
+			}
+			target, code, detail, err := rosterTarget(resolvedPaths(t), rows, "", initial.Handle())
+			if err != nil || code != 0 || target.SeatID != row.SeatID || target.ID != "reported-thread" {
+				t.Fatalf("delivery after identity swap: target=%+v code=%d detail=%q err=%v", target, code, detail, err)
+			}
+			// Neither a reused name, nor a new thread, nor a label spoofing the handle
+			// may capture a reference to a seat which has genuinely gone.
+			rows[0].SeatID, rows[0].Name, rows[0].ID = "replacement-seat", initial.Handle(), initial.ID
+			if got, found, err := ResolveIn(ctx, initial.Handle(), scan, io.Discard, nil); err != nil || found {
+				t.Fatalf("gone seat redirected: chat=%+v found=%t err=%v", got, found, err)
+			}
+			rows = nil
+			if _, _, err := ResolveIn(ctx, initial.Handle(), func(context.Context) ([]compose.Row, error) {
+				return nil, errors.New("fleet read failed")
+			}, io.Discard, nil); err == nil || !strings.Contains(err.Error(), "fleet read failed") {
+				t.Fatalf("failed scan rendered as absence: %v", err)
+			}
+		})
+	}
+}

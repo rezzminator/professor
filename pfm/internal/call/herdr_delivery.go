@@ -35,21 +35,29 @@ func (engine *Engine) callHerdr(
 	if !pfmengine.MustLookup(id).HerdrNativePrompt {
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
-	target, err = ProveHerdrTarget(ctx, target)
+	target, agent, screen, err := engine.awaitHerdrNative(ctx, target, &base, lock)
 	if err != nil {
-		base.Status, base.Code = statusUndelivered, CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
-		return base, nil
+		var unsent *herdr.InputNotSentError
+		if errors.As(err, &unsent) {
+			base.Status, base.Code = statusUndelivered, CodeUndelivered
+			base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
+			return base, nil
+		}
+		if errors.Is(err, ErrStartupSplash) {
+			if agent.Agent.Status != herdrUnknown {
+				base.Status = statusUndelivered
+			}
+			base.Code = CodeUndelivered
+			base.Message = fmt.Sprintf(
+				"ABORT: native startup is unknown or has no composer; nothing was typed: %v",
+				err,
+			)
+			return base, nil
+		}
+		return base, err
 	}
 	base.SocketPath, base.Pane = target.SocketPath, target.Pane
-	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
-	if err != nil {
-		return base, fmt.Errorf("herdr read target %q on %q: %w", target.Pane, target.SocketPath, err)
-	}
-	agent, err := decodeHerdrAgent(result, "agent_info", target)
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = err.Error()
+	if base.Code != 0 {
 		return base, nil
 	}
 	switch agent.Agent.Status {
@@ -59,20 +67,13 @@ func (engine *Engine) callHerdr(
 			base.Message = "native agent is working; idle-only retry typed nothing"
 			return base, nil
 		}
-		// agent.prompt admits idle agents only. A working native agent owns
-		// the same composer queue as a raw pane; use that input path without
-		// interrupting unless force_now was explicitly requested.
+		// agent.prompt admits idle agents only; a working agent owns a safe
+		// composer queue, which only an explicit force_now may interrupt.
 		base.Busy = true
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
-	case herdrBlocked, herdrUnknown:
+	case herdrBlocked:
 		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: target pane is %s; nothing was typed", agent.Agent.Status)
-		return base, nil
-	}
-	screen, _, err := herdrCaptureFormat(ctx, target, herdrRecentLines, "")
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: native composer could not be checked; nothing was typed: %v", err)
+		base.Message = "ABORT: target pane is blocked; nothing was typed"
 		return base, nil
 	}
 	if IsFooterBusy(id, screen) {
@@ -106,7 +107,7 @@ func (engine *Engine) callHerdr(
 		return base, nil
 	}
 	base.SocketPath, base.Pane = target.SocketPath, target.Pane
-	result, err = herdr.SeatRequest(ctx, target.SocketPath, "agent.prompt", struct {
+	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.prompt", struct {
 		Target string `json:"target"`
 		Text   string `json:"text"`
 	}{target.Pane, prepared.Message})

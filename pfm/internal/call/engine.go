@@ -562,10 +562,10 @@ func (engine *Engine) callResolved(
 		Pane:           target.Pane,
 		ResolutionNote: detail,
 	}
-	if target.Backend == backendHerdr && target.SocketPath != "" && target.Pane != "" {
+	if target.Backend == backendHerdr && target.SocketPath != "" && (target.Pane != "" || target.SeatID != "") {
 		// Prove before locking: the seat's lock and the receipt name the
 		// pane the seat holds now, never the address the caller observed.
-		proved, err := ProveHerdrTarget(ctx, target)
+		proved, err := engine.proveHerdrCallTarget(ctx, target)
 		if err != nil {
 			base.Status, base.Code = statusUndelivered, CodeUndelivered
 			base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)

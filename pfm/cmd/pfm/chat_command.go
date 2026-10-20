@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/recovery"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -430,6 +431,10 @@ func runChatNameWithContext(
 	name := strings.TrimSpace(strings.Join(flags.Args()[1:], " "))
 	if name == "" || strings.ContainsAny(name, "\r\n\x00") {
 		fmt.Fprintln(stderr, "pfm chat name: name must be one non-empty line")
+		return 2
+	}
+	if err := naming.ValidateLabel(name); err != nil {
+		fmt.Fprintf(stderr, "pfm chat name: %v\n", err)
 		return 2
 	}
 	chat, code := headlessTarget(ctx, flags.Arg(0), stdout, stderr, false, runtimes...)

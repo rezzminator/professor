@@ -223,3 +223,11 @@ func TestLadderRawPaneSocketScopeAndAmbientFallback(t *testing.T) {
 		}
 	})
 }
+
+func TestDurableSeatMissNeverFallsBackToRawName(t *testing.T) {
+	raw := &ladderRaw{outcomes: map[Kind]Outcome{Session: {Code: 0, Stdout: "/fixture/socket\t%9"}}}
+	seat, code, detail, err := (Ladder{Raw: raw}).Resolve(context.Background(), "seat:retired", LadderOptions{})
+	if err != nil || code != CodeUnknown || seat.Pane != "" || !strings.Contains(detail, "no live chat") {
+		t.Fatalf("gone durable seat: seat=%+v code=%d detail=%q err=%v", seat, code, detail, err)
+	}
+}

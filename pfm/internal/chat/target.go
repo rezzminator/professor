@@ -112,6 +112,9 @@ func DeliverName(
 	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\x00\r\n") {
 		return 1, "", errors.New("chat name must be nonempty and contain no NUL or newline")
 	}
+	if err := naming.ValidateLabel(name); err != nil {
+		return 1, "", err
+	}
 	engine, err := NewCallEngine(false, runtime)
 	if err != nil {
 		return 1, "", err
@@ -445,7 +448,7 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	}
 	for index := range rows {
 		row := rows[index]
-		if row.ID == match.ID && row.Socket == match.Socket &&
+		if row.SeatID == match.SeatID && row.ID == match.ID && row.Socket == match.Socket &&
 			row.PaneID == match.Pane && row.Name == match.Name {
 			return FromRow(row), true, nil
 		}

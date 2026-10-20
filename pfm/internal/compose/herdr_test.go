@@ -334,6 +334,35 @@ func TestHerdrCodexSeatNamesOverrideIndexedTitles(t *testing.T) {
 	}
 }
 
+func TestReservedSeatTitleNeverOverridesNativeSeatName(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		input := Input{
+			Options: Options{View: AllView},
+			Transcripts: []store.Transcript{{
+				UUID: "reserved-title", Path: "/jail/reserved.jsonl", MTimeNS: 1000,
+				CustomTitle: "SeAt:other", AITitle: "Automatic title",
+			}},
+		}
+		wantName, wantUser := "Automatic title", ""
+		if native {
+			input.HerdrSeats = []gather.HerdrSeat{{Seat: fleetdb.Seat{
+				SeatID: "native-seat", SessionID: "reserved-title", Engine: "cc", Backend: "herdr", State: "live",
+				Name: "Chosen seat", HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
+			}}}
+			wantName, wantUser = "Chosen seat", "Chosen seat"
+		}
+		output := Compose(input)
+		if len(output.Rows) != 1 {
+			t.Fatalf("native=%v rows=%+v", native, output.Rows)
+		}
+		row := output.Rows[0]
+		if row.Name != wantName || row.UserName != wantUser || !row.UserNameKnown {
+			t.Errorf("native=%v name=%q user=%q known=%v; want name=%q user=%q",
+				native, row.Name, row.UserName, row.UserNameKnown, wantName, wantUser)
+		}
+	}
+}
+
 func userNameRollout(id string) store.Rollout {
 	return store.Rollout{
 		ID:          id,

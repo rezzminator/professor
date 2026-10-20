@@ -61,6 +61,7 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 			owner.SeatID,
 		)
 	}
+	target.ID = proved.SessionID
 	target.SeatID = proved.SeatID
 	target.Pane, target.SocketPath = proved.HerdrPane, proved.HerdrSocket
 	target.HerdrWorkspace, target.Engine = proved.HerdrWorkspace, proved.Engine

@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -42,6 +43,9 @@ func PrepareHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult
 }
 
 func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (result HerdrResult, returnErr error) {
+	if err := naming.ValidateLabel(request.Seat.Name); err != nil {
+		return result, err
+	}
 	choice := request.Choice
 	if choice.Backend != BackendHerdr || !filepath.IsAbs(choice.HerdrSocket) || choice.HerdrWorkspace == "" ||
 		choice.HerdrPane == "" {

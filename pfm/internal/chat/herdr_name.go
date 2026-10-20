@@ -10,6 +10,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
@@ -61,6 +62,9 @@ func RenameHerdrOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.Se
 // renameNativeOwned also serves explicit restore, whose authority is the checked
 // new caller pane after positive old-host death, before its new host can start.
 func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.Seat, name string) error {
+	if err := naming.ValidateLabel(name); err != nil {
+		return err
+	}
 	target := headless.Chat{SeatID: seat.SeatID, Socket: seat.HerdrSocket, Pane: seat.HerdrPane}
 	body, err := herdr.SeatRequest(
 		ctx,

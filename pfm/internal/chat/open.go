@@ -90,9 +90,14 @@ func ExitResolved(ctx context.Context, runtime *config.Runtime, chat headless.Ch
 
 // resolvedKillRequest is the one kill a resolved chat asks for: its exact id,
 // engine, transcript, socket and pane, so a split pane stays pane-scoped.
+// Native kills bind the durable seat, not its provisional launch session.
 func resolvedKillRequest(chat headless.Chat, exit bool) kill.Request {
+	id := chat.ID
+	if chat.Backend == spawn.BackendHerdr && chat.SeatID != "" {
+		id = chat.SeatID
+	}
 	return kill.Request{
-		ID: chat.ID, Engine: chat.Engine, RolloutPath: chat.Path,
+		ID: id, Engine: chat.Engine, RolloutPath: chat.Path,
 		SocketName: chat.Socket, PaneID: chat.Pane, Exit: exit,
 	}
 }

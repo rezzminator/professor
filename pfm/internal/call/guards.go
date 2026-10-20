@@ -13,9 +13,12 @@ import (
 
 var (
 	claudeMenuPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]`)
-	codexMenuPattern  = regexp.MustCompile(`›[\s\v]*\d+\.[\s\v]`)
-	numberedOption    = regexp.MustCompile(`^[\s\v]*›?[\s\v]*\d+\.[\s\v]`)
-	busyPattern       = regexp.MustCompile(`(?i)esc to interrupt|\(\d+s ·|· \d+s|\d+ tokens`)
+	claudeTrustOption = regexp.MustCompile(
+		`^❯[\s\v]*(?:\d+\.[\s\v]*)?(?:Yes, I trust this folder|No, exit|No, continue without these permissions)[\s\v]*$`,
+	)
+	codexMenuPattern = regexp.MustCompile(`›[\s\v]*\d+\.[\s\v]`)
+	numberedOption   = regexp.MustCompile(`^[\s\v]*›?[\s\v]*\d+\.[\s\v]`)
+	busyPattern      = regexp.MustCompile(`(?i)esc to interrupt|\(\d+s ·|· \d+s|\d+ tokens`)
 	// claudeBusyPattern is a running Claude turn, read only from the shapes the
 	// engine itself draws: "esc to interrupt"; the spinner's parenthesised
 	// timer, minutes included ("(12s ·", "(1m 50s ·"); a column-0 spinner glyph
@@ -125,17 +128,19 @@ func IsBusyFor(engine pfmengine.ID, capture string) bool {
 	return false
 }
 
-// SelectorLine returns the selected numbered option for a real open menu.
+// SelectorLine returns the selected option for an open menu, including an
+// unnumbered Claude folder-trust row.
 // A lone Codex "› 1. draft" remains a legal composer line.
 func SelectorLine(capture string) string {
-	line := composerLastLine(capture)
+	line := rawLastComposerLine(capture)
 	if line == "" {
 		return ""
 	}
 	clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
 	clean = strings.TrimSpace(clean)
 	if strings.HasPrefix(clean, "❯") {
-		if claudeMenuPattern.MatchString(clean) {
+		if claudeMenuPattern.MatchString(clean) ||
+			isClaudeTrustSelector(capture, clean) {
 			return clean
 		}
 		return ""
@@ -231,8 +236,12 @@ func composerDraft(line string) string {
 // its marker, or only dim hint text — and returns the plain draft it read.
 // styled is read only for a non-empty draft; a styled capture that fails is an
 // error, never an empty composer. A composer not drawn reads empty here: a
-// caller that must prove the box is up checks LastComposerLine first.
+// caller that must prove the box is up checks LastComposerLine first. An open
+// trust selector is never empty input.
 func ComposerEmpty(capture string, styled func() (string, error)) (bool, string, error) {
+	if pfmengine.ClaudeTrustDialog(capture) && SelectorLine(capture) != "" {
+		return false, "", nil
+	}
 	draft := ComposerDraftText(capture)
 	if draft == "" {
 		return true, "", nil
@@ -299,6 +308,30 @@ func isDimPlaceholder(styledLine string) bool {
 }
 
 func composerLastLine(capture string) string {
+	line := rawLastComposerLine(capture)
+	if isClaudeTrustSelector(capture, strings.TrimSpace(stripTerminalControl(line))) {
+		return ""
+	}
+	return line
+}
+
+// A bounded input box below quoted dialog text is editable, even when its
+// draft happens to be exactly one of the trust choices.
+func isClaudeTrustSelector(capture, line string) bool {
+	if !claudeTrustOption.MatchString(line) || !pfmengine.ClaudeTrustDialog(capture) {
+		return false
+	}
+	lines := strings.Split(capture, "\n")
+	row := lastComposerRow(lines)
+	if row > 0 && ComposerBoxRule(stripTerminalControl(lines[row-1])) {
+		if _, bounded := ComposerBoxText(capture); bounded {
+			return false
+		}
+	}
+	return true
+}
+
+func rawLastComposerLine(capture string) string {
 	lines := strings.Split(capture, "\n")
 	if row := lastComposerRow(lines); row >= 0 {
 		return lines[row]

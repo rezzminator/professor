@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 type Launcher interface {
@@ -54,6 +55,9 @@ func RenameCodex(
 	timings Timings,
 	trace Trace,
 ) (string, error) {
+	if err := naming.ValidateLabel(name); err != nil {
+		return "", err
+	}
 	named, warning, blocked := nameCodexThread(ctx, tmux, socket, target, name, timings, trace, codexRenameProof())
 	if blocked && warning == "" {
 		warning = "composer unavailable; thread was not renamed"

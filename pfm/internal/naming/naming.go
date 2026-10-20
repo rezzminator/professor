@@ -1,6 +1,7 @@
 package naming
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -17,6 +18,22 @@ const (
 	// legacy label prefix, read-compat only.
 	legacyKillPrefix = "_HIDE"
 )
+
+// SeatPrefix is reserved for exact durable seat handles, never display labels.
+const SeatPrefix = "seat:"
+
+// ReservedLabel reports a label that would occupy the durable-handle namespace.
+func ReservedLabel(label string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), SeatPrefix)
+}
+
+// ValidateLabel refuses reserved labels before any naming side effect.
+func ValidateLabel(label string) error {
+	if ReservedLabel(label) {
+		return fmt.Errorf("label %q is reserved for durable seat handles", label)
+	}
+	return nil
+}
 
 // LabelKilled reports whether a display name carries KillPrefix.
 func LabelKilled(name string) bool {
@@ -84,13 +101,12 @@ func CodexNameIndex(
 // DisplayName applies transcript naming precedence. The caller supplies the
 // last custom title, last AI title, and first real prompt found by the indexer.
 func DisplayName(customTitle, aiTitle, firstPrompt string) string {
-	if customTitle != "" {
-		return customTitle
+	for _, label := range []string{customTitle, aiTitle, firstPrompt} {
+		if label != "" && !ReservedLabel(label) {
+			return label
+		}
 	}
-	if aiTitle != "" {
-		return aiTitle
-	}
-	return firstPrompt
+	return ""
 }
 
 // Unnamed is the name a live row gets when every naming source is empty. It
@@ -174,9 +190,12 @@ func CxName(
 		if id == "" {
 			continue
 		}
-		if name := names[id]; name != "" {
+		if name := names[id]; name != "" && !ReservedLabel(name) {
 			return ClipRunes(SquashTabsAndNewlines(name), 60)
 		}
+	}
+	if ReservedLabel(firstUserMessage) {
+		return ""
 	}
 	return ClipRunes(SquashTabsAndNewlines(firstUserMessage), 60)
 }
@@ -238,7 +257,7 @@ func LaunchName(label string) string {
 		}
 	}
 	name := strings.TrimSpace(cleaned.String())
-	if name == "" || name == Unnamed {
+	if name == "" || name == Unnamed || ReservedLabel(name) {
 		return ""
 	}
 	return strings.TrimSpace(ClipRunes(name, LaunchNameRunes))

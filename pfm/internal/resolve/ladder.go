@@ -136,7 +136,7 @@ func (ladder Ladder) Resolve(
 			)
 		}
 	}
-	if ladder.Raw == nil {
+	if strings.HasPrefix(name, SeatPrefix) || ladder.Raw == nil {
 		return Seat{}, CodeUnknown, miss, nil
 	}
 	kinds := options.Kinds

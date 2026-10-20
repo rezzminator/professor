@@ -31,10 +31,12 @@ const tabStateUnknown = "unknown"
 var errTabPaneList = errors.New("list Herdr tab panes")
 
 type herdrTabProvider struct {
-	scan    func(context.Context) (FleetScan, error)
-	inspect func(context.Context, headless.Chat, time.Time) (headless.Status, error)
-	views   func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
-	mode    func() (string, error)
+	clock         clock.Clock
+	missingAgents map[string]time.Time
+	scan          func(context.Context) (FleetScan, error)
+	inspect       func(context.Context, headless.Chat, time.Time) (headless.Status, error)
+	views         func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
+	mode          func() (string, error)
 	// glyphs reads the theme's tab glyphs each tick; nil draws the defaults.
 	glyphs func() (herdr.TabGlyphs, error)
 	warn   io.Writer
@@ -44,6 +46,12 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	if ticks, ok := provider.warn.(*tickWarnings); ok {
 		ticks.tick()
 	}
+	clk := provider.clock
+	if clk == nil {
+		clk = clock.Real
+	}
+	pendingAgents := map[string]time.Time{}
+	defer func() { provider.missingAgents = pendingAgents }()
 	mode, err := provider.mode()
 	if err != nil {
 		return nil, fmt.Errorf("read tab status configuration: %w", err)
@@ -102,33 +110,38 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		if views[0].State == tabStateUnknown {
 			// Ownership is proved, but foreground evidence is unavailable.
 			// A transcript/cache must not overwrite that uncertainty.
-		} else if status, err := provider.inspect(ctx, target, clock.Real.Now()); err != nil {
+		} else if status, err := provider.inspect(ctx, target, clk.Now()); err != nil {
 			var refusal *herdr.Refusal
 			if target.Backend == spawn.BackendHerdr && errors.As(err, &refusal) && refusal.Code == herdr.AgentNotFound {
-				panes, listErr := herdr.ReadTabPanes(ctx, socket)
-				if listErr != nil {
-					err = errors.Join(err, fmt.Errorf("confirm closed tab pane %s: %w", target.Pane, listErr))
-				} else {
-					present := false
-					for _, pane := range panes {
-						// A moved pane keeps its terminal identity, not its public id.
-						if pane.Pane == target.Pane || (views[0].Terminal != "" && pane.Terminal == views[0].Terminal) {
-							present = true
-							break
-						}
-					}
-					if !present {
+				key := target.SeatID + "\x00" + target.ID + "\x00" + socket + "\x00" + views[0].Terminal
+				since, found := provider.missingAgents[key]
+				if !found {
+					since = clk.Now()
+				}
+				confirmed, confirmErr := missingTabAgentState(ctx, target, views[0].Terminal, clk.Now().Sub(since))
+				if confirmErr == nil {
+					if confirmed == "" {
 						continue
 					}
+					state = confirmed
+					if confirmed == tabStateUnknown {
+						pendingAgents[key] = since
+					}
+					err = nil
+				} else {
+					pendingAgents[key] = since
+					err = errors.Join(err, confirmErr)
 				}
 			}
-			if _, writeErr := fmt.Fprintf(
-				provider.warn,
-				"Herdr tab status of %s: %v\n",
-				target.ID,
-				err,
-			); writeErr != nil {
-				return nil, fmt.Errorf("persist status inspection failure: %w", writeErr)
+			if err != nil {
+				if _, writeErr := fmt.Fprintf(
+					provider.warn,
+					"Herdr tab status of %s: %v\n",
+					target.ID,
+					err,
+				); writeErr != nil {
+					return nil, fmt.Errorf("persist status inspection failure: %w", writeErr)
+				}
 			}
 		} else {
 			state = status.State
@@ -143,6 +156,48 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		}
 	}
 	return decorations, nil
+}
+
+// SessionEnd releases the agent before the engine exits, and a shell can keep
+// its pane open afterwards. Neither a missing agent nor a listed pane proves
+// death: refresh the pane identity and foreground, allowing a bounded transition.
+const tabAgentExitGrace = 5 * time.Second
+
+func missingTabAgentState(
+	ctx context.Context,
+	target headless.Chat,
+	terminal string,
+	elapsed time.Duration,
+) (string, error) {
+	panes, err := herdr.ReadTabPanes(ctx, target.Socket)
+	if err != nil {
+		return tabStateUnknown, fmt.Errorf("confirm tab pane %s: %w", target.Pane, err)
+	}
+	for _, pane := range panes {
+		if terminal != "" && pane.Terminal != terminal || terminal == "" && pane.Pane != target.Pane {
+			continue
+		}
+		alive, err := tabEngineForeground(
+			ctx,
+			fleetdb.Seat{HerdrSocket: target.Socket, HerdrPane: pane.Pane, Engine: string(target.Engine)},
+		)
+		if err != nil {
+			return tabStateUnknown, fmt.Errorf("confirm released tab agent %s: %w", pane.Pane, err)
+		}
+		if !alive {
+			return headless.StateDead, nil
+		}
+		if elapsed < tabAgentExitGrace {
+			return tabStateUnknown, nil
+		}
+		return tabStateUnknown, fmt.Errorf(
+			"herdr pane %s still runs %s after %s without its agent",
+			pane.Pane,
+			target.Engine,
+			tabAgentExitGrace,
+		)
+	}
+	return "", nil
 }
 
 // PaintHerdrIndicators is the actual plugin command's chat-aware painter.
@@ -342,7 +397,7 @@ func (reader *tabViewReader) views(
 	if reader.previous == nil {
 		reader.previous = map[string][]herdr.TabDecoration{}
 	}
-	if target.Backend == "herdr" {
+	if target.Backend == spawn.BackendHerdr {
 		if target.Socket != socket {
 			return nil, nil
 		}

@@ -358,7 +358,7 @@ func claudeWindowRenames(
 			plans[key] = plan
 			order = append(order, key)
 		}
-		if label.Failed {
+		if label.Failed || naming.ReservedLabel(label.Label) {
 			plan.skip = true
 			continue
 		}
@@ -435,5 +435,8 @@ const WindowNameRunes = 24
 // for the name-sync timer). Two writers that clipped differently would each
 // see the other's name as drift and rename the window back and forth forever.
 func WindowNameFor(name string) string {
+	if naming.ReservedLabel(name) {
+		return ""
+	}
 	return naming.ClipRunes(name, WindowNameRunes)
 }

@@ -208,16 +208,16 @@ type StatusOutput struct {
 
 // TargetInput is shared by chat actions whose CLI form takes one target.
 type TargetInput struct {
-	Target string `json:"target" jsonschema:"chat id, name, session, or tmux target"`
+	Target string `json:"target" jsonschema:"chat id, name, session, tmux target, or exact durable native seat:<id>"`
 }
 
 type NameInput struct {
 	Target string `json:"target"`
-	Name   string `json:"name"`
+	Name   string `json:"name" jsonschema:"chat label; seat: prefix is reserved (case-insensitive)"`
 }
 
 type NewInput struct {
-	Name      string `json:"name,omitempty" jsonschema:"the chat's name in pfm ls and the target call, status and kill take; inside a workbench, empty takes its next {name}:{n}"`
+	Name      string `json:"name,omitempty" jsonschema:"chat label (seat: prefix reserved, case-insensitive); inside a workbench, empty takes its next {name}:{n}"`
 	Engine    string `json:"engine,omitempty" jsonschema:"cc/claude, cx/codex or ox/opencode; the caller's engine when empty"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"working directory, relative to the caller's; the caller's directory when empty"`
 	Account   int    `json:"account,omitempty" jsonschema:"account number to launch on; pfm picks when 0"`

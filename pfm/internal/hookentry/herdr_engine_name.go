@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -36,6 +37,9 @@ func (reporter *herdrReporter) engineName(ctx context.Context, payload herdrPayl
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return "", err
 		}
+	}
+	if err := naming.ValidateLabel(name); err != nil {
+		return "", err
 	}
 	state := fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()

@@ -929,3 +929,19 @@ func TestOpenMessageCarriesEveryWarning(t *testing.T) {
 		t.Fatalf("openMessage without warnings = %q", got)
 	}
 }
+
+func TestReservedSeatLabel(t *testing.T) {
+	service := newService("test", &backend{
+		chat:     &fakeChatVerbs{},
+		dispatch: func(context.Context, []string, io.Writer, io.Writer) int { return 0 },
+	})
+	for _, label := range []string{"seat:child", "SeAt:child"} {
+		_, _, newErr := service.chatNew(context.Background(), nil, NewInput{Name: label})
+		_, _, nameErr := service.chatName(context.Background(), nil, NameInput{Target: "fixture", Name: label})
+		for _, err := range []error{newErr, nameErr} {
+			if err == nil || !strings.Contains(err.Error(), "reserved for durable seat handles") {
+				t.Errorf("label %q: error=%v", label, err)
+			}
+		}
+	}
+}

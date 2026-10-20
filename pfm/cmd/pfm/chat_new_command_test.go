@@ -609,3 +609,18 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 		})
 	}
 }
+
+func TestReservedSeatLabel(t *testing.T) {
+	for _, label := range []string{"seat:child", "SeAt:child"} {
+		for _, args := range [][]string{
+			{"chat", "new", "--name", label, "--backend", "invalid"},
+			{"chat", "name", "missing", label},
+		} {
+			var out, stderr bytes.Buffer
+			code := run(args, &out, &stderr)
+			if code != 2 || !strings.Contains(stderr.String(), "reserved for durable seat handles") {
+				t.Errorf("%v: code=%d stderr=%s", args, code, &stderr)
+			}
+		}
+	}
+}

@@ -185,3 +185,26 @@ func TestClearTmuxNameUsesExistingHerdrWindowHook(t *testing.T) {
 		t.Fatalf("name/window hook commands=%v want %v", calls, want)
 	}
 }
+
+func TestReservedSeatLabel(t *testing.T) {
+	root := t.TempDir()
+	values := paths.Values{Home: root, StateDB: filepath.Join(root, "absent.db")}
+	path := filepath.Join(root, "transcript.jsonl")
+	for _, label := range []string{"seat:child", "SeAt:child"} {
+		body, err := json.Marshal(map[string]string{"type": "custom-title", "customTitle": label})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		reporter := herdrReporter{
+			options: herdrOptions{engine: engine.Claude, event: herdr.EventStart},
+			deps:    herdrDeps{seatPaths: &values},
+		}
+		name, err := reporter.engineName(context.Background(), herdrPayload{SessionID: "fixture", TranscriptPath: path})
+		if err == nil || !strings.Contains(err.Error(), "reserved for durable seat handles") || name != "" {
+			t.Errorf("reserved engine title: name=%q err=%v", name, err)
+		}
+	}
+}

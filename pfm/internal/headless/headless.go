@@ -32,6 +32,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -73,10 +74,13 @@ type Chat struct {
 }
 
 // Handle preserves a resolved conversation across calls and waits. A native
-// socket hosts many seats, so only its thread id (or name before indexing)
-// identifies the conversation; a tmux socket is dedicated to one chat.
+// socket hosts many seats. Its durable seat survives replacement of a planner's
+// provisional thread id; a tmux socket is dedicated to one chat.
 func (chat Chat) Handle() string {
 	if chat.Backend == "herdr" {
+		if chat.SeatID != "" {
+			return resolve.SeatPrefix + chat.SeatID
+		}
 		if chat.ID != "" {
 			return chat.ID
 		}

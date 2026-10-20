@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,7 +80,7 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 				case "pane.read":
 					screen := "❯ "
 					if mode == "trust" {
-						screen = "Quick safety check\nYes, I trust this folder\nNo, exit"
+						screen = unnumberedTrustCapture(t)
 					}
 					return map[string]any{
 						"type": "pane_read",
@@ -144,6 +145,10 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			options := headless.AwaitOptions{}
+			if mode == "trust" {
+				options.Timeout = 100 * time.Millisecond
+				options.Poll = time.Millisecond
+			}
 			if mode == "timeout" {
 				options.Timeout = time.Nanosecond
 			}
@@ -225,7 +230,7 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 // A native launch owns a pane before Claude creates a transcript. The same
 // persisted seat can be live or positively retired.
 func TestNativeBirthAwaitReportsTrustBeforeTranscript(t *testing.T) {
-	for _, state := range []string{"live", "dead", "bind-race", "quoted", "selected-trust"} {
+	for _, state := range []string{"live", "dead", "bind-race", "quoted", "selected-trust", "unnumbered", "unnumbered-quoted"} {
 		t.Run(state, func(t *testing.T) {
 			testjail.Fleet(t)
 			var db *fleetdb.Store
@@ -263,6 +268,10 @@ func TestNativeBirthAwaitReportsTrustBeforeTranscript(t *testing.T) {
 					switch state {
 					case "quoted":
 						screen += "\n────────\n❯ \n────────"
+					case "unnumbered":
+						screen = unnumberedTrustCapture(t)
+					case "unnumbered-quoted":
+						screen = unnumberedTrustCapture(t) + "\n────────\n❯ \n────────"
 					case "selected-trust":
 						screen = "Quick safety check\n❯ 1. Yes, I trust this folder\n  2. No, exit"
 					}
@@ -286,7 +295,7 @@ func TestNativeBirthAwaitReportsTrustBeforeTranscript(t *testing.T) {
 			turn, err := headless.Await(ctx, func(ctx context.Context) (headless.Chat, bool, error) {
 				return nativeBirthTarget(ctx, seat, &runtime)
 			}, headless.AwaitOptions{Grace: time.Nanosecond, Timeout: 50 * time.Millisecond, Poll: time.Millisecond})
-			if state == "quoted" {
+			if state == "quoted" || state == "unnumbered-quoted" {
 				if !errors.Is(err, headless.ErrAwaitTimeout) || turn.State == headless.StateBlocked {
 					t.Fatalf("trust quotes above composer state=%q error=%v, want live timeout", turn.State, err)
 				}
@@ -308,4 +317,13 @@ func TestNativeBirthAwaitReportsTrustBeforeTranscript(t *testing.T) {
 			}
 		})
 	}
+}
+
+func unnumberedTrustCapture(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile("../engine/testdata/claude-trust-unnumbered.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }

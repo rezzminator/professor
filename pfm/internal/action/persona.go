@@ -73,7 +73,7 @@ func applyWorkbench(request *Request) error {
 			return err
 		}
 		request.OpenCodePlugin = path
-		fleet, err := paths.ComposedHarnessPrompt(request.Home, pfmengine.OpenCode)
+		fleet, err := paths.GeneratedHarnessPrompt(request.Home, pfmengine.OpenCode)
 		if err != nil {
 			if !errors.Is(err, paths.ErrNoSourceRepoMarker) && !errors.Is(err, paths.ErrSourceRepoUnusable) {
 				wrapped := fmt.Errorf("resolve the fleet prompt an OpenCode workbench launch replaces: %w", err)

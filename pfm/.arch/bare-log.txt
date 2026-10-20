@@ -1,4 +1,3 @@
-harness-prompts/compose/main.go 1
 internal/archive/archive.go 1
 internal/chat/target.go 1
 internal/fleetdb/fleetdb.go 1

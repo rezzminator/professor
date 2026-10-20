@@ -387,7 +387,7 @@ func PromptWarning(request Request, machine pfmconfig.Config) string {
 }
 
 func PromptFile(home string) (string, error) {
-	return paths.ComposedHarnessPrompt(home, pfmengine.Claude)
+	return paths.GeneratedHarnessPrompt(home, pfmengine.Claude)
 }
 
 func argsPersonaFlag(args []string, flag string) bool {

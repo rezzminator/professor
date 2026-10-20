@@ -26,7 +26,7 @@ func roleWorkbenchFixture(t *testing.T) (string, string, string) {
 	if err := paths.WriteSourceRepoMarker(home, root); err != nil {
 		t.Fatal(err)
 	}
-	mustWrite(t, filepath.Join(root, "pfm", "harness-prompts", "composed", "claude.md"), "FLEET")
+	mustWrite(t, filepath.Join(root, "pfm", "harness-prompts", "generated", "claude.md"), "FLEET")
 	return root, dir, home
 }
 

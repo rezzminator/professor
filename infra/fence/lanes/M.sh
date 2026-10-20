@@ -82,17 +82,16 @@ done
 need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chats to live in ($CWD)"
-need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
+need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "bash /worktree/infra/fence/source-clone.sh /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it (M.01, M.02)"
-# The harvester's default cache is <home>/.professor/.harvester-cache, and here
-# <home>/.professor is the blueprint clone, mounted read-only: every stored
-# result would fail with "read-only file system". The lane configures its own
-# writable cache.dir under $HOME BEFORE the daemon starts, so the HTTP daemon
-# (M.11, M.12, M.14) and every server started later read the same directory.
+# Keep the harvester's cache outside the writable blueprint snapshot. The
+# lane configures its own cache.dir under $HOME BEFORE the daemon starts, so
+# the HTTP daemon (M.11, M.12, M.14) and every server started later read the
+# same directory.
 need "a writable harvester cache.dir $HARVEST_CACHE and loopback search in $HARVESTER_CFG" \
   "[ \"\$(jq -r '.cache.dir // empty' '$HARVESTER_CFG' 2>/dev/null)\" = '$HARVEST_CACHE' ] && [ \"\$(jq -r '.search.searxngURL // empty' '$HARVESTER_CFG' 2>/dev/null)\" = 'http://127.0.0.1:9' ] && [ -d '$HARVEST_CACHE' ] && [ -w '$HARVEST_CACHE' ]" \
   "mkdir -p '$HARVEST_CACHE' && { if [ -f '$HARVESTER_CFG' ]; then jq --arg d '$HARVEST_CACHE' '.cache = ((.cache // {}) + {dir: \$d}) | .search = ((.search // {}) + {enabled: true, searxngURL: \"http://127.0.0.1:9\"})' '$HARVESTER_CFG'; else jq -n --arg d '$HARVEST_CACHE' '{cache: {dir: \$d}, search: {enabled: true, searxngURL: \"http://127.0.0.1:9\"}}'; fi; } >'$SCRATCH/harvester.config.json' && mv -f '$SCRATCH/harvester.config.json' '$HARVESTER_CFG'" ||
-  lane_abort "no writable harvester cache — every stored harvester result would fail against the read-only blueprint mount"
+  lane_abort "no writable harvester cache — stored harvester results would fail or use the wrong cache directory"
 need "the professor MCP daemon on :$PORT" \
   "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/status)\" != 000 ]" \
   "lane_daemon_up" ||

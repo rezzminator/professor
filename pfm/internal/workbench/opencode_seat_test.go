@@ -62,7 +62,7 @@ func TestOpenCodeSeatPluginRemovesOnlyTheFleetPrompt(t *testing.T) {
 	}
 	dir := t.TempDir()
 	prompt := filepath.Join(dir, "scribe.md")
-	fleet := filepath.Join(dir, "clone", "pfm", "harness-prompts", "composed", "opencode.md")
+	fleet := filepath.Join(dir, "clone", "pfm", "harness-prompts", "generated", "opencode.md")
 	fleetBlock := "Instructions from: " + fleet + "\nYou are the fleet.\n\n"
 	benchBlock := "Instructions from: " + prompt + "\nYou are scribe.\n"
 	prefix := "You are opencode.\n<env>\n  Working directory: /work/acme/docs/scribe\n</env>\n"
@@ -91,7 +91,7 @@ func TestOpenCodeSeatPluginRemovesOnlyTheFleetPrompt(t *testing.T) {
 		{
 			name: "header names another spelling",
 			system: []string{
-				prefix + "Instructions from: ~/clone/pfm/harness-prompts/composed/opencode.md\nYou are the fleet.\n\n" + suffix,
+				prefix + "Instructions from: ~/clone/pfm/harness-prompts/generated/opencode.md\nYou are the fleet.\n\n" + suffix,
 			},
 			want: []string{prefix + suffix},
 		},

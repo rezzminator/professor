@@ -39,7 +39,7 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 REBUILD=0 PRINT_HASH=0 TAG=""
-HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios infra/plugin-lab/tests/fakes/claude"
+HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/source-clone.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios infra/plugin-lab/tests/fakes/claude"
 
 while [ $# -gt 0 ]; do
   case "$1" in

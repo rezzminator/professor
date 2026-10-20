@@ -140,7 +140,7 @@ func TestChatNewWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 				t.Fatal(err)
 			}
 			if entry.stage {
-				composed := paths.ComposedHarnessPromptIn(jail.root, pfmengine.Claude)
+				composed := paths.GeneratedHarnessPromptIn(jail.root, pfmengine.Claude)
 				if err := os.MkdirAll(filepath.Dir(composed), 0o755); err != nil {
 					t.Fatal(err)
 				}

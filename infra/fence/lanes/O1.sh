@@ -33,7 +33,7 @@ lane_begin O1
 # ── prelude ─────────────────────────────────────────────────────────────────
 lane_require_seat_ops "$CONFIG"
 
-need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
+need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "bash /worktree/infra/fence/source-clone.sh /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it"
 need "the managed install root $MANAGED" "[ -d '$MANAGED' ]" "(cd '$BLUEPRINT' && pfm install --yes)" ||
   lane_abort "pfm install has never completed in this container"
@@ -75,8 +75,8 @@ check_path I22 "MCP ownership ledger" "$MANAGED/mcp-ownership.json"
 clone="$(cat "$MANAGED/source-repo" 2>/dev/null)"
 check_path I11 "clone-sourced pfm.zsh shim" "$clone/pfm/internal/installer/assets/shim/pfm.zsh"
 grep -Fq "$clone/pfm/internal/installer/assets/shim/pfm.zsh" "$HOME/.zshrc" 2>/dev/null || missing="$missing I11 (~/.zshrc does not source the clone shim);"
-check_path I7 "composed Codex prompt" "$clone/pfm/harness-prompts/composed/codex.md"
-check_path I9 "composed Claude prompt" "$clone/pfm/harness-prompts/composed/claude.md"
+check_path I7 "generated Codex prompt" "$clone/pfm/harness-prompts/generated/codex.md"
+check_path I9 "generated Claude prompt" "$clone/pfm/harness-prompts/generated/claude.md"
 check_path I8 "harness-prompt baseline" "$clone/pfm/harness-prompts/claude/baselines/harness-original.sha256"
 # I15: every bundled theme profile, its palette in Claude's themes dir and its
 # whole profile in pfm's install dir, the names read from the clone's

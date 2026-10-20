@@ -226,18 +226,18 @@ func ReadSourceRepoMarker(home string) (string, error) {
 	return repo, nil
 }
 
-// ComposedHarnessPrompt locates the installed engine prompt in the recorded clone.
-func ComposedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
+// GeneratedHarnessPrompt locates the installed engine prompt in the recorded clone.
+func GeneratedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
 	repo, err := ReadSourceRepoMarker(home)
 	if err != nil {
-		return "", fmt.Errorf("resolve composed harness prompt: %w", err)
+		return "", fmt.Errorf("resolve generated harness prompt: %w", err)
 	}
-	return ComposedHarnessPromptIn(repo, id), nil
+	return GeneratedHarnessPromptIn(repo, id), nil
 }
 
-// ComposedHarnessPromptIn locates the engine prompt in the given clone.
-func ComposedHarnessPromptIn(repo string, id pfmengine.ID) string {
-	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md")
+// GeneratedHarnessPromptIn locates the engine prompt in the given clone.
+func GeneratedHarnessPromptIn(repo string, id pfmengine.ID) string {
+	return filepath.Join(repo, "pfm", "harness-prompts", "generated", pfmengine.MustLookup(id).LongName+".md")
 }
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,

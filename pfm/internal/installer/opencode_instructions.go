@@ -63,10 +63,10 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) (returnErr error)
 			var content []byte
 			content, err = paths.SourceRepoMarkerContent(repo)
 			if err == nil {
-				composed = paths.ComposedHarnessPromptIn(strings.TrimSpace(string(content)), pfmengine.OpenCode)
+				composed = paths.GeneratedHarnessPromptIn(strings.TrimSpace(string(content)), pfmengine.OpenCode)
 			}
 		} else {
-			composed, err = paths.ComposedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
+			composed, err = paths.GeneratedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
 		}
 		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
 			installer.skip("skip opencode instructions: no source repo recorded")

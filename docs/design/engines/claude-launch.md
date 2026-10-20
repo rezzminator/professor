@@ -195,9 +195,9 @@ The trace records what the status line received and emitted; it does not by itse
 
 ## The system prompt
 
-- **The composed file is built, not staged.** `make -C pfm prompts` (run by `dev.sh build pfm` and by `/pfm:release`) composes `share/head.md` + `{engine}/professor.md` + `share/tail.md` into the tracked `pfm/harness-prompts/composed/{claude,codex,opencode}.md`. `dev.sh test pfm` fails when a composed file differs from its parts.
-- **Launch points at the repo.** `--system-prompt-file` is `{clone}/pfm/harness-prompts/composed/claude.md`, `{clone}` from the source-repo record. Nothing is copied at install.
-- **Workbench launches** replace the composed file with the manifest prompt; explicit `--system-prompt-file` / `--harness-prompt` win, and a role seat composes on that base (`internal/workbench/persona.go`, `internal/agentrole/base_prompt.go`).
+- **The generated file is assembled at install, never at build.** `pfm install` joins `share/head.md` + `{engine}/professor.md` + `share/tail.md`, taken from the source parts embedded in the binary, and writes `{clone}/pfm/harness-prompts/generated/{claude,codex,opencode}.md` before any consumer runs. `generated/` is gitignored and not embedded. The assembly tests check the expected output of the source parts; the install lifecycle tests prove the files exist after install.
+- **Launch points at the generated file.** `--system-prompt-file` is `{clone}/pfm/harness-prompts/generated/claude.md`, `{clone}` from the source-repo record (`paths.GeneratedHarnessPromptIn`). Nothing is copied to a staged location at install.
+- **Workbench launches** replace the generated file with the manifest prompt; explicit `--system-prompt-file` / `--harness-prompt` win, and a role seat composes on that base (`internal/workbench/persona.go`, `internal/agentrole/base_prompt.go`).
 - **Role seats** compose the claude prompt with the role into a seat file under the SID dir and pass that instead (`agentrole.ComposeSeatPrompt`); `pfm chat reload` refreshes it before respawning.
 - **Missing file fails open, loudly:** the launch omits the flag and starts on Claude's own prompt, and the starter is told why (`claudelaunch.PromptWarning`, the one verdict) on the surface they launched from: stderr for `chat new` / `chat branch` / the picker / the launcher, the tool message for `open`, the pane for agent resume, the reload worker's log plus a pane display for reload; spawn-audit reports it too. A surface that attaches next (the picker, the launcher, `chat new --attach`) holds for Enter when stdin and stderr are both a terminal, so the attach cannot cover the warning (`internal/launchnotice`); off a terminal it only prints, and Ctrl-C at the launcher's prompt kills the server it made. Agent resume prints in the pane without waiting, since a detached pane has nobody to press Enter. A caller-stated `--system-prompt` or `--system-prompt-file` is deliberate and never warned.
 
@@ -316,7 +316,7 @@ Reads each live `cc-` chat's Claude argv from `/proc`, decodes it with `claudela
 | Verdict | Meaning |
 | --- | --- |
 | `INJECTED` | argv carries `--settings` with `outputStyle:"default"` and the registry's hook set, plus the prompt material the account's `systemPrompt` names (`--system-prompt-file`, or `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT` inside the `--settings` payload) |
-| `VIOLATION` | a fresh launch without the registry payload, or professor prompt material missing because the composed prompt is unavailable; that reason names the resolve error and blames no spawn site |
+| `VIOLATION` | a fresh launch without the registry payload, or professor prompt material missing because the generated prompt is unavailable; that reason names the resolve error and blames no spawn site |
 | `PREDATES-LAYER` | the process started before the current spawn door, with its age named, or its hook set differs from the registry at any age; reload to carry it |
 | `ROLE-OK` / `ROLE-MISMATCH` / `ROLE-CHECK-FAILED` | a seat prompt file against its role |
 
@@ -330,5 +330,5 @@ Values set through the `--settings` `env` block are read from argv, never from `
 - The hygiene rows ↔ the Codex launch's unset list (`pfm internal codex-launch`) ↔ the headless strip lists ↔ the doctor harness probe's capture environment — all read from the registry.
 - `outputStyle` constant ↔ the gate in `infra/check-self-hosted-manifest.sh`.
 - The cost rows (`costLedger`, the exporter variables, the `PFM_COST_LEDGER` marker) ↔ `pfm/internal/claudelaunch/cost.go` ↔ [cost-ledger.md](cost-ledger.md); `PFM_COST_LEDGER_DIR` (`pfm/internal/paths/paths.go`) names the ledger directory the sink writes and every reader opens.
-- `pfm/harness-prompts/composed/*.md` ↔ their parts.
+- `pfm/harness-prompts/generated/*.md` (assembled by `pfm install`, gitignored) ↔ the embedded source parts under `pfm/harness-prompts/{share,claude,codex,opencode}/`; the Codex output ↔ `codexprompt.FleetPrompt`.
 - `chat.backend` (`pfm/internal/config/chat.go`) ↔ `example.pfm.config.json` ↔ [pfm-home.md § chat](pfm-home.md#chat) ↔ `spawn.ChooseBackend`.

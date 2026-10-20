@@ -83,7 +83,7 @@ func TestRenderExplicitDefaultPrompt(t *testing.T) {
 	machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
 	clone := filepath.Join(home, "blueprint")
 	for path, body := range map[string]string{
-		filepath.Join(clone, "pfm", "harness-prompts", "composed", "claude.md"): "Professor.",
+		filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md"): "Professor.",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -795,7 +795,7 @@ func stageComposedPrompt(t *testing.T, home string, write bool) string {
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
-	path := paths.ComposedHarnessPromptIn(clone, pfmengine.Claude)
+	path := paths.GeneratedHarnessPromptIn(clone, pfmengine.Claude)
 	if !write {
 		return path
 	}

@@ -15,7 +15,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - public face: the files a visitor or adopter reads first · `README.md`, `INSTALL.md`, `CHANGELOG.md`, `VERSION`, `releases/v{X.Y.Z}.md`
 - leak gate: the identifying-content scan, run `pre-push` · `scripts/leak-check.sh`, `.githooks/pre-push`
 - pfm: the fleet engine, Go · `pfm/cmd/pfm/`, `pfm/internal/` · child `pfm/CLAUDE.md`
-- fleet prompt: the main chat's system layer per engine, composed at build into the tracked `pfm/harness-prompts/composed/` by `make -C pfm prompts`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here · `pfm/harness-prompts/`
+- fleet prompt: the main chat's system layer per engine, gitignored at `pfm/harness-prompts/generated/{engine}.md`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here · generated from `pfm/harness-prompts/` by `pfm install`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the only web and document harvester, over a pinned Python conversion sidecar · `pfm/internal/harvest/`, `pfm/internal/harvestmcp/`, sidecar `pfm/internal/harvestpy/`
 - flights: the foreman tiers and the lander that build and land work past the direct rung, and `/flights:doctor`, their meter · `templates/global/agents/flights-*.md`, `templates/global/commands/flights/` · design `docs/design/flights/`

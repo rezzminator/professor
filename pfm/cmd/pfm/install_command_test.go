@@ -203,6 +203,10 @@ func assertManagerConsulted(t *testing.T, logPath string, wantDarwinConsulted bo
 }
 
 func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
+	// Apply now generates prompts in the source clone. Never discover the
+	// read-only test checkout; each subtest owns its default clone under HOME.
+	t.Chdir(t.TempDir())
+	t.Setenv("PFM_SOURCE_REPO", "")
 	// The launchctl fake's "print" reply models launchAgentRunning's state
 	// line (launchd.go:177-196); its exit code always succeeds like the
 	// existing systemctl fakes below, so a subtest's only lever is the

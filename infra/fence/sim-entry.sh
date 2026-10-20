@@ -46,7 +46,10 @@ engine_sync_link_stable "$ENGINE_SYNC_BIN" 2>/tmp/sim-engine-sync-link.log ||
 
 export PFM_CONFIG="${PFM_CONFIG:-$HOME/.local/state/pfm/pfm.config.json}"
 mkdir -p "$(dirname "$PFM_CONFIG")"
-pfm install --yes --skip-engine codex --skip-themes >/tmp/sim-install.log 2>&1 ||
+# Install writes generated prompts into a writable clone, never the mount.
+bash /worktree/infra/fence/source-clone.sh /worktree "$HOME/.professor" >/tmp/sim-source-clone.log 2>&1 ||
+  fail "writable source snapshot" /tmp/sim-source-clone.log
+(cd "$HOME/.professor" && pfm install --yes --skip-engine codex --skip-themes) >/tmp/sim-install.log 2>&1 ||
   fail "pfm install (converter sidecar into the harvest volume)" /tmp/sim-install.log
 [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
   fail "engine-sync on PATH after pfm install (got: $(command -v engine-sync || echo none))" /tmp/sim-install.log

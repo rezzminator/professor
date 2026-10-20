@@ -214,6 +214,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.seedConfig(); err != nil {
 		return err
 	}
+	if err := installer.generateHarnessPrompts(); err != nil {
+		return fmt.Errorf("generate harness prompts: %w", err)
+	}
 	installer.deferFailure(installer.installHarvest(ctx))
 	installer.deferFailure(installer.installMarkdownTool(ctx))
 	installer.installThemes(ctx)

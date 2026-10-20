@@ -400,8 +400,8 @@ target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
   config="$CODEX_HOME/config.toml"
-  staged="$HOME/.professor/pfm/harness-prompts/composed/codex.md"
-  # pfm writes the composed Codex prompt into developer_instructions
+  staged="$HOME/.professor/pfm/harness-prompts/generated/codex.md"
+  # pfm writes the generated Codex prompt into developer_instructions
   # (internal/installer/codex_developer_instructions.go); the retired
   # SessionStart appendix hook must be gone from hooks.json.
   if [ ! -f "$config" ]; then
@@ -412,14 +412,14 @@ if requires E2.01-open-seat; then
   if [ -f "$CODEX_HOME/hooks.json" ] && grep -q 'internal codex-appendix' "$CODEX_HOME/hooks.json"; then
     bad="$bad $CODEX_HOME/hooks.json still carries the retired SessionStart appendix hook;"
   fi
-  [ -f "$staged" ] || bad="$bad no composed Codex prompt at $staged to compare the config against;"
+  [ -f "$staged" ] || bad="$bad no generated Codex prompt at $staged to compare the config against;"
   marker="$(head -1 "$staged" 2>/dev/null)"
   sock="$(live_field "$CHAT" 11)"
   start="$(tmux -S "$(_lane_tmux_dir)/$sock" display -p '#{pane_start_command}' 2>&1)"
   pid="$(pane_pid)"
   argv="$(tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null)"
   if [ -z "$marker" ]; then
-    bad="$bad the composed Codex prompt has no first line;"
+    bad="$bad the generated Codex prompt has no first line;"
   elif ! grep -qF 'developer_instructions=' <<<"$argv"; then
     bad="$bad the live pane's process argv carries no developer_instructions argument (start command ${#start} bytes; process argv ${#argv} bytes);"
   elif ! grep -qF -- "$marker" <<<"$argv"; then

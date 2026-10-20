@@ -59,7 +59,7 @@ lane_begin O2
 # ── prelude: what this lane needs, made when missing, no-op otherwise ───────
 lane_require_seat_ops "$CONFIG"
 
-need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
+need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "bash /worktree/infra/fence/source-clone.sh /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it"
 need "the managed install root $MANAGED" "[ -d '$MANAGED' ]" "(cd '$BLUEPRINT' && pfm install --yes)" ||
   lane_abort "pfm install has never completed in this container"

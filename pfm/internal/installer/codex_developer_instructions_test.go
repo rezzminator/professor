@@ -152,14 +152,8 @@ func TestInstallWritesTheComposedPromptIntoEveryCodexHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	composedPath, err := paths.ComposedHarnessPrompt(home, pfmengine.Codex)
+	composedPath, err := paths.GeneratedHarnessPrompt(home, pfmengine.Codex)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(composedPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(composedPath, prompt, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(home, "pfm.config.json")

@@ -70,7 +70,7 @@ FENCE_TEST_CONFIG = $(shell $(call fence_test_env,PFM_FENCE_TEST_P) $(call fence
 TEST_P = $(word 1,$(FENCE_TEST_CONFIG))
 TESTFLAGS ?= $(if $(findstring CONFIG-INVALID,$(FENCE_TEST_CONFIG)),$(error invalid fence test configuration; see named error above),-p $(TEST_P) -parallel $(word 2,$(FENCE_TEST_CONFIG)))
 
-.PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags timing sweep install host-install rollback \
+.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover testflags timing sweep install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
@@ -88,11 +88,6 @@ build: ## Compile to tmp/bin/pfm.dev (a local artifact, never the shipped path);
 	@mkdir -p $(dir $(LOCAL))
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
 	@echo "built: $(LOCAL)"
-
-# The composer runs here, so it builds for the host even when a cross build
-# exports GOOS/GOARCH (else: "exec format error").
-prompts: ## Compose the tracked harness prompts from their parts
-	GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run ./harness-prompts/compose
 
 tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
 	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh

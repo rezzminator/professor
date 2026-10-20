@@ -1,13 +1,14 @@
 # harness-prompts — the fleet's system-prompt layer
 
-One prompt per engine, composed from three parts, plus the Claude drift baseline.
+One prompt per engine, assembled at install from three source parts, plus the Claude drift baseline.
 
-## The composition
+## The assembly
 
 Every engine reads the same Professor: a shared head (identity, voice, stance, work rhythm),
 an engine middle (the mechanics only that harness has), and a shared tail (orchestration and
-the standing laws). `make -C pfm prompts` joins the three at build time, so
-what an engine reads is one file on disk, not an assembly the launcher has to get right.
+the standing laws). `pfm install` joins the three from the parts embedded in the binary and
+writes one file per engine, so what an engine reads is one file on disk, not an assembly the
+launcher has to get right. Nothing is assembled at build time and no output is tracked.
 
 | part | file |
 | --- | --- |
@@ -16,19 +17,23 @@ what an engine reads is one file on disk, not an assembly the launcher has to ge
 | tail | `share/tail.md` |
 
 Each part's trailing newlines are trimmed and the three are joined by one blank line, the
-result ending in a single newline. Nothing else is added: the composed file is the three parts
-and the two seams.
+result ending in a single newline. Nothing else is added: a generated file is the three parts
+and the two seams. The Codex mapping is applied after assembly, to the full Codex prompt rather than the middle alone; the
+in-memory Codex fleet prompt that agent roles carry (`codexprompt.FleetPrompt`) is that same
+assembly and mapping from the same source parts.
 
-## The three composed files
+## The three generated files
 
-`make -C pfm prompts` writes tracked files under `composed/`. The compose package test
-recomputes each file and names the first differing line if a part or composed file drifts.
+`pfm install` writes the files below under `{clone}/pfm/harness-prompts/generated/` before any
+consumer runs; the directory is gitignored and never embedded. The assembly tests compare each
+output with the expected join of the source parts, and the install lifecycle tests prove the files
+exist after install.
 
-- `composed/claude.md` — head + `claude/professor.md` + tail. `"systemPrompt": "professor"`
+- `generated/claude.md` — head + `claude/professor.md` + tail. `"systemPrompt": "professor"`
   makes every managed Claude launch inject it via `--system-prompt-file`, replacing the harness's
   built-in prose (tool schemas and CLAUDE.md are separate request lanes and are unaffected).
-- `composed/codex.md` — head + `codex/professor.md` + tail. Codex takes only an appendix to
-  its own prompt, so the composed file IS the appendix, delivered through `developer_instructions`
+- `generated/codex.md` — head + `codex/professor.md` + tail. Codex takes only an appendix to
+  its own prompt, so `generated/codex.md` IS the appendix, which `pfm install` reads into `developer_instructions`
   in each configured Codex home's `config.toml`, inside a marked
   `# BEGIN pfm developer_instructions — installer-owned` / `# END pfm developer_instructions —
   installer-owned` fence that `pfm install` writes and owns; Codex reads the key as the first
@@ -43,16 +48,17 @@ recomputes each file and names the first differing line if a part or composed fi
   parent turn. The Codex appendix keeps the parent turn active and calls `wait_agent` with its configured
   default timeout while delegated work remains, waiting again after progress or a timeout and reporting
   timeouts in commentary. The shared tail defers waiting to each engine; Claude and OpenCode keep
-  their engine-specific end-turn behavior. Recompose, rebuild pfm and run `pfm install` to deploy prompt
+  their engine-specific end-turn behavior. Rebuild pfm and run `pfm install` to regenerate and deploy prompt
   changes; already-running chats need to reload their instructions.
-- `composed/opencode.md` — head + `opencode/professor.md` + tail. OpenCode has no
+- `generated/opencode.md` — head + `opencode/professor.md` + tail. OpenCode has no
   system-prompt replacement flag; its machine-scope `opencode.jsonc` carries an `instructions`
-  array of files whose content it appends to the system prompt, and `pfm install` names the clone's composed
-  file there, preserving every other key and every entry the operator wrote.
+  array of files whose content it appends to the system prompt, and `pfm install` names the clone's
+  `generated/opencode.md` there, preserving every other key and every entry the operator wrote.
 
-The clone holds the composed prompts and Claude baselines; install stages none of them.
-`harnessprompts.go` embeds the parts and baselines into the binary for composition and
-the doctor's `harness-prompts embed=` comparison. That row excludes `compose/` and `composed/`;
+The clone holds the source parts, the generated prompts and the Claude baselines; install stages
+no copy of them. `harnessprompts.go` embeds the source parts and baselines into the binary for
+assembly and the doctor's `harness-prompts embed=` comparison. That row compares the source tree
+and excludes the `generated/` outputs;
 it reports `MISMATCH` when an embedded source differs from the clone. The row states both
 directions and prescribes neither: a hash difference says the two disagree, not which one is
 newer — a clone checked out to an older revision than the binary is the binary being ahead.
@@ -102,4 +108,4 @@ SHA256, and model provenance together. Never automatically accept a newly captur
 
 `claude.systemPrompt` values: `production` (default — the CLI's own prompt, untouched), `lean` (the CLI's
 built-in minimal prompt via `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`), `professor` (inject the clone's
-`composed/claude.md`).
+`generated/claude.md`).

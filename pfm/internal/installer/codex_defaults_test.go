@@ -205,6 +205,9 @@ func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	installer := &engine{options: Options{Home: home, Stdout: io.Discard}, apply: true, stamp: "test"}
+	if err := installer.generateHarnessPrompts(); err != nil {
+		t.Fatal(err)
+	}
 	if err := installer.wireCodexDefaults(); err != nil {
 		t.Fatal(err)
 	}
@@ -298,6 +301,9 @@ func TestCodexDefaultsRefusesDanglingConfigSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	installer := &engine{options: Options{Home: home, Stdout: io.Discard}, apply: true, stamp: "test"}
+	if err := installer.generateHarnessPrompts(); err != nil {
+		t.Fatal(err)
+	}
 	if err := installer.wireCodexDefaults(); err == nil || !strings.Contains(err.Error(), "dangling symlink") {
 		t.Fatalf("expected dangling-link refusal, got %v", err)
 	}

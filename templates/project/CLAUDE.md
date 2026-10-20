@@ -14,7 +14,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 {PROJECT_ROSTER}
 
 - child CLAUDE.md: a roster entry's own conventions and code placement, beside its agents and skills · `{project}/CLAUDE.md`, `{project}/.claude/`
-- fleet prompt: the main chat's system layer — voice, § Model Selection, § Orchestration — composed at build time by `make -C pfm prompts` into the clone's tracked `composed/`; `pfm install` stages none of it · `{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`
+- fleet prompt: the main chat's system layer — voice, § Model Selection, § Orchestration — written by `pfm install` from its binary's embedded parts into the clone's gitignored `generated/` · `{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`
 - permanent docs: the reference docs the main loop or the `documenter` agent writes · `docs/_index.md` and the clusters it links, each roster entry's `{project}/docs/`
 
 <!-- OPTIONAL docs map: add entries like these if the project keeps clustered reference docs, or delete the block.

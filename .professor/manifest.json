@@ -99,7 +99,7 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "2b050225554d1143a8f219e57c8e478acf2ec7d740ac3e6ad8021f2f047fa62e",
-    ".claude/agents/gitter.md": "d7ac68eb58007d5837c4d2ac3ac688e31437dbdc137938e714f84e7023ff5b1d",
+    ".claude/agents/gitter.md": "a99d321112d2fbc4d39500a9e94787ed2eac2e9145565e2b85112034e00ad34a",
     ".claude/agents/gpt-changelogger.md": "f6383197ebda4c0d9f8db11a0da7dcc5ee3218355511fc6188cfad5c537d09cc",
     ".claude/agents/gpt-gitter.md": "fb39920cd9b0e1103750065357dff715fcfe6b15f7a1435d6d83e3ae304cbd95",
     ".claude/agents/gpt-pcm.md": "416b2162318864272b881ddde92b1cd4b933e54d2ee8f4f0f6bef3b9f9c9f300",

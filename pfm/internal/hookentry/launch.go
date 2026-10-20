@@ -179,6 +179,9 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			}
 			filtered = append(filtered, sessionEnv...)
 			environment = filtered
+			if !launchRunsNonInteractive(arguments) {
+				arguments = claudelaunch.RefreshRemoteControl(arguments, prefs.RemoteControl, "")
+			}
 			if !launchIsHeadless(arguments) {
 				environment, _ = armCostLedger(environment, env, prefs.CostLedger, stderr)
 			}

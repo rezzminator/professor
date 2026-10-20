@@ -64,6 +64,7 @@ func KillServer(ctx context.Context, resolved paths.Values, socket string) (err 
 // chat by ending its server, removing its role prompt and confirming the socket
 // no longer answers. Its caller already runs outside every chat (pfm restart's
 // detached worker), so nothing here waits for a turn to end.
+// A host restart uses EndForRestart to retain the native resume recipe.
 func EndNow(ctx context.Context, chat headless.Chat, values paths.Values) error {
 	if chat.Backend == spawn.BackendHerdr {
 		return endHerdr(ctx, chat, values)
@@ -81,6 +82,16 @@ func EndNow(ctx context.Context, chat headless.Chat, values paths.Values) error 
 		return fmt.Errorf("chat %s ended, but its role prompt stays: %w", chat.ID, err)
 	}
 	return nil
+}
+
+// EndForRestart closes a chat without discarding a native conversation's launch
+// identity and account. The same ownership lock covers closing and retirement:
+// a concurrent schedule may resume only after the old supervisor is proved gone.
+func EndForRestart(ctx context.Context, chat headless.Chat, values paths.Values) error {
+	if chat.Backend == spawn.BackendHerdr {
+		return endHerdrSteps(ctx, chat, values, io.Discard, true)
+	}
+	return EndNow(ctx, chat, values)
 }
 
 // EndTarget handles durable native worker/retry paths before asking the caller
@@ -243,12 +254,18 @@ func endNativeWorkerSteps(ctx context.Context, id string, values paths.Values, s
 		endStep(steps, "failed: %v", err)
 		return err
 	}
-	return endHerdrSteps(ctx, headless.Chat{Backend: seat.Backend, SeatID: id, ID: seat.SessionID}, values, steps)
+	return endHerdrSteps(
+		ctx,
+		headless.Chat{Backend: seat.Backend, SeatID: id, ID: seat.SessionID},
+		values,
+		steps,
+		false,
+	)
 }
 
 // endHerdr closes only a proved canonical owner, and retires only after close.
 func endHerdr(ctx context.Context, chat headless.Chat, values paths.Values) error {
-	return endHerdrSteps(ctx, chat, values, io.Discard)
+	return endHerdrSteps(ctx, chat, values, io.Discard, false)
 }
 
 // endStep writes one timestamped line of the end worker's progress; the worker
@@ -264,7 +281,9 @@ func endStep(steps io.Writer, format string, args ...any) {
 
 // endHerdrSteps is endHerdr that writes each step it takes to steps, and the
 // error it returns.
-func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values, steps io.Writer) (returnErr error) {
+func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values, steps io.Writer,
+	preserve bool,
+) (returnErr error) {
 	defer func() {
 		if returnErr != nil {
 			endStep(steps, "failed: %v", returnErr)
@@ -289,6 +308,11 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 	endStep(steps, "seat read: %s pane %s", seat.SeatID, seat.HerdrPane)
 	if seat.Backend != spawn.BackendHerdr || seat.SessionID != chat.ID {
 		return fmt.Errorf("native end target %s no longer matches its durable seat", chat.SeatID)
+	}
+	if preserve {
+		if _, err := state.ReadSeatRun(seat.SeatID); err != nil {
+			return fmt.Errorf("preserve restart recipe before closing %s: %w", seat.SeatID, err)
+		}
 	}
 	pending := seat.EndPending
 	seat, owned, proofErr := gather.ProveHerdrSeat(ctx, state, gather.NewProcFS(values.ProcRoot), seat)
@@ -351,9 +375,42 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 			endStep(steps, "pane.close acknowledged")
 		}
 	}
+	if preserve {
+		// pane.close may acknowledge before the child exits. Retain end intent
+		// on timeout so no opener can overlap the retiring supervisor.
+		deadline := clock.Real.Now().Add(5 * time.Second)
+		for {
+			gone, err := gather.HerdrSeatRetired(ctx, gather.NewProcFS(values.ProcRoot), seat)
+			if err != nil {
+				return fmt.Errorf("verify restart seat %s retired: %w", seat.SeatID, err)
+			}
+			if gone {
+				break
+			}
+			if !clock.Real.Now().Before(deadline) {
+				return fmt.Errorf(
+					"restart seat %s supervisor still running after pane.close; end intent retained",
+					seat.SeatID,
+				)
+			}
+			if err := clock.Real.Sleep(ctx, 50*time.Millisecond); err != nil {
+				return fmt.Errorf("wait for restart seat %s retirement: %w", seat.SeatID, err)
+			}
+		}
+	}
 	// Before the seat row goes, so a failure here leaves the seat retryable.
 	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
 		return fmt.Errorf("remove ended seat reload files: %w", err)
+	}
+	if preserve {
+		before := seat
+		seat.State, seat.EndPending, seat.ReloadPending = "lost", false, false
+		seat.LostNote = "retired by pfm restart; resume recipe retained"
+		if err := state.UpdateSeat(ctx, before, seat); err != nil {
+			return fmt.Errorf("retain restart seat %s for resume: %w", seat.SeatID, err)
+		}
+		endStep(steps, "seat retired for resume: %s", seat.SeatID)
+		return nil
 	}
 	if err := state.DeleteSeatRun(seat.SeatID); err != nil {
 		return fmt.Errorf("remove ended seat recipe: %w", err)

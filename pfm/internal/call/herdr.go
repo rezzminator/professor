@@ -13,17 +13,18 @@ import (
 )
 
 const (
-	herdrRecentLines       = 1000
-	HerdrBackend           = "herdr"
-	backendHerdr           = HerdrBackend
-	backendTmux            = "tmux"
-	herdrBlocked           = "blocked"
-	herdrDone              = "done"
-	herdrIdle              = "idle"
-	herdrWorking           = "working"
-	herdrUnknown           = "unknown"
-	statusDelivered        = "delivered"
-	statusTypedUnconfirmed = "typed_unconfirmed"
+	herdrRecentLines        = 1000
+	HerdrBackend            = "herdr"
+	backendHerdr            = HerdrBackend
+	backendTmux             = "tmux"
+	herdrBlocked            = "blocked"
+	herdrDone               = "done"
+	herdrIdle               = "idle"
+	herdrWorking            = "working"
+	herdrUnknown            = "unknown"
+	statusDelivered         = "delivered"
+	statusDeliveredUnproven = "delivered_unproven"
+	statusTypedUnconfirmed  = "typed_unconfirmed"
 )
 
 func herdrCapture(ctx context.Context, target Target, lines int) (string, string, error) {

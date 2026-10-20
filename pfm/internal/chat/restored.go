@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -184,7 +185,7 @@ func restoreNative(
 	if err != nil {
 		return fmt.Errorf("read restored recipe: %w", err)
 	}
-	run, err = resumeNativeRun(run, seat)
+	run, err = resumeNativeRun(run, seat, runtime.Config, stderr)
 	if err != nil {
 		return err
 	}
@@ -300,15 +301,20 @@ func notifyNativeLoss(ctx context.Context, seat fleetdb.Seat, note string) error
 	return nil
 }
 
-// resumeNativeRun retains the structured launch's preferences. Only birth
-// identity and its initial positional prompt are consumed, never resent.
-func resumeNativeRun(run fleetdb.SeatRun, seat fleetdb.Seat) (fleetdb.SeatRun, error) {
+// resumeNativeRun retains the structured launch's preferences except policies
+// refreshed at execution. Birth identity and its initial prompt are never resent.
+func resumeNativeRun(
+	run fleetdb.SeatRun,
+	seat fleetdb.Seat,
+	machine config.Config,
+	stderr io.Writer,
+) (fleetdb.SeatRun, error) {
 	engineID := pfmengine.ID(seat.Engine)
 	if _, err := pfmengine.Lookup(engineID); err != nil {
 		return run, err
 	}
 	if seat.SessionID == "" {
-		return run, nil
+		return reload.RefreshRecipeRemoteControl(run, engineID, machine, seat.Name, stderr), nil
 	}
 	if engineID == pfmengine.Claude {
 		if _, err := claudelaunch.Parse(append([]string{run.Binary}, run.Args...)); err != nil {
@@ -400,7 +406,7 @@ func resumeNativeRun(run fleetdb.SeatRun, seat fleetdb.Seat) (fleetdb.SeatRun, e
 	}
 	run.Args = args
 	run.Env = herdr.StripReporter(run.Env)
-	return run, nil
+	return reload.RefreshRecipeRemoteControl(run, engineID, machine, seat.Name, stderr), nil
 }
 
 func prepareRestoredSeat(

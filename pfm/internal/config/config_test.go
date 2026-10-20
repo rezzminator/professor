@@ -147,8 +147,8 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		RequireManagedCleanup: true,
 		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
+		RemoteControl:         true,
 		CostLedger:            true,
-
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
 		t.Fatalf("Claude = %#v, want bypass/claude defaults", got.Claude)
@@ -308,8 +308,8 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		RequireManagedCleanup: true,
 		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
+		RemoteControl:         true,
 		CostLedger:            true,
-
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
 		t.Fatalf("Claude = %#v, want configured values", got.Claude)

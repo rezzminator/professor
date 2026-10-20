@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -34,6 +35,7 @@ type Request struct {
 	ConfigDir, Binary, SessionID, Resume string
 	Fork                                 bool
 	Name                                 string
+	RemoteControlName                    string
 	Cache1H                              *bool
 	Model, Effort, PromptFile            string
 	Args                                 []string
@@ -169,6 +171,11 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 			result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
 		}
 	}
+	result.Argv = RefreshRemoteControl(
+		result.Argv,
+		prefs.RemoteControl && request.Purpose != PurposeQuery,
+		cmp.Or(request.RemoteControlName, request.Name),
+	)
 	return result, nil
 }
 

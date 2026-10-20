@@ -393,6 +393,7 @@ func TestEndHerdrStepsLogEachStepAndTheFailure(t *testing.T) {
 				},
 				runtime.Paths,
 				&steps,
+				false,
 			)
 			if (err != nil) != (scenario.refusal != "") {
 				t.Fatalf("endHerdrSteps err=%v refusal=%q", err, scenario.refusal)

@@ -132,6 +132,9 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 			return []byte("inactive\n"), nil
 		}
 	}
+	if runner.manager && call == "systemctl --user show --property=ActiveState --value "+scheduleTimerUnit {
+		return []byte("active\n"), nil
+	}
 	if call == "systemctl --user show --property=ActiveState --value "+mcpUnitName {
 		if runner.mcpState == "" {
 			return []byte("active\n"), nil

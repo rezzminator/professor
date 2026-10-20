@@ -246,6 +246,7 @@ var v079ClaudeKeys = map[string]bool{
 
 // releaseClaudeKeys are the claude.* keys added after v0.79.0.
 var releaseClaudeKeys = []string{
+	"remoteControl",
 	"helperModel",
 	"pluginCheckoutRoot",
 	"plugins",
@@ -270,7 +271,7 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 		defaults := Defaults(home, nil)
 		defaults.Accounts = []Account{{
 			ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"),
-			Claude: &ClaudePrefs{HelperModel: DefaultHelperModel},
+			Claude: &ClaudePrefs{HelperModel: DefaultHelperModel, RemoteControl: true},
 		}}
 		for name, build := range map[string]func() ([]byte, error){
 			"MarshalDefault":                  func() ([]byte, error) { return MarshalDefault(home, nil) },

@@ -244,7 +244,8 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		script := "case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0\n"
+		script := "case \"$*\" in *ActiveState*pfm-schedule.timer) echo active;; " +
+			"*ActiveState*) echo inactive;; esac\nexit 0\n"
 		binDir, logPath := writeManagerFakes(t, script, launchctlIdle)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)

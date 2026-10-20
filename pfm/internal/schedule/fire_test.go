@@ -196,7 +196,8 @@ func TestFireDeliversAOneTimeScheduleOnce(t *testing.T) {
 		}
 	}
 	if len(deliverer.delivered) != 1 || deliverer.delivered[0].id != id ||
-		deliverer.delivered[0].message != "⏰ pfm schedule "+strconv.FormatInt(id, 10)+" (once): ping once" {
+		deliverer.delivered[0].message != "⏰ pfm schedule "+strconv.FormatInt(id, 10)+" (once): ping once\n\n"+
+			"[pfm-schedule id="+strconv.FormatInt(id, 10)+" fire=2027-01-15T09:00:00Z]" {
 		t.Fatalf("delivered %+v, want one-time schedule %d delivered once", deliverer.delivered, id)
 	}
 }

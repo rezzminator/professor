@@ -1,6 +1,7 @@
 package call
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -485,4 +486,24 @@ func countCompactionReceipts(capture string) int {
 		}
 	}
 	return count
+}
+
+// refuseNonIdleRetry guards a retry whose prior submission was uncertain. Unlike
+// an initial call it cannot queue a second turn or stash an existing draft.
+func (engine *Engine) refuseNonIdleRetry(ctx context.Context, target Target, capture string, base *Result) bool {
+	if base.Busy {
+		base.Code, base.Message = CodeBusy, "target is busy; idle-only retry typed nothing"
+		return true
+	}
+	empty, _, err := ComposerEmpty(capture, func() (string, error) {
+		return engine.tmux.Capture(ctx, target.SocketPath, target.Pane, true, 0)
+	})
+	if err != nil || !empty || !ComposerRowShown(capture) || SelectorLine(capture) != "" {
+		base.Code, base.Message = CodeUndelivered, "idle-only retry requires an empty composer; nothing typed"
+		if err != nil {
+			base.Message += ": " + err.Error()
+		}
+		return true
+	}
+	return false
 }

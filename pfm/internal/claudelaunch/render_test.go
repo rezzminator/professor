@@ -145,9 +145,6 @@ func TestRenderFreshInteractive(t *testing.T) {
 	}) {
 		t.Errorf("env=%q", launch.Env)
 	}
-	if len(launch.Argv) < 2 || launch.Argv[0] != "--session-id" || launch.Argv[1] != "S" {
-		t.Errorf("argv start=%q", launch.Argv)
-	}
 	if parsed.SessionID != "S" || !parsed.Autonomy {
 		t.Errorf("verbs=%#v", parsed)
 	}

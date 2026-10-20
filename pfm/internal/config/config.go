@@ -91,6 +91,9 @@ type ClaudePrefs struct {
 	// Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
 	Cache1H      bool
 	NativeCursor bool
+	// RemoteControl starts interactive Claude sessions with Remote Control requested.
+	// Claude still enforces its login and endpoint eligibility. Defaults true.
+	RemoteControl bool
 	// MaxSubagentSpawnDepth and MaxConcurrentSubagents lift Claude Code's
 	// sub-agent ceilings on every managed launch — see subagents.go. Zero is
 	// the unset sentinel on both.
@@ -305,6 +308,7 @@ type rawClaude struct {
 	Theme                 *string `json:"theme,omitempty"`
 	Cache1H               *bool   `json:"cache1h,omitempty"`
 	NativeCursor          *bool   `json:"nativeCursor,omitempty"`
+	RemoteControl         *bool   `json:"remoteControl,omitempty"`
 	SystemPrompt          *string `json:"systemPrompt,omitempty"`
 	// RetiredCompactNudge accepts old config files; it is never read or written.
 	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
@@ -466,6 +470,7 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, keyTheme):          SourceDefault,
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
+		engineConfigKey(pfmengine.Claude, "remoteControl"):   SourceDefault,
 		"claude.webSearchesPerSession":                       SourceDefault,
 		"claude.autoCompactWindow":                           SourceDefault,
 		"claude.helperModel":                                 SourceDefault,
@@ -532,6 +537,7 @@ func defaultsWithMCPServers(
 			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
 			Cache1H:               true,
+			RemoteControl:         true,
 			CostLedger:            true,
 			Plugins:               DefaultClaudePlugins(),
 
@@ -767,6 +773,7 @@ func loadWithMCPServers(
 			return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 		}
 		applyNativeCursor(&result.Claude, raw.Claude.NativeCursor, false, result.Sources, -1)
+		applyRemoteControl(&result.Claude, raw.Claude.RemoteControl, true, result.Sources, -1)
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
@@ -818,6 +825,13 @@ func loadWithMCPServers(
 					return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 				}
 				applyNativeCursor(&prefs, value.Claude.NativeCursor, result.Claude.NativeCursor, result.Sources, index)
+				applyRemoteControl(
+					&prefs,
+					value.Claude.RemoteControl,
+					result.Claude.RemoteControl,
+					result.Sources,
+					index,
+				)
 				if err := applySubagentCaps(
 					&prefs, *value.Claude, result.Claude, result.Path, "accounts", index, result.Sources,
 				); err != nil {
@@ -1192,6 +1206,7 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
 		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
+		result.RemoteControl = account.Claude.RemoteControl
 		copyClaudeLaunchPrefs(&result, *account.Claude)
 		// Zero is unset on both caps, so Load's inheritance already put the
 		// resolved top-level value here — same unconditional copy as Cache1H.
@@ -1368,30 +1383,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			"emoji":     account.Emoji,
 		}
 		if account.Claude != nil {
-			claude := map[string]any{
-				"webSearchesPerSession": account.Claude.WebSearchesPerSession,
-				"autoCompactWindow":     account.Claude.AutoCompactWindow,
-				"tmuxTruecolor":         account.Claude.TmuxTruecolor,
-				"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
-				"requireManagedCleanup": account.Claude.RequireManagedCleanup,
-				keyTheme:                themeMarshalValue(account.Claude.Theme),
-				"cache1h":               account.Claude.Cache1H,
-				"nativeCursor":          account.Claude.NativeCursor,
-			}
-			// These empty sentinels mean inherit. Writing them as explicit empty
-			// values makes our strict loader reject its own output.
-			if account.Claude.PermissionMode != "" {
-				claude["permissionMode"] = account.Claude.PermissionMode
-			}
-			if account.Claude.Binary != "" {
-				claude[engineKeyBinary] = account.Claude.Binary
-			}
-			// Preserve explicit account preferences, even when currently equal to the
-			// machine value: a later machine edit must not turn them into inheritance.
-			if account.Claude.HelperModel != config.Claude.HelperModel ||
-				config.Source(fmt.Sprintf("accounts[%d].claude.helperModel", index)) == SourceFile {
-				claude["helperModel"] = account.Claude.HelperModel
-			}
+			claude := marshalClaudeAccount(config, account, index)
 			value[claudeName] = claude
 		}
 		if account.Codex != nil {

@@ -219,6 +219,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	}
 	printClaude("permissionMode", config.Claude.PermissionMode)
 	printClaude("binary", config.Claude.Binary)
+	printClaude("remoteControl", config.Claude.RemoteControl)
 	printClaude("theme", config.Claude.Theme)
 	printClaude("webSearchesPerSession", config.Claude.WebSearchesPerSession)
 	printClaude("autoCompactWindow", config.Claude.AutoCompactWindow)

@@ -418,7 +418,12 @@ func runScheduleRm(args []string, stdout, stderr io.Writer, runtime *pfmconfig.R
 		return 2
 	}
 	ctx := context.Background()
-	state, opened := openScheduleStore(ctx, scheduleCommand+" rm", stderr, runtime)
+	effective, err := pfmconfig.RuntimeOrDefault(runtime)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s rm: read runtime: %v\n", scheduleCommand, err)
+		return 1
+	}
+	state, opened := openScheduleStore(ctx, scheduleCommand+" rm", stderr, &effective)
 	if !opened {
 		return 1
 	}
@@ -432,5 +437,9 @@ func runScheduleRm(args []string, stdout, stderr io.Writer, runtime *pfmconfig.R
 		return closeScheduleStore(state, scheduleCommand+" rm", stderr, 1)
 	}
 	fmt.Fprintf(stdout, "removed schedule %d\n", id)
+	if err := removeScheduleReceipt(scheduleReceiptPath(effective.Paths.StateDB, id)); err != nil {
+		fmt.Fprintf(stderr, "%s rm: schedule %d removed, but %v\n", scheduleCommand, id, err)
+		return closeScheduleStore(state, scheduleCommand+" rm", stderr, 1)
+	}
 	return closeScheduleStore(state, scheduleCommand+" rm", stderr, 0)
 }

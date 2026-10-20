@@ -92,7 +92,10 @@ type Request struct {
 	Target   string
 	Message  string
 	ForceNow bool
-	Origin   string
+	// RequireIdle refuses busy targets and nonempty composers without changing
+	// them. A scheduler uses it only after transcript absence permits a retry.
+	RequireIdle bool
+	Origin      string
 	// FileBacked says Message came from --file. It travels through tmux's
 	// bracketed-paste transport so a long Codex body is not mistaken for an
 	// inline composer whose visible head/tail cannot be proven.

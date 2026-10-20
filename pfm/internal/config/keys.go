@@ -68,6 +68,7 @@ func Keys() []KeyDefault {
 		{"claude.theme", nil},
 		{"claude.cache1h", true},
 		{"claude.nativeCursor", false},
+		{"claude.remoteControl", true},
 		{"claude.systemPrompt", nil},
 		{"claude.webSearchesPerSession", int64(9007199254740991)},
 		{"claude.autoCompactWindow", int64(100000)},

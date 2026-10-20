@@ -12,6 +12,7 @@ const (
 	knobCache1H                    = "cache1h"
 	knobSystemPrompt               = "systemPrompt"
 	knobNativeCursor               = "nativeCursor"
+	knobRemoteControl              = "remoteControl"
 	knobSubagentStatuslineTrace    = "subagentStatuslineTrace"
 	knobMaxSubagentSpawnDepth      = "maxSubagentSpawnDepth"
 	knobMaxConcurrentSubagents     = "maxConcurrentSubagents"
@@ -81,6 +82,7 @@ const (
 	flagResumeShort            = "-r"
 	flagContinue               = "--continue"
 	flagContinueShort          = "-c"
+	flagRemoteControl          = "--remote-control"
 	flagName                   = "--name"
 	flagNameShort              = "-n"
 	flagPromptFile             = "--system-prompt-file"
@@ -227,6 +229,10 @@ var Knobs = func() []Knob {
 			SourceConfig,
 			productionMode,
 			"Choose the managed system prompt.",
+		},
+		Knob{
+			knobRemoteControl, WireFlag, flagRemoteControl, SourceConfig, true,
+			"Request Remote Control for every interactive session; Claude enforces eligibility.",
 		},
 		Knob{
 			knobNativeCursor,

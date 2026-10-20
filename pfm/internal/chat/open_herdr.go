@@ -469,7 +469,7 @@ func detachedNativeLocked(
 	if err != nil {
 		return result, err
 	}
-	run, err = resumeNativeRun(run, seat)
+	run, err = resumeNativeRun(run, seat, runtime.Config, stderr)
 	if err != nil {
 		return result, err
 	}

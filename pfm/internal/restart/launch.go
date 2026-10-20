@@ -293,7 +293,7 @@ func childExited(pid int) (bool, error) {
 	return reaped == pid, nil
 }
 
-// liveFleet is the real chat roster: the fleet scan, and chat.EndNow.
+// liveFleet is the real chat roster: the fleet scan, and chat.EndForRestart.
 type liveFleet struct {
 	runtime config.Runtime
 	warn    io.Writer
@@ -315,7 +315,7 @@ func (fleet liveFleet) Live(ctx context.Context) ([]headless.Chat, map[string]st
 }
 
 func (fleet liveFleet) End(ctx context.Context, chat headless.Chat) error {
-	return pfmchat.EndNow(ctx, chat, fleet.runtime.Paths)
+	return pfmchat.EndForRestart(ctx, chat, fleet.runtime.Paths)
 }
 
 // LiveDeps is the host's real doors for one restart.

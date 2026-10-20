@@ -274,6 +274,9 @@ func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun)
 		return request, fleetdb.SeatRun{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
 	}
 	request.SessionID = seat.SessionID
+	if request.Name == "" {
+		request.Name = seat.Name
+	}
 	if request.CWD == "" {
 		request.CWD = old.CWD
 	}

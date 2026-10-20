@@ -151,7 +151,11 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 				}
 				// Once a transcript exists, restore resumes it without replaying
 				// the initial prompt or interpreting its dash-led text as flags.
-				recipe, err = resumeNativeRun(recipe, fleetdb.Seat{Engine: string(pfmengine.Codex), SessionID: id})
+				recipe, err = resumeNativeRun(
+					recipe,
+					fleetdb.Seat{Engine: string(pfmengine.Codex), SessionID: id},
+					config.Config{}, io.Discard,
+				)
 				if err != nil || len(recipe.Args) != 2 || recipe.Args[0] != "resume" || recipe.Args[1] != id {
 					t.Fatalf("native Codex restore retained prompt as options: args=%q err=%v", recipe.Args, err)
 				}

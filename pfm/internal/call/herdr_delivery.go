@@ -54,6 +54,11 @@ func (engine *Engine) callHerdr(
 	}
 	switch agent.Agent.Status {
 	case herdrWorking:
+		if request.RequireIdle {
+			base.Busy, base.Code = true, CodeBusy
+			base.Message = "native agent is working; idle-only retry typed nothing"
+			return base, nil
+		}
 		// agent.prompt admits idle agents only. A working native agent owns
 		// the same composer queue as a raw pane; use that input path without
 		// interrupting unless force_now was explicitly requested.
@@ -132,6 +137,15 @@ func (engine *Engine) callHerdr(
 		base.Message = err.Error()
 		return base, nil
 	}
+	// A syntactically valid acknowledgement can still carry the old idle
+	// snapshot. Only this agent working, or a new completion event, proves
+	// that a turn started; idle state-change sequence alone is not a turn.
+	boundary := agent.Agent.StateChangeSeq
+	if agent.Agent.CompletionSeq != nil && *agent.Agent.CompletionSeq > boundary {
+		boundary = *agent.Agent.CompletionSeq
+	}
+	started := prompted.Agent.Status == herdrWorking ||
+		prompted.Agent.CompletionSeq != nil && *prompted.Agent.CompletionSeq > boundary
 	turn := &herdrTurn{
 		SocketPath: target.SocketPath, Pane: target.Pane,
 		StateChangeSeq: prompted.Agent.StateChangeSeq, CompletionSeq: prompted.Agent.CompletionSeq,
@@ -139,6 +153,10 @@ func (engine *Engine) callHerdr(
 	}
 	base.Status = statusDelivered
 	base.Message = fmt.Sprintf("called LIVE into %q — Herdr agent_prompted", target.Pane)
+	if !started {
+		base.Status = statusDeliveredUnproven
+		base.Message += " — acknowledged input but proved no started turn"
+	}
 	for _, warning := range prepared.Warnings {
 		base.Message += " — WARNING: " + warning
 	}
@@ -169,6 +187,10 @@ func (engine *Engine) callHerdrRaw(
 	}
 	base.Busy = base.Busy || IsFooterBusy(id, before)
 	busy := base.Busy
+	if request.RequireIdle && busy {
+		base.Code, base.Message = CodeBusy, "target is busy; idle-only retry typed nothing"
+		return base, nil
+	}
 	for attempt := 0; ; attempt++ {
 		// Check before Escape as well as after each redraw: force_now must
 		// never discard or type over an existing draft, menu or blocked UI.

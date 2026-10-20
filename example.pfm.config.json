@@ -16,6 +16,7 @@
     "theme": null,
     "cache1h": true,
     "nativeCursor": false,
+    "remoteControl": true,
     "systemPrompt": null,
     "webSearchesPerSession": 9007199254740991,
     "autoCompactWindow": 100000,

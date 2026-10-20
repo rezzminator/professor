@@ -1568,6 +1568,16 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 			))
 		}
 	}
+	// Enabling a timer is not evidence that it is ticking. A silent failed
+	// start would strand every due wake until another install repaired it.
+	state, err := fleetUnitState(ctx, installer.options.Runner, scheduleTimerUnit)
+	if err != nil {
+		installer.deferFailure(installer.fail(fmt.Errorf("verify schedule timer after enable --now: %w", err)))
+	} else if state != unitStateActive {
+		installer.deferFailure(installer.fail(fmt.Errorf(
+			"schedule timer %s is %s after enable --now; due wakes will not run", scheduleTimerUnit, state,
+		)))
+	}
 }
 
 func (installer *engine) userManagerAvailable(ctx context.Context) bool {

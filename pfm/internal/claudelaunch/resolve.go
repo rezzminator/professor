@@ -135,6 +135,8 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 			return productionMode
 		}
 		return prefs.SystemPrompt
+	case knobRemoteControl:
+		return strconv.FormatBool(prefs.RemoteControl)
 	case knobNativeCursor:
 		return strconv.FormatBool(prefs.NativeCursor)
 	case knobMaxSubagentSpawnDepth:

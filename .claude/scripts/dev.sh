@@ -611,8 +611,10 @@ fence knobs: fence_config_init (infra/fence/shared.sh) owns every PFM_FENCE_* na
 its default and its validation; iso and the in-fence test, e2e, all and gate paths
 run it first, and an invalid value exits non-zero before any run. Among them:
   PFM_FENCE_PROFILE      desktop | native | auto (auto reads the Docker daemon's OS and
-                         resources, never the hostname); desktop and native carry
-                         identical defaults
+                         resources, never the hostname); native overrides four desktop
+                         defaults: PFM_FENCE_CPUS 12 (desktop 6), PFM_FENCE_MEM 12g
+                         (5g), PFM_FENCE_TEST_P 6 and STEPS_JOBS 6 (desktop empty,
+                         sized from the CPUs); every other knob is shared
   PFM_FENCE_CPUS         the container's CPU cap; 0 sets no quota
   PFM_FENCE_CPUSET       the container's pinned CPUs; empty leaves it unpinned
   PFM_FENCE_MEM          the container's memory cap, memory + swap

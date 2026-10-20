@@ -331,8 +331,9 @@ fi
 
 beat O1.10-doctor-exit-contract
 spends none
-clean_rc=0
-pfm doctor >/dev/null 2>&1 || clean_rc=$?
+# O1.09 just ran doctor on this same healthy state; no mutation separates
+# these beats. Reuse its baseline, retaining the broken and repaired probes.
+clean_rc="$doc_rc"
 overlay="$HOME/.local/bin/pfm-statusline"
 bad="" broken_out="" broken_rc=""
 if with_restored "$overlay"; then

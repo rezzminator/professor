@@ -153,6 +153,28 @@ def call_keys(recs):
 
 
 class ClaudeKit(Fixture):
+    def test_typed_blocked_field_in_error_output_is_not_a_denial(self):
+        path = self.write_claude([
+            c_user("Read the contract.", 0),
+            c_call("t1", "Bash", {"command": "cat spec.py missing.py"}, 1),
+            c_result("t1", "Exit code 1\n    blocked: str | None = None\nmissing.py: No such file", 2, err=True),
+            c_final("Missing file.", 3),
+        ])
+        self.prep(path)
+        self.assertEqual(self.counts().get("ERROR"), 1)
+        self.assertEqual(self.counts().get("DENIAL", 0), 0)
+
+    def test_prompt_snapshot_is_readable_historical_instruction_evidence(self):
+        snapshot = {"type": "attachment", "timestamp": iso(1),
+                    "attachment": {"type": "prompt_snapshot",
+                                   "systemPrompt": ["Budget: 45 tool calls.", "Prefer no rendering."]}}
+        path = self.write_claude([c_user("Screenshots first.", 0), snapshot, c_final("Done.", 2)])
+        self.prep(path)
+        self.assertEqual(len(self.labelled("PROMPT-SNAPSHOT")), 1)
+        out = self.kitcmd("entry", self.dir, "L2").stdout
+        self.assertIn("PROMPT SNAPSHOT\nBudget: 45 tool calls.\nPrefer no rendering.", out)
+        self.assertNotIn("DROPPED attachment.prompt_snapshot", "\n".join(self.digest()))
+
     def write_claude(self, records=None, name="s1.jsonl"):
         path = self.path("projects", "p", name)
         os.makedirs(os.path.dirname(path), exist_ok=True)

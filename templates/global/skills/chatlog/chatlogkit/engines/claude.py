@@ -224,6 +224,13 @@ def _attachment(p, n, ts, att):
         ev.mech.add("HOOK")
         p.add(ev, "attachment." + pystr(att["type"]))
         return
+    if att.get("type") == "prompt_snapshot":
+        text = flat_content(att.get("systemPrompt"))
+        if text.strip():
+            ev = Event(n, ts, NOTE, text="PROMPT SNAPSHOT\n" + text, sub="prompt_snapshot")
+            ev.mech.add("PROMPT-SNAPSHOT")
+            p.add(ev, "attachment.prompt_snapshot")
+            return
     if att.get("type") != "queued_command":
         p.mark(n, SKIPPED, "attachment." + ("?" if "type" not in att else pystr(att["type"])))
         return

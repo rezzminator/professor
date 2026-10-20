@@ -406,7 +406,7 @@ func appearanceFor(ctx context.Context, env Env, applied Applied) (Appearance, e
 	if !applied.Auto {
 		return applied.Side, nil
 	}
-	return DetectAppearance(ctx, env.Runner)
+	return DetectAppearance(ctx, env)
 }
 
 type convergeMode int

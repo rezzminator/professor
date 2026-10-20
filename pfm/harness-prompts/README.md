@@ -35,9 +35,16 @@ recomputes each file and names the first differing line if a part or composed fi
   developer item of every thread and rebuilds it verbatim after compaction. A hand-written
   `developer_instructions` outside the fence is preserved untouched and the fleet prompt is not
   installed there. `pfm doctor`'s `codex developer_instructions=` row reports `ok`, `MISSING`,
-  `CHECK FAILED` and related states (e.g. `no-accounts`, `MISMATCH`) for each configured account. Full-history children inherit context; fresh/custom
-  children need the coordination briefing specified in the appendix. These instructions guide tool
+  `CHECK FAILED` and related states (e.g. `no-accounts`, `MISMATCH`) for each configured account. Full-history children inherit context; fresh/partial-history
+  children whose role or custom instruction replaces the prompt need the native coordination and waiting
+  rules plus the two orchestration sections in their briefing. These instructions guide tool
   selection; they do not remove the professor MCP's chat_* tools.
+  Ordinary child completions queue mailbox messages with `trigger_turn=false`; they do not start an idle
+  parent turn. The Codex appendix keeps the parent turn active and calls `wait_agent` with its configured
+  default timeout while delegated work remains, waiting again after progress or a timeout and reporting
+  timeouts in commentary. The shared tail defers waiting to each engine; Claude and OpenCode keep
+  their engine-specific end-turn behavior. Recompose, rebuild pfm and run `pfm install` to deploy prompt
+  changes; already-running chats need to reload their instructions.
 - `composed/opencode.md` — head + `opencode/professor.md` + tail. OpenCode has no
   system-prompt replacement flag; its machine-scope `opencode.jsonc` carries an `instructions`
   array of files whose content it appends to the system prompt, and `pfm install` names the clone's composed

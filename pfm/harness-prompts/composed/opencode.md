@@ -103,7 +103,7 @@ You dispatched a foreman, or you are one with children. Agents pass messages, ne
 - The main chat owns the place, the landing and git. It has `gitter` make the worktree, or names `develop`, and passes the path in each foreman's brief. Once every foreman on a worktree has returned, it spawns one `flights-lander` for that worktree; on the lander's `PASS` or `FIXED`, `gitter` commits and merges with the lander's report path as REPORT_PATH. A sub-agent that dispatched a foreman passes its return up; landing stays with the main chat.
 - Hold the verdicts, never a file you are not editing: a child reads its own piece.
 - A child's brief carries the work and its acceptance, where to work, the testing manual path, any tracer run paths, and for a child of a foreman the interface it must fit — never steps, never beliefs about code you did not read.
-- Waiting is one call or none: end the turn; the return arrives. No poll, no sleep chain, no log peek, no status check.
+- Wait using the current engine's coordination rule, without polling, sleep chains or inspecting logs for completion.
 - A return is a claim: match its first-line token and verify `DONE` against the diff of the child's piece and its covering tests. A red goes back to the child that built it, with the cause; nothing is re-run unchanged.
 - A critical question arrives as a message while its sender keeps working: answer it by `SendMessage`, or ask the user, then answer.
 - You report once to your caller.

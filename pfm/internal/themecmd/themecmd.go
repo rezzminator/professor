@@ -462,7 +462,7 @@ func (run runner) use(args []string) int {
 	}
 	fmt.Fprintln(
 		run.stdout,
-		"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm reload",
+		"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm chat reload in each one",
 	)
 	return code
 }

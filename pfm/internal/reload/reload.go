@@ -416,7 +416,7 @@ func Run(
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
 	if promptWarning != "" {
-		announcePane(ctx, request, tmux, stderr, "pfm reload: "+promptWarning)
+		announcePane(ctx, request, tmux, stderr, "pfm chat reload: "+promptWarning)
 	}
 	carrySchedules(ctx, leftBehind, request.SessionID, stderr)
 	if err := writeHandoff(lock, handoffRecord{
@@ -484,7 +484,11 @@ func waitCallerIdle(
 				announced = true
 				fmt.Fprintln(stderr, "pfm chat reload: the chat's turn is still running — holding /exit until it ends")
 				announcePane(
-					ctx, request, tmux, stderr, "pfm reload: waiting for this turn to end, then rebooting this chat",
+					ctx,
+					request,
+					tmux,
+					stderr,
+					"pfm chat reload: waiting for this turn to end, then rebooting this chat",
 				)
 			}
 		case !showsComposer:
@@ -500,7 +504,7 @@ func waitCallerIdle(
 			stable++
 			if stable >= 2 {
 				if announced {
-					announcePane(ctx, request, tmux, stderr, "pfm reload: rebooting now")
+					announcePane(ctx, request, tmux, stderr, "pfm chat reload: rebooting now")
 				}
 				return capture, nil
 			}

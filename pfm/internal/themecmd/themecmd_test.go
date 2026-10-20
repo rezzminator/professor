@@ -209,8 +209,10 @@ func TestRunVerbs(t *testing.T) {
 			wantCode:  0,
 			wantCalls: []call{{verb: "use", name: "tokyo-night"}, {verb: "sync"}},
 			wantStdout: []string{
-				"wrote " + twoAccounts[0], "wrote " + twoAccounts[1], "IN-SYNC",
-				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm reload",
+				"wrote " + twoAccounts[0],
+				"wrote " + twoAccounts[1],
+				"IN-SYNC",
+				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm chat reload in each one",
 			},
 		},
 		{
@@ -224,7 +226,7 @@ func TestRunVerbs(t *testing.T) {
 			wantStdout: []string{
 				"wrote " + twoAccounts[0],
 				"theme sync is off: run pfm theme on to repaint tmux, herdr and VS Code",
-				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm reload",
+				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm chat reload in each one",
 			},
 		},
 		{

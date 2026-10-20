@@ -275,7 +275,7 @@ func TestHerdrStateNeverFailsATurn(t *testing.T) {
 		}
 	})
 	// An unreadable payload cannot say whether a sub-agent sent it, so it
-	// reports nothing; a payload over the read cap decodes as garbage.
+	// reports nothing; oversized input must be named, never silently truncated.
 	for _, test := range []struct{ name, stdin, named string }{
 		{"garbage payload", `not json`, "decode"},
 		{"empty payload", ``, "empty"},
@@ -893,5 +893,98 @@ func TestHerdrStatePartialReplacementSendReservesOwnership(t *testing.T) {
 	a.seq = 300
 	if allowed, err := a.preparePane(target, true); err != nil || allowed {
 		t.Fatalf("delayed old detach allowed=%v err=%v, want replacement protected", allowed, err)
+	}
+}
+
+// Hook responses can exceed the old 1 MiB stdin limit. Identity fields may
+// follow the large value, so reporting a prefix would bypass the child guard.
+func TestHerdrStateLargePayload(t *testing.T) {
+	large := strings.Repeat("x", 2<<20)
+	t.Run("Codex PostToolUse", func(t *testing.T) {
+		rig := codexRig(t)
+		rig.wantQuiet(rig.codex("start", "x1", `,"source":"startup"`))
+		rig.wantQuiet(rig.codex("working", "x1", `,"hook_event_name":"PostToolUse","tool_response":"`+large+`"`))
+		calls := rig.herdr.calls()
+		found := false
+		for _, call := range calls {
+			if strings.Contains(call, `"state":"working"`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("large Codex result lost working state: %v", calls)
+		}
+	})
+	for _, tc := range []struct {
+		name, field, suffix string
+		report              bool
+	}{
+		{"tool response", "tool_response", `,"session_id":"s1"`, true},
+		{"prompt", "prompt", `,"session_id":"s1"`, true},
+		{"child after response", "tool_response", `,"agent_id":"child"`, false},
+		{"memory thread after response", "tool_response", `,"transcript_path":null`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newChatRig(t)
+			rig.seed(rig.registered("idle", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+			rig.clientEnv(4242, "w1:p1")
+			engine := "claude"
+			if strings.HasPrefix(tc.name, "memory") {
+				engine = "codex"
+			}
+			got := rig.run([]string{"--engine", engine, "working"}, `{"`+tc.field+`":"`+large+`"`+tc.suffix+`}`)
+			rig.wantQuiet(got)
+			if tc.report && rig.tmux.storedState(t).State != "working" {
+				t.Fatalf("large %s did not report working", tc.field)
+			}
+			if !tc.report && rig.tmux.storedState(t).State != "idle" {
+				t.Fatal("child changed parent state")
+			}
+		})
+	}
+}
+
+func TestHerdrStateEndAfterTmuxServerGone(t *testing.T) {
+	for _, event := range []string{"end", "working"} {
+		t.Run(event, func(t *testing.T) {
+			socket := filepath.Join(t.TempDir(), "cc-gone")
+			var stderr bytes.Buffer
+			var logged []string
+			deps := herdrDeps{
+				getenv: func(k string) string {
+					return map[string]string{"TMUX": socket + ",1,0", "TMUX_PANE": "%0", "HERDR_BIN_PATH": "herdr"}[k]
+				},
+				tmux:     runTmuxForHerdr,
+				now:      time.Now,
+				logError: func(_ string, _ time.Time, message string) error { logged = append(logged, message); return nil },
+			}
+			rc := reportToHerdr([]string{event}, strings.NewReader(`{"session_id":"s1"}`), &stderr, deps)
+			if event == "end" {
+				if rc != 0 || len(logged) != 0 || !strings.Contains(stderr.String(), "INFO") {
+					t.Fatalf("ended server: rc=%d errors=%v stderr=%s", rc, logged, &stderr)
+				}
+			} else if len(logged) != 1 {
+				t.Fatalf("live event lost its fault: %v stderr=%s", logged, &stderr)
+			}
+		})
+	}
+}
+
+func TestHerdrStatePayloadLimitIsExplicit(t *testing.T) {
+	var stderr bytes.Buffer
+	deps := herdrDeps{now: time.Now}
+	input := strings.NewReader(`{"tool_response":"` + strings.Repeat("x", 64<<20) + `","agent_id":"child"}`)
+	before := input.Len()
+	if rc := reportToHerdr(
+		[]string{"working"},
+		input,
+		&stderr,
+		deps,
+	); rc != 0 ||
+		!strings.Contains(stderr.String(), "exceeds") {
+		t.Fatalf("over-limit input: rc=%d stderr=%s", rc, &stderr)
+	}
+	if read := before - input.Len(); read != (64<<20)+1 {
+		t.Fatalf("hook consumed %d bytes, want exactly the budget plus one probe byte", read)
 	}
 }

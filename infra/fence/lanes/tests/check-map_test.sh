@@ -180,16 +180,16 @@ STUB
 
 # ---- 10: the derive against a stub pfm ----------------------------------
 # The stub serves five top-level commands, five chat subcommands, each family
-# roster (with shared read) over `pfm mcp serve --stdio --family …`, a hidden `chat secret` and `internal hook-x` its dispatcher
+# roster over `pfm mcp serve --stdio --family …`, a hidden `chat secret` and `internal hook-x` its dispatcher
 # knows, and answers `unknown command` for everything else — the real pfm's
 # answer for a verb it does not have.
 
 write_derive_stub "$(cat <<'ARM'
-  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}' ;;
+  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}' ;;
   "mcp serve --stdio --family harvester") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}' ;;
 ARM
 )"
-FULL='pfm alpha\tE1\tE1.01-fixture\npfm beta\tE1\tE1.01-fixture\npfm internal hook-x\tE1\tE1.01-fixture\npfm mcp\tE1\tE1.01-fixture\npfm chat new\tO1\tO1.01-fixture\npfm chat ls\tO1\tO1.01-fixture\npfm chat call\tO1\tO1.01-fixture\npfm chat status\tO1\tO1.01-fixture\npfm chat kill\tO1\tO1.01-fixture\npfm chat unkill\tO1\tO1.01-fixture\npfm chat secret\tO1\tO1.01-fixture\nmcp__chat-professor__ls\tE1\tE1.01-fixture\nmcp__chat-professor__read\tE1\tE1.01-fixture\nmcp__harvester-professor__read\tE1\tE1.01-fixture\nmcp__harvester-professor__download_file\tE1\tE1.01-fixture\n'
+FULL='pfm alpha\tE1\tE1.01-fixture\npfm beta\tE1\tE1.01-fixture\npfm internal hook-x\tE1\tE1.01-fixture\npfm mcp\tE1\tE1.01-fixture\npfm chat new\tO1\tO1.01-fixture\npfm chat ls\tO1\tO1.01-fixture\npfm chat call\tO1\tO1.01-fixture\npfm chat status\tO1\tO1.01-fixture\npfm chat kill\tO1\tO1.01-fixture\npfm chat unkill\tO1\tO1.01-fixture\npfm chat secret\tO1\tO1.01-fixture\nmcp__chat-professor__ls\tE1\tE1.01-fixture\nmcp__chat-professor__last\tE1\tE1.01-fixture\nmcp__harvester-professor__read\tE1\tE1.01-fixture\nmcp__harvester-professor__download_file\tE1\tE1.01-fixture\n'
 
 map "$FULL"
 run_sut
@@ -204,14 +204,14 @@ else
   bad "derive clean" "rc=$RC" "$OUT"
 fi
 
-# Each family's read has a coverage door even when both expose the same verb.
+# Each family has an independent tool coverage door.
 map "$(printf '%b' "$FULL" | grep -v '^mcp__harvester-professor__read')
 "
 run_sut
 if [ "$RC" -eq 1 ] && grep -q 'UNMAPPED-TOOL: mcp__harvester-professor__read' <<<"$OUT"; then
-  ok "shared read has independent family coverage"
+  ok "harvester read has independent family coverage"
 else
-  bad "shared read family coverage" "rc=$RC" "$OUT"
+  bad "harvester read family coverage" "rc=$RC" "$OUT"
 fi
 map "$FULL"
 
@@ -287,7 +287,7 @@ write_derive_stub "$(cat <<'ARM'
     rc=$?
     [ "$rc" -gt 128 ] || exit 0
     if [ "$5" = chat ]; then
-      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}'
+      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}'
     else
       echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}'
     fi
@@ -341,7 +341,7 @@ fi
 # ---- 11: hidden probes overlap, while their findings stay in map order ---
 
 write_derive_stub "$(cat <<'ARM'
-  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}' ;;
+  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}' ;;
   "mcp serve --stdio --family harvester") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}' ;;
   "chat a-wait --help")
     for ((i=0; i<100; i++)); do
@@ -378,7 +378,7 @@ write_derive_stub "$(cat <<'ARM'
         error) echo '{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"fixture family unavailable"}}' ;;
       esac
     elif [ "$5" = chat ]; then
-      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}'
+      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}'
     else
       echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}'
     fi

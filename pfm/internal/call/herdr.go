@@ -273,8 +273,27 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 			}
 			if IsFooterBusy(id, screen) {
 				turn.SawWorking = true
-			} else if turn.SawWorking && ComposerRowShown(screen) && ComposerDraftText(screen) == "" {
-				return nil
+			} else if turn.SawWorking && ComposerRowShown(screen) {
+				redrawn := false
+				empty, _, err := ComposerEmpty(screen, func() (string, error) {
+					styled, err := herdrRawCapture(ctx, target, "ansi")
+					if err != nil {
+						return "", err
+					}
+					if !ComposerRowShown(styled) || SelectorLine(styled) != "" || IsFooterBusy(id, styled) {
+						redrawn = true
+						return "", fmt.Errorf("raw Herdr composer changed while checking styling")
+					}
+					return styled, nil
+				})
+				// A redraw is an unsettled observation, not a failed read.
+				// Retry within the existing budget; genuine capture errors stay visible.
+				if err != nil && !redrawn {
+					return fmt.Errorf("raw Herdr turn composer: %w", err)
+				}
+				if empty {
+					return nil
+				}
 			}
 			engine.sleepContext(ctx, engine.options.ThenIdlePoll)
 		}

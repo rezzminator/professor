@@ -323,32 +323,6 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Fatalf("capture = %+v", captured)
 	}
 
-	found := callTool[FindOutput](t, session, "find", FindInput{
-		Excerpt: "secret middle",
-	})
-	if found.Count != 1 ||
-		found.Candidates[0].ID != "fixture" ||
-		!found.Candidates[0].Confirmed {
-		t.Fatalf("find = %+v", found)
-	}
-
-	read := callTool[ReadOutput](t, session, "read", ReadInput{
-		Source:   "fixture",
-		LastN:    2,
-		MaxBytes: 1000,
-	})
-	// The human's interrupt is a turn end, kept in the record the way a
-	// model-server error is (transcript.interruptedTurn).
-	wantTurns := []Turn{
-		{Role: "assistant", Text: "[turn aborted: interrupted]"},
-		{Role: "user", Text: "Final prompt"},
-	}
-	if !reflect.DeepEqual(read.Turns, wantTurns) ||
-		read.Count != 2 ||
-		!read.Truncated {
-		t.Fatalf("read = %+v, want turns %+v", read, wantTurns)
-	}
-
 	called := callTool[CallOutput](t, session, "call", CallInput{
 		Target:  "Fixture Label",
 		Message: "hello fixture",

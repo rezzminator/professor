@@ -126,11 +126,12 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) (result AskResult) 
 	}
 
 	input, resolveErr := ask.ResolveInput(ask.AskInput{
-		ContentFiles: contentFiles,
-		SourceLabels: sourceLabels,
-		Prompt:       prompt,
-		Engine:       engineName,
-		Model:        options.Model,
+		InlineContent: true,
+		ContentFiles:  contentFiles,
+		SourceLabels:  sourceLabels,
+		Prompt:        prompt,
+		Engine:        engineName,
+		Model:         options.Model,
 	}, options.Config)
 	if resolveErr != nil {
 		return failedAsk(resolveErr)
@@ -150,15 +151,24 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) (result AskResult) 
 	return AskResult{Text: text}
 }
 
-// capturePane turns a live chat into a full-scrollback pane capture. This is
-// the same socket-resolution and tmux-capture sequence runChatCapture uses
-// in cmd/pfm's chat_command.go (chatSocketPath, then chat.Pane else
-// chat.Session else chat.Socket as the target, then a styled
-// pfmcall.TmuxCaller.Capture over the full scrollback). internal/headless
-// cannot import cmd/pfm (package main) to call chatSocketPath directly, so
-// resolveChatSocketPath below mirrors its two-branch shape exactly instead of
-// inventing a different resolution rule.
+// capturePane routes native seats through call's ownership-checked Herdr
+// capture; tmux seats retain styled full-scrollback capture and target fallbacks.
 func capturePane(ctx context.Context, chat Chat) (string, error) {
+	if chat.Backend == pfmcall.HerdrBackend {
+		caller, err := pfmcall.New(pfmcall.Dependencies{})
+		if err != nil {
+			return "", fmt.Errorf("initialize native capture: %w", err)
+		}
+		capture, err := caller.CaptureTarget(ctx, pfmcall.Target{
+			Backend: chat.Backend, SeatID: chat.SeatID, HerdrWorkspace: chat.HerdrWorkspace,
+			SocketPath: chat.Socket, Pane: chat.Pane, Engine: string(chat.Engine),
+			Name: chat.Name, ID: chat.ID, Session: chat.Session,
+		}, pfmcall.FullScrollback)
+		if err != nil {
+			return "", fmt.Errorf("capture native pane: %w", err)
+		}
+		return capture, nil
+	}
 	socketPath, err := paths.SocketPath(chat.Socket)
 	if err != nil {
 		return "", fmt.Errorf("resolve socket path: %w", err)

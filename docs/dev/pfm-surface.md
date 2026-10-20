@@ -94,7 +94,7 @@ SessionEnd hook. Closes the terminal a chat was being WATCHED through when the h
 | `open` | ● | Open/attach an existing chat. |
 | `read` | ● | Read transcript (full/excerpt). |
 | `last` | ● | Newest entry by role. |
-| `status` | ◆ | Inspect liveness/state. `--summary` adds a ≤40-word summary of the last human exchange through configured `ask`; `--engine`/`--model` override that one call. Complete exchanges cache by transcript path + last-record byte offset; the no-flag form remains token-free and unchanged. `--ask` instead answers what the chat is doing RIGHT NOW from its live pane capture, with the last exchange as background; it NEVER caches, because a pane a second later is a different pane, and it words an absent pane (`TRANSCRIPT-ONLY (chat is not live: ...)`), a failed capture (`TRANSCRIPT-ONLY (pane capture failed: ...)`) and a missing exchange (`PANE-ONLY (...)`) distinctly, so a probe that could not run never reads as an empty one. |
+| `status` | ◆ | Inspect liveness/state. `--summary` adds a ≤40-word summary of the last human exchange, sent inline in the prepared stdin (not by file path), through configured `ask`; `--engine`/`--model` override that one call. Complete exchanges cache by transcript path + last-record byte offset; the no-flag form remains token-free and unchanged. `--ask` instead answers what the chat is doing RIGHT NOW from its live pane captured on the target's own host (`call.Engine.CaptureTarget`: Herdr `pane.read` or tmux), with the last exchange as background; it NEVER caches, because a pane a second later is a different pane, and it words an absent pane (`TRANSCRIPT-ONLY (chat is not live: ...)`), a failed capture (`TRANSCRIPT-ONLY (pane capture failed: ...)`) and a missing exchange (`PANE-ONLY (...)`) distinctly, so a probe that could not run never reads as an empty one. |
 | `stream` | ● | Follow output live. |
 | `call` | ● | Type into a pane (signing rules unchanged). |
 | `ask` | ● | Headless ask flow. |
@@ -125,22 +125,21 @@ If an enabled family fails configuration, its server still lists that family's n
 
 Toggled by `mcp.servers.chat.enabled`; `servicedesk` belongs to this family and follows its toggle.
 
+The chat MCP family has no transcript-reading verbs: old-transcript inspection goes to the `agent-investigator` agent or `/chatlog`, while the CLI `read` and `find` verbs and `pfm transcript show` stay shell commands. `save` and the live-state tools (`last`, `status`, `capture`) stay MCP tools.
+
 | Tool | Status | Inputs | Returns |
 | --------------------------- | ------ | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ls` | ● | `{all?, killed?, project?, limit?}` | Fleet rows (accounts, engines, sizes, liveness), including chats still booting. `project` filters case-insensitively on project label or directory; rows are capped (200 default, 1000 max) with `matched`/`truncated` reporting the cut. Without `all`, rows are scoped to the caller's repository (a linked worktree counts as its repo) when `_meta` resolves the caller; `scope` names the repo or `all repos — caller cwd unknown`, `elsewhere` counts the rows left out. `all` also adds killed and background rows, unlike `pfm chat ls --all`, which stays on live chats. |
 | `new` | ✚ | `{name?, prompt?, engine?, account?, model?, effort?, agentRole?, cwd?, cache?, attach?, await?, progress?, settle?, timeout?}` | Spawned chat identity; name optional inside a workbench. |
 | `open` | ✚ | `{target}` | Open result. |
-| `read` | ◆ | `{source, last_n?, max_bytes?}` | Transcript text (converges onto CLI `read`). |
-| `digest` | ◆ | `{source, lines?, since?, until?, grep?, ignore_case?, only?, tool?, results?, first?, last?, text?, max_bytes?}` | `pfm transcript show`'s one-line-per-event digest of any Claude or Codex transcript (prompts, replies, each call with its result), run in-process: `text`, `bytes`, `total_bytes`, `truncated`. Each field is one `--flag=value` and the source follows `--`; ids resolve under pfm's resolved roots; the run stops at its deadline. A source that does not resolve (NOT FOUND, AMBIGUOUS with candidates) or a failed digest is a tool error carrying its `TRANSCRIPT FAILED — …` line, a filter matching nothing is a digest saying `shown 0 of N`. |
 | `last` | ✚ | `{target}` | Newest entry. |
 | `status` | ✚ | `{target, summary?, ask?, engine?, model?}` | Liveness/state. `summary` recaps the last exchange (cached); `ask` reports current state from the live pane (never cached). |
-| `call` | ● | `{target, message, then?, force_now?}` | Delivery report (signing rules apply). |
+| `call` | ● | `{target, message, then?, force_now?}` | Delivery report (signing rules apply). A busy Herdr seat queues the message; `force_now` interrupts first. |
 | `capture` | ● | `{target, tail_lines?, max_bytes?}` | Pane text. |
 | `keys` | ✚ | `{target, keys: [string], literal?, delay_ms?, capture?}` | Press keys in the chat's pane — the model's hands on a TUI that swallowed a keystroke. Same validation as the CLI verb: an unknown key name is an error, never typed as text. |
 | `name` | ✚ | `{target, name}` | Rename result. |
 | `kill` / `unkill` | ✚ | `{target, exit?}` / `{target}` | Kill-state result. A live target is really ended (its pane is closed by the exit finisher); the message names which happened — pane closed, or de-listed only. |
 | `exit` | ✚ | `{}` | Ends the CALLING chat itself — kill + hide, as `pfm chat kill self --exit`; `unkill` reverses the hide. The caller is only the request's own identity (`_meta.pfmProxy` or `_meta.threadId`), never the server process's environment: a call with none is a tool error and ends nothing. It returns once the exit finisher is spawned; the finisher waits for the caller's turn to end, types `/exit` only into a Claude composer proven empty (no draft on any row down to the box's closing rule) and confirms the background-work dialog; a draft, a composer not drawn, and every Codex or OpenCode pane (no composer pfm can prove empty) get no keystroke, the fallback kill-pane closes the pane, and the reason goes to `{sid}/kill-exit-{socket}.log`. A sub-agent's call is indistinguishable from its main chat's over Claude Code, so the description tells a sub-agent to return instead. |
-| `find` | ◆ | `{excerpt, limit?, include_self?}` | Matching transcripts (converges onto CLI `find`). |
 | `save` | ✚ | `{target, transcript?}` | Appends a transcript + environment snapshot to a FILE — `target` is a path, never a chat, and a bare word is refused. |
 | `whoami` | ● | `{}` | Caller identity. |
 | `resolve` | ● | `{kind, name}` | Resolved target. |

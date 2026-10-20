@@ -421,7 +421,7 @@ func (engine *Engine) Capture(
 	}
 	// chat.sh:1215-1219 captures with -S - : the WHOLE retained scrollback, not
 	// just the visible fold, bounded only by tmux's history-limit. The caller's
-	// last_n / max_bytes bounds are applied to the result, after the capture.
+	// tailLines and transport byte bounds are applied after the capture.
 	capture, err := engine.tmux.Capture(
 		ctx,
 		target.SocketPath,

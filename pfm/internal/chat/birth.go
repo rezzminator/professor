@@ -80,8 +80,14 @@ func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.Hea
 			fmt.Fprintf(stderr, "pfm chat new: record native launch %s: %v\n", plan.Record.SessionID, err)
 		}
 	}
+	recipe := *plan.SeatRun
+	// Tmux birth submits Codex's prompt after launch; a native seat has no
+	// tmux submission phase, so carry it in the engine's positional argv.
+	if engineID == pfmengine.Codex && !plan.PromptOnCommandLine && prompt != "" {
+		recipe.Args = append(append([]string(nil), recipe.Args...), "--", prompt)
+	}
 	result, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
-		Choice: choice, Paths: runtime.Paths, Run: *plan.SeatRun,
+		Choice: choice, Paths: runtime.Paths, Run: recipe,
 		Seat: fleetdb.Seat{SessionID: id, Engine: string(engineID), Name: name},
 	})
 	born := result.Seat.SeatID != ""

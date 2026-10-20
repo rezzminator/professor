@@ -839,15 +839,12 @@ expect-log 'UNSIGNED'
 expect-log 'shared HTTP daemon'
 expect-log 'name is required'
 expect-log 'must be a non-empty thread id'
-expect-log 'limit must be between 1 and 50'
 expect-log 'tail_lines must be between 1 and 1000'
 expect-log 'is not a tmux key'
 expect-log 'has no live Codex tmux seat'
 expect-log 'engine and model require summary=true or ask=true'
 expect-log '"tool":"keys".*"target":"NO_SUCH_CHAT_LANE_M"'
 expect-log '"tool":"keys".*"err":"send.*Escape'
-expect-log '"tool":"read".*no chat named.*lane-m-no-such-transcript-id'
-expect-log '"tool":"digest".*TRANSCRIPT FAILED — NOT FOUND lane-m-no-such-transcript-id'
 expect-log '"tool":"last".*no chat named.*NO_SUCH_CHAT_LANE_M'
 expect-log '"tool":"status".*no chat named.*NO_SUCH_CHAT_LANE_M'
 expect-log '"tool":"new".*account 99 is not in the configured roster'
@@ -1015,62 +1012,11 @@ if requires; then
   else
     notes="$notes M9 valid-thread path not asserted: $E2_CHAT has no live row (${E2_WHY:-it died after the prelude});"
   fi
-  # M10 find / M11 read — the transcript index over this chat's own words
-  find_needle="LANE-M-FIND-$$-$(date +%s)"
-  if CHAT_SENDER_SESSION=lane-M CHAT_SENDER_LABEL=lane-M MCP_STDIO_CONFIG="$INPROC_CFG" \
-    mcp_call stdio chat-professor call "$(jq -cn --arg t "$CHAT" --arg m "reply with exactly one word: $find_needle" '{target: $t, message: $m}')" &&
-    wait_prompt "$CHAT" "$find_needle" 240; then
-    if wait_for 90 "mcp_call http chat-professor find \"\$(jq -cn --arg e '$find_needle' '{excerpt: \$e}')\" && [ \"\$(sfield .count)\" -ge 1 ]"; then
-      printf '%s' "$MCP_STRUCT" | jq -e --arg id "$sid" '.candidates[] | select(.id == $id)' >/dev/null 2>&1 ||
-        bad="$bad M10: find matched $(sfield .count) candidate(s) but none is this chat's session $sid: $(one_line "$(sfield '[.candidates[].id] | join(",")')");"
-      [ -n "$(sfield '.needles | length')" ] || bad="$bad M10: find answered without needles;"
-    else
-      bad="$bad M10: find never found '$find_needle' in this chat's transcript within 90s (last answer: isError=$MCP_ISERR count $(sfield .count) $(one_line "$MCP_TEXT" | cut -c1-120));"
-    fi
-  else
-    bad="$bad M10: the find needle could not be planted in $CHAT: ${MCP_WHY:-$LANE_WAIT_WHY};"
+  # The save check uses the CLI transcript locator.
+  if ! TRANSCRIPT="$(pfm transcript locate "$sid" 2>"$SCRATCH/transcript-locate.err")"; then
+    bad="$bad transcript locate $sid failed: $(one_line "$(cat "$SCRATCH/transcript-locate.err")");"
   fi
-  if mcp_call http chat-professor find '{"excerpt":"zzz-lane-m-nobody-ever-said-this-4f2a9c"}'; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .count)" = 0 ] ||
-      bad="$bad M10: an excerpt nobody said answered isError=$MCP_ISERR count $(sfield .count) '$(one_line "$MCP_TEXT" | cut -c1-100)' (want count 0, no error);"
-    [ "$MCP_ISERR" = false ] && notes="$notes M10 observed: a miss is count 0 (the tool text documents a tool error 'no session contains the excerpt');"
-  else
-    bad="$bad M10: find miss: $MCP_WHY;"
-  fi
-  if mcp_call http chat-professor find '{"excerpt":"x","limit":500}'; then
-    [ "$MCP_ISERR" = true ] && grep -q 'limit must be between 1 and 50' <<<"$MCP_TEXT" || bad="$bad M10: limit 500 did not raise the bound error: $(one_line "$MCP_TEXT");"
-  else
-    bad="$bad M10: find bound: $MCP_WHY;"
-  fi
-  TRANSCRIPT=""
-  if mcp_call http chat-professor read "$(jq -cn --arg s "$sid" '{source: $s, last_n: 5}')"; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .id)" = "$sid" ] && [ "$(sfield .count)" -ge 1 ] 2>/dev/null && [ "$(sfield .count)" -le 5 ] 2>/dev/null ||
-      bad="$bad M11: read $sid answered isError=$MCP_ISERR id '$(sfield .id)' count $(sfield .count) (want ≤ 5 turns of this session);"
-    TRANSCRIPT="$(sfield .path)"
-    [ -f "$TRANSCRIPT" ] || bad="$bad M11: read's path '$TRANSCRIPT' is not a file;"
-    printf '%s' "$MCP_STRUCT" | jq -e --arg n "$find_needle" 'any(.turns[]?; .role == "user" and ((.text // "") | contains($n)))' >/dev/null 2>&1 ||
-      bad="$bad M11: read carries no user record for $find_needle;"
-  else
-    bad="$bad M11: read: $MCP_WHY;"
-  fi
-  if mcp_call http chat-professor read '{"source":"lane-m-no-such-transcript-id"}'; then
-    [ "$MCP_ISERR" = true ] || bad="$bad M11: read on an unknown id answered a result, not a tool error: $(one_line "$MCP_TEXT");"
-  else
-    bad="$bad M11: read unknown: $MCP_WHY;"
-  fi
-  # M11b digest — the same transcript digested: a grep for the needle shows its event, an unknown source is a tool error
-  if [ -n "$TRANSCRIPT" ] && mcp_call http chat-professor digest "$(jq -cn --arg s "$TRANSCRIPT" --arg n "$find_needle" '{source: $s, grep: $n}')"; then
-    [ "$MCP_ISERR" = false ] && grep -qF "$find_needle" <<<"$(sfield .text)" && grep -q 'shown [1-9]' <<<"$(sfield .text)" ||
-      bad="$bad M11b: digest of $TRANSCRIPT answered isError=$MCP_ISERR without an event carrying $find_needle: $(one_line "$MCP_TEXT" | cut -c1-120);"
-  else
-    bad="$bad M11b: digest: ${MCP_WHY:-no transcript path from M11};"
-  fi
-  if mcp_call http chat-professor digest '{"source":"lane-m-no-such-transcript-id"}'; then
-    [ "$MCP_ISERR" = true ] && grep -q 'NOT FOUND' <<<"$MCP_TEXT" || bad="$bad M11b: digest on an unknown source answered isError=$MCP_ISERR '$(one_line "$MCP_TEXT" | cut -c1-120)' (want a tool error naming NOT FOUND);"
-  else
-    bad="$bad M11b: digest unknown: $MCP_WHY;"
-  fi
-  # M12 last — the newest answer; the needle belongs to the user record above.
+  # M12 last — the newest answer.
   if mcp_call http chat-professor last "$(jq -cn --arg t "$CHAT" '{target: $t}')"; then
     [ "$MCP_ISERR" = false ] && [ -n "$(sfield .text)" ] ||
       bad="$bad M12: last answered isError=$MCP_ISERR with no newest answer: $(one_line "$MCP_TEXT" | cut -c1-80);"
@@ -1125,7 +1071,7 @@ if requires; then
     bad="$bad M14: new $NEW_CHAT: $MCP_WHY;"
   fi
   if [ -n "$bad" ]; then fail "$bad${notes:+ · notes:$notes}"; else
-    pass "ls/resolve/call/keys/capture/whoami/find/read/last/status/new each asserted for result AND refusal shape over the daemon (call delivered over signed stdio); $NEW_CHAT spawned on cc:$SEAT${notes:+ · notes:$notes}"
+    pass "ls/resolve/call/keys/capture/whoami/last/status/new each asserted for result AND refusal shape over the daemon (call delivered over signed stdio); $NEW_CHAT spawned on cc:$SEAT${notes:+ · notes:$notes}"
   fi
 fi
 
@@ -1265,7 +1211,7 @@ else
       bad="$bad M19: save: $MCP_WHY;"
     fi
   else
-    bad="$bad M19: no transcript path for $CHAT (M.09's read did not yield one) — the path form was NOT asserted;"
+    bad="$bad M19: no transcript path for $CHAT (M.09's CLI transcript locate failed) — the path form was NOT asserted;"
   fi
   if mcp_call http chat-professor save "$(jq -cn --arg t "$SCRATCH/save/no-caller.md" '{target: $t}')"; then
     [ "$MCP_ISERR" = true ] && grep -qF 'MCP request has no _meta.threadId' <<<"$MCP_TEXT" ||

@@ -1,7 +1,7 @@
 ---
 name: agent-investigator
 description: 'Investigates and audits past transcripts — "read my chat with X", "what went wrong in that run", "did that agent really do Y", "audit agent X", "why was X slow or costly"; Claude chats and sub-agents, Codex, OpenCode. Pass the mission, any names, ids, paths, agent type or time window, and your own session id. Returns the answer, then evidence by transcript line, NOT READ.'
-tools: Read, Grep, Glob, Bash, Write, Edit, Agent, mcp__chat-professor__ls, mcp__chat-professor__find, mcp__chat-professor__status, mcp__chat-professor__last, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Grep, Glob, Bash, Write, Edit, Agent, mcp__chat-professor__ls, mcp__chat-professor__status, mcp__chat-professor__last, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: opus
 effort: high
 ---
@@ -18,7 +18,7 @@ The kit is yours to maintain: `chatlog.py` and its `chatlogkit/` package (`readl
    - An id, path, chat name or `{store}#{session}`: `pfm transcript locate {target}`. `AMBIGUOUS` lists every chat sharing the name: choose by dir, date or a prompt the mission quotes, and name the ones left out.
    - A session's sub-agents: `pfm transcript agents {session}`; an agent type's runs: `python3 -I $HOME/.claude/skills/chatlog/chatlog.py runs --type {type} --since 7d`. A count, cost or spawn tree across many runs: `python3 -I $HOME/.claude/skills/chatlog/chatlog.py census` over `--type {type} --since 7d`, `--session {session}` or paths, `--tree` for the tree. Search `~/.claude/projects` itself, never through `~/.cc/*/projects` (links: they miss or triple every file).
    - Live, resumable or killed, or a Codex seat's name: `pfm ls --all --tsv | grep -i '{name}'`.
-   - An excerpt: `mcp__chat-professor__find`; a hit counts only once a quoted transcript line matches it. An error is retried once, then goes in `NOT READ`.
+   - An excerpt: save it to a file under `/tmp/agent-investigator/` and run `pfm chat find {file}`: stdout is the best match's `{id}\t{path}`, stderr its needle hits and up to four runners-up. Then `chatlog.py prep {path}` and `chatlog.py find {dir} {regex}` over the match, a runner-up when it misses; a hit counts only once a quoted transcript line matches it. An error is retried once, then goes in `NOT READ`.
 2. READ: one `transcript-reader` per target, all in one message, each prompt exactly:
 
    ```

@@ -7,7 +7,6 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
@@ -45,8 +44,6 @@ type backend struct {
 	warnings             io.Writer
 	allowAmbientIdentity bool
 	runtimeIdentity      string
-	// digestTimeout bounds one digest run; zero is digestRunTimeout.
-	digestTimeout time.Duration
 }
 
 func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error) {

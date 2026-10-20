@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
@@ -102,6 +103,25 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			// Ownership is proved, but foreground evidence is unavailable.
 			// A transcript/cache must not overwrite that uncertainty.
 		} else if status, err := provider.inspect(ctx, target, clock.Real.Now()); err != nil {
+			var refusal *herdr.Refusal
+			if target.Backend == spawn.BackendHerdr && errors.As(err, &refusal) && refusal.Code == herdr.AgentNotFound {
+				panes, listErr := herdr.ReadTabPanes(ctx, socket)
+				if listErr != nil {
+					err = errors.Join(err, fmt.Errorf("confirm closed tab pane %s: %w", target.Pane, listErr))
+				} else {
+					present := false
+					for _, pane := range panes {
+						// A moved pane keeps its terminal identity, not its public id.
+						if pane.Pane == target.Pane || (views[0].Terminal != "" && pane.Terminal == views[0].Terminal) {
+							present = true
+							break
+						}
+					}
+					if !present {
+						continue
+					}
+				}
+			}
 			if _, writeErr := fmt.Fprintf(
 				provider.warn,
 				"Herdr tab status of %s: %v\n",

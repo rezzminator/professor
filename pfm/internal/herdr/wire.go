@@ -464,6 +464,9 @@ func capRunes(message string) string {
 	return string(runes[:MaxMessageRunes-1]) + "…"
 }
 
+// AgentNotFound is Herdr refusing an agent lookup for an unregistered target.
+const AgentNotFound = "agent_not_found"
+
 // Refusal is Herdr answering a request with an error response.
 type Refusal struct {
 	Request string

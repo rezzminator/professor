@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -653,5 +654,58 @@ func TestHerdrTabProviderReadsNoGlyphsOutsideEmojiMode(t *testing.T) {
 		if read || warn.Len() > 0 {
 			t.Fatalf("%s: glyphs read=%v warn=%q, want neither", mode, read, warn.String())
 		}
+	}
+}
+
+// A pane can disappear between pane.list and agent.get. Only a fresh listing
+// proving it gone permits dropping the stale decoration without a diagnostic.
+func TestHerdrTabProviderPaneClosesDuringStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, result, code string
+		quiet              bool
+	}{
+		{"closed", `{"type":"pane_list","panes":[]}`, "agent_not_found", true},
+		{"still present", `{"type":"pane_list","panes":[{"pane_id":"w1:p1","terminal_id":"term","workspace_id":"w1","tab_id":"tab","focused":false}]}`, "agent_not_found", false},
+		{"moved terminal", `{"type":"pane_list","panes":[{"pane_id":"w2:p2","terminal_id":"term","workspace_id":"w2","tab_id":"new-tab","focused":false}]}`, "agent_not_found", false},
+		{"broken enumeration", `{"type":"broken"}`, "agent_not_found", false},
+		{"other refusal", `{"type":"pane_list","panes":[]}`, "permission_denied", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			socket := nativeChatSocket(
+				t,
+				func(nativeChatRequest) (any, string) { return json.RawMessage(tc.result), "" },
+			)
+			var warnings bytes.Buffer
+			provider := herdrTabProvider{
+				scan: func(context.Context) (FleetScan, error) {
+					return FleetScan{
+						Rows: []compose.Row{
+							{Backend: "herdr", ID: "s1", Socket: socket, PaneID: "w1:p1", Kind: compose.LiveClaude},
+						},
+					}, nil
+				},
+				views: func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error) {
+					return []herdr.TabDecoration{{Pane: "w1:p1", Terminal: "term", Identity: "s1"}}, nil
+				},
+				inspect: func(context.Context, headless.Chat, time.Time) (headless.Status, error) {
+					return headless.Status{}, fmt.Errorf(
+						"read endpoint: %w",
+						&herdr.Refusal{Request: "agent.get pfm-seat", Code: tc.code, Message: "target missing"},
+					)
+				},
+				mode: func() (string, error) { return "emoji", nil }, warn: &warnings,
+			}
+			views, err := provider.tabs(context.Background(), socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.quiet {
+				if len(views) != 0 || warnings.Len() != 0 {
+					t.Fatalf("closed tab painted/logged: views=%v warning=%s", views, &warnings)
+				}
+			} else if warnings.Len() == 0 {
+				t.Fatal("unproved disappearance concealed a real fault")
+			}
+		})
 	}
 }

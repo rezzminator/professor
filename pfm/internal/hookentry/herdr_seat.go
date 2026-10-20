@@ -264,6 +264,7 @@ func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload he
 
 // herdrPayload is the part of an engine's hook payload the reporter reads.
 type herdrPayload struct {
+	TranscriptNull   bool            `json:"-"`
 	HookEventName    string          `json:"hook_event_name"`
 	SessionID        string          `json:"session_id"`
 	AgentID          string          `json:"agent_id"`

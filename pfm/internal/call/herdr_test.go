@@ -140,7 +140,7 @@ func nativePaneRead(request nativeRequest, text string) map[string]any {
 		text = "────────\n" + text + "\n────────"
 	}
 	return map[string]any{"type": "pane_read", "read": map[string]any{
-		"pane_id": request.Params["pane_id"], "text": text, "truncated": false,
+		"pane_id": request.Params["pane_id"], "text": text, "truncated": false, "format": request.Params["format"],
 	}}
 }
 
@@ -764,6 +764,9 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 	}{
 		{name: "observed-working", screens: []string{"› \nesc interrupt", "› "}},
 		{name: "already-observed", screens: []string{"› "}, sawWorking: true},
+		{name: "dim-placeholder", screens: []string{"› Ask Codex to do anything"}, sawWorking: true},
+		{name: "placeholder-redraw", screens: []string{"› Ask Codex to do anything", "› Ask Codex to do anything\nesc interrupt", "› "}, sawWorking: true},
+		{name: "literal-placeholder-draft", screens: []string{"› Ask Codex to do anything"}, sawWorking: true, wantCode: CodeUndelivered},
 		{name: "stale-idle", screens: []string{"› "}, wantCode: CodeUndelivered},
 		{name: "blocked", screens: []string{"› 1. Allow once\n  2. Deny"}, wantCode: CodeUndelivered},
 	} {
@@ -774,6 +777,9 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 				case "pane.read":
 					screen := test.screens[min(i, len(test.screens)-1)]
 					i++
+					if test.name == "dim-placeholder" && request.Params["format"] == "ansi" {
+						screen = "› \x1b[2mAsk Codex to do anything\x1b[0m"
+					}
 					if entered {
 						screen = "resume the port\n› "
 					}

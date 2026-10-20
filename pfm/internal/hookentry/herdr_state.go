@@ -69,6 +69,7 @@ type herdrDeps struct {
 	// logError appends one reporter error to the session's log; tmux discards
 	// the stderr of a hook it runs, so this is where the error stays visible.
 	logError func(session string, at time.Time, message string) error
+	logInfo  func(session string, at time.Time, message string) error
 	// procInfo reads one process: its parent pid and command name. getpid is
 	// the hook process.
 	procInfo func(pid int) (parent int, command string, err error)
@@ -112,6 +113,12 @@ func realHerdrDeps() herdrDeps {
 			return fmt.Errorf("no pfm state directory for the error log: %w", err)
 		}
 		return herdr.AppendError(deps.lockDir, session, at, message)
+	}
+	deps.logInfo = func(session string, at time.Time, message string) error {
+		if err != nil {
+			return fmt.Errorf("no pfm state directory for the info log: %w", err)
+		}
+		return herdr.AppendInfo(deps.lockDir, session, at, message)
 	}
 	return deps
 }
@@ -169,22 +176,14 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 	reporter.session = options.session
 	var payload herdrPayload
 	if !options.event.FiredByTmux() {
-		// A payload that cannot be read cannot say whether a sub-agent sent
-		// it, so it reports nothing; one over the cap decodes as garbage.
-		raw, err := io.ReadAll(io.LimitReader(stdin, herdrMaxPayload))
-		switch {
-		case err != nil:
-			reporter.warn("pfm internal herdr-state %s: read hook payload (skipped): %v", options.event, err)
-			return 0
-		case len(raw) == 0:
-			reporter.warn("pfm internal herdr-state %s: empty hook payload (skipped)", options.event)
+		// Read every identity field before reporting, even after a large response.
+		payload, err = readHerdrPayload(stdin)
+		if err != nil {
+			const decodeFailure = "pfm internal herdr-state %s engine=%s: decode hook payload (skipped): %v"
+			reporter.warn(decodeFailure, options.event, options.engine, err)
 			return 0
 		}
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			reporter.warn("pfm internal herdr-state %s: decode hook payload (skipped): %v", options.event, err)
-			return 0
-		}
-		if threadWithoutRollout(options.engine, raw) {
+		if threadWithoutRollout(options.engine, payload) {
 			return 0
 		}
 	}
@@ -417,7 +416,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	}
 	session, panePID, err := reporter.tmuxSession(ctx)
 	if err != nil {
-		return err
+		return reporter.tmuxReadFailure(err)
 	}
 	reporter.session = session
 	if reporter.firedByEngine() {

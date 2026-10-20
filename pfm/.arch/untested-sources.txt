@@ -80,7 +80,6 @@ internal/kill/manager.go
 internal/kill/self.go
 internal/kill/spawn.go
 internal/kill/types.go
-internal/mcpserv/search.go
 internal/mcpserv/types.go
 internal/naming/doc.go
 internal/reap/runner.go

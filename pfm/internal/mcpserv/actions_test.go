@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,7 +22,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every
@@ -32,13 +30,9 @@ type fakeChatVerbs struct {
 	lasts             []chat.LastRequest
 	statuses          []chat.StatusRequest
 	lists             []chat.ListRequest
-	finds             []chat.FindRequest
-	reads             []string
 	last              chat.LastResult
 	status            headless.Status
 	listed            chat.ListResult
-	found             []chat.TranscriptMatch
-	read              []transcript.Entry
 	err               error
 	resolveScopedSelf bool
 	resolvedSelfIDs   []string
@@ -79,27 +73,9 @@ func (fake *fakeChatVerbs) List(_ context.Context, request chat.ListRequest) (ch
 	return fake.listed, fake.err
 }
 
-func (fake *fakeChatVerbs) Find(_ context.Context, request chat.FindRequest) ([]chat.TranscriptMatch, error) {
-	fake.finds = append(fake.finds, request)
-	return fake.found, fake.err
-}
-
 func (fake *fakeChatVerbs) Exit(_ context.Context, self headless.Chat) (string, error) {
 	fake.exits = append(fake.exits, self)
 	return fake.exitMessage, fake.exitErr
-}
-
-func (fake *fakeChatVerbs) Read(
-	_ context.Context,
-	target string,
-	tail int,
-) (headless.Chat, []transcript.Entry, bool, error) {
-	fake.reads = append(fake.reads, fmt.Sprintf("%s/%d", target, tail))
-	return headless.Chat{
-		ID:     target,
-		Engine: pfmengine.Claude,
-		Path:   "/transcripts/" + target + ".jsonl",
-	}, fake.read, false, fake.err
 }
 
 // TestChatLastAndStatusReachTheTypedVerbs pins the seam: last and

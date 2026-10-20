@@ -373,6 +373,22 @@ func TestHerdrReporterErrorsDoctor(t *testing.T) {
 			wantRow: func(*testing.T, string) string { return herdrReporterRow + " ok none in the last 24h" },
 		},
 		{
+			name: "informational teardown is not a reporter error",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := herdr.AppendInfo(dir, "cc-info", now, "normal end"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "cc-gone.log"), []byte(now.Format(time.RFC3339)+"\tINFO\tend after server disappeared\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantRow: func(*testing.T, string) string { return herdrReporterRow + " ok none in the last 24h" },
+		},
+		{
 			name:    "only errors older than 24h",
 			seed:    logLine("cc-1", now.Add(-25*time.Hour), "lock timed out"),
 			wantRow: func(*testing.T, string) string { return herdrReporterRow + " ok none in the last 24h" },

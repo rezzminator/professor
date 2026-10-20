@@ -13,14 +13,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
-// TestChatLSFindReadAdaptTheTypedVerbs pins MCP's half of ls, find
-// and read: each maps its input onto the verb's typed request, applies
+// TestChatLSAdaptTheTypedVerbs pins MCP's half of ls: each maps its input onto the verb's typed request, applies
 // the tool's payload contract, and projects the answer onto the wire — no
 // callback into package main, no second implementation of the verb.
-func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
+func TestChatLSAdaptTheTypedVerbs(t *testing.T) {
 	t.Parallel()
 	verbs := &fakeChatVerbs{
 		listed: chat.ListResult{
@@ -37,15 +35,6 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 			},
 			Herdr:   []string{"w6:p2 .professor idle pfm-1", "not in herdr"},
 			Matched: 5, Truncated: true, KilledCount: 1,
-		},
-		found: []chat.TranscriptMatch{
-			{ID: "one", Path: "/t/one.jsonl", Last: "2026-01-02", Hits: 2},
-			{ID: "two", Path: "/t/two.jsonl", Hits: 1},
-			{ID: "three", Path: "/t/three.jsonl", Hits: 1},
-		},
-		read: []transcript.Entry{
-			{Role: transcript.RoleUser, Text: "question"},
-			{Role: transcript.RoleAssistant, Text: "a long answer"},
 		},
 	}
 	service := newService("test", &backend{chat: verbs})
@@ -81,37 +70,12 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 	if err != nil || !strings.Contains(string(encoded), `"herdr":"w6:p2 .professor idle pfm-1"`) {
 		t.Fatalf("live row JSON = %s, %v, want the herdr field", encoded, err)
 	}
-
-	_, find, err := service.chatFind(ctx, nil, FindInput{Excerpt: "a literal chat name", Limit: 2, IncludeSelf: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []chat.FindRequest{{Excerpt: "a literal chat name"}}; !reflect.DeepEqual(verbs.finds, want) {
-		t.Fatalf("Find calls = %+v, want %+v", verbs.finds, want)
-	}
-	if find.Count != 2 || find.Candidates[0].ID != "one" || find.Candidates[0].Date != "2026-01-02" ||
-		!find.Candidates[0].Confirmed || find.SelfID != "" ||
-		!reflect.DeepEqual(find.Needles, []string{"a literal chat name"}) {
-		t.Fatalf("find = %+v, want the two best candidates and no self_id", find)
-	}
-
-	_, read, err := service.chatRead(ctx, nil, ReadInput{Source: "claude-b", MaxBytes: 12})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"claude-b/20"}; !reflect.DeepEqual(verbs.reads, want) {
-		t.Fatalf("Read calls = %q, want %q", verbs.reads, want)
-	}
-	if read.ID != "claude-b" || read.Count != 1 || read.Turns[0].Role != transcript.RoleAssistant ||
-		read.Bytes > 12 || !read.Truncated {
-		t.Fatalf("read = %+v, want the newest turn cut to the byte budget", read)
-	}
 }
 
-// TestChatLSFindReadRefuseBadInputBeforeTheVerb pins the entry validation:
+// TestChatLSRefuseBadInputBeforeTheVerb pins the entry validation:
 // contradictory or out-of-range input is refused without reaching the verb,
 // and a server built without its verb layer says so instead of answering empty.
-func TestChatLSFindReadRefuseBadInputBeforeTheVerb(t *testing.T) {
+func TestChatLSRefuseBadInputBeforeTheVerb(t *testing.T) {
 	t.Parallel()
 	verbs := &fakeChatVerbs{}
 	service := newService("test", &backend{chat: verbs})
@@ -119,25 +83,17 @@ func TestChatLSFindReadRefuseBadInputBeforeTheVerb(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"ls all+killed": func() error { _, _, err := service.chatLS(ctx, nil, LSInput{All: true, Killed: true}); return err },
 		"ls limit":      func() error { _, _, err := service.chatLS(ctx, nil, LSInput{Limit: maxChatLSLimit + 1}); return err },
-		"find limit":    func() error { _, _, err := service.chatFind(ctx, nil, FindInput{Excerpt: "x", Limit: 51}); return err },
-		"read last_n":   func() error { _, _, err := service.chatRead(ctx, nil, ReadInput{Source: "x", LastN: 201}); return err },
-		"read bytes": func() error {
-			_, _, err := service.chatRead(ctx, nil, ReadInput{Source: "x", MaxBytes: 1<<20 + 1})
-			return err
-		},
 	} {
 		if err := call(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if len(verbs.lists)+len(verbs.finds)+len(verbs.reads) != 0 {
+	if len(verbs.lists) != 0 {
 		t.Fatalf("a refused input reached the verb: %+v", verbs)
 	}
 	unwired := newService("test", &backend{})
 	for name, call := range map[string]func() error{
-		"ls":   func() error { _, _, err := unwired.chatLS(ctx, nil, LSInput{}); return err },
-		"find": func() error { _, _, err := unwired.chatFind(ctx, nil, FindInput{Excerpt: "x"}); return err },
-		"read": func() error { _, _, err := unwired.chatRead(ctx, nil, ReadInput{Source: "x"}); return err },
+		"ls": func() error { _, _, err := unwired.chatLS(ctx, nil, LSInput{}); return err },
 	} {
 		if err := call(); err == nil || !strings.Contains(err.Error(), name+" verb is not configured") {
 			t.Errorf("%s without verbs error = %v", name, err)

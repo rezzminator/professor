@@ -20,7 +20,7 @@
 | Kind | original agent, `templates/global/agents/agent-investigator.md`, linked by `pfm install` | original agent, `templates/global/agents/transcript-reader.md`, linked by `pfm install` |
 | Class | none: any caller, the user included | visible to `agent-investigator` only |
 | Model, effort | `opus`, `high`: the work is judgment | `haiku`, `medium`: the work is reading and labelling, never judging |
-| Tools | `Read, Grep, Glob, Bash, Write, Edit, Agent`, the chat MCP's `ls`, `find`, `status`, `last` | `Read, Bash` |
+| Tools | `Read, Grep, Glob, Bash, Write, Edit, Agent`, the chat MCP's `ls`, `status`, `last` | `Read, Bash` |
 | Budget | 40 tool calls, two rounds of readers (at most 8, then at most 4) | the windows `prep` prints |
 | Writes | an AUDIT report under `$HOME/.local/state/pfm/agent-investigator/`; fixes to the kit it maintains; the answer is its final message | its kit directory under the investigator's run directory |
 

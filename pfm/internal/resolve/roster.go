@@ -82,6 +82,7 @@ func ResolveRosterName(
 		}
 		switch {
 		case candidate.ID == name ||
+			(candidate.Session != "" && candidate.Session == name) ||
 			(session != "" && SessionName(socket) == session) ||
 			candidate.Name == name:
 			exact = append(exact, candidate)

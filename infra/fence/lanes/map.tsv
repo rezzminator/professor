@@ -1,8 +1,6 @@
 name	lane	beat
 mcp__chat-professor__capture	M	M.09-chat-tools
-mcp__chat-professor__digest	M	M.09-chat-tools
 mcp__chat-professor__exit	M	M.10-chat-tools-gap
-mcp__chat-professor__find	M	M.09-chat-tools
 mcp__chat-professor__call	M	M.09-chat-tools
 mcp__chat-professor__keys	M	M.09-chat-tools
 mcp__chat-professor__kill	M	M.10-chat-tools-gap
@@ -11,7 +9,6 @@ mcp__chat-professor__ls	M	M.09-chat-tools
 mcp__chat-professor__name	M	M.10-chat-tools-gap
 mcp__chat-professor__new	M	M.09-chat-tools
 mcp__chat-professor__open	M	M.10-chat-tools-gap
-mcp__chat-professor__read	M	M.09-chat-tools
 mcp__chat-professor__resolve	M	M.09-chat-tools
 mcp__chat-professor__save	M	M.10-chat-tools-gap
 mcp__chat-professor__status	M	M.09-chat-tools

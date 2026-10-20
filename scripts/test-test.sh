@@ -22,6 +22,7 @@ SUT="${1:-$HERE/.claude/scripts/test.sh}"
 SHTEST_TAG=test-test
 # shellcheck source=scripts/shtest.sh
 source "$HERE/scripts/shtest.sh"
+shtest_unset_gate_env
 shtest_isolate_host
 
 NAME="ttest$$"
@@ -102,6 +103,8 @@ printf '%s\n' 'source "$STUBLIB"' \
   'checks_templates_placeholders() { stub_record placeholders; stub_rule placeholders; [ "$RULE_RC" = 0 ] || fail_step "placeholders (exit $RULE_RC)"; }' \
   'checks_templates_scratch_paths() { stub_record scratch-paths; declare -F repo_git >/dev/null || { fail_step "scratch-paths: repo_git is not defined"; return; }; stub_rule scratch-paths; [ "$RULE_RC" = 0 ] || fail_step "scratch-paths (exit $RULE_RC)"; }' \
   >"$R/infra/fence/checks.sh"
+# The fence half loads the real fence config (fence_config_values): its defaults and validation.
+cp "$HERE/infra/fence/shared.sh" "$HERE/infra/fence/mkdir-lock.sh" "$R/infra/fence/"
 git -C "$R" init -q
 git -C "$R" add -A
 git -C "$R" -c user.name=t -c user.email=t@t commit -qm base
@@ -144,9 +147,9 @@ no_dev() { if [ "$(dev_calls)" = 0 ]; then ok "$1"; else bad "$1" "dev.sh was ca
 checks() { sed -n 's/^CHECK \([A-Z]*\) \([a-z-]*\).*/\2/p' <<<"$OUT" | tr '\n' ' '; }
 
 U='usage: test.sh <path>[::<selector>]... | test.sh --full'
-GO_A=(go -C pfm test -v -count=1 ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$')
-GO_A_PKG=(go -C pfm test -v -count=1 ./internal/a/)
-GO_E=(go -C pfm test -v -tags e2e -count=1 ./e2e/ -run '^(TestE2E)$')
+GO_A=(go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$')
+GO_A_PKG=(go -C pfm test -v -count=1 -timeout 10m ./internal/a/)
+GO_E=(go -C pfm test -v -count=1 -timeout 10m -tags e2e ./e2e/ -run '^(TestE2E)$')
 A=pfm/internal/a/a_test.go
 docker_off
 
@@ -206,12 +209,25 @@ rec_has "an e2e file runs with the e2e tag in its own package" "${GO_E[@]}"
 # shellcheck disable=SC2016 # the $( ) is the point: a selector no shell may evaluate
 run "$R" "$A"'::TestOne/sub case$(touch PWNED)|x$'
 # shellcheck disable=SC2016 # literal, as above
-rec_has "a selector passes byte for byte into -run, never through a shell" go -C pfm test -v -count=1 ./internal/a/ -run 'TestOne/sub case$(touch PWNED)|x$'
+rec_has "a selector passes byte for byte into -run, never through a shell" go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run 'TestOne/sub case$(touch PWNED)|x$'
 if [ -e "$R/PWNED" ] || [ -e "$R/pfm/PWNED" ]; then bad "a selector is never evaluated by a shell" "PWNED exists"; else ok "a selector is never evaluated by a shell"; fi
 run "$R" "$A::Test[AB]"
 rec_has "a glob character in the selector is not a pattern" "${GO_A_PKG[@]}" -run 'Test[AB]'
 run "$R" pfm/internal/a/fuzz_test.go
-rec_has "a file with only Fuzz funcs runs its Fuzz func" go -C pfm test -v -count=1 ./internal/a/ -run '^(FuzzOnly)$'
+rec_has "a file with only Fuzz funcs runs its Fuzz func" go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run '^(FuzzOnly)$'
+# The affected go test flags are the fence config's: -count and -timeout always, -p and -parallel only when set.
+export PFM_FENCE_TEST_COUNT=3 PFM_FENCE_AFFECTED_TIMEOUT=7m PFM_FENCE_AFFECTED_P=2 PFM_FENCE_AFFECTED_PARALLEL=8
+run "$R" "$A"
+unset PFM_FENCE_TEST_COUNT PFM_FENCE_AFFECTED_TIMEOUT PFM_FENCE_AFFECTED_P PFM_FENCE_AFFECTED_PARALLEL
+rec_has "the fence config's count, timeout, -p and -parallel reach an affected go test" \
+  go -C pfm test -v -count=3 -timeout 7m -p 2 -parallel 8 ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$'
+export PFM_FENCE_AFFECTED_TIMEOUT=10
+run "$R" "$A"
+unset PFM_FENCE_AFFECTED_TIMEOUT
+expect "a malformed fence config value is a named config failure, exit 1" 1 \
+  'CHECK FAIL config (fence_config_values in infra/fence/shared.sh refused the fence config or could not load — see the log; no test ran)'
+out_has "the malformed value is named" "iso: PFM_FENCE_AFFECTED_TIMEOUT must be duration (got '10')"
+rec_lacks "a malformed fence config runs no go test" 'go -C pfm test -v'
 run "$R" pfm/internal/a/helper_test.go
 rec_has "a test file with no Test func (TestMain is none) runs its whole package" "${GO_A_PKG[@]}"
 out_has "the whole-package run is labelled by its package" "TEST PASS pfm/internal/a/"

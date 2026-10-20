@@ -7,7 +7,9 @@
 # resolver, .claude/scripts/unit-path.sh (cwd-relative, repository-relative, pfm-relative or absolute;
 # a file deleted at HEAD drops silently and still brings its unit's checks). Each path brings its
 # affected tests:
-#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag), -run the
+#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag), -count, -timeout,
+#                             -p and -parallel (the last two only when set) from the fence config
+#                             (PFM_FENCE_TEST_COUNT, PFM_FENCE_AFFECTED_*: infra/fence/shared.sh), -run the
 #                             ::selector byte for byte, else every Test and Fuzz func of the file
 #                             (TestMain excluded); a test file with none runs its whole package
 #   pfm/**/*.go               go test -v of its whole package
@@ -275,10 +277,29 @@ missing_tools() { # missing_tools <units> <has md> <has go>: one name per line
   if [ "$2" = 1 ]; then command -v rumdl >/dev/null 2>&1 || echo rumdl; fi
 }
 
+go_affected() { # go_affected <go test arg>...: go test -v of pfm under the fence config's affected-test flags
+  local -a flags=(-count="$PFM_FENCE_TEST_COUNT" -timeout "$PFM_FENCE_AFFECTED_TIMEOUT")
+  [ -z "${PFM_FENCE_AFFECTED_P:-}" ] || flags+=(-p "$PFM_FENCE_AFFECTED_P")
+  [ -z "${PFM_FENCE_AFFECTED_PARALLEL:-}" ] || flags+=(-parallel "$PFM_FENCE_AFFECTED_PARALLEL")
+  go -C pfm test -v "${flags[@]}" "$@"
+}
+
 fence_half() {
-  local units="$1" n="$2" inv i files f has_md=0 has_go=0 missing="" tool inst_out inst_rc=0
+  local units="$1" n="$2" inv i files f has_md=0 has_go=0 missing="" tool inst_out inst_rc=0 knob
   shift 2
   cd "$ROOT"
+  # The fence config's defaults and validation, no Docker: go_affected reads it. A refusal runs no test.
+  # shellcheck source=../../infra/fence/shared.sh
+  if ! . "$ROOT/infra/fence/shared.sh" || ! fence_config_values; then
+    echo 'CHECK FAIL config (fence_config_values in infra/fence/shared.sh refused the fence config or could not load — see the log; no test ran)'
+    echo 'VERDICT FAIL'; return 1
+  fi
+  for knob in PFM_FENCE_TEST_COUNT PFM_FENCE_AFFECTED_TIMEOUT; do
+    if [ -z "${!knob:-}" ]; then
+      echo "CHECK FAIL config ($knob has no default: fence_config_schema in infra/fence/shared.sh lacks it; no test ran)"
+      echo 'VERDICT FAIL'; return 1
+    fi
+  done
   for ((i = 0; i < n; i++)); do
     inv="$1"; shift
     eval "$inv"
@@ -380,7 +401,7 @@ go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> [-run selector]: one go t
   pkg="./"; [ -z "$dir" ] || pkg="./$dir/"
   pkgpath="$pfm_module"; [ -z "$dir" ] || pkgpath="$pfm_module/$dir"
   case "$dir" in e2e | e2e/*) tags=(-tags e2e) ;; esac
-  add_inv t_go "$label" "$pkgpath" go -C pfm test -v ${tags[@]+"${tags[@]}"} -count=1 "$pkg" "$@"
+  add_inv t_go "$label" "$pkgpath" go_affected ${tags[@]+"${tags[@]}"} "$pkg" "$@"
 }
 sut_rows() { # sut_rows <test file>: the scripts a SUT-taking test runs against, one per line
   case "$1" in

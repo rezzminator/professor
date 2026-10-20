@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/shared.sh" || return 1
+fence_config_values || return 1
+
 # Check catalogue sourced by dev.sh. The serial blocks retain their original rows.
 
 # engine_sync_build: the fence's one way to get the engine-sync binary (infra/fence/engine-sync.sh).
@@ -642,7 +645,7 @@ for path in sys.argv[1:]:
 if not ids:
     print("Ran 0 tests")
     sys.exit(1)
-want = os.environ.get("SKILL_TEST_SHARDS") or str(min(8, os.cpu_count() or 1))
+want = os.environ.get("SKILL_TEST_SHARDS") or str(min(int(os.environ["PFM_FENCE_SKILL_SHARD_MAX"]), os.cpu_count() or 1))
 count = max(1, min(int(want), len(ids)))
 shards = [ids[i::count] for i in range(count)]
 procs = [subprocess.Popen([sys.executable, "-m", "unittest", *chunk], stdout=subprocess.PIPE,
@@ -869,7 +872,7 @@ checks_pfm_race() {
   regex="^($(awk '{print $2}' <<< "$CHECKS_PFM_RACE_TESTS" | paste -sd'|' -))\$"
   while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$CHECKS_PFM_RACE_TESTS" | awk '!seen[$0]++')
   run "pfm: go test -race (harvester chaos and race regressions)" -- bash -c '
-    CGO_ENABLED=1 go -C "$1" test -race -count=1 -json -timeout 10m -run "$2" "${@:4}" > "$3"
+    CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"
   ' _ "$d" "$regex" "$json" "${pkgs[@]}"
   go_test_report "$json"
   checks_pfm_profile_pointers "$json" "$run_dir/profile/race" "$before"
@@ -956,6 +959,9 @@ gate_budget_params() {
   GATE_BUDGET_TOLERANCE="$(awk '$1=="tolerance:" {print $2; exit}' "$budgets")"
   GATE_BUDGET_FAIL_FACTOR="$(awk '$1=="fail_factor:" {print $2; exit}' "$budgets")"
   GATE_BUDGET_VALUE="$(awk -v want="$target" '$1=="gate:" {inside=1; next} /^[a-z]/ {inside=0} inside && $1==want ":" {print $2; exit}' "$budgets")"
+  GATE_BUDGET_TOLERANCE="$(fence_config_resolve "$GATE_BUDGET_TOLERANCE")" || return 1
+  GATE_BUDGET_FAIL_FACTOR="$(fence_config_resolve "$GATE_BUDGET_FAIL_FACTOR")" || return 1
+  GATE_BUDGET_VALUE="$(fence_config_resolve "$GATE_BUDGET_VALUE")" || return 1
   if [[ -z "$GATE_BUDGET_TOLERANCE" ]]; then
     GATE_BUDGET_REASON="no tolerance in $budgets"
     return 1
@@ -1045,7 +1051,7 @@ gate_budget_verdict() {
 # as the per-step bound; a budget that cannot give one falls back to 1500 s and says why.
 # Returns 0 when it set the bound (the caller unsets it after the run), 1 when the caller's stays.
 gate_derive_bound() {
-  local target="$1" budgets="$REPO_ROOT/infra/fence/gate-budget.yml" reason="" bound=1500 limit fail_limit
+  local target="$1" budgets="$REPO_ROOT/infra/fence/gate-budget.yml" reason="" bound="$PFM_FENCE_STEP_DEFAULT_S" limit fail_limit
   [[ -z "${STEPS_BOUND_S:-}" ]] || return 1
   if ! gate_budget_params "$target" "$budgets"; then
     reason="$GATE_BUDGET_REASON"
@@ -1076,10 +1082,11 @@ gate_write_meta() {
   {
     printf 'target\t%s\ncommit\t%s\ndirty_files\t%s\n' "$target" "$commit" "$dirty"
     printf 'started\t%s\nfinished\t%s\n' "$started" "$finished"
-    printf 'fixtures\t%s\nsteps_bound_s\t%s\n' "$([[ "${PFM_GATE_FIXTURES:-}" == 1 ]] && echo 1 || echo 0)" "${STEPS_BOUND_S:-1500}"
+    printf 'fixtures\t%s\nsteps_bound_s\t%s\n' "$([[ "${PFM_GATE_FIXTURES:-}" == 1 ]] && echo 1 || echo 0)" "${STEPS_BOUND_S:-$PFM_FENCE_STEP_DEFAULT_S}"
     printf 'steps_jobs\t%s\nsteps_heavy_jobs\t%s\n' "$jobs" "$heavy_jobs"
     # The live runs in the shared fence container when this one started, itself included
     # (infra/fence/shared-run.sh); NA outside it.
+    printf 'profile\t%s\ncpus\t%s\nmem\t%s\ncpuset\t%s\ngomaxprocs\t%s\n' "${PFM_FENCE_PROFILE:-NA}" "${PFM_FENCE_CPUS:-NA}" "${PFM_FENCE_MEM:-NA}" "${PFM_FENCE_CPUSET:-}" "${GOMAXPROCS:-inherited}"
     printf 'concurrent_runs\t%s\n' "${PFM_FENCE_CONCURRENT:-NA not in the shared fence}"
   } > "$run_dir/gate.meta"
 }
@@ -1111,7 +1118,7 @@ gate_resources_stop() {
   local pid="$1" run_dir="$2" rc attempt
   # sampler.sh emits its header only after arming TERM; a stop during bootstrap
   # can otherwise be lost and leave wait hanging after a very short steps_run.
-  for ((attempt=0; attempt<50; attempt++)); do
+  for ((attempt=0; attempt<PFM_FENCE_SAMPLER_READY_TICKS; attempt++)); do
     [[ -s "$run_dir/resources.tsv" ]] && break
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.1

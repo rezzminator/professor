@@ -209,12 +209,12 @@ mkdir -p "$LOCK_DIR" || fatal "the root build lock directory could not be create
 LOCK="$LOCK_DIR/root-build-$HASH.lock" LOCKED=0
 root_unlock() { [ "$LOCKED" -eq 0 ] || rm -rf "$LOCK"; LOCKED=0; }
 told=0
-for ((i = 0; i < 18000; i++)); do
+for ((i = 0; i < PFM_FENCE_LANE_ROOT_LOCK_TICKS; i++)); do
   if mkdir_lock_try "$LOCK" "$$"; then LOCKED=1; break; fi
   [ "$told" -eq 1 ] || { say "waiting for the root build of $HASH held by pid ${MKDIR_LOCK_HOLDER:-?} ($LOCK)"; told=1; }
-  sleep 0.2
+  sleep "$PFM_FENCE_LOCK_POLL_S"
 done
-[ "$LOCKED" -eq 1 ] || fatal "the root build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after 3600 s"
+[ "$LOCKED" -eq 1 ] || fatal "the root build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after $PFM_FENCE_LANE_ROOT_LOCK_TICKS polls of $PFM_FENCE_LOCK_POLL_S s"
 trap root_unlock EXIT
 if [ "$REBUILD" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
   say "reusing $IMAGE (same hash: no root build input changed) · $(( $(date +%s) - T0 ))s"

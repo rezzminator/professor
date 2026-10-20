@@ -7,7 +7,9 @@
 # then is housekeeping run, detached; a stale image is built before the start; the container's name
 # and label carry the image key; iso gate is one exec of the egress recorder, then the ledger ingest,
 # its status passed through, and refuses a target; a set knob is forwarded, an unset one left out;
-# iso sim keeps its own compose run with the caches ensured first and the sim key. docker is a stub
+# an unreachable daemon is TOOLCHAIN-MISSING before auto profile detection;
+# iso sim keeps its own compose run with the caches ensured first and the sim key, and maps a
+# nonempty PFM_FENCE_GOMAXPROCS to GOMAXPROCS (empty sets none). docker is a stub
 # and dev.sh runs from a throwaway git repo, so nothing is built or run.
 #
 #   bash infra/fence/lanes/tests/iso-housekeeping_test.sh
@@ -46,7 +48,9 @@ mkdir -p "$BIN"
 cat >"$BIN/docker" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
+[[ "$1" != info || "${STUB_DAEMON:-1}" = 1 ]] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
 case "$1 ${2:-}" in
+  "info --format") echo "${STUB_INFO:-Docker Desktop|10|8267812044}" ;;
   "volume inspect") [ "${STUB_VOLUME:-1}" = 1 ] || { echo "Error response from daemon: no such volume" >&2; exit 1; } ;;
   "compose -f")
     if [[ "$*" == *' config '* ]]; then
@@ -118,7 +122,7 @@ done
 PFM_FENCE_NET=shared iso run true
 if [ "$(exec_mode)" = shared ]; then ok "iso run under PFM_FENCE_NET=shared runs in the shared network"; else bad "iso run shared" "$(cat "$STUB_DOCKER_LOG")"; fi
 PFM_FENCE_NET=bogus iso run true
-if [ "$RC" -eq 2 ] && grep -qF 'iso run: PFM_FENCE_NET must be private or shared: bogus' <<<"$OUT"; then ok "a bad PFM_FENCE_NET is refused, exit 2"; else bad "bad PFM_FENCE_NET" "rc=$RC" "$OUT"; fi
+if [ "$RC" -ne 0 ] && grep -qF "iso: PFM_FENCE_NET must be network (got 'bogus')" <<<"$OUT"; then ok "a bad PFM_FENCE_NET is refused by name before exec"; else bad "bad PFM_FENCE_NET" "rc=$RC" "$OUT"; fi
 
 # steps.sh sources stepprof.sh from its own directory: a fixture without it dies at dev.sh's source line.
 iso status
@@ -154,9 +158,14 @@ else bad "iso knobs" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 PFM_FENCE_TEST_P=3 iso run true
 if grep -q -- '-e PFM_FENCE_TEST_P=3 ' "$STUB_DOCKER_LOG"; then ok "PFM_FENCE_TEST_P reaches the run"; else bad "PFM_FENCE_TEST_P" "$(cat "$STUB_DOCKER_LOG")"; fi
 PFM_FENCE_CPUS=two iso run true
-if [ "$RC" -ne 0 ] && grep -qF 'iso: PFM_FENCE_CPUS must be a number of CPUs: two' <<<"$OUT" && ! grep -q '^exec' "$STUB_DOCKER_LOG"; then
+if [ "$RC" -ne 0 ] && grep -qF 'iso: PFM_FENCE_CPUS must be cpu' <<<"$OUT" && ! grep -q '^exec' "$STUB_DOCKER_LOG"; then
   ok "a bad PFM_FENCE_CPUS is refused before any exec"
 else bad "bad PFM_FENCE_CPUS" "rc=$RC" "$OUT"; fi
+STUB_DAEMON=0 PFM_FENCE_PROFILE=auto iso status
+if [ "$RC" -eq 1 ] && grep -qF "iso: TOOLCHAIN-MISSING — the docker daemon is not reachable" <<<"$OUT" \
+  && ! grep -q 'fence config is invalid\|detection failed' <<<"$OUT" && ! grep -q '^compose\|^exec' "$STUB_DOCKER_LOG"; then
+  ok "an unreachable daemon under the auto profile is TOOLCHAIN-MISSING, exit 1, before the fence config"
+else bad "unreachable daemon, auto profile" "rc=$RC (want 1)" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # --- no container: caches, start, then housekeeping detached ------------------------------------------------
 unset STUB_RUNNING
@@ -191,5 +200,29 @@ iso sim true
 if [ "$RC" -eq 0 ] && grep -qx "KEY $sim_key" "$STUB_DOCKER_LOG" && ensured_before '^compose .* run ' && ! grep -q '^exec' "$STUB_DOCKER_LOG"; then
   ok "iso sim: its own compose run with the sim-stage key, the caches ensured first"
 else bad "iso sim" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
+PFM_FENCE_GOMAXPROCS=3 iso sim true
+if [ "$RC" -eq 0 ] && grep -q '^compose .* run .*-e GOMAXPROCS=3 ' "$STUB_DOCKER_LOG"; then
+  ok "iso sim maps PFM_FENCE_GOMAXPROCS=3 to GOMAXPROCS=3"
+else bad "iso sim GOMAXPROCS" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
+PFM_FENCE_GOMAXPROCS= iso sim true
+if [ "$RC" -eq 0 ] && grep -q '^compose .* run ' "$STUB_DOCKER_LOG" && ! grep -q -- '-e GOMAXPROCS=' "$STUB_DOCKER_LOG"; then
+  ok "iso sim under an empty PFM_FENCE_GOMAXPROCS leaves GOMAXPROCS unset"
+else bad "iso sim empty GOMAXPROCS" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
+
+# One native-column edit must affect the real auto entry before steps/checks fill defaults.
+cp "$R/infra/fence/shared.sh" "$T/schema.original"
+sed -i 's/^PFM_FENCE_CPUS|.*/PFM_FENCE_CPUS|6|cpu|8/' "$R/infra/fence/shared.sh"
+unset STUB_RUNNING
+for profile_case in native desktop override; do
+  case "$profile_case" in
+    native) PFM_FENCE_PROFILE=auto STUB_INFO='Ubuntu Linux|23|126701535232' iso run true; want=8 ;;
+    desktop) PFM_FENCE_PROFILE=auto STUB_INFO='Docker Desktop|10|8267812044' iso run true; want=6 ;;
+    override) PFM_FENCE_PROFILE=native PFM_FENCE_CPUS=6 iso run true; want=6 ;;
+  esac
+  if [[ $RC == 0 ]] && grep -q -- "--cpus $want " "$STUB_DOCKER_LOG" && grep -q -- "-e PFM_FENCE_CPUS=$want " "$STUB_DOCKER_LOG"; then
+    ok "one native-default edit: $profile_case entry uses cpus=$want before source-time defaults"
+  else bad "one native-default edit: $profile_case entry" "rc=$RC $OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
+done
+cp "$T/schema.original" "$R/infra/fence/shared.sh"
 
 shtest_end

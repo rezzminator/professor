@@ -23,8 +23,8 @@ services:
     # A hard memory ceiling: RAM and swap together never exceed 3 GB, so one
     # fence cannot starve the host or the containers beside it. pfm-sim
     # inherits it through extends.
-    mem_limit: 3g
-    memswap_limit: 3g
+    mem_limit: ${PFM_FENCE_COMPOSE_MEM:?set by fence_config_init}
+    memswap_limit: ${PFM_FENCE_COMPOSE_MEM:?set by fence_config_init}
     # Fence housekeeping (infra/fence/housekeeping.sh) removes only containers
     # carrying this label: exited ones, and running ones past their age limit
     # unless `iso shell` or the demo also set pfm.fence.long-lived=1.
@@ -68,7 +68,7 @@ services:
     build:
       target: pfm-sim
     image: professor-pfm-sim
-    shm_size: "2gb"
+    shm_size: ${PFM_FENCE_SIM_SHM:?set by fence_config_init}
     entrypoint: ["/worktree/infra/fence/sim-entry.sh"]
     environment:
       # uv's cache lives INSIDE the per-worktree harvest volume: one filesystem,

@@ -230,7 +230,7 @@ sampler_parent_alive() { # the --parent process exists and is not a zombie
 }
 
 sampler_run() {
-  local interval=${SAMPLER_INTERVAL_S:-0.5} iters=${SAMPLER_SPIN_ITERS:-10000} dir c header=
+  local interval=${SAMPLER_INTERVAL_S-$(_fence_config_default SAMPLER_INTERVAL_S)} iters=${SAMPLER_SPIN_ITERS-$(_fence_config_default SAMPLER_SPIN_ITERS)} dir c header=
   SAMPLER_OUT='' SAMPLER_PARENT=''
   while (($# > 0)); do
     case $1 in

@@ -68,6 +68,18 @@ need_tool() { # need_tool <bin> <project>
   fi
 }
 
+# iso_preflight: the host iso entry's docker, git and daemon checks, run before
+# fence_config_init so auto profile detection never meets a missing Docker; each
+# failure is TOOLCHAIN-MISSING, exit 1.
+iso_preflight() {
+  need_tool docker iso || exit 1
+  need_tool git iso || exit 1
+  if ! docker info >/dev/null 2>&1; then
+    fail_step "iso: TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed); start Docker and retry"
+    exit 1
+  fi
+}
+
 run() { # run <label> -- <cmd...>
   local label="$1"; shift
   [[ "${1:-}" == "--" ]] && shift
@@ -78,6 +90,19 @@ run() { # run <label> -- <cmd...>
 # repo_git: the one fence-aware git reader, shared with the arch ratchets.
 # shellcheck source=../../pfm/scripts/repo-git.sh
 source "$REPO_ROOT/pfm/scripts/repo-git.sh" || { echo "dev.sh: cannot source pfm/scripts/repo-git.sh" >&2; exit 2; }
+# The fence config comes first on the entry paths, so the profile (auto: the
+# Docker daemon's) picks every default before steps.sh or checks.sh fills one:
+# iso always, test/e2e/all/gate inside the fence (the host's FENCE-ONLY refusal
+# stands). status, build and install never query Docker.
+case "${1:-status}" in
+  iso|test|e2e|all|gate)
+    if [[ "${1:-status}" == iso || -n "${PFM_DEV_FENCE:-}" ]]; then
+      [[ "${1:-status}" != iso ]] || iso_preflight
+      # shellcheck source=../../infra/fence/shared.sh
+      source "$REPO_ROOT/infra/fence/shared.sh" || { echo "dev.sh: cannot source infra/fence/shared.sh" >&2; exit 2; }
+      fence_config_init || { echo "dev.sh: the fence config is invalid — see the line above" >&2; exit 2; }
+    fi ;;
+esac
 # The step runner and the check catalogue: the verify, test and gate rows live
 # in infra/fence/checks.sh; gate runs them as concurrent steps (steps.sh).
 # shellcheck source=../../infra/fence/steps.sh
@@ -126,12 +151,23 @@ timing_run_dir() {
 
 # pfm_e2e_rows <pfm-dir> <timing-run-dir>: the one definition of the tagged e2e
 # rows — `test` runs them after the unit rows, `e2e` runs them alone. Tagged
-# Tier A runs serially and has its own budget and artifact.
+# Tier A has its own budget and artifact; its go test flags are the fence
+# config's (fence_config_init, infra/fence/shared.sh), an empty
+# PFM_FENCE_E2E_PARALLEL leaving -parallel to go's default.
 pfm_e2e_rows() {
-  local d="$1" timing_run="$2"
+  local d="$1" timing_run="$2" knob
+  for knob in PFM_FENCE_E2E_P PFM_FENCE_TEST_COUNT PFM_FENCE_E2E_TIMEOUT; do
+    if [[ -z "${!knob:-}" ]]; then
+      fail_step "pfm: e2e (tagged) — $knob is unset: fence_config_init (infra/fence/shared.sh) did not run"; return
+    fi
+  done
+  local -a flags=(-p "$PFM_FENCE_E2E_P")
+  [[ -z "${PFM_FENCE_E2E_PARALLEL:-}" ]] || flags+=(-parallel "$PFM_FENCE_E2E_PARALLEL")
+  flags+=(-count="$PFM_FENCE_TEST_COUNT" -timeout "$PFM_FENCE_E2E_TIMEOUT")
   run "pfm: e2e (tagged)" -- bash -c '
-    go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
-  ' _ "$d" "$timing_run/e2e.json"
+    d="$1" out="$2"; shift 2
+    go -C "$d" test -tags e2e "$@" -json ./e2e/... >"$out"
+  ' _ "$d" "$timing_run/e2e.json" "${flags[@]}"
   go_test_report "$timing_run/e2e.json"
   skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
   run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
@@ -388,7 +424,7 @@ dispatch() { # dispatch <project> <action>
 # BROKEN STATE: docker missing, its DAEMON unreachable, or the compose file
 # missing = TOOLCHAIN-MISSING and a non-zero exit — never a host fallback; a run
 # that cannot print its fence proof did not run inside the fence. The daemon is
-# probed explicitly: an installed `docker` binary with nothing behind it is the
+# probed explicitly (iso_preflight, before the fence config): an installed `docker` binary with nothing behind it is the
 # common failure, and it must be named as TOOLCHAIN-MISSING here rather than
 # surfacing later as an opaque connect error.
 # sim_volume — this worktree's harvester volume for `iso sim`, named by
@@ -396,14 +432,18 @@ dispatch() { # dispatch <project> <action>
 # checkouts step removes it once the worktree is gone.
 sim_volume() { fence_sim_volume "$REPO_ROOT"; }
 
+# fence_config_load <caller>: runs fence_config_init from a sourced
+# infra/fence/shared.sh; a shared.sh without it is TOOLCHAIN-MISSING, an
+# invalid knob the init's own line — both exit 1, never a run on unset flags.
+fence_config_load() {
+  if ! declare -F fence_config_init >/dev/null; then
+    fail_step "$1: TOOLCHAIN-MISSING — infra/fence/shared.sh defines no fence_config_init"; exit 1
+  fi
+  fence_config_init || { fail_step "$1: the fence config is invalid — see the line above"; exit 1; }
+}
+
 cmd_iso() { # cmd_iso <action> [project | command…]
   local action="${1:-}" target="${2:-pfm}"
-  need_tool docker iso || exit 1
-  need_tool git iso || exit 1
-  if ! docker info >/dev/null 2>&1; then
-    fail_step "iso: TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed); start Docker and retry"
-    exit 1
-  fi
   local compose="$REPO_ROOT/infra/fence/docker-compose.yml"
   if [[ ! -f "$compose" ]]; then
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
@@ -415,6 +455,10 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   if [[ "$action" == gate && $# -gt 1 ]]; then
     echo "usage: dev.sh iso gate — the full gate runs pfm and templates together, once, right before the merge (.claude/scripts/test.sh --full)" >&2; exit 2
   fi
+  # The fence config, before any image, compose or run: every PFM_FENCE_* knob
+  # defaulted, validated and exported by fence_config_init (infra/fence/shared.sh).
+  . "$REPO_ROOT/infra/fence/shared.sh"
+  fence_config_load iso
   # infra/fence/housekeeping.sh: fence_volumes_ensure (the cache volumes) and
   # fence_sim_volume; housekeeping itself runs detached when a shared container
   # starts (infra/fence/shared.sh), never on the per-call path.
@@ -446,6 +490,18 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   for knob in STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
     if [[ -n "${!knob+x}" ]]; then extra+=(-e "$knob=${!knob}"); fi
   done
+  # Every exported PFM_FENCE_* knob reaches the fence, except the per-run names
+  # shared.sh and shared-run.sh set themselves and the caller's host pids; the
+  # shared container's runs take the profile and caps shared.sh hands them, the
+  # effective ones under a CAPS CONFLICT, never the caller's.
+  local name
+  local -a knob_env=() knob_env_shared=()
+  while IFS= read -r name; do
+    case "$name" in PFM_FENCE_RUN_ID|PFM_FENCE_WATCH_PIDS|PFM_FENCE_DISK_DIR|PFM_FENCE_CONCURRENT) continue ;; esac
+    knob_env+=(-e "$name=${!name}")
+    case "$name" in PFM_FENCE_PROFILE|PFM_FENCE_CPUS|PFM_FENCE_MEM|PFM_FENCE_CPUSET|PFM_FENCE_HEARTBEAT_S|PFM_FENCE_TEST_P) ;;
+      *) knob_env_shared+=(-e "$name=${!name}") ;; esac
+  done < <(compgen -e PFM_FENCE_ || true)
 
   case "$action" in
     sim)
@@ -460,8 +516,10 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       fence_volumes_ensure
       [[ ! -f "$terms" ]] || extra+=(-v "$terms:/pfm-leak-terms.txt:ro" -e LEAK_TERMS=/pfm-leak-terms.txt)
       mkdir -p "$TMP_BASE/timing"
-      extra+=(-e COVER_DIR=/root/cover -v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing
+      extra+=(${knob_env[@]+"${knob_env[@]}"} -e COVER_DIR=/root/cover -v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing
         -e "PFM_TEST_TIMING_HOST=$TMP_BASE/timing" -v "$(sim_volume):/root/.local/state/pfm/harvest-python")
+      # sim-entry.sh runs go directly, so the knob maps to GOMAXPROCS here, as shared.sh does for exec; empty leaves it unset.
+      [[ -z "${PFM_FENCE_GOMAXPROCS:-}" ]] || extra+=(-e "GOMAXPROCS=$PFM_FENCE_GOMAXPROCS")
       docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} "${extra[@]}" pfm-sim bash -c "$proof; $cmd"
       return ;;
     sim-reset)
@@ -476,13 +534,12 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       ok "iso sim-reset: dropped $volume"; return ;;
   esac
 
-  # Every other action: the shared container (infra/fence/shared.sh).
-  . "$REPO_ROOT/infra/fence/shared.sh"
+  # Every other action: the shared container (infra/fence/shared.sh, sourced above).
   FENCE_SH_COMPOSE="$compose"
   fence_shared_init || { fail_step "iso: the shared fence could not be resolved — see the line above"; exit 1; }
   FENCE_SH_TERMS="$terms"
   # The worktree mount is read-only; coverage profiles land in the run's own HOME.
-  FENCE_SH_ENV=(-e COVER_DIR=/root/cover ${extra[@]+"${extra[@]}"})
+  FENCE_SH_ENV=(-e COVER_DIR=/root/cover ${extra[@]+"${extra[@]}"} ${knob_env_shared[@]+"${knob_env_shared[@]}"})
   # PFM_TEST_TIMING_HOST maps the fence's /pfm-timing back to its host path; the fence writes
   # the run dir's host path to the note PFM_TEST_RUN_NOTE, and this script's EXIT trap prints
   # it as the last line.
@@ -514,9 +571,8 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       # package, `make -C pfm lint`). Exit status is the command's own.
       # Its own network namespace by default; PFM_FENCE_NET=shared opts into the container's network
       # for a command that fetches from outside.
-      local cmd="${*:2}" net="${PFM_FENCE_NET:-private}"
+      local cmd="${*:2}" net="$PFM_FENCE_NET"
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
-      case "$net" in private|shared) ;; *) echo "iso run: PFM_FENCE_NET must be private or shared: $net" >&2; exit 2 ;; esac
       fence_shared_exec "$net" "$proof; $cmd" ;;
   esac
 }
@@ -552,14 +608,26 @@ commands:
 
 projects: ${PROJECTS[*]} | all (default)
 
-shared fence knobs, read per call:
-  PFM_FENCE_CPUS         the container's CPU cap (default 6; a running container takes
-                         a caller's different cap through docker update)
-  PFM_FENCE_MEM          the container's memory cap, memory + swap (default 5g)
-  PFM_FENCE_TEST_P       go test package concurrency, -p (default: the CPU cap)
-  PFM_FENCE_IDLE_S       a container with no live run exits after this long (default 1800)
-  PFM_FENCE_HEARTBEAT_S  a run whose caller stops beating this long is killed (default 4)
-  PFM_FENCE_NET          iso run's network: private (default, loopback only) or shared
+fence knobs: fence_config_init (infra/fence/shared.sh) owns every PFM_FENCE_* name,
+its default and its validation; iso and the in-fence test, e2e, all and gate paths
+run it first, and an invalid value exits non-zero before any run. Among them:
+  PFM_FENCE_PROFILE      desktop | native | auto (auto reads the Docker daemon's OS and
+                         resources, never the hostname); desktop and native carry
+                         identical defaults
+  PFM_FENCE_CPUS         the container's CPU cap; 0 sets no quota
+  PFM_FENCE_CPUSET       the container's pinned CPUs; empty leaves it unpinned
+  PFM_FENCE_MEM          the container's memory cap, memory + swap
+  PFM_FENCE_GOMAXPROCS   GOMAXPROCS in the fence; empty leaves it unset (Go follows the CPUs)
+  PFM_FENCE_TEST_P       go test package concurrency, -p (empty: the CPU cap)
+  PFM_FENCE_E2E_P, PFM_FENCE_E2E_PARALLEL, PFM_FENCE_TEST_COUNT, PFM_FENCE_E2E_TIMEOUT
+                         the tagged e2e rows' -p, -parallel (empty: go's default),
+                         -count and -timeout
+  PFM_FENCE_IDLE_S       a container with no live run exits after this long
+  PFM_FENCE_HEARTBEAT_S  a run whose caller stops beating this long is killed
+  PFM_FENCE_NET          iso run's network: private (loopback only) or shared
+A caller whose caps differ from the running container's while another run is live
+leaves them unchanged, prints CAPS CONFLICT and runs under the effective caps, which
+the run records.
 
 Every project that cannot be checked reports TOOLCHAIN-MISSING or NOT-INSTALLED
 and exits non-zero. A skipped check is never a pass.
@@ -584,6 +652,9 @@ esac
 case "$CMD" in
   status) cmd_status "$TARGET" ;;
   install|build|test|e2e|typecheck|verify|cover|all)
+    if [[ "$CMD" == test || "$CMD" == e2e || "$CMD" == all ]]; then
+      . "$REPO_ROOT/infra/fence/shared.sh"; fence_config_load "dev.sh $CMD"
+    fi
     if [[ "$TARGET" == "all" ]]; then
       for p in "${PROJECTS[@]}"; do head_ "$p :: $CMD"; dispatch "$p" "$CMD"; done
     else
@@ -593,6 +664,7 @@ case "$CMD" in
     fi ;;
   iso) cmd_iso "${@:2}" ;;
   gate)
+    . "$REPO_ROOT/infra/fence/shared.sh"; fence_config_load "dev.sh gate"
     case "$TARGET" in
       pfm|templates|all) gate_run "$TARGET" || FAILURES=$((FAILURES + 1)) ;;
       *) echo "unknown gate target: $TARGET" >&2; usage ;;

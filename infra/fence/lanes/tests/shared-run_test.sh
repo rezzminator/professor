@@ -63,7 +63,7 @@ out="$(srun r-sig shared 'awk "/^SigIgn:/ { print \$2 }" /proc/self/status')"; r
 if [ "$rc" = 0 ] && [[ "$out" =~ ^[0-9a-f]+$ ]] && (( (16#$out & 6) == 0 )); then ok "a run's command has SIGINT and SIGQUIT at their defaults"; else bad "a run's command ignores SIGINT or SIGQUIT" "rc=$rc SigIgn=$out"; fi
 
 # --- admission decision: source definitions only, without the command dispatcher ---------------------------
-out="$(bash -c 'source <(sed '\''/^case "${1:-}" in$/,$d'\'' "$1"); declare -F scratch_uses_ram >/dev/null && scratch_uses_ram' _ "$SUT" 2>&1)"; rc=$?
+out="$(bash -c 'source "$1" kill r-admission; declare -F scratch_uses_ram >/dev/null && scratch_uses_ram' _ "$SUT" 2>&1)"; rc=$?
 if [ "$rc" = 0 ] && [ -z "$out" ]; then ok "RAM admission reads a cgroup with room without a fallback line"
 else bad "RAM admission when room exists" "rc=$rc" "$out"; fi
 
@@ -87,6 +87,14 @@ rm -f /var/tmp/over-cap
 # not silently claim that its backing device is always disk in nested harnesses.
 if [ "$rc" = 0 ]; then ok "all six scratch mounts are capped tmpfs, noswap, with private modes and a writable disk escape"
 else bad "scratch mount type, cap, noswap, mode or disk escape" "rc=$rc" "$out"; fi
+
+# Overrides change both the mounted cap and the admission sum (all six caps plus headroom).
+out="$(PFM_FENCE_VARTMP_MIB=8 srun r-override shared '[ "$(findmnt -bn -o SIZE -T /var/tmp | tail -n 1)" = 8388608 ]')"; rc=$?
+if [[ $rc == 0 ]]; then ok "scratch override changes the real private tmpfs cap"; else bad "scratch override changes the real private tmpfs cap" "$out"; fi
+out="$(PFM_FENCE_HEADROOM_MIB=4096 bash -c 'source "$1" kill r-admission; scratch_uses_ram' _ "$SUT" 2>&1)"; rc=$?
+if [[ $rc != 0 && "$out" == 'shared-run: disk scratch: free 4096 MiB, needed 5970 MiB' ]]; then
+  ok "RAM admission sums configured caps and headroom, not the old constant"
+else bad "RAM admission sums configured caps and headroom" "rc=$rc $out"; fi
 
 # The suite's STATE is itself tmpfs: verify bind sources, not the backing filesystem type.
 disk_probe='for spec in /root:home:700 /tmp:tmp:1777 /var/tmp:vartmp:1777; do

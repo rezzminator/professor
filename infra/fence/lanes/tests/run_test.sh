@@ -42,6 +42,7 @@ lanes:
 YML
 cp "$LANES/budgets.yml" "$T/budgets.fixture.yml"
 cp -R "$SUT_DIR/fixtures" "$SUT_DIR/scenarios" "$LANES/"
+cp "$SUT_DIR/../shared.sh" "$SUT_DIR/../mkdir-lock.sh" "$SUT_DIR/../image-key.sh" "$T/infra/fence/"
 cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
 (cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
 RUN="$LANES/run.sh"
@@ -425,7 +426,7 @@ else bad "readiness bound under slow probes" "rc=$RC probe span=${span_ms}ms (wa
 
 # ---- 21c: a bound that is not whole seconds is refused at entry.
 LANE_EGRESS_READY_SECS=1.5 run_sut --lanes E1
-if [ "$RC" -eq 2 ] && grep -qF "take whole seconds, not '1.5'" <<<"$OUT"; then
+if [ "$RC" -ne 0 ] && grep -qF "LANE_EGRESS_READY_SECS must be uint" <<<"$OUT"; then
   ok "a fractional egress bound is refused at entry"
 else bad "egress bound validation" "rc=$RC" "$OUT"; fi
 

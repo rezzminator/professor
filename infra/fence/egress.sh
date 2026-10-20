@@ -189,6 +189,8 @@ PY
 }
 
 run() {
+  . "$(dirname -- "${BASH_SOURCE[0]}")/shared.sh" || return 1
+  fence_config_values || return 1
   local recorder="${EGRESS_TCPDUMP:-tcpdump}" stamp dir pcap log filter pid rc i limit ready reason verdict end_limit
   dir="${PFM_TEST_TIMING_DIR:-/tmp}/egress"
   # A shared fence run's pid namespace starts its pids at 1, so $$ repeats across concurrent runs:
@@ -211,7 +213,7 @@ run() {
   filter='port 53 or host 127.0.0.11 or not (src net 127.0.0.0/8 and dst net 127.0.0.0/8) and not ip6 host ::1'
   "$recorder" -i any -p -n -U --immediate-mode -s 0 -w "$pcap" "$filter" >/dev/null 2>"$log" &
   pid=$!
-  limit="$(python3 -c 'import sys; print(max(1, int(float(sys.argv[1]) * 20)))' "${EGRESS_LISTEN_WAIT_S:-5}")"
+  limit="$(python3 -c 'import sys; print(max(1, int(float(sys.argv[1]) * 20)))' "$EGRESS_LISTEN_WAIT_S")"
   ready=0
   for ((i=0; i<limit; i++)); do
     if grep -q 'listening on' "$log"; then ready=1; break; fi
@@ -229,7 +231,7 @@ run() {
   fi
   "$@"; rc=$?
   python3 -c 'import socket, sys; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.sendto(b"pfm-egress-end " + sys.argv[1].encode("ascii"), ("127.0.0.11", 9)); s.close()' "$stamp"
-  end_limit="$(python3 -c 'import sys; print(max(1, int(float(sys.argv[1]) * 20)))' "${EGRESS_END_WAIT_S:-5}")"
+  end_limit="$(python3 -c 'import sys; print(max(1, int(float(sys.argv[1]) * 20)))' "$EGRESS_END_WAIT_S")"
   for ((i=0; i<end_limit; i++)); do
     if [ -f "$pcap" ] && grep -aFq "pfm-egress-end $stamp" "$pcap"; then break; fi
     if ! kill -0 "$pid" 2>/dev/null; then break; fi

@@ -9,6 +9,9 @@ REPO_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 TMP_BASE="$T"
 FAILURES=0
 shtest_unset_gate_env # run nested under the gate's own stepprof wrapper, the suite starts from none of its knobs
+fence_config_values || exit 1
+# Optional scheduler knobs must remain absent so the gate owns its derived bound.
+unset STEPS_BOUND_S STEPS_JOBS
 cat > "$T/budgets.yml" <<'YAML'
 tolerance: 1.25
 fail_factor: 2
@@ -395,7 +398,7 @@ else bad 'red steps with a budget row' "$(cat "$RUN/gate.tsv")"; fi
 
 PFM_FENCE_CONCURRENT=3 PFM_GATE_FIXTURES=1 fx_case meta all
 ts='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
-if [ "$(cut -f1 "$RUN/gate.meta" | paste -sd, -)" = 'target,commit,dirty_files,started,finished,fixtures,steps_bound_s,steps_jobs,steps_heavy_jobs,concurrent_runs' ] &&
+if [ "$(cut -f1 "$RUN/gate.meta" | paste -sd, -)" = 'target,commit,dirty_files,started,finished,fixtures,steps_bound_s,steps_jobs,steps_heavy_jobs,profile,cpus,mem,cpuset,gomaxprocs,concurrent_runs' ] &&
   [ "$(meta_get concurrent_runs "$RUN/gate.meta")" = 3 ] &&
   [ "$(meta_get target "$RUN/gate.meta")" = all ] && [ "$(meta_get commit "$RUN/gate.meta")" = abcdef012345 ] &&
   [ "$(meta_get dirty_files "$RUN/gate.meta")" = 3 ] && [ "$(meta_get fixtures "$RUN/gate.meta")" = 1 ] &&
@@ -605,7 +608,7 @@ race_case() { # race_case <label> <expected FAILSTEP line or empty> <stream: "pk
   fi
   checks_pfm_race "$T/fx/pfm" "$rd" >"$T/race.out" 2>&1
   if grep -Fq "$rd/profile/race pfm: go test -race (harvester chaos and race regressions) -- bash -c" "$T/unit.calls" &&
-    grep -Fq 'CGO_ENABLED=1 go -C "$1" test -race -count=1 -json -timeout 10m -run "$2" "${@:4}" > "$3"' "$T/unit.calls" &&
+    grep -Fq 'CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"' "$T/unit.calls" &&
     grep -Fq "_ $T/fx/pfm $race_regex $rd/race.json $race_pkgs" "$T/unit.calls" &&
     [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$rd/race.json" "$rd/race.json" "$rd/profile/race")" ] &&
     [ "$(grep -v '^  PROFILE ' "$T/race.out")" = "$want" ] && [ -z "${PFM_TEST_ARTIFACT_DIR+x}" ] &&

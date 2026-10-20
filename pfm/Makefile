@@ -60,11 +60,15 @@ COVER_DIR ?= $(REPO)/tmp/cover
 LINT_BASE ?= origin/main
 # Package concurrency follows the fence's CPU cap: PFM_FENCE_TEST_P when the caller sets it
 # (infra/fence/shared.sh hands it in), else the container's cgroup quota (/sys/fs/cgroup/cpu.max,
-# rounded up), else 6 — the fenced unit captures in docs/dev/testing/concurrency-sweep.md.
-# The tagged e2e suite keeps its own -p 1 in dev.sh.
-FENCE_CPU_CAP := $(shell awk '$$1 != "max" && $$2 > 0 { q = $$1 / $$2; p = int(q); if (p < q) p++; print p }' /sys/fs/cgroup/cpu.max 2>/dev/null)
-TEST_P := $(or $(PFM_FENCE_TEST_P),$(FENCE_CPU_CAP),6)
-TESTFLAGS ?= -p $(TEST_P) -parallel 4
+# rounded up), else the configured quota or available cores with no quota — the fenced unit captures in docs/dev/testing/concurrency-sweep.md.
+# The tagged e2e suite has independent PFM_FENCE_E2E_* knobs in dev.sh.
+# Resolve only when a test target expands TESTFLAGS, never for build/install/help.
+# Explicit make variables must reach $(shell) on older GNU make too; quote
+# their values as data, so malformed input reaches validation, not the shell.
+fence_test_env = $(if $(filter undefined,$(origin $(1))),,$(1)='$(subst ','"'"',$($(1)))')
+FENCE_TEST_CONFIG = $(shell $(call fence_test_env,PFM_FENCE_TEST_P) $(call fence_test_env,PFM_FENCE_TEST_PARALLEL) bash -c '. "$(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../infra/fence/shared.sh)" && fence_config_values || exit 1; p="$$(fence_config_test_p)" || exit 1; printf "%s %s\n" "$$p" "$$PFM_FENCE_TEST_PARALLEL"' || echo CONFIG-INVALID)
+TEST_P = $(word 1,$(FENCE_TEST_CONFIG))
+TESTFLAGS ?= $(if $(findstring CONFIG-INVALID,$(FENCE_TEST_CONFIG)),$(error invalid fence test configuration; see named error above),-p $(TEST_P) -parallel $(word 2,$(FENCE_TEST_CONFIG)))
 
 .PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags timing sweep install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean

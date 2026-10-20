@@ -54,6 +54,9 @@ if ! . "$(dirname -- "${BASH_SOURCE[0]}")/mkdir-lock.sh"; then
   exit 1
 fi
 
+. "${BASH_SOURCE[0]%/*}/shared.sh" || exit 1
+fence_config_values || exit 1
+
 TAB=$'\t'
 NL=$'\n'
 HEADER="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
@@ -245,14 +248,14 @@ fail() { # fail <line>: a named line on stderr, exit 1
 ledger_lock() {
   local dir=${ledger%/*} lk="$ledger.lock" err i
   if ! err=$(mkdir -p "$dir" 2>&1); then fail "LEDGER-NOT-WRITTEN $ledger: cannot create $dir: ${err##*: }"; fi
-  for ((i = 0; i < 1200; i++)); do
+  for ((i = 0; i < PFM_FENCE_HISTORY_LOCK_TICKS; i++)); do
     if mkdir_lock_try "$lk" "$$"; then
       trap 'rm -rf "$ledger.lock"' EXIT
       return 0
     fi
     sleep 0.1
   done
-  fail "LEDGER-NOT-WRITTEN $ledger: $lk is still held by pid ${MKDIR_LOCK_HOLDER:-?} after 120 s"
+  fail "LEDGER-NOT-WRITTEN $ledger: $lk is still held by pid ${MKDIR_LOCK_HOLDER:-?} after $PFM_FENCE_HISTORY_LOCK_TICKS polls of 0.1 s"
 }
 
 ensure_ledger() { # the ledger and its sidecar exist with their headers, an interim ledger split back; any other first line is refused
@@ -394,6 +397,25 @@ ingest_run() { # ingest_run <run dir> <worktree> <load>: append the run's rows, 
       return 1
       ;;
   esac
+  # Receipt first: a failed write must leave the run retryable; the ledger lock also
+  # serializes this dedupe if the later ledger append needs a retry.
+  local caps="${concs%/*}/caps.tsv" key value
+  if [[ ! -e "$caps" ]]; then
+    if ! printf 'worktree\trun\tprofile\tcpus\tmem\tcpuset\tgomaxprocs\n' > "$caps"; then
+      printf 'gate-history: LEDGER-NOT-WRITTEN %s: caps header could not be written\n' "$caps" >&2; return 1
+    fi
+  fi
+  local -a cap_values=()
+  for key in profile cpus mem cpuset gomaxprocs; do
+    value="$(meta_value "$run/gate.meta" "$key")"; cap_values+=("$value")
+  done
+  local existing
+  if ! existing="$(awk -F '\t' -v wt="$wt" -v run="$name" '$1==wt && $2==run {found=1} END {print found+0}' "$caps")"; then
+    printf 'gate-history: LEDGER-NOT-WRITTEN %s: caps receipt could not be read\n' "$caps" >&2; return 1
+  fi
+  if [[ "$existing" == 0 ]] && ! printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$wt" "$name" "${cap_values[@]}" >> "$caps"; then
+    printf 'gate-history: LEDGER-NOT-WRITTEN %s: caps append failed\n' "$caps" >&2; return 1
+  fi
   if ! err=$({ cat >> "$ledger" <<< "$rows"; } 2>&1); then
     printf 'gate-history: LEDGER-NOT-WRITTEN %s: %s\n' "$ledger" "${err##*: }" >&2
     return 1

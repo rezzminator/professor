@@ -61,7 +61,8 @@ else
   derived_knobs=''
   bad 'derived no knob from dev.sh or shared.sh' "$DEV_SH $SHARED_SH"
 fi
-gate_knobs="$(printf '%s\n' $derived_knobs $literal_knobs | awk '!seen[$0]++' | paste -sd' ' -)"
+schema_knobs="$(fence_config_schema | cut -d'|' -f1)"
+gate_knobs="$(printf '%s\n' $derived_knobs $literal_knobs $schema_knobs | awk '!seen[$0]++' | paste -sd' ' -)"
 if out="$(
   for n in $gate_knobs; do export "$n=inherited"; done
   export BASH_ENV="$T/bash_env"
@@ -460,5 +461,18 @@ out="$(bash -c 'source "$1"' _ "$T/noprof/steps.sh" 2>&1)"; rc=$?
 if [ "$rc" -eq 1 ] && [ "$out" = "steps.sh: cannot source $T/noprof/stepprof.sh" ]; then
   ok 'steps.sh without stepprof.sh beside it names the missing file and fails'
 else bad 'missing stepprof.sh' "rc=$rc $out"; fi
+
+# Public knobs change scheduling and Go concurrency without changing the Makefile.
+out="$(env -u TESTFLAGS PFM_FENCE_TEST_P=2 PFM_FENCE_TEST_PARALLEL=7 make -s -C "$MK_DIR" --no-print-directory testflags 2>&1)"; rc=$?
+if [[ $rc == 0 && "$out" == '-p 2 -parallel 7' ]]; then ok 'Go package and in-package parallelism are independently configurable'; else bad 'Go concurrency override' "$out"; fi
+out="$(env -u TESTFLAGS PFM_FENCE_TEST_PARALLEL=0 make -s -C "$MK_DIR" --no-print-directory testflags 2>&1)"; rc=$?
+if [[ $rc != 0 && "$out" == *'PFM_FENCE_TEST_PARALLEL'* ]]; then ok 'invalid Go parallelism refuses make before any test'; else bad 'invalid Go parallelism' "$out"; fi
+
+out="$(unset PFM_FENCE_STEP_DEFAULT_S STEPS_BOUND_S; steps_bound)"; rc=$?
+if [[ $rc == 0 && "$out" == "$(_fence_config_default PFM_FENCE_STEP_DEFAULT_S)" ]]; then ok 'step bound rederives its registered default after environment cleanup'; else bad 'step bound after cleanup' "$out"; fi
+out="$(PFM_FENCE_TEST_PARALLEL=0 make -s -C "$MK_DIR" --no-print-directory help 2>&1)"; rc=$?
+if [[ $rc == 0 && "$out" == *'pfm targets'* ]]; then ok 'non-test make targets do not resolve test-only configuration'; else bad 'non-test make configuration' "$out"; fi
+out="$(env -u TESTFLAGS make -s -C "$MK_DIR" --no-print-directory testflags PFM_FENCE_TEST_P=3 PFM_FENCE_TEST_PARALLEL=7 2>&1)"; rc=$?
+if [[ $rc == 0 && "$out" == '-p 3 -parallel 7' ]]; then ok 'explicit make concurrency variables reach validation and flags'; else bad 'make variable concurrency' "$out"; fi
 
 shtest_end

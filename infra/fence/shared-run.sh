@@ -38,6 +38,10 @@ set -uo pipefail
 STATE="${FENCE_STATE_DIR:-/var/fence}"
 MNT="${FENCE_HOST_DIR:-/pfm-fence}"
 SELF="${BASH_SOURCE[0]}"
+# Central defaults; invalid supplied configuration never falls back.
+. "$(dirname -- "$SELF")/shared.sh" || exit 1
+fence_config_values || exit 1
+
 
 die() { echo "shared-run: $*" >&2; exit "${2:-1}"; }
 valid_id() { [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || die "bad run id: $1" 2; }
@@ -101,6 +105,8 @@ cmd_run() {
   else echo "shared-run: the worktree record $STATE/worktrees/$wt could not be written — the container may be superseded under this worktree" >&2; fi
   PFM_FENCE_CONCURRENT="$(live_count)"; export PFM_FENCE_CONCURRENT
   mkdir -p "$run/disk" "$MNT/$wt/timing" || { rm -rf "$run" "$live"; die "the run directory $run could not be made"; }
+  printf 'profile\tcpus\tmem\tcpuset\n%s\t%s\t%s\t%s\n' "${PFM_FENCE_PROFILE:-NA}" "$PFM_FENCE_CPUS" "$PFM_FENCE_MEM" "$PFM_FENCE_CPUSET" > "$run/caps.tsv" || die "effective caps receipt could not be written"
+  [[ ! -d "$MNT/.runs/$id" ]] || cp "$run/caps.tsv" "$MNT/.runs/$id/caps.tsv" || die "host caps receipt could not be written"
   chmod 0700 "$run/disk" || { rm -rf "$run" "$live"; die "the run disk directory $run/disk could not be made private"; }
   if [[ "$mode" == private ]]; then
     local mods=("$tree/pfm")
@@ -119,7 +125,7 @@ cmd_run() {
     ns=$!
     echo "$ns" > "$run/ns.pid"
     (
-      hb="${PFM_FENCE_HEARTBEAT_S:-4}"
+      hb="$PFM_FENCE_HEARTBEAT_S"
       while IFS= read -r -t "$hb" -u 3 _; do :; done
       echo "shared-run: the caller of run $id is gone (heartbeat ended) — killing the run" >&2
       kill_run "$id"
@@ -136,7 +142,7 @@ cmd_run() {
 scratch_uses_ram() {
   # This is a snapshot, not a reservation: simultaneous admissions can still race.
   local cg="${PFM_FENCE_CGROUP_ROOT:-/sys/fs/cgroup}" limit current free
-  local needed_mib=$((256 + 1536 + 16 + 64 + 1 + 1 + 1024))
+  local needed_mib=$((PFM_FENCE_HOME_MIB + PFM_FENCE_TMP_MIB + PFM_FENCE_VARTMP_MIB + PFM_FENCE_SHM_MIB + 2 * PFM_FENCE_HIDE_MIB + PFM_FENCE_HEADROOM_MIB))
   if ! { IFS= read -r limit < "$cg/memory.max" && IFS= read -r current < "$cg/memory.current"; } 2>/dev/null \
     || [[ ! "$limit" =~ ^[0-9]{1,18}$ || ! "$current" =~ ^[0-9]{1,18}$ ]]; then
     echo "shared-run: disk scratch: cgroup read failed ($cg/memory.max, $cg/memory.current); free unknown MiB, needed $needed_mib MiB" >&2
@@ -164,9 +170,9 @@ cmd_inner() {
   # disposable scratch to the VM's swap. All pages also count against the container cap.
   scratch_mount() { mount -t tmpfs -o "size=$2,mode=$3,noswap" tmpfs "$1" || die "$1 could not be made capped, non-swappable scratch"; }
   if scratch_uses_ram; then
-    scratch_mount /root 256m 0700
-    scratch_mount /tmp 1536m 1777
-    scratch_mount /var/tmp 16m 1777
+    scratch_mount /root "${PFM_FENCE_HOME_MIB}m" 0700
+    scratch_mount /tmp "${PFM_FENCE_TMP_MIB}m" 1777
+    scratch_mount /var/tmp "${PFM_FENCE_VARTMP_MIB}m" 1777
   else
     mkdir -p "$run/home" "$run/tmp" "$run/vartmp" \
       && chmod 0700 "$run/home" && chmod 1777 "$run/tmp" "$run/vartmp" \
@@ -175,13 +181,13 @@ cmd_inner() {
     mount --bind "$run/tmp" /tmp || die "the run tmp could not be bound on /tmp"
     mount --bind "$run/vartmp" /var/tmp || die "the run vartmp could not be bound on /var/tmp"
   fi
-  scratch_mount /dev/shm 64m 1777
+  scratch_mount /dev/shm "${PFM_FENCE_SHM_MIB}m" 1777
   mount --bind "$run/disk" /pfm-disk || die "the run disk directory could not be bound on /pfm-disk"
   export PFM_FENCE_DISK_DIR=/pfm-disk
   mount --bind "$MNT/$wt/timing" /pfm-timing || die "the timing base could not be bound on /pfm-timing"
   if [[ -d "$MNT/.runs/$id" ]]; then mount --bind "$MNT/.runs/$id" /pfm-run || die "the run's host directory could not be bound"; fi
-  scratch_mount "$STATE" 1m 0700
-  scratch_mount "$MNT" 1m 0700
+  scratch_mount "$STATE" "${PFM_FENCE_HIDE_MIB}m" 0700
+  scratch_mount "$MNT" "${PFM_FENCE_HIDE_MIB}m" 0700
   if [[ "$mode" == private ]]; then
     ip link set lo up || die "lo could not be brought up in the private network namespace"
     if ip link add dummy0 type dummy 2>/dev/null; then

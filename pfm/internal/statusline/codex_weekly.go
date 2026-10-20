@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -26,8 +25,8 @@ type codexWindow struct {
 }
 
 // codexWeeklyLine shares the Codex renderer's cache and detached refresher.
-// Stretch the bar, not the label, to the Claude quota row's visible width.
-// The main quota row has no column fitting; neither does this one.
+// Stretch the bar to the caller's available columns, even without Claude quotas.
+// If columns are unknown, reuse the Claude row's width rather than inventing one.
 func codexWeeklyLine(runtime Runtime, now time.Time, claudeLine string) string {
 	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
 	armRefresh(runtime, RefreshKindCodex, path, 5*time.Minute)
@@ -45,9 +44,16 @@ func codexWeeklyLine(runtime Runtime, now time.Time, claudeLine string) string {
 			label += " " + yellow + "stale " + formatDuration(age.Milliseconds()) + reset
 		}
 	}
-	width := 5
-	if claudeLine != "" {
-		width = max(0, utf8.RuneCountInString(ansi.Strip(claudeLine))-utf8.RuneCountInString(ansi.Strip(label))-1)
+	columns := runtime.Columns
+	if columns <= 0 {
+		columns = ansi.StringWidth(claudeLine)
+	}
+	if columns <= 0 {
+		return label
+	}
+	width := columns - ansi.StringWidth(label) - 1
+	if width <= 0 {
+		return ansi.Truncate(label, columns, "")
 	}
 	bar := makeBar(percent, width)
 	if window == nil || err != nil {
@@ -68,26 +74,36 @@ func readCodexWeekly(path string, now time.Time) (*codexWindow, time.Duration, e
 	}
 	// An absent or null percent is unknown, not a measured zero. Reuse the
 	// shared window fields while decoding this required value with presence.
+	type weeklyWindow struct {
+		codexWindow
+		UsedPercent *float64 `json:"usedPercent"`
+	}
 	var usage struct {
-		Secondary *struct {
-			codexWindow
-			UsedPercent *float64 `json:"usedPercent"`
-		} `json:"secondary"`
+		Primary   *weeklyWindow `json:"primary"`
+		Secondary *weeklyWindow `json:"secondary"`
 	}
 	if err := json.Unmarshal(body, &usage); err != nil {
 		return nil, 0, fmt.Errorf("decode cache: %w", err)
 	}
-	if usage.Secondary == nil {
+	var window *codexWindow
+	// Slots are not durations: a weekly-only plan reports its week as primary.
+	// Prefer primary deterministically if both slots describe a seven-day window.
+	for _, candidate := range []*weeklyWindow{usage.Primary, usage.Secondary} {
+		if candidate == nil || candidate.WindowDurationMins != 7*24*60 {
+			continue
+		}
+		if candidate.UsedPercent == nil {
+			return nil, 0, fmt.Errorf("weekly window has no used percent")
+		}
+		window = &candidate.codexWindow
+		window.UsedPercent = *candidate.UsedPercent
+		if window.UsedPercent < 0 || window.UsedPercent > 100 || window.ResetsAt <= 0 {
+			return nil, 0, fmt.Errorf("invalid weekly window")
+		}
+		break
+	}
+	if window == nil {
 		return nil, 0, nil
-	}
-	if usage.Secondary.UsedPercent == nil {
-		return nil, 0, fmt.Errorf("secondary weekly window has no used percent")
-	}
-	window := &usage.Secondary.codexWindow
-	window.UsedPercent = *usage.Secondary.UsedPercent
-	if window.UsedPercent < 0 || window.UsedPercent > 100 || window.WindowDurationMins != 7*24*60 ||
-		window.ResetsAt <= 0 {
-		return nil, 0, fmt.Errorf("invalid secondary weekly window")
 	}
 	info, err := os.Stat(path)
 	if err != nil {

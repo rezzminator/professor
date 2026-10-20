@@ -9,7 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func weeklyRuntime(t *testing.T) Runtime {
@@ -48,7 +49,7 @@ func weeklyLines(t *testing.T, runtime Runtime, payload string) []string {
 	return strings.Split(strings.TrimSuffix(got, "\n"), "\n")
 }
 
-func TestClaudeCodexWeeklyMatchesQuotaWidths(t *testing.T) {
+func TestClaudeCodexWeeklyFillsAvailableWidth(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		windows string
@@ -75,8 +76,8 @@ func TestClaudeCodexWeeklyMatchesQuotaWidths(t *testing.T) {
 			if !strings.Contains(claude, "5h-used:") || !strings.Contains(codex, "codex-7d-used:63% ↻3d7h") {
 				t.Fatalf("quota row order/value/reset mismatch: %q then %q", claude, codex)
 			}
-			if got, want := utf8.RuneCountInString(codex), utf8.RuneCountInString(claude); got != want {
-				t.Fatalf("Codex width %d != Claude width %d: %q then %q", got, want, claude, codex)
+			if got := ansi.StringWidth(codex); got != test.columns {
+				t.Fatalf("Codex width %d != available width %d: %q", got, test.columns, codex)
 			}
 			cells := strings.Count(codex, "▰") + strings.Count(codex, "▱")
 			if cells <= 5 || strings.Count(codex, "▰") != 63*cells/100 {
@@ -143,7 +144,12 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 		{name: "invalid percent", body: `{"secondary":{"usedPercent":-1,"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
 		{name: "missing percent", body: `{"secondary":{"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
 		{name: "null percent", body: `{"secondary":{"usedPercent":null,"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
-		{name: "wrong window", body: `{"secondary":{"usedPercent":42,"windowDurationMins":300,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
+		{name: "short window", body: `{"secondary":{"usedPercent":42,"windowDurationMins":300,"resetsAt":1787122800}}`, want: "codex-7d: no data"},
+		{name: "primary invalid percent", body: `{"primary":{"usedPercent":101,"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
+		{name: "primary missing percent", body: `{"primary":{"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
+		{name: "primary null percent", body: `{"primary":{"usedPercent":null,"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
+		{name: "primary invalid reset", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080}}`, want: "codex-7d: error", warn: true},
+		{name: "primary stale", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800},"secondary":null}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h0m", refreshes: 1},
 		{name: "stale", body: `{"secondary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800}}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h0m", refreshes: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -171,9 +177,8 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 			if !strings.Contains(last, test.want) {
 				t.Fatalf("weekly row must expose %q, got %q", test.want, last)
 			}
-			if len(lines) != 4 ||
-				utf8.RuneCountInString(last) != utf8.RuneCountInString(styleANSI.ReplaceAllString(lines[2], "")) {
-				t.Fatalf("unavailable/stale weekly row must match Claude width: %q", lines)
+			if len(lines) != 4 || ansi.StringWidth(last) != runtime.Columns {
+				t.Fatalf("unavailable/stale weekly row must fill available width: %q", lines)
 			}
 			if refreshes != test.refreshes {
 				t.Fatalf("refreshes=%d, want %d", refreshes, test.refreshes)
@@ -186,9 +191,62 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 }
 
 func TestClaudeCodexWeeklyWithoutClaudeQuotas(t *testing.T) {
-	lines := weeklyLines(t, weeklyRuntime(t), `{}`)
+	runtime := weeklyRuntime(t)
+	lines := weeklyLines(t, runtime, `{}`)
 	if len(lines) != 3 || !strings.Contains(lines[2], "codex-7d: no data") {
 		t.Fatalf("missing Claude quotas must not hide Codex data status: %q", lines)
+	}
+	if got := ansi.StringWidth(lines[2]); got != runtime.Columns {
+		t.Fatalf("missing Claude quotas must still fill %d columns, got %d: %q", runtime.Columns, got, lines[2])
+	}
+}
+
+func TestClaudeCodexWeeklySelectsDurationAcrossWindows(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"observed primary only", `{"primary":{"resetsAt":1793089450,"usedPercent":50,"windowDurationMins":10080},"secondary":null}`, "codex-7d-used:50%"},
+		{"primary with short secondary", `{"primary":{"resetsAt":1793089450,"usedPercent":50,"windowDurationMins":10080},"secondary":{"resetsAt":1793089450,"usedPercent":99,"windowDurationMins":300}}`, "codex-7d-used:50%"},
+		{"secondary with short primary", `{"primary":{"usedPercent":99,"windowDurationMins":300},"secondary":{"resetsAt":1793089450,"usedPercent":50,"windowDurationMins":10080}}`, "codex-7d-used:50%"},
+		{"both weekly primary first", `{"primary":{"resetsAt":1793089450,"usedPercent":50,"windowDurationMins":10080},"secondary":{"resetsAt":1793089450,"usedPercent":99,"windowDurationMins":10080}}`, "codex-7d-used:50%"},
+		{"only short windows", `{"primary":{"usedPercent":50,"windowDurationMins":300},"secondary":{"usedPercent":99,"windowDurationMins":60}}`, "codex-7d: no data"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := weeklyRuntime(t)
+			weeklyCache(t, runtime, test.body, time.Minute)
+			lines := weeklyLines(t, runtime, `{}`)
+			if len(lines) != 3 || !strings.Contains(lines[2], test.want) {
+				t.Fatalf("weekly selection must expose %q without Claude quotas: %q", test.want, lines)
+			}
+			if got := ansi.StringWidth(lines[2]); got != runtime.Columns {
+				t.Fatalf("weekly row width %d != available width %d: %q", got, runtime.Columns, lines[2])
+			}
+		})
+	}
+}
+
+func TestClaudeCodexWeeklyNarrowWidths(t *testing.T) {
+	for _, body := range []string{
+		`{"primary":{"usedPercent":50,"windowDurationMins":10080,"resetsAt":1787122800}}`,
+		`{`,
+		`{}`,
+	} {
+		for _, columns := range []int{1, 8, 16, 24, 40} {
+			t.Run(fmt.Sprintf("%s/%d", body, columns), func(t *testing.T) {
+				runtime := weeklyRuntime(t)
+				runtime.Columns = columns
+				var warnings bytes.Buffer
+				runtime.Warn = &warnings
+				weeklyCache(t, runtime, body, 2*time.Hour)
+				lines := weeklyLines(t, runtime, `{}`)
+				last := lines[len(lines)-1]
+				if got := ansi.StringWidth(last); got > columns || got == 0 {
+					t.Fatalf("weekly row width %d must fit %d columns: %q", got, columns, last)
+				}
+			})
+		}
 	}
 }
 

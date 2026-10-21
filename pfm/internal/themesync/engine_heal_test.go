@@ -2,6 +2,7 @@ package themesync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -114,6 +115,70 @@ func TestReapplyNeverRecapturesThePriorOfAThemedServer(t *testing.T) {
 	}
 }
 
+func TestOffPreservesTmuxPriorsWhenReadsFail(t *testing.T) {
+	for _, option := range []string{"mode-style", "@host_accent", tmuxGenerationKey, tmuxChipsKey} {
+		t.Run(option, func(t *testing.T) {
+			h := newHarness(t)
+			h.tmux.servers["cc-a"]["@host_accent"] = "#123456"
+			h.on()
+			read := option
+			if option != tmuxGenerationKey && option != tmuxChipsKey {
+				read = tmuxPriorName(option)
+			}
+			before := h.tmux.servers["cc-a"]["mode-style"]
+			prior := h.tmux.servers["cc-a"][tmuxPriorName("mode-style")]
+			flaky := h.env
+			flaky.Tmux = flakyPriorTmux{fakeTmux: h.tmux, option: read}
+			report, err := Off(context.Background(), flaky)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantVerdict(t, report, surfaceTmux, VerdictError, read)
+			if got := h.tmux.servers["cc-a"]; got["mode-style"] != before ||
+				got[tmuxPriorName("mode-style")] != prior || got[tmuxPriorName("@host_accent")] != "v:#123456" {
+				t.Errorf("failed observation changed settings or priors: %v", got)
+			}
+			if !RestorePending(h.stateDir) {
+				t.Error("failed prior read left no restore retry obligation")
+			}
+			if _, err := Off(context.Background(), h.env); err != nil {
+				t.Fatal(err)
+			}
+			if got := h.tmux.servers["cc-a"]; got["mode-style"] != "bg=yellow,fg=black" ||
+				got["@host_accent"] != "#123456" {
+				t.Errorf("retry did not restore the original values: %v", got)
+			}
+		})
+	}
+}
+
+// A real tmux Apply can fail after a prefix, leaving saved priors and themed styles but no marker.
+func TestApplyPreservesTmuxPriorsAfterPartialApply(t *testing.T) {
+	for _, read := range []string{tmuxPriorName("mode-style"), tmuxGenerationKey, tmuxChipsKey} {
+		t.Run(read, func(t *testing.T) {
+			h := newHarness(t)
+			h.on()
+			delete(h.tmux.servers["cc-a"], tmuxGenerationKey)
+			flaky := h.env
+			flaky.Tmux = flakyPriorTmux{fakeTmux: h.tmux, option: read}
+			report, err := Sync(context.Background(), flaky, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantVerdict(t, report, surfaceTmux, VerdictError, read)
+			if got := h.tmux.servers["cc-a"][tmuxPriorName("mode-style")]; got != "v:bg=yellow,fg=black" {
+				t.Errorf("retry overwrote original prior with %q", got)
+			}
+			if _, err := Off(context.Background(), h.env); err != nil {
+				t.Fatal(err)
+			}
+			if got := h.tmux.servers["cc-a"]["mode-style"]; got != "bg=yellow,fg=black" {
+				t.Errorf("off restored themed value %q instead of user value", got)
+			}
+		})
+	}
+}
+
 func TestSyncReappliesOnlyTheDriftedSurfaceAndRewritesNoState(t *testing.T) {
 	h := newHarness(t)
 	h.on()
@@ -142,6 +207,48 @@ func TestSyncReappliesOnlyTheDriftedSurfaceAndRewritesNoState(t *testing.T) {
 	}
 	if !os.SameFile(stateBefore, stateAfter) {
 		t.Error("a sync that changed nothing rewrote state.json")
+	}
+}
+
+func TestFlipPersistsOnlyMeasuredSurfacesIncludingZero(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		t.Run(map[bool]string{false: "absent", true: "error"}[failure], func(t *testing.T) {
+			h := newHarness(t)
+			h.on()
+			if failure {
+				for socket := range h.tmux.servers {
+					h.tmux.failApply[socket] = errors.New("apply refused")
+				}
+			} else {
+				h.tmux.servers = map[string]map[string]string{}
+			}
+			h.write(settingsRel, `{"theme":"light"}`)
+			origin := time.Now().Add(time.Hour)
+			if err := os.Chtimes(h.path(settingsRel), origin, origin); err != nil {
+				t.Fatal(err)
+			}
+			previous := flipClock
+			flipClock = &scriptedClock{times: []time.Time{origin}}
+			t.Cleanup(func() { flipClock = previous })
+			h.sync(false)
+			// state() reloads JSON; marshal once more to prove presence survives a round trip.
+			encoded, err := json.Marshal(h.state().LastFlip)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := fields["tmux"]; exists {
+				t.Errorf("unmeasured tmux offset persisted: %s", encoded)
+			}
+			for _, surface := range []string{"herdr", "vscode"} {
+				if string(fields[surface]) != "0" {
+					t.Errorf("measured zero %s offset lost: %s", surface, encoded)
+				}
+			}
+		})
 	}
 }
 

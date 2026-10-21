@@ -122,6 +122,7 @@ const context = {
   subscriptions: [],
   globalState: { get: (key, def) => (key in store ? store[key] : def), update: (key, value) => { store[key] = value; } },
 };
+` + vscodeThemeLockSetupJS + `
 const api = require(extensionPath).activate(context);
 // An extension without the theme API applies nothing; the steps below then
 // report what it left, so the test fails on what it asserts, not on a crash.
@@ -149,6 +150,7 @@ const settled = async (before) => {
     if (JSON.stringify(readJSONFile('vscode-ack.json')) !== before) return;
   }
 };
+` + vscodeThemeLockResultJS + `
 if (mode === 'scenario') {
   (async () => {
     if (scenario.prevAck) fs.writeFileSync(path.join(stateDir, 'vscode-ack.json'), JSON.stringify(scenario.prevAck));

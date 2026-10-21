@@ -92,6 +92,51 @@ func TestHerdrShellUsesLoginShell(t *testing.T) {
 	t.Fatal("wrapper has no captured real shell")
 }
 
+func TestHerdrShellInspectionDetectsAndRepairsExecutableDrift(t *testing.T) {
+	for _, corrupt := range []string{"#!/bin/sh\nexit 1\n", "append", "replace"} {
+		t.Run(corrupt, func(t *testing.T) {
+			installer, config, _ := herdrShellInstaller(t, "", true)
+			if err := installer.wireHerdrShell(false); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wrapper := paths.HerdrShellWrapper(installer.options.Home)
+			raw, err := os.ReadFile(wrapper)
+			if err != nil {
+				t.Fatal(err)
+			}
+			broken := corrupt
+			switch corrupt {
+			case "append":
+				broken = string(raw) + "# stale extra content\n"
+			case "replace":
+				broken = strings.Replace(string(raw), "unset PFM_AUTO_OPEN", "#unset PFM_AUTO_OPEN", 1)
+			}
+			if err := testjail.WriteExecutable(wrapper, []byte(broken), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			status, err := InspectHerdrShell(installer.options.Home, installer.env())
+			if err != nil || !status.Owned || status.Wired {
+				t.Errorf("corrupt executable wrapper reported healthy: status=%+v error=%v", status, err)
+			}
+			if err := installer.wireHerdrShell(false); err != nil {
+				t.Fatal(err)
+			}
+			status, err = InspectHerdrShell(installer.options.Home, installer.env())
+			if err != nil || !status.Owned || !status.Wired {
+				t.Fatalf("repaired wrapper not healthy: status=%+v error=%v", status, err)
+			}
+			after, err := os.ReadFile(config)
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("health repair rewrote config: %s error=%v", after, err)
+			}
+		})
+	}
+}
+
 func TestHerdrShellRefreshesOwnedWrapper(t *testing.T) {
 	installer, config, _ := herdrShellInstaller(t, "", true)
 	if err := installer.wireHerdrShell(false); err != nil {

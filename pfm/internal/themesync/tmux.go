@@ -130,8 +130,14 @@ func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 		return fmt.Errorf("tmux %s: %w", socket, err)
 	}
 	mark, markErr := s.servers.Show(ctx, socket, tmuxGenerationKey)
+	if markErr != nil && !errors.Is(markErr, ErrTmuxOptionUnset) {
+		return fmt.Errorf("tmux %s: read %s: %w", socket, tmuxGenerationKey, markErr)
+	}
 	themed := markErr == nil && mark != ""
 	chipMark, chipMarkErr := s.servers.Show(ctx, socket, tmuxChipsKey)
+	if chipMarkErr != nil && !errors.Is(chipMarkErr, ErrTmuxOptionUnset) {
+		return fmt.Errorf("tmux %s: read %s: %w", socket, tmuxChipsKey, chipMarkErr)
+	}
 	chipped := chipMarkErr == nil && chipMark != ""
 	var commands [][]string
 	options := tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation)
@@ -152,8 +158,11 @@ func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 		if err != nil {
 			return fmt.Errorf("tmux %s: read %s: %w", socket, option.Name, err)
 		}
-		// An unset prior reads as an error once the server proved alive.
-		if prior, priorErr := s.servers.Show(ctx, socket, tmuxPriorName(option.Name)); priorErr != nil || prior == "" {
+		prior, priorErr := s.servers.Show(ctx, socket, tmuxPriorName(option.Name))
+		if priorErr != nil && !errors.Is(priorErr, ErrTmuxOptionUnset) {
+			return fmt.Errorf("tmux %s: read %s: %w", socket, tmuxPriorName(option.Name), priorErr)
+		}
+		if priorErr != nil || prior == "" {
 			commands = append(
 				commands,
 				[]string{tmuxSetOption, tmuxGlobal, tmuxPriorName(option.Name), tmuxPriorValue(current)},
@@ -291,12 +300,21 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 		return fmt.Errorf("tmux %s: %w", socket, err)
 	}
 	mark, markErr := s.servers.Show(ctx, socket, tmuxGenerationKey)
+	if markErr != nil && !errors.Is(markErr, ErrTmuxOptionUnset) {
+		return fmt.Errorf("tmux %s: read %s: %w", socket, tmuxGenerationKey, markErr)
+	}
 	themed := markErr == nil && mark != ""
 	chipMark, chipMarkErr := s.servers.Show(ctx, socket, tmuxChipsKey)
+	if chipMarkErr != nil && !errors.Is(chipMarkErr, ErrTmuxOptionUnset) {
+		return fmt.Errorf("tmux %s: read %s: %w", socket, tmuxChipsKey, chipMarkErr)
+	}
 	chipped := chipMarkErr == nil && chipMark != ""
 	var commands [][]string
 	for _, name := range tmuxStyleNames {
 		raw, err := s.servers.Show(ctx, socket, tmuxPriorName(name))
+		if err != nil && !errors.Is(err, ErrTmuxOptionUnset) {
+			return fmt.Errorf("tmux %s: read %s: %w", socket, tmuxPriorName(name), err)
+		}
 		if value, ok := tmuxPriorParse(raw); err == nil && ok {
 			commands = append(commands, []string{tmuxSetOption, tmuxGlobal, name, value})
 		} else if themed {
@@ -306,6 +324,9 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 	}
 	for _, name := range tmuxChipNames {
 		raw, err := s.servers.Show(ctx, socket, tmuxPriorName(name))
+		if err != nil && !errors.Is(err, ErrTmuxOptionUnset) {
+			return fmt.Errorf("tmux %s: read %s: %w", socket, tmuxPriorName(name), err)
+		}
 		if value, ok := tmuxPriorParse(raw); err == nil && ok {
 			commands = append(commands, []string{tmuxSetOption, tmuxGlobal, name, value})
 		} else if (err == nil && tmuxPriorIsUnset(raw)) || chipped {

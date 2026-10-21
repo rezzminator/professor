@@ -16,13 +16,16 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
-// The main line's effort reads auto-effort-control's state file for the session when
-// one exists: its mode and level, ERR in red for a file that cannot be read or
-// says nothing valid, and the shared bar form when there is none.
+// The payload reports applied effort; the plugin's state reports automation and
+// requested effort, never proof that the provider applied it. Thinking is separate.
+// ERR and STALE preserve both unknown effort and visible state diagnostics.
 func TestModelSegmentCarriesEffort(t *testing.T) {
 	withSession := strings.Replace(styledPayload, `"session_name"`, `"session_id":"sess-1","session_name"`, 1)
 	withoutEffort := strings.Replace(withSession, `"effort":{"level":"high"},`, "", 1)
 	thinkingOff := strings.Replace(withSession, `"enabled":true`, `"enabled":false`, 1)
+	atLevel := func(level string) string {
+		return strings.Replace(withSession, `"effort":{"level":"high"}`, `"effort":{"level":"`+level+`"}`, 1)
+	}
 	byTranscript := strings.Replace(
 		styledPayload,
 		`"session_name"`,
@@ -52,15 +55,18 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		barColour                                 string
 		directory, fifo, wantWarn, unreadableArgs bool
 	}{
-		{name: "auto at medium", payload: withSession, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰ medium AUTO │ ", colour: cEffort, barColour: cGood},
-		{name: "auto at low", payload: withSession, file: sess1, content: state("auto", `"low"`), want: "◆ Opus 4·▰ low AUTO │ ", colour: cEffort, barColour: cWindow},
+		{name: "auto at medium", payload: atLevel("medium"), file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰ medium AUTO │ ", colour: cEffort, barColour: cGood},
+		{name: "auto at low", payload: atLevel("low"), file: sess1, content: state("auto", `"low"`), want: "◆ Opus 4·▰ low AUTO │ ", colour: cEffort, barColour: cWindow},
 		{name: "auto before the first request shows the session's level", payload: withSession, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·▰▰▰ high AUTO │ ", colour: cEffort, barColour: cWarn},
-		{name: "auto before the first request with no session level", payload: withoutEffort, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·effort AUTO │ ", colour: cEffort},
+		{name: "auto before the first request with no session level", payload: withoutEffort, file: sess1, content: state("auto", "null"), want: "◆ Opus 4·effort unknown AUTO │ ", colour: cEffort},
 		{name: "the main chat's own level", payload: withSession, file: sess1, content: state("model", `"high"`), want: "◆ Opus 4·▰▰▰ high · model's pick │ ", colour: cEffort, barColour: cWarn},
-		{name: "the main chat at max", payload: withSession, file: sess1, content: state("model", `"max"`), want: "◆ Opus 4·▰▰▰▰▰ max · model's pick │ ", colour: cEffort, barColour: cBad},
-		{name: "the user's pin", payload: withSession, file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·▰▰▰▰ xhigh · your /effort │ ", colour: cEffort, barColour: cElapsed},
-		{name: "off at the payload level", payload: withSession, file: sess1, content: state("off", "null"), want: "◆ Opus 4·effort off │ ", colour: cEffort},
-		{name: "off without a payload level", payload: withoutEffort, file: sess1, content: state("off", "null"), want: "◆ Opus 4·effort off │ ", colour: cEffort},
+		{name: "the main chat at max", payload: atLevel("max"), file: sess1, content: state("model", `"max"`), want: "◆ Opus 4·▰▰▰▰▰ max · model's pick │ ", colour: cEffort, barColour: cBad},
+		{name: "the user's pin", payload: atLevel("xhigh"), file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·▰▰▰▰ xhigh · your /effort │ ", colour: cEffort, barColour: cElapsed},
+		{name: "off at the payload level", payload: withSession, file: sess1, content: state("off", "null"), want: "◆ Opus 4·▰▰▰ high · AUTO inactive │ ", colour: cEffort, barColour: cWarn},
+		{name: "off without a payload level", payload: withoutEffort, file: sess1, content: state("off", "null"), want: "◆ Opus 4·effort unknown · AUTO inactive │ ", colour: cEffort},
+		{name: "auto request differs from applied effort", payload: withSession, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰▰ high AUTO · requested medium │ ", colour: cEffort, barColour: cWarn},
+		{name: "pin request differs from applied effort", payload: withSession, file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·▰▰▰ high · your /effort · requested xhigh │ ", colour: cEffort, barColour: cWarn},
+		{name: "model request is not proof without payload", payload: withoutEffort, file: sess1, content: state("model", `"high"`), want: "◆ Opus 4·effort unknown · model's pick · requested high │ ", colour: cEffort},
 		{name: "session from the transcript name", payload: byTranscript, file: ".local/state/auto-effort-control/state.sess-2.json", content: state("auto", `"high"`), want: "◆ Opus 4·▰▰▰ high AUTO │ ", colour: cEffort, barColour: cWarn},
 		{name: "unreadable", payload: withSession, file: sess1, directory: true, want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "a pipe, never waited on", payload: withSession, file: sess1, fifo: true, want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
@@ -74,7 +80,7 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		{name: "keeper negative", payload: withSession, file: sess1, content: line("auto", `"medium"`, "-3"), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "keeper null", payload: withSession, file: sess1, content: line("auto", `"medium"`, "null"), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "no keeper vouches", payload: withSession, file: sess1, content: line("model", `"high"`, "0"), want: "◆ Opus 4·▰▰▰ high · STALE │ ", colour: cMuted},
-		{name: "stale without a payload level", payload: withoutEffort, file: sess1, content: line("auto", `"medium"`, "0"), want: "◆ Opus 4·effort STALE │ ", colour: cMuted},
+		{name: "stale without a payload level", payload: withoutEffort, file: sess1, content: line("auto", `"medium"`, "0"), want: "◆ Opus 4·effort unknown · STALE │ ", colour: cMuted},
 		{name: "the keeper is gone", payload: withSession, file: sess1, content: line("pin", `"xhigh"`, dead), want: "◆ Opus 4·▰▰▰ high · STALE │ ", colour: cMuted},
 		{name: "the pid is no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), want: "◆ Opus 4·▰▰▰ high · STALE │ ", colour: cMuted},
 		{name: "the keeper's argv unreadable", payload: withSession, file: sess1, content: line("auto", `"medium"`, self), unreadableArgs: true, want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
@@ -82,11 +88,15 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		{name: "level not in the five", payload: withSession, file: sess1, content: state("auto", `"ultra"`), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "the main chat's level missing", payload: withSession, file: sess1, content: state("model", "null"), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "the pin's level missing", payload: withSession, file: sess1, content: state("pin", "null"), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
-		{name: "error without a payload level", payload: withoutEffort, file: sess1, content: "{", want: "◆ Opus 4·effort ERR │ ", colour: cBad, wantWarn: true},
+		{name: "error without a payload level", payload: withoutEffort, file: sess1, content: "{", want: "◆ Opus 4·effort unknown · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "no state file", payload: withSession, want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
 		{name: "no session to name a file", payload: styledPayload, file: ".local/state/auto-effort-control/state.json", content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
-		{name: "thinking off", payload: thinkingOff, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·effort off │ ", colour: cMuted},
-		{name: "without effort", payload: withoutEffort, want: "◆ Opus 4 │ "},
+		{name: "thinking off keeps effort and reads automation", payload: thinkingOff, file: sess1, content: state("auto", `"high"`), want: "◆ Opus 4·▰▰▰ high AUTO │ ", colour: cEffort, barColour: cWarn},
+		{name: "thinking absent keeps effort", payload: strings.Replace(withSession, `"thinking":{"enabled":true},`, "", 1), want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
+		{name: "thinking off still reports state errors", payload: thinkingOff, file: sess1, content: "{", want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "without effort", payload: withoutEffort, want: "◆ Opus 4·effort unknown │ ", colour: cEffort},
+		{name: "gpt without thinking keeps reported effort", payload: strings.Replace(strings.Replace(withSession, "Opus 4", "gpt-6-Astra", 1), `"thinking":{"enabled":true},`, "", 1), file: sess1, content: state("off", "null"), want: "·▰▰▰ high · AUTO inactive │ ", colour: cEffort, barColour: cWarn},
+		{name: "gpt effort unproved remains unknown", payload: strings.Replace(strings.Replace(withoutEffort, "Opus 4", "gpt-6-Astra", 1), `"enabled":true`, `"enabled":false`, 1), file: sess1, content: state("off", "null"), want: "·effort unknown · AUTO inactive │ ", colour: cEffort},
 		{name: "auto escalation", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"high"`), "a lookup over logs", "3 failing test runs", 1), want: "◆ Opus 4·▰▰▰ high AUTO · raised: 3 failing tests │ ", colour: cEffort, barColour: cWarn},
 		{name: "model reason is not escalation", payload: withSession, file: sess1, content: strings.Replace(state("model", `"high"`), "a lookup over logs", "3 failing test runs", 1), want: "◆ Opus 4·▰▰▰ high · model's pick │ ", colour: cEffort, barColour: cWarn},
 		{name: "malformed reason remains automatic", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"high"`), "a lookup over logs", "0 failing test runs", 1), want: "◆ Opus 4·▰▰▰ high AUTO │ ", colour: cEffort, barColour: cWarn},

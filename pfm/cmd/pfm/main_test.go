@@ -116,7 +116,7 @@ func TestSettledRootInterface(t *testing.T) {
 	help := stdout.String()
 	for _, want := range []string{
 		"operator commands:", "  chat", "  install", "  update", "  init", "wiring commands:",
-		"  statusline", "  usage-hook",
+		"  statusline", "  usage-hook", "tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree DIR)",
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("root help missing %q:\n%s", want, help)

@@ -64,7 +64,8 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 		if lookupErr != nil {
 			return Target{}, false, fmt.Errorf("resolve moved native kill owner: %w", lookupErr)
 		}
-		if ok && candidate.Backend == herdrBackend && candidate.HerdrSocket == request.SocketName {
+		if ok && candidate.Backend == herdrBackend && candidate.State == "live" &&
+			candidate.HerdrSocket == request.SocketName {
 			values, err := paths.Resolve()
 			if err != nil {
 				return Target{}, false, fmt.Errorf("resolve moved native kill paths: %w", err)
@@ -74,9 +75,15 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 				return Target{}, false, fmt.Errorf("prove moved native kill owner: %w", err)
 			}
 			if !owned {
-				return Target{}, false, fmt.Errorf("native kill explicit pane has no live proved owner")
+				dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), candidate)
+				if err != nil {
+					return Target{}, false, fmt.Errorf("prove native ghost host: %w", err)
+				}
+				if !dead {
+					return Target{}, false, fmt.Errorf("native kill explicit pane has no live proved owner")
+				}
 			}
-			if proved.HerdrPane != request.PaneID {
+			if owned && proved.HerdrPane != request.PaneID {
 				body, err := herdr.SeatRequest(
 					ctx,
 					proved.HerdrSocket,
@@ -136,7 +143,7 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 			request.Engine,
 		)
 	}
-	proved, _, err := (herdrKiller{database: manager.database, seat: seat}).prove(ctx)
+	proved, owned, err := (herdrKiller{database: manager.database, seat: seat}).prove(ctx)
 	if err != nil {
 		return Target{}, false, fmt.Errorf("resolve native kill ownership: %w", err)
 	}
@@ -144,6 +151,22 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 	id := seat.SessionID
 	if id == "" {
 		id = seat.SeatID
+	}
+	if !owned {
+		values, err := paths.Resolve()
+		if err != nil {
+			return Target{}, false, fmt.Errorf("resolve native ghost paths: %w", err)
+		}
+		dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), seat)
+		if err != nil {
+			return Target{}, false, fmt.Errorf("prove native ghost host: %w", err)
+		}
+		if !dead {
+			return Target{}, false, fmt.Errorf("native kill has no live proved owner")
+		}
+		// A positively dead saved supervisor authorizes hiding this identity,
+		// never mutating its stale address (which may now name another pane).
+		return Target{Engine: engine, ID: id}, true, nil
 	}
 	return Target{
 		Engine:     engine,

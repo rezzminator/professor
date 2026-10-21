@@ -19,7 +19,7 @@ import (
 
 // modelSegment is the main line's model block: the model's symbol and name,
 // then the effort joined by a muted "·" — the same shape the sub-agent rows
-// give their model (subagentModel). No effort renders the model alone.
+// give their model (subagentModel). Missing effort remains explicitly unknown.
 func modelSegment(data input, state autoEffortState) string {
 	return cModel + modelglyph.Symbol(
 		data.Model.DisplayName,
@@ -31,36 +31,32 @@ func modelSegment(data input, state autoEffortState) string {
 // effortSuffix keeps every source and failure visible beside the shared effort bar.
 func effortSuffix(data input, state autoEffortState) string {
 	joint := cMuted + "·" + reset
-	if !data.Thinking.Enabled {
-		if data.Effort.Level == "" {
-			return ""
-		}
-		return joint + cMuted + "effort off" + reset
+	// The harness reports applied effort independently of thinking.enabled.
+	// The controller's mode is automation policy, and its level is a request:
+	// neither proves that reasoning is off or that the request was applied.
+	plain := modelglyph.EffortLabel(data.Effort.Level)
+	if plain == "" {
+		plain = "effort unknown"
+	}
+	label := paintedEffort(data.Effort.Level, cEffort)
+	if label == "" {
+		label = cEffort + plain
+	}
+	requested := ""
+	if state.level != "" && state.level != data.Effort.Level {
+		requested = " · requested " + state.level
 	}
 	switch {
 	case state.err != nil:
-		return joint + cBad + modeLabel("ERR", modelglyph.EffortLabel(data.Effort.Level)) + reset
+		return joint + cBad + modeLabel("ERR", plain) + reset
 	case state.stale:
-		return joint + cMuted + modeLabel("STALE", modelglyph.EffortLabel(data.Effort.Level)) + reset
-	case !state.found && data.Effort.Level == "":
-		return ""
+		return joint + cMuted + modeLabel("STALE", plain) + reset
 	case !state.found:
-		return joint + paintedEffort(data.Effort.Level, cEffort) + reset
+		return joint + label + reset
 	case state.mode == "off":
-		return joint + cEffort + "effort off" + reset
+		return joint + modeLabel(autoEffortModes[state.mode], label) + reset
 	case state.mode == "auto":
-		// Before auto-effort-control's first request (a fresh session or a
-		// /reload-plugins) its state holds no level: the level Claude Code
-		// reports for the session is the one in effect, so it shows instead.
-		level := state.level
-		if level == "" {
-			level = data.Effort.Level
-		}
-		label := paintedEffort(level, cEffort)
-		if label == "" {
-			label = cEffort + "effort"
-		}
-		label += " AUTO"
+		label += " AUTO" + requested
 		// Only the producer's exact escalation reason names failing tests.
 		if count, ok := strings.CutSuffix(state.reason, " failing test runs"); ok {
 			if failures, err := strconv.Atoi(count); err == nil && failures > 0 && strconv.Itoa(failures) == count {
@@ -69,8 +65,7 @@ func effortSuffix(data input, state autoEffortState) string {
 		}
 		return joint + label + reset
 	default:
-		// model and pin always carry a level (parseAutoEffortState refuses them without one).
-		return joint + modeLabel(autoEffortModes[state.mode], paintedEffort(state.level, cEffort)) + reset
+		return joint + modeLabel(autoEffortModes[state.mode], label) + requested + reset
 	}
 }
 
@@ -109,7 +104,7 @@ var autoEffortModes = map[string]string{
 	"auto":  "AUTO",
 	"model": "model's pick",
 	"pin":   "your /effort",
-	"off":   "effort off",
+	"off":   "AUTO inactive",
 }
 
 // autoEffortStateVersion is the state file's `version` this reader knows.
@@ -132,9 +127,6 @@ type autoEffortState struct {
 // No session id names no file: the absent state. Every failure goes to warn,
 // one line naming the path and the cause.
 func sessionAutoEffort(runtime Runtime, data input) autoEffortState {
-	if !data.Thinking.Enabled {
-		return autoEffortState{}
-	}
 	sessionID := sessionIDOf(data.SessionID, data.TranscriptPath)
 	if sessionID == "" {
 		return autoEffortState{}

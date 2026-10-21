@@ -4,11 +4,13 @@
 // and the frame go into Global settings; Workspace chrome overrides old workspace/Peacock colours,
 // including folder-only and remote windows.
 // Owned keys (also inside existing [Theme] blocks) retain their prior values for theme off.
-// Windows serialize records and acknowledgements under vscode-apply.lock.
+// Windows serialize settings and records under vscode-apply.lock, acknowledgements under
+// vscode-ack.lock (also when applying failed). Locks are never evicted by age.
 const vscode = require('vscode');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { randomUUID } = require('crypto');
 
 const CONTRACT = 'current.json';
 const ACK = 'vscode-ack.json';
@@ -16,8 +18,8 @@ const RECORD = 'vscode-applied.json';
 const CHROME_RECORD = 'vscode-chrome.json';
 const PEACOCK = 'johnpapa.vscode-peacock';
 const LOCK = 'vscode-apply.lock';
+const ACK_LOCK = 'vscode-ack.lock';
 const POLL_MS = 2000;
-const LOCK_STALE_MS = 30000;
 const LOCK_WAIT_MS = 100;
 const LOCK_TRIES = 100;
 
@@ -112,27 +114,33 @@ function sameColors(a, b) {
   return keys.length === Object.keys(b).length && keys.every((key) => JSON.stringify(b[key]) === JSON.stringify(a[key]));
 }
 
-async function withLock(dir, work) {
-  const lock = path.join(dir, LOCK);
+// A slow or suspended extension host still owns its lock. A dead host's lock must be removed
+// manually after closing all extension hosts; age cannot distinguish these cases safely.
+async function withLock(dir, work, name = LOCK) {
+  const lock = path.join(dir, name);
   for (let attempt = 0; ; attempt++) {
     try {
       fs.mkdirSync(lock);
       break;
     } catch (err) {
       if (err.code !== 'EEXIST') throw new Error(`lock ${lock}: ${err.message}`);
-      const age = Date.now() - fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs;
-      if (age > LOCK_STALE_MS) {
-        fs.rmSync(lock, { recursive: true, force: true });
-        continue;
-      }
-      if (attempt >= LOCK_TRIES) throw new Error(`lock ${lock} held by another window for ${Math.round(age)} ms`);
+      if (attempt >= LOCK_TRIES) throw new Error(`lock ${lock} held by another window; left intact`);
       await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_MS));
     }
   }
+  const identity = fs.statSync(lock);
+  const owner = randomUUID();
+  const ownerPath = path.join(lock, 'owner');
+  fs.writeFileSync(ownerPath, owner, { flag: 'wx' });
   try {
     return await work();
   } finally {
-    fs.rmSync(lock, { recursive: true, force: true });
+    const current = fs.statSync(lock, { throwIfNoEntry: false });
+    if (!current || current.dev !== identity.dev || current.ino !== identity.ino ||
+        fs.readFileSync(ownerPath, 'utf8') !== owner) {
+      throw new Error(`lock ${lock} ownership changed; replacement left intact`);
+    }
+    fs.rmSync(lock, { recursive: true });
   }
 }
 
@@ -150,12 +158,14 @@ function previousChrome(dir) {
   }
 }
 
-// writeAck writes the ack with the chrome map of the ack on disk, this window's entry (when it has
-// one) replacing its own.
-function writeAck(dir, ack, target, entry) {
-  const chrome = previousChrome(dir);
-  if (target) chrome[target] = entry;
-  writeJSONAtomic(path.join(dir, ACK), { ...ack, appliedAt: new Date().toISOString(), chrome });
+// Every acknowledgement, including an apply-lock failure, merges under the same short-lived
+// mutex. Taking it never needs the apply lock, so failure reporting cannot bypass serialization.
+async function writeAck(dir, ack, target, entry) {
+  await withLock(dir, () => {
+    const chrome = previousChrome(dir);
+    if (target) chrome[target] = entry;
+    writeJSONAtomic(path.join(dir, ACK), { ...ack, appliedAt: new Date().toISOString(), chrome });
+  }, ACK_LOCK);
 }
 
 // applyGlobal brings Global terminal and frame colours to the contract, under
@@ -231,7 +241,7 @@ async function applyChrome(dir, target, contract, generation, wantChrome, wantTe
 
 // applyContract reads the contract and brings the user's settings to it; every outcome but an
 // absent contract ends in an ack, a failure carried in its `error`, never dropped. The ack is
-// written inside the lock, so two windows never drop each other's chrome entry. It returns the
+// merged inside its own mutex, so two windows never drop each other's chrome entry. It returns the
 // contract it read, or undefined when there was none to read.
 async function applyContract(dir) {
   const contractPath = path.join(dir, CONTRACT);
@@ -246,12 +256,7 @@ async function applyContract(dir) {
   } catch (err) {
     if (err.code === 'ENOENT') return;
     const broken = { generation: null, appliedAt: '', keys: [], error: `read ${contractPath}: ${err.message}` };
-    try {
-      await withLock(dir, () => writeAck(dir, broken, null, null));
-    } catch (lockErr) {
-      console.error(`Professor: pfm theme ack of the unreadable ${contractPath} written without the lock: ${lockErr?.stack ?? lockErr}`);
-      writeAck(dir, broken, null, null);
-    }
+    await writeAck(dir, broken, null, null);
     return;
   }
   const want = contract.enabled ? hexColors(contract.colors, TERMINAL_KEY) : {};
@@ -280,14 +285,13 @@ async function applyContract(dir) {
         const unlisted = peacockUnlisted(wantChrome);
         if (unlisted.length) chromeEntry.error = `Peacock repaints ${unlisted.length} frame keys: list them in peacock.excludedSettings`;
       }
-      writeAck(dir, ack, target || 'global', target ? entry : chromeEntry);
+      await writeAck(dir, ack, target || 'global', target ? entry : chromeEntry);
     });
   } catch (err) {
-    // The lock could not be taken (or the ack could not be written under it): still ack, with the
-    // other windows' entries as the ack on disk last held them.
+    // Applying failed: publish the failure through the same acknowledgement mutex as success.
     ack.error = `apply generation ${generation} to workbench.colorCustomizations: ${err?.message ?? err}`;
     if (target) entry = { generation, keys: Object.keys(wantChrome).sort(), error: ack.error };
-    writeAck(dir, ack, target || 'global', target ? entry : { ...chromeEntry, error: ack.error });
+    await writeAck(dir, ack, target || 'global', target ? entry : { ...chromeEntry, error: ack.error });
   }
   return contract;
 }

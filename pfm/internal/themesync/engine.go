@@ -277,9 +277,15 @@ func (s *session) recordFlip() {
 	if s.origin == nil || len(s.offsets) == 0 {
 		return
 	}
+	measured := func(surface string) *float64 {
+		if offset, ok := s.offsets[surface]; ok {
+			return &offset
+		}
+		return nil
+	}
 	s.state.LastFlip = &Flip{
 		At: s.origin.at.UTC().Format(time.RFC3339Nano), Source: s.origin.path,
-		Tmux: s.offsets[surfaceTmux], Herdr: s.offsets[surfaceHerdr], VSCode: s.offsets[surfaceVscode],
+		Tmux: measured(surfaceTmux), Herdr: measured(surfaceHerdr), VSCode: measured(surfaceVscode),
 	}
 }
 

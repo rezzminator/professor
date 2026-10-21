@@ -27,9 +27,31 @@ type rawChat struct {
 
 // ChatSummary renders the resolved chat settings and their configuration sources.
 func (config Config) ChatSummary() string {
-	return fmt.Sprintf("config chat.backend=%s (%s)\nconfig chat.herdrTabPriority=%t (%s)\n",
-		config.Chat.Backend, config.Source("chat.backend"),
-		config.Chat.HerdrTabPriority, config.Source("chat.herdrTabPriority"))
+	return fmt.Sprintf(
+		"config chat.backend=%s (%s)\nconfig chat.herdrTabStatus=%s (%s)\nconfig chat.herdrTabPriority=%t (%s)\n",
+		config.Chat.Backend,
+		config.Source("chat.backend"),
+		config.Chat.HerdrTabStatus,
+		config.Source("chat.herdrTabStatus"),
+		config.Chat.HerdrTabPriority,
+		config.Source("chat.herdrTabPriority"),
+	)
+}
+
+// marshalChat preserves explicit selections without making an untouched default
+// file incompatible with older strict readers that have no chat section.
+func marshalChat(config Config) map[string]any {
+	value := make(map[string]any)
+	if config.Chat.Backend != DefaultChatBackend || config.Source("chat.backend") == SourceFile {
+		value["backend"] = config.Chat.Backend
+	}
+	if config.Chat.HerdrTabStatus != DefaultHerdrTabStatus || config.Source("chat.herdrTabStatus") == SourceFile {
+		value["herdrTabStatus"] = config.Chat.HerdrTabStatus
+	}
+	if config.Chat.HerdrTabPriority || config.Source("chat.herdrTabPriority") == SourceFile {
+		value["herdrTabPriority"] = config.Chat.HerdrTabPriority
+	}
+	return value
 }
 
 // applyChatAndAsk decodes the chat birth and one-shot engine preferences.

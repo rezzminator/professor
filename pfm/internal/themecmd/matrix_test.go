@@ -67,14 +67,14 @@ func TestStatusJSONWithTheSyncOff(t *testing.T) {
 }
 
 func TestStatusEndsOnTheMeasuredLastFlip(t *testing.T) {
-	ack := 1.5
+	tmux, herdr, vscode, ack := 0.25, 0.5, 0.75, 1.5
 	report := matrix(themesync.VerdictSource, themesync.VerdictInSync)
 	report.LastFlip = &themesync.Flip{
 		At:     "2026-10-16T03:00:00.250Z",
 		Source: "/h/.claude/settings.json",
-		Tmux:   0.25,
-		Herdr:  0.5,
-		VSCode: 0.75,
+		Tmux:   &tmux,
+		Herdr:  &herdr,
+		VSCode: &vscode,
 		Ack:    &ack,
 	}
 	fake := fakeThemesync{on: true, report: report}
@@ -91,6 +91,23 @@ func TestStatusEndsOnTheMeasuredLastFlip(t *testing.T) {
 	RunVerb(context.Background(), []string{"status"}, fake.deps(false), &stdout, &stderr)
 	if strings.Contains(stdout.String(), "ack") {
 		t.Errorf("a flip without an ack names one:\n%s", stdout.String())
+	}
+}
+
+func TestFlipLineDistinguishesUnmeasuredFromZero(t *testing.T) {
+	for _, raw := range []string{
+		`{"at":"2026-10-16T03:00:00Z","source":"settings.json","herdr":0,"vscode":0.25}`,
+		`{"at":"2026-10-16T03:00:00Z","source":"settings.json","tmux":null,"herdr":0,"vscode":0.25}`,
+	} {
+		var flip themesync.Flip
+		if err := json.Unmarshal([]byte(raw), &flip); err != nil {
+			t.Fatal(err)
+		}
+		got := flipLine(flip)
+		want := "tmux unmeasured · herdr +0.00 s · vscode contract +0.25 s"
+		if !strings.Contains(got, want) {
+			t.Errorf("flipLine = %q, want %q", got, want)
+		}
 	}
 }
 

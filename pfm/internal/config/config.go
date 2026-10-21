@@ -1436,10 +1436,6 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		keyTheme:   config.Theme,
 		"state":    map[string]any{"db": config.State.DB, "cacheDb": config.State.CacheDB},
 		"accounts": accounts,
-		"chat": map[string]any{
-			"backend": config.Chat.Backend, "herdrTabStatus": config.Chat.HerdrTabStatus,
-			"herdrTabPriority": config.Chat.HerdrTabPriority,
-		},
 		claudeName: marshalClaude(config),
 		codexName:  codexValue,
 		"tmux": map[string]any{
@@ -1455,6 +1451,9 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	}
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
+	}
+	if chat := marshalChat(config); len(chat) != 0 {
+		value["chat"] = chat
 	}
 	if doctor := marshalDoctor(config); len(doctor) != 0 {
 		value["doctor"] = doctor

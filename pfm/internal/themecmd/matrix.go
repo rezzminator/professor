@@ -101,9 +101,15 @@ func flipLine(flip themesync.Flip) string {
 	if parsed, err := time.Parse(time.RFC3339Nano, flip.At); err == nil {
 		at = parsed.UTC().Format(time.RFC3339)
 	}
+	measured := func(name string, offset *float64) string {
+		if offset == nil {
+			return name + " unmeasured"
+		}
+		return fmt.Sprintf("%s +%.2f s", name, *offset)
+	}
 	parts := []string{
-		fmt.Sprintf("tmux +%.2f s", flip.Tmux), fmt.Sprintf("herdr +%.2f s", flip.Herdr),
-		fmt.Sprintf("vscode contract +%.2f s", flip.VSCode),
+		measured("tmux", flip.Tmux), measured("herdr", flip.Herdr),
+		measured("vscode contract", flip.VSCode),
 	}
 	line := fmt.Sprintf("last flip %s %s: %s", at, flip.Source, strings.Join(parts, " · "))
 	if flip.Ack != nil {

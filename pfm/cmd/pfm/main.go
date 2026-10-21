@@ -238,7 +238,7 @@ func printUsage(w io.Writer) {
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
 		"  model-cost the model price table, refreshed daily: MODEL_ID --all --check --json --force",
-		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --flight DIR)",
+		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree DIR)",
 		"  theme     Claude Code's theme rendered into tmux, Herdr and VS Code: status, sync, on, off",
 		"  transcript digest one Claude, Codex or OpenCode transcript: show, locate, agents",
 		"  version   print the pfm version", "", "wiring commands:",

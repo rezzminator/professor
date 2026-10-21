@@ -435,6 +435,9 @@
     "global/agents/gpt-documenter.md": {
       "curated": true
     },
+    "global/agents/gpt-pcm.md": {
+      "curated": true
+    },
     "global/agents/gpt-flights-hunter.md": {
       "curated": true
     },

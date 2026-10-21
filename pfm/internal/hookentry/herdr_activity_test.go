@@ -17,6 +17,48 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+// Historical native=false targets are not proof of a tmux transport.
+func TestHerdrNativeReplayRetirement(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(strconv.FormatBool(native), func(t *testing.T) {
+			server := newFakeHerdr(t)
+			jail := newHerdrJail(t)
+			now := int64(time.Hour * 2)
+			deps := jail.deps(herdrPaneEnv(server, "w1:p1"), &now)
+			reporter := &herdrReporter{deps: deps}
+			state := herdrActivity{
+				Stored: herdrStored{
+					Engine:        "claude",
+					SessionID:     "s1",
+					State:         "working",
+					Agents:        map[string]bool{"a": true},
+					MainStoppedAt: 1,
+				},
+				Targets: []herdrActivityTarget{{Pane: "w1:p1", Socket: server.path, Seq: 10, Native: native}},
+			}
+			if err := os.MkdirAll(jail.lockDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := reporter.writeActivity("s1", state); err != nil {
+				t.Fatal(err)
+			}
+			done, err := reporter.expireAgents("s1")
+			if err != nil || !done {
+				t.Fatalf("retire: done=%v err=%v", done, err)
+			}
+			for _, line := range server.requests() {
+				if strings.Contains(line, `"method":"pane.report_agent"`) {
+					t.Fatalf("native watchdog reasserted state: %s", line)
+				}
+			}
+			got, err := reporter.readActivity("s1")
+			if err != nil || len(got.Targets) != 0 {
+				t.Fatalf("baseline worker can still replay targets: %+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestHerdrBackgroundAgents(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -104,7 +146,19 @@ func activityTestEvent(t *testing.T, jail *herdrJail, server *fakeHerdr, now *in
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := runHerdrIn(t, jail, herdrPaneEnv(server, "w1:p1"), nil, now, []string{event}, string(data))
+	if jail.activityTmux == nil {
+		jail.activityTmux = newFakeTmux("cc-1")
+		jail.activityTmux.clients = []string{"4242"}
+		jail.activityTmux.stored = mustJSON(
+			herdrStored{
+				Engine:    "claude",
+				SessionID: "activity-session",
+				Clients:   map[string]herdrClient{"4242": {Pane: "w1:p1", Socket: server.path, Terminal: "term_1"}},
+			},
+		)
+		server.addPane("w1:p1", "term_1", 4242)
+	}
+	got := runHerdrIn(t, jail, activityEnv(server), jail.activityTmux, now, []string{event}, string(data))
 	if got.rc != 0 || got.stderr != "" {
 		t.Errorf("%s: rc=%d stderr=%s", step, got.rc, got.stderr)
 	}
@@ -151,10 +205,10 @@ func TestHerdrLostAgentStopExpiresWithoutAnotherHook(t *testing.T) {
 	code := routeHerdrState(
 		append(
 			[]string{"agents-watch"},
-			activityWatchArgs(t, jail.deps(herdrPaneEnv(server, "w1:p1"), &now), "activity-session")...),
+			activityWatchArgs(t, jail.deps(activityEnv(server), &now), "activity-session")...),
 		strings.NewReader(""),
 		&stderr,
-		jail.deps(herdrPaneEnv(server, "w1:p1"), &now),
+		jail.deps(activityEnv(server), &now),
 	)
 	if code != 0 || stderr.Len() != 0 {
 		t.Errorf("watch rc=%d stderr=%s", code, &stderr)
@@ -225,7 +279,7 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 		if rc != 0 || stderr.Len() != 0 {
 			t.Fatalf("%s: rc=%d stderr=%s", test.event, rc, &stderr)
 		}
-		assertActivityReport(t, server, test.want, test.message)
+		assertActivityReport(t, server, "", "")
 	}
 	now = now.Add(time.Hour + time.Second)
 	var stderr bytes.Buffer
@@ -237,7 +291,7 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 		stderr.Len() != 0 {
 		t.Fatalf("watch rc=%d stderr=%s", rc, &stderr)
 	}
-	assertActivityReport(t, server, "idle", "")
+	assertActivityReport(t, server, "", "")
 }
 
 func TestHerdrBackgroundAgentsThroughTmux(t *testing.T) {
@@ -260,9 +314,9 @@ func TestHerdrAgentWatchDoesNotIdleANewPrompt(t *testing.T) {
 	now += int64(time.Hour + time.Second)
 	var stderr bytes.Buffer
 	if rc := watchHerdrAgents(
-		activityWatchArgs(t, jail.deps(herdrPaneEnv(server, "w1:p1"), &now), "activity-session"),
+		activityWatchArgs(t, jail.deps(activityEnv(server), &now), "activity-session"),
 		&stderr,
-		jail.deps(herdrPaneEnv(server, "w1:p1"), &now),
+		jail.deps(activityEnv(server), &now),
 	); rc != 0 ||
 		stderr.Len() != 0 {
 		t.Fatalf("watch rc=%d stderr=%s", rc, &stderr)
@@ -290,7 +344,7 @@ func TestHerdrAgentLeaseIsNotExtendedByIdleOrAgentEvents(t *testing.T) {
 	for _, event := range []string{"prompt", "agent-start:a", "idle"} {
 		activityTestEvent(t, jail, server, &now, event)
 	}
-	reporter := &herdrReporter{deps: jail.deps(herdrPaneEnv(server, "w1:p1"), &now)}
+	reporter := &herdrReporter{deps: jail.deps(activityEnv(server), &now)}
 	before, err := reporter.readActivity("activity-session")
 	if err != nil {
 		t.Fatal(err)
@@ -326,12 +380,12 @@ func TestHerdrAgentWatchNeverIdlesAReplacementOwner(t *testing.T) {
 		activityTestEvent(t, jail, server, &now, event)
 	}
 	reporter := &herdrReporter{
-		deps:    jail.deps(herdrPaneEnv(server, "w1:p1"), &now),
+		deps:    jail.deps(activityEnv(server), &now),
 		session: "replacement",
 		seq:     uint64(now + 1),
 	}
 	if err := reporter.reservePane(
-		herdrTarget{socket: server.path, pane: "w1:p1", client: "different-client"},
+		herdrTarget{socket: server.path, pane: "w1:p1", terminal: "term_1", client: "different-client"},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -425,12 +479,12 @@ func TestHerdrActivityEndRemovesRecord(t *testing.T) {
 			jail := newHerdrJail(t)
 			now := int64(time.Second)
 			activityTestEvent(t, jail, server, &now, "prompt")
-			got := runHerdrIn(t, jail, herdrPaneEnv(server, "w1:p1"), nil, &now, []string{"end"},
+			got := runHerdrIn(t, jail, activityEnv(server), jail.activityTmux, &now, []string{"end"},
 				fmt.Sprintf(`{"session_id":"activity-session","reason":%q}`, reason))
 			if got.rc != 0 || got.stderr != "" {
 				t.Fatalf("end: %+v", got)
 			}
-			reporter := &herdrReporter{deps: jail.deps(herdrPaneEnv(server, "w1:p1"), &now)}
+			reporter := &herdrReporter{deps: jail.deps(activityEnv(server), &now)}
 			if _, err := os.Stat(reporter.activityPath("activity-session")); !os.IsNotExist(err) {
 				t.Fatalf("ended record retained: %v", err)
 			}
@@ -445,7 +499,7 @@ func TestHerdrAgentWatchRetriesAReadFailure(t *testing.T) {
 	for _, step := range []string{"prompt", "agent-start:a", "idle"} {
 		activityTestEvent(t, jail, server, &now, step)
 	}
-	deps := jail.deps(herdrPaneEnv(server, "w1:p1"), &now)
+	deps := jail.deps(activityEnv(server), &now)
 	reporter := &herdrReporter{deps: deps}
 	args := activityWatchArgs(t, deps, "activity-session")
 	path := reporter.activityPath("activity-session")
@@ -537,4 +591,10 @@ func TestHerdrTranscriptWatchDoesNotCrossSessions(t *testing.T) {
 	if _, err := os.Stat(reporter.activityPath("replacement-session")); !os.IsNotExist(err) {
 		t.Fatalf("watch touched a session whose lock it never held: %v", err)
 	}
+}
+
+func activityEnv(server *fakeHerdr) map[string]string {
+	env := herdrPaneEnv(server, "w1:p1")
+	env["TMUX"], env["TMUX_PANE"] = rigSocket+",1,0", "%0"
+	return env
 }

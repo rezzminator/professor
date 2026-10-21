@@ -95,6 +95,9 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			home := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(home, "tmux"), 0o700); err != nil {
+				t.Fatal(err)
+			}
 			path := filepath.Join(home, testcase.file)
 			if testcase.file != "" {
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

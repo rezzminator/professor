@@ -36,15 +36,30 @@ type CommandRunner interface {
 
 type commandRunner struct{}
 
+type commandExitError struct {
+	code   int
+	stderr string
+}
+
+func (err *commandExitError) Error() string {
+	return fmt.Sprintf("exit status %d: %s", err.code, err.stderr)
+}
+
 func (commandRunner) Output(
 	ctx context.Context,
 	name string,
 	args ...string,
 ) ([]byte, error) {
+	options := deps.RunOptions{}
+	if name == "git" {
+		// The non-repository diagnostic is a Git protocol distinction, not a
+		// translated message to display. Keep it stable for classification.
+		options.Env = append(os.Environ(), "LC_ALL=C")
+	}
 	result, err := obs.Runner(deps.RealRunner{}).
-		Run(ctx, append([]string{deps.Executable(name)}, args...), deps.RunOptions{})
+		Run(ctx, append([]string{deps.Executable(name)}, args...), options)
 	if err == nil && result.ExitCode != 0 {
-		err = fmt.Errorf("exit status %d", result.ExitCode)
+		err = &commandExitError{code: result.ExitCode, stderr: strings.TrimSpace(string(result.Stderr))}
 	}
 	if err != nil {
 		return nil, err
@@ -56,7 +71,8 @@ func (commandRunner) Output(
 // them, so no fixture reads a live socket, account, cache, process tree, or
 // repository.
 type Runtime struct {
-	Now func() time.Time
+	contextCatalog *contextCatalog
+	Now            func() time.Time
 
 	Home          string
 	ConfigDir     string
@@ -216,6 +232,9 @@ func (runtime Runtime) normalized() Runtime {
 	}
 	if runtime.Warn == nil {
 		runtime.Warn = os.Stderr
+	}
+	if runtime.contextCatalog == nil {
+		runtime.contextCatalog = newContextCatalog(runtime.Home, runtime.getenv, runtime.now(), runtime.Warn)
 	}
 	return runtime
 }

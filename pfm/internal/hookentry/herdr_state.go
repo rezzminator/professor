@@ -442,6 +442,11 @@ func (reporter *herdrReporter) processTarget() herdrTarget {
 }
 
 func (reporter *herdrReporter) apply(ctx context.Context, payload herdrPayload, target herdrTarget) error {
+	// An unproved/bare native Claude launch must never fall back to state
+	// reporting. Durable native-seat proof is the metadata/release door.
+	if reporter.nativeClaude() {
+		return nil
+	}
 	if !target.ok() {
 		return nil
 	}

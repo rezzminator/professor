@@ -30,10 +30,11 @@ const (
 // on disk for all Claude transports, serialized by the existing session lock
 // primitive in a separate namespace, before taking any seat/bridge locks.
 type herdrActivity struct {
-	Stored      herdrStored           `json:"stored"`
-	Targets     []herdrActivityTarget `json:"targets,omitempty"`
-	TmuxSocket  string                `json:"tmux_socket,omitempty"`
-	TmuxSession string                `json:"tmux_session,omitempty"`
+	Stored         herdrStored           `json:"stored"`
+	Targets        []herdrActivityTarget `json:"targets,omitempty"`
+	RetiredTargets []herdrActivityTarget `json:"retired_targets,omitempty"`
+	TmuxSocket     string                `json:"tmux_socket,omitempty"`
+	TmuxSession    string                `json:"tmux_session,omitempty"`
 }
 
 type herdrActivityTarget struct {
@@ -97,7 +98,27 @@ func (reporter *herdrReporter) writeActivity(session string, state herdrActivity
 
 // runActivity holds the activity lock across the complete report, so a delayed
 // asynchronous tool hook cannot overwrite Stop or a synchronous agent lifecycle.
-func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPayload) error {
+func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPayload) (returnErr error) {
+	if reporter.nativeClaude() {
+		if reporter.options.event == herdr.EventAgentStart || reporter.options.event == herdr.EventAgentStop {
+			return nil
+		}
+		if payload.SessionID != "" && reporter.deps.lockDir != "" {
+			unlock, err := reporter.lock(ctx, reporter.activityKey(payload.SessionID))
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			state, err := reporter.readActivity(payload.SessionID)
+			if err != nil {
+				return err
+			}
+			if err := reporter.retireNativeTargets(ctx, payload.SessionID, &state); err != nil {
+				return err
+			}
+		}
+		return reporter.run(ctx, payload)
+	}
 	if reporter.options.engine != pfmengine.Claude || reporter.options.event.FiredByTmux() ||
 		payload.SessionID == "" || reporter.deps.lockDir == "" ||
 		(reporter.deps.getenv("TMUX") == "" && !reporter.processTarget().ok()) ||
@@ -116,6 +137,13 @@ func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPay
 	state, err := reporter.readActivity(payload.SessionID)
 	if err != nil {
 		return err
+	}
+	if err := reporter.retireNativeTargets(ctx, payload.SessionID, &state); err != nil {
+		var pending herdrRetirementPending
+		if !errors.As(err, &pending) {
+			return err
+		}
+		defer func() { returnErr = errors.Join(returnErr, err) }()
 	}
 	agentEvent := reporter.options.event == herdr.EventAgentStart || reporter.options.event == herdr.EventAgentStop
 	// Counts commute by agent id, unlike main-turn reports: do not drop a delayed
@@ -336,7 +364,7 @@ func watchHerdrAgentsWithWait(args []string, stderr io.Writer, deps herdrDeps, w
 	}
 }
 
-func (reporter *herdrReporter) expireAgents(session string, generation ...int64) (bool, error) {
+func (reporter *herdrReporter) expireAgents(session string, generation ...int64) (done bool, returnErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
 	defer cancel()
 	unlock, err := reporter.lock(ctx, reporter.activityKey(session))
@@ -347,6 +375,13 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 	state, err := reporter.readActivity(session)
 	if err != nil {
 		return true, err
+	}
+	if err := reporter.retireNativeTargets(ctx, session, &state); err != nil {
+		var pending herdrRetirementPending
+		if !errors.As(err, &pending) {
+			return true, err
+		}
+		defer func() { returnErr = errors.Join(returnErr, err) }()
 	}
 	stopped := state.Stored.MainStoppedAt
 	if stopped == 0 || len(state.Stored.Agents) == 0 || (len(generation) > 0 && generation[0] != stopped) {
@@ -399,7 +434,7 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 			errs = append(errs, err)
 			continue
 		}
-		if owner.Client != saved.Owner {
+		if owner.Client != saved.Owner || owner.Seq > saved.Seq {
 			continue
 		}
 		if target.terminal != "" {

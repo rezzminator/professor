@@ -88,6 +88,38 @@ func (report Report) Line() ([]byte, error) {
 	})
 }
 
+// SessionReport publishes restore metadata without taking ownership of lifecycle
+// state. Native Claude panes leave that state to Herdr's screen detection.
+type SessionReport struct {
+	Pane, Source, Agent, SessionID, SessionPath, StartSource string
+	ResumeArgv                                               []string
+	Seq                                                      uint64
+}
+
+// Line renders pane.report_agent_session; state and message are not in its schema.
+func (report SessionReport) Line() ([]byte, error) {
+	if report.Pane == "" || report.Agent == "" {
+		return nil, fmt.Errorf(
+			"herdr session report: pane %q and agent %q are both required",
+			report.Pane,
+			report.Agent,
+		)
+	}
+	return json.Marshal(request{
+		ID: fmt.Sprintf("pfm-%d", report.Seq), Method: "pane.report_agent_session",
+		Params: struct {
+			Pane        string   `json:"pane_id"`
+			Source      string   `json:"source"`
+			Agent       string   `json:"agent"`
+			SessionID   string   `json:"agent_session_id,omitempty"`
+			SessionPath string   `json:"agent_session_path,omitempty"`
+			StartSource string   `json:"session_start_source,omitempty"`
+			ResumeArgv  []string `json:"resume_argv,omitempty"`
+			Seq         uint64   `json:"seq"`
+		}{report.Pane, sourceOr(report.Source), report.Agent, report.SessionID, report.SessionPath, report.StartSource, report.ResumeArgv, report.Seq},
+	})
+}
+
 // Release is one pane.release_agent request: the user quit.
 type Release struct {
 	Pane string

@@ -1,10 +1,11 @@
-// Package herdr is pfm's reporter for the Herdr terminal multiplexer
-// (https://herdr.dev): a pfm-launched chat of any engine reports its state,
-// its session and its resume command to the Herdr pane it is attached in, and
-// releases the pane when it ends. It follows Herdr's reporter contract
-// (add-herdr-support): a stable source that never starts with `herdr:`, a
-// strictly increasing seq, a resume_argv only while the source holds the pane,
-// and a release on exit. Outside a Herdr pane nothing here runs.
+// Package herdr integrates pfm chats with the Herdr terminal multiplexer
+// (https://herdr.dev). Tmux chats and native Codex/OpenCode report lifecycle
+// state, session metadata and resume commands under the stable pfm source.
+// Native Claude reports session/restore metadata only under herdr:claude,
+// joining Herdr's native identity so state-free restore commands persist.
+// Herdr detects its lifecycle state. Old pfm ownership is released with a
+// newer sequence before metadata is republished; end also clears pfm's title.
+// Outside Herdr nothing here runs.
 package herdr
 
 import (
@@ -81,8 +82,8 @@ func without(environ, names []string) []string {
 type Event string
 
 const (
-	// EventStart is a session beginning or switching in place: idle, with the
-	// session and its resume command.
+	// EventStart is a session beginning or switching in place: session/restore
+	// metadata, plus idle only on transports whose state pfm owns.
 	EventStart Event = "start"
 	// EventWorking is a turn running.
 	EventWorking Event = "working"

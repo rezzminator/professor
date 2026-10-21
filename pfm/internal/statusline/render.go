@@ -1,11 +1,9 @@
 package statusline
 
 import (
-	"bufio"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,7 +16,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/sky"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -47,9 +44,11 @@ type input struct {
 	ContextWindow struct {
 		UsedPercentage    float64 `json:"used_percentage"`
 		ContextWindowSize int64   `json:"context_window_size"`
+		PercentageKnown   bool    `json:"-"`
 		TotalInputTokens  int64   `json:"total_input_tokens"`
 		TotalOutputTokens int64   `json:"total_output_tokens"`
 		CurrentUsage      struct {
+			Known                    bool  `json:"-"`
 			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 			InputTokens              int64 `json:"input_tokens"`
@@ -175,8 +174,18 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("decode statusline input: %w", err)
 	}
-	if data.Model.DisplayName == "" {
-		data.Model.DisplayName = pfmengine.MustLookup(pfmengine.Claude).Short
+	if err := validateInput(data); err != nil {
+		return "", fmt.Errorf("invalid statusline input: %w", err)
+	}
+	if data.Model.ID == "" {
+		data.Model.ID = runtime.getenv("ANTHROPIC_MODEL")
+	}
+	if data.Model.DisplayName == "" ||
+		(openAIModel(data.Model.ID) && data.Model.DisplayName == pfmengine.MustLookup(pfmengine.Claude).Short) {
+		data.Model.DisplayName = modelFamily(data.Model.ID)
+		if data.Model.DisplayName == "" {
+			data.Model.DisplayName = pfmengine.MustLookup(runtime.Engine).Short
+		}
 	}
 	directory := data.Workspace.CurrentDir
 	if directory == "" {
@@ -204,6 +213,11 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		directoryName = "~"
 	}
 
+	gauge, l2, _ := renderContextLine(runtime, data, directory, now)
+	if data.Model.ID == "" && gauge.model != "" {
+		data.Model.ID = gauge.model
+		data.Model.DisplayName = modelFamily(gauge.model)
+	}
 	l1 := badge + modelSegment(data, sessionAutoEffort(runtime, data))
 	l1 += sep + blue + directoryName + reset
 	if data.Worktree.Name != "" {
@@ -227,9 +241,8 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	if data.SessionName != "" {
 		l1 += sep + cLabel + "🔖 " + data.SessionName + reset
 	}
-	l1 += sep + sky.SnapshotCounts(fleetCounts(runtime))
+	l1 += sep + fleetSegment(runtime)
 
-	gauge, l2, contextTokens := renderContextLine(runtime, data, directory, now)
 	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
 	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
 	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.
@@ -237,15 +250,12 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 
 	l3 := ""
 	if runtime.Engine == pfmengine.Codex {
-		codexLine, replacement := codexSegment(runtime, now, contextTokens, l2, gauge.transcript)
-		if replacement != "" {
-			l2 = replacement
-		}
+		codexLine := codexQuotaSegment(runtime, now)
 		l3 = appendSegment(l3, codexLine)
 	}
 	l3 = appendRateSegments(l3, now, data)
 	if runtime.Engine == pfmengine.Claude {
-		weekly := codexWeeklyLine(runtime, now, l3)
+		weekly := codexWeeklyLine(runtime, now, l1, l2, l3)
 		if l3 != "" && weekly != "" {
 			l3 += "\n" + reset
 		}
@@ -373,72 +383,6 @@ func appendRateSegments(line string, now time.Time, data input) string {
 	return line
 }
 
-func gitSegment(ctx context.Context, runtime Runtime, directory string) string {
-	if directory == "" {
-		return ""
-	}
-	if err := os.MkdirAll(runtime.CacheDir, 0o700); err != nil {
-		return ""
-	}
-	digest := md5.Sum([]byte(directory))
-	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-"+hex.EncodeToString(digest[:]))
-	stale := true
-	if info, err := os.Stat(cachePath); err == nil {
-		stale = runtime.now().Sub(info.ModTime()) > 5*time.Second
-	}
-	if stale {
-		commandContext, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
-		branch, err := runtime.Command.Output(
-			commandContext,
-			"git",
-			"-C", directory, "--no-optional-locks", "symbolic-ref", "--short", "HEAD",
-		)
-		cancel()
-		content := ""
-		if err == nil && strings.TrimSpace(string(branch)) != "" {
-			staged := gitDiffCount(ctx, runtime, directory, true)
-			modified := gitDiffCount(ctx, runtime, directory, false)
-			content = fmt.Sprintf("%s|%d|%d", strings.TrimSpace(string(branch)), staged, modified)
-		}
-		_ = atomicfile.Write(cachePath, []byte(content), 0o600)
-	}
-	body, err := os.ReadFile(cachePath)
-	if err != nil || len(body) == 0 {
-		return ""
-	}
-	fields := strings.Split(strings.TrimSpace(string(body)), "|")
-	if len(fields) != 3 || fields[0] == "" {
-		return ""
-	}
-	staged, _ := strconv.Atoi(fields[1])
-	modified, _ := strconv.Atoi(fields[2])
-	color, suffix := green, ""
-	if staged > 0 {
-		suffix += fmt.Sprintf(" %s+%d", green, staged)
-		color = yellow
-	}
-	if modified > 0 {
-		suffix += fmt.Sprintf(" %s~%d", yellow, modified)
-		color = yellow
-	}
-	return color + "🌿 " + fields[0] + suffix + reset
-}
-
-func gitDiffCount(ctx context.Context, runtime Runtime, directory string, staged bool) int {
-	args := []string{"-C", directory, "--no-optional-locks", "diff"}
-	if staged {
-		args = append(args, "--cached")
-	}
-	args = append(args, "--numstat")
-	commandContext, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
-	defer cancel()
-	output, err := runtime.Command.Output(commandContext, "git", args...)
-	if err != nil {
-		return 0
-	}
-	return len(strings.FieldsFunc(strings.TrimSpace(string(output)), func(r rune) bool { return r == '\n' }))
-}
-
 func accountBadge(runtime Runtime) (string, int) {
 	if strings.TrimSpace(runtime.ConfigDir) == "" {
 		return "", 0
@@ -483,7 +427,7 @@ func accountBadgeForID(runtime Runtime, account int) (string, int) {
 	return "", 0
 }
 
-func fleetCounts(runtime Runtime) map[pfmengine.ID]int {
+func fleetCountsWithError(runtime Runtime) (map[pfmengine.ID]int, error) {
 	allowProbe := runtime.getenv("PFM_TEST_PROBE_SOCKETS") == "1"
 	counts := make(map[pfmengine.ID]int)
 	count := func(name string) {
@@ -513,16 +457,16 @@ func fleetCounts(runtime Runtime) map[pfmengine.ID]int {
 			seen[name] = true
 			count(name)
 		}
-		return counts
+		return counts, nil
 	}
 	entries, err := os.ReadDir(runtime.TmuxDir)
 	if err != nil {
-		return counts
+		return nil, fmt.Errorf("read fleet sockets %s: %w", runtime.TmuxDir, err)
 	}
 	for _, entry := range entries {
 		count(entry.Name())
 	}
-	return counts
+	return counts, nil
 }
 
 // windowConvergeTimeout bounds the whole convergence. The statusline renders
@@ -618,7 +562,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 
 // pfmSocket resolves the fleet socket this render is running inside, or
 // reports that it is not in one. It applies the same probe-socket allowance
-// fleetCounts does so a jailed fixture can exercise the path.
+// fleetCountsWithError does so a jailed fixture can exercise the path.
 func pfmSocket(runtime Runtime) (string, bool) {
 	tmux := runtime.getenv("TMUX")
 	if tmux == "" {
@@ -790,139 +734,78 @@ func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Du
 	}
 }
 
-func codexSegment(
-	runtime Runtime,
-	now time.Time,
-	contextTokens int64,
-	currentL2 string,
-	transcriptGauge bool,
-) (string, string) {
-	model := runtime.getenv("ANTHROPIC_MODEL")
-	if model == "" {
-		model = "gpt-5.6-sol"
-	}
-	model = strings.TrimSuffix(model, "[1m]")
-	segment := green + "🍀 " + model + reset
-	procTCP, err := os.ReadFile(filepath.Join(runtime.ProcRoot, "net", "tcp"))
-	if err == nil && strings.Contains(strings.ToUpper(string(procTCP)), ":494D ") {
-		segment += sep + dim + "⇅ proxy" + reset
-	} else {
-		segment += sep + red + "⇅ proxy DOWN" + reset
-	}
-	requests, authReject := codexRequestCount(runtime, now)
-	if requests > 0 {
-		segment += sep + dim + "↻ " + strconv.Itoa(requests) + " today" + reset
-	}
-	if authReject {
-		segment += sep + red + "⚠ auth-reject streak — WS upgrade refused; CCP_CODEX_TRANSPORT=http" + reset
-	}
-	usagePath := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
-	armRefresh(runtime, RefreshKindCodex, usagePath, 5*time.Minute)
-	usageBody, usageErr := os.ReadFile(usagePath)
-	var usage codexUsageCache
-	if usageErr == nil && json.Unmarshal(usageBody, &usage) == nil {
-		for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
-			if window == nil || window.UsedPercent < 0 {
-				continue
-			}
-			percent := gaugePercent(window.UsedPercent)
-			segment += sep + makeBar(percent, 5) + " " + percentColor(percent) +
-				windowLabel(window.WindowDurationMins) + "-used:" + strconv.Itoa(percent) + "%" + reset +
-				resetCountdown(now, window.ResetsAt)
-		}
-		if usage.PlanType != "" {
-			segment += sep + dim + "ChatGPT " + usage.PlanType + reset
-		}
-	} else {
-		segment += sep + dim + "ChatGPT subscription" + reset
-	}
+const codexQuotaLabel = "ChatGPT quota "
 
-	replacement := ""
-	window := int64(0)
-	baseModel := strings.TrimSuffix(model, "-fast")
-	if strings.HasPrefix(baseModel, "gpt-5.6-") || strings.HasPrefix(baseModel, "gpt-6") {
-		window = 272_000
-	} else {
-		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)
+func codexQuotaSegment(runtime Runtime, now time.Time) string {
+	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
+	armRefresh(runtime, RefreshKindCodex, path, 5*time.Minute)
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return cWarn + codexQuotaLabel + "missing" + reset
 	}
-	if !transcriptGauge && window > 0 && contextTokens > 0 {
-		percent := gaugePercent(float64(contextTokens) * 100 / float64(window))
-		if percent > 100 {
-			percent = 100
-		}
-		rest := ""
-		if index := strings.Index(currentL2, sep); index >= 0 {
-			rest = currentL2[index:]
-		}
-		replacement = urgencyEmoji(percent) + " " + makeBar(percent, 10) + " " +
-			percentColor(percent) + strconv.Itoa(percent) + "%" + reset + " " + dim +
-			"of " + formatContextTokens(window) + reset + rest
-	}
-	return segment, replacement
-}
-
-func codexRequestCount(runtime Runtime, now time.Time) (int, bool) {
-	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-gptreq")
-	if statuslineFileAge(cachePath, now) > 30*time.Second {
-		logPath := filepath.Join(runtime.Home, ".local", "state", "claude-code-proxy", "proxy.log")
-		file, err := os.Open(logPath)
-		if err == nil {
-			defer func() {
-				if err := file.Close(); err != nil {
-					fmt.Fprintf(os.Stderr, "statusline: close %s proxy log %s: %v\n",
-						pfmengine.MustLookup(pfmengine.Codex).Short, logPath, err)
-				}
-			}()
-			today := now.UTC().Format("2006-01-02")
-			count := 0
-			last := make([]int, 0, 3)
-			scanner := bufio.NewScanner(file)
-			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-			for scanner.Scan() {
-				var row struct {
-					Message string `json:"msg"`
-					Time    string `json:"t"`
-					Status  int    `json:"status"`
-				}
-				if json.Unmarshal(scanner.Bytes(), &row) != nil {
-					continue
-				}
-				if row.Message != "request_completed" {
-					continue
-				}
-				if strings.HasPrefix(row.Time, today) {
-					count++
-				}
-				last = append(last, row.Status)
-				if len(last) > 3 {
-					last = last[len(last)-3:]
-				}
-			}
-			reject := len(last) == 3
-			for _, status := range last {
-				reject = reject && (status == 401 || status == 403)
-			}
-			_ = atomicfile.Write(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolDigit(reject))), 0o600)
-		}
-	}
-	body, err := os.ReadFile(cachePath)
 	if err != nil {
-		return 0, false
+		fmt.Fprintf(runtime.Warn, "statusline: read Codex quota %s: %v\n", path, err)
+		return cBad + codexQuotaLabel + catalogError + reset
 	}
-	fields := strings.Fields(string(body))
-	if len(fields) != 2 {
-		return 0, false
+	var rawUsage struct {
+		Primary   json.RawMessage `json:"primary"`
+		Secondary json.RawMessage `json:"secondary"`
 	}
-	count, _ := strconv.Atoi(fields[0])
-	reject, _ := strconv.Atoi(fields[1])
-	return count, reject == 1
-}
-
-func boolDigit(value bool) int {
-	if value {
-		return 1
+	if err := json.Unmarshal(body, &rawUsage); err != nil {
+		return cBad + codexQuotaLabel + catalogError + reset
 	}
-	return 0
+	for _, raw := range []json.RawMessage{rawUsage.Primary, rawUsage.Secondary} {
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		var fields struct {
+			Percent *float64 `json:"usedPercent"`
+		}
+		if json.Unmarshal(raw, &fields) != nil || fields.Percent == nil {
+			return cBad + codexQuotaLabel + catalogError + reset
+		}
+	}
+	var usage codexUsageCache
+	if err := json.Unmarshal(body, &usage); err != nil {
+		return cBad + codexQuotaLabel + catalogError + reset
+	}
+	if usage.Primary == nil && usage.Secondary == nil {
+		return cWarn + codexQuotaLabel + "unknown" + reset
+	}
+	segment := ""
+	for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
+		if window == nil {
+			continue
+		}
+		if window.UsedPercent < 0 || window.UsedPercent > 100 || window.ResetsAt <= 0 ||
+			window.WindowDurationMins <= 0 {
+			return cBad + codexQuotaLabel + catalogError + reset
+		}
+		percent := gaugePercent(window.UsedPercent)
+		segment = appendSegment(
+			segment,
+			makeBar(
+				percent,
+				5,
+			)+" "+percentColor(
+				percent,
+			)+windowLabel(
+				window.WindowDurationMins,
+			)+"-used:"+strconv.Itoa(
+				percent,
+			)+"%"+reset+resetCountdown(
+				now,
+				window.ResetsAt,
+			),
+		)
+	}
+	if statuslineFileAge(path, now) > 5*time.Minute {
+		segment += " " + cWarn + "stale" + reset
+	}
+	if usage.PlanType != "" {
+		segment = appendSegment(segment, dim+"ChatGPT "+usage.PlanType+reset)
+	}
+	return segment
 }
 
 func windowLabel(minutes int64) string {

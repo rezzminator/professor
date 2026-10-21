@@ -25,13 +25,11 @@ type codexWindow struct {
 }
 
 // codexWeeklyLine shares the Codex renderer's cache and detached refresher.
-// Stretch the bar to the Claude footer's content width, even without Claude quotas.
-// Hook COLUMNS is the raw terminal width. The ordinary local Claude footer has
-// two outer cells per side; pfm's managed statusLine.padding is zero. The hook
-// exposes neither special remote layouts nor user padding overrides, so this
-// contract covers the managed local footer, not those unobservable layouts.
-// If columns are unknown, reuse the Claude row's width rather than inventing one.
-func codexWeeklyLine(runtime Runtime, now time.Time, claudeLine string) string {
+// Match the widest rendered sibling row, keeping the label intact when space allows.
+// Hook COLUMNS bounds that width: the managed local Claude footer has two outer
+// cells per side and statusLine.padding=0. Remote layouts and user padding
+// overrides are not exposed by the hook.
+func codexWeeklyLine(runtime Runtime, now time.Time, siblingLines ...string) string {
 	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
 	armRefresh(runtime, RefreshKindCodex, path, 5*time.Minute)
 	window, age, err := readCodexWeekly(path, now)
@@ -48,17 +46,16 @@ func codexWeeklyLine(runtime Runtime, now time.Time, claudeLine string) string {
 			label += " " + yellow + "stale " + formatDuration(age.Milliseconds()) + reset
 		}
 	}
-	columns := runtime.Columns
-	if columns > 0 {
-		columns -= 2 * 2 // Claude's outer footer padding, left and right.
-		if columns <= 0 {
+	columns := ansi.StringWidth(label)
+	for _, line := range siblingLines {
+		columns = max(columns, ansi.StringWidth(line))
+	}
+	if runtime.Columns > 0 {
+		contentColumns := runtime.Columns - 2*2 // Claude's outer footer padding, left and right.
+		if contentColumns <= 0 {
 			return ""
 		}
-	} else {
-		columns = ansi.StringWidth(claudeLine)
-		if columns <= 0 {
-			return label
-		}
+		columns = min(columns, contentColumns)
 	}
 	width := columns - ansi.StringWidth(label) - 1
 	if width <= 0 {

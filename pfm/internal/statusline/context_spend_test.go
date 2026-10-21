@@ -400,7 +400,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 }
 
 // The context gauge divides by the window Claude Code reports for the model
-// it runs; the model-name guess serves only a payload that names none.
+// it runs; an absent capacity remains unknown, never a model-family guess.
 func TestContextWindowTakesTheHarnessSize(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -410,8 +410,8 @@ func TestContextWindowTakesTheHarnessSize(t *testing.T) {
 	}{
 		{name: "reported 200K on an opus", size: 200_000, model: "claude-opus-5-5", want: 200_000},
 		{name: "reported 1M on a haiku", size: 1_000_000, model: "claude-haiku-5-5", want: 1_000_000},
-		{name: "unreported haiku guesses 200K", model: "claude-haiku-5-5", want: 200_000},
-		{name: "unreported opus guesses 1M", model: "claude-opus-5-5", want: 1_000_000},
+		{name: "unreported haiku is unknown", model: "claude-haiku-5-5", want: 0},
+		{name: "unreported opus is unknown", model: "claude-opus-5-5", want: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -505,7 +505,7 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
 			// the row is read inside the minute after the turn ended, before a finished row collapses
 			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
-			if !strings.Contains(got, "1.0K/1.0M "+tc.want+"│") {
+			if !strings.Contains(got, "1.0K/? ctx missing "+tc.want+"│") {
 				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
 			}
 		})

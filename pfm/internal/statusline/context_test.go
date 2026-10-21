@@ -26,7 +26,7 @@ func TestContextFloorKeyMatchesRetiredOverlay(t *testing.T) {
 		}{ID: "claude-haiku-4", DisplayName: "Claude"}},
 		transcript.Meta{},
 	)
-	if window != 200_000 {
-		t.Fatalf("Haiku model-id window = %d, want 200000", window)
+	if window != 0 {
+		t.Fatalf("Haiku model-id window = %d, want unknown (0)", window)
 	}
 }

@@ -100,8 +100,23 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		return true, nil
 	}
 	action := reporter.plan(payload)
+	if reporter.options.engine == pfmengine.Claude && reporter.options.event == herdr.EventStart {
+		// Compaction/fork still refresh session metadata, never lifecycle state.
+		action = &herdrAction{}
+	}
 	if action == nil {
 		return true, nil
+	}
+	if reporter.options.engine == pfmengine.Claude {
+		owner, err := reporter.paneOwner(
+			herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID},
+		)
+		if err != nil {
+			return true, err
+		}
+		if owner.Seq > reporter.seq {
+			return true, fmt.Errorf("native Claude hook predates current ownership sequence")
+		}
 	}
 	before := seat
 	if payload.SessionID != "" {
@@ -136,12 +151,14 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if err := reporter.reserveNativeOwnership(seat, seq); err != nil {
 		return true, err
 	}
-	if err := reporter.send(
-		ctx,
-		herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID},
-		action,
-		seq,
-	); err != nil {
+	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
+	payload.SessionID = seat.SessionID
+	if reporter.options.engine == pfmengine.Claude && !action.release {
+		err = reporter.deferNativeClaude(ctx, target, payload, seq)
+	} else {
+		err = reporter.send(ctx, target, action, seq)
+	}
+	if err != nil {
 		return true, err
 	}
 	if reporter.options.event != herdr.EventEnd {

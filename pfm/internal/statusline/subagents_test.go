@@ -184,50 +184,50 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			name: "an effort that is not a string is left out; a name shows without a role; no growth line",
 			task: `{"id":"e","name":"bot","status":"running","model":"claude-haiku-4","effort":{"level":"high"},` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│bot│haiku│running",
+			want: "4.2K/?│bot│haiku│running",
 		},
 		{
 			name: "a gpt- agent renders its tier then its version",
 			task: `{"id":"g1","name":"sol","status":"running","model":"gpt-6-sol","effort":"low",` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│sol│sol-6·▰ low│running",
+			want: "4.2K/? ctx missing│sol│sol-6·▰ low│running",
 		},
 		{
 			name: "a gpt- agent's dotted version survives",
 			task: `{"id":"g2","name":"bot","status":"running","model":"gpt-5.6-terra","effort":"high",` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│bot│terra-5.6·▰▰▰ high│running",
+			want: "4.2K/? ctx missing│bot│terra-5.6·▰▰▰ high│running",
 		},
 		{
 			name: "a bare gpt- version has no tier and renders whole",
 			task: `{"id":"g3","name":"bot","status":"running","model":"gpt-6","tokenCount":10}`,
-			want: "10│bot│gpt-6│running",
+			want: "10/? ctx missing│bot│gpt-6│running",
 		},
 		{
 			name: "a gpt- agent on the priority tier renders its tier, not the -fast suffix",
 			task: `{"id":"g4","name":"bot","status":"running","model":"gpt-6-sol-fast[1m]","tokenCount":10}`,
-			want: "10│bot│sol-6│running",
+			want: "10/? ctx missing│bot│sol-6│running",
 		},
 		{
 			name: "a bare gpt- version on the priority tier renders whole, without the -fast suffix",
 			task: `{"id":"g5","name":"bot","status":"running","model":"gpt-5.5-fast","tokenCount":10}`,
-			want: "10│bot│gpt-5.5│running",
+			want: "10/? ctx missing│bot│gpt-5.5│running",
 		},
 		{
 			name: "an agent in the session's own directory shows no cwd",
 			task: `{"id":"same","status":"running","cwd":"/work/repo/","model":"haiku","tokenCount":10,"label":"x"}`,
-			want: "10│haiku│running│x",
+			want: "10/?│haiku│running│x",
 		},
 		{
 			name: "a task with no tokens and no window still gets a row with unknown context",
 			task: `{"id":"a5","label":"shell","tokenCount":0}`,
-			want: "?/?│shell",
+			want: "0/?│shell",
 		},
 		{
 			name: "a gateway agent with zero counters keeps its rich row",
 			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x",` +
 				`"model":"gpt-6-sol","tokenCount":0,"contextWindowSize":0`),
-			want: "?/? Σ$0.00/0/0/0│general-purpose│sol-6│running 2m:0s│idle 2m0s│💾–│pfm│x",
+			want: "0/? ctx missing Σ$0.00/0/0/0│general-purpose│sol-6│running 2m:0s│idle 2m0s│💾–│pfm│x",
 		},
 		{
 			name: "an adopted agent with missing counters and model still gets a rich row",
@@ -235,15 +235,11 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			want: "?/? Σ$0.00/0/0/0│general-purpose│running 2m:0s│idle 2m0s│💾–│pfm│x",
 		},
 		{
-			name: "zero progress with a known window is unknown, not a zero percent gauge",
+			name: "zero counters remain known but a gateway harness window is not authoritative",
 			task: `{"id":"g0","name":"bot","model":"gpt-6-sol","tokenCount":0,"contextWindowSize":200000}`,
-			want: "?/200.0K│bot│sol-6",
+			want: "0/? ctx missing│bot│sol-6",
 		},
-		{
-			name: "negative counters are unknown, not a reason to omit the row",
-			task: `{"id":"negative","tokenCount":-1,"contextWindowSize":-1}`,
-			want: "?/?",
-		},
+
 		{
 			name: "a task with no id is skipped",
 			task: `{"label":"orphan","contextWindowSize":1000000,"tokenCount":5}`,
@@ -488,7 +484,7 @@ func TestRenderSubagentsMetaWithoutRoleIsNotEmpty(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"m": agentTranscriptLines[:1]}, map[string]string{"m": ""})
 	got, warned := renderOneSubagent(t, session,
 		`{"id":"m","type":"local_agent","status":"running","tokenCount":10}`)
-	if !strings.HasPrefix(got, "10 Σ$0.00/0/0/0│role ?│running") ||
+	if !strings.HasPrefix(got, "10/? Σ$0.00/0/0/0│role ?│running") ||
 		!strings.Contains(warned, "names no agentType") {
 		t.Fatalf("content = %q warn = %q, want role ? and the cause", got, warned)
 	}

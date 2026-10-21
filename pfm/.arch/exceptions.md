@@ -1,5 +1,7 @@
 # Ruled arch exceptions
 
+- C18 `internal/statusline/context_capacity.go`: `gatewayModelsPathEnv` preserves the external gateway's official `GPT_GATEWAY_CHATGPT_MODELS_PATH` environment name for its configured catalog path; this one literal is excepted without obfuscation, relocation, or a broad checker exclusion.
+
 A baseline entry that a wave ADDED (not measured from the old tree) carries its reason here, one line each: check, file, reason. The ratchet never reads this file.
 
 - C11 `internal/paths/paths.go`: the legacy `fleet.db` literal (`legacyDBName`, read through `paths.LegacyStateDB` and `paths.LegacyCacheDB`) is how the legacy-database host checks and the create refusal find the old files.

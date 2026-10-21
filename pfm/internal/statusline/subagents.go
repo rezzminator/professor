@@ -45,6 +45,8 @@ type subagentTask struct {
 	Cwd               string          `json:"cwd"`
 	ContextWindowSize int64           `json:"contextWindowSize"`
 	TokenCount        int64           `json:"tokenCount"`
+	tokenKnown        bool
+	capacityState     string
 }
 
 // subagentRow is one line Claude Code accepts back: the task id and the body
@@ -228,11 +230,15 @@ func RenderSubagents(
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
+	catalog := newContextCatalog(home, env.Get, now, warn)
 	var tree *agentTree // scanned once per render, on the first agent row
 	roles := newRoleLookup(data.Cwd, home, userAgents, warn)
 	ledger := loadLedgerView(data.SessionID, home, env, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
+		if task.TokenCount < 0 || task.ContextWindowSize < 0 {
+			return "", fmt.Errorf("row %s: negative context counters", task.ID)
+		}
 		if task.ID == "" {
 			continue
 		}
@@ -243,7 +249,8 @@ func RenderSubagents(
 				tree.judgeLiveness(now, liveTasks(data.Tasks))
 			}
 			read := *tree.read(task.ID)
-			read.noCacheWindow = openAIModel(task.Model) || openAIModel(read.model)
+			task.Model = currentModel(task.Model, read.model)
+			read.noCacheWindow = openAIModel(task.Model)
 			if read.roleErr == nil {
 				read.role = roles.name(read.role, warn)
 			}
@@ -263,6 +270,9 @@ func RenderSubagents(
 				}
 			}
 			activity = &read
+		}
+		if openAIModel(task.Model) {
+			task.ContextWindowSize, task.capacityState = catalog.capacity(task.Model)
 		}
 		row := subagentRow{
 			ID:      task.ID,
@@ -353,18 +363,21 @@ func activeContent(
 	now time.Time,
 ) []rowPart {
 	gauge := cTokens + "?" + reset
-	if task.TokenCount > 0 {
+	if task.TokenCount > 0 || task.tokenKnown {
 		gauge = cTokens + formatContextTokens(task.TokenCount) + reset
 	}
 	if task.ContextWindowSize > 0 {
-		if task.TokenCount > 0 {
+		if task.TokenCount > 0 || task.tokenKnown {
 			percent := gaugePercent(float64(task.TokenCount) * 100 / float64(task.ContextWindowSize))
 			gauge = makeBar(percent, subagentBarWidth) + " " +
 				percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " + gauge
 		}
 		gauge += cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
-	} else if task.TokenCount <= 0 {
+	} else {
 		gauge += cWindow + "/?" + reset
+	}
+	if task.capacityState != "" {
+		gauge += " " + cWarn + "ctx " + task.capacityState + reset
 	}
 	var parts []rowPart
 	if activity != nil {

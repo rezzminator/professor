@@ -113,6 +113,23 @@ function sourceInventory(directory) {
     process.exit(rejected ? 5 : 2);
   }
   const rows = JSON.parse(scan.stdout);
+  // Reuse the inventory's structured frontmatter reader for registration names
+  // and the tools-derived sandbox default, rather than parsing YAML as prose.
+  const metadata = spawnSync("python3", ["-I", "-c", [
+    "import json,pathlib,runpy,sys",
+    "read = runpy.run_path(sys.argv[1])['frontmatter']",
+    "print(json.dumps([read(pathlib.Path(path))[0] for path in json.load(sys.stdin)]))",
+  ].join("\n"), join(ROOT, "scripts/agent-source-inventory.py")], {
+    input: JSON.stringify(rows.map((row) => row.path)), encoding: "utf8",
+  });
+  if (metadata.error || metadata.status !== 0)
+    throw new Error(`cannot read source protocols in ${directory}: ${metadata.error || metadata.stderr.trim() || `exit ${metadata.status}`}`);
+  const headers = JSON.parse(metadata.stdout);
+  for (const [index, row] of rows.entries()) {
+    const header = headers[index];
+    row.base = typeof header.name === "string" && header.name.trim() ? header.name.trim() : row.name;
+    row.tools = header.tools;
+  }
   inventoryCache.set(directory, rows);
   return rows;
 }
@@ -240,29 +257,53 @@ function eligible(source, runtime) {
   return engine !== false && requires.every((name) => capabilities.has(name.trim()));
 }
 
-// A role's generated name: its file's basename, plus `-{suffix}` for a child project; neverRegister
-// names a base or a final name that neither runtime emits. Eligibility is source evidence.
+// One registration walk supplies both roster names and each artifact's OWN source.
+// Match source.RoleName/DeclaredName: a declared name (else basename), child suffix,
+// then neverRegister by base or final name. Never discard a collision with a Set/map overwrite.
 const sourceCounts = new Map();
 function expectedAgents(runtime, nested) {
   const registered = (base, name) => !POLICY.neverRegister.includes(base) && !POLICY.neverRegister.includes(name);
-  const sources = markdownSources(join(ROOT, ".claude/agents"), nested);
-  let defined = sources.length;
-  const expected = sources.filter((source) => registered(source.name, source.name) && eligible(source, runtime))
-    .map((source) => source.name);
-  for (const project of projects) {
-    let suffix = project;
+  const registrations = [];
+  let defined = 0;
+  for (const project of [".", ...projects]) {
+    let suffix = project === "." ? "" : project;
     if (POLICY.suffixMode === "none") suffix = "";
-    if (POLICY.suffixMode === "strip-prefix")
+    if (project !== "." && POLICY.suffixMode === "strip-prefix")
       suffix = project.startsWith(POLICY.suffixPrefix) ? project.slice(POLICY.suffixPrefix.length) : project;
-    const childSources = markdownSources(join(ROOT, project, ".claude/agents"), nested);
-    defined += childSources.length;
-    for (const source of childSources) {
-      const name = suffix ? `${source.name}-${suffix.replaceAll("/", "-")}` : source.name;
-      if (registered(source.name, name) && eligible(source, runtime)) expected.push(name);
+    const sources = markdownSources(join(ROOT, project, ".claude/agents"), nested);
+    defined += sources.length;
+    for (const source of sources) {
+      if (project !== "." && !suffix && POLICY.suffixMode !== "none") {
+        failures.push(`${runtime}: ${source.path}: project ${project} has an empty agent suffix under ${POLICY.suffixMode} policy`);
+        continue;
+      }
+      const name = suffix ? `${source.base}-${suffix.replaceAll("/", "-")}` : source.base;
+      if (registered(source.base, name)) registrations.push({ name, source });
     }
   }
+  // Both compilers reserve names BEFORE eligibility, using paths.FoldName
+  // (Unicode NFC + case fold). Python supplies full case folding, not JS lowercasing.
+  const folded = spawnSync("python3", ["-I", "-c",
+    "import json,sys,unicodedata; print(json.dumps([unicodedata.normalize('NFC', name).casefold() for name in json.load(sys.stdin)]))"], {
+    input: JSON.stringify(registrations.map(({ name }) => name)), encoding: "utf8",
+  });
+  if (folded.error || folded.status !== 0)
+    throw new Error(`cannot compare ${runtime} registration names: ${folded.error || folded.stderr.trim() || `exit ${folded.status}`}`);
+  const keys = JSON.parse(folded.stdout);
+  const seen = new Map();
+  const expected = [];
+  for (const [index, registration] of registrations.entries()) {
+    const { name, source } = registration;
+    const previous = seen.get(keys[index]);
+    if (previous) {
+      failures.push(`${runtime}: conflicting role name ${name} from ${previous.path} and ${source.path}`);
+      continue;
+    }
+    seen.set(keys[index], source);
+    if (eligible(source, runtime)) expected.push(registration);
+  }
   sourceCounts.set(runtime, defined);
-  return [...new Set(expected)].sort();
+  return expected;
 }
 function compare(runtime, expected, actual, extension) {
   for (const name of expected.filter((n) => !actual.includes(n)))
@@ -270,8 +311,10 @@ function compare(runtime, expected, actual, extension) {
   for (const name of actual.filter((n) => !expected.includes(n)))
     failures.push(`${runtime}: generated agent has no source: ${name}${extension}`);
 }
-const codexExpected = expectedAgents("codex", true);
-const openCodeExpected = expectedAgents("opencode", false);
+const codexRegistrations = expectedAgents("codex", true);
+const openCodeRegistrations = expectedAgents("opencode", false);
+const codexExpected = codexRegistrations.map(({ name }) => name).sort();
+const openCodeExpected = openCodeRegistrations.map(({ name }) => name).sort();
 compare("codex", codexExpected, generatedNames(codexDir, ".toml"), ".toml");
 compare("opencode", openCodeExpected, generatedNames(openCodeDir, ".md"), ".md");
 
@@ -287,24 +330,28 @@ function artifactPermissions(path, runtime) {
     throw new Error(`cannot read structured ${runtime} permissions in ${path}: ${parsed.error || parsed.stderr.trim() || `exit ${parsed.status}`}`);
   return JSON.parse(parsed.stdout);
 }
-for (const writer of ["gitter", "gpt-gitter"]) {
-  const source = sourceInventory(join(ROOT, ".claude/agents")).find((row) => row.name === writer);
-  if (codexExpected.includes(writer)) {
-    const path = join(ROOT, `.codex/agents/${writer}.toml`);
-    const configured = source.engines.codex?.sandbox;
-    // Both writers grant Write; without an explicit pin the compiler emits no
-    // sandbox override, as with inherit. Judge TOML data, not instruction text.
-    const expected = configured && configured !== "inherit" ? configured : null;
-    if (existsSync(path) && artifactPermissions(path, "codex").sandbox !== expected) {
-      failures.push(`codex: ${writer}.toml sandbox override differs from its source protocol (expected ${expected ?? "inherit"})`);
-    }
-  }
-
-  if (openCodeExpected.includes(writer)) {
-    const path = join(ROOT, `.opencode/agent/${writer}.md`);
-    const expected = source.engines.opencode?.permission?.bash?.["git *"];
-    if (existsSync(path) && artifactPermissions(path, "opencode").permission?.bash?.["git *"] !== expected) {
-      failures.push(`opencode: ${writer}.md lacks its source per-agent git write permission`);
+for (const [runtime, registrations] of [["codex", codexRegistrations], ["opencode", openCodeRegistrations]]) {
+  for (const { name, source } of registrations) {
+    if (!["gitter", "gpt-gitter"].includes(source.base)) continue;
+    if (runtime === "codex") {
+      const path = join(codexDir, `${name}.toml`);
+      const configured = source.engines.codex?.sandbox?.trim();
+      const tools = (Array.isArray(source.tools) ? source.tools.join(",") : source.tools ?? "").trim();
+      // codexRoleSettings: an explicit pin wins; inherit is no override;
+      // otherwise a nonempty tools list with no write tool defaults to read-only.
+      const readOnly = tools && !tools.split(",").some((tool) =>
+        ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool.trim()));
+      const expected = configured === "inherit" ? null : configured || (readOnly ? "read-only" : null);
+      if (existsSync(path) && artifactPermissions(path, runtime).sandbox !== expected)
+        failures.push(`codex: ${name}.toml sandbox override differs from its source protocol (expected ${expected ?? "inherit"}) — ${source.path}`);
+    } else {
+      const path = join(openCodeDir, `${name}.md`);
+      const expected = source.engines.opencode?.permission ?? null;
+      // Serialize parsed data, never instruction text. Keep mapping order:
+      // OpenCode uses the LAST matching permission rule, so deep equality that
+      // ignores object-key order would accept a Git-denying rule permutation.
+      if (existsSync(path) && JSON.stringify(artifactPermissions(path, runtime).permission) !== JSON.stringify(expected))
+        failures.push(`opencode: ${name}.md lacks its source per-agent git write permission — ${source.path}`);
     }
   }
 }

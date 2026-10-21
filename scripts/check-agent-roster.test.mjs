@@ -302,6 +302,208 @@ function cleanVerdictStub(f) {
   f.env.ENGINE_SYNC_BIN = join(f.root, "clean-engine-sync");
 }
 
+function writerSource(name, sandbox = 'inherit', git = 'allow', header = '', tools = 'Read, Write, Bash') {
+  return `---\nname: ${name}\ndescription: Writer fixture\nmodel: smart\ntools: ${tools}\n${header}engines:\n  codex:\n    sandbox: ${sandbox}\n  opencode:\n    permission:\n      bash:\n        "git *": ${git}\n---\nPerform the assigned Git phase.\n`;
+}
+
+for (const runtime of ['codex', 'opencode']) {
+  test(`registered child writer corruption fails despite clean compiler: ${runtime}`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, {
+      'demo-child/.claude/agents/gpt-gitter.md': writerSource('gpt-gitter'),
+    });
+    const name = 'gpt-gitter-demo-child';
+    if (runtime === 'codex') {
+      f.put(`.codex/agents/${name}.toml`, 'sandbox_mode = "workspace-write"\ndeveloper_instructions = "sandbox inherit"\n');
+    } else {
+      f.put(`.opencode/agent/${name}.md`, '---\npermission:\n  bash:\n    "git *": deny\n---\nThe body claims "git *": allow.\n');
+    }
+    cleanVerdictStub(f);
+    const result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.ok(result.out.includes(`${runtime}: ${name}`), result.out);
+    assert.doesNotMatch(result.out, /agent-roster: clean/);
+  });
+}
+
+for (const writer of ['gitter', 'gpt-gitter']) {
+  for (const [label, policy, project, directory, suffix, openCode] of [
+    ['default suffix', {}, 'demo-child', '', '-demo-child', true],
+    ['no suffix', { suffixMode: 'none' }, 'demo-child', '', '', true],
+    ['stripped suffix', { suffixMode: 'strip-prefix', suffixPrefix: 'demo-' }, 'demo-child', '', '-child', true],
+    ['nested source', {}, 'demo-child', '/team', '-demo-child', false],
+  ]) {
+    test(`${writer} child uses its own structured protocol: ${label}`, (t) => {
+      // A root writer is deliberately different: looking up the child's base at the root is wrong.
+      const rootName = suffix ? writer : (writer === 'gitter' ? 'gpt-gitter' : 'gitter');
+      const f = fixture(t, policy, { version: 1 }, {}, {
+        [`.claude/agents/${rootName}.md`]: writerSource(rootName),
+        [`${project}/CLAUDE.md`]: '# Child\n',
+        [`${project}/.claude/agents${directory}/${writer}.md`]: writerSource(writer, 'workspace-write', 'ask'),
+      });
+      const name = `${writer}${suffix}`;
+      let result = check(f);
+      assert.equal(result.status, 0, result.out);
+      cleanVerdictStub(f);
+      f.put(`.codex/agents/${name}.toml`, 'sandbox_mode = "read-only"\n');
+      result = check(f);
+      assert.equal(result.status, 1, result.out);
+      assert.ok(result.out.includes(`codex: ${name}.toml sandbox override differs from its source protocol (expected workspace-write)`), result.out);
+      if (openCode) {
+        // Restore Codex so the second red proves OpenCode independently.
+        f.put(`.codex/agents/${name}.toml`, 'sandbox_mode = "workspace-write"\n');
+        f.put(`.opencode/agent/${name}.md`, '---\npermission:\n  bash:\n    "git *": allow\n---\nWrite.\n');
+        result = check(f);
+        assert.equal(result.status, 1, result.out);
+        assert.ok(result.out.includes(`opencode: ${name}.md lacks its source per-agent git write permission`), result.out);
+        assert.doesNotMatch(result.out, /codex: .*sandbox override/);
+      }
+    });
+  }
+}
+
+for (const [label, policy, header, machine, sandbox, git] of [
+  ['disabled runtimes', {}, 'engines:\n  codex: false\n  opencode: false\n', {}, 'inherit', 'allow'],
+  ['unmet requirement', {}, 'requires: [writers]\n', {}, 'inherit', 'allow'],
+  ['met requirement', {}, 'requires: [writers]\n', { targets: { capabilities: ['writers'] } }, 'read-only', 'deny'],
+  ['base never registered', { neverRegister: ['gpt-gitter'] }, '', {}, 'inherit', 'allow'],
+  ['final name never registered', { neverRegister: ['gpt-gitter-demo-child'] }, '', {}, 'inherit', 'allow'],
+  ['excluded project', { excludeProjects: ['demo-child'] }, '', {}, 'inherit', 'allow'],
+]) {
+  test(`child writer registration respects ${label}`, (t) => {
+    const source = label === 'disabled runtimes'
+      ? `---\nname: gpt-gitter\nmodel: smart\n${header}---\nRead.\n`
+      : writerSource('gpt-gitter', sandbox, git, header);
+    const f = fixture(t, policy, { version: 1 }, machine, {
+      'demo-child/.claude/agents/gpt-gitter.md': source,
+    });
+    cleanVerdictStub(f);
+    const result = check(f);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.out, /agent-roster: clean/);
+  });
+}
+
+test('nested project paths fail as unsupported registration policy, not absent writers', (t) => {
+  const f = fixture(t);
+  f.put('home/.claude/engine-sync.json', JSON.stringify({ version: 1, codex: { projects: ['group/demo-child'] } }));
+  cleanVerdictStub(f);
+  const result = check(f);
+  assert.equal(result.status, 2, result.out);
+  assert.match(result.out, /agent-roster: ERROR .*config show/);
+  assert.match(result.out, /codex.projects: invalid name "group\/demo-child"/);
+});
+
+for (const [label, tools, sandbox, expected] of [
+  ['read tools default', 'tools: Read, Bash\n', '', 'read-only'],
+  ['write tools default', 'tools: Read, Write, Bash\n', '', null],
+  ['list tools default', 'tools: [Read, Edit, Bash]\n', '', null],
+  ['absent tools default', '', '', null],
+  ['explicit inherit overrides read tools', 'tools: Read, Bash\n', 'engines:\n  codex:\n    sandbox: inherit\n', null],
+]) {
+  test(`child writer sandbox follows its source: ${label}`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, {
+      'demo-child/.claude/agents/gitter.md': `---\nname: gitter\ndescription: Writer fixture\nmodel: smart\n${tools}${sandbox}---\nWrite.\n`,
+    });
+    let result = check(f);
+    assert.equal(result.status, 0, result.out);
+    cleanVerdictStub(f);
+    f.put('.codex/agents/gitter-demo-child.toml', `sandbox_mode = "${expected === 'read-only' ? 'workspace-write' : 'read-only'}"\n`);
+    result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.ok(result.out.includes(`expected ${expected ?? 'inherit'}`), result.out);
+  });
+}
+
+for (const runtime of ['codex', 'opencode']) {
+  test(`child writer disabled only for ${runtime} validates the other runtime`, (t) => {
+    const source = writerSource('gpt-gitter').replace(runtime === 'codex'
+      ? '  codex:\n    sandbox: inherit' : '  opencode:\n    permission:\n      bash:\n        "git *": allow', `  ${runtime}: false`);
+    const f = fixture(t, {}, { version: 1 }, {}, {
+      'demo-child/.claude/agents/gpt-gitter.md': source,
+    });
+    cleanVerdictStub(f);
+    let result = check(f);
+    assert.equal(result.status, 0, result.out);
+    const active = runtime === 'codex' ? 'opencode' : 'codex';
+    f.put(active === 'codex' ? '.codex/agents/gpt-gitter-demo-child.toml' : '.opencode/agent/gpt-gitter-demo-child.md',
+      active === 'codex' ? 'sandbox_mode = "read-only"\n' : '---\npermission: deny\n---\nRead.\n');
+    result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.ok(result.out.includes(`${active}: gpt-gitter-demo-child`), result.out);
+    assert.ok(!result.out.includes(`${runtime}: gpt-gitter-demo-child`), result.out);
+  });
+}
+
+for (const directory of ['.claude/agents', '.claude/agents/team', 'demo-child/.claude/agents']) {
+  test(`writer registration uses declared name and own source: ${directory}`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, {
+      [`${directory}/writer.md`]: writerSource('gitter', 'read-only', 'ask'),
+    });
+    const name = `gitter${directory.startsWith('demo-child') ? '-demo-child' : ''}`;
+    let result = check(f);
+    assert.equal(result.status, 0, result.out);
+    cleanVerdictStub(f);
+    f.put(`.codex/agents/${name}.toml`, 'sandbox_mode = "workspace-write"\n');
+    result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.ok(result.out.includes(`codex: ${name}.toml`), result.out);
+    assert.ok(result.out.includes(`${directory}/writer.md`), result.out);
+  });
+}
+
+for (const permission of ['allow', 'bash: allow', 'bash:\n  "git *": allow\n  "git push *": ask']) {
+  test(`child writer preserves structured OpenCode permission: ${permission}`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, {
+      'demo-child/.claude/agents/gitter.md': `---\nname: gitter\ndescription: Writer fixture\nmodel: smart\nengines:\n  opencode:\n    permission:\n      ${permission.replaceAll('\n', '\n      ')}\n---\nWrite.\n`,
+    });
+    let result = check(f);
+    assert.equal(result.status, 0, result.out);
+    cleanVerdictStub(f);
+    f.put('.opencode/agent/gitter-demo-child.md', '---\npermission:\n  bash:\n    "git *": allow\n    "git push *": deny\n---\nWrite.\n');
+    result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, /opencode: gitter-demo-child\.md lacks its source per-agent git write permission/);
+  });
+}
+
+test('child writer reordered Git permission rules fail despite clean compiler', (t) => {
+  const source = writerSource('gitter').replace('"git *": allow', '"*": deny\n        "git *": allow');
+  const f = fixture(t, {}, { version: 1 }, {}, {
+    'demo-child/.claude/agents/gitter.md': source,
+  });
+  assert.equal(check(f).status, 0);
+  cleanVerdictStub(f);
+  // OpenCode's last matching rule wins: the same values in reverse order deny Git.
+  f.put('.opencode/agent/gitter-demo-child.md', '---\npermission:\n  bash:\n    "git *": allow\n    "*": deny\n---\nWrite.\n');
+  const result = check(f);
+  assert.equal(result.status, 1, result.out);
+  assert.match(result.out, /opencode: gitter-demo-child\.md lacks its source per-agent git write permission/);
+});
+
+for (const [label, second, header, policy, collision] of [
+  ['same name', 'gpt-gitter', '', {}, true],
+  ['case-folded name', 'GPT-GITTER', '', {}, true],
+  ['disabled source still reserves its name', 'gpt-gitter', 'engines:\n  codex: false\n  opencode: false\n', {}, true],
+  ['unmet requirement still reserves its name', 'gpt-gitter', 'requires: [writers]\n', {}, true],
+  ['never registered source reserves no name', 'gpt-gitter', '', { neverRegister: ['gpt-gitter'] }, false],
+]) {
+  test(`writer collision follows shared registration law: ${label}`, (t) => {
+    const f = fixture(t, { suffixMode: 'none', ...policy }, { version: 1 }, {}, {
+      '.claude/agents/gpt-gitter.md': writerSource('gpt-gitter'),
+    });
+    // Keep real generated artifacts, then introduce the source conflict that
+    // judge 1 is pretending not to see (a conflicting build writes no mirrors).
+    f.put(`demo-child/.claude/agents/${second}.md`, `---\nname: ${second}\ndescription: Writer fixture\nmodel: smart\n${header}---\nRead.\n`);
+    cleanVerdictStub(f);
+    const result = check(f);
+    assert.equal(result.status, collision ? 1 : 0, result.out);
+    if (collision) {
+      assert.match(result.out, /role name .* from .*\.claude\/agents\/gpt-gitter\.md and .*demo-child\/\.claude\/agents\//);
+      assert.doesNotMatch(result.out, /agent-roster: clean/);
+    }
+  });
+}
+
 for (const [runtime, corrupt] of [
   ['opencode', '---\nname: gpt-gitter\npermission:\n  bash:\n    "git *": deny\n---\nThe body says "git *": allow, but the permission denies it.\n'],
   ...['read-only', 'workspace-write', 'unknown'].map((mode) => ['codex', `name = "gpt-gitter"\nsandbox_mode = "${mode}"\n`]),

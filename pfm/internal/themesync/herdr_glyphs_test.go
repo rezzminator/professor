@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // surfaces.herdr holds the custom tokens and the tabGlyphs object side by
@@ -152,5 +153,28 @@ func TestHerdrTabGlyphsRefusesANonRegularState(t *testing.T) {
 	}
 	if _, err := HerdrTabGlyphs(dir); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("a FIFO state = %v, want a not-a-regular-file error", err)
+	}
+}
+
+func TestHerdrTabGlyphsUnchangedStateAvoidsBodyWork(t *testing.T) {
+	testjail.PauseFlightRecorder(t)
+	h := newHarness(t)
+	h.writeProfile(profileJSON(`{"herdr":{"tabGlyphs":{"blocked":["X","Y"]}}}`))
+	h.on()
+	glyphs, err := HerdrTabGlyphs(h.stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	glyphs.Blocked[0] = "caller mutation"
+	if next, err := HerdrTabGlyphs(h.stateDir); err != nil || next.Blocked[0] != "X" {
+		t.Fatalf("caller corrupted cached glyphs: %+v, %v", next, err)
+	}
+	allocations := testing.AllocsPerRun(10, func() {
+		if _, err := HerdrTabGlyphs(h.stateDir); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocations > 30 {
+		t.Errorf("unchanged theme state decoded on paint: %.0f allocations; want <=30", allocations)
 	}
 }

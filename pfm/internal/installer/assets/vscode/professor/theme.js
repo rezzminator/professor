@@ -19,6 +19,11 @@ const CHROME_RECORD = 'vscode-chrome.json';
 const PEACOCK = 'johnpapa.vscode-peacock';
 const LOCK = 'vscode-apply.lock';
 const ACK_LOCK = 'vscode-ack.lock';
+// Publication failures cannot use the failed mutex or overwrite shared history.
+// A replacement may reclaim only a provably dead owner in its own process scope.
+const ACK_FAILURES = 'vscode-ack-failures';
+const ACK_OWNER = randomUUID();
+const ACK_PROCESS = { pid: process.pid, scope: ackProcessScope() };
 const POLL_MS = 2000;
 const LOCK_WAIT_MS = 100;
 const LOCK_TRIES = 100;
@@ -144,28 +149,98 @@ async function withLock(dir, work, name = LOCK) {
   }
 }
 
-// previousChrome is the chrome map of the ack on disk: the entries other windows wrote. An ack that
-// is absent or unreadable starts an empty map.
+// Only genuinely absent history starts empty. Unknown history belongs to other
+// windows too: leave its bytes intact and publish a separate diagnostic.
 function previousChrome(dir) {
   const ackPath = path.join(dir, ACK);
   try {
-    const chrome = readJSON(ackPath)?.chrome;
-    if (!chrome || typeof chrome !== 'object' || Array.isArray(chrome)) return {};
-    return Object.fromEntries(Object.entries(chrome).filter(([, entry]) => entry && typeof entry === 'object'));
+    const ack = readJSON(ackPath);
+    const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
+    if (!object(ack)) throw new Error('expected an acknowledgement object');
+    if (ack.chrome === undefined) return {}; // legacy terminal-only acknowledgement
+    if (!object(ack.chrome) || Object.values(ack.chrome).some((entry) => !object(entry))) {
+      throw new Error('invalid window chrome history');
+    }
+    return ack.chrome;
   } catch (err) {
-    if (err.code !== 'ENOENT') console.error(`Professor: pfm theme ack ${ackPath} unreadable, its window entries start over: ${err?.stack ?? err}`);
-    return {};
+    if (err.code === 'ENOENT') return {};
+    throw new Error(`read acknowledgement history ${ackPath}: ${err.message}`);
   }
 }
 
-// Every acknowledgement, including an apply-lock failure, merges under the same short-lived
-// mutex. Taking it never needs the apply lock, so failure reporting cannot bypass serialization.
+// Boot UUIDs scope PIDs to one machine boot; Linux also needs its PID namespace.
+// Without this proof, retain predecessor evidence rather than guessing it dead.
+function ackProcessScope() {
+  try {
+    if (process.platform === 'linux') {
+      const boot = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      const namespace = fs.readlinkSync('/proc/self/ns/pid');
+      if (boot && namespace) return `linux:${boot}:${namespace}`;
+    } else if (process.platform === 'darwin') {
+      const boot = require('child_process').execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], { encoding: 'utf8', timeout: 1000 }).trim();
+      if (boot) return `darwin:${boot}`;
+    }
+    throw new Error('no boot/process namespace identity');
+  } catch (err) {
+    console.error(`Professor: cannot prove predecessor ACK owners dead; diagnostics will be retained: ${err.message}`);
+    return null;
+  }
+}
+
+// Run only after a successful serialized ACK merge. ESRCH is proof only within
+// the exact same boot/process namespace; EPERM, reused PIDs and unknown owners
+// remain visible to Go. Never repair or discard unreadable shared ACK history.
+function clearDeadAckFailures(dir) {
+  if (!ACK_PROCESS.scope) return;
+  let names;
+  try { names = fs.readdirSync(dir); } catch (err) {
+    if (err.code === 'ENOENT') return;
+    throw new Error(`enumerate acknowledgement failures ${dir}: ${err.message}`);
+  }
+  for (const name of names) {
+    if (name.startsWith('.') || !name.endsWith('.json') || name === `${ACK_OWNER}.json`) continue;
+    const file = path.join(dir, name);
+    let identity, failure;
+    try {
+      identity = fs.lstatSync(file);
+      if (!identity.isFile()) continue;
+      failure = readJSON(file);
+    } catch (err) {
+      if (err.code === 'ENOENT') continue; // reporting owner recovered concurrently
+      throw new Error(`read acknowledgement failure ${file}: ${err.message}`);
+    }
+    const owner = failure?.owner;
+    if (owner?.scope !== ACK_PROCESS.scope || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) continue;
+    try { process.kill(owner.pid, 0); continue; } catch (err) {
+      if (err.code !== 'ESRCH') {
+        console.error(`Professor: acknowledgement owner ${file} is not proven dead: ${err.message}`);
+        continue;
+      }
+    }
+    const current = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (current && current.dev === identity.dev && current.ino === identity.ino) fs.rmSync(file);
+  }
+}
+
+// Every shared acknowledgement merges under its mutex. Failure evidence is a
+// separate per-owner file, also read by Go before accepting same-generation ACKs.
 async function writeAck(dir, ack, target, entry) {
-  await withLock(dir, () => {
-    const chrome = previousChrome(dir);
-    if (target) chrome[target] = entry;
-    writeJSONAtomic(path.join(dir, ACK), { ...ack, appliedAt: new Date().toISOString(), chrome });
-  }, ACK_LOCK);
+  const failureDir = path.join(dir, ACK_FAILURES);
+  const failurePath = path.join(failureDir, `${ACK_OWNER}.json`);
+  try {
+    await withLock(dir, () => {
+      const chrome = previousChrome(dir);
+      if (target) chrome[target] = entry;
+      writeJSONAtomic(path.join(dir, ACK), { ...ack, appliedAt: new Date().toISOString(), chrome });
+      if (!ack.error && !entry?.error) clearDeadAckFailures(failureDir);
+    }, ACK_LOCK);
+    fs.rmSync(failurePath, { force: true });
+  } catch (err) {
+    const error = `publish acknowledgement generation ${ack.generation}: ${err.message}`;
+    fs.mkdirSync(failureDir, { recursive: true });
+    writeJSONAtomic(failurePath, { generation: ack.generation, target, error, owner: ACK_PROCESS });
+    throw new Error(error);
+  }
 }
 
 // applyGlobal brings Global terminal and frame colours to the contract, under
@@ -285,14 +360,15 @@ async function applyContract(dir) {
         const unlisted = peacockUnlisted(wantChrome);
         if (unlisted.length) chromeEntry.error = `Peacock repaints ${unlisted.length} frame keys: list them in peacock.excludedSettings`;
       }
-      await writeAck(dir, ack, target || 'global', target ? entry : chromeEntry);
     });
   } catch (err) {
-    // Applying failed: publish the failure through the same acknowledgement mutex as success.
     ack.error = `apply generation ${generation} to workbench.colorCustomizations: ${err?.message ?? err}`;
     if (target) entry = { generation, keys: Object.keys(wantChrome).sort(), error: ack.error };
-    await writeAck(dir, ack, target || 'global', target ? entry : { ...chromeEntry, error: ack.error });
+    else chromeEntry.error = ack.error;
   }
+  // Publication is attempted once, outside the apply catch. Retrying a failed
+  // ACK mutex cannot report its own failure and used to leave stale success.
+  await writeAck(dir, ack, target || 'global', target ? entry : chromeEntry);
   return contract;
 }
 
@@ -315,6 +391,7 @@ function startThemeSync(dir = stateDir(), onApplied = () => {}, refusal = '') {
   const syncTheme = () => {
     chain = chain.then(() => applyContract(dir)).then((contract) => contract && onApplied(contract)).catch((err) => {
       console.error(`Professor: pfm theme sync of ${contractPath} failed: ${err?.stack ?? err}`);
+      vscode.window.showErrorMessage(`Professor: pfm theme sync failed: ${err?.message ?? err}`);
     });
     return chain;
   };

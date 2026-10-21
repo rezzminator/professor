@@ -320,7 +320,6 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 		} else if themed {
 			commands = append(commands, []string{tmuxSetOption, tmuxUnset, name})
 		}
-		commands = append(commands, []string{tmuxSetOption, tmuxUnset, tmuxPriorName(name)})
 	}
 	for _, name := range tmuxChipNames {
 		raw, err := s.servers.Show(ctx, socket, tmuxPriorName(name))
@@ -332,7 +331,6 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 		} else if (err == nil && tmuxPriorIsUnset(raw)) || chipped {
 			commands = append(commands, []string{tmuxSetOption, tmuxUnset, name})
 		}
-		commands = append(commands, []string{tmuxSetOption, tmuxUnset, tmuxPriorName(name)})
 	}
 	for _, option := range tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation) {
 		if strings.HasPrefix(option.Name, "@") && !isTmuxChip(option.Name) {
@@ -340,8 +338,19 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 		}
 	}
 	commands = append(commands, []string{tmuxSetOption, tmuxUnset, tmuxStateName})
+	// Apply is sequential, not atomic. Keep every prior until all values are
+	// restored and both ownership markers are gone. A failed prefix can then
+	// replay restoration; a failed cleanup cannot mistake restored values for
+	// theme-owned values whose missing prior means they should be unset.
 	if err := s.servers.Apply(ctx, socket, commands); err != nil {
 		return fmt.Errorf("tmux %s: restore: %w", socket, err)
+	}
+	var cleanup [][]string
+	for _, name := range append(slices.Clone(tmuxStyleNames), tmuxChipNames...) {
+		cleanup = append(cleanup, []string{tmuxSetOption, tmuxUnset, tmuxPriorName(name)})
+	}
+	if err := s.servers.Apply(ctx, socket, cleanup); err != nil {
+		return fmt.Errorf("tmux %s: clean restored priors: %w", socket, err)
 	}
 	return nil
 }

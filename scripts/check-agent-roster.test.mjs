@@ -456,6 +456,7 @@ const twins = [
   ['gpt-collector', 'gpt-6.1-sol', 'high', 'collector'],
   ['gpt-conflict-resolver', 'gpt-6.1-sol', 'high', 'conflict-resolver'],
   ['gpt-documenter', 'gpt-6.1-sol', 'high', 'documenter'],
+  ['gpt-pcm', 'gpt-6.1-sol', 'high'],
   ['gpt-flights-hunter', 'gpt-6.1-sol', 'high', 'flights-hunter'],
   ['gpt-flights-spec-walker', 'gpt-6.1-sol', 'high', 'flights-spec-walker'],
   ['gpt-flights-sub-lander', 'gpt-6.1-sol', 'high', 'flights-sub-lander'],
@@ -566,6 +567,28 @@ test('the gpt-agents capability decides whether the GPT twins are linked', () =>
       `${name}: not reported SKIPPED`);
     assert.doesNotMatch(on.doctor.out, new RegExp(`agent SKIPPED all ${name} `), `${name}: SKIPPED although the capability is declared`);
   }
+});
+
+test('gpt-pcm registers the project PCM owner with its runtime skills and fail-closed GPT routing', () => {
+  const render = renderShipped([CAPABILITY]);
+  const text = renderedText(render, 'gpt-pcm');
+  assert.ok(text, 'gpt-pcm: the rendered registration is missing');
+  const fm = parseFrontmatter('gpt-pcm', text);
+  const project = parseFrontmatter('project gpt-pcm', readFileSync(join(ROOT, 'templates/project/agents/gpt-pcm.md'), 'utf8'));
+  for (const key of ['tools', 'skills', 'model', 'effort', 'requires', 'engines', 'autoCompact'])
+    assert.deepEqual(fm[key], project[key], `gpt-pcm: project registration ${key} drifted`);
+  assert.equal(realpathSync(renderedPath(render, 'gpt-pcm')),
+    join(render.home, 'source/templates/generated/agents/gpt-pcm.md'));
+  assert.match(text, /Read this repository's `\.claude\/agents\/pcm\.md` in full before acting/);
+  assert.match(text, /execute its protocol, including skills, checks, refusals and report format/);
+  assert.match(text, /BLOCKED: project pcm manual unreadable/);
+  assert.match(text, /BLOCKED: GPT role unavailable: \{role\}/);
+  assert.match(text, /`general-purpose` and `Explore` use `sol`/);
+  assert.match(text, /manual's model/);
+  assert.match(text, /Registry discovery requires a new session or user-authorized reload/);
+  assert.match(text, /Git writes remain with the authorized Git writer/);
+  for (const caller of ['gpt-documenter', 'gpt-foreman'])
+    assert.ok(renderedText(render, caller).includes('`gpt-pcm`'), `${caller}: PCM ownership route missing`);
 });
 
 // A fifth field names the rendered variant a twin derives from when it is not the role's own manual.

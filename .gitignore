@@ -77,3 +77,7 @@ scripts/leak-terms.txt
 
 # Fleet prompts are assembled from embedded source parts by pfm install.
 /pfm/harness-prompts/generated/
+
+# employer-specific research agents: local only, never tracked
+templates/global/agents/bk-*.md
+templates/generated/agents/bk-*.md

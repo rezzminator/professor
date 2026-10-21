@@ -107,6 +107,13 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		stamp:       options.Now().Format("20060102-150405"),
 		managedRoot: managedRootForHome(options.Home),
 	}
+	if installer.apply {
+		unlock, lockErr := lockInstaller(installer.managedRoot)
+		if lockErr != nil {
+			return Report{}, lockErr
+		}
+		defer func() { err = errors.Join(err, unlock()) }()
+	}
 	installer.say("pfm install: home=%s config=%s", options.Home, options.ConfigDir)
 	switch options.Mode {
 	case ModeDryRun:
@@ -304,7 +311,9 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
+	installer.deferFailure(installer.ensureExtensions(ctx, false))
 	installer.deferFailure(installer.ensureClaudePlugins(ctx))
+	installer.deferFailure(installer.recordClaudeExtensionMarketplaces())
 	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
 	installer.deferFailure(installer.wireCodexHooks())
@@ -617,6 +626,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
 	if err := installer.unwireClaudeLauncher(); err != nil {
+		return err
+	}
+	if err := installer.ensureExtensions(ctx, true); err != nil {
 		return err
 	}
 	if err := installer.ensureClaudeEnv(true); err != nil {

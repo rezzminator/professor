@@ -289,6 +289,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		fmt.Fprintf(stdout, "config ask.%s.model=%s (%s)\n", name, prefs.Model, config.Source("ask."+name+".model"))
 		fmt.Fprintf(stdout, "config ask.%s.effort=%s (%s)\n", name, prefs.Effort, config.Source("ask."+name+".effort"))
 	}
+	config.ReportExtensions(stdout)
 	printResolvedHarvesterConfig(stdout, config)
 }
 

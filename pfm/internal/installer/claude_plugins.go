@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -570,6 +571,14 @@ func (installer *engine) installClaudePlugin(
 	target *ClaudePluginTarget,
 ) error {
 	install := []string{binary, claudePluginCommand, "install", target.ID, "-y"}
+	for name, definition := range pfmconfig.ExtensionRegistry() {
+		if installer.options.Extensions[name].Active(pfmengine.MustLookup(pfmengine.Claude).LongName) &&
+			definition.Engines[pfmengine.MustLookup(pfmengine.Claude).LongName].ID == target.ID {
+			install = append(
+				install,
+				definition.Engines[pfmengine.MustLookup(pfmengine.Claude).LongName].InstallSuffix...)
+		}
+	}
 	var add []string
 	message := fmt.Sprintf("run %s=%s %s", claudeConfigDirEnv, dir, shellCommandLine(install...))
 	if target.Source != "" {

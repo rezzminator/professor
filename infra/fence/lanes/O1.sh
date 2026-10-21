@@ -617,4 +617,39 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "the dry run opens with the plan header, finds all seven families (exit $plan_rc), names its last process and starts no worker; an argument exits 2 with the usage, and so does the internal worker without --front"
 fi
 
+# ─── O1.20 — cross-engine extension switch ────────────────────────────────
+beat O1.20-extensions
+spends none
+bad=""
+extension_backup="$(mktemp)"
+cp "$CONFIG" "$extension_backup"
+for enabled in true false; do
+  python3 - "$CONFIG" "$enabled" <<'PYEXT'
+import json,sys
+p=sys.argv[1]
+with open(p) as f: config=json.load(f)
+config["extensions"]={"ponytail":{"enabled":sys.argv[2]=="true","engines":["claude","codex","opencode"],"env":{"PONYTAIL_SUBAGENT_MATCHER":"^fixture$"},"options":{"ledger":False}}}
+with open(p,"w") as f: json.dump(config,f)
+PYEXT
+  extension_out="$(install_again)"; extension_rc=$?
+  [ "$extension_rc" -eq 0 ] || bad="$bad extension $enabled install exited $extension_rc: $(one_line "$extension_out");"
+  extension_doctor="$(pfm doctor 2>&1)"
+  for engine in claude codex opencode; do
+    for aspect in installed enabled options env; do
+      grep -qF "doctor: extension ponytail/$engine $aspect" <<<"$extension_doctor" || bad="$bad extension $enabled $engine lacks $aspect doctor row;"
+    done
+  done
+  grep -qF 'doctor: extension ponytail/codex hook trust' <<<"$extension_doctor" || bad="$bad extension $enabled lacks hook trust row;"
+  if grep -E '^doctor: extension(s| )' <<<"$extension_doctor" | grep -q 'FAIL'; then
+    bad="$bad extension $enabled doctor drift: $(one_line "$(grep -E '^doctor: extension(s| )' <<<"$extension_doctor")");"
+  fi
+done
+cp "$extension_backup" "$CONFIG"
+rm -f "$extension_backup"
+restore_out="$(install_again)"; restore_rc=$?
+[ "$restore_rc" -eq 0 ] || bad="$bad restoring extension config failed ($restore_rc): $(one_line "$restore_out");"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "extension ON/OFF converges all engines and every doctor aspect, original config restored"
+fi
+
 lane_end

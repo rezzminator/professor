@@ -73,9 +73,19 @@ func TestCodexLaunchDropsThePaneOfAChildThatIsNoInteractiveChat(t *testing.T) {
 				SIDDir:  filepath.Join(root, "sid"),
 				TmuxDir: filepath.Join(root, "tmux"),
 			}}
+			runtime.Config.Extensions = map[string]config.Extension{
+				"ponytail": {
+					Enabled: true,
+					Engines: []string{"codex"},
+					Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "^worker$"},
+				},
+			}
 			var stderr bytes.Buffer
 			if code := CodexLaunch(test.args, &stderr, runtime); code != 0 {
 				t.Fatalf("CodexLaunch code=%d stderr=%q", code, stderr.String())
+			}
+			if !slices.Contains(gotEnv, "PONYTAIL_SUBAGENT_MATCHER=^worker$") {
+				t.Errorf("extension env lost at Codex exec: %q", gotEnv)
 			}
 			if gotEnv == nil {
 				t.Fatalf("CodexLaunch never reached exec")
@@ -185,6 +195,57 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 			}
 			if !slices.Equal(gotArgv, test.want) {
 				t.Fatalf("CodexLaunch(%q) exec argv = %q, want %q", test.args, gotArgv, test.want)
+			}
+		})
+	}
+}
+
+func TestCodexLaunchExtensionOwnership(t *testing.T) {
+	root := testjail.ShortRoot(t)
+	binary := filepath.Join(root, "codex")
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	t.Setenv("PATH", root)
+	t.Setenv("PONYTAIL_USER_EXPORT", "user")
+	t.Setenv("PONYTAIL_SUBAGENT_MATCHER", "inherited")
+	previous := LaunchExec
+	t.Cleanup(func() { LaunchExec = previous })
+	for _, mode := range []string{"on", "off", "dropped"} {
+		t.Run(mode, func(t *testing.T) {
+			ext := config.Extension{
+				Enabled: mode != "off",
+				Engines: []string{"codex"},
+				Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "configured"},
+			}
+			if mode == "dropped" {
+				ext.Engines = nil
+			}
+			var env []string
+			LaunchExec = func(_ string, _, environment []string) error { env = environment; return nil }
+			runtime := config.Runtime{
+				Config: config.Config{Extensions: map[string]config.Extension{"ponytail": ext}},
+				Paths: paths.Values{
+					Home:    root,
+					StateDB: filepath.Join(root, "state", "pfm.db"),
+					SIDDir:  filepath.Join(root, "sid"),
+					TmuxDir: filepath.Join(root, "tmux"),
+				},
+			}
+			var stderr bytes.Buffer
+			if code := CodexLaunch(nil, &stderr, runtime); code != 0 {
+				t.Fatalf("launch code=%d: %s", code, &stderr)
+			}
+			if !slices.Contains(env, "PONYTAIL_USER_EXPORT=user") {
+				t.Errorf("exec overlay lost unowned export: %v", env)
+			}
+			want := "inherited"
+			if mode == "on" {
+				want = "configured"
+			}
+			if !slices.Contains(env, "PONYTAIL_SUBAGENT_MATCHER="+want) {
+				t.Errorf("exec overlay precedence wrong: %v", env)
 			}
 		})
 	}

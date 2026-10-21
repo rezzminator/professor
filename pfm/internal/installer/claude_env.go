@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -459,6 +460,11 @@ func ClaudeEnvUnknownKeys(env map[string]string, targets []ClaudePluginTarget) [
 	var unknown []string
 	for _, key := range slices.Sorted(maps.Keys(env)) {
 		known := key == PluginLogDirEnv
+		for name := range pfmconfig.ExtensionRegistry() {
+			if strings.HasPrefix(key, pfmconfig.ExtensionEnvPrefix(name)) {
+				known = true
+			}
+		}
 		for index := range targets {
 			prefix := strings.ToUpper(strings.ReplaceAll(targets[index].Name, "-", "_"))
 			if key == prefix || strings.HasPrefix(key, prefix+"_") {

@@ -67,4 +67,4 @@ Inside a chat, the `mcp__harvester-professor__*` tools (`mcp__harvester-professo
 
 ## Config
 
-`pfm config show` prints the config path (`{clone}/pfm.config.json` by default; `pfm --config PATH` or `PFM_CONFIG` overrides) and every effective key with its source (file or default) — accounts, `claude.systemPrompt` (`production | lean | professor`), `claude.permissionMode`, `mcp.servers.*`, `harvester.enabled`, `ask.*`. `pfm config claude [--account N]` prints the resolved Claude launch settings. `pfm config validate` checks the file; `pfm config init [--force]` writes a fresh one.
+`pfm config show` prints the config path (`{clone}/pfm.config.json` by default; `pfm --config PATH` or `PFM_CONFIG` overrides) and every effective key with its source (file or default) — accounts, `claude.systemPrompt` (`production | lean | professor`), `claude.permissionMode`, `mcp.servers.*`, `harvester.enabled`, `extensions.*`, `ask.*`. `pfm config claude [--account N]` prints the resolved Claude launch settings. `pfm config validate` checks the file; `pfm config init [--force]` writes a fresh one.

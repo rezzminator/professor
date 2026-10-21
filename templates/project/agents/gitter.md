@@ -124,7 +124,7 @@ NEVER report a file as "not staged" or "not committed" without verifying it agai
 
 ### Iso environment protection
 
-Iso worktrees patch `.env.{profile}`, create `.dev-ports`, `docker-compose.{profile}.yml`, and `schema` symlinks. These MUST NEVER reach `main`. If a `pipeline/` branch has a `.dev-ports` file, **refuse and redirect** to `/dev iso merge {profile}`. (Drop this section if the project has no iso-worktree tooling.)
+Iso worktrees patch `.env.{profile}`, create `.dev-ports`, `docker-compose.{profile}.yml`, and `schema` symlinks. These MUST NEVER reach `main`. If a `pipeline/` branch has a `.dev-ports` file, **refuse MERGE** and report the iso artifacts to the caller. Cleanup belongs to a scoped gitter dispatch on that source branch; rerun the merge review and gate before retrying MERGE. (Drop this section if the project has no iso-worktree tooling.)
 
 ### General rules
 

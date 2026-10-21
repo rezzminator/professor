@@ -21,7 +21,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ## System wiring
 
 - `CLAUDE.md`: the orientation file (Vocabulary, Runtime, Rules)
-- `.claude/commands/*.md`: project slash commands (`/pcm`, `/dev`, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
+- `.claude/commands/*.md`: project slash commands (`/pcm`, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
 - `.claude/agents/*.md`: root agents (`gitter`, `pcm`) and any `{proj}-{role}` specialist wrappers; machine-global agents live in `~/.claude/agents/`
 - `.claude/commands/{project}-testing-manual.md`: one per project, its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md`: reusable skills

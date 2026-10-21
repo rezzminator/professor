@@ -13,8 +13,7 @@
 #   ./dev.sh export       Export DB tables to seeding/local/ (runs {DB_EXPORT_CMD})
 #   ./dev.sh promote-demo Copy seeding/local/ → seeding/demo/ (review passwords.json after)
 #
-# This script replaces the slow Claude-interpreted /dev command with
-# native bash that runs steps in parallel where possible.
+# Native bash runs independent lifecycle steps in parallel.
 
 set -euo pipefail
 
@@ -29,8 +28,7 @@ ARCHIVE_DIR="${DEV_DIR}/archive"
 # Dev servers run on a DEDICATED tmux socket — never the default socket, where an
 # interactive Claude Code session lives. Isolating it means the dev lifecycle
 # (kill / restart / fresh) can never reach the tmux server Claude runs under. The
-# old shared-socket setup once let `/dev fresh` take a live Claude session down
-# with it. View / attach dev sessions with:  tmux -L {PROJECT_NAME_LOWER}-dev ls
+# dedicated socket exposes dev sessions via: tmux -L {PROJECT_NAME_LOWER}-dev ls
 DEV_TMUX_SOCKET="{PROJECT_NAME_LOWER}-dev"
 
 # ─── Project roster ───────────────────────────────────────────────
@@ -669,7 +667,7 @@ cmd_up() {
       # address, so the same two-stage check is mirrored inline here.
       wait_for "{QUEUE} (${LS_PORT:-{QUEUE_PORT}})" "curl -sf http://localhost:${LS_PORT:-{QUEUE_PORT}}/_localstack/health >/dev/null && curl -sf http://localhost:${LS_PORT:-{QUEUE_PORT}}/_localstack/init | grep -Eq '\"READY\"[[:space:]]*:[[:space:]]*true'" 20 || infra_ok=false
       if ! $infra_ok; then
-        fail "Isolated infrastructure not running — run '/dev iso init' first"
+        fail "Isolated infrastructure not running — start this profile's containers through the infra project's Makefile first"
         exit 1
       fi
     else
@@ -1069,7 +1067,7 @@ cmd_log() {
   local service="${1:-all}"
   local lines="${2:-50}"
 
-  # Handle numeric first arg (e.g., /dev log 100)
+  # Handle numeric first arg (e.g., .claude/scripts/dev.sh log 100)
   if [[ "$service" =~ ^[0-9]+$ ]]; then
     lines="$service"
     service="all"

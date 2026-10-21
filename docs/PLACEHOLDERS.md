@@ -227,7 +227,6 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{SCOPE}` | `commands/pcm.md` | the audit scope being run |
 | `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
-| `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |
 | `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md`, `global/agents/reviewer-pro.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
 | `{HHMMSS}` | `global/agents/agent-investigator.md`, `generated/agents/gpt-agent-investigator.md` | the UTC time of the report's write, hours, minutes and seconds |
 | `{RUN}` / `{ID}` / `{QUESTION}` | `global/agents/tracer.md`, `global/agents/sub-tracer.md`, `generated/agents/gpt-tracer.md`, `generated/agents/gpt-sub-tracer.md`, `global/commands/tracer/use.md` | the trace run's directory `tt new` printed; a sub-tracer's dotted node id; the card's `Q{n}` question number |

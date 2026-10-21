@@ -88,6 +88,9 @@ for (const [scope, directory] of [
     ['unmet requirement', 'requires: [gpt-agents]', [], 0, 0],
     ['all requirements needed', 'requires: [gpt-agents, another]', ['gpt-agents'], 0, 0],
     ['requirements met and trimmed', 'requires: [" gpt-agents ", another]', [' gpt-agents ', 'another'], 1, 1],
+    ['numeric requirement met', 'requires: [123]', ['123'], 1, 1],
+    ['numeric requirement unmet', 'requires: [123]', [], 0, 0],
+    ['boolean requirement text', 'requires: [true]', ['true'], 1, 1],
     ['no requirements', 'requires: []', [], 1, 1],
     ['requirements met but engine excluded', 'requires: [gpt-agents]\nengines:\n  codex: false\n  opencode: false', ['gpt-agents'], 0, 0],
   ]) {
@@ -299,6 +302,21 @@ function cleanVerdictStub(f) {
   f.env.ENGINE_SYNC_BIN = join(f.root, "clean-engine-sync");
 }
 
+for (const [runtime, corrupt] of [
+  ['opencode', '---\nname: gpt-gitter\npermission:\n  bash:\n    "git *": deny\n---\nThe body says "git *": allow, but the permission denies it.\n'],
+  ...['read-only', 'workspace-write', 'unknown'].map((mode) => ['codex', `name = "gpt-gitter"\nsandbox_mode = "${mode}"\n`]),
+]) {
+  test(`structured writer permission corruption fails despite clean compiler: ${runtime} ${corrupt}`, (t) => {
+    const source = '---\nname: gpt-gitter\ndescription: Writer fixture\nmodel: smart\nengines:\n  codex:\n    sandbox: inherit\n  opencode:\n    permission:\n      bash:\n        "git *": allow\n---\nWrite git.\n';
+    const f = fixture(t, {}, { version: 1 }, {}, { '.claude/agents/gpt-gitter.md': source });
+    f.put(runtime === 'codex' ? '.codex/agents/gpt-gitter.toml' : '.opencode/agent/gpt-gitter.md', corrupt);
+    cleanVerdictStub(f);
+    const result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, new RegExp(`${runtime}: gpt-gitter`));
+  });
+}
+
 test("a role with no generated Codex twin fails although engine-sync's check reports clean", (t) => {
   const f = fixture(t);
   unlinkSync(join(f.root, ".codex/agents/alpha.toml"));
@@ -333,6 +351,8 @@ test("sources that define no agent name what the comparison could not do", (t) =
   const f = fixture(t);
   rmSync(join(f.root, ".claude/agents"), { recursive: true });
   rmSync(join(f.root, "demo-child/.claude/agents"), { recursive: true });
+  mkdirSync(join(f.root, ".claude/agents"), { recursive: true });
+  mkdirSync(join(f.root, "demo-child/.claude/agents"), { recursive: true });
   rmSync(join(f.root, ".codex/agents"), { recursive: true });
   rmSync(join(f.root, ".opencode/agent"), { recursive: true });
   mkdirSync(join(f.root, ".codex/agents"), { recursive: true });
@@ -358,7 +378,7 @@ for (const writer of ['gitter', 'gpt-gitter']) {
     cleanVerdictStub(f);
     const result = check(f);
     assert.equal(result.status, 1, result.out);
-    assert.ok(result.out.includes(`codex: ${writer}.toml is registered read-only and cannot perform its source protocol`), result.out);
+    assert.ok(result.out.includes(`codex: ${writer}.toml sandbox override differs from its source protocol (expected inherit)`), result.out);
     assert.doesNotMatch(result.out, /agent-roster: clean/);
   });
   test(`${writer} missing OpenCode Git permission fails despite a clean compiler verdict`, (t) => {
@@ -367,7 +387,7 @@ for (const writer of ['gitter', 'gpt-gitter']) {
     cleanVerdictStub(f);
     const result = check(f);
     assert.equal(result.status, 1, result.out);
-    assert.ok(result.out.includes(`opencode: ${writer}.md lacks its per-agent git write permission`), result.out);
+    assert.ok(result.out.includes(`opencode: ${writer}.md lacks its source per-agent git write permission`), result.out);
     assert.doesNotMatch(result.out, /agent-roster: clean/);
   });
 }
@@ -687,6 +707,50 @@ const effortSteered = new Map([
   ['flights-foreman', foremanEffort], ['flights-foreman-sonnet', foremanEffort],
   ['reviewer', true], ['reviewer-pro', true], ['reviewer-nt', true], ['documenter', true],
 ]);
+function assertEffortPermission(name, text) {
+  const fm = parseFrontmatter(name, text);
+  const tools = (fm.tools ?? '').split(',').map((tool) => tool.trim());
+  const inheritsAll = fm.tools === undefined || tools.includes('*');
+  const denied = new Set(fm.disallowedTools ?? []);
+  const held = effortButtons.filter((button) => (inheritsAll || tools.includes(button)) && !denied.has(button));
+  const want = effortSteered.get(name);
+  if (want === undefined) {
+    assert.equal(fm.effortControl, undefined, `${name}: steered by effortControl but not an approved role`);
+    assert.deepEqual(held, [], `${name}: holds effort buttons`);
+    return false;
+  }
+  assert.deepEqual(fm.effortControl, want, `${name}: effortControl`);
+  assert.deepEqual(held, effortButtons, `${name}: must hold every effort button`);
+  for (const button of inheritsAll ? [] : effortButtons)
+    assert.equal(tools.filter((tool) => tool === button).length, 1, `${name}: must hold ${button} once; tools ${fm.tools}`);
+  return true;
+}
+
+test('effort permission gate rejects an unapproved role inheriting every tool', () => {
+  assert.throws(() => assertEffortPermission('unapproved', '---\nname: unapproved\n---\nRead.\n'), /holds effort buttons/);
+  assert.throws(() => assertEffortPermission('unapproved', '---\nname: unapproved\ntools: "*"\n---\nRead.\n'), /holds effort buttons/);
+  assert.equal(assertEffortPermission('unapproved', '---\nname: unapproved\ntools: Read, Bash\n---\nRead.\n'), false);
+});
+
+test('effort permission gate evaluates native exclusions without reducing inherited capabilities', () => {
+  const exclusions = `disallowedTools: ${JSON.stringify(effortButtons)}\n`;
+  for (const tools of ['', 'tools: "*"\n', `tools: Read, Bash, ${effortButtons.join(', ')}\n`]) {
+    assert.equal(assertEffortPermission('unapproved', `---\nname: unapproved\n${tools}${exclusions}---\nRead.\n`), false);
+  }
+  for (const surviving of effortButtons) {
+    const denied = effortButtons.filter((button) => button !== surviving);
+    assert.throws(() => assertEffortPermission('unapproved', `---\nname: unapproved\ndisallowedTools: ${JSON.stringify(denied)}\n---\nRead.\n`));
+  }
+  assert.throws(() => assertEffortPermission('reviewer', `---\nname: reviewer\neffortControl: true\ndisallowedTools: [${effortButtons[0]}]\n---\nReview.\n`));
+  const render = renderShipped([CAPABILITY]);
+  for (const name of ['astra', 'sol', 'luna']) {
+    const fm = parseFrontmatter(name, renderedText(render, name));
+    assert.equal(fm.tools, undefined, `${name}: unrelated inherited capabilities narrowed`);
+    assert.equal(fm.effortControl, undefined, `${name}: must not be automatically steered`);
+    assert.deepEqual(fm.disallowedTools, effortButtons, `${name}: exclude exactly the effort buttons`);
+  }
+});
+
 test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pcm or releaser', () => {
   const render = renderShipped([CAPABILITY]);
   const dir = join(render.home, '.claude/agents');
@@ -699,20 +763,7 @@ test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pc
     assert.ok(agents.some(([agent]) => agent === name), `${name}: not rendered, so its lack of buttons is unproven`);
   const steered = [];
   for (const [name, text] of agents) {
-    const fm = parseFrontmatter(name, text);
-    const tools = (fm.tools ?? '').split(',').map((tool) => tool.trim());
-    // An agent with no tools line inherits every tool, the three effort buttons among them.
-    const inheritsAll = fm.tools === undefined;
-    const want = effortSteered.get(name);
-    if (want === undefined) {
-      assert.equal(fm.effortControl, undefined, `${name}: steered by effortControl but not an approved role`);
-      assert.deepEqual(tools.filter((tool) => /effort_(?:up|down|auto)$/.test(tool)), [], `${name}: holds effort buttons`);
-      continue;
-    }
-    steered.push(name);
-    assert.deepEqual(fm.effortControl, want, `${name}: effortControl`);
-    for (const button of inheritsAll ? [] : effortButtons)
-      assert.equal(tools.filter((tool) => tool === button).length, 1, `${name}: must hold ${button} once; tools ${fm.tools}`);
+    if (assertEffortPermission(name, text)) steered.push(name);
   }
   assert.deepEqual(steered.sort(), [...effortSteered.keys()].sort(), 'an approved steered role was not rendered');
   // A twin pins its own tools to drop the buttons: the rest stays its role's list.

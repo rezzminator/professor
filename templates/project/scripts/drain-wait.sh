@@ -10,7 +10,7 @@ set -euo pipefail
 #
 # OPTIONAL — only for a roster with an asynchronous queue consumer (an LLM worker, a
 # job runner) whose progress a health endpoint reports. A roster with no such project
-# ships without this script; /dev FRESH skips the drain step.
+# ships without this script and has no drain step.
 #
 # ── ADAPT PER PROJECT ─────────────────────────────────────────────────────────────
 # This barrier polls a health endpoint that reports queue progress as JSON. Wire the

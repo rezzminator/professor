@@ -8,6 +8,31 @@ source "$SUT"
 REPO_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 TMP_BASE="$T"
 FAILURES=0
+
+# A fence scratch directory disappears after the call. Every unregistered token
+# must remain in the retained output, including those outside the top ten.
+mkdir -p "$T/placeholder-fixture/templates" "$T/placeholder-fixture/docs" "$T/placeholder-tmp"
+printf '{KNOWN}\n' > "$T/placeholder-fixture/docs/PLACEHOLDERS.md"
+printf '{UNREGISTERED_%02d}\n' {1..12} > "$T/placeholder-fixture/templates/example.md"
+(
+  cd "$T/placeholder-fixture" || exit 1
+  export PFM_DEV_FENCE=1 TMPDIR="$T/placeholder-tmp"
+  head_() { :; }
+  fail_step() { printf 'FAIL %s\n' "$*"; }
+  info() { printf '%s\n' "$*"; }
+  checks_templates_placeholders
+) > "$T/placeholder-report" 2>&1
+rm -rf "$T/placeholder-tmp"
+missing=0
+for token in $(printf '{UNREGISTERED_%02d}\n' {1..12}); do
+  grep -Fq "$token" "$T/placeholder-report" || missing=$((missing + 1))
+done
+if [ "$missing" = 0 ] && grep -q '^FAIL 12 of 12' "$T/placeholder-report"; then
+  ok 'all placeholder failures survive scratch cleanup in retained output'
+else
+  bad 'complete placeholder diagnostics after scratch cleanup' "missing $missing tokens" "$(cat "$T/placeholder-report")"
+fi
+
 shtest_unset_gate_env # run nested under the gate's own stepprof wrapper, the suite starts from none of its knobs
 fence_config_values || exit 1
 # Optional scheduler knobs must remain absent so the gate owns its derived bound.

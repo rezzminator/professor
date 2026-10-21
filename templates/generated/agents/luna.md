@@ -10,6 +10,10 @@ autoCompact:
   forceAt: 230k
   nudgeFrom: 190k
   nudgeEvery: 20k
+disallowedTools:
+  - mcp__auto-effort-control__effort_up
+  - mcp__auto-effort-control__effort_down
+  - mcp__auto-effort-control__effort_auto
 description: general-purpose on GPT luna medium
 model: gpt-6-luna[1m]
 effort: medium

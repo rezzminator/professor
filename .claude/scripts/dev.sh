@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # dev.sh — the single entry point for building, testing, and inspecting this
-# repo's three projects. /dev drives it; agents call it directly.
+# repo's projects. Agents call it directly.
 #
 # WHAT THIS SCRIPT REPORTS WHEN IT IS ITSELF BROKEN:
 #   - a missing toolchain (go/node) is TOOLCHAIN-MISSING and exits non-zero.

@@ -149,7 +149,11 @@ checks_templates_placeholders() {
       fi
       printf '%s\n' "$unregistered" > "$out"
       fail_step "$(wc -l <<<"$unregistered") of $(wc -l <<<"$used") markdown-template tokens are absent from PLACEHOLDERS.md — register each as an install placeholder or under § Runtime metavariables"
-      info "most frequent 10 (full list: $out):"
+      # The fence's private /tmp is removed at exit. Keep the complete failure
+      # list in the retained log, not only a pointer to that ephemeral file.
+      info "unregistered tokens (complete list):"
+      while IFS= read -r tok; do info "  $tok"; done < "$out"
+      info "most frequent 10:"
       grep -rhoE '\{[A-Z][A-Z0-9_]+\}' --include='*.md' templates \
         | grep -xFf "$out" | sort | uniq -c | sort -rn | head -10 \
         | while read -r n tok; do info "  ${n}x  $tok"; done

@@ -280,25 +280,31 @@ for (const [runtime, expected] of [["codex", codexExpected], ["opencode", openCo
     failures.push(`${runtime}: the sources under .claude/agents (root and child projects) define no registered agent — the comparison had nothing to compare`);
 }
 
+function artifactPermissions(path, runtime) {
+  const args = ["-I", join(ROOT, "scripts/agent-source-inventory.py"), path, "--artifact", runtime];
+  const parsed = spawnSync("python3", args, { encoding: "utf8" });
+  if (parsed.error || parsed.status !== 0)
+    throw new Error(`cannot read structured ${runtime} permissions in ${path}: ${parsed.error || parsed.stderr.trim() || `exit ${parsed.status}`}`);
+  return JSON.parse(parsed.stdout);
+}
 for (const writer of ["gitter", "gpt-gitter"]) {
+  const source = sourceInventory(join(ROOT, ".claude/agents")).find((row) => row.name === writer);
   if (codexExpected.includes(writer)) {
     const path = join(ROOT, `.codex/agents/${writer}.toml`);
-    if (
-      existsSync(path) &&
-      /sandbox_mode\s*=\s*"read-only"/.test(readFileSync(path, "utf8"))
-    ) {
-      failures.push(
-        `codex: ${writer}.toml is registered read-only and cannot perform its source protocol`,
-      );
+    const configured = source.engines.codex?.sandbox;
+    // Both writers grant Write; without an explicit pin the compiler emits no
+    // sandbox override, as with inherit. Judge TOML data, not instruction text.
+    const expected = configured && configured !== "inherit" ? configured : null;
+    if (existsSync(path) && artifactPermissions(path, "codex").sandbox !== expected) {
+      failures.push(`codex: ${writer}.toml sandbox override differs from its source protocol (expected ${expected ?? "inherit"})`);
     }
   }
 
   if (openCodeExpected.includes(writer)) {
     const path = join(ROOT, `.opencode/agent/${writer}.md`);
-    if (existsSync(path) && !/"git \*": allow/.test(readFileSync(path, "utf8"))) {
-      failures.push(
-        `opencode: ${writer}.md lacks its per-agent git write permission`,
-      );
+    const expected = source.engines.opencode?.permission?.bash?.["git *"];
+    if (existsSync(path) && artifactPermissions(path, "opencode").permission?.bash?.["git *"] !== expected) {
+      failures.push(`opencode: ${writer}.md lacks its source per-agent git write permission`);
     }
   }
 }

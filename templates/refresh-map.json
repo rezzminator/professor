@@ -223,11 +223,6 @@
         ".claude/commands/audit/security.md": "9e31c001184143838657407a8ce251cd50511209e0ddc4c99c8c8a680167f877"
       }
     },
-    "project/commands/dev.md": {
-      "sources": {
-        ".claude/commands/dev.md": "0e4bab1df3f8211fb8ba367e51733befbf5379f8f58fee0760cfbd782b910c84"
-      }
-    },
     "project/commands/marketer.md": {
       "sources": {
         ".claude/commands/marketer.md": "0ab86d1dc0624d2a3bff8ed76274d32984b0ac3dc0983b29ce50e92da2ed0e41"

@@ -346,8 +346,17 @@ for (const [runtime, registrations] of [["codex", codexRegistrations], ["opencod
         failures.push(`codex: ${name}.toml sandbox override differs from its source protocol (expected ${expected ?? "inherit"}) — ${source.path}`);
     } else {
       const path = join(openCodeDir, `${name}.md`);
-      const expected = source.engines.opencode?.permission ?? null;
-      // Serialize parsed data, never instruction text. Keep mapping order:
+      let expected = source.engines.opencode?.permission ?? null;
+      if (expected && typeof expected === "object" && !Array.isArray(expected)) {
+        const tools = Object.entries(expected);
+        // The compiler omits an empty tool object and stably hoists the top-level wildcard.
+        // Project only the expectation; emitted order and inner pattern rules stay untouched.
+        expected = tools.length ? Object.fromEntries([
+          ...tools.filter(([tool]) => tool === "*"),
+          ...tools.filter(([tool]) => tool !== "*"),
+        ]) : null;
+      }
+      // Serialize parsed data, never instruction text. Keep all remaining mapping order:
       // OpenCode uses the LAST matching permission rule, so deep equality that
       // ignores object-key order would accept a Git-denying rule permutation.
       if (existsSync(path) && JSON.stringify(artifactPermissions(path, runtime).permission) !== JSON.stringify(expected))

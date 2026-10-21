@@ -466,6 +466,47 @@ for (const permission of ['allow', 'bash: allow', 'bash:\n  "git *": allow\n  "g
   });
 }
 
+const orderedWriterRules = { '*': 'deny', 'git *': 'allow', 'git push *': 'ask' };
+for (const writer of ['gitter', 'gpt-gitter']) {
+  for (const [label, permission, expected] of [
+    ['null', null, null],
+    ['empty object', {}, null],
+    ...['allow', 'ask', 'deny'].map((action) => [`action ${action}`, action, action]),
+    ['wildcard late', { read: 'allow', bash: orderedWriterRules, edit: 'ask', '*': 'deny' },
+      { '*': 'deny', read: 'allow', bash: orderedWriterRules, edit: 'ask' }],
+    ['wildcard middle', { read: 'allow', '*': 'deny', bash: orderedWriterRules, edit: 'ask' },
+      { '*': 'deny', read: 'allow', bash: orderedWriterRules, edit: 'ask' }],
+  ]) {
+    test(`${writer} OpenCode permission projection: ${label}`, (t) => {
+      const f = fixture(t, {}, { version: 1 }, {}, {
+        // A different root writer catches accidental fallback from the suffixed writer's own source.
+        [`.claude/agents/${writer}.md`]: writerSource(writer, 'inherit', 'ask'),
+        [`demo-child/.claude/agents/${writer}.md`]: `---\nname: ${writer}\ndescription: Writer fixture\nmodel: smart\nengines:\n  opencode: ${permission === null ? '{}' : `\n    permission: ${JSON.stringify(permission)}`}\n---\nWrite.\n`,
+      });
+      const path = `.opencode/agent/${writer}-demo-child.md`;
+      const emitted = parseFrontmatter(path, readFileSync(join(f.root, path), 'utf8')).permission ?? null;
+      assert.equal(JSON.stringify(emitted), JSON.stringify(expected), 'compiler canonical permission');
+      let result = check(f);
+      assert.equal(result.status, 0, result.out);
+      assert.match(result.out, /agent-roster: clean/);
+      cleanVerdictStub(f);
+      const mutations = expected && typeof expected === 'object' ? [
+        { ...expected, '*': 'allow' },
+        { ...expected, bash: { ...orderedWriterRules, 'git *': 'deny' } },
+        { ...expected, bash: { 'git *': 'allow', '*': 'deny', 'git push *': 'ask' } },
+        { '*': 'deny', edit: 'ask', bash: orderedWriterRules, read: 'allow' },
+      ] : [expected === 'deny' ? 'allow' : 'deny'];
+      for (const mutated of mutations) {
+        f.put(path, `---\npermission: ${JSON.stringify(mutated)}\n---\nWrite.\n`);
+        result = check(f);
+        assert.equal(result.status, 1, `${JSON.stringify(mutated)}: ${result.out}`);
+        assert.ok(result.out.includes(`opencode: ${writer}-demo-child.md lacks its source per-agent git write permission`), result.out);
+        assert.doesNotMatch(result.out, /agent-roster: clean/);
+      }
+    });
+  }
+}
+
 test('child writer reordered Git permission rules fail despite clean compiler', (t) => {
   const source = writerSource('gitter').replace('"git *": allow', '"*": deny\n        "git *": allow');
   const f = fixture(t, {}, { version: 1 }, {}, {

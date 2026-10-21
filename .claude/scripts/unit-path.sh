@@ -37,7 +37,7 @@ unit_canon() { # unit_canon <absolute path>: GNU `realpath -m` on any host — t
   out="$(realpath -- "$head")" || return
   [ "$out" != / ] || out=
   IFS=/ read -r -a segs <<< "$rest"
-  for seg in "${segs[@]}"; do
+  for seg in "${segs[@]+"${segs[@]}"}"; do
     case "$seg" in
       '' | .) ;;
       ..) out="${out%/*}" ;;

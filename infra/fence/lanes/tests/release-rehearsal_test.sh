@@ -33,6 +33,7 @@ cat >"$BIN/docker" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
 case "$1" in
+  build) [ "${STUB_BUILD_FAIL:-0}" = 0 ] || exit 9 ;;
   container)
     [ -f "$STUB_RUNNING" ] || [ -f "$STUB_EXITED" ] || exit 1
     case "$*" in *State.Running*) [ -f "$STUB_RUNNING" ] && echo true ;; esac ;;
@@ -43,6 +44,7 @@ STUB
 chmod +x "$BIN/docker"
 export PATH="$BIN:$PATH" STUB_DOCKER_LOG="$T/docker.log" STUB_RUNNING="$T/running" STUB_EXITED="$T/exited"
 
+unset PFM_NPM_REGISTRY
 : >"$STUB_DOCKER_LOG"
 OUT="$(bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
 hk_line="$(grep -n '^fence_housekeeping' "$STUB_DOCKER_LOG" | head -1 | cut -d: -f1)"
@@ -56,6 +58,23 @@ else bad "up: housekeeping before build" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LO
 if grep -q -- '--label pfm.fence=1 ' <<<"$run_argv" && grep -q -- '--label pfm.fence.long-lived=1 ' <<<"$run_argv"; then
   ok "up: the rehearsal container carries --label pfm.fence=1 and --label pfm.fence.long-lived=1"
 else bad "up: fence labels" "$run_argv"; fi
+
+if ! grep '^build ' "$STUB_DOCKER_LOG" | grep -q -- '--build-arg'; then ok "up: unset registry leaves docker defaults unchanged"
+else bad "up: unset registry" "$(cat "$STUB_DOCKER_LOG")"; fi
+for registry in '' 'https://npm.example.invalid/path?key=a&value=b'; do
+  rm -f "$STUB_RUNNING" "$STUB_EXITED"; : >"$STUB_DOCKER_LOG"
+  OUT="$(PFM_NPM_REGISTRY="$registry" bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
+  build_argv="$(grep '^build ' "$STUB_DOCKER_LOG")"
+  if [ -z "$registry" ]; then expected=0; else expected=1; fi
+  count="$(grep -o -- '--build-arg' <<<"$build_argv" | wc -l)"
+  if [ "$RC" = 0 ] && [ "$count" -eq "$expected" ] && { [ -z "$registry" ] || [[ "$build_argv" == *"--build-arg PFM_NPM_REGISTRY=$registry "* ]]; }; then
+    ok "up: optional registry '$registry' is forwarded exactly once when nonempty"
+  else bad "up: registry '$registry'" "rc=$RC" "$build_argv" "$OUT"; fi
+done
+rm -f "$STUB_RUNNING" "$STUB_EXITED"
+OUT="$(STUB_BUILD_FAIL=1 PFM_NPM_REGISTRY=https://npm.example.invalid bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
+if [ "$RC" = 1 ] && grep -qF 'build image professor-pfm-dev failed' <<<"$OUT"; then ok "up: mirror build failure keeps its named error"
+else bad "up: mirror build failure" "rc=$RC" "$OUT"; fi
 
 # An exited container housekeeping reaps (every exited pfm.fence=1 one) no longer blocks `up`.
 rm -f "$STUB_RUNNING"; : >"$STUB_EXITED"; : >"$STUB_DOCKER_LOG"

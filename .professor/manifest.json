@@ -116,7 +116,7 @@
     ".claude/scripts/dev.sh": "6d27cc015c337a323eec25c53449e2438979fa3a9ebd8f8e5ede330e02f5128b",
     ".claude/scripts/format-md.sh": "bba3241e6011300c45238b75ea47aa82ba5ba179299b4048a4eae04c240894d3",
     ".claude/scripts/test.sh": "54ad386f0894c6016e02ed02ea75fabad0cbeeb2d4cb8a1a8400b637c11ac292",
-    ".claude/scripts/unit-path.sh": "ec5dc00d19662e53439a5cd210af12d5a3d8680acc5ec6b76606d036b14450bd",
+    ".claude/scripts/unit-path.sh": "be9407a8a1f1e4f30a681d893d2eace6903759110a29b4210c7e8bcf51dcb92a",
     ".claude/settings.json": "b6e55fe038648276e021fdbe1928a1a80831cf794276ae28d7f2f9a0063fb505",
     ".codex/config.toml": "8732c6ca8b84645e162ffaa33d910c5be538fc9d09da7988d2907a6b24a31e53",
     ".gitignore": "896024e2afe4960758c458f8159672490612591edbd173574c5d9c0a4e4f64bb",

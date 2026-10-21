@@ -86,7 +86,7 @@ _fence_image_derive() { # <compose-file> <service>; sets key and image name
   platform="${DOCKER_DEFAULT_PLATFORM:-}"
   if ! key_output="$(
     { printf 'pfm.fence.inputs v1\nservice %s\n' "$service"
-      while IFS= read -r line; do case "$line" in '      context: '*) ;; *) printf '%s\n' "$line" ;; esac; done <<<"$block"
+      while IFS= read -r line; do case "$line" in ('      context: '*) ;; (*) printf '%s\n' "$line" ;; esac; done <<<"$block"
       printf 'platform %s\ndockerfile %s\n%s\n' "$platform" "$dockerfile_hash" "$tree"
     } | "${sha_cmd[@]}"
   )"; then

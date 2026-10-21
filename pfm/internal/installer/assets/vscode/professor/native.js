@@ -5,7 +5,9 @@
 // `value` the Claude Code theme value the contract names as its `palette` — the one map from a VS
 // Code theme id to a pfm theme. Nothing here derives a colour.
 //
-// Both directions run in a local window only: a remote window's settings are another machine's
+// Both directions run only where pfm runs (choose.js pfmHere): a local window, or a remote window
+// whose extension host is pfm's machine (a Linux host driven through Remote-SSH, where pfm,
+// Claude Code, tmux and Herdr all live). Any other remote window's settings are another machine's
 // story, and its colorTheme is left to that window's workspace.
 //
 // - Native → pfm: the user accepts a Professor theme in the picker (workbench.colorTheme changes to
@@ -52,10 +54,6 @@ function loadIndex(file = INDEX) {
   }
 }
 
-function local() {
-  return vscode.env.remoteName === undefined;
-}
-
 function readRecord(dir) {
   const file = path.join(dir, RECORD);
   try {
@@ -87,10 +85,11 @@ function currentContract(dir) {
   }
 }
 
-// startNativeThemes wires both directions for the state dir and the pfm runner choose.js uses.
+// startNativeThemes wires both directions for the state dir and the pfm runner choose.js uses;
+// here() says whether this window is pfm's (choose.js pfmHere), whyNot() why not (choose.js notHere).
 // follow(contract) is pfm → native, called by theme.js after every applied contract; the returned
 // disposable ends the picker listener.
-function startNativeThemes({ dir, runPfm, why, index = loadIndex() }) {
+function startNativeThemes({ dir, runPfm, why, here, whyNot, index = loadIndex() }) {
   const byID = new Map(index.map((theme) => [theme.id, theme]));
   const byValue = new Map(index.map((theme) => [theme.value, theme]));
   let picking = Promise.resolve();
@@ -99,7 +98,7 @@ function startNativeThemes({ dir, runPfm, why, index = loadIndex() }) {
   let echo = null;
 
   async function follow(contract) {
-    if (!local() || !byID.size || !contract || !contract.enabled || typeof contract.palette !== 'string') return;
+    if (!here() || !byID.size || !contract || !contract.enabled || typeof contract.palette !== 'string') return;
     const record = readRecord(dir);
     if (record && record.palette === contract.palette) return;
     const theme = byValue.get(contract.palette);
@@ -109,7 +108,9 @@ function startNativeThemes({ dir, runPfm, why, index = loadIndex() }) {
     if (workbench.get('colorTheme') === theme.id) return;
     echo = theme.id;
     try {
-      await workbench.update('colorTheme', theme.id, vscode.ConfigurationTarget.Global);
+      const target = vscode.env.remoteName === undefined
+        ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
+      await workbench.update('colorTheme', theme.id, target);
     } catch (err) {
       echo = null;
       // The palette was not followed: the prior record stands, so the next sync tries again.
@@ -122,9 +123,14 @@ function startNativeThemes({ dir, runPfm, why, index = loadIndex() }) {
     const id = vscode.workspace.getConfiguration('workbench').get('colorTheme');
     const followed = echo;
     echo = null;
-    if (id === followed || !local() || !vscode.window.state.focused) return;
+    if (id === followed || !vscode.window.state.focused) return;
     const theme = byID.get(id);
     if (!theme) return;
+    // A Professor theme picked where pfm does not run changes no Claude chat: said, never silent.
+    if (!here()) {
+      vscode.window.showWarningMessage(`Professor: ${theme.label} changes VS Code alone — ${whyNot()}.`);
+      return;
+    }
     const contract = currentContract(dir);
     if (contract && contract.enabled && contract.palette === theme.value) return;
     // Recorded before pfm runs: the contract it writes then names a palette already followed.

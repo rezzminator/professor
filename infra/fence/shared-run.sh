@@ -11,12 +11,16 @@
 # the host-visible start marker /pfm-fence/.runs/<id>/started, records its worktree as a user of the
 # container (/var/fence/worktrees/<worktree>, which also lifts a superseded mark: a worktree still on this
 # key keeps it), counts the live runs into
-# PFM_FENCE_CONCURRENT, makes /var/fence/runs/<id>/{home,tmp,vartmp}, and starts the command under
+# PFM_FENCE_CONCURRENT, makes /var/fence/runs/<id>/disk, and starts the command under
 # `unshare --fork --pid --mount-proc --mount` (plus --net for private): its own pid namespace and
 # /proc, so a process scan or a pkill sees this run alone; its own mounts — the caller's tree
-# read-only at /worktree, the engine-sync source read-only at /engine-sync, the run's home on /root,
-# its tmp on /tmp, its vartmp on /var/tmp, a fresh tmpfs on /dev/shm, the worktree's timing base on
-# /pfm-timing and the run's host directory on /pfm-run, then /var/fence and /pfm-fence hidden — so no
+# read-only at /worktree, the engine-sync source read-only at /engine-sync; capped, noswap tmpfs
+# on /root, /tmp and /var/tmp when the container's cgroup v2 memory.max minus memory.current
+# covers all tmpfs caps plus 1024 MiB headroom, otherwise private disk binds with one stderr line
+# naming free/needed MiB (a failed read is explicit); /dev/shm stays capped, noswap tmpfs;
+# the worktree's timing base on /pfm-timing and the run's
+# host directory on /pfm-run; its disk-backed escape on /pfm-disk (PFM_FENCE_DISK_DIR), then
+# /var/fence and /pfm-fence hidden behind capped, noswap tmpfs — so no
 # fixed path under HOME or /tmp is shared with another run; and for private its own network
 # namespace with lo up (a dummy0 default route makes an outside connect leave a packet the egress
 # recorder sees, never a delivery), so a fixed test port never collides. A private run first makes
@@ -29,11 +33,15 @@
 # `shared-run: …` line on stderr and exit 1 — never a run outside its namespaces.
 # Seams for infra/fence/lanes/tests/shared-run_test.sh: FENCE_STATE_DIR (default /var/fence) and
 # FENCE_HOST_DIR (default /pfm-fence), each outside /root, /tmp and /var/tmp (the run binds over those
-# before it hides the two).
+# before it hides the two). PFM_FENCE_CGROUP_ROOT overrides /sys/fs/cgroup for admission tests.
 set -uo pipefail
 STATE="${FENCE_STATE_DIR:-/var/fence}"
 MNT="${FENCE_HOST_DIR:-/pfm-fence}"
 SELF="${BASH_SOURCE[0]}"
+# Central defaults; invalid supplied configuration never falls back.
+. "$(dirname -- "$SELF")/shared.sh" || exit 1
+fence_config_values || exit 1
+
 
 die() { echo "shared-run: $*" >&2; exit "${2:-1}"; }
 valid_id() { [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || die "bad run id: $1" 2; }
@@ -96,8 +104,10 @@ cmd_run() {
   if mkdir -p "$STATE/worktrees" && : > "$STATE/worktrees/$wt"; then rm -f "$STATE/superseded"
   else echo "shared-run: the worktree record $STATE/worktrees/$wt could not be written — the container may be superseded under this worktree" >&2; fi
   PFM_FENCE_CONCURRENT="$(live_count)"; export PFM_FENCE_CONCURRENT
-  mkdir -p "$run/home" "$run/tmp" "$run/vartmp" "$MNT/$wt/timing" || { rm -rf "$run" "$live"; die "the run directory $run could not be made"; }
-  chmod 1777 "$run/tmp" "$run/vartmp"
+  mkdir -p "$run/disk" "$MNT/$wt/timing" || { rm -rf "$run" "$live"; die "the run directory $run could not be made"; }
+  printf 'profile\tcpus\tmem\tcpuset\n%s\t%s\t%s\t%s\n' "${PFM_FENCE_PROFILE:-NA}" "$PFM_FENCE_CPUS" "$PFM_FENCE_MEM" "$PFM_FENCE_CPUSET" > "$run/caps.tsv" || die "effective caps receipt could not be written"
+  [[ ! -d "$MNT/.runs/$id" ]] || cp "$run/caps.tsv" "$MNT/.runs/$id/caps.tsv" || die "host caps receipt could not be written"
+  chmod 0700 "$run/disk" || { rm -rf "$run" "$live"; die "the run disk directory $run/disk could not be made private"; }
   if [[ "$mode" == private ]]; then
     local mods=("$tree/pfm")
     [[ "$es" == - ]] || mods+=("$es")
@@ -115,7 +125,7 @@ cmd_run() {
     ns=$!
     echo "$ns" > "$run/ns.pid"
     (
-      hb="${PFM_FENCE_HEARTBEAT_S:-4}"
+      hb="$PFM_FENCE_HEARTBEAT_S"
       while IFS= read -r -t "$hb" -u 3 _; do :; done
       echo "shared-run: the caller of run $id is gone (heartbeat ended) — killing the run" >&2
       kill_run "$id"
@@ -129,6 +139,22 @@ cmd_run() {
   exit "$rc"
 }
 
+scratch_uses_ram() {
+  # This is a snapshot, not a reservation: simultaneous admissions can still race.
+  local cg="${PFM_FENCE_CGROUP_ROOT:-/sys/fs/cgroup}" limit current free
+  local needed_mib=$((PFM_FENCE_HOME_MIB + PFM_FENCE_TMP_MIB + PFM_FENCE_VARTMP_MIB + PFM_FENCE_SHM_MIB + 2 * PFM_FENCE_HIDE_MIB + PFM_FENCE_HEADROOM_MIB))
+  if ! { IFS= read -r limit < "$cg/memory.max" && IFS= read -r current < "$cg/memory.current"; } 2>/dev/null \
+    || [[ ! "$limit" =~ ^[0-9]{1,18}$ || ! "$current" =~ ^[0-9]{1,18}$ ]]; then
+    echo "shared-run: disk scratch: cgroup read failed ($cg/memory.max, $cg/memory.current); free unknown MiB, needed $needed_mib MiB" >&2
+    return 1
+  fi
+  free=$((10#$limit - 10#$current))
+  (( free >= 0 )) || free=0
+  (( free >= needed_mib * 1024 * 1024 )) && return 0
+  echo "shared-run: disk scratch: free $((free / 1024 / 1024)) MiB, needed $needed_mib MiB" >&2
+  return 1
+}
+
 cmd_inner() {
   local id="$1" mode="$2" tree="$3" es="$4" wt="$5" run
   shift 5
@@ -136,17 +162,32 @@ cmd_inner() {
   run="$STATE/runs/$id"
   mount --make-rprivate / 2>/dev/null
   bind_ro() { mount --bind "$1" "$2" && { mount -o remount,bind,ro "$2" 2>/dev/null || true; }; }
-  mkdir -p /worktree /engine-sync /pfm-timing /pfm-run 2>/dev/null
+  mkdir -p /worktree /engine-sync /pfm-timing /pfm-run /pfm-disk 2>/dev/null
   bind_ro "$tree" /worktree || die "the tree $tree could not be bound on /worktree"
   if [[ "$es" != - ]]; then bind_ro "$es" /engine-sync || die "the engine-sync source $es could not be bound"; fi
-  mount --bind "$run/home" /root || die "the run home could not be bound on /root"
-  mount --bind "$run/tmp" /tmp || die "the run tmp could not be bound on /tmp"
-  mount --bind "$run/vartmp" /var/tmp || die "the run vartmp could not be bound on /var/tmp"
-  mount -t tmpfs -o mode=1777 tmpfs /dev/shm || die "/dev/shm could not be made private"
+  # Baseline gate scratch peaked near 1 GiB in /tmp; leave 50% headroom, not half the VM's
+  # RAM per mount. noswap is deliberate: an unsupported kernel fails closed, never spills
+  # disposable scratch to the VM's swap. All pages also count against the container cap.
+  scratch_mount() { mount -t tmpfs -o "size=$2,mode=$3,noswap" tmpfs "$1" || die "$1 could not be made capped, non-swappable scratch"; }
+  if scratch_uses_ram; then
+    scratch_mount /root "${PFM_FENCE_HOME_MIB}m" 0700
+    scratch_mount /tmp "${PFM_FENCE_TMP_MIB}m" 1777
+    scratch_mount /var/tmp "${PFM_FENCE_VARTMP_MIB}m" 1777
+  else
+    mkdir -p "$run/home" "$run/tmp" "$run/vartmp" \
+      && chmod 0700 "$run/home" && chmod 1777 "$run/tmp" "$run/vartmp" \
+      || die "the run's disk scratch could not be made private"
+    mount --bind "$run/home" /root || die "the run home could not be bound on /root"
+    mount --bind "$run/tmp" /tmp || die "the run tmp could not be bound on /tmp"
+    mount --bind "$run/vartmp" /var/tmp || die "the run vartmp could not be bound on /var/tmp"
+  fi
+  scratch_mount /dev/shm "${PFM_FENCE_SHM_MIB}m" 1777
+  mount --bind "$run/disk" /pfm-disk || die "the run disk directory could not be bound on /pfm-disk"
+  export PFM_FENCE_DISK_DIR=/pfm-disk
   mount --bind "$MNT/$wt/timing" /pfm-timing || die "the timing base could not be bound on /pfm-timing"
   if [[ -d "$MNT/.runs/$id" ]]; then mount --bind "$MNT/.runs/$id" /pfm-run || die "the run's host directory could not be bound"; fi
-  mount -t tmpfs -o mode=0700 tmpfs "$STATE" || die "$STATE could not be hidden"
-  mount -t tmpfs -o mode=0700 tmpfs "$MNT" || die "$MNT could not be hidden"
+  scratch_mount "$STATE" "${PFM_FENCE_HIDE_MIB}m" 0700
+  scratch_mount "$MNT" "${PFM_FENCE_HIDE_MIB}m" 0700
   if [[ "$mode" == private ]]; then
     ip link set lo up || die "lo could not be brought up in the private network namespace"
     if ip link add dummy0 type dummy 2>/dev/null; then

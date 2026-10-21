@@ -27,12 +27,19 @@ func TestDoctorJailRecordsCheckoutForPromptReaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := paths.ComposedHarnessPrompt(runtime.Paths.Home, engine.Claude)
+	prompt, err := paths.GeneratedHarnessPrompt(runtime.Paths.Home, engine.Claude)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.ReadFile(prompt); err != nil {
-		t.Fatalf("clone %s prompt %s: %v", clone, prompt, err)
+	want := filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md")
+	if prompt != want {
+		t.Fatalf("clone %s prompt path = %s, want %s", clone, prompt, want)
+	}
+	// This jail records a source checkout, not an installation. Source parts
+	// exist in a fresh clone; generated prompts arrive only after install.
+	head := filepath.Join(clone, "pfm", "harness-prompts", "share", "head.md")
+	if _, err := os.ReadFile(head); err != nil {
+		t.Fatalf("clone %s source part %s: %v", clone, head, err)
 	}
 	dir, err := paths.HarnessBaselineDir(runtime.Paths.Home)
 	if err != nil {

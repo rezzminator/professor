@@ -10,11 +10,11 @@ from .writes import event_writes
 
 MECH = ("BRIEF PROMPT FINAL SAY-CLAIM NOTE NOTICE COMPACTION COMPACT-SUMMARY COMPACT-CALL HANDOFF "
         "HOOK SPAWN ERROR ERROR-OUTPUT DENIAL AFTER-ERROR NO-RESULT UNFINISHED WAIT WRITE REPEAT "
-        "TOTALS MODEL-WAIT COSTLIEST").split()
-DENY = re.compile(r"denied|rejected|doesn't want to proceed|not allowed|blocked|refused|permission", re.I)
+        "TOTALS MODEL-WAIT COSTLIEST PROMPT-SNAPSHOT").split()
+DENY = re.compile(r"denied|rejected|doesn't want to proceed|not allowed|\bblocked\b(?!\s*:)|refused|permission", re.I)
 SPAWN_TOOLS = ("Agent", "Task", "spawn_agent", "task")
 WAIT_SECONDS = 60
-NOTE_MECH = ("COMPACTION", "COMPACT-SUMMARY", "NOTICE", "HOOK", "SPAWN")
+NOTE_MECH = ("COMPACTION", "COMPACT-SUMMARY", "NOTICE", "HOOK", "SPAWN", "PROMPT-SNAPSHOT")
 
 
 def note_label(ev):

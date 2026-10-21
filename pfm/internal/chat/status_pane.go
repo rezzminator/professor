@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -263,4 +265,76 @@ func statusFromHerdr(
 		}
 	}
 	return status, nil
+}
+
+// CheckAwait names the startup dialog that cannot appear in a transcript:
+// Claude has not accepted the workspace, so it has not opened its record yet.
+// This is observation only: trusting the folder always belongs to the user.
+func CheckAwait(ctx context.Context, chat headless.Chat, runtime *pfmconfig.Runtime) error {
+	if !chat.Live || chat.Engine != pfmengine.Claude {
+		return nil
+	}
+	engine, err := NewCallEngine(false, runtime)
+	if err != nil {
+		return fmt.Errorf("check %s before waiting: %w", chat.Name, err)
+	}
+	socket := chat.Socket
+	if chat.Backend != spawn.BackendHerdr {
+		values, err := targetPaths(runtime)
+		if err != nil {
+			return fmt.Errorf("resolve %s wait paths: %w", chat.Name, err)
+		}
+		socket, err = values.SocketUnder(socket)
+		if err != nil {
+			return fmt.Errorf("resolve %s wait socket: %w", chat.Name, err)
+		}
+	}
+	target := pfmcall.Target{
+		Backend: chat.Backend, SeatID: chat.SeatID, SocketPath: socket,
+		Pane: PaneTarget(chat), Engine: string(chat.Engine),
+	}
+	var screen string
+	if chat.Backend == spawn.BackendHerdr {
+		// Recent output can retain a dismissed trust selector while Claude is
+		// already answering. Only the visible screen describes a live dialog.
+		screen, err = pfmcall.CaptureHerdrVisible(ctx, target)
+	} else {
+		screen, err = engine.CaptureTarget(ctx, target, 1000)
+	}
+	if err != nil {
+		return fmt.Errorf("read %s pane %s before waiting: %w", chat.Name, PaneTarget(chat), err)
+	}
+	// A normal composer below quoted dialog text proves those words are
+	// scrollback, not the active startup dialog. Selected trust rows, numbered
+	// or not, are selectors rather than composers; delivery keeps its own guards.
+	if pfmcall.LastComposerLine(screen) != "" && pfmcall.SelectorLine(screen) == "" {
+		return nil
+	}
+	if pfmengine.ClaudeTrustDialog(screen) {
+		return fmt.Errorf(
+			"%w: %s is alive in pane %s (%s); open the chat with `pfm chat open %s` and answer the dialog yourself (\"Yes, I trust this folder\" is your decision), or start the chat in a trusted directory; pfm pressed nothing",
+			headless.ErrTrustDialog,
+			chat.Name,
+			PaneTarget(chat),
+			socket,
+			action.Quote(chat.Handle()),
+		)
+	}
+	return nil
+}
+
+// FollowCheck preserves lookup and pane-read errors instead of converting them
+// into a false liveness bit. The resolved thread, not a shared socket or a
+// mutable display name, identifies every subsequent observation.
+func FollowCheck(ctx context.Context, chat headless.Chat, runtime *pfmconfig.Runtime) func() error {
+	return func() error {
+		current, found, err := Resolve(ctx, chat.Handle(), io.Discard, runtime)
+		if err != nil {
+			return err
+		}
+		if !found || !current.Live {
+			return headless.ErrChatGone
+		}
+		return CheckAwait(ctx, current, runtime)
+	}
 }

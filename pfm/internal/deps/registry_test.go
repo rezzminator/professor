@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestLoginShellCommandsAreOptionalAndPlatformGated(t *testing.T) {
+	for _, tc := range []struct{ command, platform string }{
+		{"dscl", platformDarwin},
+		{"getent", platformLinux},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			for _, entry := range Registry(Options{Home: t.TempDir()}) {
+				if entry.Name != tc.command {
+					continue
+				}
+				if entry.Required || len(entry.Platforms) != 1 || entry.Platforms[0] != tc.platform ||
+					len(entry.VersionArgs) != 0 {
+					t.Fatalf("login-shell dependency must be optional and %s-only: %+v", tc.platform, entry)
+				}
+				if !entry.AppliesTo(tc.platform) || entry.AppliesTo("windows") || !Registered(tc.command) {
+					t.Fatalf("login-shell dependency has invalid availability: %+v", entry)
+				}
+				return
+			}
+			t.Fatalf("login-shell dependency %s is not registered", tc.command)
+		})
+	}
+}
+
 // resetResolveCache clears the memoized resolution table before and after a
 // test so PATH fixtures from other tests in this package (or a previous run
 // of this one) cannot leak a cached path across t.Setenv("PATH", ...) calls.

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/costledger"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
@@ -22,6 +24,7 @@ import (
 // cannot price, carried a usage iteration of a type pfm does not know, or a
 // transcript below the agent could not be read.
 type agentSpend struct {
+	gateway gatewaySpend
 	usd     float64
 	in, out int64
 	// advisorUSD is the part of usd the advisor model billed.
@@ -40,6 +43,7 @@ type agentSpend struct {
 }
 
 func (spend *agentSpend) add(other agentSpend) {
+	spend.gateway.add(other.gateway)
 	spend.usd += other.usd
 	spend.advisorUSD += other.advisorUSD
 	spend.advisorUnpriced += other.advisorUnpriced
@@ -63,25 +67,31 @@ type spendScan struct {
 }
 
 type response struct {
-	model    string
-	billed   pricing.ClaudeUsage
-	requests []pricing.ClaudeUsage
-	advisors []pricing.AdvisorUsage
-	unknown  bool
+	at         string
+	model      string
+	billed     pricing.ClaudeUsage
+	requests   []pricing.ClaudeUsage
+	advisors   []pricing.AdvisorUsage
+	incomplete bool
+	unknown    bool
 }
 
 func newSpendScan(prices *pricing.Prices) *spendScan {
 	return &spendScan{prices: prices, responses: map[string]response{}, tools: map[string]struct{}{}}
 }
 
-func (scan *spendScan) record(messageID, requestID, model string, usage *pricing.UsageBlock) {
+func (scan *spendScan) record(messageID, requestID, model string, usage *transcriptUsage, timestamp ...string) {
 	if usage == nil {
 		return
 	}
 	billed, _ := usage.Billed()
 	seen := response{
 		model: model, billed: billed, requests: usage.Requests(), advisors: usage.Advisors(),
-		unknown: len(usage.UnknownIterations()) != 0,
+		incomplete: gatewayModel(model) && !usage.reportsCache,
+		unknown:    len(usage.UnknownIterations()) != 0,
+	}
+	if len(timestamp) > 0 {
+		seen.at = timestamp[0]
 	}
 	if key := transcript.ResponseKey(messageID, requestID, "", ""); key != "" {
 		scan.responses[key] = seen
@@ -106,8 +116,12 @@ func (scan *spendScan) total() agentSpend {
 // plus each advisor consultation's, the advisor priced at the model it names.
 // An iteration of a type pfm does not know leaves the sum a floor.
 func (scan *spendScan) priceResponse(seen response) agentSpend {
+	if seen.incomplete {
+		return agentSpend{partial: true, gateway: gatewaySpend{present: true, partial: true}}
+	}
 	spend := scan.price(seen.model, seen.billed, seen.requests)
 	spend.partial = spend.partial || seen.unknown
+	spend.gateway.partial = spend.gateway.partial || (spend.gateway.present && seen.unknown)
 	for _, advisor := range seen.advisors {
 		consulted := scan.price(advisor.Model, advisor.Usage, []pricing.ClaudeUsage{advisor.Usage})
 		consulted.advisorUSD = consulted.usd
@@ -116,12 +130,31 @@ func (scan *spendScan) priceResponse(seen response) agentSpend {
 		}
 		spend.add(consulted)
 	}
+	if spend.gateway.usd > 0 {
+		at, _ := time.Parse(time.RFC3339Nano, seen.at)
+		spend.gateway.calls = []gatewayCall{{at: at, usd: spend.gateway.usd}}
+	}
 	return spend
 }
 
 // price is billed's tokens and the USD of its requests, which sum to it.
-func (scan *spendScan) price(model string, billed pricing.ClaudeUsage, requests []pricing.ClaudeUsage) agentSpend {
-	spend := agentSpend{in: billed.Context(), out: billed.Output}
+func (scan *spendScan) price(
+	model string,
+	billed pricing.ClaudeUsage,
+	requests []pricing.ClaudeUsage,
+) (spend agentSpend) {
+	defer func() {
+		if gatewayModel(model) {
+			spend.gateway = gatewaySpend{
+				present: true,
+				usd:     spend.usd,
+				in:      spend.in,
+				out:     spend.out,
+				partial: spend.partial,
+			}
+		}
+	}()
+	spend = agentSpend{in: billed.Context(), out: billed.Output}
 	if billed == (pricing.ClaudeUsage{}) {
 		return spend
 	}
@@ -153,9 +186,9 @@ func (scan *spendScan) line(line []byte) {
 		TotalDuration float64  `json:"totalDuration"`
 		RequestID     string   `json:"requestId"`
 		Message       struct {
-			ID      string              `json:"id"`
-			Model   string              `json:"model"`
-			Usage   *pricing.UsageBlock `json:"usage"`
+			ID      string           `json:"id"`
+			Model   string           `json:"model"`
+			Usage   *transcriptUsage `json:"usage"`
 			Content []struct {
 				Type string `json:"type"`
 				ID   string `json:"id"`
@@ -179,7 +212,7 @@ func (scan *spendScan) line(line []byte) {
 			scan.tools[block.ID] = struct{}{}
 		}
 	}
-	scan.record(entry.Message.ID, entry.RequestID, entry.Message.Model, entry.Message.Usage)
+	scan.record(entry.Message.ID, entry.RequestID, entry.Message.Model, entry.Message.Usage, entry.Timestamp)
 }
 
 // sessionSpend is what a whole chat billed: its own transcript and every
@@ -301,5 +334,11 @@ func spendSegment(activity agentActivity) string {
 	if spend.partial && spend.priced > 0 {
 		line += cWarn + "+?" + reset
 	}
-	return line
+	return line + spend.gateway.note()
+}
+
+// gatewayModel recognizes the gateway's model ids without coupling to its store.
+func gatewayModel(model string) bool {
+	id, ok := pricing.NormalizeID(model)
+	return ok && strings.HasPrefix(id, "gpt-")
 }

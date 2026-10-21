@@ -30,6 +30,11 @@ export FENCE_STATE_DIR=/mnt/state FENCE_HOST_DIR=/mnt/host PFM_FENCE_HEARTBEAT_S
 mkdir -p "$FENCE_STATE_DIR" "$FENCE_HOST_DIR/.runs" "$T/tree"
 echo here >"$T/tree/marker"
 TREE="$T/tree"
+# A fixed cgroup fixture makes admission independent of other runs in the shared container.
+export PFM_FENCE_CGROUP_ROOT=/mnt/cgroup
+mkdir -p "$PFM_FENCE_CGROUP_ROOT"
+printf '%s\n' 5368709120 > "$PFM_FENCE_CGROUP_ROOT/memory.max"
+printf '%s\n' 1073741824 > "$PFM_FENCE_CGROUP_ROOT/memory.current"
 
 beat() { while printf '.\n' 2>/dev/null; do sleep 0.3; done; }
 srun() { # srun <id> <mode> <command string>: a run with a live heartbeat; prints its output
@@ -56,6 +61,62 @@ if [ ! -e "$TREE/x" ]; then ok "a run never writes its tree"; else bad "a run wr
 # (an ignore inherited at entry cannot be trapped, so a test that sends INT would see it vanish).
 out="$(srun r-sig shared 'awk "/^SigIgn:/ { print \$2 }" /proc/self/status')"; rc=$?
 if [ "$rc" = 0 ] && [[ "$out" =~ ^[0-9a-f]+$ ]] && (( (16#$out & 6) == 0 )); then ok "a run's command has SIGINT and SIGQUIT at their defaults"; else bad "a run's command ignores SIGINT or SIGQUIT" "rc=$rc SigIgn=$out"; fi
+
+# --- admission decision: source definitions only, without the command dispatcher ---------------------------
+out="$(bash -c 'source "$1" kill r-admission; declare -F scratch_uses_ram >/dev/null && scratch_uses_ram' _ "$SUT" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ -z "$out" ]; then ok "RAM admission reads a cgroup with room without a fallback line"
+else bad "RAM admission when room exists" "rc=$rc" "$out"; fi
+
+# --- capped, non-swappable scratch and explicit disk semantics ---------------------------------------------
+out="$(srun r-memory shared '
+for spec in /root:268435456:700 /tmp:1610612736:1777 /var/tmp:16777216:1777 /dev/shm:67108864:1777 /mnt/state:1048576:700 /mnt/host:1048576:700; do
+  path=${spec%%:*}; rest=${spec#*:}; bytes=${rest%%:*}; mode=${rest##*:}
+  [ "$(findmnt -bn -o FSTYPE -T "$path" | tail -n 1)" = tmpfs ] || { echo "$path is not tmpfs"; exit 1; }
+  [ "$(findmnt -bn -o SIZE -T "$path" | tail -n 1)" = "$bytes" ] || { echo "$path has the wrong cap"; exit 1; }
+  case ",$(findmnt -n -o OPTIONS -T "$path" | tail -n 1)," in *,noswap,*) ;; *) echo "$path can swap"; exit 1 ;; esac
+  [ "$(stat -c %a "$path")" = "$mode" ] || { echo "$path has the wrong mode"; exit 1; }
+done
+if cap_error=$(dd if=/dev/zero of=/var/tmp/over-cap bs=1M count=17 status=none 2>&1); then
+  echo "/var/tmp exceeded its cap"; exit 1
+fi
+grep -q "No space left on device" <<<"$cap_error" || { echo "/var/tmp cap did not report ENOSPC: $cap_error"; exit 1; }
+rm -f /var/tmp/over-cap
+[ "$PFM_FENCE_DISK_DIR" = /pfm-disk ] && [ "$(findmnt -n -o TARGET -T /pfm-disk | tail -n 1)" = /pfm-disk ] && echo disk > /pfm-disk/probe
+')"; rc=$?
+# This suite's STATE is on tmpfs itself; the explicit disk escape must bind the run's directory,
+# not silently claim that its backing device is always disk in nested harnesses.
+if [ "$rc" = 0 ]; then ok "all six scratch mounts are capped tmpfs, noswap, with private modes and a writable disk escape"
+else bad "scratch mount type, cap, noswap, mode or disk escape" "rc=$rc" "$out"; fi
+
+# Overrides change both the mounted cap and the admission sum (all six caps plus headroom).
+out="$(PFM_FENCE_VARTMP_MIB=8 srun r-override shared '[ "$(findmnt -bn -o SIZE -T /var/tmp | tail -n 1)" = 8388608 ]')"; rc=$?
+if [[ $rc == 0 ]]; then ok "scratch override changes the real private tmpfs cap"; else bad "scratch override changes the real private tmpfs cap" "$out"; fi
+out="$(PFM_FENCE_HEADROOM_MIB=4096 bash -c 'source "$1" kill r-admission; scratch_uses_ram' _ "$SUT" 2>&1)"; rc=$?
+if [[ $rc != 0 && "$out" == 'shared-run: disk scratch: free 4096 MiB, needed 5970 MiB' ]]; then
+  ok "RAM admission sums configured caps and headroom, not the old constant"
+else bad "RAM admission sums configured caps and headroom" "rc=$rc $out"; fi
+
+# The suite's STATE is itself tmpfs: verify bind sources, not the backing filesystem type.
+disk_probe='for spec in /root:home:700 /tmp:tmp:1777 /var/tmp:vartmp:1777; do
+  path=${spec%%:*}; rest=${spec#*:}; dir=${rest%%:*}; mode=${rest##*:}
+  [ "$(findmnt -n -o FSROOT -T "$path" | tail -n 1)" = "/state/runs/$ID/$dir" ] || { echo "$path is not the run disk bind"; exit 1; }
+  [ "$(stat -c %a "$path")" = "$mode" ] || { echo "$path has the wrong disk mode"; exit 1; }
+  echo private > "$path/probe"
+done
+[ "$PFM_FENCE_DISK_DIR" = /pfm-disk ]'
+printf '%s\n' 2147483648 > "$PFM_FENCE_CGROUP_ROOT/memory.max"
+printf '%s\n' 536870912 > "$PFM_FENCE_CGROUP_ROOT/memory.current"
+out="$(srun r-low shared "ID=r-low; $disk_probe")"; rc=$?
+if [ "$rc" = 0 ] && [ "$out" = 'shared-run: disk scratch: free 1536 MiB, needed 2898 MiB' ]; then
+  ok "low cgroup memory selects private disk binds and one free/needed fallback line"
+else bad "disk admission when memory is low" "rc=$rc" "$out"; fi
+rm "$PFM_FENCE_CGROUP_ROOT/memory.current"
+out="$(srun r-unreadable shared "ID=r-unreadable; $disk_probe")"; rc=$?
+if [ "$rc" = 0 ] && [ "$out" = "shared-run: disk scratch: cgroup read failed ($PFM_FENCE_CGROUP_ROOT/memory.max, $PFM_FENCE_CGROUP_ROOT/memory.current); free unknown MiB, needed 2898 MiB" ]; then
+  ok "a failed cgroup read selects disk and one explicit read-failed fallback line"
+else bad "disk admission when the cgroup read fails" "rc=$rc" "$out"; fi
+printf '%s\n' 5368709120 > "$PFM_FENCE_CGROUP_ROOT/memory.max"
+printf '%s\n' 1073741824 > "$PFM_FENCE_CGROUP_ROOT/memory.current"
 
 # --- per-run fixed paths ----------------------------------------------------------------------------------
 fixed='for d in /tmp /root /var/tmp /dev/shm; do echo "$ID" > "$d/fixed"; done; sleep 1.5

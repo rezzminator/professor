@@ -609,7 +609,7 @@ func (current *composer) liveClaudeRow(
 		transcript.AITitle,
 		transcript.FirstPrompt,
 	)
-	row.UserName = transcript.CustomTitle
+	row.UserName = naming.DisplayName(transcript.CustomTitle, "", "")
 	row.Name = naming.LiveFallback(
 		indexed, pane.WindowName,
 		pane.PaneTitle,
@@ -881,7 +881,7 @@ func (current *composer) transcriptRow(
 			transcript.AITitle,
 			transcript.FirstPrompt,
 		),
-		UserName:      transcript.CustomTitle,
+		UserName:      naming.DisplayName(transcript.CustomTitle, "", ""),
 		UserNameKnown: transcript.MTimeNS != 0,
 		LastPrompt:    transcript.LastPrompt,
 		Project:       current.projects.of(transcript.CWD),

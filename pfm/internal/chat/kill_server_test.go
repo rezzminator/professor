@@ -9,9 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -393,6 +396,7 @@ func TestEndHerdrStepsLogEachStepAndTheFailure(t *testing.T) {
 				},
 				runtime.Paths,
 				&steps,
+				false,
 			)
 			if (err != nil) != (scenario.refusal != "") {
 				t.Fatalf("endHerdrSteps err=%v refusal=%q", err, scenario.refusal)
@@ -466,4 +470,70 @@ func TestEndNowRefusesAChatWithNoAddress(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "neither a Herdr seat nor a tmux socket") {
 		t.Fatalf("EndNow on an addressless chat = %v", err)
 	}
+}
+
+func TestResolvedNativeKillSurvivesSessionReplacement(t *testing.T) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		t.Run(string(engine), func(t *testing.T) {
+			testjail.Fleet(t)
+			t.Setenv("TMUX_TMPDIR", t.TempDir())
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
+				t.Errorf("unexpected native mutation: %s", req.Method)
+				return nil, "unexpected_method"
+			})
+			runtime, seats, seat := nativeChatSeat(t, socket, "live")
+			seat.Engine = string(engine)
+			seat = nativeChatHost(t, seats, seat, true)
+			// Resolve happened before the reporter replaced this provisional identity.
+			initial := headless.Chat{
+				Backend: "herdr", SeatID: seat.SeatID, ID: "provisional-session",
+				Engine: engine, Socket: socket, Pane: seat.HerdrPane, Live: true,
+			}
+			database, err := store.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			finisher := &birthKillSpawner{}
+			manager, err := kill.New(database, kill.Dependencies{Paths: runtime.Paths, Spawner: finisher})
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := manager.Kill(context.Background(), resolvedKillRequest(initial, true))
+			if err != nil || target.ID != seat.SessionID || len(finisher.calls) != 1 {
+				t.Fatalf("kill after session swap: target=%+v finishers=%+v err=%v", target, finisher.calls, err)
+			}
+			if _, found, err := database.Killed(context.Background(), seat.SessionID); err != nil || !found {
+				t.Fatalf("current conversation kill missing: found=%t err=%v", found, err)
+			}
+			// Reuse of the exact pane by a different seat must not redirect this kill.
+			if err := seats.DeleteSeat(context.Background(), seat.SeatID); err != nil {
+				t.Fatal(err)
+			}
+			seat.SeatID, seat.SessionID = "replacement-seat", "replacement-session"
+			nativeChatHost(t, seats, seat, true)
+			if _, err := manager.Kill(
+				context.Background(),
+				resolvedKillRequest(initial, true),
+			); err == nil ||
+				len(finisher.calls) != 1 {
+				t.Fatalf("gone durable seat redirected: finishers=%+v err=%v", finisher.calls, err)
+			}
+		})
+	}
+}
+
+type birthKillSpawner struct{ calls []kill.ExitArgs }
+
+func (*birthKillSpawner) Prepare(kill.ExitArgs) error { return nil }
+func (s *birthKillSpawner) Spawn(_ context.Context, args kill.ExitArgs) error {
+	s.calls = append(s.calls, args)
+	return nil
 }

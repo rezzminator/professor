@@ -286,7 +286,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			`"contextWindowSize":1000,"tokenCount":10,"label":"map it"}`
 	}
 	const (
-		fullRow    = "▰▰▰▰▰▰▰▰ 100% 1.0K/1.0K Σ$0.01/2.0K/35/2│scout·general-purpose│opus│"
+		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K Σ$0.01/2.0K/35/2│scout·general-purpose│opus│"
 		fullTail   = " 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│map it"
 		parentTail = " 3m:30s│1 error│💾5m✓1m:38s 94%│⟲1│map it"
 	)

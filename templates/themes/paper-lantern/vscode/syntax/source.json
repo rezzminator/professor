@@ -1,0 +1,12 @@
+{
+  "0000": {
+    "name": "Sumi · plain text",
+    "scope": [
+      "source",
+      "text"
+    ],
+    "settings": {
+      "foreground": "#2a241f"
+    }
+  }
+}

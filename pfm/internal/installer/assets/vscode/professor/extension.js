@@ -1,7 +1,7 @@
 // Professor — the framework's assistant inside VS Code. pfm installs it (`pfm install --vscode`)
 // and links it into every VS Code extensions directory on the host. Its two surfaces: the
-// Professor terminal (below) and `pfm theme`, which paints the terminal and a local window's title,
-// activity and status bars (theme.js, started in activate), picks that theme (choose.js), and
+// Professor terminal (below) and `pfm theme`, which paints the terminal and every window's title,
+// activity and status bars and borders (theme.js, started in activate), picks that theme (choose.js), and
 // lists every pfm theme in VS Code's own Color Theme picker, kept in step with it (native.js).
 //
 // Its first surface is the Professor terminal profile: a login shell that opens the pfm chat
@@ -17,7 +17,7 @@
 // icon/colour cycle and env. The onDidOpenTerminal focus hook covers every entry point too.
 const vscode = require('vscode');
 const { startThemeSync, stateDir } = require('./theme');
-const { chooseTheme, runPfm, why } = require('./choose');
+const { chooseTheme, clientSide, notHere, pfmHere, runPfm, why } = require('./choose');
 const { startNativeThemes } = require('./native');
 
 // Terminals this activation handed to VS Code and has not yet seen open, keyed by the marker
@@ -109,19 +109,28 @@ function activate(context) {
     vscode.commands.registerCommand('workbench.action.terminal.new', (args) =>
       openTerminal(args?.config ? args : { config: professorProfile(context), location: args?.location })),
   );
-  // Its second surface is `pfm theme`: the terminal, and a local window's title, activity and status
+  // Its second surface is `pfm theme`: the terminal, and every window's title, activity and status
   // bars, follow Claude Code's theme (theme.js); "Professor: Choose Theme" picks that theme through
-  // pfm (choose.js), which refuses in a remote window; and a Professor theme accepted in VS Code's
-  // Color Theme picker is that same pick, while a theme picked anywhere else switches the Color
-  // Theme to its Professor twin (native.js).
+  // pfm (choose.js); and a Professor theme accepted in VS Code's Color Theme picker is that same
+  // pick, while a theme picked anywhere else switches the Color Theme to its Professor twin
+  // (native.js). Both pick doors run only where pfm runs (pfmHere: a local window, or a remote one
+  // whose extension host has pfm); the professor.pfmHere context shows the command there alone, and
+  // a pick anywhere else says why (notHere). A remote window served from the client's side
+  // (clientSide) paints nothing either: the contract it would read is the client's.
   // syncTheme is the extension's exported API: apply the contract now, resolved once applied.
   const dir = stateDir();
-  const native = startNativeThemes({ dir, runPfm, why });
-  const theme = startThemeSync(dir, native.follow);
+  const kind = context.extension.extensionKind;
+  const here = () => pfmHere(kind);
+  const whyNot = () => notHere(kind);
+  vscode.commands.executeCommand('setContext', 'professor.pfmHere', here()).then(undefined, (err) => {
+    console.error(`Professor: setContext professor.pfmHere failed, Choose Theme stays hidden in a remote window: ${err?.message ?? err}`);
+  });
+  const native = startNativeThemes({ dir, runPfm, why, here, whyNot });
+  const theme = startThemeSync(dir, native.follow, clientSide(kind) ? whyNot() : '');
   context.subscriptions.push(
     native.disposable,
     theme.disposable,
-    vscode.commands.registerCommand('professor.chooseTheme', chooseTheme),
+    vscode.commands.registerCommand('professor.chooseTheme', () => chooseTheme(here, whyNot)),
   );
   return { syncTheme: theme.syncTheme };
 }

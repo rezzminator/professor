@@ -169,8 +169,10 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  reload      reboot a Claude chat in place under another configured account/cache mode")
 	fmt.Fprintln(w, "  find/save/branch/history/ls/resolve")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "targets: seat:<id> is an exact durable native seat, never a label or pane fallback")
+	fmt.Fprintln(w, "labels: the prefix seat: is reserved (case-insensitive)")
 	fmt.Fprintln(w, "exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat")
-	fmt.Fprintln(w, "            5 answer timed out · 6 message not delivered")
+	fmt.Fprintln(w, "            5 answer timed out · 6 message not delivered / blocked at folder-trust")
 }
 
 // headlessTarget resolves a name for a verb that needs one, reporting the
@@ -405,10 +407,6 @@ func runHeadlessStream(args []string, stdout, stderr io.Writer, runtimes ...comm
 	if code != 0 {
 		return code
 	}
-	if chat.Path == "" {
-		fmt.Fprintf(stderr, "pfm chat stream: %q has not written a transcript yet\n", chat.Name)
-		return codeDeadChat
-	}
 	name := chat.Name
 	err := headless.Stream(ctx, chat.Path, chat.Engine, headless.StreamOptions{
 		Filter:    pattern,
@@ -416,17 +414,17 @@ func runHeadlessStream(args []string, stdout, stderr io.Writer, runtimes ...comm
 		FromStart: *fromStart,
 		Follow:    !*noFollow,
 		Raw:       *raw,
-		Alive: func() bool {
-			chat, found, err := pfmchat.Resolve(context.Background(), name, io.Discard, firstRuntime(runtimes))
-			return err == nil && found && chat.Live
-		},
+		Check:     pfmchat.FollowCheck(ctx, chat, firstRuntime(runtimes)),
 	}, stdout)
 	if err != nil {
-		if err == headless.ErrChatGone {
+		if errors.Is(err, headless.ErrChatGone) {
 			fmt.Fprintf(stderr, "pfm chat stream: %s is gone\n", name)
 			return codeDeadChat
 		}
 		fmt.Fprintf(stderr, "pfm chat stream: %v\n", err)
+		if errors.Is(err, headless.ErrTrustDialog) {
+			return codeUndelivered
+		}
 		return 1
 	}
 	return 0

@@ -1,0 +1,63 @@
+{
+  "0000": {
+    "name": "Driftwood: comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#89a8ae"
+    }
+  },
+  "0001": {
+    "name": "Driftwood carvings: doc-comment tags",
+    "scope": [
+      "comment keyword.codetag",
+      "storage.type.class.jsdoc",
+      "comment.block.documentation storage.type.class",
+      "keyword.other.phpdoc",
+      "comment.block.documentation punctuation.definition.block.tag"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#e8a7e9"
+    }
+  },
+  "0002": {
+    "name": "Driftwood carvings: doc-comment types",
+    "scope": [
+      "comment.block.documentation entity.name.type",
+      "comment.block.documentation support.type",
+      "comment.block.documentation punctuation.definition.bracket.curly"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f7cd6c"
+    }
+  },
+  "0003": {
+    "name": "Driftwood carvings: doc-comment names",
+    "scope": [
+      "comment.block.documentation variable.other",
+      "comment.block.documentation variable.parameter"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#fdd0b8"
+    }
+  },
+  "0004": {
+    "name": "Buoy: TODO and FIXME",
+    "scope": [
+      "comment keyword.codetag.notation",
+      "comment.line keyword.todo",
+      "keyword.other.todo"
+    ],
+    "settings": {
+      "fontStyle": "bold italic",
+      "foreground": "#f7cd6c"
+    }
+  }
+}

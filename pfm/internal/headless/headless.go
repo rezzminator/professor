@@ -32,6 +32,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -70,6 +71,25 @@ type Chat struct {
 	// PanePID is the process at the root of the seat's pane, as the fleet
 	// last listed it; 0 when unknown.
 	PanePID int
+}
+
+// Handle preserves a resolved conversation across calls and waits. A native
+// socket hosts many seats. Its durable seat survives replacement of a planner's
+// provisional thread id; a tmux socket is dedicated to one chat.
+func (chat Chat) Handle() string {
+	if chat.Backend == "herdr" {
+		if chat.SeatID != "" {
+			return resolve.SeatPrefix + chat.SeatID
+		}
+		if chat.ID != "" {
+			return chat.ID
+		}
+		return chat.Name
+	}
+	if chat.Socket != "" {
+		return chat.Socket
+	}
+	return chat.Name
 }
 
 // Status is the machine-readable verdict. Field names are a contract — a

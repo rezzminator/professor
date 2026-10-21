@@ -16,6 +16,56 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+func TestSummarizeDeliversLastExchangeToRunner(t *testing.T) {
+	for _, engineName := range []string{"claude", "codex"} {
+		t.Run(engineName, func(t *testing.T) {
+			root, database := summaryTestStore(t)
+			transcriptPath := filepath.Join(root, "exchange.jsonl")
+			writeSummaryTranscript(t, transcriptPath,
+				`{"type":"user","message":{"role":"user","content":"obsolete question"}}`,
+				`{"type":"assistant","message":{"role":"assistant","content":"obsolete answer"}}`,
+				`{"type":"user","message":{"role":"user","content":"which checks ran?"}}`,
+				`{"type":"assistant","message":{"role":"assistant","content":"the capture regression passed"}}`,
+			)
+			capture := filepath.Join(root, "stdin")
+			bin := filepath.Join(root, "bin")
+			output := `{"result":"capture regression passed"}`
+			if engineName == "codex" {
+				output = `{"type":"item.completed","item":{"type":"agent_message","text":"capture regression passed"}}' '{"type":"turn.completed"}`
+			}
+			writeSummaryStub(t, bin, engineName,
+				`/bin/cat > "$ASK_CAPTURE"`+"\nprintf '%s\\n' '"+output+"'",
+			)
+			t.Setenv("PATH", bin)
+			t.Setenv("ASK_CAPTURE", capture)
+			options := SummaryOptions{
+				Config: summaryMachine(t, engineName), Database: database, TempDir: filepath.Join(root, "prepared"),
+			}
+			result := Summarize(
+				context.Background(),
+				Chat{Name: "seat", Engine: pfmengine.Claude, Path: transcriptPath},
+				options,
+			)
+			if result.Text != "capture regression passed" || result.Warning != nil {
+				t.Fatalf("summary=%+v", result)
+			}
+			raw, err := os.ReadFile(capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"which checks ran?", "the capture regression passed", "STATE: COMPLETE"} {
+				if !strings.Contains(string(raw), want) {
+					t.Errorf("runner input missing last exchange %q: %s", want, raw)
+				}
+			}
+			if strings.Contains(string(raw), "obsolete") {
+				t.Errorf("runner received an older exchange: %s", raw)
+			}
+			assertNoLeakedTempFiles(t, options.TempDir)
+		})
+	}
+}
+
 func TestSummarizeCachesCompleteExchangeAndBoundsAnswer(t *testing.T) {
 	root, database := summaryTestStore(t)
 	transcriptPath := filepath.Join(root, "complete.jsonl")

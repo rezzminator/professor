@@ -3,7 +3,8 @@
   "theme": "default",
   "chat": {
     "backend": "auto",
-    "herdrTabStatus": "emoji"
+    "herdrTabStatus": "emoji",
+    "herdrTabPriority": false
   },
   "state": {
     "db": "~/.local/state/pfm/pfm.db",
@@ -15,6 +16,7 @@
     "theme": null,
     "cache1h": true,
     "nativeCursor": false,
+    "remoteControl": true,
     "systemPrompt": null,
     "webSearchesPerSession": 9007199254740991,
     "autoCompactWindow": 100000,
@@ -34,7 +36,8 @@
     ],
     "env": {},
     "costLedger": true,
-    "gptAgents": false
+    "gptAgents": false,
+    "subagentStatuslineTrace": false
   },
   "codex": {
     "yolo": true,

@@ -17,6 +17,7 @@ import (
 // by tmux, so every reporter error is also appended to a per-session log in
 // the pfm state directory, where `pfm doctor` reads it. One line per error:
 // the RFC 3339 time, a tab, the message with newlines folded to spaces.
+// Expected lifecycle outcomes carry an INFO column and never count as errors.
 
 // ErrorLogSuffix ends the per-session log file name: {session}.log.
 const ErrorLogSuffix = ".log"
@@ -41,7 +42,17 @@ type ErrorRecord struct {
 }
 
 // AppendError appends one error line to dir/{session}.log, creating dir.
-func AppendError(dir, session string, at time.Time, message string) (returnErr error) {
+func AppendError(dir, session string, at time.Time, message string) error {
+	return appendReporterLog(dir, session, at, "", message)
+}
+
+// AppendInfo records an expected lifecycle outcome, not a reporter fault.
+// The explicit level column leaves legacy, unlevelled errors readable.
+func AppendInfo(dir, session string, at time.Time, message string) error {
+	return appendReporterLog(dir, session, at, "INFO\t", message)
+}
+
+func appendReporterLog(dir, session string, at time.Time, level, message string) (returnErr error) {
 	if dir == "" || session == "" || strings.ContainsAny(session, "/\x00") {
 		return fmt.Errorf("herdr error log: dir %q session %q is not a plain log location", dir, session)
 	}
@@ -84,7 +95,7 @@ func AppendError(dir, session string, at time.Time, message string) (returnErr e
 		}
 		folded = folded[:cut]
 	}
-	line := at.UTC().Format(time.RFC3339) + "\t" + folded + "\n"
+	line := at.UTC().Format(time.RFC3339) + "\t" + level + folded + "\n"
 	if _, err := file.WriteString(line); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("herdr error log: write %s: %w", path, err)
@@ -96,7 +107,8 @@ func AppendError(dir, session string, at time.Time, message string) (returnErr e
 }
 
 // RecentErrors returns every logged error in dir at or after since, newest
-// first. A missing dir is no errors; an unreadable log or a malformed line is
+// first, excluding explicit INFO records. Legacy unlevelled lines are errors.
+// A missing dir is no errors; an unreadable log or a malformed line is
 // an error, never an empty list.
 func RecentErrors(dir string, since time.Time) ([]ErrorRecord, error) {
 	entries, err := os.ReadDir(dir)
@@ -123,6 +135,9 @@ func RecentErrors(dir string, since time.Time) ([]ErrorRecord, error) {
 			if !found || parseErr != nil {
 				_ = file.Close()
 				return nil, fmt.Errorf("herdr error log: %s holds a malformed line %q", path, scanner.Text())
+			}
+			if strings.HasPrefix(message, "INFO\t") {
+				continue
 			}
 			if !at.Before(since) {
 				records = append(

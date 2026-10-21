@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -402,4 +403,136 @@ INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,1
 			}
 		})
 	}
+}
+
+// A reader's snapshot holds the WAL briefly while another opener reads the
+// schema version; the backup waits it out instead of failing the open.
+func TestBackupBeforeMigrationWaitsOutBusyCheckpoint(t *testing.T) {
+	t.Parallel()
+	db, path, release := heldBackupSnapshot(t)
+	released := make(chan error, 1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		released <- release()
+	}()
+	backupErr := BackupBeforeMigration(context.Background(), db, path, 7, true)
+	if err := <-released; err != nil {
+		t.Fatal(err)
+	}
+	if backupErr != nil {
+		t.Fatalf("backup with a briefly held reader: %v", backupErr)
+	}
+	backup, err := sql.Open("sqlite", path+".bak-before-v7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := backup.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var count int
+	if err := backup.QueryRow("SELECT count(*) FROM t").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("backup rows=%d err=%v", count, err)
+	}
+}
+
+func TestBackupBeforeMigrationBoundsBusyCheckpoint(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		wait time.Duration
+		want string
+	}{
+		{name: "retry budget", wait: 6 * time.Second, want: "WAL checkpoint busy after"},
+		{name: "caller deadline", wait: 50 * time.Millisecond, want: "wait for busy WAL checkpoint"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			db, path, _ := heldBackupSnapshot(t)
+			// A checkpoint must not wait the store's ten seconds on every attempt.
+			if _, err := db.Exec("PRAGMA busy_timeout=10000"); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), test.wait)
+			defer cancel()
+			err := BackupBeforeMigration(ctx, db, path, 7, true)
+			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("backup error=%v, want deadline with %q", err, test.want)
+			}
+			if test.name == "retry budget" && ctx.Err() != nil {
+				t.Fatal("checkpoint exhausted the caller's deadline instead of its own retry budget")
+			}
+			var busyTimeout int
+			if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil || busyTimeout != 10000 {
+				t.Fatalf("restored busy_timeout=%d err=%v", busyTimeout, err)
+			}
+			if _, err := os.Stat(path + ".bak-before-v7"); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("failed checkpoint published a backup: %v", err)
+			}
+		})
+	}
+}
+
+// heldBackupSnapshot keeps frames newer than a second connection's snapshot in
+// the WAL. Cleanup releases the reader even when the assertion fails.
+func heldBackupSnapshot(t *testing.T) (*sql.DB, string, func() error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil || mode != "wal" {
+		t.Fatalf("journal_mode=%q,%v", mode, err)
+	}
+	if _, err := db.ExecContext(ctx, "CREATE TABLE t(v INTEGER); INSERT INTO t VALUES(1)"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := other.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	reader, err := other.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	var releaseErr error
+	release := func() error {
+		once.Do(func() {
+			_, err := reader.ExecContext(ctx, "ROLLBACK")
+			releaseErr = errors.Join(err, reader.Close())
+		})
+		return releaseErr
+	}
+	t.Cleanup(func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := reader.ExecContext(ctx, "BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := reader.QueryRowContext(ctx, "SELECT count(*) FROM t").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO t VALUES(2)"); err != nil {
+		t.Fatal(err)
+	}
+	return db, path, release
 }

@@ -69,6 +69,10 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, ru
 		fmt.Fprintf(stderr, "pfm chat ask: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
+	if err := pfmchat.CheckAwait(ctx, chat, firstRuntime(runtimes)); err != nil {
+		return reportTurn(headless.Turn{}, err, askAction, chat.Name,
+			time.Duration(*timeout)*time.Second, *asJSON, stdout, stderr)
+	}
 	// The frontier is taken BEFORE the message is delivered: an answer is only
 	// an answer if it was written after the question.
 	frontier, err := headless.Frontier(chat)
@@ -87,7 +91,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, ru
 	start := clk.Now()
 	budget := time.Duration(*timeout) * time.Second
 	result, err := engine.Call(ctx, pfmcall.Request{
-		Target:   chat.Socket,
+		Target:   chat.Handle(),
 		Message:  message,
 		ForceNow: *force,
 	})
@@ -98,7 +102,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, ru
 			return 1
 		}
 		result, err = engine.Call(ctx, pfmcall.Request{
-			Target:   chat.Socket,
+			Target:   chat.Handle(),
 			Message:  message,
 			ForceNow: *force,
 		})
@@ -148,7 +152,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, ru
 		ctx,
 		askAction,
 		chat.Name,
-		chatHandle(chat.Socket, chat.Name),
+		chat.Handle(),
 		options,
 		*asJSON,
 		stdout,
@@ -189,6 +193,9 @@ func reportTurn(
 	asJSON bool,
 	stdout, stderr io.Writer,
 ) int {
+	if errors.Is(err, headless.ErrTrustDialog) {
+		turn.State = headless.StateBlocked
+	}
 	if turn.Name == "" {
 		turn.Name = name
 	}
@@ -214,6 +221,9 @@ func reportTurn(
 		return codeAwaitSuperseded
 	case err == nil:
 		return 0
+	case errors.Is(err, headless.ErrTrustDialog):
+		fmt.Fprintf(stderr, "pfm chat %s: %v\n", verb, err)
+		return codeUndelivered
 	case errors.Is(err, headless.ErrAwaitTimeout):
 		fmt.Fprintf(
 			stderr,
@@ -237,15 +247,4 @@ func reportTurn(
 		fmt.Fprintf(stderr, "pfm chat %s: %v\n", verb, err)
 		return 1
 	}
-}
-
-// chatHandle is what a wait re-resolves the chat by. The socket wins: it is
-// the one name minted by this process, it cannot be ambiguous, and it does not
-// depend on the naming pipeline having caught up with a rename that happened a
-// second ago.
-func chatHandle(socket, name string) string {
-	if socket != "" {
-		return socket
-	}
-	return name
 }

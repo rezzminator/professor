@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -99,14 +100,29 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		return true, nil
 	}
 	action := reporter.plan(payload)
+	if reporter.options.engine == pfmengine.Claude && reporter.options.event == herdr.EventStart {
+		// Compaction/fork still refresh session metadata, never lifecycle state.
+		action = &herdrAction{}
+	}
 	if action == nil {
 		return true, nil
+	}
+	if reporter.options.engine == pfmengine.Claude {
+		owner, err := reporter.paneOwner(
+			herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID},
+		)
+		if err != nil {
+			return true, err
+		}
+		if owner.Seq > reporter.seq {
+			return true, fmt.Errorf("native Claude hook predates current ownership sequence")
+		}
 	}
 	before := seat
 	if payload.SessionID != "" {
 		seat.SessionID = payload.SessionID
 	}
-	promptSubmitted := payload.HookEventName == "UserPromptSubmit" ||
+	promptSubmitted := payload.HookEventName == claudelaunch.HookEventUserPromptSubmit ||
 		(reporter.options.engine == pfmengine.OpenCode && payload.HookEventName == "chat.message")
 	if reporter.options.event == herdr.EventWorking && promptSubmitted && !payload.IsInterrupt {
 		seat.LostNote = ""
@@ -135,12 +151,20 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if err := reporter.reserveNativeOwnership(seat, seq); err != nil {
 		return true, err
 	}
-	return true, reporter.send(
-		ctx,
-		herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane},
-		action,
-		seq,
-	)
+	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
+	payload.SessionID = seat.SessionID
+	if reporter.options.engine == pfmengine.Claude && !action.release {
+		err = reporter.deferNativeClaude(ctx, target, payload, seq)
+	} else {
+		err = reporter.send(ctx, target, action, seq)
+	}
+	if err != nil {
+		return true, err
+	}
+	if reporter.options.event != herdr.EventEnd {
+		return true, reporter.syncNativeEngineName(ctx, seat, payload)
+	}
+	return true, nil
 }
 
 // nativeReporterSeat treats inherited pane context as a hint only. The saved
@@ -263,6 +287,7 @@ func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload he
 
 // herdrPayload is the part of an engine's hook payload the reporter reads.
 type herdrPayload struct {
+	TranscriptNull   bool            `json:"-"`
 	HookEventName    string          `json:"hook_event_name"`
 	SessionID        string          `json:"session_id"`
 	AgentID          string          `json:"agent_id"`

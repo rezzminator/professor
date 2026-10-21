@@ -214,6 +214,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.seedConfig(); err != nil {
 		return err
 	}
+	if err := installer.generateHarnessPrompts(); err != nil {
+		return fmt.Errorf("generate harness prompts: %w", err)
+	}
 	installer.deferFailure(installer.installHarvest(ctx))
 	installer.deferFailure(installer.installMarkdownTool(ctx))
 	installer.installThemes(ctx)
@@ -325,6 +328,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireOpenCodeInstructions())
 	installer.deferFailure(installer.wireLogDefault())
 	installer.deferFailure(installer.wireShell(false))
+	installer.deferFailure(installer.wireHerdrShell(false))
 	installer.deferFailure(installer.wireVSCode())
 	installer.deferFailure(installer.writeUpdateMetadata())
 	// Like a failed plugin install, a refused login default is reported at
@@ -703,6 +707,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.wireShell(true); err != nil {
+		return err
+	}
+	if err := installer.wireHerdrShell(true); err != nil {
 		return err
 	}
 	installer.deferFailure(installer.wireLoginDefault(true))
@@ -1563,6 +1570,16 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 				fmt.Errorf("systemctl --user enable --now %s: %w", strings.Join(units, " "), err),
 			))
 		}
+	}
+	// Enabling a timer is not evidence that it is ticking. A silent failed
+	// start would strand every due wake until another install repaired it.
+	state, err := fleetUnitState(ctx, installer.options.Runner, scheduleTimerUnit)
+	if err != nil {
+		installer.deferFailure(installer.fail(fmt.Errorf("verify schedule timer after enable --now: %w", err)))
+	} else if state != unitStateActive {
+		installer.deferFailure(installer.fail(fmt.Errorf(
+			"schedule timer %s is %s after enable --now; due wakes will not run", scheduleTimerUnit, state,
+		)))
 	}
 }
 

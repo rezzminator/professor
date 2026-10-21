@@ -2,49 +2,93 @@
 
 ## Runtime prerequisite
 
-These machine-global agents are optional entry points. Invoke them by registered name without the Agent tool's `model` override. A compatible gateway must accept the Claude harness's Anthropic Messages requests and route the GPT model IDs to an OpenAI-compatible backend. The `[1m]` suffix is a harness context-window hint; the gateway must support the declared IDs and reasoning efforts. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) is that gateway, a separate repository pinned as the `plugins/gpt-gateway` submodule and installed on its own; Professor ships no credentials, endpoint or account configuration.
+Invoke a registered twin without the Agent `model` override. A compatible gateway accepts the Claude harness's Anthropic Messages requests and routes the GPT model IDs to an OpenAI-compatible backend. The `[1m]` suffix is a harness context-window hint. [gpt-gateway](https://github.com/rezzminator/gpt-gateway), pinned as `plugins/gpt-gateway`, supplies that route; Professor supplies no credentials, endpoint or account configuration. Installation and mirror compilation are local operations, not provider calls.
 
-Installation and mirror compilation are local file operations: they do not contact a model provider or require a gateway. A host without one can install normally and use the ordinary Claude agents; invoking a GPT twin without a matching route fails at the provider boundary.
+## Canonical role inventory
 
-## Declarations
+Every row preserves its canonical manual. New twins use `gpt-6.1-sol[1m]` at `high`; existing research tiers retain `low` for `gpt-rr` and `medium` for `gpt-rr-pro`/`gpt-rr-pro-max`. Existing lightweight transcript and trace readers retain `gpt-6-luna[1m]` at `medium`.
 
-| Agent | From | Model | Effort | Body |
-| --- | --- | --- | --- | --- |
-| `gpt-foreman` | `flights-foreman` | `gpt-6.1-sol[1m]` | `high` | the manual, the return law prepended, its own name renamed |
-| `gpt-flights-lander` | `flights-lander` | `gpt-6.1-sol[1m]` | `high` | the manual, the return law prepended, Claude children unchanged |
-| `gpt-reviewer` | `reviewer` | `gpt-6.1-sol[1m]` | `high` | the full review manual, Claude tracers unchanged |
-| `gpt-reviewer-pro` | `reviewer-pro` | `gpt-6.1-sol[1m]` | `high` | the full deep-review manual, Claude tracers unchanged |
-| `gpt-rr` | `rr` | `gpt-6.1-sol[1m]` | `low` | the full research-lead manual, Claude diggers unchanged |
-| `gpt-rr-pro` | `rr-pro` | `gpt-6.1-sol[1m]` | `medium` | as `rr-pro`: its budget and repository lane |
-| `gpt-rr-pro-max` | `rr-pro-max` | `gpt-6.1-sol[1m]` | `medium` | as `rr-pro-max`: its budget, repository lane and `Read` |
-| `sol` | `general-purpose` | `gpt-6.1-sol[1m]` | `high` | the `shared/gpt-worker.md` append text |
-| `luna` | `general-purpose` | `gpt-6-luna[1m]` | `medium` | the `shared/gpt-worker.md` append text |
-| `astra` | `general-purpose` | `gpt-6-astra[1m]` | `high` | the `shared/gpt-worker.md` append text |
+| Canonical role | GPT registration | Source scope |
+| --- | --- | --- |
+| `agent-investigator` | `gpt-agent-investigator` | global declaration |
+| `clone-distiller` | `gpt-clone-distiller` | global declaration |
+| `collector` | `gpt-collector` | global declaration |
+| `conflict-resolver` | `gpt-conflict-resolver` | global declaration |
+| `documenter` | `gpt-documenter` | global declaration |
+| `flights-foreman` | `gpt-foreman` | global declaration |
+| `flights-foreman-sonnet` | `gpt-foreman` | shared tier coverage |
+| `flights-hunter` | `gpt-flights-hunter` | global declaration |
+| `flights-lander` | `gpt-flights-lander` | global declaration |
+| `flights-spec-walker` | `gpt-flights-spec-walker` | global declaration |
+| `flights-sub-lander` | `gpt-flights-sub-lander` | global declaration |
+| `gitter` | `gpt-gitter` | global declaration + portable project wrapper |
+| `imaginator` | `gpt-imaginator` | global declaration |
+| `reviewer` | `gpt-reviewer` | global declaration |
+| `reviewer-nt` | `gpt-reviewer-nt` | global declaration |
+| `reviewer-pro` | `gpt-reviewer-pro` | global declaration |
+| `rr` | `gpt-rr` | global declaration |
+| `rr-pro` | `gpt-rr-pro` | global declaration |
+| `rr-pro-max` | `gpt-rr-pro-max` | global declaration |
+| `sub-rr` | `gpt-sub-rr` | global declaration |
+| `sub-tracer` | `gpt-sub-tracer` | global declaration |
+| `tracer` | `gpt-tracer` | global declaration |
+| `transcript-reader` | `gpt-transcript-reader` | global declaration |
+| `pcm` | `gpt-pcm` | portable project wrapper |
+| `changelogger` | `gpt-changelogger` | repository-only project wrapper |
+| `releaser` | `gpt-releaser` | repository-only project wrapper |
+| `themer` | `gpt-themer` | repository-only project wrapper |
+| `general-purpose`, `Explore` | `sol` | general worker / read-only exploration brief |
 
-Each twin is a declaration in `templates/global/agents/{name}.md`, with `from:` and its settings in frontmatter; engine-sync renders it into its generated directory and `pfm install` links the result. The shared files live in `templates/global/agents/shared/`, carry no `name`, and are never installed. `shared/gpt.md` gives every twin `requires: [gpt-agents]`, `engines: {codex: false, opencode: false}` and the `autoCompact` block `forceAt: 230k`, `nudgeFrom: 190k`, `nudgeEvery: 20k`. `shared/gpt-flights.md` extends it and prepends the return law to the manual: the parent hears the twin's result only through its final return, and a message to `main` carries only what the manual sends there. `shared/gpt-worker.md` extends it and appends the general-worker text to the empty `general-purpose` body.
+The other general workers, `luna` and `astra`, retain `gpt-6-luna[1m]` at `medium` and `gpt-6-astra[1m]` at `high`; `sol` uses sol at `high`.
 
-A flight twin carries its original's whole manual, so an edit to the original reaches the twin at the next `pfm install`. `gpt-foreman` renames `flights-foreman` to `gpt-foreman` wherever the manual names it as an agent; a file path such as `flights-foreman.md` is never renamed. Its children are `gpt-foreman` or `flights-foreman-sonnet`, which stays a Claude agent. `gpt-flights-lander` keeps its original's `visibility`, `main` only, and renames nothing: its `flights-hunter`, `flights-spec-walker` and `flights-sub-lander` children stay Claude agents, each listing it in its `visible-to` beside `flights-lander`, as does the `lander-inventory` kit. `gpt-reviewer` and `gpt-reviewer-pro` are visible to `main` alone; their `tracer` and `sub-tracer` readers stay Claude agents and are never renamed. `gpt-rr`, `gpt-rr-pro` and `gpt-rr-pro-max` derive from their tier, so `gpt-rr-pro` and `gpt-rr-pro-max` carry that tier's § Budget, repository lane and tools; they rename nothing, keep their original's open visibility, and spawn the Claude `sub-rr` and `clone-distiller`. `sub-rr` lists the three in its `visible-to`, and the `rr-dir` `SubagentStart` matcher names them, so each receives its `RR-DIR:` line. engine-sync stamps `role: {original}` on each flight and research twin; a `general-purpose` worker carries none.
+## Declarations and project wrappers
 
-A twin never carries `effortControl`: the effort buttons of `auto-effort-control` belong to Claude agents ([flights.md](../flights/flights.md#effort-buttons)), so `gpt-foreman`, `gpt-reviewer` and `gpt-reviewer-pro` unset the key and pin a `tools:` line without the buttons, whatever their originals declare; `flights-lander` carries neither, and `gpt-flights-lander` pins its original's `tools:` line.
+Machine declarations in `templates/global/agents/{name}.md` use the existing `from:` renderer. Shared profiles under `shared/` are not agents. `shared/gpt.md` supplies `requires: [gpt-agents]`, Claude-only engine opt-outs, compaction thresholds (`230k`, `190k`, `20k`) and fail-closed child routing. `shared/gpt-flights.md` adds the final-return law and replaces the canonical Provider section. Derived artifacts live in `templates/generated/agents/`; engine-sync stamps their canonical `role`, including `role: reviewer` for the `reviewer-nt` derivative. Source declarations and wrappers never set `role`.
 
-The RR twins keep their original's effort, tools, save law and body; `gpt-rr-pro` and `gpt-rr-pro-max` derive from the rendered `rr-pro` and `rr-pro-max`, so they carry each tier's budget and `shared/repo-lane.md`. They rename nothing: their `sub-rr` diggers and `clone-distiller` stay Claude agents, and `sub-rr`'s visibility lists the three twins beside the three Claude leads. Each is stamped `role: rr`. Their `RR-DIR:` line comes from the same `rr-dir` SubagentStart hook, whose matcher `rr|rr-pro|rr-pro-max|gpt-rr|gpt-rr-pro|gpt-rr-pro-max` names all six (`HookRRDirMatcher`, `pfm/internal/claudelaunch/hooks.go`).
+Project loading rejects `from:`. Each `.claude/agents/gpt-{role}.md` is a registered wrapper whose body reads `.claude/agents/{role}.md` in full, then executes that protocol with GPT-only dispatch. Its frontmatter copies the canonical tools, skills and hooks and pins the GPT model/effort. All but gitter opt out of Codex and OpenCode. Reading a manual alone does not activate its metadata. Portable `gpt-pcm` and `gpt-gitter` ship under `templates/project/agents/`; release and theme wrappers stay repository-local. The global gitter retains its delegation to the repository's canonical `.claude/agents/gitter.md` under the inherited GPT constraint.
 
-## Opt-in
+A twin removes `effortControl` and its three effort buttons when its canonical role carries them, preserving the other tools. Canonical role bodies remain unchanged; declarations rename child registrations, not file paths or skill names such as `tracer:use`.
 
-The twins install only on a host that opts in with `"gptAgents": true` under `claude` in the machine config `pfm.config.json`: pfm then writes `gpt-agents` into the `targets.capabilities` list of the global `~/.claude/engine-sync.json`, which every engine-sync call reads and passes `--capability gpt-agents` on its own install and doctor calls. Without it, check reports each twin `SKIPPED {twin} — requires gpt-agents`, machine doctor prints its `agent SKIPPED all {twin} {path} (requires gpt-agents unmet)` row, and an install retires the twins' links and generated files an earlier opted-in install owned, never a file it does not own.
+## Child-dispatch closure
 
-## Hooks
+All GPT dispatches inspect the live registry, omit explicit model overrides, propagate GPT-only routing, and return `BLOCKED: GPT role unavailable: {role}` for an unavailable or inaccessible required child. There is no Anthropic fallback and no skipped protocol step.
 
-No twin carries a hook: neither its declaration nor its original's frontmatter attaches one. The GPT Stop-hook scripts and their ownership receipt an earlier install placed are retired: `pfm install` and uninstall remove each `hooks/` link that resolves exactly to its managed copy in the default Claude store, an explicit install store and every account, then the managed copies, their log directories and the receipt; an operator file or a foreign link at the same path is kept and named (`retireGptHooks`, `pfm/internal/installer/retired_hooks.go`).
+| Parent | Required GPT children |
+| --- | --- |
+| `gpt-foreman` | `gpt-foreman`, `gpt-documenter`, `gpt-pcm` |
+| `gpt-flights-lander` | `gpt-flights-hunter`, `gpt-flights-spec-walker`, `gpt-flights-sub-lander` |
+| `gpt-reviewer`, `gpt-reviewer-pro` | `gpt-tracer` |
+| `gpt-rr` | `gpt-sub-rr` |
+| `gpt-rr-pro`, `gpt-rr-pro-max` | `gpt-sub-rr`, `gpt-clone-distiller` |
+| `gpt-clone-distiller` | `gpt-tracer` |
+| `gpt-documenter` | recursive `gpt-documenter`; cheap mechanical checks use `sol` |
+| `gpt-gitter` | `gpt-conflict-resolver` |
+| `gpt-agent-investigator` | `gpt-transcript-reader` |
+| `gpt-tracer`, `gpt-sub-tracer` | `gpt-sub-tracer` |
+| `gpt-pcm` | `sol` for both Explore walkers and independent `model: haiku` checks; both foreman tiers use `gpt-foreman` |
+| `gpt-releaser` | `gpt-reviewer`, `gpt-changelogger`, `gpt-gitter` |
+| `gpt-changelogger` | `gpt-tracer` |
 
-## Engine mirrors
+Helper `visibility` admits the mapped callers, and gitter's child allowlist contains `gpt-conflict-resolver`. The RR leads retain their original save law, budgets and tools. Their `RR-DIR:` comes from the existing `rr-dir` SubagentStart matcher naming all three GPT research leads (`HookRRDirMatcher`, `pfm/internal/claudelaunch/hooks.go`).
 
-The twins are Claude-only: `shared/gpt.md` sets `engines.codex` and `engines.opencode` to `false`, so engine-sync writes no Codex role and no OpenCode agent for them in any scope. A Codex or OpenCode session runs the ordinary roles on its own models. The adapter installs no provider credentials and translates no Claude hook into another engine's hook.
+## GitGuard boundary
 
-## Hand-copy conflicts
+Neither a wrapper's registration nor compiler-stamped `role: gitter` authorizes Git writes. Both GPT gitter surfaces require evidence that the installed GitGuard explicitly supports their observed native hook identity `gpt-gitter`. Without it they return `BLOCKED: gpt-gitter native GitGuard identity unproven`. They never spoof identity, bypass the guard, resolve a refused conflict themselves, or weaken explicit publication authorization. GitGuard support is a separate guarded change, not an inference from prompt metadata.
 
-A pre-existing regular file at a twin's name in an account's `agents/` directory is not pfm-owned: installation reports the conflict instead of replacing it, and doctor reports it `SHADOWED`. `pfm install --adopt-agents` moves each such file under `{XDG state}/engine-sync/adopted/{UTC timestamp}/` and links the rendered twin in its place. A change to a twin belongs in its own `{name}.md` declaration or its original; recreating a hand copy defeats install ownership.
+## Opt-in and engine mirrors
 
-## Verification
+`"gptAgents": true` under `claude` in `pfm.config.json` makes pfm write `gpt-agents` to `targets.capabilities` in the global engine-sync policy. Machine declarations are linked only with that capability; without it, doctor prints `agent SKIPPED all {twin} {path} (requires gpt-agents unmet)` and an install retires only its previously owned links and generated artifacts. Project wrappers are scaffolded project files, not machine-managed links; their `requires` metadata is not a claim that the Claude project loader hides them. Dispatch still checks the live registry.
 
-`scripts/check-agent-roster.test.mjs` renders the shipped declaration files through the built engine-sync, with and without `--capability gpt-agents`, and pins on the rendered twins what it pinned on the old source files: no machine-absolute path, the renames applied, model and effort, the compaction block and the size cap — 15 KiB for a worker twin, 2 KiB over the larger of 15 KiB and its original for a role twin. It also proves each twin linked only with the capability, `SKIPPED` without it, and written as no Codex role and no OpenCode agent. Its `templates.mirrors` gate registration runs the cases. The installer and install-health tests check account fan-out, repair and named failures. Run the affected scripts through `.claude/scripts/test.sh` while building, and the full gate, `.claude/scripts/test.sh --full`, once before landing.
+The GPT entries are Claude-only except `gpt-gitter`: its global declaration and project wrappers preserve Codex `sandbox: inherit` with model `gpt-6-luna`, and OpenCode `"git *": allow` with model `openai/gpt-6.1-sol-fast`. These exact identities carry runtime permissions, not native GitGuard authority; the fail-closed guard check still applies. Other canonical roles keep their supported engine overrides. The mirrors stay generated. A new session or user-authorized reload discovers added registrations; a file read does not refresh the session registry. No account or default model setting changes to select a twin.
+
+## Hooks and ownership
+
+Project wrappers preserve canonical hooks, notably releaser's `PreToolUse` wait hook, and pcm's preloaded `quality:prompt` skill. Machine twins inherit their originals' hook metadata. The retired GPT Stop-hook scripts remain retired; installation removes only its managed links and receipts (`retireGptHooks`, `pfm/internal/installer/retired_hooks.go`).
+
+A pre-existing regular machine agent file is not pfm-owned: install reports a conflict and doctor reports `SHADOWED`. `pfm install --adopt-agents` moves it into the engine-sync adoption state before linking its owned render. Edit a declaration or canonical manual rather than replacing a link with a hand copy.
+
+## Verification and landing timing
+
+`scripts/check-agent-roster.test.mjs` independently pins the rendered roster, canonical manual preservation, runtime metadata, child routes, helper visibility, capability-on/off behavior and engine opt-outs. It reads rendered files, not compiler verdict claims. A missing role, changed manual or blocked helper is a named assertion failure. The generated-agent freshness check holds tracked renders equal to a scratch render. Installed engine-sync must actually pass Codex build/check and OpenCode build/doctor after project source changes.
+
+Run affected tests through `.claude/scripts/test.sh`; the full gate belongs to landing, not each wrapper. `.professor/manifest.json` enumerates tracked project sources only: the authorized Git writer stages new wrappers before `infra/check-self-hosted-manifest.sh --write`, then checks the ledger and commits. An unstaged wrapper is not prematurely recorded as tracked. `templates/refresh-map.json` classifies portable wrappers and global declarations as curated, and repository-only release/theme roles as ignored live sources.

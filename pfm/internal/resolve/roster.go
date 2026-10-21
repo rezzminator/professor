@@ -8,6 +8,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
+// SeatPrefix reserves exact durable-seat references, never names or raw panes.
+const SeatPrefix = naming.SeatPrefix
+
 // RosterCandidate is one composed fleet row projected onto the fields needed
 // to resolve a human target name. Callers keep composition in their own layer;
 // this package owns the matching judgment shared by CLI and MCP.
@@ -75,13 +78,21 @@ func ResolveRosterName(
 	exact := make([]RosterCandidate, 0, 2)
 	folded := make([]RosterCandidate, 0, 2)
 	session := SessionName(name)
+	seatID, seatTarget := strings.CutPrefix(name, SeatPrefix)
 	for _, candidate := range candidates {
+		if seatTarget {
+			if seatID != "" && candidate.Backend == "herdr" && candidate.SeatID == seatID {
+				exact = append(exact, candidate)
+			}
+			continue
+		}
 		socket := candidate.Socket
 		if socket == "" {
 			socket = candidate.SocketPath
 		}
 		switch {
 		case candidate.ID == name ||
+			(candidate.Session != "" && candidate.Session == name) ||
 			(session != "" && SessionName(socket) == session) ||
 			candidate.Name == name:
 			exact = append(exact, candidate)

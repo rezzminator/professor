@@ -1,0 +1,18 @@
+{
+  "@host_accent": "#fa7bc6",
+  "@p_amber": "#fce353",
+  "@p_fg": "#f8f0fa",
+  "@p_fg1": "#c7bad8",
+  "@p_fg2": "#9284a8",
+  "@p_g0": "#1d1428",
+  "@p_g3": "#3b2152",
+  "@p_red": "#ff8fa3",
+  "message-command-style": "bg=#2c1d3c,fg=#72e5fd,bold",
+  "message-style": "bg=#fa7bc6,fg=#170f1e,bold",
+  "mode-style": "bg=#72e5fd,fg=#170f1e",
+  "pane-active-border-style": "fg=#{?#{==:#{@pfm-state},blocked},#{@pfm-state-blocked},#{?#{==:#{@pfm-state},working},#{@pfm-state-working},#{?#{==:#{@pfm-state},done},#{@pfm-state-done},#{@host_accent}}}}",
+  "pane-border-style": "fg=#4f3d66",
+  "status-style": "bg=#1d1428,fg=#c7bad8",
+  "window-status-current-style": "fg=#{?#{==:#{@pfm-state},blocked},#{@pfm-state-blocked},#{?#{==:#{@pfm-state},working},#{@pfm-state-working},#{?#{==:#{@pfm-state},done},#{@pfm-state-done},#{@host_accent}}}},bg=#3b2152,bold",
+  "window-status-style": "fg=#9284a8"
+}

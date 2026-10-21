@@ -52,6 +52,7 @@ func TestSeatRequest(t *testing.T) {
 }
 
 func TestSeatWaitUsesCallerDeadline(t *testing.T) {
+	t.Parallel()
 	socket := serve(t, func(string) string {
 		<-time.After(1100 * time.Millisecond)
 		return `{"result":{"type":"agent_waited","agent_status":"idle"}}`
@@ -100,6 +101,7 @@ func TestSeatWaitUsesCallerDeadline(t *testing.T) {
 }
 
 func TestSeatRecentReadDeadline(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, source string
 		bound        time.Duration

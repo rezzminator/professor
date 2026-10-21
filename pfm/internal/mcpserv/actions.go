@@ -14,6 +14,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -107,6 +108,9 @@ func (service *Service) chatNew(
 	request *mcp.CallToolRequest,
 	input NewInput,
 ) (result *mcp.CallToolResult, output ActionOutput, returnErr error) {
+	if err := naming.ValidateLabel(input.Name); err != nil {
+		return nil, ActionOutput{}, err
+	}
 	ctx = spawn.WithBackendEnvironment(ctx, nil)
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
@@ -334,6 +338,9 @@ func (service *Service) chatName(
 ) (*mcp.CallToolResult, ActionOutput, error) {
 	if strings.TrimSpace(input.Name) == "" || strings.ContainsAny(input.Name, "\r\n\x00") {
 		return nil, ActionOutput{}, fmt.Errorf("name must be one non-empty line")
+	}
+	if err := naming.ValidateLabel(input.Name); err != nil {
+		return nil, ActionOutput{}, err
 	}
 	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {

@@ -86,12 +86,16 @@ var ErrTabNotSole = errors.New("the chat's pane is not alone in its tab")
 // for it (empty until the painter follows the chat's name).
 type tabLabelRecord struct {
 	Base, Rendered, Identity, State, Mode, Seen string
-	On                                          bool
+	// Frame is the frame of State's markers Rendered drew (tabFrame).
+	Frame int
 	// UserSet says Base is a label the user set in Herdr, adopted by the
 	// status painter: no later automatic change of the chat's composed name
 	// replaces it, only a name the user chose does: an explicit pfm rename
 	// (LabelSoleTab) or a change of the chat's user name (SeenUser).
 	UserSet bool
+	// UnseenExplicit protects an explicit pfm rename before the painter's
+	// first source observation, which can still carry the pre-rename title.
+	UnseenExplicit bool `json:",omitzero"`
 	// SeenUser is the chat's user name (TabDecoration.UserName) the status
 	// painter last saw on a row read from its source (UserKnown), UserSeen
 	// whether it saw such a row at all: a record written before the painter
@@ -103,6 +107,28 @@ type tabLabelRecord struct {
 	// have applied it. The next writer settles it against the tab's label
 	// (settlePending) before it reads the label as anyone else's.
 	Pending string
+	// Glyphs are the tab glyphs the status painter last drew with, so a
+	// rename between its ticks keeps the theme's prefix.
+	Glyphs TabGlyphs `json:",omitzero"`
+}
+
+// owns says label is one pfm rendered for this record: the label it last
+// wrote, or the record's base under any frame of its state, so a tab caught
+// mid-animation (a rename applied whose record was not yet stored, a frame a
+// concurrent writer drew) never reads as a label the user set.
+func (record *tabLabelRecord) owns(label string) bool {
+	if label == record.Rendered {
+		return true
+	}
+	if record.Rendered == "" {
+		return false
+	}
+	for frame := range tabMarkers(record.State, record.Mode, record.Glyphs) {
+		if label == DecoratedTabLabel(record.Base, record.State, record.Mode, frame, record.Glyphs) {
+			return true
+		}
+	}
+	return false
 }
 
 // settlePending resolves a rename whose answer was lost: a tab label equal to
@@ -229,19 +255,28 @@ func writeSoleTabLabel(
 			return err
 		}
 		settled := record.settlePending(info.Label)
-		if !explicit && (record.UserSet || record.Rendered != "" && info.Label != record.Rendered) {
+		if !explicit && (record.UserSet || record.Rendered != "" && !record.owns(info.Label)) {
 			// An unchanged name re-announced is no rename: the user's label stays.
 			if settled {
 				return writeTabLabel(path, record)
 			}
 			return nil
 		}
-		if info.Label != record.Rendered {
+		if !record.owns(info.Label) {
 			record = tabLabelRecord{}
 		}
 		// An explicit rename: the name is pfm's again, whoever set the label before.
-		record.Base, record.UserSet = TabLabel(label), false
-		want := DecoratedTabLabel(record.Base, record.State, record.Mode, record.On)
+		base := TabLabel(label)
+		switch {
+		case explicit:
+			record.UnseenExplicit = record.Seen == ""
+		case base != record.Base:
+			// Another name no user chose replaces the explicit one: nothing left to protect.
+			record.UnseenExplicit = false
+		}
+		// A re-announce of the same name keeps an unseen explicit rename protected.
+		record.Base, record.UserSet = base, false
+		want := DecoratedTabLabel(record.Base, record.State, record.Mode, record.Frame, record.Glyphs)
 		if info.Label != want {
 			rename, err := (TabRename{Tab: tab, Label: want, Seq: seq()}).Line()
 			if err != nil {

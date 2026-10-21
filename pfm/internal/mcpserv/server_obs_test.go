@@ -21,7 +21,7 @@ func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 		}
 	}()
 	client := connectInMemory(t, service.Server())
-	_ = callTool[FindOutput](t, client.clientSession, "find", FindInput{Excerpt: "alpha unique"})
+	_ = callTool[LastOutput](t, client.clientSession, "last", LastInput{Target: "alpha"})
 	var found *obs.Record
 	for _, record := range recorder.Records() {
 		if record.Message == "mcp.call" {
@@ -31,7 +31,7 @@ func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	if found == nil {
 		t.Fatalf("no mcp.call record: %s", recorder.Raw())
 	}
-	for key, want := range map[string]any{obs.FieldComp: "mcp", "kind": "tool", "tool": "find"} {
+	for key, want := range map[string]any{obs.FieldComp: "mcp", "kind": "tool", "tool": "last"} {
 		if got, _ := found.Field(key); got != want {
 			t.Fatalf("mcp.call record %s = %v, want %v: %v", key, got, want, found.Fields)
 		}

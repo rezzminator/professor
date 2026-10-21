@@ -1,0 +1,127 @@
+{
+  "0020": {
+    "name": "Turquoise: functions",
+    "scope": [
+      "entity.name.function",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "support.function.any-method",
+      "meta.function-call.generic",
+      "entity.name.function.member",
+      "entity.name.method",
+      "meta.method-call entity.name.function",
+      "entity.name.function.target.makefile",
+      "entity.name.command.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cd6c8"
+    }
+  },
+  "0022": {
+    "name": "Avocado: types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.other.inherited-class",
+      "support.type",
+      "support.class",
+      "entity.name.type.alias",
+      "entity.name.type.class",
+      "support.class.builtin",
+      "support.class.component",
+      "storage.type.java",
+      "storage.type.generic.java",
+      "storage.type.object.array.java",
+      "storage.type.cs",
+      "entity.other.attribute-name.class.css",
+      "entity.other.attribute-name.class"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b9dd7c"
+    }
+  },
+  "0024": {
+    "name": "Lilac: namespaces and modules",
+    "scope": [
+      "entity.name.namespace",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "storage.modifier.import",
+      "support.other.namespace",
+      "entity.name.type.namespace",
+      "entity.name.import.go",
+      "entity.name.package.go",
+      "fenced_code.block.language"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#adb3ff"
+    }
+  },
+  "0025": {
+    "name": "Lilac: decorators, annotations, macros",
+    "scope": [
+      "entity.name.function.decorator",
+      "meta.decorator",
+      "punctuation.decorator",
+      "meta.attribute",
+      "entity.name.function.macro",
+      "support.function.macro",
+      "entity.name.function.preprocessor",
+      "meta.preprocessor",
+      "storage.type.annotation",
+      "punctuation.definition.annotation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#adb3ff"
+    }
+  },
+  "0026": {
+    "name": "Coral: tags",
+    "scope": [
+      "entity.name.tag",
+      "meta.tag.sgml",
+      "entity.name.tag.html",
+      "entity.name.tag.xml",
+      "entity.name.tag.css",
+      "entity.name.tag.wildcard.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8f85"
+    }
+  },
+  "0027": {
+    "name": "Orchid: attributes",
+    "scope": [
+      "entity.other.attribute-name",
+      "entity.other.attribute-name.html",
+      "entity.other.attribute-name.jsx",
+      "entity.other.attribute-name.tsx"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#eea2d4"
+    }
+  },
+  "0028": {
+    "name": "Turquoise, italic: pseudo-classes",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class.css",
+      "entity.other.attribute-name.pseudo-element.css",
+      "entity.other.attribute-name.pseudo-class",
+      "entity.other.attribute-name.pseudo-element"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#5cd6c8"
+    }
+  }
+}

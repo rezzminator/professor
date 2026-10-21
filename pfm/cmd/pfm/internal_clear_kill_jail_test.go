@@ -8,21 +8,123 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+// Issue #37: Claude copies a title into /clear's empty successor. Hiding the
+// original then leaves only the empty chat under that name. The hook must keep
+// the real conversation resumable, including a /rename not yet in the index.
+func TestClearKillKeepsNamedConversationResumable(t *testing.T) {
+	for _, title := range []struct {
+		name   string
+		record string
+		cwd    string
+	}{
+		{"custom title", `{"type":"custom-title","customTitle":"Research Desk"}`, "/work/example"},
+		{"agent name", `{"type":"agent-name","agentName":"Research Desk"}`, "/work/example"},
+		{"missing cached cwd", `{"type":"custom-title","customTitle":"Research Desk"}`, ""},
+		{"dot cached cwd", `{"type":"custom-title","customTitle":"Research Desk"}`, "."},
+	} {
+		t.Run(title.name, func(t *testing.T) {
+			root := testjail.Fleet(t)
+			t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
+			ctx := context.Background()
+			database, err := store.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			})
+			const original = "11111111-1111-4111-8111-111111111111"
+			const successor = "22222222-2222-4222-8222-222222222222"
+			contents := make(map[string]string)
+			for _, id := range []string{original, successor} {
+				body := title.record + "\n"
+				if id == original {
+					body += `{"type":"user","cwd":"/work/example","message":{"content":"Research this topic"}}` + "\n"
+				} else {
+					body += `{"type":"user","cwd":"/work/example","message":{"content":"<command-name>/clear</command-name>"}}` + "\n"
+				}
+				path := filepath.Join(root, "claude", id+".jsonl")
+				contents[path] = body
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				// Seed a stale, unnamed index entry: /rename may have just landed.
+				if err := database.UpsertTranscript(ctx, store.Transcript{
+					UUID: id, Path: path, CWD: title.cwd, Size: 1,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			payload := `{"hook_event_name":"SessionEnd","reason":"clear","session_id":"` + original + `"}`
+			if code, stdout, stderr := runClearKillPayload(t, payload); code != 0 || stdout != "" || stderr != "" {
+				t.Fatalf("ClearKill() = %d, stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			for path, want := range contents {
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != want {
+					t.Fatalf("/clear hook rewrote engine-owned transcript %s: got %q, want %q", path, got, want)
+				}
+			}
+			transcripts, err := database.Transcripts(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			killed, err := database.KilledChats(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := compose.Compose(compose.Input{Transcripts: transcripts, Killed: killed}).Rows
+			for _, row := range rows {
+				if row.ID == original && row.Name == "Research Desk" && row.Kind == compose.ResumeClaude {
+					return
+				}
+			}
+			t.Fatalf(
+				"named conversation missing from default resume rows after /clear: rows=%#v killed=%#v",
+				rows,
+				killed,
+			)
+		})
+	}
+}
 
 func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		payload  string
 		fleet    bool
+		records  string
 		wantKill bool
 	}{
 		{
 			name:     "clear fleet chat",
 			payload:  `{"hook_event_name":"SessionEnd","reason":"clear","session_id":"11111111-1111-4111-8111-111111111111"}`,
 			fleet:    true,
+			wantKill: true,
+		},
+		{
+			name:     "an AI title is not a chosen name",
+			payload:  `{"hook_event_name":"SessionEnd","reason":"clear","session_id":"11111111-1111-4111-8111-111111111111"}`,
+			fleet:    true,
+			records:  `{"type":"ai-title","aiTitle":"Automatic topic"}` + "\n",
+			wantKill: true,
+		},
+		{
+			name:     "empty title records are not a chosen name",
+			payload:  `{"hook_event_name":"SessionEnd","reason":"clear","session_id":"11111111-1111-4111-8111-111111111111"}`,
+			fleet:    true,
+			records:  `{"type":"custom-title","customTitle":""}` + "\n" + `{"type":"agent-name","agentName":""}` + "\n",
 			wantKill: true,
 		},
 		{
@@ -58,7 +160,7 @@ func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			body := `{"type":"user","cwd":"/work/example","message":{"content":"first"}}` + "\n" +
+			body := test.records + `{"type":"user","cwd":"/work/example","message":{"content":"first"}}` + "\n" +
 				`{"type":"user","cwd":"/work/example","message":{"content":"second"}}` + "\n"
 			if err := os.WriteFile(transcriptPath, []byte(body), 0o600); err != nil {
 				t.Fatal(err)

@@ -24,7 +24,7 @@ import (
 //     in its first 8000 bytes;
 //   - lock: go.sum, *.lock, package-lock.json, pnpm-lock.yaml, yarn.lock,
 //     npm-shrinkwrap.json;
-//   - generated: under templates/generated/ or pfm/harness-prompts/composed/,
+//   - generated: under templates/generated/ or pfm/harness-prompts/generated/,
 //     *.pb.go, *_gen.go, *.gen.*, or a file whose first 5 lines hold
 //     "Code generated" and then "DO NOT EDIT";
 //   - test: *_test.go, test_*.py, *_test.py, *.test.*, *.spec.*, or any
@@ -47,7 +47,7 @@ var (
 		"npm-shrinkwrap.json": true,
 	}
 	testSegments  = map[string]bool{"test": true, "tests": true, "testdata": true, "__tests__": true, "fixtures": true}
-	generatedDirs = []string{"templates/generated/", "pfm/harness-prompts/composed/"}
+	generatedDirs = []string{"templates/generated/", "pfm/harness-prompts/generated/"}
 	generatedMark = regexp.MustCompile(`(?s)Code generated.*DO NOT EDIT`)
 )
 

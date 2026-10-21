@@ -38,14 +38,16 @@ JSON
     cp "$HERE/fixtures/opencode-auth.json" "$HOME/.local/share/opencode/auth.json"
     ;;
   install)
-    [ -e "$HOME/.professor" ] || ln -s /worktree "$HOME/.professor"
+    # The mounted worktree stays read-only; install owns generated prompt files
+    # inside this container-local clone.
+    bash /worktree/infra/fence/source-clone.sh /worktree "$HOME/.professor"
     mkdir -p "$HOME/.config/opencode"
     printf '{"model":"openai/lane-fixture"}\n' >"$HOME/.config/opencode/opencode.jsonc"
-    (cd /worktree && pfm install --yes)
+    (cd "$HOME/.professor" && pfm install --yes)
     [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
       { echo "provision: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
     settings_tmp="$(mktemp)"
-    jq --arg t "custom:hibiscus-night" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
+    jq --arg t "custom:tokyo-night" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
     cat "$settings_tmp" >"$HOME/.claude/settings.json"
     rm -f "$settings_tmp"
     git config --global user.name demo

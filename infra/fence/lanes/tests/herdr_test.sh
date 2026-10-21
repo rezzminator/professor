@@ -177,4 +177,26 @@ for row in 'raw|0|called LIVE — Herdr raw composer confirmed|yes' 'raw|0|deliv
   got=no; h_outcome_matches "$kind" "$code" "$text" && got=yes
   if [ "$got" = "$want" ]; then ok "row4 outcome $kind $want: $text"; else bad "row4 outcome $kind expected $want" "$got"; fi
 done
+# A failed initial focus probe has not changed anything and must not restore
+# from a backup that this beat has not created yet.
+awk '/^h_tab_ids\(\)/ {copy=1} /^h_single=/ {copy=0} copy' "$LANES/H.sh" >"$T/priority-helpers.sh"
+out="$(H_FIXTURE="$T/fixture" bash -c '
+  source "$1"
+  H_PANE=p1
+  beat() { :; }; requires() { return 0; }; fail() { printf "FAIL %s\n" "$*"; }
+  h_request() {
+    case "$1" in
+      pane.get) printf '\''{"result":{"pane":{"tab_id":"fleet"}}}\n'\'' ;;
+      tab.list) printf '\''{"result":{"tabs":[{"tab_id":"fleet","workspace_id":"w1"}]}}\n'\'' ;;
+      agent.get) printf '\''{"result":{"agent":{"agent":"claude","agent_status":"idle"}}}\n'\'' ;;
+    esac
+  }
+  h_tab_ids() { printf "fleet\n"; }
+  h_tab_focused() { return 17; }
+  h_tp_restore() { printf "UNSAFE-RESTORE\n"; }
+  h_tab_priority
+' _ "$T/priority-helpers.sh" 2>&1)"; rc=$?
+if [ "$out" = 'FAIL tab priority original focus' ]; then
+  ok "priority focus-read failure stops before any restoration or config mutation"
+else bad "priority focus-read failure must not restore nonexistent backup" "rc=$rc" "$out"; fi
 shtest_end

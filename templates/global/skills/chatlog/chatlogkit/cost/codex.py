@@ -19,11 +19,11 @@ from . import claude as C, prices as P
 from .fmt import NOT_PRICED, clip, count, epoch_ms, fixed, head as head_line, run_rows, utf16_len
 
 BIG = 20 * 1024
-USAGE = ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens")
+USAGE = ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens", "reasoning_output_tokens")
 
 
 def _usage(v):
-    """(input, cached, output, total) of a usage object, None when it is no object or a count is no integer."""
+    """(input, cached, output, total, reasoning) usage; reasoning is included in output."""
     if not isinstance(v, dict):
         return None
     try:
@@ -65,6 +65,7 @@ def run(path, p, book):
     t0, t1, big = math.inf, -math.inf, 0
     models, efforts = {}, {}
     n_calls, tok_out, ctx_peak, usd_run, unpriced_run = 0, 0, 0.0, 0.0, False
+    tok_in = tok_cached = tok_reasoning = 0
     for n, r in recs:
         if r is None:
             scan.bad += 1
@@ -117,7 +118,7 @@ def run(path, p, book):
             last = _usage(info.get("last_token_usage"))
             if last is None or not any(last):
                 no_last += 1
-                base = (0, 0, 0, 0) if reset or not seen else prev_usage
+                base = (0,) * len(USAGE) if reset or not seen else prev_usage
                 last = tuple(max(a - b, 0) for a, b in zip(total, base))
             prev_total, prev_usage, seen = total[3], total, True
             if math.isnan(ts):
@@ -131,7 +132,10 @@ def run(path, p, book):
     stamps.sort()
     for item in rows:
         _, ts, last, mdl, eff, tools = item
-        inp, cached, out, _total = last
+        inp, cached, out, _total, reasoning = last
+        tok_in += inp
+        tok_cached += cached
+        tok_reasoning += reasoning
         n_calls += 1
         row = book.resolve(mdl) if book.loaded else None
         parts = P.codex_parts(row, inp, cached, out, inp) if row else None
@@ -160,4 +164,7 @@ def run(path, p, book):
     extra = []
     if no_last:
         extra.append(f"{no_last} token_count events without last_token_usage (priced from the cumulative's delta)")
-    return [head] + run_rows(out_rows), scan, extra
+    usage = (f"TOKENS input={tok_in} cached_input={tok_cached} uncached_input={tok_in - tok_cached} "
+             f"output={tok_out} reasoning_output={tok_reasoning} "
+             f"nonreasoning_output={tok_out - tok_reasoning}; reasoning is included in output")
+    return [head] + run_rows(out_rows) + [usage], scan, extra

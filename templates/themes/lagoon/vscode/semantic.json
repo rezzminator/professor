@@ -1,0 +1,99 @@
+{
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "*.mutable:rust": {
+    "underline": true
+  },
+  "attribute": "#e8a7e9",
+  "boolean": "#ccabff",
+  "builtinConstant": "#ccabff",
+  "builtinType": "#f7cd6c",
+  "class": "#f7cd6c",
+  "class.defaultLibrary": "#f7cd6c",
+  "clsParameter": {
+    "foreground": "#ccabff",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#89a8ae",
+    "italic": true
+  },
+  "decorator": "#e8a7e9",
+  "derive": "#e8a7e9",
+  "enum": "#f7cd6c",
+  "enumMember": "#ffab68",
+  "escapeSequence": "#86f8cf",
+  "event": "#e8a7e9",
+  "formatSpecifier": "#86f8cf",
+  "function": "#39e5c9",
+  "function.defaultLibrary": "#76c7ff",
+  "interface": "#f7cd6c",
+  "interface.defaultLibrary": "#f7cd6c",
+  "interface:rust": {
+    "foreground": "#f7cd6c",
+    "italic": true
+  },
+  "keyword": "#ffa28f",
+  "label": "#ffa28f",
+  "lifetime": {
+    "foreground": "#e8a7e9",
+    "italic": true
+  },
+  "macro": "#e8a7e9",
+  "magicFunction": {
+    "foreground": "#76c7ff",
+    "italic": true
+  },
+  "method": "#39e5c9",
+  "method.defaultLibrary": "#76c7ff",
+  "modifier": {
+    "foreground": "#fb9cc0",
+    "italic": true
+  },
+  "module": "#d0cafd",
+  "namespace": "#d0cafd",
+  "namespace.defaultLibrary": "#d0cafd",
+  "number": "#ffab68",
+  "numberLiteral": "#ffab68",
+  "operator": "#e8b7ac",
+  "parameter": {
+    "foreground": "#fdd0b8",
+    "italic": true
+  },
+  "property": "#afdff0",
+  "property.defaultLibrary": "#76c7ff",
+  "property.readonly": "#afdff0",
+  "regexp": "#ff9bdb",
+  "selfKeyword": {
+    "foreground": "#ccabff",
+    "italic": true
+  },
+  "selfParameter": {
+    "foreground": "#ccabff",
+    "italic": true
+  },
+  "selfTypeKeyword": {
+    "foreground": "#f7cd6c",
+    "italic": true
+  },
+  "string": "#9ae79f",
+  "stringLiteral": "#9ae79f",
+  "struct": "#f7cd6c",
+  "type": "#f7cd6c",
+  "type.defaultLibrary": "#f7cd6c",
+  "typeParameter": {
+    "foreground": "#f7cd6c",
+    "italic": true
+  },
+  "unresolvedReference": {
+    "foreground": "#ff7d81",
+    "underline": true
+  },
+  "variable": "#e1f3f2",
+  "variable.defaultLibrary": "#76c7ff",
+  "variable.readonly": "#e1f3f2",
+  "variable.readonly.defaultLibrary:go": "#ccabff",
+  "variable.readonly:go": "#ffab68",
+  "variable.readonly:python": "#ffab68"
+}

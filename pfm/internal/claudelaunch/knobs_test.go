@@ -67,6 +67,10 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("duplicate knob %s", knob.Name)
 		}
 		seen[knob.Name] = true
+		if knob.Name == "remoteControl" &&
+			(knob.Wire != WireFlag || knob.Target != "--remote-control" || knob.Default != true) {
+			t.Errorf("remoteControl registry=%#v, want the default-on interactive CLI flag", knob)
+		}
 		if knob.Name == "cache1h" && (knob.Wire != WireEnv || knob.Target != "CACHE_LIVE_CONTROL_MAIN_TTL") {
 			t.Errorf("cache1h wire=%s target=%q, want the process environment", knob.Wire, knob.Target)
 		}
@@ -76,7 +80,7 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("hygiene row %s missing", name)
 		}
 	}
-	for _, name := range []string{"configDir", "binary", "cache1h", "shell", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "helperModel", "tmuxTruecolor", "noFlicker", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
+	for _, name := range []string{"configDir", "binary", "cache1h", "shell", "systemPrompt", "nativeCursor", "remoteControl", "subagentStatuslineTrace", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "helperModel", "tmuxTruecolor", "noFlicker", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
 		if !seen[name] {
 			t.Errorf("knob %s missing", name)
 		}

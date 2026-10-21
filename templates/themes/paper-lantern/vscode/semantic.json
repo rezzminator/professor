@@ -1,0 +1,137 @@
+{
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "*.unsafe": {
+    "bold": true
+  },
+  "attribute": "#970639",
+  "boolean": {
+    "foreground": "#853a93",
+    "italic": true
+  },
+  "builtinAttribute": {
+    "foreground": "#970639",
+    "italic": true
+  },
+  "builtinConstant": {
+    "foreground": "#853a93",
+    "italic": true
+  },
+  "builtinFunction": {
+    "foreground": "#2a409b",
+    "italic": true
+  },
+  "builtinType": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "class": "#785603",
+  "class.defaultLibrary": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "clsParameter": {
+    "foreground": "#b43026",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#857868",
+    "italic": true
+  },
+  "decorator": "#970639",
+  "enum": "#785603",
+  "enumMember": "#853a93",
+  "escapeSequence": "#9f5401",
+  "event": "#9f5401",
+  "formatSpecifier": "#9f5401",
+  "function": "#2a409b",
+  "function.defaultLibrary": {
+    "foreground": "#2a409b",
+    "italic": true
+  },
+  "interface": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "keyword": "#b43026",
+  "keyword.controlFlow": "#b43026",
+  "label": {
+    "foreground": "#9f5401",
+    "italic": true
+  },
+  "lifetime": {
+    "foreground": "#9f5401",
+    "italic": true
+  },
+  "macro": "#970639",
+  "magicFunction": {
+    "foreground": "#2a409b",
+    "italic": true
+  },
+  "method": "#2a409b",
+  "method.defaultLibrary": {
+    "foreground": "#2a409b",
+    "italic": true
+  },
+  "module": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "namespace": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "number": "#853a93",
+  "operator": "#4e597d",
+  "parameter": {
+    "foreground": "#663c23",
+    "italic": true
+  },
+  "property": "#075f6b",
+  "property.defaultLibrary": {
+    "foreground": "#075f6b",
+    "italic": true
+  },
+  "property.readonly": "#075f6b",
+  "regexp": "#29745a",
+  "selfKeyword": {
+    "foreground": "#b43026",
+    "italic": true
+  },
+  "selfParameter": {
+    "foreground": "#b43026",
+    "italic": true
+  },
+  "selfTypeKeyword": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "string": "#427231",
+  "struct": "#785603",
+  "type": "#785603",
+  "type.defaultLibrary": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "typeAlias": "#785603",
+  "typeParameter": {
+    "foreground": "#785603",
+    "italic": true
+  },
+  "unresolvedReference": {
+    "foreground": "#a8182c",
+    "underline": true
+  },
+  "variable": "#2a241f",
+  "variable.constant": "#853a93",
+  "variable.defaultLibrary": {
+    "foreground": "#2a241f",
+    "italic": true
+  },
+  "variable.readonly": "#4a3352",
+  "variable.readonly.defaultLibrary": {
+    "foreground": "#853a93",
+    "italic": true
+  }
+}

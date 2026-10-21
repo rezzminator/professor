@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -174,6 +175,70 @@ func TestHerdrBridgeProof(t *testing.T) {
 			}
 			if (len(tmuxCalls) > 0) != tc.wantTmux {
 				t.Fatalf("tmux calls %q; want any=%t", tmuxCalls, tc.wantTmux)
+			}
+		})
+	}
+}
+
+func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		argv          []string
+		missing       bool
+		durable       bool
+		foregroundErr error
+		mixed         bool
+		notFleet      bool
+	}{
+		{name: "shell", argv: []string{"-zsh"}, notFleet: true},
+		{name: "shell-helper", argv: []string{"id", "-Gn"}, notFleet: true},
+		{name: "default-shell-wrapper", argv: []string{"/fixture/pfm-herdr-shell"}, notFleet: true},
+		{name: "picker-before-chat", argv: []string{"pfm"}, notFleet: true},
+		{name: "empty-foreground", notFleet: true},
+		{name: "missing-process", argv: []string{"-zsh"}, missing: true},
+		{name: "foreground-read-failed", foregroundErr: errors.New("socket refused")},
+		{name: "fleet-tmux-refused", argv: []string{"tmux", "-L", "cc-1", "attach"}},
+		{name: "shell-plus-failed-tmux", argv: []string{"tmux", "-L", "cc-1", "attach"}, mixed: true},
+		{name: "shell-plus-missing-process", argv: []string{"-zsh"}, missing: true, mixed: true},
+		{name: "empty-command-line", argv: []string{}},
+		{name: "blank-program", argv: []string{""}},
+		{name: "durable-owner-unproved", argv: []string{"-zsh"}, durable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const socket = "/fixture/herdr.sock"
+			ownerSocket, pane := "/fixture/other.sock", "w6:p3"
+			if tc.durable {
+				ownerSocket, pane = socket, "w1:p2"
+			}
+			seedNativeOwner(t, Target{SocketPath: ownerSocket, Engine: "cc"})
+			proc := &bridgeProc{
+				argv: map[int][]string{7: tc.argv}, starts: map[int][]uint64{7: {1}}, reads: map[int]int{},
+			}
+			if tc.missing {
+				delete(proc.starts, 7)
+			}
+			proc.argv[8], proc.starts[8] = []string{"-zsh"}, []uint64{2}
+			prover := bridgeProver{
+				values: paths.Values{TmuxDir: "/fixture/tmux"}, proc: proc,
+				foreground: func(context.Context, string, string) ([]int, error) {
+					if tc.argv == nil {
+						return nil, tc.foregroundErr
+					}
+					if tc.mixed {
+						return []int{8, 7}, tc.foregroundErr
+					}
+					return []int{7}, tc.foregroundErr
+				},
+				tmux: func(context.Context, string, ...string) (string, error) {
+					return "", errors.New("fleet server refused")
+				},
+			}
+			err := proveHerdrPaneOrBridge(context.Background(), socket, pane, prover.prove)
+			if err == nil || errors.Is(err, herdr.ErrNotFleetPane) != tc.notFleet {
+				t.Fatalf("proof = %v; non-fleet=%t, want %t", err, errors.Is(err, herdr.ErrNotFleetPane), tc.notFleet)
+			}
+			if !tc.notFleet && !strings.Contains(err.Error(), "ownership unproved") {
+				t.Fatalf("genuine proof failure was not named: %v", err)
 			}
 		})
 	}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestTmuxOptionsRenderStylesAndUserOptions(t *testing.T) {
-	options := tmuxOptions(hibiscusApplied(t), Dark, 3)
+	options := tmuxOptions(tokyoNightApplied(t), Dark, 3)
 	byName := map[string]string{}
 	for _, option := range options {
 		byName[option.Name] = option.Value
@@ -14,32 +14,32 @@ func TestTmuxOptionsRenderStylesAndUserOptions(t *testing.T) {
 	if len(options) != len(byName) || len(options) != 30 {
 		t.Fatalf("got %d options (%d unique), want 30", len(options), len(byName))
 	}
-	format := "#{?#{==:#{@pfm-state},blocked},#e0af68,#{?#{==:#{@pfm-state},working},#7aa2f7," +
-		"#{?#{==:#{@pfm-state},done},#9ece6a,#7b84af}}}"
+	format := "#{?#{==:#{@pfm-state},blocked},#ffd23f,#{?#{==:#{@pfm-state},working},#2d9bff," +
+		"#{?#{==:#{@pfm-state},done},#00ffa3,#9b8fd6}}}"
 	want := map[string]string{
-		"status-style":                "bg=#1f2335,fg=#c0caf5",
-		"window-status-style":         "fg=#565f89",
+		"status-style":                "bg=#221634,fg=#ff9ed6",
+		"window-status-style":         "fg=#7a6fb0",
 		"window-status-current-style": "fg=" + format + ",bold",
-		"pane-border-style":           "fg=#565f89",
+		"pane-border-style":           "fg=#7a6fb0",
 		"pane-active-border-style":    "fg=" + format,
-		"message-style":               "bg=#292e42,fg=#c0caf5",
-		"message-command-style":       "bg=#1f2335,fg=#7aa2f7",
-		"mode-style":                  "bg=#283457,fg=#c0caf5",
-		"@host_accent":                "#7aa2f7",
-		"@p_g0":                       "#1f2335",
-		"@p_g3":                       "#1a1b26",
-		"@p_fg":                       "#c0caf5",
-		"@p_fg1":                      "#565f89",
-		"@p_fg2":                      "#565f89",
-		"@p_red":                      "#f7768e",
-		"@p_amber":                    "#e0af68",
+		"message-style":               "bg=#4a3d6b,fg=#ff9ed6",
+		"message-command-style":       "bg=#221634,fg=#c95cff",
+		"mode-style":                  "bg=#3a2d6b,fg=#ff9ed6",
+		"@host_accent":                "#c95cff",
+		"@p_g0":                       "#221634",
+		"@p_g3":                       "#0f0f1a",
+		"@p_fg":                       "#ff9ed6",
+		"@p_fg1":                      "#7a6fb0",
+		"@p_fg2":                      "#7a6fb0",
+		"@p_red":                      "#ff3d6e",
+		"@p_amber":                    "#ffd23f",
 		"@pfm-theme-chips":            "1",
-		"@pfm-theme":                  "custom:hibiscus-night",
+		"@pfm-theme":                  "custom:tokyo-night",
 		"@pfm-theme-generation":       "3",
-		"@pfm-c-bg":                   "#1a1b26",
-		"@pfm-c-accent":               "#7aa2f7",
-		"@pfm-state-blocked":          "#e0af68",
-		"@pfm-state-idle":             "#7b84af",
+		"@pfm-c-bg":                   "#0f0f1a",
+		"@pfm-c-accent":               "#c95cff",
+		"@pfm-state-blocked":          "#ffd23f",
+		"@pfm-state-idle":             "#9b8fd6",
 		"@pfm-state-colour":           format,
 	}
 	for name, value := range want {

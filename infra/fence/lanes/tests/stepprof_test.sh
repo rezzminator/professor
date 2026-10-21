@@ -31,6 +31,9 @@ for mode in 'set -euo pipefail' ':'; do
     ok "sourced in a shell run with '$mode': silent, no option changed, stepprof_run defined"
   else bad "sourced quietly after '$mode'" "rc/output: $out"; fi
 done
+# The documented basename CLI form must resolve its shared helper too.
+out="$(cd "$(dirname -- "$SUT")" && bash "${SUT##*/}" "$T/basename-cli" basename 3 -- true 2>&1)"; rc=$?
+if [[ $rc == 0 && -s "$T/basename-cli/basename.prof.tsv" ]]; then ok 'basename CLI resolves its registered defaults'; else bad 'basename CLI helper resolution' "$out"; fi
 # shellcheck source=../../stepprof.sh
 source "$SUT"
 

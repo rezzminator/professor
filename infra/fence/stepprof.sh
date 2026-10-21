@@ -150,6 +150,9 @@ stepprof_snapshot_tree() { # stepprof_snapshot_tree <dir> <bound> <root pid> →
   } > "$dir/tree.txt" 2>&1
 }
 
+if [[ ${BASH_SOURCE[0]} == */* ]]; then STEPPROF_HERE=${BASH_SOURCE[0]%/*}; else STEPPROF_HERE=.; fi
+. "$STEPPROF_HERE/shared.sh" || { return 1 2>/dev/null || exit 1; }
+
 stepprof_main() { # the body of stepprof_run; exits, so it runs in its own subshell
   set +e; trap - ERR
   if (($# < 5)) || [[ $4 != -- ]]; then
@@ -160,7 +163,7 @@ stepprof_main() { # the body of stepprof_run; exits, so it runs in its own subsh
   shift 4
   [[ -n $name && $name != */* ]] || { echo "stepprof: step name must be non-empty and hold no '/': '$name'" >&2; exit 64; }
   [[ $bound =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "stepprof: bound must be decimal seconds, got '$bound'" >&2; exit 64; }
-  local grace=${STEPPROF_GRACE_TICKS:-20} trace=${STEPPROF_TRACE:-err} trace_body
+  local grace=${STEPPROF_GRACE_TICKS-$(_fence_config_default STEPPROF_GRACE_TICKS)} trace=${STEPPROF_TRACE-$(_fence_config_default STEPPROF_TRACE)} trace_body
   [[ $grace =~ ^[0-9]+$ ]] || { echo "stepprof: STEPPROF_GRACE_TICKS must be a whole number, got '$grace'" >&2; exit 64; }
   case $trace in
     x)

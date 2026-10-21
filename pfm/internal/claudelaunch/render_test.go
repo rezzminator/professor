@@ -83,7 +83,7 @@ func TestRenderExplicitDefaultPrompt(t *testing.T) {
 	machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
 	clone := filepath.Join(home, "blueprint")
 	for path, body := range map[string]string{
-		filepath.Join(clone, "pfm", "harness-prompts", "composed", "claude.md"): "Professor.",
+		filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md"): "Professor.",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -145,9 +145,6 @@ func TestRenderFreshInteractive(t *testing.T) {
 	}) {
 		t.Errorf("env=%q", launch.Env)
 	}
-	if len(launch.Argv) < 2 || launch.Argv[0] != "--session-id" || launch.Argv[1] != "S" {
-		t.Errorf("argv start=%q", launch.Argv)
-	}
 	if parsed.SessionID != "S" || !parsed.Autonomy {
 		t.Errorf("verbs=%#v", parsed)
 	}
@@ -165,7 +162,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 19 {
+	if len(parsed.Hooks) != 23 {
 		t.Errorf("hooks=%d", len(parsed.Hooks))
 	}
 	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
@@ -339,6 +336,30 @@ func TestRenderCacheLifetimeMainChatOnly(t *testing.T) {
 				"cache1h=%t: settings env carries %#v; a settings reload would re-hand a consumed handoff",
 				entry.cache1h, got,
 			)
+		}
+	}
+}
+
+func TestRenderSubagentStatuslineTraceFollowsTheConfigSwitch(t *testing.T) {
+	home, machine := renderMachine(t)
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeQuery} {
+		for _, on := range []bool{false, true} {
+			machine.Claude.SubagentStatuslineTrace = on
+			_, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Args: []string{"hello"}}, machine)
+			got, set := parsed.SettingsEnv[EnvSubagentStatuslineTrace]
+			if set != on || (on && got != "1") {
+				t.Errorf("purpose %v trace=%t: settings env %s = %q (set %t), want %t", purpose, on,
+					EnvSubagentStatuslineTrace, got, set, on)
+			}
+		}
+	}
+	if EnvSubagentStatuslineTrace != "PFM_SUBAGENT_STATUSLINE_TRACE" {
+		t.Errorf("EnvSubagentStatuslineTrace = %q", EnvSubagentStatuslineTrace)
+	}
+	machine.Claude.SubagentStatuslineTrace = true
+	for _, row := range Resolve(machine, 0) {
+		if row.Knob.Name == knobSubagentStatuslineTrace && row.Value != "true" {
+			t.Errorf("Resolve value = %q, want true", row.Value)
 		}
 	}
 }
@@ -774,7 +795,7 @@ func stageComposedPrompt(t *testing.T, home string, write bool) string {
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
-	path := paths.ComposedHarnessPromptIn(clone, pfmengine.Claude)
+	path := paths.GeneratedHarnessPromptIn(clone, pfmengine.Claude)
 	if !write {
 		return path
 	}

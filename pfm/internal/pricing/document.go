@@ -32,6 +32,7 @@ type Document struct {
 	FileError  string        `json:"file_error,omitempty"`
 	Refresh    RefreshReport `json:"refresh"`
 	Override   *Override     `json:"override"`
+	Billing    *Billing      `json:"billing,omitempty"`
 	Model      string        `json:"model,omitempty"`
 	Rows       []Row         `json:"rows"`
 }
@@ -79,6 +80,18 @@ func DecodeDocument(content []byte, name string) (Document, error) {
 				"price document %s: checked_at %q is not an RFC 3339 time",
 				name,
 				doc.CheckedAt,
+			)
+		}
+	}
+	if doc.Billing != nil {
+		multiplier, err := billingMultiplier(doc.Billing.Route, doc.Billing.Region)
+		if err != nil {
+			return Document{}, fmt.Errorf("price document %s: %w", name, err)
+		}
+		if multiplier != doc.Billing.Multiplier || (!doc.Billing.Configured && *doc.Billing != defaultBilling()) {
+			return Document{}, fmt.Errorf(
+				"price document %s: billing multiplier or configured flag contradicts route/region",
+				name,
 			)
 		}
 	}

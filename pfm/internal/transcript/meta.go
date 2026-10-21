@@ -23,6 +23,7 @@ const metaMaxLine = 32 << 20
 // invent one.
 type Meta struct {
 	Model               string
+	ContextKnown        bool
 	ContextTokens       int64
 	ContextWindow       int64
 	SizeBytes           int64
@@ -76,24 +77,29 @@ func contextOf(usage pricing.UsageBlock) int64 {
 }
 
 type metaRecord struct {
-	Type             string             `json:"type"`
-	Subtype          string             `json:"subtype"`
-	IsMeta           bool               `json:"isMeta"`
-	IsSidechain      bool               `json:"isSidechain"`
-	IsCompactSummary bool               `json:"isCompactSummary"`
-	Usage            pricing.UsageBlock `json:"usage"`
+	Type             string          `json:"type"`
+	Subtype          string          `json:"subtype"`
+	IsMeta           bool            `json:"isMeta"`
+	IsSidechain      bool            `json:"isSidechain"`
+	IsCompactSummary bool            `json:"isCompactSummary"`
+	Usage            json.RawMessage `json:"usage"`
 	Message          struct {
-		Model   string             `json:"model"`
-		Content json.RawMessage    `json:"content"`
-		Usage   pricing.UsageBlock `json:"usage"`
+		Model   string          `json:"model"`
+		Content json.RawMessage `json:"content"`
+		Usage   json.RawMessage `json:"usage"`
 	} `json:"message"`
 	CompactMetadata struct {
 		PostTokens int64 `json:"postTokens"`
 	} `json:"compactMetadata"`
 	Payload struct {
-		Type  string          `json:"type"`
-		Model string          `json:"model"`
-		Info  *CodexTokenInfo `json:"info"`
+		Type  string `json:"type"`
+		Model string `json:"model"`
+		Info  *struct {
+			LastTokenUsage *struct {
+				TotalTokens *int64 `json:"total_tokens"`
+			} `json:"last_token_usage"`
+			ModelContextWindow int64 `json:"model_context_window"`
+		} `json:"info"`
 	} `json:"payload"`
 }
 
@@ -168,16 +174,15 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 		if parsed.Payload.Type == "token_count" {
 			// Codex emits both the current context-window use and a lifetime
 			// total. The latter grows for the whole thread and can exceed the
-			// window many times over; it is only a compatibility fallback for
-			// older rollout records that predate last_token_usage.
+			// window many times over; it cannot stand in for absent occupancy.
 			info := parsed.Payload.Info
 			if info == nil {
-				info = &CodexTokenInfo{}
+				return
 			}
-			if current := info.LastTokenUsage.Total(); current > 0 {
-				meta.ContextTokens = current
-			} else if total := info.TotalTokenUsage.Total(); total > 0 {
-				meta.ContextTokens = total
+			if info.LastTokenUsage != nil && info.LastTokenUsage.TotalTokens != nil &&
+				*info.LastTokenUsage.TotalTokens >= 0 {
+				meta.ContextTokens = *info.LastTokenUsage.TotalTokens
+				meta.ContextKnown = true
 			}
 			if window := info.ModelContextWindow; window > 0 {
 				meta.ContextWindow = window
@@ -201,24 +206,59 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 		}
 		return
 	}
-	if parsed.Type != "assistant" {
+	if parsed.Type != "assistant" || parsed.Message.Model == "<synthetic>" {
 		return
 	}
 	// "<synthetic>" is the harness's own marker on records it wrote itself
 	// (interrupts, tool errors); it is not a model anybody chose.
-	if parsed.Message.Model != "" && parsed.Message.Model != "<synthetic>" {
+	if parsed.Message.Model != "" {
+		if meta.Model != "" && meta.Model != parsed.Message.Model {
+			// A new model's streaming record must not relabel the previous
+			// model's prompt counters as its own completed request.
+			meta.ContextKnown = false
+		}
 		meta.Model = parsed.Message.Model
 	}
-	usage := parsed.Usage
-	if contextOf(usage) <= 0 {
-		usage = parsed.Message.Usage
+	used, known := usableContext(parsed.Usage)
+	if !known {
+		used, known = usableContext(parsed.Message.Usage)
 	}
-	// Claude's occupancy is what entered the model: direct input plus both
-	// cache classes. Output belongs to the response and is not in that gauge.
-	if used := contextOf(usage); used > 0 {
+	if known {
 		meta.ContextTokens = used
+		meta.ContextKnown = true
 		state.claudeUsageSeen = true
 		meta.CompactedAfterUsage = false
 		meta.PostCompactTokens = 0
 	}
+}
+
+// usableContext distinguishes an explicitly empty prompt from output-only,
+// synthetic or absent usage. Iteration selection remains pricing's contract.
+func usableContext(raw json.RawMessage) (int64, bool) {
+	var usage pricing.UsageBlock
+	if json.Unmarshal(raw, &usage) != nil {
+		return 0, false
+	}
+	var fields struct {
+		Input      *int64            `json:"input_tokens"`
+		Read       *int64            `json:"cache_read_input_tokens"`
+		Created    *int64            `json:"cache_creation_input_tokens"`
+		Iterations []json.RawMessage `json:"iterations"`
+	}
+	if json.Unmarshal(raw, &fields) != nil {
+		return 0, false
+	}
+	for _, counter := range []*int64{fields.Input, fields.Read, fields.Created} {
+		if counter != nil && *counter < 0 {
+			return 0, false
+		}
+	}
+	if contextOf(usage) > 0 {
+		return contextOf(usage), true
+	}
+	// Advisor-only iterations describe another model, not an empty executor prompt.
+	if len(fields.Iterations) > 0 && len(usage.Requests()) == 0 {
+		return 0, false
+	}
+	return 0, fields.Input != nil || fields.Read != nil || fields.Created != nil
 }

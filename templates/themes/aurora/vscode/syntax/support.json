@@ -1,0 +1,106 @@
+{
+  "0023": {
+    "name": "Pack ice · built-in functions",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin",
+      "keyword.other.special-method",
+      "support.function.go",
+      "support.function.builtin.python",
+      "support.function.builtin.shell",
+      "support.function.console",
+      "support.function.dom",
+      "support.variable.dom",
+      "support.variable.object",
+      "support.variable",
+      "variable.language.global",
+      "support.function.magic.python",
+      "support.variable.magic.python"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a2e6f7"
+    }
+  },
+  "0025": {
+    "name": "Moonlight, cold · built-in and primitive types",
+    "scope": [
+      "support.type",
+      "support.class",
+      "storage.type.primitive",
+      "storage.type.built-in",
+      "support.type.primitive",
+      "keyword.type",
+      "support.type.builtin",
+      "entity.name.type.primitive",
+      "entity.name.type.numeric",
+      "storage.type.built-in.primitive",
+      "support.type.python",
+      "storage.type.boolean.go",
+      "storage.type.numeric.go",
+      "storage.type.string.go",
+      "storage.type.byte.go",
+      "storage.type.rune.go",
+      "storage.type.error.go",
+      "storage.type.uintptr.go",
+      "storage.type.any.go",
+      "storage.type.core.rust",
+      "entity.name.type.numeric.rust",
+      "entity.name.type.primitive.rust",
+      "support.class.builtin",
+      "support.class.promise",
+      "support.type.object"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f2d48c"
+    }
+  },
+  "0035": {
+    "name": "Sirius · CSS properties",
+    "scope": [
+      "support.type.property-name.css",
+      "meta.property-name.css",
+      "support.type.vendored.property-name",
+      "support.type.property-name.scss",
+      "variable.css",
+      "variable.argument.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9fc2ff"
+    }
+  },
+  "0036": {
+    "name": "O I 630.0 nm, curtain top · CSS values",
+    "scope": [
+      "support.constant.property-value.css",
+      "meta.property-value.css",
+      "support.constant.color",
+      "constant.other.color",
+      "constant.other.color.rgb-value",
+      "support.constant.font-name",
+      "support.constant.vendored",
+      "keyword.other.important"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9e8f"
+    }
+  },
+  "0037": {
+    "name": "Pack ice · CSS functions",
+    "scope": [
+      "support.function.misc.css",
+      "support.function.transform.css",
+      "support.function.gradient.css",
+      "support.function.calc.css",
+      "support.function.var.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a2e6f7"
+    }
+  }
+}

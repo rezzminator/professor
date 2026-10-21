@@ -1,0 +1,52 @@
+{
+  "0011": {
+    "name": "O I 557.7 nm, eye-bright · strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "string.unquoted",
+      "string.quoted.single",
+      "string.quoted.double",
+      "string.quoted.triple",
+      "string.quoted.raw",
+      "string.interpolated",
+      "punctuation.definition.string",
+      "punctuation.definition.string.begin",
+      "punctuation.definition.string.end"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#c8f08f"
+    }
+  },
+  "0013": {
+    "name": "N2 fringe, pale · regular expressions",
+    "scope": [
+      "string.regexp",
+      "source.regexp",
+      "string.regexp punctuation.definition.string",
+      "constant.other.character-class.regexp",
+      "keyword.operator.quantifier.regexp",
+      "punctuation.definition.group.regexp",
+      "keyword.control.anchor.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f8b2de"
+    }
+  },
+  "0052": {
+    "name": "Sirius · link text",
+    "scope": [
+      "string.other.link.title.markdown",
+      "string.other.link.description.markdown",
+      "string.other.link.description.title.markdown",
+      "entity.name.reference.link"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9fc2ff"
+    }
+  }
+}

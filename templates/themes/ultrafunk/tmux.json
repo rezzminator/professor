@@ -1,0 +1,11 @@
+{
+  "@p_fg1": "#efc6ea",
+  "@p_fg2": "#b78ad3",
+  "@p_g3": "#4f1a70",
+  "message-command-style": "bg=#100518,fg=#3ce8ff,bold",
+  "message-style": "bg=#ff2fc8,fg=#100518,bold",
+  "mode-style": "bg=#c6ff4a,fg=#100518",
+  "pane-border-style": "fg=#341449",
+  "status-style": "bg=#2c0f3e,fg=#efc6ea",
+  "window-status-style": "fg=#b78ad3"
+}

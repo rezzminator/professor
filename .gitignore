@@ -74,3 +74,6 @@ scripts/placeholder-map.tsv
 # leak-check.sh private denylist — names the very things that must never be
 # published, so it is never tracked/public. See scripts/leak-check.sh header.
 scripts/leak-terms.txt
+
+# Fleet prompts are assembled from embedded source parts by pfm install.
+/pfm/harness-prompts/generated/

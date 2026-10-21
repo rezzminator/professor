@@ -487,7 +487,8 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 	writeCodexConfig(t, fix, fmt.Sprintf("[mcp_servers.chat-professor]\ncommand = \"sh\"\nargs = [%q,%q,%q,%q,%q]\n",
 		"-c", command, "fixture", executable, verbsStdioProfessorArg))
 	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0)})
-	// find searches Claude transcripts; its fixture must seed that store.
+	// Use a completed Claude exchange so last has a stable answer while
+	// this Codex turn exercises the protocol and its pane identity.
 	code, _, stderr := runOnce(
 		fix,
 		"claude",
@@ -507,11 +508,15 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 	session.waitFrame("seed reply", func(frame string) bool { return strings.Contains(frame, "⏺ ok") })
 	fix.indexedRollouts()
 	session.typeLine(
-		`query mock-engine: [{"type":"mcp","tool":"find","input":{"excerpt":"violet archive fixture","include_self":true}},{"type":"turn","reply":"MCP finished"}]`,
+		fmt.Sprintf(
+			`query mock-engine: [{"type":"mcp","tool":"last","input":{"target":%q}},{"type":"turn","reply":"MCP finished"}]`,
+			fixtureSession,
+		),
 	)
 	session.waitFrame("MCP reply", func(frame string) bool { return strings.Contains(frame, "⏺ MCP finished") })
-	result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-find.json"))
-	if !strings.Contains(result, fixtureSession) || strings.Contains(result, `"isError":true`) {
+	result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-last.json"))
+	if !strings.Contains(result, fixtureSession) || !strings.Contains(result, `"text":"ok"`) ||
+		strings.Contains(result, `"isError":true`) {
 		t.Fatalf("pfm tools/call=%s", result)
 	}
 	var callID string
@@ -530,7 +535,7 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Type == "function_call" && payload.Name == "find" {
+		if payload.Type == "function_call" && payload.Name == "last" {
 			callID = payload.CallID
 		}
 		if payload.Type == "function_call_output" && payload.CallID == callID &&
@@ -548,7 +553,7 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 
 func TestCodexMCPFailuresAreRecordedShownAndKeepPaneLive(t *testing.T) {
 	for _, row := range []struct{ name, table, tool, cause string }{
-		{"missing server", "", "find", "professor"},
+		{"missing server", "", "last", "professor"},
 		{"call", "configured", "unknown_fixture_tool", "tools/call"},
 	} {
 		t.Run(row.name, func(t *testing.T) {

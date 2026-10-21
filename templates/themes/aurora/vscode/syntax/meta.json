@@ -1,0 +1,100 @@
+{
+  "0057": {
+    "name": "Night slate · rules and separators",
+    "scope": [
+      "meta.separator",
+      "meta.separator.markdown",
+      "punctuation.definition.thematic-break"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8792b4"
+    }
+  },
+  "0061": {
+    "name": "H-beta 486.1 nm · diff headers",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.range",
+      "meta.diff.index",
+      "meta.diff.header.git",
+      "meta.diff.header.command"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#6fd8ff"
+    }
+  },
+  "0066": {
+    "name": "Curtain ladder, rung 1 · JSON keys at depth 1",
+    "scope": [
+      "meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf0a8"
+    }
+  },
+  "0067": {
+    "name": "Curtain ladder, rung 2 · JSON keys at depth 2",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b49cff"
+    }
+  },
+  "0068": {
+    "name": "Curtain ladder, rung 3 · JSON keys at depth 3",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#6fd8ff"
+    }
+  },
+  "0069": {
+    "name": "Curtain ladder, rung 4 · JSON keys at depth 4",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f286d2"
+    }
+  },
+  "0070": {
+    "name": "Curtain ladder, rung 5 · JSON keys at depth 5",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f2d48c"
+    }
+  },
+  "0071": {
+    "name": "Curtain ladder, rung 6 · JSON keys at depth 6",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9e8f"
+    }
+  }
+}

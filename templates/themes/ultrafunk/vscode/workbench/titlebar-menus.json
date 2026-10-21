@@ -1,0 +1,22 @@
+{
+  "commandCenter.activeBackground": "#3a1452",
+  "commandCenter.activeBorder": "#ff2fc880",
+  "commandCenter.activeForeground": "#ffe3f5",
+  "commandCenter.background": "#2c0f3e99",
+  "commandCenter.debuggingBackground": "#c6ff4a33",
+  "commandCenter.inactiveBorder": "#341449",
+  "commandCenter.inactiveForeground": "#9473bf",
+  "menu.background": "#241034",
+  "menu.border": "#c77dff55",
+  "menu.foreground": "#ffe3f5",
+  "menu.selectionBackground": "#4f1a70",
+  "menu.selectionBorder": "#ff2fc800",
+  "menu.selectionForeground": "#fff6fb",
+  "menu.separatorBackground": "#c77dff40",
+  "menubar.selectionBackground": "#3a1452",
+  "menubar.selectionBorder": "#ff2fc800",
+  "menubar.selectionForeground": "#ffe3f5",
+  "titleBar.border": "#ff2fc866",
+  "window.activeBorder": "#ff2fc866",
+  "window.inactiveBorder": "#341449"
+}

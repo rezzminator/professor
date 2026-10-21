@@ -1,0 +1,20 @@
+{
+  "panel.background": "#170f1e",
+  "panel.border": "#2b1f3b",
+  "panel.dropBorder": "#72e5fd",
+  "panelInput.border": "#2b1f3b",
+  "panelSection.border": "#2b1f3b",
+  "panelSection.dropBackground": "#72e5fd1a",
+  "panelSectionHeader.background": "#1b1325",
+  "panelSectionHeader.border": "#2b1f3b",
+  "panelSectionHeader.foreground": "#f8f0fa",
+  "panelStickyScroll.background": "#1b1325",
+  "panelStickyScroll.border": "#2b1f3b",
+  "panelStickyScroll.shadow": "#00000099",
+  "panelTitle.activeBorder": "#72e5fd",
+  "panelTitle.activeForeground": "#f8f0fa",
+  "panelTitle.border": "#2b1f3b",
+  "panelTitle.inactiveForeground": "#9284a8",
+  "panelTitleBadge.background": "#72e5fd",
+  "panelTitleBadge.foreground": "#170f1e"
+}

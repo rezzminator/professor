@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -81,7 +81,7 @@ func (runner *pluginRunner) Run(_ context.Context, argv []string, options deps.R
 }
 
 func (*pluginRunner) LookPath(name string) (string, error) {
-	return "", errors.New("pluginRunner: no " + name)
+	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
 }
 
 func pluginFixture(t *testing.T) (home, binary, first, second string) {

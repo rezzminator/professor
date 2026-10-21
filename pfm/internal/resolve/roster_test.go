@@ -15,6 +15,21 @@ func TestResolveRosterNamePrefersTheUniqueLiveRow(t *testing.T) {
 	}
 }
 
+func TestResolveRosterNameKeepsNativeSessionAddressAfterAutoTitle(t *testing.T) {
+	seat := RosterCandidate{
+		Backend: "herdr", Session: "probe-cx", Name: "Generated title",
+		ID: "thread", Socket: "/run/herdr.sock", Pane: "w1:p2", Live: true,
+	}
+	other := RosterCandidate{
+		Backend: "herdr", Session: "other-cx", Name: "Another title",
+		ID: "other", Socket: seat.Socket, Pane: "w1:p3", Live: true,
+	}
+	got, found, err := ResolveRosterName([]RosterCandidate{seat, other}, "probe-cx")
+	if err != nil || !found || got != seat {
+		t.Fatalf("session address after auto-title = (%+v, %t, %v), want original seat", got, found, err)
+	}
+}
+
 func TestResolveRosterNameAmbiguityNamesStableAddresses(t *testing.T) {
 	_, found, err := ResolveRosterName([]RosterCandidate{
 		{Name: "seat", ID: "one", Socket: "cx-1", Pane: "%1", Live: true},

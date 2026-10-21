@@ -112,6 +112,9 @@ func DeliverName(
 	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\x00\r\n") {
 		return 1, "", errors.New("chat name must be nonempty and contain no NUL or newline")
 	}
+	if err := naming.ValidateLabel(name); err != nil {
+		return 1, "", err
+	}
 	engine, err := NewCallEngine(false, runtime)
 	if err != nil {
 		return 1, "", err
@@ -445,7 +448,7 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	}
 	for index := range rows {
 		row := rows[index]
-		if row.ID == match.ID && row.Socket == match.Socket &&
+		if row.SeatID == match.SeatID && row.ID == match.ID && row.Socket == match.Socket &&
 			row.PaneID == match.Pane && row.Name == match.Name {
 			return FromRow(row), true, nil
 		}
@@ -509,24 +512,53 @@ func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Iden
 	if err != nil {
 		return resolve.Identity{}, false
 	}
-	for index := range scan.Output.Rows {
-		row := scan.Output.Rows[index]
-		if row.ID != thread || row.Socket == "" {
+	return codexSeatIdentity(scan.Output.Rows, scan.Env.Paths, thread)
+}
+
+func codexSeatIdentity(rows []compose.Row, values paths.Values, thread string) (resolve.Identity, bool) {
+	var match compose.Row
+	count := 0
+	for index := range rows {
+		row := rows[index]
+		if row.ID != thread || row.Kind != compose.LiveCodex || row.Killed || row.Socket == "" {
 			continue
 		}
-		// A seat with no live socket is no identity: better to say the sender
-		// is underivable than to hand back a handle nobody can reply to.
-		return resolve.Identity{
-			Session:    row.Socket,
-			SocketPath: filepath.Join(scan.Env.Paths.TmuxDir, row.Socket),
-			SocketName: row.Socket,
-			Engine:     string(pfmengine.Codex),
-			ID:         thread,
-			Source:     "codex-thread",
-			Recovered:  true,
-		}, true
+		match = row
+		count++
 	}
-	return resolve.Identity{}, false
+	if count != 1 || match.BackendError != "" {
+		return resolve.Identity{}, false
+	}
+	socketPath, err := targetSocket(values, match.Backend, match.Socket)
+	if err != nil {
+		return resolve.Identity{}, false
+	}
+	session := match.Socket
+	if match.Backend == spawn.BackendHerdr {
+		if match.PaneID == "" {
+			return resolve.Identity{}, false
+		}
+		session = match.SessionName
+		if session == "" {
+			session = match.SeatID
+		}
+		if session == "" {
+			return resolve.Identity{}, false
+		}
+	}
+	return resolve.Identity{
+		Backend:        match.Backend,
+		SeatID:         match.SeatID,
+		HerdrWorkspace: match.HerdrWorkspace,
+		Session:        session,
+		SocketPath:     socketPath,
+		SocketName:     filepath.Base(socketPath),
+		Pane:           match.PaneID,
+		Engine:         string(pfmengine.Codex),
+		ID:             thread,
+		Source:         "codex-thread",
+		Recovered:      true,
+	}, true
 }
 
 // targetSocket keeps native addresses absolute; only tmux sockets use the fleet root.

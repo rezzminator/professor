@@ -636,3 +636,22 @@ func TestResponseRequestsCostParts(t *testing.T) {
 		}
 	})
 }
+
+func TestResolveGatewayFastAlias(t *testing.T) {
+	table := Table{Rows: []Row{{Key: "gpt-6-sol", Engine: EngineCodex}}}
+	for _, id := range []string{"gpt-6-sol-fast[1m]", "openai/gpt-6-sol-fast"} {
+		row, ok := table.Resolve(id)
+		if !ok || row.Key != "gpt-6-sol" {
+			t.Errorf("Resolve(%q) = %q, %v", id, row.Key, ok)
+		}
+	}
+	table.Rows = append(table.Rows, Row{Key: "gpt-6-sol-fast", Engine: EngineCodex})
+	if row, ok := table.Resolve("gpt-6-sol-fast"); !ok || row.Key != "gpt-6-sol-fast" {
+		t.Fatal("exact published price must win")
+	}
+	if _, ok := (Table{Rows: []Row{{Key: "claude-sonnet-5-5", Engine: EngineClaude}}}).Resolve(
+		"claude-sonnet-5-5-fast",
+	); ok {
+		t.Fatal("non-gateway alias accepted")
+	}
+}

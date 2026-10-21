@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // TestClaudePluginGapsSparesListedKeys: a plugin enabled under two or more keys
@@ -244,5 +246,137 @@ func TestClaudePluginGapsNamesEveryCopy(t *testing.T) {
 				t.Fatalf("got %q, %v want %q", got, err, test.want)
 			}
 		})
+	}
+}
+
+// TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs: install moves a
+// retired plugin's pluginConfigs entry to its successor and deletes every
+// retired and other-copy entry, so Claude Code's plugin finds no duplicate to
+// warn on; a successor's own entry is never overwritten, and a dry run writes
+// nothing.
+func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
+	const name = "auto-effort-control"
+	successor, github, professor := devID(name), name+"@"+name, name+"@professor"
+	retiredGitHub, retiredDev := "effort-live-control@effort-live-control", "effort-live-control@effort-live-control-dev"
+	patterns := `{"options":{"testCommandPatterns":["make test"]}}`
+	other := `{"options":{"testCommandPatterns":["go test"]}}`
+	for _, test := range []struct {
+		name      string
+		configs   string
+		apply     bool
+		wantKeys  map[string]string
+		wantLines []string
+	}{
+		{
+			"two retired entries and no successor entry", `"` + retiredGitHub + `":` + patterns + `,"` + retiredDev + `":` + patterns,
+			true,
+			map[string]string{successor: patterns},
+			[]string{
+				"; copy the pluginConfigs of " + retiredGitHub + " to " + successor +
+					"; drop the pluginConfigs of " + retiredGitHub + ", " + retiredDev + "\n",
+			},
+		},
+		{
+			"the first retired entry is carried, a differing one named", `"` + retiredGitHub + `":` + patterns + `,"` +
+				retiredDev + `":` + other,
+			true,
+			map[string]string{successor: patterns},
+			[]string{"; drop the pluginConfigs of " + retiredGitHub + ", " + retiredDev + " (differs)\n"},
+		},
+		{
+			"a successor entry is never overwritten", `"` + successor + `":` + other + `,"` + retiredGitHub + `":` + patterns,
+			true,
+			map[string]string{successor: other},
+			[]string{"; drop the pluginConfigs of " + retiredGitHub + " (differs)\n"},
+		},
+		{
+			"another copy's entry is dropped after it is carried", `"` + github + `":` + patterns + `,"` + professor + `":` + patterns,
+			true,
+			map[string]string{successor: patterns},
+			[]string{"; drop the pluginConfigs of " + github + ", " + professor + "\n"},
+		},
+		{"a dry run writes nothing", `"` + retiredGitHub + `":` + patterns, false, nil, []string{
+			"; copy the pluginConfigs of " + retiredGitHub + " to " + successor + "; drop the pluginConfigs of " + retiredGitHub + "\n",
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			inst, runner, out, _, first := alphaPluginEngine(t, root)
+			writePluginCheckout(t, root, name)
+			inst.apply = test.apply
+			inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: name}}
+			simulateClaude(t, runner)
+			// Retired ids already disabled: only their pluginConfigs are stale.
+			before := `{"enabledPlugins":{"` + retiredGitHub + `":false,"` + retiredDev + `":false,"` + github + `":false},` +
+				`"pluginConfigs":{` + test.configs + `}}`
+			path := filepath.Join(first, "settings.json")
+			writeFixture(t, path, before)
+			if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+			}
+			for _, line := range test.wantLines {
+				if !strings.Contains(out.String(), line) {
+					t.Fatalf("missing %q:\n%s", line, out.String())
+				}
+			}
+			after := readFixture(t, path)
+			if !test.apply {
+				if after != before {
+					t.Fatalf("dry run wrote settings: %s", after)
+				}
+				return
+			}
+			var got struct {
+				Configs map[string]json.RawMessage `json:"pluginConfigs"`
+			}
+			if err := json.Unmarshal([]byte(after), &got); err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Configs) != len(test.wantKeys) {
+				t.Fatalf("pluginConfigs = %s, want only %v", after, test.wantKeys)
+			}
+			for id, want := range test.wantKeys {
+				var gotEntry, wantEntry any
+				if err := json.Unmarshal(got.Configs[id], &gotEntry); err != nil {
+					t.Fatalf("pluginConfigs[%s] = %s: %v", id, got.Configs[id], err)
+				}
+				if err := json.Unmarshal([]byte(want), &wantEntry); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(gotEntry, wantEntry) {
+					t.Fatalf("pluginConfigs[%s] = %s, want %s", id, got.Configs[id], want)
+				}
+			}
+			out.Reset()
+			err := inst.ensureClaudePlugins(context.Background())
+			if err != nil || strings.Contains(out.String(), "pluginConfigs") {
+				t.Fatalf("second run err=%v:\n%s", err, out.String())
+			}
+		})
+	}
+}
+
+// TestClaudePluginGapsNamesAStaleRetiredPluginConfig: doctor reports a
+// pluginConfigs entry of a retired or other copy beside its successor's.
+func TestClaudePluginGapsNamesAStaleRetiredPluginConfig(t *testing.T) {
+	const name = "auto-effort-control"
+	target := ClaudePluginTarget{
+		Name: name, ID: devID(name), DevID: devID(name), GitHubID: name + "@" + name, Own: true,
+	}
+	file := filepath.Join(t.TempDir(), "settings.json")
+	writeFixture(t, file, `{"enabledPlugins":{"`+target.ID+`":true},"pluginConfigs":{"`+target.ID+`":{"options":{}},`+
+		`"effort-live-control@effort-live-control":{"options":{}},"`+target.GitHubID+`":{"options":{}}}}`)
+	gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{target})
+	want := ClaudePluginGap{
+		"pluginConfigs of " + target.GitHubID + " and effort-live-control@effort-live-control still in " + file +
+			": retired or other copies of " + target.ID,
+		"pfm install copies the first to " + target.ID + " when it has none, then drops them",
+	}
+	if err != nil || len(gaps) != 1 || gaps[0] != want {
+		t.Fatalf("gaps = %q, %v; want [%q]", gaps, err, want)
+	}
+	writeFixture(t, file, `{"enabledPlugins":{"`+target.ID+`":true},"pluginConfigs":{"`+target.ID+`":{"options":{}}}}`)
+	if gaps, err = ClaudePluginGaps(file, []ClaudePluginTarget{target}); err != nil || len(gaps) != 0 {
+		t.Fatalf("a settled settings.json reported %q, %v", gaps, err)
 	}
 }

@@ -426,6 +426,7 @@ func Synthesize(request Request) (Plan, error) {
 			claudeResumeFlag,
 			request.Row.ID,
 		)
+		resumeSpawn.RemoteControlName = request.Row.Name
 		resume, err := resumeSpawn.ShellCommand()
 		if err != nil {
 			return Plan{}, err
@@ -461,6 +462,7 @@ func Synthesize(request Request) (Plan, error) {
 			claudeResumeFlag,
 			request.Row.ID,
 		)
+		resumeSpawn.RemoteControlName = request.Row.Name
 		resume, err := resumeSpawn.ShellCommand()
 		if err != nil {
 			return Plan{}, err
@@ -568,6 +570,9 @@ func claudeCommandWith(
 ) (string, error) {
 	_ = strip
 	spawn := claudePersonaSpawn(purpose, home, account, cache1H, machine, workbench.Persona{}, name, args...)
+	if purpose == PurposeResume {
+		spawn.Name, spawn.RemoteControlName = "", name
+	}
 	return spawn.ShellCommand()
 }
 

@@ -15,13 +15,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
 	vscodeContractFile = "current.json"
 	vscodeAckFile      = "vscode-ack.json"
 	// vscodeChromeRecordFile is the extension's record of the chrome it wrote
-	// into each local workspace file (theme.js CHROME_RECORD); pfm only reads it.
+	// into each workspace layer (theme.js CHROME_RECORD); pfm only reads it.
 	vscodeChromeRecordFile = "vscode-chrome.json"
 	vscodeGrace            = 10 * time.Second
 	vscodeDeferred         = "applies when VS Code starts"
@@ -31,10 +32,26 @@ const (
 // wallClock is the time seam for backup stamps and the VS Code ack grace window.
 var wallClock clock.Clock = clock.Real
 
-// vscodeProducts are the VS Code family user dirs whose settings.json is backed up.
+// vscodeProducts are the macOS VS Code family user dirs whose settings.json is
+// backed up; elsewhere the candidates are paths.VSCodeSettingsCandidates'.
 var vscodeProducts = []string{"Code", "Code - Insiders", "VSCodium", "Cursor"}
 
-// vscodeAppMarkers identify a running VS Code family main binary in `ps -axo args=`.
+// vscodeLinuxMarkers identify a running VS Code family main binary or VS Code
+// Server (the extension host of a Remote-SSH window) in `ps -axo args=`
+// outside macOS.
+var vscodeLinuxMarkers = []string{
+	"/.vscode-server/cli/servers/",
+	"/.vscode-server/bin/",
+	"/.vscode-server-insiders/cli/servers/",
+	"/.vscode-server-insiders/bin/",
+	"/usr/share/code/code",
+	"/usr/share/code-insiders/code-insiders",
+	"/usr/share/codium/codium",
+	"/opt/visual-studio-code/code",
+	"/snap/code/",
+}
+
+// vscodeAppMarkers identify a running VS Code family main binary in `ps -axo args=` on macOS.
 var vscodeAppMarkers = []string{
 	"/Visual Studio Code.app/Contents/MacOS/",
 	"/Code.app/Contents/MacOS/",
@@ -52,9 +69,9 @@ type vscodeContract struct {
 	Mode       string            `json:"mode"`
 	Appearance string            `json:"appearance"`
 	Colors     map[string]string `json:"colors"`
-	// Chrome is the window chrome (title, activity and status bars) the
-	// extension writes into a LOCAL window's workspace colorCustomizations
-	// only; a remote window never takes it.
+	// Chrome is the frame, written to Global and every window's Workspace
+	// colorCustomizations by the extension running on this machine: a local
+	// window's, or a Remote-SSH window's whose remote host this is.
 	Chrome map[string]string `json:"chrome"`
 }
 
@@ -64,12 +81,11 @@ type vscodeAck struct {
 	AppliedAt  string   `json:"appliedAt"`
 	Keys       []string `json:"keys"`
 	Error      string   `json:"error"`
-	// Chrome is each local workspace file's last chrome outcome, keyed by
-	// its path; a remote or folder-only window adds no entry.
+	// Chrome holds each workspace path/URI's outcome; global names an empty window.
 	Chrome map[string]vscodeChromeAck `json:"chrome"`
 }
 
-// vscodeChromeAck is one local workspace's chrome outcome: the generation
+// vscodeChromeAck is one window's chrome outcome: the generation
 // whose chrome it carries, the keys set, and why it was not applied.
 type vscodeChromeAck struct {
 	Generation int      `json:"generation"`
@@ -77,12 +93,9 @@ type vscodeChromeAck struct {
 	Error      string   `json:"error"`
 }
 
-// vscodeContract renders one appearance: the terminal colour keys in Colors
-// and the window chrome in Chrome. They are separate fields because the
-// extension routes them differently: colors go to the user's Global settings,
-// chrome only to a local window's Workspace settings, where Peacock paints
-// the same keys; every key Peacock paints there is set, so none stays its
-// colour. The theme's VS Code pins replace the colour of the key they name.
+// vscodeContract renders terminal colours and the frame on every window. The
+// extension writes both to Global, plus chrome to Workspace to beat old overrides.
+// Existing chrome pins and workbench colours replace their respective derived keys.
 func (applied Applied) vscodeContract(appearance Appearance, generation int) vscodeContract {
 	variant := applied.variant(appearance)
 	mode := string(applied.Side)
@@ -118,13 +131,13 @@ func (applied Applied) vscodeContract(appearance Appearance, generation int) vsc
 	chrome := map[string]string{}
 	for _, key := range []string{
 		"titleBar.activeBackground", "activityBar.activeBackground", "activityBarTop.activeBackground",
-		"statusBar.background",
+		"statusBar.background", "statusBar.noFolderBackground",
 	} {
 		chrome[key] = variant.Surface
 	}
 	for _, key := range []string{
 		"titleBar.activeForeground", "activityBar.foreground", "activityBarTop.foreground",
-		"commandCenter.foreground", "statusBar.foreground",
+		"commandCenter.foreground", "statusBar.foreground", "statusBar.noFolderForeground",
 	} {
 		chrome[key] = variant.Foreground
 	}
@@ -142,11 +155,15 @@ func (applied Applied) vscodeContract(appearance Appearance, generation int) vsc
 	}
 	for _, key := range []string{
 		"activityBar.activeBorder", "activityBarTop.activeBorder", "activityBarBadge.background",
-		"sash.hoverBorder", "statusBar.debuggingBackground", "statusBarItem.remoteBackground",
+		"sash.hoverBorder", "statusBar.debuggingBackground", "statusBar.debuggingBorder",
+		"statusBarItem.remoteBackground", "window.activeBorder",
 	} {
 		chrome[key] = variant.Accent
 	}
-	for _, key := range []string{"commandCenter.border", "statusBarItem.hoverBackground"} {
+	for _, key := range []string{
+		"commandCenter.border", "statusBarItem.hoverBackground", "window.inactiveBorder",
+		"titleBar.border", "activityBar.border", "statusBar.border", "statusBar.noFolderBorder",
+	} {
 		chrome[key] = variant.Overlay
 	}
 	pins := vscodePins(applied.Pins)
@@ -183,37 +200,43 @@ func vscodeVerdict(
 	case age < vscodeGrace:
 		return VerdictPending, "waiting for the extension to apply generation " + fmt.Sprint(generation)
 	case haveAck:
-		return VerdictDrift, fmt.Sprintf("extension ack is at generation %d, want %d", ack.Generation, generation)
+		return VerdictDrift, fmt.Sprintf("extension ack is at generation %d, want %d: no VS Code window running "+
+			"Professor on this machine applied it; a Remote-SSH window runs Professor here only when the client's "+
+			"Professor is 0.6.0 or later: update it there and reload the window", ack.Generation, generation)
 	default:
 		return VerdictPending, fmt.Sprintf("reload a VS Code window once: no Professor extension has acknowledged "+
 			"a theme yet (%s absent)", ackPath)
 	}
 }
 
-// chromeErrors lists, by path order, each local workspace whose chrome the
+// chromeErrors lists, by path order, each workspace whose chrome the
 // extension could not apply, current or not; empty when none failed.
 func chromeErrors(ack vscodeAck, current bool, generation int) string {
-	var paths []string
+	var failed []string
 	for path, entry := range ack.Chrome {
 		if entry.Error != "" && (entry.Generation == generation) == current {
-			paths = append(paths, path)
+			failed = append(failed, path)
 		}
 	}
-	sort.Strings(paths)
-	parts := make([]string, 0, len(paths))
-	for _, path := range paths {
+	sort.Strings(failed)
+	parts := make([]string, 0, len(failed))
+	for _, path := range failed {
 		entry := ack.Chrome[path]
-		part := "window chrome " + filepath.Base(path) + ": " + entry.Error
+		label := path
+		if filepath.IsAbs(path) {
+			label = filepath.Base(path)
+		}
+		part := "window chrome " + label + ": " + entry.Error
 		if !current {
 			part = fmt.Sprintf("window chrome %s failed at generation %d (%s); retried when it next opens",
-				filepath.Base(path), entry.Generation, entry.Error)
+				label, entry.Generation, entry.Error)
 		}
 		parts = append(parts, part)
 	}
 	return strings.Join(parts, "; ")
 }
 
-// chromeFailure is the ERROR detail of the local workspaces whose chrome the
+// chromeFailure is the ERROR detail of the workspaces whose chrome the
 // extension could not apply at the generation in force; an entry of an
 // earlier generation is a window that has not opened since, never a current
 // failure. Empty when none failed.
@@ -221,23 +244,26 @@ func chromeFailure(ack vscodeAck, generation int) string {
 	return chromeErrors(ack, true, generation)
 }
 
-// chromeDetail names the local workspaces holding this generation's chrome
+// chromeDetail names the workspaces holding this generation's chrome
 // and each earlier-generation failure still waiting for its window; empty
 // when there are none.
 func chromeDetail(ack vscodeAck, generation int) string {
 	count := 0
-	for _, entry := range ack.Chrome {
-		if entry.Generation == generation && entry.Error == "" {
+	for target, entry := range ack.Chrome {
+		if target != "global" && entry.Generation == generation && entry.Error == "" {
 			count++
 		}
 	}
 	var parts []string
+	if entry, ok := ack.Chrome["global"]; ok && entry.Generation == generation && entry.Error == "" {
+		parts = append(parts, "global frame")
+	}
 	switch count {
 	case 0:
 	case 1:
-		parts = append(parts, "window chrome in 1 local workspace")
+		parts = append(parts, "window chrome in 1 workspace")
 	default:
-		parts = append(parts, fmt.Sprintf("window chrome in %d local workspaces", count))
+		parts = append(parts, fmt.Sprintf("window chrome in %d workspaces", count))
 	}
 	if stale := chromeErrors(ack, false, generation); stale != "" {
 		parts = append(parts, stale)
@@ -250,16 +276,20 @@ func chromeDetail(ack vscodeAck, generation int) string {
 // counts. A workspace file whose stat fails otherwise keeps its entry.
 func dropGoneWorkspaces(ack *vscodeAck) {
 	for path := range ack.Chrome {
+		// Only legacy local saved workspace paths can be judged by this host's filesystem.
+		if !filepath.IsAbs(path) {
+			continue
+		}
 		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 			delete(ack.Chrome, path)
 		}
 	}
 }
 
-// vscodeRunning reports whether `ps -axo args=` lists a VS Code family main binary.
-func vscodeRunning(psOutput string) bool {
+// vscodeRunning reports whether `ps -axo args=` lists a process one of markers names.
+func vscodeRunning(psOutput string, markers []string) bool {
 	for _, line := range strings.Split(psOutput, "\n") {
-		for _, marker := range vscodeAppMarkers {
+		for _, marker := range markers {
 			if strings.Contains(line, marker) {
 				return true
 			}
@@ -268,54 +298,113 @@ func vscodeRunning(psOutput string) bool {
 	return false
 }
 
+// vscodeSettings are the settings.json files the vscode row looks for: on
+// macOS each product's under Application Support, elsewhere the one lookup
+// pfm install --vscode shares, the VS Code Server's Machine settings included.
 func (s *session) vscodeSettings() []string {
-	var paths []string
+	if !s.env.darwin() {
+		return paths.VSCodeSettingsCandidates(s.env.Home, false, paths.OSEnv{})
+	}
+	var settings []string
 	for _, product := range vscodeProducts {
-		paths = append(
-			paths,
+		settings = append(
+			settings,
 			filepath.Join(s.env.Home, "Library", "Application Support", product, "User", "settings.json"),
 		)
 	}
-	return paths
+	return settings
+}
+
+// vscodeServerRoots are the VS Code Server installs outside macOS: a
+// Remote-SSH window's extension host runs from one, and its Machine
+// settings.json exists only once a Remote setting was saved, so the root
+// alone already makes VS Code present (the installer links its extension
+// there on the same evidence).
+func (s *session) vscodeServerRoots() []string {
+	if s.env.darwin() {
+		return nil
+	}
+	return []string{filepath.Join(s.env.Home, ".vscode-server"), filepath.Join(s.env.Home, ".vscode-server-insiders")}
+}
+
+// vscodePresent says whether this host has a VS Code the contract serves: a
+// settings.json the row looks for, or a VS Code Server root. A path that
+// cannot be looked at is the error, naming it, never absence.
+func (s *session) vscodePresent() (bool, string, error) {
+	for _, settings := range s.vscodeSettings() {
+		_, err := os.Stat(settings)
+		if err == nil {
+			return true, "", nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return false, settings, fmt.Errorf("themesync: stat %s: %w", settings, err)
+		}
+	}
+	for _, root := range s.vscodeServerRoots() {
+		info, err := os.Stat(root)
+		if err == nil && info.IsDir() {
+			return true, "", nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, root, fmt.Errorf("themesync: stat %s: %w", root, err)
+		}
+	}
+	return false, "", nil
+}
+
+// vscodeMarkers are the process markers of a running VS Code on this platform.
+func (s *session) vscodeMarkers() []string {
+	if s.env.darwin() {
+		return vscodeAppMarkers
+	}
+	return vscodeLinuxMarkers
 }
 
 func (s *session) vscodeContractPath() string { return filepath.Join(s.store.dir, vscodeContractFile) }
+
+// vscodeServerNote names the VS Code Server roots an ABSENT row also looked
+// for, "" on macOS.
+func vscodeServerNote(roots []string) string {
+	if len(roots) == 0 {
+		return ""
+	}
+	return " and no VS Code Server at " + strings.Join(roots, ", ")
+}
 
 func (s *session) vscodeAbsent() SurfaceResult {
 	return s.absent(
 		surfaceVscode,
 		s.vscodeContractPath(),
-		"no VS Code settings.json at "+strings.Join(s.vscodeSettings(), ", "),
+		"no VS Code settings.json at "+strings.Join(s.vscodeSettings(), ", ")+vscodeServerNote(s.vscodeServerRoots()),
 	)
 }
 
 // vscodeEnsureBackups copies each existing settings.json beside itself once, before the first set.
-func (s *session) vscodeEnsureBackups() (present bool, err error) {
+func (s *session) vscodeEnsureBackups() error {
 	for _, settings := range s.vscodeSettings() {
 		content, readErr := os.ReadFile(settings)
 		if errors.Is(readErr, os.ErrNotExist) {
 			continue
 		}
 		if readErr != nil {
-			return present, fmt.Errorf("themesync: read %s: %w", settings, readErr)
+			return fmt.Errorf("themesync: read %s: %w", settings, readErr)
 		}
-		present = true
 		if s.state.VSCode[settings] != "" {
 			continue
 		}
 		backup, err := s.backupBeside(settings, content)
 		if err != nil {
-			return present, err
+			return err
 		}
 		if s.state.VSCode == nil {
 			s.state.VSCode = map[string]string{}
 		}
 		s.state.VSCode[settings] = backup
 		if err := s.persist(); err != nil {
-			return present, err
+			return err
 		}
 	}
-	return present, nil
+	return nil
 }
 
 func (s *session) writeVscodeContract(contract vscodeContract) error {
@@ -334,9 +423,12 @@ func (s *session) writeVscodeContract(contract vscodeContract) error {
 }
 
 func (s *session) applyVscode(_ context.Context) SurfaceResult {
-	present, err := s.vscodeEnsureBackups()
-	if err != nil {
+	if err := s.vscodeEnsureBackups(); err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
+	}
+	present, failedPath, err := s.vscodePresent()
+	if err != nil {
+		return s.failed(surfaceVscode, failedPath, err)
 	}
 	contract := s.theme().vscodeContract(s.state.Appearance, s.state.Generation)
 	if err := s.writeVscodeContract(contract); err != nil {
@@ -350,13 +442,9 @@ func (s *session) applyVscode(_ context.Context) SurfaceResult {
 
 func (s *session) readVscode(ctx context.Context) SurfaceResult {
 	path := s.vscodeContractPath()
-	present := false
-	for _, settings := range s.vscodeSettings() {
-		_, err := os.Stat(settings)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return s.failed(surfaceVscode, settings, fmt.Errorf("themesync: stat %s: %w", settings, err))
-		}
-		present = present || err == nil
+	present, failedPath, err := s.vscodePresent()
+	if err != nil {
+		return s.failed(surfaceVscode, failedPath, err)
 	}
 	if !present {
 		return s.vscodeAbsent()
@@ -390,8 +478,14 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceVscode, path, fmt.Errorf("themesync: stat %s: %w", path, err))
 	}
-	verdict, detail := vscodeVerdict(ack, haveAck, s.state.Generation, vscodeRunning(string(result.Stdout)),
-		wallClock.Now().Sub(info.ModTime()), filepath.Join(s.store.dir, vscodeAckFile))
+	verdict, detail := vscodeVerdict(
+		ack,
+		haveAck,
+		s.state.Generation,
+		vscodeRunning(string(result.Stdout), s.vscodeMarkers()),
+		wallClock.Now().Sub(info.ModTime()),
+		filepath.Join(s.store.dir, vscodeAckFile),
+	)
 	generation := 0
 	if verdict == VerdictInSync {
 		generation = ack.Generation
@@ -414,59 +508,31 @@ func (s *session) readAck() (ack vscodeAck, found bool, err error) {
 	return ack, true, nil
 }
 
-// paintedWorkspaces lists, by path order, the local workspace files the
-// extension's chrome record says still carry chrome: each one is restored only
-// by a window that opens it. A workspace file that no longer exists is left
-// out; an absent record is none, an unreadable one an error.
-func (s *session) paintedWorkspaces() ([]string, error) {
-	recordPath := filepath.Join(s.store.dir, vscodeChromeRecordFile)
-	raw, err := os.ReadFile(recordPath)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return nil, nil
-	case err != nil:
-		return nil, fmt.Errorf("themesync: read %s: %w", recordPath, err)
-	}
-	var records map[string]struct {
-		Keys map[string]json.RawMessage `json:"keys"`
-	}
-	if err := json.Unmarshal(raw, &records); err != nil {
-		return nil, fmt.Errorf("themesync: parse %s: %w", recordPath, err)
-	}
-	var painted []string
-	for workspace, record := range records {
-		if len(record.Keys) == 0 {
-			continue
-		}
-		if _, err := os.Stat(workspace); errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		painted = append(painted, workspace)
-	}
-	sort.Strings(painted)
-	return painted, nil
-}
-
 func (s *session) restoreVscode(_ context.Context) SurfaceResult {
 	if err := s.writeVscodeContract(vscodeOffContract(s.state.Generation)); err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
 	}
-	painted, err := s.paintedWorkspaces()
+	pending, err := VSCodePendingRestores(s.store.dir)
 	if err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
 	}
-	for _, settings := range s.vscodeSettings() {
-		if _, err := os.Stat(settings); err != nil {
-			continue
+	present, failedPath, err := s.vscodePresent()
+	if err != nil {
+		return s.failed(surfaceVscode, failedPath, err)
+	}
+	s.state.VSCode = nil
+	if len(pending) > 0 {
+		var targets []string
+		for _, restore := range pending {
+			targets = append(targets, restore.Record+" target "+restore.Target+": "+strings.Join(restore.Keys, ", "))
 		}
-		s.state.VSCode = nil
-		detail := "the extension clears the colours when it next reads " + vscodeContractFile
-		if len(painted) == 0 {
-			return s.result(surfaceVscode, VerdictApplied, s.vscodeContractPath(), detail)
-		}
-		detail += "; window chrome stays in " + strings.Join(painted, ", ") +
-			" until a VS Code window on each workspace applies the off"
+		detail := "VS Code colours stay in " + strings.Join(targets, "; ") +
+			" until VS Code with the Professor extension consumes the disabled " + vscodeContractFile
 		return s.result(surfaceVscode, VerdictPending, s.vscodeContractPath(), detail)
 	}
-	return s.vscodeAbsent()
+	if !present {
+		return s.vscodeAbsent()
+	}
+	detail := "the extension clears the colours when it next reads " + vscodeContractFile
+	return s.result(surfaceVscode, VerdictApplied, s.vscodeContractPath(), detail)
 }

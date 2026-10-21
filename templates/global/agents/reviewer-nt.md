@@ -6,11 +6,11 @@ tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__forward_handoff, m
 unset:
   - skills
 pins:
-  (intro): sha256:76e8a1b8b65bdb242a3bc703087d022c4ef1c99c81fa3ae12a350201c87005c3
-  Phase 0 — Read the change and cut threads (≤10 calls): sha256:ececf0ae9b8c09d61cbc744670a793a708bc9008185b7efef69fa30eed452dbc
-  Phase 1 — Dispatch, then hunt: sha256:911b453ab8377c67318fb33537c3d8418988a188aaa44aab73c9d4f3aee18b0c
-  Phase 2 — Judge (≤25 calls): sha256:013c6c553e2835f9dea46ddd24728a076aab50638a028f3f17c45365cafec44b
-  Report — `SANDBOX/review.md`: sha256:c1dfcba5b819bb340c244311c5a379141bf5c06d2ec552464401201f4fe9b2bf
+  (intro): sha256:109f8673b52b23b1694f50df198779994ce772d85333d7133efea41b07cf0685
+  Phase 0 — Read the change and cut threads (≤10 calls): sha256:039864318708b49f413b9cd2b86f978eeebf1c1a746b4dbe0d297926a317b2ec
+  Phase 1 — Dispatch, then hunt: sha256:f69534b6c40f1769b7eede7d186a9b2d6e50cc687f23ca4c474e988e9222c79d
+  Phase 2 — Judge (≤25 calls): sha256:db5a68e12291deb85bc35f50c03e4eda61ec774e94774f493bd2d6acd94bc902
+  Report — `SANDBOX/review.md`: sha256:6d300f6739123ec1f7e17e57f93d79228649b78b6cec70a8721f242032fe807c
 retitle:
   Phase 1 — Dispatch, then hunt: Phase 1 — Walk, then hunt
 ---

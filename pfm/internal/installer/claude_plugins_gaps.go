@@ -31,7 +31,8 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 // ids (GitHub, professor, -dev), every install-only plugin enabled under any,
 // every local target whose copy is missing, not a plain directory or not the
 // checkout's content, every other plugin enabled under two or more keys, and
-// every enabled retired default plugin copy. A
+// every enabled retired default plugin copy, and every retired or other copy's
+// pluginConfigs entry left beside its successor's. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -100,6 +101,26 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 						"; if claude.plugins still lists it, replace that entry with " + successor,
 				})
 			}
+		}
+	}
+	for index := range targets {
+		target := &targets[index]
+		retired := retiredClaudePlugins[target.Name]
+		if !target.Own || len(retired) == 0 {
+			continue
+		}
+		// Install carries the first entry to target.ID and drops them all
+		// (retireConfigs); the plugin warns on each one it leaves.
+		if ids := retiredConfigIDs(document, target, retired); len(ids) != 0 {
+			shown := make([]string, len(ids))
+			for position, id := range ids {
+				shown[position] = EscapeControl(id)
+			}
+			gaps = append(gaps, ClaudePluginGap{
+				Problem: "pluginConfigs of " + strings.Join(shown, " and ") + " still in " + path +
+					": retired or other copies of " + target.ID,
+				Fix: "pfm install copies the first to " + target.ID + " when it has none, then drops them",
+			})
 		}
 	}
 	return append(gaps, claudePluginDuplicateGaps(document, path, targets)...), nil

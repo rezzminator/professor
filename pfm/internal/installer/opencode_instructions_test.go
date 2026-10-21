@@ -48,7 +48,7 @@ func TestInstallWiresOpenCodeInstructions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	composed := filepath.Join(clone, "pfm", "harness-prompts", "composed", "opencode.md")
+	composed := filepath.Join(clone, "pfm", "harness-prompts", "generated", "opencode.md")
 	raw := readFixture(t, config)
 	if !strings.Contains(raw, "// operator comment") {
 		t.Fatalf("operator comment lost:\n%s", raw)
@@ -182,7 +182,7 @@ func TestFirstInstallWiresOpenCodeInstructions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			composed := filepath.Join(physical, "pfm", "harness-prompts", "composed", "opencode.md")
+			composed := filepath.Join(physical, "pfm", "harness-prompts", "generated", "opencode.md")
 			raw := readFixture(t, config)
 			entries, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, raw), config)
 			if err != nil {
@@ -244,9 +244,9 @@ func TestOpenCodeInstructionsOtherClones(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			home, clone := t.TempDir(), t.TempDir()
 			config := OpenCodeConfigPath(home)
-			composed := filepath.Join(clone, "pfm", "harness-prompts", "composed", "opencode.md")
+			composed := filepath.Join(clone, "pfm", "harness-prompts", "generated", "opencode.md")
 			entries := []string{
-				"/srv/old-clone/pfm/harness-prompts/composed/opencode.md",
+				"/srv/old-clone/pfm/harness-prompts/generated/opencode.md",
 				filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts", "opencode.md"),
 				"./house-rules.md",
 			}
@@ -284,7 +284,7 @@ func TestOpenCodeInstructionsUninstallWithoutMarker(t *testing.T) {
 	writeFixture(
 		t,
 		config,
-		`{"instructions":["/srv/old-clone/pfm/harness-prompts/composed/opencode.md","operator.md"]}`,
+		`{"instructions":["/srv/old-clone/pfm/harness-prompts/generated/opencode.md","operator.md"]}`,
 	)
 	var output strings.Builder
 	installer := &engine{options: Options{
@@ -297,7 +297,7 @@ func TestOpenCodeInstructionsUninstallWithoutMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{"/srv/old-clone/pfm/harness-prompts/composed/opencode.md", "operator.md"}) ||
+	if !reflect.DeepEqual(got, []string{"/srv/old-clone/pfm/harness-prompts/generated/opencode.md", "operator.md"}) ||
 		installer.report.Skipped != 0 {
 		t.Fatalf("instructions = %v, report = %+v, output = %q", got, installer.report, output.String())
 	}
@@ -339,7 +339,7 @@ func TestOpenCodeReceiptFailureRetryRecoversOwnershipAndKeepsForeignInstructions
 func TestOpenCodePreexistingComposedInstructionRemainsOperatorOwned(t *testing.T) {
 	home, clone := t.TempDir(), t.TempDir()
 	config := OpenCodeConfigPath(home)
-	composed := filepath.Join(clone, "pfm", "harness-prompts", "composed", "opencode.md")
+	composed := filepath.Join(clone, "pfm", "harness-prompts", "generated", "opencode.md")
 	raw, err := json.Marshal(map[string]any{"instructions": []string{"operator.md", composed}})
 	if err != nil {
 		t.Fatal(err)

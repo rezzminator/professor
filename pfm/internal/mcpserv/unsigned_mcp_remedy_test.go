@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
@@ -97,5 +99,30 @@ func TestMCPSelfRefusalNamesAnMCPReachableRemedy(t *testing.T) {
 	}
 	if !strings.Contains(output.Message, "pfm chat") {
 		t.Fatalf("whoami message names no MCP-reachable remedy: %q", output.Message)
+	}
+}
+
+// TestMCPUnsignedRefusalNamesTheFailedCallerBinding pins that a request which
+// carried its own identity (_meta.threadId) that failed to bind says so: the
+// refusal names the binding's reason, never only "no identity of its own".
+func TestMCPUnsignedRefusalNamesTheFailedCallerBinding(t *testing.T) {
+	t.Parallel()
+	service := newService("test", &backend{
+		chat:                 &fakeChatVerbs{},
+		callEngine:           fakeUnsignedCaller{},
+		allowAmbientIdentity: false,
+	})
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "thread-gone"}}}
+	_, output, err := service.chatCall(
+		context.Background(),
+		request,
+		CallInput{Target: "some-explicit-session", Message: "hello"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) ||
+		!strings.Contains(output.Message, `did not bind: MCP _meta.threadId "thread-gone" has no live Codex seat`) {
+		t.Fatalf("call message hides the failed caller binding: %q", output.Message)
 	}
 }

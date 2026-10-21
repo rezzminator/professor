@@ -226,18 +226,18 @@ func ReadSourceRepoMarker(home string) (string, error) {
 	return repo, nil
 }
 
-// ComposedHarnessPrompt locates the installed engine prompt in the recorded clone.
-func ComposedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
+// GeneratedHarnessPrompt locates the installed engine prompt in the recorded clone.
+func GeneratedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
 	repo, err := ReadSourceRepoMarker(home)
 	if err != nil {
-		return "", fmt.Errorf("resolve composed harness prompt: %w", err)
+		return "", fmt.Errorf("resolve generated harness prompt: %w", err)
 	}
-	return ComposedHarnessPromptIn(repo, id), nil
+	return GeneratedHarnessPromptIn(repo, id), nil
 }
 
-// ComposedHarnessPromptIn locates the engine prompt in the given clone.
-func ComposedHarnessPromptIn(repo string, id pfmengine.ID) string {
-	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md")
+// GeneratedHarnessPromptIn locates the engine prompt in the given clone.
+func GeneratedHarnessPromptIn(repo string, id pfmengine.ID) string {
+	return filepath.Join(repo, "pfm", "harness-prompts", "generated", pfmengine.MustLookup(id).LongName+".md")
 }
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,
@@ -641,6 +641,12 @@ func AutoEffortStateFile(env Env, home, sessionID string) (string, error) {
 // the activity log, so `pfm doctor` can show the cause of a sink that stopped.
 func CostSinkLog(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "log", "cost-sink.log")
+}
+
+// SubagentStatuslineTrace is the opt-in structural trace beside the cost sink
+// and activity logs. It never holds prompts, labels or transcript bodies.
+func SubagentStatuslineTrace(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "log", "subagent-statusline.jsonl")
 }
 
 // LegacyHarnessPromptsDir identifies the former managed prompt directory.

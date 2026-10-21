@@ -92,6 +92,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			KeyClaudeGptAgents,
 		)
 	}
+	if raw.SubagentStatuslineTrace != nil && index >= 0 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.subagentStatuslineTrace is machine-wide: set %s",
+			path,
+			configScope(scope, index),
+			KeyClaudeSubagentStatuslineTrace,
+		)
+	}
 	if raw.CostLedger != nil && index >= 0 {
 		return ClaudePrefs{}, fmt.Errorf(
 			"config %s: %s.costLedger is machine-wide: set %s",
@@ -180,6 +188,10 @@ func applyClaudeMachinePrefs(
 		target.CostLedger = *raw.CostLedger
 		sources[KeyClaudeCostLedger] = SourceFile
 	}
+	if raw.SubagentStatuslineTrace != nil {
+		target.SubagentStatuslineTrace = *raw.SubagentStatuslineTrace
+		sources[KeyClaudeSubagentStatuslineTrace] = SourceFile
+	}
 	return nil
 }
 
@@ -215,7 +227,7 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 }
 
 // marshalClaude is the machine claude block. The keys a pfm of the last release (v0.79.0) does
-// not know — helperModel, pluginCheckoutRoot, plugins, env, costLedger — are written only when the file
+// not know — helperModel, pluginCheckoutRoot, plugins, env, costLedger, subagentStatuslineTrace — are written only when the file
 // set them or the value differs from the default, so `pfm config init` writes a file that pfm still
 // decodes: its loader refuses an unknown key. An unset value loads as its default either way.
 func marshalClaude(config Config) map[string]any {
@@ -232,6 +244,9 @@ func marshalClaude(config Config) map[string]any {
 		"nativeCursor":          config.Claude.NativeCursor,
 	}
 	set := func(key string) bool { return config.Source(key) == SourceFile }
+	if set("claude.remoteControl") || !config.Claude.RemoteControl {
+		value["remoteControl"] = config.Claude.RemoteControl
+	}
 	if set("claude.helperModel") || config.Claude.HelperModel != DefaultHelperModel {
 		value["helperModel"] = config.Claude.HelperModel
 	}
@@ -254,5 +269,41 @@ func marshalClaude(config Config) map[string]any {
 	if set(KeyClaudeGptAgents) || config.Claude.GptAgents {
 		value["gptAgents"] = config.Claude.GptAgents
 	}
+	if set(KeyClaudeSubagentStatuslineTrace) || config.Claude.SubagentStatuslineTrace {
+		value["subagentStatuslineTrace"] = config.Claude.SubagentStatuslineTrace
+	}
 	return value
+}
+
+// marshalClaudeAccount preserves explicit account switches, including false overrides.
+func marshalClaudeAccount(config Config, account Account, index int) map[string]any {
+	claude := map[string]any{
+		"webSearchesPerSession": account.Claude.WebSearchesPerSession,
+		"autoCompactWindow":     account.Claude.AutoCompactWindow,
+		"tmuxTruecolor":         account.Claude.TmuxTruecolor,
+		"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
+		"requireManagedCleanup": account.Claude.RequireManagedCleanup,
+		keyTheme:                themeMarshalValue(account.Claude.Theme),
+		"cache1h":               account.Claude.Cache1H,
+		"nativeCursor":          account.Claude.NativeCursor,
+	}
+	if config.Source(fmt.Sprintf("accounts[%d].claude.remoteControl", index)) == SourceFile ||
+		account.Claude.RemoteControl != config.Claude.RemoteControl {
+		claude["remoteControl"] = account.Claude.RemoteControl
+	}
+	// These empty sentinels mean inherit. Writing them as explicit empty
+	// values makes our strict loader reject its own output.
+	if account.Claude.PermissionMode != "" {
+		claude["permissionMode"] = account.Claude.PermissionMode
+	}
+	if account.Claude.Binary != "" {
+		claude[engineKeyBinary] = account.Claude.Binary
+	}
+	// Preserve explicit account preferences, even when currently equal to the
+	// machine value: a later machine edit must not turn them into inheritance.
+	if account.Claude.HelperModel != config.Claude.HelperModel ||
+		config.Source(fmt.Sprintf("accounts[%d].claude.helperModel", index)) == SourceFile {
+		claude["helperModel"] = account.Claude.HelperModel
+	}
+	return claude
 }

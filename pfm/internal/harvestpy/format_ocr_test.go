@@ -253,13 +253,14 @@ markdown = '**pp qq ' + ' '.join(words) + '**'
 judge('run placed outward from its certain token', page_markdown(' '.join(shuffled), markdown), markdown, 'xs qq pp', False)
 assert not failures, failures
 # A repeated word the surplus pieces cannot spell costs one search, not one per copy.
+# Charge CPU work, not wall time spent descheduled on a busy host; keep the 3s bound.
 import time
 word = 'a' * 23 + 'b'
 page.text = ' '.join([word] * 300)
 c._pymupdf4llm_markdown = lambda *a, **kw: ' '.join('a' * size for size in range(1, 24) for _ in range(300))
-started = time.monotonic()
+started = time.process_time()
 result = c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})
-elapsed = time.monotonic() - started
+elapsed = time.process_time() - started
 assert 'conversion omitted 300 text-layer tokens' in result['markdown'], result['markdown'][:300]
 assert elapsed < 3, ('an unspellable repeated word was searched once per copy', elapsed)
 # Distinct unspellable words share one search budget per page: a crafted page cannot stall the worker.
@@ -267,21 +268,34 @@ words = [chr(0x4e00 + index) + 'a' * 22 + 'b' for index in range(1000)]
 page.text = ' '.join(words)
 c._pymupdf4llm_markdown = lambda *a, **kw: ' '.join(
     [word[0] for word in words] + ['a' * size for size in range(1, 23) for _ in range(6)])
-started = time.monotonic()
+started = time.process_time()
 result = c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})
-elapsed = time.monotonic() - started
+elapsed = time.process_time() - started
 assert 'conversion omitted 1000 text-layer tokens' in result['markdown'], result['markdown'][:300]
 assert elapsed < 3, ('distinct unspellable words were each searched in full', elapsed)
 # Aligning a page against its Markdown stays bounded: a numeric table renders a pipe between every cell,
 # so no two tokens align in a row.
 cells = [str(index % 10) for index in range(1990)]
 page.text = ' '.join(cells[:995] + ['m%d' % index for index in range(10)] + cells[995:])
-c._pymupdf4llm_markdown = lambda *a, **kw: '|' + '|'.join(cells) + '|'
-started = time.monotonic()
+# Model four seconds descheduled while rendering, without making the suite sleep.
+# The work bound must ignore time the worker did not run.
+monotonic = time.monotonic
+wall_stall = 0
+time.monotonic = lambda: monotonic() + wall_stall
+def table_markdown(*a, **kw):
+    global wall_stall
+    wall_stall = 4
+    return '|' + '|'.join(cells) + '|'
+c._pymupdf4llm_markdown = table_markdown
+wall_started, cpu_started = time.monotonic(), time.process_time()
+started = time.process_time()
 result = c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})
-elapsed = time.monotonic() - started
+elapsed = time.process_time() - started
+wall_elapsed, cpu_elapsed = time.monotonic() - wall_started, time.process_time() - cpu_started
+time.monotonic = monotonic
 assert 'using the native text layer' in result['markdown'], ('alignment budget did not fall back', result['markdown'][:300])
 assert elapsed < 3, ('aligning a table page was not bounded', elapsed)
+print('PDF table alignment: cpu=%.3fs wall=%.3fs (includes 4s descheduled)' % (cpu_elapsed, wall_elapsed))
 page.text = 'Readable native text'
 def broken(*a, **kw): raise RuntimeError('text layer unreadable')
 page.get_text = broken
@@ -291,9 +305,11 @@ print('PDF loss audit passed')
 `
 	cmd := exec.Command(python, "-c", probe, dir)
 	cmd.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("PDF loss audit: %v\n%s", err, out)
 	}
+	t.Logf("%s", out)
 }
 
 func equalFloats(got, want []float64) bool {

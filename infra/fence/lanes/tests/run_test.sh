@@ -42,6 +42,7 @@ lanes:
 YML
 cp "$LANES/budgets.yml" "$T/budgets.fixture.yml"
 cp -R "$SUT_DIR/fixtures" "$SUT_DIR/scenarios" "$LANES/"
+cp "$SUT_DIR/../shared.sh" "$SUT_DIR/../mkdir-lock.sh" "$SUT_DIR/../image-key.sh" "$T/infra/fence/"
 cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
 (cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
 RUN="$LANES/run.sh"
@@ -425,7 +426,7 @@ else bad "readiness bound under slow probes" "rc=$RC probe span=${span_ms}ms (wa
 
 # ---- 21c: a bound that is not whole seconds is refused at entry.
 LANE_EGRESS_READY_SECS=1.5 run_sut --lanes E1
-if [ "$RC" -eq 2 ] && grep -qF "take whole seconds, not '1.5'" <<<"$OUT"; then
+if [ "$RC" -ne 0 ] && grep -qF "LANE_EGRESS_READY_SECS must be uint" <<<"$OUT"; then
   ok "a fractional egress bound is refused at entry"
 else bad "egress bound validation" "rc=$RC" "$OUT"; fi
 
@@ -509,6 +510,14 @@ for selection in H H,E1; do
     { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
     ok "focused discovery $selection has the isolated solo contract"
   else bad "focused discovery $selection solo contract" "rc=$RC" "$OUT"; fi
+done
+for selection in H H,E1; do
+  : >"$T/docker.log"
+  LANE_H_SCOPE=tab-priority STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes "$selection"
+  if { [ "$selection" = H ] && [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=tab-priority' "$T/docker.log"; } ||
+    { [ "$selection" = H,E1 ] && [ "$RC" = 2 ] && grep -q 'LANE_H_SCOPE requires solo H' <<<"$OUT"; }; then
+    ok "focused tab-priority $selection has the solo contract"
+  else bad "focused tab-priority $selection solo contract" "rc=$RC" "$OUT"; fi
 done
 for selection in H H,E1; do
   : >"$T/docker.log"

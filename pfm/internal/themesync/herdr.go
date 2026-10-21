@@ -255,35 +255,7 @@ func (s *session) herdrPath() (string, error) {
 		// Snapshots from before config overrides always edited this path.
 		return filepath.Join(s.env.Home, ".config", "herdr", "config.toml"), nil
 	}
-	if path, set := (paths.OSEnv{}).Lookup("HERDR_CONFIG_PATH"); set {
-		if path == "" {
-			return "", errors.New("themesync: HERDR_CONFIG_PATH is empty")
-		}
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			return path, fmt.Errorf("themesync: resolve Herdr config %s: %w", path, err)
-		}
-		return absolute, nil
-	}
-	directory, set := (paths.OSEnv{}).Lookup("XDG_CONFIG_HOME")
-	if !set {
-		directory = filepath.Join(s.env.Home, ".config")
-	}
-	debug := filepath.Join(directory, "herdr-dev", "config.toml")
-	if _, err := os.Stat(debug); err == nil {
-		return debug, fmt.Errorf(
-			"themesync: debug Herdr config exists at %s; set HERDR_CONFIG_PATH to identify the server's config",
-			debug,
-		)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return debug, fmt.Errorf("themesync: inspect debug Herdr config %s: %w", debug, err)
-	}
-	path := filepath.Join(directory, "herdr", "config.toml")
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return path, fmt.Errorf("themesync: resolve Herdr config %s: %w", path, err)
-	}
-	return absolute, nil
+	return paths.HerdrConfig(s.env.Home, paths.OSEnv{})
 }
 
 // herdrReload asks a running Herdr server to reread its config; a server that
@@ -524,4 +496,34 @@ func herdrReloadAcknowledgement(stdout, stderr []byte) (string, error) {
 		return "", fmt.Errorf("themesync: Herdr config reload status %q: %s", ack.Status, detail)
 	}
 	return detail, nil
+}
+
+// HerdrTabGlyphs is the tab status glyphs of the theme in force, its profile's
+// surfaces.herdr.tabGlyphs as the sync last applied them, for the Herdr tab
+// painter to read on every tick, so a theme switch shows on the next paint.
+// No sync, a sync that is off or has applied nothing, or a theme with no
+// glyphs is the zero value: the default glyphs. A state file that cannot be
+// read or parsed, or a glyph herdr refuses, is an error naming the file.
+func HerdrTabGlyphs(stateDir string) (herdr.TabGlyphs, error) {
+	store := stateStore{dir: stateDir}
+	// A FIFO or device in place of state.json would block the read, and with
+	// it every tab's status, on the painter's half-second tick.
+	if info, err := os.Stat(store.statePath()); err == nil && !info.Mode().IsRegular() {
+		return herdr.TabGlyphs{}, fmt.Errorf(
+			"themesync: %s is not a regular file (%s)", store.statePath(), info.Mode().Type(),
+		)
+	}
+	state, found, err := store.load()
+	if err != nil {
+		return herdr.TabGlyphs{}, err
+	}
+	if !found || !state.Enabled || state.Applied == nil || state.Applied.Pins == nil ||
+		state.Applied.Pins.Herdr == nil {
+		return herdr.TabGlyphs{}, nil
+	}
+	glyphs, err := herdr.ParseTabGlyphs(state.Applied.Pins.Herdr.TabGlyphs)
+	if err != nil {
+		return herdr.TabGlyphs{}, fmt.Errorf("themesync: %s: %w", store.statePath(), err)
+	}
+	return glyphs, nil
 }

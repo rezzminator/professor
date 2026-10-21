@@ -18,7 +18,7 @@ func TestRefreshSeatPromptReadsComposedClaudePrompt(t *testing.T) {
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
-	prompt := filepath.Join(clone, "pfm", "harness-prompts", "composed", "claude.md")
+	prompt := filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md")
 	mustWrite(t, prompt, "FLEET\n")
 	if err := WriteSeatPrompt(sidDir, "cc-role", "", "<!-- pfm agent-role: reader -->\nSTALE"); err != nil {
 		t.Fatal(err)

@@ -153,6 +153,28 @@ def call_keys(recs):
 
 
 class ClaudeKit(Fixture):
+    def test_typed_blocked_field_in_error_output_is_not_a_denial(self):
+        path = self.write_claude([
+            c_user("Read the contract.", 0),
+            c_call("t1", "Bash", {"command": "cat spec.py missing.py"}, 1),
+            c_result("t1", "Exit code 1\n    blocked: str | None = None\nmissing.py: No such file", 2, err=True),
+            c_final("Missing file.", 3),
+        ])
+        self.prep(path)
+        self.assertEqual(self.counts().get("ERROR"), 1)
+        self.assertEqual(self.counts().get("DENIAL", 0), 0)
+
+    def test_prompt_snapshot_is_readable_historical_instruction_evidence(self):
+        snapshot = {"type": "attachment", "timestamp": iso(1),
+                    "attachment": {"type": "prompt_snapshot",
+                                   "systemPrompt": ["Budget: 45 tool calls.", "Prefer no rendering."]}}
+        path = self.write_claude([c_user("Screenshots first.", 0), snapshot, c_final("Done.", 2)])
+        self.prep(path)
+        self.assertEqual(len(self.labelled("PROMPT-SNAPSHOT")), 1)
+        out = self.kitcmd("entry", self.dir, "L2").stdout
+        self.assertIn("PROMPT SNAPSHOT\nBudget: 45 tool calls.\nPrefer no rendering.", out)
+        self.assertNotIn("DROPPED attachment.prompt_snapshot", "\n".join(self.digest()))
+
     def write_claude(self, records=None, name="s1.jsonl"):
         path = self.path("projects", "p", name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -686,6 +708,31 @@ def codex_records():
 
 
 class CodexKit(Fixture):
+    def test_header_uses_latest_turn_context(self):
+        recs = codex_records()
+        recs.insert(1, x_rec("turn_context", {"model": "parent-model", "effort": "medium"}, 0))
+        out = self.prep(self.write_rollout(recs))
+        self.assertIn("gpt-5.5 high", out)
+        self.assertNotIn("parent-model", out)
+
+    def test_image_view_records_are_rendered(self):
+        recs = codex_records()
+        recs[-1:-1] = [x_rec("event_msg", {"type": "item_completed", "item": {
+            "type": "ImageView", "path": "file:///fx/piece-01.png"}}, 15)]
+        self.prep(self.write_rollout(recs))
+        self.assertIn("view_image file://./piece-01.png", "\n".join(self.digest()))
+
+    def test_timeline_token_classes(self):
+        recs = codex_records()
+        for rec in recs:
+            if rec.get("payload", {}).get("type") == "token_count":
+                rec["payload"]["info"]["last_token_usage"]["reasoning_output_tokens"] = 10
+        self.prep(self.write_rollout(recs))
+        with open(os.path.join(self.dir, "timeline.txt")) as f:
+            timeline = f.read()
+        self.assertIn("TOKENS input=3400 cached_input=1500 uncached_input=1900 output=170 "
+                      "reasoning_output=30 nonreasoning_output=140", timeline)
+
     def write_rollout(self, records=None):
         path = self.path("codex", "sessions", "2026", "01", "01", "rollout-2026-01-01T10-00-00-01aa.jsonl")
         os.makedirs(os.path.dirname(path))

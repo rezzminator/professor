@@ -59,7 +59,7 @@ lane_begin O2
 # ── prelude: what this lane needs, made when missing, no-op otherwise ───────
 lane_require_seat_ops "$CONFIG"
 
-need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
+need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "bash /worktree/infra/fence/source-clone.sh /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it"
 need "the managed install root $MANAGED" "[ -d '$MANAGED' ]" "(cd '$BLUEPRINT' && pfm install --yes)" ||
   lane_abort "pfm install has never completed in this container"
@@ -380,7 +380,7 @@ else
   elif [ ! -s "$manifest" ]; then
     bad="$bad the manifest --apply named ($manifest) is missing or empty;"
   else
-    [ "$(head -1 "$manifest")" = "$(printf 'uuid\tengine\torig_path\tbytes\tarchived_path\tarchived_at')" ] ||
+    [ "$(head -1 "$manifest")" = "$(printf 'uuid\tengine\torig_path\tbytes\tarchived_path\tarchived_at\tstate\tfile_id')" ] ||
       bad="$bad the manifest header is not the documented TSV: $(one_line "$(head -1 "$manifest")");"
     last_id="$(tail -1 "$manifest" | cut -f1)"
     last_orig="$(tail -1 "$manifest" | cut -f3)"
@@ -560,6 +560,21 @@ rc=$?
 pfm internal clear-kill stray </dev/null >/dev/null 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || bad="$bad clear-kill with a positional argument exited $rc (want 2, usage);"
+# clear-name: a named /clear successor gets its own supported title on the first prompt, once.
+clear_id=22222222-2222-4222-8222-222222222222
+clear_fresh="Lane Desk #2"
+cn="$(printf '{"hook_event_name":"SessionStart","source":"clear","session_id":"%s","session_title":"Lane Desk"}' "$clear_id" | env -u HERDR_ENV pfm internal clear-name 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 0 ] && [ -z "$cn" ] && [ ! -s "$int_err" ] || bad="$bad clear-name start failed: rc=$rc out=$(one_line "$cn") err=$(one_line "$(cat "$int_err")");"
+cn="$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s"}' "$clear_id" | pfm internal clear-name 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 0 ] && [ ! -s "$int_err" ] && [ "$(printf '%s' "$cn" | jq -r '.hookSpecificOutput.sessionTitle')" = "$clear_fresh" ] || bad="$bad clear-name first prompt did not title successor: rc=$rc out=$(one_line "$cn") err=$(one_line "$(cat "$int_err")");"
+cn="$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s"}' "$clear_id" | pfm internal clear-name 2>"$int_err")"
+[ "$?" -eq 0 ] && [ -z "$cn" ] && [ ! -s "$int_err" ] || bad="$bad clear-name repeated first-prompt title: $(one_line "$cn$(cat "$int_err")");"
+printf 'not json' | pfm internal clear-name >/dev/null 2>"$int_err"
+[ "$?" -eq 0 ] && grep -q 'decode hook payload' "$int_err" || bad="$bad clear-name malformed payload was not fail-open and visibly diagnosed;"
+pfm internal clear-name stray </dev/null >/dev/null 2>"$int_err"
+[ "$?" -eq 2 ] || bad="$bad clear-name positional argument did not return usage 2;"
 # X26 epic-inject: from a plain shell there is no chat identity — fail-open, exit 0, nothing injected.
 ei="$(printf '{"transcript_path":"/tmp/none.jsonl","cwd":"%s"}' "$CWD" | pfm internal epic-inject 2>"$int_err")"
 rc=$?
@@ -587,7 +602,7 @@ sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},
 [ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
 sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
 [ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
-# herdr-state: outside a Herdr pane (HERDR_ENV unset) every event is a silent exit-0 no-op, whatever arrives on stdin.
+# herdr-state: outside a Herdr pane valid events are silent exit-0 no-ops; malformed payloads warn without blocking.
 for hs_event in start working blocked idle end notification attach sync; do
   hs_out="$(printf '{"session_id":"lane-no-such-session","hook_event_name":"Stop","message":"x"}' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine claude "$hs_event" 2>"$int_err")"
   rc=$?
@@ -598,8 +613,11 @@ done
 hs_out="$(printf 'not json' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine codex idle 2>"$int_err")"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad herdr-state on garbage stdin exited $rc (want 0, a hook exit 2 blocks Claude): $(one_line "$(cat "$int_err")");"
-[ -z "$hs_out" ] && [ ! -s "$int_err" ] || bad="$bad herdr-state on garbage stdin outside Herdr was not silent: $(one_line "$hs_out$(cat "$int_err")");"
+[ -z "$hs_out" ] || bad="$bad herdr-state on garbage stdin printed success on stdout: $(one_line "$hs_out");"
+grep -qF 'decode hook payload (skipped)' "$int_err" ||
+  bad="$bad herdr-state on garbage stdin did not diagnose the malformed payload: $(one_line "$(cat "$int_err")");"
 # Native seat plumbing refuses malformed requests before touching any live pane.
+expect-log '"hook":"seat-host","decision":"error","exit":1'
 seat_out="$(pfm internal seat-host 2>"$int_err")"
 rc=$?
 [ "$rc" -eq 1 ] && grep -qF 'expected one seat id' "$int_err" ||
@@ -709,7 +727,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · herdr-state outside Herdr exits 0 silent on every event and on garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · clear-name first-prompt title once and visible malformed-payload failure · herdr-state outside Herdr exits 0 silent on valid events and visibly diagnoses garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────
@@ -1013,9 +1031,10 @@ END_HARVEST_ENDPOINTS
   size="$(pfm harvest --include-content=false "$local_doc" 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad --include-content=false exited $rc: $(one_line "$size");"
-  grep -qE 'tokens: [0-9]+ / chars: [0-9]+ / path: .+ / cached: (true|false)' <<<"$size" ||
-    bad="$bad --include-content=false did not print the tokens/chars/path/cached line: $(one_line "$size");"
-  grep -qF 'cached: true' <<<"$size" || bad="$bad a second fetch of $local_doc was not a cache hit: $(one_line "$size");"
+  grep -qE '^size: [0-9]+ chars, ~[0-9]+ tokens$' <<<"$size" ||
+    bad="$bad --include-content=false did not print the size line: $(one_line "$size");"
+  cached="$(pfm harvest --json --include-content=false "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
+  [ "$cached" = true ] || bad="$bad a second fetch of $local_doc reported cached '${cached:-<none>}' (want true);"
   refresh="$(pfm harvest --json --refresh "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
   [ "$refresh" = false ] || bad="$bad --refresh reported cached '${refresh:-<none>}' (want false: the cache was bypassed);"
   pfm harvest >/dev/null 2>&1

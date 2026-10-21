@@ -1,0 +1,111 @@
+{
+  "0022": {
+    "name": "Sumi · variables",
+    "scope": [
+      "variable",
+      "variable.other",
+      "meta.definition.variable.name",
+      "variable.other.readwrite",
+      "variable.other.local",
+      "variable.other.global",
+      "variable.other.assignment",
+      "variable.other.declaration",
+      "entity.name.variable",
+      "support.variable"
+    ],
+    "settings": {
+      "foreground": "#2a241f"
+    }
+  },
+  "0023": {
+    "name": "Shu · self & this",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.parameter.function.language.special.self.python",
+      "variable.parameter.function.language.special.cls.python",
+      "variable.language.special.self.python",
+      "variable.language.special.cls.python",
+      "variable.language.self.rust",
+      "storage.type.self.rust"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b43026"
+    }
+  },
+  "0024": {
+    "name": "Kogecha · parameters",
+    "scope": [
+      "variable.parameter",
+      "meta.parameter",
+      "entity.name.variable.parameter",
+      "variable.parameter.function",
+      "variable.parameter.function.language.python",
+      "meta.function.parameters variable.other",
+      "variable.parameter.go"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#663c23"
+    }
+  },
+  "0025": {
+    "name": "Asagi · properties & keys",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "variable.object.property",
+      "variable.other.member",
+      "variable.other.field",
+      "entity.name.variable.field",
+      "meta.field.declaration entity.name",
+      "support.variable.property",
+      "variable.other.object.member",
+      "meta.object.member",
+      "entity.name.field"
+    ],
+    "settings": {
+      "foreground": "#075f6b"
+    }
+  },
+  "0048": {
+    "name": "Kogecha · CSS variables",
+    "scope": [
+      "variable.scss",
+      "variable.other.less",
+      "variable.parameter.url.css",
+      "variable.other.custom-property.css"
+    ],
+    "settings": {
+      "foreground": "#663c23"
+    }
+  },
+  "0053": {
+    "name": "Kogecha · shell variables",
+    "scope": [
+      "variable.other.normal.shell",
+      "variable.other.positional.shell",
+      "variable.other.bracket.shell",
+      "variable.other.special.shell",
+      "variable.language.special.shell"
+    ],
+    "settings": {
+      "foreground": "#663c23"
+    }
+  },
+  "0081": {
+    "name": "Kogecha · Python keyword arguments",
+    "scope": [
+      "variable.parameter.function-call.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#663c23"
+    }
+  }
+}

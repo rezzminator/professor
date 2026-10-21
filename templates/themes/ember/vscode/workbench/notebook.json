@@ -1,0 +1,23 @@
+{
+  "notebook.cellBorderColor": "#312823",
+  "notebook.cellEditorBackground": "#0d0a08",
+  "notebook.cellHoverBackground": "#2b221c55",
+  "notebook.cellInsertionIndicator": "#ff9044",
+  "notebook.cellStatusBarItemHoverBackground": "#372b23",
+  "notebook.cellToolbarSeparator": "#312823",
+  "notebook.editorBackground": "#171310",
+  "notebook.focusedCellBackground": "#2b221c40",
+  "notebook.focusedCellBorder": "#ff904499",
+  "notebook.focusedEditorBorder": "#ff904466",
+  "notebook.inactiveFocusedCellBorder": "#312823",
+  "notebook.inactiveSelectedCellBorder": "#312823",
+  "notebook.outputContainerBackgroundColor": "#0d0a08",
+  "notebook.outputContainerBorderColor": "#312823",
+  "notebook.selectedCellBackground": "#2b221c80",
+  "notebook.selectedCellBorder": "#312823",
+  "notebook.symbolHighlightBackground": "#ffb75e1a",
+  "notebookEditorOverviewRuler.runningCellForeground": "#83b6e8",
+  "notebookStatusErrorIcon.foreground": "#f05656",
+  "notebookStatusRunningIcon.foreground": "#83b6e8",
+  "notebookStatusSuccessIcon.foreground": "#90d378"
+}

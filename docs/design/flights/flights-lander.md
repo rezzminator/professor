@@ -54,7 +54,7 @@ When TARGET's tip is not an ancestor of the worktree's HEAD, the lander has `git
 
 ## The inventory and the computed spawn
 
-Call 1 runs `lander-inventory.py`, shipped as the machine-global kit skill `templates/global/skills/lander-inventory/` and invoked as `python3 -I $HOME/.claude/skills/lander-inventory/lander-inventory.py {WORKTREE} {BASE} --spec {FILES}`. Its output file sits beside REPORT_PATH (`.md` → `.inventory.txt`):
+Call 1 runs `lander-inventory.py`, shipped as the machine-global kit skill `templates/global/skills/lander-inventory/` and invoked as `python3 -I $HOME/.claude/skills/lander-inventory/lander-inventory.py {WORKTREE} {BASE} --spec {FILES}`. It diffs BASE against the working tree, so a foreman's uncommitted and untracked work counts with its commits. Its output file sits beside REPORT_PATH (`.md` → `.inventory.txt`):
 
 - `LEFT`: a name the diff removed everywhere it touched, still in the tree outside history files.
 - `LITERAL`: a name a code or data file dropped from inside a string or key on a replaced line, so a matcher or a stored format there knows only the new spelling.
@@ -107,6 +107,8 @@ RESIDUALS … | none
 DECISIONS … | none
 REPORT {the report path}
 ```
+
+The verdict is the message's first word. Any finding left unfixed, or a gate not green, makes it `FAIL`, whatever the prose around it says.
 
 `STOP_AT review` returns one line instead: `REVIEWED {WORKTREE} · {n} findings · REPORT {REPORT_PATH}`.
 

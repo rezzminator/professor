@@ -39,7 +39,7 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 REBUILD=0 PRINT_HASH=0 TAG=""
-HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios infra/plugin-lab/tests/fakes/claude"
+HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/source-clone.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios infra/plugin-lab/tests/fakes/claude"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -209,12 +209,12 @@ mkdir -p "$LOCK_DIR" || fatal "the root build lock directory could not be create
 LOCK="$LOCK_DIR/root-build-$HASH.lock" LOCKED=0
 root_unlock() { [ "$LOCKED" -eq 0 ] || rm -rf "$LOCK"; LOCKED=0; }
 told=0
-for ((i = 0; i < 18000; i++)); do
+for ((i = 0; i < PFM_FENCE_LANE_ROOT_LOCK_TICKS; i++)); do
   if mkdir_lock_try "$LOCK" "$$"; then LOCKED=1; break; fi
   [ "$told" -eq 1 ] || { say "waiting for the root build of $HASH held by pid ${MKDIR_LOCK_HOLDER:-?} ($LOCK)"; told=1; }
-  sleep 0.2
+  sleep "$PFM_FENCE_LOCK_POLL_S"
 done
-[ "$LOCKED" -eq 1 ] || fatal "the root build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after 3600 s"
+[ "$LOCKED" -eq 1 ] || fatal "the root build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after $PFM_FENCE_LANE_ROOT_LOCK_TICKS polls of $PFM_FENCE_LOCK_POLL_S s"
 trap root_unlock EXIT
 if [ "$REBUILD" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
   say "reusing $IMAGE (same hash: no root build input changed) · $(( $(date +%s) - T0 ))s"

@@ -1,6 +1,6 @@
 # Cost ledger
 
-Every API call a Claude Code chat makes is priced exactly once, in a per-session file, so the status line, `pfm tokens` and callmeter show one dollar figure that agrees with Claude Code's own session total. The ledger exists because the chat's transcripts do not hold every call: Claude Code makes calls it never records there, and a transcript-priced total undercounts by the whole of that spend.
+Every API call a Claude Code chat makes is priced once per correlation identity ([Identity](#identity)), in a per-session file, so the status line, `pfm tokens` and callmeter read one set of telemetry-reported dollars, which for request-correlated calls agrees with Claude Code's own session total. The ledger exists because the chat's transcripts do not hold every call: Claude Code makes calls it never records there, and a transcript-priced total undercounts by the whole of that spend.
 
 The pieces: the launch registry points Claude Code's OpenTelemetry exporters at a loopback sink ([The launch](#the-launch)); a detached `pfm internal cost-sink` process joins the two exported halves of each call ([The sink](#the-sink), [The join](#the-join)) and appends one line per call to `{session_id}.jsonl` ([The ledger](#the-ledger)); readers sum it ([The status lines](#the-status-lines), [pfm tokens](#pfm-tokens)). The launch registry's own shape is in [claude-launch.md](claude-launch.md); the statusline's fields are in [statusline.md](../context/statusline.md).
 
@@ -11,8 +11,10 @@ The pieces: the launch registry points Claude Code's OpenTelemetry exporters at 
 - [The launch](#the-launch)
 - [The sink](#the-sink)
 - [The join](#the-join)
+- [Identity](#identity)
 - [The ledger](#the-ledger)
 - [The status lines](#the-status-lines)
+- [Gateway GPT spend](#gateway-gpt-spend)
 - [Before the ledger](#before-the-ledger)
 - [pfm tokens](#pfm-tokens)
 - [Config and environment](#config-and-environment)
@@ -23,9 +25,10 @@ The pieces: the launch registry points Claude Code's OpenTelemetry exporters at 
 
 ## Decisions
 
-- **The ledger is exact; a transcript is not.** Claude Code's session total (`cost.total_cost_usd`) prices at the published list and so does pfm's price table: no rate error exists. The gap is calls (below) that no transcript line records.
-- **Telemetry is the only witness of an unrecorded call.** Claude Code's OpenTelemetry `api_request` log event carries the call's own `cost_usd_micros`; its `claude_code.llm_request` span carries the agent. Neither alone is a ledger row; the sink joins them on `request_id`.
+- **The ledger is exact for request-correlated priced telemetry; a transcript is not.** A row's `cost_usd_micros` is Claude Code's own price of that call, independent of pfm's price table. The gap between the ledger and a transcript is calls (below) that no transcript line records. Observations with no request id, rows whose cost never arrived (`UnknownCost`) and rows that may overlap stay visible and are named, never folded into a claim of exactness. pfm's table prices only transcript estimates and is an estimate at the configured billing route ([pfm-surface.md](../../dev/pfm-surface.md#billing-route-and-region)), not a billed amount.
+- **Telemetry is the only witness of an unrecorded call.** Claude Code's OpenTelemetry `api_request` log event carries the call's own `cost_usd_micros`; its `claude_code.llm_request` span carries the agent. Neither alone is a ledger row; the sink joins them on the call's identity, its `request_id` where telemetry carries one ([Identity](#identity)).
 - **The sink is per chat and detached.** The launcher binds the listening socket before Claude starts and hands it to a sink process that outlives nothing but its chat plus a short drain. No shared daemon, no port to configure, nothing leaves `127.0.0.1`.
+- **The ledger never invents identity.** A request id or session id telemetry does not carry stays empty; no id is fabricated, and a row with no correlation is kept as its own observation, never merged with another. Ledger totals are sums of observations: logs, spans and retries may overlap, so a total is never claimed as a count of unique calls.
 - **A ledger failure is a marker, never a failed chat.** Every problem on the launch path becomes a `PFM_COST_LEDGER` value the status line renders and a line in the sink log `pfm doctor` shows; Claude starts regardless.
 - **The user's own telemetry wins.** A launch whose environment or account `settings.json` already names `CLAUDE_CODE_ENABLE_TELEMETRY` or any `OTEL_*` variable keeps it and runs without a ledger.
 - **One dollar on the main line.** The main status line shows exactly one dollar amount in every state; the amounts behind a flag are reported by `pfm tokens`.
@@ -99,34 +102,51 @@ A passthrough start (for example a `claude` run inside an existing pfm tmux sock
 
 - **Endpoints.** `POST /v1/logs` and `POST /v1/traces` answer `200 {}`; any other path answers `404`, any other method `405`. A body over 8 MiB, compressed or decompressed, answers `413`; `Content-Encoding: gzip` is accepted.
 - **What it keeps.** Only `api_request` log records and `claude_code.llm_request` spans; every other event and span is dropped before it is stored.
-- **Session ids.** A record whose `session.id` is outside the ledger's character class (`costledger.ValidSessionID`) is refused and logged, never joined into a path.
+- **Session ids.** A record whose session id is non-empty and outside the ledger's character class (`costledger.ValidSessionID`) is refused, counted in the answer's `partialSuccess` and logged, never joined into a path. A record with no session id is not refused: it is stored unattributed ([The ledger](#the-ledger)).
+- **Unattributed warning.** A record missing its session id or its correlation identity counts in `Sink.Unattributed()` and is kept. The sink log gets one warning per sink endpoint (`/v1/logs`, `/v1/traces`), not one per record; the counter and the ledger rows keep every observation visible.
 - **Identity of the chat.** The launcher's pid plus that process's start time, read through `gather` at arm time. A reused pid has another start time and counts as gone.
 - **Exit.** When the chat is gone the sink keeps accepting until three seconds pass without a POST (at most fifteen), writes every pending half and exits; Claude's exporters flush on exit and a late batch must still land. Thirty consecutive unreadable process-table reads also end it, with the cause logged.
-- **Prune.** At start it deletes `*.jsonl` files older than 90 days from the ledger directory.
+- **Prune.** At start (`costledger.Prune`) it deletes `*.jsonl` files older than 90 days from the ledger directory and from `observations/` alike, never the `unattributed/` directory's file.
 - **Failure.** Nothing in the sink can stop the chat. A refused POST, a ledger write that failed, a panic while serving, a failed prune: one line in the sink log, `~/.local/state/pfm/log/cost-sink.log` (`paths.CostSinkLog`), which the launcher also writes its own decisions to. `pfm doctor` shows its tail ([Doctor](#doctor)).
 
 ## The join
 
-Claude Code exports one call as two OTLP records that arrive in separate POSTs, in either order:
+Claude Code exports one call as two OTLP records that arrive in separate POSTs, in either order. A record's attributes are its own over its resource's: an OTLP resource attribute is inherited, a record or span attribute of the same key overrides it (`scopedAttrs`, `pfm/internal/costsink/otlp.go`). The columns name the preferred key, with its fallback in [Identity](#identity):
 
 | Half | Carries | Lacks |
 | --- | --- | --- |
-| `api_request` log | `request_id`, `session.id`, `query_source`, `model`, token counts, `cost_usd_micros` (an integer, or a JSON string; absent, the `cost_usd` double rounded to the micro), `speed`, `effort`, `event.timestamp` | the agent |
-| `claude_code.llm_request` span | `request_id`, `session.id`, `agent_id` (absent for the main thread), `parent_agent_id`, `query_source_safe`, `model`, token counts, `speed`, `effort`, end time | the cost |
+| `api_request` log | `request_id`, `session.id`, `query_source`, `model`, token counts, `cost_usd_micros` (an integer, or a JSON string; absent, the `cost_usd` double rounded to the micro), `speed`, `effort`, `event.timestamp` (else the record's `timeUnixNano`), the OTLP `traceId`/`spanId` | the agent |
+| `claude_code.llm_request` span | `request_id`, `session.id`, `agent_id` (absent for the main thread), `parent_agent_id`, `query_source_safe`, `model`, token counts, `speed`, `effort`, end time, the OTLP `traceId`/`spanId` | the cost |
 
 `request_id` equals the `requestId` of the transcript line that records the same call. The sub-agent `agent_id` equals the stem of its transcript file `agent-{id}.jsonl` and the status line's task id. A span's `query_source_safe` spells `agent.builtin.x` where the log says `agent:builtin:x`; a span-only row rewrites the prefix to the log's spelling.
 
-A half waits 20 seconds for its partner (`costsink.DefaultWait`). Matched, the row is `log+span`. A log half unmatched after the wait is written as `log` with `agent_id` `"?"`; a span half unmatched is written as `span` with a `null` cost. Nothing is dropped. A partner that arrives after its half was flushed appends an upgraded `log+span` line; readers keep the best.
+A half waits 20 seconds for its partner (`costsink.DefaultWait`). Matched, the row is `log+span`. A log half with an identity, unmatched after the wait, is written as `log` with `agent_id` `"?"`; a span half unmatched is written as `span` with a `null` cost. Nothing is dropped. A partner that arrives after its half was flushed appends an upgraded `log+span` line; readers keep the best.
+
+### Identity
+
+A ledger row dedupes on `Row.Identity()` (`pfm/internal/costledger/costledger.go`), first that applies; the two halves of a call join only on the request id:
+
+| Identity | Source |
+| --- | --- |
+| `request:{id}` | the request id: `request_id`, else `gen_ai.response.id` (`attrs.requestID`) |
+| `span:{traceId}:{spanId}` | no request id, and the row is a span's (`join` = `span`) with its own real OTLP pair: `traceId` 32 hex characters, `spanId` 16, neither all zero, compared lowercased; stored as the optional `trace_id` and `span_id` |
+| empty | neither: the observation is correlated with nothing |
+
+The session id is `session.id`, else `session_id` (`attrs.sessionID`), empty when neither exists. The prefixes only keep the two namespaces apart in the dedupe key; no request id or session id is ever built from a trace or span id.
+
+A log record's `traceId` and `spanId` are the enclosing span context, which Claude Code reuses across different requests (a real capture holds six such contexts), so they never identify or dedupe a call; a request-less log keeps them as context only. A `claude_code.llm_request` span's own pair is unique to it, but it matches no log: there is no trace alias between a log and a span, and only a real request id (`request_id`, `gen_ai.response.id`) joins the two halves, in the sink and in the readers. An invalid or all-zero id is never usable. A request-less log and a request-less span with the same pair therefore stay two observations, and session-only records are never merged with each other.
+
+A half with an empty identity is not held for a partner: it is written at once as its own `log` or `span` row, and rows with an empty identity are never deduped.
 
 ## The ledger
 
-`{dir}/{session_id}.jsonl`, `dir` = `paths.CostLedgerDir(env, home)`: `$PFM_COST_LEDGER_DIR` when set, else `~/.local/state/pfm/cost-ledger`. One file per chat session, a resumed session appending to the same file; directory mode 0700, file mode 0600. A line is one JSON object, one `write(2)` on an `O_APPEND` descriptor, keys in this order:
+`{dir}/{session_id}.jsonl`, `dir` = `paths.CostLedgerDir(env, home)`: `$PFM_COST_LEDGER_DIR` when set, else `~/.local/state/pfm/cost-ledger`. One file per chat session, a resumed session appending to the same file; directory mode 0700, file mode 0600. The root file holds only rows with a real `request_id`, so callmeter, which reads that file standalone, never meets a request-less row. A session-attributed row without a `request_id` goes to `{dir}/observations/{session_id}.jsonl` (`costledger.ObservationsDir(dir)`), the same row format under the same session. A session-less observation (no `session.id` or `session_id`) goes to `{dir}/unattributed/records.jsonl` (`costledger.Unattributed(dir)` reads it) and is assigned to no chat. A line is one JSON object, one `write(2)` on an `O_APPEND` descriptor, keys in this order:
 
 | Key | Type | Meaning |
 | --- | --- | --- |
-| `request_id` | string | Anthropic API request id; unique after dedupe |
+| `request_id` | string | Anthropic API request id, `""` when telemetry carried none; unique after dedupe when non-empty |
 | `ts` | string | RFC 3339 UTC with milliseconds: the log half's `event.timestamp`, else the span's end time, else the sink's first receipt of the request |
-| `session_id` | string | the file's session |
+| `session_id` | string | the file's session, in the root and the `observations/` file alike; `""` in the unattributed file |
 | `agent_id` | string | `""` main thread, `"?"` a log-only row whose agent is unknown, else the sub-agent id |
 | `parent_agent_id` | string | the spawning sub-agent; `""` for main, a top-level sub-agent and a log-only row |
 | `query_source` | string | what the call was for (`repl_main_thread`, `agent:builtin:general-purpose`, `web_search_tool`, `web_fetch_apply`, `agent_summary`, `prompt_suggestion`, `compact`, …) |
@@ -138,14 +158,15 @@ A half waits 20 seconds for its partner (`costsink.DefaultWait`). Matched, the r
 | `cost_usd_micros` | integer or null | Claude Code's own price of the call, USD × 10^6; `null` when the log half never arrived |
 | `speed`, `effort` | string | as reported, `""` when absent |
 | `join` | string | `log+span`, `log` or `span` |
+| `trace_id`, `span_id` | string | the record's OTLP trace and span ids; omitted when absent. Only a span row's own pair is ever an identity, for a row with no request id; a log row's are context |
 
 ### Readers
 
-`costledger.ForSession(dir, sessionID)` (`pfm/internal/costledger/costledger.go`) parses line by line and dedupes by `request_id`: the best `join` wins (`log+span` over `log` over `span`), the later line among equals. A line that is not a JSON object (a torn tail) is a counted `Faults`, never silent; a missing file is `Present == false`, not an error. `costledger.Sum` totals rows; a `null` cost is counted in `UnknownCost` and named, never a zero. callmeter reads the same files standalone as optional data and never writes or deletes there.
+`costledger.ForSession(dir, sessionID)` (`pfm/internal/costledger/costledger.go`) parses line by line and dedupes by `Row.Identity()` ([Identity](#identity)): the best `join` wins (`log+span` over `log` over `span`), the later line among equals. A row with an empty identity is kept as its own observation, never deduped. A line that is not a JSON object (a torn tail), names a session other than the file's, or has no `request_id` and an invalid `join` is a counted `Faults`, never silent; a row with a request id and an empty historical `join` stays readable; a missing file is `Present == false`, not an error. `ForSession` reads both the root `{session_id}.jsonl` and `observations/{session_id}.jsonl` and combines their rows and faults, so a session with only request-less rows is `Present`. `costledger.SessionIDs(dir)` lists the sessions of both directories, each id once. `costledger.Sum` totals rows; a `null` cost is counted in `UnknownCost` and named, never a zero. callmeter reads the same files standalone as optional data and never writes or deletes there.
 
 ### Side calls
 
-A ledger row is held by a transcript when some transcript line of the session, the main file or any `subagents/agent-*.jsonl`, carries a `requestId` equal to its `request_id`. A row held by none is a side call: exact spend that no transcript shows (`Ledger.Side`).
+A ledger row is held by a transcript when some transcript line of the session, the main file or any `subagents/agent-*.jsonl`, carries a `requestId` equal to its `request_id`. A row held by none is a side call: exact spend that no transcript shows (`Ledger.Side`). A row with an empty `request_id` can be held by no line, so it is always a side call.
 
 ## The status lines
 
@@ -167,7 +188,7 @@ Every number on the main line and where it comes from:
 | `⏳ 5m32s` | session wall time | the payload's `cost.total_duration_ms` |
 | `5h-used:32%`, `7d-used:71%` | rate-limit windows | the payload's `rate_limits`, or pfm's refreshed copy |
 
-The main line renders exactly one `$` in every state; a test (`TestMainLineRendersOneDollarAmountInEveryState`) renders every state, resumed, pre-ledger and crashed launches among them, and counts. The invariant that keeps every surface on one figure: the complete total equals the main thread's own ledger rows plus every top-level sub-agent row plus the spend before the ledger (which no agent owns), and `pfm tokens`' session total; callmeter's `PRE-LEDGER USD` is the same before-ledger figure by the same rule. A chat that was resumed, or that began before the ledger, still shows its whole spend: Claude Code restores its total from the transcript on resume, so nothing about the figure depends on which launch armed a sink.
+The main line renders exactly one `$` in every state; a test (`TestMainLineRendersOneDollarAmountInEveryState`) renders every state, resumed, pre-ledger and crashed launches among them, and counts. The invariant that keeps every surface on one figure, for a chat with no gateway GPT supplement ([Gateway GPT spend](#gateway-gpt-spend) adds an `API-eq` amount the ledger lacks, so with one the line may exceed `pfm tokens`' native total by it, not always: a before-ledger overlap can cover the whole supplement): the complete total equals the main thread's own ledger rows plus every top-level sub-agent row plus the spend before the ledger (which no agent owns), and `pfm tokens`' session total; callmeter's `PRE-LEDGER USD` is the same before-ledger figure by the same rule. A chat that was resumed, or that began before the ledger, still shows its whole spend: Claude Code restores its total from the transcript on resume, so nothing about the figure depends on which launch armed a sink.
 
 ### Markers
 
@@ -198,7 +219,17 @@ A row's spend field `Σ$1.24/3.1M/42K/12` (`spendSegment`; the muted `Σ` marks 
 | `+?` | a floor: with a ledger, a row of the agent or below it whose cost never arrived; without one, a model the price table cannot price or a transcript below that cannot be read |
 | `Σ$?/?/?/?` | no ledger and the agent's own transcript cannot be read; with a ledger the row keeps its ledger dollars and shows `?` for tool calls |
 
-The invariant: the main thread's own rows plus every top-level row equal the ledger total. A row's gauge, status, cache and the other fields are in [statusline.md](../context/statusline.md#the-sub-agent-row).
+The invariant, native rows only: the main thread's own rows plus every top-level row equal the ledger total; a gateway GPT supplement ([Gateway GPT spend](#gateway-gpt-spend)) sits outside it. A row's gauge, status, cache and the other fields are in [statusline.md](../context/statusline.md#the-sub-agent-row).
+
+## Gateway GPT spend
+
+A GPT model routed through the gateway sends no Anthropic-priced telemetry, so the ledger can hold a zero-dollar row or none for it. The status lines price those calls from the agent's transcript, at pfm's price table, as an API-equivalent subtotal (`gatewaySpend`, `pfm/internal/statusline/ledger_spend.go`): what the calls would cost at published rates, never subscription dollars charged. It is kept apart from the ledger so native telemetry cannot erase it.
+
+- The subtotal supplements the ledger only by a positive missing amount: native or known dollars are never replaced, and a gateway subtotal the ledger already holds is never added twice. Token columns follow the same rule.
+- A main line or sub-agent row whose dollars include GPT ends them with a muted `API-eq`. A transcript-only main line (no ledger) takes the larger of the harness total and the transcript total for GPT.
+- A streaming GPT opening estimate (an input count with no cache counters) is not billed: the call is an unknown floor, and the final message with the same id replaces it. A call whose final usage the transcript never recorded stays unknown; no gateway database is read in production.
+- A restored `cost-state` figure in the [spend before the ledger](#before-the-ledger) is unattributed to any agent, so historical gateway calls can overlap it. `beforeGatewayOverlap` (`pfm/internal/statusline/ledger_spend.go`) considers each cost-state's native remainder separately. A timestamped gateway call is provably later when it is at or after that state's `Until` (the next launch's first stamped line), or, with no `Until`, strictly after its `At`; these calls add to native history. Calls with missing timestamps or not provably later remain possible overlap. For each state, overlap is bounded by the minimum of its native remainder, the missing gateway supplement (`booked.usd - native.usd`) and those possibly historical calls' subtotal; the largest remainder after that subtraction is kept. Any positive overlap is ambiguous and marks the combined amount as a `+?` floor, not an exact total.
+- Price resolution (`Table.Resolve`, `pfm/internal/pricing/pricing.go`): a `-fast` suffix on a normalized `gpt-` id resolves its published base row unless an exact `-fast` row exists; the `[1m]` long-context suffix is supported as before. Reasoning output is already inside the output count, so it adds no separate bill.
 
 ## Before the ledger
 
@@ -218,11 +249,17 @@ cutoff(c) = max( exit(c) + 2 s, until(c) ), or no bound when no timestamped line
 
 The one dollar amount is the ledger total plus `before`, shown unless Claude Code's payload is ahead of it by more than the tolerance. The payload therefore leads in the one or two seconds before a call's OTLP export reaches the ledger, and the ledger plus `before` leads after a crash that wrote no cost-state; in the ordinary case the line is exactly the sum of the rows `pfm tokens` prints. A gap trigger (payload against ledger) would flicker after every call and is not used.
 
-callmeter names the same difference as `PRE-LEDGER USD` in `report cost`, from the same rule over the latest cost-state it holds, because callmeter is standalone and keeps no earlier ones; it holds no transcript stamps, so its exit is the later of `session_costs.started + wall_ms` and the session's latest `SessionEnd` event, the hook that fires at the exit that wrote that cost-state ([callmeter's design](../../../plugins/callmeter/docs/design.md)).
+callmeter names the same difference as `PRE-LEDGER USD` in `report cost`, from the same rule over the latest cost-state it holds, because callmeter is standalone and keeps no earlier ones; it holds no transcript stamps, so its exit is the later of `session_costs.started + wall_ms` and the session's latest `SessionEnd` event, the hook that fires at the exit that wrote that cost-state ([callmeter's design](https://github.com/rezzminator/callmeter/blob/develop/docs/design.md)).
 
 ## pfm tokens
 
-`pfm tokens` and `pfm tokens --session SID` (`pfm/internal/tokens/costreport.go`) read each Claude chat's ledger beside its transcripts and print what the status line's markers point at. The ledger directory is `paths.CostLedgerDir`, so `PFM_COST_LEDGER_DIR` redirects it. Codex and OpenCode runs have no Claude ledger and are unchanged.
+`pfm tokens` and `pfm tokens --session SID` (`pfm/internal/tokens/costreport.go`) read each Claude chat's ledger beside its transcripts, and print what the status line's markers point at. The ledger directory is `paths.CostLedgerDir`, so `PFM_COST_LEDGER_DIR` redirects it. Codex and OpenCode runs have no Claude ledger and are unchanged.
+
+Which ledgers are read:
+
+- **A chat with transcripts** in the audit selection: its `{session_id}.jsonl` and its `observations/{session_id}.jsonl`, read together by `costledger.ForSession`.
+- **A telemetry-only session** (`includeTelemetryChats`): a ledger file with no selected transcript, listed as `telemetry only (no selected transcript)`, kept when at least one of its rows has a timestamp inside the audit window (`ledgerWindow`). The transcript-metadata filters (`--project`, `--family`, and a non-default `--family-rx`; the default `.` restricts nothing) cannot place such a session, so under any of them none is included; `--session SID` restricts them to the session ids with that prefix. A session's totals stay lifetime totals whichever window selected it. A row whose `ts` does not parse is excluded from the window, one scan note naming the session and the stamp. A session with malformed lines and no row in the window is reported as a failed read of that session's ledger (`N malformed records; no calls dated in the selected window`), never as absence. Candidates come from `costledger.SessionIDs`, so a session with only `observations/` rows is found.
+- **Unattributed telemetry** (`costledger.Unattributed`): the `unattributed/records.jsonl` rows inside the window, shown beside the chats and never assigned to one.
 
 A chat with a ledger gets a block under `== COST LEDGER`, the chats dearest first:
 
@@ -233,14 +270,32 @@ A chat with a ledger gets a block under `== COST LEDGER`, the chats dearest firs
 | `side calls $X (N calls no transcript holds)` | rows no transcript holds: a row is held when any transcript line of the session, the main file or any `subagents/agent-*.jsonl`, in any file the ownership walk found however old, carries its `request_id` as `requestId` (`Ledger.Side`). A transcript that could not be read, or a line that could not be decoded, may hide a held request, so the block says `side calls may be overstated` and names the file |
 | `N calls with no cost in the ledger` | rows with `cost_usd_micros` null: counted, named, not in the total |
 | `N torn ledger lines skipped` | `Ledger.Faults` |
+| `N observations without request_id cannot be reconciled …` | an `unreliable` note when rows have an empty `request_id`: no transcript line can hold them, so they count as side calls, and uncorrelated log or span observations and retries may overlap |
 | `Claude Code says $X` | the main transcript's last `cost-state` line (`totalCostUSD`); `no cost-state line in this chat's transcript` when there is none (`pfm tokens` has no stdin payload, so the transcript is its only source of Claude Code's total). When a timestamped line follows that cost-state the chat has run past it, and the line reads `Claude Code's last cost-state says $X (written at an earlier exit; the chat has run since)` |
 | `session total minus Claude Code: +$X` | shown only when the last cost-state is the chat's final word (no timestamped transcript line follows it) and the two differ by half a cent or more; both numbers print as dollars and cents here, so the threshold is half a cent. The session total includes the spend before the ledger, so a healthy chat reads 0 here |
 | `by agent` | cost and share of the session total: the main thread's own calls, each top-level sub-agent as a tree (itself and everything it spawned, children indented), the calls of an agent the log never named (`?`) last. The parent is the ledger's `parent_agent_id`, else the meta file's `parentAgentId`; a parent that is no agent with calls, or a loop, makes the agent top-level. The main thread and the top-level rows sum to the session total |
 | `by query_source` | cost and share per `query_source`, dearest first: `repl_main_thread`, each `agent:builtin:{name}`, `web_search_tool`, `web_fetch_apply`, `agent_summary`, `prompt_suggestion`, `compact`, … |
 
+`(N calls)` in these lines counts ledger rows, that is observations ([Identity](#identity)); a total is a sum of them, not a count of unique calls.
+
+The block `unattributed telemetry (no session, host-wide window; not assigned to selected chats)` lists, for the unattributed rows in the window: observations and reported cost, rows without cost, malformed rows (`Ledger.Faults`), the tokens (`input`, `cached`, `cache-write`, `output`), then one `{query_source}: N observations, $X` line per source. It ends `observations may overlap or repeat; not a unique-call count or an additive spend total`, and its dollars are not added to any chat's total or to the session totals above.
+
+Every Claude report's data-gaps line (`gapsLine`, `pfm/internal/tokens/scan.go`) also carries two fixed warnings:
+
+- **`backgroundGap`:** transcript totals exclude background API calls (`auto_mode`, `prompt_suggestion`, `hook_prompt`, `generate_session_title`, `agent_summary`). Captured telemetry is reported separately by `pfm tokens` (without `--tree`; tree reports show no `COST LEDGER` section), and telemetry that never arrived, or sessions hidden by a metadata filter, cannot be quantified. The per-run dollars estimated from transcripts are unchanged by it.
+- **`billingGap`:** shown when no billing route is configured in `pfm.prices.json`; default direct/global list prices may not match cloud billing ([pfm.prices.json billing](../../dev/pfm-surface.md#pfm-model-cost)). The `pricing:` line ends `; Claude {route}/{region}` once the price book carries a billing selection.
+
 A chat with no ledger keeps today's output and one line, `side calls not measured (no cost ledger)` (per chat count when some chats have one). A ledger that exists and cannot be read is a read error on stderr and in the block, and exits 1, never "no ledger". The estimate columns elsewhere in the report (per-run dollars from the transcripts at the price table) are unchanged: the ledger adds a section, it replaces nothing.
 
-`--out` gains a `costLedger` array, one object per chat with a ledger (every amount in micro-dollars, with `side`, `claudeCodeMicros`, `differenceMicros`, `beforeLedgerMicros`, `sessionMicros`, `byAgent`, `bySource`), only when a ledger exists, so a document from a machine without ledgers is byte-identical to before.
+`--out` gains a `costLedger` array, one object per chat with a ledger (every amount in micro-dollars, with `side`, `claudeCodeMicros`, `differenceMicros`, `beforeLedgerMicros`, `sessionMicros`, `byAgent`, `bySource`), only when a ledger exists. Each session object also carries `countsAreObservations`, true when some row lacks a `request_id`: the text counts then read `observation(s)` instead of `call(s)`, with the reconciliation warning. The array holds sessions only; unattributed telemetry is the separate top-level `unattributedTelemetry` member, present only when the unattributed file exists:
+
+| Field | Meaning |
+| --- | --- |
+| `scope` | `host-wide window, no session; not additive to selected chats` |
+| `observations`, `micros`, `unknownCost`, `faults` | rows in the window, their reported cost in micro-dollars, rows without cost, malformed lines |
+| `inputTokens`, `cacheReadTokens`, `cacheCreationTokens`, `outputTokens` | token sums |
+| `mayOverlap` | always `true` |
+| `bySource` | `[{source, observations, micros, unknownCost}]` per `query_source` |
 
 ## Config and environment
 
@@ -264,13 +319,17 @@ doctor: cost sink log: 2026-10-09T18:27:28.025Z cost-launch: armed a sink on 127
 
 ## Privacy
 
-No prompt, message, tool, path or identity field is ever written: the sink copies only the fields in the table above, and the `api_request` record's identity attributes (email, user, account and organization ids) are not among them. OTLP fixtures in tests are sanitized from the raw captures with invented placeholders for every such field.
+No prompt, message, tool, path or identity field is ever written: the sink copies only the fields in the table above (the OTLP `trace_id` and `span_id` are random correlation ids, not identity), and the `api_request` record's identity attributes (email, user, account and organization ids) are not among them. OTLP fixtures in tests are sanitized from the raw captures with invented placeholders for every such field.
 
 ## Tests and fixtures
 
 - `pfm/internal/costsink/testdata/probe-session.jsonl` is the sanitized replay of the probe's 25 OTLP POSTs (`{"t":seconds,"path":…,"body":OTLP}` per line), produced by `testdata/sanitize-otlp.py`. The sink test replays it: the first 15 calls total 1294100 micros with the agent split of the reference join (main 340251, `a…01` 78574, `a…02` 787435, `a…03` 87840), and all 21 total 1435027.
 - `pfm/internal/costledger/testdata/sample-15.jsonl` is those 15 rows as ledger lines, the fixture the readers, the status lines and `pfm tokens` test against.
 - Real-process tests (`internal/costsink`) start a wrapper over a fake claude script and assert the pid is kept, the endpoint names the armed port, and the listener descriptor does not reach Claude.
+- `TestDecodeResourceIdentityAndResponseID` (`costsink/otlp_test.go`) pins resource-inherited attributes, record overrides, `gen_ai.response.id` and `session_id` as fallbacks.
+- `TestSinkKeepsUnattributedObservationsWithoutFabricatingIDsOrSpamming` and `TestSinkDoesNotTreatLogTraceContextAsCallIdentity` (`costsink/sink_test.go`) pin the unattributed file, the one warning per endpoint, and the identity rule: a span's own pair and a real request id dedupe a repeat, while a request-less log's trace context never dedupes anything.
+- `TestUnattributedKeepsObservationsAndDeduplicatesOnlyRealIdentity` (`costledger`) pins the reader's dedupe and the invalid trace ids.
+- `TestCostLedgerReportsBackgroundWithoutAnyTranscript` and `TestCostLedgerReportsUnattributedWindowSeparatelyInTextAndJSON` (`tokens/costreport_test.go`) pin the transcriptless session and the separate unattributed block in text and `--out`.
 - No suite runs a live engine; the live check after landing is a chat started on the host.
 
 ## Surfaces that stay in sync

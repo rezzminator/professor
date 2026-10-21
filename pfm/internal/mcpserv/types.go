@@ -168,89 +168,6 @@ type WhoamiOutput struct {
 	Message    string `json:"message,omitempty"`
 }
 
-// FindInput searches indexed transcript files.
-type FindInput struct {
-	Excerpt     string `json:"excerpt" jsonschema:"literal name or prompt excerpt to find; a multi-line excerpt is split into needles and candidates are ranked by how many they hit"`
-	Limit       int    `json:"limit,omitempty" jsonschema:"maximum candidates, default 10 and maximum 50"`
-	IncludeSelf bool   `json:"include_self,omitempty" jsonschema:"also match the asking session's own transcript, which is excluded by default where the server knows the asking session (self_id then names it)"`
-}
-
-// FindCandidate is one confirmed indexed transcript match.
-type FindCandidate struct {
-	ID        string `json:"id"`
-	Path      string `json:"path"`
-	Engine    string `json:"engine"`
-	Name      string `json:"name"`
-	Dir       string `json:"dir"`
-	Date      string `json:"date"`
-	Excerpt   string `json:"excerpt,omitempty"`
-	Confirmed bool   `json:"confirmed"`
-	Hits      int    `json:"hits"`
-}
-
-// FindOutput is find's structured response.
-type FindOutput struct {
-	Candidates []FindCandidate `json:"candidates"`
-	Count      int             `json:"count"`
-	Needles    []string        `json:"needles,omitempty"`
-	SelfID     string          `json:"self_id,omitempty"`
-}
-
-// ReadInput requests bounded recent transcript turns.
-type ReadInput struct {
-	Source   string `json:"source" jsonschema:"indexed Claude/Codex id or exact indexed path"`
-	LastN    int    `json:"last_n,omitempty" jsonschema:"maximum recent turns, default 20 and maximum 200"`
-	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 65536 and maximum 1048576"`
-}
-
-// DigestInput requests the one-line-per-event digest of one transcript. Every
-// optional field maps onto one `pfm transcript show` flag.
-type DigestInput struct {
-	Source     string `json:"source" jsonschema:"find id, Claude, Codex or OpenCode session or agent id (or prefix), transcript path, OpenCode locator {store}#{session id}, or a Claude chat's or OpenCode session's title"`
-	Lines      string `json:"lines,omitempty" jsonschema:"transcript line range FROM-TO, FROM- or one line number; the events those records produced"`
-	Since      string `json:"since,omitempty" jsonschema:"window start: HH:MM[:SS] UTC, an ISO time, +5m from the transcript start, -15m from its end"`
-	Until      string `json:"until,omitempty" jsonschema:"window end, same forms as since"`
-	Grep       string `json:"grep,omitempty" jsonschema:"keep events whose full text (input, result, prose) matches this regular expression"`
-	IgnoreCase bool   `json:"ignore_case,omitempty" jsonschema:"match grep case-insensitively"`
-	Only       string `json:"only,omitempty" jsonschema:"event kinds, comma-separated: prompt, reply, call, note, final; error alone keeps only failed calls"`
-	Tool       string `json:"tool,omitempty" jsonschema:"keep only calls of these tool names, comma-separated"`
-	Results    string `json:"results,omitempty" jsonschema:"call results shown: brief (default), none, full or tail:N lines"`
-	First      int    `json:"first,omitempty" jsonschema:"keep the first N events after every other filter"`
-	Last       int    `json:"last,omitempty" jsonschema:"keep the last N events after every other filter"`
-	Text       int    `json:"text,omitempty" jsonschema:"characters kept of a prompt or reply, default 500"`
-	MaxBytes   int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, cut at a line end; default 65536 and maximum 1048576"`
-}
-
-// DigestOutput is digest's bounded digest text.
-type DigestOutput struct {
-	Text       string `json:"text"`
-	Bytes      int    `json:"bytes"`
-	TotalBytes int    `json:"total_bytes"`
-	Truncated  bool   `json:"truncated"`
-}
-
-// Turn is one visible user, assistant, tool, or summary transcript record.
-// A tool call carries the tool's name in Tool and its condensed input as Text
-// — the transcript records no prose for it, and a turn with an empty Text
-// reads as a chat that said nothing rather than one that called a tool.
-type Turn struct {
-	Role      string `json:"role"`
-	Text      string `json:"text"`
-	Tool      string `json:"tool,omitempty"`
-	Timestamp string `json:"timestamp,omitempty"`
-}
-
-// ReadOutput is read's bounded extraction.
-type ReadOutput struct {
-	ID        string `json:"id"`
-	Path      string `json:"path"`
-	Engine    string `json:"engine"`
-	Turns     []Turn `json:"turns"`
-	Count     int    `json:"count"`
-	Truncated bool   `json:"truncated"`
-	Bytes     int    `json:"bytes"`
-}
-
 // LastInput selects the newest assistant answer for a chat.
 type LastInput struct {
 	Target string `json:"target" jsonschema:"chat id, name, session, or tmux target"`
@@ -291,16 +208,16 @@ type StatusOutput struct {
 
 // TargetInput is shared by chat actions whose CLI form takes one target.
 type TargetInput struct {
-	Target string `json:"target" jsonschema:"chat id, name, session, or tmux target"`
+	Target string `json:"target" jsonschema:"chat id, name, session, tmux target, or exact durable native seat:<id>"`
 }
 
 type NameInput struct {
 	Target string `json:"target"`
-	Name   string `json:"name"`
+	Name   string `json:"name" jsonschema:"chat label; seat: prefix is reserved (case-insensitive)"`
 }
 
 type NewInput struct {
-	Name      string `json:"name,omitempty" jsonschema:"the chat's name in pfm ls and the target call, status and kill take; inside a workbench, empty takes its next {name}:{n}"`
+	Name      string `json:"name,omitempty" jsonschema:"chat label (seat: prefix reserved, case-insensitive); inside a workbench, empty takes its next {name}:{n}"`
 	Engine    string `json:"engine,omitempty" jsonschema:"cc/claude, cx/codex or ox/opencode; the caller's engine when empty"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"working directory, relative to the caller's; the caller's directory when empty"`
 	Account   int    `json:"account,omitempty" jsonschema:"account number to launch on; pfm picks when 0"`

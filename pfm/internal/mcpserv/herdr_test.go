@@ -115,3 +115,102 @@ func TestHerdrLossNoteIsNotBackendFailure(t *testing.T) {
 		}
 	}
 }
+
+// TestHerdrCodexThreadMetaBindsNativeSeat pins that a Codex chat seated on
+// Herdr signs its own calls: _meta.threadId binds the native row, its
+// absolute Herdr socket kept as-is (never judged as a tmux socket name), and
+// the identity carries the Herdr backend, seat and workspace.
+func TestHerdrCodexThreadMetaBindsNativeSeat(t *testing.T) {
+	row := compose.Row{
+		Kind:           compose.LiveCodex,
+		ID:             "thread-native",
+		Name:           "SMOKE_CX",
+		SessionName:    "SMOKE_CX",
+		Backend:        "herdr",
+		SeatID:         "seat-cx",
+		HerdrWorkspace: "w7",
+		Socket:         "/jail/native/herdr.sock",
+		PaneID:         "w7:pW",
+		CWD:            "/jail/work",
+	}
+	current := &backend{
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		paths: paths.Values{TmuxDir: "/jail/tmux"},
+	}
+	caller, err := current.callerForRequest(context.Background(), mcp.Meta{"threadId": "thread-native"})
+	if err != nil || !caller.valid {
+		t.Fatalf("Herdr Codex caller = %+v err=%v, want a valid binding", caller, err)
+	}
+	identity := caller.identity
+	if identity.SocketPath != row.Socket || identity.SocketName != "herdr.sock" || identity.Pane != row.PaneID ||
+		identity.Session != "SMOKE_CX" || identity.ID != "thread-native" || identity.Engine != "cx" ||
+		identity.Backend != "herdr" || identity.SeatID != "seat-cx" || identity.HerdrWorkspace != "w7" ||
+		identity.Source != "mcp-thread-meta" {
+		t.Fatalf("identity = %+v, want the native Herdr seat", identity)
+	}
+}
+
+func TestHerdrCodexThreadMetaSignsCallAndWhoami(t *testing.T) {
+	service := metadataIdentityService(t)
+	verbs := service.backend.chat.(*fakeChatVerbs)
+	row := &verbs.listed.Rows[0]
+	row.Backend = "herdr"
+	row.SeatID = "seat-cx"
+	row.HerdrWorkspace = "w7"
+	row.Socket = "/jail/native/herdr.sock"
+	row.PaneID = "w7:pW"
+	client := connectInMemory(t, service.Server())
+	meta := mcp.Meta{"threadId": "thread-a"}
+	whoami := callToolWithMeta[WhoamiOutput](t, client.clientSession, "whoami", meta, WhoamiInput{})
+	if whoami.Status != "ok" || whoami.SocketPath != row.Socket || whoami.Pane != row.PaneID ||
+		whoami.ID != row.ID || whoami.Engine != "cx" {
+		t.Fatalf("native whoami = %+v", whoami)
+	}
+	raw := callToolWithMeta[ResolveOutput](t, client.clientSession, "resolve", meta, ResolveInput{
+		Kind: "session", Name: "%2",
+	})
+	if raw.Code == 0 || raw.SocketPath != "" || !strings.Contains(raw.Candidates, "Herdr") {
+		t.Errorf("native caller resolved a tmux-only raw pane: %+v", raw)
+	}
+	output := callToolWithMeta[CallOutput](t, client.clientSession, "call", meta, CallInput{
+		Target: "busy-session", Message: "native caller signature",
+	})
+	if output.Code != 0 || !output.Typed || output.Unsigned ||
+		!strings.Contains(output.Proof, "sid thread-a") ||
+		!strings.Contains(output.Proof, `to reply: call "Codex A" <message>`) {
+		t.Fatalf("native caller lost signed explicit delivery: %+v", output)
+	}
+}
+
+func TestHerdrCodexThreadMetaNamesBackendFailure(t *testing.T) {
+	row := compose.Row{
+		Kind: compose.LiveCodex, ID: "thread-native", SessionName: "Native",
+		Backend: "herdr", Socket: "/jail/native/herdr.sock", PaneID: "w7:pW",
+		BackendError: "HERDR UNREACHABLE own socket",
+	}
+	current := &backend{
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		paths: paths.Values{TmuxDir: "/jail/tmux"},
+	}
+	caller, err := current.callerForRequest(context.Background(), mcp.Meta{"threadId": row.ID})
+	if err != nil || caller.valid || !caller.present || !strings.Contains(caller.detail, row.BackendError) {
+		t.Fatalf("backend failure caller = %+v err=%v", caller, err)
+	}
+}
+
+// TestHerdrCodexThreadMetaRejectsRelativeNativeSocket pins that a native row
+// whose socket is not absolute stays unbound with its reason, never signed.
+func TestHerdrCodexThreadMetaRejectsRelativeNativeSocket(t *testing.T) {
+	row := compose.Row{
+		Kind: compose.LiveCodex, ID: "thread-native", SessionName: "SMOKE_CX",
+		Backend: "herdr", Socket: "herdr.sock", PaneID: "w7:pW",
+	}
+	current := &backend{
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		paths: paths.Values{TmuxDir: "/jail/tmux"},
+	}
+	caller, err := current.callerForRequest(context.Background(), mcp.Meta{"threadId": "thread-native"})
+	if err != nil || caller.valid || !caller.present || !strings.Contains(caller.detail, "not absolute") {
+		t.Fatalf("relative native socket caller = %+v err=%v, want a present invalid binding", caller, err)
+	}
+}

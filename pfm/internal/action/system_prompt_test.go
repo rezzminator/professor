@@ -23,7 +23,7 @@ func TestProfessorPromptPathUsesRecordedClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := ProfessorPromptPath(home)
-	want := filepath.Join(repo, "pfm", "harness-prompts", "composed", "claude.md")
+	want := filepath.Join(repo, "pfm", "harness-prompts", "generated", "claude.md")
 	if err != nil || got != want {
 		t.Fatalf("prompt path = %q, %v; want %q", got, err, want)
 	}

@@ -34,7 +34,7 @@ func (reporter *herdrReporter) themeAgentState(payload herdrPayload) (state stri
 		return "", nil
 	case action.release:
 		return "cleared", themesync.TmuxStateClear()
-	case reporter.options.event == herdr.EventIdle:
+	case reporter.options.event == herdr.EventIdle && action.stored.State == string(herdr.StateIdle):
 		return "done", themesync.TmuxStateOption("done")
 	}
 	return action.stored.State, themesync.TmuxStateOption(action.stored.State)

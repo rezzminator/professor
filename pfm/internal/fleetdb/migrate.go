@@ -276,12 +276,8 @@ func BackupBeforeMigration(
 	if !existed {
 		return nil
 	}
-	var busy, log, checkpointed int
-	if err := db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed); err != nil {
-		return fmt.Errorf("backup %s: checkpoint WAL: %w", path, err)
-	}
-	if busy != 0 {
-		return fmt.Errorf("backup %s: WAL checkpoint busy", path)
+	if err := checkpointBeforeBackup(ctx, db); err != nil {
+		return fmt.Errorf("backup %s: %w", path, err)
 	}
 	// Keep other writers from checkpointing into the main file while it is
 	// copied. The checkpoint precedes this lock so it can finish normally.
@@ -323,6 +319,55 @@ func BackupBeforeMigration(
 		return fmt.Errorf("backup %s to %s: %w", path, target, err)
 	}
 	return nil
+}
+
+// checkpointBeforeBackup waits out brief read snapshots. Disable SQLite's
+// per-attempt busy wait on this connection so it cannot multiply the retry
+// budget or hide cancellation, then restore it before returning the connection.
+func checkpointBeforeBackup(ctx context.Context, db *sql.DB) (returnErr error) {
+	const checkpointStep, checkpointWait = 10 * time.Millisecond, 5 * time.Second
+	waiting, cancel := context.WithTimeout(ctx, checkpointWait)
+	defer cancel()
+	conn, err := db.Conn(waiting)
+	if err != nil {
+		return fmt.Errorf("checkpoint WAL: acquire connection: %w", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("checkpoint WAL: close connection: %w", err))
+		}
+	}()
+	var busyTimeout int
+	if err := conn.QueryRowContext(waiting, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		return fmt.Errorf("checkpoint WAL: read busy timeout: %w", err)
+	}
+	if _, err := conn.ExecContext(waiting, "PRAGMA busy_timeout=0"); err != nil {
+		return fmt.Errorf("checkpoint WAL: disable busy timeout: %w", err)
+	}
+	defer func() {
+		if _, err := conn.ExecContext(
+			context.Background(),
+			fmt.Sprintf("PRAGMA busy_timeout=%d", busyTimeout),
+		); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("checkpoint WAL: restore busy timeout: %w", err))
+		}
+	}()
+	for attempt := 1; ; attempt++ {
+		var busy, log, checkpointed int
+		err := conn.QueryRowContext(waiting, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed)
+		if err == nil && busy == 0 {
+			return nil
+		}
+		if err != nil && waiting.Err() == nil {
+			return fmt.Errorf("checkpoint WAL: %w", err)
+		}
+		if err := clock.Real.Sleep(waiting, checkpointStep); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("wait for busy WAL checkpoint: %w", ctx.Err())
+			}
+			return fmt.Errorf("WAL checkpoint busy after %d attempts over %s: %w", attempt, checkpointWait, err)
+		}
+	}
 }
 
 // addSeatOwnership preserves old readers while adding live native ownership.

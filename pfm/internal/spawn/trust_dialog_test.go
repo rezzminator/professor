@@ -2,6 +2,7 @@ package spawn
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -16,14 +17,18 @@ const trustDialogScreen = " Accessing workspace:\n\n /work/alpha\n\n" +
 // trustPane is a Claude pane stuck on the folder-trust dialog.
 type trustPane struct {
 	*fakeCodex
+	screen string
 }
 
-func (trustPane) Capture(context.Context, string, string) (string, error) {
+func (pane trustPane) Capture(context.Context, string, string) (string, error) {
+	if pane.screen != "" {
+		return pane.screen, nil
+	}
 	return trustDialogScreen, nil
 }
 
 func TestRunHoldsAtTheClaudeFolderTrustDialogWithoutAKey(t *testing.T) {
-	pane := trustPane{newFakeCodex()}
+	pane := trustPane{fakeCodex: newFakeCodex()}
 	result, err := Run(context.Background(), pane, Request{
 		Engine:  "cc",
 		Name:    "worker",
@@ -68,15 +73,24 @@ func TestTrustRefusalNamesTheDialogTheFolderAndTheAttachLine(t *testing.T) {
 // chat, and the key that clears it trusts a folder the human never chose — the
 // wait gives up with nothing pressed, however long the dialog holds still.
 func TestWaitForComposerNeverAnswersTheClaudeFolderTrustDialog(t *testing.T) {
-	pane := trustPane{newFakeCodex()}
-	ready := waitForComposer(
-		context.Background(), pane, "cc-1-2-3", "cc-1-2-3", testTimings(), tracer{},
-		func(string) bool { return false },
-	)
-	if ready {
-		t.Fatal("waitForComposer reported a composer on the folder-trust dialog")
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	body, err := os.ReadFile("../engine/testdata/claude-trust-unnumbered.txt")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(pane.keys) != 0 {
-		t.Fatalf("keys sent to the folder-trust dialog: %v", pane.keys)
+	for _, screen := range []string{trustDialogScreen, string(body)} {
+		for _, readyValue := range []bool{false, true} {
+			pane := trustPane{fakeCodex: newFakeCodex(), screen: screen}
+			ready := waitForComposer(
+				context.Background(), pane, "cc-1-2-3", "cc-1-2-3", testTimings(), tracer{},
+				func(string) bool { return readyValue },
+			)
+			if ready {
+				t.Errorf("waitForComposer accepted trust dialog with readiness=%v: %q", readyValue, screen)
+			}
+			if len(pane.keys) != 0 {
+				t.Errorf("keys sent to the folder-trust dialog: %v", pane.keys)
+			}
+		}
 	}
 }

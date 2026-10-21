@@ -316,6 +316,8 @@ func Run(
 		tally,
 	)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
+	printRuntimeRemoteControlDoctor(stdout, runtime, dependencies.Env, tally)
+	printRemoteControlRecipeDoctor(ctx, stdout, resolved, runtime.Config, tally)
 	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(
 		stdout,
 		resolved.Home,
@@ -332,6 +334,7 @@ func Run(
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
 	tally.failures += printTracetreeKitDoctor(ctx, stdout, resolved.Home, dependencies)
+	tally.warnings += printHerdrShellDoctor(stdout, resolved.Home, dependencies)
 	herdrWarnings, herdrFailures := printHerdrDoctor(ctx, stdout, dependencies, runtime.Config)
 	tally.warnings += herdrWarnings
 	tally.failures += herdrFailures

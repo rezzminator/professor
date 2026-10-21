@@ -75,7 +75,10 @@ func IndicatorEvents() []string {
 
 // The blink: one half-second per phase, so a blocked token is on for 500 ms and
 // off for 500 ms (1 Hz). The phase is a function of the wall clock alone, so
-// concurrent painters agree without talking to each other. A blinker that
+// concurrent painters agree without talking to each other. The same tick
+// (TabTick) picks each decorated tab's frame, so a tab state of several frames
+// (only blocked and error) advances one frame per tick, a
+// tab renamed only when its label differs from the tick's frame. A blinker that
 // meets maxPaintFailures failed repaints in a row gives up.
 const (
 	blinkHalfPeriod  = 500 * time.Millisecond
@@ -93,7 +96,12 @@ const (
 // lock directory that keeps one blinker per socket, and the seams the socket
 // exchange and the time sit behind.
 // PaneProof proves a durable owner immediately before a pane-addressed write.
+// ErrNotFleetPane excludes a positively identified non-fleet pane, never proves it.
 type PaneProof func(context.Context, string, string) error
+
+// ErrNotFleetPane means neither a durable fleet seat nor a fleet bridge is
+// present. A failed read is not this answer; it remains an ownership failure.
+var ErrNotFleetPane = errors.New("pane has no fleet chat")
 
 var errIndicatorOwnership = errors.New("pane ownership unproved")
 
@@ -116,12 +124,17 @@ type indicatorPainter struct {
 	tabObservations []TabDecoration
 	// unproved holds each pane whose ownership proof failed: the status it
 	// failed under, when, and under which Herdr server start. Such a pane is
-	// named once per server start while it stays unproved, and paint re-proves
+	// named once per status change while it stays unproved, and paint re-proves
 	// it only once its status changes or unprovedReprove passed; a proof that
 	// succeeds forgets it. Each hook-fired painter is its own process, so the
 	// memo is kept in lockDir per socket (unprovedPath) and reread every paint;
 	// a lost update between two painters only names a pane once more.
 	unproved map[string]unprovedPane
+	// classified caches successful ownership only for no-op paints. Every write
+	// still obtains fresh proof; the cache never authorizes a mutation.
+	classified    map[string]unprovedPane
+	priority      func() (bool, error)
+	priorityState *priorityMemo
 	// serverStart reads the Herdr server's start identity (its socket file's
 	// mtime), the key of the unproved-pane memo; nil reads the socket file.
 	serverStart func() (int64, error)
@@ -181,7 +194,10 @@ func (painter *indicatorPainter) nextSeq() uint64 {
 // it takes the socket's blinker lock and repaints on the half-second until
 // neither remains, or returns at once when another process holds the lock. After
 // the lock is released it lists once more and takes it again if a blocked
-// or done agent appeared meanwhile.
+// or done agent appeared meanwhile. With a tab provider it takes the lock
+// first and keeps ticking while any tab is decorated, so an animated frame
+// advances on every tick, and stops once no tab is decorated and nothing is
+// blocked or done.
 func (painter *indicatorPainter) run(ctx context.Context) error {
 	if painter.socket == "" {
 		err := fmt.Errorf("herdr indicators: no Herdr socket: %s is not set", EnvSocket)
@@ -261,7 +277,8 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 	}
 }
 
-// blink repaints on every half-second boundary until nothing is blocked or done. A
+// blink repaints on every half-second boundary until nothing is blocked or done
+// and no tab is decorated. A
 // cancelled context ends it cleanly; maxPaintFailures failed repaints in a row
 // end it with the last error. A tick that finds the socket's stop marker, or
 // its record gone (ClearIndicators: pfm's Herdr theme is off), clears the
@@ -328,22 +345,22 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		return false, false, err
 	}
 	painter.loadUnproved()
-	blinkOn := painter.clock.Now().UnixMilli()/blinkHalfPeriod.Milliseconds()%2 == 0
+	tick := TabTick(painter.clock.Now().UnixMilli())
+	blinkOn := tick%2 == 0
 	painter.hasDone = false
 	for _, target := range targets {
+		want, known := wantedIndicators(target.status, blinkOn)
+		accepted, err := painter.report(ctx, target, indicatorPatch(target.tokens, want))
+		if errors.Is(err, ErrNotFleetPane) {
+			continue
+		}
 		blocked = blocked || target.status == string(StateBlocked)
 		painter.hasDone = painter.hasDone || target.status == "done"
-		want, known := wantedIndicators(target.status, blinkOn)
-		if !known && !painter.reported[target.status] {
+		if !known && err == nil && !painter.reported[target.status] {
 			painter.reported[target.status] = true
 			painter.logf("herdr indicators: socket %s: %s %s has agent_status %q, painted as unknown",
 				painter.socket, target.kind, target.id, target.status)
 		}
-		patch := indicatorPatch(target.tokens, want)
-		if patch != nil && painter.skipUnproved(target) {
-			continue
-		}
-		accepted, err := painter.report(ctx, target, patch)
 		if errors.Is(err, errIndicatorOwnership) {
 			continue
 		}
@@ -356,12 +373,13 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		}
 		wrote = wrote || accepted
 	}
+	painter.prioritize(ctx)
 	if painter.tabs != nil {
 		observations, err := painter.tabs(ctx, painter.socket)
 		if err != nil {
 			return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
 		}
-		accepted, err := painter.paintTabs(ctx, observations, blinkOn)
+		accepted, err := painter.paintTabs(ctx, observations, tick)
 		wrote = wrote || accepted
 		if errors.Is(err, errThemeOff) {
 			return blocked, wrote, nil
@@ -380,7 +398,7 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 func (painter *indicatorPainter) paintTabs(
 	ctx context.Context,
 	observations []TabDecoration,
-	blinkOn bool,
+	tick int64,
 ) (wrote bool, err error) {
 	painter.tabObservations = observations
 	painter.hasTabs = false
@@ -388,7 +406,7 @@ func (painter *indicatorPainter) paintTabs(
 	for i := range observations {
 		observation := observations[i]
 		painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
-		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, blinkOn, painter.guardedCall)
+		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, tick, painter.guardedCall)
 		wrote = wrote || accepted
 		key := "tab\x00" + observation.Tab + "\x00" + observation.Identity
 		switch {
@@ -465,15 +483,27 @@ func (painter *indicatorPainter) list(ctx context.Context) ([]indicatorTarget, e
 // report writes patch to target; a nil patch writes nothing. accepted says
 // whether Herdr took it: only the matching resource-not-found refusal (the
 // target closed since the list) is logged and skipped. Other refusals fail.
+// Painting classifies even a pane needing no patch, so a shell's stale status
+// cannot keep the blinker alive. Clearing proves only panes holding our tokens.
 func (painter *indicatorPainter) report(
 	ctx context.Context,
 	target indicatorTarget,
 	patch map[string]*string,
 ) (accepted bool, err error) {
-	if patch == nil {
+	if patch == nil && (target.kind != targetPane || painter.clearing) {
 		return false, nil
 	}
 	if target.kind == targetPane {
+		if !painter.clearing && painter.skipUnproved(target) {
+			return false, errIndicatorOwnership
+		}
+		if patch == nil {
+			last, ok := painter.classified[target.id]
+			if ok && last.Status == target.status && last.Server == painter.server &&
+				painter.clock.Now().Sub(time.Unix(0, last.At)) < unprovedReprove {
+				return false, nil
+			}
+		}
 		var err error
 		if painter.provePane == nil {
 			err = fmt.Errorf("ownership unproved: no pane proof configured")
@@ -481,7 +511,18 @@ func (painter *indicatorPainter) report(
 			err = painter.provePane(ctx, painter.socket, target.id)
 		}
 		if err != nil {
-			if _, named := painter.unproved[target.id]; !named {
+			delete(painter.classified, target.id)
+		}
+		if errors.Is(err, ErrNotFleetPane) && !painter.clearing {
+			if last, named := painter.unproved[target.id]; named {
+				last.At = 0 // Retry immediately, but retain the once-per-status warning.
+				painter.unproved[target.id] = last
+				painter.storeUnproved()
+			}
+			return false, err
+		}
+		if err != nil {
+			if last, named := painter.unproved[target.id]; !named || last.Status != target.status {
 				painter.logf(
 					"herdr indicators: socket %s: pane %s ownership unproved: %v",
 					painter.socket,
@@ -502,6 +543,15 @@ func (painter *indicatorPainter) report(
 			delete(painter.unproved, target.id)
 			painter.storeUnproved()
 		}
+		if painter.classified == nil {
+			painter.classified = map[string]unprovedPane{}
+		}
+		painter.classified[target.id] = unprovedPane{
+			Status: target.status, At: painter.clock.Now().UnixNano(), Server: painter.server,
+		}
+	}
+	if patch == nil {
+		return false, nil
 	}
 	line, err := tokenReport{target: target, tokens: patch, seq: painter.nextSeq()}.Line()
 	if err != nil {

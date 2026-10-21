@@ -14,6 +14,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+var errNoHerdrOwner = errors.New("no durable owner")
+
 // ProveHerdrTarget resolves the durable supervisor before a pane-addressed
 // operation, returning its current address rather than trusting a stale target.
 func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
@@ -44,7 +46,7 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 		owner = seat
 	}
 	if owner == nil {
-		return target, fmt.Errorf("herdr pane %s ownership unproved: no durable owner", target.Pane)
+		return target, fmt.Errorf("herdr pane %s ownership unproved: %w", target.Pane, errNoHerdrOwner)
 	}
 	if owner.HerdrSocket != target.SocketPath || target.Engine != "" && owner.Engine != target.Engine {
 		return target, fmt.Errorf("herdr pane %s ownership unproved: durable owner changed", target.Pane)
@@ -59,6 +61,7 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 			owner.SeatID,
 		)
 	}
+	target.ID = proved.SessionID
 	target.SeatID = proved.SeatID
 	target.Pane, target.SocketPath = proved.HerdrPane, proved.HerdrSocket
 	target.HerdrWorkspace, target.Engine = proved.HerdrWorkspace, proved.Engine
@@ -68,6 +71,7 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 // ProveHerdrPane refuses stale observations rather than applying their data to
 // a different canonical pane. Callers with retargetable input use ProveHerdrTarget.
 // A pane no durable seat owns is proved when it hosts a pfm tmux chat client.
+// Positive absence of both returns herdr.ErrNotFleetPane; a failed read never does.
 func ProveHerdrPane(ctx context.Context, socket, pane string) error {
 	return proveHerdrPaneOrBridge(ctx, socket, pane, ProveHerdrBridge)
 }
@@ -117,6 +121,9 @@ func proveHerdrPaneOrBridge(
 	proved, err := ProveHerdrTarget(ctx, Target{SocketPath: socket, Pane: pane})
 	if err != nil {
 		if _, bridgeErr := bridge(ctx, socket, pane); bridgeErr != nil {
+			if errors.Is(err, errNoHerdrOwner) && errors.Is(bridgeErr, errNoHerdrBridge) {
+				return errors.Join(herdr.ErrNotFleetPane, err, bridgeErr)
+			}
 			return errors.Join(err, bridgeErr)
 		}
 		return nil

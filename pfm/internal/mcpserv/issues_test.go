@@ -55,7 +55,7 @@ func TestChatInstructionsRouteComplaintsToServicedesk(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = clientSession.Close() })
 
-	want := "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; find, then read an old transcript → find, digest; save my transcript → save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+	want := "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 	got := clientSession.InitializeResult().Instructions
 	if got != want {
 		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", got, want)

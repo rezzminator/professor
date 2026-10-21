@@ -92,7 +92,7 @@ func InstallConfig(
 
 // seedNewClaudeKeys are the claude keys added since v0.79.0, which a pfm of
 // that release refuses as unknown (config.marshalClaude).
-var seedNewClaudeKeys = []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger"}
+var seedNewClaudeKeys = []string{"remoteControl", "helperModel", "pluginCheckoutRoot", "plugins", "costLedger"}
 
 // seedWithoutDefaultNewKeys is the seed a first install writes: the example's
 // bytes, less each key of seedNewClaudeKeys that config.Marshal would leave out

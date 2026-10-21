@@ -1,0 +1,16 @@
+{
+  "0000": {
+    "name": "Night haze: comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment",
+      "comment.line",
+      "comment.block"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#8c7db3"
+    }
+  }
+}

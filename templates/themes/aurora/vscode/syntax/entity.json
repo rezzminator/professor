@@ -1,0 +1,189 @@
+{
+  "0022": {
+    "name": "H-beta 486.1 nm · functions",
+    "scope": [
+      "entity.name.function",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "support.function.any-method",
+      "meta.function-call.generic",
+      "entity.name.function.member",
+      "entity.name.method",
+      "meta.method-call entity.name.function",
+      "meta.function-call.method",
+      "entity.name.function.call",
+      "meta.require",
+      "entity.name.function.constructor"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#6fd8ff"
+    }
+  },
+  "0024": {
+    "name": "Moonlight on snow · types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.other.inherited-class",
+      "entity.name.type.parameter",
+      "entity.name.type.alias",
+      "entity.name.type.class",
+      "entity.name.type.interface",
+      "entity.name.type.enum",
+      "entity.name.type.struct",
+      "entity.name.type.trait",
+      "entity.name.trait",
+      "entity.name.union",
+      "entity.name.type.instance",
+      "meta.return-type entity.name.type",
+      "support.class.component",
+      "entity.name.type.go",
+      "entity.name.class.python",
+      "storage.type.java",
+      "storage.type.cs"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f2d48c"
+    }
+  },
+  "0026": {
+    "name": "Glacier · namespaces and modules",
+    "scope": [
+      "entity.name.namespace",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "storage.modifier.import",
+      "support.other.namespace",
+      "entity.name.type.namespace",
+      "entity.name.import.go",
+      "entity.name.package.go",
+      "support.module",
+      "entity.name.scope-resolution",
+      "meta.import variable.other.readwrite.alias",
+      "entity.name.type.package",
+      "storage.modifier.package"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#74e2d2"
+    }
+  },
+  "0027": {
+    "name": "N2 fringe · decorators, attributes, macros",
+    "scope": [
+      "entity.name.function.decorator",
+      "meta.decorator",
+      "punctuation.decorator",
+      "meta.attribute",
+      "entity.name.function.macro",
+      "support.function.macro",
+      "meta.function.decorator",
+      "punctuation.definition.decorator",
+      "meta.annotation",
+      "storage.type.annotation",
+      "punctuation.definition.annotation",
+      "meta.attribute.rust",
+      "punctuation.definition.attribute.rust",
+      "entity.name.function.preprocessor",
+      "meta.preprocessor",
+      "keyword.control.directive.include",
+      "entity.name.lifetime.rust",
+      "storage.modifier.lifetime.rust",
+      "punctuation.definition.lifetime.rust"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f286d2"
+    }
+  },
+  "0028": {
+    "name": "O I 630.0 nm, diffuse · markup tags",
+    "scope": [
+      "entity.name.tag",
+      "meta.tag.sgml",
+      "entity.name.tag.html",
+      "entity.name.tag.xml",
+      "entity.name.tag.svg",
+      "entity.name.tag.css",
+      "entity.name.tag.reference.scss",
+      "meta.tag.metadata.doctype entity.name.tag",
+      "punctuation.definition.tag.html",
+      "punctuation.definition.tag.xml"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8a96"
+    }
+  },
+  "0030": {
+    "name": "Moonlight on snow · components in markup",
+    "scope": [
+      "entity.name.tag.tsx support.class.component",
+      "entity.name.tag.jsx support.class.component",
+      "support.class.component.tsx",
+      "support.class.component.jsx",
+      "entity.name.tag.vue support.class.component"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f2d48c"
+    }
+  },
+  "0031": {
+    "name": "The red curtain's edge · attributes",
+    "scope": [
+      "entity.other.attribute-name",
+      "entity.other.attribute-name.html",
+      "entity.other.attribute-name.jsx",
+      "entity.other.attribute-name.tsx",
+      "entity.other.attribute-name.xml",
+      "entity.other.attribute-name.localname"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffae7c"
+    }
+  },
+  "0032": {
+    "name": "Moonlight · CSS class selectors",
+    "scope": [
+      "entity.other.attribute-name.class.css",
+      "entity.other.attribute-name.class",
+      "entity.other.attribute-name.parent-selector"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f2d48c"
+    }
+  },
+  "0033": {
+    "name": "The red curtain's edge · CSS id selectors",
+    "scope": [
+      "entity.other.attribute-name.id.css",
+      "entity.other.attribute-name.id"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffae7c"
+    }
+  },
+  "0034": {
+    "name": "N2 fringe · CSS pseudo-classes and elements",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class",
+      "entity.other.attribute-name.pseudo-element",
+      "entity.other.attribute-name.pseudo-class.css",
+      "entity.other.attribute-name.pseudo-element.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f286d2"
+    }
+  }
+}

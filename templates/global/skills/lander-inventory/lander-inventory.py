@@ -3,7 +3,10 @@
 
 usage: lander-inventory.py WORKTREE BASE [HEAD] [--spec FILE ...]
 
-LEFT  a name the diff removed everywhere it touched, still present in the tree at HEAD
+The diff is BASE against the working tree — commits, staged, unstaged and untracked work —
+or, with HEAD, the commits BASE..HEAD.
+
+LEFT  a name the diff removed everywhere it touched, still present in the tree
 LITERAL  a gone name that sat inside a string or key on a replaced code/data line
          (a matcher or stored format that may still meet the old spelling)
 GONE  a file the diff deleted or renamed away, still named in the tree
@@ -46,6 +49,27 @@ def git(wt, *args):
     return p.stdout
 
 
+def untracked(wt, head):
+    # untracked, unignored files: new work the diff against the working tree must carry
+    return [] if head else [f for f in git(wt, "ls-files", "-z", "--others", "--exclude-standard").split("\0") if f]
+
+
+def lines_of(wt, f):
+    try:
+        data = open(f"{wt}/{f}", "rb").read()
+    except OSError as e:
+        fail(f"FAILED read untracked {f}: {e.strerror}\n")
+    return None if b"\0" in data else data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
+
+
+def grep_hits(head, out):
+    # git grep rows: REV:file:line:… with a revision, file:line:… over the working tree
+    for row in out.splitlines():
+        parts = row.split(":", 3 if head else 2)
+        if len(parts) == (4 if head else 3):
+            yield parts[-3:]
+
+
 def namelike(t):
     # a name, not a word: _ , an inner capital, a digit, or 2+ hyphens (a key like a-b-c; "re-run" is prose)
     return (not HEX.match(t) and len(t) >= 6 and not t.startswith("--")
@@ -68,10 +92,17 @@ def main():
     if len(argv) < 2:
         sys.stdout.write(__doc__); sys.exit(2)
     wt, base = argv[0], argv[1]
-    head = argv[2] if len(argv) > 2 else "HEAD"
-    diff = git(wt, "diff", "--no-color", "-U0", "--no-ext-diff", f"{base}", f"{head}")
+    head = argv[2] if len(argv) > 2 else None  # None: the working tree
+    rev = [base, head] if head else [base]
+    label = f"{base}..{head or 'WORKTREE'}"
+    # git grep searches the tree the diff measured: the HEAD revision, or the working tree with untracked files
+    gopt, grev = ([], [head]) if head else (["--untracked"], [])
+    new = untracked(wt, head)
+    diff = git(wt, "diff", "--no-color", "-U0", "--no-ext-diff", *rev)
+    for f in new:
+        diff += git(wt, "diff", "--no-index", "--no-color", "-U0", "--no-ext-diff", "--", "/dev/null", f)
     if not diff.strip():
-        fail(f"FAILED empty diff {base}..{head}\n")
+        fail(f"FAILED empty diff {label}\n")
     removed, added, added_in = defaultdict(set), set(), defaultdict(set)
     swaps = []
     path, newln, minus = None, 0, []
@@ -104,19 +135,15 @@ def main():
     pats = set()
     for t in gone:
         pats |= {s for s in segments(t) if s not in added}
-    w(f"INVENTORY {base}..{head} · {len(removed)} names on removed lines · {len(gone)} gone from every added line\n")
+    w(f"INVENTORY {label} · {len(removed)} names on removed lines · {len(gone)} gone from every added line\n")
     left = []
     if pats:
-        p = subprocess.run(["git", "-C", wt, "grep", "-n", "-o", "-w", "-F", "-I", "-f", "/dev/stdin", head, "--"],
+        p = subprocess.run(["git", "-C", wt, "grep", "-n", "-o", "-w", "-F", "-I", *gopt, "-f", "/dev/stdin", *grev, "--"],
                            input="\n".join(sorted(pats)) + "\n", capture_output=True, text=True)
         if p.returncode not in (0, 1):
             fail(f"FAILED git grep: {p.stderr.strip()[:300]}\n")
         hits = defaultdict(list)
-        for row in p.stdout.splitlines():
-            parts = row.split(":", 3)
-            if len(parts) < 4:
-                continue
-            _, f, ln, tok = parts
+        for f, ln, tok in grep_hits(head, p.stdout):
             hits[tok].append((f, ln))
         for tok, locs in hits.items():
             live = [(f, ln) for f, ln in locs if not HISTORY.search(f)]
@@ -136,7 +163,7 @@ def main():
     if hist_only:
         w(f"HISTORY-ONLY {len(hist_only)} names: {' '.join(sorted(l[1] for l in hist_only)[:30])}\n")
     # GONE: a file the diff deleted or renamed away, still named in the tree
-    st = git(wt, "diff", "--name-status", "-M", "--diff-filter=DR", base, head)
+    st = git(wt, "diff", "--name-status", "-M", "--diff-filter=DR", *rev)
     gone_files = []
     for row in st.splitlines():
         parts = row.split("\t")
@@ -155,14 +182,10 @@ def main():
         if len(stem) < 5:
             continue
         # the stem catches prose and comments that name the thing without its extension
-        p2 = subprocess.run(["git", "-C", wt, "grep", "-n", "-I", "-F", *([] if "/" in stem else ["-w"]), stem, head, "--"], capture_output=True, text=True)
+        p2 = subprocess.run(["git", "-C", wt, "grep", "-n", "-I", "-F", *gopt, *([] if "/" in stem else ["-w"]), stem, *grev, "--"], capture_output=True, text=True)
         if p2.returncode not in (0, 1):
             fail(f"FAILED git grep {name}: {p2.stderr.strip()[:200]}\n")
-        live = []
-        for r in p2.stdout.splitlines():
-            q = r.split(":", 3)
-            if len(q) >= 3 and not HISTORY.search(q[1]):
-                live.append(f"{q[1]}:{q[2]}")
+        live = [f"{f}:{ln}" for f, ln, _ in grep_hits(head, p2.stdout) if not HISTORY.search(f)]
         if live:
             more = f" +{len(live) - 2 * MAX_LOC}" if len(live) > 2 * MAX_LOC else ""
             w(f"GONE {stem} ({name}) · {how} · {len(live)} lines · {' '.join(live[:2 * MAX_LOC])}{more}\n")
@@ -192,19 +215,20 @@ def main():
     for t, locs, ntest in split[:MAX_SWAP]:
         w(f"LITERAL {t} · {len(locs)} lines here, {ntest} in tests · {' '.join(locs[:MAX_LOC])}{' +' + str(len(locs) - MAX_LOC) if len(locs) > MAX_LOC else ''}\n")
 
-    plan(wt, base, head, specs)
+    plan(wt, rev, new, specs)
     sys.stdout.write("".join(OUT))
 
 
-def plan(wt, base, head, specs):
+def plan(wt, rev, new, specs):
     """The spawn, computed, so two runs on one input spawn alike."""
     rows = []  # PLAN lines, appended after the inventory so its line numbers stay put
     # hunters: production diff in path order, cut into equal clusters
     prod, tests = [], defaultdict(list)
-    names = {f.rsplit("/", 1)[-1] for f in git(wt, "diff", "--name-only", "--no-renames", base, head).splitlines()}
+    names = {f.rsplit("/", 1)[-1] for f in git(wt, "diff", "--name-only", "--no-renames", *rev).splitlines() + new}
     # deleted files have no code left to hunt (GONE rows cover their names)
-    for row in git(wt, "diff", "--numstat", "--no-renames", "--diff-filter=d", base, head).splitlines():
-        parts = row.split("\t")
+    stat = [row.split("\t") for row in git(wt, "diff", "--numstat", "--no-renames", "--diff-filter=d", *rev).splitlines()]
+    stat += [[str(n), "0", f] for f in new if (n := lines_of(wt, f)) is not None]
+    for parts in stat:
         if len(parts) != 3 or parts[0] == "-":
             continue
         n, f = int(parts[0]) + int(parts[1]), parts[2]

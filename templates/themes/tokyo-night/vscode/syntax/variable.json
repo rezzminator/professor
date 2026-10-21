@@ -1,0 +1,104 @@
+{
+  "0008": {
+    "name": "Number, Boolean, Undefined, Null",
+    "scope": [
+      "variable.other.constant",
+      "punctuation.definition.constant",
+      "constant.language",
+      "constant.numeric",
+      "support.constant",
+      "constant.other.caps"
+    ],
+    "settings": {
+      "foreground": "#ffd23f"
+    }
+  },
+  "0027": {
+    "name": "Variables",
+    "scope": [
+      "variable",
+      "support.variable",
+      "string constant.other.placeholder",
+      "variable.parameter.handlebars",
+      "variable.other.object",
+      "meta.fstring",
+      "meta.function-call meta.function-call.arguments",
+      "meta.embedded.inline.phpx constant.other.php"
+    ],
+    "settings": {
+      "foreground": "#ffbde3"
+    }
+  },
+  "0030": {
+    "name": "Object Property",
+    "scope": [
+      "variable.other.property",
+      "support.variable.property",
+      "support.variable.property.dom",
+      "meta.function-call variable.other.object.property"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0031": {
+    "name": "Object Property",
+    "scope": [
+      "variable.other.object.property"
+    ],
+    "settings": {
+      "foreground": "#ffbde3"
+    }
+  },
+  "0037": {
+    "name": "Function Argument",
+    "scope": [
+      "variable.parameter.function.language.special",
+      "variable.parameter",
+      "meta.function.parameters punctuation.definition.variable",
+      "meta.function.parameter variable"
+    ],
+    "settings": {
+      "foreground": "#ffb4a8"
+    }
+  },
+  "0059": {
+    "name": "Language methods",
+    "scope": [
+      "variable.language"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0060": {
+    "name": "Variable punctuation",
+    "scope": [
+      "variable.other punctuation.definition.variable"
+    ],
+    "settings": {
+      "foreground": "#ffbde3"
+    }
+  },
+  "0131": {
+    "name": "Pink · variables",
+    "scope": [
+      "variable.other",
+      "variable.object.property"
+    ],
+    "settings": {
+      "foreground": "#ffbde3"
+    }
+  },
+  "0133": {
+    "name": "Pink · language variables",
+    "scope": [
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  }
+}

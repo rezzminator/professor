@@ -15,8 +15,8 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - architecture ratchet: C1–C26 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
 - lint law: gofumpt + gci + golines at 120, plus dupl, goconst, gocritic, revive, staticcheck; coverage thresholds · `.golangci.yml`, `.testcoverage.yml`, tools pinned in `infra/fence/tools.env`
 - shim: the thin zsh wrapper that `eval`s the eval-protocol line, sourced in place from the clone · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
-- installer: stages every host asset embedded from `internal/installer/assets/`; the fleet prompts and the shim are read from the clone instead · `internal/installer/`
-- composed prompts: the tracked fleet prompt per engine, drift-gated by a test · `harness-prompts/composed/` · generated from `harness-prompts/` by `make -C pfm prompts`
+- installer: stages every host asset embedded from `internal/installer/assets/`; the shim is read from the clone instead · `internal/installer/`
+- generated prompts: the gitignored fleet prompt per engine, shared head + engine middle + tail, written before any consumer reads it · `harness-prompts/generated/{claude|codex|opencode}.md` · generated from the `harness-prompts/` parts the binary embeds by `pfm install`
 - machine config: gitignored `{clone}/pfm.config.json`, seeded from `example.pfm.config.json`; `PFM_CONFIG` overrides · design `docs/design/engines/pfm-home.md`
 - launch registry: every flag, env value and `--settings` key a Claude chat starts with · `internal/claudelaunch/` · design `docs/design/engines/claude-launch.md`
 - cost ledger: every Claude API call's price, `{session_id}.jsonl` joined from the OpenTelemetry log and span a per-chat `pfm internal cost-sink` receives on loopback; the one source of the status line's dollars, `pfm tokens` and callmeter · `internal/costledger/`, `internal/costsink/` · design `docs/design/engines/cost-ledger.md`
@@ -33,7 +33,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - The full gate, `.claude/scripts/test.sh --full`, runs vet, fmt-check, lint-new (lines changed since the Makefile's `LINT_BASE`, origin/main: a develop base judges nothing on a push to develop), the architecture ratchet, the gate scripts' own `scripts/*_test.sh`, and unit plus tagged e2e, each against its timing budget, with the templates rows as concurrent steps in one run, the unit suite sharded by `scripts/test-shard.sh`, and prints a per-step table.
 - A package's tests: `.claude/scripts/test.sh internal/{pkg}/{file}.go`; a probe it does not cover: `.claude/scripts/dev.sh iso run '{command}'`, the lint burn-down view `iso run 'make -C pfm lint'`.
-- The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools; `make -C pfm prompts` likewise runs on the host.
+- The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools.
 
 ## Environment Variables
 

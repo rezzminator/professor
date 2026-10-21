@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -28,12 +29,20 @@ import (
 // a snapshot no entry points at any more.
 func pluginCacheSkipped(name string) bool { return pluginCopySkipped(name) || name == ".orphaned_at" }
 
+// claudeGeneratedTypings says whether rel lies under .claude-plugin/types/,
+// where Claude Code writes the typings of its own build into a checkout and,
+// separately, into each snapshot (plugins gitignore it): the two differ there
+// whenever Claude Code's build does, with no plugin change behind it.
+func claudeGeneratedTypings(rel string) bool {
+	return strings.HasPrefix(filepath.ToSlash(rel), ".claude-plugin/types/")
+}
+
 // pluginCacheDigest maps every file under root to its content hash; modes are
 // left out, the snapshot being Claude's copy, not pfm's.
 func pluginCacheDigest(root string) (map[string]string, error) {
 	digest := map[string]string{}
 	err := walkPluginTree(root, pluginCacheSkipped, func(rel, path string, info fs.FileInfo) error {
-		if info.IsDir() {
+		if info.IsDir() || claudeGeneratedTypings(rel) {
 			return nil
 		}
 		content, err := os.ReadFile(path)

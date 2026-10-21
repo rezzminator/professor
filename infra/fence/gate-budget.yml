@@ -7,9 +7,9 @@
 # Evidence: $HOME/.local/state/pfm/flights/professor/fast-gate/measure/r5/
 # and $HOME/.local/state/pfm/flights/professor/fast-gate/measure/r7/.
 # Gate walls warn above tolerance through fail_factor × limit; beyond it they fail.
-tolerance: 1.25
-fail_factor: 2
+tolerance: PFM_FENCE_GATE_TOLERANCE
+fail_factor: PFM_FENCE_GATE_FAIL_FACTOR
 gate:
-  all: 198
-  pfm: 198
-  templates: 32
+  all: PFM_FENCE_GATE_ALL_S
+  pfm: PFM_FENCE_GATE_PFM_S
+  templates: PFM_FENCE_GATE_TEMPLATES_S

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -172,16 +173,32 @@ type Env struct {
 	// StateDir is DefaultStateDir(Home) unless a test points it elsewhere.
 	StateDir string
 	// PfmBinary is the pfm the herdr plugin runs and the follower requires;
-	// the follower's launch agent runs the stable launcher, which execs
-	// ~/.local/bin/pfm (agentlauncher).
+	// the follower's macOS launch agent runs the stable launcher, which execs
+	// ~/.local/bin/pfm (agentlauncher), and its systemd service elsewhere
+	// runs PfmBinary itself.
 	PfmBinary string
-	// Runner runs defaults, herdr, ps and launchctl.
+	// Runner runs defaults, herdr, ps, launchctl and systemctl.
 	Runner deps.Runner
 	// Tmux reaches pfm's chat servers.
 	Tmux TmuxServers
-	// LaunchdJob is the launchd job label this process runs as (its
-	// XPC_SERVICE_NAME), "" outside launchd.
+	// LaunchdJob is the follower job label this process runs as (its
+	// XPC_SERVICE_NAME: launchd sets it for the macOS agent, the Linux
+	// follower's systemd service sets it to the same label), "" outside it.
 	LaunchdJob string
+	// GOOS is the platform the run serves, "" meaning runtime.GOOS: darwin
+	// keeps its launch agent and ~/Library/Application Support VS Code dirs,
+	// every other platform a systemd user unit trio and the Linux VS Code
+	// settings (paths.VSCodeSettingsCandidates).
+	GOOS string
+}
+
+// darwin says whether the run serves macOS.
+func (env Env) darwin() bool {
+	goos := env.GOOS
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	return goos == "darwin"
 }
 
 // FollowerLabel is the launchd job label of the follower's launch agent.
@@ -244,5 +261,9 @@ func RestorePending(stateDir string) bool {
 	if err != nil {
 		return true // the off this gates surfaces the error
 	}
-	return found && (state.Enabled || state.OffPending || state.Herdr != nil || len(state.VSCode) > 0)
+	if found && (state.Enabled || state.OffPending || state.Herdr != nil || len(state.VSCode) > 0) {
+		return true
+	}
+	pending, err := VSCodePendingRestores(stateDir)
+	return err != nil || len(pending) > 0
 }

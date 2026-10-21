@@ -1,0 +1,45 @@
+{
+  "0024": {
+    "name": "Parrotfish: built-ins",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin",
+      "keyword.other.special-method",
+      "support.function.builtin.go",
+      "support.function.builtin.shell",
+      "support.function.misc.css",
+      "support.function.aggregate.sql",
+      "support.variable.dom",
+      "support.variable.object",
+      "support.variable.object.process",
+      "support.variable.object.node"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#76c7ff"
+    }
+  },
+  "0025": {
+    "name": "Parrotfish: magic methods",
+    "scope": [
+      "support.function.magic.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#76c7ff"
+    }
+  },
+  "0027": {
+    "name": "Sand: primitive types, upright",
+    "scope": [
+      "support.type.primitive",
+      "storage.type.primitive",
+      "keyword.type"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f7cd6c"
+    }
+  }
+}

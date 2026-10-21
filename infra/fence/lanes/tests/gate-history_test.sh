@@ -49,6 +49,7 @@ printf 'target\tall\ncommit\tabc1234\ndirty_files\t0\nstarted\t2026-10-01T10:00:
   printf 'templates.leak\tPASS\t2.0\tNA\tNA\tNA\tNA\tNA\tnot measured\tresources.tsv missing\n'
   printf 'GATE\tPASS\t41.1\t125.0\t3.5\t0.5\t0.1\t0.0\tCODE\ttick-deficit 1%% (> -5%%)\n'
 } > "$run/profile.tsv"
+printf 'profile\tnative\ncpus\t6\nmem\t5368709120\ncpuset\t2-9\ngomaxprocs\t8\n' >> "$run/gate.meta"
 out=$(gh ingest "$T/wt1/timing" --project p 2>&1); rc=$?
 L=$LD/p/ledger.tsv
 eq 'ingest profiled run: exit 0' 0 "$rc"
@@ -58,7 +59,21 @@ want=$(printf '%s\n' "$HEADER" \
   "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}not measured${TAB}NA" \
   "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}GATE${TAB}PASS${TAB}41.1${TAB}125.0${TAB}3.5${TAB}0.5${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA")
 eq 'ingest profiled run: header, then one row per profile.tsv row (GATE included), columns per the contract' "$want" "$(cat "$L")"
+eq 'caps sidecar records effective caps without changing the measurement ledger schema' "$(printf 'worktree\trun\tprofile\tcpus\tmem\tcpuset\tgomaxprocs\nwt1\trun.PROF\tnative\t6\t5368709120\t2-9\t8')" "$(cat "$LD/p/caps.tsv")"
 cp "$L" "$T/prof.ledger"
+
+# A failed caps receipt must not mark a gate ingested and lose its effective caps forever.
+LD=$T/ld-caps-fail
+mkdir -p "$LD/p/caps.tsv"
+out=$(gh ingest "$T/wt1/timing" --project p 2>&1); rc=$?
+if [[ $rc != 0 && "$out" == *LEDGER-NOT-WRITTEN* && "$(rowcount "$LD/p/ledger.tsv")" == 1 ]]; then
+  ok 'caps write refusal is named and leaves the run retryable'
+else bad 'caps write refusal is named and leaves the run retryable' "rc=$rc $out" "$(cat "$LD/p/ledger.tsv")"; fi
+rmdir "$LD/p/caps.tsv"
+out=$(gh ingest "$T/wt1/timing" --project p 2>&1); rc=$?
+if [[ $rc == 0 && "$(rowcount "$LD/p/caps.tsv")" == 2 && "$(rowcount "$LD/p/ledger.tsv")" == 4 ]]; then
+  ok 'retry after caps write refusal records the run and its caps exactly once'
+else bad 'retry after caps write refusal' "rc=$rc $out"; fi
 
 # --- ingest: old runs ---------------------------------------------------------------
 LD=$T/ld-old

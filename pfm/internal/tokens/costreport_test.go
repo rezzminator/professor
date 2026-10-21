@@ -175,7 +175,7 @@ func ledgerAudit(t *testing.T, root, ledgerDir string, args ...string) (int, str
 func rowFields(t *testing.T, stdout, label string) []string {
 	t.Helper()
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.Contains(line, label) {
+		if strings.HasPrefix(line, "      ") && strings.Contains(line, label) {
 			return strings.Fields(line)
 		}
 	}
@@ -184,6 +184,121 @@ func rowFields(t *testing.T, stdout, label string) []string {
 }
 
 func tail2(fields []string) string { return strings.Join(fields[len(fields)-2:], " ") }
+
+func TestCostLedgerReportsBackgroundWithoutAnyTranscript(t *testing.T) {
+	root, dir := t.TempDir(), t.TempDir()
+	micros := int64(125000)
+	row := costledger.Row{
+		RequestID: "req_background", SessionID: otherSession,
+		TS: "2026-10-09T18:30:00.000Z", QuerySource: "auto_mode", Model: "claude-opus-5-5",
+		InputTokens: 10, OutputTokens: 20, CostUSDMicros: &micros, Join: costledger.JoinLog,
+	}
+	if err := costledger.Append(dir, row); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := ledgerAudit(t, root, dir)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "auto_mode") ||
+		!strings.Contains(stdout, "side calls $0.12 (1 call no transcript holds)") {
+		t.Fatalf("telemetry-only call missing: exit=%d stderr=%q\n%s", code, stderr, stdout)
+	}
+}
+
+func TestCostLedgerDiscoversRequestlessSessionObservations(t *testing.T) {
+	root, dir := t.TempDir(), t.TempDir()
+	micros := int64(125000)
+	if err := costledger.Append(dir, costledger.Row{
+		SessionID: otherSession, TS: "2026-10-09T18:30:00.000Z", QuerySource: "auto_mode",
+		CostUSDMicros: &micros, Join: costledger.JoinLog,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := ledgerAudit(t, root, dir)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "auto_mode") || !strings.Contains(stdout, "$0.12") {
+		t.Fatalf("observation-only session missing: exit=%d stderr=%q\n%s", code, stderr, stdout)
+	}
+}
+
+func TestCostLedgerOldFaultySessionDoesNotInventWindowActivity(t *testing.T) {
+	root, dir := t.TempDir(), t.TempDir()
+	micros := int64(125000)
+	if err := costledger.Append(dir, costledger.Row{
+		RequestID: "req_old", SessionID: otherSession, TS: "2026-09-01T18:30:00.000Z",
+		CostUSDMicros: &micros, Join: costledger.JoinLog,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path, err := costledger.Path(dir, otherSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("{torn\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, stderr := ledgerAudit(t, root, dir)
+	if strings.Contains(stdout, "$0.12") || !strings.Contains(stdout+stderr, "malformed records") {
+		t.Fatalf("old malformed ledger manufactured activity or hid its fault: stderr=%q\n%s", stderr, stdout)
+	}
+}
+
+func TestCostLedgerInvalidUnattributedTimestampIsNamed(t *testing.T) {
+	root, dir := t.TempDir(), t.TempDir()
+	if err := costledger.Append(dir, costledger.Row{TS: "not-a-date", Join: costledger.JoinLog}); err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, stderr := ledgerAudit(t, root, dir)
+	if !strings.Contains(stdout+stderr, "telemetry timestamp") || !strings.Contains(stdout+stderr, "not-a-date") {
+		t.Fatalf("invalid timestamp rendered as absence: stderr=%q\n%s", stderr, stdout)
+	}
+}
+
+func TestCostLedgerReportsUnattributedWindowSeparatelyInTextAndJSON(t *testing.T) {
+	root, dir := t.TempDir(), t.TempDir()
+	micros := int64(125000)
+	for _, at := range []string{"2026-10-09T18:30:00.000Z", "2026-10-01T18:30:00.000Z"} {
+		row := costledger.Row{
+			TS: at, QuerySource: "auto_mode", InputTokens: 10, CacheReadTokens: 30,
+			CacheCreationTokens: 40, OutputTokens: 20, CostUSDMicros: &micros, Join: costledger.JoinLog,
+		}
+		if err := costledger.Append(dir, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(t.TempDir(), "audit.json")
+	code, stdout, stderr := ledgerAudit(t, root, dir, "--out", out, "--project", "selected-project")
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	for _, want := range []string{
+		"unattributed telemetry (no session, host-wide window", "1 observations, $0.12",
+		"tokens input=10 cached=30 cache-write=40 output=20", "auto_mode: 1 observations", "may overlap or repeat",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("unattributed report lacks %q:\n%s", want, stdout)
+		}
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data struct {
+		Unattributed struct {
+			Observations int   `json:"observations"`
+			Micros       int64 `json:"micros"`
+			MayOverlap   bool  `json:"mayOverlap"`
+		} `json:"unattributedTelemetry"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil || data.Unattributed.Observations != 1 ||
+		data.Unattributed.Micros != micros || !data.Unattributed.MayOverlap {
+		t.Fatalf("unattributed JSON = %+v, %v", data, err)
+	}
+}
 
 func TestCostLedgerReportsTotalSideCallsAndTheSplit(t *testing.T) {
 	root, ledgerDir := t.TempDir(), t.TempDir()
@@ -545,7 +660,7 @@ func TestCostLedgerAbsentIsOneLineAndNoSection(t *testing.T) {
 	if !strings.Contains(stdout, "\n"+noLedgerLine+"\n") {
 		t.Errorf("stdout lacks the line %q:\n%s", noLedgerLine, stdout)
 	}
-	if strings.Contains(stdout, "COST LEDGER") {
+	if strings.Contains(stdout, "\n== COST LEDGER") {
 		t.Errorf("a chat with no ledger got a section:\n%s", stdout)
 	}
 	out := filepath.Join(t.TempDir(), "audit.json")
@@ -590,7 +705,7 @@ func TestCostLedgerMixedChatsAndTheSessionSelector(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit %d stderr %q", code, stderr)
 		}
-		if strings.Contains(stdout, "COST LEDGER") || !strings.Contains(stdout, "\n"+noLedgerLine+"\n") {
+		if strings.Contains(stdout, "\n== COST LEDGER") || !strings.Contains(stdout, "\n"+noLedgerLine+"\n") {
 			t.Errorf("--session of the chat with no ledger:\n%s", stdout)
 		}
 	})

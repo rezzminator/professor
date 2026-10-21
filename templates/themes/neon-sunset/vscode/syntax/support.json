@@ -1,0 +1,33 @@
+{
+  "0022": {
+    "name": "Mint: built-ins",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin",
+      "keyword.other.special-method",
+      "support.function.builtin.go",
+      "support.function.builtin.shell",
+      "support.function.misc.css",
+      "support.function.transform.css",
+      "support.variable",
+      "support.variable.property",
+      "support.function.console",
+      "support.class.builtin"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72f1b8"
+    }
+  },
+  "0061": {
+    "name": "Git rebase verbs",
+    "scope": [
+      "support.function.git-rebase"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fd67ad"
+    }
+  }
+}

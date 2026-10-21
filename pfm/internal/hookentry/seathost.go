@@ -29,6 +29,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -112,6 +113,30 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		run, runErr := db.ReadSeatRun(seat.SeatID)
 		var argv []string
 		var options deps.StartOptions
+		if runErr == nil {
+			machine := runtime.Config
+			// The supervisor can outlive a preference change and restart without the
+			// restore door. Read the pinned config again before every engine start.
+			var policyErr error
+			if pfmengine.ID(seat.Engine) == pfmengine.Claude && machine.Path != "" {
+				machine, policyErr = config.Load(
+					machine.Path,
+					runtime.Paths.Home,
+					runtime.Paths.Roots[pfmengine.Claude],
+					runtime.Paths.FirstRoot(pfmengine.Codex),
+				)
+			}
+			if policyErr != nil {
+				run = reload.DisableRecipeRemoteControl(
+					run,
+					seat.Name,
+					fmt.Sprintf("refresh seat launch preferences: %v", policyErr),
+					stderr,
+				)
+			} else {
+				run = reload.RefreshRecipeRemoteControl(run, pfmengine.ID(seat.Engine), machine, seat.Name, stderr)
+			}
+		}
 		if runErr == nil {
 			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
 		}

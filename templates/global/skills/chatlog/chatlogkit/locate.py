@@ -413,6 +413,16 @@ def _agent_row(path):
 
 def session_agents(path):
     name = os.path.basename(path)
+    if name.startswith(ROLLOUT_PREFIX):
+        members, errors = codex_family(path)
+        head = rollout_header(path)
+        lines = [f"SESSION {head['id']} · {path}", f"AGENTS {len(members) - 1}"]
+        for member in members[1:]:
+            child = rollout_header(member)
+            lines.append(f"{child['id']} · {child['agent_path'] or child['nickname']} · "
+                         f"{child['role']} · parent {child['parent']} · "
+                         f"{_size_text(os.path.getsize(member))} · {member}")
+        return lines + [f"UNREADABLE {place} — {reason}" for place, reason in errors]
     if os.path.basename(os.path.dirname(path)) == "subagents" or name.startswith("agent-") \
             or name.startswith(ROLLOUT_PREFIX):
         die(f"KIT FAILED — agents takes a top-level Claude session; {path} is a sub-agent or Codex transcript")

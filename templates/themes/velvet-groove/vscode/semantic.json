@@ -1,0 +1,104 @@
+{
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "boolean": "#c192f0",
+  "builtinType": {
+    "foreground": "#b9dd7c",
+    "italic": true
+  },
+  "class": "#b9dd7c",
+  "class.defaultLibrary": {
+    "foreground": "#b9dd7c",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#b38e93",
+    "italic": true
+  },
+  "decorator": "#adb3ff",
+  "enum": "#b9dd7c",
+  "enumMember": "#ff9d5c",
+  "escapeSequence": "#85e3e8",
+  "event": "#ed98e5",
+  "formatSpecifier": "#85e3e8",
+  "function": "#5cd6c8",
+  "function.declaration": {
+    "bold": true,
+    "foreground": "#5cd6c8"
+  },
+  "function.defaultLibrary": "#85e3e8",
+  "function.definition": {
+    "bold": true,
+    "foreground": "#5cd6c8"
+  },
+  "interface": {
+    "foreground": "#b9dd7c",
+    "italic": true
+  },
+  "keyword": "#ff75a0",
+  "keyword.controlFlow": "#ff75a0",
+  "label": {
+    "foreground": "#adb3ff",
+    "italic": true
+  },
+  "lifetime": {
+    "foreground": "#ed98e5",
+    "italic": true
+  },
+  "macro": "#adb3ff",
+  "method": "#5cd6c8",
+  "method.declaration": {
+    "bold": true,
+    "foreground": "#5cd6c8"
+  },
+  "method.defaultLibrary": "#85e3e8",
+  "method.definition": {
+    "bold": true,
+    "foreground": "#5cd6c8"
+  },
+  "modifier": {
+    "foreground": "#eea2d4",
+    "italic": true
+  },
+  "namespace": "#adb3ff",
+  "number": "#ff9d5c",
+  "operator": "#f0a6b6",
+  "parameter": {
+    "foreground": "#ffb898",
+    "italic": true
+  },
+  "property": "#b5d3ff",
+  "property.readonly": "#ff9d5c",
+  "regexp": "#81e992",
+  "selfKeyword": {
+    "foreground": "#ed98e5",
+    "italic": true
+  },
+  "selfTypeKeyword": {
+    "foreground": "#b9dd7c",
+    "italic": true
+  },
+  "string": "#f4c76c",
+  "struct": "#b9dd7c",
+  "type": "#b9dd7c",
+  "type.defaultLibrary": {
+    "foreground": "#b9dd7c",
+    "italic": true
+  },
+  "typeParameter": {
+    "foreground": "#b9dd7c",
+    "italic": true
+  },
+  "unresolvedReference": {
+    "foreground": "#ff7a6b",
+    "underline": true
+  },
+  "variable": "#ffe9e9",
+  "variable.defaultLibrary": "#85e3e8",
+  "variable.readonly": "#ff9d5c",
+  "variable.readonly:javascript": "#ffe9e9",
+  "variable.readonly:javascriptreact": "#ffe9e9",
+  "variable.readonly:typescript": "#ffe9e9",
+  "variable.readonly:typescriptreact": "#ffe9e9"
+}

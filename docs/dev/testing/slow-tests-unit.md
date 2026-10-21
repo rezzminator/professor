@@ -40,7 +40,7 @@ seedOpenCodeStress; store.Open temp DB; three goroutines call syncOpenCodeMirror
 
 U — both databases are temp/local and the concurrency seam is in-process.
 
-### TestDeliverThenRequiresTheTailNeedleWhenTheBaselineCaptureFailed
+### TestDeliverThenRefusesWhenTheBaselineCaptureFailed
 
 **Source:** [pfm/internal/reload/reload_then_proof_test.go](../../../pfm/internal/reload/reload_then_proof_test.go) line 226 · **Observed:** 0.00s · **Class:** injected fake seams
 

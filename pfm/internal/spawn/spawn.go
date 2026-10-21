@@ -110,6 +110,9 @@ func Run(
 	tmux Tmux,
 	request Request,
 ) (Result, error) {
+	if err := naming.ValidateLabel(request.Name); err != nil {
+		return Result{}, err
+	}
 	if tmux == nil {
 		return Result{}, errors.New("spawn requires a tmux client")
 	}
@@ -336,6 +339,11 @@ func waitForComposer(
 	for {
 		capture, err := tmux.Capture(ctx, socket, target)
 		switch {
+		case err == nil && pfmengine.ClaudeTrustDialog(capture):
+			// Trust precedes readiness: Claude's launcher may already be ready,
+			// but this dialog's Enter and Escape both select "No, exit".
+			trace.step("held at the folder-trust dialog: nothing pressed | %s", screen(capture))
+			return false
 		case err == nil && ready(capture):
 			held++
 			if held >= composerHoldReads {
@@ -348,12 +356,6 @@ func waitForComposer(
 			held = 0
 			if codexFolderUntrusted(capture) && codexFolderTrustKey(capture) == "" {
 				trace.step("untrusted folder: nothing pressed | %s", screen(capture))
-				return false
-			}
-			if pfmengine.ClaudeTrustDialog(capture) {
-				// Its default row is "No, exit": Enter or Escape ends the chat,
-				// and the key that clears it trusts a folder no human chose.
-				trace.step("held at the folder-trust dialog: nothing pressed | %s", screen(capture))
 				return false
 			}
 			trimmed := strings.TrimSpace(capture)

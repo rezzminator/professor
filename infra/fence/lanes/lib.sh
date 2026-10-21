@@ -52,6 +52,8 @@
 # bash 3.2 (macOS) compatible: no associative arrays, no mapfile, no ${x^^}.
 
 LANE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+. "$LANE_LIB_DIR/../shared.sh" || return 1
+fence_config_values || return 1
 : "${LANE_GAPS:=$LANE_LIB_DIR/known-gaps.yml}"
 : "${LANE_STAMP:=$(date +%Y%m%d-%H%M%S)}"
 : "${LANE_OUT_DIR:=${TMPDIR:-/tmp}/lanes/$LANE_STAMP}"
@@ -506,10 +508,10 @@ _lane_alive_probe() {
 lane_alive() {
   _lane_alive_probe && return 0
   # Default 1 second; self-tests shorten the retry interval.
-  sleep "$(_lane_poll_secs "${LANE_ALIVE_RETRY_SECS-}" 1)"
+  sleep "$(_lane_poll_secs "${LANE_ALIVE_RETRY_SECS-}" "$(_fence_config_default LANE_ALIVE_RETRY_SECS)")"
   _lane_alive_probe && return 0
   # Default 1 second; self-tests shorten the retry interval.
-  sleep "$(_lane_poll_secs "${LANE_ALIVE_RETRY_SECS-}" 1)"
+  sleep "$(_lane_poll_secs "${LANE_ALIVE_RETRY_SECS-}" "$(_fence_config_default LANE_ALIVE_RETRY_SECS)")"
   _lane_alive_probe
 }
 
@@ -797,23 +799,31 @@ claude_registry_without_family_entries() {
   jq -cS '.mcpServers = ((.mcpServers // {}) | del(."chat-professor", ."harvester-professor"))' "$1"
 }
 
-# bundled_themes <templates/themes dir> — the theme profiles the directory
-# ships, every *.json in it, one name per line (each installs as
+# bundled_themes <templates/themes dir> — the themes the directory ships,
+# every subdirectory, one name per line (each installs as
 # ~/.claude/themes/{name}.json and ~/.local/share/pfm/install/themes/{name}.json).
 # Exit 1 with the reason on stdout when the directory is unreadable or holds
-# no profile, so a caller never reads a failed lookup as "no themes".
+# no theme, so a caller never reads a failed lookup as "no themes".
 bundled_themes() {
-  local listing names
-  if ! listing="$(ls -1 -- "$1" 2>&1)"; then
+  local listing names entry
+  if ! listing="$(ls -1A -- "$1" 2>&1)"; then
     printf 'no bundled theme read from %s: %s' "$1" "$(one_line "$listing")"
     return 1
   fi
-  names="$(printf '%s\n' "$listing" | sed -n 's/\.json$//p')"
+  names=""
+  while IFS= read -r entry; do
+    [ -n "$entry" ] && [ -d "$1/$entry" ] || continue
+    if [ ! -f "$1/$entry/theme.json" ]; then
+      printf 'no bundled theme read from %s: %s/theme.json missing' "$1" "$entry"
+      return 1
+    fi
+    names="$names$entry"$'\n'
+  done <<<"$listing"
   if [ -z "$names" ]; then
-    printf 'no bundled theme read from %s: no *.json profile there' "$1"
+    printf 'no bundled theme read from %s: no theme directory there' "$1"
     return 1
   fi
-  printf '%s\n' "$names"
+  printf '%s' "$names"
 }
 
 # assert_opencode_mcp_registered <pfm-bin> — M.03 and E3.02 are the same
@@ -1006,7 +1016,7 @@ wait_last() {
     fi
     # Default half a second: the mock engine answers in milliseconds, so a
     # coarser poll is pure idle; self-tests shorten it further.
-    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" 0.5)"
+    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" "$(_fence_config_default LANE_WAIT_LAST_EVERY_SECS)")"
   done
   LANE_WAIT_WHY="timed out after $3s waiting for '$2' from $1"
   [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_last "$1 $2" "$t0" timeout
@@ -1031,7 +1041,7 @@ wait_for() {
       return 0
     fi
     # Default 0.2 seconds; self-tests shorten it further.
-    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.2)"
+    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" "$(_fence_config_default LANE_WAIT_FOR_EVERY_SECS)")"
   done
   # shellcheck disable=SC2034 # read by the lanes, which name the reason in their verdict
   LANE_WAIT_WHY="timed out after ${secs}s waiting for: $*"
@@ -1058,7 +1068,7 @@ wait_prompt() { # wait_prompt <chat> <needle> <secs> — user transcript records
       [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_prompt "$1 $2" "$t0" ok
       return 0
     fi
-    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" 0.5)"
+    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" "$(_fence_config_default LANE_WAIT_LAST_EVERY_SECS)")"
   done
   LANE_WAIT_WHY="timed out after $3s waiting for '$2' from $1"
   [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_prompt "$1 $2" "$t0" timeout
@@ -1115,7 +1125,7 @@ lane_storm_start() { # lane_storm_start <n> [sends]
       { echo "storm: spawn $me failed" >&2; return 1; }
     echo "spawned $me ($engine · $project)"
   done
-  wait_secs="${LANE_STORM_WAIT_SECS:-60}"
+  wait_secs="${LANE_STORM_WAIT_SECS-$(_fence_config_default LANE_STORM_WAIT_SECS)}"
   [[ "$wait_secs" =~ ^[1-9][0-9]*$ ]] || wait_secs=60
   deadline=$(( $(_lane_now) + wait_secs ))
   while :; do
@@ -1133,7 +1143,7 @@ lane_storm_start() { # lane_storm_start <n> [sends]
       return 1
     fi
     # POLL-STEP: wait for the next fleet read, paced like wait_for.
-    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.5)"
+    sleep "$(_lane_poll_secs "${LANE_STORM_EVERY_SECS-}" "$(_fence_config_default LANE_STORM_EVERY_SECS)")"
   done
   for pair in 'STORM_1 STORM_2' 'STORM_3 STORM_4' 'STORM_5 STORM_6'; do
     read -r me engine <<<"$pair"
@@ -1154,7 +1164,7 @@ lane_storm_kill() {
   for n in $(awk -F'\t' '$1 ~ /^live-/ && $5 ~ /^STORM_[0-9]+$/ {print $5}' <<<"$rows"); do
     if pfm chat end "$n" >/dev/null; then echo "ended $n"; else echo "kill-storm: pfm chat end $n failed (see above)" >&2; failed=1; fi
   done
-  wait_secs="${LANE_STORM_WAIT_SECS:-60}"
+  wait_secs="${LANE_STORM_WAIT_SECS-$(_fence_config_default LANE_STORM_WAIT_SECS)}"
   [[ "$wait_secs" =~ ^[1-9][0-9]*$ ]] || wait_secs=60
   deadline=$(( $(_lane_now) + wait_secs ))
   while :; do
@@ -1162,7 +1172,7 @@ lane_storm_kill() {
     if ! awk -F'\t' '$1 ~ /^live-/ && $5 ~ /^STORM_[0-9]+$/ {found=1} END {exit !found}' <<<"$rows"; then break; fi
     [ "$(_lane_now)" -ge "$deadline" ] && break
     # POLL-STEP: wait for the next fleet read, paced like wait_for.
-    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.5)"
+    sleep "$(_lane_poll_secs "${LANE_STORM_EVERY_SECS-}" "$(_fence_config_default LANE_STORM_EVERY_SECS)")"
   done
   for id in $(awk -F'\t' '$1 ~ /^resume-/ && $5 ~ /^STORM_[0-9]+$/ {print $2}' <<<"$rows"); do
     if pfm chat kill "$id" >/dev/null; then echo "hid $id"; else echo "kill-storm: pfm chat kill $id failed (see above)" >&2; failed=1; fi

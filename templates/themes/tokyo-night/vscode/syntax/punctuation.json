@@ -1,0 +1,88 @@
+{
+  "0015": {
+    "name": "Interpolation, PHP tags, Smarty tags",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "meta.embedded.line.tag.smarty",
+      "support.constant.handlebars",
+      "punctuation.section.tag.twig"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0025": {
+    "name": "Tag Punctuation",
+    "scope": [
+      "punctuation.definition.tag",
+      "text.html.php meta.embedded.block.html meta.tag.metadata.script.end.html punctuation.definition.tag.begin.html text.html.basic"
+    ],
+    "settings": {
+      "foreground": "#ed5cc1"
+    }
+  },
+  "0071": {
+    "name": "Regular Expressions - Punctuation",
+    "scope": [
+      "punctuation.definition.group"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0088": {
+    "name": "Plain Punctuation",
+    "scope": [
+      "punctuation.definition.list_item.markdown"
+    ],
+    "settings": {
+      "foreground": "#eb84cc"
+    }
+  },
+  "0127": {
+    "name": "Pink · operators and punctuation",
+    "scope": [
+      "punctuation.accessor",
+      "punctuation.separator.key-value",
+      "keyword.operator.assignment",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.decorator",
+      "punctuation.definition.heading.markdown",
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "string.regexp constant.character.escape"
+    ],
+    "settings": {
+      "foreground": "#ff70e5"
+    }
+  },
+  "0149": {
+    "name": "Pink · diff added marker",
+    "scope": [
+      "punctuation.definition.inserted"
+    ],
+    "settings": {
+      "foreground": "#00ffa3"
+    }
+  },
+  "0150": {
+    "name": "Pink · diff deleted marker",
+    "scope": [
+      "punctuation.definition.deleted"
+    ],
+    "settings": {
+      "foreground": "#ff5781"
+    }
+  },
+  "0151": {
+    "name": "Pink · diff changed marker",
+    "scope": [
+      "punctuation.definition.changed"
+    ],
+    "settings": {
+      "foreground": "#ff70e5"
+    }
+  }
+}

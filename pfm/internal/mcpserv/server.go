@@ -21,7 +21,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
-	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const (
@@ -46,14 +45,14 @@ const (
 )
 
 var chatToolNames = []string{
-	"call", "capture", "digest", "exit", "find",
+	"call", "capture", "exit",
 	"keys", killToolName, lastToolName, "ls", "name",
-	newToolName, "open", "read", "resolve",
+	newToolName, "open", "resolve",
 	saveToolName, "servicedesk", "status", "unkill", "whoami",
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; find, then read an old transcript → find, digest; save my transcript → save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+const chatInstructions = "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -105,8 +104,6 @@ type ChatVerbs interface {
 	Last(context.Context, chat.LastRequest) (chat.LastResult, error)
 	Status(context.Context, chat.StatusRequest) (headless.Status, error)
 	List(context.Context, chat.ListRequest) (chat.ListResult, error)
-	Find(context.Context, chat.FindRequest) ([]chat.TranscriptMatch, error)
-	Read(ctx context.Context, target string, tail int) (headless.Chat, []transcript.Entry, bool, error)
 	Exit(ctx context.Context, self headless.Chat) (string, error)
 }
 
@@ -176,7 +173,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("keys", service.chatKeys))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "capture",
-		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call capture{target:\"my-chat\"} or capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; dead = the chat resolved but its pane could not be read; error = the capture failed some other way, message says how. For the last answer only, last; for a killed or old chat, read.",
+		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call capture{target:\"my-chat\"} or capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; dead = the chat resolved but its pane could not be read; error = the capture failed some other way, message says how. For the last answer only, last; for a killed or old chat, use /chatlog.",
 		Annotations: readOnly,
 	}, obs.Tool("capture", service.chatCapture))
 	mcp.AddTool(server, &mcp.Tool{
@@ -185,23 +182,8 @@ func (service *Service) registerTools(server *mcp.Server) {
 		Annotations: readOnly,
 	}, obs.Tool("whoami", service.chatWhoami))
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "find",
-		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to digest. Only Claude transcripts are searched. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
-		Annotations: readOnly,
-	}, obs.Tool("find", service.chatFind))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "read",
-		Description: "Reads the recent visible turns of an indexed transcript — \"what happened in that chat\", after find or with a known id. Call read{source:\"<id from find>\", last_n:20}. Returns turns (role, text, timestamp) with count and truncated; turns empty with count 0 = the transcript has no visible turns yet; a tool error = no transcript by that id or path. For a LIVE chat's current answer, last. For a window, a filter or tool results, digest.",
-		Annotations: readOnly,
-	}, obs.Tool("read", service.chatRead))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "digest",
-		Description: "Digests a transcript, one line per event — prompts, replies, each tool call with its result, notes — \"what did that chat or sub-agent do\", \"its failed calls\", \"what happened 14:00–14:30\". Call digest{source:\"<find id, session or agent id, path, or chat title>\", grep:\"deploy\", last:40}. Returns text: a header (file, span, calls by tool, FILTER line), then the events; \"shown 0 of N\" = nothing matched. A tool error = the source did not resolve (NOT FOUND, or AMBIGUOUS with candidates) or the digest failed. read: recent turns only, no results; a live chat's newest answer, last.",
-		Annotations: readOnly,
-	}, obs.Tool("digest", service.chatDigest))
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        lastToolName,
-		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure); on Codex a turn still in progress is a tool error that says so; Claude and OpenCode return the newest answer written so far. For screen text, capture; for older turns, read.",
+		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure); on Codex a turn still in progress is a tool error that says so; Claude and OpenCode return the newest answer written so far. For screen text, capture; for older turns, use /chatlog.",
 		Annotations: readOnly,
 	}, obs.Tool(lastToolName, service.chatLast))
 	mcp.AddTool(server, &mcp.Tool{
@@ -536,7 +518,14 @@ func (service *Service) chatCall(
 		ForceNow: input.ForceNow,
 		Then:     input.Then,
 	})
-	return nil, outputFromCall(result), err
+	output := outputFromCall(result)
+	if caller.present && !caller.valid && caller.detail != "" &&
+		strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) {
+		// The request did carry an identity that failed to bind: name why, so
+		// a binding failure never reads as "no identity was sent".
+		output.Message += " The request's own caller identity did not bind: " + caller.detail
+	}
+	return nil, output, err
 }
 
 // mcpUnsignedMessage restates pfmcall.ErrUnsigned's refusal for an MCP

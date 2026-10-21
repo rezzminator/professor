@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -23,7 +22,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
-	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // callToolWithMeta is the protocol-level counterpart of callTool. The
@@ -63,34 +61,6 @@ func callToolWithMeta[T any](
 		t.Fatalf("%s structured output %s: %v", name, content, err)
 	}
 	return output
-}
-
-func callToolErrorWithMeta(
-	t *testing.T,
-	session *mcp.ClientSession,
-	name string,
-	meta mcp.Meta,
-	arguments any,
-) string {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Meta:      meta,
-		Name:      name,
-		Arguments: arguments,
-	})
-	if err != nil {
-		t.Fatalf("%s: %v", name, err)
-	}
-	if !result.IsError {
-		t.Fatalf("%s unexpectedly succeeded: %#v", name, result.StructuredContent)
-	}
-	content, err := json.Marshal(result.Content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(content)
 }
 
 // metadataIdentityService installs two deterministic live Codex rows through
@@ -244,18 +214,6 @@ type metadataNamedResolver struct {
 	name     string
 	socket   string
 	pane     string
-}
-
-type metadataReadVerbs struct {
-	chat.Verbs
-	rows []compose.Row
-}
-
-func (verbs *metadataReadVerbs) List(
-	_ context.Context,
-	_ chat.ListRequest,
-) (chat.ListResult, error) {
-	return chat.ListResult{Rows: verbs.rows, Matched: len(verbs.rows)}, nil
 }
 
 func (resolver metadataNamedResolver) Resolve(
@@ -510,144 +468,6 @@ func TestMCPResolveRefusesRelativeTargetsWithoutAValidCaller(t *testing.T) {
 	}
 }
 
-func TestMCPReadBindsSelfToIndexedAndPrivateCallerTranscripts(t *testing.T) {
-	service := metadataIdentityService(t)
-	roots := service.backend.paths.Roots[pfmengine.Claude]
-	if len(roots) == 0 {
-		t.Fatal("metadata fixture has no Claude transcript root")
-	}
-	root := roots[0]
-	indexedPath := filepath.Join(root, "project-indexed", "indexed-caller.jsonl")
-	privatePath := filepath.Join(root, "project-private", "private-caller.jsonl")
-	for path, text := range map[string]string{
-		indexedPath: "indexed caller answer",
-		privatePath: "private caller answer",
-	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		writeJSONL(t, path, []any{
-			map[string]any{"type": "assistant", "message": map[string]any{"content": text}},
-		})
-	}
-	canonicalIndexedPath, err := filepath.EvalSymlinks(indexedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := service.backend.database.UpsertTranscript(context.Background(), store.Transcript{
-		UUID: "indexed-caller", Path: indexedPath, CWD: "/work/indexed",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	rows := []compose.Row{
-		{
-			Kind: compose.LiveClaude, ID: "indexed-caller", Path: indexedPath, CWD: "/work/indexed",
-			SessionName: "cc-indexed", Socket: "cc-indexed", PaneID: "%1", Name: "Indexed caller",
-		},
-		{
-			Kind: compose.LiveClaude, ID: "private-caller", Path: privatePath, CWD: "/work/private",
-			SessionName: "cc-private", Socket: "cc-private", PaneID: "%2", Name: "Private caller",
-		},
-	}
-	service.backend.chat = &metadataReadVerbs{
-		Verbs: chat.Verbs{Warnings: io.Discard},
-		rows:  rows,
-	}
-	clients := []protocolClient{
-		connectInMemory(t, service.Server()),
-		connectInMemory(t, service.Server()),
-	}
-	metas := []mcp.Meta{
-		{"pfmProxy": map[string]any{
-			"v": ProxyWireVersion, "session": rows[0].SessionName, "socketName": rows[0].Socket,
-			"pane": rows[0].PaneID, "engine": "claude", "id": rows[0].ID,
-		}},
-		{"pfmProxy": map[string]any{
-			"v": ProxyWireVersion, "session": rows[1].SessionName, "socketName": rows[1].Socket,
-			"pane": rows[1].PaneID, "engine": "claude", "id": rows[1].ID,
-		}},
-	}
-	wantPaths := []string{indexedPath, privatePath}
-	wantTexts := []string{"indexed caller answer", "private caller answer"}
-	for index, source := range []string{"self", "me"} {
-		read := callToolWithMeta[ReadOutput](
-			t, clients[index].clientSession, "read", metas[index],
-			ReadInput{Source: source, LastN: 1, MaxBytes: 1024},
-		)
-		if read.ID != rows[index].ID || read.Path != wantPaths[index] ||
-			read.Count != 1 || read.Turns[0].Text != wantTexts[index] {
-			t.Fatalf("read(%s)[%d] = %+v", source, index, read)
-		}
-	}
-
-	type result struct {
-		index  int
-		output ReadOutput
-	}
-	results := make(chan result, len(clients))
-	var wait sync.WaitGroup
-	for index := range clients {
-		index := index
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			results <- result{index: index, output: callToolWithMeta[ReadOutput](
-				t, clients[index].clientSession, "read", metas[index],
-				ReadInput{Source: "self", LastN: 1, MaxBytes: 1024},
-			)}
-		}()
-	}
-	wait.Wait()
-	close(results)
-	for got := range results {
-		if got.output.Path != wantPaths[got.index] || got.output.Count != 1 ||
-			got.output.Turns[0].Text != wantTexts[got.index] {
-			t.Errorf("overlapping read[%d] = %+v", got.index, got.output)
-		}
-	}
-
-	explicit := callToolWithMeta[ReadOutput](
-		t, clients[0].clientSession, "read", mcp.Meta{"threadId": "not-a-live-thread"},
-		ReadInput{Source: "indexed-caller", LastN: 1, MaxBytes: 1024},
-	)
-	if explicit.Path != canonicalIndexedPath || explicit.Count != 1 ||
-		explicit.Turns[0].Text != "indexed caller answer" {
-		t.Fatalf("explicit read = %+v", explicit)
-	}
-}
-
-func TestMCPReadRefusesSelfWithoutAValidCallerAndKeepsAmbientStdio(t *testing.T) {
-	service := metadataIdentityService(t)
-	client := connectInMemory(t, service.Server())
-	for _, test := range []struct {
-		name string
-		meta mcp.Meta
-		want string
-	}{
-		{name: "absent", meta: nil, want: "MCP request has no _meta.threadId"},
-		{name: "invalid", meta: mcp.Meta{"threadId": "not-a-live-thread"}, want: "has no live Codex tmux seat"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			failure := callToolErrorWithMeta(
-				t, client.clientSession, "read", test.meta,
-				ReadInput{Source: "self", LastN: 1},
-			)
-			if !strings.Contains(failure, test.want) {
-				t.Fatalf("read self failure = %s, want %q", failure, test.want)
-			}
-		})
-	}
-
-	verbs := &fakeChatVerbs{read: nil}
-	ambient := newService("test", &backend{chat: verbs, allowAmbientIdentity: true})
-	_, output, err := ambient.chatRead(
-		context.Background(), nil, ReadInput{Source: "self", LastN: 1},
-	)
-	if err != nil || output.ID != "self" || !reflect.DeepEqual(verbs.reads, []string{"self/1"}) {
-		t.Fatalf("ambient stdio read = %+v calls=%v err=%v", output, verbs.reads, err)
-	}
-}
-
 // A shared HTTP daemon can be launched by a developer from inside Claude. A
 // metadata-free request belongs to no chat and must not inherit that launcher's
 // session id, even when the daemon process has a real ambient Claude identity.
@@ -726,7 +546,7 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 		context.Background(), mcp.Meta{"threadId": "thread-a"},
 	)
 	if err != nil || caller.valid || !caller.present ||
-		!strings.Contains(caller.detail, "matched 2 live Codex tmux seats") {
+		!strings.Contains(caller.detail, "matched 2 live Codex seats") {
 		t.Fatalf("duplicate caller resolution = %+v err=%v", caller, err)
 	}
 

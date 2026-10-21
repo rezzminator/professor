@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ type AskInput struct {
 	Model        string
 	Effort       string
 	Timeout      time.Duration
+	// InlineContent delivers private prepared snippets without filesystem tools.
+	// Leave large document sources on disk for the engine's bounded reads.
+	InlineContent bool
 }
 
 type SourceSpan struct {
@@ -179,6 +183,23 @@ func (engine processEngine) Run(parent context.Context, input AskInput) (AskResu
 	prompt, err := BuildPrompt(input)
 	if err != nil {
 		return AskResult{}, err
+	}
+	// Summary/status snippets need their bytes delivered, not just a path.
+	// Other asks retain filesystem reads rather than preloading whole documents.
+	if input.InlineContent {
+		var prepared strings.Builder
+		prepared.WriteString(prompt)
+		prepared.WriteString("\n\nPrepared content follows inline; use these bytes without opening files.\n")
+		for index, file := range input.ContentFiles {
+			content, readErr := os.ReadFile(file)
+			if readErr != nil {
+				return AskResult{}, fmt.Errorf("read prepared content file %d %q: %w", index+1, file, readErr)
+			}
+			fmt.Fprintf(&prepared, "\n--- BEGIN FILE %d ---\n", index+1)
+			prepared.Write(content)
+			fmt.Fprintf(&prepared, "\n--- END FILE %d ---\n", index+1)
+		}
+		prompt = prepared.String()
 	}
 	timeout := input.Timeout
 	if timeout == 0 {

@@ -271,8 +271,8 @@ func installSeedClaude(t *testing.T, example []byte) map[string]json.RawMessage 
 	return claude
 }
 
-// The seed a first install writes leaves out the four claude keys a pfm of the
-// last release refuses (helperModel, pluginCheckoutRoot, plugins, costLedger)
+// The seed a first install writes leaves out the new claude keys a pfm of the
+// last release refuses (remoteControl, helperModel, pluginCheckoutRoot, plugins, costLedger)
 // while they sit at their defaults, exactly as `pfm config init` does
 // (marshalClaude); the example file itself keeps them, for its parity test.
 func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
@@ -285,7 +285,7 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	claude := installSeedClaude(t, example)
-	for _, key := range []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger"} {
+	for _, key := range []string{"remoteControl", "helperModel", "pluginCheckoutRoot", "plugins", "costLedger"} {
 		if _, present := claude[key]; present {
 			t.Errorf("the seed keeps claude.%s at its default", key)
 		}
@@ -298,9 +298,10 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 // A value the example sets away from its default is kept.
 func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
 	claude := installSeedClaude(t, []byte(`{"version":2,"claude":{"helperModel":"claude-custom-1","costLedger":false,`+
-		`"plugins":["auto-effort-control"],"theme":null}}`))
+		`"plugins":["auto-effort-control"],"remoteControl":false,"theme":null}}`))
 	for key, want := range map[string]string{
 		"helperModel": `"claude-custom-1"`, "costLedger": "false", "plugins": `["auto-effort-control"]`,
+		"remoteControl": "false",
 	} {
 		if got := strings.Join(strings.Fields(string(claude[key])), ""); got != want {
 			t.Errorf("seed claude.%s = %q, want %q", key, got, want)

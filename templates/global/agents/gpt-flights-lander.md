@@ -4,6 +4,10 @@ from: flights-lander
 extends:
   - shared/gpt-flights.md
 description: flights-lander on GPT sol high
+rename:
+  flights-hunter: gpt-flights-hunter
+  flights-spec-walker: gpt-flights-spec-walker
+  flights-sub-lander: gpt-flights-sub-lander
 model: gpt-6.1-sol[1m]
 effort: high
 visibility:

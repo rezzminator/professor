@@ -10,13 +10,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // renameHerdr follows successful engine /rename delivery. Persist only after
-// the pane label and the agent name agree, then label the pane's tab under
-// herdr.LabelSoleTab's rule; every partial failure is returned to the caller.
+// the pane label, agent name and tab label agree under herdr.LabelSoleTab's
+// rule; every partial failure is returned to the caller and remains retryable.
 func renameHerdr(ctx context.Context, target headless.Chat, name string, values paths.Values) (returnErr error) {
 	state := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
@@ -50,9 +51,20 @@ func renameHerdr(ctx context.Context, target headless.Chat, name string, values 
 	return renameNativeOwned(ctx, state, seat, name)
 }
 
+// RenameHerdrOwned updates the pane, agent, durable name and sole-tab label.
+// The caller must already hold the conversation/bridge locks and have proved
+// the seat's current terminal and supervisor. Lifecycle hooks use this same
+// naming path as DeliverName, without typing into the user's prompt.
+func RenameHerdrOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.Seat, name string) error {
+	return renameNativeOwned(ctx, state, seat, name)
+}
+
 // renameNativeOwned also serves explicit restore, whose authority is the checked
 // new caller pane after positive old-host death, before its new host can start.
 func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.Seat, name string) error {
+	if err := naming.ValidateLabel(name); err != nil {
+		return err
+	}
 	target := headless.Chat{SeatID: seat.SeatID, Socket: seat.HerdrSocket, Pane: seat.HerdrPane}
 	body, err := herdr.SeatRequest(
 		ctx,
@@ -104,13 +116,13 @@ func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.S
 		if agent.Agent.Pane != target.Pane || agent.Agent.Name != slug {
 			return fmt.Errorf("herdr agent rename returned an unexpected acknowledgement: %s", body)
 		}
+		if err := labelNativeTab(ctx, target, name); err != nil {
+			return fmt.Errorf("label Herdr tab after pane and agent rename: %w", err)
+		}
 		before := seat
 		seat.Name = name
 		if err := state.UpdateSeat(ctx, before, seat); err != nil {
-			return fmt.Errorf("persist name after Herdr pane and agent rename: %w", err)
-		}
-		if err := labelNativeTab(ctx, target, name); err != nil {
-			return fmt.Errorf("label Herdr tab after pane and agent rename: %w", err)
+			return fmt.Errorf("persist name after Herdr pane, agent and tab rename: %w", err)
 		}
 		return nil
 	}

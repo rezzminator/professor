@@ -30,7 +30,7 @@ func assetFiles() ([]assetFile, error) {
 			return nil
 		}
 		relative := strings.TrimPrefix(name, "assets/")
-		if relative == "shim/pfm.zsh" {
+		if relative == "shim/pfm.zsh" || relative == herdrShellAsset {
 			return nil
 		}
 		if !schedulerAsset(relative) {

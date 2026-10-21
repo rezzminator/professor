@@ -1,0 +1,33 @@
+{
+  "0031": {
+    "name": "Invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#ff5c7a"
+    }
+  },
+  "0032": {
+    "name": "Deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#ff5c7a"
+    }
+  },
+  "0060": {
+    "name": "Git commit: overlong subject",
+    "scope": [
+      "invalid.deprecated.line-too-long.git-commit"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff5c7a"
+    }
+  }
+}

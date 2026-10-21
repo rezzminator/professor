@@ -85,6 +85,12 @@ func (store stateStore) save(state themeState) error {
 	return nil
 }
 
+// LockState serializes an external surface writer with theme set, sync and off.
+// The caller must hold it across both reading and publishing the shared config.
+func LockState(home string) (release func() error, err error) {
+	return (stateStore{dir: DefaultStateDir(home)}).lock()
+}
+
 // lock takes the exclusive flock; the returned release unlocks and closes it.
 func (store stateStore) lock() (release func() error, err error) {
 	if err := os.MkdirAll(store.dir, 0o700); err != nil {

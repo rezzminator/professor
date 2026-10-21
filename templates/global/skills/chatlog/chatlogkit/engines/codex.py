@@ -61,6 +61,9 @@ def record(p, n, obj):
     elif kind == "turn_context":
         settings = get(get(payload, "collaboration_mode"), "settings")
         settings = settings if isinstance(settings, dict) else {}
+        # Forked histories can carry the parent's context before the child's own turn.
+        for key in ("model", "effort"):
+            p.meta.pop(key, None)
         _set_or(p, "model", payload.get("model"), get(settings, "model"))
         _set_or(p, "effort", payload.get("effort"), get(settings, "reasoning_effort"))
         p.mark(n, HEADER, kind)
@@ -199,6 +202,10 @@ def _item(n, ts, item):
     status = item.get("status")
     unfinished = status is not None and _stamp_of(status) != "completed"
     t = _stamp_of(item.get("type"))
+    if t == "ImageView":
+        ev = Event(n, ts, CALL, name="view_image", text=pystr(item.get("path", "")))
+        ev.set_result("image viewed", unfinished, ts)
+        return [ev]
     if t == "CommandExecution":
         ev = Event(n, ts, CALL, name="exec", text=command_line(item.get("command")))
         parsed_cmd = item.get("parsed_cmd") if isinstance(item.get("parsed_cmd"), list) else []

@@ -35,59 +35,53 @@ func (engine *Engine) callHerdr(
 	if !pfmengine.MustLookup(id).HerdrNativePrompt {
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
-	target, err = ProveHerdrTarget(ctx, target)
+	target, agent, screen, err := engine.awaitHerdrNative(ctx, target, &base, lock)
 	if err != nil {
-		base.Status, base.Code = statusUndelivered, CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
-		return base, nil
+		var unsent *herdr.InputNotSentError
+		if errors.As(err, &unsent) {
+			base.Status, base.Code = statusUndelivered, CodeUndelivered
+			base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
+			return base, nil
+		}
+		if errors.Is(err, ErrStartupSplash) {
+			if agent.Agent.Status != herdrUnknown {
+				base.Status = statusUndelivered
+			}
+			base.Code = CodeUndelivered
+			base.Message = fmt.Sprintf(
+				"ABORT: native startup is unknown or has no composer; nothing was typed: %v",
+				err,
+			)
+			return base, nil
+		}
+		return base, err
 	}
 	base.SocketPath, base.Pane = target.SocketPath, target.Pane
-	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
-	if err != nil {
-		return base, fmt.Errorf("herdr read target %q on %q: %w", target.Pane, target.SocketPath, err)
-	}
-	agent, err := decodeHerdrAgent(result, "agent_info", target)
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = err.Error()
+	if base.Code != 0 {
 		return base, nil
 	}
 	switch agent.Agent.Status {
 	case herdrWorking:
+		if request.RequireIdle {
+			base.Busy, base.Code = true, CodeBusy
+			base.Message = "native agent is working; idle-only retry typed nothing"
+			return base, nil
+		}
+		// agent.prompt admits idle agents only; a working agent owns a safe
+		// composer queue, which only an explicit force_now may interrupt.
 		base.Busy = true
-		base.Code = CodeBusy
-		base.Message = "ABORT: target pane is busy; nothing was typed"
-		return base, nil
-	case herdrBlocked, herdrUnknown:
+		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
+	case herdrBlocked:
 		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: target pane is %s; nothing was typed", agent.Agent.Status)
+		base.Message = "ABORT: target pane is blocked; nothing was typed"
 		return base, nil
 	}
-	screen, _, err := herdrCaptureFormat(ctx, target, herdrRecentLines, "")
-	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf("ABORT: native composer could not be checked; nothing was typed: %v", err)
-		return base, nil
+	if IsFooterBusy(id, screen) {
+		base.Busy = true
+		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
-	if !ComposerRowShown(screen) || SelectorLine(screen) != "" || pfmengine.ClaudeTrustDialog(screen) ||
-		IsFooterBusy(id, screen) {
-		base.Code = CodeUndelivered
-		base.Status = statusUndelivered
-		base.Message = "ABORT: native composer is not empty and ready; nothing was typed, existing draft/menu preserved"
-		return base, nil
-	}
-	empty, _, err := ComposerEmpty(screen, func() (string, error) {
-		styled, _, readErr := herdrCaptureFormat(ctx, target, herdrRecentLines, "ansi")
-		if readErr != nil {
-			return "", readErr
-		}
-		if !ComposerRowShown(styled) || SelectorLine(styled) != "" || pfmengine.ClaudeTrustDialog(styled) ||
-			IsFooterBusy(id, styled) || !ComposerBoxEmpty(styled) {
-			return "", fmt.Errorf("herdr composer changed while checking styling")
-		}
-		return styled, nil
-	})
-	if err != nil || !empty || !ComposerBoxEmpty(screen) {
+	empty, err := herdrComposerEmpty(ctx, target, id, screen)
+	if err != nil || !empty {
 		base.Status, base.Code = statusUndelivered, CodeUndelivered
 		base.Message = "ABORT: native composer is not empty and ready; nothing was typed, existing draft/menu preserved"
 		if err != nil {
@@ -113,7 +107,7 @@ func (engine *Engine) callHerdr(
 		return base, nil
 	}
 	base.SocketPath, base.Pane = target.SocketPath, target.Pane
-	result, err = herdr.SeatRequest(ctx, target.SocketPath, "agent.prompt", struct {
+	result, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.prompt", struct {
 		Target string `json:"target"`
 		Text   string `json:"text"`
 	}{target.Pane, prepared.Message})
@@ -144,6 +138,15 @@ func (engine *Engine) callHerdr(
 		base.Message = err.Error()
 		return base, nil
 	}
+	// A syntactically valid acknowledgement can still carry the old idle
+	// snapshot. Only this agent working, or a new completion event, proves
+	// that a turn started; idle state-change sequence alone is not a turn.
+	boundary := agent.Agent.StateChangeSeq
+	if agent.Agent.CompletionSeq != nil && *agent.Agent.CompletionSeq > boundary {
+		boundary = *agent.Agent.CompletionSeq
+	}
+	started := prompted.Agent.Status == herdrWorking ||
+		prompted.Agent.CompletionSeq != nil && *prompted.Agent.CompletionSeq > boundary
 	turn := &herdrTurn{
 		SocketPath: target.SocketPath, Pane: target.Pane,
 		StateChangeSeq: prompted.Agent.StateChangeSeq, CompletionSeq: prompted.Agent.CompletionSeq,
@@ -151,6 +154,15 @@ func (engine *Engine) callHerdr(
 	}
 	base.Status = statusDelivered
 	base.Message = fmt.Sprintf("called LIVE into %q — Herdr agent_prompted", target.Pane)
+	if !started {
+		if proofErr := engine.confirmHerdrTurn(ctx, target, prompted, boundary, lock); proofErr != nil {
+			base.Status = statusDeliveredUnproven
+			base.Message += fmt.Sprintf(" — acknowledged input but proved no started turn: %v", proofErr)
+		} else {
+			turn.SawWorking = true
+			base.Message += " — Herdr turn confirmed"
+		}
+	}
 	for _, warning := range prepared.Warnings {
 		base.Message += " — WARNING: " + warning
 	}
@@ -161,6 +173,69 @@ func (engine *Engine) callHerdr(
 		}
 	}
 	return base, nil
+}
+
+// CaptureHerdrVisible reads a proved pane's current frame, not its recent
+// output history. Dialog checks must not judge an already dismissed selector.
+func CaptureHerdrVisible(ctx context.Context, target Target) (string, error) {
+	return herdrRawCapture(ctx, target, "")
+}
+
+// confirmHerdrTurn observes the acknowledged agent without submitting again.
+// Hook publication can lag agent.prompt's snapshot; idle sequence changes alone
+// still cannot prove a turn. The existing proof-settle budget bounds all reads.
+func (engine *Engine) confirmHerdrTurn(
+	ctx context.Context, target Target, prompted herdrAgentResult, boundary uint64, lock *targetLock,
+) error {
+	ctx, cancel := context.WithTimeout(ctx, engine.options.ProofSettle)
+	defer cancel()
+	deadline := engine.options.Clock.Now().Add(engine.options.ProofSettle)
+	for {
+		if !engine.options.Clock.Now().Before(deadline) {
+			return fmt.Errorf("no started turn within %s", engine.options.ProofSettle)
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("confirm Herdr turn for %s: %w", target.Pane, err)
+		}
+		proved, err := ProveHerdrTarget(ctx, target)
+		if err != nil {
+			return fmt.Errorf("confirm Herdr turn ownership for %s: %w", target.Pane, err)
+		}
+		if proved.Pane != target.Pane || proved.SocketPath != target.SocketPath {
+			return fmt.Errorf("confirm Herdr turn for %s: acknowledged pane changed", target.Pane)
+		}
+		body, err := herdr.SeatRequest(ctx, target.SocketPath, "agent.get", map[string]string{"target": target.Pane})
+		if err != nil {
+			return fmt.Errorf("confirm Herdr turn read for %s: %w", target.Pane, err)
+		}
+		observed, err := decodeHerdrAgent(body, "agent_info", target)
+		if err != nil {
+			return fmt.Errorf("confirm Herdr turn for %s: %w", target.Pane, err)
+		}
+		if observed.Agent.Terminal != prompted.Agent.Terminal ||
+			!sameHerdrSession(prompted.Agent.AgentSession, observed.Agent.AgentSession) {
+			return fmt.Errorf("confirm Herdr turn for %s: agent identity changed", target.Pane)
+		}
+		if observed.Agent.Status == herdrBlocked || observed.Agent.Status == herdrUnknown {
+			return fmt.Errorf("confirm Herdr turn for %s: agent is %s", target.Pane, observed.Agent.Status)
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("confirm Herdr turn for %s: %w", target.Pane, err)
+		}
+		if observed.Agent.Status == herdrWorking && observed.Agent.StateChangeSeq > boundary ||
+			observed.Agent.CompletionSeq != nil && *observed.Agent.CompletionSeq > boundary {
+			return nil
+		}
+		if err := lock.beat(); err != nil {
+			return fmt.Errorf("hold Herdr turn proof lock for %s: %w", target.Pane, err)
+		}
+		if err := engine.options.Clock.Sleep(
+			ctx,
+			min(engine.options.Poll, deadline.Sub(engine.options.Clock.Now())),
+		); err != nil {
+			return fmt.Errorf("no started turn within %s: %w", engine.options.ProofSettle, err)
+		}
+	}
 }
 
 func (engine *Engine) callHerdrRaw(
@@ -179,34 +254,47 @@ func (engine *Engine) callHerdrRaw(
 		)
 		return base, nil
 	}
-	if IsFooterBusy(id, before) {
-		base.Busy, base.Code, base.Message = true, CodeBusy, "ABORT: target pane is busy; nothing was typed"
+	base.Busy = base.Busy || IsFooterBusy(id, before)
+	busy := base.Busy
+	if request.RequireIdle && busy {
+		base.Code, base.Message = CodeBusy, "target is busy; idle-only retry typed nothing"
 		return base, nil
 	}
-	if !ComposerRowShown(before) || SelectorLine(before) != "" {
-		base.Status, base.Code, base.Message = statusUndelivered, CodeUndelivered, "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
-		return base, nil
-	}
-	empty, _, err := ComposerEmpty(before, func() (string, error) {
-		styled, readErr := herdrRawCapture(ctx, target, "ansi")
-		if readErr != nil {
-			return "", readErr
+	for attempt := 0; ; attempt++ {
+		// Check before Escape as well as after each redraw: force_now must
+		// never discard or type over an existing draft, menu or blocked UI.
+		empty, checkErr := herdrComposerEmpty(ctx, target, id, before)
+		if checkErr != nil || !empty {
+			base.Status, base.Code = statusUndelivered, CodeUndelivered
+			base.Message = "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
+			if checkErr != nil {
+				base.Message = fmt.Sprintf(
+					"ABORT: Herdr composer styling could not be checked; nothing was typed: %v",
+					checkErr,
+				)
+			}
+			return base, nil
 		}
-		if !ComposerRowShown(styled) || SelectorLine(styled) != "" || IsFooterBusy(id, styled) {
-			return "", fmt.Errorf("herdr composer changed while checking styling")
+		if !request.ForceNow || !busy || attempt >= engine.options.InterruptTries {
+			break
 		}
-		return styled, nil
-	})
-	if err != nil {
-		base.Code, base.Message = CodeUndelivered, fmt.Sprintf(
-			"ABORT: Herdr composer styling could not be checked; nothing was typed: %v", err,
-		)
-		return base, nil
-	}
-	if !empty {
-		base.Status, base.Code = statusUndelivered, CodeUndelivered
-		base.Message = "ABORT: Herdr composer is not empty and ready; nothing was typed, existing draft/menu preserved"
-		return base, nil
+		if err := lock.beat(); err != nil {
+			return lockLost(base, target.Pane, err), nil
+		}
+		if err := engine.SendKey(ctx, target, "Escape"); err != nil {
+			base.Status, base.Code = statusUndelivered, CodeUndelivered
+			base.Message = fmt.Sprintf("ABORT: Herdr interrupt unconfirmed; nothing was typed: %v", err)
+			return base, nil
+		}
+		base.Interrupted = true
+		engine.sleepContext(ctx, engine.options.Poll)
+		before, err = herdrRawCapture(ctx, target, "")
+		if err != nil {
+			base.Status, base.Code = statusUndelivered, CodeUndelivered
+			base.Message = fmt.Sprintf("ABORT: Herdr capture failed while interrupting; nothing was typed: %v", err)
+			return base, nil
+		}
+		busy = IsFooterBusy(id, before)
 	}
 	prepared, err := engine.prepareLiveMessage(ctx, target, request.Message, false)
 	if err != nil {
@@ -299,6 +387,30 @@ func (engine *Engine) callHerdrRaw(
 	}
 	base.Status, base.Code, base.Message = statusTypedUnconfirmed, CodeUndelivered, "typed Herdr raw text but could not confirm submission; do not retry blindly"
 	return base, nil
+}
+
+// A busy footer does not make the composer unsafe: it is the engine's queue.
+// Native Claude still requires the full bounded box, including wrapped lines.
+func herdrComposerEmpty(ctx context.Context, target Target, id pfmengine.ID, screen string) (bool, error) {
+	ready := func(capture string) bool {
+		return ComposerRowShown(capture) && SelectorLine(capture) == "" &&
+			!pfmengine.ClaudeTrustDialog(capture) &&
+			(!pfmengine.MustLookup(id).HerdrNativePrompt || ComposerBoxEmpty(capture))
+	}
+	if !ready(screen) {
+		return false, nil
+	}
+	empty, _, err := ComposerEmpty(screen, func() (string, error) {
+		styled, readErr := herdrRawCapture(ctx, target, "ansi")
+		if readErr != nil {
+			return "", readErr
+		}
+		if !ready(styled) {
+			return "", fmt.Errorf("herdr composer changed while checking styling")
+		}
+		return styled, nil
+	})
+	return empty, err
 }
 
 // herdrSendText proves the seat, then sends text to the pane it holds now,

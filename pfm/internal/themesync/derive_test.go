@@ -15,16 +15,16 @@ func tokenMap(tokens []herdrToken) map[string]string {
 	return out
 }
 
-func TestDeriveVariantMapsHibiscusOntoHerdrAndTheTerminalPalette(t *testing.T) {
-	hibiscus := hibiscusApplied(t).Primary
+func TestDeriveVariantMapsTokyoNightOntoHerdrAndTheTerminalPalette(t *testing.T) {
+	tokyoNight := tokyoNightApplied(t).Primary
 	wantHerdr := map[string]string{
-		"accent": "#7aa2f7", "panel_bg": "#1a1b26", "sidebar_bg": "#1f2335", "active_row_bg": "#283457",
-		"selection_bg": "#283457", "surface0": "#1f2335", "surface1": "#292e42", "surface_dim": "#1f2335",
-		"overlay0": "#565f89", "overlay1": "#7b84af", "text": "#c0caf5", "subtext0": "#7b84af",
-		"mauve": "#bb9af7", "green": "#7b84af", "yellow": "#7aa2f7", "red": "#e0af68", "blue": "#9ece6a",
-		"teal": "#9ece6a", "peach": "#ec937b",
+		"accent": "#c95cff", "panel_bg": "#0f0f1a", "sidebar_bg": "#221634", "active_row_bg": "#3a2d6b",
+		"selection_bg": "#3a2d6b", "surface0": "#221634", "surface1": "#4a3d6b", "surface_dim": "#221634",
+		"overlay0": "#7a6fb0", "overlay1": "#9b8fd6", "text": "#ff9ed6", "subtext0": "#9b8fd6",
+		"mauve": "#c95cff", "green": "#9b8fd6", "yellow": "#2d9bff", "red": "#ffd23f", "blue": "#00ffa3",
+		"teal": "#00ffa3", "peach": "#ff8c42",
 	}
-	got := tokenMap(hibiscus.herdrTokens())
+	got := tokenMap(tokyoNight.herdrTokens())
 	if len(got) != 19 {
 		t.Fatalf("herdr tokens = %d, want 19", len(got))
 	}
@@ -33,12 +33,12 @@ func TestDeriveVariantMapsHibiscusOntoHerdrAndTheTerminalPalette(t *testing.T) {
 			t.Errorf("herdr %s = %s, want %s", name, got[name], want)
 		}
 	}
-	wantANSI := "#1a1b26 #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #c0caf5 #565f89"
-	if joined := strings.Join(hibiscus.ANSI[:9], " "); joined != wantANSI {
+	wantANSI := "#0f0f1a #ff3d6e #00ffa3 #ffd23f #2d9bff #c95cff #22e1ff #ff9ed6 #7a6fb0"
+	if joined := strings.Join(tokyoNight.ANSI[:9], " "); joined != wantANSI {
 		t.Errorf("ANSI 0-8 = %s, want %s", joined, wantANSI)
 	}
-	if hibiscus.ANSI[15] != "#c0caf5" || hibiscus.ANSI[9] != hibiscus.ANSI[1] {
-		t.Errorf("bright half = %v", hibiscus.ANSI[8:])
+	if tokyoNight.ANSI[15] != "#ff9ed6" || tokyoNight.ANSI[9] != tokyoNight.ANSI[1] {
+		t.Errorf("bright half = %v", tokyoNight.ANSI[8:])
 	}
 }
 
@@ -115,10 +115,10 @@ func contrast(t *testing.T, a, b string) float64 {
 }
 
 // TestHerdrMappingContrastGuard pins P13: on every built-in theme and the
-// hibiscus custom one the muted overlay stays legible on the raised surface
+// shipped tokyo-night one the muted overlay stays legible on the raised surface
 // (overlay0/surface0 >= 2.5) and each state hue on the panel (>= 3).
 func TestHerdrMappingContrastGuard(t *testing.T) {
-	variants := map[string]Variant{"custom:hibiscus-night": hibiscusApplied(t).Primary}
+	variants := map[string]Variant{"custom:tokyo-night": tokyoNightApplied(t).Primary}
 	for name := range builtinThemes {
 		variant, _, err := builtinVariant(name)
 		if err != nil {
@@ -127,7 +127,7 @@ func TestHerdrMappingContrastGuard(t *testing.T) {
 		variants[name] = variant
 	}
 	if len(variants) != 7 {
-		t.Fatalf("guard covers %d themes, want the 6 built-ins and hibiscus", len(variants))
+		t.Fatalf("guard covers %d themes, want the 6 built-ins and tokyo-night", len(variants))
 	}
 	for name, variant := range variants {
 		tokens := tokenMap(variant.herdrTokens())
@@ -234,14 +234,14 @@ func customTokens(t *testing.T, raw string) map[string]string {
 func stateThemes(t *testing.T) map[string]map[string]string {
 	t.Helper()
 	themes := map[string]map[string]string{
-		"custom:hibiscus-night": customTokens(t, fixtureHibiscus),
-		"custom:fixture-funk":   customTokens(t, fixtureFunk),
+		"custom:tokyo-night":  customTokens(t, shippedClaudeTheme(t, tokyoNightName)),
+		"custom:fixture-funk": customTokens(t, fixtureFunk),
 	}
 	for name, tokens := range builtinThemes {
 		themes[name] = tokens
 	}
 	if len(themes) != 8 {
-		t.Fatalf("state hues cover %d themes, want the 6 built-ins, hibiscus and the funk fixture", len(themes))
+		t.Fatalf("state hues cover %d themes, want the 6 built-ins, tokyo-night and the funk fixture", len(themes))
 	}
 	return themes
 }
@@ -265,7 +265,7 @@ func TestStateHuesComeFromTheThemeAndClearEverySidebarBackground(t *testing.T) {
 	// is 3:1 on all of those, so the hover row gives way.
 	honoured := map[string]int{
 		"dark": 4, "light": 4, "dark-ansi": 3, "light-ansi": 4, "dark-daltonized": 4, "light-daltonized": 4,
-		"custom:hibiscus-night": 4, "custom:fixture-funk": 4,
+		"custom:tokyo-night": 4, "custom:fixture-funk": 4,
 	}
 	for name, tokens := range stateThemes(t) {
 		t.Run(name, func(t *testing.T) {

@@ -12,9 +12,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 )
 
-// profileCheck is one profile file as `pfm theme check` reports it: the VS
-// Code theme install would render from it, or the error install would refuse
-// it with.
+// profileCheck is one theme directory as `pfm theme check` reports it: the
+// VS Code theme install would render from it, or the error install would
+// refuse it with.
 type profileCheck struct {
 	Path                string `json:"path"`
 	OK                  bool   `json:"ok"`
@@ -32,9 +32,9 @@ type checkOutcome struct {
 	Profiles []profileCheck `json:"profiles"`
 }
 
-// check is `pfm theme check [file…]`: every check install runs on a profile
-// (installer.CheckProfile), run on the files named or, with none, on every
-// profile the recorded source clone ships, writing nothing. Exit 0 only when
+// check is `pfm theme check [dir…]`: every check install runs on a theme
+// (installer.CheckProfile), run on the directories named or, with none, on
+// every theme the recorded source clone ships, writing nothing. Exit 0 only when
 // every profile passes; a profile list that could not be read is exit 1,
 // never an empty pass.
 func (run runner) check(args []string) int {
@@ -79,9 +79,9 @@ func (run runner) check(args []string) int {
 	return code
 }
 
-// sourceProfiles are the profiles of the source clone pfm install recorded;
-// a missing marker or an empty templates/themes/ is an error naming where it
-// looked.
+// sourceProfiles are the theme directories of the source clone pfm install
+// recorded; a missing marker or an empty templates/themes/ is an error naming
+// where it looked.
 func (run runner) sourceProfiles() ([]string, error) {
 	env, err := run.deps.Env()
 	if err != nil {
@@ -89,14 +89,17 @@ func (run runner) sourceProfiles() ([]string, error) {
 	}
 	repo, err := paths.ReadSourceRepoMarker(env.Home)
 	if err != nil {
-		return nil, fmt.Errorf("check: no profile named and no source clone to scan (%w); name the profile files", err)
+		return nil, fmt.Errorf(
+			"check: no theme named and no source clone to scan (%w); name the theme directories",
+			err,
+		)
 	}
 	files, err := installer.SourceProfiles(repo)
 	if err != nil {
 		return nil, fmt.Errorf("check: %w", err)
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("check: no profile in %s", filepath.Join(repo, "templates", "themes"))
+		return nil, fmt.Errorf("check: no theme in %s", filepath.Join(repo, "templates", "themes"))
 	}
 	return files, nil
 }

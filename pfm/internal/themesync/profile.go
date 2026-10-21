@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 // claudeTokenSource is Claude Code's theme token ids, one per line, `#` lines
@@ -44,9 +46,10 @@ func parseClaudeTokens(source string) map[string]bool {
 	return ids
 }
 
-// Profile is one theme profile, templates/themes/{name}.json: Claude Code's
-// palette (name, base, overrides; the only keys Claude ever sees) and the
-// optional per-surface pins beside it, which win over what derive fills.
+// Profile is one theme profile, assembled from templates/themes/{name}/
+// (ReadProfileDir): Claude Code's palette (name, base, overrides; the only
+// keys Claude ever sees) and the optional per-surface pins beside it, which
+// win over what derive fills.
 type Profile struct {
 	Name      string            `json:"name"`
 	Base      string            `json:"base,omitempty"`
@@ -56,12 +59,73 @@ type Profile struct {
 
 // SurfacePins are a profile's per-surface values, each keyed by the name the
 // surface's renderer emits: Tmux by tmux option (tmuxOptions), Herdr by
-// custom token (herdrTokens), VSCode by contract key (vscodeContract colors
-// and chrome). A pin naming a key its renderer does not emit is an error.
+// custom token (herdrTokens) and tab state (herdr.TabGlyphKeys), VSCode by
+// contract key (vscodeContract colors and chrome). A pin naming a key its
+// renderer does not emit is an error.
 type SurfacePins struct {
 	Tmux   map[string]string `json:"tmux,omitempty"`
-	Herdr  map[string]string `json:"herdr,omitempty"`
+	Herdr  *HerdrPins        `json:"herdr,omitempty"`
 	VSCode *VSCodePins       `json:"vscode,omitempty"`
+}
+
+// herdrTabGlyphsKey is the one key of surfaces.herdr that is not a custom
+// token: the tab status glyphs, an object of glyph frames by tab state, each
+// a string (one still frame) or an array of frames (herdr.TabFrames).
+const herdrTabGlyphsKey = "tabGlyphs"
+
+// HerdrPins are surfaces.herdr, one JSON object: Tokens, every key but
+// tabGlyphs, are Herdr custom tokens by name; TabGlyphs, the tabGlyphs
+// object, are the tab status painter's glyphs by herdr.TabGlyphKeys key.
+type HerdrPins struct {
+	Tokens    map[string]string
+	TabGlyphs map[string]herdr.TabFrames
+}
+
+// UnmarshalJSON reads surfaces.herdr: every value a string but tabGlyphs, an
+// object of glyph frames. An empty half stays nil, as canonicalPins writes it, so
+// a state.json round trip compares equal.
+func (pins *HerdrPins) UnmarshalJSON(content []byte) error {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(content, &keys); err != nil {
+		return fmt.Errorf("herdr pins: %w", err)
+	}
+	*pins = HerdrPins{}
+	for key, raw := range keys {
+		if key == herdrTabGlyphsKey {
+			if err := json.Unmarshal(raw, &pins.TabGlyphs); err != nil {
+				return fmt.Errorf("herdr %s: an object of glyph frames by tab state: %w", key, err)
+			}
+			continue
+		}
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return fmt.Errorf("herdr pin %q: %w", key, err)
+		}
+		if pins.Tokens == nil {
+			pins.Tokens = map[string]string{}
+		}
+		pins.Tokens[key] = value
+	}
+	if len(pins.TabGlyphs) == 0 {
+		pins.TabGlyphs = nil
+	}
+	return nil
+}
+
+// MarshalJSON writes the one object UnmarshalJSON reads.
+func (pins HerdrPins) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(pins.Tokens)+1)
+	for key, value := range pins.Tokens {
+		out[key] = value
+	}
+	if len(pins.TabGlyphs) > 0 {
+		out[herdrTabGlyphsKey] = pins.TabGlyphs
+	}
+	content, err := json.Marshal(out)
+	if err != nil {
+		return nil, fmt.Errorf("encode herdr pins: %w", err)
+	}
+	return content, nil
 }
 
 // VSCodePins pin the contract's terminal colours and window chrome. Theme is

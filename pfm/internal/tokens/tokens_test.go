@@ -58,6 +58,24 @@ func intended(text string) string {
 	text = strings.ReplaceAll(text, "TOKEN_AUDIT_PRICES ", "--prices ")
 	// R6: no cost ledger on the machine, so the report adds its one line after the cross-check block
 	text = crossCheckBlock.ReplaceAllString(text, "${1}\n"+noLedgerLine)
+	// The Node goldens predate #43's explicit coverage and billing assumptions.
+	// Keep their numeric/transcript expectations, extending only the new provenance surfaces.
+	if strings.HasPrefix(text, "TOKEN AUDIT ·") && !strings.HasPrefix(text, "TOKEN AUDIT · codex ·") {
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			if strings.HasPrefix(line, "data gaps: ") {
+				gaps := strings.TrimPrefix(line, "data gaps: ")
+				if gaps == "none" {
+					gaps = ""
+				} else {
+					gaps += " · "
+				}
+				lines[i] = "data gaps: " + gaps + backgroundGap + " · " + billingGap
+			}
+		}
+		text = strings.Join(lines, "\n")
+	}
+	text = strings.ReplaceAll(text, `],"served_from":`, `],"billing":null,"served_from":`)
 	return nodeError.ReplaceAllStringFunc(text, func(match string) string {
 		parts := nodeError.FindStringSubmatch(match)
 		return nodeOps[parts[2]] + " " + parts[3] + ": " + parts[1]
@@ -302,6 +320,12 @@ func compareText(t *testing.T, what, want, got string) {
 func TestIntendedRewritesTheNodeDeltas(t *testing.T) {
 	cases := []struct{ node, pfm string }{
 		{"token-audit: --since wants", "pfm tokens: --since wants"},
+		{
+			"TOKEN AUDIT · fixture\ndata gaps: none\n",
+			"TOKEN AUDIT · fixture\ndata gaps: " + backgroundGap + " · " + billingGap + "\n",
+		},
+		{`{"sources":[],"served_from":"embedded"}`, `{"sources":[],"billing":null,"served_from":"embedded"}`},
+		{"TOKEN AUDIT · codex · fixture\ndata gaps: none", "TOKEN AUDIT · codex · fixture\ndata gaps: none"},
 		{
 			"token-audit: TOKEN_AUDIT_PRICES /t/x.json: ENOENT: no such file or directory, open '/t/x.json'",
 			"pfm tokens: --prices /t/x.json: open /t/x.json: no such file or directory",

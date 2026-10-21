@@ -37,6 +37,8 @@ func HookTemplates(home string) []Hook {
 		},
 		{Event: HookEventUserPromptSubmit, Command: binary + " usage-hook", Name: "usage"},
 		{Event: "SessionEnd", Command: binary + " internal clear-kill", Name: "clear-kill"},
+		{Event: "SessionStart", Matcher: "clear", Command: binary + " internal clear-name", Name: "clear-name-start"},
+		{Event: HookEventUserPromptSubmit, Command: binary + " internal clear-name", Name: "clear-name-prompt"},
 		{Event: "SessionEnd", Command: binary + " internal exit-close", Name: "exit-close"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal git-guard", Name: "git-guard"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal store-guard", Name: "store-guard"},
@@ -79,6 +81,8 @@ func HookTemplates(home string) []Hook {
 			Async:   true,
 		},
 		{Event: "Stop", Command: herdrCommand(binary, herdr.EventIdle), Name: "herdr-idle"},
+		{Event: "SubagentStart", Command: herdrCommand(binary, herdr.EventAgentStart), Name: "herdr-agent-start"},
+		{Event: "SubagentStop", Command: herdrCommand(binary, herdr.EventAgentStop), Name: "herdr-agent-stop"},
 		{Event: "SessionEnd", Command: herdrCommand(binary, herdr.EventEnd), Name: "herdr-end"},
 	}
 }

@@ -11,11 +11,11 @@ import (
 )
 
 func TestHerdrRenderAutoForcedDarkAndLightSide(t *testing.T) {
-	hibiscus := hibiscusApplied(t)
-	dark := herdrRender(hibiscus, 7)
+	tokyoNight := tokyoNightApplied(t)
+	dark := herdrRender(tokyoNight, 7)
 	for _, want := range []string{
-		"# >>> pfm theme · custom:hibiscus-night · gen 7 >>>\n[theme]\n",
-		"name = \"tokyo-night\"\nauto_switch = false\n\n[theme.custom]\naccent = \"#7aa2f7\"\npanel_bg = \"#1a1b26\"\n",
+		"# >>> pfm theme · custom:tokyo-night · gen 7 >>>\n[theme]\n",
+		"name = \"tokyo-night\"\nauto_switch = false\n\n[theme.custom]\naccent = \"#c95cff\"\npanel_bg = \"#0f0f1a\"\n",
 	} {
 		if !strings.Contains(dark, want) {
 			t.Errorf("dark block lacks %q:\n%s", want, dark)
@@ -71,7 +71,7 @@ const herdrWithTheme = "onboarding = false\n\n[ui]\nstatus_indicators = \"dots\"
 	"[theme]\nname = \"solarized\"\nauto_switch = false\n\n# VS Code shortcuts\n# second line\n[keys]\nnew_tab = \"prefix+c\"\n"
 
 func TestHerdrInstallReplacesTheThemeSpanAndRemoveRestoresBytes(t *testing.T) {
-	block := herdrRender(hibiscusApplied(t), 2)
+	block := herdrRender(tokyoNightApplied(t), 2)
 	updated, snapshot, err := herdrInstall(herdrWithTheme, block)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestHerdrInstallReplacesTheThemeSpanAndRemoveRestoresBytes(t *testing.T) {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 	if strings.Contains(updated, "name = \"solarized\"") ||
-		!strings.Contains(updated, "# >>> pfm theme · custom:hibiscus-night · gen 2 >>>") {
+		!strings.Contains(updated, "# >>> pfm theme · custom:tokyo-night · gen 2 >>>") {
 		t.Fatalf("theme span not replaced:\n%s", updated)
 	}
 	if !strings.Contains(updated, "# <<< pfm theme <<<\n\n# VS Code shortcuts\n# second line\n[keys]\n") {
@@ -94,7 +94,7 @@ func TestHerdrInstallReplacesTheThemeSpanAndRemoveRestoresBytes(t *testing.T) {
 
 func TestHerdrInstallWithCustomSubtablesAndNoTrailingNewline(t *testing.T) {
 	original := "[theme]\nname = \"catppuccin\"\n[theme.custom]\naccent = \"#fff\"\n[theme.custom.light]\ntext = \"#000\""
-	updated, snapshot, err := herdrInstall(original, herdrRender(hibiscusApplied(t), 1))
+	updated, snapshot, err := herdrInstall(original, herdrRender(tokyoNightApplied(t), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestHerdrInstallWithCustomSubtablesAndNoTrailingNewline(t *testing.T) {
 
 func TestHerdrInstallWithNoThemeAppendsAndRemoveStripsExactly(t *testing.T) {
 	for _, original := range []string{"", "a = 1\n", "a = 1", "a = 1\n\n", "[keys]\nx = 1\n"} {
-		block := herdrRender(hibiscusApplied(t), 1)
+		block := herdrRender(tokyoNightApplied(t), 1)
 		updated, snapshot, err := herdrInstall(original, block)
 		if err != nil {
 			t.Fatalf("%q: %v", original, err)
@@ -126,12 +126,12 @@ func TestHerdrInstallWithNoThemeAppendsAndRemoveStripsExactly(t *testing.T) {
 }
 
 func TestHerdrReplaceSwapsAnExistingBlockInPlaceAndKeepsUserEdits(t *testing.T) {
-	first, snapshot, err := herdrInstall(herdrWithTheme, herdrRender(hibiscusApplied(t), 1))
+	first, snapshot, err := herdrInstall(herdrWithTheme, herdrRender(tokyoNightApplied(t), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	edited := strings.Replace(first, "new_tab = \"prefix+c\"", "new_tab = \"prefix+t\"", 1)
-	second, replaced := herdrReplace(edited, herdrRender(hibiscusApplied(t), 2))
+	second, replaced := herdrReplace(edited, herdrRender(tokyoNightApplied(t), 2))
 	if !replaced || strings.Count(second, ">>> pfm theme") != 1 || !strings.Contains(second, "gen 2 >>>") {
 		t.Fatalf("replace = %v\n%s", replaced, second)
 	}
@@ -152,7 +152,7 @@ func TestHerdrInstallRefusesShapesItCannotRestoreByteForByte(t *testing.T) {
 	}
 	for name, original := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := herdrInstall(original, herdrRender(hibiscusApplied(t), 1)); err == nil {
+			if _, _, err := herdrInstall(original, herdrRender(tokyoNightApplied(t), 1)); err == nil {
 				t.Fatal("expected an error, got nil")
 			}
 		})
@@ -160,7 +160,7 @@ func TestHerdrInstallRefusesShapesItCannotRestoreByteForByte(t *testing.T) {
 }
 
 func TestHerdrExtractReadsTheStampedGeneration(t *testing.T) {
-	block := herdrRender(hibiscusApplied(t), 9)
+	block := herdrRender(tokyoNightApplied(t), 9)
 	updated, _, err := herdrInstall(herdrWithTheme, block)
 	if err != nil {
 		t.Fatal(err)
@@ -177,14 +177,14 @@ func TestHerdrExtractReadsTheStampedGeneration(t *testing.T) {
 const herdrSidebar = "[ui.sidebar.agents]\nrows = [\n  [\"$pfm_working\", \"agent\"],\n  [\"$pfm_blocked\"],\n" +
 	"  [\"$pfm_done\", \"$pfm_unknown\"]\n]\n\n[ui.sidebar.spaces]\nrows = [[\"name\", \"$pfm_working\"]]\n"
 
-// hibiscusStyled is herdrSidebar after an apply under hibiscus-night: working is
+// tokyoNightStyled is herdrSidebar after an apply under tokyo-night: working is
 // the theme's blue, blocked its yellow, done its success, and unknown its
-// inactive #565f89 lifted to 3:1 on the sidebar backgrounds.
-func hibiscusStyled(t *testing.T) string {
+// inactive #7a6fb0 lifted to 3:1 on the sidebar backgrounds.
+func tokyoNightStyled(t *testing.T) string {
 	t.Helper()
 	out := herdrSidebar
 	for token, hue := range map[string]string{
-		"pfm_working": "#7aa2f7", "pfm_blocked": "#e0af68", "pfm_done": "#9ece6a", "pfm_unknown": "#747ea8",
+		"pfm_working": "#2d9bff", "pfm_blocked": "#ffd23f", "pfm_done": "#00ffa3", "pfm_unknown": "#9289be",
 	} {
 		out = strings.ReplaceAll(out, `"$`+token+`"`, `{ token = "$`+token+`", fg = "`+hue+`" }`)
 	}
@@ -202,15 +202,15 @@ func TestHerdrApplyStylesTheSidebarRowsAndOffRestoresThemBare(t *testing.T) {
 	before := herdrConfigWithSidebar(h)
 	wantVerdict(t, h.on(), "herdr", VerdictInSync, "")
 	got := h.read(".config/herdr/config.toml")
-	if !strings.Contains(got, hibiscusStyled(t)) {
-		t.Fatalf("sidebar rows not styled with the hibiscus hues:\n%s", got)
+	if !strings.Contains(got, tokyoNightStyled(t)) {
+		t.Fatalf("sidebar rows not styled with the tokyo-night hues:\n%s", got)
 	}
 	wantVerdict(t, h.status(), "herdr", VerdictInSync, "")
 
-	h.write(".config/herdr/config.toml", strings.Replace(got, `fg = "#e0af68"`, `fg = "#111111"`, 1))
+	h.write(".config/herdr/config.toml", strings.Replace(got, `fg = "#ffd23f"`, `fg = "#111111"`, 1))
 	wantVerdict(t, h.status(), "herdr", VerdictDrift, "sidebar row pfm token styles differ")
 	wantVerdict(t, h.sync(false), "herdr", VerdictInSync, "")
-	if !strings.Contains(h.read(".config/herdr/config.toml"), hibiscusStyled(t)) {
+	if !strings.Contains(h.read(".config/herdr/config.toml"), tokyoNightStyled(t)) {
 		t.Fatalf("drifted fg not rewritten:\n%s", h.read(".config/herdr/config.toml"))
 	}
 
@@ -234,7 +234,7 @@ func TestHerdrOffStripsStyledRowsEvenWhenThePfmBlockIsGone(t *testing.T) {
 	herdrConfigWithSidebar(h)
 	h.on()
 	styled := h.read(".config/herdr/config.toml")
-	if !strings.Contains(styled, hibiscusStyled(t)) {
+	if !strings.Contains(styled, tokyoNightStyled(t)) {
 		t.Fatalf("on did not style the sidebar rows:\n%s", styled)
 	}
 	block, _, found := herdrExtract(styled)

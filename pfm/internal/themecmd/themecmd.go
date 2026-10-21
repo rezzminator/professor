@@ -45,10 +45,11 @@ const usage = `usage: pfm theme [status|sync|on|off|list|use|check] [options]
   on                 follow Claude Code's theme: install the follower and theme every surface (--json)
   off                restore every surface exactly as it was and stop syncing (--json)
   list               the themes use accepts, * marking the current one (--json)
-  use {name}         set the theme of every Claude account, then sync; new chats follow (--json)
-  check [file...]    run install's profile checks, render each VS Code theme and hold its text to the
-                     contrast floors, writing nothing; TextMate scope names are not checked against any
-                     grammar; no file: every profile in the source clone's templates/themes/ (--json)`
+  use {name}         set the theme of every Claude account, then sync; unpinned chats follow live (--json)
+  check [dir...]     run install's checks on each theme directory (its file set, each file's canonical form
+                     and grouping, the profile), render each VS Code theme and hold its text to the contrast
+                     floors, writing nothing; TextMate scope names are not checked against any grammar; no
+                     dir: every theme in the source clone's templates/themes/ (--json)`
 
 // Ops is themesync as the verb calls it; tests inject fakes.
 type Ops struct {
@@ -459,6 +460,9 @@ func (run runner) use(args []string) int {
 	case !syncOn:
 		fmt.Fprintln(run.stdout, "theme sync is off: run pfm theme on to repaint tmux, herdr and VS Code")
 	}
-	fmt.Fprintln(run.stdout, "new chats follow; run /theme in open chats")
+	fmt.Fprintln(
+		run.stdout,
+		"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm chat reload in each one",
+	)
 	return code
 }

@@ -41,6 +41,10 @@ const KeyClaudeCostLedger = "claude.costLedger"
 // KeyClaudeGptAgents is the machine-wide opt-in for the gpt agent family.
 const KeyClaudeGptAgents = "claude.gptAgents"
 
+// KeyClaudeSubagentStatuslineTrace is the machine-wide switch of the sub-agent status line's
+// trace: true launches Claude with PFM_SUBAGENT_STATUSLINE_TRACE=1 in its settings env.
+const KeyClaudeSubagentStatuslineTrace = "claude.subagentStatuslineTrace"
+
 // KeyDefault describes a machine-config leaf and the value shown by the
 // tracked example when the key is unset. Roster arrays are intentionally
 // absent: accounts are discovered from the local machine.
@@ -56,6 +60,7 @@ func Keys() []KeyDefault {
 		{keyTheme, "default"},
 		{"chat.backend", DefaultChatBackend},
 		{"chat.herdrTabStatus", DefaultHerdrTabStatus},
+		{"chat.herdrTabPriority", false},
 		{keyStateDB, "~/.local/state/pfm/pfm.db"},
 		{keyStateCacheDB, "~/.local/state/pfm/pfm-cache.db"},
 		{"claude.permissionMode", PermissionBypass},
@@ -63,6 +68,7 @@ func Keys() []KeyDefault {
 		{"claude.theme", nil},
 		{"claude.cache1h", true},
 		{"claude.nativeCursor", false},
+		{"claude.remoteControl", true},
 		{"claude.systemPrompt", nil},
 		{"claude.webSearchesPerSession", int64(9007199254740991)},
 		{"claude.autoCompactWindow", int64(100000)},
@@ -77,6 +83,7 @@ func Keys() []KeyDefault {
 		{KeyClaudeEnv, map[string]any{}},
 		{KeyClaudeCostLedger, true},
 		{KeyClaudeGptAgents, false},
+		{KeyClaudeSubagentStatuslineTrace, false},
 		{"codex.yolo", true},
 		{"codex.binary", pfmengine.MustLookup(pfmengine.Codex).Binary},
 		{"opencode.binary", pfmengine.MustLookup(pfmengine.OpenCode).Binary},

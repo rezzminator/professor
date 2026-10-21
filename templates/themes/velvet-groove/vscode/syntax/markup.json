@@ -1,0 +1,188 @@
+{
+  "0031": {
+    "name": "Liner notes: headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff75a0"
+    }
+  },
+  "0032": {
+    "name": "Sunset stripe: heading 1",
+    "scope": [
+      "heading.1.markdown",
+      "heading.1.markdown entity.name.section.markdown",
+      "heading.1.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff75a0"
+    }
+  },
+  "0033": {
+    "name": "Sunset stripe: heading 2",
+    "scope": [
+      "heading.2.markdown",
+      "heading.2.markdown entity.name.section.markdown",
+      "heading.2.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff9d5c"
+    }
+  },
+  "0034": {
+    "name": "Sunset stripe: heading 3",
+    "scope": [
+      "heading.3.markdown",
+      "heading.3.markdown entity.name.section.markdown",
+      "heading.3.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f4c76c"
+    }
+  },
+  "0035": {
+    "name": "Sunset stripe: heading 4",
+    "scope": [
+      "heading.4.markdown",
+      "heading.4.markdown entity.name.section.markdown",
+      "heading.4.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b9dd7c"
+    }
+  },
+  "0036": {
+    "name": "Sunset stripe: heading 5",
+    "scope": [
+      "heading.5.markdown",
+      "heading.5.markdown entity.name.section.markdown",
+      "heading.5.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#5cd6c8"
+    }
+  },
+  "0037": {
+    "name": "Sunset stripe: heading 6",
+    "scope": [
+      "heading.6.markdown",
+      "heading.6.markdown entity.name.section.markdown",
+      "heading.6.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#adb3ff"
+    }
+  },
+  "0038": {
+    "name": "Liner notes: bold",
+    "scope": [
+      "markup.bold",
+      "punctuation.definition.bold.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffcbd6"
+    }
+  },
+  "0039": {
+    "name": "Liner notes: italic",
+    "scope": [
+      "markup.italic",
+      "punctuation.definition.italic.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#eea2d4"
+    }
+  },
+  "0040": {
+    "name": "Liner notes: strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#b38e93"
+    }
+  },
+  "0042": {
+    "name": "Liner notes: link targets",
+    "scope": [
+      "markup.underline.link",
+      "constant.other.reference.link",
+      "markup.underline.link.markdown",
+      "markup.underline.link.image.markdown"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#5cd6c8"
+    }
+  },
+  "0043": {
+    "name": "Liner notes: code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.fenced_code",
+      "markup.raw",
+      "markup.inline.raw.string.markdown",
+      "markup.raw.block.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb898"
+    }
+  },
+  "0044": {
+    "name": "Liner notes: quotes",
+    "scope": [
+      "markup.quote"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ecd0cf"
+    }
+  },
+  "0046": {
+    "name": "Diff: inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#81e992"
+    }
+  },
+  "0047": {
+    "name": "Diff: deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff7a6b"
+    }
+  },
+  "0048": {
+    "name": "Diff: changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f4c76c"
+    }
+  }
+}

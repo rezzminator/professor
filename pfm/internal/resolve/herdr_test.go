@@ -231,6 +231,12 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 			}
 			identity, err := identifier.Identify(context.Background())
 			if !tc.want {
+				if tc.name == "omitted" {
+					if err == nil || !strings.Contains(err.Error(), "foreground_processes missing or null") {
+						t.Fatalf("missing process probe rendered as no seat: identity=%+v err=%v", identity, err)
+					}
+					return
+				}
 				if tc.name == "legacy-recycled" || strings.HasPrefix(tc.name, "saved-host-") ||
 					tc.name == "recorded-probe-failed" || tc.name == "history-live-host" || tc.name == "live-terminal-ambiguous" {
 					if err == nil {

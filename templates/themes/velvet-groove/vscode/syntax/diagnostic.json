@@ -1,0 +1,23 @@
+{
+  "0029": {
+    "name": "Flame: invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#ff7a6b"
+    }
+  },
+  "0030": {
+    "name": "Struck: deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#c9a3a6"
+    }
+  }
+}

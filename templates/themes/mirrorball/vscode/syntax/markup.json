@@ -1,0 +1,211 @@
+{
+  "0041": {
+    "name": "Headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown",
+      "markup.heading.setext"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fa7bc6"
+    }
+  },
+  "0042": {
+    "name": "Glint: bold",
+    "scope": [
+      "markup.bold"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffb3dc"
+    }
+  },
+  "0043": {
+    "name": "Lilac: italic",
+    "scope": [
+      "markup.italic"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#d6c4ff"
+    }
+  },
+  "0044": {
+    "name": "Smoke: strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#8e7ea4"
+    }
+  },
+  "0046": {
+    "name": "Sky beam: URLs",
+    "scope": [
+      "markup.underline.link"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0047": {
+    "name": "Amber: inline code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.fenced_code",
+      "markup.raw",
+      "markup.inline.raw.string"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f0ad67"
+    }
+  },
+  "0048": {
+    "name": "Sky beam: code fence language",
+    "scope": [
+      "fenced_code.block.language"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0049": {
+    "name": "Smoke: quotes",
+    "scope": [
+      "markup.quote",
+      "punctuation.definition.quote.begin.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b9abc9"
+    }
+  },
+  "0051": {
+    "name": "Gold beam: math",
+    "scope": [
+      "markup.math"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fce353"
+    }
+  },
+  "0052": {
+    "name": "Tiles: tables",
+    "scope": [
+      "markup.table punctuation.separator",
+      "punctuation.separator.table.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#aa9cbf"
+    }
+  },
+  "0053": {
+    "name": "Cyan beam: inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0054": {
+    "name": "Rose: deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8fa3"
+    }
+  },
+  "0055": {
+    "name": "Gold beam: changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fce353"
+    }
+  },
+  "0069": {
+    "name": "Heading 1",
+    "scope": [
+      "heading.1.markdown entity.name.section.markdown",
+      "heading.1.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.1.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fa7bc6"
+    }
+  },
+  "0070": {
+    "name": "Heading 2",
+    "scope": [
+      "heading.2.markdown entity.name.section.markdown",
+      "heading.2.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.2.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0071": {
+    "name": "Heading 3",
+    "scope": [
+      "heading.3.markdown entity.name.section.markdown",
+      "heading.3.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fce353"
+    }
+  },
+  "0072": {
+    "name": "Heading 4",
+    "scope": [
+      "heading.4.markdown entity.name.section.markdown",
+      "heading.4.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b294f5"
+    }
+  },
+  "0073": {
+    "name": "Heading 5",
+    "scope": [
+      "heading.5.markdown entity.name.section.markdown",
+      "heading.5.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#a6e7a7"
+    }
+  },
+  "0074": {
+    "name": "Heading 6",
+    "scope": [
+      "heading.6.markdown entity.name.section.markdown",
+      "heading.6.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffa07a"
+    }
+  }
+}

@@ -412,7 +412,7 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 				request.Home,
 			) + `"]}'`
 			if marker == "clone recorded" {
-				want += " PFM_OPENCODE_FLEET_FILE=" + Quote(paths.ComposedHarnessPromptIn(clone, pfmengine.OpenCode))
+				want += " PFM_OPENCODE_FLEET_FILE=" + Quote(paths.GeneratedHarnessPromptIn(clone, pfmengine.OpenCode))
 			}
 			want += " PFM_OPENCODE_SYSTEM_FILE=" + Quote(prompt) + " opencode"
 			if !strings.Contains(run, want) {

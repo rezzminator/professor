@@ -97,7 +97,7 @@ The main chat chooses at dispatch; a foreman chooses for the rare child it spawn
 | Choice | Decided by | Rule |
 | --- | --- | --- |
 | Foreman tier | difficulty and ambiguity, never size | `flights-foreman-sonnet`: the path is clear, the pattern is in the code · `flights-foreman`: design choices, ambiguity, unfamiliar code, an unknown cause, several modules, the toughest work |
-| Child tier | what the area needs | `flights-foreman-sonnet`: a clear path, the pattern is in the code · `flights-foreman`: design, debugging, judgment |
+| Child tier | what the area needs | `flights-foreman-sonnet`: a clear path, the pattern is in the code · `flights-foreman`: design, debugging, judgment · `documenter`: docs · `pcm`: prompt files |
 | Lander children | the lander's inventory PLAN, computed from the diff and the spec files | hunters k = min(4, ceil(production diff lines / 600)) · spec walkers per spec with 10+ numbered rows · sub-landers by inventory row ranges |
 
 The lander itself has no tiers: `flights-lander` lands every worktree.

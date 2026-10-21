@@ -62,6 +62,7 @@ type Prices struct {
 	Table
 	Origin
 	Override *Override
+	Billing  Billing
 }
 
 // Stamp is the last check that confirmed the clone file: when, the sha256 of
@@ -134,7 +135,7 @@ func fetchedBefore(a, b Table) bool {
 // published table. A missing override file is none; an unreadable or invalid
 // one is an error naming it.
 func ServeTable(published Table, origin Origin, pfmConfigPath string) (Prices, error) {
-	prices := Prices{Table: published, Origin: origin}
+	prices := Prices{Table: published, Origin: origin, Billing: defaultBilling()}
 	prices.Rows = make([]Row, len(published.Rows))
 	position := make(map[string]int, len(published.Rows))
 	for i, row := range published.Rows {
@@ -156,10 +157,12 @@ func ServeTable(published Table, origin Origin, pfmConfigPath string) (Prices, e
 	if err != nil {
 		return Prices{}, fmt.Errorf("prices override %s: %w", path, err)
 	}
-	overrides, err := decodeOverride(content, path)
+	overrides, billing, err := decodeOverride(content, path)
 	if err != nil {
 		return Prices{}, err
 	}
+	prices.Billing = billing
+	applyBilling(&prices)
 	for _, row := range overrides {
 		row.Source = SourceOverride
 		if at, ok := position[row.Key]; ok {

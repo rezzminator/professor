@@ -28,8 +28,8 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 		}
 	}()
 	client := connectInMemory(t, service.Server())
-	_ = callTool[FindOutput](t, client.clientSession, "find", FindInput{
-		Excerpt: "alpha unique",
+	_ = callTool[LastOutput](t, client.clientSession, "last", LastInput{
+		Target: "alpha",
 	})
 	runtime.GC()
 	beforeGoroutines := runtime.NumGoroutine()
@@ -37,13 +37,13 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 	beforeRSS := rssBytes(t)
 	started := time.Now()
 	for iteration := 0; iteration < 200; iteration++ {
-		output := callTool[FindOutput](
+		output := callTool[LastOutput](
 			t,
 			client.clientSession,
-			"find",
-			FindInput{Excerpt: "alpha unique"},
+			"last",
+			LastInput{Target: "alpha"},
 		)
-		if output.Count != 1 || output.Candidates[0].ID != "alpha" {
+		if !strings.Contains(output.Text, "alpha answer") {
 			t.Fatalf("iteration %d cross-talk: %+v", iteration, output)
 		}
 	}
@@ -96,10 +96,10 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			query := "alpha unique"
+			query := "alpha"
 			want := "alpha"
 			if worker%2 == 1 {
-				query = "beta unique"
+				query = "beta"
 				want = "beta"
 			}
 			for iteration := 0; iteration < 25; iteration++ {
@@ -110,9 +110,9 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 				result, err := clients[worker].clientSession.CallTool(
 					ctx,
 					&mcp.CallToolParams{
-						Name: "find",
-						Arguments: FindInput{
-							Excerpt: query,
+						Name: "last",
+						Arguments: LastInput{
+							Target: query,
 						},
 					},
 				)
@@ -122,10 +122,9 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 					return
 				}
 				content, _ := json.Marshal(result.StructuredContent)
-				var output FindOutput
+				var output LastOutput
 				if err := json.Unmarshal(content, &output); err != nil ||
-					output.Count != 1 ||
-					output.Candidates[0].ID != want {
+					!strings.Contains(output.Text, want+" answer") {
 					errors <- fmt.Errorf(
 						"worker %d cross-talk: %s err=%v",
 						worker,

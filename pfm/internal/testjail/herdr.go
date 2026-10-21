@@ -1,6 +1,38 @@
 package testjail
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
+)
+
+// StageHerdrShell supplies the config and wrapper of an installed Herdr host.
+func StageHerdrShell(t *testing.T, home string) string {
+	t.Helper()
+	path := filepath.Join(home, ".config", "herdr", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := paths.HerdrShellWrapper(home)
+	if err := os.MkdirAll(filepath.Dir(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteExecutable(wrapper, []byte("#!/bin/sh\nexec /bin/sh \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := fmt.Sprintf(
+		"[terminal]\n# >>> pfm herdr shell >>>\ndefault_shell = %q\n# <<< pfm herdr shell <<<\n",
+		wrapper,
+	)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 // HerdrPaneInfo returns the required Herdr 0.9.5 PaneInfo identity fields.
 // Optional fields belong to the test exercising them, not this common fixture.

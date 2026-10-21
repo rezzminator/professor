@@ -60,14 +60,18 @@ COVER_DIR ?= $(REPO)/tmp/cover
 LINT_BASE ?= origin/main
 # Package concurrency follows the fence's CPU cap: PFM_FENCE_TEST_P when the caller sets it
 # (infra/fence/shared.sh hands it in), else the container's cgroup quota (/sys/fs/cgroup/cpu.max,
-# rounded up), else 6 — the fenced unit captures in docs/dev/testing/concurrency-sweep.md.
-# The tagged e2e suite keeps its own -p 1 in dev.sh.
-FENCE_CPU_CAP := $(shell awk '$$1 != "max" && $$2 > 0 { q = $$1 / $$2; p = int(q); if (p < q) p++; print p }' /sys/fs/cgroup/cpu.max 2>/dev/null)
-TEST_P := $(or $(PFM_FENCE_TEST_P),$(FENCE_CPU_CAP),6)
-TESTFLAGS ?= -p $(TEST_P) -parallel 4
+# rounded up), else the configured quota or available cores with no quota — the fenced unit captures in docs/dev/testing/concurrency-sweep.md.
+# The tagged e2e suite has independent PFM_FENCE_E2E_* knobs in dev.sh.
+# Resolve only when a test target expands TESTFLAGS, never for build/install/help.
+# Explicit make variables must reach $(shell) on older GNU make too; quote
+# their values as data, so malformed input reaches validation, not the shell.
+fence_test_env = $(if $(filter undefined,$(origin $(1))),,$(1)='$(subst ','"'"',$($(1)))')
+FENCE_TEST_CONFIG = $(shell $(call fence_test_env,PFM_FENCE_TEST_P) $(call fence_test_env,PFM_FENCE_TEST_PARALLEL) bash -c '. "$(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../infra/fence/shared.sh)" && fence_config_values || exit 1; p="$$(fence_config_test_p)" || exit 1; printf "%s %s\n" "$$p" "$$PFM_FENCE_TEST_PARALLEL"' || echo CONFIG-INVALID)
+TEST_P = $(word 1,$(FENCE_TEST_CONFIG))
+TESTFLAGS ?= $(if $(findstring CONFIG-INVALID,$(FENCE_TEST_CONFIG)),$(error invalid fence test configuration; see named error above),-p $(TEST_P) -parallel $(word 2,$(FENCE_TEST_CONFIG)))
 
-.PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags timing sweep install host-install rollback \
-        mcp-restart mcp-status stale sweep-stale clean
+.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover testflags timing sweep install host-install rollback \
+        agents-plan agents-install mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
 	@echo "pfm targets — run as: make <target>"
@@ -84,11 +88,6 @@ build: ## Compile to tmp/bin/pfm.dev (a local artifact, never the shipped path);
 	@mkdir -p $(dir $(LOCAL))
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
 	@echo "built: $(LOCAL)"
-
-# The composer runs here, so it builds for the host even when a cross build
-# exports GOOS/GOARCH (else: "exec format error").
-prompts: ## Compose the tracked harness prompts from their parts
-	GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run ./harness-prompts/compose
 
 tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
 	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh
@@ -175,6 +174,12 @@ sweep: ## Measure the fenced concurrency sweep and publish its report
 	bash scripts/test-sweep.sh --report "$(FENCE_TIMING)/sweep-fence.tsv"
 
 # -------------------------------------------------------------- install ----
+
+agents-plan: ## Preview machine agent generation and registry links without rebuilding binaries or restarting services
+	engine-sync global --source-repo "$(REPO)" --plan
+
+agents-install: ## Generate and link machine agents without rebuilding binaries or restarting services; preview with agents-plan first
+	engine-sync global --source-repo "$(REPO)"
 
 install: ## Swap in a new build, restart the daemon, sweep obsolete processes, and keep compatible stdio proxies
 	@$(MAKE) --no-print-directory host-install

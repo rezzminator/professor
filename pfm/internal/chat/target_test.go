@@ -279,6 +279,59 @@ func TestSeatIdentityIsOnlyTheLastRung(t *testing.T) {
 	}
 }
 
+func TestCodexSeatIdentityKeepsNativeAddressAndRejectsUnusableRows(t *testing.T) {
+	values := paths.Values{TmuxDir: "/jail/tmux"}
+	native := compose.Row{
+		Kind: compose.LiveCodex, ID: "thread-native", Name: "Native", SessionName: "Native",
+		Backend: "herdr", SeatID: "seat-cx", HerdrWorkspace: "w7",
+		Socket: "/jail/native/herdr.sock", PaneID: "w7:pW",
+	}
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*compose.Row)
+		duplicate bool
+		want      bool
+	}{
+		{name: "native", want: true},
+		{name: "unnamed", mutate: func(row *compose.Row) { row.SessionName = "" }, want: true},
+		{name: "relative", mutate: func(row *compose.Row) { row.Socket = "herdr.sock" }},
+		{name: "dead", mutate: func(row *compose.Row) { row.Kind = compose.ResumeCodex }},
+		{name: "killed", mutate: func(row *compose.Row) { row.Killed = true }},
+		{name: "backend failure", mutate: func(row *compose.Row) { row.BackendError = "HERDR UNREACHABLE" }},
+		{name: "wrong engine", mutate: func(row *compose.Row) { row.Kind = compose.LiveClaude }},
+		{name: "no pane", mutate: func(row *compose.Row) { row.PaneID = "" }},
+		{name: "ambiguous", duplicate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := native
+			if tc.mutate != nil {
+				tc.mutate(&row)
+			}
+			rows := []compose.Row{row}
+			if tc.duplicate {
+				rows = append(rows, row)
+			}
+			identity, found := codexSeatIdentity(rows, values, native.ID)
+			if found != tc.want {
+				t.Fatalf("identity = %+v found=%t, want found=%t", identity, found, tc.want)
+			}
+			if !found {
+				return
+			}
+			session := row.SessionName
+			if session == "" {
+				session = row.SeatID
+			}
+			if identity.Backend != row.Backend || identity.SeatID != row.SeatID ||
+				identity.HerdrWorkspace != row.HerdrWorkspace || identity.SocketPath != row.Socket ||
+				identity.SocketName != "herdr.sock" || identity.Pane != row.PaneID ||
+				identity.Session != session || identity.ID != row.ID || identity.Engine != "cx" {
+				t.Fatalf("native identity = %+v, want native row %+v", identity, row)
+			}
+		})
+	}
+}
+
 // TestTargetReportsAScanThatCouldNotLook drives the law through a real scan:
 // with the fleet's index database unopenable, Target returns a *TargetError
 // carrying the failure, not ErrUnknownChat — and a healthy scan that finds
@@ -325,5 +378,48 @@ func TestHerdrRosterPreservesTargetOwnedAddress(t *testing.T) {
 		target.SeatID != "seat1" ||
 		target.HerdrWorkspace != "w6" {
 		t.Fatalf("target=%+v code=%d err=%v", target, code, err)
+	}
+}
+
+// A launch identity is provisional; a resolved handle must keep following the
+// same durable seat after a reporter publishes the real thread (for either engine).
+func TestResolvedHandleSurvivesNativeSessionReplacement(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.LiveCodex, compose.LiveClaude} {
+		t.Run(string(compose.EngineForKind(kind)), func(t *testing.T) {
+			testjail.Fleet(t)
+			t.Setenv("TMUX_TMPDIR", t.TempDir())
+			ctx := context.Background()
+			row := compose.Row{
+				Backend: "herdr", SeatID: "durable-seat", ID: "provisional-session",
+				Name: "new-chat", Kind: kind, Socket: filepath.Join(t.TempDir(), "herdr.sock"), PaneID: "w1:p2",
+			}
+			rows := []compose.Row{row}
+			scan := func(context.Context) ([]compose.Row, error) { return rows, nil }
+			initial, found, err := ResolveIn(ctx, row.Name, scan, io.Discard, nil)
+			if err != nil || !found {
+				t.Fatalf("initial resolution: found=%t err=%v", found, err)
+			}
+			rows[0].ID, rows[0].Name, rows[0].Path = "reported-thread", "renamed-chat", "/fixture/reported.jsonl"
+			current, found, err := ResolveIn(ctx, initial.Handle(), scan, io.Discard, nil)
+			if err != nil || !found || current.ID != "reported-thread" || current.Path != "/fixture/reported.jsonl" {
+				t.Fatalf("follow after identity swap: chat=%+v found=%t err=%v", current, found, err)
+			}
+			target, code, detail, err := rosterTarget(resolvedPaths(t), rows, "", initial.Handle())
+			if err != nil || code != 0 || target.SeatID != row.SeatID || target.ID != "reported-thread" {
+				t.Fatalf("delivery after identity swap: target=%+v code=%d detail=%q err=%v", target, code, detail, err)
+			}
+			// Neither a reused name, nor a new thread, nor a label spoofing the handle
+			// may capture a reference to a seat which has genuinely gone.
+			rows[0].SeatID, rows[0].Name, rows[0].ID = "replacement-seat", initial.Handle(), initial.ID
+			if got, found, err := ResolveIn(ctx, initial.Handle(), scan, io.Discard, nil); err != nil || found {
+				t.Fatalf("gone seat redirected: chat=%+v found=%t err=%v", got, found, err)
+			}
+			rows = nil
+			if _, _, err := ResolveIn(ctx, initial.Handle(), func(context.Context) ([]compose.Row, error) {
+				return nil, errors.New("fleet read failed")
+			}, io.Discard, nil); err == nil || !strings.Contains(err.Error(), "fleet read failed") {
+				t.Fatalf("failed scan rendered as absence: %v", err)
+			}
+		})
 	}
 }

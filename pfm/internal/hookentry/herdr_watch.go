@@ -61,6 +61,9 @@ type herdrWatchTiming struct{ poll, lifetime time.Duration }
 // routeHerdrState sends the watch verb to the transcript watch and every other
 // verb to the reporter.
 func routeHerdrState(args []string, stdin io.Reader, stderr io.Writer, deps herdrDeps) int {
+	if len(args) != 0 && args[0] == herdrAgentsWatch {
+		return watchHerdrAgents(args[1:], stderr, deps)
+	}
 	if len(args) != 0 && args[0] == herdrWatchVerb {
 		return watchForHerdr(
 			args[1:],
@@ -333,6 +336,17 @@ func (watch *herdrWatch) report() error {
 	reporter := watch.reporter
 	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
 	defer cancel()
+	// Take Claude's activity lock before the tmux and bridge locks, just as a
+	// real hook does. Re-read the tmux state after acquiring both locks.
+	initial, err := reporter.readState(ctx, reporter.session)
+	if err != nil {
+		return err
+	}
+	activityUnlock, err := reporter.lock(ctx, reporter.activityKey(initial.SessionID))
+	if err != nil {
+		return err
+	}
+	defer activityUnlock()
 	unlock, err := reporter.lock(ctx, reporter.session)
 	if err != nil {
 		return err
@@ -342,13 +356,34 @@ func (watch *herdrWatch) report() error {
 	if err != nil {
 		return err
 	}
-	if state.Seq != watch.seq || state.State != string(herdr.StateBlocked) {
+	if state.Seq != watch.seq || state.State != string(herdr.StateBlocked) || state.SessionID != initial.SessionID {
 		return nil
 	}
 	reporter.seq = watch.seq + 1
 	payload := herdrPayload{SessionID: state.SessionID}
+	activity, err := reporter.readActivity(state.SessionID)
+	if err != nil {
+		return err
+	}
+	// Held-block hooks can advance only the activity record. Never lower its
+	// stale-event fence when the transcript watch clears the older tmux block.
+	reporter.seq = max(reporter.seq, activity.Stored.Seq+1)
+	wasWaiting := activity.Stored.MainStoppedAt != 0 && len(activity.Stored.Agents) > 0
+	action, err := reporter.planActivity(payload, &activity.Stored)
+	if err != nil {
+		return err
+	}
+	action.stored.Agents = activity.Stored.Agents
+	action.stored.MainStoppedAt = activity.Stored.MainStoppedAt
+	action.stored.Seq = reporter.seq
+	activity.Stored = action.stored
+	activity.TmuxSocket = reporter.options.socket
+	activity.TmuxSession = reporter.session
+	reporter.activity = &activity
+	reporter.activityAction = action
 	if reporter.themeOn() {
 		reporter.themeState(ctx, payload)
 	}
-	return reporter.event(ctx, reporter.session, state, payload)
+	err = reporter.event(ctx, reporter.session, state, payload)
+	return errors.Join(err, reporter.finishActivity(state.SessionID, activity, wasWaiting))
 }

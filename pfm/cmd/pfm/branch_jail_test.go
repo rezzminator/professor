@@ -191,6 +191,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	joined := strings.Join(strings.Fields(string(arguments)), " ")
 	for _, want := range []string{
 		"--resume " + parentID, "--fork-session", "--model opus[1m]", "--name Parent seat-branch",
+		"--remote-control Parent seat-branch",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("claude argv %q lacks %q", joined, want)

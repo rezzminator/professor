@@ -1,0 +1,101 @@
+{
+  "0057": {
+    "name": "Bronze · diff headers",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.index",
+      "meta.diff.header.git",
+      "meta.diff.header.from-file",
+      "meta.diff.header.to-file"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#d29f73"
+    }
+  },
+  "0058": {
+    "name": "Pale steel · diff ranges",
+    "scope": [
+      "meta.diff.range",
+      "meta.diff.range.unified",
+      "punctuation.definition.range.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b4d6ef"
+    }
+  },
+  "0067": {
+    "name": "Cooling ramp 1 · molten: JSON keys at depth 1",
+    "scope": [
+      "meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json punctuation.support.type.property-name.end.json",
+      "support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9044"
+    }
+  },
+  "0068": {
+    "name": "Cooling ramp 2 · gold: JSON keys at depth 2",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#face68"
+    }
+  },
+  "0069": {
+    "name": "Cooling ramp 3 · pale straw: JSON keys at depth 3",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e0dca7"
+    }
+  },
+  "0070": {
+    "name": "Cooling ramp 4 · bronze: JSON keys at depth 4",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#cf976b"
+    }
+  },
+  "0071": {
+    "name": "Cooling ramp 5 · temper violet: JSON keys at depth 5",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#bf91cd"
+    }
+  },
+  "0072": {
+    "name": "Cooling ramp 6 · temper blue: JSON keys at depth 6",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.begin.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name.end.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#79b0e8"
+    }
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "0049": {
+    "name": "Diff: headers",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.index",
+      "meta.diff.header.from-file",
+      "meta.diff.header.to-file"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cd6c8"
+    }
+  },
+  "0050": {
+    "name": "Diff: ranges",
+    "scope": [
+      "meta.diff.range"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#adb3ff"
+    }
+  },
+  "0051": {
+    "name": "Key depth 1",
+    "scope": [
+      "meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b5d3ff"
+    }
+  },
+  "0052": {
+    "name": "Key depth 2",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cd6c8"
+    }
+  },
+  "0053": {
+    "name": "Key depth 3",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b9dd7c"
+    }
+  },
+  "0054": {
+    "name": "Key depth 4",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#adb3ff"
+    }
+  },
+  "0055": {
+    "name": "Key depth 5",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#eea2d4"
+    }
+  },
+  "0056": {
+    "name": "Key depth 6",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb898"
+    }
+  }
+}

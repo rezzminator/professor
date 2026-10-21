@@ -462,6 +462,7 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	if want := "1.0K/1.0M Σ$0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
+	// the payload's 1.0K shows 0% of the window, so the gauge reads the transcript's call
 	if want := "176.5K/1.0M Σ$1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
 	}
@@ -483,29 +484,31 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		lines []string
-		want  string // the gauge's tokens and what follows it, ANSI stripped
+		want  string // what follows the gauge, ANSI stripped
 	}{
 		{
 			// 100K+10K at $2, 150K read at $0.2, 1M out at $10: 0.22 + 0.03 + 10.
 			name: "the base tier, a cache write billed as input",
 			lines: gpt(`{"input_tokens":100000,"output_tokens":1000000,"cache_read_input_tokens":150000,` +
 				`"cache_creation_input_tokens":10000}`),
-			want: "260.0K/1.0M Σ$10.25/260.0K/1.0M/0",
+			want: "Σ$10.25/260.0K/1.0M/0 API-eq",
 		},
 		{
 			name: "a model no row prices stays unpriced",
 			lines: []string{
 				`{"type":"assistant","message":{"id":"g-1","model":"gpt-nonesuch-9","usage":` +
-					`{"input_tokens":1000,"output_tokens":100}}}`, turnEnded,
+					`{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0}}}`, turnEnded,
 			},
-			want: "1.0K/1.0M Σ$?/1.0K/100/0",
+			want: "Σ$?/1.0K/100/0 API-eq",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
 			// the row is read inside the minute after the turn ended, before a finished row collapses
 			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
-			if !strings.Contains(got, tc.want+"│") {
+			// the payload's 1K beats the transcript's call; the catalog this test never
+			// writes leaves the gpt window unknown
+			if !strings.Contains(got, "1.0K/? ctx missing "+tc.want+"│") {
 				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
 			}
 		})
@@ -533,5 +536,44 @@ func TestRenderSubagentsReadsTheLedgerUnderTheInjectedEnv(t *testing.T) {
 	rows := renderLedgerRows(t, ledgerDir, ledgerSampleSession, session, ledgerAgentRoot)
 	if want := "$0.95/740.0K/3.2K/"; !strings.Contains(rows[ledgerAgentRoot], want) {
 		t.Fatalf("row = %q, want the injected ledger's %q", rows[ledgerAgentRoot], want)
+	}
+}
+
+func TestRenderGatewayZeroLedgerWithNativeChild(t *testing.T) {
+	const final = `{"type":"assistant","message":{"id":"g","model":"gpt-6-sol","usage":{"input_tokens":100000,"output_tokens":10000,"cache_read_input_tokens":50000}}}`
+	session := nestedSession(
+		t,
+		map[string][]string{"p": {final}, "c": {spendChildResponse}},
+		map[string]string{"p": "", "c": "p"},
+	)
+	dir := t.TempDir()
+	writeSpendLedger(t, dir, []costledger.Row{
+		{
+			RequestID:       "g",
+			SessionID:       spendSession,
+			AgentID:         "p",
+			Model:           "gpt-6-sol",
+			InputTokens:     100000,
+			CacheReadTokens: 50000,
+			OutputTokens:    10000,
+			CostUSDMicros:   micros(0),
+		},
+		{
+			RequestID:     "c",
+			SessionID:     spendSession,
+			AgentID:       "c",
+			ParentAgentID: "p",
+			Model:         "claude-sonnet-5-5",
+			InputTokens:   1000,
+			OutputTokens:  100,
+			CostUSDMicros: micros(3000),
+		},
+	})
+	rows := renderLedgerRows(t, dir, spendSession, session, "p", "c")
+	if !strings.Contains(rows["p"], "Σ$0.31/151.0K/10.1K/1 API-eq") {
+		t.Fatalf("gateway parent lost price/native child: %q", rows["p"])
+	}
+	if !strings.Contains(rows["c"], "Σ$0.00/1.0K/100/1") || strings.Contains(rows["c"], "API-eq") {
+		t.Fatalf("native child changed: %q", rows["c"])
 	}
 }

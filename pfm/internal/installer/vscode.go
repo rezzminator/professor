@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -659,36 +661,11 @@ func (installer *engine) vscodeSettingsPaths() []string {
 	if installer.options.vscodeSettingsPaths != nil {
 		return cleanUniquePaths(installer.options.vscodeSettingsPaths)
 	}
-	home := installer.options.Home
 	platform, _ := installer.vscodePlatform()
-	var canonical string
-	var candidates []string
-	if platform == vscodePlatformOSX {
-		canonical = filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
-		candidates = []string{
-			canonical,
-			filepath.Join(home, "Library", "Application Support", "Code - Insiders", "User", "settings.json"),
-			filepath.Join(home, "Library", "Application Support", "VSCodium", "User", "settings.json"),
-		}
-	} else {
-		configRoot := installer.env().Get("XDG_CONFIG_HOME")
-		if !filepath.IsAbs(configRoot) {
-			configRoot = filepath.Join(home, ".config")
-		}
-		canonical = filepath.Join(configRoot, "Code", "User", "settings.json")
-		candidates = []string{
-			canonical,
-			filepath.Join(configRoot, "Code - Insiders", "User", "settings.json"),
-			filepath.Join(configRoot, "VSCodium", "User", "settings.json"),
-			filepath.Join(home, ".vscode-server", "data", "Machine", "settings.json"),
-			filepath.Join(home, ".vscode-server-insiders", "data", "Machine", "settings.json"),
-		}
-	}
-	if portable := installer.env().Get("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
-		// VSCODE_PORTABLE is the portable data directory itself, not the
-		// install folder holding it (see vscodeExtensionLinks).
-		candidates = append(candidates, filepath.Join(portable, "user-data", "User", "settings.json"))
-	}
+	candidates := paths.VSCodeSettingsCandidates(
+		installer.options.Home, platform == vscodePlatformOSX, installer.env(),
+	)
+	canonical := candidates[0]
 	var found []string
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {

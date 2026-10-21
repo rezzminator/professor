@@ -1,0 +1,64 @@
+{
+  "0008": {
+    "name": "Sand dollar: punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "punctuation.accessor",
+      "punctuation.definition.block",
+      "punctuation.definition.parameters",
+      "punctuation.definition.arguments",
+      "punctuation.definition.array",
+      "punctuation.definition.dictionary",
+      "punctuation.separator.namespace",
+      "punctuation.definition.tag",
+      "keyword.operator.type.annotation",
+      "punctuation.definition.typeparameters",
+      "punctuation.separator.dictionary.key-value.json",
+      "punctuation.definition.markdown",
+      "punctuation.definition.list_item.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9bc0cf"
+    }
+  },
+  "0012": {
+    "name": "Staghorn coral: template expression marks",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "punctuation.definition.interpolation",
+      "punctuation.section.interpolation",
+      "constant.character.format.placeholder.other.python punctuation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa28f"
+    }
+  },
+  "0050": {
+    "name": "Lagoon teal: quote bar",
+    "scope": [
+      "punctuation.definition.quote.begin.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#47dfc9"
+    }
+  },
+  "0051": {
+    "name": "Staghorn coral: list markers",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa28f"
+    }
+  }
+}

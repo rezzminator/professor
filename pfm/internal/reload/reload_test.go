@@ -836,8 +836,8 @@ func TestRunAnnouncesTheHoldAndTheRebootOnThePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantWaiting := "pfm reload: waiting for this turn to end, then rebooting this chat"
-	wantRebooting := "pfm reload: rebooting now"
+	wantWaiting := "pfm chat reload: waiting for this turn to end, then rebooting this chat"
+	wantRebooting := "pfm chat reload: rebooting now"
 	if len(tmux.displays) != 2 || tmux.displays[0] != wantWaiting || tmux.displays[1] != wantRebooting {
 		t.Fatalf("pane displays=%#v, want [%q, %q]", tmux.displays, wantWaiting, wantRebooting)
 	}

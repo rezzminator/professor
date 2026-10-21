@@ -1,0 +1,183 @@
+{
+  "0003": {
+    "name": "Aurora Pink · keywords",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.other",
+      "keyword.declaration",
+      "storage.type.function",
+      "keyword.control.conditional",
+      "keyword.control.loop",
+      "keyword.control.switch",
+      "keyword.control.trycatch",
+      "keyword.control.exception",
+      "keyword.operator.new",
+      "keyword.operator.expression",
+      "keyword.operator.logical.python",
+      "keyword.operator.word",
+      "keyword.other.using",
+      "keyword.control.directive",
+      "keyword.control.at-rule",
+      "keyword.control.default",
+      "keyword.control.case"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fe66b7"
+    }
+  },
+  "0004": {
+    "name": "Corona Magenta · exits",
+    "scope": [
+      "keyword.control.flow",
+      "keyword.control.return",
+      "keyword.control.flow.return",
+      "keyword.control.flow.break",
+      "keyword.control.flow.continue",
+      "keyword.control.flow.throw",
+      "keyword.control.flow.yield",
+      "keyword.control.yield",
+      "keyword.control.await",
+      "keyword.control.flow.await",
+      "keyword.control.goto",
+      "keyword.control.defer.go",
+      "keyword.control.go"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff2fc8"
+    }
+  },
+  "0005": {
+    "name": "UV Violet · storage & modifiers",
+    "scope": [
+      "storage",
+      "storage.type",
+      "storage.modifier",
+      "keyword.storage",
+      "storage.type.class",
+      "storage.type.struct",
+      "storage.type.interface",
+      "storage.type.enum",
+      "storage.type.type",
+      "storage.type.namespace",
+      "storage.type.trait",
+      "storage.type.impl",
+      "storage.type.module",
+      "storage.modifier.async",
+      "keyword.other.fn.rust",
+      "keyword.function.go",
+      "keyword.struct.go",
+      "keyword.interface.go",
+      "keyword.type.go",
+      "keyword.var.go",
+      "keyword.const.go",
+      "keyword.package.go",
+      "keyword.import.go",
+      "storage.type.function.python",
+      "storage.type.class.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c77dff"
+    }
+  },
+  "0006": {
+    "name": "UV Violet · imports",
+    "scope": [
+      "keyword.control.import",
+      "keyword.control.from",
+      "keyword.control.export",
+      "keyword.control.as",
+      "keyword.import",
+      "keyword.other.import",
+      "keyword.control.import.python",
+      "keyword.control.module",
+      "keyword.other.crate"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c77dff"
+    }
+  },
+  "0007": {
+    "name": "Hot pink · operators",
+    "scope": [
+      "keyword.operator",
+      "keyword.operator.assignment",
+      "keyword.operator.arithmetic",
+      "keyword.operator.comparison",
+      "keyword.operator.relational",
+      "keyword.operator.logical",
+      "keyword.operator.bitwise",
+      "keyword.operator.ternary",
+      "keyword.operator.spread",
+      "keyword.operator.rest",
+      "keyword.operator.type",
+      "keyword.operator.optional",
+      "keyword.operator.channel.go",
+      "keyword.operator.address.go",
+      "keyword.operator.pointer",
+      "keyword.operator.borrow",
+      "storage.type.function.arrow",
+      "punctuation.accessor",
+      "punctuation.separator.key-value",
+      "punctuation.separator.annotation",
+      "keyword.operator.type.annotation",
+      "punctuation.separator.namespace"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8fcb"
+    }
+  },
+  "0016": {
+    "name": "Corona Magenta · regex quantifiers & anchors",
+    "scope": [
+      "keyword.operator.quantifier.regexp",
+      "keyword.control.anchor.regexp",
+      "keyword.operator.or.regexp",
+      "keyword.operator.negation.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff2fc8"
+    }
+  },
+  "0018": {
+    "name": "Amber · units",
+    "scope": [
+      "keyword.other.unit",
+      "keyword.other.unit.px.css",
+      "keyword.other.unit.percentage.css",
+      "keyword.other.unit.suffix"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffb347"
+    }
+  },
+  "0070": {
+    "name": "Arc Yellow · SQL types",
+    "scope": [
+      "storage.type.sql",
+      "support.type.sql"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb347"
+    }
+  },
+  "0072": {
+    "name": "Pink glow · git commit",
+    "scope": [
+      "keyword.other.git-rebase",
+      "entity.name.function.git-rebase"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fe66b7"
+    }
+  }
+}

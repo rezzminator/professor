@@ -34,6 +34,10 @@
 # non-zero; neither function ever falls back to a host-local execution.
 
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/image-key.sh"
+# Central defaults; invalid supplied configuration never falls back.
+. "$(dirname -- "${BASH_SOURCE[0]}")/../shared.sh" || return 1
+fence_config_values || return 1
+
 
 lane_fence_env() { # resolve PFM_DEV_* once, from the worktree root
   local root="$1"

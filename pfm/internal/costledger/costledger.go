@@ -50,6 +50,35 @@ type Row struct {
 	Speed               string `json:"speed"`
 	Effort              string `json:"effort"`
 	Join                string `json:"join"`
+	TraceID             string `json:"trace_id,omitempty"`
+	SpanID              string `json:"span_id,omitempty"`
+}
+
+// Identity is a real request id, else an llm span's own OTLP trace/span pair.
+// Logs carry the enclosing span context, reused across calls, so it is not their identity.
+// Prefixes distinguish internal key namespaces, never fabricated request ids.
+func (r Row) Identity() string {
+	if r.RequestID != "" {
+		return "request:" + r.RequestID
+	}
+	if r.Join == JoinSpan && validOTLPID(r.TraceID, 32) && validOTLPID(r.SpanID, 16) {
+		return "span:" + strings.ToLower(r.TraceID) + ":" + strings.ToLower(r.SpanID)
+	}
+	return ""
+}
+
+func validOTLPID(id string, size int) bool {
+	if len(id) != size || strings.Trim(id, "0") == "" {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Ledger is one session's deduped rows in first-appearance order.
@@ -99,13 +128,57 @@ func Path(dir, sessionID string) (string, error) {
 	return filepath.Join(dir, sessionID+".jsonl"), nil
 }
 
+// ObservationsDir holds session-attributed rows without request ids, outside
+// the legacy session-file contract consumed by callmeter.
+func ObservationsDir(dir string) string { return filepath.Join(dir, "observations") }
+
+// SessionIDs lists session ledgers, including request-less observations.
+func SessionIDs(dir string) ([]string, error) {
+	seen := map[string]bool{}
+	var ids []string
+	for _, root := range []string{dir, ObservationsDir(dir)} {
+		entries, err := os.ReadDir(root)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("cost ledger: list %s: %w", root, err)
+		}
+		for _, entry := range entries {
+			id, ok := strings.CutSuffix(entry.Name(), ".jsonl")
+			if entry.IsDir() || !ok || !ValidSessionID(id) || seen[id] {
+				continue
+			}
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func ledgerPath(dir string, row Row) (string, error) {
+	if row.SessionID == "" {
+		return filepath.Join(dir, "unattributed", "records.jsonl"), nil
+	}
+	if row.RequestID == "" {
+		return Path(ObservationsDir(dir), row.SessionID)
+	}
+	return Path(dir, row.SessionID)
+}
+
+// Unattributed reads observations for which telemetry provided no session. They are not
+// assigned to a chat; rows without correlation remain separate, potentially overlapping observations.
+func Unattributed(dir string) (Ledger, error) {
+	return readLedger(filepath.Join(dir, "unattributed", "records.jsonl"), "")
+}
+
 // Append writes row as one line, one write(2) on an O_APPEND descriptor, to its session's file
 // under dir, creating the directory 0700 and the file 0600.
 func Append(dir string, row Row) error {
-	if row.RequestID == "" {
-		return errors.New("cost ledger: a row needs a request_id")
+	if row.RequestID == "" && joinRank(row.Join) == 0 {
+		return fmt.Errorf("cost ledger: row has invalid join %q", row.Join)
 	}
-	path, err := Path(dir, row.SessionID)
+	path, err := ledgerPath(dir, row)
 	if err != nil {
 		return err
 	}
@@ -114,8 +187,8 @@ func Append(dir string, row Row) error {
 		return fmt.Errorf("cost ledger: encode row %s: %w", row.RequestID, err)
 	}
 	line = append(line, '\n')
-	if err := os.MkdirAll(dir, dirMode); err != nil {
-		return fmt.Errorf("cost ledger: create %s: %w", dir, err)
+	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
+		return fmt.Errorf("cost ledger: create directory for %s: %w", path, err)
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, fileMode)
 	if err != nil {
@@ -151,6 +224,21 @@ func ForSession(dir, sessionID string) (Ledger, error) {
 	if err != nil {
 		return Ledger{}, err
 	}
+	ledger, err := readLedger(path, sessionID)
+	if err != nil {
+		return Ledger{}, err
+	}
+	observations, err := readLedger(filepath.Join(ObservationsDir(dir), sessionID+".jsonl"), sessionID)
+	if err != nil {
+		return Ledger{}, err
+	}
+	ledger.Present = ledger.Present || observations.Present
+	ledger.Faults += observations.Faults
+	ledger.Rows = append(ledger.Rows, observations.Rows...)
+	return ledger, nil
+}
+
+func readLedger(path, sessionID string) (Ledger, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Ledger{}, nil
@@ -169,14 +257,20 @@ func ForSession(dir, sessionID string) (Ledger, error) {
 			continue
 		}
 		var row Row
-		if err := json.Unmarshal(line, &row); err != nil || row.RequestID == "" {
+		if err := json.Unmarshal(line, &row); err != nil || !bytes.HasPrefix(line, []byte("{")) ||
+			row.SessionID != sessionID || (row.RequestID == "" && joinRank(row.Join) == 0) {
 			ledger.Faults++
 			continue
 		}
-		at, seen := index[row.RequestID]
+		id := row.Identity()
+		if id == "" {
+			ledger.Rows = append(ledger.Rows, row)
+			continue
+		}
+		at, seen := index[id]
 		switch {
 		case !seen:
-			index[row.RequestID] = len(ledger.Rows)
+			index[id] = len(ledger.Rows)
 			ledger.Rows = append(ledger.Rows, row)
 		case joinRank(row.Join) >= joinRank(ledger.Rows[at].Join):
 			ledger.Rows[at] = row
@@ -222,6 +316,12 @@ func (l Ledger) Side(held func(requestID string) bool) []Row {
 // Prune removes the *.jsonl files under dir whose mtime is older than maxAge before now and
 // returns how many it removed. A missing dir is nothing to prune.
 func Prune(dir string, now time.Time, maxAge time.Duration) (int, error) {
+	removed, err := pruneDir(dir, now, maxAge)
+	observations, observationErr := pruneDir(ObservationsDir(dir), now, maxAge)
+	return removed + observations, errors.Join(err, observationErr)
+}
+
+func pruneDir(dir string, now time.Time, maxAge time.Duration) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil

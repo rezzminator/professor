@@ -75,7 +75,7 @@ func composeParts(engineLongName string) [3]string {
 // single blank line, so a part that gains or loses a trailing newline cannot
 // move the seams — a composed prompt is the three parts and the two seams,
 // and nothing else. Composition lives HERE because more than one caller needs
-// the same bytes: the installer stages them per engine, writes Codex's copy
+// the same bytes: the installer generates them per engine, writes Codex's copy
 // into config.toml, and a Codex --agent-role seat carries Codex's copy ahead of its role (codexprompt).
 func Composed(engineLongName string) ([]byte, error) {
 	var sections [3][]byte
@@ -83,6 +83,9 @@ func Composed(engineLongName string) ([]byte, error) {
 		raw, err := ReadPart(name)
 		if err != nil {
 			return nil, err
+		}
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return nil, fmt.Errorf("compose %s harness prompt: empty part %s", engineLongName, name)
 		}
 		sections[index] = bytes.TrimRight(raw, "\n")
 	}

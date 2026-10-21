@@ -22,7 +22,7 @@ type gitGuardHookInput struct {
 }
 
 const (
-	// gitGuardExemptAgent is the one agent type that writes shared git state.
+	// gitGuardExemptAgent is the canonical writer; its exact native twin is also exempt.
 	gitGuardExemptAgent = "gitter"
 	gitGuardWorktreeSh  = ".claude/scripts/worktree.sh"
 	gitGuardOnlyGitter  = `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.`
@@ -100,7 +100,7 @@ type gitGuardBlock struct {
 // GitGuard is the PreToolUse hook on Bash that denies a write to shared git
 // state (worktrees, history, branches and tags, remotes, the index, wide
 // working-tree destruction, repository settings) to every caller but the
-// gitter agent. A read or decode failure is fail-open to stderr; a command
+// gitter and gpt-gitter agents. A read or decode failure is fail-open to stderr; a command
 // that mentions git (gitGuardMentionsGit) but does not parse is denied, and
 // so is every command that passed the git filter and hits a parse bound.
 func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
@@ -118,7 +118,7 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 	command := hook.ToolInput.Command
-	if hook.ToolName != bashTool || hook.AgentType == gitGuardExemptAgent ||
+	if hook.ToolName != bashTool || hook.AgentType == gitGuardExemptAgent || hook.AgentType == "gpt-gitter" ||
 		(!strings.Contains(command, "git") && !strings.Contains(command, "worktree.sh")) {
 		return 0
 	}

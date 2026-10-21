@@ -27,20 +27,20 @@ import (
 )
 
 const (
-	// themeProfilesRelative is the Professor theme directory: every *.json in
-	// it is one theme's profile, and nothing else is.
+	// themeProfilesRelative is the Professor theme directory: every
+	// subdirectory of it is one theme (themesync.ReadProfileDir), and nothing
+	// else is.
 	themeProfilesRelative = "templates/themes"
 	themeOwnershipName    = "theme-ownership.json"
 	maxThemeDownloadBytes = 10 << 20
 )
 
-// themeProfile is one Professor theme install ships: a {name}.json profile in
+// themeProfile is one Professor theme install ships: a {name}/ directory in
 // templates/themes/, read from the source clone or, with no clone, downloaded
-// from the release.
+// file by file from the release.
 type themeProfile struct {
-	file  string // {name}.json
-	local string // its absolute path in the source clone; empty when downloaded
-	raw   string // its release URL; empty when read from the source clone
+	local string // its absolute directory in the source clone; empty when downloaded
+	raw   string // its release directory URL, ending in "/"; empty when read from the source clone
 }
 
 type themeOwnershipRecord struct {
@@ -67,7 +67,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 
 	for _, name := range sortedThemeNames(profiles) {
 		source := profiles[name]
-		target := filepath.Join(installer.options.Home, ".claude", "themes", source.file)
+		target := filepath.Join(installer.options.Home, ".claude", "themes", name+".json")
 		claude := themeFile{key: name, path: target}
 		if skip := claude.inspect(name, ownership); skip != "" {
 			installer.skip(skip)
@@ -112,7 +112,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 			installer.skip("theme " + name + " " + loadErr.Error())
 			continue
 		}
-		files, filesErr := themeFiles(installer.options.Home, name, source.file, claude, content)
+		files, filesErr := themeFiles(installer.options.Home, name, claude, content)
 		if filesErr != nil {
 			installer.skip("theme " + name + " " + filesErr.Error())
 			continue
@@ -154,26 +154,24 @@ func (installer *engine) uninstallThemes() {
 	}
 }
 
-// loadThemeContent returns a profile's bytes: read from the source clone
-// ("read failed: ..." names the path) or downloaded from the release
-// ("fetch failed: ..."); either way non-JSON is refused.
+// loadThemeContent returns a theme's profile document, assembled from its
+// directory (themesync.ReadProfileDir) in the source clone ("read failed:
+// ..." names the path) or from its files downloaded from the release
+// (themesync.AssembleProfile; "fetch failed: ..."); either way every file is
+// held to the theme layout.
 func loadThemeContent(ctx context.Context, client *http.Client, source themeProfile) ([]byte, error) {
 	if source.local != "" {
-		content, err := os.ReadFile(source.local)
+		content, err := themesync.ReadProfileDir(source.local)
 		if err != nil {
 			return nil, fmt.Errorf("read failed: %w", err)
 		}
-		if !json.Valid(content) {
-			return nil, fmt.Errorf("read failed: %s is not valid JSON", source.local)
-		}
 		return content, nil
 	}
-	content, err := fetchTheme(ctx, client, source.raw)
+	content, err := themesync.AssembleProfile(func(file string) ([]byte, error) {
+		return fetchTheme(ctx, client, source.raw+file)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("fetch failed: %w", err)
-	}
-	if !json.Valid(content) {
-		return nil, errors.New("fetch failed: response is not valid JSON")
+		return nil, fmt.Errorf("fetch failed: %s: %w", source.raw, err)
 	}
 	return content, nil
 }
@@ -279,8 +277,8 @@ func releaseUnpublishedAlpha(rawURL string) bool {
 }
 
 // loadThemeProfiles finds the themes install ships, keyed by name: every
-// profile in the source clone's templates/themes/, or, with no source clone
-// or one without that directory, every profile there at the release.
+// theme directory in the source clone's templates/themes/, or, with no source
+// clone or one without that directory, every one there at the release.
 func loadThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, error) {
 	if strings.TrimSpace(options.SourceRepo) == "" {
 		profiles, err := releaseThemeProfiles(ctx, options)
@@ -290,7 +288,7 @@ func loadThemeProfiles(ctx context.Context, options Options) (map[string]themePr
 		return profiles, nil
 	}
 	directory := filepath.Join(options.SourceRepo, filepath.FromSlash(themeProfilesRelative))
-	files, err := localProfileFiles(directory)
+	names, err := localProfileDirs(directory)
 	if errors.Is(err, fs.ErrNotExist) {
 		profiles, releaseErr := releaseThemeProfiles(ctx, options)
 		if releaseErr != nil {
@@ -301,16 +299,15 @@ func loadThemeProfiles(ctx context.Context, options Options) (map[string]themePr
 	if err != nil {
 		return nil, err
 	}
-	profiles := make(map[string]themeProfile, len(files))
-	for _, file := range files {
-		name := strings.TrimSuffix(file, ".json")
+	profiles := make(map[string]themeProfile, len(names))
+	for _, name := range names {
 		if err := validateThemeName(name); err != nil {
-			return nil, fmt.Errorf("profile %s: %w", file, err)
+			return nil, fmt.Errorf("theme %s: %w", name, err)
 		}
-		profiles[name] = themeProfile{file: file, local: filepath.Join(directory, file)}
+		profiles[name] = themeProfile{local: filepath.Join(directory, name)}
 	}
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("no profile in %s: a theme is a *.json file there", directory)
+		return nil, fmt.Errorf("no theme in %s: a theme is a {name}/ directory there", directory)
 	}
 	return profiles, nil
 }
@@ -331,63 +328,77 @@ func releaseThemeProfiles(ctx context.Context, options Options) (map[string]them
 	if options.ThemesOffline {
 		return nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
 	}
-	files, err := releaseProfileFiles(ctx, options.ThemeHTTPClient, base)
+	names, err := releaseProfileDirs(ctx, options.ThemeHTTPClient, base)
 	if err != nil {
 		return nil, err
 	}
-	profiles := make(map[string]themeProfile, len(files))
-	for _, file := range files {
-		name := strings.TrimSuffix(file, ".json")
+	profiles := make(map[string]themeProfile, len(names))
+	for _, name := range names {
 		if err := validateThemeName(name); err != nil {
-			return nil, fmt.Errorf("profile %s: %w", file, err)
+			return nil, fmt.Errorf("theme %s: %w", name, err)
 		}
-		raw := strings.TrimSuffix(base, "/") + "/" + file
+		raw := strings.TrimSuffix(base, "/") + "/" + name + "/"
 		if err := validateThemeURL(raw); err != nil {
-			return nil, fmt.Errorf("profile %s release URL: %w", file, err)
+			return nil, fmt.Errorf("theme %s release URL: %w", name, err)
 		}
-		profiles[name] = themeProfile{file: file, raw: raw}
+		profiles[name] = themeProfile{raw: raw}
 	}
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("no profile in %s", base)
+		return nil, fmt.Errorf("no theme in %s", base)
 	}
 	return profiles, nil
 }
 
-// isProfileFile reports whether a file in templates/themes/ is a profile:
-// every JSON file there is one.
-func isProfileFile(name string) bool {
-	return strings.HasSuffix(name, ".json")
+// flatProfileError refuses a {name}.json file directly in templates/themes/:
+// a theme is a directory, so a profile left in the single-file form would
+// otherwise never install, unseen.
+func flatProfileError(file, where string) error {
+	return fmt.Errorf(
+		"%s in %s is a single-file profile: a theme is a %s/ directory of themesync.ProfileFiles",
+		file, where, strings.TrimSuffix(file, ".json"),
+	)
 }
 
-// localProfileFiles are the profiles in the source clone's templates/themes/,
-// sorted: every regular *.json file. A profile is its file alone, so dropping
-// one there is all adding it takes.
-func localProfileFiles(dir string) ([]string, error) {
+// localProfileDirs are the themes in the source clone's templates/themes/,
+// sorted: every subdirectory, each a theme. A {name}.json file there is an
+// error (flatProfileError), a symlink or other non-regular entry too; any
+// other file (the README) is not a theme.
+func localProfileDirs(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("list profiles in %s: %w", dir, err)
+		return nil, fmt.Errorf("list themes in %s: %w", dir, err)
 	}
-	var files []string
+	var names []string
 	for _, entry := range entries {
-		if !isProfileFile(entry.Name()) {
-			continue
+		switch {
+		case entry.IsDir():
+			names = append(names, entry.Name())
+		case !entry.Type().IsRegular():
+			return nil, fmt.Errorf(
+				"%s in %s is neither a theme directory nor a file (%s)",
+				entry.Name(),
+				dir,
+				entry.Type(),
+			)
+		case strings.HasSuffix(entry.Name(), ".json"):
+			return nil, flatProfileError(entry.Name(), dir)
 		}
-		if !entry.Type().IsRegular() {
-			return nil, fmt.Errorf("profile %s in %s is not a regular file (%s)", entry.Name(), dir, entry.Type())
-		}
-		files = append(files, entry.Name())
 	}
-	return files, nil
+	return names, nil
 }
 
-// githubContentsFile is the contents API's type for a file entry, as against
-// "dir", "symlink" or "submodule".
-const githubContentsFile = "file"
+// The contents API's types for a directory and a file entry, as against
+// "symlink" or "submodule".
+const (
+	githubContentsDir  = "dir"
+	githubContentsFile = "file"
+)
 
-// releaseProfileFiles lists the profiles at a release theme URL on
+// releaseProfileDirs lists the themes at a release theme URL on
 // raw.githubusercontent.com through GitHub's contents API, the one listing
-// that host has: the files of templates/themes/ at the URL's ref.
-func releaseProfileFiles(ctx context.Context, client *http.Client, releaseURL string) ([]string, error) {
+// that host has: the directories of templates/themes/ at the URL's ref. A
+// {name}.json file there is an error (flatProfileError).
+func releaseProfileDirs(ctx context.Context, client *http.Client, releaseURL string) ([]string, error) {
 	listing, err := themeListingURL(releaseURL)
 	if err != nil {
 		return nil, err
@@ -403,14 +414,17 @@ func releaseProfileFiles(ctx context.Context, client *http.Client, releaseURL st
 	if err := json.Unmarshal(content, &entries); err != nil {
 		return nil, fmt.Errorf("list release profiles: decode %s: %w", listing, err)
 	}
-	var files []string
+	var names []string
 	for _, entry := range entries {
-		if entry.Type == githubContentsFile && isProfileFile(entry.Name) {
-			files = append(files, entry.Name)
+		switch {
+		case entry.Type == githubContentsDir:
+			names = append(names, entry.Name)
+		case entry.Type == githubContentsFile && strings.HasSuffix(entry.Name, ".json"):
+			return nil, flatProfileError(entry.Name, releaseURL)
 		}
 	}
-	sort.Strings(files)
-	return files, nil
+	sort.Strings(names)
+	return names, nil
 }
 
 // themeListingURL turns a release theme URL,

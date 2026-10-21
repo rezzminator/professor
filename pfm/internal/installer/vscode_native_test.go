@@ -61,6 +61,7 @@ const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   ProgressLocation: { Notification: 15 },
   env: { remoteName: scenario.remoteName || undefined },
+  ExtensionKind: { UI: 1, Workspace: 2 },
   workspace: {
     workspaceFile: undefined,
     onDidChangeConfiguration: (listener) => {
@@ -120,7 +121,11 @@ Module._load = function (request) {
   return originalLoad.apply(this, arguments);
 };
 
-const context = { extension: { id: 'professor.professor' }, subscriptions: [], globalState: { get: (key, def) => def, update() {} } };
+const context = {
+  extension: { id: 'professor.professor', extensionKind: scenario.extensionKind },
+  subscriptions: [],
+  globalState: { get: (key, def) => def, update() {} },
+};
 const api = require(extensionPath).activate(context);
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 // A fired change reaches the extension's own listener, which queues its pick; the pick is idle
@@ -166,8 +171,12 @@ type nativeStep struct {
 }
 
 type nativeScenario struct {
-	ColorTheme     string       `json:"colorTheme"`
-	RemoteName     string       `json:"remoteName,omitempty"`
+	ColorTheme string `json:"colorTheme"`
+	RemoteName string `json:"remoteName,omitempty"`
+	// ExtensionKind is where the extension host runs (1 UI, 2 Workspace:
+	// vscode.ExtensionKind), 0 left unset.
+	ExtensionKind  int          `json:"extensionKind,omitempty"`
+	NoPfm          bool         `json:"-"`
 	Unfocused      bool         `json:"unfocused,omitempty"`
 	RefuseUpdate   bool         `json:"refuseUpdate,omitempty"`
 	FireOnUpdate   bool         `json:"fireOnUpdate,omitempty"`
@@ -222,7 +231,8 @@ func pick(id string) *string { return &id }
 // pfm at ~/.local/bin/pfm — `theme use {value}` logs its arguments and, like
 // the real one, writes a contract naming that palette at the next generation,
 // or fails with useStderr when useExit is not zero — and walks scenario.
-// With StateMissing the state dir does not exist yet.
+// With StateMissing the state dir does not exist yet; with NoPfm the host
+// has no ~/.local/bin/pfm.
 func runVSCodeNative(t *testing.T, scenario nativeScenario, useExit int, useStderr string) []nativeSnapshot {
 	t.Helper()
 	node, err := exec.LookPath("node")
@@ -254,8 +264,10 @@ printf '{"enabled": true, "generation": %%d, "palette": "%%s", "colors": {}, "ch
 	if err := os.MkdirAll(bin, 0o700); err != nil {
 		t.Fatalf("mkdir fake pfm bin %s: %v", bin, err)
 	}
-	if err := testjail.WriteExecutable(filepath.Join(bin, "pfm"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	if !scenario.NoPfm {
+		if err := testjail.WriteExecutable(filepath.Join(bin, "pfm"), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	encoded, err := json.Marshal(scenario)
 	if err != nil {
@@ -348,21 +360,55 @@ func TestNativeColorThemeAndPfmFollowEachOtherWithoutALoop(t *testing.T) {
 	}
 }
 
-func TestNativeColorThemeNeverMovesARemoteOrUnfocusedWindow(t *testing.T) {
+func TestNativeColorThemeNeverMovesARemoteWindowPfmDoesNotRunInOrAnUnfocusedOne(t *testing.T) {
 	t.Parallel()
 	walk := []nativeStep{
 		{Name: "seed", Contract: nativeContract(1, "custom:lagoon")},
 		{Name: "pfm-elsewhere", Contract: nativeContract(2, "custom:ultrafunk")},
 		{Name: "native-pick", Pick: pick("professor-lagoon")},
 	}
-	remote := runVSCodeNative(t, nativeScenario{ColorTheme: "Sonar", RemoteName: "ssh-remote", Steps: walk}, 0, "")
-	last := remote[len(remote)-1]
-	if last.ColorTheme != "professor-lagoon" || len(last.Updates) != 0 || len(last.Calls) != 0 || last.Record != nil {
-		t.Fatalf("a remote window must neither set the Color Theme nor run pfm nor record: %+v", last)
+	for name, scenario := range map[string]nativeScenario{
+		"remote host without pfm": {ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 2, NoPfm: true},
+		"served from the UI side": {ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 1},
+	} {
+		scenario.Steps = walk
+		remote := runVSCodeNative(t, scenario, 0, "")
+		last := remote[len(remote)-1]
+		if last.ColorTheme != "professor-lagoon" || len(last.Updates) != 0 || len(last.Calls) != 0 ||
+			last.Record != nil {
+			t.Fatalf("%s: a remote window must neither set the Color Theme nor run pfm nor record: %+v", name, last)
+		}
 	}
 	unfocused := runVSCodeNative(t, nativeScenario{ColorTheme: "Sonar", Unfocused: true, Steps: walk}, 0, "")
 	if last := unfocused[len(unfocused)-1]; len(last.Calls) != 0 {
 		t.Fatalf("an unfocused window must leave the pick to the focused one: %q", last.Calls)
+	}
+}
+
+// TestNativeColorThemeFollowsBothWaysInARemoteWindowWhosePfmIsHere: a Linux
+// host driven through Remote-SSH runs pfm, Claude Code, tmux and Herdr on the
+// extension host's machine, so its remote window is local to pfm: a palette
+// pfm changed switches the Color Theme, and a Professor theme picked there
+// runs pfm theme use.
+func TestNativeColorThemeFollowsBothWaysInARemoteWindowWhosePfmIsHere(t *testing.T) {
+	t.Parallel()
+	steps := runVSCodeNative(t, nativeScenario{
+		ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 2,
+		Steps: []nativeStep{
+			{Name: "seed", Contract: nativeContract(1, "custom:lagoon")},
+			{Name: "pfm-elsewhere", Contract: nativeContract(2, "custom:ultrafunk")},
+			{Name: "native-pick", Pick: pick("professor-lagoon")},
+			{Name: "follower-sees-pick"},
+		},
+	}, 0, "")
+	if elsewhere := steps[1]; elsewhere.ColorTheme != "professor-ultrafunk" || len(elsewhere.Updates) != 1 {
+		t.Fatalf("pfm -> native: the remote window must switch to the palette's Professor theme: %+v", elsewhere)
+	}
+	if native := steps[2]; !slices.Equal(native.Calls, []string{"theme use custom:lagoon"}) {
+		t.Fatalf("native -> pfm: the remote window's pick must run pfm theme use once, got %q", native.Calls)
+	}
+	if follower := steps[3]; len(follower.Updates) != 1 || follower.ColorTheme != "professor-lagoon" {
+		t.Fatalf("the loop guard: the contract pfm wrote for the pick must not switch again: %+v", follower)
 	}
 }
 

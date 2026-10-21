@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -22,6 +23,15 @@ type fakePfm struct {
 	listExit   int
 	useStderr  string
 	useExit    int
+	// absent leaves ~/.local/bin/pfm out: a host pfm is not installed on.
+	absent bool
+}
+
+// chooseWindow is the window the command runs in: remoteName "" a local one,
+// kind where the extension host runs (1 UI, 2 Workspace), 0 left unset.
+type chooseWindow struct {
+	remoteName string
+	kind       int
 }
 
 type chooseRun struct {
@@ -37,13 +47,19 @@ type chooseRun struct {
 		Kind    string `json:"kind"`
 		Message string `json:"message"`
 	} `json:"messages"`
+	Contexts [][]any `json:"contexts"`
 }
 
-// runVSCodeChooseTheme runs the professor.chooseTheme handler in a window
-// (remoteName "" is a local one, pick the quick-pick label chosen, "" a
-// cancel) over a fake pfm, and returns what the extension showed and the
-// argument line of every pfm run.
-func runVSCodeChooseTheme(t *testing.T, remoteName, pick string, pfm fakePfm) (chooseRun, []string) {
+// runVSCodeChooseTheme runs the professor.chooseTheme handler in a local
+// window (pick the quick-pick label chosen, "" a cancel) over a fake pfm, and
+// returns what the extension showed and the argument line of every pfm run.
+func runVSCodeChooseTheme(t *testing.T, pick string, pfm fakePfm) (chooseRun, []string) {
+	t.Helper()
+	return runVSCodeChooseThemeIn(t, chooseWindow{}, pick, pfm)
+}
+
+// runVSCodeChooseThemeIn is runVSCodeChooseTheme in the given window.
+func runVSCodeChooseThemeIn(t *testing.T, window chooseWindow, pick string, pfm fakePfm) (chooseRun, []string) {
 	t.Helper()
 	home := t.TempDir()
 	bin := filepath.Join(home, ".local", "bin")
@@ -68,10 +84,14 @@ esac
 echo "fake pfm: unexpected arguments: $*" >&2
 exit 64
 `, pfm.listExit, pfm.useExit)
-	if err := testjail.WriteExecutable(filepath.Join(bin, "pfm"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	if !pfm.absent {
+		if err := testjail.WriteExecutable(filepath.Join(bin, "pfm"), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	scenario, err := json.Marshal(map[string]string{"remoteName": remoteName, "pick": pick})
+	scenario, err := json.Marshal(map[string]any{
+		"remoteName": window.remoteName, "extensionKind": window.kind, "pick": pick,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +190,7 @@ func TestVSCodeChooseThemeRunsPfmListThenUseInALocalWindow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			run, calls := runVSCodeChooseTheme(t, "", tc.pick, tc.pfm)
+			run, calls := runVSCodeChooseTheme(t, tc.pick, tc.pfm)
 			if !run.Registered {
 				t.Fatal("extension.js registers no professor.chooseTheme handler")
 			}
@@ -204,7 +224,7 @@ func TestVSCodeChooseThemeRunsPfmListThenUseInALocalWindow(t *testing.T) {
 // an account lacks says where it is missing.
 func TestVSCodeChooseThemeOffersTheCurrentThemeFirstAndMarksMissingOnes(t *testing.T) {
 	t.Parallel()
-	run, _ := runVSCodeChooseTheme(t, "", "", fakePfm{list: chooseThemeList})
+	run, _ := runVSCodeChooseTheme(t, "", fakePfm{list: chooseThemeList})
 	if len(run.QuickPicks) != 1 {
 		t.Fatalf("quick picks shown = %d, want 1 (registered=%v)", len(run.QuickPicks), run.Registered)
 	}
@@ -230,20 +250,49 @@ func TestVSCodeChooseThemeOffersTheCurrentThemeFirstAndMarksMissingOnes(t *testi
 	}
 }
 
-// TestVSCodeChooseThemeNeverRunsPfmInARemoteWindow: a remote window's handler
-// refuses with a message and executes nothing, and the manifest hides the
-// command from a remote window's palette.
-func TestVSCodeChooseThemeNeverRunsPfmInARemoteWindow(t *testing.T) {
+// TestVSCodeChooseThemeNeverRunsPfmInARemoteWindowPfmDoesNotRunIn: a remote
+// window whose extension host has no pfm, or one the extension serves from
+// the UI side, refuses with a message and executes nothing; the manifest
+// shows the command in a local window or where pfm runs.
+func TestVSCodeChooseThemeNeverRunsPfmInARemoteWindowPfmDoesNotRunIn(t *testing.T) {
 	t.Parallel()
-	run, calls := runVSCodeChooseTheme(t, "ssh-remote", "Dusk", fakePfm{list: chooseThemeList})
-	if !run.Registered {
-		t.Fatal("extension.js registers no professor.chooseTheme handler")
-	}
-	if len(calls) != 0 || len(run.QuickPicks) != 0 {
-		t.Errorf("remote window ran pfm %q and showed %d quick picks, want neither", calls, len(run.QuickPicks))
-	}
-	if len(run.Messages) != 1 || run.Messages[0].Kind != "warning" {
-		t.Errorf("remote window messages = %+v, want exactly one warning saying why", run.Messages)
+	for name, tc := range map[string]struct {
+		window chooseWindow
+		pfm    fakePfm
+	}{
+		"remote host without pfm": {chooseWindow{"ssh-remote", 2}, fakePfm{list: chooseThemeList, absent: true}},
+		"served from the UI side": {chooseWindow{"ssh-remote", 1}, fakePfm{list: chooseThemeList}},
+	} {
+		run, calls := runVSCodeChooseThemeIn(t, tc.window, "Dusk", tc.pfm)
+		if !run.Registered {
+			t.Fatal("extension.js registers no professor.chooseTheme handler")
+		}
+		if len(calls) != 0 || len(run.QuickPicks) != 0 {
+			t.Errorf(
+				"%s: remote window ran pfm %q and showed %d quick picks, want neither",
+				name,
+				calls,
+				len(run.QuickPicks),
+			)
+		}
+		// A window served from the client's side also says once, at activation, that it paints
+		// nothing; the command's own refusal is the one naming Choose Theme.
+		var refusals int
+		for _, message := range run.Messages {
+			if message.Kind == "warning" && strings.Contains(message.Message, "Choose Theme") {
+				refusals++
+			}
+		}
+		if refusals != 1 {
+			t.Errorf(
+				"%s: remote window messages = %+v, want exactly one Choose Theme warning saying why",
+				name,
+				run.Messages,
+			)
+		}
+		if want := [][]any{{"setContext", "professor.pfmHere", false}}; !reflect.DeepEqual(run.Contexts, want) {
+			t.Errorf("%s: activate set contexts %v, want %v", name, run.Contexts, want)
+		}
 	}
 
 	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/package.json")
@@ -277,10 +326,26 @@ func TestVSCodeChooseThemeNeverRunsPfmInARemoteWindow(t *testing.T) {
 	}
 	hidden := false
 	for _, entry := range manifest.Contributes.Menus.CommandPalette {
-		hidden = hidden || entry.Command == "professor.chooseTheme" && entry.When == "!remoteName"
+		hidden = hidden || entry.Command == "professor.chooseTheme" && entry.When == "!remoteName || professor.pfmHere"
 	}
 	if !hidden {
-		t.Errorf("package.json commandPalette has no `!remoteName` entry for professor.chooseTheme: %+v",
-			manifest.Contributes.Menus.CommandPalette)
+		t.Errorf(
+			"package.json commandPalette has no `!remoteName || professor.pfmHere` entry for professor.chooseTheme: %+v",
+			manifest.Contributes.Menus.CommandPalette,
+		)
+	}
+}
+
+// TestVSCodeChooseThemeRunsInARemoteWindowWhosePfmIsHere: on a Linux host
+// driven through Remote-SSH the extension host runs pfm, so the command lists
+// and sets the theme there as in a local window.
+func TestVSCodeChooseThemeRunsInARemoteWindowWhosePfmIsHere(t *testing.T) {
+	t.Parallel()
+	run, calls := runVSCodeChooseThemeIn(t, chooseWindow{"ssh-remote", 2}, "Dusk", fakePfm{list: chooseThemeList})
+	if want := []string{"theme list --json", "theme use custom:dusk"}; !slices.Equal(calls, want) {
+		t.Fatalf("remote window whose host runs pfm ran %q, want %q", calls, want)
+	}
+	if want := [][]any{{"setContext", "professor.pfmHere", true}}; !reflect.DeepEqual(run.Contexts, want) {
+		t.Errorf("activate set contexts %v, want %v", run.Contexts, want)
 	}
 }

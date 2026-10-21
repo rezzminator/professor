@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -34,6 +35,7 @@ type Request struct {
 	ConfigDir, Binary, SessionID, Resume string
 	Fork                                 bool
 	Name                                 string
+	RemoteControlName                    string
 	Cache1H                              *bool
 	Model, Effort, PromptFile            string
 	Args                                 []string
@@ -169,6 +171,11 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 			result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
 		}
 	}
+	result.Argv = RefreshRemoteControl(
+		result.Argv,
+		prefs.RemoteControl && request.Purpose != PurposeQuery,
+		cmp.Or(request.RemoteControlName, request.Name),
+	)
 	return result, nil
 }
 
@@ -244,6 +251,9 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
+	if prefs.SubagentStatuslineTrace {
+		env[EnvSubagentStatuslineTrace] = "1"
+	}
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}
@@ -251,8 +261,8 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 		env[envSimplePrompt] = "1"
 	}
 	settings["env"] = env
-	if prefs.Theme != "" {
-		settings[knobTheme] = prefs.Theme
+	if theme, _ := themeForLaunch(prefs.Theme); theme != "" {
+		settings[knobTheme] = theme
 	}
 	if request.Purpose != PurposeQuery {
 		settings[knobHooks] = hookSettings(HookTemplates(request.Home))
@@ -377,7 +387,7 @@ func PromptWarning(request Request, machine pfmconfig.Config) string {
 }
 
 func PromptFile(home string) (string, error) {
-	return paths.ComposedHarnessPrompt(home, pfmengine.Claude)
+	return paths.GeneratedHarnessPrompt(home, pfmengine.Claude)
 }
 
 func argsPersonaFlag(args []string, flag string) bool {

@@ -1,0 +1,233 @@
+{
+  "0025": {
+    "name": "Horizon Cyan · functions",
+    "scope": [
+      "entity.name.function",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "support.function.any-method",
+      "meta.function-call.generic",
+      "entity.name.function.member",
+      "meta.function-call",
+      "entity.name.method",
+      "meta.method-call entity.name.function",
+      "entity.name.function.go",
+      "entity.name.function.support.go",
+      "meta.function-call.python",
+      "entity.name.function.call",
+      "entity.name.command.shell",
+      "support.function.git-rebase"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3ce8ff"
+    }
+  },
+  "0026": {
+    "name": "Horizon Cyan · constructors",
+    "scope": [
+      "entity.name.function.constructor",
+      "meta.class.constructor entity.name.function",
+      "keyword.operator.new entity.name.function"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#3ce8ff"
+    }
+  },
+  "0028": {
+    "name": "Arc Yellow · types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.other.inherited-class",
+      "support.type",
+      "support.class",
+      "entity.name.type.class",
+      "entity.name.type.interface",
+      "entity.name.type.struct",
+      "entity.name.type.enum",
+      "entity.name.type.alias",
+      "entity.name.type.go",
+      "entity.name.type.rust",
+      "entity.name.type.trait",
+      "support.class.builtin",
+      "support.type.exception",
+      "entity.name.type.instance",
+      "meta.return-type",
+      "entity.name.type.module.rust"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe14a"
+    }
+  },
+  "0030": {
+    "name": "Arc Yellow · type parameters",
+    "scope": [
+      "entity.name.type.parameter",
+      "variable.type.parameter",
+      "meta.type.parameters entity.name.type",
+      "storage.type.generic"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffe14a"
+    }
+  },
+  "0031": {
+    "name": "Lilac · namespaces & modules",
+    "scope": [
+      "entity.name.namespace",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "storage.modifier.import",
+      "support.other.namespace",
+      "entity.name.import.go",
+      "entity.name.package.go",
+      "entity.name.type.namespace",
+      "support.other.module",
+      "entity.name.scope-resolution",
+      "meta.import.python entity.name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e0b0ff"
+    }
+  },
+  "0032": {
+    "name": "Signal Green · decorators & macros",
+    "scope": [
+      "entity.name.function.decorator",
+      "meta.decorator",
+      "punctuation.decorator",
+      "meta.attribute",
+      "entity.name.function.macro",
+      "support.function.macro",
+      "meta.function.decorator.python",
+      "entity.name.function.decorator.python",
+      "meta.annotation",
+      "storage.type.annotation",
+      "punctuation.definition.annotation",
+      "entity.name.function.preprocessor",
+      "keyword.control.directive.include",
+      "meta.preprocessor",
+      "punctuation.definition.attribute.rust",
+      "meta.attribute.rust"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3cf29b"
+    }
+  },
+  "0033": {
+    "name": "Blaze Orange · lifetimes & labels",
+    "scope": [
+      "entity.name.lifetime.rust",
+      "storage.modifier.lifetime.rust",
+      "punctuation.definition.lifetime.rust",
+      "entity.name.label",
+      "entity.name.goto-label"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ff8a3d"
+    }
+  },
+  "0034": {
+    "name": "Aurora Pink · tags",
+    "scope": [
+      "entity.name.tag",
+      "meta.tag.sgml",
+      "entity.name.tag.html",
+      "entity.name.tag.xml",
+      "entity.name.tag.css",
+      "entity.name.tag.reference.scss",
+      "meta.tag entity.name.tag"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fe66b7"
+    }
+  },
+  "0036": {
+    "name": "Amber · attributes",
+    "scope": [
+      "entity.other.attribute-name",
+      "entity.other.attribute-name.html",
+      "entity.other.attribute-name.jsx",
+      "entity.other.attribute-name.tsx",
+      "entity.other.attribute-name.xml"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffb347"
+    }
+  },
+  "0037": {
+    "name": "Arc Yellow · CSS classes",
+    "scope": [
+      "entity.other.attribute-name.class.css",
+      "entity.other.attribute-name.class",
+      "entity.other.attribute-name.class.scss"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe14a"
+    }
+  },
+  "0038": {
+    "name": "Blaze Orange · CSS ids",
+    "scope": [
+      "entity.other.attribute-name.id.css",
+      "entity.other.attribute-name.id"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8a3d"
+    }
+  },
+  "0039": {
+    "name": "UV Violet · CSS pseudo",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class.css",
+      "entity.other.attribute-name.pseudo-element.css",
+      "entity.other.attribute-name.pseudo-class",
+      "entity.other.attribute-name.pseudo-element"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c77dff"
+    }
+  },
+  "0068": {
+    "name": "Arc Yellow · TOML & INI tables",
+    "scope": [
+      "entity.name.section.toml",
+      "entity.other.attribute-name.table.toml",
+      "support.type.property-name.table.toml punctuation",
+      "entity.name.section.group-title.ini"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffe14a"
+    }
+  },
+  "0069": {
+    "name": "Pink glow · YAML anchors",
+    "scope": [
+      "entity.name.type.anchor.yaml",
+      "variable.other.alias.yaml",
+      "punctuation.definition.anchor.yaml",
+      "punctuation.definition.alias.yaml"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ff7ad9"
+    }
+  }
+}

@@ -421,7 +421,7 @@ func (engine *Engine) Capture(
 	}
 	// chat.sh:1215-1219 captures with -S - : the WHOLE retained scrollback, not
 	// just the visible fold, bounded only by tmux's history-limit. The caller's
-	// last_n / max_bytes bounds are applied to the result, after the capture.
+	// tailLines and transport byte bounds are applied after the capture.
 	capture, err := engine.tmux.Capture(
 		ctx,
 		target.SocketPath,
@@ -562,10 +562,10 @@ func (engine *Engine) callResolved(
 		Pane:           target.Pane,
 		ResolutionNote: detail,
 	}
-	if target.Backend == backendHerdr && target.SocketPath != "" && target.Pane != "" {
+	if target.Backend == backendHerdr && target.SocketPath != "" && (target.Pane != "" || target.SeatID != "") {
 		// Prove before locking: the seat's lock and the receipt name the
 		// pane the seat holds now, never the address the caller observed.
-		proved, err := ProveHerdrTarget(ctx, target)
+		proved, err := engine.proveHerdrCallTarget(ctx, target)
 		if err != nil {
 			base.Status, base.Code = statusUndelivered, CodeUndelivered
 			base.Message = fmt.Sprintf("ABORT: Herdr ownership could not be proved; nothing was typed: %v", err)
@@ -610,6 +610,9 @@ func (engine *Engine) callResolved(
 		return base, err
 	}
 	base.Busy = IsBusyFor(paneEngine, capture)
+	if request.RequireIdle && engine.refuseNonIdleRetry(ctx, target, capture, &base) {
+		return base, nil
+	}
 	// Both TUIs own a safe composer queue while a turn is running. A normal
 	// call types there and submits without interrupting the active turn;
 	// force-now alone is allowed to send Escape. pane_current_command is NOT a
@@ -1028,7 +1031,7 @@ func (engine *Engine) callResolved(
 	engine.sleepContext(ctx, engine.options.ProofSettle)
 	proof, proofErr := engine.capturePane(ctx, target, 0)
 	if proofErr != nil {
-		base.Status = "delivered_unproven"
+		base.Status = statusDeliveredUnproven
 		base.Code = 0
 		base.Message = fmt.Sprintf(
 			"delivered-unproven into %q — input cleared, but the post-submit pane capture failed: %v",
@@ -1138,7 +1141,7 @@ func (engine *Engine) callResolved(
 	}
 	base.Proof = lastNonEmptyLines(proof, engine.options.ProofLines)
 	if !deliveryProven(paneEngine, preSubmitCapture, proof, message, queueing, pasteTransport) {
-		base.Status = "delivered_unproven"
+		base.Status = statusDeliveredUnproven
 		base.Message = fmt.Sprintf(
 			"delivered-unproven into %q — input cleared, but the pane capture below shows neither the message past the input bar nor the expected %s",
 			target.Pane,

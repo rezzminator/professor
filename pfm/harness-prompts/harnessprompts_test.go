@@ -1,7 +1,9 @@
 package harnessprompts
 
 import (
+	"bytes"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -97,5 +99,43 @@ func TestTopLevelNamesTheEmbeddedRoot(t *testing.T) {
 	got := TopLevel()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("TopLevel() = %v, want %v", got, want)
+	}
+}
+
+// The prompt-byte contract is exactly the source parts in order, with one
+// blank line at each seam and one final newline. No tracked output is needed.
+func TestComposeMatchesSourceParts(t *testing.T) {
+	for _, engine := range []string{"claude", "codex", "opencode"} {
+		t.Run(engine, func(t *testing.T) {
+			got, err := Composed(engine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			remaining := got
+			for index, part := range []string{"share/head.md", engine + "/professor.md", "share/tail.md"} {
+				raw, err := os.ReadFile(part)
+				if err != nil {
+					t.Fatal(err)
+				}
+				suffix := "\n\n"
+				if index == 2 {
+					suffix = "\n"
+				}
+				want := append(bytes.TrimRight(raw, "\n"), suffix...)
+				if !bytes.HasPrefix(remaining, want) {
+					t.Fatalf("assembled %s prompt differs at %s or its seam", engine, part)
+				}
+				remaining = remaining[len(want):]
+			}
+			if len(remaining) != 0 {
+				t.Fatalf("assembled %s prompt has %d unexpected trailing bytes", engine, len(remaining))
+			}
+		})
+	}
+	if _, err := Composed(
+		"no-such-engine",
+	); err == nil ||
+		!strings.Contains(err.Error(), "no-such-engine/professor.md") {
+		t.Fatalf("assembly did not name missing engine part: %v", err)
 	}
 }

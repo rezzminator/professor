@@ -1,0 +1,30 @@
+{
+  "0002": {
+    "name": "Smoke: comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment",
+      "string.quoted.docstring"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#8e7ea4"
+    }
+  },
+  "0003": {
+    "name": "Smoke: doc comment tags",
+    "scope": [
+      "comment keyword.codetag",
+      "storage.type.class.jsdoc",
+      "comment.block.documentation storage.type",
+      "comment.block.documentation punctuation.definition.block.tag",
+      "comment.block.documentation entity.name.type",
+      "comment.block.documentation variable.other"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b294f5"
+    }
+  }
+}

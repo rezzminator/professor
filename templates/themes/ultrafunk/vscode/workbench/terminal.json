@@ -1,0 +1,23 @@
+{
+  "terminal.border": "#341449",
+  "terminal.dropBackground": "#ff2fc81f",
+  "terminal.findMatchBackground": "#c6ff4a55",
+  "terminal.findMatchBorder": "#c6ff4a",
+  "terminal.findMatchHighlightBackground": "#ffe14a2e",
+  "terminal.findMatchHighlightBorder": "#ffe14a80",
+  "terminal.hoverHighlightBackground": "#3ce8ff1a",
+  "terminal.inactiveSelectionBackground": "#4f1a7099",
+  "terminal.initialHintForeground": "#9473bf",
+  "terminal.selectionForeground": "#fff6fb",
+  "terminalCommandDecoration.defaultBackground": "#6a2c8f",
+  "terminalCommandDecoration.errorBackground": "#ff4040",
+  "terminalCommandDecoration.successBackground": "#3cf29b",
+  "terminalCommandGuide.foreground": "#c77dff80",
+  "terminalCursor.background": "#100518",
+  "terminalOverviewRuler.border": "#34144900",
+  "terminalOverviewRuler.cursorForeground": "#ff2fc8b3",
+  "terminalOverviewRuler.findMatchForeground": "#c6ff4acc",
+  "terminalStickyScroll.background": "#1b0928",
+  "terminalStickyScroll.border": "#c77dff33",
+  "terminalStickyScrollHover.background": "#2c0f3e"
+}

@@ -1,6 +1,7 @@
 package hookentry
 
 import (
+	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -39,8 +40,34 @@ func TestThreadWithoutRollout(t *testing.T) {
 		{"cx", `{}`, false},
 		{"cl", `{"transcript_path":null}`, false},
 	} {
-		if got := threadWithoutRollout(pfmengine.ID(test.engine), []byte(test.raw)); got != test.want {
+		payload, err := readHerdrPayload(strings.NewReader(test.raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := threadWithoutRollout(pfmengine.ID(test.engine), payload); got != test.want {
 			t.Errorf("threadWithoutRollout(%s, %s) = %v, want %v", test.engine, test.raw, got, test.want)
 		}
+	}
+}
+
+func TestReadHerdrPayloadValidatesTheWholeStream(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		bad       bool
+	}{
+		{"nested response", `{"tool_response":{"items":[null,true,2,{"escaped":"a\"b"}]},"session_id":"s1"}`, false},
+		{"huge ignored exponent", `{"tool_response":1e9999,"session_id":"s1"}`, false},
+		{"truncated response", `{"tool_response":{"items":[1,2]`, true},
+		{"bad escape in response", `{"tool_response":"\q"}`, true},
+		{"trailing object", `{"session_id":"s1"}{"agent_id":"child"}`, true},
+		{"wrong field type", `{"agent_id":1}`, true},
+		{"null payload", `null`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := readHerdrPayload(strings.NewReader(tc.raw))
+			if (err != nil) != tc.bad || !tc.bad && payload.SessionID != "s1" {
+				t.Fatalf("payload=%+v err=%v", payload, err)
+			}
+		})
 	}
 }

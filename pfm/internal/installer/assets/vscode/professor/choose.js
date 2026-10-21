@@ -3,11 +3,13 @@
 // (`pfm theme list --json`, themesync.ThemeList) and tells it the pick (`pfm theme use {name}`),
 // which sets `theme` in every Claude account's settings.json and runs one sync; the contract
 // theme.js follows does the rest. pfm is run by execFile with an argument array, never through a
-// shell, and only in a local window: a remote window's pfm is not the machine whose Claude settings
-// these are, so its handler refuses before it runs anything (package.json also hides the command
-// from a remote window's palette).
+// shell, and only where pfmHere holds: a local window, or a remote window whose extension host is
+// the machine pfm runs on (a Linux host driven through Remote-SSH, where pfm, Claude Code, tmux
+// and Herdr all live). Anywhere else the Claude settings are another machine's, so the handler
+// refuses before it runs anything (package.json also hides the command from that palette).
 const vscode = require('vscode');
 const { execFile } = require('child_process');
+const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
@@ -18,6 +20,39 @@ const MAX_BUFFER = 4 * 1024 * 1024;
 // themecmd's pfmLauncher: the installed pfm, the one door a host asset runs.
 function pfmBinary() {
   return path.join(os.homedir(), '.local', 'bin', 'pfm');
+}
+
+// clientSide says whether this is a remote window whose extension host is the client's (UI) side:
+// package.json's extensionKind ["workspace"] never puts Professor there, but a client copy older
+// than 0.6.0 ("ui", whose kind VS Code takes over the remote copy's) or a remote.extensionKind
+// override does, and there pfm, the contract and the Claude chats are the client's, not the window's.
+function clientSide(extensionKind) {
+  return vscode.env.remoteName !== undefined && extensionKind !== vscode.ExtensionKind?.Workspace;
+}
+
+// notHere is why a remote window keeps out of pfm, and what the user does about it.
+function notHere(extensionKind) {
+  const remote = vscode.env.remoteName;
+  if (clientSide(extensionKind)) {
+    return `this ${remote} window runs Professor on this computer, not on the ${remote} host its Claude chats live on: run pfm install on the ${remote} host, update Professor on this computer (pfm install) or drop its remote.extensionKind entry for professor.professor, then reload the window`;
+  }
+  return `the ${remote} host has no ${pfmBinary()}: run pfm install there, then reload the window`;
+}
+
+// pfmHere says whether this window's Claude settings are the ones the extension host's pfm sets:
+// always in a local window; in a remote window only when the extension runs on the remote side
+// (extensionKind Workspace) and that machine has the installed pfm. A remote window served from
+// the client's side, or whose remote host has no pfm, keeps out.
+function pfmHere(extensionKind) {
+  if (vscode.env.remoteName === undefined) return true;
+  if (clientSide(extensionKind)) return false;
+  try {
+    fs.accessSync(pfmBinary(), fs.constants.X_OK);
+    return true;
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error(`Professor: ${pfmBinary()} is not runnable here, this ${vscode.env.remoteName} window keeps out of pfm: ${err?.message ?? err}`);
+    return false;
+  }
 }
 
 // runPfm resolves, never rejects: {ok, exited, code, stdout, stderr, cause}. `exited` tells a pfm that
@@ -71,11 +106,10 @@ function detail(theme) {
   return parts.length ? parts.join(' · ') : undefined;
 }
 
-async function chooseTheme() {
-  if (vscode.env.remoteName !== undefined) {
-    vscode.window.showWarningMessage(
-      `Professor: Choose Theme runs in a local window only: the Claude settings it sets are this machine's, not ${vscode.env.remoteName}'s.`,
-    );
+// chooseTheme is the command's handler; here is pfmHere and whyNot notHere, bound to this extension host.
+async function chooseTheme(here, whyNot) {
+  if (!here()) {
+    vscode.window.showWarningMessage(`Professor: Choose Theme sets no Claude theme here — ${whyNot()}.`);
     return;
   }
   let list;
@@ -117,4 +151,4 @@ async function chooseTheme() {
   );
 }
 
-module.exports = { chooseTheme, runPfm, why };
+module.exports = { chooseTheme, clientSide, notHere, pfmHere, runPfm, why };

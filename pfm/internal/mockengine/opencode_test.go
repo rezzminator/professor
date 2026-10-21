@@ -106,7 +106,7 @@ func TestOpenCodeInlineMCPKeepsNamedRefusal(t *testing.T) {
 	fix.write(Scenario{Pane: openCodeShapes})
 	session := fix.startTUI("opencode", []string{fix.work}, nil)
 	session.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, openCodeShapes.Composer) })
-	session.typeLine(`mock-engine: {"type":"mcp","tool":"find"}`)
+	session.typeLine(`mock-engine: {"type":"mcp","tool":"last"}`)
 	if code := session.waitExit(); code != ExitUnpinned || !strings.Contains(session.stderr.String(), "opencode MCP") {
 		t.Fatalf("inline MCP exit=%d stderr=%q", code, session.stderr.String())
 	}

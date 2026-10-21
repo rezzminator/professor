@@ -1,0 +1,63 @@
+{
+  "0038": {
+    "name": "Fire coral: invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#ff7d81"
+    }
+  },
+  "0039": {
+    "name": "Fire coral: deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#ff7d81"
+    }
+  },
+  "0058": {
+    "name": "Log: info",
+    "scope": [
+      "token.info-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#71c9fa"
+    }
+  },
+  "0059": {
+    "name": "Log: warning",
+    "scope": [
+      "token.warn-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f5df40"
+    }
+  },
+  "0060": {
+    "name": "Log: error",
+    "scope": [
+      "token.error-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff7d81"
+    }
+  },
+  "0061": {
+    "name": "Log: debug",
+    "scope": [
+      "token.debug-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ccabff"
+    }
+  }
+}

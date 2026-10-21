@@ -2,10 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // socketFromRun reads the socket out of a run report line, which is the handle
@@ -192,5 +203,270 @@ func TestRunRefusesToCallAnUnheardPromptDelivered(t *testing.T) {
 	// kill a seat the user may want to drive by hand.
 	if !strings.Contains(stdout.String(), "\tnamed\t") {
 		t.Fatalf("run report = %q, want the live chat still reported", stdout.String())
+	}
+}
+
+// Two seats deliberately share one socket. Delivery and the subsequent await
+// must retain the selected conversation, for both native and raw engines.
+func TestAskNativeSharedSocketKeepsConversation(t *testing.T) {
+	root := jailTest(t)
+	writeJailedCodexAuth(t, root)
+	statedTestSender(t)
+	values := jailPaths(t)
+	t.Setenv("TMUX", "")
+	t.Setenv("HERDR_ENV", "")
+	previous := askAwaitTimings
+	askAwaitTimings.Poll, askAwaitTimings.Settle = time.Millisecond, time.Millisecond
+	t.Cleanup(func() { askAwaitTimings = previous })
+	socket := filepath.Join(testjail.ShortRoot(t), "ask.sock")
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	t.Cleanup(func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var seats []fleetdb.Seat
+	files := map[string]string{}
+	for i, engine := range []string{"cc", "cx"} {
+		id := fmt.Sprintf("11111111-1111-4111-8111-%012d", i+1)
+		pane := fmt.Sprintf("w6:p%d", i+1)
+		seat := fleetdb.Seat{
+			SeatID: "ask-" + engine, SessionID: id, Name: "ASK_" + engine, Engine: engine,
+			Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: pane, HerdrWorkspace: "w6",
+			HerdrTerminalID: "fixture-" + pane, SeatHostPID: 900001 + i, SeatHostStart: 100,
+		}
+		seats = append(seats, seat)
+		path := filepath.Join(root, "claude", "project", id+".jsonl")
+		body := `{"type":"user","cwd":"/work/native","message":{"content":"initial"}}` + "\n"
+		if engine == "cx" {
+			path = filepath.Join(
+				root,
+				"codex",
+				"sessions",
+				"2030",
+				"01",
+				"02",
+				"rollout-2030-01-02T03-04-05-"+id+".jsonl",
+			)
+			body = `{"type":"session_meta","payload":{"id":"` + id + `","cwd":"/work/native","thread_source":"user"}}` + "\n" + `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"initial"}]}}` + "\n"
+		}
+		files[pane] = path
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.PutSeat(context.Background(), seat); err != nil {
+			t.Fatal(err)
+		}
+		writeNativeAskHost(t, values.ProcRoot, seat)
+	}
+	var trust, failRead atomic.Bool
+	var deliveries atomic.Int32
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	t.Cleanup(func() { _ = listener.Close(); <-done })
+	go func() {
+		defer close(done)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string         `json:"id"`
+					Method string         `json:"method"`
+					Params map[string]any `json:"params"`
+				}
+				if err := json.NewDecoder(conn).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				pane, _ := req.Params["pane_id"].(string)
+				if pane == "" {
+					pane, _ = req.Params["target"].(string)
+				}
+				var result any
+				switch req.Method {
+				case "pane.list":
+					result = map[string]any{
+						"type": "pane_list",
+						"panes": []any{
+							testjail.HerdrPaneInfo("w6:p1")["pane"],
+							testjail.HerdrPaneInfo("w6:p2")["pane"],
+						},
+					}
+				case "pane.get":
+					result = testjail.HerdrPaneInfo(pane)
+				case "pane.process_info":
+					pid := 900001
+					if pane == "w6:p2" {
+						pid++
+					}
+					result = map[string]any{
+						"type": "pane_process_info",
+						"process_info": map[string]any{
+							"pane_id":              pane,
+							"shell_pid":            pid,
+							"foreground_processes": []any{map[string]any{"pid": pid, "argv0": "pfm"}},
+						},
+					}
+				case "pane.read":
+					if failRead.Load() {
+						if err := json.NewEncoder(conn).
+							Encode(map[string]any{"id": req.ID, "error": map[string]string{"code": "read_failed", "message": "fixture capture failed"}}); err != nil {
+							t.Error(err)
+						}
+						return
+					}
+					screen := "❯ \n────────\n"
+					if pane == "w6:p2" {
+						screen = "› \n"
+					}
+					if trust.Load() && pane == "w6:p1" {
+						screen = "Quick safety check\nYes, I trust this folder\nNo, exit"
+					}
+					result = map[string]any{
+						"type": "pane_read",
+						"read": map[string]any{
+							"pane_id":      pane,
+							"workspace_id": "w6",
+							"text":         screen,
+							"truncated":    false,
+							"format":       req.Params["format"],
+						},
+					}
+				case "agent.get", "agent.prompt":
+					kind, status := "agent_info", "idle"
+					if trust.Load() {
+						status = "blocked"
+					}
+					if req.Method == "agent.prompt" {
+						kind, status = "agent_prompted", "working"
+					}
+					result = map[string]any{
+						"type": kind,
+						"agent": map[string]any{
+							"pane_id":          pane,
+							"terminal_id":      "fixture-" + pane,
+							"agent_status":     status,
+							"state_change_seq": 1,
+						},
+					}
+				case "pane.send_text", "pane.send_input", "pane.send_keys":
+					result = map[string]any{"type": "ok"}
+				default:
+					t.Errorf("unexpected native method %s", req.Method)
+					return
+				}
+				if req.Method == "agent.prompt" || req.Method == "pane.send_keys" {
+					deliveries.Add(1)
+					body := `{"type":"user","message":{"content":"question"}}` + "\n" + `{"type":"assistant","message":{"content":[{"type":"text","text":"native answer cc"}]}}` + "\n"
+					if pane == "w6:p2" {
+						body = `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"question"}]}}` + "\n" + `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"native answer cx"}]}}` + "\n"
+					}
+					file, err := os.OpenFile(files[pane], os.O_APPEND|os.O_WRONLY, 0o600)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					if _, err := file.WriteString(body); err != nil {
+						t.Error(err)
+					}
+					if err := file.Close(); err != nil {
+						t.Error(err)
+					}
+				}
+				if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+	}()
+	for _, seat := range seats {
+		for _, target := range []string{seat.Name, seat.SessionID} {
+			t.Run(seat.Engine+"/"+target, func(t *testing.T) {
+				var out, errout bytes.Buffer
+				code := run([]string{"chat", "ask", "--timeout", "3", target, "answer only"}, &out, &errout)
+				if code != 0 || strings.TrimSpace(out.String()) != "native answer "+seat.Engine {
+					t.Fatalf("ask target=%s exit=%d out=%q err=%q", target, code, out.String(), errout.String())
+				}
+			})
+		}
+	}
+	beforeTrust := deliveries.Load()
+	trust.Store(true)
+	for _, verb := range []string{"ask", "stream"} {
+		var out, errout bytes.Buffer
+		args := []string{"chat", verb, seats[0].Name}
+		if verb == "ask" {
+			args = append(args, "answer only")
+		}
+		code := run(args, &out, &errout)
+		if code != codeUndelivered || !strings.Contains(errout.String(), "folder-trust dialog") ||
+			!strings.Contains(errout.String(), "w6:p1") ||
+			strings.Contains(errout.String(), "gone") {
+			t.Errorf("%s trust exit=%d out=%q err=%q", verb, code, out.String(), errout.String())
+		}
+	}
+	if deliveries.Load() != beforeTrust {
+		t.Fatal("trust refusal sent input to a live seat")
+	}
+	failRead.Store(true)
+	var failedOut, failedErr bytes.Buffer
+	if code := run(
+		[]string{"chat", "stream", seats[0].Name},
+		&failedOut,
+		&failedErr,
+	); code != 1 || !strings.Contains(failedErr.String(), "fixture capture failed") ||
+		strings.Contains(failedErr.String(), "gone") {
+		t.Fatalf("failed stream probe exit=%d err=%q", code, failedErr.String())
+	}
+	failRead.Store(false)
+	// A genuinely ambiguous name remains a refusal, not an arbitrary delivery.
+	seats[1].Name = seats[0].Name
+	if err := state.PutSeat(context.Background(), seats[1]); err != nil {
+		t.Fatal(err)
+	}
+	var out, errout bytes.Buffer
+	if code := run(
+		[]string{"chat", "ask", seats[0].Name, "answer only"},
+		&out,
+		&errout,
+	); code == 0 ||
+		!strings.Contains(errout.String(), "matches 2 chats") {
+		t.Fatalf("ambiguous ask exit=%d err=%q", code, errout.String())
+	}
+}
+
+func writeNativeAskHost(t *testing.T, root string, seat fleetdb.Seat) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, strconv.Itoa(seat.SeatHostPID))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Fields("S 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 100")
+	if err := os.WriteFile(
+		filepath.Join(dir, "stat"),
+		[]byte(fmt.Sprintf("%d (pfm) %s", seat.SeatHostPID, strings.Join(fields, " "))),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "cmdline"),
+		[]byte("/fixture/pfm\x00internal\x00seat-host\x00"+seat.SeatID+"\x00"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
 	}
 }

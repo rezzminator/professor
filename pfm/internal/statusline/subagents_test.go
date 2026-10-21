@@ -159,14 +159,14 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			task: task(`"id":"a1","name":"scout","type":"local_agent","status":"running","label":"map the resolver",` +
 				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000,"tokenCount":312000,` +
 				`"tokenSamples":[0,125000,250000,500000,1000000]`),
-			want: "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│scout·tracer│opus·▰▰▰ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
+			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M Σ$0.01/2.0K/35/2│scout·tracer│opus·▰▰▰ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
 				"⟲1│pfm│map the resolver",
 		},
 		{
 			name: "a finished agent's time stops at its transcript's last entry",
 			task: task(`"id":"a1","type":"local_agent","status":"completed","label":"x","model":"claude-sonnet-5",` +
 				`"contextWindowSize":1000000,"tokenCount":90000,"tokenSamples":[900000,90000]`),
-			want: "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│tracer│sonnet│completed 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│x",
+			want: "▱▱▱▱▱▱▱▱ 9% 90.0K/1.0M Σ$0.01/2.0K/35/2│tracer│sonnet│completed 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│x",
 		},
 		{
 			name: "no model turn yet: zero tools, an empty cache, and idle since its prompt",
@@ -184,45 +184,62 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			name: "an effort that is not a string is left out; a name shows without a role; no growth line",
 			task: `{"id":"e","name":"bot","status":"running","model":"claude-haiku-4","effort":{"level":"high"},` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│bot│haiku│running",
+			want: "4.2K/?│bot│haiku│running",
 		},
 		{
 			name: "a gpt- agent renders its tier then its version",
 			task: `{"id":"g1","name":"sol","status":"running","model":"gpt-6-sol","effort":"low",` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│sol│sol-6·▰ low│running",
+			want: "4.2K/? ctx missing│sol│sol-6·▰ low│running",
 		},
 		{
 			name: "a gpt- agent's dotted version survives",
 			task: `{"id":"g2","name":"bot","status":"running","model":"gpt-5.6-terra","effort":"high",` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K│bot│terra-5.6·▰▰▰ high│running",
+			want: "4.2K/? ctx missing│bot│terra-5.6·▰▰▰ high│running",
 		},
 		{
 			name: "a bare gpt- version has no tier and renders whole",
 			task: `{"id":"g3","name":"bot","status":"running","model":"gpt-6","tokenCount":10}`,
-			want: "10│bot│gpt-6│running",
+			want: "10/? ctx missing│bot│gpt-6│running",
 		},
 		{
 			name: "a gpt- agent on the priority tier renders its tier, not the -fast suffix",
 			task: `{"id":"g4","name":"bot","status":"running","model":"gpt-6-sol-fast[1m]","tokenCount":10}`,
-			want: "10│bot│sol-6│running",
+			want: "10/? ctx missing│bot│sol-6│running",
 		},
 		{
 			name: "a bare gpt- version on the priority tier renders whole, without the -fast suffix",
 			task: `{"id":"g5","name":"bot","status":"running","model":"gpt-5.5-fast","tokenCount":10}`,
-			want: "10│bot│gpt-5.5│running",
+			want: "10/? ctx missing│bot│gpt-5.5│running",
 		},
 		{
 			name: "an agent in the session's own directory shows no cwd",
 			task: `{"id":"same","status":"running","cwd":"/work/repo/","model":"haiku","tokenCount":10,"label":"x"}`,
-			want: "10│haiku│running│x",
+			want: "10/?│haiku│running│x",
 		},
 		{
-			name: "a task with no tokens and no window keeps Claude Code's own row",
+			name: "a task with no tokens and no window still gets a row with unknown context",
 			task: `{"id":"a5","label":"shell","tokenCount":0}`,
-			want: "",
+			want: "0/?│shell",
 		},
+		{
+			name: "a gateway agent with zero counters keeps its rich row",
+			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x",` +
+				`"model":"gpt-6-sol","tokenCount":0,"contextWindowSize":0`),
+			want: "0/? ctx missing Σ$0.00/0/0/0│general-purpose│sol-6│running 2m:0s│idle 2m0s│💾–│pfm│x",
+		},
+		{
+			name: "an adopted agent with missing counters and model still gets a rich row",
+			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x"`),
+			want: "?/? Σ$0.00/0/0/0│general-purpose│running 2m:0s│idle 2m0s│💾–│pfm│x",
+		},
+		{
+			name: "zero counters remain known but a gateway harness window is not authoritative",
+			task: `{"id":"g0","name":"bot","model":"gpt-6-sol","tokenCount":0,"contextWindowSize":200000}`,
+			want: "0/? ctx missing│bot│sol-6",
+		},
+
 		{
 			name: "a task with no id is skipped",
 			task: `{"label":"orphan","contextWindowSize":1000000,"tokenCount":5}`,
@@ -467,7 +484,7 @@ func TestRenderSubagentsMetaWithoutRoleIsNotEmpty(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"m": agentTranscriptLines[:1]}, map[string]string{"m": ""})
 	got, warned := renderOneSubagent(t, session,
 		`{"id":"m","type":"local_agent","status":"running","tokenCount":10}`)
-	if !strings.HasPrefix(got, "10 Σ$0.00/0/0/0│role ?│running") ||
+	if !strings.HasPrefix(got, "10/? Σ$0.00/0/0/0│role ?│running") ||
 		!strings.Contains(warned, "names no agentType") {
 		t.Fatalf("content = %q warn = %q, want role ? and the cause", got, warned)
 	}
@@ -500,7 +517,8 @@ func TestRenderSubagentsIdleOnlyWhileRunning(t *testing.T) {
 func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 	got, err := RenderSubagents([]byte(`{"tasks":[
 		{"id":"first","tokenCount":10,"contextWindowSize":100},
-		{"id":"skipped"},
+		{"id":"unknown"},
+		{"label":"no id"},
 		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", noEnv, "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
@@ -513,8 +531,8 @@ func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 		}
 		ids = append(ids, row.ID)
 	}
-	if strings.Join(ids, ",") != "first,second" {
-		t.Fatalf("row ids = %v, want [first second]", ids)
+	if strings.Join(ids, ",") != "first,unknown,second" {
+		t.Fatalf("row ids = %v, want [first unknown second]", ids)
 	}
 }
 

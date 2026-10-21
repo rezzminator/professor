@@ -2,8 +2,11 @@ package headless
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +15,9 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // assertNoLeakedTempFiles is Ask's cleanup pin (see the package doc comment
@@ -78,6 +84,138 @@ func startHeadlessTmuxSession(t *testing.T) (socketPath, session string) {
 // doc comment on AskOptions): unlike Summarize, Ask never consults or writes
 // a cache, because a pane moves every second and a cached answer would be a
 // confidently stale claim about a chat that has moved on.
+func TestAskCapturesHerdrSeatThroughNativeHost(t *testing.T) {
+	root, _ := summaryTestStore(t)
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	// Keep the native socket short enough for the Unix sun_path limit.
+	socketRoot, err := os.MkdirTemp("", "headless-herdr-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(socketRoot); err != nil {
+			t.Error(err)
+		}
+	})
+	socket := filepath.Join(socketRoot, "s")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			func() {
+				defer func() {
+					if err := conn.Close(); err != nil {
+						t.Errorf("close native fixture: %v", err)
+					}
+				}()
+				var request struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(conn).Decode(&request); err != nil {
+					t.Errorf("decode native request: %v", err)
+					return
+				}
+				var result any
+				switch request.Method {
+				case "pane.list":
+					result = map[string]any{"type": "pane_list", "panes": []any{map[string]any{
+						"pane_id": "w1:p2", "workspace_id": "w1", "terminal_id": "stable",
+					}}}
+				case "pane.process_info":
+					result = map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+						"pane_id": "w1:p2", "shell_pid": 41,
+					}}
+				case "pane.read":
+					result = map[string]any{"type": "pane_read", "read": map[string]any{
+						"pane_id": "w1:p2", "text": "native capture is running checks", "truncated": false,
+					}}
+				default:
+					t.Errorf("unexpected native request %q", request.Method)
+				}
+				if err := json.NewEncoder(conn).Encode(map[string]any{"id": request.ID, "result": result}); err != nil {
+					t.Errorf("reply to native request: %v", err)
+				}
+			}()
+		}
+	}()
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Error(err)
+		}
+		<-done
+	})
+
+	t.Setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := db.PutSeat(context.Background(), fleetdb.Seat{
+		SeatID: "capture-seat", Engine: "cc", Backend: "herdr", State: "live",
+		HerdrSocket: socket, HerdrPane: "w1:p2", HerdrWorkspace: "w1", HerdrTerminalID: "stable",
+		SeatHostPID: 42, SeatHostStart: 100,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for pid, parent := range map[int]int{41: 1, 42: 41} {
+		dir := filepath.Join(values.ProcRoot, strconv.Itoa(pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fields := strings.Fields("S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 100")
+		fields[1] = strconv.Itoa(parent)
+		argv := "/bin/sh\x00"
+		if pid == 42 {
+			argv = "/fixture/pfm\x00internal\x00seat-host\x00capture-seat\x00"
+		}
+		for name, body := range map[string]string{
+			"stat": fmt.Sprintf("%d (pfm) %s", pid, strings.Join(fields, " ")), "cmdline": argv,
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(values.ProcRoot, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "bin")
+	capture := filepath.Join(root, "stdin")
+	writeSummaryStub(t, bin, "claude", `/bin/cat > "$ASK_CAPTURE"
+printf '%s\n' '{"result":"native capture is running checks"}'`)
+	t.Setenv("ASK_CAPTURE", capture)
+	t.Setenv("PATH", bin)
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "prepared")}
+	chat := Chat{
+		Name: "native seat", Engine: pfmengine.Claude, Backend: "herdr", SeatID: "capture-seat",
+		HerdrWorkspace: "w1", Socket: socket, Pane: "w1:p2", Live: true,
+	}
+	result := Ask(context.Background(), chat, options)
+	if result.Warning != nil || !strings.HasPrefix(result.Text, "PANE-ONLY (no human exchange recorded yet): ") {
+		t.Fatalf("native status ask=%+v; want a native pane capture, not TRANSCRIPT-ONLY or unavailable", result)
+	}
+	raw, err := os.ReadFile(capture)
+	if err != nil || !strings.Contains(string(raw), "native capture is running checks") {
+		t.Fatalf("runner missing native capture: %q err=%v", raw, err)
+	}
+	assertNoLeakedTempFiles(t, options.TempDir)
+}
+
 func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "exchange.jsonl")

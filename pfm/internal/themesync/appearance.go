@@ -2,17 +2,22 @@ package themesync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-// DetectAppearance reads macOS's appearance; a failed read is an error, never
-// a guessed side. `defaults read -g AppleInterfaceStyle` prints Dark in dark
-// mode and exits 1 with "does not exist" when the key is absent (light mode).
-func DetectAppearance(ctx context.Context, runner deps.Runner) (Appearance, error) {
-	result, err := runner.Run(ctx, []string{"defaults", "read", "-g", "AppleInterfaceStyle"}, deps.RunOptions{})
+// DetectAppearance reads macOS's appearance; other platforms and failed reads
+// return an error, never a guessed side. Env.GOOS selects the served platform.
+// `defaults read -g AppleInterfaceStyle` prints Dark in dark mode and exits 1
+// with "does not exist" when the key is absent (light mode).
+func DetectAppearance(ctx context.Context, env Env) (Appearance, error) {
+	if !env.darwin() {
+		return "", errors.New("themesync: auto appearance detection unsupported; choose an explicit theme/appearance")
+	}
+	result, err := env.Runner.Run(ctx, []string{"defaults", "read", "-g", "AppleInterfaceStyle"}, deps.RunOptions{})
 	if err != nil {
 		return "", fmt.Errorf("themesync: read macOS appearance: %w", err)
 	}

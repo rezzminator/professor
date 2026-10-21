@@ -192,12 +192,11 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	fmt.Fprintf(
 		stdout,
 		"config version=%d effective (input=%d %s)\n",
-		config.Version,
-		config.InputVersion,
+		config.Version, config.InputVersion,
 		config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
-	fmt.Fprintf(stdout, "config chat.backend=%s (%s)\n", config.Chat.Backend, config.Source("chat.backend"))
+	fmt.Fprint(stdout, config.ChatSummary())
 	for index, value := range []string{runtime.Paths.StateDB, runtime.Paths.CacheDB} {
 		source := config.Source([]string{"state.db", "state.cacheDb"}[index])
 		if (paths.OSEnv{}).Get([]string{paths.EnvStateDB, paths.EnvCacheDB}[index]) != "" {
@@ -220,6 +219,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	}
 	printClaude("permissionMode", config.Claude.PermissionMode)
 	printClaude("binary", config.Claude.Binary)
+	printClaude("remoteControl", config.Claude.RemoteControl)
 	printClaude("theme", config.Claude.Theme)
 	printClaude("webSearchesPerSession", config.Claude.WebSearchesPerSession)
 	printClaude("autoCompactWindow", config.Claude.AutoCompactWindow)
@@ -242,6 +242,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("plugins", strings.Join(plugins, ","))
 	printClaude("costLedger", config.Claude.CostLedger)
 	printClaude("gptAgents", config.Claude.GptAgents)
+	printClaude("subagentStatuslineTrace", config.Claude.SubagentStatuslineTrace)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

@@ -73,7 +73,8 @@ func TestFormatInterval(t *testing.T) {
 func TestMessageNamesIdIntervalAndPrompt(t *testing.T) {
 	t.Parallel()
 	got := Message(fleetdb.Schedule{ID: 12, Interval: 15 * 24 * time.Hour, Prompt: "check the nightly build"})
-	const want = "⏰ pfm schedule 12 (every 15d): check the nightly build"
+	const want = "⏰ pfm schedule 12 (every 15d): check the nightly build\n\n" +
+		"[pfm-schedule id=12 fire=0001-01-01T00:00:00Z]"
 	if got != want {
 		t.Fatalf("Message = %q, want %q", got, want)
 	}
@@ -159,7 +160,7 @@ func TestScheduleWhenNamesExactlyOneTiming(t *testing.T) {
 func TestMessageNamesAOneTimeSchedule(t *testing.T) {
 	t.Parallel()
 	got := Message(fleetdb.Schedule{ID: 4, Once: true, Interval: time.Hour, Prompt: "check it"})
-	if want := "⏰ pfm schedule 4 (once): check it"; got != want {
+	if want := "⏰ pfm schedule 4 (once): check it\n\n[pfm-schedule id=4 fire=0001-01-01T00:00:00Z]"; got != want {
 		t.Fatalf("Message = %q, want %q", got, want)
 	}
 }

@@ -10,6 +10,8 @@
 #       this script does not drive, such as the e2e suite
 set -euo pipefail
 export PFM_SHARD_MODULE="$(cd "$(dirname "$0")/.." && pwd)"
+. "$PFM_SHARD_MODULE/../infra/fence/shared.sh"
+fence_config_values || exit 2
 exec python3 - "$@" <<'PY'
 import argparse
 import json
@@ -32,8 +34,8 @@ PREFIX = 'github.com/rezzminator/professor/pfm/'
 # four measured 39.2 s then 43.7 s under varying host load.
 # internal/update: 11.9 s alone, nearly all of it ~45 serial Run calls (package-var seams).
 SHARDS = {
-    PREFIX + 'cmd/pfm': 4,
-    PREFIX + 'internal/update': 2,
+    PREFIX + 'cmd/pfm': int(os.environ['PFM_FENCE_SHARDS_CMD']),
+    PREFIX + 'internal/update': int(os.environ['PFM_FENCE_SHARDS_UPDATE']),
 }
 TERMINALS = {'pass', 'fail', 'skip'}
 
@@ -341,7 +343,7 @@ class LoadRecord:
             self.stop_sampling.set()
 
     def sample_loop(self):
-        while not self.stop_sampling.wait(0.5):
+        while not self.stop_sampling.wait(float(os.environ['SAMPLER_INTERVAL_S'])):
             self.sample()
 
     def start(self):
@@ -506,7 +508,7 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir,
     unsharded = longest_first([package for package in packages if package not in selected], package_elapsed(args.history))
     if args.mode == 'run' and unsharded:
         # The default timeout goes first so a caller's -timeout wins.
-        start(['go', 'test', '-timeout', '25m', *args.flags, '-count=1', '-json', *unsharded], MODULE)
+        start(['go', 'test', '-timeout', os.environ['PFM_FENCE_TEST_TIMEOUT'], *args.flags, '-count=' + os.environ['PFM_FENCE_TEST_COUNT'], '-json', *unsharded], MODULE)
 
     for package in selected:
         binary = binary_dir / (package.rsplit('/', 1)[-1] + '.test')
@@ -542,7 +544,7 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir,
         for shard in shards:
             selector = '^(' + '|'.join(re.escape(name) for name in shard) + ')$' if shard else '^$'
             command = ['go', 'tool', 'test2json', '-t', '-p', package, str(binary), '-test.v=test2json',
-                       '-test.count=1', '-test.timeout', '25m', '-test.run', selector, *args.binary_flags]
+                       '-test.count=' + os.environ['PFM_FENCE_TEST_COUNT'], '-test.timeout', os.environ['PFM_FENCE_TEST_TIMEOUT'], '-test.run', selector, *args.binary_flags]
             start(command, package_dir(package), package)
             group.append(processes[-1])
         finish(group)

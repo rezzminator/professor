@@ -406,7 +406,7 @@ func appearanceFor(ctx context.Context, env Env, applied Applied) (Appearance, e
 	if !applied.Auto {
 		return applied.Side, nil
 	}
-	return DetectAppearance(ctx, env.Runner)
+	return DetectAppearance(ctx, env)
 }
 
 type convergeMode int
@@ -572,14 +572,21 @@ func (s *session) flipWithAck() *Flip {
 func Off(ctx context.Context, env Env) (report Report, err error) {
 	store, release, err := beginActive(env)
 	if errors.Is(err, errInert) {
-		return Report{}, nil
+		pending, readErr := VSCodePendingRestores(env.withStateDir().StateDir)
+		if readErr != nil {
+			return Report{}, readErr
+		}
+		if len(pending) == 0 {
+			return Report{}, nil
+		}
+		store, release, err = begin(env)
 	}
 	if err != nil {
 		return Report{}, err
 	}
 	defer func() { err = errors.Join(err, release()) }()
-	state, found, err := store.load()
-	if err != nil || !found {
+	state, _, err := store.load()
+	if err != nil {
 		return Report{}, err
 	}
 	if state.Enabled {

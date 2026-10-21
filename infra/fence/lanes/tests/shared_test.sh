@@ -22,6 +22,7 @@ SHTEST_TAG=fence-shared-test
 # shellcheck source=/dev/null
 . "$FENCE/../../scripts/shtest.sh"
 shtest_unset_gate_env
+PFM_FENCE_PROFILE=desktop
 [ -f "$SUT" ] || { echo "shared_test: no shared.sh at $SUT" >&2; exit 2; }
 # shellcheck source=/dev/null
 . "$SUT"
@@ -37,11 +38,14 @@ fence_housekeeping() { :; }
 stub_docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_RUN_RC, STUB_UPDATE_RC; $T/run.inuse (one in-use refusal), $T/exec.rcs (space list) — files, as docker runs in $( ) subshells
   { printf 'docker'; printf ' %q' "$@"; printf '\n'; } >>"$REC"
   case "$1" in
+    info) echo "${STUB_INFO:-Docker Desktop|10|8267812044}" ;;
     inspect) # $T/gone: while it exists, the container has stopped and gone (`run --rm`)
       [ ! -e "$T/gone" ] || return 1
       local insp="${STUB_INSPECT:-}"; [ ! -e "$T/inspect.after" ] || insp="$(cat "$T/inspect.after")"
       [ -n "$insp" ] || return 1
-      if [ "$2" = -f ] && [ "$3" = '{{.State.Running}}' ]; then echo "${insp%% *}"; else echo "$insp"; fi ;;
+      if [ "$2" = -f ] && [ "$3" = '{{.State.Running}}' ]; then echo "${insp%% *}";
+      elif [[ "$3" == '{{.HostConfig.NanoCpus}}'* ]]; then echo "${insp#* }";
+      else echo "$insp"; fi ;;
     image) # STUB_KTAG_LABEL: the k- tag's label (unset = no such tag); STUB_IMG: the plain tag's "id label"
       case "$2" in
         inspect) case "${*: -1}" in
@@ -53,11 +57,24 @@ stub_docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_
       esac ;;
     tag) return 0 ;;
     compose) [ -z "${STUB_IMG_AFTER_BUILD:-}" ] || STUB_IMG="$STUB_IMG_AFTER_BUILD"; return "${STUB_BUILD_RC:-0}" ;;
-    update) return "${STUB_UPDATE_RC:-0}" ;;
+    update)
+      [[ "${STUB_UPDATE_RC:-0}" == 0 ]] || return "$STUB_UPDATE_RC"
+      if [[ "${STUB_UPDATE_NOOP:-0}" != 1 ]]; then
+        local cpu mem cpuset
+        cpu="$(_fence_sh_nanocpus "$3")"; mem="$(_fence_sh_bytes "$5")"; cpuset="$9"
+        printf 'true %s %s %s|%s\n' "$cpu" "$mem" "$cpuset" "$mem" > "$T/inspect.after"
+      fi ;;
+    rm) touch "$T/gone" ;;
     run) if [ -e "$T/run.inuse" ]; then rm -f "$T/run.inuse"; [ -z "${STUB_INUSE_INSPECT:-}" ] || echo "$STUB_INUSE_INSPECT" >"$T/inspect.after"; echo 'Conflict. The container name is already in use'; return 125; fi
          [ "${STUB_RUN_RC:-0}" = 0 ] || { echo 'boom: no such image'; return "$STUB_RUN_RC"; }; echo cid ;;
     ps) printf '%s\n' "${STUB_PS:-}" ;;
     exec)
+      if [[ "$*" == *fence-live-count* ]]; then if [[ -n "${STUB_LIVE_DIR:-}" ]]; then find "$STUB_LIVE_DIR" -type f | wc -l; else echo "${STUB_LIVE_COUNT:-0}"; fi; return 0; fi
+      if [[ "$*" == *fence-reserve* && -n "${STUB_LIVE_DIR:-}" ]]; then touch "$STUB_LIVE_DIR/${*: -1}"; return 0; fi
+      if [[ "$*" == *'rm -f /var/fence/live/'* && -n "${STUB_LIVE_DIR:-}" ]]; then
+        local live_path="${*: -1}"; rm -f "$STUB_LIVE_DIR/${live_path##*/}"; return 0
+      fi
+      if [[ "$*" == *fence-reserve* || "$*" == *'rm -f /var/fence/live/'* ]]; then return 0; fi
       local rcs rc
       rcs="$(cat "$T/exec.rcs" 2>/dev/null)"; rc="${rcs%% *}"; [ -n "$rc" ] || rc=0
       if [ "$rcs" = "${rcs#* }" ]; then : >"$T/exec.rcs"; else echo "${rcs#* }" >"$T/exec.rcs"; fi
@@ -72,16 +89,17 @@ eval "real_after_start() $(declare -f _fence_sh_after_start | tail -n +2)"
 _fence_sh_after_start() { echo after_start >>"$REC"; [ -z "${STUB_AFTER_SLEEP:-}" ] || command sleep "$STUB_AFTER_SLEEP"; }
 PFM_DEV_GIT_COMMON="$MAIN/.git"
 init() { # init [tree]: a fresh fence_shared_init from MAIN (or the given tree)
+  local PFM_FENCE_CPUS="${PFM_FENCE_CPUS-6}" PFM_FENCE_MEM="${PFM_FENCE_MEM-5g}"
   REPO_ROOT="${1:-$MAIN}"; fence_shared_init
 }
-reset() { : >"$REC"; unset STUB_INSPECT STUB_RUN_RC STUB_UPDATE_RC STUB_PS STUB_KTAG_LABEL STUB_IMG STUB_IMG_AFTER_BUILD STUB_BUILD_RC STUB_KTAGS STUB_INUSE_INSPECT STUB_AFTER_SLEEP; FENCE_IMAGE_BUILD=(); rm -f "$T/exec.rcs" "$T/run.inuse" "$T/gone" "$T/inspect.after"; }
+reset() { : >"$REC"; unset STUB_INSPECT STUB_RUN_RC STUB_UPDATE_RC STUB_UPDATE_NOOP STUB_PS STUB_KTAG_LABEL STUB_IMG STUB_IMG_AFTER_BUILD STUB_BUILD_RC STUB_KTAGS STUB_INUSE_INSPECT STUB_AFTER_SLEEP; FENCE_IMAGE_BUILD=(); rm -f "$T/exec.rcs" "$T/run.inuse" "$T/gone" "$T/inspect.after"; }
 has() { if grep -qF -- "$2" "$REC"; then ok "$1"; else bad "$1" "no docker call with: $2" "$(cat "$REC")"; fi; }
 lacks() { if grep -qF -- "$2" "$REC"; then bad "$1" "a docker call with: $2" "$(cat "$REC")"; else ok "$1"; fi; }
 PFM_DEV_INPUTS_KEY=abcdef0123456789abcdef; FENCE_IMAGE_BUILD=(); FENCE_SH_COMPOSE="$T/docker-compose.yml"
 
 # --- init: knobs and paths ---------------------------------------------------------------------------------
 for bad in 'PFM_FENCE_CPUS=two' 'PFM_FENCE_MEM=5 GB' 'PFM_FENCE_TEST_P=0'; do
-  out="$(env "$bad" bash -c '. "$1"; REPO_ROOT="$2" PFM_DEV_GIT_COMMON="$2/.git" fence_shared_init' _ "$SUT" "$MAIN" 2>&1)"; rc=$?
+  out="$(env PFM_FENCE_PROFILE=desktop "$bad" bash -c '. "$1"; REPO_ROOT="$2" PFM_DEV_GIT_COMMON="$2/.git" fence_shared_init' _ "$SUT" "$MAIN" 2>&1)"; rc=$?
   if [ "$rc" != 0 ] && grep -q "^iso: ${bad%%=*} must be" <<<"$out"; then ok "$bad is refused, named"; else bad "$bad refusal" "rc=$rc" "$out"; fi
 done
 init
@@ -91,6 +109,7 @@ else bad "init paths" "$FENCE_SH_HOST $FENCE_SH_LOCK $FENCE_SH_WT"; fi
 if [ "$FENCE_SH_CPUS $FENCE_SH_MEM" = '6 5g' ]; then ok "the caps default to 6 CPUs and 5g"; else bad "default caps" "$FENCE_SH_CPUS $FENCE_SH_MEM"; fi
 PFM_FENCE_CPUS=3.5 PFM_FENCE_MEM=6144m init
 if [ "$FENCE_SH_CPUS $FENCE_SH_MEM" = '3.5 6144m' ]; then ok "PFM_FENCE_CPUS and PFM_FENCE_MEM set the caps per call"; else bad "knob caps" "$FENCE_SH_CPUS $FENCE_SH_MEM"; fi
+unset PFM_FENCE_CPUS PFM_FENCE_MEM
 init "$MAIN/.worktrees/wt1"
 n1="$(_fence_sh_name)"
 if [ "$FENCE_SH_WT" = wt1 ] && [ -z "$FENCE_SH_EXT" ]; then ok "a worktree under the main checkout needs no extra root"; else bad "worktree init" "$FENCE_SH_WT ext=$FENCE_SH_EXT"; fi
@@ -116,7 +135,7 @@ lacks "a running container is never started again" 'docker run'
 reset; STUB_INSPECT='true 6000000000 5368709120'
 PFM_FENCE_CPUS=4 PFM_FENCE_MEM=8g init
 out="$(fence_shared_ensure 2>&1)"; rc=$?
-has "other caps are applied to the running container with docker update" "docker update --cpus 4 --memory 8g --memory-swap 8g $FENCE_SH_NAME"
+has "other caps are applied to the running container with docker update" "docker update --cpus 4 --memory 8g --memory-swap 8g --cpuset-cpus '' $FENCE_SH_NAME"
 if [ "$rc" = 0 ] && grep -qF "fence: $FENCE_SH_NAME caps now cpus=4 mem=8g" <<<"$out"; then ok "a cap update is named"; else bad "cap update line" "$out"; fi
 reset; STUB_INSPECT='true 6000000000 5368709120'; STUB_UPDATE_RC=1
 out="$(fence_shared_ensure 2>&1)"; rc=$?
@@ -205,6 +224,7 @@ if [ ! -e "$FENCE_SH_LOCK" ]; then ok "the untag releases the start lock it held
 kill "$live" 2>/dev/null; wait "$live" 2>/dev/null; rm -rf "$alive"
 
 # --- exec ----------------------------------------------------------------------------------------------------
+unset PFM_FENCE_CPUS PFM_FENCE_MEM
 init "$MAIN/.worktrees/wt1"; reset
 STUB_INSPECT='true 6000000000 5368709120'
 PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec private 'echo hi'; rc=$?
@@ -261,5 +281,129 @@ reset; STUB_INSPECT='true 6000000000 5368709120'
 out="$(PFM_DEV_ENGINE_SYNC_SRC="$T/elsewhere" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec shared 'true' 2>&1)"; rc=$?
 if [ "$rc" = 1 ] && grep -q '^iso: the engine-sync source .* is outside the shared container' <<<"$out"; then ok "an engine-sync source outside the roots is refused, named"; else bad "engine-sync refusal" "rc=$rc" "$out"; fi
 lacks "a refused engine-sync source never reaches docker exec" 'docker exec'
+
+# Public configuration must reject malformed supplied knobs, not silently run with defaults.
+for assignment in 'PFM_FENCE_HEARTBEAT_S=bad' 'PFM_FENCE_IDLE_S=0' 'PFM_FENCE_CPUSET=2--4' 'PFM_FENCE_GOMAXPROCS=-1' 'STEPS_JOBS=0' 'PFM_FENCE_MEM=0g' 'STEPPROF_GRACE_TICKS=08' 'PFM_FENCE_NET=outside'; do
+  out="$(env PFM_FENCE_PROFILE=desktop "$assignment" bash -c '. "$1"; REPO_ROOT="$2" PFM_DEV_GIT_COMMON="$2/.git" fence_shared_init' _ "$SUT" "$MAIN" 2>&1)"; rc=$?
+  if [[ $rc != 0 && "$out" == *"${assignment%%=*}"* ]]; then ok "entry rejects $assignment by name"; else bad "entry rejects $assignment by name" "rc=$rc $out"; fi
+done
+for profile in desktop native; do
+  out="$(PFM_FENCE_PROFILE="$profile" PFM_FENCE_CPUS=2 PFM_FENCE_MEM=5g bash -c '. "$1"; REPO_ROOT="$2" PFM_DEV_GIT_COMMON="$2/.git" fence_shared_init; printf "%s|%s|%s" "${PFM_FENCE_PROFILE:-}" "$FENCE_SH_CPUS" "$FENCE_SH_MEM"' _ "$SUT" "$MAIN" 2>&1)"
+  [[ "$out" == "$profile|2|5g" ]] && ok "$profile preserves explicit cap and legacy memory" || bad "$profile preserves explicit cap and legacy memory" "$out"
+done
+reset; STUB_INSPECT='true 6000000000 5368709120'; STUB_LIVE_COUNT=1
+PFM_FENCE_PROFILE=desktop PFM_FENCE_CPUS=4 PFM_FENCE_MEM=8g init
+out="$( { fence_shared_ensure && printf 'effective=%s|%s|%s\n' "$FENCE_SH_CPUS" "$FENCE_SH_MEM" "$FENCE_SH_CPUSET"; } 2>&1)"; rc=$?
+lacks "a live run prevents caps changing beneath it" 'docker update'
+if [[ $rc == 0 && "$out" == *'fence: CAPS CONFLICT requested cpus=4 mem=8g cpuset= — running under live cpus=6 mem=5368709120 cpuset= (another run is live)'* ]]; then ok "caps conflict is loud and names requested and effective caps"; else bad "caps conflict is loud and names requested and effective caps" "$out"; fi
+[[ "$out" == *'effective=6|5368709120|'* ]] && ok "caps conflict forwards effective caps, never requested ones" || bad "caps conflict effective receipt" "$out"
+unset STUB_LIVE_COUNT
+
+# Effective bytes from Docker must survive the same validation used inside shared-run.sh.
+if PFM_FENCE_MEM=5368709120 fence_config_values; then ok "effective byte memory passes in-run validation"; else bad "effective byte memory validation"; fi
+reset; STUB_INSPECT='true 6000000000 5368709120'; STUB_UPDATE_NOOP=1
+PFM_FENCE_CPUS=4 PFM_FENCE_MEM=8g init
+out="$( { fence_shared_ensure && printf 'effective=%s|%s\n' "$FENCE_SH_CPUS" "$FENCE_SH_MEM"; } 2>&1)"; rc=$?
+if [[ $rc == 0 && "$out" == *'update did not apply every requested cap'* && "$out" == *'effective=6|5368709120'* ]]; then ok "successful no-op updates report inspected caps, never requested ones"; else bad "no-op update receipt" "$out"; fi
+for clear in quota cpuset; do
+  reset
+  if [[ "$clear" == quota ]]; then STUB_INSPECT='true 6000000000 5368709120'; PFM_FENCE_CPUS=0 init
+  else STUB_INSPECT='true 6000000000 5368709120 1-8'; PFM_FENCE_CPUS=6 PFM_FENCE_CPUSET='' init; fi
+  out="$(fence_shared_ensure 2>&1)"; rc=$?
+  if [[ $rc == 0 && "$out" == *'recreating idle'* ]] && grep -q '^docker rm -f ' "$REC" && grep -q '^docker run ' "$REC" && ! grep -q '^docker update ' "$REC"; then ok "idle $clear clear recreates instead of issuing a Docker no-op"; else bad "idle $clear clear" "$out" "$(cat "$REC")"; fi
+  unset PFM_FENCE_CPUS PFM_FENCE_CPUSET
+ done
+reset; STUB_PS=$'pfm-fence-old-key\npfm-fence-new-key'
+dead="$FENCE_SH_HOST/.runs/20261018T000000Z-999999-987"; mkdir -p "$dead"
+_fence_sh_reap_runs > "$T/reap-keys.log" 2>&1
+if [[ ! -d "$dead" ]] && grep -q '^docker exec pfm-fence-old-key ' "$REC" && grep -q '^docker exec pfm-fence-new-key ' "$REC"; then ok "dead caller reservations are reaped across all image keys"; else bad "cross-key reap" "$(cat "$REC")"; fi
+
+# Detection is Docker facts, never the host name; explicit profile avoids the probe.
+for facts in 'Docker Desktop|10|8267812044|desktop' 'Docker Desktop|24|126701535232|desktop' 'Ubuntu Linux|23|126701535232|native' 'Ubuntu Linux|8|126701535232|desktop' 'Debian Linux|23|5368709120|desktop'; do
+  want="${facts##*|}"; STUB_INFO="${facts%|*}"
+  if got="$(PFM_FENCE_PROFILE=auto fence_config_init && printf '%s' "$PFM_FENCE_PROFILE")" && [[ "$got" == "$want" ]]; then ok "Docker facts select $want"; else bad "Docker facts select $want" "$got"; fi
+done
+out="$(PFM_FENCE_PROFILE=native STUB_INFO=broken fence_config_init 2>&1)"; rc=$?
+[[ $rc == 0 ]] && ok "explicit profile wins over unreadable Docker facts" || bad "explicit profile precedence" "$out"
+out="$(PFM_FENCE_PROFILE=auto STUB_INFO=broken fence_config_init 2>&1)"; rc=$?
+[[ $rc != 0 && "$out" == *'PFM_FENCE_PROFILE'* ]] && ok "failed auto detection is not a silent profile fallback" || bad "failed auto detection" "$out"
+for assignment in 'PFM_FENCE_CPUS=0' 'PFM_FENCE_CPUSET=1-8,10' 'PFM_FENCE_GOMAXPROCS=8'; do
+  if env PFM_FENCE_PROFILE=desktop "$assignment" bash -c '. "$1"; fence_config_init' _ "$SUT"; then ok "valid override $assignment"; else bad "valid override $assignment"; fi
+done
+
+# Hold the first run between reservation and supervisor registration. A competing caller
+# must see the reservation, not an empty machine whose caps it may change.
+reset; STUB_INSPECT='true 6000000000 5368709120'; STUB_LIVE_DIR="$T/reservations"; mkdir -p "$STUB_LIVE_DIR"
+PFM_FENCE_CPUS=4 PFM_FENCE_MEM=8g init
+FENCE_SH_PENDING_ID=admit-first fence_shared_ensure >"$T/admit-first.log" 2>&1; first_rc=$?
+PFM_FENCE_CPUS=8 PFM_FENCE_MEM=12g init
+out="$(FENCE_SH_PENDING_ID=admit-second fence_shared_ensure 2>&1)"; rc=$?
+if [[ $first_rc == 0 && $rc == 0 && "$(grep -c '^docker update' "$REC")" == 1 && -f "$STUB_LIVE_DIR/admit-first" && -f "$STUB_LIVE_DIR/admit-second" && "$out" == *'CAPS CONFLICT'* && ! -e "$FENCE_SH_LOCK" ]]; then
+  ok "admission reservation closes the cap-update versus registration race"
+else bad "admission reservation closes the cap-update versus registration race" "$out" "$(cat "$REC")"; fi
+unset STUB_LIVE_DIR
+
+
+# Admission reserves PID 1 before setup; a setup error must release it before discarding
+# the host record, or no subsequent reaper can discover the abandoned reservation.
+for setup_failure in leak-copy fifo; do
+  reset; STUB_INSPECT='true 6000000000 5368709120'
+  STUB_LIVE_DIR="$T/setup-$setup_failure-live"; mkdir -p "$STUB_LIVE_DIR"
+  PFM_FENCE_CPUS=6 PFM_FENCE_MEM=5g init
+  setup_host="$T/setup-$setup_failure-host"; mkdir -p "$setup_host/.runs" "$setup_host/$FENCE_SH_WT"
+  echo private > "$T/setup-terms"
+  out="$(
+    FENCE_SH_HOST="$setup_host"
+    if [[ "$setup_failure" == leak-copy ]]; then
+      FENCE_SH_TERMS="$T/setup-terms"
+      cp() { return 1; }
+    else
+      FENCE_SH_TERMS=''
+      mkfifo() { return 1; }
+    fi
+    PFM_DEV_ENGINE_SYNC_SRC="$MAIN/plugins/engine-sync" PFM_DEV_GIT_DIR_REL=worktrees/wt1 fence_shared_exec private true
+  )"; rc=$?
+  if [[ $rc != 0 && -z "$(find "$STUB_LIVE_DIR" -type f)" && -z "$(find "$setup_host/.runs" -mindepth 1 -maxdepth 1)" ]] &&
+    ! grep -q 'shared-run.sh.*run' "$REC"; then
+    ok "$setup_failure failure after admission releases reservation and host record without starting a run"
+  else bad "$setup_failure failure after admission releases reservation" "rc=$rc $out" "$(find "$STUB_LIVE_DIR" -type f)" "$(cat "$REC")"; fi
+  unset STUB_LIVE_DIR
+done
+
+# The measured native profile must resolve without carrying machine-specific CPU IDs.
+out="$(env PFM_FENCE_PROFILE=native bash -c '
+. "$1"
+unset PFM_FENCE_CPUS PFM_FENCE_MEM PFM_FENCE_CPUSET PFM_FENCE_GOMAXPROCS PFM_FENCE_TEST_P STEPS_JOBS STEPS_HEAVY_JOBS
+fence_config_init || exit $?
+printf "%s|%s|%s|%s|%s|%s|%s" "$PFM_FENCE_CPUS" "$PFM_FENCE_MEM" "$PFM_FENCE_CPUSET" "$PFM_FENCE_GOMAXPROCS" "$PFM_FENCE_TEST_P" "$STEPS_JOBS" "$STEPS_HEAVY_JOBS"
+' _ "$SUT" 2>&1)"; rc=$?
+[[ $rc == 0 && "$out" == '12|12g|||6|6|2' ]] && ok "native defaults match the measured portable bounded scheduler" || bad "measured native defaults" "rc=$rc $out"
+
+# Different fixture defaults exercise the real resolver without shipping a tuning or a seam.
+profile_fixture='
+. "$1"
+fence_config_schema() { printf "%s\n" "PFM_FENCE_CPUS|6|cpu|8" "PFM_FENCE_MEM|5g|size|=" "PFM_FENCE_GOMAXPROCS|4|optional_int|"; }
+unset PFM_FENCE_CPUS PFM_FENCE_MEM PFM_FENCE_GOMAXPROCS
+[[ "${2:-}" != override ]] || PFM_FENCE_CPUS=6
+[[ "${2:-}" != empty ]] || PFM_FENCE_GOMAXPROCS=""
+fence_config_init || exit $?
+printf "%s|%s|%s|%s" "$PFM_FENCE_CPUS" "$PFM_FENCE_MEM" "$PFM_FENCE_GOMAXPROCS" "$(_fence_config_default PFM_FENCE_CPUS)"
+'
+for spec in desktop:6:4:default native:8::default native:6::override desktop:6::empty; do
+  IFS=: read -r profile want_cpu want_go mode <<< "$spec"
+  out="$(env PFM_FENCE_PROFILE="$profile" bash -c "$profile_fixture" _ "$SUT" "$mode" 2>&1)"; rc=$?
+  helper_cpu=6; [[ "$profile" != native ]] || helper_cpu=8
+  if [[ $rc == 0 && "$out" == "$want_cpu|5g|$want_go|$helper_cpu" ]]; then
+    ok "$profile selects its own defaults, inheritance, empty native default and $mode precedence"
+  else bad "$profile profile-specific defaults ($mode)" "rc=$rc $out"; fi
+done
+out="$(PFM_FENCE_PROFILE=native bash -c '. "$1"; fence_config_schema() { echo "PFM_FENCE_CPUS|6|cpu|broken"; }; unset PFM_FENCE_CPUS; fence_config_init' _ "$SUT" 2>&1)"; rc=$?
+[[ $rc != 0 && "$out" == *'PFM_FENCE_CPUS must be cpu'* ]] && ok "selected native default is validated by name" || bad "selected native default validation" "rc=$rc $out"
+
+# Every declared knob has a valid default and rejects a supplied broken value by name.
+while IFS='|' read -r knob default kind native; do
+  out="$(env "$knob=invalid!" bash -c '. "$1"; fence_config_values' _ "$SUT" 2>&1)"; rc=$?
+  if [[ $rc != 0 && "$out" == *"$knob must be"* ]]; then ok "schema rejects malformed $knob"; else bad "schema rejects malformed $knob" "$out"; fi
+done < <(fence_config_schema)
 
 shtest_end

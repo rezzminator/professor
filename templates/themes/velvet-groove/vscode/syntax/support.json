@@ -1,0 +1,46 @@
+{
+  "0021": {
+    "name": "Aqua: built-in functions",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin",
+      "keyword.other.special-method",
+      "support.function.builtin.go",
+      "entity.name.function.support.builtin",
+      "support.function.builtin.shell",
+      "support.function.misc.css",
+      "support.function.transform.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#85e3e8"
+    }
+  },
+  "0023": {
+    "name": "Avocado, italic: primitive types",
+    "scope": [
+      "support.type.primitive",
+      "storage.type.primitive",
+      "storage.type.built-in",
+      "keyword.type",
+      "support.type.builtin",
+      "storage.type.numeric.go",
+      "storage.type.string.go",
+      "storage.type.boolean.go",
+      "storage.type.byte.go",
+      "storage.type.rune.go",
+      "storage.type.error.go",
+      "storage.type.uintptr.go",
+      "support.type.python",
+      "entity.name.type.primitive",
+      "entity.name.type.numeric",
+      "entity.name.type.parameter",
+      "entity.name.type.type-parameter"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b9dd7c"
+    }
+  }
+}

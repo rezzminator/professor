@@ -16,6 +16,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 	home, machine := renderMachine(t)
 	machine.Claude.Theme = "dark"
 	machine.Claude.NativeCursor = true
+	machine.Claude.SubagentStatuslineTrace = true
 	machine.Claude.MaxConcurrentSubagents = 3
 	machine.Claude.SystemPrompt = "professor"
 	machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: true}
@@ -93,9 +94,17 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.PromptFile != prompt {
 					t.Errorf("prompt=%q", parsed.PromptFile)
 				}
+			case "remoteControl":
+				if !parsed.RemoteControl || parsed.RemoteControlName != "named" {
+					t.Errorf("remote control=%v name=%q", parsed.RemoteControl, parsed.RemoteControlName)
+				}
 			case "nativeCursor":
 				if parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"] != "1" {
 					t.Error("cursor missing")
+				}
+			case "subagentStatuslineTrace":
+				if parsed.SettingsEnv["PFM_SUBAGENT_STATUSLINE_TRACE"] != "1" {
+					t.Error("sub-agent status line trace missing")
 				}
 			case "maxSubagentSpawnDepth":
 				if parsed.SettingsEnv["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] != "8" {

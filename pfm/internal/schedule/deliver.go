@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,17 +41,17 @@ var (
 )
 
 // chatDeliverer wakes a chat and types a schedule into it: a live chat
-// is called as it stands, a dead one is resumed detached on a fresh tmux
-// socket and typed into once its composer is up. The seams default to the real
+// is called as it stands, a dead one is resumed detached on its chosen host
+// and typed into once its composer is up. Session identity selects the pane: a
+// Herdr socket may host several chats. The seams default to the real
 // doors; a test replaces them.
 type chatDeliverer struct {
 	runtime *pfmconfig.Runtime
 	stdout  io.Writer
 	stderr  io.Writer
-	tmuxDir string
 	open    func(ctx context.Context, sessionID string) (action.OpenResult, error)
-	capture func(ctx context.Context, socketPath, target string) (string, error)
-	call    func(ctx context.Context, r fleetdb.Schedule, target, message string) error
+	capture func(ctx context.Context, sessionID string) (string, error)
+	call    func(ctx context.Context, r fleetdb.Schedule, request pfmcall.Request) (pfmcall.Result, error)
 	unhide  func(ctx context.Context, sessionID string) (removed bool, err error)
 
 	// archiveDir is the archive the fire restores a chat from when the index no longer holds it.
@@ -62,13 +61,24 @@ type chatDeliverer struct {
 func newChatDeliverer(runtime *pfmconfig.Runtime, stdout, stderr io.Writer) *chatDeliverer {
 	deliverer := &chatDeliverer{
 		runtime: runtime, stdout: stdout, stderr: stderr,
-		tmuxDir: runtime.Paths.TmuxDir, archiveDir: runtime.Paths.ArchiveDir,
+		archiveDir: runtime.Paths.ArchiveDir,
 	}
 	deliverer.open = func(ctx context.Context, sessionID string) (action.OpenResult, error) {
 		return pfmchat.OpenDetachedID(ctx, sessionID, stderr, runtime)
 	}
-	deliverer.capture = func(ctx context.Context, socketPath, target string) (string, error) {
-		return (pfmcall.TmuxCaller{}).Capture(ctx, socketPath, target, false, scheduleCaptureLines)
+	deliverer.capture = func(ctx context.Context, sessionID string) (string, error) {
+		engine, err := pfmchat.NewCallEngine(true, runtime)
+		if err != nil {
+			return "", fmt.Errorf("build readiness caller: %w", err)
+		}
+		target, code, detail, err := engine.Resolve(ctx, sessionID)
+		if err != nil {
+			return "", fmt.Errorf("resolve revived chat %s: %w", sessionID, err)
+		}
+		if code != 0 {
+			return "", fmt.Errorf("resolve revived chat %s: code %d: %s", sessionID, code, detail)
+		}
+		return engine.CaptureTarget(ctx, target, scheduleCaptureLines)
 	}
 	deliverer.call = deliverer.callSchedule
 	deliverer.unhide = deliverer.unkill
@@ -84,14 +94,12 @@ func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Schedule,
 	if err != nil {
 		return fmt.Errorf("resolve chat %s (%s): %w", r.SessionID, r.Label, err)
 	}
-	target := r.SessionID
 	if result.State == scheduleOpened {
-		if err := deliverer.awaitComposer(ctx, result.Socket); err != nil {
+		if err := deliverer.awaitComposer(ctx, r.SessionID, result.Socket); err != nil {
 			return err
 		}
-		target = result.Socket
 	}
-	if err := deliverer.call(ctx, r, target, message); err != nil {
+	if err := deliverer.submitSchedule(ctx, r, r.SessionID, message); err != nil {
 		return err
 	}
 	return deliverer.unhideDelivered(ctx, r.SessionID)
@@ -181,13 +189,12 @@ func (deliverer *chatDeliverer) openArchived(
 // awaitComposer polls a revived chat's pane until its composer shows on
 // consecutive reads. A folder-trust dialog fails at once: its one key is the
 // human's decision, never a schedule's.
-func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string) error {
-	socketPath := filepath.Join(deliverer.tmuxDir, socket)
+func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, sessionID, socket string) error {
 	deadline := clock.Real.Now().Add(scheduleComposerWait)
 	streak := 0
 	var lastErr error
 	for {
-		capture, err := deliverer.capture(ctx, socketPath, socket)
+		capture, err := deliverer.capture(ctx, sessionID)
 		switch {
 		case err != nil:
 			streak, lastErr = 0, err
@@ -223,23 +230,16 @@ func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string
 func (deliverer *chatDeliverer) callSchedule(
 	ctx context.Context,
 	r fleetdb.Schedule,
-	target, message string,
-) error {
+	request pfmcall.Request,
+) (pfmcall.Result, error) {
 	engine, err := pfmchat.NewCallEngine(true, deliverer.runtime)
 	if err != nil {
-		return fmt.Errorf("build caller for %s: %w", target, err)
+		return pfmcall.Result{}, fmt.Errorf("build caller for %s: %w", request.Target, err)
 	}
 	if r.SetByID != "" {
 		engine = engine.WithIdentity(resolve.Identity{ID: r.SetByID}, r.SetByLabel)
 	}
-	res, err := engine.Call(ctx, pfmcall.Request{Target: target, Message: message})
-	if err != nil {
-		return fmt.Errorf("call into %s: %w", target, err)
-	}
-	if res.Code != 0 || !res.Typed {
-		return fmt.Errorf("call into %s: code %d: %s", target, res.Code, res.Message)
-	}
-	return nil
+	return engine.Call(ctx, request)
 }
 
 // RunFire is `pfm internal schedule-fire`: the scheduler's tick.

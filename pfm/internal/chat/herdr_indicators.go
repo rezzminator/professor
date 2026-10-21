@@ -20,6 +20,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 const tabStateUnknown = "unknown"
@@ -29,20 +31,47 @@ const tabStateUnknown = "unknown"
 var errTabPaneList = errors.New("list Herdr tab panes")
 
 type herdrTabProvider struct {
-	scan    func(context.Context) (FleetScan, error)
-	inspect func(context.Context, headless.Chat, time.Time) (headless.Status, error)
-	views   func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
-	mode    func() (string, error)
-	warn    io.Writer
+	clock         clock.Clock
+	missingAgents map[string]time.Time
+	scan          func(context.Context) (FleetScan, error)
+	inspect       func(context.Context, headless.Chat, time.Time) (headless.Status, error)
+	views         func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
+	mode          func() (string, error)
+	// glyphs reads the theme's tab glyphs each tick; nil draws the defaults.
+	glyphs func() (herdr.TabGlyphs, error)
+	warn   io.Writer
 }
 
 func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]herdr.TabDecoration, error) {
 	if ticks, ok := provider.warn.(*tickWarnings); ok {
 		ticks.tick()
 	}
+	clk := provider.clock
+	if clk == nil {
+		clk = clock.Real
+	}
+	pendingAgents := map[string]time.Time{}
+	defer func() { provider.missingAgents = pendingAgents }()
 	mode, err := provider.mode()
 	if err != nil {
 		return nil, fmt.Errorf("read tab status configuration: %w", err)
+	}
+	var glyphs herdr.TabGlyphs
+	// Only emoji mode draws the theme's glyphs: off and text never read them,
+	// so a broken theme state is never named for a mode that ignores it.
+	if provider.glyphs != nil && mode != herdr.TabStatusOff && mode != "text" {
+		// An unreadable theme never stops the tabs' status: it is named, and
+		// the tabs keep painting with the default glyphs while it lasts.
+		if glyphs, err = provider.glyphs(); err != nil {
+			glyphs = herdr.TabGlyphs{}
+			if _, writeErr := fmt.Fprintf(
+				provider.warn,
+				"Herdr tab glyphs of the theme: %v (painting the default glyphs)\n",
+				err,
+			); writeErr != nil {
+				return nil, fmt.Errorf("persist tab glyph failure: %w", writeErr)
+			}
+		}
 	}
 	scan, err := provider.scan(ctx)
 	if err != nil {
@@ -81,14 +110,38 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		if views[0].State == tabStateUnknown {
 			// Ownership is proved, but foreground evidence is unavailable.
 			// A transcript/cache must not overwrite that uncertainty.
-		} else if status, err := provider.inspect(ctx, target, clock.Real.Now()); err != nil {
-			if _, writeErr := fmt.Fprintf(
-				provider.warn,
-				"Herdr tab status of %s: %v\n",
-				target.ID,
-				err,
-			); writeErr != nil {
-				return nil, fmt.Errorf("persist status inspection failure: %w", writeErr)
+		} else if status, err := provider.inspect(ctx, target, clk.Now()); err != nil {
+			var refusal *herdr.Refusal
+			if target.Backend == spawn.BackendHerdr && errors.As(err, &refusal) && refusal.Code == herdr.AgentNotFound {
+				key := target.SeatID + "\x00" + target.ID + "\x00" + socket + "\x00" + views[0].Terminal
+				since, found := provider.missingAgents[key]
+				if !found {
+					since = clk.Now()
+				}
+				confirmed, confirmErr := missingTabAgentState(ctx, target, views[0].Terminal, clk.Now().Sub(since))
+				if confirmErr == nil {
+					if confirmed == "" {
+						continue
+					}
+					state = confirmed
+					if confirmed == tabStateUnknown {
+						pendingAgents[key] = since
+					}
+					err = nil
+				} else {
+					pendingAgents[key] = since
+					err = errors.Join(err, confirmErr)
+				}
+			}
+			if err != nil {
+				if _, writeErr := fmt.Fprintf(
+					provider.warn,
+					"Herdr tab status of %s: %v\n",
+					target.ID,
+					err,
+				); writeErr != nil {
+					return nil, fmt.Errorf("persist status inspection failure: %w", writeErr)
+				}
 			}
 		} else {
 			state = status.State
@@ -98,10 +151,53 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			view.Name, view.UserName, view.UserKnown = target.Name, row.UserName, row.UserNameKnown
 			view.State = state
 			view.Mode = mode
+			view.Glyphs = glyphs
 			decorations = append(decorations, view)
 		}
 	}
 	return decorations, nil
+}
+
+// SessionEnd releases the agent before the engine exits, and a shell can keep
+// its pane open afterwards. Neither a missing agent nor a listed pane proves
+// death: refresh the pane identity and foreground, allowing a bounded transition.
+const tabAgentExitGrace = 5 * time.Second
+
+func missingTabAgentState(
+	ctx context.Context,
+	target headless.Chat,
+	terminal string,
+	elapsed time.Duration,
+) (string, error) {
+	panes, err := herdr.ReadTabPanes(ctx, target.Socket)
+	if err != nil {
+		return tabStateUnknown, fmt.Errorf("confirm tab pane %s: %w", target.Pane, err)
+	}
+	for _, pane := range panes {
+		if terminal != "" && pane.Terminal != terminal || terminal == "" && pane.Pane != target.Pane {
+			continue
+		}
+		alive, err := tabEngineForeground(
+			ctx,
+			fleetdb.Seat{HerdrSocket: target.Socket, HerdrPane: pane.Pane, Engine: string(target.Engine)},
+		)
+		if err != nil {
+			return tabStateUnknown, fmt.Errorf("confirm released tab agent %s: %w", pane.Pane, err)
+		}
+		if !alive {
+			return headless.StateDead, nil
+		}
+		if elapsed < tabAgentExitGrace {
+			return tabStateUnknown, nil
+		}
+		return tabStateUnknown, fmt.Errorf(
+			"herdr pane %s still runs %s after %s without its agent",
+			pane.Pane,
+			target.Engine,
+			tabAgentExitGrace,
+		)
+	}
+	return "", nil
 }
 
 // PaintHerdrIndicators is the actual plugin command's chat-aware painter.
@@ -124,6 +220,8 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		}
 		return latest.Config.Chat.HerdrTabStatus, nil
 	}
+	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)
+	provider.glyphs = func() (herdr.TabGlyphs, error) { return themesync.HerdrTabGlyphs(stateDir) }
 	var panes []herdr.TabPane
 	var loaded bool
 	provider.scan = func(ctx context.Context) (FleetScan, error) {
@@ -152,7 +250,14 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		}
 		return addresses.views(ctx, target, socket, panes)
 	}
-	return herdr.PaintIndicatorsWithTabs(ctx, socket, lockDir, persisted, provider.tabs, call.ProveHerdrPane)
+	priority := func() (bool, error) {
+		latest, err := pfmconfig.LoadRuntime(runtime.Config.Path)
+		if err != nil {
+			return false, fmt.Errorf("load Herdr tab priority configuration: %w", err)
+		}
+		return latest.Config.Chat.HerdrTabPriority, nil
+	}
+	return herdr.PaintIndicatorsWithTabs(ctx, socket, lockDir, persisted, provider.tabs, call.ProveHerdrPane, priority)
 }
 
 // tickWarnings names each per-chat tab diagnostic once while it recurs on
@@ -292,7 +397,7 @@ func (reader *tabViewReader) views(
 	if reader.previous == nil {
 		reader.previous = map[string][]herdr.TabDecoration{}
 	}
-	if target.Backend == "herdr" {
+	if target.Backend == spawn.BackendHerdr {
 		if target.Socket != socket {
 			return nil, nil
 		}

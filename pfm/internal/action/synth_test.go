@@ -446,7 +446,7 @@ exit 2
 		t.Fatal(err)
 	}
 	line := string(content)
-	if !strings.HasPrefix(line, "argv=--resume "+id+" --settings ") ||
+	if !strings.HasPrefix(line, "argv=--remote-control --resume "+id+" --settings ") ||
 		!strings.Contains(line, "\nsid=unset\n") || !strings.Contains(line, "\ncode=unset\n") ||
 		!strings.Contains(line, "\ncfg="+pfmconfig.DefaultAccountDir(home, 2)+"\n") ||
 		!strings.Contains(line, "\nenable=unset\n") || !strings.Contains(line, "\nforce=unset\n") ||

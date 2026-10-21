@@ -292,7 +292,7 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 			}
 			t.Setenv("HERDR_BIN_PATH", stub)
 			t.Setenv(herdr.EnvSocket, serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
-			t.Setenv("HERDR_CONFIG_PATH", filepath.Join(t.TempDir(), "config.toml"))
+			stageDoctorHerdrShell(t, runtime.Paths.Home)
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
 
@@ -367,6 +367,22 @@ func TestHerdrReporterErrorsDoctor(t *testing.T) {
 			seed: func(t *testing.T, dir string) {
 				t.Helper()
 				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantRow: func(*testing.T, string) string { return herdrReporterRow + " ok none in the last 24h" },
+		},
+		{
+			name: "informational teardown is not a reporter error",
+			seed: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := herdr.AppendInfo(dir, "cc-info", now, "normal end"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "cc-gone.log"), []byte(now.Format(time.RFC3339)+"\tINFO\tend after server disappeared\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -514,7 +530,7 @@ func TestHerdrDoctorChecksEveryManagedHome(t *testing.T) {
 			}
 			t.Setenv("HERDR_BIN_PATH", stub)
 			t.Setenv("HERDR_SOCKET_PATH", serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
-			t.Setenv("HERDR_CONFIG_PATH", filepath.Join(t.TempDir(), "config.toml"))
+			stageDoctorHerdrShell(t, runtime.Paths.Home)
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
 			if code != 3 || !strings.Contains(stdout.String(), "home="+second) ||

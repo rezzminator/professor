@@ -26,6 +26,32 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
+	for _, event := range []string{"working", "idle", "blocked", "notification", "agent-start", "agent-stop"} {
+		t.Run(event, func(t *testing.T) {
+			server := newFakeHerdr(t)
+			jail := newHerdrJail(t)
+			now := int64(time.Second)
+			payload := `{"session_id":"s1","notification_type":"permission_prompt"}`
+			if event == "agent-start" {
+				payload = `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStart"}`
+			}
+			if event == "agent-stop" {
+				payload = `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStop"}`
+			}
+			got := runHerdrIn(t, jail, herdrPaneEnv(server, "w1:p1"), nil, &now, []string{event}, payload)
+			if got.rc != 0 {
+				t.Fatal(got)
+			}
+			for _, line := range server.requests() {
+				if strings.Contains(line, `"method":"pane.report_agent"`) {
+					t.Fatalf("native lifecycle overrides detection: %s", line)
+				}
+			}
+		})
+	}
+}
+
 func TestHerdrNativeSeatReporter(t *testing.T) {
 	for _, event := range []string{"start", "working", "idle", "attach", "detach", "sync", "invalid resume", "delayed working"} {
 		t.Run(event, func(t *testing.T) {
@@ -95,7 +121,13 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				t.Fatalf("native seat binding = %q, want %s", got.SessionID, reportedSession)
 			}
 			lines := server.requests()
-			if len(lines) != 1 {
+			if event == "invalid resume" {
+				if len(lines) != 1 || !strings.Contains(lines[0], `"method":"pane.release_agent"`) {
+					t.Fatalf("invalid restore must not be registered as complete: %q", lines)
+				}
+				return
+			}
+			if len(lines) != 2 {
 				t.Fatalf("native reports=%q", lines)
 			}
 			var request struct {
@@ -107,22 +139,16 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 					Resume []string `json:"resume_argv"`
 				} `json:"params"`
 			}
-			if err := json.Unmarshal([]byte(lines[0]), &request); err != nil {
+			if err := json.Unmarshal([]byte(lines[1]), &request); err != nil {
 				t.Fatal(err)
 			}
-			if event == "delayed working" && request.Params.Seq != 100 {
-				t.Fatalf("native report reordered event by send time: seq=%d want ingress=100", request.Params.Seq)
+			if event == "delayed working" && request.Params.Seq != 102 {
+				t.Fatalf("native release/session sequence=%d want ingress+2=102", request.Params.Seq)
 			}
-			wantState := "idle"
-			if reportEvent == "working" {
-				wantState = "working"
-			}
+
 			wantResume := []string{herdr.ResumeCommand, "chat", "open", "--restored", "new-session"}
-			if event == "invalid resume" {
-				wantResume = nil
-			}
-			if request.Method != "pane.report_agent" || request.Params.Pane != "w6:p3" ||
-				request.Params.State != wantState ||
+			if request.Method != "pane.report_agent_session" || request.Params.Pane != "w6:p3" ||
+				request.Params.State != "" ||
 				!reflect.DeepEqual(request.Params.Resume, wantResume) {
 				t.Fatalf("native report = %s", lines[0])
 			}
@@ -325,12 +351,10 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 				}
 				return
 			}
-			wantState := event
-			if event == "notification" {
-				wantState = "idle"
-			}
+
 			lines := server.requests()
-			if len(lines) != 1 || !strings.Contains(lines[0], `"state":"`+wantState+`"`) || stderr.Len() != 0 {
+			if len(lines) != 2 || !strings.Contains(lines[1], `"method":"pane.report_agent_session"`) ||
+				stderr.Len() != 0 {
 				t.Fatalf("read-only native %s report=%q stderr=%s", event, lines, &stderr)
 			}
 		})
@@ -408,11 +432,17 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 			if current.LostNote != want || current.ReloadPending != tc.pending {
 				t.Fatalf("note/pending after %s: %+v want note=%q", tc.name, current, want)
 			}
-			if tc.pending || strings.Contains(tc.payload, `"is_interrupt":true`) {
+			switch {
+			case tc.pending || strings.Contains(tc.payload, `"is_interrupt":true`):
 				if len(server.requests()) != 0 {
 					t.Fatalf("pending reload released pane: %v", server.requests())
 				}
-			} else {
+			case engine == pfmengine.Claude:
+				if len(server.requests()) != 2 ||
+					!strings.Contains(server.requests()[1], `"method":"pane.report_agent_session"`) {
+					t.Fatalf("native metadata=%v", server.requests())
+				}
+			default:
 				if len(server.requests()) != 1 ||
 					!strings.Contains(server.requests()[0], `"method":"pane.report_agent"`) {
 					t.Fatalf("native report=%v", server.requests())
@@ -570,6 +600,19 @@ func newNativeReporterHerdrCount(
 					server.lines = append(server.lines, string(line))
 					server.mu.Unlock()
 					result = map[string]any{"type": "ok"}
+					switch req.Method {
+					case "pane.rename":
+						result = map[string]any{"pane": map[string]any{"pane_id": pane, "label": req.Params["label"]}}
+					case "agent.rename":
+						result = map[string]any{"agent": map[string]any{"pane_id": pane, "name": req.Params["name"]}}
+					case "pane.get":
+						result = testjail.HerdrPaneInfo(pane)
+					case "tab.get":
+						result = map[string]any{
+							"type": "tab_info",
+							"tab":  map[string]any{"tab_id": "w6:t1", "label": "Previous", "pane_count": 1},
+						}
+					}
 				}
 				if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
 					t.Error(err)
@@ -627,7 +670,7 @@ func TestNativeReporterProvesItsSupervisorAndCanonicalTarget(t *testing.T) {
 				SeatID:      "native-seat",
 				SessionID:   "bound",
 				Backend:     "herdr",
-				Engine:      "cc",
+				Engine:      "cx",
 				State:       "live",
 				HerdrSocket: server.path,
 				HerdrPane:   "w6:p3",
@@ -694,7 +737,12 @@ func TestNativeReporterProvesItsSupervisorAndCanonicalTarget(t *testing.T) {
 				return inherited[key]
 			}
 			var stderr bytes.Buffer
-			rc := reportToHerdr([]string{"working"}, strings.NewReader(`{"session_id":"bound"}`), &stderr, deps)
+			rc := reportToHerdr(
+				[]string{"--engine", "codex", "working"},
+				strings.NewReader(`{"session_id":"bound"}`),
+				&stderr,
+				deps,
+			)
 			current, found, err := db.Seat(context.Background(), seat.SeatID)
 			allowed := mode == "moved" || mode == "already-moved"
 			if allowed {
@@ -765,7 +813,7 @@ func TestNativeReporterUsesTwoRPCProofForEachEvent(t *testing.T) {
 	seat := fleetdb.Seat{
 		SeatID:      "native-seat",
 		SessionID:   "bound",
-		Engine:      "cc",
+		Engine:      "cx",
 		Backend:     "herdr",
 		State:       "live",
 		HerdrSocket: server.path,
@@ -785,7 +833,12 @@ func TestNativeReporterUsesTwoRPCProofForEachEvent(t *testing.T) {
 	}
 	report := func() {
 		var stderr bytes.Buffer
-		reportToHerdr([]string{"working"}, strings.NewReader(`{"session_id":"bound"}`), &stderr, deps)
+		reportToHerdr(
+			[]string{"--engine", "codex", "working"},
+			strings.NewReader(`{"session_id":"bound"}`),
+			&stderr,
+			deps,
+		)
 		if stderr.Len() != 0 {
 			t.Fatal(&stderr)
 		}
@@ -871,7 +924,7 @@ func TestNativeReporterReprovesMovedOrRecycledCachedAddress(t *testing.T) {
 			seat := fleetdb.Seat{
 				SeatID:      "native-seat",
 				SessionID:   "bound",
-				Engine:      "cc",
+				Engine:      "cx",
 				Backend:     "herdr",
 				State:       "live",
 				HerdrSocket: server.path,
@@ -890,13 +943,23 @@ func TestNativeReporterReprovesMovedOrRecycledCachedAddress(t *testing.T) {
 				return env[key]
 			}
 			var first bytes.Buffer
-			reportToHerdr([]string{"working"}, strings.NewReader(`{"session_id":"bound"}`), &first, deps)
+			reportToHerdr(
+				[]string{"--engine", "codex", "working"},
+				strings.NewReader(`{"session_id":"bound"}`),
+				&first,
+				deps,
+			)
 			if first.Len() != 0 {
 				t.Fatal(&first)
 			}
 			moved.Store(true)
 			var second bytes.Buffer
-			reportToHerdr([]string{"working"}, strings.NewReader(`{"session_id":"bound"}`), &second, deps)
+			reportToHerdr(
+				[]string{"--engine", "codex", "working"},
+				strings.NewReader(`{"session_id":"bound"}`),
+				&second,
+				deps,
+			)
 			requests := server.requests()
 			if mode == "recycled" {
 				if second.Len() == 0 || len(requests) != 1 {

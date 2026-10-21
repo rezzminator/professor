@@ -77,8 +77,8 @@ func matrix(verdicts ...themesync.Verdict) themesync.Report {
 	report := themesync.Report{
 		Enabled: true, Appearance: themesync.Dark, Generation: 7,
 		Source: &themesync.SourceInfo{
-			Account: "~/.claude", Path: "/h/.claude/settings.json", Value: "custom:hibiscus-night",
-			Title: "Hibiscus Night", Side: themesync.Dark,
+			Account: "~/.claude", Path: "/h/.claude/settings.json", Value: "custom:tokyo-night",
+			Title: "Tokyo Night · neon pink", Side: themesync.Dark,
 		},
 	}
 	for index, verdict := range verdicts {
@@ -109,7 +109,7 @@ func TestRunVerbs(t *testing.T) {
 			fake:     fakeThemesync{on: true, report: matrix(themesync.VerdictSource, themesync.VerdictInSync)},
 			wantCode: 0, wantCalls: []call{{verb: "status"}},
 			wantStdout: []string{
-				"pfm theme · custom:hibiscus-night (Hibiscus Night) · dark · gen 7",
+				"pfm theme · custom:tokyo-night (Tokyo Night · neon pink) · dark · gen 7",
 				"claude", "SOURCE", "tmux", "IN-SYNC", "/p/IN-SYNC", "d-IN-SYNC",
 				"in sync · 1 of 1 surfaces at gen 7",
 			},
@@ -155,12 +155,12 @@ func TestRunVerbs(t *testing.T) {
 			args: []string{"on"},
 			fake: fakeThemesync{
 				err: errors.New(
-					"custom theme hibiscus-night: open /h/.claude/themes/hibiscus-night.json: no such file or directory",
+					"custom theme tokyo-night: open /h/.claude/themes/tokyo-night.json: no such file or directory",
 				),
 			},
 			wantCode:   1,
 			wantCalls:  []call{{verb: "on"}},
-			wantStderr: []string{"pfm theme: custom theme hibiscus-night"},
+			wantStderr: []string{"pfm theme: custom theme tokyo-night"},
 		},
 		{
 			name: "sync", args: []string{"sync"},
@@ -196,54 +196,56 @@ func TestRunVerbs(t *testing.T) {
 			wantCode: 1, wantCalls: []call{{verb: "off"}}, wantStderr: []string{"pfm theme: snapshot missing"},
 		},
 		{
-			name: "use sets the theme, syncs once and tells new chats to follow",
-			args: []string{"use", "hibiscus-night"},
+			name: "use sets the theme, syncs once and tells unpinned chats to follow live",
+			args: []string{"use", "tokyo-night"},
 			fake: fakeThemesync{
 				on:     true,
 				report: matrix(themesync.VerdictSource, themesync.VerdictInSync),
 				use: themesync.UseResult{
-					Value:   "custom:hibiscus-night",
+					Value:   "custom:tokyo-night",
 					Written: []string{twoAccounts[0], twoAccounts[1]},
 				},
 			},
 			wantCode:  0,
-			wantCalls: []call{{verb: "use", name: "hibiscus-night"}, {verb: "sync"}},
+			wantCalls: []call{{verb: "use", name: "tokyo-night"}, {verb: "sync"}},
 			wantStdout: []string{
-				"wrote " + twoAccounts[0], "wrote " + twoAccounts[1], "IN-SYNC",
-				"new chats follow; run /theme in open chats",
+				"wrote " + twoAccounts[0],
+				"wrote " + twoAccounts[1],
+				"IN-SYNC",
+				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm chat reload in each one",
 			},
 		},
 		{
-			name: "use with the sync off says how to repaint", args: []string{"use", "hibiscus-night"},
+			name: "use with the sync off says how to repaint", args: []string{"use", "tokyo-night"},
 			fake: fakeThemesync{
 				on:  false,
-				use: themesync.UseResult{Value: "custom:hibiscus-night", Written: []string{twoAccounts[0]}},
+				use: themesync.UseResult{Value: "custom:tokyo-night", Written: []string{twoAccounts[0]}},
 			},
 			wantCode:  0,
-			wantCalls: []call{{verb: "use", name: "hibiscus-night"}},
+			wantCalls: []call{{verb: "use", name: "tokyo-night"}},
 			wantStdout: []string{
 				"wrote " + twoAccounts[0],
 				"theme sync is off: run pfm theme on to repaint tmux, herdr and VS Code",
-				"new chats follow; run /theme in open chats",
+				"open chats without a pinned theme follow live; for pinned chats, enable theme sync and run pfm chat reload in each one",
 			},
 		},
 		{
 			name: "a refused account exits 1 naming the row on stderr, and the written one still syncs",
-			args: []string{"use", "custom:hibiscus-night"},
+			args: []string{"use", "custom:tokyo-night"},
 			fake: fakeThemesync{
 				on: true, report: matrix(themesync.VerdictSource, themesync.VerdictInSync),
 				use: themesync.UseResult{
-					Value: "custom:hibiscus-night", Written: []string{twoAccounts[0]},
+					Value: "custom:tokyo-night", Written: []string{twoAccounts[0]},
 					Refused: []themesync.ThemeListError{{
-						Path: twoAccounts[1], Error: "theme file hibiscus-night.json is missing from /h/.cc/1/themes",
+						Path: twoAccounts[1], Error: "theme file tokyo-night.json is missing from /h/.cc/1/themes",
 					}},
 				},
 			},
 			wantCode:   1,
-			wantCalls:  []call{{verb: "use", name: "custom:hibiscus-night"}, {verb: "sync"}},
+			wantCalls:  []call{{verb: "use", name: "custom:tokyo-night"}, {verb: "sync"}},
 			wantStdout: []string{"wrote " + twoAccounts[0], "IN-SYNC"},
 			wantStderr: []string{
-				"refused " + twoAccounts[1] + ": theme file hibiscus-night.json is missing from /h/.cc/1/themes",
+				"refused " + twoAccounts[1] + ": theme file tokyo-night.json is missing from /h/.cc/1/themes",
 			},
 		},
 		{
@@ -263,7 +265,7 @@ func TestRunVerbs(t *testing.T) {
 				"refused " + twoAccounts[0] + ": disk full",
 				"pfm theme: no account settings.json was written",
 			},
-			notStdout: []string{"new chats follow", "wrote"},
+			notStdout: []string{"open chats without a pinned theme follow live", "wrote"},
 		},
 		{
 			name: "an unknown name exits 1 with the valid names",
@@ -275,7 +277,7 @@ func TestRunVerbs(t *testing.T) {
 			wantCode:   1,
 			wantCalls:  []call{{verb: "use", name: "nonsense"}},
 			wantStderr: []string{`pfm theme: unknown theme "nonsense"; valid names: auto, dark`},
-			notStdout:  []string{"new chats follow"},
+			notStdout:  []string{"open chats without a pinned theme follow live"},
 		},
 		{
 			name: "a sync that errors exits 1 naming the cause, the written accounts still told",
@@ -286,7 +288,7 @@ func TestRunVerbs(t *testing.T) {
 			},
 			wantCode:   1,
 			wantCalls:  []call{{verb: "use", name: "dark"}, {verb: "sync"}},
-			wantStdout: []string{"wrote " + twoAccounts[0], "new chats follow"},
+			wantStdout: []string{"wrote " + twoAccounts[0], "open chats without a pinned theme follow live"},
 			wantStderr: []string{"pfm theme: sync: state unreadable"},
 		},
 		{
@@ -297,7 +299,7 @@ func TestRunVerbs(t *testing.T) {
 			},
 			wantCode:   1,
 			wantCalls:  []call{{verb: "use", name: "dark"}, {verb: "sync"}},
-			wantStdout: []string{"DRIFT", "new chats follow"},
+			wantStdout: []string{"DRIFT", "open chats without a pinned theme follow live"},
 			wantStderr: []string{"sync left surfaces out of sync: tmux DRIFT d-DRIFT"},
 		},
 		{
@@ -306,7 +308,7 @@ func TestRunVerbs(t *testing.T) {
 			wantStderr: []string{"needs exactly one theme name", "usage: pfm theme", "use {name}"},
 		},
 		{
-			name: "use with two names is usage", args: []string{"use", "hibiscus-night", "ember"},
+			name: "use with two names is usage", args: []string{"use", "tokyo-night", "ember"},
 			fake: fakeThemesync{on: true}, wantCode: 2,
 			wantStderr: []string{`unexpected argument "ember"`, "usage: pfm theme"},
 		},
@@ -327,8 +329,8 @@ func TestRunVerbs(t *testing.T) {
 			wantStderr: []string{"pfm theme: no Claude account settings.json"},
 		},
 		{
-			name: "list takes no positional", args: []string{"list", "hibiscus-night"},
-			fake: fakeThemesync{}, wantCode: 2, wantStderr: []string{`unexpected argument "hibiscus-night"`},
+			name: "list takes no positional", args: []string{"list", "tokyo-night"},
+			fake: fakeThemesync{}, wantCode: 2, wantStderr: []string{`unexpected argument "tokyo-night"`},
 		},
 		{
 			name: "the retired set verb is an unknown subcommand", args: []string{"set", "tokyo-night"},
@@ -431,12 +433,12 @@ func TestSurfaceEnvCarriesTheLaunchdJob(t *testing.T) {
 
 func TestListDrawsTheRowsErrorsAndMissingAccountsExactly(t *testing.T) {
 	fake := fakeThemesync{list: themesync.ThemeList{
-		Current: "custom:hibiscus-night",
+		Current: "custom:tokyo-night",
 		Themes: []themesync.ThemeChoice{
 			{
-				Name:    "hibiscus-night",
-				Value:   "custom:hibiscus-night",
-				Title:   "Hibiscus · Night",
+				Name:    "tokyo-night",
+				Value:   "custom:tokyo-night",
+				Title:   "Tokyo Night · neon pink",
 				Kind:    themesync.KindCustom,
 				Current: true,
 				Missing: []string{"~/.cc/1", "~/.cc/2"},
@@ -447,9 +449,9 @@ func TestListDrawsTheRowsErrorsAndMissingAccountsExactly(t *testing.T) {
 	}}
 	var stdout, stderr bytes.Buffer
 	code := RunVerb(context.Background(), []string{"list"}, fake.deps(false), &stdout, &stderr)
-	want := "  NAME            VALUE                  TITLE\n" +
-		"* hibiscus-night  custom:hibiscus-night  Hibiscus · Night  missing in ~/.cc/1, ~/.cc/2\n" +
-		"  dark            dark                   dark\n" +
+	want := "  NAME         VALUE               TITLE\n" +
+		"* tokyo-night  custom:tokyo-night  Tokyo Night · neon pink  missing in ~/.cc/1, ~/.cc/2\n" +
+		"  dark         dark                dark\n" +
 		"ERROR /h/.claude/themes: not a directory\n"
 	if code != 1 || stdout.String() != want {
 		t.Fatalf(

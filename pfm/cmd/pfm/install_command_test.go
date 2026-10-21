@@ -203,6 +203,10 @@ func assertManagerConsulted(t *testing.T, logPath string, wantDarwinConsulted bo
 }
 
 func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
+	// Apply now generates prompts in the source clone. Never discover the
+	// read-only test checkout; each subtest owns its default clone under HOME.
+	t.Chdir(t.TempDir())
+	t.Setenv("PFM_SOURCE_REPO", "")
 	// The launchctl fake's "print" reply models launchAgentRunning's state
 	// line (launchd.go:177-196); its exit code always succeeds like the
 	// existing systemctl fakes below, so a subtest's only lever is the
@@ -244,7 +248,8 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		script := "case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0\n"
+		script := "case \"$*\" in *ActiveState*pfm-schedule.timer) echo active;; " +
+			"*ActiveState*) echo inactive;; esac\nexit 0\n"
 		binDir, logPath := writeManagerFakes(t, script, launchctlIdle)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)

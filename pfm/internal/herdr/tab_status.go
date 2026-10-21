@@ -8,6 +8,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
@@ -39,9 +40,12 @@ type TabDecoration struct {
 	// follows, so a row whose source is not read yet (a booting chat) never
 	// reads as the chat's first user name.
 	UserKnown bool
-	Revision  uint64
-	Session   json.RawMessage
-	Validate  func(context.Context) (bool, error)
+	// Glyphs are the theme's tab status glyphs this tick (themesync
+	// HerdrTabGlyphs); the zero value draws the defaults.
+	Glyphs   TabGlyphs
+	Revision uint64
+	Session  json.RawMessage
+	Validate func(context.Context) (bool, error)
 	// Retained marks a view whose live owner is gone (a bridge tab whose tmux
 	// client exited): it carries no Validate and is acted on only while pfm's
 	// own label record for the tab names its Identity and the tab still shows
@@ -52,40 +56,71 @@ type TabDecoration struct {
 // TabProvider enumerates the chats displayed on one Herdr endpoint.
 type TabProvider func(context.Context, string) ([]TabDecoration, error)
 
-// DecoratedTabLabel reserves prefix runes before truncating the clean base.
-// Every emoji occupies two columns; the off phase is a hollow square, not
-// whitespace that TabRename's cleaning would strip. Text markers use three.
-func DecoratedTabLabel(base, state, mode string, on bool) string {
+// tabMarkers are the prefixes state plays in mode, one per frame: emoji mode
+// the theme's frames (a zero TabGlyphs field keeps its default), text mode
+// three-rune markers, its blocked and error pulsing with "[ ]" and every
+// steady state still. Each emoji frame is ValidTabGlyph, so cleaning never
+// rewrites the prefix, and a pulse's off phase is a glyph of its own, not
+// whitespace that TabRename's cleaning would strip.
+func tabMarkers(state, mode string, glyphs TabGlyphs) []string {
+	key, text := TabGlyphUnknown, "[?]"
+	switch state {
+	case "working":
+		key, text = TabGlyphWorking, "[W]"
+	case TabGlyphIdle:
+		key, text = TabGlyphIdle, "[I]"
+	case priorityDone:
+		key, text = TabGlyphDone, "[C]"
+	case string(StateBlocked):
+		key, text = TabGlyphBlocked, "[B]"
+	case "error":
+		key, text = TabGlyphError, "[E]"
+	case "dead":
+		key, text = TabGlyphDead, "[D]"
+	}
+	if mode != "text" {
+		return glyphs.frames(key)
+	}
+	if key == TabGlyphBlocked || key == TabGlyphError {
+		return []string{text, "[ ]"}
+	}
+	return []string{text}
+}
+
+// tabFrame is the frame state plays at the wall-clock tick (TabTick): the
+// tick modulo its frame count, so every painter draws the same frame at the
+// same moment; a still state is always frame 0.
+func tabFrame(state, mode string, tick int64, glyphs TabGlyphs) int {
+	if mode == TabStatusOff || state == "" {
+		return 0
+	}
+	count := int64(len(tabMarkers(state, mode, glyphs)))
+	return int(((tick % count) + count) % count)
+}
+
+// DecoratedTabLabel prefixes the clean base with state's marker at frame
+// (taken modulo the state's frame count). The base is truncated against the
+// state's widest marker, so it never shifts between frames.
+func DecoratedTabLabel(base, state, mode string, frame int, glyphs TabGlyphs) string {
 	base = strings.Join(strings.Fields(TabLabel(base)), " ")
 	if mode == TabStatusOff || state == "" {
 		return TabLabel(base)
 	}
-	glyph, text := "❔", "[?]"
-	switch state {
-	case "working":
-		glyph, text = "🟡", "[W]"
-	case "idle":
-		glyph, text = "🟢", "[I]"
-	case string(StateBlocked):
-		glyph, text = "🔴", "[B]"
-	case "error":
-		glyph, text = "🟥", "[E]"
-	case "dead":
-		glyph, text = "⬛", "[D]"
+	markers := tabMarkers(state, mode, glyphs)
+	widest := 0
+	for _, marker := range markers {
+		widest = max(widest, utf8.RuneCountInString(marker))
 	}
-	if !on && (state == string(StateBlocked) || state == "error") {
-		glyph, text = "⬜", "[ ]"
-	}
-	if mode == "text" {
-		glyph = text
-	}
-	prefix := glyph + " "
+	count := len(markers)
+	marker := markers[((frame%count)+count)%count]
 	runes := []rune(base)
-	limit := MaxTitleRunes - len([]rune(prefix))
+	limit := MaxTitleRunes - widest - 1
 	if len(runes) > limit {
-		base = string(runes[:limit])
+		// A cut on a space would leave a trailing one the rename's cleaning
+		// strips, so the label shown would never equal the one rendered.
+		base = strings.TrimRight(string(runes[:limit]), " ")
 	}
-	return prefix + base
+	return marker + " " + base
 }
 
 // TabPane is the producer's PaneInfo projection used for ownership checks.
@@ -181,7 +216,7 @@ func reconcileTab(
 	ctx context.Context,
 	socket, dir string,
 	d TabDecoration,
-	on bool,
+	tick int64,
 	call func(context.Context, string, ...[]byte) ([]json.RawMessage, error),
 ) (wrote bool, returnErr error) {
 	if d.Tab == "" || d.Terminal == "" || d.Identity == "" {
@@ -231,7 +266,7 @@ func reconcileTab(
 			return nil
 		}
 		record.settlePending(tab.Label)
-		if d.Retained && tab.Label != record.Rendered {
+		if d.Retained && !record.owns(tab.Label) {
 			return fmt.Errorf(
 				"%w: tab %s was renamed after pfm rendered %q",
 				errTabLabelForeign,
@@ -240,7 +275,7 @@ func reconcileTab(
 			)
 		}
 		if d.Mode == TabStatusOff {
-			if record.Identity != d.Identity || record.Rendered != tab.Label {
+			if record.Identity != d.Identity || !record.owns(tab.Label) {
 				return nil
 			}
 		} else {
@@ -249,13 +284,18 @@ func reconcileTab(
 				record = tabLabelRecord{Base: d.Name, Seen: d.Name}
 			case record.Base == "":
 				record.Base, record.Seen = d.Name, d.Name
-			case record.Rendered != tab.Label && tab.Label != record.Base && tab.Label != "":
+			case !record.owns(tab.Label) && tab.Label != record.Base && tab.Label != "":
 				// Treat an external label as literal text, never strip prefixes;
 				// it is the user's, and stands until an explicit pfm rename. A
 				// tab with no label holds none of the user's: pfm's name stays.
 				record.Base, record.Seen, record.UserSet = tab.Label, d.Name, true
 			case record.Seen == "":
-				// A record no painter followed yet: follow the chat's name from here.
+				// A launch/re-announce can predate the first user title. Follow
+				// that source-backed title now; a user's label or an unproved
+				// automatic name still starts from the existing baseline.
+				if !record.UserSet && !record.UnseenExplicit && d.UserKnown && d.UserName != "" && d.Name != "" {
+					record.Base = d.Name
+				}
 				record.Seen = d.Name
 			case record.UserSet && record.UserSeen && d.UserKnown && d.UserName != "" &&
 				d.UserName != record.SeenUser:
@@ -280,8 +320,18 @@ func reconcileTab(
 			}
 			record.UserSeen = true
 		}
-		record.Identity, record.State, record.Mode, record.On = d.Identity, d.State, d.Mode, on
-		want := DecoratedTabLabel(record.Base, d.State, d.Mode, on)
+		// Herdr owns completion/seen state: Stop reports idle, exposed as done
+		// until focus marks its output seen (`herdr --skill`, idle vs done).
+		// This is the same focus observation used by priority return; a sole
+		// pane is the whole tab. Keep transcript errors/death authoritative.
+		if d.State == TabGlyphIdle && pane.State == priorityDone && !*pane.Focused {
+			d.State = priorityDone
+		} else if d.State == priorityDone && *pane.Focused {
+			d.State = TabGlyphIdle
+		}
+		record.Identity, record.State, record.Mode = d.Identity, d.State, d.Mode
+		record.Frame, record.Glyphs = tabFrame(d.State, d.Mode, tick, d.Glyphs), d.Glyphs
+		want := DecoratedTabLabel(record.Base, d.State, d.Mode, record.Frame, d.Glyphs)
 		if tab.Label != want {
 			rename, err := (TabRename{Tab: d.Tab, Label: want, Seq: 2}).Line()
 			if err != nil {
@@ -293,7 +343,7 @@ func reconcileTab(
 			wrote = true
 		}
 		record.Rendered = want
-		if record == before {
+		if reflect.DeepEqual(record, before) {
 			return nil
 		}
 		return writeTabLabel(path, record)
@@ -319,6 +369,7 @@ func PaintIndicatorsWithTabs(
 	stderr io.Writer,
 	tabs TabProvider,
 	proof PaneProof,
+	priority func() (bool, error),
 ) error {
 	if stderr == nil {
 		stderr = io.Discard
@@ -330,7 +381,7 @@ func PaintIndicatorsWithTabs(
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs, provePane: proof,
+		tabs:     tabs, provePane: proof, priority: priority,
 	}
 	return painter.run(ctx)
 }
@@ -362,7 +413,7 @@ func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
 		d.Revision = pane.Revision
 		d.AgentStatus = pane.State
 		d.Mode = TabStatusOff
-		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, true, painter.call); err != nil &&
+		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, 0, painter.call); err != nil &&
 			!errors.Is(err, errTabLabelForeign) {
 			failures = append(failures, err)
 		}

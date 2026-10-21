@@ -1,0 +1,136 @@
+{
+  "0057": {
+    "name": "Shu · headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown",
+      "markup.heading.setext",
+      "heading.1.markdown",
+      "heading.2.markdown",
+      "heading.3.markdown",
+      "heading.4.markdown",
+      "heading.5.markdown",
+      "heading.6.markdown",
+      "markup.heading entity.name"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b43026"
+    }
+  },
+  "0058": {
+    "name": "Sumi · bold",
+    "scope": [
+      "markup.bold",
+      "punctuation.definition.bold"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#17120e"
+    }
+  },
+  "0059": {
+    "name": "Sumi · italic",
+    "scope": [
+      "markup.italic",
+      "punctuation.definition.italic"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#2a241f"
+    }
+  },
+  "0060": {
+    "name": "Nezumi · strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#695f51"
+    }
+  },
+  "0061": {
+    "name": "Ai · links",
+    "scope": [
+      "markup.underline.link",
+      "string.other.link",
+      "constant.other.reference.link",
+      "markup.underline.link.markdown",
+      "markup.underline.link.image.markdown"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#2a409b"
+    }
+  },
+  "0063": {
+    "name": "Kaki · inline code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.inline.raw.string.markdown",
+      "markup.raw",
+      "markup.raw.monospace"
+    ],
+    "settings": {
+      "foreground": "#9f5401"
+    }
+  },
+  "0064": {
+    "name": "Sumi · fenced code",
+    "scope": [
+      "markup.fenced_code",
+      "markup.fenced_code.block.markdown",
+      "markup.raw.block.markdown"
+    ],
+    "settings": {
+      "foreground": "#4e443b"
+    }
+  },
+  "0066": {
+    "name": "Nezumi · quotes",
+    "scope": [
+      "markup.quote",
+      "markup.quote.markdown",
+      "punctuation.definition.quote.begin.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#716658"
+    }
+  },
+  "0069": {
+    "name": "Matcha · inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted",
+      "markup.inserted.diff"
+    ],
+    "settings": {
+      "foreground": "#427231"
+    }
+  },
+  "0070": {
+    "name": "Shu · deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted",
+      "markup.deleted.diff"
+    ],
+    "settings": {
+      "foreground": "#a62d22"
+    }
+  },
+  "0071": {
+    "name": "Kin · changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed",
+      "markup.changed.diff"
+    ],
+    "settings": {
+      "foreground": "#8a6200"
+    }
+  }
+}

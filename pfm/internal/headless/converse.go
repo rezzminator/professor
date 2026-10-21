@@ -20,6 +20,10 @@ import (
 // is why the partial Turn is returned with it.
 var ErrAwaitTimeout = errors.New("the chat did not answer in time")
 
+// ErrTrustDialog ends a wait on a live chat needing the user's folder-trust
+// decision. Callers wrap it with the pane address and the manual remedy.
+var ErrTrustDialog = errors.New("blocked at Claude Code's folder-trust dialog")
+
 // Turn is one exchange: what the chat did after a message was delivered to it.
 // Field names are a contract — a consumer scripts against them.
 type Turn struct {
@@ -46,6 +50,12 @@ type Turn struct {
 	// Offset is the transcript frontier this turn ended on, so a caller
 	// holding a conversation open can wait for the NEXT answer from here.
 	Offset int64 `json:"-"`
+}
+
+// Refused distinguishes a model-server refusal from an answer, including
+// a final refusal recorded just before its seat exited.
+func (turn Turn) Refused(err error) bool {
+	return turn.Error != "" && (err == nil || errors.Is(err, ErrChatGone))
 }
 
 func waitForNextPoll(ctx context.Context, timerClock clock.Clock, duration time.Duration) error {
@@ -159,6 +169,9 @@ func Await(
 			var err error
 			chat, found, err = resolve(ctx)
 			if err != nil {
+				if errors.Is(err, ErrTrustDialog) {
+					turn.Name, turn.Engine, turn.State = chat.Name, string(chat.Engine), StateBlocked
+				}
 				return finish(turn, answers, start, options.Now()), err
 			}
 			resolvedAt = options.Now()

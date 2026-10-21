@@ -6,8 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -207,5 +210,85 @@ func reloadIdleWaitRequest(socket string) Request {
 		Engine: pfmengine.Claude, SocketPath: socket, Pane: "%7",
 		SessionID: "11111111-1111-4111-8111-111111111111", CWD: "/jail/project",
 		Account: 2, AccountIDs: []int{2}, Machine: reloadTestMachine("", os.Getenv(paths.EnvHome)),
+	}
+}
+
+type guardedThenTmux struct {
+	delayedThenTmux
+	before   string
+	styled   string
+	styleErr error
+}
+
+func (tmux *guardedThenTmux) Capture(ctx context.Context, socket, pane string) (string, error) {
+	if tmux.literal == "" {
+		return tmux.before, nil
+	}
+	return tmux.delayedThenTmux.Capture(ctx, socket, pane)
+}
+
+func (tmux *guardedThenTmux) CaptureStyled(context.Context, string, string) (string, error) {
+	return tmux.styled, tmux.styleErr
+}
+
+func TestDeliverThenPreservesResumedDraft(t *testing.T) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		for _, tc := range []struct {
+			name     string
+			plain    string
+			styled   string
+			styleErr error
+			want     string
+		}{
+			{name: "draft", plain: "human draft", styled: "human draft", want: "human draft"},
+			{name: "bounded-draft", plain: strings.Repeat("x", 80) + "TAIL_NOT_LOGGED", styled: strings.Repeat("x", 80) + "TAIL_NOT_LOGGED", want: strings.Repeat("x", 80)},
+			{name: "dim-hint", plain: "Try running tests", styled: "\x1b[2mTry running tests\x1b[0m"},
+			{name: "same-text-user-draft", plain: "Try running tests", styled: "Try running tests", want: "Try running tests"},
+			{name: "wrapped-draft", plain: "\n  human draft", styled: "\n  human draft", want: "human draft"},
+			{name: "marker-in-draft", plain: "\n  human draft\n" + "❯ ", styled: "\n  human draft\n" + "❯ ", want: "human draft"},
+			{name: "wrapped-dim-hint", plain: "\n  Try running tests", styled: "\n  \x1b[2mTry running tests\x1b[0m"},
+			{name: "style-error", plain: "human draft", styleErr: errors.New("styling lost"), want: "styling lost"},
+		} {
+			t.Run(string(engine)+"/"+tc.name, func(t *testing.T) {
+				marker, binary := "❯", "claude"
+				if engine == pfmengine.Codex {
+					marker, binary = "›", "codex"
+				}
+				tmux := &guardedThenTmux{
+					delayedThenTmux: delayedThenTmux{marker: marker},
+					before:          "────────\n" + marker + " " + tc.plain + "\n────────",
+					styled:          "────────\n" + marker + " " + tc.styled + "\n────────",
+					styleErr:        tc.styleErr,
+				}
+				tmux.respawn = binary
+				proc := fakeReloadProc{
+					pids: []int{801}, argv: map[int][]string{801: {binary}},
+					stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
+				}
+				clk := clock.NewFake(time.Unix(0, 0))
+				var err error
+				driveFakeClock(t, clk, func() {
+					err = deliverThen(context.Background(), Request{
+						Engine: engine, SocketPath: "/tmp/probe-draft", Pane: "%7", Then: "wake up",
+					}, Options{ThenTries: 2, Clock: clk, Paste: func(_ context.Context, _, _, text string) error {
+						tmux.literal = text
+						return nil
+					}}, tmux, proc, io.Discard)
+				})
+				if tc.want == "" {
+					if err != nil || !tmux.submitted {
+						t.Fatalf("dim hint blocked delivery: submitted=%t err=%v", tmux.submitted, err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), tc.want) ||
+					strings.Contains(err.Error(), "TAIL_NOT_LOGGED") {
+					t.Fatalf("deliverThen error = %v; want %q and bounded evidence", err, tc.want)
+				}
+				if tmux.literal != "" || tmux.submitted {
+					t.Fatalf("follow-up mashed into draft: literal=%q submitted=%t", tmux.literal, tmux.submitted)
+				}
+			})
+		}
 	}
 }

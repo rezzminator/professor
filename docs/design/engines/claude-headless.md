@@ -59,6 +59,8 @@ For Codex, which cannot honour these controls, the run is refused before launch 
 
 `pfm/internal/ask/ask.go:185-195`, used by the status and summary helpers (`pfm/internal/headless/statusask.go:138`, `pfm/internal/headless/summary.go:89`). Native, Args `--output-format text`: `claude -p [--model M] [--effort E] --output-format text --settings {…}`.
 
+The ask engine (`ask.processEngine.Run`) sends prepared content files inline in the stdin only when `AskInput.InlineContent` is set (default false); headless `Summarize` and `Ask` set it for their private prepared snippets, so the last exchange reaches the model without engine filesystem access, while harvester and document ask keep path-based reads and never preload whole documents; the status-ask helper captures the live pane through `call.Engine.CaptureTarget` on the target's own host (Herdr `pane.read`, else tmux).
+
 ### Credential-refresh ACK
 
 `pfm/internal/stats/limits.go:871-881`: `claude -p --model claude-haiku-4-5 --max-turns 1 --settings {"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}` with prompt `ACK` and no explicit environment — the cheapest request that makes Claude Code refresh an account's credentials.

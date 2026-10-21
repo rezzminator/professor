@@ -1,6 +1,7 @@
 package call
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,9 +13,12 @@ import (
 
 var (
 	claudeMenuPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]`)
-	codexMenuPattern  = regexp.MustCompile(`›[\s\v]*\d+\.[\s\v]`)
-	numberedOption    = regexp.MustCompile(`^[\s\v]*›?[\s\v]*\d+\.[\s\v]`)
-	busyPattern       = regexp.MustCompile(`(?i)esc to interrupt|\(\d+s ·|· \d+s|\d+ tokens`)
+	claudeTrustOption = regexp.MustCompile(
+		`^❯[\s\v]*(?:\d+\.[\s\v]*)?(?:Yes, I trust this folder|No, exit|No, continue without these permissions)[\s\v]*$`,
+	)
+	codexMenuPattern = regexp.MustCompile(`›[\s\v]*\d+\.[\s\v]`)
+	numberedOption   = regexp.MustCompile(`^[\s\v]*›?[\s\v]*\d+\.[\s\v]`)
+	busyPattern      = regexp.MustCompile(`(?i)esc to interrupt|\(\d+s ·|· \d+s|\d+ tokens`)
 	// claudeBusyPattern is a running Claude turn, read only from the shapes the
 	// engine itself draws: "esc to interrupt"; the spinner's parenthesised
 	// timer, minutes included ("(12s ·", "(1m 50s ·"); a column-0 spinner glyph
@@ -124,17 +128,19 @@ func IsBusyFor(engine pfmengine.ID, capture string) bool {
 	return false
 }
 
-// SelectorLine returns the selected numbered option for a real open menu.
+// SelectorLine returns the selected option for an open menu, including an
+// unnumbered Claude folder-trust row.
 // A lone Codex "› 1. draft" remains a legal composer line.
 func SelectorLine(capture string) string {
-	line := composerLastLine(capture)
+	line := rawLastComposerLine(capture)
 	if line == "" {
 		return ""
 	}
 	clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
 	clean = strings.TrimSpace(clean)
 	if strings.HasPrefix(clean, "❯") {
-		if claudeMenuPattern.MatchString(clean) {
+		if claudeMenuPattern.MatchString(clean) ||
+			isClaudeTrustSelector(capture, clean) {
 			return clean
 		}
 		return ""
@@ -230,8 +236,12 @@ func composerDraft(line string) string {
 // its marker, or only dim hint text — and returns the plain draft it read.
 // styled is read only for a non-empty draft; a styled capture that fails is an
 // error, never an empty composer. A composer not drawn reads empty here: a
-// caller that must prove the box is up checks LastComposerLine first.
+// caller that must prove the box is up checks LastComposerLine first. An open
+// trust selector is never empty input.
 func ComposerEmpty(capture string, styled func() (string, error)) (bool, string, error) {
+	if pfmengine.ClaudeTrustDialog(capture) && SelectorLine(capture) != "" {
+		return false, "", nil
+	}
 	draft := ComposerDraftText(capture)
 	if draft == "" {
 		return true, "", nil
@@ -298,6 +308,30 @@ func isDimPlaceholder(styledLine string) bool {
 }
 
 func composerLastLine(capture string) string {
+	line := rawLastComposerLine(capture)
+	if isClaudeTrustSelector(capture, strings.TrimSpace(stripTerminalControl(line))) {
+		return ""
+	}
+	return line
+}
+
+// A bounded input box below quoted dialog text is editable, even when its
+// draft happens to be exactly one of the trust choices.
+func isClaudeTrustSelector(capture, line string) bool {
+	if !claudeTrustOption.MatchString(line) || !pfmengine.ClaudeTrustDialog(capture) {
+		return false
+	}
+	lines := strings.Split(capture, "\n")
+	row := lastComposerRow(lines)
+	if row > 0 && ComposerBoxRule(stripTerminalControl(lines[row-1])) {
+		if _, bounded := ComposerBoxText(capture); bounded {
+			return false
+		}
+	}
+	return true
+}
+
+func rawLastComposerLine(capture string) string {
 	lines := strings.Split(capture, "\n")
 	if row := lastComposerRow(lines); row >= 0 {
 		return lines[row]
@@ -349,10 +383,20 @@ func lastComposerRow(lines []string) int {
 // visible character at all: hasDraft's marker-row allowances (a lone spinner
 // frame, Codex's braille sparkle) are a typed "-" or text on these rows.
 func ComposerBoxEmpty(capture string) bool {
+	text, bounded := ComposerBoxText(capture)
+	return bounded && strings.IndexFunc(stripTerminalControl(text), func(character rune) bool {
+		return unicode.IsGraphic(character) && !unicode.IsSpace(character)
+	}) < 0
+}
+
+// ComposerBoxText returns the styled continuation rows beneath the active
+// composer marker, and whether a closing rule established their boundary.
+// A marker typed inside a bounded draft is content, never a new composer.
+func ComposerBoxText(capture string) (string, bool) {
 	lines := strings.Split(capture, "\n")
 	row := lastComposerRow(lines)
 	if row < 0 {
-		return false
+		return "", false
 	}
 	topWidth := 0
 	if row > 0 {
@@ -361,18 +405,13 @@ func ComposerBoxEmpty(capture string) bool {
 			topWidth = utf8.RuneCountInString(top)
 		}
 	}
-	for _, line := range lines[row+1:] {
-		clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
+	for end := row + 1; end < len(lines); end++ {
+		clean := stripTerminalControl(strings.TrimSuffix(lines[end], "\r"))
 		if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= topWidth {
-			return true
-		}
-		if strings.IndexFunc(clean, func(character rune) bool {
-			return unicode.IsGraphic(character) && !unicode.IsSpace(character)
-		}) >= 0 {
-			return false
+			return strings.Join(lines[row+1:end], "\n"), true
 		}
 	}
-	return false
+	return "", false
 }
 
 // ComposerBoxRule reports whether a captured line is one of the input box's
@@ -485,4 +524,24 @@ func countCompactionReceipts(capture string) int {
 		}
 	}
 	return count
+}
+
+// refuseNonIdleRetry guards a retry whose prior submission was uncertain. Unlike
+// an initial call it cannot queue a second turn or stash an existing draft.
+func (engine *Engine) refuseNonIdleRetry(ctx context.Context, target Target, capture string, base *Result) bool {
+	if base.Busy {
+		base.Code, base.Message = CodeBusy, "target is busy; idle-only retry typed nothing"
+		return true
+	}
+	empty, _, err := ComposerEmpty(capture, func() (string, error) {
+		return engine.tmux.Capture(ctx, target.SocketPath, target.Pane, true, 0)
+	})
+	if err != nil || !empty || !ComposerRowShown(capture) || SelectorLine(capture) != "" {
+		base.Code, base.Message = CodeUndelivered, "idle-only retry requires an empty composer; nothing typed"
+		if err != nil {
+			base.Message += ": " + err.Error()
+		}
+		return true
+	}
+	return false
 }

@@ -1,6 +1,7 @@
 package statusline
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,11 +21,18 @@ import (
 const rootProjectKey = "root"
 
 type contextGauge struct {
-	percent      int
-	window       int64
-	humanPrompts int
-	marker       string
-	transcript   bool
+	model         string
+	transcriptErr bool
+	tokens        int64
+	known         bool
+	capacityState string
+	cacheHit      int
+	percent       int
+	percentKnown  bool
+	window        int64
+	humanPrompts  int
+	marker        string
+	transcript    bool
 	// scanned is what the gauge's pass over the transcript billed, nil when
 	// that pass did not complete: the spend segment reuses it instead of
 	// reading the same file again.
@@ -38,20 +46,34 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	}
 	gauge := transcriptGauge(runtime, data, project, mainScan)
 	percent := gauge.percent
-	l2 := urgencyEmoji(percent) + " " + makeBar(percent, 10) + " " + percentColor(percent) +
-		gauge.marker + strconv.Itoa(percent) + "%" + reset
+	label := "?%"
+	if (gauge.window > 0 && gauge.known) || gauge.percentKnown {
+		label = strconv.Itoa(percent) + "%"
+	} else if !gauge.known && data.ContextWindow.UsedPercentage > 0 {
+		label = strconv.Itoa(percent) + "%"
+	}
+	count := "?"
+	if gauge.known {
+		count = formatContextTokens(gauge.tokens)
+	}
+	l2 := urgencyEmoji(
+		percent,
+	) + " " + makeBar(
+		percent,
+		10,
+	) + " " + percentColor(
+		percent,
+	) + gauge.marker + label + " " + count + reset
+	if gauge.capacityState != "" {
+		l2 += " " + cWarn + "ctx " + gauge.capacityState + reset
+	}
 	if gauge.transcript && runtime.Engine == pfmengine.Codex && gauge.window > 0 {
 		l2 += " " + cWindow + "of " + formatContextTokens(gauge.window) + reset
 	}
-	contextTokens := data.ContextWindow.CurrentUsage.CacheReadInputTokens +
-		data.ContextWindow.CurrentUsage.CacheCreationInputTokens +
-		data.ContextWindow.CurrentUsage.InputTokens
-	if runtime.Engine == pfmengine.Codex && (runtime.Columns == 0 || runtime.Columns >= 100) && contextTokens > 0 {
-		l2 += sep + cTokens + "🧮" + formatContextTokens(contextTokens) + reset
-		if gauge.humanPrompts > 0 {
-			l2 += " " + dim + "✎" + strconv.Itoa(gauge.humanPrompts) + reset
-		}
+	if runtime.Engine == pfmengine.Codex && gauge.humanPrompts > 0 {
+		l2 += " " + dim + "✎" + strconv.Itoa(gauge.humanPrompts) + reset
 	}
+	contextTokens := gauge.tokens
 	if runtime.Engine != pfmengine.Codex {
 		l2 += sep + sessionSpendSegment(data, runtime.Prices, readLedgerBooks(runtime, data.SessionID), gauge.scanned)
 	}
@@ -61,6 +83,14 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	if runtime.Engine != pfmengine.Codex {
 		usage := data.ContextWindow.CurrentUsage
 		hit = cacheHitPercent(usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.InputTokens)
+	}
+	if openAIModel(gauge.model) || openAIModel(data.Model.ID) ||
+		(data.Model.ID == "" && openAIModel(data.Model.DisplayName)) {
+		text := unmeasuredCacheText(gauge.cacheHit)
+		if gauge.transcriptErr {
+			text = cBad + "💾!" + reset
+		}
+		return gauge, l2 + sep + text, contextTokens
 	}
 	return gauge, l2 + cacheWindowSegment(
 		runtime,
@@ -99,14 +129,20 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, 
 		tools = cTools + strconv.Itoa(spend.tools) + reset
 	}
 	if books.ledger.Present {
-		booked := ledgerSpend(books.ledger.Rows)
+		native := ledgerSpend(books.ledger.Rows)
+		booked := spend.withLedger(native)
 		before := preLedgerUSD(books.ledger.Rows, spend)
+		if supplement := booked.usd - native.usd; supplement > 0 {
+			var ambiguous bool
+			before, ambiguous = beforeGatewayOverlap(books.ledger.Rows, spend, supplement)
+			booked.partial = booked.partial || ambiguous
+		}
 		one := completeSpend(booked.usd, before, total)
 		line := spendDollars(one, true) + spendTail(booked.in, booked.out, tools)
 		if booked.partial {
 			line += cWarn + "+?" + reset
 		}
-		return line + markerText(spendMarker(books, one, 0, false, before))
+		return line + markerText(spendMarker(books, one, 0, false, before)) + booked.gateway.note()
 	}
 	if !readable {
 		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset +
@@ -115,13 +151,16 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, 
 	logged := spend.priced > 0 || !spend.partial
 	line := spendDollars(spend.usd, logged)
 	if total > 0 {
+		if spend.gateway.present {
+			total = max(total, spend.usd)
+		}
 		line = spendDollars(total, true)
 	}
 	line += spendTail(spend.in, spend.out, tools)
 	if spend.partial && logged {
 		line += cWarn + "+?" + reset
 	}
-	return line + markerText(spendMarker(books, total, spend.usd, logged, 0))
+	return line + markerText(spendMarker(books, total, spend.usd, logged, 0)) + spend.gateway.note()
 }
 
 // spendTail is "1.0M/5.1K/46": prompt tokens, output tokens, tool calls.
@@ -155,37 +194,82 @@ func spendDollars(usd float64, known bool) string {
 // transcriptGauge makes the transcript authoritative whenever it can be read.
 // The harness percentage is retained only for absent or unreadable transcripts.
 func transcriptGauge(runtime Runtime, data input, project string, scan *spendScan) contextGauge {
-	fallback := contextGauge{percent: gaugePercent(data.ContextWindow.UsedPercentage)}
+	usage := data.ContextWindow.CurrentUsage
+	fallback := contextGauge{
+		model:    data.Model.ID,
+		percent:  gaugePercent(data.ContextWindow.UsedPercentage),
+		tokens:   usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens,
+		cacheHit: -1,
+	}
+	fallback.known = usage.Known || fallback.tokens > 0
+	fallback.percentKnown = !openAIModel(data.Model.ID) &&
+		(data.ContextWindow.PercentageKnown || data.ContextWindow.UsedPercentage > 0)
+	fallback.window, fallback.capacityState = resolvedContextWindow(runtime, data, transcript.Meta{})
+	if fallback.known && fallback.window > 0 {
+		fallback.percent = gaugePercent(float64(fallback.tokens) * 100 / float64(fallback.window))
+	}
 	if data.TranscriptPath == "" {
 		return fallback
 	}
-	var observe func(line []byte)
-	if scan != nil {
-		observe = scan.line
-	}
-	meta, err := transcript.ReadMetaObserving(data.TranscriptPath, string(runtime.Engine), observe)
+	activity := agentActivity{cacheHit: -1}
+	meta, err := transcript.ReadMetaObserving(data.TranscriptPath, string(runtime.Engine), func(line []byte) {
+		if scan != nil {
+			scan.line(line)
+		}
+		// Reuse the completed-call cache rule without another transcript read.
+		var record struct {
+			Type      string `json:"type"`
+			Sidechain bool   `json:"isSidechain"`
+			Message   struct {
+				Usage *transcriptUsage `json:"usage"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(line, &record) == nil && record.Type == entryAssistant && !record.Sidechain &&
+			record.Message.Usage != nil &&
+			record.Message.Usage.reportsCache {
+			u := record.Message.Usage
+			if hit := cacheHitPercent(u.CacheRead, u.CacheCreation, u.Input); hit >= 0 {
+				activity.cacheHit = hit
+			}
+		}
+	})
 	if err != nil {
+		fallback.transcriptErr = true
 		return fallback
 	}
-	window := contextWindow(runtime, data, meta)
-	meta.ContextWindow = window
-	gauge := contextGauge{
-		percent:      gaugePercent(meta.ContextPercent()),
-		window:       window,
-		humanPrompts: meta.HumanPrompts,
-		transcript:   true,
+	fallback.cacheHit = activity.cacheHit
+	fallback.model = currentModel(data.Model.ID, meta.Model)
+	if data.Model.ID == "" {
+		fallback.window, fallback.capacityState = resolvedContextWindow(runtime, data, meta)
+		if fallback.known && fallback.window > 0 {
+			fallback.percent = gaugePercent(float64(fallback.tokens) * 100 / float64(fallback.window))
+		}
 	}
 	if scan != nil {
 		scanned := scan.total()
-		gauge.scanned = &scanned
+		fallback.scanned = &scanned
 	}
+	// A readable transcript without a usable current request is not a zero gauge.
+	if !meta.ContextKnown {
+		return fallback
+	}
+	if data.Model.ID != "" && meta.Model != "" &&
+		canonicalContextModel(data.Model.ID) != canonicalContextModel(meta.Model) {
+		return fallback
+	}
+	window, state := resolvedContextWindow(runtime, data, meta)
+	meta.ContextWindow = window
+	gauge := fallback
+	gauge.window, gauge.capacityState = window, state
+	gauge.percentKnown = window > 0
+	gauge.tokens, gauge.known = meta.ContextTokens, true
+	gauge.percent = gaugePercent(meta.ContextPercent())
+	gauge.humanPrompts, gauge.transcript = meta.HumanPrompts, true
 	floorPath := contextFloorPath(runtime, project)
 	if meta.CompactedAfterUsage {
-		estimate := readContextFloor(floorPath)
-		if meta.PostCompactTokens > 0 {
-			estimate += meta.PostCompactTokens
-		}
+		estimate := readContextFloor(floorPath) + meta.PostCompactTokens
 		if estimate > 0 {
+			gauge.tokens = estimate
 			meta.ContextTokens = estimate
 		}
 		gauge.percent = gaugePercent(meta.ContextPercent())
@@ -201,27 +285,29 @@ func transcriptGauge(runtime Runtime, data input, project string, scan *spendSca
 	return gauge
 }
 
-func contextWindow(runtime Runtime, data input, meta transcript.Meta) int64 {
+func resolvedContextWindow(runtime Runtime, data input, meta transcript.Meta) (int64, string) {
 	if override, err := strconv.ParseInt(runtime.getenv("PFM_CONTEXT_WINDOW"), 10, 64); err == nil && override > 0 {
-		return override
+		return override, ""
 	}
-	if runtime.Engine == pfmengine.Codex {
-		return meta.ContextWindow
+	if runtime.Engine == pfmengine.Codex && meta.ContextWindow > 0 {
+		return meta.ContextWindow, ""
 	}
-	if data.ContextWindow.ContextWindowSize > 0 {
-		return data.ContextWindow.ContextWindowSize
-	}
-	model := data.Model.ID
-	if model == "" {
-		model = meta.Model
-	}
+	model := currentModel(data.Model.ID, meta.Model)
 	if model == "" {
 		model = data.Model.DisplayName
 	}
-	if strings.Contains(strings.ToLower(model), "haiku") {
-		return 200_000
+	if openAIModel(model) {
+		return runtime.catalog().capacity(model)
 	}
-	return 1_000_000
+	if data.ContextWindow.ContextWindowSize > 0 {
+		return data.ContextWindow.ContextWindowSize, ""
+	}
+	return 0, "unknown"
+}
+
+func contextWindow(runtime Runtime, data input, meta transcript.Meta) int64 {
+	window, _ := resolvedContextWindow(runtime, data, meta)
+	return window
 }
 
 func contextFloorPath(runtime Runtime, project string) string {

@@ -428,13 +428,14 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	path := writeConfigFixture(
 		t,
 		root,
-		`{"version":2,"claude":{"webSearchesPerSession":17,"autoCompactWindow":250000,"helperModel":"claude-sonnet-5-5","tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
+		`{"version":2,"claude":{"remoteControl":false,"webSearchesPerSession":17,"autoCompactWindow":250000,"helperModel":"claude-sonnet-5-5","tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
 	)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("config show code=%d stderr=%q", code, stderr.String())
 	}
 	for _, want := range []string{
+		"config claude.remoteControl=false (file)",
 		"config claude.webSearchesPerSession=17 (file)",
 		"config claude.autoCompactWindow=250000 (file)",
 		"config claude.helperModel=claude-sonnet-5-5 (file)",
@@ -454,6 +455,9 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	stderr.Reset()
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("default config show code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "config claude.remoteControl=true (default)") {
+		t.Fatalf("default config show lacks Remote Control: %s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "config claude.autoCompactWindow=100000 (default)") {
 		t.Fatalf("default config show lacks auto compact window: %s", stdout.String())

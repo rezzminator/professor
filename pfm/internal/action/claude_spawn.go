@@ -28,20 +28,21 @@ const (
 
 // ClaudeSpawn prints or executes the launch returned by the registry.
 type ClaudeSpawn struct {
-	Purpose    Purpose
-	Account    int
-	Cache1H    *bool
-	SessionID  string
-	Resume     string
-	Fork       bool
-	Name       string
-	Model      string
-	Effort     string
-	PromptFile string
-	Args       []string
-	Home       string
-	Machine    pfmconfig.Config
-	Runner     deps.Runner
+	Purpose           Purpose
+	Account           int
+	Cache1H           *bool
+	SessionID         string
+	Resume            string
+	Fork              bool
+	Name              string
+	RemoteControlName string
+	Model             string
+	Effort            string
+	PromptFile        string
+	Args              []string
+	Home              string
+	Machine           pfmconfig.Config
+	Runner            deps.Runner
 
 	binary            string
 	explicitConfigDir string
@@ -51,7 +52,7 @@ func (spawn ClaudeSpawn) request() claudelaunch.Request {
 	return claudelaunch.Request{
 		Purpose: spawn.Purpose, Account: spawn.Account, Cache1H: spawn.Cache1H,
 		SessionID: spawn.SessionID, Resume: spawn.Resume, Fork: spawn.Fork,
-		Name: spawn.Name, Model: spawn.Model, Effort: spawn.Effort,
+		Name: spawn.Name, RemoteControlName: spawn.RemoteControlName, Model: spawn.Model, Effort: spawn.Effort,
 		PromptFile: spawn.PromptFile, Args: spawn.Args, Home: spawn.Home,
 		Binary: spawn.binary, ConfigDir: spawn.explicitConfigDir,
 	}

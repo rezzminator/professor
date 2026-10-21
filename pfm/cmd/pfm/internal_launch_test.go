@@ -184,7 +184,7 @@ exit 3
 	}
 	for _, want := range []string{
 		"tmux=" + socket,
-		"argv=--resume fixture-id --dangerously-skip-permissions --settings {",
+		"argv=--remote-control --resume fixture-id --dangerously-skip-permissions --settings {",
 		"ttl=1h",
 		"config=" + filepath.Join(root, "caller-config"),
 		"force=unset", "sid=unset", "child=unset", "endpoint=unset",

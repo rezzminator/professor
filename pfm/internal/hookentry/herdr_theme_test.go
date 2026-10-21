@@ -35,6 +35,18 @@ func (rig *chatRig) themeStateCalls() []string {
 	return calls
 }
 
+func TestHerdrThemeKeepsWorkingWhileBackgroundAgentRuns(t *testing.T) {
+	rig := newChatRig(t)
+	rig.themeOn()
+	rig.wantQuiet(rig.engine("working", `{"session_id":"s1","hook_event_name":"UserPromptSubmit"}`))
+	rig.wantQuiet(rig.engine("agent-start", `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStart"}`))
+	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
+	calls := rig.themeStateCalls()
+	if len(calls) == 0 || !strings.HasSuffix(calls[len(calls)-1], " @pfm-state working") {
+		t.Fatalf("background agent theme state=%v; want working", calls)
+	}
+}
+
 func TestHerdrStateMarksTheServersAgentStateWhileTheThemeIsOn(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -176,5 +188,24 @@ func TestHerdrStateLeavesANonChatTmuxServerUnmarked(t *testing.T) {
 	rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
 	if calls := rig.themeStateCalls(); len(calls) != 0 {
 		t.Fatalf("the user's own tmux server was marked: %v", calls)
+	}
+}
+
+func TestHerdrThemeIgnoresLifecycleWithoutHerdr(t *testing.T) {
+	rig := newChatRig(t)
+	rig.themeOn()
+	delete(rig.env, "HERDR_BIN_PATH")
+	rig.jail.onPath = false
+	for _, step := range []struct{ event, payload, want string }{
+		{"working", `{"session_id":"s1","hook_event_name":"UserPromptSubmit"}`, "working"},
+		{"agent-start", `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStart"}`, "working"},
+		{"idle", `{"session_id":"s1"}`, "done"},
+		{"agent-stop", `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStop"}`, "done"},
+	} {
+		rig.wantQuiet(rig.engine(step.event, step.payload))
+		calls := rig.themeStateCalls()
+		if len(calls) == 0 || !strings.HasSuffix(calls[len(calls)-1], " @pfm-state "+step.want) {
+			t.Fatalf("%s theme marks=%v, want %s", step.event, calls, step.want)
+		}
 	}
 }

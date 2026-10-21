@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/archive"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -24,13 +25,13 @@ import (
 )
 
 type deliveryRig struct {
-	state      string
-	openErr    error
-	captures   []string
-	captured   int
-	callErr    error
-	called     []string
-	socketPath string
+	state         string
+	openErr       error
+	captures      []string
+	captured      int
+	callErr       error
+	called        []string
+	captureTarget string
 
 	hidden    bool // the chat is hidden until the unhide seam lifts it
 	unhideErr error
@@ -51,24 +52,25 @@ func (rig *deliveryRig) unhideSeam(_ context.Context, sessionID string) (bool, e
 	return removed, nil
 }
 
-func (rig *deliveryRig) deliverer() *chatDeliverer {
+func (rig *deliveryRig) deliverer(t *testing.T) *chatDeliverer {
+	t.Helper()
 	return &chatDeliverer{
+		runtime: &pfmconfig.Runtime{Paths: paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")}},
 		stdout:  &rig.stdout,
 		unhide:  rig.unhideSeam,
-		tmuxDir: "/tmux",
 		open: func(context.Context, string) (action.OpenResult, error) {
 			return action.OpenResult{State: rig.state, Socket: "cc-revived"}, rig.openErr
 		},
-		capture: func(_ context.Context, socketPath, _ string) (string, error) {
-			rig.socketPath = socketPath
+		capture: func(_ context.Context, target string) (string, error) {
+			rig.captureTarget = target
 			index := min(rig.captured, len(rig.captures)-1)
 			rig.captured++
 			return rig.captures[index], nil
 		},
-		call: func(_ context.Context, _ fleetdb.Schedule, target, _ string) error {
+		call: func(_ context.Context, _ fleetdb.Schedule, request pfmcall.Request) (pfmcall.Result, error) {
 			rig.events = append(rig.events, "call")
-			rig.called = append(rig.called, target)
-			return rig.callErr
+			rig.called = append(rig.called, request.Target)
+			return pfmcall.Result{Status: "delivered", Typed: true}, rig.callErr
 		},
 	}
 }
@@ -86,7 +88,7 @@ var testSchedule = fleetdb.Schedule{
 
 func TestScheduleDelivererCallsALiveChatByItsSessionId(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}}
-	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if len(rig.called) != 1 || rig.called[0] != "sess-7" || rig.captured != 0 {
@@ -98,20 +100,20 @@ func TestScheduleDelivererCallsALiveChatByItsSessionId(t *testing.T) {
 func TestScheduleDelivererWaitsForThreeConsecutiveComposerReads(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := &deliveryRig{state: "opened", captures: []string{"booting", "❯ ", "booting", "❯ ", "❯ ", "❯ "}}
-	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
-	if rig.captured != 6 || len(rig.called) != 1 || rig.called[0] != "cc-revived" ||
-		rig.socketPath != "/tmux/cc-revived" {
-		t.Fatalf("captured=%d called=%v socket=%q, want 6 reads, call at the fresh socket",
-			rig.captured, rig.called, rig.socketPath)
+	if rig.captured != 6 || len(rig.called) != 1 || rig.called[0] != "sess-7" ||
+		rig.captureTarget != "sess-7" {
+		t.Fatalf("captured=%d called=%v socket=%q, want 6 reads and a call at the revived session",
+			rig.captured, rig.called, rig.captureTarget)
 	}
 }
 
 func TestScheduleDelivererRefusesAFolderTrustDialog(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := &deliveryRig{state: "opened", captures: []string{"Yes, I trust this folder\nNo, exit\n❯ 1. Yes"}}
-	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
+	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "folder-trust dialog; nothing typed") || len(rig.called) != 0 {
 		t.Fatalf("err=%v called=%v, want the trust-dialog refusal and nothing typed", err, rig.called)
 	}
@@ -120,7 +122,7 @@ func TestScheduleDelivererRefusesAFolderTrustDialog(t *testing.T) {
 func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 30*time.Millisecond)
 	rig := &deliveryRig{state: "opened", captures: []string{"still booting"}}
-	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
+	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "showed no composer within") ||
 		!strings.Contains(err.Error(), "cc-revived") || len(rig.called) != 0 {
 		t.Fatalf("err=%v called=%v", err, rig.called)
@@ -129,12 +131,12 @@ func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
 
 func TestScheduleDelivererReportsResolveAndCallFailures(t *testing.T) {
 	rig := &deliveryRig{openErr: errors.New("chat is not indexed")}
-	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
+	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "resolve chat sess-7 (seven)") {
 		t.Fatalf("open failure err=%v", err)
 	}
 	rig = &deliveryRig{state: "live", callErr: errors.New("pane gone")}
-	err = rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
+	err = rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "pane gone") {
 		t.Fatalf("call failure err=%v", err)
 	}
@@ -142,7 +144,7 @@ func TestScheduleDelivererReportsResolveAndCallFailures(t *testing.T) {
 
 func TestScheduleDelivererUnhidesAHiddenChatAfterTheCall(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}, hidden: true}
-	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(rig.events, ","); got != "call,unhide" || rig.unhides[0] != "sess-7" {
@@ -155,7 +157,7 @@ func TestScheduleDelivererUnhidesAHiddenChatAfterTheCall(t *testing.T) {
 
 func TestScheduleDelivererLeavesAVisibleChatAlone(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}}
-	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if rig.stdout.Len() != 0 || len(rig.called) != 1 {
@@ -166,7 +168,7 @@ func TestScheduleDelivererLeavesAVisibleChatAlone(t *testing.T) {
 
 func TestScheduleDelivererDoesNotUnhideAChatItFailedToDeliverTo(t *testing.T) {
 	rig := &deliveryRig{state: "live", callErr: errors.New("pane gone"), hidden: true}
-	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err == nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err == nil {
 		t.Fatal("want the call failure")
 	}
 	if len(rig.unhides) != 0 || !rig.hidden || rig.stdout.Len() != 0 {
@@ -212,7 +214,7 @@ func TestScheduleDelivererUnhideFailureStillDeliversAndIsReportedWithIdAndCause(
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := &deliveryRig{state: "live", hidden: true}
-			deliverer := rig.deliverer()
+			deliverer := rig.deliverer(t)
 			deliverer.unhide = func(context.Context, string) (bool, error) { return tc.removed, tc.unhideErr }
 			if tc.stdoutFail {
 				deliverer.stdout = failingWriter{}
@@ -357,10 +359,11 @@ func archiveChat(t *testing.T, values paths.Values, id, original string) {
 	}
 }
 
-func (rig *archiveRig) deliverer() *chatDeliverer {
+func (rig *archiveRig) deliverer(t *testing.T) *chatDeliverer {
+	t.Helper()
 	return &chatDeliverer{
+		runtime:    &pfmconfig.Runtime{Paths: paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")}},
 		stdout:     &rig.stdout,
-		tmuxDir:    "/tmux",
 		archiveDir: rig.values.ArchiveDir,
 		unhide: func(_ context.Context, _ string) (bool, error) {
 			rig.events = append(rig.events, "unhide")
@@ -382,12 +385,12 @@ func (rig *archiveRig) deliverer() *chatDeliverer {
 			}
 			return action.OpenResult{State: "opened", Socket: "cc-revived"}, nil
 		},
-		capture: func(context.Context, string, string) (string, error) { return "❯ ", nil },
-		call: func(_ context.Context, _ fleetdb.Schedule, target, message string) error {
+		capture: func(context.Context, string) (string, error) { return "❯ ", nil },
+		call: func(_ context.Context, _ fleetdb.Schedule, request pfmcall.Request) (pfmcall.Result, error) {
 			rig.events = append(rig.events, "call")
-			rig.called = append(rig.called, target)
-			rig.messages = append(rig.messages, message)
-			return nil
+			rig.called = append(rig.called, request.Target)
+			rig.messages = append(rig.messages, request.Message)
+			return pfmcall.Result{Status: "delivered", Typed: true}, nil
 		},
 	}
 }
@@ -399,13 +402,13 @@ func (rig *archiveRig) schedule() fleetdb.Schedule {
 func TestScheduleDelivererRestoresAnArchivedChatThenDeliversIt(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := newArchiveRig(t, true)
-	if err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if _, err := os.Stat(rig.original); err != nil {
 		t.Fatalf("the archived chat was not put back at %s: %v", rig.original, err)
 	}
-	if rig.opens != 2 || len(rig.called) != 1 || rig.called[0] != "cc-revived" || rig.messages[0] != "msg" {
+	if rig.opens != 2 || len(rig.called) != 1 || rig.called[0] != rig.id || rig.messages[0] != "msg" {
 		t.Fatalf("opens=%d called=%v messages=%v, want a restore between two opens and the prompt unchanged",
 			rig.opens, rig.called, rig.messages)
 	}
@@ -418,7 +421,7 @@ func TestScheduleDelivererUnhidesAnArchivedChatItRestored(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := newArchiveRig(t, true)
 	rig.hidden = true
-	if err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if got := strings.Join(rig.events, ","); got != "open,open,call,unhide" || rig.hidden {
@@ -448,7 +451,7 @@ func TestScheduleDelivererRestoreFailureIsARecordedFailureAndTheScheduleStaysDue
 		t.Fatal(err)
 	}
 
-	report, err := Fire(context.Background(), store, rig.deliverer(), filepath.Join(t.TempDir(), "fire.lock"), now)
+	report, err := Fire(context.Background(), store, rig.deliverer(t), filepath.Join(t.TempDir(), "fire.lock"), now)
 	if err != nil {
 		t.Fatalf("Fire: %v", err)
 	}
@@ -471,7 +474,7 @@ func TestScheduleDelivererNamesAChatInNeitherTheIndexNorTheArchive(t *testing.T)
 	if err := os.Remove(rig.original); err != nil {
 		t.Fatal(err)
 	}
-	err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg")
+	err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg")
 	if err == nil || !strings.Contains(err.Error(), "resolve chat "+rig.id+" (nine)") ||
 		!strings.Contains(err.Error(), "is not indexed") || !strings.Contains(err.Error(), "not in the archive") ||
 		len(rig.called) != 0 || rig.stdout.Len() != 0 {
@@ -489,7 +492,7 @@ func TestScheduleDelivererLeavesTheArchiveAloneUnlessTheChatIsNotIndexed(t *test
 			shortenComposerWait(t, time.Millisecond, 5*time.Second)
 			rig := newArchiveRig(t, true)
 			rig.openErr, rig.indexed = openErr, openErr == nil
-			err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg")
+			err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg")
 			if (openErr != nil) != (err != nil) {
 				t.Fatalf("err = %v for open error %v", err, openErr)
 			}
@@ -512,7 +515,7 @@ func TestScheduleDelivererRestoredButUnopenedChatDeliversOnTheNextFire(t *testin
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := newArchiveRig(t, true)
 	rig.reopen = errors.New("open the fleet database: database is locked")
-	err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg")
+	err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg")
 	restored := "restored archived chat " + rig.id + " but it still cannot be opened"
 	if err == nil || !strings.Contains(err.Error(), restored) ||
 		!strings.Contains(err.Error(), "database is locked") || len(rig.called) != 0 {
@@ -522,7 +525,7 @@ func TestScheduleDelivererRestoredButUnopenedChatDeliversOnTheNextFire(t *testin
 		t.Fatalf("the restore was not kept at %s: %v", rig.original, statErr)
 	}
 	rig.reopen = nil
-	if err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
+	if err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
 		t.Fatalf("next fire: %v", err)
 	}
 	if rig.opens != 3 || len(rig.called) != 1 || rig.stdout.String() != "restored archived chat "+rig.id+"\n" {

@@ -1,0 +1,72 @@
+{
+  "0012": {
+    "name": "Corona · string escapes and placeholders",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "string.regexp constant.character.escape",
+      "constant.other.placeholder",
+      "constant.character.format.placeholder",
+      "constant.character.string.escape",
+      "punctuation.definition.placeholder"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#86ecff"
+    }
+  },
+  "0015": {
+    "name": "O I 630.0 nm, curtain top · numbers",
+    "scope": [
+      "constant.numeric",
+      "keyword.other.unit",
+      "constant.numeric.integer",
+      "constant.numeric.float",
+      "constant.numeric.hex",
+      "constant.numeric.decimal",
+      "constant.numeric.binary",
+      "constant.numeric.octal",
+      "punctuation.separator.decimal"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9e8f"
+    }
+  },
+  "0016": {
+    "name": "O I 630.0 nm, curtain top · constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other",
+      "constant.other.symbol",
+      "constant.other.key",
+      "variable.other.constant.property"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9e8f"
+    }
+  },
+  "0017": {
+    "name": "N2 fringe · language constants",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.nil",
+      "constant.language.python",
+      "constant.language.go",
+      "constant.language.json",
+      "support.constant.language"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f286d2"
+    }
+  }
+}

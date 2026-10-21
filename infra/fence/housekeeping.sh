@@ -102,13 +102,17 @@
 # listing removes no sim volume and no scratch root.
 
 FENCE_HK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || FENCE_HK_DIR=""
+# Central defaults; invalid supplied configuration never falls back.
+. "$FENCE_HK_DIR/shared.sh" || return 1
+fence_config_values || return 1
+
 FENCE_CACHE_VOLUMES="pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache pfm-lane-harvest-cache pfm-lane-uv-cache"
 # volume · budget variable · default MB, one row per shared cache volume
-FENCE_CACHE_BUDGETS="pfm-dev-gocache PFM_FENCE_GOCACHE_MB 15000
-pfm-dev-gomod PFM_FENCE_GOMOD_MB 4000
-pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB 2000
-pfm-lane-uv-cache PFM_FENCE_UVCACHE_MB 8000
-pfm-lane-harvest-cache PFM_FENCE_HARVESTCACHE_MB 8000"
+FENCE_CACHE_BUDGETS="pfm-dev-gocache PFM_FENCE_GOCACHE_MB $PFM_FENCE_GOCACHE_MB
+pfm-dev-gomod PFM_FENCE_GOMOD_MB $PFM_FENCE_GOMOD_MB
+pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB $PFM_FENCE_LINTCACHE_MB
+pfm-lane-uv-cache PFM_FENCE_UVCACHE_MB $PFM_FENCE_UVCACHE_MB
+pfm-lane-harvest-cache PFM_FENCE_HARVESTCACHE_MB $PFM_FENCE_HARVESTCACHE_MB"
 
 _fence_hk_warn() { printf 'WARN fence housekeeping: %s failed: %s\n' "$1" "$2" >&2; }
 _fence_hk_say() { printf 'fence housekeeping: %s\n' "$1" >&2; }
@@ -133,10 +137,10 @@ _fence_hk_mb() {
 }
 
 _fence_hk_containers() {
-  local max="${PFM_FENCE_CONTAINER_MAX_HOURS:-6}" ids out now name created ts age
+  local max="${PFM_FENCE_CONTAINER_MAX_HOURS-$(_fence_config_default PFM_FENCE_CONTAINER_MAX_HOURS)}" ids out now name created ts age
   if ! _fence_hk_posint "$max"; then
-    _fence_hk_warn containers "PFM_FENCE_CONTAINER_MAX_HOURS='$max' is not a positive integer — using 6"
-    max=6
+    _fence_hk_warn containers "PFM_FENCE_CONTAINER_MAX_HOURS='$max' is not a positive integer"
+    return 1
   fi
   max=$((10#$max))
   if ! ids="$(docker ps -a -q --filter label=pfm.fence=1 --filter status=exited 2>&1)"; then
@@ -276,7 +280,7 @@ _fence_hk_stamp_dir() { # the stamps and the checkout ledger: /tmp/{project}/fen
   printf '%s/fence\n' "$(_fence_hk_project_dir)"
 }
 
-_fence_hk_stamp_fresh() { [ -n "$(find "$1" -mmin -"${2:-1440}" 2>/dev/null)" ]; } # written in the last $2 minutes (default 24 h)
+_fence_hk_stamp_fresh() { [ -n "$(find "$1" -mmin -"$2" 2>/dev/null)" ]; } # written in the last $2 minutes
 
 _fence_hk_stamp() { # _fence_hk_stamp <step> <stamp> — a failed write repeats the step next build
   local out
@@ -285,10 +289,10 @@ _fence_hk_stamp() { # _fence_hk_stamp <step> <stamp> — a failed write repeats 
 }
 
 _fence_hk_cache_budget() {
-  local dir stamp out rc v var def budget size used all_ok=1 present="" every="${PFM_FENCE_BUDGET_MINUTES:-120}"
+  local dir stamp out rc v var def budget size used all_ok=1 present="" every="${PFM_FENCE_BUDGET_MINUTES-$(_fence_config_default PFM_FENCE_BUDGET_MINUTES)}"
   if ! _fence_hk_posint "$every"; then
-    _fence_hk_warn cache-budget "PFM_FENCE_BUDGET_MINUTES='$every' is not a positive integer — using 120"
-    every=120
+    _fence_hk_warn cache-budget "PFM_FENCE_BUDGET_MINUTES='$every' is not a positive integer"
+    return 1
   fi
   dir="$(_fence_hk_stamp_dir)"; stamp="$dir/cache-budget.stamp"
   _fence_hk_stamp_fresh "$stamp" "$((10#$every))" && return 0
@@ -300,19 +304,19 @@ _fence_hk_cache_budget() {
   done <<<"$FENCE_CACHE_BUDGETS"
   if [ -n "$present" ]; then
     local df=(docker system df -v --format '{{range .Volumes}}{{.Name}}\t{{.Size}}{{println}}{{end}}')
-    command -v timeout >/dev/null 2>&1 && df=(timeout 120 "${df[@]}")
+    command -v timeout >/dev/null 2>&1 && df=(timeout "$PFM_FENCE_DF_TIMEOUT_S" "${df[@]}")
     out="$("${df[@]}" 2>&1)"; rc=$?
     if [ "$rc" -ne 0 ]; then
-      [ "$rc" -eq 124 ] && out="timed out after 120 s"
+      [ "$rc" -eq 124 ] && out="timed out after $PFM_FENCE_DF_TIMEOUT_S s"
       _fence_hk_warn cache-budget "could not size the cache volumes (docker system df -v): $(_fence_hk_line "$out")"; return
     fi
     local sizes="$out"
     while read -r v var def; do
       case " $present " in *" $v "*) ;; *) continue ;; esac
-      budget="${!var:-$def}"
+      budget="${!var-$def}"
       if ! _fence_hk_posint "$budget"; then
-        _fence_hk_warn cache-budget "$var='$budget' is not a positive integer — using $def"
-        budget="$def"
+        _fence_hk_warn cache-budget "$var='$budget' is not a positive integer"
+        return 1
       fi
       budget=$((10#$budget))
       size="$(awk -F'\t' -v v="$v" '$1 == v { print $2; exit }' <<<"$sizes")"
@@ -331,14 +335,14 @@ _fence_hk_cache_budget() {
 }
 
 _fence_hk_build_cache() {
-  local hours="${PFM_FENCE_BUILDCACHE_HOURS:-168}" dir stamp out
+  local hours="${PFM_FENCE_BUILDCACHE_HOURS-$(_fence_config_default PFM_FENCE_BUILDCACHE_HOURS)}" dir stamp out
   if ! _fence_hk_posint "$hours"; then
-    _fence_hk_warn build-cache "PFM_FENCE_BUILDCACHE_HOURS='$hours' is not a positive integer — using 168"
-    hours=168
+    _fence_hk_warn build-cache "PFM_FENCE_BUILDCACHE_HOURS='$hours' is not a positive integer"
+    return 1
   fi
   hours=$((10#$hours))
   dir="$(_fence_hk_stamp_dir)"; stamp="$dir/build-cache.stamp"
-  _fence_hk_stamp_fresh "$stamp" && return 0
+  _fence_hk_stamp_fresh "$stamp" "$PFM_FENCE_BUILDCACHE_MINUTES" && return 0
   if out="$(docker builder prune -f --filter "until=${hours}h" 2>&1)"; then
     _fence_hk_say "removed build cache unused for ${hours}h — $(grep -i 'reclaimed' <<<"$out" || echo 'Total reclaimed space: 0B')"
     _fence_hk_stamp build-cache "$stamp"; return 0
@@ -478,10 +482,10 @@ _fence_hk_checkouts() {
 }
 
 _fence_hk_scratch() {
-  local days="${PFM_FENCE_SCRATCH_DAYS:-7}" list project c
+  local days="${PFM_FENCE_SCRATCH_DAYS-$(_fence_config_default PFM_FENCE_SCRATCH_DAYS)}" list project c
   if ! _fence_hk_posint "$days"; then
-    _fence_hk_warn scratch "PFM_FENCE_SCRATCH_DAYS='$days' is not a positive integer — using 7"
-    days=7
+    _fence_hk_warn scratch "PFM_FENCE_SCRATCH_DAYS='$days' is not a positive integer"
+    return 1
   fi
   days=$((10#$days))
   if ! list="$(_fence_hk_checkout_list)"; then
@@ -499,6 +503,7 @@ _fence_hk_scratch() {
 # Each public entry runs in a subshell with the caller's shell options reset, so
 # no failure, unset variable or ERR trap inside it can end or fail the caller.
 fence_housekeeping() { # fence_housekeeping [lane-hash]
+  fence_config_values || return 1
   (
     set +eEu +o pipefail; trap - ERR; IFS=$' \t\n'
     _fence_hk_containers

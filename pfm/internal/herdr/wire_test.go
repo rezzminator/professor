@@ -41,6 +41,27 @@ func TestReportLineIsExactlyHerdrsRequest(t *testing.T) {
 	}
 }
 
+func TestSessionReportLineIsExactlyHerdrsRequest(t *testing.T) {
+	line, err := (SessionReport{
+		Pane: "w1:p1", Agent: "claude", SessionID: "s1", SessionPath: "/fixture/session.jsonl",
+		StartSource: "compact", ResumeArgv: []string{"pfm", "chat", "open", "--restored", "s1"}, Seq: 43,
+	}).Line()
+	want := `{"id":"pfm-43","method":"pane.report_agent_session","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","agent_session_id":"s1","agent_session_path":"/fixture/session.jsonl","session_start_source":"compact","resume_argv":["pfm","chat","open","--restored","s1"],"seq":43}}`
+	if err != nil || string(line) != want {
+		t.Fatalf("session wire=%s err=%v want=%s", line, err, want)
+	}
+	for _, report := range []SessionReport{{Pane: "p"}, {Agent: "claude"}} {
+		if _, err := report.Line(); err == nil {
+			t.Fatalf("accepted incomplete session report: %+v", report)
+		}
+	}
+	line, err = (SessionReport{Pane: "p", Agent: "claude", Source: "other", Seq: 44}).Line()
+	if err != nil || strings.Contains(string(line), "agent_session_id") || strings.Contains(string(line), "state") ||
+		!strings.Contains(string(line), `"source":"other"`) {
+		t.Fatalf("optional session wire=%s err=%v", line, err)
+	}
+}
+
 func TestReleaseLineIsExactlyHerdrsRequest(t *testing.T) {
 	line, err := Release{Pane: "w1:p1", Agent: "opencode", Seq: 9}.Line()
 	want := `{"id":"pfm-9","method":"pane.release_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","seq":9}}`
@@ -326,6 +347,12 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	if err != nil || len(pids) != 2 || pids[0] != 4242 || pids[1] != 7 {
 		t.Errorf("ParseProcessInfo = %v, %v", pids, err)
 	}
+	empty, err := ParseProcessInfo(
+		json.RawMessage(`{"type":"pane_process_info","process_info":{"foreground_processes":[]}}`),
+	)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("explicit empty foreground = %v, %v", empty, err)
+	}
 	// The shape a live Herdr answered for a plain zsh pane.
 	shellPID, err := ParseShellPID(json.RawMessage(
 		`{"type":"pane_process_info","process_info":{"foreground_process_group_id":51234,"foreground_processes":` +
@@ -358,6 +385,14 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 		"agents of another type": func() error { _, err := ParseAgentList(json.RawMessage(`{"type":"ok"}`)); return err },
 		"panes of another type":  func() error { _, err := ParsePanes(json.RawMessage(`{"type":"agent_list"}`)); return err },
 		"process info garbage":   func() error { _, err := ParseProcessInfo(json.RawMessage(`[1]`)); return err },
+		"missing foreground": func() error {
+			_, err := ParseProcessInfo(json.RawMessage(`{"type":"pane_process_info","process_info":{}}`))
+			return err
+		},
+		"null foreground": func() error {
+			_, err := ParseProcessInfo(json.RawMessage(`{"type":"pane_process_info","process_info":{"foreground_processes":null}}`))
+			return err
+		},
 		"process info of another type": func() error {
 			_, err := ParseProcessInfo(json.RawMessage(`{"type":"ok","process_info":{"foreground_processes":[{"pid":7,"name":"x"}]}}`))
 			return err

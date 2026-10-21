@@ -105,6 +105,18 @@ var fixedCommands = []Entry{
 		InstallHint: "install zsh",
 	},
 	{
+		Name:        "dscl",
+		Purpose:     "account login shell discovery for Herdr installation",
+		Platforms:   []string{platformDarwin},
+		InstallHint: "restore the system Directory Services command",
+	},
+	{
+		Name:        "getent",
+		Purpose:     "account login shell discovery for Herdr installation",
+		Platforms:   []string{platformLinux},
+		InstallHint: "install getent (libc-bin or the platform equivalent)",
+	},
+	{
 		Name:        "ps",
 		Purpose:     "Darwin process-table inspection",
 		Required:    true,

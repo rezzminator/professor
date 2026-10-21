@@ -324,7 +324,9 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		for _, key := range keys {
 			switch key {
 			case "ctrl+s":
-				f.text = f.composer()
+				if f.mode != "stash-refused" {
+					f.text = f.composer()
+				}
 			case "BSpace":
 				f.text = strings.TrimSuffix(f.text, "t")
 				if len(f.text) > len("❯ ") {
@@ -400,7 +402,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "dim-hint", mode: "dim-hint"},
 		{name: "same-text-draft", draft: true},
 		{name: "pending-cleared-before-new-process", mode: "pending-race"},
-		{name: "stashed-draft", draft: true},
+		{name: "stashed-draft", draft: true, then: true},
 		{name: "same-target-then", then: true},
 		{name: "failed-start", mode: "failed-start", want: "permission denied"},
 		{name: "old-process-is-not-success", mode: "old-process", want: "new engine"},
@@ -941,6 +943,30 @@ func TestLockNativeReloadSafety(t *testing.T) {
 				if readErr != nil || string(got) != "target-sentinel" {
 					t.Fatalf("symlink target=%q err=%v", got, readErr)
 				}
+			}
+		})
+	}
+}
+
+func TestRunHerdrNamesDraftInRefusal(t *testing.T) {
+	for _, stage := range []string{"before-exit", "after-resume"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newReloadHerdrFixture(t)
+			draft := strings.Repeat("界", 80) + "TAIL_NOT_LOGGED"
+			if stage == "before-exit" {
+				f.text = "❯ " + draft
+				f.mode = "stash-refused"
+			} else {
+				f.request.Then = "wake up"
+				f.onExit = func() { f.text = "❯ " + draft }
+			}
+			_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), strings.Repeat("界", 80)) ||
+				strings.Contains(err.Error(), "TAIL_NOT_LOGGED") {
+				t.Fatalf("RunHerdr error = %v; want bounded draft evidence", err)
+			}
+			if f.prompted != "" || f.text != "❯ "+draft {
+				t.Fatalf("draft changed or wake delivered: text=%q prompted=%q", f.text, f.prompted)
 			}
 		})
 	}

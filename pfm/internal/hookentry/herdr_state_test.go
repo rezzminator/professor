@@ -26,7 +26,7 @@ func TestHerdrStateOutsideHerdrIsASilentNoOp(t *testing.T) {
 		{"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1"},
 		{"HERDR_PANE_ID": "w1:p1", "HERDR_SOCKET_PATH": server.path},
 	} {
-		got := runHerdr(t, env, nil, &clock, []string{"--engine", "claude", "working"}, `{"session_id":"s1"}`)
+		got := runHerdr(t, env, nil, &clock, []string{"--engine", "opencode", "working"}, `{"session_id":"s1"}`)
 		if got.rc != 0 || got.stderr != "" {
 			t.Fatalf("env=%v: rc=%d stderr=%q, want a silent exit 0", env, got.rc, got.stderr)
 		}
@@ -49,10 +49,10 @@ func TestHerdrStateReportsTheExactRequestLines(t *testing.T) {
 	}{
 		{
 			"start is idle with session and resume",
-			[]string{"--engine", "claude", "start"},
+			[]string{"--engine", "opencode", "start"},
 			payload,
 			"",
-			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"idle",` + resume + `,"seq":1001000}}`},
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"idle",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"working",
@@ -72,46 +72,46 @@ func TestHerdrStateReportsTheExactRequestLines(t *testing.T) {
 			// Only a prompt an intercept blocks leaves the pane as it is; a
 			// near miss starts a turn like any other prompt.
 			"a prompt no intercept blocks reports working",
-			[]string{"--engine", "claude", "working"},
+			[]string{"--engine", "opencode", "working"},
 			`{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/reloaded e"}`,
 			"",
-			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"working",` + resume + `,"seq":1001000}}`},
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"working",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"blocked carries its message",
-			[]string{"--engine", "claude", "blocked"},
+			[]string{"--engine", "opencode", "blocked"},
 			`{"session_id":"` + session + `","message":"needs approval"}`,
 			"",
-			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"blocked","message":"needs approval",` + resume + `,"seq":1001000}}`},
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"blocked","message":"needs approval",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"permission_prompt notification is blocked",
-			[]string{"--engine", "claude", "notification"},
+			[]string{"--engine", "opencode", "notification"},
 			`{"session_id":"` + session + `","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`,
 			"",
-			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"blocked","message":"Claude needs your permission to use Bash",` + resume + `,"seq":1001000}}`},
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"blocked","message":"Claude needs your permission to use Bash",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"elicitation_dialog notification is blocked",
-			[]string{"--engine", "claude", "notification"},
+			[]string{"--engine", "opencode", "notification"},
 			`{"session_id":"` + session + `","notification_type":"elicitation_dialog","message":"pick one"}`,
 			"",
-			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"blocked","message":"pick one",` + resume + `,"seq":1001000}}`},
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"blocked","message":"pick one",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"idle_prompt notification is idle",
-			[]string{"--engine", "claude", "notification"},
+			[]string{"--engine", "opencode", "notification"},
 			`{"session_id":"` + session + `","notification_type":"idle_prompt","message":"waiting"}`,
 			"",
-			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"idle",` + resume + `,"seq":1001000}}`},
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"idle",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"end releases the pane and clears its title",
-			[]string{"--engine", "claude", "end"},
+			[]string{"--engine", "opencode", "end"},
 			`{"session_id":"` + session + `","reason":"prompt_input_exit"}`,
 			"",
 			[]string{
-				`{"id":"pfm-1001000","method":"pane.release_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","seq":1001000}}`,
+				`{"id":"pfm-1001000","method":"pane.release_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","seq":1001000}}`,
 				`{"id":"pfm-1001001","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm","clear_title":true}}`,
 			},
 		},
@@ -170,7 +170,7 @@ func TestHerdrStateSeqIsStrictlyIncreasingAcrossProcesses(t *testing.T) {
 	clock := int64(1_000_000)
 	env := herdrPaneEnv(server, "w1:p1")
 	for _, event := range []string{"start", "working", "working", "blocked", "idle", "end"} {
-		runHerdr(t, env, nil, &clock, []string{"--engine", "claude", event}, `{"session_id":"s1","message":"m"}`)
+		runHerdr(t, env, nil, &clock, []string{"--engine", "opencode", event}, `{"session_id":"s1","message":"m"}`)
 	}
 	last := uint64(0)
 	lines := server.requests()
@@ -209,7 +209,7 @@ func TestHerdrStateOmitsAResumeCommandHerdrWouldRefuse(t *testing.T) {
 			herdrPaneEnv(server, "w1:p1"),
 			nil,
 			&clock,
-			[]string{"--engine", "claude", "working"},
+			[]string{"--engine", "opencode", "working"},
 			string(payload),
 		)
 		lines := server.requests()
@@ -226,7 +226,14 @@ func TestHerdrStateCapsALongMessage(t *testing.T) {
 	server := newFakeHerdr(t)
 	clock := int64(1_000_000)
 	payload, _ := json.Marshal(map[string]string{"session_id": "s1", "message": strings.Repeat("é", 1000)})
-	runHerdr(t, herdrPaneEnv(server, "w1:p1"), nil, &clock, []string{"--engine", "claude", "blocked"}, string(payload))
+	runHerdr(
+		t,
+		herdrPaneEnv(server, "w1:p1"),
+		nil,
+		&clock,
+		[]string{"--engine", "opencode", "blocked"},
+		string(payload),
+	)
 	var request struct {
 		Params struct {
 			Message string `json:"message"`
@@ -250,7 +257,7 @@ func TestHerdrStateNeverFailsATurn(t *testing.T) {
 	t.Run("socket gone", func(t *testing.T) {
 		env := herdrPaneEnv(server, "w1:p1")
 		env["HERDR_SOCKET_PATH"] = filepath.Join(os.TempDir(), "pfm-no-such-herdr.sock")
-		got := runHerdr(t, env, nil, &clock, []string{"--engine", "claude", "working"}, `{"session_id":"s1"}`)
+		got := runHerdr(t, env, nil, &clock, []string{"--engine", "opencode", "working"}, `{"session_id":"s1"}`)
 		if got.rc != 0 || !strings.Contains(got.stderr, "pfm-no-such-herdr.sock") ||
 			!strings.Contains(got.stderr, "herdr-state") {
 			t.Fatalf(
@@ -267,7 +274,7 @@ func TestHerdrStateNeverFailsATurn(t *testing.T) {
 			herdrPaneEnv(server, "w1:p1"),
 			nil,
 			&clock,
-			[]string{"--engine", "claude", "working"},
+			[]string{"--engine", "opencode", "working"},
 			`{"session_id":"s1"}`,
 		)
 		if got.rc != 0 || !strings.Contains(got.stderr, "resume_not_accepted") {
@@ -275,7 +282,7 @@ func TestHerdrStateNeverFailsATurn(t *testing.T) {
 		}
 	})
 	// An unreadable payload cannot say whether a sub-agent sent it, so it
-	// reports nothing; a payload over the read cap decodes as garbage.
+	// reports nothing; oversized input must be named, never silently truncated.
 	for _, test := range []struct{ name, stdin, named string }{
 		{"garbage payload", `not json`, "decode"},
 		{"empty payload", ``, "empty"},
@@ -287,7 +294,7 @@ func TestHerdrStateNeverFailsATurn(t *testing.T) {
 				herdrPaneEnv(quiet, "w1:p1"),
 				nil,
 				&clock,
-				[]string{"--engine", "claude", "idle"},
+				[]string{"--engine", "opencode", "idle"},
 				test.stdin,
 			)
 			if got.rc != 0 || !strings.Contains(got.stderr, test.named) {
@@ -893,5 +900,98 @@ func TestHerdrStatePartialReplacementSendReservesOwnership(t *testing.T) {
 	a.seq = 300
 	if allowed, err := a.preparePane(target, true); err != nil || allowed {
 		t.Fatalf("delayed old detach allowed=%v err=%v, want replacement protected", allowed, err)
+	}
+}
+
+// Hook responses can exceed the old 1 MiB stdin limit. Identity fields may
+// follow the large value, so reporting a prefix would bypass the child guard.
+func TestHerdrStateLargePayload(t *testing.T) {
+	large := strings.Repeat("x", 2<<20)
+	t.Run("Codex PostToolUse", func(t *testing.T) {
+		rig := codexRig(t)
+		rig.wantQuiet(rig.codex("start", "x1", `,"source":"startup"`))
+		rig.wantQuiet(rig.codex("working", "x1", `,"hook_event_name":"PostToolUse","tool_response":"`+large+`"`))
+		calls := rig.herdr.calls()
+		found := false
+		for _, call := range calls {
+			if strings.Contains(call, `"state":"working"`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("large Codex result lost working state: %v", calls)
+		}
+	})
+	for _, tc := range []struct {
+		name, field, suffix string
+		report              bool
+	}{
+		{"tool response", "tool_response", `,"session_id":"s1"`, true},
+		{"prompt", "prompt", `,"session_id":"s1"`, true},
+		{"child after response", "tool_response", `,"agent_id":"child"`, false},
+		{"memory thread after response", "tool_response", `,"transcript_path":null`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newChatRig(t)
+			rig.seed(rig.registered("idle", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+			rig.clientEnv(4242, "w1:p1")
+			engine := "claude"
+			if strings.HasPrefix(tc.name, "memory") {
+				engine = "codex"
+			}
+			got := rig.run([]string{"--engine", engine, "working"}, `{"`+tc.field+`":"`+large+`"`+tc.suffix+`}`)
+			rig.wantQuiet(got)
+			if tc.report && rig.tmux.storedState(t).State != "working" {
+				t.Fatalf("large %s did not report working", tc.field)
+			}
+			if !tc.report && rig.tmux.storedState(t).State != "idle" {
+				t.Fatal("child changed parent state")
+			}
+		})
+	}
+}
+
+func TestHerdrStateEndAfterTmuxServerGone(t *testing.T) {
+	for _, event := range []string{"end", "working"} {
+		t.Run(event, func(t *testing.T) {
+			socket := filepath.Join(t.TempDir(), "cc-gone")
+			var stderr bytes.Buffer
+			var logged []string
+			deps := herdrDeps{
+				getenv: func(k string) string {
+					return map[string]string{"TMUX": socket + ",1,0", "TMUX_PANE": "%0", "HERDR_BIN_PATH": "herdr"}[k]
+				},
+				tmux:     runTmuxForHerdr,
+				now:      time.Now,
+				logError: func(_ string, _ time.Time, message string) error { logged = append(logged, message); return nil },
+			}
+			rc := reportToHerdr([]string{event}, strings.NewReader(`{"session_id":"s1"}`), &stderr, deps)
+			if event == "end" {
+				if rc != 0 || len(logged) != 0 || !strings.Contains(stderr.String(), "INFO") {
+					t.Fatalf("ended server: rc=%d errors=%v stderr=%s", rc, logged, &stderr)
+				}
+			} else if len(logged) != 1 {
+				t.Fatalf("live event lost its fault: %v stderr=%s", logged, &stderr)
+			}
+		})
+	}
+}
+
+func TestHerdrStatePayloadLimitIsExplicit(t *testing.T) {
+	var stderr bytes.Buffer
+	deps := herdrDeps{now: time.Now}
+	input := strings.NewReader(`{"tool_response":"` + strings.Repeat("x", 64<<20) + `","agent_id":"child"}`)
+	before := input.Len()
+	if rc := reportToHerdr(
+		[]string{"working"},
+		input,
+		&stderr,
+		deps,
+	); rc != 0 ||
+		!strings.Contains(stderr.String(), "exceeds") {
+		t.Fatalf("over-limit input: rc=%d stderr=%s", rc, &stderr)
+	}
+	if read := before - input.Len(); read != (64<<20)+1 {
+		t.Fatalf("hook consumed %d bytes, want exactly the budget plus one probe byte", read)
 	}
 }

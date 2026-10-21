@@ -14,13 +14,22 @@ const DefaultHerdrTabStatus = "emoji"
 
 // ChatConfig selects the default birth backend.
 type ChatConfig struct {
-	Backend        string
-	HerdrTabStatus string
+	Backend          string
+	HerdrTabStatus   string
+	HerdrTabPriority bool
 }
 
 type rawChat struct {
-	Backend        *string `json:"backend,omitempty"`
-	HerdrTabStatus *string `json:"herdrTabStatus,omitempty"`
+	Backend          *string `json:"backend,omitempty"`
+	HerdrTabStatus   *string `json:"herdrTabStatus,omitempty"`
+	HerdrTabPriority *bool   `json:"herdrTabPriority,omitempty"`
+}
+
+// ChatSummary renders the resolved chat settings and their configuration sources.
+func (config Config) ChatSummary() string {
+	return fmt.Sprintf("config chat.backend=%s (%s)\nconfig chat.herdrTabPriority=%t (%s)\n",
+		config.Chat.Backend, config.Source("chat.backend"),
+		config.Chat.HerdrTabPriority, config.Source("chat.herdrTabPriority"))
 }
 
 // applyChatAndAsk decodes the chat birth and one-shot engine preferences.
@@ -42,6 +51,10 @@ func applyChatAndAsk(result *Config, raw rawConfig) error {
 		default:
 			return fmt.Errorf("config %s: chat.herdrTabStatus must be emoji, text or off", result.Path)
 		}
+	}
+	if raw.Chat != nil && raw.Chat.HerdrTabPriority != nil {
+		result.Chat.HerdrTabPriority = *raw.Chat.HerdrTabPriority
+		result.Sources["chat.herdrTabPriority"] = SourceFile
 	}
 	if raw.Ask != nil {
 		if raw.Ask.Engine != nil {

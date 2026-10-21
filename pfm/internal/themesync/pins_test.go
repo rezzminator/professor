@@ -6,14 +6,77 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
+
+func TestProfileDoneGlyphPinsValidateAndLegacyProfilesKeepDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		glyphs string
+		want   herdr.TabFrames
+	}{
+		{"legacy", `{"working":"🔵"}`, herdr.TabFrames{"🟡"}},
+		{"still done", `{"done":"⭐"}`, herdr.TabFrames{"⭐"}},
+		{"single-frame done array", `{"done":["🟡"]}`, herdr.TabFrames{"🟡"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile, err := ParseProfile([]byte(profileJSON(`{"herdr":{"tabGlyphs":` + tc.glyphs + `}}`)))
+			if err != nil {
+				t.Fatalf("profile with %s glyphs: %v", tc.name, err)
+			}
+			glyphs, err := herdr.ParseTabGlyphs(profile.Surfaces.Herdr.TabGlyphs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for tick := range 4 {
+				want := tc.want[tick%len(tc.want)] + " Chat"
+				if got := herdr.DecoratedTabLabel("Chat", "done", "emoji", tick, glyphs); got != want {
+					t.Errorf("done frame %d = %q, want %q", tick, got, want)
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		frames string
+		want   string
+	}{
+		{`[]`, "no frames"},
+		{`["🟡"," "]`, "frame 1"},
+	} {
+		_, err := ParseProfile([]byte(profileJSON(`{"herdr":{"tabGlyphs":{"done":` + tc.frames + `}}}`)))
+		if err == nil || !strings.Contains(err.Error(), `herdr tabGlyphs pin "done"`) ||
+			!strings.Contains(err.Error(), tc.want) {
+			t.Errorf("done %s: error = %v, want done named with %q", tc.frames, err, tc.want)
+		}
+	}
+}
+
+func TestProfilePinsOnlyBlockedAndErrorMayAnimate(t *testing.T) {
+	for _, state := range []string{"working", "done", "idle", "dead", "unknown", "blocked", "error"} {
+		t.Run(state, func(t *testing.T) {
+			surfaces := `{"herdr":{"tabGlyphs":{"` + state + `":["🔵","⚪"]}}}`
+			_, err := ParseProfile([]byte(profileJSON(surfaces)))
+			if state == "blocked" || state == "error" {
+				if err != nil {
+					t.Errorf("animated %s: %v", state, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), state) ||
+				!strings.Contains(err.Error(), "only blocked and error") {
+				t.Errorf("animated %s: error = %v, want state named and only blocked and error may animate", state, err)
+			}
+		})
+	}
+}
 
 func TestPinnableKeysAreTheKeysTheRenderersEmit(t *testing.T) {
 	keys, err := renderedPinKeys()
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied := hibiscusApplied(t)
+	applied := tokyoNightApplied(t)
 	bookkeeping := []string{"@pfm-theme", "@pfm-theme-generation", "@pfm-theme-chips", "@pfm-state-colour"}
 	rendered := map[string]bool{}
 	for _, option := range tmuxOptions(applied, Dark, 1) {
@@ -80,14 +143,20 @@ func TestValidatePinsAcceptsEveryRenderedKeyWithItsKindOfValue(t *testing.T) {
 		out := map[string]string{}
 		for name, kind := range kinds {
 			out[name] = "bg=colour1,fg=#abcdef"
-			if kind != pinText {
+			switch kind {
+			case pinColour, pinHex:
 				out[name] = "#abcdef"
+			case pinText:
 			}
 		}
 		return out
 	}
+	glyphs := map[string]herdr.TabFrames{}
+	for name := range keys.herdrGlyphs {
+		glyphs[name] = herdr.TabFrames{"⭕"}
+	}
 	all := &SurfacePins{
-		Tmux: fill(keys.tmux), Herdr: fill(keys.herdr),
+		Tmux: fill(keys.tmux), Herdr: &HerdrPins{Tokens: fill(keys.herdr), TabGlyphs: glyphs},
 		VSCode: &VSCodePins{Colors: fill(keys.vscodeColors), Chrome: fill(keys.vscodeChrome)},
 	}
 	if err := validatePins(all); err != nil {
@@ -152,13 +221,33 @@ func TestValidatePinsRejectsAnUnknownKeyOrABadValueNamingBoth(t *testing.T) {
 		},
 		{
 			"unknown herdr token",
-			SurfacePins{Herdr: map[string]string{"accent_fg": "#ffffff"}},
+			SurfacePins{Herdr: &HerdrPins{Tokens: map[string]string{"accent_fg": "#ffffff"}}},
 			[]string{"herdr", "accent_fg"},
 		},
 		{
 			"bad herdr colour",
-			SurfacePins{Herdr: map[string]string{"accent": "ultraviolet"}},
+			SurfacePins{Herdr: &HerdrPins{Tokens: map[string]string{"accent": "ultraviolet"}}},
 			[]string{"herdr", "accent", "ultraviolet"},
+		},
+		{
+			"unknown herdr tab glyph state",
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"blink": {"⭕"}}}},
+			[]string{"herdr tabGlyphs", "blink"},
+		},
+		{
+			"empty herdr tab glyph",
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🔴", ""}}}},
+			[]string{"herdr tabGlyphs", "blocked", "frame 1", "empty"},
+		},
+		{
+			"herdr tab glyph with no frames",
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"working": {}}}},
+			[]string{"herdr tabGlyphs", "working", "no frames"},
+		},
+		{
+			"herdr tab glyph over the prefix budget",
+			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"error": {"🔴🔴🔴🔴🔴🔴🔴🔴🔴"}}}},
+			[]string{"herdr tabGlyphs", "error", "budget"},
 		},
 		{
 			"unknown vscode colour",
@@ -211,7 +300,10 @@ func TestCanonicalPinsWriteColoursAsHexAndDropEmptyMaps(t *testing.T) {
 		Tmux: map[string]string{
 			"@host_accent": "#F0A", "@p_g0": "rgb(1, 2, 3)", "status-style": "bg=#0a0a0a,fg=default",
 		},
-		Herdr:  map[string]string{"accent": "ansi:red"},
+		Herdr: &HerdrPins{
+			Tokens:    map[string]string{"accent": "ansi:red"},
+			TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🟣"}},
+		},
 		VSCode: &VSCodePins{Colors: map[string]string{}, Chrome: map[string]string{"sash.hoverBorder": "#FF2E9380"}},
 	})
 	if err != nil {
@@ -221,14 +313,19 @@ func TestCanonicalPinsWriteColoursAsHexAndDropEmptyMaps(t *testing.T) {
 		Tmux: map[string]string{
 			"@host_accent": "#ff00aa", "@p_g0": "#010203", "status-style": "bg=#0a0a0a,fg=default",
 		},
-		Herdr:  map[string]string{"accent": "#cd0000"},
+		Herdr: &HerdrPins{
+			Tokens:    map[string]string{"accent": "#cd0000"},
+			TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🟣"}},
+		},
 		VSCode: &VSCodePins{Chrome: map[string]string{"sash.hoverBorder": "#FF2E9380"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("canonical pins = %+v, want %+v", got, want)
 	}
 	for name, empty := range map[string]*SurfacePins{
-		"nil": nil, "no maps": {}, "empty maps": {Tmux: map[string]string{}, VSCode: &VSCodePins{}},
+		"nil": nil, "no maps": {}, "empty maps": {
+			Tmux: map[string]string{}, Herdr: &HerdrPins{Tokens: map[string]string{}}, VSCode: &VSCodePins{},
+		},
 	} {
 		if got, err := canonicalPins(empty); err != nil || got != nil {
 			t.Errorf("%s: canonical pins = %+v, %v, want nil so a state.json round trip is stable", name, got, err)
@@ -251,7 +348,8 @@ func TestProfilePinsReadsOnlyACustomValuesProfile(t *testing.T) {
 		}
 	}
 	got, err := profilePins(home, "custom:orchid")
-	if err != nil || got.file != path || got.at.IsZero() || got.pins == nil || got.pins.Herdr["accent"] != "#ff2e93" {
+	if err != nil || got.file != path || got.at.IsZero() || got.pins == nil ||
+		got.pins.Herdr.Tokens["accent"] != "#ff2e93" {
 		t.Errorf("profilePins(custom:orchid) = %+v, %v, want the pins read from %s", got, err, path)
 	}
 	for _, value := range []string{"custom:", "custom:../orchid", `custom:a\b`} {

@@ -15,6 +15,8 @@ type Parsed struct {
 	Hooks                                                         []Hook
 	PromptFile, MCPConfig, SessionID, Resume, Name, Model, Effort string
 	Fork, Autonomy                                                bool
+	RemoteControl                                                 bool
+	RemoteControlName                                             string
 	Rest                                                          []string
 }
 
@@ -40,6 +42,14 @@ func Parse(argv []string) (Parsed, error) {
 			return argv[index], nil
 		}
 		switch flag {
+		case flagRemoteControl:
+			parsed.RemoteControl = true
+			if inline {
+				parsed.RemoteControlName = inlineValue
+			} else if index+1 < len(argv) && !strings.HasPrefix(argv[index+1], "-") {
+				index++
+				parsed.RemoteControlName = argv[index]
+			}
 		case flagSessionID,
 			flagResume,
 			flagName,
@@ -136,7 +146,15 @@ func Parse(argv []string) (Parsed, error) {
 func splitValueFlag(word string) (string, string, bool) {
 	name, value, inline := strings.Cut(word, "=")
 	switch name {
-	case flagSessionID, flagResume, flagName, flagModel, flagEffort, flagPromptFile, flagSettings, flagMCPConfig:
+	case flagSessionID,
+		flagResume,
+		flagName,
+		flagModel,
+		flagEffort,
+		flagPromptFile,
+		flagSettings,
+		flagMCPConfig,
+		flagRemoteControl:
 		return name, value, inline
 	default:
 		return word, "", false
@@ -248,6 +266,12 @@ func parsedHookName(event, command string) string {
 		default:
 			return "herdr-" + name
 		}
+	}
+	if name == "clear-name" {
+		if event == HookEventUserPromptSubmit {
+			return "clear-name-prompt"
+		}
+		return "clear-name-start"
 	}
 	if name == "usage-hook" {
 		return "usage"

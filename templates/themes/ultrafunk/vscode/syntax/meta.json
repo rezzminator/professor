@@ -1,0 +1,54 @@
+{
+  "0012": {
+    "name": "Text in the glow · interpolated code",
+    "scope": [
+      "meta.template.expression",
+      "meta.embedded.line",
+      "meta.interpolation",
+      "source.css.embedded"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe3f5"
+    }
+  },
+  "0060": {
+    "name": "Dim lavender · rules & tables",
+    "scope": [
+      "meta.separator.markdown",
+      "punctuation.definition.table.markdown",
+      "punctuation.separator.table.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a582c4"
+    }
+  },
+  "0064": {
+    "name": "Horizon Cyan · diff headers",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.range",
+      "meta.diff.index",
+      "meta.diff.header.from-file",
+      "meta.diff.header.to-file",
+      "punctuation.definition.from-file.diff",
+      "punctuation.definition.to-file.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3ce8ff"
+    }
+  },
+  "0065": {
+    "name": "UV Violet · diff ranges",
+    "scope": [
+      "meta.diff.range.unified",
+      "punctuation.definition.range.diff"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c77dff"
+    }
+  }
+}

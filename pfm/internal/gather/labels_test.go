@@ -224,3 +224,11 @@ func TestBothEnginesConvergeInOnePass(t *testing.T) {
 		t.Fatalf("renames = %v", got)
 	}
 }
+
+func TestReservedSeatLabel(t *testing.T) {
+	for _, label := range []string{"seat:child", "SeAt:child"} {
+		if got := WindowNameFor(label); got != "" {
+			t.Errorf("reserved window title adopted: %q", got)
+		}
+	}
+}

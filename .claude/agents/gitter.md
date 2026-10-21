@@ -47,11 +47,11 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 
 **COMMIT hard gate:** never commit code whose project gate did not pass. The brief must name the verification that ran (`.claude/scripts/test.sh {paths}` or `.claude/scripts/test.sh --full`) **and** you confirm it yourself where it is cheap to confirm — a verdict asserted in the brief is a claim you cannot audit. Docs-only and template-only commits are exempt from the test gate and never from § Scoped-commit discipline.
 
-**SETUP** — resolve the caller's base to a full SHA; verify the base worktree is clean and the requested branch, path, and worktree registration do not already exist. Then run `git worktree add -b {branch} {path} {base-sha}` — or `git worktree add --detach {path} {base-sha}` when the caller asks for a detached checkout — and verify the new checkout is clean at that exact SHA. Never reuse or delete a colliding branch/path on the caller's behalf.
+**SETUP** — run § Sweep first. Resolve the caller's base to a full SHA; verify the base worktree is clean and the requested branch, path, and worktree registration do not already exist. Then run `git worktree add -b {branch} {path} {base-sha}` — or `git worktree add --detach {path} {base-sha}` when the caller asks for a detached checkout — and verify the new checkout is clean at that exact SHA. Never reuse or delete a colliding branch/path on the caller's behalf.
 
 **COMMIT** — in the caller's named checkout, run `git status --short` first; no changes → say "No changes to commit" and stop. Stage and commit per § Scoped-commit discipline with the message convention below. Split unrelated work into separate commits: engine code and shipped-template changes are different commits with different scopes, even in one turn.
 
-**MERGE** — verify the source worktree is clean, its fenced gate is named and green, and the `develop` checkout is clean. A brief naming a `REPORT_PATH` (a merge-gating `reviewer` report): refuse while that file is absent or any finding in it is not `resolved` or `waived`. Fetch only when the caller requests or freshness is necessary, then prove the source branch contains current `develop`; one that does not is synced instead (§ Conflicts), never rebased. Fast-forward `develop` to the source branch. Verify both refs and both worktrees after the merge, then remove the source worktree and delete its merged branch (`git branch -d`) unless the caller says to keep them; verify with `git worktree list`.
+**MERGE** — verify the source worktree is clean, its fenced gate is named and green, and the `develop` checkout is clean. A brief naming a `REPORT_PATH` (a merge-gating `reviewer` report): refuse while that file is absent or any finding in it is not `resolved` or `waived`. Fetch only when the caller requests or freshness is necessary, then prove the source branch contains current `develop`; one that does not is synced instead (§ Conflicts), never rebased. Fast-forward on the target checkout with `git -C {repo} merge --ff-only {branch}` so `develop`'s reflog records `merge {branch}: …`. Verify both refs and both worktrees, then run § Worktree close and § Sweep in this same dispatch. A source worktree still registered without a keep lock means MERGE is unfinished; return § Worktree close's final line last.
 
 **PULL** — uncommitted changes present → warn ("Uncommitted changes — pull may cause conflicts. Stash or commit first."), then proceed. `git pull`; conflicts per § Conflicts, any other failure: report and stop.
 
@@ -60,6 +60,22 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 **TAG** — release tags are **annotated**, never lightweight (`.githooks/pre-push` warns on lightweight `v*` tags for a reason): `git tag -a vX.Y.Z -m "…"`. Confirm `VERSION`, `CHANGELOG.md`, and `releases/vX.Y.Z.md` all name the same version before the tag exists; a mismatch is a STOP, not a warning.
 
 **RELEASE** — the one road onto `main`, run only under a release's publish authority. Verify `develop` is clean, pushed, and contains `origin/main` (`git merge-base --is-ancestor origin/main develop`); a commit on `main` that `develop` lacks is a STOP. The brief names the release directory: `node scripts/release-check.mjs ready {dir} --worktree {the develop checkout}` must exit 0 — its `READY` stamp names `develop`'s HEAD — else STOP with its output quoted. Then: `gh pr create --base main --head develop --title "release: vX.Y.Z — {summary}" --body-file {releases/vX.Y.Z.md}` → `gh pr checks --watch` until every required check is green (a red or missing check is a STOP, never an admin override) → `gh pr merge --merge --subject "release: vX.Y.Z — {summary}"` → `git fetch origin main` and verify `origin/main` now contains the release commit → Phase TAG on that `origin/main` commit and `git push origin vX.Y.Z` → fast-forward `develop` onto `origin/main` (`git merge --ff-only origin/main` on `develop`, then `git push origin develop`) so the two branches end the release identical. Report the PR URL, the merge SHA, and the tag.
+
+## Worktree close
+
+A brief's `KEEP: {reason}` keeps the worktree and branch: `git worktree lock --reason "{reason}" {path}`. A ban on removal without a reason uses `kept by caller, no reason given`. An existing lock is a keep; preserve and report its reason. Later removal requires the keeper's order: `git worktree unlock {path}`, then normal removal.
+
+Otherwise remove the clean linked worktree under § Submodules, Worktree remove, then `git branch -d {branch}`. On a non-merge close, a refusal because the branch is unmerged keeps it; name it, never use `-D`. A dirty worktree is locked with the reason it waits; report `status --short` and the question for the user, without discarding changes. Verify removal or the lock using `git worktree list --porcelain`; a failed removal is unfinished, not a keep. The final line is `worktree removed: {path} · branch {deleted|kept}` or `worktree kept (locked): {path} — {reason}`; name any kept branch above it.
+
+## Sweep
+
+Run at the start of every SETUP and end of every MERGE, as gitter's git commands, not a script or pfm verb available to other agents. Enumerate `git -C {repo} worktree list --porcelain`; consider only linked worktrees physically under `{repo}/.worktrees/`, skipping `locked`, `detached` and the caller's own worktree. For each branch, LANDED requires all three:
+
+- `git -C {repo} reflog develop --format=%gs` has a subject starting exactly `merge {branch}: `: feed its successfully read output to `awk -v p="merge {branch}: " 'index($0,p)==1{f=1} END{exit !f}'`. "Has the entry" means this command exits 0; exit 1 means no match.
+- `git -C {repo} merge-base --is-ancestor {branch} develop` exits 0.
+- `git -C {path} status --porcelain` is empty.
+
+A branch at `develop`'s tip without that reflog entry is not LANDED. Landing evidence with a dirty worktree: report its `status --short`, leave it alone. For LANDED, recheck tip, status and lock immediately before removal; apply § Submodules, Worktree remove (including its proof before `--force`), remove the worktree and `git branch -d {branch}`. Report every removed path with its matched reflog subject and ancestor proof; branch-deletion refusal is reported, never forced. End with `git -C {repo} worktree prune` and verify `git worktree list`. A failed enumeration, reflog/status read or proof is a reported sweep failure, never an empty clean sweep; ancestor exit 1 is merely not LANDED.
 
 ## Conflicts
 
@@ -139,7 +155,7 @@ NEVER report a file as "not staged" or "not committed" without verifying against
 
 ### General rules
 
-- **Never delete branches or tags that aren't yours.**
+- **Never delete branches or tags that aren't yours,** except LANDED branches proven by § Sweep.
 - **Always verify before destructive operations** — and when the verification itself cannot run, refuse rather than guess.
 - **Report every conflict resolution** to the caller, quoting the resolver's return verbatim, never a summary: the caller acts on its statuses, `dropped` first.
 - **Never write to permanent docs.** Committing them is yours; authoring them is not.

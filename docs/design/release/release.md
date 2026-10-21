@@ -57,11 +57,11 @@ The note grammar that serves this reader is public, because adopters read it: `d
 
 ## The lifecycle
 
-1. `prepare` opens the release: pulls `develop`, fetches tags, sets up the two worktrees and the release directory, runs the refresh pass when `--from` names a live project.
+1. `prepare` opens the release: pulls `develop`, fetches tags, sets up the two worktrees and the release directory, runs the refresh pass when `--from` names a live project. Each SETUP brief carries `KEEP: release v{NEW} in progress`; gitter locks both worktrees before returning, and verifies or restores those locks on resume.
 2. Phases run in order; each is a fresh `releaser` spawn. A phase that finds something to fix returns it; the main chat fixes it on the candidate by the work ladder and re-runs the phase over the delta.
 3. `READY`: `release-check ready --stamp` writes the commit that passed every verdict. The main chat reports the note, the waivers and the verdicts to the user and stops.
 4. The user reads the note. Publication is a separate decision, made in the user's own turn.
-5. `publish` lands exactly the stamped commit, pushes, runs `gitter` Phase RELEASE, spawns the `releaser` for VERIFY, and closes the development line.
+5. `publish` lands exactly the stamped commit, pushes, runs `gitter` Phase RELEASE, spawns the `releaser` for VERIFY, and closes the development line. MERGE carries the same KEEP line: the candidate remains locked through VERIFY, even after its tip lands on `develop`. Close tears down the rehearsal machines, then gitter unlocks both release worktrees before normal guarded removal, deletes the merged branch with `-d`, and verifies both registrations absent. Until removal, the main chat carries `worktree kept (locked): {path} — release v{NEW} in progress` in its Verdict; a failed close names what stayed.
 
 `prepare` is safe to run days before a release: it writes only the candidate branch, the worktrees and the release directory. It resumes from `run.md` when run again for the same version.
 

@@ -6,6 +6,7 @@ Creates the worktree a flight runs in, before its first foreman is dispatched.
 
 ## 1. Validate preconditions
 
+- Run `gitter.md` § Sweep before creating anything; the caller's own worktree is excluded.
 - Confirm the brief names the residue dir.
 - Confirm no leftover worktree: `./.claude/scripts/worktree.sh list $PIPELINE`. If it exists, warn and stop — never overwrite.
 - **Uncommitted changes on main** — handle per the orchestrator's `CarryWIP` directive (`commit` | `leave`, default `leave`). Run only when `git status --porcelain` is non-empty:

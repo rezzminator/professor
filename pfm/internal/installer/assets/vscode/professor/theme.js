@@ -412,4 +412,4 @@ function startThemeSync(dir = stateDir(), onApplied = () => {}, refusal = '') {
   };
 }
 
-module.exports = { startThemeSync, stateDir, planColors };
+module.exports = { startThemeSync, stateDir, planColors, chromeTarget, withLock };

@@ -21,7 +21,8 @@ var tabGlyphCache struct {
 
 // HerdrTabGlyphs is the applied theme's tab glyphs, or defaults when off/absent.
 // Every paint stats the file; only a changed identity, size, mode or modification
-// time reads and decodes its body. Read/parse errors remain visible on every tick.
+// time reads and decodes its body after a successful load. Failed loads retry on
+// the next tick, so a transient read error cannot pin an unchanged file forever.
 func HerdrTabGlyphs(stateDir string) (herdr.TabGlyphs, error) {
 	store := stateStore{dir: stateDir}
 	path := store.statePath()
@@ -41,7 +42,7 @@ func HerdrTabGlyphs(stateDir string) (herdr.TabGlyphs, error) {
 		return herdr.TabGlyphs{}, fmt.Errorf("themesync: %s is not a regular file (%s)", path, info.Mode().Type())
 	}
 	prior := tabGlyphCache.info
-	if tabGlyphCache.path != path || prior == nil || !os.SameFile(prior, info) ||
+	if tabGlyphCache.err != nil || tabGlyphCache.path != path || prior == nil || !os.SameFile(prior, info) ||
 		prior.Size() != info.Size() || prior.Mode() != info.Mode() || !prior.ModTime().Equal(info.ModTime()) {
 		tabGlyphCache.path, tabGlyphCache.info = path, info
 		tabGlyphCache.glyphs, tabGlyphCache.err = loadHerdrTabGlyphs(store)

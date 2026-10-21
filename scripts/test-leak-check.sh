@@ -557,6 +557,17 @@ if [[ "$rc" -eq 0 && "$(cat "$T/hook-calls")" == *"--range "*" $hook_sha" && "$(
 else
   bad 'F5: pre-push without a remote name passes no --remote' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
 fi
+# F7, hook side: a new ref keeps the empty-tree base even when origin/main shares its history, so
+# leak-check excludes every commit the remote holds instead of rescanning all since the last release.
+git -C "$hook_repo" update-ref refs/remotes/origin/main "$hook_sha"
+hook_empty_tree="$(git -C "$hook_repo" hash-object -t tree /dev/null)"
+hook_push origin 'https://example.invalid/r.git'
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-calls")" == "--range $hook_empty_tree $hook_sha --remote origin" ]]; then
+  ok 'F7: pre-push hands a new ref the empty-tree base, never origin/main'
+else
+  bad 'F7: pre-push hands a new ref the empty-tree base, never origin/main' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
+fi
+git -C "$hook_repo" update-ref -d refs/remotes/origin/main
 
 # F10, hook side: judge the pushed commit, never staged, dirty or untracked repairs.
 arch_push() { # arch_push <ref> [tip]: one new-ref push of the selected commit

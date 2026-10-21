@@ -3,7 +3,10 @@
 Every transcript here is invented: a Claude jsonl, a Codex rollout and an OpenCode store the tests build in a
 temp directory, then read through the entry point (`python3 -I chatlog.py {verb}`) exactly as an agent does.
 Prices come from a fixture table seeded in the kit directory, so no test calls pfm."""
+import contextlib
 import copy
+import io
+import multiprocessing
 import json
 import os
 import shutil
@@ -19,6 +22,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 ENTRY = os.path.join(HERE, "chatlog.py")
 sys.path.insert(0, HERE)
 
+from chatlogkit import cli, locate  # noqa: E402
 from chatlogkit.cost import claude as cost_claude, prices as cost_prices  # noqa: E402
 from chatlogkit.engines import opencode as oc_engine  # noqa: E402
 from chatlogkit.model import parse_stamp  # noqa: E402
@@ -183,6 +187,78 @@ class ClaudeKit(Fixture):
                 f.write(json.dumps(rec) + "\n")
             f.write("this line is not json\n")
         return path
+
+    def test_evidence_concurrent_prep_keeps_separate_generations(self):
+        """Both processes reach build after the directory check; no scheduler luck proves isolation."""
+        paths = [self.write_claude([c_user(tag, 0), c_final(tag, 1)], name=tag + ".jsonl")
+                 for tag in ("first-evidence", "second-evidence")]
+        ctx = multiprocessing.get_context("fork")
+        barrier, results = ctx.Barrier(2), ctx.Queue()
+        build = cli.build
+
+        def synchronized_build(*args):
+            barrier.wait(timeout=15)
+            return build(*args)
+
+        def worker(path):
+            output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(output):
+                    cli.prep([path, "--dir", self.path("run")])
+                results.put((True, output.getvalue()))
+            except BaseException as e:
+                results.put((False, repr(e)))
+
+        env = {"HOME": self.tmp, "CHATLOG_KIT_DIR": self.kit}
+        with mock.patch.dict(os.environ, env), mock.patch.object(cli, "KIT_DIR", self.kit), \
+                mock.patch.object(cli, "build", synchronized_build):
+            workers = [ctx.Process(target=worker, args=(p,)) for p in paths]
+            for proc in workers:
+                proc.start()
+            try:
+                got = [results.get(timeout=25) for _ in workers]
+                for proc in workers:
+                    proc.join(timeout=5)
+                    self.assertEqual(proc.exitcode, 0)
+            finally:
+                for proc in workers:
+                    if proc.is_alive():
+                        proc.terminate()
+                        proc.join()
+                results.close()
+                results.join_thread()
+        self.assertTrue(all(ok for ok, _ in got), got)
+        dirs = [next(ln[4:] for ln in text.splitlines() if ln.startswith("DIR ")) for _, text in got]
+        self.assertEqual(len(set(dirs)), 2, got)
+        for dirp in dirs:
+            with open(os.path.join(dirp, "kit.json")) as f:
+                kit = json.load(f)
+            tag = os.path.basename(kit["path"]).removesuffix(".jsonl")
+            with open(os.path.join(dirp, "digest.txt")) as f:
+                self.assertIn(tag, f.read())
+            self.kitcmd("report", dirp)
+            self.kitcmd("verify", os.path.join(dirp, "report.tsv"))
+
+    def test_evidence_same_target_prep_preserves_existing_generation(self):
+        path = self.write_claude([c_user("original evidence", 0), c_final("old final", 1)])
+        self.prep(path)
+        self.kitcmd("note", self.dir, "D1 CLAIM")
+        self.kitcmd("report", self.dir)
+        names = ("kit.json", "digest.txt", "timeline.txt", "mech.tsv", "notes.tsv", "report.tsv")
+        before = {}
+        for name in names:
+            with open(os.path.join(self.dir, name), "rb") as f:
+                before[name] = f.read()
+        self.write_claude([c_user("replacement evidence", 0), c_final("new final", 1)])
+        out = self.kitcmd("prep", path, "--dir", self.dir).stdout
+        newdir = next(ln[4:] for ln in out.splitlines() if ln.startswith("DIR "))
+        self.assertNotEqual(newdir, self.dir)
+        for name in names:
+            with open(os.path.join(self.dir, name), "rb") as f:
+                self.assertEqual(f.read(), before[name], name)
+        with open(os.path.join(newdir, "digest.txt")) as f:
+            self.assertIn("replacement evidence", f.read())
+        self.kitcmd("verify", os.path.join(self.dir, "report.tsv"))
 
     def test_labels(self):
         out = self.prep(self.write_claude())
@@ -948,6 +1024,45 @@ class OpenCodeKit(Fixture):
         self.assertEqual(oc_engine.split_locator(f"{self.db}#{self.sid}"), (self.db, self.sid))
 
 
+class DiscoveryEvidence(Fixture):
+    def test_evidence_id_discovery_failure_cannot_certify_a_match_or_absence(self):
+        for hits in ([self.path("match.jsonl")], [], [self.path("a.jsonl"), self.path("b.jsonl")]):
+            with self.subTest(hits=hits), mock.patch.object(locate, "id_hits", return_value=(hits, ["list fixture-root: denied"])), \
+                    mock.patch.object(locate, "claude_roots", return_value=[]), \
+                    mock.patch.object(locate, "codex_homes", return_value=[]), \
+                    mock.patch.object(locate, "opencode_roots", return_value=[]):
+                with self.assertRaisesRegex(locate.NotFound, "INCOMPLETE.*fixture-root: denied"):
+                    locate.resolve("abc123")
+
+    def test_evidence_agent_path_discovery_failure_cannot_certify_uniqueness(self):
+        with mock.patch.object(locate, "codex_homes", return_value=[self.tmp]), \
+                mock.patch.object(locate, "walk_rollouts", return_value=(["rollout-match.jsonl"], ["walk denied"])), \
+                mock.patch.object(locate, "rollout_agent_path", return_value="/root/worker"):
+            with self.assertRaisesRegex(locate.NotFound, "INCOMPLETE.*walk denied"):
+                locate.resolve("/root/worker")
+        with mock.patch.object(locate, "codex_homes", return_value=[self.tmp]), \
+                mock.patch.object(locate, "walk_rollouts", return_value=(["match", "unreadable"], [])), \
+                mock.patch.object(locate, "rollout_agent_path", side_effect=["/root/worker", None]):
+            with self.assertRaisesRegex(locate.NotFound, "INCOMPLETE.*unreadable"):
+                locate.resolve("/root/worker")
+
+    def test_evidence_subagent_walk_errors_reach_id_discovery(self):
+        root = self.path("projects")
+        folder = os.path.join(root, "p", "session", "subagents")
+        os.makedirs(folder)
+
+        def failed_walk(path, onerror):
+            onerror(PermissionError(13, "fixture denied", path))
+            return iter(())
+
+        with mock.patch.object(locate, "claude_roots", return_value=[root]), \
+                mock.patch.object(locate, "codex_homes", return_value=[]), \
+                mock.patch.object(locate.os, "walk", side_effect=failed_walk):
+            hits, failed = locate.id_hits("abc123")
+        self.assertEqual(hits, [])
+        self.assertTrue(any("fixture denied" in e and folder in e for e in failed), failed)
+
+
 # -------------------------------------------------------------------------------- the reader's verbs
 
 class Verbs(Fixture):
@@ -981,6 +1096,40 @@ class Verbs(Fixture):
         res = self.kitcmd("verify", tampered, check=False)
         self.assertNotIn("BAD 0", res.stdout)
         self.assertRegex(res.stdout, r"· BAD [1-9]")
+
+    def test_evidence_report_requires_readable_timeline_and_retains_output(self):
+        timeline = os.path.join(self.dir, "timeline.txt")
+        with open(timeline, "rb") as f:
+            original = f.read()
+        for broken in ("missing", "directory", "empty", "truncated"):
+            for prior in (False, True):
+                with self.subTest(broken=broken, prior=prior):
+                    out = self.path(f"{broken}-{prior}.tsv")
+                    if prior:
+                        with open(out, "w") as f:
+                            f.write("previous valid report\n")
+                    os.remove(timeline)
+                    if broken == "directory":
+                        os.mkdir(timeline)
+                    elif broken != "missing":
+                        with open(timeline, "w") as f:
+                            f.write("" if broken == "empty" else "TIMELINE truncated\n")
+                    try:
+                        done = self.kitcmd("report", self.dir, "--out", out, check=False)
+                        self.assertNotEqual(done.returncode, 0, done.stdout)
+                        self.assertIn("KIT FAILED", done.stdout)
+                        self.assertIn("timeline", done.stdout.lower())
+                        self.assertNotIn("READ ", done.stdout)
+                        if prior:
+                            with open(out) as f:
+                                self.assertEqual(f.read(), "previous valid report\n")
+                        else:
+                            self.assertFalse(os.path.exists(out))
+                    finally:
+                        if os.path.isdir(timeline):
+                            os.rmdir(timeline)
+                        with open(timeline, "wb") as f:
+                            f.write(original)
 
     def test_missing_digest_is_failed(self):
         os.remove(os.path.join(self.dir, "digest.txt"))

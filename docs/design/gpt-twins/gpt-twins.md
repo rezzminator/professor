@@ -73,7 +73,7 @@ Helper `visibility` admits the mapped callers, and gitter's child allowlist cont
 
 ## GitGuard boundary
 
-Neither a wrapper's registration nor compiler-stamped `role: gitter` authorizes Git writes. Both GPT gitter surfaces require evidence that the installed GitGuard explicitly supports their observed native hook identity `gpt-gitter`. Without it they return `BLOCKED: gpt-gitter native GitGuard identity unproven`. They never spoof identity, bypass the guard, resolve a refused conflict themselves, or weaken explicit publication authorization. GitGuard support is a separate guarded change, not an inference from prompt metadata.
+Neither a wrapper's registration nor compiler-stamped `role: gitter` authorizes Git writes. GitGuard exempts exactly `gitter` and `gpt-gitter` (`pfm/internal/hookentry/git_guard.go:121`). Before the first Git write, both GPT gitter surfaces prove it in one Bash call: `git -C {repo} worktree prune -n`, a dry run the hook denies to every other native `agent_type`, then a test payload for `gpt-gitter` and one for `control` piped to the installed guard (`$HOME/.local/bin/pfm internal git-guard`, the launch-line hook command, absent from every settings file). Proof is the call not denied, a bare `[gpt-gitter exit=0]` row and a deny on the `control` row; anything else returns `BLOCKED: gpt-gitter native GitGuard identity unproven`. They never spoof identity, bypass the guard, resolve a refused conflict themselves, or weaken explicit publication authorization.
 
 ## Opt-in and engine mirrors
 

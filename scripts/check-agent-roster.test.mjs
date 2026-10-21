@@ -822,6 +822,7 @@ test('project GPT wrappers preserve runtime metadata and close independent provi
     if (role === 'gitter') {
       assert.deepEqual(twin.visibility.agents.include, ['gpt-conflict-resolver']);
       assert.ok(text.includes('GitGuard') && text.includes('BLOCKED: gpt-gitter native GitGuard identity unproven'));
+      assert.ok(text.includes('worktree prune -n') && text.includes('"$HOME/.local/bin/pfm" internal git-guard'), 'gitter: GitGuard admission lacks its runnable proof');
     }
     if (role === 'changelogger') assert.deepEqual(twin.visibility['visible-to'].include, ['gpt-releaser']);
     if (['pcm', 'gitter'].includes(role))

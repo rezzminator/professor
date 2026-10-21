@@ -27,7 +27,7 @@ An agent that made its own worktree left it behind: nothing tore it down, and st
 
 ## Who is exempt
 
-A payload whose `agent_type` is `gitter` is always allowed (`git_guard.go:26`, checked at `:121`). The hook reads only the name, so either gitter qualifies: a project's own (`.claude/agents/gitter.md`, scaffolded from `templates/project/agents/gitter.md`) or the machine-global one (`templates/global/agents/gitter.md`, which `pfm install` links into every account and a project's own gitter overrides by name). Every other caller is checked, a main chat (no `agent_type`) included.
+A payload whose `agent_type` is exactly `gitter` or `gpt-gitter` is always allowed (`git_guard.go:26`, checked at `:121`); `gpt-gitter` proves its own admission before its first write ([gpt-twins.md](../gpt-twins/gpt-twins.md#gitguard-boundary)). The hook reads only the name, so either gitter qualifies: a project's own (`.claude/agents/gitter.md`, scaffolded from `templates/project/agents/gitter.md`) or the machine-global one (`templates/global/agents/gitter.md`, which `pfm install` links into every account and a project's own gitter overrides by name). Every other caller is checked, a main chat (no `agent_type`) included.
 
 ## How it reads a command
 

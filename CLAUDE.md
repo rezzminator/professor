@@ -69,7 +69,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## CI
 
-- `.github/workflows/{verify|install-verify|plugin-scan}.yml` run on every push to `{main|develop}` and every pull request; `.github/workflows/release.yml` on a `v*` tag.
+- `.github/workflows/plugin-scan.yml` runs on `{main|develop}` pushes, pull requests and manually; `.github/workflows/release.yml` on `v*` tags and manually (artifacts only).
 
 ## Host
 

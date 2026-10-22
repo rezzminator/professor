@@ -7,7 +7,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rezzminator/professor/actions/workflows/verify.yml"><img alt="verify" src="https://github.com/rezzminator/professor/actions/workflows/verify.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/rezzminator/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/rezzminator/professor"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/rezzminator/professor"></a>
   <img alt="go" src="https://img.shields.io/badge/go-1.27-00ADD8">

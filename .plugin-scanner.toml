@@ -14,4 +14,13 @@ ignore_paths = [
   # environment-variable NAMES, not values: its constants name
   # ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY.
   "pfm/internal/claudelaunch/knobs.go",
+  # Display-token interpolation in a theme fixture, not an authentication token.
+  "pfm/internal/themesync/herdr_test.go",
+  # Research quotes available sandbox modes; it does not configure a default.
+  ".professor/RR/llm-coding-agent-execution-orchestration-2026-09-20.md",
+  # Synthetic, unpublished plugins use the repository's license and security policy.
+  "infra/plugin-lab/fixtures/lab-agents/LICENSE",
+  "infra/plugin-lab/fixtures/lab-agents/SECURITY.md",
+  "infra/plugin-lab/fixtures/lab-agents/plugins/lab-agents/LICENSE",
+  "infra/plugin-lab/fixtures/lab-agents/plugins/lab-agents/SECURITY.md",
 ]

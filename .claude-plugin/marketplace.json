@@ -11,7 +11,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/sub-agent-compact.git",
-        "path": "plugins/sub-agent-compact",
+        "path": "./plugins/sub-agent-compact",
         "ref": "main"
       },
       "description": "Smart auto-compact for Claude Code: a separate compaction point for every sub-agent, and self-compaction at a milestone the model chooses.",
@@ -24,7 +24,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/cache-live-control.git",
-        "path": "plugins/cache-live-control",
+        "path": "./plugins/cache-live-control",
         "ref": "main"
       },
       "description": "A /cache command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn.",
@@ -37,7 +37,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/auto-effort.git",
-        "path": "plugins/auto-effort-control",
+        "path": "./plugins/auto-effort-control",
         "ref": "main"
       },
       "description": "Tune reasoning levels — automatic main-chat tuning; set_effort, effort_up, effort_down and effort_auto choices; /effort pins; [effort: low|medium|high|xhigh|max] sub-agent launches with bounded failure escalation.",
@@ -50,7 +50,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/tool-visibility-controller.git",
-        "path": "plugins/tool-visibility-controller",
+        "path": "./plugins/tool-visibility-controller",
         "ref": "main"
       },
       "description": "Claude Code plugin for per-agent tool visibility — hide and refuse subagents, skills, MCP and built-in tools per loop",
@@ -63,7 +63,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/buddy.git",
-        "path": "plugins/buddy",
+        "path": "./plugins/buddy",
         "ref": "main"
       },
       "description": "Claude Code buddy plugin: Quack the ASCII duck waddles above your prompt and talks back — or bring back your /buddy",
@@ -76,7 +76,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/callmeter.git",
-        "path": "plugins/callmeter",
+        "path": "./plugins/callmeter",
         "ref": "main"
       },
       "description": "Claude Code plugin for tracking token usage and context growth — every tool call and sub-agent in local SQLite",
@@ -89,7 +89,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/engine-sync.git",
-        "path": "plugins/engine-sync",
+        "path": "./plugins/engine-sync",
         "ref": "main"
       },
       "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
@@ -102,7 +102,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/cache-keepwarm.git",
-        "path": "plugins/cache-keepwarm",
+        "path": "./plugins/cache-keepwarm",
         "ref": "main"
       },
       "description": "Keeps the main chat's prompt cache warm while it waits on background agents, shells, Monitors and workflows: one invisible replay before expiry, admitted only while the forecast spend stays under the rewrite it saves.",

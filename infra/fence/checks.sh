@@ -854,30 +854,51 @@ internal/installer TestMCPWritePreservesAnEditDuringBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence
 internal/store TestClearNameReservationsAreUniqueAcrossCaches'
 
-# checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo
-# (the pfm-dev image carries gcc; CGO_ENABLED=1 for this command alone, every other build stays static),
-# its stream kept as <run dir>/race.json and profiled into its own root <run dir>/profile/race — its
-# packages are pfm.unit's too, and failure pointers match a process by package. BROKEN STATE: a named test
-# with no pass event in the stream — skipped, renamed, unbuilt, or a stream that was never written — is
-# a red line naming each such test; no C compiler is TOOLCHAIN-MISSING and no test runs.
+# Both required module race steps use the original cgo invocation and exact named-pass
+# validation. A missing, skipped, renamed or unbuilt test never becomes "no tests to run".
+CHECKS_HARVESTER_RACE_TESTS='internal/harvest TestHarvesterChaos
+internal/harvest TestFetchFailureIsCachedBeforeItsFlightEnds
+internal/harvest TestFetchSizeOnlyLeaderSharesTheWholePage
+internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
+internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
+internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
+internal/harvestmcp TestServiceChaos'
+
 checks_pfm_race() {
-  local d="$1" run_dir="$2" json="$2/race.json" before="$FAILURES" regex pkgs=() pkg test passed missing="" n=0 total=0
-  local -x PFM_TEST_ARTIFACT_DIR="$run_dir/profile/race"
-  need_tool gcc pfm || return 1
-  regex="^($(awk '{print $2}' <<< "$CHECKS_PFM_RACE_TESTS" | paste -sd'|' -))\$"
-  while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$CHECKS_PFM_RACE_TESTS" | awk '!seen[$0]++')
-  run "pfm: go test -race (race regressions)" -- bash -c '
+  checks_module_race "$1" "$2" pfm github.com/rezzminator/professor/pfm "$CHECKS_PFM_RACE_TESTS"
+}
+
+checks_harvester_race() { # mounted standalone source, gate run directory
+  if [[ ! -r "$1/go.mod" ]]; then
+    fail_step "harvester: race source unavailable: $1/go.mod"
+    return 1
+  fi
+  checks_module_race "$1" "$2" harvester github.com/rezzminator/harvester "$CHECKS_HARVESTER_RACE_TESTS"
+}
+
+# checks_module_race <module dir> <run dir> <scope> <module name> <package/Test lines>
+# JSON and optional process profiles are distinct per module. A tool/build/race failure
+# remains red even when another package supplies every named pass event.
+checks_module_race() {
+  local d="$1" run_dir="$2" scope="$3" module="$4" tests="$5" stem=race
+  [[ "$scope" == pfm ]] || stem="$scope-race"
+  local json="$run_dir/$stem.json" before="$FAILURES" regex pkgs=() pkg test passed missing="" n=0 total=0
+  local -x PFM_TEST_ARTIFACT_DIR="$run_dir/profile/$stem"
+  need_tool gcc "$scope" || return 1
+  regex="^($(awk '{print $2}' <<< "$tests" | paste -sd'|' -))\$"
+  while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$tests" | awk '!seen[$0]++')
+  run "$scope: go test -race (race regressions)" -- bash -c '
     CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"
   ' _ "$d" "$regex" "$json" "${pkgs[@]}"
   go_test_report "$json"
-  checks_pfm_profile_pointers "$json" "$run_dir/profile/race" "$before"
+  checks_pfm_profile_pointers "$json" "$run_dir/profile/$stem" "$before"
   passed="$(jq -r 'select(.Action=="pass" and .Test != null) | .Package + " " + .Test' "$json" 2>/dev/null)" || passed=""
   while read -r pkg test; do
     total=$((total + 1))
-    grep -Fxq "github.com/rezzminator/professor/pfm/$pkg $test" <<< "$passed" && continue
+    grep -Fxq "$module/$pkg $test" <<< "$passed" && continue
     n=$((n + 1)); missing+="${missing:+, }$pkg $test"
-  done <<< "$CHECKS_PFM_RACE_TESTS"
-  (( n == 0 )) || fail_step "pfm: race — $n of $total named test(s) never passed: $missing"
+  done <<< "$tests"
+  (( n == 0 )) || fail_step "$scope: race — $n of $total named test(s) never passed: $missing"
 }
 
 # The RUN DIR line: a test run's caller reads the run dir it made from the output's last line,
@@ -1175,6 +1196,7 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
     steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir" || return 1
     steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir" || return 1
+    steps_add_heavy harvester.race checks_harvester_race /harvester "$run_dir" || return 1
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"

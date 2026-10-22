@@ -22,8 +22,8 @@
 #
 # summary: reads <run-dir>/gate.tsv, steps/*.prof.tsv, resources.tsv,
 # resources.err, profile/*/summary.json, profile/fixture-*/*/summary.json and
-# profile/race/*/summary.json (each Go fixture step profiles into its own
-# profile/fixture-<kind>/ root and the race step into profile/race/; INDEX.txt lists
+# profile/{race,harvester-race}/*/summary.json (each Go fixture step profiles into its own
+# profile/fixture-<kind>/ root and the race steps into their own profile roots; INDEX.txt lists
 # such a root's process directories in its place); asks pfm/scripts/test-contention.sh
 # (windows) once for every step window plus the whole file; writes
 # <run-dir>/profile.tsv (one row per gate.tsv step, then GATE) and
@@ -33,7 +33,7 @@
 #                                         slowest PASS steps
 #     PROFILE index <run-dir>/profile/INDEX.txt
 # A step line carries its pointers: ` · xtrace` (ERR records), ` · hang` (the
-# bound ended it), ` · profiles` (a Go step — pfm.unit, pfm.e2e, pfm.race, fixture.go-* —
+# bound ended it), ` · profiles` (a Go step — pfm.unit, pfm.e2e, pfm.race, harvester.race, fixture.go-* —
 # that is not PASS). A pointer to an artifact that is not there says
 # MISSING. Exit 0; 64 bad usage; 2 no run directory or an unreadable gate.tsv;
 # 71 an output cannot be written.
@@ -61,8 +61,8 @@ import tempfile
 PREFIX = 'github.com/rezzminator/professor/pfm/'
 NUMBER = re.compile(r'[+-]?[0-9]+(\.[0-9]+)?')
 REASON = re.compile(r'[A-Za-z0-9_-]+')
-STEP_ROOT = re.compile(r'fixture-[a-z0-9-]+|race')  # a Go step's own profile root (a fixture, the race step), never a process
-GO_STEPS = ('pfm.unit', 'pfm.e2e', 'pfm.race')
+STEP_ROOT = re.compile(r'fixture-[a-z0-9-]+|race|harvester-race')  # a Go step's own profile root (a fixture, the race step), never a process
+GO_STEPS = ('pfm.unit', 'pfm.e2e', 'pfm.race', 'harvester.race')
 GO_STEP_PREFIX = 'fixture.go-'
 SLOWEST_PASS = 5
 JUDGE_SECONDS = 120

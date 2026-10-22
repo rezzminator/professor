@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Real Herdr substrate only: no seat, engine, credentials or provider.
+# Real Herdr substrate and pfm lifecycle with a Go fake; no provider credentials.
 set -uo pipefail
 SHTEST_TAG=lane-herdr-test
 source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 LANES="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-BINARY="$(command -v herdr)" || { bad "Herdr binary present" "missing herdr"; shtest_end; exit 1; }
+if [ "${PFM_DEV_FENCE:-}" != 1 ] || [ "$(uname -s)" != Linux ]; then
+  bad "FIXTURE-BOOTSTRAP-FAILED" "requires the Linux development fence"; shtest_end; exit 1
+fi
+for tool in herdr go jq sqlite3 python3 timeout ps find awk sort cmp grep tmux; do
+  command -v "$tool" >/dev/null || { bad "TOOLCHAIN-MISSING" "$tool"; shtest_end; exit 1; }
+done
+BINARY="$(command -v herdr)"
 HOME_ROOT="$T/home"
 mkdir -p "$HOME_ROOT" "$T/fixture"
 cat >"$T/herdr.toml" <<'EOF'
@@ -53,6 +59,170 @@ else
   env HOME="$HOME_ROOT" HERDR_CONFIG_PATH="$T/herdr.toml" timeout 10 "$BINARY" --session lane-H server stop || { echo "test cleanup failed for $socket" >&2; exit 1; }
 fi
 if [ "$((SECONDS-start))" -lt 20 ]; then ok "readiness and teardown complete inside the 20-second outer bound"; else bad "bounded substrate lifecycle" "wall=$((SECONDS-start))"; fi
+# Compile before the live control's timeout; cold compilation uses the runner's bound.
+REPO="$(cd -- "$LANES/../../.." && pwd -P)"
+if ! go -C "$REPO/pfm" build -o "$T/pfm" ./cmd/pfm ||
+   ! go -C "$REPO/pfm" build -o "$T/mock-engine" ./cmd/mock-engine; then
+  bad "FIXTURE-BOOTSTRAP-FAILED" "compile pfm/cmd/pfm or pfm/cmd/mock-engine"; shtest_end; exit 1
+fi
+cat >"$T/lifecycle.sh" <<'LIFECYCLE'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+trap 'printf "LIFECYCLE FAIL command=%s line=%s\n" "$BASH_COMMAND" "$LINENO" >&2' ERR
+ROOT="$FIXTURE_ROOT"
+export HOME="$ROOT/home" PFM_HOME="$ROOT/home"
+export PFM_CONFIG="$HOME/pfm.config.json" PFM_STATE_DB="$HOME/.local/state/pfm/pfm.db"
+export PFM_SID_DIR="$HOME/sid" PFM_TMUX_DIR="$HOME/tmux" TMUX_TMPDIR="$HOME/tmux"
+export PFM_PROC_ROOT=/proc PFM_TMUX_CONF=/dev/null
+export XDG_CONFIG_HOME="$HOME/.config" XDG_DATA_HOME="$HOME/.local/share"
+export XDG_STATE_HOME="$HOME/.local/state" XDG_CACHE_HOME="$HOME/.cache"
+export HERDR_CONFIG_PATH="$ROOT/herdr.toml" MOCK_ENGINE_SCENARIO="$ROOT/scenario.json" MOCK_ENGINE_ENGINE=claude
+export PFM_CLAUDE_ROOTS="$HOME/.claude/projects" PATH="$ROOT/bin:$HOME/.local/bin:$PATH"
+export PFM_PRICES_OFFLINE=1 PFM_HARVESTPY_OFFLINE=1 PFM_SKILL_SOURCES_OFFLINE=1 PFM_THEMES_OFFLINE=1
+unset TMUX HERDR_ENV HERDR_PANE_ID HERDR_WORKSPACE_ID HERDR_SOCKET_PATH
+HERE="$LANES_DIR"
+. "$HERE/lib.sh"
+. "$HERE/herdr.sh"
+H_FIXTURE="$ROOT/fixture"
+fail_control() { printf 'LIFECYCLE FAIL %s\n' "$*" >&2; exit 1; }
+passed() { printf 'LIFECYCLE PASS %s\n' "$*"; }
+external() { env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_WORKSPACE_ID "$PFM_BIN" "$@"; }
+request() { python3 "$HERE/herdr.py" request "$HERDR_SOCKET_PATH" "$1" "$2"; }
+tmux_witness() {
+  fixture_processes tmux || return 1
+  find "$TMUX_TMPDIR" -type s -print | sort
+}
+fixture_processes() {
+  python3 - "$MOCK_ENGINE_SCENARIO" "${1:-}" <<'PY'
+import os,pathlib,sys
+needle=os.fsencode('MOCK_ENGINE_SCENARIO='+sys.argv[1])
+for proc in pathlib.Path('/proc').glob('[0-9]*'):
+    if int(proc.name) in (os.getpid(),os.getppid()):continue
+    try:
+        if needle not in (proc/'environ').read_bytes().split(b'\0'):continue
+        if sys.argv[2] == 'tmux' and not (proc/'comm').read_text().startswith('tmux'):continue
+        print(proc.name)
+    except (FileNotFoundError,ProcessLookupError):pass
+PY
+}
+fixture_gone() { fixture_processes >"$ROOT/survivors" 2>"$ROOT/process-probe.log" && [ ! -s "$ROOT/survivors" ]; }
+cleanup() {
+  local rc=$? p
+  trap - EXIT
+  if [ "$rc" != 0 ]; then
+    printf 'LIFECYCLE DIAGNOSTICS root=%s child=%s\n' "$ROOT" "${child_pid:-unknown}" >&2
+    for p in "$ROOT"/*.json "$ROOT"/*.txt "$ROOT"/fixture/*.log "$ROOT"/records/* "$HOME"/.local/state/pfm/log/*; do
+      if [ -f "$p" ]; then printf 'ARTIFACT %s\n' "$p"; tail -n 30 "$p"; fi
+    done
+    if [ -f "$PFM_STATE_DB" ]; then
+      sqlite3 -header "$PFM_STATE_DB" 'select session_id,name,backend,herdr_socket,herdr_pane,end_pending from seat;' || printf 'LIFECYCLE DIAGNOSTIC FAILED durable seats\n' >&2
+    fi
+    ps -eo pid=,ppid=,pgid=,comm=
+  fi
+  h_server_cleanup || { printf 'LIFECYCLE FAIL server cleanup\n' >&2; rc=1; }
+  # Only sockets and processes under this fixture's private identity may be disposed.
+  while IFS= read -r p; do
+    tmux -S "$p" kill-server || { printf 'LIFECYCLE FAIL tmux cleanup %s\n' "$p" >&2; rc=1; }
+  done < <(find "$TMUX_TMPDIR" -type s -print)
+  if ! wait_for 3 fixture_gone; then
+    printf 'LIFECYCLE FAIL fixture process survivors: '; cat "$ROOT/survivors"
+    cat "$ROOT/process-probe.log" >&2
+    while IFS= read -r p; do ps -p "$p" -o pid=,ppid=,pgid=,args=; done <"$ROOT/survivors"
+    rc=1
+    while IFS= read -r p; do kill -TERM "$p" 2>/dev/null || true; done <"$ROOT/survivors"
+    if ! wait_for 3 fixture_gone; then
+      while IFS= read -r p; do kill -KILL "$p" 2>/dev/null || true; done <"$ROOT/survivors"
+      wait_for 3 fixture_gone || { printf 'LIFECYCLE FAIL survivors after KILL: '; cat "$ROOT/survivors"; }
+    fi
+  fi
+  rm -rf -- "$ROOT" || rc=1
+  [ ! -e "$ROOT" ] || { printf 'LIFECYCLE FAIL scratch survivor %s\n' "$ROOT" >&2; rc=1; }
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mkdir -p "$ROOT/bin" "$ROOT/project" "$H_FIXTURE" "$HOME/.cc/1" "$HOME/.local/bin" \
+  "$HOME/.local/state/pfm" "$HOME/.config/herdr" "$PFM_CLAUDE_ROOTS" "$PFM_SID_DIR" "$TMUX_TMPDIR"
+ln -s "$PFM_CLAUDE_ROOTS" "$HOME/.cc/1/projects"
+ln -s "$MOCK_BIN" "$ROOT/bin/claude"
+ln -s "$PFM_BIN" "$ROOT/bin/pfm"
+ln -s "$PFM_BIN" "$HOME/.local/bin/pfm"
+cp "$HERDR_TEST_CONFIG" "$HERDR_CONFIG_PATH"
+cat >"$PFM_CONFIG" <<JSON
+{"version":2,"accounts":[{"id":1,"configDir":"~/.cc/1","emoji":"x"}],"claude":{"systemPrompt":"production","binary":"$ROOT/bin/claude","costLedger":false}}
+JSON
+cat >"$MOCK_ENGINE_SCENARIO" <<JSON
+{"version":"2.1.270 (Claude Code)","session_id":"11111111-1111-4111-8111-111111111111","busy_ms":0,"jail":{},"record_dir":"$ROOT/records"}
+JSON
+# h_server_start owns traps, so restore our diagnostic/cleanup composition even on startup failure.
+start_rc=0; h_server_start || start_rc=$?
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+[ "$start_rc" = 0 ] || fail_control 'FIXTURE-BOOTSTRAP-FAILED real server startup'
+herdr --session lane-H api snapshot >"$ROOT/snapshot.json"
+jq -e '.result.snapshot.protocol == 22 and .result.snapshot.version == "0.9.5"' "$ROOT/snapshot.json" >/dev/null || fail_control 'pinned server identity'
+ws="$(herdr --session lane-H workspace create --label H --cwd "$ROOT/project" --no-focus)"
+export HERDR_PANE_ID="$(jq -er '.result.root_pane.pane_id' <<<"$ws")" HERDR_WORKSPACE_ID="$(jq -er '.result.workspace.workspace_id' <<<"$ws")"
+tmux_witness >"$ROOT/tmux-before"
+out="$("$PFM_BIN" chat new --name H_GO --engine cc --account 1 --cwd "$ROOT/project" --backend herdr)" || fail_control 'native birth'
+printf '%s\n' "$out"
+child="$(awk -F'\t' '$3 == "herdr" {print $5}' <<<"$out")"
+[ -n "$child" ] || fail_control 'birth returned no Herdr pane'
+sid="$(sqlite3 "$PFM_STATE_DB" "select session_id from seat where name='H_GO';")"
+[[ "$sid" =~ ^[0-9a-f-]{36}$ ]] || fail_control 'birth returned no unique durable session'
+identity="$(sqlite3 "$PFM_STATE_DB" "select backend || '|' || herdr_socket || '|' || herdr_pane || '|' || session_id from seat where name='H_GO';")"
+[ "$identity" = "herdr|$HERDR_SOCKET_PATH|$child|$sid" ] || fail_control "durable identity: $identity"
+ready() {
+  external chat capture "$sid" >"$ROOT/screen.txt" && grep -q '❯' "$ROOT/screen.txt" &&
+    external chat status "$sid" --json >"$ROOT/status.json" &&
+    jq -e --arg s "$sid" '.state == "idle" and .session_id == $s' "$ROOT/status.json" >/dev/null
+}
+wait_for 12 ready || fail_control "$LANE_WAIT_WHY"
+request pane.process_info "{\"pane_id\":\"$child\"}" >"$ROOT/process.json"
+jq -e '.result.process_info as $p | any($p.foreground_processes[]; .name == "claude" and .argv[0] == "claude" and .pid == $p.foreground_process_group_id)' "$ROOT/process.json" >/dev/null || fail_control 'canonical native foreground process'
+child_pid="$(jq -er '.result.process_info.foreground_process_group_id' "$ROOT/process.json")"
+[ -d "/proc/$child_pid" ] || fail_control 'native foreground process absent from real proc'
+tmux_witness >"$ROOT/tmux-after"
+cmp "$ROOT/tmux-before" "$ROOT/tmux-after" || fail_control 'native birth created tmux fallback'
+passed "native identity $identity PID=$child_pid composer and idle"
+external chat call --allow-unsigned "$sid" 'H_GO_PROBE mock-engine: {"type":"turn","reply":"H_GO_REPLY"}' || fail_control 'unsigned call'
+receipt() {
+  external chat read "$sid" --json --tail 10 >"$ROOT/transcript.json" &&
+    jq -e 'any(.entries[]; .role == "user" and ((.text // "")|contains("H_GO_PROBE")))' "$ROOT/transcript.json" >/dev/null &&
+    external chat capture "$sid" >"$ROOT/reply.txt" && grep -Fxq '⏺ H_GO_REPLY' "$ROOT/reply.txt"
+}
+wait_for 8 receipt || fail_control "$LANE_WAIT_WHY"
+passed 'call user transcript and real pane reply'
+external chat end "$sid" || fail_control 'schedule end'
+ended() {
+  local code=0
+  request pane.get "{\"pane_id\":\"$child\"}" >"$ROOT/end.json" 2>&1 || code=$?
+  [ "$code" = 1 ] && jq -e '.error.code == "pane_not_found"' "$ROOT/end.json" >/dev/null &&
+    [ "$(sqlite3 "$PFM_STATE_DB" "select count(*) from seat where session_id='$sid';")" = 0 ] &&
+    [ ! -d "/proc/$child_pid" ]
+}
+wait_for 10 ended || fail_control "$LANE_WAIT_WHY"
+passed 'end removes exact pane, durable seat and native child'
+code=0
+HERDR_SOCKET_PATH="$ROOT/missing.sock" "$PFM_BIN" chat new --name H_REFUSED --engine cc --account 1 --cwd "$ROOT/project" --backend herdr >"$ROOT/refusal.txt" 2>&1 || code=$?
+[ "$code" != 0 ] && grep -qiE 'socket|connect|herdr' "$ROOT/refusal.txt" || fail_control 'missing socket did not explicitly refuse birth'
+[ "$(sqlite3 "$PFM_STATE_DB" "select count(*) from seat where name='H_REFUSED';")" = 0 ] || fail_control 'refused birth left a durable seat'
+tmux_witness >"$ROOT/tmux-refusal"
+cmp "$ROOT/tmux-before" "$ROOT/tmux-refusal" || fail_control 'refused birth created tmux fallback'
+passed 'missing socket refuses birth without durable seat or tmux fallback'
+h_server_cleanup || fail_control 'server/socket teardown'
+passed 'server and socket gone'
+LIFECYCLE
+env FIXTURE_ROOT="$T/lifecycle" LANES_DIR="$LANES" HERDR_TEST_CONFIG="$T/herdr.toml" \
+  PFM_BIN="$T/pfm" MOCK_BIN="$T/mock-engine" \
+  timeout --signal=TERM --kill-after=20s 30s bash "$T/lifecycle.sh" >"$T/lifecycle.log" 2>&1
+rc=$?
+cat "$T/lifecycle.log"
+if [ "$rc" = 0 ] && [ ! -e "$T/lifecycle" ]; then
+  ok "real Herdr pfm lifecycle and failure refusal complete with private state removed"
+else bad "real Herdr pfm lifecycle" "rc=$rc scratch=$T/lifecycle"; fi
 # Exercise the exact H witness under each independent producer failure.
 awk '/^h_tmux_servers\(\)/ {copy=1} copy {print} copy && /^}/ {exit}' "$LANES/H.sh" >"$T/tmux-witness.sh"
 cat >"$T/tmux-driver.sh" <<'EOF'

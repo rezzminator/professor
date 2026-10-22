@@ -68,7 +68,8 @@ foreman -> reads, writes the whole change, runs the affected tests once -> one r
 (a child only for an area disjoint from the foreman's own, while the foreman is busy with its part)
 every foreman on the worktree returned -> main chat -> flights-lander -> its own review, children in the background
 lander fixes all findings -> affected tests until green -> full gate once -> lander returns
-main chat -> gitter commits / merges
+main chat -> gitter commits / merges -> same-dispatch verified teardown (or KEEP lock)
+flight abandoned without merge -> writers stopped -> main chat -> gitter close
 ```
 
 1. **Settle.** The main chat settles open requirements with the user before any dispatch.
@@ -87,8 +88,9 @@ main chat -> gitter commits / merges
    6. returns.
 
    One worktree gets one lander: no separate reviewer, no second round, no second lander.
-5. **Merge.** On `PASS` or `FIXED`, the main chat sends gitter to commit and merge, with the lander's report path as its REPORT_PATH.
-6. **Measure.** `/flights:doctor`, run by the user, reports the measure for the tree.
+5. **Merge and tear down.** On `PASS` or `FIXED`, the main chat sends gitter to commit and merge, with the lander's report path as its REPORT_PATH. Teardown belongs to that same MERGE dispatch, verified by `git worktree list`. The return ends `worktree removed: {path} · branch {deleted|kept}` or `worktree kept (locked): {path} — {reason}`. A needed keep is `KEEP: {reason}` in the brief, never a teardown ban; gitter keeps the branch and locks the worktree with that reason. A reasonless removal ban becomes a lock with reason `kept by caller, no reason given`. The main chat that kept it carries the `kept (locked)` line in its Verdict until it orders gitter to unlock and remove it.
+6. **Close without a merge.** A lander `FAIL` not retried, an abandoned foreman `PARTIAL`, a dropped flight or an abandoned dead agent's flight still closes, after its writers stop. The main chat sends gitter to remove the clean linked worktree, keeping and naming any unmerged branch (`-d` only, never `-D`). Dirty work is locked with the reason it waits and the user is asked what to do with its changes; the Verdict names what stayed. The main checkout is never a close target.
+7. **Measure.** `/flights:doctor`, run by the user, reports the measure for the tree.
 
 ## Choosing a tier
 
@@ -195,7 +197,7 @@ The deepest chain is main → foreman → child foreman → tracer → sub-trace
 | The lander's kit | `templates/global/skills/lander-inventory/` | The inventory and the computed spawn |
 | The command | `templates/global/commands/flights/doctor.md` | The meter |
 | The measurement | `pfm tokens --tree` in `pfm/internal/tokens/` | The measure's numbers |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration and § You hold a flight | The ladder, the foreman rubric, main-chat ownership of worktree, lander and gitter |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration and § You hold a flight | The ladder, foreman rubric, main-chat landing and close, visible KEEP locks |
 | The project contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The first move of a sub-agent |
 | The tracer | `templates/global/agents/tracer.md`, `templates/global/skills/tracetree/`, `docs/design/tracing/` | The store and its reuse |
 | This directory | `docs/design/flights/` | One file per member, this file for what they share |

@@ -423,3 +423,67 @@ func TestReaderCheckFailureNamesTheReaderAsked(t *testing.T) {
 		t.Fatalf("the gaps blame an unnamed reader, read as the defuddle reader that answered 200: %q", result.Partial)
 	}
 }
+
+func TestReaderMarkdownDecodesHTMLEntities(t *testing.T) {
+	t.Parallel()
+	const source = "https://article.example.test/story"
+	const encoded = "&gt; A quoted comment &amp; a &#62; comparison with &quot;quotes&quot;.\n\n"
+	for _, rung := range []string{"jina", "defuddle-reader"} {
+		t.Run(rung, func(t *testing.T) {
+			origin := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Host == "defuddle.md" {
+					return response(
+						request,
+						http.StatusOK,
+						"text/plain",
+						"---\ntitle: Reader article\n---\n"+strings.Repeat(encoded, 20),
+					), nil
+				}
+				return response(
+					request,
+					http.StatusForbidden,
+					"text/html",
+					"<html><body>checking your browser</body></html>",
+				), nil
+			})
+			reader := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.Header.Get(readerHTMLFormat) == "html" {
+					return response(
+						request,
+						http.StatusOK,
+						"text/html",
+						"<html><body><p>Article.</p></body></html>",
+					), nil
+				}
+				if rung == "defuddle-reader" {
+					return response(request, http.StatusServiceUnavailable, "text/plain", "busy"), nil
+				}
+				return response(
+					request,
+					http.StatusOK,
+					"text/plain",
+					"Title: Reader article\nMarkdown Content:\n"+strings.Repeat(encoded, 20),
+				), nil
+			})
+			h := mustNew(t, Options{
+				CacheDir: t.TempDir(),
+				Client:   &http.Client{Transport: origin},
+				Chrome: &http.Client{
+					Transport: origin,
+				},
+				Jina:        &http.Client{Transport: reader},
+				OA:          &http.Client{Transport: origin},
+				Converter:   &browserSpyConverter{},
+				BrowserRung: browserOff(),
+				Clock:       newPacingClock(),
+			})
+			result := h.FetchWithOptions(context.Background(), source, FetchOptions{Refresh: true})
+			if result.Error != "" || result.Method != rung {
+				t.Fatalf("reader result: method=%q error=%q", result.Method, result.Error)
+			}
+			if !strings.Contains(result.Content, "> A quoted comment & a > comparison with \"quotes\".") {
+				t.Fatalf("reader %s kept encoded HTML entities: %.150q", rung, result.Content)
+			}
+		})
+	}
+}

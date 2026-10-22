@@ -98,7 +98,7 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "2b050225554d1143a8f219e57c8e478acf2ec7d740ac3e6ad8021f2f047fa62e",
-    ".claude/agents/gitter.md": "93cbdbe6f0701cd9d265a595c8285c8fff379cc2adaebef582efd8ceb76dfc1c",
+    ".claude/agents/gitter.md": "aaa95e8178f4666f94b0980655eabe5a079388f35a11768d74109944b758edcf",
     ".claude/agents/gpt-changelogger.md": "f6383197ebda4c0d9f8db11a0da7dcc5ee3218355511fc6188cfad5c537d09cc",
     ".claude/agents/gpt-gitter.md": "853085027c03ee56c4275d2ff00f1361db892920d7ed213f70cdeb1df296cfc5",
     ".claude/agents/gpt-pcm.md": "416b2162318864272b881ddde92b1cd4b933e54d2ee8f4f0f6bef3b9f9c9f300",
@@ -110,7 +110,7 @@
     ".claude/commands/github-marketing.md": "41f371d469b0c59609d0fa97c3bb1fc3c7bf39ee6fcaedb3f0bfe00c3336721a",
     ".claude/commands/pcm.md": "531ed83a23e035e7db3543add6d08738e46c3cdeb3960437419c2fdbd6cb4bcb",
     ".claude/commands/pfm-testing-manual.md": "3605cf12ba174c578483461c613703386c281ffdd42241249c8e821a8cbd51c7",
-    ".claude/commands/pfm/release.md": "18bb6c6b52a74875bb95b39fd15f9163e3c73a0fdfc5d7c2b027bbcd3807e24b",
+    ".claude/commands/pfm/release.md": "25b50b57871bf7658df146b23e415b4813a1d73fad2bd00caa61159bd81a7313",
     ".claude/commands/pfm/update.md": "dd613d84a8c24c01b68cf067ae444a6cbd7b4d41faf811d9482cb6f5c12dd527",
     ".claude/engine-sync.json": "511dbaa998d3ec5a85f56d9626ad64b223adfb654cd0dd1ca043708bb5b8a638",
     ".claude/scripts/dev.sh": "6d27cc015c337a323eec25c53449e2438979fa3a9ebd8f8e5ede330e02f5128b",

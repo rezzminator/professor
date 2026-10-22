@@ -44,9 +44,9 @@ The spawn brief names a **Phase**. Card phases: `Read` the named card in `docs/c
 
 | Phase | Protocol |
 | ------------------- | ------------------------------------------------------------------------- |
-| SETUP | card `gitter-phase-setup.md` — create worktree branch, ports, audit trail |
+| SETUP | card `gitter-phase-setup.md` — sweep, create worktree branch, ports, audit trail |
 | COMMIT | inline below — a code change landing directly on `main` |
-| MERGE | card `gitter-phase-merge.md` — review-gated merge to main, conflicts, cleanup (worktree, and the merged branch unless kept) |
+| MERGE | card `gitter-phase-merge.md` — review-gated merge to main, conflicts, verified teardown or KEEP lock, sweep |
 | DOCS-COMMIT | card `gitter-phase-docs.md` — commit docs on main, archive dirs to tmp |
 | PUSH | card `gitter-phase-push.md` — hard-gated by § Remote Publication Boundary |
 | PULL | inline below |
@@ -60,6 +60,22 @@ No phase named = freeform request: handle with your git expertise — read comma
 **COMMIT** — a code change that lands directly on `main`: a landed flight's batch lane and any fix the caller is authorized to land there. **Local only — never any push variant** (§ Remote Publication Boundary). `git status --short` first; no changes → say "No changes to commit" and stop. (1) Code commit — the specific files the caller named, per § Scoped-commit discipline, type `fix`, description from the brief. (2) Doc commit if the brief names doc changes — a SEPARATE commit, type `docs`, same trailers; skip it when the brief says none. Split unrelated work into separate commits. Confirm per template.
 
 **PULL** — uncommitted changes present → warn ("Uncommitted changes — pull may cause conflicts. Stash or commit first.") then proceed. `git pull`; conflicts per § Conflicts, any other failure: report and stop. Confirm per template.
+
+## Worktree close
+
+A brief's `KEEP: {reason}` keeps the worktree and branch: `git worktree lock --reason "{reason}" {path}`. A ban on removal without a reason uses `kept by caller, no reason given`. Preserve an existing lock and report its reason. Later removal requires the keeper's order: `git worktree unlock {path}`, then normal removal through `./.claude/scripts/worktree.sh remove {name}`.
+
+A flight closed without a merge removes its clean linked worktree through that script, then tries `git branch -d {branch}`; an unmerged branch is kept and named, never `-D`. A dirty one is locked with the reason it waits; report `status --short` and the question for the user, leaving changes intact. Verify removal or the lock using `git worktree list --porcelain`; a failed removal is unfinished, not a keep. The final line is `worktree removed: {path} · branch {deleted|kept}` or `worktree kept (locked): {path} — {reason}`; name a kept branch above it. MERGE cleanup follows its card § 5.
+
+## Sweep
+
+Run at the start of every SETUP and end of every MERGE as gitter's git commands, not a script or pfm verb available to other agents. Enumerate `git -C {repo} worktree list --porcelain`; consider only linked worktrees physically under `{repo}/.worktrees/`, skipping `locked`, `detached` and the caller's own worktree. LANDED requires all three against the MERGE target, `main`:
+
+- `git -C {repo} reflog main --format=%gs` has a subject starting exactly `merge {branch}: `: feed its successfully read output to `awk -v p="merge {branch}: " 'index($0,p)==1{f=1} END{exit !f}'`. "Has the entry" means this command exits 0; exit 1 means no match.
+- `git -C {repo} merge-base --is-ancestor {branch} main` exits 0.
+- `git -C {path} status --porcelain` is empty.
+
+A branch at `main`'s tip without that reflog entry is not LANDED. Landing evidence with a dirty worktree: report its `status --short`, leave it alone. For LANDED, recheck tip, status and lock immediately before removal; `./.claude/scripts/worktree.sh remove {name}` runs its submodule proof and teardown, then `git branch -d {branch}`. Report each removed path with matched reflog subject and ancestor proof; report branch-deletion refusal, never force it. End with `git -C {repo} worktree prune` and verify `git worktree list`. Failed enumeration, reflog/status reads or proofs are reported sweep failures, never an empty clean sweep; ancestor exit 1 is simply not LANDED.
 
 ## Commit Message Convention
 
@@ -128,7 +144,7 @@ Iso worktrees patch `.env.{profile}`, create `.dev-ports`, `docker-compose.{prof
 
 ### General rules
 
-- **Never delete branches that aren't yours** — only `pipeline/$PIPELINE`
+- **Never delete branches that aren't yours** — only `pipeline/$PIPELINE`, except LANDED branches proven by § Sweep
 - **Always verify before destructive operations**
 - **Report every conflict resolution** to the orchestrator, quoting the resolver's return verbatim, never a summary: the orchestrator acts on its statuses, `dropped` first
 - **Never write to permanent docs** — exception: the Living Reference below

@@ -8,14 +8,16 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // ConvergeHerdrNames carries in-engine /rename (which fires no title hook)
-// from the indexed transcripts to proved native seats. name-sync calls this
-// only on --apply, through the very same naming path as DeliverName.
+// from the index to proved native seats: a Claude seat follows its
+// transcript's custom title, a Codex seat its thread's indexed name. name-sync
+// calls this only on --apply, through the very same naming path as DeliverName.
 func ConvergeHerdrNames(ctx context.Context, db *store.Store, values paths.Values, stderr io.Writer) (ok bool) {
 	ok = true
 	state := fleetdb.OpenSharedState(ctx, values)
@@ -30,30 +32,37 @@ func ConvergeHerdrNames(ctx context.Context, db *store.Store, values paths.Value
 		fmt.Fprintf(stderr, "pfm name-sync: enumerate native names: %v\n", err)
 		return false
 	}
+	cxNames, err := db.CxNames(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm name-sync: read Codex thread names: %v\n", err)
+		return false
+	}
 	for index := range seats {
 		seat := &seats[index]
-		if seat.Backend != spawn.BackendHerdr || seat.Engine != string(engine.Claude) || seat.State != "live" ||
-			seat.EndPending {
+		if seat.Backend != spawn.BackendHerdr || seat.State != "live" || seat.EndPending {
 			continue
 		}
-		indexed, found, err := db.Transcript(ctx, seat.SessionID)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm name-sync: read native name %s: %v\n", seat.SeatID, err)
-			ok = false
-			continue
+		var name string
+		switch seat.Engine {
+		case string(engine.Claude):
+			indexed, found, err := db.Transcript(ctx, seat.SessionID)
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm name-sync: read native name %s: %v\n", seat.SeatID, err)
+				ok = false
+				continue
+			}
+			if found {
+				name = indexed.CustomTitle
+			}
+		case string(engine.Codex):
+			name = naming.CxName(seat.SessionID, "", "", cxNames, "")
 		}
-		if !found || indexed.CustomTitle == "" || indexed.CustomTitle == seat.Name {
+		if name == "" || name == seat.Name {
 			continue
 		}
 		target := headless.Chat{SeatID: seat.SeatID, ID: seat.SessionID, Socket: seat.HerdrSocket, Pane: seat.HerdrPane}
-		if err := renameHerdr(ctx, target, indexed.CustomTitle, values); err != nil {
-			fmt.Fprintf(
-				stderr,
-				"pfm name-sync: native seat %s NOT renamed %q: %v\n",
-				seat.SeatID,
-				indexed.CustomTitle,
-				err,
-			)
+		if err := renameHerdr(ctx, target, name, values); err != nil {
+			fmt.Fprintf(stderr, "pfm name-sync: native seat %s NOT renamed %q: %v\n", seat.SeatID, name, err)
 			ok = false
 		}
 	}

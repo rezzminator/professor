@@ -56,18 +56,21 @@ For each roster project, compare worktree `.env.local`/`.env.test` with main; ap
 
 ## 5. Archive the audit trail, then clean up worktree — UNCONDITIONAL
 
-**This step runs in the SAME dispatch as the merge itself — a MERGE that returns with `.worktrees/{name}` still on disk is INCOMPLETE.** The DOCS-COMMIT `Archive:` parameter governs docs archival only — `Archive: none` never skips this step. Salvage before removal: any build doc dirty INSIDE the worktree's copy (`$WORKTREE/docs/dev/builds/**` — executors sometimes write through worktree-relative paths) diffs against its root counterpart; unique or differing content is copied root-side first. Removal deletes the merged `pipeline/{name}` branch unless the brief says to keep it; the merge commit on main is the revert path.
+This step runs in the same dispatch as the merge: a source worktree still registered without a keep lock means MERGE is unfinished. The DOCS-COMMIT `Archive:` parameter governs docs archival only — `Archive: none` never skips this step. Salvage before removal: any build doc dirty inside `$WORKTREE/docs/dev/builds/**` diffs against its root counterpart; copy unique or differing content root-side first. Archive the audit trail:
 
 ```bash
 bash .claude/scripts/checkpoint.sh archive "$WORKTREE" "$DOCS/audit-trail.json"
-./.claude/scripts/worktree.sh remove $PIPELINE --delete-branch
-ls .worktrees/   # VERIFY: $PIPELINE must be absent — if listed, the merge is not done; retry/report, never proceed silently
-git branch --list "pipeline/$PIPELINE"  # VERIFY: must print nothing unless the brief says to keep the branch
 ```
 
-When the brief says to keep the branch, run `./.claude/scripts/worktree.sh remove $PIPELINE` instead. A branch still listed when deletion was required means the MERGE is unfinished: report the failure, even if the script printed "Branch deleted".
+Apply `gitter.md` § Worktree close's KEEP-lock rule first. Otherwise remove the clean worktree and merged branch:
 
-The completion report's final line states `worktree removed: {name} · branch {deleted|kept}` — the orchestrator treats a MERGE report without it as unfinished.
+```bash
+./.claude/scripts/worktree.sh remove "$PIPELINE" --delete-branch
+git worktree list --porcelain  # source registration must be absent
+git branch --list "pipeline/$PIPELINE"  # must print nothing
+```
+
+The script owns the submodule proof and teardown. A failed removal or branch deletion is unfinished even if the script printed success; report it. Run `gitter.md` § Sweep after cleanup. The completion report ends with § Worktree close's `worktree removed: {path} · branch {deleted|kept}` or `worktree kept (locked): {path} — {reason}` line; no such line means unfinished.
 
 ## 6. Update § Gotchas (only if needed)
 

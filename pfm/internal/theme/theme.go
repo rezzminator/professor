@@ -6,6 +6,7 @@ import (
 	"os"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 const (
@@ -27,11 +28,14 @@ const (
 // the default renderer, so a palette change cannot leave a stray hardcoded
 // color behind.
 type Palette struct {
-	EngineRow   map[pfmengine.ID]string
-	AgentRow    string
-	StatsEngine map[pfmengine.ID]string
-	StatsCPU    string
-	StatsRAM    string
+	// Empty for legacy palettes, which inherit the terminal's background.
+	Background, Foreground string
+	SelectedForeground     string
+	EngineRow              map[pfmengine.ID]string
+	AgentRow               string
+	StatsEngine            map[pfmengine.ID]string
+	StatsCPU               string
+	StatsRAM               string
 	// StatsName colours the NAME cell of every stats table — a chat's name and
 	// a Docker container's alike. It is its own token because a name is not an
 	// engine: both cells used to borrow the Claude row colour, which was
@@ -168,6 +172,30 @@ func Load(name string) Palette {
 		palette = defaultPalette
 	}
 	return withEngineFallbacks(palette)
+}
+
+// FromVariant assigns the picker's roles to the already-derived theme. State
+// colours keep themesync's contrast guards; engine hues keep their identity.
+func FromVariant(v themesync.Variant) Palette {
+	return withEngineFallbacks(Palette{
+		Background: v.Background, Foreground: v.Foreground, SelectedForeground: v.SelectionForeground,
+		EngineRow: map[pfmengine.ID]string{
+			pfmengine.Claude: v.Orange, pfmengine.Codex: v.State.Working, pfmengine.OpenCode: v.State.Done,
+		},
+		StatsEngine: map[pfmengine.ID]string{
+			pfmengine.Claude: v.Orange, pfmengine.Codex: v.State.Working, pfmengine.OpenCode: v.State.Done,
+		},
+		AgentRow: v.ANSI[5], StatsCPU: v.State.Done, StatsRAM: v.State.Working, StatsName: v.Accent,
+		Accent: v.Accent, Muted: v.Muted, Warn: v.State.Blocked,
+		CosmosLineage: v.Muted, CosmosStar: v.Muted, CosmosBright: v.Foreground,
+		CosmosSun: v.Orange, CosmosSunHot: v.Foreground,
+		Header: v.Foreground, HeaderBg: v.Surface, GroupA: v.State.Done, GroupB: v.State.Working,
+		Border: v.Muted, Selected: v.SelectionBackground, Dim: v.Muted,
+		StatsHeader: v.Accent, StatsMemory: v.State.Working, StatsToken: v.State.Blocked,
+		StatsGear: v.Orange, StatsImage: v.ANSI[5],
+		LimitGreen: v.State.Done, LimitAmber: v.State.Blocked, LimitRed: v.ANSI[1],
+		Label: v.Accent, HeatCold: v.Overlay,
+	})
 }
 
 func withEngineFallbacks(palette Palette) Palette {

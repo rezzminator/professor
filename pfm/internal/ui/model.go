@@ -18,7 +18,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/sky"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
-	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 const (
@@ -102,6 +101,7 @@ type Model struct {
 	suppressedCount      int
 	refreshing           bool
 	scheduleError        string
+	themeError           string
 	primary              int
 	initialPrimary       int
 	accountIDs           []int
@@ -213,7 +213,7 @@ type Model struct {
 
 // NewModel builds the first frame entirely from cached state.
 func NewModel(snapshot Snapshot) Model {
-	configureStyles(theme.Load(snapshot.Theme))
+	configureSnapshotStyles(snapshot)
 	configuredAccountEmojis = copyEmojis(snapshot.AccountEmojis)
 	configuredCodexAccountEmojis = copyEmojis(snapshot.CodexAccountEmojis)
 	input := textinput.New()
@@ -233,6 +233,7 @@ func NewModel(snapshot Snapshot) Model {
 		suppressedCount:     snapshot.SuppressedCount,
 		refreshing:          snapshot.Refreshing,
 		scheduleError:       snapshot.ScheduleError,
+		themeError:          snapshot.ThemeError,
 		primary:             validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		initialPrimary:      validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		accountIDs:          normalizedAccountIDs(snapshot.AccountIDs),
@@ -988,6 +989,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		model.refreshing = false
 		return
 	}
+	configureSnapshotStyles(snapshot)
 	follow := model.selectedKey()
 	fallback := model.cursor
 	if snapshot.ProjectDirs != nil {
@@ -1037,6 +1039,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.refreshing = snapshot.Refreshing
 	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError)
 	model.scheduleError = snapshot.ScheduleError
+	model.themeError = snapshot.ThemeError
 	for index := range model.rows {
 		id := model.rows[index].ID
 		if id != "" {

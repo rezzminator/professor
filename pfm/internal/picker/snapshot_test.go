@@ -2,23 +2,31 @@ package picker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -499,6 +507,253 @@ func TestNativeSnapshotsRetainCappedBackgroundMetadata(t *testing.T) {
 				t.Fatal("native stream failed")
 			}
 			check(t, (<-updates).Rows)
+		})
+	}
+}
+
+func pickerThemeVariant(light bool) themesync.Variant {
+	v := themesync.Variant{
+		Background:          "#101020",
+		Foreground:          "#eeeef0",
+		Surface:             "#202030",
+		Overlay:             "#303040",
+		Accent:              "#b080e0",
+		Orange:              "#e09060",
+		Muted:               "#9090a0",
+		SelectionBackground: "#404050",
+		SelectionForeground: "#eeeef0",
+		State: themesync.StateColors{
+			Working: "#80b0e0",
+			Done:    "#80c090",
+			Blocked: "#d0b070",
+			Idle:    "#a0a0b0",
+			Unknown: "#9090a0",
+		},
+	}
+	if light {
+		v.Background, v.Foreground, v.Surface = "#faf8f0", "#302820", "#eee8dc"
+		v.SelectionBackground, v.SelectionForeground = "#ddd0b8", v.Foreground
+		v.Accent, v.Orange, v.Muted = "#703890", "#904018", "#686050"
+		v.State.Working, v.State.Done, v.State.Blocked = "#205080", "#285c30", "#785020"
+	}
+	for i := range v.ANSI {
+		v.ANSI[i] = v.Foreground
+	}
+	return v
+}
+
+func writePickerTheme(
+	t *testing.T,
+	home string,
+	applied themesync.Applied,
+	appearance themesync.Appearance,
+	enabled bool,
+) string {
+	t.Helper()
+	dir := themesync.DefaultStateDir(home)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content, err := json.Marshal(map[string]any{"enabled": enabled, "appearance": appearance, "applied": applied})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, themesync.StateFileName)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPickerUsesEveryShippedProfile(t *testing.T) {
+	const profiles = "../../../templates/themes"
+	entries, err := os.ReadDir(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		count++
+		t.Run(entry.Name(), func(t *testing.T) {
+			home := t.TempDir()
+			profile, err := themesync.ReadProfileDir(filepath.Join(profiles, entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			themes := filepath.Join(home, ".claude", "themes")
+			if err := os.MkdirAll(themes, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(themes, entry.Name()+".json"), profile, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			settings := `{"theme":"` + themesync.CustomValue(entry.Name()) + `"}`
+			if err := os.WriteFile(
+				filepath.Join(home, ".claude", "settings.json"),
+				[]byte(settings),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := themesync.On(
+				context.Background(),
+				themesync.Env{Home: home, Runner: &deps.FakeRunner{}},
+			); err != nil {
+				t.Fatal(err)
+			}
+			variant, err := themesync.CurrentVariant(themesync.DefaultStateDir(home))
+			if err != nil || variant == nil {
+				t.Fatalf("profile did not derive: %v, %v", variant, err)
+			}
+			snapshot := buildSnapshot(
+				context.Background(),
+				fleet.Env{Paths: paths.Values{Home: home}},
+				scanRequest{NoSky: true},
+				compose.Output{},
+			)
+			view := ui.NewModel(snapshot).View()
+			if !reflect.DeepEqual(view.BackgroundColor, lipgloss.Color(variant.Background)) ||
+				!reflect.DeepEqual(view.ForegroundColor, lipgloss.Color(variant.Foreground)) {
+				t.Fatalf("picker did not carry %s's derived canvas", entry.Name())
+			}
+		})
+	}
+	if count == 0 {
+		t.Fatal("no shipped profiles enumerated")
+	}
+}
+
+func TestPickerUsesAppliedThemeAndAppearance(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		auto, light bool
+	}{
+		{"dark", false, false}, {"light", false, true}, {"auto-dark", true, false}, {"auto-light", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			primary, alternate := pickerThemeVariant(false), pickerThemeVariant(true)
+			applied := themesync.Applied{Primary: primary, Auto: tc.auto, Alternate: &alternate}
+			appearance, want := themesync.Dark, primary
+			if tc.light {
+				appearance, want = themesync.Light, alternate
+				if !tc.auto {
+					applied.Primary = alternate
+				}
+			}
+			writePickerTheme(t, home, applied, appearance, true)
+			snapshot := buildSnapshot(
+				context.Background(),
+				fleet.Env{Paths: paths.Values{Home: home}},
+				scanRequest{NoSky: true},
+				compose.Output{},
+			)
+			view := ui.NewModel(snapshot).View()
+			if !reflect.DeepEqual(view.BackgroundColor, lipgloss.Color(want.Background)) ||
+				!reflect.DeepEqual(view.ForegroundColor, lipgloss.Color(want.Foreground)) {
+				t.Fatalf(
+					"picker background/foreground = %v/%v, want Applied %s/%s",
+					view.BackgroundColor,
+					view.ForegroundColor,
+					want.Background,
+					want.Foreground,
+				)
+			}
+			var r, g, b int
+			if _, err := fmt.Sscanf(want.Accent, "#%02x%02x%02x", &r, &g, &b); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(view.Content, fmt.Sprintf("48;2;%d;%d;%d", r, g, b)) {
+				t.Fatal("picker wordmark does not carry the Applied accent")
+			}
+		})
+	}
+}
+
+func TestPickerThemeRefreshAndOff(t *testing.T) {
+	home := t.TempDir()
+	env := fleet.Env{Paths: paths.Values{Home: home}}
+	request := scanRequest{NoSky: true}
+	initial := buildSnapshot(context.Background(), env, request, compose.Output{})
+	model := ui.NewModel(initial)
+	baseline := model.View()
+	v := pickerThemeVariant(true)
+	writePickerTheme(t, home, themesync.Applied{Primary: v}, themesync.Light, false)
+	disabled := buildSnapshot(context.Background(), env, request, compose.Output{})
+	if !reflect.DeepEqual(ui.NewModel(disabled).View(), baseline) {
+		t.Fatal("disabled theme state changed the exact original picker")
+	}
+	path := writePickerTheme(t, home, themesync.Applied{Primary: v}, themesync.Light, true)
+	refresh := rereadFacts(env, request, sentRefresh{snapshot: initial})
+	if !rowFactsMoved(initial, refresh) {
+		t.Fatal("parked refresh did not notice the theme change")
+	}
+	updated, _ := model.Update(ui.RefreshMsg{Snapshot: refresh})
+	if !reflect.DeepEqual(updated.View().BackgroundColor, lipgloss.Color(v.Background)) {
+		t.Fatal("open picker did not adopt the refreshed theme")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	off := rereadFacts(env, request, sentRefresh{snapshot: refresh})
+	updated, _ = updated.Update(ui.RefreshMsg{Snapshot: off})
+	if !reflect.DeepEqual(updated.View(), baseline) {
+		t.Fatal("theme off did not restore the exact original picker")
+	}
+}
+
+func TestPickerThemeUnreadableReportsAndFallsBack(t *testing.T) {
+	for _, bad := range []string{"malformed", "directory"} {
+		t.Run(bad, func(t *testing.T) {
+			home := t.TempDir()
+			env := fleet.Env{Paths: paths.Values{Home: home}, Config: config.Config{Theme: "tokyo-night"}}
+			request := scanRequest{NoSky: true}
+			baseline := ui.NewModel(buildSnapshot(context.Background(), env, request, compose.Output{})).View()
+			path := writePickerTheme(t, home, themesync.Applied{}, themesync.Dark, false)
+			if bad == "directory" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, log := obs.Test(t)
+			snapshot := buildSnapshot(ctx, env, request, compose.Output{})
+			got := ui.NewModel(snapshot).View()
+			if !strings.Contains(log.Raw(), path) || !strings.Contains(log.Raw(), "WARN") {
+				t.Fatalf("unreadable theme state was silently treated as off: log=%q", log.Raw())
+			}
+			if !strings.Contains(snapshot.ThemeError, path) ||
+				!strings.Contains(ansi.Strip(got.Content), "theme unreadable") {
+				t.Fatal("unreadable theme state was not shown in the picker")
+			}
+			snapshot.ThemeError = ""
+			if !reflect.DeepEqual(ui.NewModel(snapshot).View(), baseline) {
+				t.Fatal("unreadable state changed the legacy palette")
+			}
+			broken := rereadFacts(env, request, sentRefresh{snapshot: snapshot})
+			if !rowFactsMoved(snapshot, broken) || broken.ThemeError == "" {
+				t.Fatal("parked refresh did not publish the theme error")
+			}
+			model := ui.NewModel(snapshot)
+			updated, _ := model.Update(ui.RefreshMsg{Snapshot: broken})
+			if !strings.Contains(ansi.Strip(updated.View().Content), "theme unreadable") {
+				t.Fatal("theme error refresh was not shown")
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			recovered := rereadFacts(env, request, sentRefresh{snapshot: broken})
+			updated, _ = updated.Update(ui.RefreshMsg{Snapshot: recovered})
+			if !rowFactsMoved(broken, recovered) || !reflect.DeepEqual(updated.View(), baseline) {
+				t.Fatal("theme recovery did not clear the visible error")
+			}
 		})
 	}
 }

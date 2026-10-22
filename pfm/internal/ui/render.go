@@ -71,6 +71,10 @@ var (
 
 func configureStyles(palette theme.Palette) {
 	configuredPalette = palette
+	selectedForeground := palette.SelectedForeground
+	if selectedForeground == "" {
+		selectedForeground = palette.Header
+	}
 	headerStyle = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Header)).
@@ -78,7 +82,7 @@ func configureStyles(palette theme.Palette) {
 	borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Border))
 	selectedStyle = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color(palette.Header)).
+		Foreground(lipgloss.Color(selectedForeground)).
 		Background(lipgloss.Color(palette.Selected))
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
@@ -110,9 +114,25 @@ func configureStyles(palette theme.Palette) {
 		Bold(true).
 		Foreground(lipgloss.Color(palette.LimitRed))
 	professorUpdateStyle = lipgloss.NewStyle().Bold(true).Blink(true).
-		Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color(palette.LimitAmber))
+		Foreground(lipgloss.Color(paletteInk("#111827"))).Background(lipgloss.Color(palette.LimitAmber))
 	professorUpdateSelectedStyle = lipgloss.NewStyle().Bold(true).Blink(true).
-		Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color(palette.LimitAmber))
+		Foreground(lipgloss.Color(paletteInk("#111827"))).Background(lipgloss.Color(palette.LimitAmber))
+}
+
+func configureSnapshotStyles(snapshot Snapshot) {
+	if snapshot.ThemePalette != nil {
+		configureStyles(*snapshot.ThemePalette)
+		return
+	}
+	configureStyles(theme.Load(snapshot.Theme))
+}
+
+// paletteInk preserves legacy badge ink when the terminal owns the background.
+func paletteInk(legacy string) string {
+	if configuredPalette.Background != "" {
+		return configuredPalette.Background
+	}
+	return legacy
 }
 
 // View renders only the visible viewport, so frame cost is independent of the
@@ -122,6 +142,10 @@ func (model Model) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeNone
 	view.WindowTitle = "pfm"
+	if configuredPalette.Background != "" {
+		view.BackgroundColor = lipgloss.Color(configuredPalette.Background)
+		view.ForegroundColor = lipgloss.Color(configuredPalette.Foreground)
+	}
 	return view
 }
 

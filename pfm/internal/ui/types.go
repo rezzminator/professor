@@ -8,6 +8,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 // Tab is one top-level picker body. Chats preserves the original picker and
@@ -83,6 +84,10 @@ type Snapshot struct {
 	OpenCodePrimaryAccount int
 	OpenCodeAccountIDs     []int
 	Theme                  string
+	// ThemePalette is the cached Applied theme; nil preserves the legacy Theme.
+	ThemePalette *theme.Palette
+	// ThemeError distinguishes an unreadable sync state from sync being off.
+	ThemeError string
 	// Home is the reader's home directory, so the dossier can write a path as
 	// ~/…; rendering never reads the environment itself.
 	Home string

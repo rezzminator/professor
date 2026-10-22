@@ -123,7 +123,7 @@ func (model Model) mastheadTitle(width int) string {
 	count := tone{fg: palette.Header, bold: true}
 	word := tone{fg: palette.Muted}
 	spans := []span{
-		{text: " ◆ pfm ", paint: tone{fg: mastheadInk, bg: palette.Accent, bold: true}},
+		{text: " ◆ pfm ", paint: tone{fg: paletteInk(mastheadInk), bg: palette.Accent, bold: true}},
 		{text: "  ", paint: ink},
 	}
 	// The stale marker leads the vitals: the fill cuts from the right, and a
@@ -131,6 +131,12 @@ func (model Model) mastheadTitle(width int) string {
 	// counts it pushes out are what a narrow terminal loses.
 	if stale := model.staleFleetText(); stale != "" {
 		spans = append(spans, span{text: "⚠ " + stale + "   ", paint: tone{fg: palette.Warn, bold: true}})
+	}
+	if model.themeError != "" {
+		spans = append(spans, span{
+			text:  "theme unreadable: " + cleanField(model.themeError) + "   ",
+			paint: tone{fg: palette.Warn, bold: true},
+		})
 	}
 	vitals := model.fleetVitals()
 	anyLive := false
@@ -316,7 +322,10 @@ func (model Model) renderTabs(width int) string {
 	spans := []span{{text: " tabs ", paint: strip(tone{fg: palette.Dim})}, {text: " ", paint: strip(tone{})}}
 	for index, name := range names {
 		if Tab(index) == model.tab {
-			spans = append(spans, span{text: name, paint: tone{fg: mastheadInk, bg: palette.Accent, bold: true}})
+			spans = append(
+				spans,
+				span{text: name, paint: tone{fg: paletteInk(mastheadInk), bg: palette.Accent, bold: true}},
+			)
 		} else {
 			spans = append(spans, span{text: name, paint: strip(tone{fg: palette.Muted})})
 		}

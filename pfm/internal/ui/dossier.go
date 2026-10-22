@@ -227,7 +227,7 @@ func (model Model) dossierLines(row compose.Row, inner, rows int) []dossierLine 
 	engineHex := engineHexOf(row)
 	age := rowAgeNS(row, model.nowNS)
 	heat := heatOf(age)
-	chipPaint := tone{fg: "#0b1020", bg: engineHex}
+	chipPaint := tone{fg: paletteInk(mastheadInk), bg: engineHex}
 	if !row.Kind.IsAddressable() {
 		chipPaint = tone{fg: palette.Header, bg: palette.Selected}
 	}

@@ -501,14 +501,15 @@ func streamFleetRefreshesWith(
 	// the defaults) re-reads the rows' working state over the LAST pass's
 	// composed output — a stat per transcript, no tmux and no process scan — so
 	// a chat that goes busy or idle while the picker is parked shows it within
-	// fleetRefreshInterval rounded up to the park poll.
+	// fleetRefreshInterval rounded up to the park poll. The same poll reads the
+	// cached theme, even when no chat is live or no facts reader is installed.
 	polls := 0
 	refreshParkedFacts := func() bool {
 		polls++
 		every := int((fleetRefreshInterval + fleetRefreshParkPollInterval - 1) / fleetRefreshParkPollInterval)
 		// A blind presence probe (no baseline) leaves its stale marker up: a
 		// facts snapshot would clear it while nothing watches the chat set.
-		if request.Facts == nil || !presence.have || polls%max(every, 1) != 0 || !hasLiveRow(lastSent.output.Rows) {
+		if !presence.have || polls%max(every, 1) != 0 {
 			return true
 		}
 		reread := environment

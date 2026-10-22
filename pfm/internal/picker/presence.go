@@ -144,9 +144,11 @@ func hasLiveRow(rows []compose.Row) bool {
 
 // rowFactsMoved reports whether a re-read of the rows' facts changed anything
 // the picker shows: the rows themselves (model, effort, working state) or why
-// facts or schedules could not be read.
+// facts or schedules could not be read, and the cached picker theme.
 func rowFactsMoved(previous, next ui.Snapshot) bool {
 	return previous.FactsError != next.FactsError ||
 		previous.ScheduleError != next.ScheduleError ||
+		previous.ThemeError != next.ThemeError ||
+		!reflect.DeepEqual(previous.ThemePalette, next.ThemePalette) ||
 		!reflect.DeepEqual(previous.Rows, next.Rows)
 }

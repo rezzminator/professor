@@ -48,6 +48,9 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
 	defer cancel()
+	if reporter.codexSubagent(ctx, payload) {
+		return 0
+	}
 	if err := reporter.runActivity(ctx, payload); err != nil {
 		reporter.warn("pfm internal herdr-state %s: %v (fail-open)", options.event, err)
 	}

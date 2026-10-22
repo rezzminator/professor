@@ -85,6 +85,7 @@ type herdrDeps struct {
 	// sidDir holds the reload pane mutexes (reload.LockPath): an end event
 	// during a reload's /exit leaves the chat server's title alone.
 	sidDir    string
+	codexHome string
 	seatPaths *paths.Values
 }
 
@@ -103,6 +104,7 @@ func realHerdrDeps() herdrDeps {
 	if err == nil {
 		deps.lockDir = paths.HerdrLockDir(home)
 		deps.stateDir = themesync.DefaultStateDir(home)
+		deps.codexHome = pfmengine.MustLookup(pfmengine.Codex).DefaultRoots(home)[0]
 		deps.seatPaths = &paths.Values{
 			Home:    home,
 			StateDB: paths.EnvOrFrom(env, paths.EnvStateDB, paths.DefaultStateDB(home)),
@@ -302,6 +304,9 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 	case herdr.EventAgentStart, herdr.EventAgentStop:
 		return report(herdr.StateWorking, "")
 	case herdr.EventBlocked:
+		if reporter.options.engine == pfmengine.Codex && payload.ToolName == "request_user_input_async" {
+			return report(herdr.StateWorking, "")
+		}
 		return reporter.toolBlock(payload, report(herdr.StateBlocked, blockedMessage(payload)))
 	case herdr.EventNotification:
 		switch payload.NotificationType {

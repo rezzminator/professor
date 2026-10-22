@@ -1104,6 +1104,8 @@ The walk found three regressions, each watched red before its fix: an engine han
 
 **UNPLAYED — native Claude detection:** an actual Claude background agent running for 60 s, real permission and `AskUserQuestion` dialogs, real-engine restore, and real Codex/OpenCode screen behaviour after this change. No real engine/account suite is permitted; historical fake-provider lane coverage below does not close these gaps.
 
+**UNPLAYED — native Codex queued questions and subagent hooks:** the fake Codex writes child rollouts but fires only `SessionStart`; it does not emit a child's `PermissionRequest`, `PostToolUse`, `Stop` or `SessionEnd`, or model `request_user_input_async` queued while the parent remains Working. `internal/hookentry/herdr_codex_test.go` exercises synthetic payloads for child isolation, missing-rollout reporting and blocking/async question transitions; it does not prove native hook emission or Herdr screen-detection arbitration. No real engine/account suite is permitted.
+
 **Herdr seat gaps:**
 
 - `herdr agent start` readiness is played by `H.agent-start` and a separate manual real-server walk: `agent_started` reports `interactive_ready=true` for the managed native launcher. `--then` sends ordered same-target steers, never an automatic transcript reply.

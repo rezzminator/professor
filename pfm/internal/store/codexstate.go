@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -414,4 +415,41 @@ func firstNonEmptyText(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// ReadCodexThreadIdentity reads only one thread's lineage, including before its
+// rollout exists. Optional columns stay unknown on older Codex generations.
+func ReadCodexThreadIdentity(
+	ctx context.Context, file, id string,
+) (identity codexmeta.Fields, found bool, returnErr error) {
+	db, err := sqlitedb.OpenReadOnly(file, 200*time.Millisecond)
+	if err != nil {
+		return identity, false, fmt.Errorf("open Codex thread identity %s in %s: %w", id, file, err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex thread identity %s in %s: %w", id, file, err))
+		}
+	}()
+	columns, err := codexStateColumns(ctx, db)
+	if err != nil {
+		return identity, false, fmt.Errorf("read Codex thread identity schema %s: %w", file, err)
+	}
+	if _, ok := columns["id"]; !ok {
+		return identity, false, fmt.Errorf("codex thread identity store %s has no threads.id", file)
+	}
+	query := "SELECT " + codexStateColumn(columns, "thread_source", "''") + ", " +
+		codexStateColumn(columns, "agent_path", "''") + ", " +
+		codexStateColumn(columns, "parent_thread_id", "''") + " FROM threads WHERE id = ?"
+	read := obs.SQL(ctx, engine.MustLookup(engine.Codex).LongName, query)
+	err = db.QueryRowContext(ctx, query, id).Scan(&identity.ThreadSource, &identity.AgentPath, &identity.ParentThreadID)
+	read.End(-1, err)
+	if errors.Is(err, sql.ErrNoRows) {
+		return identity, false, nil
+	}
+	if err != nil {
+		return identity, false, fmt.Errorf("read Codex thread identity %s in %s: %w", id, file, err)
+	}
+	identity.ID = id
+	return identity, true, nil
 }

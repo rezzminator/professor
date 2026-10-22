@@ -1,12 +1,22 @@
 package hookentry
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // codexTUI is pid 90, a Codex TUI the user started from the pane's zsh (pid
@@ -25,11 +35,30 @@ func codexRig(t *testing.T) *chatRig {
 	return rig
 }
 
+func codexHookPayload(t *testing.T, session, metadata string, extra ...string) string {
+	t.Helper()
+	if metadata == "" {
+		identity, err := json.Marshal(map[string]string{"id": session, "source": "cli", "thread_source": "user"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata = `{"type":"session_meta","payload":` + string(identity) + `}`
+	}
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(metadata+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPath, err := json.Marshal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `{"session_id":"` + session + `","transcript_path":` + string(encodedPath) +
+		strings.Join(extra, "") + `}`
+}
+
 func (rig *chatRig) codex(event, session string, extra ...string) herdrRun {
 	rig.t.Helper()
-	payload := `{"session_id":"` + session + `","transcript_path":"/h/.codex/sessions/r.jsonl"` +
-		strings.Join(extra, "") + `}`
-	return rig.run([]string{"--engine", "codex", event}, payload)
+	return rig.run([]string{"--engine", "codex", event}, codexHookPayload(rig.t, session, "", extra...))
 }
 
 func codexReportCall(pane, state, session, message string) string {
@@ -372,4 +401,261 @@ func TestCodexEventWithoutARegistrationIsSilent(t *testing.T) {
 			t.Fatalf("no-session.log = %q, want the unreadable record's row", logged)
 		}
 	})
+}
+
+func codexNativeRig(t *testing.T) (*fakeHerdr, herdrDeps, *fleetdb.Store, fleetdb.Seat) {
+	t.Helper()
+	server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
+	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")}
+	seat := fleetdb.Seat{
+		SeatID: "native-seat", SessionID: "parent", Engine: "cx", Backend: "herdr", State: "live",
+		HerdrSocket: server.path, HerdrPane: "w6:p3",
+	}
+	stampNativeReporterSeat(t, &seat)
+	db := fleetdb.OpenSharedState(context.Background(), values)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := db.PutSeat(context.Background(), seat); err != nil {
+		t.Fatal(err)
+	}
+	env := herdrPaneEnv(server, "w6:p3")
+	deps := newHerdrJail(t).deps(env, new(int64))
+	deps.seatPaths = &values
+	deps.getpid = os.Getpid
+	deps.getenv = func(key string) string {
+		if key == paths.EnvProcRoot {
+			return os.Getenv(key)
+		}
+		return env[key]
+	}
+	return server, deps, db, seat
+}
+
+func TestHerdrCodexSubagentHooksPreserveParent(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		for _, metadata := range []string{
+			`{"type":"session_meta","payload":{"id":"child","thread_source":"subagent","parent_thread_id":"parent"}}`,
+			`{"type":"session_meta","payload":{"id":"child","parent_thread_id":"parent","source":"cli"}}`,
+			`{"type":"session_meta","payload":{"id":"child","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent"}}}}}`,
+		} {
+			for _, event := range []string{"start", "working", "blocked", "idle", "end"} {
+				t.Run(strconv.FormatBool(native)+"/"+event+"/"+metadata, func(t *testing.T) {
+					payload := codexHookPayload(t, "child", metadata, `,"source":"startup","tool_name":"exec_command"`)
+					if native {
+						server, deps, db, seat := codexNativeRig(t)
+						var stderr bytes.Buffer
+						reportToHerdr([]string{"--engine", "codex", event}, strings.NewReader(payload), &stderr, deps)
+						current, found, err := db.Seat(context.Background(), seat.SeatID)
+						if err != nil || !found || current.SessionID != "parent" || len(server.requests()) != 0 {
+							t.Fatalf(
+								"subagent %s changed native parent: seat=%+v found=%v err=%v requests=%v stderr=%s",
+								event,
+								current,
+								found,
+								err,
+								server.requests(),
+								&stderr,
+							)
+						}
+						return
+					}
+					rig := codexRig(t)
+					rig.wantQuiet(rig.codex("start", "parent", `,"source":"startup"`))
+					rig.wantQuiet(rig.codex("working", "parent"))
+					before := len(rig.herdr.requests())
+					rig.wantQuiet(rig.run([]string{"--engine", "codex", event}, payload))
+					if len(rig.herdr.requests()) != before ||
+						!slices.Equal(codexRecords(t, rig.jail.lockDir), []string{"parent"}) {
+						t.Fatalf("subagent %s changed parent: records=%v requests=%v", event,
+							codexRecords(t, rig.jail.lockDir), rig.herdr.requests())
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHerdrCodexSubagentWithoutRolloutUsesState(t *testing.T) {
+	descriptor := pfmengine.MustLookup(pfmengine.Codex)
+	for _, source := range []string{"subagent", "agent-path", "selected-home", "root-list", "default-home"} {
+		t.Run(source, func(t *testing.T) {
+			server, deps, db, seat := codexNativeRig(t)
+			home := t.TempDir()
+			state, err := sqlitedb.OpenReadWrite(filepath.Join(home, "state_5.sqlite"), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			threadSource, agentPath := "subagent", ""
+			if source == "agent-path" {
+				threadSource, agentPath = "", "/root/worker"
+			}
+			_, err = state.Exec("CREATE TABLE threads (id TEXT PRIMARY KEY, thread_source TEXT, agent_path TEXT)")
+			if err == nil {
+				_, err = state.Exec("INSERT INTO threads VALUES (?, ?, ?)", "child", threadSource, agentPath)
+			}
+			if err = errors.Join(err, state.Close()); err != nil {
+				t.Fatal(err)
+			}
+			getenv := deps.getenv
+			otherHome := t.TempDir()
+			deps.codexHome = home
+			deps.getenv = func(key string) string {
+				if key == descriptor.HomeEnv {
+					if source == "root-list" || source == "default-home" {
+						return ""
+					}
+					return home
+				}
+				if key == descriptor.RootEnv {
+					switch source {
+					case "selected-home":
+						return otherHome
+					case "root-list":
+						return otherHome + string(os.PathListSeparator) + home
+					default:
+						return ""
+					}
+				}
+				return getenv(key)
+			}
+			for _, event := range []string{"start", "blocked", "working", "idle", "end"} {
+				var stderr bytes.Buffer
+				reportToHerdr(
+					[]string{"--engine", "codex", event},
+					strings.NewReader(`{"session_id":"child"}`),
+					&stderr,
+					deps,
+				)
+				current, found, err := db.Seat(context.Background(), seat.SeatID)
+				if err != nil || !found || current.SessionID != "parent" || len(server.requests()) != 0 {
+					t.Fatalf("rollout-less subagent %s changed parent: seat=%+v found=%v err=%v requests=%v stderr=%s",
+						event, current, found, err, server.requests(), &stderr)
+				}
+			}
+		})
+	}
+}
+
+func TestHerdrCodexRootWithoutRolloutStillWorks(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		for _, missing := range []bool{false, true} {
+			t.Run(strconv.FormatBool(native)+"/"+strconv.FormatBool(missing), func(t *testing.T) {
+				rig := codexRig(t)
+				server, deps, _, _ := codexNativeRig(t)
+				if !native {
+					server = rig.herdr
+				}
+				for _, event := range []string{"start", "working"} {
+					hook := "SessionStart"
+					if event == "working" {
+						hook = "UserPromptSubmit"
+					}
+					payload := map[string]string{"session_id": "parent", "hook_event_name": hook, "source": "startup"}
+					if missing {
+						payload["transcript_path"] = filepath.Join(t.TempDir(), "not-written-yet.jsonl")
+					}
+					raw, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var stderr bytes.Buffer
+					if native {
+						reportToHerdr([]string{"--engine", "codex", event}, bytes.NewReader(raw), &stderr, deps)
+					} else {
+						got := rig.run([]string{"--engine", "codex", event}, string(raw))
+						if got.rc != 0 {
+							t.Fatal(got)
+						}
+					}
+				}
+				calls := server.requests()
+				if len(calls) != 2 || !strings.Contains(calls[1], `"state":"working"`) {
+					t.Fatalf("rollout-less root did not reach working: %v", calls)
+				}
+			})
+		}
+	}
+}
+
+func TestHerdrCodexBlockingAndAsyncQuestions(t *testing.T) {
+	rig := codexRig(t)
+	rig.wantQuiet(rig.codex("start", "parent", `,"source":"startup"`))
+	for _, step := range []struct{ event, tool, state, message string }{
+		{"working", "", "working", ""},
+		{"blocked", "exec_command", "blocked", "waiting for approval: exec_command"},
+		{"working", "exec_command", "working", ""},
+		{"blocked", "request_user_input_async", "working", ""},
+		{"idle", "", "idle", ""},
+	} {
+		rig.wantQuiet(rig.codex(step.event, "parent", `,"tool_name":"`+step.tool+`"`))
+		calls := rig.herdr.requests()
+		last := calls[len(calls)-1]
+		if !strings.Contains(last, `"state":"`+step.state+`"`) ||
+			step.message != "" && !strings.Contains(last, step.message) {
+			t.Errorf(
+				"%s %s reported %s; want state=%s message=%q",
+				step.event,
+				step.tool,
+				last,
+				step.state,
+				step.message,
+			)
+		}
+	}
+}
+
+func TestHerdrCodexUnknownLineagePreservesReportingAndLogsFailures(t *testing.T) {
+	for _, mode := range []string{"missing", "malformed", "directory", "mismatch", "unknown", "broken-state"} {
+		t.Run(mode, func(t *testing.T) {
+			rig := codexRig(t)
+			raw := `{"type":"session_meta","payload":{"id":"root","source":"cli"}}`
+			if mode == "malformed" {
+				raw = "{"
+			}
+			if mode == "mismatch" {
+				raw = `{"type":"session_meta","payload":{"id":"other","thread_source":"subagent"}}`
+			}
+			if mode == "unknown" {
+				raw = `{"type":"session_meta","payload":{"id":"root"}}`
+			}
+			payload := codexHookPayload(t, "root", raw)
+			var decoded herdrPayload
+			if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "missing" || mode == "directory" || mode == "broken-state" {
+				if err := os.Remove(decoded.TranscriptPath); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "directory" {
+				if err := os.Mkdir(decoded.TranscriptPath, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "broken-state" {
+				home := t.TempDir()
+				rig.env[paths.EnvCodexHome] = home
+				if err := os.WriteFile(filepath.Join(home, "state_5.sqlite"), []byte("not sqlite"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, event := range []string{"start", "working", "idle", "end"} {
+				got := rig.run([]string{"--engine", "codex", event}, payload)
+				if got.rc != 0 || mode != "unknown" && !strings.Contains(got.stderr, "report retained") {
+					t.Fatalf("%s root event dropped or failure silent: %+v", event, got)
+				}
+			}
+			rig.wantCalls(
+				codexReportCall("w1:p1", "idle", "root", ""),
+				codexReportCall("w1:p1", "working", "root", ""),
+				codexReportCall("w1:p1", "idle", "root", ""),
+				`pane.release_agent {"pane_id":"w1:p1","source":"pfm","agent":"codex"}`,
+				`pane.report_metadata {"pane_id":"w1:p1","source":"pfm","clear_title":true}`,
+			)
+		})
+	}
 }

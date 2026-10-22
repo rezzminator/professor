@@ -9,11 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/costledger"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // A Codex hook never names its pane through its own environment: a bare
@@ -314,4 +317,69 @@ func removeCodexPane(path string) error {
 		return fmt.Errorf("remove the Codex pane registration %s: %w", path, err)
 	}
 	return nil
+}
+
+// Codex subagents share the TUI's ancestry, never its state or restore identity.
+// Missing/newborn rollouts are not proof of a child: preserve root hooks on doubt.
+func (reporter *herdrReporter) codexSubagent(ctx context.Context, payload herdrPayload) bool {
+	if reporter.options.engine != pfmengine.Codex || reporter.options.event.FiredByTmux() {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer cancel()
+	if payload.TranscriptPath != "" {
+		header, err := codexmeta.ReadHeader(payload.TranscriptPath)
+		switch {
+		case err != nil:
+			reporter.warn("Codex hook %s session %s: read lineage from %s (report retained unless child proven): %v",
+				reporter.options.event, payload.SessionID, payload.TranscriptPath, err)
+		case header.ID != "" && header.ID != payload.SessionID:
+			reporter.warn("Codex hook %s session %s: rollout %s belongs to %s (identity ignored, report retained)",
+				reporter.options.event, payload.SessionID, payload.TranscriptPath, header.ID)
+		case codexChildIdentity(header):
+			return true
+		case header.Kind == codexmeta.User:
+			return false
+		}
+	}
+	descriptor := pfmengine.MustLookup(pfmengine.Codex)
+	// The launcher's selected account is authoritative; RootEnv is a discovery
+	// search list, not necessarily the home this Codex process uses.
+	homes := []string{reporter.deps.getenv(descriptor.HomeEnv)}
+	if homes[0] == "" {
+		homes = filepath.SplitList(reporter.deps.getenv(descriptor.RootEnv))
+		if len(homes) == 0 {
+			homes = []string{reporter.deps.codexHome}
+		}
+	}
+	for _, home := range homes {
+		files, err := store.CodexStateFiles(home)
+		if err != nil {
+			reporter.warn("Codex hook %s session %s: list lineage stores in %s (report retained): %v",
+				reporter.options.event, payload.SessionID, home, err)
+			continue
+		}
+		for _, file := range files {
+			identity, found, err := store.ReadCodexThreadIdentity(ctx, file, payload.SessionID)
+			if err != nil {
+				reporter.warn(
+					"Codex hook %s session %s: inspect lineage store %s (report retained unless child proven): %v",
+					reporter.options.event,
+					payload.SessionID,
+					file,
+					err,
+				)
+				continue
+			}
+			if found {
+				return codexChildIdentity(codexmeta.Header{Fields: identity})
+			}
+		}
+	}
+	return false
+}
+
+func codexChildIdentity(header codexmeta.Header) bool {
+	return header.Kind == codexmeta.Subagent || header.ThreadSource == "subagent" ||
+		header.ParentThreadID != "" || strings.HasPrefix(header.AgentPath, "/root/")
 }

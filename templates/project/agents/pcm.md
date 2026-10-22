@@ -33,7 +33,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ### Critical invariants
 
 - Path variables: agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- Pipeline flow lives in the fleet prompt § Orchestration and the `flights-*` descriptions (main chat → a `flights-foreman` tier → main chat → `flights-lander` → gitter; `/flights:doctor` meters a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
+- Pipeline flow lives in the `flights-*` descriptions (main chat → a `flights-foreman` tier → main chat → `flights-lander` → gitter; `/flights:doctor` meters a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
 - Agent frontmatter matches behavior: `name`, `description`, `tools`.
 - Registry over tables: a command's or skill's `description:` is its routing, written to `/quality:description`; `disable-model-invocation: true` hides a command from the model and goes only on user-triggered-by-design commands.
 - No command over 35KB, no agent over 15KB. Every `general-purpose` spawn carries the full root `CLAUDE.md`, so a root line is the most expensive line; `@path` imports expand at launch, so cut content, never relocate it.
@@ -88,11 +88,11 @@ Consistency checklist:
 - `worktree.sh` project resolution matches directory names
 - Every `flights-*` agent and `/flights:doctor` named resolves to an installed file
 - Tech stack descriptions match `package.json` or `pyproject.toml` deps
-- The chain each `flights-*` description names (predecessor → successor) matches the fleet prompt § Orchestration
+- The chain each `flights-*` description names (predecessor → successor) matches its agent protocol and its neighbours' descriptions
 
 ### 3 Plan
 
-Group changes into breaking (atomic) and non-breaking (independent). Route by the fleet prompt § Orchestration ladder: direct work is yours or one sub-agent's; anything larger goes to the foreman tier its difficulty calls for, with requirements settled first; you apply and verify its return, and the main chat lands it.
+Group changes into breaking (atomic) and non-breaking (independent). Settle requirements before dispatch; choose any foreman tier by the `flights-foreman*` descriptions. You apply and verify its return; the main chat lands it through `flights-lander`.
 
 ### 4 Execute
 

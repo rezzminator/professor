@@ -31,7 +31,7 @@ Every session and sub-agent reads the orientation file whole before its first to
 
 - Order is define-before-use.
 - `#` marks a spine section, `##` its child; exempt the file from the markdown linter's single-title and heading-level rules.
-- A top-level section outside the spine exists only when its content fits no spine section and passes § Rules admission — typically a protocol every reader runs first (a sub-agent's first move), placed where that reader meets it.
+- A top-level section outside the spine exists only when its content fits no spine section and passes § Rules admission.
 
 ## Title and stake
 

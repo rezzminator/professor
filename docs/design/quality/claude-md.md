@@ -66,7 +66,7 @@ What the evidence decides: a directory tour is the content that measurably fails
 
 - Order is define-before-use: Runtime and Rules cite Vocabulary terms bare and never re-explain them, so each term costs its bytes once.
 - `#` marks a spine section, `##` its children; a markdown linter's single-title and heading-level rules are exempted for the orientation file.
-- A top-level section outside the spine exists only when its content fits no spine section and passes § Rules admission — typically a protocol every reader runs first (a sub-agent's first move), placed where that reader meets it.
+- A top-level section outside the spine exists only when its content fits no spine section and passes § Rules admission.
 
 ## Title and stake
 

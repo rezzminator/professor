@@ -15,10 +15,10 @@ This repo is the framework, not an app that uses it: everything under `templates
 - public face: the files a visitor or adopter reads first · `README.md`, `INSTALL.md`, `CHANGELOG.md`, `VERSION`, `releases/v{X.Y.Z}.md`
 - leak gate: the identifying-content scan, run `pre-push` · `scripts/leak-check.sh`, `.githooks/pre-push`
 - pfm: the fleet engine, Go · `pfm/cmd/pfm/`, `pfm/internal/` · child `pfm/CLAUDE.md`
-- fleet prompt: the main chat's system layer per engine, gitignored at `pfm/harness-prompts/generated/{engine}.md`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here · generated from `pfm/harness-prompts/` by `pfm install`
+- fleet prompt: the main chat's system layer per engine, gitignored at `pfm/harness-prompts/generated/{engine}.md`; sub-agents never receive it, so the dispatch law lives under § Rules here · generated from `pfm/harness-prompts/` by `pfm install`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the only web and document harvester, over a pinned Python conversion sidecar · `pfm/internal/harvest/`, `pfm/internal/harvestmcp/`, sidecar `pfm/internal/harvestpy/`
-- flights: the foreman tiers and the lander that build and land work past the direct rung, and `/flights:doctor`, their meter · `templates/global/agents/flights-*.md`, `templates/global/commands/flights/` · design `docs/design/flights/`
+- flights: the foreman tiers and the lander that build and land work, and `/flights:doctor`, their meter · `templates/global/agents/flights-*.md`, `templates/global/commands/flights/` · design `docs/design/flights/`
 - quality laws: the `/quality:*` family every prompt and orientation-file edit loads · `templates/global/commands/quality/` · design `docs/design/quality/`
 - fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - demo fence: for presentations · `infra/demo/`
@@ -86,18 +86,6 @@ This repo is the framework, not an app that uses it: everything under `templates
 - **Version discipline:** `VERSION`, `CHANGELOG.md`, `releases/v{X.Y.Z}.md` and the tag MUST agree; between releases `develop`'s `VERSION` is the next `{X.Y.Z}-alpha`; `/pfm:release` owns the sequence.
 - **Release notes are NEVER written during development:** `/pfm:release` derives them from `develop`'s diff against `main` and its commit messages.
 
-## Your first move as a sub-agent
-
-Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
-
-- A brief carrying the user's ruling to skip the ceremony (no foreman, no spawn): do it yourself, start to finish, whatever its size.
-- Otherwise take the lowest rung that fits; a higher rung needs its named reason.
-  1. The solution is in hand and fits about 80 calls, a small failure you can read to its cause included: do it yourself.
-  2. Anything larger, or work crossing build units: your first call spawns a foreman by difficulty, never size — `flights-foreman-sonnet` the path is clear (the code has the pattern, the requirements are settled), `flights-foreman` design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules, or the toughest challenges where being wrong is costly — with the work, all you hold, acceptance, where to work and the testing manual paths; pass its return up, landing stays with the main chat.
-- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Take the four failing test lanes to green": one foreman. ✗ A planner writing briefs for workers that read the same code again.
-- Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
-
 ## Dispatch
 
 Tiers and effort live in the fleet prompt's § Model Selection; the cast and each agent's pinned model in `.claude/agents/` frontmatter.
@@ -136,7 +124,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build through `.claude/scripts/dev.sh iso`; a foreman runs only its affected tests per `.claude/commands/pfm-testing-manual.md`; the full gate is the lander's.
 - Dev and test runs target fence worktrees, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Template, doc, prompt and config-file changes land on `develop` directly, in the main checkout.
-- A fenced flight closes in order, run by the main chat: once every foreman on the worktree returned, `flights-lander` (fleet prompt § You hold a flight) — its own review, every finding fixed, the full gate once → the authorized Git writer commits to `develop` → the host mirror build under § Host.
+- A fenced flight closes in order, run by the main chat: once every foreman on the worktree returned, `flights-lander` — its own review, every finding fixed, the full gate once → the authorized Git writer commits to `develop` → the host mirror build under § Host.
 - At every milestone, checkpoint the plan to a file, then compact before the next phase; a held turn arms an idle-fired self-call instead.
 - AskUserQuestion is the user's whole screen: context travels inside the question text; each round simpler and more concrete, never a rephrase.
 

@@ -57,17 +57,6 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 - **NEVER commit broken code or merge before the gate passes.**
 - **Only the main loop or the documenter agent it dispatches writes permanent docs,** under the `/quality:doc` Approval gate; `docs/epics/legal/` belongs to `/officer`, `docs/business/` to `/mentor` and `/marketer` (`marketing/`), and `docs/facts/` to the main loop solely on the user's explicit ruling.
 
-## Your first move as a sub-agent
-
-- Before your first tool call, count the tasks in your brief: a task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
-- A brief carrying the user's ruling to skip the ceremony (no foreman, no spawn): do it yourself, start to finish, whatever its size.
-- Otherwise take the lowest rung that fits; a higher rung needs its named reason.
-  1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish.
-  2. Anything larger, or work crossing build units: your first tool call spawns a foreman, its tier by difficulty and ambiguity, never size — `flights-foreman-sonnet` the path is clear (the code has the pattern, the requirements are settled, little is left to decide), `flights-foreman` design choices or ambiguity, unfamiliar code, a bug with a known symptom and an unknown cause, work across several modules, or the toughest challenges where being wrong is costly — handing it the work, everything you already hold, acceptance, where to work and the testing manual paths; pass its return up, landing stays with the main chat.
-- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Take the four failing test lanes to green": one foreman. ✗ A planner writing briefs for workers that read the same code again.
-- Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — not a no-op command, a repeated log peek or a `sleep` chain.
-
 ## Dispatch
 
 - Tiers, effort and delegation posture live in the fleet prompt's § Model Selection — never restated here.

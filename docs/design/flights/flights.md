@@ -197,8 +197,8 @@ The deepest chain is main → foreman → child foreman → tracer → sub-trace
 | The lander's kit | `templates/global/skills/lander-inventory/` | The inventory and the computed spawn |
 | The command | `templates/global/commands/flights/doctor.md` | The meter |
 | The measurement | `pfm tokens --tree` in `pfm/internal/tokens/` | The measure's numbers |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration and § You hold a flight | The ladder, foreman rubric, main-chat landing and close, visible KEEP locks |
-| The project contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The first move of a sub-agent |
+| Dispatch routing | `templates/global/agents/flights-foreman.md`, `templates/global/agents/flights-foreman-sonnet.md` — `description:` | Foreman suitability; main chat → foreman → main chat → flights-lander → gitter |
+| Landing | `templates/global/agents/flights-lander.md` | Main-only landing after every foreman returns: sync, review, fix, affected tests, full gate, report |
 | The tracer | `templates/global/agents/tracer.md`, `templates/global/skills/tracetree/`, `docs/design/tracing/` | The store and its reuse |
 | This directory | `docs/design/flights/` | One file per member, this file for what they share |
 

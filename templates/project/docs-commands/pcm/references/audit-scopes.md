@@ -35,7 +35,7 @@ Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — incl
 
 ## `pipeline` — Walk the flight chain end-to-end
 
-Files: `~/.claude/agents/flights-*.md` and `~/.claude/commands/flights/doctor.md` (machine-global), the fleet prompt § Orchestration, all agents they reference
+Files: `~/.claude/agents/flights-*.md` and `~/.claude/commands/flights/doctor.md` (machine-global), all agents they reference
 
 - **Reference resolution:** every "Read and follow" path → target file exists
 - **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, or `~/.claude/agents/`

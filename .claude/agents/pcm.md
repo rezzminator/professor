@@ -86,7 +86,7 @@ Consistency checklist:
 
 ### 3 Plan
 
-Group changes into breaking (atomic) and non-breaking (independent). Route by the fleet prompt § Orchestration ladder: direct work is yours or one sub-agent's; anything larger goes to the foreman tier its difficulty calls for, with requirements settled first; you apply and verify its return, and the main chat lands it.
+Group changes into breaking (atomic) and non-breaking (independent). Settle requirements before dispatch; choose any foreman tier by the `flights-foreman*` descriptions. You apply and verify its return; the main chat lands it through `flights-lander`.
 
 ### 4 Execute
 

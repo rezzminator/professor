@@ -206,7 +206,7 @@ Marketing dev tasks for the flight pipeline.
 - Ask the user: goal (waitlist, conference, awareness)? audience priority? social proof available? web-only or broader? deadlines? new certifications to market?
 - Each task states what, why, key behaviors, and boundaries; group by category (SEO & Technical, Content & Copy, Conversion, Analytics, i18n), number sequentially, and flag compliance inline as `[WATCH: ...]` or `[BLOCKED: ...]`. Routing and size stay out — the foreman decides those.
 - Produce the task list as `# Tasks`, then `## {Category} ({N} tasks)`, then one numbered line per task carrying its file refs and flags; save it to `/tmp/marketer-flight-{YYYY-MM-DD}.md` as the record.
-- Report the path and task count, then hand the task list as the request to the foreman tier its difficulty calls for (the fleet prompt § Orchestration); the main chat lands its return through `flights-lander`.
+- Report the path and task count, then hand the task list as the request to the foreman tier its difficulty calls for (the `flights-foreman*` descriptions); the main chat lands its return through `flights-lander`.
 
 ## Competitive Messaging
 

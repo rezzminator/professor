@@ -23,7 +23,7 @@ Each row names its transcript `path:line` (`pfm transcript show {id}`).
 
 | Check | Finding |
 | --- | --- |
-| Tier fit | a foreman tier above or below its brief's difficulty (the fleet prompt's foreman rubric: difficulty and ambiguity, never size); a lander spawn off its inventory PLAN — a child added, dropped or re-cut |
+| Tier fit | a foreman tier above or below its brief's difficulty (judged against the `flights-foreman*` descriptions: difficulty and ambiguity, never size); a lander spawn off its inventory PLAN — a child added, dropped or re-cut |
 | Re-reads | a file an agent read again after a tracer answer citing it reached that agent |
 | Store hits | tracer questions answered `TRACE Q{n} · none` from the store, and questions walked again whose cited files were unchanged |
 | Full suites outside the lander | any full suite or gate a foreman ran |

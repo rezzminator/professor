@@ -41,6 +41,9 @@ func (h *Harvester) readerPageChecked(
 	readerHeaders map[string]string,
 ) convertedPage {
 	page := readerPage(source, markdown)
+	if redditThreadURL(source) {
+		page.checks = "the Reddit extractor could not run: scores, nesting and stated-count reconciliation are missing"
+	}
 	wallAsked := paywallCallPattern.MatchString(markdown) || loginWalledHost(source)
 	target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
 	headers := map[string]string{readerHTMLFormat: "html"}
@@ -88,7 +91,7 @@ func (h *Harvester) readerPageChecked(
 		if wallAsked {
 			page.wall = wallCheckFailed(why)
 		}
-		page.checks = readerChecksFailed(why)
+		page.checks = joinReasons(page.checks, readerChecksFailed(why))
 		return page
 	}
 	if wallAsked {
@@ -98,7 +101,7 @@ func (h *Harvester) readerPageChecked(
 	if measure := measureContentRecall(visibleWords(doc), markdown); measure.low() {
 		recall = "the reader's markdown kept " + measure.String()
 	}
-	page.checks = joinReasons(threadGap(ctx, doc), recall)
+	page.checks = joinReasons(page.checks, threadGap(ctx, doc), recall)
 	page.landing = readerLanding(ctx, source, doc)
 	return page
 }

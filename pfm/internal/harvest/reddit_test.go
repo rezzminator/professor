@@ -64,6 +64,99 @@ func TestRedditThreadExtractorRendersTheTreeAndNamesEveryGap(t *testing.T) {
 	}
 }
 
+// A reader copy cannot preserve the thread metadata the site extractor reads from HTML.
+func TestRedditRefusalTriesTheBrowserBeforeReaders(t *testing.T) {
+	t.Parallel()
+	const source = "https://www.reddit.com/r/examplesub/comments/abc123/placeholder_thread_title/"
+	for _, tc := range []struct {
+		name    string
+		browser *bool
+		spy     *browserSpyConverter
+		method  string
+	}{
+		{"thread rendered", browserOn(), &browserSpyConverter{html: wallFixture(t, "reddit-thread-rendered.html"), status: http.StatusOK}, "browser-chrome"},
+		{"browser refused", browserOn(), &browserSpyConverter{html: "<html><body>checking your browser</body></html>", status: http.StatusForbidden}, "jina"},
+		{"browser unavailable", browserOn(), &browserSpyConverter{err: errors.New("chrome missing")}, "jina"},
+		{"browser disabled", browserOff(), &browserSpyConverter{}, "jina"},
+		{"defuddle fallback", browserOn(), &browserSpyConverter{status: http.StatusForbidden}, "defuddle-reader"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Host == "defuddle.md" {
+					return response(
+						request,
+						http.StatusOK,
+						"text/plain",
+						strings.Repeat("Reader thread copy with comments. ", 30),
+					), nil
+				}
+				return response(
+					request,
+					http.StatusForbidden,
+					"text/html",
+					"<html><body>checking your browser</body></html>",
+				), nil
+			})
+			reader := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if tc.method == "defuddle-reader" && request.Header.Get(readerHTMLFormat) != "html" {
+					return response(request, http.StatusServiceUnavailable, "text/plain", "busy"), nil
+				}
+				if *tc.browser && tc.spy.browserCalls == 0 {
+					t.Error("reader was asked before the enabled browser could render the Reddit thread")
+				}
+				if request.Header.Get(readerHTMLFormat) == "html" {
+					return response(
+						request,
+						http.StatusOK,
+						"text/html",
+						"<html><body><p>Reader copy.</p></body></html>",
+					), nil
+				}
+				return response(
+					request,
+					http.StatusOK,
+					"text/plain",
+					strings.Repeat("Reader thread copy with comments. ", 30),
+				), nil
+			})
+			h := mustNew(t, Options{
+				CacheDir: t.TempDir(),
+				Client:   &http.Client{Transport: origin},
+				Chrome: &http.Client{
+					Transport: origin,
+				},
+				Jina:        &http.Client{Transport: reader},
+				OA:          &http.Client{Transport: origin},
+				Converter:   tc.spy,
+				BrowserRung: tc.browser,
+				Clock:       newPacingClock(),
+			})
+			result := h.FetchWithOptions(context.Background(), source, FetchOptions{Refresh: true})
+			if result.Error != "" || result.Method != tc.method {
+				t.Fatalf(
+					"Reddit refusal stored method=%q rungs=%v error=%q, want %s",
+					result.Method,
+					result.Rungs,
+					result.Error,
+					tc.method,
+				)
+			}
+			if *tc.browser && tc.spy.browserCalls != 1 {
+				t.Errorf("browser rendered %d times, want once", tc.spy.browserCalls)
+			}
+			if tc.method == "browser-chrome" {
+				for _, want := range []string{"# Placeholder thread title", "**Score:** 321", "12 stated · 8 loaded", "  - **u/bravo_placeholder** · 55 points"} {
+					if !strings.Contains(result.Content, want) {
+						t.Errorf("rendered Reddit thread lacks %q", want)
+					}
+				}
+			} else if !strings.Contains(result.Partial, "the Reddit extractor could not run: scores, nesting and stated-count reconciliation are missing") {
+				t.Fatalf("reader copy omitted the Reddit extraction gap: %q", result.Partial)
+			}
+		})
+	}
+}
+
 // TestRedditSSRPageEscalatesToTheBrowserRung: the plain GET returns the first
 // page of comments (inside a <template>); the extractor flags it partial, so
 // the ladder spends the browser rung — skipping the readers, which cannot load
@@ -789,5 +882,26 @@ func TestRedditContinuedThreadServedEmptyIsNotAGap(t *testing.T) {
 				t.Fatalf("a failed continuation is not flagged: %q", result.Partial)
 			}
 		})
+	}
+}
+
+func TestRedditThreadURL(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		source string
+		want   bool
+	}{
+		{"https://www.reddit.com/r/examplesub/comments/abc123/title/", true},
+		{"https://reddit.com/comments/abc123", true},
+		{"https://old.reddit.com/user/example/comments/abc123/title/", true},
+		{"https://www.reddit.com/r/examplesub/", false},
+		{"https://www.reddit.com/r/comments/wiki/", false},
+		{"https://www.reddit.com/user/example/", false},
+		{"https://notreddit.com/r/examplesub/comments/abc123/", false},
+		{"https://reddit.com.example.test/comments/abc123/", false},
+	} {
+		if got := redditThreadURL(tc.source); got != tc.want {
+			t.Errorf("redditThreadURL(%q) = %t, want %t", tc.source, got, tc.want)
+		}
 	}
 }

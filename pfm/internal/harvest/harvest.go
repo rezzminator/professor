@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"net/url"
@@ -401,66 +402,17 @@ func (h *Harvester) fetchURLWithPolicy(
 	// No reader or archive copy stands in for a missing origin, nor for a hash route's view (hashRouteShell).
 	originGone := originMissing(lastStatus, lastChallenge, source) || hashRouteShell(ctx, source, lastPage) ||
 		gaps.refused != "" // an address redirecting to a login or the home page: no copy stands in for it
-	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
-		rungs = append(rungs, "jina")
-		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
-		// A reader rung speaks to the reader, not the target: its status and
-		// Retry-After are never the site's (noteRungOutcome, retry_after.go).
-		answer := h.jinaRead(withoutRetryAfterNote(ctx), target, options.Refresh)
-		body, status, err := answer.body, answer.status, answer.err
-		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
-		if err == nil && status < 400 && !isChallenge(body, status) && jinaTargetError(body) == 0 {
-			// Jina Reader already returns clean Markdown. Feeding it back into an
-			// HTML converter loses headings and code blocks, so preserve it as the
-			// original HTML-source kind for cache/type semantics.
-			converted, convErr := quoraReaderPage(source, pageText(stripJinaEnvelope(string(body)))), error(nil)
-			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
-				!sameAsShell(appShellText, converted) && !loaders.readerGateOnly(source, converted) {
-				checked := h.readerPageChecked(ctx, source, converted, answer.headers)
-				checked.checks = joinReasons(checked.checks, answer.stale)
-				stored := checked.withGaps(converted, gaps, loaders)
-				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
-			}
-		}
-	}
-	// defuddle.md — a second keyless reader beside Jina (different infra,
-	// different blocks), tried before the legal mirror pivot.
-	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
-		rungs = append(rungs, "defuddle")
-		target := "https://defuddle.md/" + source
-		body, status, _, err := getBody(withoutRetryAfterNote(ctx), h.client, target, h.userAgent, h.options.MaxBytes)
-		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
-		if err == nil && status < 400 && !isChallenge(body, status) {
-			converted := pageText(stripDefuddleEnvelope(string(body)))
-			longer := contentChars(converted) > lastContentChars || appShellText != ""
-			gate := loaders.readerGateOnly(source, converted) // recorded even for a copy not longer
-			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
-				!sameAsShell(appShellText, converted) && !gate {
-				return h.storeResult(
-					source,
-					kindHTML,
-					"defuddle-reader",
-					h.readerPageChecked(ctx, source, converted, nil).withGaps(converted, gaps, loaders),
-					int64(len(body)),
-					status,
-					rungs,
-					options,
-				)
-			}
-		}
-	}
-	// Real-browser rung (opt-in, fetch.browser): Patchright + system
-	// Chrome. Passes passive bot walls — including the Cloudflare MANAGED
-	// challenge tier — that no HTTP-client trick can, because it holds a real
-	// browser surface. It never solves anything interactive. Sits after
-	// defuddle and before the legal mirror pivot, exactly like the retired
-	// Python dispatch ladder.
+	// Reddit's thread extractor needs the original DOM for scores and the comment
+	// tree. Give the browser that chance before a reader discards the markup.
 	browserRan := false
 	browserEmptyRender := false
 	browserUnavailable := ""
 	browserPolicyRefused := false
 	converterOutage := false
-	if h.settings.browser && !isPrivateURL(source) && guess != kindPDF {
+	tryBrowser := func() (Result, bool) {
+		if !h.settings.browser || isPrivateURL(source) || guess == kindPDF {
+			return Result{}, false
+		}
 		rungs = append(rungs, "browser")
 		if browserFetcher, ok := h.options.Converter.(BrowserFetcher); !ok {
 			browserUnavailable = "no BrowserFetcher adapter is wired into this Harvester"
@@ -530,10 +482,75 @@ func (h *Harvester) fetchURLWithPolicy(
 							status,
 							rungs,
 							options,
-						)
+						), true
 					}
 				}
 			}
+		}
+		return Result{}, false
+	}
+	browserFirst := redditThreadURL(source)
+	if browserFirst {
+		if result, ok := tryBrowser(); ok {
+			return result
+		}
+	}
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
+		rungs = append(rungs, "jina")
+		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
+		// A reader rung speaks to the reader, not the target: its status and
+		// Retry-After are never the site's (noteRungOutcome, retry_after.go).
+		answer := h.jinaRead(withoutRetryAfterNote(ctx), target, options.Refresh)
+		body, status, err := answer.body, answer.status, answer.err
+		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
+		if err == nil && status < 400 && !isChallenge(body, status) && jinaTargetError(body) == 0 {
+			// Jina Reader already returns clean Markdown. Feeding it back into an
+			// HTML converter loses headings and code blocks, so preserve it as the
+			// original HTML-source kind for cache/type semantics.
+			converted, convErr := quoraReaderPage(
+				source,
+				pageText(html.UnescapeString(stripJinaEnvelope(string(body)))),
+			), error(
+				nil,
+			)
+			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
+				!sameAsShell(appShellText, converted) && !loaders.readerGateOnly(source, converted) {
+				checked := h.readerPageChecked(ctx, source, converted, answer.headers)
+				checked.checks = joinReasons(checked.checks, answer.stale)
+				stored := checked.withGaps(converted, gaps, loaders)
+				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
+			}
+		}
+	}
+	// defuddle.md — a second keyless reader beside Jina (different infra,
+	// different blocks), tried before the legal mirror pivot.
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
+		rungs = append(rungs, "defuddle")
+		target := "https://defuddle.md/" + source
+		body, status, _, err := getBody(withoutRetryAfterNote(ctx), h.client, target, h.userAgent, h.options.MaxBytes)
+		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
+		if err == nil && status < 400 && !isChallenge(body, status) {
+			converted := pageText(html.UnescapeString(stripDefuddleEnvelope(string(body))))
+			longer := contentChars(converted) > lastContentChars || appShellText != ""
+			gate := loaders.readerGateOnly(source, converted) // recorded even for a copy not longer
+			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
+				!sameAsShell(appShellText, converted) && !gate {
+				return h.storeResult(
+					source,
+					kindHTML,
+					"defuddle-reader",
+					h.readerPageChecked(ctx, source, converted, nil).withGaps(converted, gaps, loaders),
+					int64(len(body)),
+					status,
+					rungs,
+					options,
+				)
+			}
+		}
+	}
+	if !browserFirst {
+		if result, ok := tryBrowser(); ok {
+			return result
 		}
 	}
 	if partialPage != nil {

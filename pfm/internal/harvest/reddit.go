@@ -51,9 +51,23 @@ var redditQuota = siteQuota{site: "Reddit", requests: 200, window: 10 * time.Min
 
 var redditReplyCountRe = regexp.MustCompile(`(\d[\d,]*)\s+more\s+repl`)
 
+const redditHost = "reddit.com"
+
 // redditPartialAccept asks a loader for its fragment of the tree alone, as the
 // page's own loader element does; without it Reddit answers the whole page.
 const redditPartialAccept = "text/vnd.reddit.partial+html, text/html;q=0.9"
+
+// redditThreadURL distinguishes comment threads from subreddit and profile listings.
+func redditThreadURL(source string) bool {
+	page, err := url.Parse(source)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(page.Hostname())
+	return (host == redditHost || strings.HasSuffix(host, "."+redditHost)) && redditThreadPath.MatchString(page.Path)
+}
+
+var redditThreadPath = regexp.MustCompile(`^/(?:r/[^/]+/|user/[^/]+/)?comments/[^/]+(?:/|$)`)
 
 // redditComment is one rendered comment line block.
 type redditComment struct {
@@ -76,7 +90,7 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 	// renders; kept, they make one thread two different artifacts.
 	renderer := markdownRenderer{base: base, textOnly: func(link *url.URL) bool {
 		host := strings.ToLower(link.Hostname())
-		ownHost := host == "reddit.com" || strings.HasSuffix(host, ".reddit.com")
+		ownHost := host == redditHost || strings.HasSuffix(host, "."+redditHost)
 		return ownHost && strings.HasPrefix(link.Path, "/search")
 	}}
 

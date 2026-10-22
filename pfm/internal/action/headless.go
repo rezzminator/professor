@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -36,8 +37,8 @@ type HeadlessRequest struct {
 	CWD             string
 	Prompt          string
 	// PromptChannel is already composed for the selected engine: a per-seat
-	// system-prompt file path for Claude, or the complete developer
-	// instructions value for Codex. Empty preserves the ordinary launch.
+	// system-prompt file path for Claude, complete developer instructions for
+	// Codex, or native policy text for OpenCode. Empty preserves the ordinary launch.
 	PromptChannel  string
 	Home           string
 	PrimaryAccount int
@@ -392,13 +393,26 @@ func codexAutonomyArgs(yolo bool) []string {
 	return append(args, "--sandbox", "workspace-write")
 }
 
+// OpenCodeEffort shares the reasoning-effort vocabulary with Codex. The native
+// seat plugin also checks that the resolved OpenCode model provides the variant.
+func OpenCodeEffort(effort string) (string, error) {
+	if effort == "" {
+		return "", nil
+	}
+	lower := strings.ToLower(effort)
+	if _, known := codexEfforts[lower]; !known {
+		return "", fmt.Errorf("unknown OpenCode effort %q", effort)
+	}
+	return lower, nil
+}
+
 // PlanOpenCode uses the same launch producer as an interactive fresh seat.
 func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
+	if hasNUL(request.PromptChannel) || !utf8.ValidString(request.PromptChannel) {
+		return HeadlessPlan{}, errors.New("OpenCode prompt channel requires UTF-8 policy text without NUL")
+	}
 	if err := validateHeadlessRequest(request); err != nil {
 		return HeadlessPlan{}, err
-	}
-	if request.Effort != "" || request.PromptChannel != "" {
-		return HeadlessPlan{}, errors.New("OpenCode headless effort and prompt channel are not supported")
 	}
 	machine := normalizedMachineConfig(request.Config, request.Home)
 	launch := Request{
@@ -411,6 +425,22 @@ func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
 	}
 	if err := applyWorkbench(&launch); err != nil {
 		return HeadlessPlan{}, err
+	}
+	launch.Persona.Model = launch.Persona.ModelOr(request.Model)
+	var err error
+	launch.Persona.Effort, err = OpenCodeEffort(launch.Persona.EffortOr(request.Effort))
+	if err != nil {
+		return HeadlessPlan{}, err
+	}
+	// A workbench's canonical body already travels through instructions and its
+	// seat plugin. Other composed policy is appended beside native/project policy.
+	if request.PromptChannel != launch.Persona.Body {
+		launch.OpenCodePromptChannel = request.PromptChannel
+	}
+	if launch.Persona.Model != "" || launch.Persona.Effort != "" || launch.OpenCodePromptChannel != "" {
+		if err := attachOpenCodeSeatPlugin(&launch); err != nil {
+			return HeadlessPlan{}, err
+		}
 	}
 	plan, err := Synthesize(launch)
 	if err != nil {

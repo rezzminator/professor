@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -510,7 +511,7 @@ func TestChatNameNativeDeliveryConvergesWithoutTmuxWindow(t *testing.T) {
 }
 
 func TestChatNewNativeRawEngineBirth(t *testing.T) {
-	for _, engine := range []string{"codex", "opencode"} {
+	for _, engine := range []string{"codex", "opencode", "opencode-workbench"} {
 		t.Run(engine, func(t *testing.T) {
 			jail := newRunJail(t)
 			defer jail.killSockets(t)
@@ -579,8 +580,25 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			directory, selected := jail.root, engine
+			if engine == "opencode-workbench" {
+				directory, _ = newWorkbenchRunFixture(t, jail)
+				if err := atomicfile.Write(paths.WorkbenchManifest(directory), []byte(
+					`{"prompt":"scribe.md","engines":["opencode"],"model":"openai/other","effort":"medium"}`,
+				), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
+				selected = "ox"
+			}
+			args := []string{"new", "--engine", selected, "--name", "RAW", "--cwd", directory}
+			prompt := "First task 'quoted'\nsecond line"
+			if engine != "codex" {
+				args = append(args, "--model", "openai/gpt-6.1-sol", "--effort", "high", prompt)
+				runtime.Config.OpenCode.Binary = binary
+			}
 			code := runChatWithRuntime(
-				[]string{"new", "--engine", engine, "--name", "RAW", "--cwd", jail.root},
+				args,
 				nil,
 				&stdout,
 				&stderr,
@@ -605,6 +623,27 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 					recipes,
 					recipeErr,
 				)
+			}
+			if engine != "codex" {
+				recipe, err := state.ReadSeatRun(seats[0].SeatID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, word := range []string{"--model", "openai/gpt-6.1-sol", "--prompt", prompt} {
+					if !slices.Contains(recipe.Args, word) {
+						t.Errorf("native recipe lacks %q: %+v", word, recipe)
+					}
+				}
+				if recipe.Binary != binary || slices.Contains(recipe.Args, "--variant") ||
+					!slices.Contains(recipe.Env, "PFM_OPENCODE_MODEL=openai/gpt-6.1-sol") ||
+					!slices.Contains(recipe.Env, "PFM_OPENCODE_VARIANT=high") {
+					t.Errorf("native model/effort/binary recipe=%+v", recipe)
+				}
+				if engine == "opencode-workbench" &&
+					(!slices.Contains(recipe.Env, "PFM_OPENCODE_SYSTEM_FILE="+filepath.Join(directory, ".professor", "scribe.md")) ||
+						strings.Contains(strings.Join(recipe.Env, "\n"), "PFM_OPENCODE_POLICY=You are scribe.")) {
+					t.Errorf("canonical persona missing or duplicated: %+v", recipe)
+				}
 			}
 		})
 	}

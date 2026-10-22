@@ -251,3 +251,88 @@ process.stdout.write(JSON.stringify({system: output.system, same: output.system 
 		})
 	}
 }
+
+// Exercise the shipped JS hooks, not a Go reconstruction of native config.
+func TestOpenCodeSeatPluginPinsNativeModelVariantAndPolicy(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugin := filepath.Join(t.TempDir(), "seat.mjs")
+	if err := StageOpenCodeSeatPlugin(plugin); err != nil {
+		t.Fatal(err)
+	}
+	driver := `import assert from "node:assert/strict"
+import {pathToFileURL} from "node:url"
+const {WorkbenchSeat} = await import(pathToFileURL(process.argv[1]))
+process.env.PFM_OPENCODE_MODEL = "openai/gpt-6.1-sol"
+process.env.PFM_OPENCODE_VARIANT = "high"
+process.env.PFM_OPENCODE_POLICY = "Launch constitution."
+delete process.env.PFM_OPENCODE_SYSTEM_FILE
+for (const custom of [false, true]) {
+  const name = custom ? "careful" : "build"
+  const policy = {prompt: "Keep my agent policy.", permission: {edit: "deny"}, tools: {bash: false}}
+  const config = {instructions: ["AGENTS.md"], plugin: ["reporter.mjs"], agent: {[name]: {...policy}}}
+  if (custom) config.default_agent = name
+  const hooks = await WorkbenchSeat()
+  await hooks.config(config)
+  assert.deepEqual(config.agent[name], {...policy, model: "openai/gpt-6.1-sol", variant: "high"})
+  assert.deepEqual(Object.keys(config.agent), [name])
+  assert.equal(config.default_agent, custom ? name : undefined)
+  assert.deepEqual(config.instructions, ["AGENTS.md"])
+  assert.deepEqual(config.plugin, ["reporter.mjs"])
+  // Native TUI sends remembered selection before agent.variant; the message
+  // hook must pin the saved user variant before native option/metadata assembly.
+  const remembered = "low"
+  const message = {agent: name, model: {providerID: "openai", modelID: "gpt-6.1-sol", variant: remembered ?? config.agent[name].variant}}
+  assert.equal(typeof hooks["chat.message"], "function", "native message hook must override remembered variant")
+  await hooks["chat.message"]({agent: name, variant: remembered}, {message, parts: []})
+  assert.equal(message.model.variant, "high")
+  const child = {agent: "explore", model: {variant: "low"}}
+  await hooks["chat.message"]({agent: "explore"}, {message: child, parts: []})
+  assert.equal(child.model.variant, "low")
+  const input = {agent: name, message, model: {providerID: "openai", id: "gpt-6.1-sol", variants: {high: {reasoningEffort: "high"}}}}
+  await hooks["chat.params"](input, {options: {}})
+  const nativeOptions = input.model.variants[message.model.variant]
+  assert.equal(nativeOptions.reasoningEffort, "high")
+  await assert.rejects(() => hooks["chat.params"]({...input, message: {model: {variant: "low"}}}, {options: {}}), /requested variant high but message carries low/)
+  await assert.rejects(() => hooks["chat.params"]({...input, model: {...input.model, variants: {low: {}}}}, {options: {}}), /does not support.*high/)
+  await assert.rejects(() => hooks["chat.params"]({...input, model: {...input.model, id: "other"}}, {options: {}}), /requested model/)
+  await hooks["chat.params"]({...input, agent: "title", model: {id: "small"}}, {options: {}})
+  const output = {system: ["Native safety.", "Project policy."]}
+  await hooks["experimental.chat.system.transform"]({}, output)
+  assert.deepEqual(output.system, ["Native safety.", "Project policy.", "Launch constitution."])
+}
+for (const agent of [{disable: true}, {hidden: true}, {mode: "subagent"}, {name: "renamed"}]) {
+  const hooks = await WorkbenchSeat()
+  const config = {agent: {build: {...agent, permission: {edit: "deny"}}}}
+  await assert.rejects(() => hooks.config(config), /default agent build is not an available primary/)
+  // Native can ignore the config error and fall back to plan. Neither hook
+  // may silently accept that fallback with a different model or variant.
+  await assert.rejects(() => hooks["chat.message"]({}, {message: {agent: "plan", model: {variant: "low"}}}), /not an available primary/)
+  await assert.rejects(() => hooks["chat.params"]({agent: "plan", model: {id: "fallback"}}, {}), /not an available primary/)
+  assert.deepEqual(config.agent.build.permission, {edit: "deny"})
+}
+delete process.env.PFM_OPENCODE_MODEL
+for (const config of [{model: "openai/configured"}, {default_agent: "plan", agent: {plan: {model: "openai/planner", permission: {edit: "deny"}}}}]) {
+  const hooks = await WorkbenchSeat()
+  const name = config.default_agent || "build"
+  const expected = config.agent?.[name]?.model ?? config.model
+  await hooks.config(config)
+  assert.equal(config.agent[name].model, expected)
+  assert.equal(config.agent[name].variant, "high")
+}
+for (const config of [{}, {default_agent: "missing"}]) {
+  const hooks = await WorkbenchSeat()
+  await assert.rejects(() => hooks.config(config), /requires an explicit or configured model|default agent missing is not configured/)
+  // Native logs and ignores config-hook errors; the call boundary must refuse too.
+  await assert.rejects(() => hooks["chat.params"]({agent: "build", model: {id: "fallback"}}, {}), /requires an explicit or configured model|default agent missing is not configured/)
+}
+console.log("native launch model/variant/policy fixtures passed")
+`
+	command := exec.Command(node, "--input-type=module", "-e", driver, plugin)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("native launch plugin: %v\n%s", err, output)
+	}
+}

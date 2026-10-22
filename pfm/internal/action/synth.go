@@ -30,7 +30,10 @@ var hygiene = envStripWords(hygieneNames)
 // the extension closes the socket with 1008, and OpenCode's backoff resets on
 // every open — one rejected handshake per second for the life of the chat.
 // Claude keeps the variable: the CLI reads the token and the IDE link is wanted.
-var opencodeHygieneNames = append(append([]string{}, hygieneNames...), "CLAUDE_CODE_SSE_PORT")
+var opencodeHygieneNames = append(append([]string{}, hygieneNames...),
+	"CLAUDE_CODE_SSE_PORT", "PFM_OPENCODE_MODEL", "PFM_OPENCODE_VARIANT", "PFM_OPENCODE_POLICY",
+	"PFM_OPENCODE_SYSTEM_FILE", "PFM_OPENCODE_FLEET_FILE",
+)
 
 var opencodeHygiene = envStripWords(opencodeHygieneNames)
 

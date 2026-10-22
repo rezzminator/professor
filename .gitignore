@@ -1,5 +1,9 @@
 .DS_Store
 /pfm.config.json
+/harvester.config.json
+# Pre-plugin harvester config and cache beside pfm.config.json (gateway credentials, private pages): `pfm install` moves the config and `harvester setup` the cache to the harvester's own homes.
+.harvester-cache/
+.harvester-state/
 *.swp
 *.bak
 node_modules/

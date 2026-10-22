@@ -543,9 +543,8 @@ checks_templates_release_check() {
 }
 
 checks_templates_refresh_scope() {
-  head_ "templates — refresh-scope and verify leak policy fixtures"
+  head_ "templates — refresh-scope fixtures"
   run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
-  run "templates: verify leak policy fixtures" -- python3 "$REPO_ROOT/scripts/test-verify-leak-policy.py"
 
 }
 

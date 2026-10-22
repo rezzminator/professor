@@ -7,7 +7,7 @@ import tempfile
 import time
 import traceback
 
-from . import census, cost, locate, rows, waits
+from . import census, cost, locate, rows, waits, metrics
 from .digest import EVENT_LINE, Request, build, clean
 from .engines import Failure, load as load_jsonl, opencode
 from .labels import MECH, mechanical
@@ -38,6 +38,8 @@ USAGE = """chatlog kit: the mechanics of reading transcripts, so a reader only r
                           spawns, USD, final line), a TOTAL row, FAILED per unreadable one,
                           GAPS per transcript whose dollars carry data gaps;
                           --tree the spawn tree with calls and USD rolled up per branch
+  metrics --manifest FILE --prices FILE --out FILE [--gateway DB]
+                          response-id usage, tool batching, waits and per-run audit metrics as JSON
   waits --calls TARGET | [--type-re RE] [--child-re RE] [--since 14d] [--root DIR]... [--host NAME] [--gap S] [--out F]
                           per sub-agent run of the matched types (default the reviewers): its wall,
                           its children's spawn-to-return, its idle while a child was out, its
@@ -57,7 +59,7 @@ def parse(target, path):
 def prep(args):
     lines = opt(args, "--lines", "")
     dirp = opt(args, "--dir")
-    window = int(opt(args, "--window", "40000"))
+    window = int(opt(args, "--window", "16000"))
     rmax = int(opt(args, "--reader-max", "250000"))
     if len(args) != 1:
         die("usage: chatlog.py prep TARGET [--lines A-B] [--dir DIR] [--window BYTES] [--reader-max BYTES]", 2)
@@ -246,7 +248,7 @@ def split_plan(dig, rmax):
 def main(argv):
     verbs = {"prep": prep, "read": rows.read, "find": find, "note": rows.note, "report": rows.report,
              "verify": rows.verify, "prompts": rows.prompts, "writes": rows.writes, "entry": entry, "runs": locate.runs, "census": census.census,
-             "waits": waits.waits}
+             "waits": waits.waits, "metrics": metrics.metrics}
     if len(argv) < 2 or argv[1] not in verbs:
         die(USAGE, 2)
     try:

@@ -134,7 +134,7 @@ func TestClaudeCodexCxSkipTerminalOwnershipWithoutHelpers(t *testing.T) {
 		t.Fatalf("claude/codex/cx without helpers: %v: %s", err, output)
 	}
 	got := string(output)
-	for _, want := range []string{"claude=7", "codex=9", "cx: needs an interactive terminal", "cx=1", "pfm=0"} {
+	for _, want := range []string{"claude=7", "codex=0", "cx: needs an interactive terminal", "cx=1", "pfm=0"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output=%q, want %q", got, want)
 		}
@@ -689,65 +689,28 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 	}
 }
 
-// A `codex` typed into a shell runs in-process: the shim asks `pfm internal codex-transport` about the
-// same arguments and hands Codex its answer before them, so the chat's hooks run under the TUI and
-// reach its pane. A pfm that cannot answer is said on stderr, and Codex still starts on its default
-// transport.
-func TestCodexShimRunsTheChatInProcess(t *testing.T) {
+// Typed Codex launches use the same config/env door as cx, never a raw fallback.
+func TestCodexShimUsesManagedLaunch(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
-		t.Skip("zsh is not installed")
+		t.Fatal(err)
 	}
-	for _, test := range []struct {
-		name, pfm, wantArgv, wantStderr string
-	}{
-		{
-			"in-process",
-			"#!/bin/sh\n[ \"$1 $2\" = 'internal codex-transport' ] || exit 64\nshift 2\n" +
-				"printf '%s\\n' \"$*\" >\"$HOME/asked\"\nprintf -- '--no-daemon\\n'\n",
-			"argv=--no-daemon|resume|--last|", "",
-		},
-		{"pfm answers no transport", "#!/bin/sh\nexit 0\n", "argv=resume|--last|", ""},
-		{
-			"pfm fails", "#!/bin/sh\nexit 5\n", "argv=resume|--last|",
-			"codex: pfm internal codex-transport exited 5: Codex starts as typed, without --no-daemon\n",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			home := t.TempDir()
-			binDir := filepath.Join(home, ".local", "bin")
-			fakeBin := filepath.Join(home, "fakebin")
-			for _, directory := range []string{binDir, fakeBin} {
-				if err := os.MkdirAll(directory, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			writeShimFile(t, filepath.Join(binDir, "pfm"), test.pfm)
-			writeShimFile(t, filepath.Join(fakeBin, "codex"),
-				"#!/bin/sh\nprintf 'argv='\nfor a in \"$@\"; do printf '%s|' \"$a\"; done\nprintf '\\n'\n")
-			script := "source " + quoteZsh(embeddedShimPath(t)) + "\ncodex resume --last 2>\"$HOME/err\"\n"
-			command := jailedZshCommand(zsh, script, home,
-				"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
-			output, err := command.CombinedOutput()
-			if err != nil {
-				t.Fatalf("codex resume --last: %v: %s", err, output)
-			}
-			if got := strings.TrimSpace(string(output)); got != test.wantArgv {
-				t.Fatalf("codex got %q, want %q", got, test.wantArgv)
-			}
-			stderr, err := os.ReadFile(filepath.Join(home, "err"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if test.wantStderr == "" && len(stderr) != 0 || !strings.Contains(string(stderr), test.wantStderr) {
-				t.Fatalf("stderr=%q, want %q", stderr, test.wantStderr)
-			}
-			if test.name == "in-process" {
-				asked, err := os.ReadFile(filepath.Join(home, "asked"))
-				if err != nil || string(asked) != "resume --last\n" {
-					t.Fatalf("pfm was asked %q (err %v), want the user's arguments", asked, err)
-				}
-			}
-		})
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeShimFile(
+		t,
+		filepath.Join(bin, "pfm"),
+		"#!/bin/sh\n[ \"$1 $2\" = 'internal codex-launch' ] || exit 64\nshift 2\nprintf 'argv='\nfor arg in \"$@\"; do printf '%s|' \"$arg\"; done\nprintf '\\n'\n",
+	)
+	command := jailedZshCommand(zsh, "source "+quoteZsh(embeddedShimPath(t))+"\ncodex resume --last\n", home)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("managed launch %v: %s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != "argv=resume|--last|" {
+		t.Fatalf("managed launch args: %s", output)
 	}
 }

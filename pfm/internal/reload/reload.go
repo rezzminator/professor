@@ -573,6 +573,11 @@ func codexRun(request Request) (string, error) {
 	for _, name := range claudelaunch.Hygiene() {
 		parts = append(parts, "-u", name)
 	}
+	if extensionEnv := strings.TrimSpace(
+		action.ExtensionShellEnv(request.Machine, pfmengine.MustLookup(pfmengine.Codex).LongName),
+	); extensionEnv != "" {
+		parts = append(parts, extensionEnv)
+	}
 	if request.CodexHome != "" {
 		parts = append(parts, "CODEX_HOME="+action.Quote(request.CodexHome))
 	}

@@ -33,6 +33,8 @@ You dispatched a foreman, or you are one with children. Agents pass messages, ne
 
 Every response ends with ONE **Verdict** line — the outcome plus the next step, never a recap; the only sanctioned trailing line. It is often the only line the user reads, so it stands alone in plain words: what happened and what they do next, with no ids, counters or internal labels, and at most one question.
 
+With `PONYTAIL MODE ACTIVE` in injected context, put ponytail's required skipped/risk line(s) in their own block directly above the Verdict; the Verdict stays last.
+
 Format: `**Verdict:** {done/decided} — {next step, or what to watch} — {a question only the user can settle — scope, money, anything outward-facing — when any}.`
 
 - `**Verdict:** N+1 query fixed in the session resolver, 47 queries down to 2 — run the integration suite before shipping. 🍵`

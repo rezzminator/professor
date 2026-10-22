@@ -287,10 +287,11 @@ func Run(
 		runtime.Version, resolved.Home, runtime.Config.Claude,
 		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
 	)
+	pluginBuild.Plugins = runtime.Config.ExtensionClaudePlugins()
 	printClaudePluginsDoctor(
 		stdout,
 		claudeStore,
-		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
+		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.ExtensionClaudeEnv()),
 		pluginBuild,
 		tally,
 	)
@@ -301,20 +302,21 @@ func Run(
 	}
 	printManagedPluginLogsDoctor(
 		stdout, append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...), pluginBuild,
-		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
+		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.ExtensionClaudeEnv()),
 		installer.ManagedRoot(resolved.Home), filepath.Join(claudeEnvDir, "settings.json"), tally,
 	)
 	printClaudeEnvDoctor(
 		stdout,
 		installer.ManagedRoot(resolved.Home),
 		filepath.Join(claudeEnvDir, "settings.json"),
-		runtime.Config.Claude.Env,
+		runtime.Config.ExtensionClaudeEnv(),
 		doctorClaudePluginBuild(
 			runtime.Version, resolved.Home, runtime.Config.Claude,
 			runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
 		),
 		tally,
 	)
+	printExtensionsDoctor(ctx, stdout, resolved.Home, claudeEnvDir, runtime.Config, tally)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	printRuntimeRemoteControlDoctor(stdout, runtime, dependencies.Env, tally)
 	printRemoteControlRecipeDoctor(ctx, stdout, resolved, runtime.Config, tally)

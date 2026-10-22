@@ -160,3 +160,4 @@ pfm chat call	H	H.herdr-to-herdr
 pfm chat watch	H	H.watch
 pfm chat name	H	H.name
 pfm chat open	H	H.open-restored
+pfm config validate	O1	O1.20-extensions

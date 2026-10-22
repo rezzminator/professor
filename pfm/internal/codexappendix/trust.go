@@ -264,7 +264,7 @@ func listNativeHooks(ctx context.Context, binary, account string) (nativeListing
 	if binary == "" {
 		return nativeListing{}, physical, fmt.Errorf("%w: Codex binary is not configured", ErrNativeHookTrustUnknown)
 	}
-	raw, err := rpc(ctx, binary, physical, "hooks/list", map[string]any{"cwds": []string{physical}})
+	raw, err := rpc(ctx, binary, physical, "hooks/list", map[string]any{rpcCWDsKey: []string{physical}})
 	if err != nil {
 		return nativeListing{}, physical, fmt.Errorf("%w: hooks/list: %w", ErrNativeHookTrustUnknown, err)
 	}
@@ -368,7 +368,7 @@ func RegisterHookTrusts(ctx context.Context, binary, account string, handlers []
 	if err != nil {
 		return fmt.Errorf("resolve hooks.json of Codex account %s: %w", physical, err)
 	}
-	raw, err := rpc(ctx, binary, physical, "hooks/list", map[string]any{"cwds": []string{physical}})
+	raw, err := rpc(ctx, binary, physical, "hooks/list", map[string]any{rpcCWDsKey: []string{physical}})
 	if err != nil {
 		return fmt.Errorf("list hooks of Codex account %s: %w", physical, err)
 	}

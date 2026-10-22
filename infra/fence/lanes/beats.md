@@ -142,6 +142,7 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 - `O1.17-transcript` · `pfm transcript` help names its verbs; an unknown verb exits 2 naming the invalid choice; a fixture transcript's `show` prints its `TRANSCRIPT claude` header and its prompt; `locate` of an id nothing holds exits 1 naming `NOT FOUND` · spends none
 - `O1.18-theme` · `pfm theme status` (and bare `pfm theme`) and `pfm theme sync` in a home that never ran `on` print the off line and exit 0; the retired `ls` and `set` verbs and an unknown verb exit 2 naming the unknown subcommand · spends none
 - `O1.19-restart-dry-run` · `pfm restart --dry-run` opens with the plan header, has a `find` line for every family (chats, chat-helpers, herdr, services, mcp-daemon, search-backend, pfm), exits 0 or 1 only with a `FAILED` find named, names its `last` pfm process (the restart worker a plain run detaches) and spawns no worker; `pfm restart now` exits 2 with the usage, and `pfm internal restart-run` without `--front` exits 2 with its own · spends none
+- `O1.20-extensions` · fixture `ponytail` ON/OFF across Claude, Codex and OpenCode runs install and requires doctor's `installed`, `enabled`, `options`, `env` and Codex `hook trust` extension rows with no extension `FAIL`; restores the original machine config and reruns install to converge afterward · spends none
 
 ## Lane O2 — ops & host, the destructive tail
 

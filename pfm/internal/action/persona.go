@@ -182,7 +182,10 @@ func openCodeSeatRun(request Request, machine pfmconfig.Config, resume bool) (*f
 	return &fleetdb.SeatRun{
 		Binary: binaryWord(machine.OpenCode.Binary, pfmengine.MustLookup(pfmengine.OpenCode).Binary, false),
 		Args:   args,
-		Env:    launchEnvironment(os.Environ(), launch),
-		CWD:    request.Row.CWD,
+		Env: machine.ExtensionEnvironment(
+			pfmengine.MustLookup(pfmengine.OpenCode).LongName,
+			launchEnvironment(os.Environ(), launch),
+		),
+		CWD: request.Row.CWD,
 	}, nil
 }

@@ -376,8 +376,11 @@ func codexSeatRun(machine pfmconfig.Config, account int, cwd string, args ...str
 	return &fleetdb.SeatRun{
 		Binary: codexBinaryWord(machine, account),
 		Args:   arguments,
-		Env:    launchEnvironment(os.Environ(), launch),
-		CWD:    cwd,
+		Env: machine.ExtensionEnvironment(
+			pfmengine.MustLookup(pfmengine.Codex).LongName,
+			launchEnvironment(os.Environ(), launch),
+		),
+		CWD: cwd,
 	}
 }
 

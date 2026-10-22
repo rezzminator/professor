@@ -560,19 +560,16 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 
 // A daemon restarted under a different chat runtime between the original send
 // and its replay: a chat call is refused rather than replayed into the wrong
-// fleet, while a harvester call — which carries no chat runtime — replays and
-// is answered. The runtime is probed before a replay, never before the
+// fleet. The runtime is probed before a replay, never before the
 // original send.
-func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
+func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct {
-		name       string
-		call       string
-		wantReplay bool
+		name string
+		call string
 	}{
 		{name: "chat call refused", call: "new"},
 		{name: "servicedesk call refused", call: "servicedesk"},
-		{name: "harvester call replayed", call: "read", wantReplay: true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			var routeCalls, firstSendProbes atomic.Int32
@@ -608,37 +605,25 @@ func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
 			defer server.Close()
 			proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 			proxy.expectedRuntimeIdentity = "sha256:selected"
-			if row.wantReplay {
-				proxy.family = pfmconfig.MCPServerHarvester
-			}
 			proxy.sessionID = "old-session"
 			proxy.protocol = "2025-06-18"
 			proxy.retryDelay = time.Millisecond
 			proxy.retryWindow = time.Second
 			proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
 			frame := []byte(proxyTestToolCall(8, row.call, `{"name":"wrong-fleet"}`))
-			response, err := proxy.sendWithRetry(context.Background(), frame, false)
+			_, err := proxy.sendWithRetry(context.Background(), frame, false)
 			if firstSendProbes.Load() != 0 {
 				t.Fatalf("first send probed /status %d times, want none", firstSendProbes.Load())
 			}
-			if !row.wantReplay {
-				const refused = "runtime mismatch during recovery; request was not replayed"
-				if err == nil || !strings.Contains(err.Error(), refused) {
-					t.Fatalf("mismatched replacement error = %v, want contextual no-replay error", err)
-				}
-				if routeCalls.Load() != 1 {
-					t.Fatalf(
-						"mismatched replacement received %d route posts, want only failed original",
-						routeCalls.Load(),
-					)
-				}
-				return
+			const refused = "runtime mismatch during recovery; request was not replayed"
+			if err == nil || !strings.Contains(err.Error(), refused) {
+				t.Fatalf("mismatched replacement error = %v, want contextual no-replay error", err)
 			}
-			if err != nil {
-				t.Fatalf("harvester replay error = %v, want the replayed answer", err)
-			}
-			if want := `{"jsonrpc":"2.0","id":8,"result":{"answered":"tools/call"}}`; string(response) != want {
-				t.Fatalf("harvester replay response = %s, want %s", response, want)
+			if routeCalls.Load() != 1 {
+				t.Fatalf(
+					"mismatched replacement received %d route posts, want only failed original",
+					routeCalls.Load(),
+				)
 			}
 		})
 	}
@@ -711,9 +696,6 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	}
 }
 
-// A harvester call needs no current transcript: with the crumb unreadable or
-// the crumb directory not absolute it still forwards the identity resolved at
-// start, where a chat call is refused.
 func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	t.Parallel()
 	var received []map[string]any
@@ -782,23 +764,6 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 			output.String(),
 		)
 	}
-	assertHarvesterCallForwarded := func(id int) {
-		previous := proxy.family
-		proxy.family = pfmconfig.MCPServerHarvester
-		defer func() { proxy.family = previous }()
-		t.Helper()
-		proxy.forward(context.Background(), []byte(proxyTestToolCall(id, "read", `{}`)), &output)
-		meta := received[len(received)-1]["params"].(map[string]any)["_meta"].(map[string]any)
-		if len(received) != before+1 || meta["pfmProxy"].(map[string]any)["id"] != "conversation-a" {
-			t.Fatalf("harvester call without a usable crumb: received=%d output=%s",
-				len(received)-before, output.String())
-		}
-		received = received[:before]
-	}
-	assertHarvesterCallForwarded(51)
-	proxy.sidDir = "relative/sid"
-	assertHarvesterCallForwarded(52)
-	proxy.sidDir = sidDir
 	if err := os.Remove(crumb); err != nil {
 		t.Fatal(err)
 	}

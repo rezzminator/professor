@@ -217,7 +217,7 @@ func TestHarnessMainWindowsTakePrecedenceOverCache(t *testing.T) {
 	}
 }
 
-func TestHarvestRateLimitsPersistsAValidFableWithoutUsableFlatWindows(t *testing.T) {
+func TestRecordRateLimitsPersistsAValidFableWithoutUsableFlatWindows(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	for _, testcase := range []struct {
 		name         string

@@ -13,7 +13,7 @@
 #   3. harvester.config.json with fetch.browser on: the same file a person
 #      writes to opt in, so the rung runs exactly as it does for them.
 #
-# The browser sidecar (env-browser) is provisioned lazily by pfm on the first
+# The browser sidecar (env-browser) is provisioned lazily by harvester on the first
 # browser fetch and persists in the same volume.
 #
 # BROKEN STATE: a failed build, a failed install, or a
@@ -31,7 +31,7 @@ fail() { # fail <step> <log>
 chrome="$(google-chrome-stable --version 2>/dev/null)" || fail "google-chrome-stable is not runnable" /dev/null
 
 mkdir -p "$HOME/.local/bin"
-go -C /worktree/pfm build -o "$HOME/.local/bin/pfm" ./cmd/pfm >/tmp/sim-build.log 2>&1 ||
+go -C /worktree/pfm build -ldflags "-X main.version=$(cat /worktree/VERSION)" -o "$HOME/.local/bin/pfm" ./cmd/pfm >/tmp/sim-build.log 2>&1 ||
   fail "go build ./cmd/pfm from /worktree" /tmp/sim-build.log
 # The Codex/OpenCode compiler pfm install execs and the lanes run as engine-sync, from the
 # engine-sync source docker-compose.yml mounts at /engine-sync.
@@ -49,12 +49,20 @@ mkdir -p "$(dirname "$PFM_CONFIG")"
 # Install writes generated prompts into a writable clone, never the mount.
 bash /worktree/infra/fence/source-clone.sh /worktree "$HOME/.professor" >/tmp/sim-source-clone.log 2>&1 ||
   fail "writable source snapshot" /tmp/sim-source-clone.log
+# This browser/converter fixture needs no Claude account or marketplace cache.
+# Keep an explicitly supplied config; seed only this fresh container's default.
+if [[ ! -f "$PFM_CONFIG" ]]; then
+  (umask 077; printf '{"version":2,"accounts":[],"claude":{"plugins":[]}}\n' >"$PFM_CONFIG")
+fi
+pfm mcp harvester enable >/tmp/sim-config.log 2>&1 ||
+  fail "enable standalone harvester registration" /tmp/sim-config.log
 (cd "$HOME/.professor" && pfm install --yes --skip-engine codex --skip-themes) >/tmp/sim-install.log 2>&1 ||
   fail "pfm install (converter sidecar into the harvest volume)" /tmp/sim-install.log
 [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
   fail "engine-sync on PATH after pfm install (got: $(command -v engine-sync || echo none))" /tmp/sim-install.log
 
-printf '{\n  "fetch": {\n    "browser": true\n  }\n}\n' >"$(dirname "$PFM_CONFIG")/harvester.config.json"
+mkdir -p "$HOME/.config/harvester"
+printf '{\n  "fetch": {\n    "browser": true\n  }\n}\n' >"$HOME/.config/harvester/harvester.config.json"
 
-echo "sim: chrome=\"$chrome\" harvest=$HOME/.local/state/pfm/harvest-python browser-rung=on pfm=$(command -v pfm)"
+echo "sim: chrome=\"$chrome\" harvest=$HOME/.local/state/harvester/python browser-rung=on pfm=$(command -v pfm)"
 exec "$@"

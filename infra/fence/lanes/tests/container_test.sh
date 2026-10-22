@@ -17,6 +17,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 [ -f "$SUT" ] || { echo "container_test: no container.sh at $SUT" >&2; exit 2; }
 
 # STUB_RMI_RC: the exit status `docker rmi` answers with (1 = no such image).
+PFM_DEV_HARVESTER_SRC="$T/harvester"
+PFM_DEV_HARVESTER_MISSING=""
 BIN="$T/bin"
 mkdir -p "$BIN" "$T/infra/fence"
 printf 'FROM scratch\n' >"$T/infra/fence/pfm-dev.Dockerfile"
@@ -132,4 +134,8 @@ if grep -qF -- "-e PFM_DEV_ENGINE_SYNC_MISSING=/m/plugins/engine-sync: no go.mod
   ok "lane_run hands an absent engine-sync source's cause to the container"
 else bad "lane_run engine-sync absence" "$(cat "$STUB_DOCKER_LOG")"; fi
 
+if grep -qF -- "-v $T/harvester:/harvester:ro" "$STUB_DOCKER_LOG" &&
+  grep -qF -- "-e HARVESTER_LOG_LEVEL=debug" "$STUB_DOCKER_LOG"; then
+  ok 'lane containers mount the standalone harvester source read-only'
+else bad 'lane container omitted harvester source' "$(cat "$STUB_DOCKER_LOG")"; fi
 shtest_end

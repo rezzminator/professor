@@ -239,14 +239,14 @@
   "name": "sed-then-bash-c-grep-r",
   "covers": "sed -n range; bash -c with grep -r over . parsed in place",
   "cwd": "/tmp/demo-proj",
-  "command": "sed -n 812,820p pfm/internal/harvestmcp/service.go; bash -c 'grep -rln \"ERROR:\" --include=\"*.py\" . 2>/dev/null | head; grep -rn \"alpha beta\\|gamma after delta\" --include=\"*.py\" --include=\"*.md\" . 2>/dev/null | grep -v node_modules | head'",
+  "command": "sed -n 812,820p pfm/internal/examplemcp/service.go; bash -c 'grep -rln \"ERROR:\" --include=\"*.py\" . 2>/dev/null | head; grep -rn \"alpha beta\\|gamma after delta\" --include=\"*.py\" --include=\"*.md\" . 2>/dev/null | grep -v node_modules | head'",
   "parts": [
    {
     "program": "sed",
     "args": [
      "-n",
      "812,820p",
-     "pfm/internal/harvestmcp/service.go"
+     "pfm/internal/examplemcp/service.go"
     ],
     "status": "ok"
    },
@@ -303,7 +303,7 @@
   "name": "docker-exec-bash-c-never-parsed",
   "covers": "docker exec … bash -c: a remote runner, its string never parsed",
   "cwd": "/tmp/demo-proj",
-  "command": "docker exec demo bash -c 'cd /worktree/pfm && mkdir -p $HOME/.local/bin && go build -ldflags \"-X main.version=$(cat ../VERSION)\" -o $HOME/.local/bin/pfm ./cmd/pfm && export PATH=$HOME/.local/bin:$PATH && pfm --version && cd /worktree && pfm install --yes --skip-harvest --skip-themes --skip-engine codex 2>&1 | tail -30'",
+  "command": "docker exec demo bash -c 'cd /worktree/pfm && mkdir -p $HOME/.local/bin && go build -ldflags \"-X main.version=$(cat ../VERSION)\" -o $HOME/.local/bin/pfm ./cmd/pfm && export PATH=$HOME/.local/bin:$PATH && pfm --version && cd /worktree && pfm install --yes --offline --skip-themes --skip-engine codex 2>&1 | tail -30'",
   "parts": [
    {
     "program": "docker",
@@ -312,7 +312,7 @@
      "demo",
      "bash",
      "-c",
-     "cd /worktree/pfm && mkdir -p $HOME/.local/bin && go build -ldflags \"-X main.version=$(cat ../VERSION)\" -o $HOME/.local/bin/pfm ./cmd/pfm && export PATH=$HOME/.local/bin:$PATH && pfm --version && cd /worktree && pfm install --yes --skip-harvest --skip-themes --skip-engine codex 2>&1 | tail -30"
+     "cd /worktree/pfm && mkdir -p $HOME/.local/bin && go build -ldflags \"-X main.version=$(cat ../VERSION)\" -o $HOME/.local/bin/pfm ./cmd/pfm && export PATH=$HOME/.local/bin:$PATH && pfm --version && cd /worktree && pfm install --yes --offline --skip-themes --skip-engine codex 2>&1 | tail -30"
     ],
     "status": "ok"
    }
@@ -1642,7 +1642,7 @@
   "name": "cd-grep-globs-two-dirs",
   "covers": "cd X && grep -rnE over two *.go globs kept as written | grep -v | head",
   "cwd": "/tmp/demo-proj",
-  "command": "cd /tmp/demo-proj/pfm && grep -rnE '\"browser\"|browser *=|settings\\.browser|Browser *\\*bool' internal/harvest/*.go internal/harvestmcp/*.go | grep -v _test | head -12",
+  "command": "cd /tmp/demo-proj/pfm && grep -rnE '\"browser\"|browser *=|settings\\.browser|Browser *\\*bool' internal/example/*.go internal/examplemcp/*.go | grep -v _test | head -12",
   "parts": [
    {
     "program": "cd",
@@ -1656,8 +1656,8 @@
     "args": [
      "-rnE",
      "\"browser\"|browser *=|settings\\.browser|Browser *\\*bool",
-     "internal/harvest/*.go",
-     "internal/harvestmcp/*.go"
+     "internal/example/*.go",
+     "internal/examplemcp/*.go"
     ],
     "status": "ok"
    },
@@ -1682,12 +1682,12 @@
   "name": "cd-wc-missing-then-ls-glob",
   "covers": "cd X && wc -l over four files && ls *.go kept as written | tr",
   "cwd": "/tmp/demo-proj",
-  "command": "cd /tmp/demo-proj/pfm/internal/harvest && wc -l harvest.go content.go detect.go net.go && ls *.go | tr '\\n' ' '",
+  "command": "cd /tmp/demo-proj/pfm/internal/example && wc -l example.go content.go detect.go net.go && ls *.go | tr '\\n' ' '",
   "parts": [
    {
     "program": "cd",
     "args": [
-     "/tmp/demo-proj/pfm/internal/harvest"
+     "/tmp/demo-proj/pfm/internal/example"
     ],
     "status": "ok"
    },
@@ -1695,7 +1695,7 @@
     "program": "wc",
     "args": [
      "-l",
-     "harvest.go",
+     "example.go",
      "content.go",
      "detect.go",
      "net.go"
@@ -2646,7 +2646,7 @@
   "name": "head-tail-stats-then-for-if-grep",
   "covers": "tail f | cut; echo; pfm | grep; ls d | grep; for f in globs, bound as written; do [ -f ] && { echo; grep f | tail; }; done",
   "cwd": "/tmp/demo-proj/pfm",
-  "command": "tail -1 /tmp/demo-proj/.cache/stats.jsonl | cut -c1-600; echo; pfm doctor 2>&1 | grep -i 'harvestpy_browser'; ls /tmp/demo-proj/logs 2>/dev/null | grep -i pfm; for f in /tmp/demo-proj/logs/pfm*/*.log /tmp/demo-proj/state/pfm/*.log; do [ -f \"$f\" ] && { echo \"== $f\"; grep -iE 'browser|app-shell' \"$f\" | tail -5; }; done 2>/dev/null",
+  "command": "tail -1 /tmp/demo-proj/.cache/stats.jsonl | cut -c1-600; echo; pfm doctor 2>&1 | grep -i 'example_browser'; ls /tmp/demo-proj/logs 2>/dev/null | grep -i pfm; for f in /tmp/demo-proj/logs/pfm*/*.log /tmp/demo-proj/state/pfm/*.log; do [ -f \"$f\" ] && { echo \"== $f\"; grep -iE 'browser|app-shell' \"$f\" | tail -5; }; done 2>/dev/null",
   "parts": [
    {
     "program": "tail",
@@ -2679,7 +2679,7 @@
     "program": "grep",
     "args": [
      "-i",
-     "harvestpy_browser"
+     "example_browser"
     ],
     "status": "ok"
    },

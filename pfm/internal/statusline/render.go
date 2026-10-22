@@ -206,7 +206,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	writeBreadcrumb(runtime, data.TranscriptPath)
 	convergeWindowName(ctx, runtime, data)
 
-	harvestRateLimits(runtime, now, account, data)
+	recordRateLimits(runtime, now, account, data)
 
 	directoryName := filepath.Base(filepath.Clean(directory))
 	if directory == "" || directoryName == string(filepath.Separator) {
@@ -604,7 +604,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	}
 }
 
-func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) {
+func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
 	// Every window carrying a reset time is recorded under `windows`, 0% used
 	// included: 0% is a real reading, and a seat that has just started is
 	// exactly the one whose usage door should answer from this file instead of

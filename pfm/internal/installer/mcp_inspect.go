@@ -26,7 +26,7 @@ const (
 
 // MCPClientCutover is one consumer's visible route for one server. Unreadable
 // is a first-class state so doctor cannot mistake a failed inspection for
-// cutover. Name is the server this report classifies ("professor", "chat", "harvester");
+// cutover. Name is the server this report classifies ("professor", "chat", mcpServerHarvester);
 // callers that only ever inspect one server may ignore it.
 type MCPClientCutover struct {
 	Client string
@@ -184,9 +184,25 @@ func classifyOpenCodeRegistration(name string, registration map[string]any, home
 	command, _ := registration["command"].([]any)
 	switch {
 	case isFamilyRegistration(name):
-		if registration[configTypeKey] == openCodeLocal &&
-			sameStrings(command, append([]string{bin}, mcpFamilyStdioArgs(name)...)) {
-			return MCPClientPFM
+		if registration[configTypeKey] == openCodeLocal && len(command) != 0 {
+			argv := make([]string, len(command))
+			for index, value := range command {
+				text, ok := value.(string)
+				if !ok {
+					return MCPClientForeignRegistration
+				}
+				argv[index] = text
+			}
+			state := classifyRegistration(name, mcpClientRegistration{
+				Type: stdioProtocol, Command: argv[0], Args: argv[1:],
+			}, port)
+			wantedBinary := bin
+			if state == MCPClientPFM {
+				wantedBinary = mcpFamilyBinary(home, name)
+			}
+			if (state == MCPClientPFM || state == MCPClientLegacyPFM) && argv[0] == wantedBinary {
+				return state
+			}
 		}
 	case name == professorName && registration[configTypeKey] == openCodeLocal:
 		if sameStrings(command, append([]string{bin}, mcpStdioArgs...)) {
@@ -264,7 +280,7 @@ func inspectProjectMCPServers(path, home string, port int, names ...string) []MC
 			decodeErr := json.Unmarshal(encoded, &shape)
 			bin := filepath.Join(home, ".local", "bin", "pfm")
 			if report.State == MCPClientPFM &&
-				(decodeErr != nil || !isExactStdioShape(shape, bin, mcpFamilyStdioArgs(name))) {
+				(decodeErr != nil || !isExactStdioShape(shape, mcpFamilyBinary(home, name), mcpFamilyStdioArgs(name))) {
 				report.State = MCPClientForeignRegistration
 			}
 			if report.State == MCPClientLegacyPFM && (decodeErr != nil ||
@@ -332,7 +348,11 @@ func InspectCodexServers(path, home string, port int, names ...string) []MCPClie
 		registration, present := document.Servers[name]
 		if present {
 			report.State = classifyRegistration(name, registration, port)
-			if (name == professorName || isFamilyRegistration(name)) && registration.Command != bin {
+			wantedBinary := bin
+			if report.State == MCPClientPFM && isFamilyRegistration(name) {
+				wantedBinary = mcpFamilyBinary(home, name)
+			}
+			if (name == professorName || isFamilyRegistration(name)) && registration.Command != wantedBinary {
 				report.State = MCPClientForeignRegistration
 			}
 		}
@@ -349,8 +369,7 @@ func InspectCodexServers(path, home string, port int, names ...string) []MCPClie
 	return reports
 }
 
-// classifyRegistration is the one implementation shared by every Claude and
-// Codex server inspection. The transport law: every engine registers the
+// classifyRegistration is shared by Claude, Codex and OpenCode family inspection. The transport law: every engine registers the
 // stdio `professor` (`<bin> mcp serve --stdio`), so `professor` is pfm only in
 // that shape and any HTTP `professor` is foreign; `chat` and `harvester` are
 // legacy keys, legacy-pfm only in pfm's own old shapes (the loopback
@@ -369,7 +388,16 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 			(typeName == "" || typeName == stdioProtocol) && slices.Equal(registration.Args, want)
 	}
 	switch name {
-	case "chat-professor", "harvester-professor":
+	case "harvester-professor":
+		if stdioArgs(mcpCommand, mcpServeCommand, "--stdio", "--family", mcpServerHarvester) {
+			return MCPClientLegacyPFM
+		}
+		if command == mcpServerHarvester && registration.URL == "" && noExtras &&
+			(typeName == "" || typeName == stdioProtocol) && slices.Equal(registration.Args, []string{mcpCommand}) {
+			return MCPClientPFM
+		}
+		return MCPClientForeignRegistration
+	case "chat-professor":
 		if stdioArgs(mcpFamilyStdioArgs(name)...) {
 			return MCPClientPFM
 		}

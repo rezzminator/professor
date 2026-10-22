@@ -293,7 +293,6 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 }
 
 func TestDoctorEnumeratesExternalDependencies(t *testing.T) {
-	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	jailTest(t)
 	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {

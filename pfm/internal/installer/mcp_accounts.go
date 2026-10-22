@@ -150,7 +150,11 @@ func (installer *engine) cutOverClaudeMCP() error {
 			}
 			matches := isPFMLegacyClaudeShape(name, shape, installer.mcpChatCommand(), installer.options.MCPPort)
 			if isFamilyRegistration(name) {
-				matches = isExactStdioShape(shape, installer.mcpChatCommand(), mcpFamilyStdioArgs(name))
+				matches = matches || isExactStdioShape(
+					shape,
+					mcpFamilyBinary(installer.options.Home, name),
+					mcpFamilyStdioArgs(name),
+				)
 			}
 			if matches {
 				delete(servers, name)
@@ -177,7 +181,7 @@ func (installer *engine) cutOverClaudeMCP() error {
 			encoded, err := json.Marshal(
 				map[string]any{
 					configTypeKey:    stdioProtocol,
-					configCommandKey: installer.mcpChatCommand(),
+					configCommandKey: mcpFamilyBinary(installer.options.Home, name),
 					"args":           mcpFamilyStdioArgs(name),
 				},
 			)

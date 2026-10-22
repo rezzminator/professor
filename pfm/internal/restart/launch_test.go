@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -307,35 +305,19 @@ func TestSessionLeaderReadsThisProcess(t *testing.T) {
 	}
 }
 
-func TestLiveDepsReadsTheSearchBackendAndDaemonFromConfig(t *testing.T) {
+func TestLiveDepsReadsTheDaemonFromConfig(t *testing.T) {
 	runtime := config.Runtime{Paths: paths.Values{StateDB: "/jail/state/fleet.db", Home: "/jail"}}
 	plain := LiveDeps(runtime, &bytes.Buffer{}, []int{9}, chatAddress{Socket: "pfm-cc-a"})
-	if plain.SearchURL != "" || plain.DaemonProbe != nil || plain.LaunchedFrom.Socket != "pfm-cc-a" ||
+	if plain.DaemonProbe != nil || plain.LaunchedFrom.Socket != "pfm-cc-a" ||
 		!slices.Equal(plain.Spare, []int{9}) {
 		t.Fatalf("plain deps = %+v", plain)
 	}
 	if plain.LogDir != "/jail/state/restart" {
 		t.Fatalf("log dir = %q, want beside the state database", plain.LogDir)
 	}
-	runtime.Config.Harvester.Enabled = true
-	runtime.Config.Harvester.Search.Enabled = true
-	runtime.Config.Harvester.Search.SearXNGURL = "http://127.0.0.1:8888"
 	runtime.Config.MCPServers = map[string]config.MCPServer{"chat": {Enabled: true}}
 	configured := LiveDeps(runtime, &bytes.Buffer{}, nil, chatAddress{})
-	if configured.SearchURL != "http://127.0.0.1:8888" || configured.DaemonProbe == nil {
-		t.Fatalf("configured deps: search %q, daemon probe set %v", configured.SearchURL, configured.DaemonProbe != nil)
-	}
-}
-
-func TestProbeURLAnswersOnAnyHTTPAnswer(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	if err := probeURL(context.Background(), server.URL); err != nil {
-		t.Fatalf("probe of a live server = %v", err)
-	}
-	server.Close()
-	if err := probeURL(context.Background(), server.URL); err == nil {
-		t.Fatal("probe of a closed server answered")
+	if configured.DaemonProbe == nil {
+		t.Fatalf("configured deps: daemon probe set %v", configured.DaemonProbe != nil)
 	}
 }

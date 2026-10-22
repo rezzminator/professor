@@ -12,12 +12,11 @@ import (
 )
 
 const (
-	preSplitMCPPort           = 8377
-	checkLegacyStateDB        = "legacy-state-db"
-	checkLegacyCacheDB        = "legacy-cache-db"
-	checkLegacyHarvesterCache = "legacy-harvester-cache"
-	checkStagedPrompts        = "staged-prompts"
-	checkSharedDB             = "shared-db"
+	preSplitMCPPort    = 8377
+	checkLegacyStateDB = "legacy-state-db"
+	checkLegacyCacheDB = "legacy-cache-db"
+	checkStagedPrompts = "staged-prompts"
+	checkSharedDB      = "shared-db"
 )
 
 const legacyConfigCheck = "legacy-config"
@@ -60,24 +59,6 @@ func legacyConfig(env Env) ([]Row, error) {
 	return rows, nil
 }
 
-func legacyHarvesterConfig(env Env) ([]Row, error) {
-	var rows []Row
-	path := filepath.Join(env.LegacyConfigDir, "harvester.config.json")
-	target := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
-	if paths.PhysicalPath(path) == paths.PhysicalPath(target) {
-		return rows, nil
-	}
-	if _, ok := readFile(&rows, "legacy-harvester-config", path); ok {
-		if fix, ok := moveOrRemove(&rows, "legacy-harvester-config", path, target); ok {
-			rows = append(
-				rows,
-				Row{Block, "legacy-harvester-config", path, "legacy harvester config outside the clone", fix},
-			)
-		}
-	}
-	return rows, nil
-}
-
 func preSplitConfig(env Env) ([]Row, error) {
 	var rows []Row
 	const check = "pre-split-config"
@@ -86,8 +67,7 @@ func preSplitConfig(env Env) ([]Row, error) {
 	if exists {
 		var document struct {
 			MCP struct {
-				Servers map[string]json.RawMessage `json:"servers"`
-				HTTP    struct {
+				HTTP struct {
 					Port int `json:"port"`
 				} `json:"http"`
 			} `json:"mcp"`
@@ -110,35 +90,6 @@ func preSplitConfig(env Env) ([]Row, error) {
 			}
 			// The beside-file finding precedes key findings in the contract.
 			rows = append(rows, besideConfig(env)...)
-			if harvester, present := document.MCP.Servers["harvester"]; present {
-				var server struct {
-					Enabled json.RawMessage `json:"enabled"`
-				}
-				if err := json.Unmarshal(harvester, &server); err != nil {
-					rows = append(rows, unreadable(check, env.ConfigPath, err))
-				} else {
-					value := string(server.Enabled)
-					if value == "" {
-						value = "null"
-					}
-					fix := fmt.Sprintf(
-						"move mcp.servers.harvester.enabled (%s) to \"enabled\" in %s, then delete mcp.servers.harvester from %s",
-						value,
-						filepath.Join(dir, "harvester.config.json"),
-						env.ConfigPath,
-					)
-					rows = append(
-						rows,
-						Row{
-							Block,
-							check,
-							env.ConfigPath,
-							"mcp.servers.harvester belongs in harvester.config.json",
-							fix,
-						},
-					)
-				}
-			}
 			if document.MCP.HTTP.Port == preSplitMCPPort {
 				rows = append(
 					rows,
@@ -248,36 +199,6 @@ func legacyDB(check, kind, legacy, target string) ([]Row, error) {
 		}
 	}
 	rows = append(rows, Row{Block, check, legacy, "legacy " + kind + " database at the pre-layout path", fix})
-	return rows, nil
-}
-
-func legacyHarvesterCache(env Env) ([]Row, error) {
-	var rows []Row
-	if env.HarvesterCacheDir != "" {
-		return rows, nil
-	}
-	const check = checkLegacyHarvesterCache
-	path, target := paths.LegacyHarvesterCacheDir(env.Home), paths.HarvesterCacheDir(env.Home)
-	if inspectPath(&rows, check, path) == nil {
-		return rows, nil
-	}
-	before := len(rows)
-	readDir(&rows, check, path)
-	if len(rows) != before {
-		return rows, nil
-	}
-	info := inspectPath(&rows, check, target)
-	if len(rows) != before {
-		return rows, nil
-	}
-	fix := "mv " + path + " " + target
-	if info != nil {
-		var ok bool
-		if fix, ok = removeKeeping(&rows, check, target, "rm -r "+path, path); !ok {
-			return rows, nil
-		}
-	}
-	rows = append(rows, Row{Warn, check, path, "pre-rename harvester cache dir", fix})
 	return rows, nil
 }
 

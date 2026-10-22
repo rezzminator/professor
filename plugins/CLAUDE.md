@@ -11,6 +11,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - callmeter: records every tool call, request, agent and turn into SQLite through a Go binary behind every hook · `callmeter/`
 - sub-agent-compact: per-party compaction policy, nudges, and self-compaction at a milestone the model picks · `sub-agent-compact/`
 - engine-sync: the Codex and OpenCode mirror writer pfm execs · `engine-sync/`
+- harvester: shared engine MCP daemon and one-shot web/document CLI pfm registers as `harvester-professor` · `harvester/`
 - installable plugin: the directory Claude Code installs, inside each checkout · `{name}/plugins/{name}/`
 - gitlink: professor's pin of one plugin commit, registered with `branch = develop` and `ignore = dirty` · `../.gitmodules`
 
@@ -32,7 +33,8 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - A plugin option is also an environment variable `{PLUGIN}_{OPTION}`, both names upper snake (`AUTO_EFFORT_CONTROL_FLOOR`): variable > the plugin's own option (`pluginConfigs`, `/config`, callmeter's `config.json`) > default; each plugin's README lists its settings.
 - sub-agent-compact and buddy declare no `userConfig`: sub-agent-compact reads only its `SUB_AGENT_COMPACT_*` variables, set from `claude.env`; buddy reads no variable and keeps every setting in `${XDG_CONFIG_HOME:-$HOME/.config}/buddy/config.json`.
 - `pfm install` writes `claude.env` from `pfm.config.json` into the primary seat's `settings.json` `env`, which every seat shares, owning only the keys it wrote (ledger `~/.local/share/pfm/install/claude-env-ownership.json`); `pfm doctor` reports a key changed or dropped by hand.
-- On alpha, pfm builds callmeter's binary from its checkout into `{CALLMETER_HOME}/bin/{version}/` before refreshing its plugin copy; its `CLAUDE.md` § Dev install covers a host without pfm.
+- On alpha, pfm builds callmeter from its source checkout into its versioned binary home before refreshing its plugin copy.
+- `pfm install` provisions harvester independently of Claude: alpha builds from source, stable verifies release checksums; `~/.local/bin/harvester` links its stable binary for every engine.
 - `pfm install` copies no engine-sync: its wrapper downloads the checksum-verified release binary on first run and links the stable path pfm execs; `ENGINE_SYNC_BIN` points pfm at a local build, and the fence builds its own from `engine-sync/`.
 - Chats run Claude Code's versioned cache `{config}/plugins/cache/{name}-dev/{name}/{version}`, never the `-dev` copy: a copy refresh alone reaches no chat, and a content change reaches the cache only with a version bump.
 - `pfm install` moves each stale cache entry with `claude plugin update`: a new chat gets the new version at once, an open chat on `/reload-plugins`; a running chat keeps its old snapshot, marked `.orphaned_at`.

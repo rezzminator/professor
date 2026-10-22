@@ -288,21 +288,21 @@ func updateRollbackAfterInstall(
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return install()
 	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		if between != nil {
 			between()
 		}
 		return doctorOutcome{Exit: 3, Failures: 1}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		beforeRollbackInstall()
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 	var stdout, stderr bytes.Buffer

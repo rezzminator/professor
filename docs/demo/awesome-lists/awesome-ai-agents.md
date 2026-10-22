@@ -1,5 +1,15 @@
 # e2b-dev/awesome-ai-agents — submission research
 
+## Contents
+
+- [1. Mechanics — which file, format, ordering, CI](#1-mechanics--which-file-format-ordering-ci)
+- [2. Section and exact insertion point](#2-section-and-exact-insertion-point)
+- [3. What others did — 8 recent add-a-project PRs read](#3-what-others-did--8-recent-add-a-project-prs-read)
+- [4. Final entry text, verbatim, plus PR mechanics](#4-final-entry-text-verbatim-plus-pr-mechanics)
+- [[Professor](https://github.com/rezzminator/professor)](#professorhttpsgithubcomrezzminatorprofessor)
+- [5. Risks specific to Professor](#5-risks-specific-to-professor)
+- [Gaps](#gaps)
+
 Repo: <https://github.com/e2b-dev/awesome-ai-agents> — 29,990 stars, default branch `main`, last push 2026-08-21T18:52:45Z. Maintained by the E2B team; one E2B staff member is the CODEOWNERS reviewer.
 
 ## 1. Mechanics — which file, format, ordering, CI

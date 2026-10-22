@@ -176,6 +176,11 @@ STUB
 esac
 STUB
   chmod +x "$BIN/pfm"
+  cat >"$BIN/harvester" <<STUB
+#!/usr/bin/env bash
+exec "$BIN/pfm" --config fixture mcp serve --stdio --family harvester
+STUB
+  chmod +x "$BIN/harvester"
 }
 
 # ---- 10: the derive against a stub pfm ----------------------------------
@@ -196,7 +201,7 @@ run_sut
 if [ "$RC" -eq 0 ] &&
   grep -q 'derived commands: 5 top-level + 6 chat subcommands · 0 unmapped' <<<"$OUT" &&
   grep -q 'derived tools over pfm mcp serve --stdio --family chat: 2 · 0 unmapped' <<<"$OUT" &&
-  grep -q 'derived tools over pfm mcp serve --stdio --family harvester: 2 · 0 unmapped' <<<"$OUT" &&
+  grep -q 'derived tools over harvester mcp: 2 · 0 unmapped' <<<"$OUT" &&
   grep -q '0 stale · 2 judged by pfm.s dispatcher' <<<"$OUT" &&
   grep -q '^check-map: clean — .*no stale row' <<<"$OUT"; then
   ok "derive clean: every command and tool mapped, and the hidden verbs pass on the dispatcher's word"
@@ -299,7 +304,7 @@ started="$(date +%s)"
 run_sut
 wall=$(( $(date +%s) - started ))
 if [ "$RC" -eq 0 ] && [ "$wall" -lt 5 ] &&
-  grep -q 'derived tools over pfm mcp serve --stdio --family harvester: 2 · 0 unmapped' <<<"$OUT" &&
+  grep -q 'derived tools over harvester mcp: 2 · 0 unmapped' <<<"$OUT" &&
   grep -q '^check-map: clean —' <<<"$OUT"; then
   ok "delayed id-2 reply is read while stdin stays open (wall ${wall}s)"
 else
@@ -390,7 +395,9 @@ for sample in 'chat empty' 'harvester empty' 'harvester error'; do
   read -r STUB_FAILED_FAMILY STUB_FAMILY_RESULT <<<"$sample"
   export STUB_FAILED_FAMILY STUB_FAMILY_RESULT
   run_sut
-  if [ "$RC" -eq 2 ] && grep -q "DERIVE-FAILED: pfm mcp serve --stdio --family $STUB_FAILED_FAMILY listed no tool" <<<"$OUT"; then
+  failed_command="pfm mcp serve --stdio --family chat"
+  [ "$STUB_FAILED_FAMILY" != harvester ] || failed_command="harvester mcp"
+  if [ "$RC" -eq 2 ] && grep -q "DERIVE-FAILED: $failed_command listed no tool" <<<"$OUT"; then
     ok "failed family named: $sample"
   else
     bad "failed family named: $sample" "rc=$RC" "$OUT"

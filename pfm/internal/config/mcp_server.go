@@ -14,9 +14,6 @@ const (
 
 // MCPServerKey names where a registered server's enabled flag is configured.
 func MCPServerKey(name string) string {
-	if name == MCPServerHarvester {
-		return "harvester.enabled"
-	}
 	return "mcp.servers." + name + ".enabled"
 }
 
@@ -50,4 +47,14 @@ func validateThirdParty(path string, entries map[string]json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// MCPServerSource reports where a registered server's enabled flag came from.
+func (config Config) MCPServerSource(name string) Source {
+	return config.Source(MCPServerKey(name))
+}
+
+// MCPServerEnabled reports the configured enablement of one registered family.
+func MCPServerEnabled(config Config, name string) bool {
+	return config.MCPServers[name].Enabled
 }

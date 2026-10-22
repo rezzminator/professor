@@ -448,9 +448,18 @@ if requires E2.01-open-seat; then
     [ -n "$fence" ] || bad="$bad $toml carries no '# BEGIN/END pfm mcp_servers — installer-owned' fence;"
     for family in chat harvester; do
       section="$(awk -v header="[mcp_servers.$family-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
-      grep -qF "command = \"$bin\"" <<<"$section" &&
-        grep -qF "args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"$family\"]" <<<"$section" ||
+      if [ "$family" = harvester ]; then
+        want_bin="$HOME/.local/bin/harvester"; want_args='args = ["mcp"]'
+      else
+        want_bin="$bin"; want_args='args = ["mcp", "serve", "--stdio", "--family", "chat"]'
+      fi
+      grep -qF "command = \"$want_bin\"" <<<"$section" &&
+        grep -qF "$want_args" <<<"$section" ||
         bad="$bad the fence lacks the $family-professor stdio command;"
+      if [ "$family" = harvester ]; then
+        grep -qxF "$(codex_harvester_env_line)" <<<"$section" ||
+          bad="$bad the fence lacks the sixteen harvester runtime environment names;"
+      fi
     done
   fi
   # The served surface: three JSON-RPC frames on stdin to the stdio command
@@ -631,7 +640,7 @@ spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
-  report="$(pfm doctor --skip-harvest 2>&1)"
+  report="$(pfm doctor 2>&1)"
   doctor_rc=$?
   bindings="$(grep -E '^doctor: codex_pane_bindings total=' <<<"$report" | tail -1)"
   panes="$(grep -E '^doctor: codex_panes live=' <<<"$report" | tail -1)"

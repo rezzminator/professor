@@ -558,7 +558,10 @@ func TestHeadlessOpenCodeCarriesReporterAndRejectsUnsupportedPolicy(t *testing.T
 		Home:           home,
 		PrimaryAccount: 1,
 		Config:         machine,
-		Model:          "provider/model",
+		Model:          "openai/gpt-6.1-sol",
+		Effort:         "High",
+		Prompt:         "Initial task 'quoted'\nnext line",
+		PromptChannel:  "Constitution, not the initial task.",
 	}
 	plan, err := PlanOpenCode(request)
 	if err != nil {
@@ -575,15 +578,58 @@ func TestHeadlessOpenCodeCarriesReporterAndRejectsUnsupportedPolicy(t *testing.T
 			lastEnvironmentValueNative(plan.SeatRun.Env, "OPENCODE_CONFIG_CONTENT"),
 		)
 	}
-	for _, field := range []string{"effort", "prompt channel"} {
+	for key, want := range map[string]string{
+		"PFM_OPENCODE_MODEL":   request.Model,
+		"PFM_OPENCODE_VARIANT": "high",
+		"PFM_OPENCODE_POLICY":  request.PromptChannel,
+	} {
+		if got := lastEnvironmentValueNative(plan.SeatRun.Env, key); got != want {
+			t.Errorf("%s=%q, want %q", key, got, want)
+		}
+	}
+	if !slices.Contains(plan.SeatRun.Args, request.Prompt) || slices.Contains(plan.SeatRun.Args, "--variant") ||
+		slices.Contains(plan.SeatRun.Args, request.PromptChannel) {
+		t.Fatalf("native prompt/policy argv=%q", plan.SeatRun.Args)
+	}
+	for _, effort := range []string{"", "turbo"} {
 		test := request
-		if field == "effort" {
-			test.Effort = "high"
-		} else {
-			test.PromptChannel = "policy"
+		test.Effort = effort
+		_, err := PlanOpenCode(test)
+		if effort == "" && err != nil ||
+			effort != "" && (err == nil || !strings.Contains(err.Error(), "unknown OpenCode effort")) {
+			t.Fatalf("effort %q error=%v", effort, err)
 		}
-		if _, err := PlanOpenCode(test); err == nil || !strings.Contains(err.Error(), "not supported") {
-			t.Fatalf("unsupported %s policy=%v", field, err)
+	}
+	test := request
+	test.PromptChannel = "policy\x00invalid"
+	if _, err := PlanOpenCode(test); err == nil || !strings.Contains(err.Error(), "prompt channel") {
+		t.Fatalf("invalid prompt channel error=%v", err)
+	}
+}
+
+func TestOpenCodeNativePolicyDoesNotDependOnReporter(t *testing.T) {
+	request := Request{
+		OpenCodePlugin:        "/fixture/seat.mjs",
+		OpenCodePromptChannel: "Policy only.",
+	}
+	request.Persona.Model, request.Persona.Effort = "openai/gpt-6.1-sol", "high"
+	assignments, err := openCodePersonaAssignments(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, word := range []string{
+		`OPENCODE_CONFIG_CONTENT={"plugin":["file:///fixture/seat.mjs"]}`,
+		"PFM_OPENCODE_MODEL=openai/gpt-6.1-sol", "PFM_OPENCODE_VARIANT=high", "PFM_OPENCODE_POLICY=Policy only.",
+	} {
+		if !slices.Contains(assignments, word) {
+			t.Errorf("native assignments lack %q: %q", word, assignments)
 		}
+	}
+	request.OpenCodePlugin = ""
+	if _, err := openCodePersonaAssignments(
+		request,
+	); err == nil ||
+		!strings.Contains(err.Error(), "require the native seat plugin") {
+		t.Fatalf("missing delivery mechanism error=%v", err)
 	}
 }

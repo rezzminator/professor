@@ -46,6 +46,7 @@ services:
       # resolves it; an absent source mounts the common Git directory instead
       # and PFM_DEV_ENGINE_SYNC_MISSING names the absence.
       - ${PFM_DEV_ENGINE_SYNC_SRC:?set by dev.sh iso — the engine-sync source}:/engine-sync:ro
+      - ${PFM_DEV_HARVESTER_SRC:?set by dev.sh iso — the harvester source}:/harvester:ro
       - pfm-dev-gocache:/root/.cache/go-build
       - pfm-dev-gomod:/root/go/pkg/mod
       - pfm-dev-lintcache:/root/.cache/golangci-lint
@@ -57,6 +58,7 @@ services:
       PFM_DEV_REPO_GIT_DIR: /pfm-git-common/${PFM_DEV_GIT_DIR_REL:?set by dev.sh iso — relative active gitdir}
       PFM_DEV_REPO_WORK_TREE: /worktree
       PFM_DEV_ENGINE_SYNC_MISSING: ${PFM_DEV_ENGINE_SYNC_MISSING:-}
+      PFM_DEV_HARVESTER_MISSING: ${PFM_DEV_HARVESTER_MISSING:-}
 
   # The real-simulation fence (`dev.sh iso sim`): pfm-dev's mounts and law plus
   # a real Google Chrome and the shared memory Chrome needs
@@ -78,7 +80,7 @@ services:
       # so uv hardlinks. Every sidecar-script edit publishes a new environment
       # (the script is in its digest); hardlinked, that costs seconds, where a
       # cross-volume copy would cost the environment's full size per edit.
-      UV_CACHE_DIR: /root/.local/state/pfm/harvest-python/.uv-cache
+      UV_CACHE_DIR: /root/.local/state/harvester/python/cache
 
 # The caches are shared by bare name with plain `docker run -v` mounters, so
 # compose never creates or prefixes them (a compose-made fence_… copy is never

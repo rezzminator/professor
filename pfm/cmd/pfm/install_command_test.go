@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -202,6 +204,36 @@ func assertManagerConsulted(t *testing.T, logPath string, wantDarwinConsulted bo
 	}
 }
 
+// Match the installer's hermetic release fixture while running the real apply path.
+type installGateHarvesterRelease struct {
+	requests []string
+}
+
+const installGateHarvesterBinary = "#!/bin/sh\n" +
+	"[ \"$*\" = setup ] || exit 2\n" +
+	"printf 'setup\\n' > \"$HOME/harvester-setup\"\n"
+
+func (release *installGateHarvesterRelease) RoundTrip(request *http.Request) (*http.Response, error) {
+	release.requests = append(release.requests, request.URL.String())
+	asset := "harvester_0.1.0_" + goRuntime.GOOS + "_" + goRuntime.GOARCH
+	const base = "https://github.com/rezzminator/harvester/releases/download/v0.1.0/"
+	var content string
+	switch request.URL.String() {
+	case "https://api.github.com/repos/rezzminator/harvester/releases/latest":
+		content = `{"tag_name":"v0.1.0"}`
+	case base + "SHA256SUMS":
+		content = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(installGateHarvesterBinary)), asset)
+	case base + asset:
+		content = installGateHarvesterBinary
+	default:
+		return nil, fmt.Errorf("unexpected install-gate release request: %s", request.URL)
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header),
+		Body: io.NopCloser(strings.NewReader(content)), Request: request,
+	}, nil
+}
+
 func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	// Apply now generates prompts in the source clone. Never discover the
 	// read-only test checkout; each subtest owns its default clone under HOME.
@@ -243,6 +275,14 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	})
 
 	t.Run("idle reachable manager applies with yes", func(t *testing.T) {
+		release := &installGateHarvesterRelease{}
+		previous := runInstaller
+		t.Cleanup(func() { runInstaller = previous })
+		runInstaller = func(ctx context.Context, options installer.Options) (installer.Report, error) {
+			options.GoPluginHTTPClient = &http.Client{Transport: release}
+			return previous(ctx, options)
+		}
+		t.Setenv("HARVESTER_RELEASE_BASE", "")
 		home := t.TempDir()
 		configPath := filepath.Join(t.TempDir(), pfmconfig.FileName)
 		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
@@ -263,6 +303,19 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 			t.Fatalf("idle yes code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		assertManagerConsulted(t, logPath, true)
+		asset := "harvester_0.1.0_" + goRuntime.GOOS + "_" + goRuntime.GOARCH
+		const base = "https://github.com/rezzminator/harvester/releases/download/v0.1.0/"
+		wantRequests := []string{
+			"https://api.github.com/repos/rezzminator/harvester/releases/latest",
+			base + "SHA256SUMS", base + asset,
+		}
+		if !reflect.DeepEqual(release.requests, wantRequests) {
+			t.Fatalf("release requests=%v, want %v", release.requests, wantRequests)
+		}
+		setup, err := os.ReadFile(filepath.Join(home, "harvester-setup"))
+		if err != nil || string(setup) != "setup\n" {
+			t.Fatalf("verified Harvester binary setup=%q err=%v", setup, err)
+		}
 	})
 
 	t.Run("running service refuses actionably", func(t *testing.T) {
@@ -312,7 +365,7 @@ func TestInstallUnknownFlagPrintsTheUsage(t *testing.T) {
 		if code := runInstall(args, &stdout, &stderr); code != wantCode {
 			t.Fatalf("args=%q code=%d stderr=%q", args, code, stderr.String())
 		}
-		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]\n"
+		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--offline] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]\n"
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr=%q want=%q", stderr.String(), want)
 		}
@@ -331,7 +384,7 @@ func TestInstallConfirmationPreservesConfigDir(t *testing.T) {
 	dir := filepath.Join(home, "claude's config")
 	runtime := commandRuntime{Paths: paths.Values{Home: home}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--config-dir", dir, "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--config-dir", dir, "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	_, confirmation, found := strings.Cut(stdout.String(), "if you agree, run again: ")
@@ -367,23 +420,23 @@ func TestInstallCarriesExplicitVSCodeTerminalOptIn(t *testing.T) {
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--vscode", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--vscode", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("pfm install --vscode code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !captured.VSCode {
 		t.Fatal("pfm install --vscode did not reach installer.Options")
 	}
-	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --vscode --skip-harvest\n") {
+	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --vscode --offline\n") {
 		t.Fatalf("VS Code preview dropped its apply flag: %q", stdout.String())
 	}
 }
 
-func TestInstallSkipHarvestDisablesProvisioningButDefaultFailureStaysLoud(t *testing.T) {
+func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })
 	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		if options.ProvisionHarvest {
-			return installer.Report{}, errors.New("harvest fixture failed")
+		if !options.Offline {
+			return installer.Report{}, errors.New("plugin fixture failed")
 		}
 		return installer.Report{}, nil
 	}
@@ -393,32 +446,32 @@ func TestInstallSkipHarvestDisablesProvisioningButDefaultFailureStaysLoud(t *tes
 	if code := runInstall([]string{"--yes"}, &stdout, &stderr, runtime); code != 1 {
 		t.Fatalf("default apply code=%d stdout=%q stderr=%q, want loud failure", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "harvest fixture failed") {
+	if !strings.Contains(stderr.String(), "plugin fixture failed") {
 		t.Fatalf("default apply stderr=%q, want provisioning failure", stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip apply code=%d stdout=%q stderr=%q, want success", code, stdout.String(), stderr.String())
 	}
 }
 
-func TestInstallSkipHarvestPreviewPreservesTheConfirmationFlag(t *testing.T) {
+func TestInstallOfflinePreviewPreservesTheConfirmationFlag(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })
 	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		if options.ProvisionHarvest {
-			t.Fatal("skip preview enabled harvest provisioning")
+		if !options.Offline {
+			t.Fatal("offline preview did not enable offline installation")
 		}
 		return installer.Report{}, nil
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --skip-harvest\n") {
+	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --offline\n") {
 		t.Fatalf("skip preview output=%q, want preserved skip confirmation", stdout.String())
 	}
 }
@@ -452,7 +505,7 @@ func TestInstallSkipEngineCodexReachesProbeInstallerAndConfirmation(t *testing.T
 		Config: pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}},
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest", "--skip-engine", "codex"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--offline", "--skip-engine", "codex"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip-engine preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if captured.CodexHomes == nil || len(captured.CodexHomes) != 0 {
@@ -461,7 +514,7 @@ func TestInstallSkipEngineCodexReachesProbeInstallerAndConfirmation(t *testing.T
 	if !strings.Contains(stdout.String(), "skipped (--skip-engine codex)") ||
 		!strings.HasSuffix(
 			stdout.String(),
-			"if you agree, run again: pfm install --yes --skip-harvest --skip-engine codex\n",
+			"if you agree, run again: pfm install --yes --offline --skip-engine codex\n",
 		) {
 		t.Fatalf("skip-engine output=%q", stdout.String())
 	}
@@ -487,7 +540,7 @@ func TestInstallAdoptAgentsReachesTheInstallerAndConfirmation(t *testing.T) {
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	for _, adopt := range []bool{false, true} {
-		args := []string{"--skip-harvest"}
+		args := []string{"--offline"}
 		if adopt {
 			args = append(args, "--adopt-agents")
 		}
@@ -498,7 +551,7 @@ func TestInstallAdoptAgentsReachesTheInstallerAndConfirmation(t *testing.T) {
 		if captured.AdoptAgents != adopt {
 			t.Fatalf("adopt=%t: Options.AdoptAgents = %t", adopt, captured.AdoptAgents)
 		}
-		if got := strings.Contains(stdout.String(), "pfm install --yes --skip-harvest --adopt-agents\n"); got != adopt {
+		if got := strings.Contains(stdout.String(), "pfm install --yes --offline --adopt-agents\n"); got != adopt {
 			t.Fatalf("adopt=%t: confirmation = %q", adopt, stdout.String())
 		}
 	}
@@ -514,7 +567,7 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest", "--skip-themes"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--offline", "--skip-themes"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip-themes preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if captured.InstallThemes {
@@ -522,7 +575,7 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 	}
 	if !strings.HasSuffix(
 		stdout.String(),
-		"if you agree, run again: pfm install --yes --skip-harvest --skip-themes\n",
+		"if you agree, run again: pfm install --yes --offline --skip-themes\n",
 	) {
 		t.Fatalf("skip-themes confirmation=%q", stdout.String())
 	}
@@ -553,7 +606,7 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 	}
 
 	var applyStdout, applyStderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &applyStdout, &applyStderr, explicitRuntime); code != 1 {
+	if code := runInstall([]string{"--yes", "--offline"}, &applyStdout, &applyStderr, explicitRuntime); code != 1 {
 		t.Fatalf(
 			"runInstall(apply, missing --config) code=%d stdout=%q stderr=%q, want refusal",
 			code,
@@ -569,7 +622,7 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 	}
 
 	var previewStdout, previewStderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest"}, &previewStdout, &previewStderr, explicitRuntime); code != 0 {
+	if code := runInstall([]string{"--offline"}, &previewStdout, &previewStderr, explicitRuntime); code != 0 {
 		t.Fatalf(
 			"runInstall(preview, missing --config) code=%d stdout=%q stderr=%q, want 0",
 			code,
@@ -611,7 +664,7 @@ func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := run(
-		[]string{"--config", defaultPath, "install", "--yes", "--skip-harvest"},
+		[]string{"--config", defaultPath, "install", "--yes", "--offline"},
 		&stdout,
 		&stderr,
 	); code != 0 {
@@ -675,7 +728,7 @@ func TestInstallSeedDatabasePathsAgreeWithMigrationAndProcessPin(t *testing.T) {
 				return installer.Report{}, nil
 			}
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{"install", "--yes", "--skip-harvest"}, &stdout, &stderr); code != 0 || !called {
+			if code := run([]string{"install", "--yes", "--offline"}, &stdout, &stderr); code != 0 || !called {
 				t.Fatalf(
 					"install code=%d called=%v stdout=%q stderr=%q",
 					code,

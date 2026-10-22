@@ -1,5 +1,24 @@
 <h1 align="center">Professor</h1>
 
+## Contents
+
+- [Why Professor?](#why-professor)
+- [Six things you can watch it do](#six-things-you-can-watch-it-do)
+  - [1. See the fleet](#1-see-the-fleet)
+  - [2. Chats that talk to each other](#2-chats-that-talk-to-each-other)
+  - [3. Rules that bite](#3-rules-that-bite)
+  - [4. Read what the web hides from bots](#4-read-what-the-web-hides-from-bots)
+  - [5. One contract, three runtimes](#5-one-contract-three-runtimes)
+  - [6. Reload without losing the conversation](#6-reload-without-losing-the-conversation)
+- [Install](#install)
+- [The discipline layer (`templates/`)](#the-discipline-layer-templates)
+- [The fleet CLI (`pfm/`)](#the-fleet-cli-pfm)
+- [Plugins](#plugins)
+- [Origin](#origin)
+- [Help and community](#help-and-community)
+- [Contributing](#contributing)
+- [License](#license)
+
 <p align="center">
   <strong>Multi-agent framework for Claude Code, Codex &amp; OpenCode.</strong><br>
   Turns the AI coding chats on your machine into a disciplined engineering team —<br>
@@ -7,7 +26,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rezzminator/professor/actions/workflows/verify.yml"><img alt="verify" src="https://github.com/rezzminator/professor/actions/workflows/verify.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/rezzminator/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/rezzminator/professor"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/rezzminator/professor"></a>
   <img alt="go" src="https://img.shields.io/badge/go-1.27-00ADD8">
@@ -92,7 +110,7 @@ About one in ten of the world's top 10,000 websites now tells AI crawlers to sta
   <img src="docs/img/cards/harv.webp" alt="Harvester: a fetch climbs the ladder on a live stage — every source it touched lit, every step logged with its reason, the result box with the character count and the trace; then the next scenario" width="900">
 </p>
 
-A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `pfm harvest ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. The same surface is available through the `harvester-professor` MCP server, with bare tools such as `read`, `search_literature` and `search_web`; each client registers it with `pfm mcp serve --stdio --family harvester`, forwarding to `/mcp/harvester-professor`. The browser rung never solves anything interactive.
+A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `harvester ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. Harvester's source is a standalone Go plugin in `plugins/harvester/`. The same surface is available through the `harvester-professor` MCP server, with bare tools such as `read`, `search_literature` and `search_web`; each client launches `harvester mcp` as a stdio proxy to the persistent daemon. The browser rung never solves anything interactive.
 
 ### 5. One contract, three runtimes
 
@@ -147,7 +165,7 @@ The checkout is pinned to the latest semantic version tag. A maintainer checkout
 Jumping several versions on one host? [UPGRADING.md](UPGRADING.md) prints the host fixes in apply order with `pfm install --check --plan`, and covers single-account gateway hosts.
 
 > [!WARNING]
-> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `chat-professor` and `harvester-professor` MCP servers ship disabled — `mcp.servers.chat.enabled` for chat, `harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
+> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `chat-professor` and `harvester-professor` MCP servers ship disabled — `mcp.servers.chat.enabled` for chat, `mcp.servers.harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
 
 ---
 
@@ -162,7 +180,7 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 - **One agent writes git.** `gitter` is the only agent that commits; every other agent is read-only.
 - **Framework edits.** A change to `.claude/**`, a `CLAUDE.md` or `templates/**` goes through the `pcm` agent (the user's `/pcm` dispatches it); it loads the quality-prompt contract before its first edit.
 - **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
-- **The flight pipeline.** Work past the direct rung goes to one foreman, its tier picked by difficulty and ambiguity, never size: `flights-foreman-sonnet` for a clear path where the pattern is in the code, `flights-foreman` for design choices, ambiguity, unfamiliar code, an unknown cause, several modules or the toughest work. The foreman reads what the build needs and writes the whole change by its own hand, spawning a child foreman only for an area sharing no file with its own. Once every foreman on the worktree has returned, the main chat sends one `flights-lander`: it computes its review plan from the diff, spawns cheap hunters, spec walkers and sub-landers in parallel, verifies every candidate on disk, fixes every finding, runs the gate, then `gitter` commits. `/flights:doctor` meters the flight from transcripts and git — landed lines per million input tokens — never from what an agent said it did.
+- **The flight pipeline.** Work too large to do directly goes to one foreman, its tier picked by difficulty and ambiguity, never size: `flights-foreman-sonnet` for a clear path where the pattern is in the code, `flights-foreman` for design choices, ambiguity, unfamiliar code, an unknown cause, several modules or the toughest work. The foreman reads what the build needs and writes the whole change by its own hand, spawning a child foreman only for an area sharing no file with its own. Once every foreman on the worktree has returned, the main chat sends one `flights-lander`: it computes its review plan from the diff, spawns cheap hunters, spec walkers and sub-landers in parallel, verifies every candidate on disk, fixes every finding, runs the gate, then `gitter` commits. `/flights:doctor` meters the flight from transcripts and git — landed lines per million input tokens — never from what an agent said it did.
 - **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
 
 With `"gptAgents": true` under `claude` in the machine config `pfm.config.json`, `pfm install` renders and links the GPT equivalents of every machine-global Professor role, plus the general-purpose `sol`, `luna`, `astra`. Both foreman tiers use `gpt-foreman`; GPT children stay on GPT and unavailable required roles report `BLOCKED`. Project roles use registered manual-loading wrappers: the portable `gpt-pcm` and `gpt-gitter`, and this repository's `gpt-changelogger`, `gpt-releaser`, `gpt-themer`. Registration grants no GitGuard authority. Invoking them requires a gateway serving their model IDs; installation does not. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) routes those IDs over your ChatGPT login. [Complete role inventory, setup and ownership](docs/design/gpt-twins/gpt-twins.md).
@@ -184,7 +202,7 @@ One Go binary with embedded installer assets. Beyond the six moments above:
 <details>
 <summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.27.1+ for source builds</summary>
 
-From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `python3` (checked, never installed by `pfm install`), `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl`/`security` on macOS. A clone host also needs the [engine-sync binary](#plugins). Go **1.27.1 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [harvest README](pfm/internal/harvest/README.md).
+From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `python3` (checked, never installed by `pfm install`), `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl`/`security` on macOS. A clone host also needs the [engine-sync binary](#plugins). Go **1.27.1 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. `pfm install` installs the Harvester plugin and runs `harvester setup` to provision its pinned `uv` and CPython environment; `--offline` passes through to setup. Themes can be skipped with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-plugin-setup-and-optional-components) before applying. Harvester configuration and testing are documented in the standalone plugin repository at `plugins/harvester/README.md`.
 
 </details>
 

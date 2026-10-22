@@ -33,7 +33,7 @@ Match the return's first-line token, never its prose.
 | Return | Reaction |
 | --- | --- |
 | `DONE {phase}` | Record it; dispatch the next phase |
-| `FIX {phase}` rows routed `code` or `docs` | Fix each in `CANDIDATE` by the work ladder (fleet prompt § Orchestration): code in the fence per `/pfm-testing-manual` with a regression test watched failing against the unfixed code first; markdown directly, prompt files through the `pcm` agent. `gitter` Phase COMMIT on `release/v{NEW}` per fix, `fix(release): {what}`. Then re-dispatch the phase: REVIEW in `delta`, GATE `first`, REHEARSE its next round |
+| `FIX {phase}` rows routed `code` or `docs` | Fix each in `CANDIDATE`: code in the fence per `/pfm-testing-manual` with a regression test watched failing against the unfixed code first; markdown directly, prompt files through the `pcm` agent. `gitter` Phase COMMIT on `release/v{NEW}` per fix, `fix(release): {what}`. Then re-dispatch the phase: REVIEW in `delta`, GATE `first`, REHEARSE its next round |
 | `FIX {phase}` rows routed `notes` | NOTES in `revise` with the rows verbatim, then re-dispatch the phase that raised them |
 | `FIX READY` rows routed `rerun` | Re-run each named phase in phase order, then READY |
 | `FAILED {phase}: {why}` | Read the cause; one re-dispatch with the cause in a changed brief; a second `FAILED` is a stop, reported with both causes |

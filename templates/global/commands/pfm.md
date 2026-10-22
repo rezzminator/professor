@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop|accept`), `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → the `pcm` agent.
+description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop|accept`), `pfm install --yes`, `pfm doctor`, chat MCP and `harvester mcp|status|stop` routing, config location; load for any `pfm` verb or question. Not for editing framework files → the `pcm` agent.
 argument-hint: [verb|question]
 ---
 
@@ -8,7 +8,7 @@ argument-hint: [verb|question]
 
 $ARGUMENTS
 
-`pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, the harvester, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store: `{BLUEPRINT_CLONE_PATH}` (default `~/.professor`; `.professor/manifest.json` can point elsewhere).
+`pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, harvester MCP registration, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store: `{BLUEPRINT_CLONE_PATH}` (default `~/.professor`; `.professor/manifest.json` can point elsewhere).
 
 For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`.
 
@@ -19,7 +19,6 @@ Operator verbs:
 - ls: list or pick fleet chats (`--killed` for the graveyard)
 - chat: operate on one chat — new, open, status, last, read, stream, call, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, schedule
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
-- harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
 - index: refresh the transcript index
 - whoami: this chat's own tmux session name
 - issues: servicedesk complaints filed through `servicedesk`
@@ -55,7 +54,7 @@ engine-sync, the `engine-sync` plugin's binary (on PATH after `pfm install`), is
 
 ## Host integration
 
-`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands and skills from `{BLUEPRINT_CLONE_PATH}`; saving a global template IS the deploy. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
+`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands and skills from `{BLUEPRINT_CLONE_PATH}`; saving a global template IS the deploy. Harvester binary provisioning also runs on Codex-only and OpenCode-only hosts: alpha builds its source checkout, stable downloads a checksum-verified release; the Claude plugin is optional. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
 
 ## Chat: MCP first, shell for the rest
 
@@ -63,8 +62,12 @@ Inside a chat, the `mcp__chat-professor__*` MCP tools are preferred for `call`, 
 
 ## Harvest: MCP first, CLI for batches
 
-Inside a chat, the `mcp__harvester-professor__*` tools (`mcp__harvester-professor__read` (its `files` field local server only), `mcp__harvester-professor__download_file`, `mcp__harvester-professor__search_literature`, `mcp__harvester-professor__search_web` (only when a search backend is configured)) answer per item; `pfm harvest [--refresh] [--include-content=false] [--ocr-language latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|path|identifier>...`, `pfm harvest download-file [--json] [--header 'Name: value']... <url>...` and `pfm harvest search [--type any|paper|book] [--limit N] [--json] <query>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
+Inside a chat, the `mcp__harvester-professor__*` tools (`mcp__harvester-professor__read` (its `files` field local server only), `mcp__harvester-professor__download_file`, `mcp__harvester-professor__search_literature`, `mcp__harvester-professor__search_web` (only when a search backend is configured)) answer per item; `harvester [--refresh] [--include-content=false] [--ocr-language latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|path|identifier>...`, `harvester download-file [--json] [--header 'Name: value']... <url>...` and `harvester search [--type any|paper|book] [--limit N] [--json] <query>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
+
+`harvester mcp` is a thin stdio proxy to one persistent daemon shared by Claude, Codex and OpenCode; it starts the daemon on demand and replaces outdated versions. `harvester status` reports it; `harvester stop` drains it. The batch CLI runs one-shot.
+
+`harvester config path|show` reads the plugin's own configuration. `pfm mcp harvester enable|disable` controls only MCP registration through `mcp.servers.harvester.enabled`.
 
 ## Config
 
-`pfm config show` prints the config path (`{clone}/pfm.config.json` by default; `pfm --config PATH` or `PFM_CONFIG` overrides) and every effective key with its source (file or default) — accounts, `claude.systemPrompt` (`production | lean | professor`), `claude.permissionMode`, `mcp.servers.*`, `harvester.enabled`, `extensions.*`, `ask.*`. `pfm config claude [--account N]` prints the resolved Claude launch settings. `pfm config validate` checks the file; `pfm config init [--force]` writes a fresh one.
+`pfm config show` prints the config path (`{clone}/pfm.config.json` by default; `pfm --config PATH` or `PFM_CONFIG` overrides) and every effective key with its source (file or default) — accounts, `claude.systemPrompt` (`production | lean | professor`), `claude.permissionMode`, `mcp.servers.*`, `extensions.*`, `ask.*`. `pfm config claude [--account N]` prints the resolved Claude launch settings. `pfm config validate` checks the file; `pfm config init [--force]` writes a fresh one.

@@ -246,7 +246,7 @@ func (professor *FamilyServers) runStdioTransport(
 				options.Family = family
 			}
 		} else {
-			return fmt.Errorf("pfm mcp stdio: choose --family chat or harvester")
+			return fmt.Errorf("pfm mcp stdio: choose --family chat")
 		}
 	}
 	if professor.views[options.Family] == nil {
@@ -380,7 +380,7 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 // isChatToolCall classifies every tools/call on the chat-family proxy, even an
 // unknown tool name, for caller refresh and conservative runtime-safe replay.
 func (proxy *stdioProxy) isChatToolCall(frame proxyFrame) bool {
-	return proxy.family != pfmconfig.MCPServerHarvester && frame.Method == "tools/call"
+	return frame.Method == "tools/call"
 }
 
 func proxyCallHasThreadID(raw []byte) (bool, error) {

@@ -65,7 +65,7 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 					fleetEnv = " PFM_OPENCODE_FLEET_FILE=" + Quote(request.OpenCodeFleetPrompt)
 				}
 				words = []string{
-					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
+					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}' PFM_OPENCODE_MODEL='openai/gpt-x' PFM_OPENCODE_VARIANT='xhigh'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
 						prompt,
 					) + " opencode",
 				}
@@ -149,9 +149,14 @@ func TestWorkbenchPersonaEffort(t *testing.T) {
 			wantEffort: "xhigh",
 		},
 		{
-			name:     "OpenCode effort unvalidated",
+			name:     "unknown OpenCode effort",
 			manifest: `{"prompt":"scribe.md","effort":"turbo","engines":["opencode"]}`,
-			engines:  []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New, wantEffort: "turbo",
+			engines:  []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New,
+			refused: map[pfmengine.ID]bool{pfmengine.OpenCode: true},
+		},
+		{
+			name: "OpenCode effort lowered", manifest: `{"prompt":"scribe.md","effort":"High","engines":["opencode"]}`,
+			engines: []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New, wantEffort: "high",
 		},
 		{
 			name: "ForLaunch error passes through", manifest: `{"prompt":""}`,
@@ -479,7 +484,7 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 				return
 			case "plain":
 				want := `OPENCODE_CONFIG_CONTENT='{"plugin":[` + herdrURL + `]}'`
-				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE") {
+				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE=") {
 					t.Fatalf("run lacks %q or carries a persona env: %s", want, run)
 				}
 			case "persona":

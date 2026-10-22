@@ -17,7 +17,7 @@ Development must never destabilize the live box: code changes happen in a git wo
 
 `docker-compose.yml` + `pfm-dev.Dockerfile` build the image (Go pinned to `pfm/go.mod`, Node to the mirror compilers' minimum); `fence-env.sh` resolves the `PFM_DEV_*` mount contract every caller sources; `tools.env` + `tools.sh` pin the dev tools `make tools` installs on the host and bakes into the image; `release-rehearsal.sh` drives the fenced adopter machine `/pfm:release` rehearses updates on.
 
-The same Dockerfile's `pfm-sim` target is the real-simulation fence: pfm-dev plus Google Chrome, which runs headless only, and 2 GB of shared memory. `sim-entry.sh` builds and installs `pfm` from the worktree with the harvester's browser rung on before running the command. Harvester state persists per worktree in `pfm-sim-harvest-<worktree>-<cksum>`, `dev.sh iso sim-reset` drops it, and fence housekeeping (`infra/fence/housekeeping.sh`) removes it once its worktree is gone.
+The same Dockerfile's `pfm-sim` target is the real-simulation fence: pfm-dev plus Google Chrome, which runs headless only, and 2 GB of shared memory. `sim-entry.sh` builds and installs `pfm` from the worktree, enables its Harvester registration, and uses the separately mounted plugin source to build/run the standalone `harvester` binary with its browser rung on. Harvester state persists per worktree in `pfm-sim-harvest-<worktree>-<cksum>`, `dev.sh iso sim-reset` drops it, and fence housekeeping (`infra/fence/housekeeping.sh`) removes it once its worktree is gone.
 
 `fence/lanes/` is the Tier B hermetic suite over the same image: `root.sh` builds a fixture-seated root with `provision.sh`, the mock engine and `adopt.sh`; `cred-scan.sh` refuses unregistered credentials; `hook-command.sh` reads a settings hook command in its plain form for lane A.11 and the demo's express-hooks beat. `run.sh` starts one offline container and runs the selected lanes in canonical order (`O1 → E1 → E2 → E3 → F → M → A → O2`), each beat asserting from pfm's own reports and the pane. `scenarios/` holds engine scripts, `lib.sh` the beat library, `check-map.sh` the coverage gate, `known-gaps.yml` and `budgets.yml` the ledgers, and `tests/` the harness tests. How to run one lane, read a red row and extend the suite: `docs/dev/testing/lanes.md`.
 
@@ -28,7 +28,7 @@ Entry point — from the worktree checkout:
 .claude/scripts/test.sh --full           # the full gate, once, right before the merge
 .claude/scripts/dev.sh iso run '<command>'  # a probe the test command does not cover
 .claude/scripts/dev.sh iso shell         # interactive shell, a fresh run
-.claude/scripts/dev.sh iso sim 'pfm harvest --refresh --json https://example.com/'  # live traffic, real Chrome
+.claude/scripts/dev.sh iso sim 'harvester --refresh --json https://example.com/'  # live traffic, real Chrome
 ```
 
 A run builds the image only when its image key changed, then prints the fence proof (`fence: container=… HOME=/root work=… run=…`); a run that cannot print it did not run inside the fence. Docker absent reports `TOOLCHAIN-MISSING` — never a silent host fallback.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 type modelCostTransport func(*http.Request) (*http.Response, error)
@@ -274,5 +275,21 @@ func TestPublishedIDsNamesNoModelForAnyPreviewLabel(t *testing.T) {
 		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 			t.Errorf("publishedIDs(%q) = %v, want %v", tc.label, got, tc.want)
 		}
+	}
+}
+
+func TestFetcherUsesBoundedHTTPAndPublisherUserAgent(t *testing.T) {
+	fetcher := NewFetcher(nil, nil)
+	if fetcher.client.Timeout != 45*time.Second {
+		t.Fatalf("HTTP timeout = %s", fetcher.client.Timeout)
+	}
+	fetcher.client.Transport = modelCostTransport(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("User-Agent"); got != "Professor model-cost/1.0" {
+			t.Errorf("User-Agent = %q", got)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(claudePage))}, nil
+	})
+	if _, err := fetcher.fetchSource(context.Background(), claudeURL); err != nil {
+		t.Fatal(err)
 	}
 }

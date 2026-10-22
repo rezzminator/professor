@@ -77,7 +77,7 @@ func TestConvergeHerdrNamesFromCodexRename(t *testing.T) {
 		}
 		switch req.Method {
 		case "pane.rename":
-			return map[string]any{"pane": map[string]any{"pane_id": "w6:p3", "label": "HARVESTER_FIX"}}, ""
+			return map[string]any{"pane": map[string]any{"pane_id": "w6:p3", "label": "ENGINE_FIX"}}, ""
 		case "agent.rename":
 			var slug string
 			if err := json.Unmarshal(req.Params["name"], &slug); err != nil {
@@ -89,7 +89,7 @@ func TestConvergeHerdrNamesFromCodexRename(t *testing.T) {
 		case "tab.get":
 			return map[string]any{
 				"type": "tab_info",
-				"tab":  map[string]any{"tab_id": "w6:t1", "label": "HARVESTER_FIX", "pane_count": 1},
+				"tab":  map[string]any{"tab_id": "w6:t1", "label": "ENGINE_FIX", "pane_count": 1},
 			}, ""
 		default:
 			return nil, "unexpected_method"
@@ -105,7 +105,7 @@ func TestConvergeHerdrNamesFromCodexRename(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	if err := db.UpsertCxName(
 		context.Background(),
-		store.CxName{ID: seat.SessionID, ThreadName: "HARVESTER_FIX", Source: store.CxNameSourceSessionIndex},
+		store.CxName{ID: seat.SessionID, ThreadName: "ENGINE_FIX", Source: store.CxNameSourceSessionIndex},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestConvergeHerdrNamesFromCodexRename(t *testing.T) {
 		t.Fatalf("converge failed: %s", &stderr)
 	}
 	got, _, err := state.Seat(context.Background(), seat.SeatID)
-	if err != nil || got.Name != "HARVESTER_FIX" {
+	if err != nil || got.Name != "ENGINE_FIX" {
 		t.Fatalf("seat=%+v err=%v stderr=%s", got, err, &stderr)
 	}
 }

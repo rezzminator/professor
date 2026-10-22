@@ -33,7 +33,7 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 				return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 			}
 			var order []string
-			updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+			updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 				order = append(order, "candidate-install")
 				if got, err := os.ReadFile(canonical); err != nil || string(got) != "new\n" {
 					t.Fatalf("candidate install binary = %q, %v; want new", got, err)
@@ -46,7 +46,7 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 				}
 				return nil
 			}
-			updateRunDoctor = func(_ context.Context, _ string, _ pfmconfig.Runtime, configPath string, _ bool, _, _ io.Writer) (doctorOutcome, error) {
+			updateRunDoctor = func(_ context.Context, _ string, _ pfmconfig.Runtime, configPath string, _, _ io.Writer) (doctorOutcome, error) {
 				order = append(order, "candidate-doctor")
 				if configPath != runtime.Config.Path {
 					t.Fatalf("candidate doctor config = %q, want %q", configPath, runtime.Config.Path)
@@ -55,7 +55,7 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 			}
 			stubUpdateBaselineDoctor(t, doctorOutcome{})
 			var previousBinary string
-			updateRollbackInstall = func(_ context.Context, binary, workingDir, sourceRepo string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+			updateRollbackInstall = func(_ context.Context, binary, workingDir, sourceRepo string, _ pfmconfig.Runtime, _, _ io.Writer) error {
 				order = append(order, "previous-install")
 				previousBinary = binary
 				for _, path := range []string{canonical, binary} {
@@ -71,7 +71,7 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 				}
 				return nil
 			}
-			updateRollbackDoctor = func(_ context.Context, binary string, _ pfmconfig.Runtime, configPath string, _ bool, _, _ io.Writer) (doctorOutcome, error) {
+			updateRollbackDoctor = func(_ context.Context, binary string, _ pfmconfig.Runtime, configPath string, _, _ io.Writer) (doctorOutcome, error) {
 				order = append(order, "previous-doctor")
 				if binary != previousBinary || configPath != runtime.Config.Path {
 					t.Errorf(
@@ -110,7 +110,7 @@ func TestUpdateRetainsBackupAfterFailedBinaryRollback(t *testing.T) {
 			stubUpdatePipeline(t, runtime)
 			canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
 			var stage string
-			updateApplyInstall = func(_ context.Context, candidate, _, _ string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+			updateApplyInstall = func(_ context.Context, candidate, _, _ string, _ pfmconfig.Runtime, _, _ io.Writer) error {
 				stage = filepath.Dir(candidate)
 				if phase == "success" {
 					return nil
@@ -134,7 +134,7 @@ func TestUpdateRetainsBackupAfterFailedBinaryRollback(t *testing.T) {
 			}
 			oldInstall, oldDoctor := updateRollbackInstall, updateRollbackDoctor
 			t.Cleanup(func() { updateRollbackInstall, updateRollbackDoctor = oldInstall, oldDoctor })
-			updateRollbackInstall = func(_ context.Context, previous, _, _ string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+			updateRollbackInstall = func(_ context.Context, previous, _, _ string, _ pfmconfig.Runtime, _, _ io.Writer) error {
 				if got, err := os.ReadFile(previous); err != nil || string(got) != "old\n" {
 					t.Fatalf("previous installer binary=%q err=%v, want old", got, err)
 				}
@@ -143,7 +143,7 @@ func TestUpdateRetainsBackupAfterFailedBinaryRollback(t *testing.T) {
 				}
 				return nil
 			}
-			updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+			updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 				return doctorOutcome{}, nil
 			}
 			var stdout, stderr bytes.Buffer
@@ -195,13 +195,13 @@ func TestUpdateRollbackJoinsStepFailures(t *testing.T) {
 			oldInstall, oldDoctor := updateRollbackInstall, updateRollbackDoctor
 			t.Cleanup(func() { updateRollbackInstall, updateRollbackDoctor = oldInstall, oldDoctor })
 			injected := errors.New("injected step failure")
-			updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+			updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 				if step == "install" {
 					return injected
 				}
 				return nil
 			}
-			updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+			updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 				if step == "doctor spawn" {
 					return doctorOutcome{}, injected
 				}
@@ -223,7 +223,6 @@ func TestUpdateRollbackJoinsStepFailures(t *testing.T) {
 				replacements,
 				nil,
 				runtime,
-				false,
 				io.Discard,
 				io.Discard,
 			)
@@ -307,7 +306,7 @@ func TestUpdateRollbackResetsSourceDespiteARefreshedPriceTable(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := rollbackUpdateState(
-		context.Background(), repo, repo, previousRef, true, nil, nil, runtime, false, &stdout, &stderr,
+		context.Background(), repo, repo, previousRef, true, nil, nil, runtime, &stdout, &stderr,
 	)
 
 	if err != nil && strings.Contains(err.Error(), "restore source revision") {

@@ -76,7 +76,7 @@ func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
 	unit := string(raw)
 	for _, want := range []string{"[Install]", "WantedBy=default.target"} {
 		if !strings.Contains(unit, want) {
-			t.Fatalf("pfm-mcp.service missing %q; enabled Harvester would not return after login:\n%s", want, unit)
+			t.Fatalf("pfm-mcp.service missing %q; enabled chat daemon would not return after login:\n%s", want, unit)
 		}
 	}
 	// systemd user services get systemd's bare default PATH, which cannot see

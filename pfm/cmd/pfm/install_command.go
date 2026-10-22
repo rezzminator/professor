@@ -24,27 +24,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
-// installHarvestProvisioner is nil in production and resolves to the real
-// pinned adapter. The command-package TestMain replaces it with a no-network
-// fake so existing CLI wiring tests never download the conversion lock.
-var (
-	installHarvestProvisionerOverride installer.HarvestProvisioner
-	installThemeHTTPClientOverride    *http.Client
-)
+var installThemeHTTPClientOverride *http.Client
 
 var runInstaller = installer.Run
-
-func installHarvestProvisioner() installer.HarvestProvisioner {
-	if installHarvestProvisionerOverride != nil {
-		return installHarvestProvisionerOverride
-	}
-	return installer.NewHarvestProvisioner()
-}
 
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--check [--plan]] [--vscode] [--offline] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
@@ -59,7 +46,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		false,
 		"install the Professor VS Code extension and make the PFM terminal the default",
 	)
-	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
+	offline := flags.Bool("offline", false, "install using cached plugin artifacts")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip the Professor themes")
 	adoptAgents := flags.Bool("adopt-agents", false, "adopt an unowned file at a declared agent's path")
@@ -142,8 +129,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		return options
 	}
 	// printDependencies is the required dependency preflight: it prints the
-	// table and returns its failure count. Provisioning only marks the
-	// harvester rows "provisioned by install"; every probe is read-only.
+	// table and returns its failure count; every probe is read-only.
 	printDependencies := func(w io.Writer, runtime commandRuntime) int {
 		entries := deps.Registry(deps.Options{
 			Home:         runtime.Paths.Home,
@@ -151,10 +137,8 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			CodexBinary:  runtime.Config.Codex.Binary,
 		})
 		probe := deps.ProbeOptions{
-			SkipHarvest:  *skipHarvest,
-			SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
-			Provisioning: true,
-			Runner:       obs.Runner(deps.RealRunner{}),
+			SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
+			Runner:      obs.Runner(deps.RealRunner{}),
 		}
 		_, failures, _ := doctor.PrintDependencies(context.Background(), w, runtime.Paths.Home, entries, probe)
 		return failures
@@ -193,7 +177,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	if mode != installer.ModeApply {
 		preflight = printDependencies(stdout, runtime)
 	}
-	options := withFlags(newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime))
+	options := withFlags(newInstallerOptions(mode, *configDir, *offline, stdout, stderr, runtime))
 	options.ConfigSeed = seeded
 	options.ConfigSeedContent = installConfig.SeedContent
 	code = runInstallerCommand(installCommand, options, stderr)
@@ -209,8 +193,8 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		if *vscode {
 			confirmation += " --vscode"
 		}
-		if *skipHarvest {
-			confirmation += " --skip-harvest"
+		if *offline {
+			confirmation += " --offline"
 		}
 		if skipCodex {
 			confirmation += " --skip-engine codex"
@@ -240,18 +224,17 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 func newInstallerOptions(
 	mode installer.Mode,
 	configDir string,
-	skipHarvest bool,
+	offline bool,
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
 ) installer.Options {
 	options := installer.Options{
 		Mode:                mode,
+		Offline:             offline,
 		ConfigDir:           configDir,
 		Stdout:              stdout,
-		ProvisionHarvest:    !skipHarvest,
 		SkillSourcesOffline: paths.SkillSourcesOffline(),
 		ThemesOffline:       paths.ThemesOffline(),
-		HarvestProvisioner:  installHarvestProvisioner(),
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]

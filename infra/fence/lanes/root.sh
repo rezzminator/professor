@@ -135,10 +135,15 @@ hash_inputs() {
   hash_tree "$ROOT" "" $HASH_PATHS \
     ':(exclude)pfm/**/*_test.go' ':(exclude)pfm/*_test.go' \
     ':(exclude)pfm/**/testdata/**' ':(exclude)pfm/testdata/**' \
-    ':(exclude)pfm/e2e/**' \
-    ':(exclude)pfm/internal/harvestpy/assets/**/*_test.py' \
-    ':(exclude)pfm/internal/harvestpy/assets/*_test.py' || return 1
+    ':(exclude)pfm/e2e/**' || return 1
   hash_plugin_copies || return 1
+  if [ -n "${PFM_DEV_HARVESTER_MISSING:-}" ]; then
+    printf 'harvester\tabsent\t0\n'
+  else
+    hash_tree "$PFM_DEV_HARVESTER_SRC" "harvester/" . \
+      ':(exclude)**/*_test.go' ':(exclude)*_test.go' \
+      ':(exclude)**/testdata/**' ':(exclude)testdata/**' || return 1
+  fi
   if [ -n "$PFM_DEV_ENGINE_SYNC_MISSING" ]; then
     printf 'engine-sync\tabsent\t0\n'
   else
@@ -241,7 +246,7 @@ trap 'exit 129' HUP
 BASE="$(lane_base_image "$ROOT" "$PIN")" || fatal "the pfm-dev fence image could not be built"
 say "base image $BASE (pinned for this build, so a concurrent dev.sh iso rebuild cannot orphan it)"
 lane_run "$BUILD" "$BASE" '' \
-  -v pfm-lane-harvest-cache:/root/.local/state/pfm/harvest-python/cache \
+  -v pfm-lane-harvest-cache:/root/.local/state/harvester/python/cache \
   -v pfm-lane-uv-cache:/root/.cache/uv \
   -e UV_CACHE_DIR=/root/.cache/uv -e UV_LINK_MODE=copy || fatal "the fence container would not start from $BASE"
 

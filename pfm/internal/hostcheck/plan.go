@@ -46,12 +46,12 @@ const (
 // prerequisite. Every name here is a registered detector's check (a test
 // pins it), so a renamed check cannot leave a stale entry behind.
 var phaseClasses = map[phase]string{
-	phaseConfig:   "legacy-config legacy-harvester-config pre-split-config",
+	phaseConfig:   "legacy-config pre-split-config",
 	phaseDatabase: "legacy-state-db legacy-cache-db",
 	phaseStore:    "account-is-store store-identity account-entry-real home-state-file",
 	phaseWiring: "pfm-settings pfm-mcp memory-helpers staged-shim third-party-mcp " +
 		"function-hook-modules shell-claude-env",
-	phaseCleanup: "legacy-harvester-cache staged-prompts shared-db stray-dir unclassified " +
+	phaseCleanup: "staged-prompts shared-db stray-dir unclassified " +
 		"stale-state-tmp beside-backup",
 	phaseInstall: "retired-store-entry",
 }

@@ -122,7 +122,7 @@ func TestHostcheckAPI(t *testing.T) {
 		t.Fatal("severity count")
 	}
 	want := strings.Fields(
-		"legacy-config legacy-harvester-config pre-split-config legacy-state-db legacy-cache-db legacy-harvester-cache pfm-settings pfm-mcp memory-helpers staged-shim staged-prompts shared-db stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup function-hook-modules shell-claude-env tmux-servers",
+		"legacy-config pre-split-config legacy-state-db legacy-cache-db pfm-settings pfm-mcp memory-helpers staged-shim staged-prompts shared-db stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup function-hook-modules shell-claude-env tmux-servers",
 	)
 	var got []string
 	for _, detector := range Detectors() {
@@ -179,12 +179,10 @@ func TestEnvFor(t *testing.T) {
 		ConfigExplicit: true,
 	}
 	runtime.Config.MCP.HTTP.Port = 19200
-	runtime.Config.Harvester.Cache.Dir = filepath.Join(env.Home, "custom-cache")
 	got := EnvFor(runtime, env.Now)
 	env.ConfigExplicit = true
 	env.LegacyConfigDir = filepath.Join(env.Home, "xdg", "pfm")
 	env.MCPPort = 19200
-	env.HarvesterCacheDir = runtime.Config.Harvester.Cache.Dir
 	env.Environ = os.Environ()
 	if !slices.Contains(got.Environ, "XDG_CONFIG_HOME="+filepath.Join(env.Home, "xdg")) {
 		t.Fatalf("env.Environ=%v lacks the process environment", got.Environ)
@@ -338,20 +336,10 @@ func TestRemoveKeepingDoors(t *testing.T) {
 			remove := filepath.Join(env.LegacyConfigDir, config.FileName)
 			return remove, hardLink(t, env.ConfigPath, remove)
 		}},
-		{"legacy-harvester-config", func(t *testing.T, env Env) (string, string) {
-			remove := filepath.Join(env.LegacyConfigDir, "harvester.config.json")
-			return remove, hardLink(t, filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json"), remove)
-		}},
 		{"legacy-state-db", func(t *testing.T, env Env) (string, string) {
 			remove := paths.LegacyStateDB(env.Home)
 			writeFile(t, remove+"-wal", "wal")
 			return remove, hardLink(t, env.StateDB, remove)
-		}},
-		{"legacy-harvester-cache", func(t *testing.T, env Env) (string, string) {
-			remove, keep := paths.LegacyHarvesterCacheDir(env.Home), paths.HarvesterCacheDir(env.Home)
-			makeDir(t, remove)
-			symlink(t, remove, keep)
-			return remove, keep
 		}},
 		{"pre-split-config", func(t *testing.T, env Env) (string, string) {
 			remove := filepath.Join(filepath.Dir(env.ConfigPath), "config.json")

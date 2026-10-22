@@ -145,10 +145,16 @@ func TestPFMMCP(t *testing.T) {
 		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
 		servers := map[string]any{}
 		for _, family := range []string{"chat", "harvester"} {
+			command := filepath.Join(env.Home, ".local", "bin", "pfm")
+			args := []string{"mcp", "serve", "--stdio", "--family", family}
+			if family == "harvester" {
+				command = filepath.Join(env.Home, ".local", "bin", "harvester")
+				args = []string{"mcp"}
+			}
 			servers[family+"-professor"] = map[string]any{
 				"type":    "stdio",
-				"command": filepath.Join(env.Home, ".local", "bin", "pfm"),
-				"args":    []string{"mcp", "serve", "--stdio", "--family", family},
+				"command": command,
+				"args":    args,
 			}
 		}
 		raw, err := json.Marshal(map[string]any{"mcpServers": servers})

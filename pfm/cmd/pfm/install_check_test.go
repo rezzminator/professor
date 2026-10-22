@@ -319,7 +319,7 @@ func TestInstallCheckAndPreviewLeaveOlderDatabasesUnmigrated(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, args := range [][]string{{"--check"}, {"--skip-harvest"}} {
+	for _, args := range [][]string{{"--check"}, {"--offline"}} {
 		before := map[string]string{}
 		for path := range older {
 			before[path] = installDatabaseFile(t, path)

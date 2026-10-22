@@ -256,9 +256,58 @@ func enabledMCPNames(servers map[string]bool) []string {
 }
 
 func mcpFamilyStdioArgs(name string) []string {
+	if strings.TrimSuffix(name, "-professor") == mcpServerHarvester {
+		return []string{mcpCommand}
+	}
 	return append(append([]string(nil), mcpStdioArgs...), "--family", strings.TrimSuffix(name, "-professor"))
 }
 
 func isFamilyRegistration(name string) bool {
 	return name == pfmconfig.MCPRegistrationName(chatName) || name == pfmconfig.MCPRegistrationName(mcpServerHarvester)
+}
+
+func mcpFamilyBinary(home, name string) string {
+	binary := "pfm"
+	if strings.TrimSuffix(name, "-professor") == mcpServerHarvester {
+		binary = mcpServerHarvester
+	}
+	return filepath.Join(home, ".local", "bin", binary)
+}
+
+// codexStdioEnvLine inherits fixed runtime variable names without recording values.
+func codexStdioEnvLine(name string) string {
+	if strings.TrimSuffix(name, "-professor") != mcpServerHarvester {
+		return ""
+	}
+	names := []string{
+		"HARVESTER_HOME_DIR", "HARVESTER_CONFIG", "HARVESTER_PYTHON_ROOT",
+		"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+		"HARVESTER_LOG_LEVEL", "HARVESTER_LOG_COMPONENTS", "HARVESTER_LOG_MIRROR",
+		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+	}
+	return `env_vars = ["` + strings.Join(names, `", "`) + `"]`
+}
+
+// codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
+// table — `command = "<bin>"` and `args = ["mcp", "serve", "--stdio"]` as the
+// TOML encoder renders them — so the writer and the strip agree byte for byte.
+func codexStdioBody(bin string, names ...string) ([]string, error) {
+	args := mcpStdioArgs
+	if len(names) > 0 {
+		args = mcpFamilyStdioArgs(names[0])
+	}
+	body := make([]string, 0, 2)
+	for _, value := range []map[string]any{{configCommandKey: bin}, {configArgsKey: args}} {
+		encoded, err := encodeCodexValues(value)
+		if err != nil {
+			return nil, err
+		}
+		body = append(body, strings.TrimSuffix(encoded, "\n"))
+	}
+	if len(names) > 0 {
+		if environment := codexStdioEnvLine(names[0]); environment != "" {
+			body = append(body, environment)
+		}
+	}
+	return body, nil
 }

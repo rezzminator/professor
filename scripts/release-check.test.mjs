@@ -302,14 +302,12 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     const r0 = await repo();
     const base = await commit(r0, {
       "pfm/internal/mcpserv/proxy.go": "package mcpserv\n",
-      "pfm/internal/harvestmcp/search_gate.go": "package harvestmcp\n",
       "pfm/cmd/pfm/mcp_serve_command.go": "package main\n",
       "pfm/cmd/pfm/mcp_serve_test.go": "package main\n",
       "pfm/cmd/pfm/main.go": "package main\n",
     });
     await commit(r0, {
       "pfm/internal/mcpserv/proxy.go": "package mcpserv\n\nfunc x() {}\n",
-      "pfm/internal/harvestmcp/search_gate.go": "package harvestmcp\n\nfunc x() {}\n",
       "pfm/cmd/pfm/mcp_serve_command.go": "package main\n\nfunc x() {}\n",
       "pfm/cmd/pfm/mcp_serve_test.go": "package main\n\nfunc y() {}\n",
       "pfm/cmd/pfm/main.go": "package main\n\nfunc z() {}\n",
@@ -318,13 +316,12 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     assertClean(r, "scope");
     for (const line of [
       "FILE M 1 tier1 pfm-update pfm/internal/mcpserv/proxy.go",
-      "FILE M 1 tier1 pfm-update pfm/internal/harvestmcp/search_gate.go",
       "FILE M 1 tier1 pfm-update pfm/cmd/pfm/mcp_serve_command.go",
       "FILE M 1 tier1 pfm-update pfm/cmd/pfm/mcp_serve_test.go",
       "FILE M 1 tier2 - pfm/cmd/pfm/main.go",
     ])
       assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
-    assert.match(r.out, /^AREA pfm-update .*pfm\/internal\/mcpserv\/.*pfm\/internal\/harvestmcp\/.*:\(glob\)pfm\/cmd\/pfm\/mcp_serve\*/m);
+    assert.match(r.out, /^AREA pfm-update .*pfm\/internal\/mcpserv\/.*:\(glob\)pfm\/cmd\/pfm\/mcp_serve\*/m);
   });
 
   test("every pfm/internal package install and update run through is pfm-update tier 1 or named generic, and the doc table lists the same set", async () => {
@@ -343,7 +340,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     assert.ok(imported.has("enginesync") && imported.has("globallink"), `import scan lost its known imports: ${[...imported]}`);
     const generic = new Set([
       "action", "atomicfile", "clock", "cli", "deps", "engine", "fleetdb", "gather", "obs", "paths",
-      "pricing", "pricing/modelcost", "reload", "schedule", "semver",
+      "pricing", "pricing/modelcost", "reload", "restart", "schedule", "semver",
     ]);
     const script = readFileSync(SCRIPT, "utf8");
     const listed = (text) => new Set(text.split(",").map((n) => n.replace(/["\s]/g, "")).filter(Boolean));
@@ -355,13 +352,14 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     const docRow = doc.match(/`pfm-update` \| `pfm\/internal\/\{([^}]*)\}\/`/)?.[1] ?? "";
     assert.deepEqual([...listed(docRow)].sort(), [...tier1].sort(), "the doc's pfm-update row differs from the script's TIER1 table");
     const r0 = await repo();
-    const files = (body) => Object.fromEntries(["enginesync", "globallink"].map((n) => [`pfm/internal/${n}/x.go`, body]));
+    const files = (body) => Object.fromEntries(["enginesync", "globallink", "restart"].map((n) => [`pfm/internal/${n}/x.go`, body]));
     const base = await commit(r0, files("package x\n"));
     await commit(r0, files("package x\n\nfunc y() {}\n"));
     const r = await run(r0, "scope", "--base", base, "--head", "HEAD");
     assertClean(r, "scope");
     for (const n of ["enginesync", "globallink"])
       assert.ok(r.out.split("\n").includes(`FILE M 1 tier1 pfm-update pfm/internal/${n}/x.go`), r.out);
+    assert.ok(r.out.split("\n").includes("FILE M 1 tier2 - pfm/internal/restart/x.go"), r.out);
   });
 
   test("ERROR, not FAIL, when --base is not an ancestor of --head", async () => {

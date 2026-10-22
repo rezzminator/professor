@@ -505,7 +505,7 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   case "$action" in
     sim)
       # The real-simulation fence: `run` on the pfm-sim service — Google Chrome
-      # (headless only), and pfm built + installed from this worktree with the
+      # (headless only), and pfm plus harvester built from their source checkouts with the
       # harvester's browser rung on (infra/fence/sim-entry.sh prints its own
       # `sim:` proof line or BOOTSTRAP-FAILED). The harvester state persists in
       # a volume keyed by this worktree's path, so a second run skips
@@ -516,7 +516,7 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       [[ ! -f "$terms" ]] || extra+=(-v "$terms:/pfm-leak-terms.txt:ro" -e LEAK_TERMS=/pfm-leak-terms.txt)
       mkdir -p "$TMP_BASE/timing"
       extra+=(${knob_env[@]+"${knob_env[@]}"} -e COVER_DIR=/root/cover -v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing
-        -e "PFM_TEST_TIMING_HOST=$TMP_BASE/timing" -v "$(sim_volume):/root/.local/state/pfm/harvest-python")
+        -e "PFM_TEST_TIMING_HOST=$TMP_BASE/timing" -v "$(sim_volume):/root/.local/state/harvester")
       # sim-entry.sh runs go directly, so the knob maps to GOMAXPROCS here, as shared.sh does for exec; empty leaves it unset.
       [[ -z "${PFM_FENCE_GOMAXPROCS:-}" ]] || extra+=(-e "GOMAXPROCS=$PFM_FENCE_GOMAXPROCS")
       docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} "${extra[@]}" pfm-sim bash -c "$proof; $cmd"

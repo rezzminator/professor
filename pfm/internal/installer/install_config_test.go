@@ -75,8 +75,8 @@ func TestInstallConfig(t *testing.T) {
 				t.Fatal("fallback changed runtime config")
 			}
 			if wantTheme == "seeded" {
-				if got.Path != target || got.Harvester.Path != pfmconfig.HarvesterPath(target) {
-					t.Fatalf("paths=%q/%q", got.Path, got.Harvester.Path)
+				if got.Path != target {
+					t.Fatalf("path=%q", got.Path)
 				}
 				if len(got.Accounts) == 0 || got.Accounts[0].ConfigDir != pfmconfig.DefaultAccountDir(home, 1) {
 					t.Fatalf("accounts=%+v", got.Accounts)

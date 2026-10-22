@@ -19,7 +19,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const Version = 2
+const (
+	Version        = 2
+	FileName       = "pfm.config.json"
+	LegacyFileName = "config.json"
+	DefaultMCPPort = 18377
+)
 
 const (
 	jsonKeyEnabled  = "enabled"
@@ -234,9 +239,6 @@ type Config struct {
 	MCPServers       map[string]MCPServer
 	MCP              MCPConfig
 	Ask              AskConfig
-	// Harvester is harvester.config.json, loaded beside Path. Its Enabled is
-	// mirrored into MCPServers["harvester"] for server-generic consumers.
-	Harvester HarvesterConfig
 
 	Path    string
 	Exists  bool
@@ -508,16 +510,7 @@ func defaultsWithMCPServers(
 	servers := make(map[string]MCPServer, len(registered))
 	for name, server := range registered {
 		servers[name] = server
-		if name != MCPServerHarvester {
-			sources["mcp.servers."+name+".enabled"] = SourceDefault
-		}
-	}
-	harvester := DefaultHarvester()
-	if server, found := registered[MCPServerHarvester]; found {
-		harvester.Enabled = server.Enabled
-	}
-	for _, key := range harvesterSourceKeys {
-		sources[key] = SourceDefault
+		sources["mcp.servers."+name+".enabled"] = SourceDefault
 	}
 	return Config{
 		Chat:             ChatConfig{Backend: DefaultChatBackend, HerdrTabStatus: DefaultHerdrTabStatus},
@@ -552,7 +545,6 @@ func defaultsWithMCPServers(
 		Log:        DefaultLog(),
 		MCPServers: servers,
 		MCP:        MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: DefaultMCPPort}},
-		Harvester:  harvester,
 		Ask: AskConfig{
 			Engine: defaultAskEngine,
 			Prefs: map[pfmengine.ID]EnginePrefs{
@@ -700,9 +692,6 @@ func loadWithMCPServers(
 			if configOverridden(paths.OSEnv{}) {
 				return Config{}, err
 			}
-			if err := finishHarvester(&result, home, registered, nil); err != nil {
-				return Config{}, err
-			}
 			return result, configMarkerError(err)
 		}
 	} else if !filepath.IsAbs(path) {
@@ -716,9 +705,6 @@ func loadWithMCPServers(
 
 	content, err := os.ReadFile(result.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		if err := finishHarvester(&result, home, registered, nil); err != nil {
-			return Config{}, err
-		}
 		return result, nil
 	}
 	if err != nil {
@@ -909,7 +895,6 @@ func loadWithMCPServers(
 		return Config{}, err
 	}
 
-	var legacyHarvesterEnabled *bool
 	if raw.MCP != nil {
 		if err := validateThirdParty(result.Path, raw.MCP.ThirdParty); err != nil {
 			return Config{}, err
@@ -928,13 +913,6 @@ func loadWithMCPServers(
 					result.Path,
 					"mcp.servers."+name+".enabled",
 				)
-			}
-			if name == MCPServerHarvester {
-				// Pre-split layout: the flag now lives in harvester.config.json.
-				// Honored until the operator moves it (host check pre-split-config).
-				enabled := *server.Enabled
-				legacyHarvesterEnabled = &enabled
-				continue
 			}
 			result.MCPServers[name] = MCPServer{Enabled: *server.Enabled}
 			result.MCP.Servers[name] = MCPServer{Enabled: *server.Enabled}
@@ -961,33 +939,7 @@ func loadWithMCPServers(
 			return Config{}, err
 		}
 	}
-	if err := finishHarvester(&result, home, registered, legacyHarvesterEnabled); err != nil {
-		return Config{}, err
-	}
 	return result, nil
-}
-
-// finishHarvester loads harvester.config.json, mirrors its enabled flag into
-// the server-generic MCP maps, and checks the one cross-file invariant.
-func finishHarvester(result *Config, home string, registered map[string]MCPServer, legacyEnabled *bool) error {
-	if result.Path != "" {
-		if err := loadHarvester(result, home, legacyEnabled); err != nil {
-			return err
-		}
-	}
-	if _, found := registered[MCPServerHarvester]; found {
-		result.MCP.Servers[MCPServerHarvester] = MCPServer{Enabled: result.Harvester.Enabled}
-	}
-	result.MCPServers = cloneMCPServers(result.MCP.Servers)
-	if result.Harvester.External.Enabled && result.Harvester.External.Port == result.MCP.HTTP.Port {
-		return fmt.Errorf(
-			"harvester config %s: external.port %d collides with mcp.http.port in %s; the two gateways need distinct ports",
-			result.Harvester.Path,
-			result.Harvester.External.Port,
-			result.Path,
-		)
-	}
-	return nil
 }
 
 // parseNameSyncInterval refuses invalid nameSync.interval values rather than
@@ -1415,9 +1367,6 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	}
 	servers := make(map[string]any, len(config.MCP.Servers))
 	for name, server := range config.MCP.Servers {
-		if name == MCPServerHarvester {
-			continue // lives in harvester.config.json (MarshalHarvester)
-		}
 		servers[name] = map[string]any{jsonKeyEnabled: server.Enabled}
 	}
 	codexValue := map[string]any{

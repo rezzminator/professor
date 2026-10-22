@@ -290,12 +290,10 @@ func TestMCPDaemonDoctorComparesMountedFamiliesWithConfig(t *testing.T) {
 		wantFamilies string
 	}{
 		{
-			name:         "enabled family not mounted",
+			name:         "standalone registration is not a daemon family",
 			enabled:      map[string]bool{pfmconfig.MCPServerChat: true, pfmconfig.MCPServerHarvester: true},
 			mounted:      []string{pfmconfig.MCPServerChat},
-			wantWarnings: 1,
-			wantFamilies: "doctor: mcp daemon families mounted=chat enabled=chat,harvester" +
-				" — the daemon predates the config; restart it: pfm install --yes",
+			wantWarnings: 0,
 		},
 		{
 			name:         "disabled family mounted",

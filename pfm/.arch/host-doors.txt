@@ -8,10 +8,6 @@ internal/costsink/launch.go 1
 internal/costsink/lifecycle.go 1
 internal/doctor/doctor.go 2
 internal/gather/tmuxprobe.go 2
-internal/harvest/doh.go 1
-internal/harvest/net.go 1
-internal/harvest/net_chrome_transport.go 3
-internal/harvest/search.go 1
 internal/hostfixture/fixtures_stale.go 1
 internal/reap/runner.go 1
 internal/reap/tmux.go 2

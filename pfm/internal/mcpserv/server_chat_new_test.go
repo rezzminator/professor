@@ -137,6 +137,57 @@ func TestChatNewCarriesTheAgentRole(t *testing.T) {
 	}
 }
 
+func TestChatNewOpenCodeModelEffortPromptAndFailure(t *testing.T) {
+	input := NewInput{
+		Name:   "native",
+		Engine: "ox",
+		Model:  "openai/gpt-6.1-sol",
+		Effort: "high",
+		Prompt: "First task 'quoted'\nsecond line",
+	}
+	want := []string{
+		"chat",
+		"new",
+		"--name",
+		"native",
+		"--engine",
+		"ox",
+		"--model",
+		input.Model,
+		"--effort",
+		"high",
+		input.Prompt,
+	}
+	for _, code := range []int{0, 2} {
+		service := newService(
+			"test",
+			&backend{dispatch: func(_ context.Context, args []string, stdout, stderr io.Writer) int {
+				if !reflect.DeepEqual(args, want) {
+					t.Fatalf("native MCP argv=%q, want %q", args, want)
+				}
+				if code != 0 {
+					_, _ = io.WriteString(stderr, "resolve native ox executable: configured override missing")
+				} else {
+					_, _ = io.WriteString(stdout, "native seat created")
+				}
+				return code
+			}},
+		)
+		_, output, err := service.chatNew(context.Background(), nil, input)
+		if code == 0 {
+			if err != nil || output.Status != "ok" || output.Code != 0 || output.Message != "native seat created" {
+				t.Fatalf("native success=%+v, %v", output, err)
+			}
+		} else if err == nil || output.Status != statusError || output.Code != code ||
+			!strings.Contains(
+				output.Message,
+				"configured override missing",
+			) || !strings.Contains(err.Error(), output.Message) {
+			t.Fatalf("native failure envelope=%+v, %v", output, err)
+		}
+	}
+}
+
 // TestChatNewDescriptionRoutesEveryModelRunHere reads new as a caller
 // does: the description within the 600-rune tool budget, its example call
 // naming only real schema fields, the launchers it replaces and the cleanup

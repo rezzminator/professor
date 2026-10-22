@@ -589,13 +589,18 @@ _fence_sh_abort_setup() { # <id> <host run dir>
 # fence_shared_exec <private|shared|tty> <command string>: one run in the shared container, from the
 # caller's tree mounted at /worktree. FENCE_SH_ENV (an array the caller fills) adds -e pairs.
 fence_shared_exec() {
-  local mode="$1" cmd="$2" id hdir tree es="-" terms rc attempt fifo feeder cli
+  local mode="$1" cmd="$2" id hdir tree es="-" hs="-" terms rc attempt fifo feeder cli
   local requested_cpu="$FENCE_SH_CPUS" requested_mem="$FENCE_SH_MEM" requested_cpuset="$FENCE_SH_CPUSET"
   local -a envs watch
   tree="$(fence_shared_map "$FENCE_SH_TREE")" || { echo "iso: $FENCE_SH_TREE is not under the mounted roots" >&2; return 1; }
   if [[ -z "${PFM_DEV_ENGINE_SYNC_MISSING:-}" ]]; then
     es="$(fence_shared_map "$PFM_DEV_ENGINE_SYNC_SRC")" || {
       echo "iso: the engine-sync source $PFM_DEV_ENGINE_SYNC_SRC is outside the shared container's roots ($FENCE_SH_MAIN${FENCE_SH_EXT:+, $FENCE_SH_EXT}) — set ENGINE_SYNC_SRC to a checkout inside them" >&2
+      return 1; }
+  fi
+  if [[ -z "${PFM_DEV_HARVESTER_MISSING:-}" && -n "${PFM_DEV_HARVESTER_SRC:-}" ]]; then
+    hs="$(fence_shared_map "$PFM_DEV_HARVESTER_SRC")" || {
+      echo "iso: the harvester source $PFM_DEV_HARVESTER_SRC is outside the shared container roots — set HARVESTER_SRC inside them" >&2
       return 1; }
   fi
   for ((attempt=1; attempt<=PFM_FENCE_EXEC_ATTEMPTS; attempt++)); do
@@ -617,7 +622,8 @@ fence_shared_exec() {
     unset FENCE_SH_PENDING_ID
     _fence_sh_leave_old_key
     envs=(-e "PFM_FENCE_RUN_ID=$id" -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" -e PFM_DEV_REPO_WORK_TREE=/worktree
-      -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" -e PFM_TEST_TIMING_DIR=/pfm-timing)
+      -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" -e PFM_TEST_TIMING_DIR=/pfm-timing
+      -e "HARVESTER_FENCE_SRC=$hs" -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}")
     # Gate knobs: a suite the gate nests starts from none of them (scripts/shtest.sh
     # shtest_unset_gate_env; infra/fence/lanes/tests/steps_test.sh derives this block's names).
     # Only generated timing artifacts are writable: /pfm-timing is the worktree's timing base.

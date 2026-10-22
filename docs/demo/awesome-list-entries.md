@@ -1,5 +1,18 @@
 # Awesome-list submission drafts — Professor
 
+## Contents
+
+- [1. hesreallyhim/awesome-claude-code](#1-hesreallyhimawesome-claude-code)
+- [2. e2b-dev/awesome-ai-agents](#2-e2b-devawesome-ai-agents)
+- [[Professor](https://github.com/rezzminator/professor)](#professorhttpsgithubcomrezzminatorprofessor)
+- [3. punkpeye/awesome-mcp-servers](#3-punkpeyeawesome-mcp-servers)
+- [4. agarrharr/awesome-cli-apps](#4-agarrharrawesome-cli-apps)
+- [5. rothgar/awesome-tuis](#5-rothgarawesome-tuis)
+- [6. avelino/awesome-go](#6-avelinoawesome-go)
+- [7. awesome-opencode/awesome-opencode](#7-awesome-opencodeawesome-opencode)
+- [8. hashgraph-online/awesome-ai-plugins](#8-hashgraph-onlineawesome-ai-plugins)
+- [Skipped](#skipped)
+
 Research-only draft. Nothing here has been posted, opened, or forked. Source facts used throughout: Professor is an LLM-harness fleet boost framework for Claude Code, Codex & OpenCode — turns your AI coding agents into a disciplined engineering team you can see, message, and hold to the rules. Repo: <https://github.com/rezzminator/professor> · MIT · Go + Markdown/shell · created 2026-04-25 · 4 stars at time of writing.
 
 ---
@@ -73,7 +86,7 @@ Adds Professor, a fleet control/orchestration layer for Claude Code, Codex and O
 - Repo URL: <https://github.com/punkpeye/awesome-mcp-servers>
 - Activity seen: 2026-09-13, 94,918 stars, not archived
 - Section to add to: **🔎 Search & Data Extraction** — for Harvester specifically (the document fetcher with a multi-rung fallback ladder, exposed over MCP). The `pfm chat call`/fleet-messaging MCP server is not a data-extraction server and does not cleanly fit any listed category (not Databases, File Systems, or Code Execution), so it is left out of this submission — only Harvester is proposed here.
-- Rules affecting us: entries need language/scope/OS emoji tags (📇/🐍/etc., ☁️/🏠, 🍎/🪟/🐧) and a description under ~255 characters; no explicit star minimum visible in the README excerpt fetched. Harvester ships inside the Professor monorepo (`pfm/internal/harvest` + `internal/harvestmcp`) rather than as a standalone repo — flag this for the maintainer since some MCP lists prefer a dedicated repo/package per server; link points at the monorepo with a note.
+- Rules affecting us: entries need language/scope/OS emoji tags (📇/🐍/etc., ☁️/🏠, 🍎/🪟/🐧) and a description under ~255 characters; no explicit star minimum visible in the README excerpt fetched. Harvester is now a standalone Go plugin repository (`internal/harvest` + `internal/harvestmcp`); hold the submission until its public remote exists, then replace the Professor monorepo link with the plugin repository URL.
 
 ```
 - [rezzminator/professor](https://github.com/rezzminator/professor) 📇 🏠 - Harvester: document fetcher with a multi-rung fallback ladder, exposed over MCP (part of the Professor fleet framework for Claude Code, Codex & OpenCode).
@@ -84,7 +97,7 @@ PR title: `Add Harvester (Professor) to Search & Data Extraction`
 PR body:
 
 ```
-Adds Harvester, the document-fetching MCP server bundled in Professor (an LLM-harness fleet framework for Claude Code/Codex/OpenCode). Harvester exposes a multi-rung fallback fetch ladder over MCP. Note: it ships inside the Professor monorepo rather than a standalone package — happy to split it out if the list prefers a dedicated repo.
+Adds Harvester, the document-fetching MCP server bundled in Professor (an LLM-harness fleet framework for Claude Code/Codex/OpenCode). Harvester exposes a multi-rung fallback fetch ladder over MCP. The public repository URL is pending; submit only after the standalone plugin repository is public.
 ```
 
 ---

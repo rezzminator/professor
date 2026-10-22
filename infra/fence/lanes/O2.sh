@@ -879,19 +879,37 @@ if [ -z "$SPARE" ]; then
   blocked "seats $LANE_SEATS" "no spare seat to drop — dropping the only seat would take the lane's own chats with it (run with --seats cc:1,cc:2)"
 else
   bad=""
+  o2_t0="${EPOCHREALTIME:-}"
   new_out="$(pfm chat new --name "$SPARE_CHAT" --engine cc --account "$SPARE" --cwd "$CWD" --await --timeout 300 \
     "You are $SPARE_CHAT, a chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says." 2>&1)"
   new_rc=$?
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_new_chat "$o2_t0" "$new_rc"
   if [ "$new_rc" -ne 0 ] || ! live_chat "$SPARE_CHAT"; then
     fail "could not open a chat on the spare seat $SPARE (exit $new_rc): $(one_line "$new_out") — nothing lives on the seat to drop under"
   else
     acct_before="$(live_field "$SPARE_CHAT" 9)"
     cp "$CONFIG" "$CONFIG.lane-backup"
     jq --argjson drop "$SPARE" '.accounts |= map(select(.id != $drop))' "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+    o2_t0="${EPOCHREALTIME:-}"
     drop_out="$(install_again)"
     drop_rc=$?
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_install "$o2_t0" "$drop_rc"
     [ "$drop_rc" -eq 0 ] || bad="$bad the install after the drop exited $drop_rc: $(one_line "$(printf '%s\n' "$drop_out" | tail -3)");"
+    # Both proofs read this fixed dropped config. Join doctor before restoring it.
+    drop_doc_output="$LANE_OUT_DIR/O2.dropped-doctor.out"
+    drop_doc_receipt="$LANE_OUT_DIR/O2.dropped-doctor.rc"
+    (
+      rm -f "$drop_doc_output" "$drop_doc_receipt" || exit 125
+      o2_t0="${EPOCHREALTIME:-}"
+      pfm doctor >"$drop_doc_output" 2>&1
+      drop_doc_status=$?
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_doctor "$o2_t0" "$drop_doc_status"
+      printf '%s\n' "$drop_doc_status" >"$drop_doc_receipt" || exit 125
+      exit "$drop_doc_status"
+    ) &
+    drop_doc_pid=$!
     # The RUNTIME side: the chat on the dropped seat keeps working.
+    o2_t0="${EPOCHREALTIME:-}"
     live_chat "$SPARE_CHAT" || bad="$bad $SPARE_CHAT lost its live row when its seat was dropped;"
     st_out="$(pfm chat status "$SPARE_CHAT" 2>&1)"
     st_rc=$?
@@ -901,9 +919,26 @@ else
       bad="$bad call into $SPARE_CHAT was refused after the drop;"
     wait_prompt "$SPARE_CHAT" SPARE-ALIVE 120 || bad="$bad $SPARE_CHAT did not receive the call after its seat was dropped: ${LANE_WAIT_WHY:-no wait reason};"
     acct_dropped="$(live_field "$SPARE_CHAT" 9)"
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_runtime "$o2_t0" checked
     # The LEDGER side: doctor's roster no longer names the seat, and doctor still runs.
-    doc="$(pfm doctor 2>&1)"
-    doc_rc=$?
+    drop_doc_wait_rc=0
+    wait "$drop_doc_pid" || drop_doc_wait_rc=$?
+    if ! doc="$(cat "$drop_doc_output" 2>&1)"; then
+      bad="$bad dropped doctor output could not be read: $(one_line "$doc");"
+    fi
+    if ! doc_rc="$(cat "$drop_doc_receipt" 2>&1)"; then
+      bad="$bad dropped doctor exit receipt could not be read: $(one_line "$doc_rc");"
+      doc_rc=255
+    fi
+    case "$doc_rc" in
+      ''|*[!0-9]*) bad="$bad dropped doctor exit receipt is malformed: $(one_line "$doc_rc");"; doc_rc=255 ;;
+    esac
+    if [ "${#doc_rc}" -gt 3 ] || [ "$doc_rc" -gt 255 ]; then
+      bad="$bad dropped doctor exit receipt is out of range;"
+      doc_rc=255
+    fi
+    [ "$drop_doc_wait_rc" -eq "$doc_rc" ] ||
+      bad="$bad dropped doctor worker exit $drop_doc_wait_rc disagrees with receipt $doc_rc;"
     acct_row="$(printf '%s\n' "$doc" | grep -m1 '^doctor: config accounts=')"
     [ -n "$acct_row" ] || bad="$bad doctor printed no 'config accounts=' row;"
     grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$acct_row" && bad="$bad doctor's roster still names the dropped seat $SPARE: $acct_row;"
@@ -911,10 +946,15 @@ else
     [ "$doc_rc" -le 1 ] || bad="$bad pfm doctor exited $doc_rc with a live chat on the dropped seat; first failure row: $(one_line "$(printf '%s\n' "$doc" | grep -m1 -E 'unhealthy|broken|error=' || true)");"
     # Restore: config back, install, the seat's hooks and the row's account return.
     mv "$CONFIG.lane-backup" "$CONFIG"
+    o2_t0="${EPOCHREALTIME:-}"
     restore_out="$(install_again)"
     restore_rc=$?
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step restored_install "$o2_t0" "$restore_rc"
     [ "$restore_rc" -eq 0 ] || bad="$bad the restoring install exited $restore_rc: $(one_line "$(printf '%s\n' "$restore_out" | tail -3)");"
+    o2_t0="${EPOCHREALTIME:-}"
     restore_doc="$(pfm doctor 2>&1)"
+    restore_doc_rc=$?
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step restored_doctor "$o2_t0" "$restore_doc_rc"
     restore_row="$(printf '%s\n' "$restore_doc" | grep -m1 '^doctor: config accounts=')"
     grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$restore_row" ||
       bad="$bad doctor's roster did not relist seat $SPARE after restore: $restore_row;"
@@ -937,9 +977,9 @@ else
   bad=""
   # Public-source probes under --network none deliberately fail DNS. Match
   # only their resolver and fallback endpoints; other ERROR records stay red.
-  expect-log '"msg":"http.out.request","cmd":"harvest".*"comp":"http.out".*"host":"cloudflare-dns.com","path":"/dns-query","err":"dial DoH resolver:'
+  expect-log '"msg":"http.out.request","cmd":"harvester".*"comp":"http.out".*"host":"cloudflare-dns.com","path":"/dns-query","err":"dial DoH resolver:'
   while read -r host path; do
-    expect-log "\"msg\":\"http.out.request\",\"cmd\":\"harvest\".*\"comp\":\"http.out\".*\"host\":\"$host\",\"path\":\"$path\",\"err\":\"DNS resolution failed for $host:"
+    expect-log "\"msg\":\"http.out.request\",\"cmd\":\"harvester\".*\"comp\":\"http.out\".*\"host\":\"$host\",\"path\":\"$path\",\"err\":\"DNS resolution failed for $host:"
   done <<'END_HARVEST_ENDPOINTS'
 www.rfc-editor.org /rfc/rfc2324.txt
 www.w3.org /WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf
@@ -973,9 +1013,9 @@ directory.doabooks.org /rest/items/find-by-metadata-field
 catalog.hathitrust.org /api/volumes/brief/isbn/9780262033848.json
 END_HARVEST_ENDPOINTS
   hv_err=/tmp/o2-harvest.err
-  hv_config="${CONFIG%/*}/harvester.config.json"
+  hv_config="$(harvester config path)"
   if with_restored "$hv_config"; then
-    jq '.cache.dir = "/root/.local/state/pfm/o2-harvest-cache"' "$hv_config" >"$hv_config.tmp" &&
+    jq '.cache.dir = "/root/.local/state/harvester/o2-cache"' "$hv_config" >"$hv_config.tmp" &&
       mv "$hv_config.tmp" "$hv_config" || bad="$bad could not set a writable lane harvester cache in $hv_config;"
   else
     bad="$bad could not back up $hv_config before setting a writable cache;"
@@ -983,11 +1023,11 @@ END_HARVEST_ENDPOINTS
   url_txt="https://www.rfc-editor.org/rfc/rfc2324.txt"
   url_pdf="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
   local_doc="$CWD/o2-harvest-local.txt"
-  local_pdf=/worktree/pfm/internal/harvestpy/testdata/corpus/raw/binary/scholar-breast-cancer.pdf
+  local_pdf=/harvester/internal/harvestpy/testdata/corpus/raw/binary/scholar-breast-cancer.pdf
   printf '# Lane O2 local harvest source\n\nThe needle is LOCAL-HARVEST-OK.\n' >"$local_doc"
   harvest_one() { # harvest_one <what> <source> <must-succeed 0|1> [content-needle] — one --json fetch, judged
     local what="$1" src="$2" must="$3" needle="${4:-}" out rc err kind status
-    out="$(pfm harvest --json "$src" 2>"$hv_err")"
+    out="$(harvester --json "$src" 2>"$hv_err")"
     rc=$?
     if ! printf '%s' "$out" | jq -e '.[0]' >/dev/null 2>&1; then
       bad="$bad $what ($src): --json printed no result object (exit $rc): $(one_line "$out") $(one_line "$(cat "$hv_err")");"
@@ -1008,7 +1048,7 @@ END_HARVEST_ENDPOINTS
       fi
       return
     fi
-    [ "$rc" -eq 0 ] || bad="$bad $what ($src) reported no error but pfm harvest exited $rc;"
+    [ "$rc" -eq 0 ] || bad="$bad $what ($src) reported no error but harvester exited $rc;"
     [ -n "$status" ] || bad="$bad $what ($src) succeeded without a cached field;"
     if [ "$must" -eq 1 ] && [ -z "$(printf '%s' "$out" | jq -r '.[0].content // empty')" ]; then
       bad="$bad $what ($src) succeeded without content;"
@@ -1028,36 +1068,35 @@ END_HARVEST_ENDPOINTS
   harvest_one "PMCID" "PMC1182327" 0
   harvest_one "ISBN" "9780262033848" 0
   # --include-content=false and --refresh on the local text: the cache answers, then is bypassed.
-  size="$(pfm harvest --include-content=false "$local_doc" 2>&1)"
+  size="$(harvester --include-content=false "$local_doc" 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad --include-content=false exited $rc: $(one_line "$size");"
   grep -qE '^size: [0-9]+ chars, ~[0-9]+ tokens$' <<<"$size" ||
     bad="$bad --include-content=false did not print the size line: $(one_line "$size");"
-  cached="$(pfm harvest --json --include-content=false "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
+  cached="$(harvester --json --include-content=false "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
   [ "$cached" = true ] || bad="$bad a second fetch of $local_doc reported cached '${cached:-<none>}' (want true);"
-  refresh="$(pfm harvest --json --refresh "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
+  refresh="$(harvester --json --refresh "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
   [ "$refresh" = false ] || bad="$bad --refresh reported cached '${refresh:-<none>}' (want false: the cache was bypassed);"
-  pfm harvest >/dev/null 2>&1
+  harvester >/dev/null 2>&1
   rc=$?
-  [ "$rc" -eq 2 ] || bad="$bad pfm harvest with no source exited $rc (want 2, usage);"
-  # H2: ask over a local document; the evidence is pfm's usage line.
-  ask_out="$(pfm harvest ask --engine claude -p "$(mock_steps '{"type":"turn","reply":"HARVEST-ASK","tokens":{"input":100,"output":20}}')" "$local_doc" 2>"$hv_err")"
+  [ "$rc" -eq 2 ] || bad="$bad harvester with no source exited $rc (want 2, usage);"
+  # H2: ask over a local document; the evidence is harvester's usage line.
+  ask_out="$(harvester ask --engine claude -p "$(mock_steps '{"type":"turn","reply":"HARVEST-ASK","tokens":{"input":100,"output":20}}')" "$local_doc" 2>"$hv_err")"
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    bad="$bad pfm harvest ask exited $rc: $(one_line "$(cat "$hv_err")");"
+    bad="$bad harvester ask exited $rc: $(one_line "$(cat "$hv_err")");"
   else
-    [ -n "$ask_out" ] || bad="$bad pfm harvest ask exited 0 but printed no answer;"
-    grep -qxF 'pfm harvest ask: usage input=100 cached_input=0 cache_creation=0 output=20' "$hv_err" ||
-      bad="$bad pfm harvest ask printed no usage line with the scripted counts on stderr: $(one_line "$(cat "$hv_err")");"
+    [ -n "$ask_out" ] || bad="$bad harvester ask exited 0 but printed no answer;"
+    grep -qxF 'harvester ask: usage input=100 cached_input=0 cache_creation=0 output=20' "$hv_err" ||
+      bad="$bad harvester ask printed no usage line with the scripted counts on stderr: $(one_line "$(cat "$hv_err")");"
   fi
-  pfm harvest ask "$local_doc" >/dev/null 2>&1
+  harvester ask "$local_doc" >/dev/null 2>&1
   rc=$?
-  [ "$rc" -eq 2 ] || bad="$bad pfm harvest ask without -p exited $rc (want 2, usage);"
+  [ "$rc" -eq 2 ] || bad="$bad harvester ask without -p exited $rc (want 2, usage);"
   # H9/H12: the sidecar's provisioning as doctor reports it — landed, not skipped.
-  doc="$(pfm doctor 2>&1)"
+  doc="$(harvester doctor 2>&1)"
   hp="$(printf '%s' "$doc" | grep '^doctor: harvestpy')"
-  [ -n "$hp" ] || bad="$bad pfm doctor printed no harvestpy row — the sidecar's provisioning is unreported;"
-  grep -qF 'harvestpy skipped' <<<"$hp" && bad="$bad doctor reports the harvestpy runtime SKIPPED — setup fell back to --skip-harvest;"
+  [ -n "$hp" ] || bad="$bad harvester doctor printed no harvestpy row — the sidecar's provisioning is unreported;"
   grep -qE 'harvestpy interpreter=\(file\) .* version=' <<<"$hp" || bad="$bad doctor names no provisioned harvestpy interpreter: $(one_line "$hp");"
   grep -qF 'live_smoke=(file) healthy' <<<"$hp" || bad="$bad doctor's harvestpy live smoke is not healthy: $(one_line "$(printf '%s' "$hp" | grep -E 'live_smoke|broken' | head -2)");"
   grep -qE 'harvestpy .*(broken|unavailable|blocked)' <<<"$hp" && bad="$bad a broken harvestpy row: $(one_line "$(printf '%s' "$hp" | grep -E 'broken|unavailable|blocked' | head -1)");"
@@ -1119,8 +1158,11 @@ if themes="$(bundled_themes "$BLUEPRINT/templates/themes")"; then
 else
   bad="$bad $themes;"
 fi
+o2_t0="${EPOCHREALTIME:-}"
 un="$( (cd "$BLUEPRINT" && pfm uninstall 2>&1) )"
 un_rc=$?
+[ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step uninstall_command "$o2_t0" "$un_rc"
+o2_t0="${EPOCHREALTIME:-}"
 un_summary="$(printf '%s' "$un" | grep -E '^summary changed=' | tail -1)"
 [ "$un_rc" -eq 0 ] || bad="$bad pfm uninstall exited $un_rc: $(one_line "$(printf '%s' "$un" | grep -iE 'error|refuse|failed' | head -2)") $(one_line "$(printf '%s\n' "$un" | tail -2)");"
 grep -qF 'MODE: uninstall' <<<"$un" || bad="$bad pfm uninstall did not announce MODE: uninstall;"
@@ -1134,10 +1176,6 @@ if [ -e "$MANAGED" ]; then
   left="$(find "$MANAGED" -type f -o -type l 2>/dev/null | head -5 | tr '\n' ' ')"
   [ -z "$left" ] || bad="$bad the managed root still holds: $left;"
 fi
-# I69: the harvestpy runtime and cache.
-for d in env cache; do
-  [ ! -e "$HOME/.local/state/pfm/harvest-python/$d" ] || bad="$bad harvestpy $d still present under ~/.local/state/pfm/harvest-python;"
-done
 # I71/I72: the launcher and the host overlays.
 for o in pfm-statusline tmux-title-renudge; do
   [ ! -e "$HOME/.local/bin/$o" ] && [ ! -L "$HOME/.local/bin/$o" ] || bad="$bad host overlay ~/.local/bin/$o still present;"
@@ -1205,9 +1243,10 @@ vsix="$(find "$HOME/.vscode" "$HOME/.vscode-server" "$HOME/.vscode-oss" -maxdept
 [ -z "$vsix" ] || bad="$bad VS Code extension link(s) still present: $vsix;"
 # I86: the adopter's project scaffold is not pfm's to remove.
 for p in $express_before; do [ -e "$p" ] || bad="$bad uninstall removed the project scaffold $p;"; done
+[ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step uninstall_assertions "$o2_t0" checked
 # I89 is a documented UNKNOWN (no pruning routine): the retention is REPORTED, not judged.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "exit $un_rc · $un_summary · managed root, ledger, overlays, /reload + handoff links, themes, harvestpy env+cache, MCP registrations, Codex wiring, pfm.zsh line all gone from $(printf '%s\n' "$seat_dirs" | grep -c .) seat(s); the foreign hook and $own_cmd kept; ${express_before:-no express scaffold present} untouched"
+  pass "exit $un_rc · $un_summary · managed root, ledger, overlays, /reload + handoff links, themes, MCP registrations, Codex wiring, pfm.zsh line all gone from $(printf '%s\n' "$seat_dirs" | grep -c .) seat(s); the foreign hook and $own_cmd kept; ${express_before:-no express scaffold present} untouched"
 fi
 
 lane_end

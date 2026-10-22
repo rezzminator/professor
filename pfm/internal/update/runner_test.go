@@ -174,14 +174,13 @@ func TestRunUpdateCandidateCommandNeverRefreshesPrices(t *testing.T) {
 
 func TestApplyUpdateInstallConfig(t *testing.T) {
 	for _, testcase := range []struct {
-		name        string
-		exists      bool
-		skipHarvest bool
-		want        []string
+		name   string
+		exists bool
+		want   []string
 	}{
 		{
-			name: "config file exists", exists: true, skipHarvest: true,
-			want: []string{"/tmp/pfm-candidate", "--config", "/cfg/pfm.config.json", "install", "--yes", "--skip-harvest"},
+			name: "config file exists", exists: true,
+			want: []string{"/tmp/pfm-candidate", "--config", "/cfg/pfm.config.json", "install", "--yes"},
 		},
 		{
 			name: "no config file",
@@ -196,7 +195,7 @@ func TestApplyUpdateInstallConfig(t *testing.T) {
 			}
 			if err := applyUpdateInstall(
 				context.Background(), "/tmp/pfm-candidate", t.TempDir(), "", runtime,
-				testcase.skipHarvest, io.Discard, io.Discard,
+				io.Discard, io.Discard,
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -334,15 +333,15 @@ func TestUpdateSourceIgnoresForeignGitSelectors(t *testing.T) {
 			runtime := updateTestRuntime(t)
 			stubUpdatePipeline(t, runtime)
 			if rollback {
-				updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+				updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 					return doctorOutcome{Exit: 3, Failures: 1}, nil
 				}
 				oldInstall, oldDoctor := updateRollbackInstall, updateRollbackDoctor
 				t.Cleanup(func() { updateRollbackInstall, updateRollbackDoctor = oldInstall, oldDoctor })
-				updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+				updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 					return nil
 				}
-				updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+				updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 					return doctorOutcome{}, nil
 				}
 			}
@@ -351,7 +350,7 @@ func TestUpdateSourceIgnoresForeignGitSelectors(t *testing.T) {
 			t.Setenv("GIT_COMMON_DIR", filepath.Join(foreign, ".git"))
 			t.Setenv("GIT_INDEX_FILE", filepath.Join(foreign, ".git", "index"))
 			var stdout, stderr bytes.Buffer
-			code := Run([]string{"--repo", repo, "--skip-harvest"}, &stdout, &stderr, runtime)
+			code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime)
 			wantCode, wantRef := 0, target
 			if rollback {
 				wantCode, wantRef = 5, previous

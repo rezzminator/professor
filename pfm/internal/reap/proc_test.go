@@ -65,7 +65,7 @@ func newFleetProc() fakeProc {
 		},
 		cmdline: map[int][]string{
 			100: {"claude", "--resume", "abc"},
-			101: {"uv", "--directory", "/home/x/harvester", "run", "harvester"},
+			101: {"uv", "--directory", "/home/x/document-worker", "run", "document-worker"},
 			102: {"/bin/sh", "-c", "statusline"},
 			200: {"zsh"},
 			201: {"pnpm", "dev"},

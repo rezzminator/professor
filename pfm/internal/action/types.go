@@ -40,6 +40,8 @@ type Request struct {
 	// OpenCodeFleetPrompt is the composed fleet prompt an OpenCode persona launch
 	// removes, empty when no clone is recorded.
 	OpenCodeFleetPrompt string
+	// OpenCodePromptChannel is launch policy text, never the initial user prompt.
+	OpenCodePromptChannel string
 	// Prompt is optional initial work for a fresh engine picker row. Resume and
 	// live routes reject/ignore no hidden input: cmd/pfm uses it only for the
 	// explicit Professor-update banner.

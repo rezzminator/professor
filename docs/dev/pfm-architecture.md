@@ -45,7 +45,7 @@ Co-change evidence is the number of commits since 2026-06-01, releases excluded,
 | Statusline and usage hook | render; the fail-open prompt hook | `internal/statusline/`, `internal/usagehook/` | statusline+ui 15 |
 | Installer | host wiring (links, units, settings, Codex agents, overlays, MCP clients) | `internal/installer/` split by surface | `installer.go` 2,484 lines, 32 commits |
 | Installer migrations | one-time retire/migrate steps with a sunset | `internal/installer/migrations/` **new** | 1,624 lines in 49 retire/migrate/legacy funcs (name heuristic) |
-| Harvester | transport, MCP surface, Python sidecar | `internal/harvest/`, `harvestmcp/`, `harvestpy/` | cohesive today; unchanged |
+| Harvester | standalone plugin; PFM integration is install, config migration, enablement, setup and doctor delegation | `plugins/harvester/` (separate module) | the plugin owns fetch, MCP and conversion packages |
 | Headless | one-shot engine processes; two-way await | `internal/headless/`, `headless/run/`, `ask/` | unchanged |
 | Hygiene | dry-run-first reap, archive, heal | `internal/{reap,archive,heal}/` | unchanged |
 | Engine registry | which engines exist; per-engine adapters | `internal/engine/**` | `matchutil` folds into `engine` |
@@ -101,7 +101,7 @@ pfm/
     installer/                      # installer.go split by surface; migrations/ below
       migrations/                   # NEW. v<version>_<slug>.go per step + steps.go ordered slice
     unchanged: action agentopen agentrole archive ask codexappendix codexmeta codexprompt compose config deps
-               gather harvest harvestmcp harvestpy headless headless/run heal index call kill
+               gather headless headless/run heal index call kill
                mcpserv naming nudge paths recovery reap reload resolve sky spawn stats statusline
                testjail theme transcript ui updatecheck usagehook
 ```

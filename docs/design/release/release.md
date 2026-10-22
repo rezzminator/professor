@@ -45,7 +45,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
-| `/pfm:release` | command | The human front and the loop: `prepare` and `publish`, one phase at a time, fixes by the work ladder, the run ledger | the main chat |
+| `/pfm:release` | command | The human front and the loop: `prepare` and `publish`, one phase at a time, the fixes, the run ledger | the main chat |
 | `releaser` | agent | Runs one phase per spawn and judges it: scope and review, the notes gate, the fenced gate, the rehearsal, the ready stamp, the published-release check | smart (`opus`), effort `high` |
 | `changelogger` | agent | Writes `releases/v{NEW}.md`, the `CHANGELOG.md` line and the coverage ledger for the updating adopter; revises on the gate's findings | smart (`opus`), effort `xhigh` |
 | `reviewer` | agent (existing) | One per review area, pre-merge mode, its report at a path in the release directory | its own pin |
@@ -58,7 +58,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 ## The lifecycle
 
 1. `prepare` opens the release: pulls `develop`, fetches tags, sets up the two worktrees and the release directory, runs the refresh pass when `--from` names a live project. Each SETUP brief carries `KEEP: release v{NEW} in progress`; gitter locks both worktrees before returning, and verifies or restores those locks on resume.
-2. Phases run in order; each is a fresh `releaser` spawn. A phase that finds something to fix returns it; the main chat fixes it on the candidate by the work ladder and re-runs the phase over the delta.
+2. Phases run in order; each is a fresh `releaser` spawn. A phase that finds something to fix returns it; the main chat fixes it on the candidate and re-runs the phase over the delta.
 3. `READY`: `release-check ready --stamp` writes the commit that passed every verdict. The main chat reports the note, the waivers and the verdicts to the user and stops.
 4. The user reads the note. Publication is a separate decision, made in the user's own turn.
 5. `publish` lands exactly the stamped commit, pushes, runs `gitter` Phase RELEASE, spawns the `releaser` for VERIFY, and closes the development line. MERGE carries the same KEEP line: the candidate remains locked through VERIFY, even after its tip lands on `develop`. Close tears down the rehearsal machines, then gitter unlocks both release worktrees before normal guarded removal, deletes the merged branch with `-d`, and verifies both registrations absent. Until removal, the main chat carries `worktree kept (locked): {path} — release v{NEW} in progress` in its Verdict; a failed close names what stayed.
@@ -116,7 +116,7 @@ $HOME/.local/state/pfm/releases/{project}/v{NEW}/
 | Token | Means | The main chat |
 | --- | --- | --- |
 | `DONE {phase}` | The phase passed at the commit it names | records it, runs the next phase |
-| `FIX {phase}: {n}` | `n` items the main chat must fix, each with its path and its route (`code`, `docs`, `notes`) | fixes `code` and `docs` by the work ladder; sends `notes` items to NOTES in revise mode; re-runs the phase |
+| `FIX {phase}: {n}` | `n` items the main chat must fix, each with its path and its route (`code`, `docs`, `notes`) | fixes `code` and `docs`; sends `notes` items to NOTES in revise mode; re-runs the phase |
 | `FAILED {phase}: {why}` | The phase could not reach a verdict: a tool that would not run, the cap, five rehearsal rounds without CLEAN | reads the cause; one re-run with a changed brief; a second is a stop |
 | `BLOCKED {phase}: {question}` | A ruling only the user can make | asks the user; under full autonomy rules it and records the ruling in `run.md` |
 

@@ -821,7 +821,7 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 	path := filepath.Join(root, "mcp-enabled.json")
 	if err := os.WriteFile(
 		path,
-		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true},"harvester":{"enabled":false}}}}`+"\n"),
+		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true}}}}`+"\n"),
 		0o600,
 	); err != nil {
 		t.Fatal(err)

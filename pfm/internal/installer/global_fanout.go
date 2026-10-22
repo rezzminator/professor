@@ -118,7 +118,7 @@ func RecordedGlobalClone(home string) (string, bool, error) {
 	return repo, true, nil
 }
 
-// wireGlobalSkills fetches source skills, then links template skills into the store.
+// wireGlobalSkills fetches source skills, then links template skills into both registries.
 func (installer *engine) wireGlobalSkills() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
@@ -132,7 +132,7 @@ func (installer *engine) wireGlobalSkills() error {
 	return installer.wireTemplateSkills(sourceRepo)
 }
 
-// wireTemplateSkills links clone skill directories into the store skills registry.
+// wireTemplateSkills links clone skill directories into both skills registries.
 // sources.json is a registry, not a skill; an absent or empty source is reported.
 func (installer *engine) wireTemplateSkills(sourceRepo string) error {
 	source := filepath.Join(sourceRepo, "templates", "global", "skills")
@@ -165,7 +165,7 @@ func (installer *engine) wireTemplateSkills(sourceRepo string) error {
 	return nil
 }
 
-// wireGlobalSkill links one clone skill directory at {store}/skills/{name}.
+// wireGlobalSkill links one clone skill directory into the store and ~/.agents/skills.
 func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error {
 	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); errors.Is(err, fs.ErrNotExist) {
 		installer.skip("SKILL-SOURCE-MISSING " + name + " (" + filepath.Join(source, "SKILL.md") + " absent)")
@@ -173,14 +173,10 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 	} else if err != nil {
 		return fmt.Errorf("inspect %s skill source: %w", name, err)
 	}
-	config := installer.options.ConfigDir
-	if err := installer.wireGlobalLink(
-		source,
-		filepath.Join(config, "skills", name),
-		sourceRepo,
-		true,
-	); err != nil {
-		return err
+	for _, target := range installer.skillSourceLinkTargets(name) {
+		if err := installer.wireGlobalLink(source, target, sourceRepo, true); err != nil {
+			return err
+		}
 	}
 
 	return nil

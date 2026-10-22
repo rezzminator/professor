@@ -19,7 +19,7 @@
 
 A release is long; a context only grows, and every call re-sends it (fleet prompt § Orchestration). One agent carrying the whole release would read the range, six review reports, the notes, three gate lanes and two rehearsal transcripts into one context. A fresh spawn per phase keeps each under the 45-call law and keeps the heavy reading out of the main chat, which keeps only the tokens, the fixes and the ledger. State between spawns lives in the release directory, never in a context: every phase starts by reading what it needs from disk.
 
-The phase agent never fixes code. A fix is work the main chat routes by the work ladder, often to a fenced executor; the judge that found the defect does not also write its fix.
+The phase agent never fixes code. A fix is work the main chat routes, often to a fenced foreman; the judge that found the defect does not also write its fix.
 
 ## The brief
 

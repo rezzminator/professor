@@ -16,7 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
-	"github.com/rezzminator/professor/pfm/internal/harvestcli"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/installer"
@@ -62,7 +61,7 @@ var version = config.DevelopmentVersion
 
 // topLevelSubcommands lists every argv[0] case for reachability and installer parity.
 var topLevelSubcommands = []string{
-	versionCommand, "ls", chatCommand, "harvest", headlessCommand, indexCommand, doctorCommand,
+	versionCommand, "ls", chatCommand, headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
@@ -148,8 +147,6 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return picker.Run(args[1:], stdout, stderr, runtime)
 	case "chat":
 		return runChatWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, context.Background())
-	case "harvest":
-		return harvestcli.Harvest(args[1:], stdout, stderr, runtime)
 	case "headless":
 		return runHeadless(args[1:], stdout, stderr, runtime)
 	case "index":
@@ -222,7 +219,6 @@ func printUsage(w io.Writer) {
 		"  ls        list or pick fleet chats",
 		"  chat      operate on one chat: new, open, call, ask, read, stream, name, kill, end",
 		"  headless  run Claude or OpenCode through one isolated process interface",
-		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path; download files",
 		"  index     refresh the transcript index",
 		"  whoami    print this chat's own tmux session name",
 		"  issues    list servicedesk complaints filed through the servicedesk MCP tool",
@@ -287,7 +283,7 @@ func runMCP(
 	if len(args) != 2 || (args[1] != "enable" && args[1] != "disable") {
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm mcp ls | pfm mcp serve [--stdio --family chat|harvester] | pfm mcp <server> enable|disable",
+			"usage: pfm mcp ls | pfm mcp serve [--stdio --family chat] | pfm mcp <server> enable|disable",
 		)
 		return 2
 	}

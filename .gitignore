@@ -1,6 +1,5 @@
 .DS_Store
 /pfm.config.json
-/harvester.config.json
 *.swp
 *.bak
 node_modules/
@@ -53,18 +52,14 @@ templates/global/agents/*.toml
 .professor/RR/*/clone-distiller/
 .professor/RR/clone-distiller/
 .professor/RR/tracer-rr/
-# Harvester conversion cache and OpenCode's own runtime files (plugin install
-# tree, nested config): host state, never repo content. `.cache/` is the
-# harvester cache's pre-migration name, ignored until `pfm install` renames it.
-.harvester-cache/
+# OpenCode's runtime files and local caches are host state.
 .cache/
 .opencode/.opencode/
 .opencode/node_modules/
 .opencode/package.json
 .opencode/package-lock.json
 .opencode/.gitignore
-# Python bytecode caches from python runs outside pfm (pfm's harvestpy launches
-# send theirs to $TMPDIR/pfm-pycache).
+# Python bytecode caches.
 __pycache__/
 
 # The scrub table maps real private values to placeholder tokens — it MUST stay local,

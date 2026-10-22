@@ -278,8 +278,8 @@ func TestPython3RegistryEntryIsRequiredAndPlatformGated(t *testing.T) {
 	if entry == nil {
 		t.Fatal("registry has no python3 entry")
 	}
-	if !entry.Required || entry.Harvest {
-		t.Errorf("python3 Required=%v Harvest=%v, want a required engine dependency", entry.Required, entry.Harvest)
+	if !entry.Required {
+		t.Errorf("python3 Required=%v, want a required engine dependency", entry.Required)
 	}
 	for _, platform := range []string{"linux", "darwin"} {
 		if !entry.AppliesTo(platform) {

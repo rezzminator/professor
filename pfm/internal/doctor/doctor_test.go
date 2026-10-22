@@ -109,7 +109,7 @@ func TestDoctorWithoutVerboseFlagPrintsNoDirLine(t *testing.T) {
 // TestPrintDependenciesCountsAnUnknownProbeStateLikeMissing: a probe state
 // PrintDependencies does not know is an unverified dependency — a required
 // engine dependency in it is a failure (so `pfm install` preflight refuses),
-// an optional or harvest one a warning; the row itself is unchanged.
+// an optional one a warning; the row itself is unchanged.
 func TestPrintDependenciesCountsAnUnknownProbeStateLikeMissing(t *testing.T) {
 	saved := DependencyProbeOverride
 	t.Cleanup(func() { DependencyProbeOverride = saved })
@@ -126,7 +126,6 @@ func TestPrintDependenciesCountsAnUnknownProbeStateLikeMissing(t *testing.T) {
 		wantWarning, wantFails int
 	}{
 		{name: "required engine dep", entry: deps.Entry{Name: "tmux", Required: true}, wantFails: 1},
-		{name: "required harvest dep", entry: deps.Entry{Name: "uv", Required: true, Harvest: true}, wantWarning: 1},
 		{name: "optional dep", entry: deps.Entry{Name: "jq"}, wantWarning: 1},
 	}
 	for _, testCase := range cases {

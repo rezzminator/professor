@@ -255,11 +255,16 @@ func TestMCPFamilyRegistrationsPreserveForeignAndCutOverLegacy(t *testing.T) {
 						expected++
 						name := family + "-professor"
 						want := []string{"mcp", "serve", "--stdio", "--family", family}
-						if cx.Servers[name].Command != bin || !reflect.DeepEqual(cx.Servers[name].Args, want) {
+						wantBin := bin
+						if family == "harvester" {
+							want = []string{"mcp"}
+							wantBin = filepath.Join(home, ".local", "bin", "harvester")
+						}
+						if cx.Servers[name].Command != wantBin || !reflect.DeepEqual(cx.Servers[name].Args, want) {
 							t.Fatalf("Codex %s = %+v", name, cx.Servers[name])
 						}
 						registration, ok := servers[name].(map[string]any)
-						if !ok || !sameStrings(registration["command"].([]any), append([]string{bin}, want...)) {
+						if !ok || !sameStrings(registration["command"].([]any), append([]string{wantBin}, want...)) {
 							t.Fatalf("OpenCode %s = %+v", name, registration)
 						}
 					}
@@ -420,11 +425,17 @@ func TestClaudeMCPFamilyCutover(t *testing.T) {
 					for _, family := range []string{"chat", "harvester"} {
 						if enabled {
 							shape, ok := servers[family+"-professor"].(map[string]any)
+							wantArgs := []string{"mcp", "serve", "--stdio", "--family", family}
+							wantCommand := command
+							if family == "harvester" {
+								wantArgs = []string{"mcp"}
+								wantCommand = filepath.Join(home, ".local", "bin", "harvester")
+							}
 							if !ok ||
 								!isExactStdioShape(
 									shape,
-									command,
-									[]string{"mcp", "serve", "--stdio", "--family", family},
+									wantCommand,
+									wantArgs,
 								) {
 								t.Fatalf("family %s=%v", family, shape)
 							}

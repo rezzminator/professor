@@ -139,6 +139,12 @@ func isPFMLegacyClaudeShape(name string, registration map[string]any, bin string
 		return isPFMHTTPShape(registration, legacyMCPURL(port, name))
 	case mcpServerHarvester:
 		return isPFMHTTPShape(registration, legacyMCPURL(port, name))
+	case "harvester-professor":
+		return isExactStdioShape(
+			registration,
+			bin,
+			[]string{mcpCommand, mcpServeCommand, "--stdio", "--family", mcpServerHarvester},
+		)
 	}
 	return false
 }
@@ -224,7 +230,8 @@ func pfmClaudeMCPShape(name string, registration map[string]any, home string, po
 	if isPFMLegacyClaudeShape(name, registration, bin, port) {
 		return true
 	}
-	return isFamilyRegistration(name) && isExactStdioShape(registration, bin, mcpFamilyStdioArgs(name))
+	return isFamilyRegistration(name) &&
+		isExactStdioShape(registration, mcpFamilyBinary(home, name), mcpFamilyStdioArgs(name))
 }
 
 func (installer *engine) writeMCPCodeConfig(names []string) error {
@@ -250,7 +257,7 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	}
 	var generated []string
 	for _, name := range names {
-		body, err := codexStdioBody(installer.mcpChatCommand(), name)
+		body, err := codexStdioBody(mcpFamilyBinary(installer.options.Home, name), name)
 		if err != nil {
 			return fmt.Errorf("encode Codex MCP registration %s: %w", name, err)
 		}
@@ -314,25 +321,6 @@ func (installer *engine) codexMCPYield(raw string) ([]string, map[string]any, st
 	return kept, foreign.Servers, yielded, nil
 }
 
-// codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
-// table — `command = "<bin>"` and `args = ["mcp", "serve", "--stdio"]` as the
-// TOML encoder renders them — so the writer and the strip agree byte for byte.
-func codexStdioBody(bin string, names ...string) ([]string, error) {
-	args := mcpStdioArgs
-	if len(names) > 0 {
-		args = mcpFamilyStdioArgs(names[0])
-	}
-	body := make([]string, 0, 2)
-	for _, value := range []map[string]any{{configCommandKey: bin}, {configArgsKey: args}} {
-		encoded, err := encodeCodexValues(value)
-		if err != nil {
-			return nil, err
-		}
-		body = append(body, strings.TrimSuffix(encoded, "\n"))
-	}
-	return body, nil
-}
-
 // stripPFMCodexLines removes every line pfm owns in a Codex config.toml: each
 // paired installer fence with its body, every orphan fence marker, each
 // legacy [mcp_servers.chat] / [mcp_servers.harvester] table whose whole body
@@ -380,6 +368,18 @@ func stripPFMCodexLines(lines []string, port int, professorBody []string) []stri
 				}
 			}
 			removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(family), body)
+			if family == mcpServerHarvester {
+				for i, line := range body {
+					if strings.HasPrefix(line, "command = ") {
+						body[i] = strings.TrimSuffix(line, `pfm"`) + `harvester"`
+					} else if strings.HasPrefix(line, "args = ") {
+						body[i] = `args = ["mcp"]`
+					}
+				}
+				removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(family), body)
+				body = append(body, codexStdioEnvLine(family))
+				removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(family), body)
+			}
 		}
 	}
 	kept := make([]string, 0, len(lines))
@@ -465,12 +465,14 @@ func OpenCodeConfigPath(home string) string {
 
 func (installer *engine) mcpOpenCodeRegistration(names ...string) map[string]any {
 	args := mcpStdioArgs
+	bin := installer.mcpChatCommand()
 	if len(names) > 0 {
 		args = mcpFamilyStdioArgs(names[0])
+		bin = mcpFamilyBinary(installer.options.Home, names[0])
 	}
 	return map[string]any{
 		"type":           openCodeLocal,
-		configCommandKey: append([]string{installer.mcpChatCommand()}, args...),
+		configCommandKey: append([]string{bin}, args...),
 		"enabled":        true,
 	}
 }

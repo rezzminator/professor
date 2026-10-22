@@ -19,6 +19,8 @@ var claudeEnvRefused = map[string]string{
 	"CACHE_LIVE_CONTROL_MAIN_TTL":   "is set on every launch from claude.cache1h: set that key instead",
 	"CACHE_LIVE_CONTROL_AGENTS_TTL": "is discarded on every launch as inherited state: set CACHE_LIVE_CONTROL_SUBAGENT_TTL instead",
 	"CALLMETER_HOME":                "is read by pfm itself, which builds callmeter's binary under it: export it where pfm runs instead",
+	"HARVESTER_HOME":                "is read by pfm itself, which installs harvester under it: export it where pfm runs instead",
+	"HARVESTER_CONFIG":              "is read by pfm itself during config migration: export it where pfm runs instead",
 	"ENGINE_SYNC_HOME":              "is read by pfm itself, which runs engine-sync from it: export it where pfm runs instead",
 }
 

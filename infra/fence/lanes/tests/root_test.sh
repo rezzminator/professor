@@ -83,7 +83,7 @@ case "$1" in
           if [ "$STUB_COMMIT_MODE" = create ]; then reason='no such file or directory'; else reason='input/output error'; fi
           echo "Error response from daemon: failed to export layer: CreateDiff: mount callback failed on /var/lib/desktop-containerd/daemon/tmpmounts/containerd-mount3073836047: mount callback failed on /var/lib/desktop-containerd/daemon/tmpmounts/containerd-mount2491854757: failed to commit: rename /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/ingest/326d610ace0d011d9a568ef39c8380be31c458b4acfa5c0b1aa501863f59e1e8/data /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/blobs/sha256/9d53aef03c0266b814e656a1361946cc1737cbab752e32c7ab1e9b7f4a5b6f00: $reason" >&2 ;;
         lchown)
-          echo 'Error response from daemon: failed to apply diff: failed to Lchown "/var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/pfm/harvest-python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9" for UID 0, GID 0: lchown /var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/pfm/harvest-python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9: no such file or directory' >&2 ;;
+          echo 'Error response from daemon: failed to apply diff: failed to Lchown "/var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/harvester/python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9" for UID 0, GID 0: lchown /var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/harvester/python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9: no such file or directory' >&2 ;;
         near-open) echo 'Error response from daemon: open /x: no such file or directory' >&2 ;;
       esac
       exit 1
@@ -145,7 +145,7 @@ ens_line="$(grep -nx 'fence_volumes_ensure' "$STUB_DOCKER_LOG" | head -1 | cut -
 if [ -n "$hk_line" ] && [ -n "$ens_line" ] && [ -n "$first_build" ] && [ "$hk_line" -lt "$first_build" ] && [ "$ens_line" -lt "$first_build" ]; then
   ok "housekeeping runs with the root's hash, and the caches are ensured, before the base build"
 else bad "housekeeping before build" "$(cat "$STUB_DOCKER_LOG")"; fi
-if grep -q -- '-v pfm-lane-harvest-cache:/root/.local/state/pfm/harvest-python/cache -v pfm-lane-uv-cache:/root/.cache/uv -e UV_CACHE_DIR=/root/.cache/uv -e UV_LINK_MODE=copy' "$STUB_DOCKER_LOG"; then
+if grep -q -- '-v pfm-lane-harvest-cache:/root/.local/state/harvester/python/cache -v pfm-lane-uv-cache:/root/.cache/uv -e UV_CACHE_DIR=/root/.cache/uv -e UV_LINK_MODE=copy' "$STUB_DOCKER_LOG"; then
   ok "root build mounts only the harvest download and uv caches"
 else bad "root build cache mounts" "$(grep '^run ' "$STUB_DOCKER_LOG")"; fi
 
@@ -271,7 +271,7 @@ else bad "empty fleet gate" "rc=$RC" "$OUT"; fi
 
 # 6 — the hash follows on-disk build content, never index or commit state.
 H="$T/hash-repo"
-mkdir -p "$H/infra/fence/lanes" "$H/infra/fence/jscpd" "$H/pfm/internal/alpha/testdata" "$H/pfm/testdata" "$H/pfm/e2e" "$H/pfm/internal/harvestpy/assets"
+mkdir -p "$H/infra/fence/lanes" "$H/infra/fence/jscpd" "$H/pfm/internal/alpha/testdata" "$H/pfm/testdata" "$H/pfm/e2e" "$H/pfm/internal/alpha/assets"
 cp "$SUT" "$H/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$H/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$H/infra/fence/fence-env.sh"
@@ -287,10 +287,10 @@ printf 'test\n' >"$H/pfm/internal/alpha/x_test.go"
 printf 'fixture\n' >"$H/pfm/internal/alpha/testdata/input"
 printf 'fixture\n' >"$H/pfm/testdata/input"
 printf 'e2e\n' >"$H/pfm/e2e/example.go"
-printf 'test\n' >"$H/pfm/internal/harvestpy/assets/example_test.py"
+printf 'package alpha\n' >"$H/pfm/internal/alpha/assets/example_test.go"
 (cd "$H" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
 base="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
-for file in infra/fence/lanes/E1.sh infra/fence/lanes/lib.sh infra/fence/lanes/beats.md infra/fence/lanes/Z.sh infra/fence/lanes/provision.sh infra/fence/jscpd/package-lock.json pfm/go.mod pfm/internal/alpha/x_test.go pfm/internal/alpha/testdata/input pfm/testdata/input pfm/e2e/example.go pfm/internal/harvestpy/assets/example_test.py; do
+for file in infra/fence/lanes/E1.sh infra/fence/lanes/lib.sh infra/fence/lanes/beats.md infra/fence/lanes/Z.sh infra/fence/lanes/provision.sh infra/fence/jscpd/package-lock.json pfm/go.mod pfm/internal/alpha/x_test.go pfm/internal/alpha/testdata/input pfm/testdata/input pfm/e2e/example.go pfm/internal/alpha/assets/example_test.go; do
   printf 'edit\n' >>"$H/$file"
   changed="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
   case "$file" in
@@ -396,6 +396,14 @@ else bad "plugin checkout hash input" "none=$pc_none empty=$pc_empty base=$pc_ba
 HASH_BIN="$T/hash-bin"; mkdir -p "$HASH_BIN"
 cat >"$HASH_BIN/git" <<'EOF'
 #!/usr/bin/env bash
+if [ -n "${STUB_HASH_FAIL_SOURCE:-}" ]; then
+  if [ "${1:-}" = -C ] && [ "${2:-}" = "$STUB_HASH_FAIL_SOURCE" ] &&
+    [ "${3:-}" = "$STUB_HASH_FAIL_OPERATION" ]; then
+    echo "harvester $STUB_HASH_FAIL_OPERATION refused (fixture)" >&2
+    exit 128
+  fi
+  exec /usr/bin/git "$@"
+fi
 case "$*" in *ls-files*) echo 'listing refused (fixture)' >&2; exit 128 ;; esac
 exec /usr/bin/git "$@"
 EOF
@@ -403,6 +411,19 @@ chmod +x "$HASH_BIN/git"
 OUT="$(PATH="$HASH_BIN:$PATH" bash "$H/infra/fence/lanes/root.sh" --print-hash 2>&1)"; RC=$?
 if [ "$RC" -eq 2 ] && grep -q 'HASH-UNDERIVABLE.*listing refused' <<<"$OUT"; then ok "a failed git listing refuses image reuse"
 else bad "failed git listing" "rc=$RC out=$OUT"; fi
+HS="$T/harvester-src"
+mkdir -p "$HS/cmd/harvester"
+printf 'module example.test/harvester\n' >"$HS/go.mod"
+printf 'package main\n' >"$HS/cmd/harvester/main.go"
+(cd "$HS" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
+for operation in ls-files hash-object; do
+  OUT="$(PATH="$HASH_BIN:$PATH" HARVESTER_SRC="$HS" ENGINE_SYNC_SRC="$ES" \
+    STUB_HASH_FAIL_SOURCE="$HS" STUB_HASH_FAIL_OPERATION="$operation" \
+    bash "$H/infra/fence/lanes/root.sh" --print-hash 2>&1)"; RC=$?
+  if [ "$RC" -eq 2 ] && grep -q '^root: HASH-UNDERIVABLE:' <<<"$OUT"; then
+    ok "a failed harvester $operation refuses image reuse before successful engine-sync hashing"
+  else bad "failed harvester $operation" "rc=$RC out=$OUT"; fi
+done
 for flag in --accounts --no-adopt; do
   case "$flag" in --accounts) set -- "$flag" 1 ;; *) set -- "$flag" ;; esac
   OUT="$(bash "$R/infra/fence/lanes/root.sh" "$@" 2>&1)"; RC=$?

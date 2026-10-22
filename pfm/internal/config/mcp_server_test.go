@@ -8,7 +8,7 @@ import (
 )
 
 func TestMCPServerKey(t *testing.T) {
-	if got := MCPServerKey(MCPServerHarvester); got != "harvester.enabled" {
+	if got := MCPServerKey(MCPServerHarvester); got != "mcp.servers.harvester.enabled" {
 		t.Fatalf("MCPServerKey(harvester) = %q", got)
 	}
 	if got := MCPServerKey(MCPServerChat); got != "mcp.servers.chat.enabled" {
@@ -107,9 +107,7 @@ func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
 	if got.Source("mcp.servers.chat.enabled") != SourceDefault {
 		t.Fatalf("chat source = %q, want default", got.Source("mcp.servers.chat.enabled"))
 	}
-	// A pre-split file's mcp.servers.harvester is honored, but reported as
-	// legacy so `pfm config show` / doctor point at the migration.
-	if got.MCPServerSource("harvester") != SourceLegacy {
-		t.Fatalf("harvester source = %q, want %q", got.MCPServerSource("harvester"), SourceLegacy)
+	if got.MCPServerSource("harvester") != SourceFile {
+		t.Fatalf("harvester source = %q, want %q", got.MCPServerSource("harvester"), SourceFile)
 	}
 }

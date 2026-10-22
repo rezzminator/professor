@@ -68,11 +68,9 @@ func applyWorkbench(request *Request) error {
 		}
 	}
 	if engine == pfmengine.OpenCode {
-		path := paths.OpenCodeWorkbenchPlugin(request.Home)
-		if err := workbench.StageOpenCodeSeatPlugin(path); err != nil {
+		if err := attachOpenCodeSeatPlugin(request); err != nil {
 			return err
 		}
-		request.OpenCodePlugin = path
 		fleet, err := paths.GeneratedHarnessPrompt(request.Home, pfmengine.OpenCode)
 		if err != nil {
 			if !errors.Is(err, paths.ErrNoSourceRepoMarker) && !errors.Is(err, paths.ErrSourceRepoUnusable) {
@@ -89,7 +87,7 @@ func applyWorkbench(request *Request) error {
 
 // WorkbenchPersona is workbench.ForLaunch with the persona's effort validated
 // through engine's one effort roster and carried lower-cased, so every launch
-// door accepts what chat new and reload accept. OpenCode carries no effort.
+// door accepts what chat new and reload accept.
 func WorkbenchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, error) {
 	persona, err := workbench.ForLaunch(cwd, engine, mode)
 	if err != nil {
@@ -100,6 +98,8 @@ func WorkbenchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (wor
 		persona.Effort, err = ClaudeEffort(persona.Effort)
 	case pfmengine.Codex:
 		persona.Effort, err = CodexEffort(persona.Effort)
+	case pfmengine.OpenCode:
+		persona.Effort, err = OpenCodeEffort(persona.Effort)
 	}
 	if err != nil {
 		wrapped := fmt.Errorf("workbench %s: %w", persona.Bench.Dir, err)
@@ -134,17 +134,40 @@ func openCodePersonaEnv(request Request) (string, error) {
 	return command.String(), nil
 }
 
+func attachOpenCodeSeatPlugin(request *Request) error {
+	path := paths.OpenCodeWorkbenchPlugin(request.Home)
+	if err := workbench.StageOpenCodeSeatPlugin(path); err != nil {
+		return err
+	}
+	request.OpenCodePlugin = path
+	return nil
+}
+
 func openCodePersonaAssignments(request Request) ([]string, error) {
 	hasPersona := request.Persona.Prompt != ""
 	var plugins []string
-	if hasPersona {
+	if request.OpenCodePlugin != "" {
 		plugins = append(plugins, (&url.URL{Scheme: "file", Path: request.OpenCodePlugin}).String())
 	}
 	if request.OpenCodeHerdrPlugin != "" {
 		plugins = append(plugins, (&url.URL{Scheme: "file", Path: request.OpenCodeHerdrPlugin}).String())
 	}
-	if len(plugins) == 0 {
+	effort, err := OpenCodeEffort(request.Persona.Effort)
+	if err != nil {
+		return nil, err
+	}
+	model := request.Persona.Model
+	if model != "" {
+		provider, name, found := strings.Cut(model, "/")
+		if !found || provider == "" || name == "" || hasNUL(model) {
+			return nil, fmt.Errorf("OpenCode model %q must be provider/model", model)
+		}
+	}
+	if len(plugins) == 0 && model == "" && effort == "" && request.OpenCodePromptChannel == "" {
 		return nil, nil
+	}
+	if (model != "" || effort != "" || request.OpenCodePromptChannel != "") && request.OpenCodePlugin == "" {
+		return nil, errors.New("OpenCode model, effort and prompt channel require the native seat plugin")
 	}
 	config := map[string]any{"plugin": plugins}
 	if hasPersona {
@@ -156,6 +179,15 @@ func openCodePersonaAssignments(request Request) ([]string, error) {
 		return nil, err
 	}
 	env := []string{"OPENCODE_CONFIG_CONTENT=" + string(body)}
+	for _, pair := range [][2]string{
+		{"PFM_OPENCODE_MODEL", model},
+		{"PFM_OPENCODE_VARIANT", effort},
+		{"PFM_OPENCODE_POLICY", request.OpenCodePromptChannel},
+	} {
+		if pair[1] != "" {
+			env = append(env, pair[0]+"="+pair[1])
+		}
+	}
 	if !hasPersona {
 		return env, nil
 	}

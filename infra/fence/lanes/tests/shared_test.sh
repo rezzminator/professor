@@ -22,6 +22,7 @@ SHTEST_TAG=fence-shared-test
 # shellcheck source=/dev/null
 . "$FENCE/../../scripts/shtest.sh"
 shtest_unset_gate_env
+unset PFM_DEV_HARVESTER_SRC PFM_DEV_HARVESTER_MISSING HARVESTER_FENCE_SRC
 PFM_FENCE_PROFILE=desktop
 [ -f "$SUT" ] || { echo "shared_test: no shared.sh at $SUT" >&2; exit 2; }
 # shellcheck source=/dev/null

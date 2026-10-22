@@ -289,7 +289,7 @@ func TestHerdrBirthResolvesRealEngineBeforeReservation(t *testing.T) {
 
 func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 	for _, engineID := range []pfmengine.ID{pfmengine.Codex, pfmengine.OpenCode} {
-		for _, mode := range []string{"configured", "path", "missing"} {
+		for _, mode := range []string{"configured", "path", "missing", "outside-path", "bad-override"} {
 			t.Run(string(engineID)+"/"+mode, func(t *testing.T) {
 				testjail.Fleet(t)
 				values, err := paths.Resolve()
@@ -306,9 +306,15 @@ func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 					}
 				}
 				t.Setenv("PATH", filepath.Dir(binary))
+				if mode == "outside-path" {
+					t.Setenv("PATH", t.TempDir())
+				}
 				word := binary
-				if mode != "configured" {
+				if mode != "configured" && mode != "outside-path" {
 					word = pfmengine.MustLookup(engineID).Binary
+				}
+				if mode == "bad-override" {
+					word = filepath.Join(values.Home, "missing", pfmengine.MustLookup(engineID).Binary)
 				}
 				request := HerdrRequest{
 					Paths: values,
@@ -324,7 +330,7 @@ func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 				result, err := PrepareHerdr(context.Background(), request)
 				db := fleetdb.OpenSharedState(context.Background(), values)
 				defer func() { _ = db.Close() }()
-				if mode == "missing" {
+				if mode == "missing" || mode == "bad-override" {
 					if err == nil || !strings.Contains(err.Error(), "resolve native") {
 						t.Fatalf("missing raw binary result=%+v err=%v", result, err)
 					}

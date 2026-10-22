@@ -115,21 +115,21 @@ func TestUpdateJSONIsExactlyOneObject(t *testing.T) {
 			repo := newUpdateGitFixture(t)
 			runtime := updateTestRuntime(t)
 			stubUpdatePipeline(t, runtime)
-			updateBaselineDoctor = func(_ context.Context, _ pfmconfig.Runtime, _ bool, stdout, _ io.Writer) (doctorOutcome, error) {
+			updateBaselineDoctor = func(_ context.Context, _ pfmconfig.Runtime, stdout, _ io.Writer) (doctorOutcome, error) {
 				fmt.Fprintln(stdout, "baseline doctor progress")
 				return doctorOutcome{}, nil
 			}
-			updateApplyInstall = func(_ context.Context, _, _, _ string, _ pfmconfig.Runtime, _ bool, stdout, stderr io.Writer) error {
+			updateApplyInstall = func(_ context.Context, _, _, _ string, _ pfmconfig.Runtime, stdout, stderr io.Writer) error {
 				fmt.Fprintln(stdout, "install progress")
 				fmt.Fprintln(stderr, "install diagnostic")
 				return nil
 			}
-			updateRunDoctor = func(_ context.Context, _ string, _ pfmconfig.Runtime, _ string, _ bool, stdout, _ io.Writer) (doctorOutcome, error) {
+			updateRunDoctor = func(_ context.Context, _ string, _ pfmconfig.Runtime, _ string, stdout, _ io.Writer) (doctorOutcome, error) {
 				output := "doctor: row=new warning\ndoctor: warnings=1\n"
 				fmt.Fprint(stdout, output)
 				return doctorOutcome{Exit: 1, Warnings: 1, Output: output}, nil
 			}
-			args := []string{"--skip-harvest", "--repo", repo, "--root", t.TempDir()}
+			args := []string{"--repo", repo, "--root", t.TempDir()}
 			if jsonOutput {
 				args = append(args, "--json")
 			}

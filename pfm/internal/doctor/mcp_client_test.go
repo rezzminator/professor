@@ -180,6 +180,10 @@ func TestDoctorMCPClientReportsFamilyOwnership(t *testing.T) {
 					name := pfmconfig.MCPRegistrationName(family)
 					bin := filepath.Join(home, ".local", "bin", "pfm")
 					args := []string{"mcp", "serve", "--stdio", "--family", family}
+					if family == pfmconfig.MCPServerHarvester {
+						bin = filepath.Join(home, ".local", "bin", "harvester")
+						args = []string{"mcp"}
+					}
 					entry := map[string]any{"type": "local", "command": append([]string{bin}, args...), "enabled": true}
 					path := filepath.Join(home, ".config", "opencode", "opencode.jsonc")
 					document := map[string]any{"mcp": map[string]any{name: entry}}

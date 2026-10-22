@@ -43,3 +43,8 @@
 	url = https://github.com/rezzminator/cache-keepwarm.git
 	branch = develop
 	ignore = dirty
+[submodule "plugins/harvester"]
+	path = plugins/harvester
+	url = https://github.com/rezzminator/harvester.git
+	branch = develop
+	ignore = dirty

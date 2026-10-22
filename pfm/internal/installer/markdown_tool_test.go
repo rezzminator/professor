@@ -135,7 +135,7 @@ func TestInstallMarkdownToolStaleVersionFallsThroughPastAlreadyPresent(t *testin
 
 	var output bytes.Buffer
 	eng := &engine{
-		options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output, HarvestOffline: true},
+		options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output, Offline: true},
 		apply:   true,
 	}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
@@ -275,7 +275,7 @@ func TestRemoveRumdlUserConfig(t *testing.T) {
 }
 
 // TestInstallMarkdownToolOfflineSkipsWithoutTouchingUV pins the offline
-// branch under apply: HarvestOffline must skip before any uv resolution or
+// branch under apply: Offline must skip before any uv resolution or
 // exec is attempted — the poisoned uv fixture proves it never runs.
 func TestInstallMarkdownToolOfflineSkipsWithoutTouchingUV(t *testing.T) {
 	dir := t.TempDir()
@@ -286,7 +286,7 @@ func TestInstallMarkdownToolOfflineSkipsWithoutTouchingUV(t *testing.T) {
 
 	var output bytes.Buffer
 	eng := &engine{
-		options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output, HarvestOffline: true},
+		options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output, Offline: true},
 		apply:   true,
 	}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
@@ -303,7 +303,7 @@ func TestInstallMarkdownToolOfflineSkipsWithoutTouchingUV(t *testing.T) {
 }
 
 // TestInstallMarkdownToolNoUVAvailableSkipsWithoutFailingInstall pins the
-// "no uv anywhere" terminal: rumdl absent, no provisioned harvestpy uv, and
+// "no uv anywhere" terminal: rumdl absent, no uv, and
 // no uv on PATH must skip cleanly rather than fail the whole install.
 func TestInstallMarkdownToolNoUVAvailableSkipsWithoutFailingInstall(t *testing.T) {
 	dir := t.TempDir()
@@ -315,7 +315,7 @@ func TestInstallMarkdownToolNoUVAvailableSkipsWithoutFailingInstall(t *testing.T
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
 		t.Fatalf("installMarkdownTool must never fail the install: %v\n%s", err, output.String())
 	}
-	want := "rumdl: no uv available (checked provisioned harvestpy uv and PATH)"
+	want := "rumdl: no uv available on PATH"
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("output=%q, want to contain %q", output.String(), want)
 	}

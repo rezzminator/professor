@@ -36,7 +36,7 @@ func TestResolveSources(t *testing.T) {
 	machine.Sources["claude.autoCompactWindow"] = pfmconfig.SourceFile
 	machine.Sources["claude.helperModel"] = pfmconfig.SourceFile
 	machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: true}
-	machine.Sources["harvester.enabled"] = pfmconfig.SourceFile
+	machine.Sources["mcp.servers.harvester.enabled"] = pfmconfig.SourceFile
 	prefs := machine.Claude
 	prefs.Theme = "light"
 	prefs.AutoCompactWindow = 50000

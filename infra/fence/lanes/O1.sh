@@ -90,7 +90,7 @@ if themes="$(bundled_themes "$clone/templates/themes")"; then
 else
   missing="$missing I15 ($themes);"
 fi
-check_path I16 "harvestpy runtime" "$HOME/.local/state/pfm/harvest-python/env"
+check_path I16 "harvester conversion runtime" "$HOME/.local/state/harvester/python/env"
 check_path I14 "VS Code extension asset" "$MANAGED/vscode/professor/package.json"
 for registry in agents commands skills; do
   [ -d "$SEAT_DIR/$registry" ] || missing="$missing I17/I18/I19 ($SEAT_DIR/$registry absent);"

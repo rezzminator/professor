@@ -1,5 +1,15 @@
 # pfm layout — phase P2c "layout moves"
 
+## Contents
+
+- [(a) Principles, applied here](#a-principles-applied-here)
+- [(b) Target tree](#b-target-tree)
+- [(c) Move table](#c-move-table)
+- [(d) Import rules after the move](#d-import-rules-after-the-move)
+- [(e) Impact on `scripts/arch-check.sh` C1–C21 and `.arch/`](#e-impact-on-scriptsarch-checksh-c1c21-and-arch)
+- [(f) Ordered steps for the executor](#f-ordered-steps-for-the-executor)
+- [(g) Open decisions](#g-open-decisions)
+
 **Status:** DESIGN, brownfield, executable. Measured on `wave/reliability-gates @ c28b072d` (2026-09-17), `pfm/`-relative paths (module `github.com/rezzminator/professor/pfm`). Method: `/quality:llm-codebase` (brownfield: measure, then migrate incrementally — under a tenth of the tree moves, so no rebuild). Companion: `docs/dev/pfm-architecture.md` (the target package map and C1–C21); this document is its layout slice and changes where files live, never what pfm does.
 
 **Precondition (P2b done first):** `pfm/internal/dream/**`, `pfm/prompts/**` and `cmd/pfm/dream_command.go` + `dream_command_test.go` are gone. `pfm/prompts/embed.go` embeds only `dreamer` and its only importers are `internal/dream/resources/resources.go` and `internal/dream/live_contract_test.go`, so P2b must delete the whole `pfm/prompts/` package — a surviving `//go:embed dreamer` with no files is a compile error. Step 0 below checks this.
@@ -10,7 +20,7 @@
 
 **One directory per unit of change.** A unit is what co-changes: the architecture doc's commit census (cmd/pfm+installer 45, cmd/pfm+ui 44, cmd/pfm+mcpserv 38) says the units are chat verbs, the picker, doctor, hook entries, update, installer. Under `internal/` the boundaries already hold; the defects are four packages that exist only to hold one file another package should own (`shared`, `tmuxfmt`, `engine/matchutil`, `chatkeys`), and `cmd/pfm`, where 60 files carry no unit in their names, so `ls` cannot show a unit and a reader finds the doctor's eight files by grepping `Doctor` across 18K lines. After P2c every `cmd/pfm` file's first token is its unit, and the three fold targets are the packages their importers already import.
 
-**Tests, fixtures, prompts and docs beside the package.** Go already puts `x_test.go` beside `x.go` (C13 enforces the mirror); the exceptions are a root `shim/` holding tests for `internal/installer/assets/shim/pfm.zsh` two directories away, and two root operator docs (`HARVESTER.md`, `HEADLESS.md`) whose subjects are `internal/harvest` and `internal/headless`. Root `testdata/` stays: `golden/` has three consumers (`action`, `compose`, `ui`), `codex-state-schema.sql` two (`kill`, `store`), and the `claude-store codex-store crumbs proc` corpora feed the jail through `PFM_*` overrides and `testdata/e2e.sh` — a corpus with N consumers has no single package to sit beside. Single-consumer fixtures already sit beside their consumer (`statusline/testdata`, `usagehook/testdata`, `harvestpy/testdata`). `e2e/` stays at the root: it builds the binary and drives the install → update flow of the whole product, and `dev.sh iso e2e` names `./e2e/...`.
+**Tests, fixtures, prompts and docs beside the package.** Go already puts `x_test.go` beside `x.go` (C13 enforces the mirror); the exceptions are a root `shim/` holding tests for `internal/installer/assets/shim/pfm.zsh` two directories away, and the root operator doc `HEADLESS.md` whose subject is `internal/headless`; Harvester documentation now lives with the standalone plugin. Root `testdata/` stays: `golden/` has three consumers (`action`, `compose`, `ui`), `codex-state-schema.sql` two (`kill`, `store`), and the `claude-store codex-store crumbs proc` corpora feed the jail through `PFM_*` overrides and `testdata/e2e.sh` — a corpus with N consumers has no single package to sit beside. Single-consumer fixtures already sit beside their consumer (`statusline/testdata`, `usagehook/testdata`, `plugins/harvester/internal/harvestpy/testdata`). `e2e/` stays at the root: it builds the binary and drives the install → update flow of the whole product, and `dev.sh iso e2e` names `./e2e/...`.
 
 **One façade per mechanism — named.** `internal/tmux` (every tmux invocation: `Command`, `Invocation`, `CouldNotRun`, and after P2c the `-F` parsing `FormatSplit`), `internal/atomicfile.Write` (whole-file replace), `internal/sqlitedb` (every SQLite open), `internal/paths` (every filesystem location and `PFM_*` read), `internal/deps` (every external binary), `internal/engine` (which engines exist; after P2c also `MatchCommand`, the one executable matcher), `internal/config` (accounts, emoji, theme, posture), `internal/chat` (the chat verbs every surface calls typed; after P2c also the tmux key-name contract `KeyValid`/`KeyNames`), `internal/fleetdb` (the operator-decision store, renamed from `shared`). No façade is created empty: each of the four folds moves an existing implementation into the façade that already owns the concept.
 
@@ -33,7 +43,7 @@ pfm/
     doctor_*.go                        # `pfm doctor` and its probe families (harness prompt, spawn audit, tmux titles, prepush, vscode, mcp client)
     internal_*.go                      # every `pfm internal <entry>` body (hook entries, launch, then, update-check, prompt block)
     update_*.go init_command.go        # binary self-update, project baselines
-    <command>_command.go               # one adapter per remaining top-level command (archive, codex, config, harvest, heal, install, issues, mcp_serve, namesync, reap, statusline, uninstall, whoami, headless_exec)
+    <command>_command.go               # one adapter per remaining top-level command (archive, codex, config, heal, install, issues, mcp_serve, namesync, reap, statusline, uninstall, whoami, headless_exec)
     mcp_shared.go                      # the one bridge from the command package into the MCP server
     *_test.go                          # same prefixes; jail scenario tests keep their `<flow>_jail_test.go` names
   internal/
@@ -47,12 +57,12 @@ pfm/
     installer/                         # host wiring; assets/ is staged verbatim (go:embed), never holds Go tests
       assets/{bin,launchd,prompts,shim,systemd,vscode}/
       shim/                            # MOVED from pfm/shim/: the zsh shim's tests, one hop from assets/shim/pfm.zsh
-    harvest/  README.md                # MOVED from pfm/HARVESTER.md
     headless/ README.md                # MOVED from pfm/HEADLESS.md; run/ is the one-shot process boundary
-    harvestmcp/ harvestpy/             # unchanged (harvestpy is the pinned Python sidecar)
     action agentopen agentrole archive ask binwatch codexappendix codexmeta codexprompt compose fleet gather heal
     index call kill mcpserv naming nudge professor reap recovery reload resolve sky spawn stale stats
     statusline testjail theme transcript ui update updatecheck usagehook     # unchanged
+
+`plugins/harvester/` is a separate Go module outside `pfm/`; it owns Harvester source, conversion, its persistent daemon, and the stdio proxy exposed to MCP clients. PFM integrates it through install, config migration, enablement, and doctor delegation.
 ```
 
 Gone after P2c: `pfm/shim/`, `pfm/internal/shared/`, `pfm/internal/tmuxfmt/`, `pfm/internal/engine/matchutil/`, `pfm/internal/chatkeys/`, `pfm/HARVESTER.md`, `pfm/HEADLESS.md` (and, from P2b, `pfm/prompts/`, `pfm/internal/dream/`).
@@ -83,7 +93,7 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | 11 | `shim/shim_test.go` | `internal/installer/shim/shim_test.go` | tests of `internal/installer/assets/shim/pfm.zsh` sit one hop from it; the fixture path at `shim_test.go:351` becomes `filepath.Join("..", "assets", "shim", "pfm.zsh")`. Not under `assets/`: `installer/assets.go:16` embeds that whole tree and would stage the tests onto the host |
 | 12 | `shim/chat_server_shim_test.go` | `internal/installer/shim/chat_server_shim_test.go` | with #11 |
 | 13 | `shim/retirement_test.go` | `internal/installer/shim/retirement_test.go` | with #11 |
-| 14 | `HARVESTER.md` | `internal/harvest/README.md` | the package's operator doc beside the package |
+| 14 | `HARVESTER.md` | `plugins/harvester/internal/harvest/README.md` | the package's operator doc beside the package |
 | 15 | `HEADLESS.md` | `internal/headless/README.md` | same |
 | 16 | `cmd/pfm/attach_e2e_test.go` | `cmd/pfm/attach_jail_test.go` | one suffix per tier (naming audit § 1.15) |
 | 17 | `cmd/pfm/lineage_e2e_test.go` | `cmd/pfm/lineage_jail_test.go` | same |
@@ -157,7 +167,7 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | `internal/stats/limits.go`, `usage_source.go` → `internal/limits/` | NOT a move: `limits.go` uses `Header`, `Window`, `AccountLimits`, `UnknownUsedPct`, `percent` declared in `stats.go:23,61,74,76,655`, and `Header`/`Window` are also the Stats-tab `Snapshot`'s; splitting them is type surgery for the pfmd Phase 2 wave (open decision 3) |
 | `internal/engine/{claude,codex,opencode}/` | per-engine adapters, one importer (`cmd/pfm/engines.go`); grep-true already |
 | `internal/store/` → `indexdb` | architecture open ruling 4; a rename with a user-visible file rename attached (`fleet.db` → `index.db`), not layout |
-| `testdata/`, `e2e/`, `internal/installer/assets/**`, `internal/harvestpy/**` | § (a) |
+| `testdata/`, `e2e/`, `internal/installer/assets/**`, | § (a) |
 | `internal/codexprompt`, `codexappendix`, `codexmeta` | three Codex concerns at three layers (fleet-prompt fence, retired-appendix cleanup, rollout reader); folding them would create a `codex/` umbrella with no unit of change |
 
 ## (d) Import rules after the move
@@ -165,8 +175,8 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 Layering, top to bottom; a package imports only downward. This is today's graph (`go list`, read-only) with the four folds applied; no new edge is introduced and no cycle is possible because every fold target is already imported by every consumer of the folded package.
 
 1. `cmd/pfm` — imports anything under `internal/`; nothing imports it (C10 keeps `mcpserv` off argv into it).
-2. surfaces and orchestration: `mcpserv`, `harvestmcp`, `ui`, `installer`, `fleet`, `chat`, `headless`, `reload`, `reap`, `heal`, `archive`, `stats`, `statusline`, `agentopen`, `engine/{claude,codex,opencode}`.
-3. mechanisms over the fleet: `action`, `spawn`, `call`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `harvest`, `harvestpy`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `agentrole`, `codexprompt`, `codexappendix`, `ask`, `headless/run`.
+2. surfaces and orchestration: `mcpserv`, `ui`, `installer`, `fleet`, `chat`, `headless`, `reload`, `reap`, `heal`, `archive`, `stats`, `statusline`, `agentopen`, `engine/{claude,codex,opencode}`.
+3. mechanisms over the fleet: `action`, `spawn`, `call`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `agentrole`, `codexprompt`, `codexappendix`, `ask`, `headless/run`.
 4. façades and leaves: `tmux` (imports `deps` only), `sqlitedb`, `atomicfile`, `paths` (imports `engine`), `deps` (imports `engine`), `config`, `engine` (imports nothing in-module), `theme`, `sky`, `testjail`.
 
 Rules the executor and every later wave keep:
@@ -175,7 +185,7 @@ Rules the executor and every later wave keep:
 - `internal/tmux` imports only `deps`. `format.go` (#7) imports nothing. Anything needing `paths` for socket addressing stays in the caller (`paths.SocketUnder` is the `..`-refusing resolver; P4 #6 makes it the one).
 - `internal/chat` imports nothing that imports `chat` (`mcpserv` and `cmd/pfm` are its callers). `keys.go` (#10) imports nothing.
 - `internal/fleetdb` imports `atomicfile paths sqlitedb` only, exactly as `shared` did; `store` imports `fleetdb` (for hides), never the reverse.
-- The only import-isolation test outside `internal/dream` is none: the 13 files a `forbidden|allowlist|may not import` grep hits were read — 11 use the word for stdout/argv/asset assertions, `internal/harvest/gateway_chokepoint_test.go` is an HTTP-egress allowlist over `harvest` **file names** (`gatewayExemptFiles`), and `harvest` does not move, so no isolation test changes. `internal/dream/isolation_test.go` leaves with P2b; the `pfm/CLAUDE.md` § Code Standards paragraph about it is P2b's `/pcm` edit.
+- The only import-isolation test outside `internal/dream` is none: the 13 files a `forbidden|allowlist|may not import` grep hits were read — 11 use the word for stdout/argv/asset assertions, `plugins/harvester/internal/harvest/gateway_chokepoint_test.go` is an HTTP-egress allowlist over `harvest` **file names** (`gatewayExemptFiles`), and PFM no longer contains Harvester source, so its HTTP-egress allowlist is maintained in the standalone plugin repository. `internal/dream/isolation_test.go` leaves with P2b; the `pfm/CLAUDE.md` § Code Standards paragraph about it is P2b's `/pcm` edit.
 - No new package is created. The three new files (`tmux/format.go`, `engine/match.go`, `chat/keys.go`) each carry one sentence in their existing package's doc: `format.go` "parses the output of a tmux -F format string with either control-separator spelling"; `match.go` "MatchCommand is the one executable matcher for engine registry matchers and process scanners"; `keys.go` "the tmux key-name contract the chat keys verb and its MCP tool validate against".
 
 ## (e) Impact on `scripts/arch-check.sh` C1–C21 and `.arch/`
@@ -199,7 +209,7 @@ Rules the executor and every later wave keep:
 | C13 `untested-sources` | every renamed source without a same-stem test: `cmd/pfm/{agent_open_command,chat_keys_command,commands,harness_prompt_baselines,call_resume,launcher_repair_command,pipeline,prepush_doctor,prompt_block,run_command,then_command}.go` → their new names; `internal/chatkeys/keys.go` → `internal/chat/keys.go`; `internal/engine/matchutil/match.go` → `internal/engine/match.go` | meaningful; #4 (`fleetdb_test.go`) keeps `fleetdb.go` mirrored |
 | C14 / C15 | none (parse `main.go`, unchanged) | meaningful |
 | C16 `env-outside-paths` | `cmd/pfm/commands.go 1` → `ls_command.go`; `launch_command.go 1` → `internal_launch.go`; `update_notice_command.go 1` → `internal_update_check.go`; `run_command.go 1` → `chat_new_command.go` | meaningful |
-| C17 `dup-functions` | value strings carry paths: `command:` loses `internal/engine/matchutil/match.go` (entry becomes `command: internal/codexappendix/codexappendix.go internal/tmux/tmux.go`); `open:` → `internal/fleetdb/fleetdb.go internal/store/store.go`; `containsstring:` → `cmd/pfm/update_command.go internal/harvestmcp/remote.go` after P2b; `lastlines:` unchanged (`chat_satellite_command.go` keeps its name); `livesockets:` → `cmd/pfm/namesync_command.go internal/ui/model.go` unchanged | meaningful; the `command:` entry shrinks (P4 #8 owns the rest) |
+| C17 `dup-functions` | value strings carry paths: `command:` loses `internal/engine/matchutil/match.go` (entry becomes `command: internal/codexappendix/codexappendix.go internal/tmux/tmux.go`); `open:` → `internal/fleetdb/fleetdb.go internal/store/store.go`; `containsstring:` → `cmd/pfm/update_command.go`; `lastlines:` unchanged (`chat_satellite_command.go` keeps its name); `livesockets:` → `cmd/pfm/namesync_command.go internal/ui/model.go` unchanged | meaningful; the `command:` entry shrinks (P4 #8 owns the rest) |
 | C18 `engine-spellings` | `cmd/pfm/commands.go 7` → `ls_command.go`; `pipeline.go 2` → `ls_pipeline.go`; `reload_command.go 3` → `chat_reload_command.go`; `run_command.go 4` → `chat_new_command.go`; `update_notice_command.go 2` → `internal_update_check.go`; `reload_engine_roster_test.go 5`, `run_engine_roster_test.go 4` → their `chat_` names; `internal/engine/opencode/match.go` unchanged | meaningful (P3 #2 shrinks it) |
 | C19 `env-namespace` | `cmd/pfm/commands.go 1` → `ls_command.go` | meaningful |
 | C20 `codex-home` | `cmd/pfm/reload_command.go 1` → `chat_reload_command.go` | meaningful (P3 #1 shrinks it) |
@@ -216,7 +226,7 @@ Each step is one commit (gitter, pathspec = the step's files plus `.arch/`), lea
 2. **`tmuxfmt` → `tmux/format.go`** (#7–#8). `git mv internal/tmuxfmt/tmuxfmt.go internal/tmux/format.go && git mv internal/tmuxfmt/tmuxfmt_test.go internal/tmux/format_test.go`; package clause → `tmux`, drop the `// Package tmuxfmt` line, rename `SplitN` → `FormatSplit` (declarations, the test, and the 5 call sites `cmd/pfm/reload_command.go:73`, `internal/resolve/tmux.go:46`, `internal/gather/tmuxprobe.go:159`, `internal/reap/tmux.go:83`, `internal/action/tmux.go:53`); delete the `internal/tmuxfmt` import in those 5 files (each already imports `internal/tmux`); reword the two comments that say "see internal/tmuxfmt" to "see internal/tmux/format.go". `rmdir internal/tmuxfmt`. Build, vet, arch.
 3. **`matchutil` → `engine/match.go`** (#9). `git mv internal/engine/matchutil/match.go internal/engine/match.go`; package clause → `engine`, drop its `// Package` line, drop its self-import of `engine` and the `pfmengine.` qualifier inside, rename `Command` → `MatchCommand`; rewrite the 5 call sites (`internal/gather/agents.go` ×2, `internal/engine/{claude,codex,opencode}/match.go`) and remove the `matchutil` import in each (all already import `engine`). `rmdir internal/engine/matchutil`. Re-key `.arch/` (`negation-dirs.txt` now empty; `dup-functions.txt` `command:` row; `untested-sources.txt`). Build, vet, arch.
 4. **`chatkeys` → `chat/keys.go`** (#10). `git mv internal/chatkeys/keys.go internal/chat/keys.go`; package clause → `chat`, drop its `// Package` line, rename `Valid` → `KeyValid`, `Names` → `KeyNames`; rewrite `cmd/pfm/chat_keys_command.go` (3 uses) and `internal/mcpserv/server.go` (2 uses), remove the `chatkeys` import in both. `rmdir internal/chatkeys`. Re-key `untested-sources.txt`. Build, vet, arch.
-5. **Tests and docs beside their subject** (#11–#17). `git mv shim internal/installer/shim`; fix the fixture path at `internal/installer/shim/shim_test.go:351` to `filepath.Join("..", "assets", "shim", "pfm.zsh")`; `git mv HARVESTER.md internal/harvest/README.md && git mv HEADLESS.md internal/headless/README.md`; re-point the `docs/demo/inventory-*.md` lines named in #14–#15; `git mv cmd/pfm/attach_e2e_test.go cmd/pfm/attach_jail_test.go && git mv cmd/pfm/lineage_e2e_test.go cmd/pfm/lineage_jail_test.go`. Re-key `test-jail-copies.txt`. `go test ./internal/installer/shim/ ./cmd/pfm/ -run 'Attach|Lineage|Shim' -count=1` must run the moved tests (a PASS with 0 tests is a failure to look — check `-v` lists them). Build, vet, arch.
+5. **Tests and docs beside their subject** (#11–#17). `git mv shim internal/installer/shim`; fix the fixture path at `internal/installer/shim/shim_test.go:351` to `filepath.Join("..", "assets", "shim", "pfm.zsh")`; `HARVESTER.md` now lives with the standalone plugin; `HEADLESS.md` lives at `internal/headless/README.md`; re-point the `docs/demo/inventory-*.md` lines named in #14–#15; `git mv cmd/pfm/attach_e2e_test.go cmd/pfm/attach_jail_test.go && git mv cmd/pfm/lineage_e2e_test.go cmd/pfm/lineage_jail_test.go`. Re-key `test-jail-copies.txt`. `go test ./internal/installer/shim/ ./cmd/pfm/ -run 'Attach|Lineage|Shim' -count=1` must run the moved tests (a PASS with 0 tests is a failure to look — check `-v` lists them). Build, vet, arch.
 6. **`cmd/pfm` doctor and internal prefixes** (#18–#61). Pure `git mv` per row; no code changes. Re-key C4, C6, C13, C16, C18, C21 as § (e) lists. Build, vet, arch, then `go test ./cmd/pfm/ -count=1`.
 7. **`cmd/pfm` picker and chat prefixes** (#62–#83). Pure `git mv` per row. Re-key C1, C4, C13, C16, C18, C20, C21. Build, vet, arch, `go test ./cmd/pfm/ -count=1`.
 8. **Orientation truth** — through `/pcm`: `:31` "(`shim/` holds only its tests)" → "(`internal/installer/shim/` holds only its tests)"; `:65` "parse through `internal/tmuxfmt`" → "parse through `internal/tmux` (`format.go`)"; § File Structure gains one sentence: "`cmd/pfm` file names start with their unit — `chat_ ls_ doctor_ internal_ update_` — so `ls cmd/pfm/<unit>_*` lists a unit." `AGENTS.md` recompiles from it (`engine-sync codex build`). In the same commit (not guarded): `scripts/arch-check.sh:165` exclusion `^\`(cmd|internal|testdata|shim|e2e|prompts)` → `^\`(cmd|internal|testdata|e2e)`; `TESTPLAN.md` references to `shim/` tests, `HARVESTER.md`, `HEADLESS.md` re-pointed (`grep -n 'shim/\|HARVESTER\|HEADLESS' TESTPLAN.md`). Arch must still PASS.

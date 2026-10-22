@@ -40,7 +40,7 @@ jailTest; newTaggedBuildFixture runs git; update.Run builds/runs candidate actio
 
 A — update verification crosses the fixture repository and candidate process boundary.
 
-### TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning
+### TestInstallHarvesterLinksBinaryAndPropagatesOffline
 
 **Source:** [pfm/cmd/pfm/update_command_test.go](../../../pfm/cmd/pfm/update_command_test.go) line 16 · **Observed:** 1.93s · **Class:** build/git subprocess
 

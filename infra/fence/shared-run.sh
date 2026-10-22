@@ -111,6 +111,7 @@ cmd_run() {
   if [[ "$mode" == private ]]; then
     local mods=("$tree/pfm")
     [[ "$es" == - ]] || mods+=("$es")
+    [[ "${HARVESTER_FENCE_SRC:--}" == - ]] || mods+=("$HARVESTER_FENCE_SRC")
     modules_ready "${mods[@]}" || { rm -rf "$run" "$live"; exit 1; }
   fi
   local -a flags=(--fork --pid --mount-proc --mount --kill-child=SIGKILL)
@@ -162,9 +163,10 @@ cmd_inner() {
   run="$STATE/runs/$id"
   mount --make-rprivate / 2>/dev/null
   bind_ro() { mount --bind "$1" "$2" && { mount -o remount,bind,ro "$2" 2>/dev/null || true; }; }
-  mkdir -p /worktree /engine-sync /pfm-timing /pfm-run /pfm-disk 2>/dev/null
+  mkdir -p /worktree /engine-sync /harvester /pfm-timing /pfm-run /pfm-disk 2>/dev/null
   bind_ro "$tree" /worktree || die "the tree $tree could not be bound on /worktree"
   if [[ "$es" != - ]]; then bind_ro "$es" /engine-sync || die "the engine-sync source $es could not be bound"; fi
+  if [[ "${HARVESTER_FENCE_SRC:--}" != - ]]; then bind_ro "$HARVESTER_FENCE_SRC" /harvester || die "the harvester source $HARVESTER_FENCE_SRC could not be bound"; fi
   # Baseline gate scratch peaked near 1 GiB in /tmp; leave 50% headroom, not half the VM's
   # RAM per mount. noswap is deliberate: an unsupported kernel fails closed, never spills
   # disposable scratch to the VM's swap. All pages also count against the container cap.

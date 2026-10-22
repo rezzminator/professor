@@ -17,6 +17,11 @@ case "${1:-}" in
     engine_sync_build "${ENGINE_SYNC_BIN:?lanes/container.sh sets ENGINE_SYNC_BIN}"
     # No Claude session runs here, so no plugin wrapper makes the stable link pfm install's PATH link needs.
     engine_sync_link_stable "$ENGINE_SYNC_BIN"
+    # The lane activity sweep judges both binaries through one fixture log.
+    plugin_log="${XDG_STATE_HOME:-$HOME/.local/state}/harvester/logs/harvester.jsonl"
+    fleet_log="${PFM_HOME:-$HOME/.local/state/pfm}/log/pfm.jsonl"
+    mkdir -p "$(dirname "$plugin_log")" "$(dirname "$fleet_log")"
+    ln -sf "$fleet_log" "$plugin_log"
     for engine in claude codex opencode; do ln -sf /usr/local/libexec/pfm-lanes/mock-engine "/usr/local/bin/$engine"; done
     cp "$HERE/scenarios/default.json" "$HOME/.local/share/pfm-lanes/default.json"
     ;;
@@ -24,9 +29,10 @@ case "${1:-}" in
     umask 077
     mkdir -p "$(dirname "$PFM_CONFIG")" "$HOME/.codex" "$HOME/.local/share/opencode"
     cat >"$PFM_CONFIG" <<'JSON'
-{"version":2,"accounts":[{"id":1,"configDir":"~/.cc/1","emoji":"🥇"},{"id":2,"configDir":"~/.cc/2","emoji":"🥈"}],"codex":{"homes":[{"id":1,"home":"~/.codex","emoji":"🥇"}]},"claude":{"systemPrompt":"professor"},"mcp":{"servers":{"chat":{"enabled":true}}}}
+{"version":2,"accounts":[{"id":1,"configDir":"~/.cc/1","emoji":"🥇"},{"id":2,"configDir":"~/.cc/2","emoji":"🥈"}],"codex":{"homes":[{"id":1,"home":"~/.codex","emoji":"🥇"}]},"claude":{"systemPrompt":"professor"},"mcp":{"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}
 JSON
-    printf '{"enabled":true}\n' >"$(dirname "$PFM_CONFIG")/harvester.config.json"
+    mkdir -p "$HOME/.config/harvester"
+    printf '{}\n' >"$HOME/.config/harvester/harvester.config.json"
     trust="$(printf '%s\n' atlas lumen orbit harvester express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s from_entries)"
     for id in 1 2; do
       dir="$HOME/.cc/$id"; mkdir -p "$dir"

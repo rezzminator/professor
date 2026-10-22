@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -73,10 +73,10 @@ type Fetcher struct {
 	clock  clock.Clock
 }
 
-// NewFetcher returns a Fetcher; a nil client uses harvest's public-address client.
+// NewFetcher returns a Fetcher; a nil client uses a 45-second HTTP timeout.
 func NewFetcher(client *http.Client, ticker clock.Clock) *Fetcher {
 	if client == nil {
-		client = harvest.NewDirectClient(45*time.Second, nil, "Professor model-cost/1.0", nil)
+		client = obs.WrapClient(&http.Client{Timeout: 45 * time.Second})
 	}
 	if ticker == nil {
 		ticker = clock.Real
@@ -109,10 +109,10 @@ func (s *Fetcher) fetchSource(ctx context.Context, sourceURL string) (Source, er
 	if err != nil {
 		return Source{}, fmt.Errorf("model-cost: request %s: %w", sourceURL, err)
 	}
+	request.Header.Set("User-Agent", "Professor model-cost/1.0")
 	request.Header.Set("Accept", "text/markdown, text/plain")
 	request.Header.Set("Cache-Control", "no-cache, no-store")
-	// Even publisher redirects stay on the two fixed official hosts. Harvest
-	// additionally validates/pins public DNS addresses and rejects private IPs.
+	// Publisher redirects stay on the two fixed official HTTPS hosts.
 	client := *s.client
 	originalRedirect := client.CheckRedirect
 	client.CheckRedirect = func(r *http.Request, via []*http.Request) error {

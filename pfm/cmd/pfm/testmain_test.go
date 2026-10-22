@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,8 +16,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
-	"github.com/rezzminator/professor/pfm/internal/harvest"
-	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -26,25 +23,6 @@ import (
 )
 
 var testPFMBinary string
-
-type noNetworkHarvestProvisioner struct{}
-
-func (noNetworkHarvestProvisioner) Plan(platform harvestpy.Platform) (harvestpy.InstallPlan, error) {
-	return harvestpy.PlanConversionEnvironment(platform)
-}
-
-func (noNetworkHarvestProvisioner) Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error) {
-	return harvestpy.CheckReport{Healthy: true}, nil
-}
-
-func (noNetworkHarvestProvisioner) Provision(
-	context.Context,
-	harvestpy.ProvisionOptions,
-) (harvestpy.ProvisionResult, error) {
-	return harvestpy.ProvisionResult{}, errors.New("test fake must not provision the pinned runtime")
-}
-
-type noNetworkHarvestDoctor struct{}
 
 type noNetworkThemeTransport struct{}
 
@@ -57,34 +35,6 @@ func (noNetworkThemeTransport) RoundTrip(*http.Request) (*http.Response, error) 
 	}, nil
 }
 
-func (noNetworkHarvestDoctor) Inspect(string, harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
-	return noNetworkHarvestDigest(), nil
-}
-
-func (noNetworkHarvestDoctor) Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error) {
-	digest := noNetworkHarvestDigest()
-	return harvestpy.CheckReport{
-		Healthy: true,
-		Digest:  digest,
-		Checks: map[string]harvestpy.CheckStatus{
-			"interpreter":           {OK: true},
-			"lock_completeness":     {OK: true},
-			"live_smoke":            {OK: true},
-			"live_smoke_conversion": {OK: true},
-		},
-	}, nil
-}
-
-func noNetworkHarvestDigest() harvestpy.EnvironmentDigest {
-	return harvestpy.EnvironmentDigest{
-		Schema:          1,
-		Python:          "3.11.15+20260610",
-		LockSHA256:      "test-lock-digest",
-		InventorySHA256: "test-inventory-digest",
-		InventoryCount:  1,
-	}
-}
-
 // testBinaryDir is where TestMain built the shared pfm binary, and where the
 // watch ladder builds its mock engine once; empty when no build ran.
 var testBinaryDir string
@@ -93,7 +43,6 @@ var testBinaryDir string
 // a path from it. See internal/testjail for why both properties matter.
 func TestMain(m *testing.M) {
 	flag.Parse()
-	restorePublicResolver := harvest.StubPublicResolverForTest(harvest.RefusePublicLookupsForTest)
 	binaryDir := ""
 	// This daemon test exercises its in-process handler and never starts the
 	// shared CLI binary. Its one-test run need not pay for a Go build.
@@ -120,9 +69,7 @@ func TestMain(m *testing.M) {
 	// registry stays unset for the whole suite and every unknown-pfm-hook
 	// scenario a rollback/residue test stages would never be recognized.
 	installer.SetImplementedSubcommands(topLevelSubcommands, internalSubcommands)
-	installHarvestProvisionerOverride = noNetworkHarvestProvisioner{}
 	installThemeHTTPClientOverride = &http.Client{Transport: noNetworkThemeTransport{}}
-	doctor.HarvestOverride = noNetworkHarvestDoctor{}
 	doctor.DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
 		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
 	}
@@ -168,7 +115,6 @@ func TestMain(m *testing.M) {
 	}
 	testjail.KeepAmbientIdentity = os.Getenv(attachHelperEnv) == "1"
 	code := testjail.Run(m)
-	restorePublicResolver()
 	if binaryDir != "" {
 		if err := os.RemoveAll(binaryDir); err != nil && code == 0 {
 			_, _ = os.Stderr.WriteString("remove shared pfm test binary directory: " + err.Error() + "\n")

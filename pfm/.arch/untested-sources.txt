@@ -44,15 +44,6 @@ internal/gather/gather.go
 internal/gather/procfs_native_darwin.go
 internal/gather/procscan.go
 internal/gather/types.go
-internal/harvest/cache.go
-internal/harvest/detect.go
-internal/harvest/local.go
-internal/harvest/mirror.go
-internal/harvest/net.go
-internal/harvest/search.go
-internal/harvest/types.go
-internal/harvestpy/digest.go
-internal/harvestpy/embed.go
 internal/headless/run/process_unix.go
 internal/headless/stream.go
 internal/heal/runner.go

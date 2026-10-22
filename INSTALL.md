@@ -80,20 +80,20 @@ The checksum only catches a corrupted/incomplete download — releases don't pub
 
 For a filtered network that cannot reach a Go module host or proxy, use this binary path: it only needs access to the release assets and the Git tag lookup above, not the module downloads needed by a source build.
 
-### Preview, optional components, and harvest footprint
+### Preview, plugin setup, and optional components
 
-Bare `pfm install` is a read-only preview. Review its planned writes and the harvest line before applying the identical flag set with `--yes`:
+Bare `pfm install` is a read-only preview. Review its planned writes and the Harvester setup line before applying the identical flag set with `--yes`:
 
 ```bash
-pfm install --skip-harvest --skip-engine codex --skip-themes
-pfm install --yes --skip-harvest --skip-engine codex --skip-themes
+pfm install --skip-engine codex --skip-themes
+pfm install --yes --skip-engine codex --skip-themes
 ```
 
-- `--skip-harvest` leaves the pinned harvestpy runtime unmanaged; it avoids the harvest download and its disk footprint. It does not hide a failed provision.
+- Harvester is installed as a plugin binary and `pfm install` runs `harvester setup`; `--offline` asks setup to use local caches without downloads. A setup failure is reported by install.
 - `--skip-engine codex` suppresses the Codex dependency probe and Codex mirror/hooks. It does not alter Claude or OpenCode surfaces.
 - `--skip-themes` suppresses theme installation. Themes are the Professor profiles in `templates/themes/`: every `{name}/` directory there, found by scanning, installs as `~/.claude/themes/{name}.json`. Each also becomes a `Professor · {name}` VS Code colour theme in the Professor extension, rendered from the installed files on every install, `--skip-themes` included, so the extension keeps listing what is already installed.
 
-The current embedded harvest plan is measured, not a promise for every host. On Linux `amd64`, the cold package closure is about **3.1 GB** (3,106,174,573 bytes) to download and about **5.8 GB** (5,786,939,761 bytes) installed. The uv and CPython bootstrap archives add roughly 57 MB, and temporary files or caches can require more free space. Other platforms and future lock revisions vary; the preview is the authoritative plan for the host.
+Harvester provisions its pinned `uv` and CPython environment under its own state root. Required downloads and disk space vary by platform and lock revision; the install preview is the authoritative plan for the host.
 
 Theme fetch failures are visible nonfatal skips, so the rest of the install can continue. A locally modified theme is preserved and reported as drift rather than overwritten. On uninstall, only theme files recorded as installer-owned in the ownership ledger are removed.
 
@@ -195,7 +195,7 @@ GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -l
 
 Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
 
-The source build has the same harvest cost and opt-outs as the [preview/apply block above](#preview-optional-components-and-harvest-footprint). Then run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
+The source build has the same Harvester setup behavior as the [preview/apply block above](#preview-plugin-setup-and-optional-components). Then run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
 ```bash
 cd "$HOME/.professor"

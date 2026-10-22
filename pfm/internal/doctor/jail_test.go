@@ -57,7 +57,6 @@ func TestDoctorJailRecordsCheckoutForPromptReaders(t *testing.T) {
 // that needs a clean baseline to add exactly one defect on top of.
 func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Helper()
-	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	dirs, files := storeLayout()
 	runtime := testjail.CleanHome(t, dirs, files)
 	stageStorePlugins(t, runtime.Paths.Home)
@@ -348,16 +347,6 @@ func TestCrumbHealthMissingDirectoryIsEmpty(t *testing.T) {
 	}
 	if entries != 0 || invalid != 0 {
 		t.Fatalf("crumbHealth missing directory entries=%d invalid=%d, want 0/0", entries, invalid)
-	}
-}
-
-// clearRetiredHarvesterEnv blanks every variable doctor reports as a retired
-// harvester setting, so a developer shell that still exports one cannot turn
-// a golden "clean" doctor run into a warning.
-func clearRetiredHarvesterEnv(t *testing.T) {
-	t.Helper()
-	for _, retired := range RetiredHarvesterEnv {
-		t.Setenv(retired.Name, "")
 	}
 }
 

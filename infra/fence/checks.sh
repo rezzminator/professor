@@ -543,9 +543,8 @@ checks_templates_release_check() {
 }
 
 checks_templates_refresh_scope() {
-  head_ "templates — refresh-scope and verify leak policy fixtures"
+  head_ "templates — refresh-scope fixtures"
   run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
-  run "templates: verify leak policy fixtures" -- python3 "$REPO_ROOT/scripts/test-verify-leak-policy.py"
 
 }
 
@@ -710,7 +709,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
   local add="$1" name
   shift
   for name in "$@"; do
-    "$add" "templates.$name" "checks_templates_${name//-/_}"
+    "$add" "templates.$name" "checks_templates_${name//-/_}" || return 1
   done
 }
 
@@ -718,9 +717,9 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   local add="$1" name
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
     generated-agents release-check refresh-scope worktree-script dev-report \
-    format-md flight-templates theme-glyphs
+    format-md flight-templates theme-glyphs || return 1
   for name in test unit-path; do
-    "$add" "templates.$name-tests" checks_templates_unit_script "$name"
+    "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done
   checks_named_template_steps "$add" engine-sync-action-tests skill-tests
 }
@@ -848,17 +847,9 @@ checks_pfm_e2e() {
   checks_pfm_profile_pointers "$run_dir/e2e.json" "$run_dir/profile" "$before"
 }
 
-# The tests the gate's race step runs under -race: the harvester chaos suites and the race regressions
-# they found, as <package dir under pfm/> <Test> lines. A test that guards a race joins here; the step
+# The tests the gate's race step runs under -race: the race regressions, as <package dir under pfm/> <Test> lines. A test that guards a race joins here; the step
 # demands a pass event of each, so a rename here or there is a red step, never "no tests to run".
-CHECKS_PFM_RACE_TESTS='internal/harvest TestHarvesterChaos
-internal/harvest TestFetchFailureIsCachedBeforeItsFlightEnds
-internal/harvest TestFetchSizeOnlyLeaderSharesTheWholePage
-internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
-internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
-internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
-internal/harvestmcp TestServiceChaos
-internal/installer TestClaudeMCPLockProtectsSlowBackup
+CHECKS_PFM_RACE_TESTS='internal/installer TestClaudeMCPLockProtectsSlowBackup
 internal/installer TestMCPWritePreservesAnEditDuringBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence
 internal/store TestClearNameReservationsAreUniqueAcrossCaches'
@@ -875,7 +866,7 @@ checks_pfm_race() {
   need_tool gcc pfm || return 1
   regex="^($(awk '{print $2}' <<< "$CHECKS_PFM_RACE_TESTS" | paste -sd'|' -))\$"
   while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$CHECKS_PFM_RACE_TESTS" | awk '!seen[$0]++')
-  run "pfm: go test -race (harvester chaos and race regressions)" -- bash -c '
+  run "pfm: go test -race (race regressions)" -- bash -c '
     CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"
   ' _ "$d" "$regex" "$json" "${pkgs[@]}"
   go_test_report "$json"
@@ -1113,7 +1104,12 @@ checks_gate_check_map() { # run dir
       return
     fi
   fi
-  run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
+  local check_map_harvester="$run_dir/check-map-harvester"
+  if ! GOTOOLCHAIN=local go -C /harvester build -o "$check_map_harvester" ./cmd/harvester; then
+    fail_step "templates: check-map harvester build FAILED"
+    return 1
+  fi
+  run "templates: lane↔command map (check-map)" -- env HARVESTER_BIN="$check_map_harvester" bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
 }
 
 # gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
@@ -1174,48 +1170,48 @@ gate_run() { # pfm, templates, or all
     return 1
   fi
   timing_run_note "$run_dir"
-  steps_reset
+  steps_reset || return 1
   if [[ "$target" == pfm || "$target" == all ]]; then
-    steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir"
-    steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir"
-    steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir"
+    steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
+    steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir" || return 1
+    steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir" || return 1
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
-      steps_add "pfm.self.$stem" bash "$f"
+      steps_add "pfm.self.${stem,,}" bash "$f" || return 1
     done
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
     for f in "$REPO_ROOT"/infra/fence/lanes/tests/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'templates: lane self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
-      steps_add "templates.lanes.$stem" bash "$f"
+      steps_add "templates.lanes.${stem,,}" bash "$f" || return 1
     done
     for f in "$REPO_ROOT"/infra/demo/tests/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'templates: demo self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
-      steps_add "templates.demo.$stem" bash "$f"
+      steps_add "templates.demo.${stem,,}" bash "$f" || return 1
     done
   fi
   if [[ "${PFM_GATE_FIXTURES:-}" == 1 ]]; then
     for stem in go-fail go-hang go-slow shell-fail shell-hang; do
-      steps_add "fixture.$stem" checks_gate_fixture "$stem" "$run_dir"
-      case "$stem" in go-slow) steps_set_bound 45 ;; shell-hang) steps_set_bound 5 ;; esac
+      steps_add "fixture.$stem" checks_gate_fixture "$stem" "$run_dir" || return 1
+      case "$stem" in go-slow) steps_set_bound 45 || return 1 ;; shell-hang) steps_set_bound 5 || return 1 ;; esac
     done
   fi
-  steps_barrier
+  steps_barrier || return 1
   if [[ "$target" == pfm || "$target" == all ]]; then
     # Heavy static steps longest first, so the short ones queue behind them for a heavy slot.
-    steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new
-    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check
-    steps_add_heavy pfm.vet run 'pfm: go vet' -- go -C "$d" vet ./...
-    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./...
-    steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh"
-    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh"
+    steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new || return 1
+    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check || return 1
+    steps_add_heavy pfm.vet run 'pfm: go vet' -- go -C "$d" vet ./... || return 1
+    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./... || return 1
+    steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
+    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
-    steps_add_heavy templates.check-map checks_gate_check_map "$run_dir"
-    checks_templates_steps steps_add
+    steps_add_heavy templates.check-map checks_gate_check_map "$run_dir" || return 1
+    checks_templates_steps steps_add || return 1
   fi
   if gate_derive_bound "$target"; then derived=1; fi
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

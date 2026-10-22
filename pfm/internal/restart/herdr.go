@@ -262,7 +262,12 @@ func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tab
 	if tree.err != nil {
 		foundBy = binary + " status --json; the processes it runs are unknown: " + tree.err.Error()
 	}
-	stopper := processStopper{procs: finder.deps.Procs, signal: finder.deps.Signal, clock: finder.deps.Clock}
+	stopper := processStopper{
+		procs:  finder.deps.Procs,
+		signal: finder.deps.Signal,
+		clock:  finder.deps.Clock,
+		uid:    finder.deps.EffectiveUID,
+	}
 	finder.plan.Units = append(finder.plan.Units, Unit{
 		Family:  FamilyHerdr,
 		Name:    "herdr server " + status.Socket,

@@ -17,8 +17,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/harvest"
-	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -240,9 +238,6 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 		Chat: http.HandlerFunc(
 			func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
 		),
-		Harvester: http.HandlerFunc(
-			func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
-		),
 	})
 
 	response := httptest.NewRecorder()
@@ -260,7 +255,7 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 	if status.PFMVersion != "test-version" || status.ProtocolVersion == "" || status.PID < 1 || status.Endpoint == "" {
 		t.Fatalf("status = %+v", status)
 	}
-	if !strings.Contains(response.Body.String(), "chat") || !strings.Contains(response.Body.String(), "harvester") {
+	if !strings.Contains(response.Body.String(), "chat") {
 		t.Fatalf("status surface = %s", response.Body.String())
 	}
 }
@@ -289,25 +284,8 @@ func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 	}
 }
 
-type scholarlyNotFoundTransport struct{ seen chan<- string }
-
-func (transport scholarlyNotFoundTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	transport.seen <- request.URL.Hostname()
-	return &http.Response{
-		StatusCode: http.StatusNotFound,
-		Status:     "404 Not Found",
-		Header:     http.Header{"Content-Type": {"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{}`)),
-		Request:    request,
-	}, nil
-}
-
 func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
-	t.Cleanup(harvest.StubPublicResolverForTest(func(context.Context, string) ([]net.IP, error) {
-		return []net.IP{net.ParseIP("203.0.113.10")}, nil
-	}))
-	seenAPIHosts := make(chan string, 64)
-	root := jailTest(t)
+	jailTest(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -321,37 +299,22 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 			t.Errorf("close chat: %v", err)
 		}
 	}()
-	harvester, err := harvestmcp.NewConfiguredHarvester("test", harvestmcp.Runtime{
-		Home: root, CacheDir: root + "/cache",
-		Client: &http.Client{Transport: scholarlyNotFoundTransport{seen: seenAPIHosts}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := harvester.Close(); err != nil {
-			t.Errorf("close harvester: %v", err)
-		}
-	}()
-
 	professor, err := mcpserv.NewFamilyServers(mcpserv.FamilyServerOptions{
-		Version: "test", Chat: chat, Harvester: harvester,
+		Version: "test", Chat: chat,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Version: "test", StartedAt: time.Now(), Endpoint: "http://127.0.0.1:8377",
-		Chat:      professor.FamilyHandler(config.MCPServerChat),
-		Harvester: professor.FamilyHandler(config.MCPServerHarvester),
+		Chat: professor.FamilyHandler(config.MCPServerChat),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	client := http.DefaultClient
 	ctx := context.Background()
 	for path, want := range map[string][]string{
-		config.MCPFamilyPath(config.MCPServerChat):      {"keys", "whoami", "new"},
-		config.MCPFamilyPath(config.MCPServerHarvester): {"read", "download_file"},
+		config.MCPFamilyPath(config.MCPServerChat): {"keys", "whoami", "new"},
 	} {
 		session, err := connectHTTPMCP(t, ctx, server.URL+path, client)
 		if err != nil {
@@ -375,7 +338,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 		}
 	}
 
-	// Both families' tools answer over the one combined route.
+	// Chat tools answer through the mounted route.
 	session, err := connectHTTPMCP(t, ctx, server.URL+config.MCPFamilyPath(config.MCPServerChat), client)
 	if err != nil {
 		t.Fatal(err)
@@ -392,38 +355,6 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	if len(whoami.Content) == 0 {
 		t.Fatalf("whoami answered no content: %+v", whoami)
 	}
-	harvestSession, err := connectHTTPMCP(t, ctx, server.URL+config.MCPFamilyPath(config.MCPServerHarvester), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := harvestSession.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	read, err := harvestSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "read", Arguments: map[string]any{"publications": []string{"doi:10.1000/never-match"}},
-	})
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if text := toolResultText(read); read.StructuredContent != nil ||
-		!strings.HasPrefix(
-			text,
-			"=== [1/1] doi:10.1000/never-match\nerror: No open copy of this work could be retrieved:",
-		) {
-		t.Fatalf("read = %q (structuredContent %v), want the public exhausted DOI explanation as text",
-			text, read.StructuredContent)
-	}
-	seen := map[string]bool{}
-	for len(seenAPIHosts) > 0 {
-		seen[<-seenAPIHosts] = true
-	}
-	for _, host := range []string{"api.openalex.org", "api.crossref.org"} {
-		if !seen[host] {
-			t.Fatalf("scholarly stub saw %v, want a request to %s", seen, host)
-		}
-	}
 }
 
 // TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath pins
@@ -431,53 +362,34 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 // cannot be mistaken for either a live server or a route that never existed.
 // Before the fix, enabled=false and "fully live" were indistinguishable.
 func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *testing.T) {
-	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
-		Chat: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
-		// Harvester left nil: mcp.servers.harvester.enabled=false never
-		// constructs a handler for it to mount.
-	})
-
 	disabled := httptest.NewRecorder()
-	handler.ServeHTTP(disabled, httptest.NewRequest(http.MethodPost, config.MCPFamilyPath("harvester"), http.NoBody))
-	if disabled.Code != http.StatusServiceUnavailable {
-		t.Fatalf("disabled route status = %d, want %d", disabled.Code, http.StatusServiceUnavailable)
+	mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{}).
+		ServeHTTP(disabled, httptest.NewRequest(http.MethodPost, config.MCPFamilyPath("chat"), http.NoBody))
+	if disabled.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(disabled.Body.String(), "pfm mcp chat enable") {
+		t.Fatalf("disabled chat = %d %q", disabled.Code, disabled.Body.String())
 	}
-	wantBody := "pfm mcp: harvester is disabled by config; enable it with: pfm mcp harvester enable\n"
-	if disabled.Body.String() != wantBody {
-		t.Fatalf("disabled route body = %q, want %q", disabled.Body.String(), wantBody)
-	}
-
+	handler := mcpserv.NewDaemonHandler(
+		mcpserv.DaemonOptions{
+			Chat: http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
+			),
+		},
+	)
 	enabled := httptest.NewRecorder()
 	handler.ServeHTTP(enabled, httptest.NewRequest(http.MethodPost, config.MCPFamilyPath("chat"), http.NoBody))
 	if enabled.Code != http.StatusNoContent {
-		t.Fatalf(
-			"enabled route status = %d, want %d — disabling harvester must not dark chat",
-			enabled.Code,
-			http.StatusNoContent,
-		)
+		t.Fatalf("enabled chat status = %d", enabled.Code)
 	}
-
-	chatOff := httptest.NewRecorder()
-	mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
-		Harvester: http.HandlerFunc(
-			func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
-		),
-	}).ServeHTTP(chatOff, httptest.NewRequest(http.MethodPost, config.MCPFamilyPath("chat"), http.NoBody))
-	wantChatBody := "pfm mcp: chat is disabled by config; enable it with: pfm mcp chat enable\n"
-	if chatOff.Code != http.StatusServiceUnavailable || chatOff.Body.String() != wantChatBody {
-		t.Fatalf("disabled chat view = %d %q, want 503 %q", chatOff.Code, chatOff.Body.String(), wantChatBody)
-	}
-
-	unknown := httptest.NewRecorder()
-	handler.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, "/mcp/unknown", http.NoBody))
-	if unknown.Code != http.StatusNotFound {
-		t.Fatalf("unregistered path status = %d, want %d", unknown.Code, http.StatusNotFound)
-	}
-	if unknown.Code == disabled.Code {
-		t.Fatalf(
-			"unregistered path and disabled server both report %d; a disabled server must read as disabled, not as an absent route",
-			unknown.Code,
-		)
+	for _, path := range []string{
+		"/mcp/unknown",
+		config.MCPFamilyPath(config.MCPServerHarvester),
+	} {
+		unknown := httptest.NewRecorder()
+		handler.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, path, http.NoBody))
+		if unknown.Code != http.StatusNotFound {
+			t.Fatalf("unmounted route %s status = %d", path, unknown.Code)
+		}
 	}
 }
 
@@ -488,15 +400,15 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 	noop := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	for _, test := range []struct {
-		name            string
-		chat, harvester http.Handler
-		want            []string
+		name string
+		chat http.Handler
+		want []string
 	}{
-		{"chat only mounted", noop, nil, []string{"chat"}},
-		{"harvester only mounted", nil, noop, []string{"harvester"}},
+		{"chat only mounted", noop, []string{"chat"}},
+		{"chat disabled", nil, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{Chat: test.chat, Harvester: test.harvester})
+			handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{Chat: test.chat})
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
 			var status mcpserv.DaemonStatus
@@ -515,75 +427,11 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 	}
 }
 
-// TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate pins the search-gate
-// fix to /status: the harvester's advertised tool list must track
-// harvestmcp.ToolNames for the runtime actually mounted, never a hardcoded
-// tool list that claims `search_web` whether or not runtimeSearchEnabled
-// holds. Before the fix, mcp_serve_command.go's package-level
-// harvesterMCPTools always listed the web search tool; that defect is what this test
-// would have caught.
-func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		runtime    harvestmcp.Runtime
-		wantSearch bool
-	}{
-		{"search disabled", harvestmcp.Runtime{Home: t.TempDir(), CacheDir: t.TempDir() + "/cache"}, false},
-		{
-			"search enabled",
-			harvestmcp.Runtime{Home: t.TempDir(), CacheDir: t.TempDir() + "/cache", SearXNGURL: "http://searxng.example.test"},
-			true,
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			harvester, err := harvestmcp.NewConfiguredHarvester("test", test.runtime)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := harvester.Close(); err != nil {
-					t.Errorf("close harvester: %v", err)
-				}
-			}()
-			professor, err := mcpserv.NewFamilyServers(
-				mcpserv.FamilyServerOptions{Version: "test", Harvester: harvester},
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
-				Harvester:      professor.FamilyHandler(config.MCPServerHarvester),
-				HarvesterTools: harvester.ToolNames(),
-			})
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
-			var status mcpserv.DaemonStatus
-			if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
-				t.Fatal(err)
-			}
-			listed := status.Servers[config.MCPServerHarvester]
-			hasSearch := false
-			for _, name := range listed {
-				if name == "search_web" {
-					hasSearch = true
-				}
-			}
-			if hasSearch != test.wantSearch {
-				t.Fatalf(
-					"harvester tools = %v, search listed = %v, want %v",
-					listed, hasSearch, test.wantSearch,
-				)
-			}
-		})
-	}
-}
-
-// TestMCPServeBothDisabledRefusesBeforeBindingPort pins the #8 fix at the
-// command layer: mcp.servers.chat.enabled=false AND
-// mcp.servers.harvester.enabled=false must refuse to start with a non-zero
+// TestMCPServeChatDisabledRefusesBeforeBindingPort pins the #8 fix at the
+// command layer: mcp.servers.chat.enabled=false must refuse to start with a non-zero
 // exit BEFORE the port is ever bound, not start an empty daemon that answers
 // nothing.
-func TestMCPServeBothDisabledRefusesBeforeBindingPort(t *testing.T) {
+func TestMCPServeChatDisabledRefusesBeforeBindingPort(t *testing.T) {
 	// A different process can claim the probe's port after Close. A refusal
 	// that bound the port will fail the rebind on every fresh attempt.
 	for attempt := 0; attempt < 5; attempt++ {
@@ -598,7 +446,8 @@ func TestMCPServeBothDisabledRefusesBeforeBindingPort(t *testing.T) {
 
 		runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
 		runtime.Config.MCP.HTTP.Port = port
-		// config.Defaults leaves both chat and harvester disabled.
+		// Enabling the standalone registration never enables the chat daemon.
+		runtime.Config.MCPServers[config.MCPServerHarvester] = config.MCPServer{Enabled: true}
 
 		var stdout, stderr bytes.Buffer
 		if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
@@ -607,8 +456,8 @@ func TestMCPServeBothDisabledRefusesBeforeBindingPort(t *testing.T) {
 		if stdout.Len() != 0 {
 			t.Fatalf("both-disabled serve stdout = %q, want no startup line — nothing was mounted", stdout.String())
 		}
-		if !strings.Contains(stderr.String(), "every registered server is disabled by config") ||
-			!strings.Contains(stderr.String(), "pfm mcp <server> enable") {
+		if !strings.Contains(stderr.String(), "chat is disabled by config") ||
+			!strings.Contains(stderr.String(), "pfm mcp chat enable") {
 			t.Fatalf(
 				"both-disabled serve stderr = %q, want the disabled-config refusal and its enable hint",
 				stderr.String(),
@@ -636,7 +485,6 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	port := strconv.Itoa(portText)
 	server := &http.Server{Handler: mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Version: "test", StartedAt: time.Unix(5, 0), Endpoint: "http://127.0.0.1:" + port,
-		Chat: http.NotFoundHandler(), Harvester: http.NotFoundHandler(),
 	})}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
@@ -773,7 +621,6 @@ func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
 	runtime := commandRuntime{Config: config.Defaults(root, nil), Paths: jailPaths(t)}
 	runtime.Config.Path = root + "/config.json"
 	runtime.Config.MCPServers[config.MCPServerChat] = config.MCPServer{Enabled: true}
-	runtime.Config.MCPServers[config.MCPServerHarvester] = config.MCPServer{Enabled: false}
 	runtime.Paths.TmuxDir = ""
 
 	var stderr bytes.Buffer
@@ -816,165 +663,6 @@ func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
 			!strings.Contains(text, "configure chat MCP backend: tmux directory is empty") {
 			t.Fatalf("%s = IsError %t %q, want the configuration error", name, result.IsError, text)
 		}
-	}
-}
-
-func TestMCPStdioDegradesPerFamily(t *testing.T) {
-	for _, test := range []struct {
-		name        string
-		breakFamily func(*commandRuntime)
-		failed      string
-		failedCall  string
-		failedArgs  map[string]any
-		wantError   string
-		healthyCall string
-	}{
-		{
-			name: "harvester fails, chat serves",
-			breakFamily: func(runtime *commandRuntime) {
-				runtime.Config.Harvester.Fetch.ProxyURL = "http://bad host"
-			},
-			failed:      config.MCPServerHarvester,
-			failedCall:  "read",
-			failedArgs:  map[string]any{"urls": []string{"https://example.com/"}},
-			wantError:   `parse Harvester proxy URL: parse "http://bad host": invalid character " " in host name`,
-			healthyCall: "ls",
-		},
-		{
-			name:        "chat fails, harvester serves",
-			breakFamily: func(runtime *commandRuntime) { runtime.Paths.TmuxDir = "" },
-			failed:      config.MCPServerChat,
-			failedCall:  "ls",
-			failedArgs:  map[string]any{},
-			wantError:   "configure chat MCP backend: tmux directory is empty",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			root := jailTest(t)
-			runtime := commandRuntime{Config: config.Defaults(root, nil), Paths: jailPaths(t)}
-			runtime.Config.Path = root + "/config.json"
-			runtime.Config.Harvester.Cache.Dir = root + "/cache"
-			runtime.Config.MCPServers[config.MCPServerChat] = config.MCPServer{Enabled: true}
-			runtime.Config.MCPServers[config.MCPServerHarvester] = config.MCPServer{Enabled: true}
-			test.breakFamily(&runtime)
-
-			var stderr bytes.Buffer
-			professor, closeFamilies, err := newStdioFamilies(&stderr, runtime, mcpRuntime(runtime, true))
-			exitCode := 0
-			defer closeFamilies(&exitCode)
-			if err != nil {
-				t.Fatalf("newStdioFamilies error = %v, want a degraded start serving the healthy family", err)
-			}
-			if !strings.Contains(stderr.String(), test.failed) || !strings.Contains(stderr.String(), test.wantError) {
-				t.Fatalf("stderr = %q, want one line naming %s and %q", stderr.String(), test.failed, test.wantError)
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			serverTransport, clientTransport := mcp.NewInMemoryTransports()
-			serverSession, err := professor.Server(test.failed).Connect(ctx, serverTransport, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = serverSession.Close() }()
-			client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
-			session, err := client.Connect(ctx, clientTransport, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = session.Close() }()
-
-			tools, err := session.ListTools(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			listed := map[string]*mcp.Tool{}
-			for _, tool := range tools.Tools {
-				listed[tool.Name] = tool
-			}
-			want := mcpserv.ToolNames()
-			if test.failed == config.MCPServerHarvester {
-				want = harvestmcp.RegisteredToolNames(harvestRuntime(runtime))
-			}
-			for _, name := range want {
-				if listed[name] == nil {
-					t.Fatalf("tools/list lacks %s; listed %d tools", name, len(tools.Tools))
-				}
-			}
-			if len(listed) != len(want) {
-				t.Fatalf("tools/list holds %d tools, want %d", len(listed), len(want))
-			}
-
-			failed, err := session.CallTool(ctx, &mcp.CallToolParams{Name: test.failedCall, Arguments: test.failedArgs})
-			if err != nil {
-				t.Fatalf("%s protocol error = %v, want an MCP error result", test.failedCall, err)
-			}
-			text := toolResultText(failed)
-			if !failed.IsError {
-				t.Fatalf("%s IsError = false, text %q", test.failedCall, text)
-			}
-			for _, part := range []string{
-				test.failed + " family failed to configure", test.wantError, runtime.Config.Path,
-				"Claude Code: /mcp", "Codex and OpenCode: start a new chat",
-			} {
-				if !strings.Contains(text, part) {
-					t.Fatalf("%s error text = %q, want it to hold %q", test.failedCall, text, part)
-				}
-			}
-
-			healthyFamily := config.MCPServerHarvester
-			if test.failed == config.MCPServerHarvester {
-				healthyFamily = config.MCPServerChat
-			}
-			healthyServerTransport, healthyClientTransport := mcp.NewInMemoryTransports()
-			healthyServer, err := professor.Server(healthyFamily).Connect(ctx, healthyServerTransport, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := healthyServer.Close(); err != nil {
-					t.Error(err)
-				}
-			}()
-			healthyClient := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
-			healthySession, err := healthyClient.Connect(ctx, healthyClientTransport, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := healthySession.Close(); err != nil {
-					t.Error(err)
-				}
-			}()
-			healthyTools, err := healthySession.ListTools(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if healthySession.InitializeResult().ServerInfo.Name != config.MCPRegistrationName(healthyFamily) {
-				t.Fatal("healthy family identity mismatch")
-			}
-			if test.healthyCall != "" {
-				result, err := healthySession.CallTool(
-					ctx,
-					&mcp.CallToolParams{Name: test.healthyCall, Arguments: map[string]any{}},
-				)
-				if err != nil || result.IsError {
-					t.Fatalf("healthy %s = %+v, %v", test.healthyCall, result, err)
-				}
-			} else {
-				for _, tool := range healthyTools.Tools {
-					if tool.Name == "read" {
-						schema, err := json.Marshal(tool.InputSchema)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if !strings.Contains(string(schema), `"urls"`) {
-							t.Fatalf("healthy read schema=%s", schema)
-						}
-					}
-				}
-			}
-		})
 	}
 }
 

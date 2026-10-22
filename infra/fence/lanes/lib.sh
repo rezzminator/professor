@@ -826,6 +826,11 @@ bundled_themes() {
   printf '%s' "$names"
 }
 
+# Independent expected Codex inheritance fixture, shared by M.02 and E2.06.
+codex_harvester_env_line() {
+  printf '%s\n' 'env_vars = ["HARVESTER_HOME_DIR", "HARVESTER_CONFIG", "HARVESTER_PYTHON_ROOT", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "HARVESTER_LOG_LEVEL", "HARVESTER_LOG_COMPONENTS", "HARVESTER_LOG_MIRROR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]'
+}
+
 # assert_opencode_mcp_registered <pfm-bin> — M.03 and E3.02 are the same
 # assertion body (OpenCode's opencode.jsonc carries both family local stdio
 # entries, and doctor's opencode rows report each family registration healthy): one shared beat body
@@ -838,8 +843,8 @@ assert_opencode_mcp_registered() {
   else
     for family in chat harvester; do
       server="$family-professor"
-      _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" --arg family "$family" \
-        '.mcp[$family + "-professor"] | .type == "local" and .command == [$bin, "mcp", "serve", "--stdio", "--family", $family] and .enabled == true' >/dev/null 2>&1 ||
+      _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" --arg family "$family" --arg harvest "$HOME/.local/bin/harvester" \
+        '.mcp[$family + "-professor"] | .type == "local" and .command == (if $family == "harvester" then [$harvest, "mcp"] else [$bin, "mcp", "serve", "--stdio", "--family", $family] end) and .enabled == true' >/dev/null 2>&1 ||
         bad="$bad M36: $oc_cfg $server is not the enabled local family stdio registration;"
     done
   fi

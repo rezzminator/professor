@@ -21,6 +21,11 @@ fi
 mkdir -p "$snapshot"
 tar -C "$source_root" --exclude='.git' --exclude='.worktrees' --exclude='./tmp' --exclude='./pfm/harness-prompts/generated' -cf - . |
   tar -C "$snapshot" --no-same-owner -xf -
+# Standalone Go plugin source is mounted separately from the professor worktree.
+if [ -f "$source_root/.claude-plugin/marketplace.json" ] && [ -f /harvester/go.mod ] && [ ! -f "$snapshot/plugins/harvester/go.mod" ]; then
+  mkdir -p "$snapshot/plugins/harvester"
+  tar -C /harvester --exclude='.git' --exclude='.worktrees' -cf - . | tar -C "$snapshot/plugins/harvester" -xf -
+fi
 git -C "$snapshot" init -q -b develop
 git -C "$snapshot" add .
 git -C "$snapshot" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm 'fence source snapshot'

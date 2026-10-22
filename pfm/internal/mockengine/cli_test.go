@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -438,5 +439,22 @@ func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
 	}
 	if got := gaps("update"); len(got) != 0 {
 		t.Fatalf("after update gaps=%v, want none", got)
+	}
+}
+
+func TestClaudeRemoteBinaryPluginLauncherBootstrapsStableBinary(t *testing.T) {
+	fix := newFixture(t)
+	if code, msg := pluginCLI(t, fix, fix.configDir, "plugin", "install", "harvester@professor"); code != 0 {
+		t.Fatalf("plugin install: %d %s", code, msg)
+	}
+	launcher := filepath.Join(fix.configDir, "plugins", "cache", "harvester@professor", "libexec", "harvester")
+	command := exec.Command(launcher, "version")
+	command.Env = append(os.Environ(), "HOME="+fix.home, "HARVESTER_HOME="+filepath.Join(fix.home, "plugin-home"))
+	if output, err := command.CombinedOutput(); err != nil || string(output) != "harvester fixture\n" {
+		t.Fatalf("launcher version: %v %q", err, output)
+	}
+	stable := filepath.Join(fix.home, "plugin-home", "bin", "harvester")
+	if info, err := os.Stat(stable); err != nil || info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("stable binary: %v %v", info, err)
 	}
 }

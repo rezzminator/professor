@@ -14,7 +14,7 @@
 
 `Severity` is a string; `Block` renders `BLOCK` and `Warn` renders `WARN`. `Row` holds `Severity`, stable `Check`, absolute `Path`, `Problem` and `Fix`. `Row.Line()` renders `{severity} {check} {path} — {problem}`.
 
-`Env` holds `Home`, `Store`, `ConfigPath`, `CloneConfigPath`, `LegacyConfigDir`, `StateDB`, `CacheDB`, `ManagedRoot`, `ConfigExplicit`, `HarvesterCacheDir`, `MCPPort`, `Accounts` and `Now`. `EnvFor(runtime config.Runtime, now time.Time) Env` derives it from the loaded runtime: store and managed root through installer path functions, legacy config through `config.LegacyConfigDir`. `CloneConfigPath` is the recorded clone's `pfm.config.json`, or empty when the marker cannot resolve.
+`Env` holds `Home`, `Store`, `ConfigPath`, `CloneConfigPath`, `LegacyConfigDir`, `StateDB`, `CacheDB`, `ManagedRoot`, `ConfigExplicit`, `MCPPort`, `Accounts` and `Now`. `EnvFor(runtime config.Runtime, now time.Time) Env` derives it from the loaded runtime: store and managed root through installer path functions, legacy config through `config.LegacyConfigDir`. `CloneConfigPath` is the recorded clone's `pfm.config.json`, or empty when the marker cannot resolve.
 
 `Detector` holds a stable `Check` and `Detect func(Env) ([]Row, error)`. `Detectors() []Detector` returns the ordered registry; `RunAll(env Env) []Row` concatenates findings; `Count(rows []Row, severity Severity) int` counts one severity. The installer package does not import hostcheck; hostcheck can use installer readers.
 
@@ -28,7 +28,7 @@ Doctor prints every finding as `host-check: {row.Line()}`, followed by `host-che
 
 The fix strings below are instructions for the operator. Detection and the install gate do not execute them. Install creates missing store entries and account links only after the gate; doctor also checks these targets ([claude-config-dir.md](claude-config-dir.md#pfm-doctor-checks)).
 
-An operator or a model applies a fix exactly as printed, so each fix must be safe as written, in any order. A fix that deletes or moves aside one path while keeping another goes through `removeKeeping` (`pfm/internal/hostcheck/hostcheck.go`). These are the present-target fixes of `legacy-config`, `legacy-harvester-config`, `legacy-state-db`, `legacy-cache-db`, `legacy-harvester-cache` and `store-identity`, plus `pre-split-config` (b), `home-state-file`, `beside-backup` and every `account-entry-real` fix. The fix prints only when no deleted path is the same file as the kept one after following links (`os.SameFile`; a path with nothing at it is no file). One file under two names prints `{remove} and {keep} are one file through a link: delete neither; replace the link with a real copy, then rerun pfm doctor` instead. A failed stat, a dangling link included, prints the `UNREADABLE` row in place of the row, with no delete.
+An operator or a model applies a fix exactly as printed, so each fix must be safe as written, in any order. A fix that deletes or moves aside one path while keeping another goes through `removeKeeping` (`pfm/internal/hostcheck/hostcheck.go`). These are the present-target fixes of `legacy-config`, `legacy-state-db`, `legacy-cache-db` and `store-identity`, plus `pre-split-config` (b), `home-state-file`, `beside-backup` and every `account-entry-real` fix. The fix prints only when no deleted path is the same file as the kept one after following links (`os.SameFile`; a path with nothing at it is no file). One file under two names prints `{remove} and {keep} are one file through a link: delete neither; replace the link with a real copy, then rerun pfm doctor` instead. A failed stat, a dangling link included, prints the `UNREADABLE` row in place of the row, with no delete.
 
 ## Paths and ordering
 
@@ -43,11 +43,9 @@ The table gives one row per detector; exact problems and fixes follow under each
 | Check | Severity | Looks at | Problem | Fix |
 | --- | --- | --- | --- | --- |
 | `legacy-config` | BLOCK | legacy config files | config outside clone | move or compare/remove |
-| `legacy-harvester-config` | BLOCK | legacy harvester config | config outside clone | move or compare/remove |
 | `pre-split-config` | BLOCK | raw config and sibling | old name, key or port | rename, split or edit |
 | `legacy-state-db` | BLOCK | legacy state and siblings | old database path | move or remove |
 | `legacy-cache-db` | BLOCK | legacy cache and siblings | old database path | move or remove |
-| `legacy-harvester-cache` | WARN | default legacy cache dir | old cache name | move or remove |
 | `pfm-settings` | BLOCK | physical user settings | duplicate pfm launch values | remove owned keys |
 | `pfm-mcp` | BLOCK | registries and ownership | legacy pfm `mcpServers` entry or stale ownership state | use the printed legacy-entry fix; `pfm install` also applies the cutover |
 | `memory-helpers` | BLOCK | fingerprinted scripts | retired helper name | rename and edit hooks |
@@ -79,25 +77,15 @@ Fix: target `{cfg}` absent: `mv {path} {cfg}`; present: `diff {path} {cfg} && rm
 
 An explicit config inside the legacy config dir gets one row at its path with problem `explicit --config inside the legacy config dir`. Its target is the recorded clone's `pfm.config.json`: absent target, `mv {path} {clone}/pfm.config.json`; present target, `diff {path} {clone}/pfm.config.json && rm {path}`; unknown clone, `move {path} into the clone as pfm.config.json, then run pfm install from the clone`. An unreadable explicit config produces the `UNREADABLE` row.
 
-### legacy-harvester-config
-
-**Severity:** BLOCK
-
-Looks at `{legacy}/harvester.config.json`.
-
-Problem: `legacy harvester config outside the clone`.
-
-Fix: target `dir({cfg})/harvester.config.json` absent: `mv {path} {target}`; present: `diff {path} {target} && rm {path}`.
-
 ### pre-split-config
 
 **Severity:** BLOCK
 
 Looks at raw JSON of `{cfg}` and `dir({cfg})/config.json`; one row per finding.
 
-Problem: (a) `{cfg}` base name is `config.json`: `the config still has its pre-split name`; (b) a `config.json` beside a `pfm.config.json`: `a pre-split config.json beside the config`; (c) key `mcp.servers.harvester`: `mcp.servers.harvester belongs in harvester.config.json`; (d) `mcp.http.port` is 8377: `mcp.http.port is the pre-split default 8377`.
+Problem: (a) `{cfg}` base name is `config.json`: `the config still has its pre-split name`; (b) a `config.json` beside a `pfm.config.json`: `a pre-split config.json beside the config`; (c) `mcp.http.port` is 8377: `mcp.http.port is the pre-split default 8377`.
 
-Fix: (a) `mv {cfg} {dir}/pfm.config.json`; (b) `rm {path}` once its content is in `{cfg}`; (c) `move mcp.servers.harvester.enabled ({value}) to "enabled" in {dir}/harvester.config.json, then delete mcp.servers.harvester from {cfg}`; (d) `set mcp.http.port to 18377 in {cfg}; pfm install re-wires every client`.
+Fix: (a) `mv {cfg} {dir}/pfm.config.json`; (b) `rm {path}` once its content is in `{cfg}`; (c) `set mcp.http.port to 18377 in {cfg}; pfm install re-wires the chat client`.
 
 ### legacy-state-db
 
@@ -118,16 +106,6 @@ Looks at `paths.LegacyCacheDB(home)` and siblings, same rules against `{CacheDB}
 Problem: `legacy cache database at the pre-layout path`.
 
 Fix: same shape with `{CacheDB}`.
-
-### legacy-harvester-cache
-
-**Severity:** WARN
-
-Looks at `paths.LegacyHarvesterCacheDir(home)` when HarvesterCacheDir is "".
-
-Problem: `pre-rename harvester cache dir`.
-
-Fix: target absent: `mv {path} {paths.HarvesterCacheDir(home)}`; present: `rm -r {path}` (the new cache is kept).
 
 ### pfm-settings
 

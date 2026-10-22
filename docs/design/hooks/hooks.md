@@ -82,7 +82,7 @@ The usage hook and the `pfm ls` Limits tab reach `GET https://api.anthropic.com/
 4. The `O_EXCL` refresh lock `acct-<id>.lock` beside the cache (`RefreshLockPath`). A lock older than 30 seconds (`lockStaleAfter`) is stale and taken over; a caller that cannot take the lock sends no request and answers from the cache; the holder re-reads the cache and answers if a peer refreshed or backed off meanwhile, and releases the lock on every path.
 5. The request, sent with `User-Agent: pfm/{version}`. Success writes the record. A 429 writes the shared backoff (`BackoffFor`): `Retry-After` honored with a ten-minute floor, message `rate-limited — retry HH:MM (429 Too Many Requests)`. Any other failure backs off one minute.
 
-The hook writes a failed refresh to stderr; its prompt output does not change. The statusline writes the snapshots from its stdin `rate_limits` (`harvestRateLimits`, `pfm/internal/statusline/render.go`): every window the harness sent, 0% included, under `windows`, beside the flat keys an older build's reader expects.
+The hook writes a failed refresh to stderr; its prompt output does not change. The statusline writes the snapshots from its stdin `rate_limits` (`recordRateLimits`, `pfm/internal/statusline/render.go`): every window the harness sent, 0% included, under `windows`, beside the flat keys an older build's reader expects.
 
 A blocked prompt returns `decision: block` with the original prompt suppressed (`pfm/internal/hookentry/prompt_block.go:23-28`).
 

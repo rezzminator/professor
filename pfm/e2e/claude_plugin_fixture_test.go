@@ -83,6 +83,15 @@ func TestClaudePluginInstallFixture(t *testing.T) {
 	if err := os.MkdirAll(installPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if strings.HasPrefix(id, "harvester@") {
+		launcher := filepath.Join(installPath, "libexec", "harvester")
+		if err := os.MkdirAll(filepath.Dir(launcher), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := testjail.WriteExecutable(launcher, []byte(e2eHarvesterBinary), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	recordPath := filepath.Join(pluginsDir, "installed_plugins.json")
 	record := struct {
 		Plugins map[string][]map[string]string `json:"plugins"`
@@ -185,8 +194,7 @@ exit 2
 	); err != nil {
 		h.t.Fatal(err)
 	}
-	// A fresh fixture uses the split config; the clone example still contains
-	// mcp.servers.harvester, which the host gate now refuses.
+	// Isolate the fresh install from MCP services outside this fixture.
 	roots := make([]string, 0, len(managedSettings))
 	for _, relative := range managedSettings {
 		roots = append(roots, filepath.Join(home, filepath.Dir(relative), "projects"))
@@ -203,8 +211,11 @@ exit 2
 	if err := os.WriteFile(filepath.Join(home, "pfm.config.json"), content, 0o600); err != nil {
 		h.t.Fatal(err)
 	}
-	h.writeJSON(filepath.Join(home, "harvester.config.json"), map[string]any{"enabled": false})
 	stageSchedulerFixtures(h.t, home)
+	if h.harvesterReleases == nil {
+		h.harvesterReleases = make(map[string]*harvesterReleaseFixture)
+	}
+	h.harvesterReleases[home] = newHarvesterReleaseFixture(h.t)
 	return home
 }
 
@@ -272,4 +283,38 @@ func (h *e2eHarness) refusalSnapshot(home string) surfaceSnapshot {
 		h.t.Fatalf("snapshot refused home: %v", err)
 	}
 	return snapshot
+}
+
+func TestHarvesterPluginDelegationE2E(t *testing.T) {
+	t.Parallel()
+	requireE2EFence(t)
+	h := &e2eHarness{
+		t: t, repo: sharedSourceRepo(t), headBinary: os.Getenv(e2eScriptBinaryEnv),
+		goCache: requiredGoEnv(t, "GOCACHE"), goModCache: requiredGoEnv(t, "GOMODCACHE"),
+	}
+	home := h.newHome(h.headBinary)
+	path := filepath.Join(home, "pfm.config.json")
+	document := h.readJSON(path)
+	document["claude"] = map[string]any{"plugins": []string{"harvester"}}
+	document["mcp"] = map[string]any{"servers": map[string]any{"harvester": map[string]any{"enabled": true}}}
+	h.writeJSON(path, document)
+	result := h.pfm(home, "install", "--yes")
+	h.requireSuccess("harvester plugin install", result)
+	h.harvesterReleases[home].assertDownloaded(t)
+	if !strings.Contains(result.stdout+result.stderr, "harvester setup fixture") {
+		t.Fatalf("install omitted delegated setup: stdout=%s stderr=%s", result.stdout, result.stderr)
+	}
+	result = h.pfm(home, "doctor")
+	output := result.stdout + result.stderr
+	if !strings.Contains(output, "doctor: harvester\n") || !strings.Contains(output, "doctor: fixture healthy") {
+		t.Fatalf("doctor omitted delegated plugin rows: %s", output)
+	}
+	binary := filepath.Join(home, ".local", "bin", "harvester")
+	if err := os.Remove(binary); err != nil {
+		t.Fatal(err)
+	}
+	result = h.pfm(home, "doctor")
+	if result.err == nil || !strings.Contains(result.stdout+result.stderr, "harvester binary="+binary+" unavailable") {
+		t.Fatalf("doctor accepted missing plugin binary: stdout=%s stderr=%s", result.stdout, result.stderr)
+	}
 }

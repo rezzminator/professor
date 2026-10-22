@@ -80,6 +80,16 @@ func TestClaudeEnvKey(t *testing.T) {
 			err:     `claude.env.CALLMETER_HOME is read by pfm itself, which builds callmeter's binary under it: export it where pfm runs instead`,
 		},
 		{
+			name:    "harvester home belongs to pfm process",
+			content: `{"version":2,"claude":{"env":{"HARVESTER_HOME":"/x"}}}`,
+			err:     `claude.env.HARVESTER_HOME is read by pfm itself, which installs harvester under it: export it where pfm runs instead`,
+		},
+		{
+			name:    "harvester config belongs to pfm process",
+			content: `{"version":2,"claude":{"env":{"HARVESTER_CONFIG":"/x"}}}`,
+			err:     `claude.env.HARVESTER_CONFIG is read by pfm itself during config migration: export it where pfm runs instead`,
+		},
+		{
 			name:    "engine-sync's home",
 			content: `{"version":2,"claude":{"env":{"ENGINE_SYNC_HOME":"/x"}}}`,
 			err:     `claude.env.ENGINE_SYNC_HOME is read by pfm itself, which runs engine-sync from it: export it where pfm runs instead`,

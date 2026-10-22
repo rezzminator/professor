@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -332,7 +330,6 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 		Clock:        clock.Real,
 		Fleet:        liveFleet{runtime: runtime, warn: warn},
 		Services:     nativeServiceManager(goruntime.GOOS, runner, clock.Real, runtime.Paths.Home, os.Getuid()),
-		HTTPProbe:    probeURL,
 		Self:         os.Getpid(),
 		EffectiveUID: uint32(os.Geteuid()),
 		Spare:        spare,
@@ -343,31 +340,12 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 		LogDir:       restartLogDir(runtime.Paths),
 		Env:          restartWorkerEnv(os.Environ()),
 	}
-	if runtime.Config.Harvester.Enabled && runtime.Config.Harvester.Search.Enabled {
-		dependencies.SearchURL = runtime.Config.Harvester.Search.SearXNGURL
-	}
-	for _, server := range runtime.Config.MCPServers {
-		if server.Enabled {
-			address := "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port)
-			dependencies.DaemonProbe = func(context.Context) error {
-				_, err := mcpserv.ProbeDaemon(address)
-				return err
-			}
-			break
+	if config.MCPServerEnabled(runtime.Config, config.MCPServerChat) {
+		address := "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port)
+		dependencies.DaemonProbe = func(context.Context) error {
+			_, err := mcpserv.ProbeDaemon(address)
+			return err
 		}
 	}
 	return dependencies
-}
-
-// probeURL answers nil when target gives any HTTP answer within 3 s.
-func probeURL(ctx context.Context, target string) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
-	if err != nil {
-		return fmt.Errorf("build probe of %s: %w", target, err)
-	}
-	response, err := obs.WrapClient(&http.Client{Timeout: 3 * time.Second}).Do(request)
-	if err != nil {
-		return fmt.Errorf("GET %s: %w", target, err)
-	}
-	return response.Body.Close()
 }

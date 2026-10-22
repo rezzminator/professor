@@ -38,7 +38,7 @@ func ExtensionChecks(ctx context.Context, root string, options Options) ([]Exten
 		if readErr == nil && target.engine == extensionOpenCode {
 			_, readErr = extensionPackageEntries(document)
 		}
-		aspects := []string{"installed", extensionEnabled, extensionOptions, harvestEnvDirName}
+		aspects := []string{"installed", extensionEnabled, extensionOptions, configEnvKey}
 		if target.engine == extensionCodex {
 			aspects = append(aspects, "hook trust")
 		}
@@ -126,7 +126,7 @@ func ExtensionChecks(ctx context.Context, root string, options Options) ([]Exten
 						}
 					}
 				}
-			case harvestEnvDirName:
+			case configEnvKey:
 				want := map[string]string{}
 				if active {
 					want = extension.Env
@@ -143,7 +143,7 @@ func ExtensionChecks(ctx context.Context, root string, options Options) ([]Exten
 				}
 				if target.engine == extensionClaude && active {
 					for key, want := range extension.Env {
-						value, has, err := extensionLookup(document, []string{harvestEnvDirName, key})
+						value, has, err := extensionLookup(document, []string{configEnvKey, key})
 						if err != nil {
 							check.Problem = err.Error()
 							break

@@ -479,10 +479,15 @@ func assertFamilyMCP(t *testing.T, home, word string, enabled ...bool) {
 	want := map[string]any{}
 	for family, on := range map[string]bool{"chat": chat, "harvester": harvester} {
 		if on {
+			command := "pfm"
+			args := []any{"mcp", "serve", "--stdio", "--family", family}
+			if family == "harvester" {
+				command, args = "harvester", []any{"mcp"}
+			}
 			want[family+"-professor"] = map[string]any{
 				"type":    "stdio",
-				"command": filepath.Join(home, ".local", "bin", "pfm"),
-				"args":    []any{"mcp", "serve", "--stdio", "--family", family},
+				"command": filepath.Join(home, ".local", "bin", command),
+				"args":    args,
 			}
 		}
 	}
@@ -580,13 +585,22 @@ func TestRenderThirdPartyMCP(t *testing.T) {
 			want := map[string]json.RawMessage{"browser": browser, "remote": remote}
 			for family, enabled := range map[string]bool{pfmconfig.MCPServerChat: tc.chat, pfmconfig.MCPServerHarvester: tc.harvester} {
 				if enabled {
-					want[pfmconfig.MCPRegistrationName(family)] = json.RawMessage(
-						fmt.Sprintf(
-							`{"args":["mcp","serve","--stdio","--family",%q],"command":%q,"type":"stdio"}`,
-							family,
-							filepath.Join(home, ".local", "bin", "pfm"),
-						),
+					command := "pfm"
+					args := []string{"mcp", "serve", "--stdio", "--family", family}
+					if family == pfmconfig.MCPServerHarvester {
+						command, args = "harvester", []string{"mcp"}
+					}
+					raw, err := json.Marshal(
+						map[string]any{
+							"args":    args,
+							"command": filepath.Join(home, ".local", "bin", command),
+							"type":    "stdio",
+						},
 					)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want[pfmconfig.MCPRegistrationName(family)] = raw
 				}
 			}
 			encoded, err := json.Marshal(map[string]any{"mcpServers": want})

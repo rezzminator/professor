@@ -84,8 +84,8 @@ func printEngineSyncHookDoctor(
 // marketplace pfm install adds that is registered from another source, are one
 // warning each with its repair. An unreadable marketplace record is a failure
 // for the ids that need it; every other listed plugin is still checked. An
-// enabled callmeter -dev copy whose binary under env's callmeter home is gone
-// is a gap (installer.CallmeterBinaryGap).
+// enabled Go binary plugin -dev copy whose matching executable is gone
+// is a gap (installer.GoPluginBinaryGap).
 func printClaudePluginsDoctor(
 	stdout io.Writer,
 	store string,
@@ -194,7 +194,7 @@ func printClaudePluginsDoctor(
 	}
 	gaps = append(gaps, marketplaceGaps...)
 	for index := range targets {
-		if gap, found := installer.CallmeterBinaryGap(env, build.Home, targets[index]); found {
+		if gap, found := installer.GoPluginBinaryGap(env, build.Home, targets[index]); found {
 			gaps = append(gaps, gap)
 		}
 	}

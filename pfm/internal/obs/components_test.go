@@ -13,7 +13,7 @@ import (
 // in its order and spelling — a wrapper naming anything else is refused.
 func TestComponentsPinsTheSpecRegistry(t *testing.T) {
 	want := []string{
-		"cli", "mcp", "http.in", "http.out", "runner", "tmux", "hooks", "db", "harvestpy", "installer", "state",
+		"cli", "mcp", "http.in", "http.out", "runner", "tmux", "hooks", "db", "installer", "state",
 	}
 	if strings.Join(Components, ",") != strings.Join(want, ",") {
 		t.Fatalf("Components = %v, want %v", Components, want)

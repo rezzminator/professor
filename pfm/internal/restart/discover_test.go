@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -54,14 +55,13 @@ func serviceUnit(order *[]string, name string) Unit {
 func fullHost(t *testing.T, order *[]string) (Deps, *hostRunner, *fakeKernel, *fakeFleet) {
 	t.Helper()
 	herdr := &herdrModel{running: true}
-	docker := &dockerModel{running: map[string]bool{"searxng": true}}
 	runner := &hostRunner{
-		paths: map[string]string{"herdr": "/opt/bin/herdr", "docker": "/usr/bin/docker"},
+		paths: map[string]string{"herdr": "/opt/bin/herdr"},
 		handle: func(argv []string) (deps.RunResult, error) {
 			if strings.HasSuffix(argv[0], "herdr") {
 				return herdr.run(argv)
 			}
-			return docker.run(argv)
+			return deps.RunResult{}, fmt.Errorf("unexpected command %v", argv)
 		},
 		onStart: herdr.started,
 	}
@@ -85,7 +85,6 @@ func fullHost(t *testing.T, order *[]string) (Deps, *hostRunner, *fakeKernel, *f
 	dependencies := testDeps(t, runner, kernel, fleet)
 	dependencies.Spare = []int{13}
 	dependencies.LaunchedFrom = chatAddress{Socket: "pfm-cc-launcher"}
-	dependencies.SearchURL = "http://127.0.0.1:8888"
 	dependencies.DaemonProbe = func(context.Context) error { return nil }
 	dependencies.Services = &fakeServices{units: []Unit{serviceUnit(order, "systemd pfm-schedule.timer")}}
 	return dependencies, runner, kernel, fleet
@@ -108,7 +107,6 @@ func TestBuildPlanOrdersEveryFamilyDownstreamFirst(t *testing.T) {
 		"herdr: herdr server /run/herdr.sock",
 		"services: systemd pfm-schedule.timer",
 		"mcp-daemon: pfm mcp serve pid 11",
-		"search-backend: docker container searxng",
 		"pfm: pfm process pid 12",
 	}
 	if got := unitNames(plan.Units); !slices.Equal(got, want) {
@@ -141,7 +139,7 @@ func TestDryRunChangesNothing(t *testing.T) {
 			t.Fatalf("the dry run ran a command that is not a read: %v", argv)
 		}
 	}
-	for _, line := range []string{"stop   9  pfm", "start  1  search-backend", "start  4  herdr"} {
+	for _, line := range []string{"stop   8  pfm", "start  1  mcp-daemon", "start  3  herdr"} {
 		if !strings.Contains(out.String(), line) {
 			t.Fatalf("plan lacks %q:\n%s", line, out.String())
 		}

@@ -9,7 +9,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 ## Tiers
 
-- Unit: a package test beside its package, no real tmux server, no real engine process, no network: it injects its resolver and HTTP client (the harvest family's `harvest.StubPublicResolverForTest` in `TestMain`).
+- Unit: a package test beside its package, no real tmux server, no real engine process, no network: it injects its resolver and HTTP client.
 - `JAIL`, `JAIL+tmux`, `JAIL+sh`, `LIVE-READ`, `UNPLAYED`: `pfm/TESTPLAN.md` § Legend. The boundary that decides: whether the test needs a real tmux server (a scratch socket inside the jail's `TMUX_TMPDIR`); a flow the fake engine cannot play is `UNPLAYED`, named in `TESTPLAN.md` § "Flows the fake engine does not yet play".
 - e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`) and the fence lanes (hermetic: mock engine, fixture seats, `--network none`); both run only inside the fence.
 
@@ -34,7 +34,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - Every test runs under `internal/testjail` (`testjail.Run` in `TestMain`; `ShortRoot`, `Fleet`, `InstalledHome`, `CleanHome` build the homes). The `PFM_*` overrides in `pfm/internal/paths/paths.go` are the only knobs; `TMUX_TMPDIR = t.TempDir()`. `C25-testmain-jail` fails a test package whose `TestMain` does not reach `testjail.Run`; with `PFM_TEST_ARTIFACT_DIR` set (the gate sets `$run/profile`) every package process leaves `summary.json`, and a red or timed-out one a `DIAGNOSIS.txt` bundle: `docs/dev/testing/profiling.md`.
 - Code flights build inside the fence through `.claude/scripts/dev.sh iso` and test through `.claude/scripts/test.sh`. The host's `~/.local/bin` and the real `$HOME` are never test targets.
 - A shared fence call's scratch is RAM, capped and never swapped: `/dev/shm` (`PFM_FENCE_SHM_MIB`, mode 1777) always, and `/root` (`PFM_FENCE_HOME_MIB`, private, mode 0700), `/tmp` (`PFM_FENCE_TMP_MIB`), `/var/tmp` (`PFM_FENCE_VARTMP_MIB`) once admitted, sizes defaulted in `fence_config_init` — free cgroup memory (`memory.max` minus `memory.current` under `$PFM_FENCE_CGROUP_ROOT`, default `/sys/fs/cgroup`) must cover every tmpfs cap plus `PFM_FENCE_HEADROOM_MIB` headroom; every mount `noswap`, a kernel lacking it failing the call; they count against the container's memory cap (`PFM_FENCE_MEM`). Short or unreadable memory binds those three onto disk under the call's run directory and prints one `shared-run: disk scratch:` line with free and needed MiB (`cgroup read failed`, free unknown, when unreadable). The Go build, module and lint caches under `/cache` stay on disk. A test needing real device semantics writes under `$PFM_FENCE_DISK_DIR` (`/pfm-disk`): disk-backed, private to the call, removed at its exit; `fsync` and durability tests stay enabled.
-- Live traffic (a real page, the harvester's browser rung, a walled or lazy-loaded site) runs in the real-simulation fence: `.claude/scripts/dev.sh iso sim '<command>'` — Google Chrome (headless only, no display) and `pfm` installed from the worktree with the browser rung on; the harvester state persists per worktree. Its first line is `sim: chrome=… browser-rung=on` or `sim: BOOTSTRAP-FAILED — <step>`. A live check proves behavior; the regression test is still a fixture-driven unit test.
+- Live traffic (a real page, the harvester's browser rung, a walled or lazy-loaded site) runs in the real-simulation fence: `.claude/scripts/dev.sh iso sim '<command>'` — Google Chrome (headless only, no display) and `pfm` plus the standalone `harvester` installed from their source checkouts with the browser rung on; the harvester state persists per worktree. Its first line is `sim: chrome=… browser-rung=on` or `sim: BOOTSTRAP-FAILED — <step>`. A live check proves behavior; the regression test is still a fixture-driven unit test.
 
 ## Run commands
 
@@ -78,7 +78,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - `codex` is a shell function on a developer host: a test or script calls `command codex`.
 - A probe that launches an engine closes stdin (`</dev/null`) or it hangs.
 - The e2e harness refuses to run without `PFM_DEV_FENCE=1`: that red on a host is the fence law, not a defect.
-- `internal/harvest` (a `/private` symlink) and `internal/hookentry` (socket path length) are red on a macOS host and green in the fence.
+- `internal/hookentry` (socket path length) is red on a macOS host and green in the fence.
 - A shell wait polls its own condition and counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never a fixed sleep or whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten (`MCP_STDIO_GRACE_SECS`).
 - A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.
 - A closed `gather.AcquireAccountGuard` keeps its flock while a parallel test's fork holds the open file description until exec: `AcquireAccountGuard(dir, false)` retries a busy lock for `accountBusyGrace` before it refuses, and a test that expects the busy refusal calls `acquireAccountGuardWithin(dir, false, 0)` (in `gather`) or holds the guard for longer than the grace.

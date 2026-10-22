@@ -325,10 +325,16 @@ func mcpConfig(home string, machine pfmconfig.Config) map[string]any {
 		if !machine.MCPServers[family].Enabled {
 			continue
 		}
+		command := filepath.Join(home, ".local", "bin", "pfm")
+		args := []string{knobMCP, "serve", "--stdio", "--family", family}
+		if family == pfmconfig.MCPServerHarvester {
+			command = filepath.Join(home, ".local", "bin", "harvester")
+			args = []string{"mcp"}
+		}
 		servers[pfmconfig.MCPRegistrationName(family)] = map[string]any{
 			typeWord:    "stdio",
-			commandWord: filepath.Join(home, ".local", "bin", "pfm"),
-			"args":      []string{knobMCP, "serve", "--stdio", "--family", family},
+			commandWord: command,
+			"args":      args,
 		}
 	}
 	if len(servers) == 0 {

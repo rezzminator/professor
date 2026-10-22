@@ -71,9 +71,6 @@ pfm config show	O1	O1.13-misc-ops
 pfm config validate	O1	O1.13-misc-ops
 pfm doctor	M	M.04-doctor-mcp
 pfm doctor	O1	O1.10-doctor-exit-contract
-pfm harvest	O2	O2.09-harvester
-pfm harvest ask	O2	O2.09-harvester
-pfm harvest download-file	M	M.11-harvester-tools
 pfm headless	O2	O2.04-headless
 pfm headless exec	O2	O2.04-headless
 pfm heal	O1	O1.11-heal

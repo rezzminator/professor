@@ -819,7 +819,7 @@ func TestInstallRefusesWhileLegacyConfigWaits(t *testing.T) {
 		modes = append(modes, options.Mode)
 		return installer.Report{}, nil
 	}
-	for _, args := range [][]string{{"install", "--skip-harvest"}, {"install", "--yes", "--skip-harvest"}} {
+	for _, args := range [][]string{{"install", "--offline"}, {"install", "--yes", "--offline"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 4 {
 			t.Fatalf("run(%q) code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
@@ -943,9 +943,9 @@ func TestInstallWithMissingNamedLegacyConfig(t *testing.T) {
 		code   int
 		prefix string
 	}{
-		{[]string{"install", "--skip-harvest"}, 0, "  skip    "},
-		{[]string{"install", "--yes", "--skip-harvest"}, 1, "pfm install: "},
-		{[]string{"install", "--check", "--skip-harvest"}, 1, "pfm install: "},
+		{[]string{"install", "--offline"}, 0, "  skip    "},
+		{[]string{"install", "--yes", "--offline"}, 1, "pfm install: "},
+		{[]string{"install", "--check", "--offline"}, 1, "pfm install: "},
 	} {
 		var stdout, stderr bytes.Buffer
 		args := append([]string{"--config", legacy}, scenario.args...)

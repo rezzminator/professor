@@ -48,13 +48,13 @@ func runRun(
 	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		"chat new",
-		"usage: pfm chat new [--name NAME] [--engine cc|cx] [--cwd DIR] "+
+		"usage: pfm chat new [--name NAME] [--engine cc|cx|ox] [--cwd DIR] "+
 			"[--backend auto|tmux|herdr] [--account N] [--cache 1h|5m] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
 			"[--harness-prompt PATH] [--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
 		stderr,
 	)
 	name := flags.String("name", "", "chat label (optional in a workbench; seat: is reserved)")
-	engine := flags.String("engine", "", "engine cc|claude or cx|codex (default: caller's engine, else config)")
+	engine := flags.String("engine", "", "engine cc|claude, cx|codex, ox|opencode (OpenCode: herdr only)")
 	backend := flags.String("backend", "", "birth backend: auto|tmux|herdr (default: chat.backend)")
 	cwd := flags.String("cwd", "", "project directory (default: the current one)")
 	account := flags.Int("account", 0, "Claude account (default: the primary one)")

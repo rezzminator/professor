@@ -664,7 +664,7 @@ else
     # The body: two reproducible builds of the tagged source, the owned binary
     # replaced, the candidate's install --yes, doctor before and after, the
     # post-update template report for express.
-    up="$(pfm update --repo "$B" --to "$LANE_TAG" --skip-harvest --root "$EXPRESS" 2>&1)"
+    up="$(pfm update --repo "$B" --to "$LANE_TAG" --root "$EXPRESS" 2>&1)"
     up_rc=$?
     [ "$up_rc" -eq 0 ] || bad="$bad pfm update --to $LANE_TAG exited $up_rc: $(one_line "$(printf '%s' "$up" | grep -E 'pfm update:|doctor' | tail -3)");"
     grep -qE '^doctor after update: warnings=[0-9]+ \(before update: [0-9]+\)$' <<<"$up" ||
@@ -679,7 +679,7 @@ else
     # installer, doctor it, and say so.
     if [ "$up_rc" -eq 0 ]; then
       jq --arg p "$WORKTREE/VERSION" '.paths += [$p]' "$LEDGER" >"$LEDGER.tmp" && mv "$LEDGER.tmp" "$LEDGER"
-      rb="$(pfm update --repo "$B" --to "$LANE_TAG" --skip-harvest 2>&1)"
+      rb="$(pfm update --repo "$B" --to "$LANE_TAG" 2>&1)"
       rb_rc=$?
       [ "$rb_rc" -eq 5 ] || bad="$bad the update with an unwritable owned path exited $rb_rc, want 5;"
       grep -qF "replace owned binary $WORKTREE/VERSION" <<<"$rb" || bad="$bad the failure did not name the unwritable owned path $WORKTREE/VERSION;"

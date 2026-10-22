@@ -863,7 +863,7 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 			switch state {
 			case "missing":
 				want, failures = "doctor: claude_plugins FAIL plugin callmeter@callmeter-dev binary "+binary+
-					" missing: its hooks would download a release binary, which an unreleased version fails"+
+					" missing: its wrapper would download a release binary, which an unreleased version fails"+
 					" — run pfm install --yes\n", 1
 			case "not executable":
 				want, failures = "doctor: claude_plugins FAIL plugin callmeter@callmeter-dev binary "+binary+

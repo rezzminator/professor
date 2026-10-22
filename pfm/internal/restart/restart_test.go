@@ -115,7 +115,7 @@ func TestPrintShowsThePlanAndRunsNoStep(t *testing.T) {
 	plan := Plan{
 		Findings: []Finding{
 			{Family: FamilyHerdr, Detail: "server running"},
-			{Family: FamilySearch, Err: errors.New("docker ps: exit 1")},
+			{Family: FamilyServices, Err: errors.New("docker ps: exit 1")},
 		},
 		Units: []Unit{
 			{Family: FamilyChats, Name: "claude a", FoundBy: "fleet scan", StopHow: "kill-server", Stop: never},
@@ -136,7 +136,7 @@ func TestPrintShowsThePlanAndRunsNoStep(t *testing.T) {
 	text := out.String()
 	for _, line := range []string{
 		"find   herdr          ok      server running",
-		"find   search-backend FAILED  docker ps: exit 1",
+		"find   services       FAILED  docker ps: exit 1",
 		"stop   1  chats          claude a", "found: fleet scan", "stop:  kill-server",
 		"start  1  herdr          herdr server", "start: herdr server",
 		"last      pfm            the worker",

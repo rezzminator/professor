@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,5 +195,58 @@ func TestOpenCodeUnownedEntriesClaimsAnInterruptedInstallsPendingEntry(t *testin
 	unowned, err = OpenCodeUnownedEntries(home, path, professorName)
 	if err != nil || len(unowned) != 1 || unowned[0] != professorName {
 		t.Fatalf("unowned=%q, err=%v; want the hand-edited professor named", unowned, err)
+	}
+}
+
+func TestInspectCodexHarvesterPluginRegistration(t *testing.T) {
+	for _, fenced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "orphan table", true: "installer fence"}[fenced], func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(t.TempDir(), "config.toml")
+			body := "[mcp_servers.harvester-professor]\ncommand = \"" + home + "/.local/bin/harvester\"\nargs = [\"mcp\"]\n"
+			if fenced {
+				body = mcpFenceBegin + "\n" + body + mcpFenceEnd + "\n"
+			}
+			writeFixture(t, path, body)
+			report := InspectCodexServers(path, home, 18377, "harvester-professor")[0]
+			if report.State != MCPClientPFM {
+				t.Fatalf("state=%s error=%v want pfm for installed plugin registration", report.State, report.Error)
+			}
+		})
+	}
+}
+
+func TestInspectOpenCodeHarvesterFamilyMigration(t *testing.T) {
+	home := t.TempDir()
+	pfm := filepath.Join(home, ".local", "bin", "pfm")
+	harvester := filepath.Join(home, ".local", "bin", "harvester")
+	for _, test := range []struct {
+		name    string
+		command []string
+		extra   bool
+		want    string
+	}{
+		{name: "old pfm family", command: []string{pfm, "mcp", "serve", "--stdio", "--family", "harvester"}, want: MCPClientLegacyPFM},
+		{name: "plugin family", command: []string{harvester, "mcp"}, want: MCPClientPFM},
+		{name: "foreign binary", command: []string{"/fixture/other/pfm", "mcp", "serve", "--stdio", "--family", "harvester"}, want: MCPClientForeignRegistration},
+		{name: "extra argument", command: []string{pfm, "mcp", "serve", "--stdio", "--family", "harvester", "--extra"}, want: MCPClientForeignRegistration},
+		{name: "extra field", command: []string{pfm, "mcp", "serve", "--stdio", "--family", "harvester"}, extra: true, want: MCPClientForeignRegistration},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			entry := map[string]any{"type": "local", "command": test.command, "enabled": true}
+			if test.extra {
+				entry["env"] = map[string]string{}
+			}
+			content, err := json.Marshal(map[string]any{"mcp": map[string]any{"harvester-professor": entry}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "opencode.jsonc")
+			writeFixture(t, path, string(content))
+			report := InspectOpenCodeServers(path, home, 18377, "harvester-professor")[0]
+			if report.State != test.want {
+				t.Fatalf("state=%s error=%v want=%s", report.State, report.Error, test.want)
+			}
+		})
 	}
 }

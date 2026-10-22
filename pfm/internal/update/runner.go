@@ -55,7 +55,6 @@ func StubBaselineDoctorForTest() func() {
 	updateBaselineDoctor = func(
 		context.Context,
 		config.Runtime,
-		bool,
 		io.Writer,
 		io.Writer,
 	) (doctorOutcome, error) {

@@ -51,3 +51,13 @@ func testConfigPath(t *testing.T) string {
 	t.Cleanup(func() { testConfigPaths.Delete(t) })
 	return actual.(string)
 }
+
+// emptyProcRoot makes {home}/proc: gather.NewProcFS reads the host's /proc when a root is missing.
+func emptyProcRoot(t *testing.T, home string) string {
+	t.Helper()
+	root := filepath.Join(home, "proc")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}

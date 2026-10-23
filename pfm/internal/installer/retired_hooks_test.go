@@ -89,7 +89,7 @@ func runRetiredHookInstall(t *testing.T, home string, mode Mode) (string, error)
 			paths.EnvSIDDir:   filepath.Join(home, "sid"),
 			paths.EnvStateDB:  filepath.Join(state, "pfm.db"),
 			paths.EnvCacheDB:  filepath.Join(state, "pfm-cache.db"),
-			paths.EnvProcRoot: filepath.Join(home, "proc"),
+			paths.EnvProcRoot: emptyProcRoot(t, home),
 			enginesync.EnvBin: testjail.EngineSyncBin(),
 		}},
 		Now:    func() time.Time { return time.Date(2031, 2, 3, 4, 5, 6, 0, time.Local) },

@@ -15,7 +15,7 @@ The foreman exists to raise the ratio of code written to tokens read. That ratio
 - [Tests](#tests)
 - [Effort buttons](#effort-buttons)
 - [Decisions](#decisions)
-- [What the family never carries](#what-the-family-never-carries)
+- [What the build/land lifecycle never carries](#what-the-buildland-lifecycle-never-carries)
 - [Harness settings](#harness-settings)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 - [Open items](#open-items)
@@ -53,10 +53,12 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 | `flights-foreman-sonnet` | agent | sonnet · high | Foreman for a clear path: the pattern is in the code; a `from:` render of `flights-foreman` |
 | `flights-foreman` | agent | opus · high | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules and the toughest work |
 | `flights-lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
+| `flights-speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
 | `flights-hunter`, `flights-spec-walker`, `flights-sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
 | `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
-- **GPT twins:** `gpt-foreman` (sol, high, no effort buttons) and `gpt-flights-lander` (sol, high) run the same protocols; `gpt-flights-lander` spawns the same Claude children.
+- **GPT twins:** `gpt-foreman` (sol, high, no effort buttons), `gpt-flights-lander` (sol, high) and `gpt-flights-speccer` (sol, xhigh) run the same protocols; their children stay on GPT.
+- **The speccer is user-invoked:** the user, or the main chat on the user's request, calls it independently. No foreman, lander or command hands work to it; it returns to its caller and hands off to nobody. Its spec, research and calibration files live in its flight directory, outside the message-only build/land protocol.
 - **Landers are spawned only by the main chat.**
 - **`tracer` and `gitter`** are fleet agents the family uses; they are not its members.
 
@@ -106,8 +108,10 @@ The lander itself has no tiers: `flights-lander` lands every worktree.
 
 ## What passes between agents
 
+In the build/land lifecycle:
+
 - **Messages only.** A brief is the spawn prompt, and a return is the final message.
-- **No files.** There is no flight directory, run log, brief file, return file, gate file or spec file.
+- **No build/land files.** The build/land protocol creates no flight directory, run log, brief file, return file, gate file or spec file.
 - **The one path that travels** is a tracer run, when one exists, named in a brief so the receiver may reuse it.
 - **A foreman's brief carries:**
   - the work and its acceptance;
@@ -173,7 +177,7 @@ A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set`
 - **Critical decisions go to the main chat, without stopping.** A critical decision is one where being wrong costs data, privacy or patient data, money, security, or anything irreversible. The agent sends it to the main chat (`SendMessage(to: "main")`) with the choice it is proceeding with, then keeps working. If an answer arrives that differs, it adopts it.
 - **The place is the parent's.** A foreman's prompt names no worktree: it works where its parent points it, and the main chat owns the place, the landing and git.
 
-## What the family never carries
+## What the build/land lifecycle never carries
 
 | Absent | Instead |
 | --- | --- |
@@ -183,7 +187,7 @@ A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set`
 | A lander or gitter spawned by a foreman | the main chat owns both |
 | Review lenses (a security seat, fixed tracers) | the lander's hunt and the children its computed PLAN spawns |
 | A second gate round | fixes inside the one lander |
-| A spec writer or a requirements interview command | the main chat settles requirements; `flights-foreman` takes novel work |
+| A required specification or requirements interview step | the main chat settles requirements; the user may independently request `flights-speccer` |
 
 ## Harness settings
 

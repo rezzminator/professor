@@ -367,6 +367,13 @@ func (installer *engine) ensureClaudePluginTarget(
 	target *ClaudePluginTarget,
 ) {
 	fail := func(err error) { run.failures = append(run.failures, installer.pluginFailure(run.dir, target.ID, err)) }
+	if successor := target.retiredSuccessor(); successor != "" {
+		// Nothing is installed, enabled or disabled for it: the successor's own
+		// pass disables its enabled copies.
+		gap := retiredListedGap(target.Name, successor)
+		fail(fmt.Errorf("%s — %s", gap.Problem, gap.Fix))
+		return
+	}
 	if target.Undecided != "" {
 		// No copy is installed, enabled or disabled on an error.
 		run.failures = append(run.failures, installer.pluginFailure(

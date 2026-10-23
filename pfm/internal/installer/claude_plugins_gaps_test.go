@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,6 +130,54 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 			t.Fatalf("a disabled retired id was edited again:\n%s", out.String())
 		}
 	})
+}
+
+// TestEnsureClaudePluginsRefusesAListedRetiredName: claude.plugins still
+// listing sub-agent-compact, the name forward-compaction retired, is a FAIL
+// naming the successor, and the retired copy is never installed or enabled:
+// ensuring it would enable what the successor's install disables. Doctor
+// reports the same gap.
+func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
+	const retired, successor = "sub-agent-compact", "forward-compaction"
+	problem := "plugin " + retired + " is retired (now " + successor + ") but " + pfmconfig.KeyClaudePlugins + " lists it"
+	home, binary, first, second := pluginFixture(t)
+	settings := filepath.Join(first, "settings.json")
+	writeFixture(t, settings, `{"enabledPlugins":{"sub-agent-compact@sub-agent-compact-dev":true}}`)
+	runner := &pluginRunner{}
+	var out bytes.Buffer
+	inst := pluginEngine(home, binary, first, second, runner, &out, true)
+	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: retired}, {ID: successor}}
+	err := inst.ensureClaudePlugins(context.Background())
+	if err == nil || !strings.Contains(err.Error(), problem) {
+		t.Fatalf("err = %v, want one naming %q\n%s", err, problem, out.String())
+	}
+	for _, call := range runner.calls {
+		// The successor installs from the retired name's repository; only its ids are the retired copy's.
+		if strings.Contains(call.argv, retired+"@") {
+			t.Fatalf("the retired name was ensured: %q\n%s", call.argv, out.String())
+		}
+	}
+	var document struct {
+		Enabled map[string]any `json:"enabledPlugins"`
+	}
+	if err := json.Unmarshal([]byte(readFixture(t, settings)), &document); err != nil {
+		t.Fatal(err)
+	}
+	for id, on := range document.Enabled {
+		if strings.HasPrefix(id, retired+"@") && on != false {
+			t.Fatalf("%s left enabled: %v\n%s", id, document.Enabled, out.String())
+		}
+	}
+	targets := ClaudePluginTargets(ClaudePluginBuild{Plugins: []pfmconfig.ClaudePlugin{{ID: retired}}})
+	gaps, err := ClaudePluginGaps(settings, targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ClaudePluginGap{problem, "replace " + retired + " with " + successor + " in " +
+		pfmconfig.KeyClaudePlugins + ", then " + ClaudePluginRepair}
+	if !slices.Contains(gaps, want) || !ClaudePluginGapNames(want.Problem, retired) {
+		t.Fatalf("gaps = %q, want %q among them", gaps, want)
+	}
 }
 
 // TestEnsureClaudePluginsReleaseRetiresTheProfessorCopy: a release install

@@ -92,7 +92,7 @@ One round per spawn, by `docs/commands/pfm/references/release-rehearsal.md`: two
 
 After `gitter` Phase RELEASE, read-only:
 
-1. The tag's `release.yml` run, watched to completion: `gh run watch {id} --exit-status`.
+1. The release PR merge's `release.yml` run, whose `publish` job made the tag, watched to completion: `gh run watch {id} --exit-status`.
 2. `gh release view v{NEW} --json tagName,isDraft,isPrerelease,body,assets`: not a draft, not a prerelease; the body equals `git show v{NEW}:releases/v{NEW}.md` up to the trailing newline; the four `pfm_*` binaries and `SHA256SUMS` attached.
 3. The host's binary and `SHA256SUMS` downloaded into `DIR/verify/`; its checksum line verifies; the binary's `version` prints `v{NEW}`.
 4. The banner's source: `pfm internal update-check --cache DIR/verify/update-check.json --current {PREV} --url https://github.com/rezzminator/professor/releases/latest` records `v{NEW}` as latest.

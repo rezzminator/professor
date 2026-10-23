@@ -90,7 +90,7 @@ The maintainer's own monorepo — where the pipeline runs daily and improvements
 
 - **Framework templates are authored in `templates/`; fleet assets are authored in `pfm/internal/installer/assets/`.** The binary embeds the latter; machines consume both through their owning install paths rather than a duplicate host bundle.
 - **`refresh-map.json` retires file-by-file.** Its `curated` class (template IS the source, no live file to derive from) is the terminal state for every entry; the map is a migration ledger, and an empty map ends the live→template derivation era.
-- **The release protocol shrinks** to: version, changelog, tag, push. The genericize/refresh pass exists only for files still in the derivation era.
+- **The release protocol shrinks** to: version, changelog, the `develop → main` merge (whose `publish` job tags it). The genericize/refresh pass exists only for files still in the derivation era.
 
 Until then, both flows run side by side: derived templates refresh from the live source under the hash map; curated templates are edited here directly.
 

@@ -110,7 +110,7 @@ With `--stamp` and every rule passing, it writes `READY` as `{sha} v{NEW} {YYYY-
 - `changelogger`: `notes` with the coverage arguments, before it returns.
 - `gitter` Phase RELEASE: `ready` without `--stamp`, as its precondition.
 - `.claude/scripts/dev.sh verify templates`: `notes --all releases`.
-- `.github/workflows/release.yml`: `notes releases/{tag}.md --version {tag}` beside the authored-notes gate.
+- `.github/workflows/release.yml`: the release PR's `release` job runs `make release`, `notes releases/v{VERSION}.md --version v{VERSION}` beside the authored-notes gate; `make release-check` runs it locally.
 
 ## Tests
 

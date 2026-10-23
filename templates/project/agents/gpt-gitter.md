@@ -1,6 +1,6 @@
 ---
 name: gpt-gitter
-description: "Handles Git phases \u2014 SETUP, COMMIT, MERGE, PUSH, PULL, TAG, RELEASE or freeform under the project Git manual. Returns verified refs or a blocker."
+description: "Handles Git phases \u2014 SETUP, COMMIT, MERGE, PUSH, PULL, RELEASE or freeform under the project Git manual. Returns verified refs or a blocker."
 tools: Read, Write, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 visibility:
   agents:

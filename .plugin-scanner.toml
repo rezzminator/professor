@@ -1,4 +1,4 @@
-# HOL AI Plugin Scanner config, auto-discovered by .github/workflows/plugin-scan.yml.
+# HOL AI Plugin Scanner config, auto-discovered by .github/workflows/release.yml.
 #
 # Each path is named exactly, never globbed, so a secret-shaped string in any
 # other file still fails the scan. None of these files holds a real key.

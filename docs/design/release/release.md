@@ -75,7 +75,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 | 3 | GATE | `releaser` | `gate.md` | the main chat fixes; GATE re-runs |
 | 4 | REHEARSE | `releaser` | `rehearsal.md`, `rehearsal/{machine}-{n}/` | notes frictions → NOTES revise; code and doc frictions → the main chat |
 | 5 | READY | `releaser` | the `## Verification` section, `READY` | the phase whose verdict is not at HEAD |
-| 6 | PUBLISH | main chat → `gitter` | the ruleset probe, the merge, the leak check, the standalone skill repos, the push, the PR, the tag | stop |
+| 6 | PUBLISH | main chat → `gitter` | the ruleset probe, the merge, the leak check, the standalone skill repos, the push, `make release-check`, the PR and its merge, whose `publish` job makes the tag | stop |
 | 7 | VERIFY | `releaser` | `published.md` | stop and report |
 | 8 | CLOSE | main chat → `gitter` | the next `-alpha` line, cleanup | stop |
 
@@ -134,7 +134,7 @@ A verdict carries over a later commit in exactly two cases, both computed by the
 
 ## Versioning
 
-`VERSION` is the source of truth; tags are `vX.Y.Z`, annotated, never moved. Between releases `develop` carries the next `X.Y.Z-alpha`.
+`VERSION` is the source of truth; tags are `vX.Y.Z`, made by the `release.yml` `publish` job on the release PR's merge commit, never pushed by hand, never moved. Between releases `develop` carries the next `X.Y.Z-alpha`.
 
 The bump has a floor computed from the note's sections, following the left-most non-zero rule (Cargo, uv, Ruff): while the major is 0, the minor is the breaking component.
 
@@ -195,7 +195,7 @@ A range of hundreds of commits cannot be reviewed hunk by hunk at release time: 
 | The reader's prompt | `pfm/internal/picker/update_row.go` `professorUpdatePrompt` and its test | Timing, surfaces, stops |
 | The rehearsal | `docs/commands/pfm/references/release-rehearsal.md`, `infra/fence/release-rehearsal.sh` | The fenced adopter |
 | The publish gate | `.claude/agents/gitter.md` Phase RELEASE | The ready re-check |
-| The CI backstop | `.github/workflows/release.yml` | The grammar check on the tagged note |
+| The CI backstop | `.github/workflows/release.yml` | The release PR's `release` job: the version past `main`'s, the grammar check on its note |
 | The mirrors and manifest | `.codex/`, `.opencode/`, `.professor/manifest.json` | The two agents registered |
 
 ## Open items

@@ -30,7 +30,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - plugins: the plugins the marketplace lists, each a git submodule of its own repo on `develop`; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every one as its `-dev` copy from them (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
-- CI: GitHub Actions gating pushes and pull requests · `.github/workflows/`, `.github/dependabot.yml`
+- CI: GitHub Actions gating the `develop → main` release pull request and publishing its merge; `make release-check` runs the same checks locally · `.github/workflows/release.yml`, `Makefile`
 
 ## Path vars
 
@@ -69,7 +69,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## CI
 
-- `.github/workflows/plugin-scan.yml` runs on `{main|develop}` pushes, pull requests and manually; `.github/workflows/release.yml` on `v*` tags and manually (artifacts only).
+- `.github/workflows/release.yml` runs on pull requests into `main` and manually (test artifacts only), never on a push: `check` (the mirrors and the HOL plugin scan), `build` and `release` gate the release PR; its merge's `publish` job tags `v{VERSION}` and creates the GitHub release.
 
 ## Host
 
@@ -80,7 +80,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 ## Publication (this repo's sacred ground)
 
 - **No push, tag or release without an explicit request in the current turn.** A finished task, a green build, a "finish it" or a completed release document is NEVER permission; the authorized Git writer publishes only on the user's plain ask in that turn.
-- **`main` is release-only:** all work lands on `develop`; `main` moves only when `/pfm:release` merges the `develop → main` release PR (gitter Phase RELEASE) — GitHub's ruleset and `.githooks/pre-push` refuse every other route.
+- **`main` is release-only:** all work lands on `develop`; `main` moves only when `/pfm:release` merges the `develop → main` release PR (gitter Phase RELEASE) — GitHub's ruleset and `.githooks/pre-push` refuse every other route; the merge tags the release, and no tag is pushed by hand.
 - **Nothing identifying ships:** no source-project brand, user PII, client domain content or machine-absolute path (`/home/…`, `/Users/…`) in any tracked file; write it clean the first time — `scripts/leak-check.sh` is the backstop, not the plan.
 - **Template example values are invented placeholders**, NEVER mined from a live private repo.
 - **Version discipline:** `VERSION`, `CHANGELOG.md`, `releases/v{X.Y.Z}.md` and the tag MUST agree; between releases `develop`'s `VERSION` is the next `{X.Y.Z}-alpha`; `/pfm:release` owns the sequence.

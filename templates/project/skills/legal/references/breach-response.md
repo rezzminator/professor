@@ -38,4 +38,4 @@ SCALE (>100 subjects → more scrutiny); ENCRYPTED (secure key → may remove th
 
 ## {PROJECT_NAME} application
 
-A breach of {SESSION_NOUN} {SENSITIVE_DATA} starts at DPC 4 and is almost certainly HIGH or VERY HIGH — plan for SA + data-subject notification. As a processor for {USER_NOUN}-clients, {PROJECT_NAME}'s Stage-1 duty is to notify the client (controller) within the DPA window; the client then runs Track A. The breach notification itself is an outsider-facing document — the self-check's "no concealment, but commitments-and-facts only" discipline applies. The authoritative runbook is the officer's breach materials.
+A breach of {SESSION_NOUN} {SENSITIVE_DATA} starts at DPC 4 and is almost certainly HIGH or VERY HIGH — plan for SA + data-subject notification. As a processor for {USER_NOUN}-clients, {PROJECT_NAME}'s Stage-1 duty is to notify the client (controller) within the DPA window; the client then runs Track A. The breach notification itself is an outsider-facing document — the self-check's "no concealment, but commitments-and-facts only" discipline applies.

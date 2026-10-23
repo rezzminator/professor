@@ -35,11 +35,11 @@ expect_has 'L16 hot reload is tree-changed' "$(row passport/identity)" $'FAIL\tt
 runlab stale-options
 expect_eq 'stale options exit 1' "$RC" 1
 expect_has 'vital/options-ignored FAIL on stale options' "$(row vital/options-ignored)" $'FAIL\t2 rows, the scenario\'s options were not applied: logs/fake-plugin/'
-expect_has 'the stale keys are named' "$(row vital/options-ignored)" 'options forwardHandoffTool, mainAutoCompact are not read'
-# the same options as SUB_AGENT_COMPACT_* variables: the plugin reports nothing ignored, the vital passes
+expect_has 'the stale keys are named' "$(row vital/options-ignored)" 'options ceiling, ceilingNative are not read'
+# the same options as FORWARD_COMPACTION_* variables: the plugin reports nothing ignored, the vital passes
 runlab env-options
 expect_eq 'env options run exits 0' "$RC" 0
-expect_has 'env options reach claude' "$(tr '\n' ' ' < "$RUN/fake/env-keys")" 'SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT'
+expect_has 'env options reach claude' "$(tr '\n' ' ' < "$RUN/fake/env-keys")" 'FORWARD_COMPACTION_CEILING FORWARD_COMPACTION_CEILING_NATIVE'
 expect_has 'vital/options-ignored PASS on env options' "$(row vital/options-ignored)" $'PASS\t0 options-ignored rows'
 # a LAB_ENV value the plugin refuses runs its default: the vital fails it, unless the scenario declares the option-error
 FAKE_OPTION=FAKE_PLUGIN_FLAG=bogus runlab hello

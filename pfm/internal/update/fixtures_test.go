@@ -370,12 +370,11 @@ func buildAdoptAtStoreFixture(t *testing.T, root string) []string {
 	t.Helper()
 	for relative, content := range map[string]string{
 		"VERSION":                                                          "0.65.0\n",
-		"templates/project/CLAUDE.md":                                      "# {TOKEN} contract\n",
 		"templates/project/settings.json":                                  "{}\n",
 		"templates/project/rumdl-policy.toml":                              "# fixture rumdl policy\n[global]\n",
 		"templates/project/commands/dev.md":                                "old\n",
 		"templates/project/agents/gitter.md":                               "---\nname: gitter\n---\nbody\n",
-		"templates/project/scripts/dev.sh":                                 "#!/usr/bin/env bash\nset -euo pipefail\n",
+		"templates/project/scripts/worktree.sh":                            "#!/usr/bin/env bash\nset -euo pipefail\n",
 		"templates/project/skills/legal/SKILL.md":                          "---\nname: legal\n---\nbody\n",
 		"templates/project/epics/TEMPLATE.md":                              "# Epic\n",
 		"templates/project/codex/config.toml":                              "model = \"{TOKEN}\"\n",
@@ -413,7 +412,6 @@ func buildScaffoldStoreFixture(t *testing.T, root string) []string {
 		mode    os.FileMode
 	}{
 		"VERSION":                         {content: "0.65.0\n", mode: 0o600},
-		"templates/project/CLAUDE.md":     {content: "# {TOKEN} contract\n", mode: 0o600},
 		"templates/project/settings.json": {content: "{}\n", mode: 0o600},
 		"templates/project/rumdl-policy.toml": {
 			content: "# fixture rumdl policy\n[global]\n",
@@ -431,7 +429,7 @@ func buildScaffoldStoreFixture(t *testing.T, root string) []string {
 			content: "---\nname: testing-manual\n---\nbody\n",
 			mode:    0o600,
 		},
-		"templates/project/scripts/dev.sh": {
+		"templates/project/scripts/worktree.sh": {
 			content: "#!/usr/bin/env bash\nset -euo pipefail\n",
 			mode:    0o755,
 		},

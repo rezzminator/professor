@@ -1,7 +1,7 @@
 ---
 name: pcm
-description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; context budget → /context-meter.
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; initial context → /context-audit.
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 skills: [quality:prompt]
 model: opus
 effort: high
@@ -21,11 +21,11 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ## System wiring
 
 - `CLAUDE.md`: the orientation file (Vocabulary, Runtime, Rules)
-- `.claude/commands/*.md`: project slash commands (`/pcm`, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
+- `.claude/commands/*.md`: project slash commands (`/pcm`, …); machine-global commands (`/flights:*`, `/quality:*`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
 - `.claude/agents/*.md`: root agents (`gitter`, `pcm`) and any `{proj}-{role}` specialist wrappers; machine-global agents live in `~/.claude/agents/`
 - `.claude/commands/{project}-testing-manual.md`: one per project, its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md`: reusable skills
-- `.claude/scripts/*.{sh,mjs}`: worktree.sh, alloc-ports.sh, dev.sh
+- `.claude/scripts/*.{sh,mjs}`: worktree.sh, alloc-ports.sh
 - the engine-sync plugin's hooks (`hook claude mark|stop|start`): registered by the plugin's own `hooks.json`, no file under `.claude/scripts/`
 - `{project}/.claude/agents/*.md`, `{project}/CLAUDE.md`: child project agents and conventions. A `{project}` held as a git submodule lands its commits in the child repo; the root repo pins a pointer (gitter-owned).
 - `docs/commands/{cmd}/references/`: command-owned reference docs (`$CDOCS/$CMD/$REFS/`); `docs/_index.md`: the hub of the cross-project reference clusters; `docs/facts/`: user-ruled system facts
@@ -126,7 +126,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 ## Special operations
 
 - Full rename: grep all occurrences, update agents, commands and `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
-- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back` unless it is an rr-family agent), compile with `engine-sync codex build .`; update the pipeline if needed.
+- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back` unless it is an rr-family agent), compile with `engine-sync codex build .`; update the pipeline if needed.
 - New skill: create `.claude/skills/{name}/SKILL.md`.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` § Rules only as a non-obvious call.
 

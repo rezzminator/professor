@@ -3,7 +3,7 @@ name: flights-hunter
 description: FLIGHTS-LANDER-ONLY Finds one diff cluster's defects — the changed files of one module, read whole against the spec rows they implement. Spawned by flights-lander. Returns candidate findings, each tied to a verbatim line.
 visibility:
   visible-to:
-    include: [flights-lander, gpt-flights-lander]
+    include: [flights-lander]
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

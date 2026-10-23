@@ -74,6 +74,10 @@ func RetiredPfmCommand(command string) (name, successor string, ok bool) {
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
 const chatlogSuccessor = "the chatlog skill"
 
+// forwardCompactionSuccessor is what the forward-compaction plugin serves in
+// place of sub-agent-compact's tools.
+const forwardCompactionSuccessor = "mcp__forward-compaction__forward_compaction / mcp__forward-compaction__look_back"
+
 // flightsSuccessor takes new work since /flights:spec retired, so the /wave
 // family, the wave-builder skill and /imagine:build-spec point there too.
 const flightsSuccessor = "the flights-foreman agent"
@@ -147,6 +151,9 @@ var retiredNames = []retiredName{
 		name: "mcp__harvester-professor__", kind: retiredTool,
 		successor: "mcp__plugin_harvester_harvester__*", match: matchPrefix,
 	},
+	// The forward-compaction plugin replaces sub-agent-compact: its server and
+	// both of its tools are renamed (forward_handoff is forward_compaction).
+	{name: "mcp__sub-agent-compact__", kind: retiredTool, successor: forwardCompactionSuccessor, match: matchPrefix},
 	// releases/v0.62.0.md "Removed: the host-level /chat:* Claude
 	// slash-command family"; "drive chat through the MCP tools instead".
 	{name: "/chat:", kind: retiredCommand, successor: "mcp__chat-professor__*", match: matchPrefix},
@@ -159,6 +166,14 @@ var retiredNames = []retiredName{
 	// Commit "remove /rnd end to end": the project-scope research command and
 	// its former /rnd:hammer and /rnd:referee sub-commands have no successor.
 	{name: "/rnd", kind: retiredCommand, match: matchFamily},
+	// Commit db16bb63 "replace context-meter and context-audit commands with
+	// one user-only initial-context audit skill".
+	{name: "/context-meter", kind: retiredCommand, successor: "/context-audit", match: matchExact},
+	// Commit "prune project templates": the project-tier /mentor, /marketer and
+	// /officer command templates are gone, with no successor.
+	{name: "/mentor", kind: retiredCommand, match: matchExact},
+	{name: "/marketer", kind: retiredCommand, match: matchExact},
+	{name: "/officer", kind: retiredCommand, match: matchExact},
 	{name: "mono-architect", kind: retiredAgent, match: matchExact},
 	{name: "mono-documenter", kind: retiredAgent, match: matchExact},
 	{name: "mono-planner", kind: retiredAgent, match: matchExact},

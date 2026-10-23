@@ -7,17 +7,17 @@
   },
   "plugins": [
     {
-      "name": "sub-agent-compact",
+      "name": "forward-compaction",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/sub-agent-compact.git",
-        "path": "./plugins/sub-agent-compact",
+        "path": "./plugins/forward-compaction",
         "ref": "main"
       },
-      "description": "Smart auto-compact for Claude Code: a separate compaction point for every sub-agent, and self-compaction at a milestone the model chooses.",
+      "description": "The model writes its own handoff through one tool and the plugin installs it at Claude Code's compaction, with facts recorded from typed events and every later message kept verbatim.",
       "homepage": "https://github.com/rezzminator/sub-agent-compact",
       "license": "MIT",
-      "keywords": ["claude-code", "sub-agent", "auto-compact", "compaction", "function-hooks", "professor"]
+      "keywords": ["claude-code", "compaction", "context-window", "handoff", "function-hooks", "professor"]
     },
     {
       "name": "cache-live-control",

@@ -797,7 +797,7 @@ case "$1" in
       echo 'SECTION-DRIFT beta-max: beta.md § Budget changed since pinned (pin sha256:a, now sha256:b) — review the override, then run engine-sync variants pin beta-max'
     fi
     if [ "${STUB_ES_UNKNOWN:-0}" -ne 0 ]; then # exit 0 with the OpenCode renderer's warning for a server it cannot grant
-      for tool in mcp__sub-agent-compact__compact mcp__sub-agent-compact__compact mcp__nosuch__x; do
+      for tool in mcp__forward-compaction__forward_compaction mcp__forward-compaction__forward_compaction mcp__nosuch__x; do
         echo "skip    unknown MCP server in tool $tool in $home/agents/beta.md — no configured or project .mcp.json server serves it; it stays denied"
       done
     fi
@@ -998,7 +998,7 @@ if grep -Fq 'SECTION-DRIFT beta-max' "$T/es.out" &&
   ok 'a SECTION-DRIFT is red and names the declaration even when engine-sync exits 0'
 else bad 'generated agents, drift' "$(cat "$T/es.out")"; fi
 es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names" STUB_ES_UNKNOWN=1
-if grep -Eq '^ *2 skip    unknown MCP server in tool mcp__sub-agent-compact__compact in ' "$T/es.out" &&
+if grep -Eq '^ *2 skip    unknown MCP server in tool mcp__forward-compaction__forward_compaction in ' "$T/es.out" &&
   grep -Fq 'FAILSTEP generated agents: engine-sync dropped MCP tools from OpenCode twins (2 distinct' "$T/es.out" &&
   ! grep -Fq 'generated agents FAILED to render' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && ga_jailed; then
   ok 'an unknown-MCP-server warning from an exit-0 render is red and names each server and its count, never a clean render'

@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: chatlog
-description: 'Digests and prices agent runs — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, name or spawn tree: `pfm transcript show|locate|agents`, `pfm tokens`, `pfm model-cost`, `chatlog.py prep|read|find|note|report|verify|prompts|writes|entry|runs|census|waits`. Faults or audits → agent-investigator; static context → /context-meter.'
+description: 'Digests and prices agent runs — "what did that agent do", "where did the tokens go", "what does model X cost"; Claude, Codex or OpenCode, by path, id, name or spawn tree: `pfm transcript show|locate|agents`, `pfm tokens`, `pfm model-cost`, `chatlog.py prep|read|find|note|report|verify|prompts|writes|entry|runs|census|waits`. Faults or audits → agent-investigator; initial context → /context-audit.'
 ---
 
 # chatlog

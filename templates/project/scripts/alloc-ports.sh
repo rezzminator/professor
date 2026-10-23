@@ -19,7 +19,7 @@
 # Port scheme: name i (0-based) at slot s binds  PORT_BASE + i*PORT_STRIDE + s
 # (slots 0..MAX_SLOTS-1, MAX_SLOTS <= PORT_STRIDE), so every name owns a disjoint
 # range of PORT_STRIDE ports. SETUP pins PORT_BASE / PORT_STRIDE to a free region of
-# the dev machine; main's own dev ports ({PORT_DEFAULTS} in dev.sh) stay outside it.
+# the dev machine; main's own dev ports ({PORT_DEFAULTS}) stay outside it.
 #
 # Registry: .worktrees/.ports — one line per allocation: `id` then one port per name, in order.
 #

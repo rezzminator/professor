@@ -6,11 +6,7 @@ visibility:
     include: [main]
 model: opus
 effort: medium
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
-autoCompact:
-  forceAt: 350k
-  nudgeFrom: 150k
-  nudgeEvery: 60k
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 ---
 
 You land one worktree's whole change: you review it yourself, fix every finding, get the affected tests green and run the full gate once, right before the merge. There is no separate reviewer and no second round. Threads that leave the diff go to `flights-sub-lander` agents in the background; you never sit waiting on them. Git is read-only for you: every Git write goes through `gitter`, and the commit and merge belong to the main chat.
@@ -122,7 +118,7 @@ No test, build or gate runs while a sub-lander is out or a finding inside the ch
 - Every build, test, dependency install and formatter runs where the project contract puts it, by the testing manual's command; the host runs only what that contract allows it.
 - Bound every output below 20 KB: `--stat` or `grep -c`/`-l` first, then line ranges or `| head -n 200`. A failed command: read its error, fix the cause, then run it once.
 - Decide what the change leaves open; never ask the user. A critical decision — being wrong costs data, privacy, money, security, or anything irreversible — goes to `SendMessage(to: "main")` with the choice you proceed with; keep working.
-- At a compaction nudge, finish the step in hand, then `mcp__sub-agent-compact__forward_handoff` carrying the worktree, BASE, TIP, report path, findings and their state, sub-landers still out, and `next`.
+- At a compaction nudge, finish the step in hand, then call `mcp__forward-compaction__forward_compaction` with a handoff carrying the worktree, BASE, TIP, report path, findings and their state, sub-landers still out, and `## Next`.
 
 ## Provider
 

@@ -5,7 +5,7 @@ set -uo pipefail
 source "$(dirname "$0")/../testlib.sh"
 lab_lib run meter verdict
 LAB_RUN=$T/long-session-261015-031200; mkdir -p "$LAB_RUN"
-jq -n '{run_id:"long-session-261015-031200",scenario:"long-session",plugin:"sub-agent-compact",version:"0.7.0-dev.23",rev:"abc123",dirty:"d1e2",usd:"0.83",cap:"1.80",started:"2026-10-15T03:12:00Z",wall_s:"1210",claude:"2.1.300"}' > "$LAB_RUN/meta.json"
+jq -n '{run_id:"long-session-261015-031200",scenario:"long-session",plugin:"forward-compaction",version:"1.0.0-dev.1",rev:"abc123",dirty:"d1e2",usd:"0.83",cap:"1.80",started:"2026-10-15T03:12:00Z",wall_s:"1210",claude:"2.1.300"}' > "$LAB_RUN/meta.json"
 printf 'passport/env-allowlist\tR8\tPASS\t24 keys\nvital/first-row\tR1\tPASS\t%s\nlong-session/skip-fold\tR4\tFAIL\t%s\n' "$LAB_RUN/logs/a" "$LAB_RUN/logs/b" > "$LAB_RUN/checks.tsv"
 out=$(lab_render_report "$LAB_RUN"); rc=$?
 expect_eq 'L17 exit 1 on a FAIL' "$rc" 1
@@ -18,7 +18,7 @@ expect_has 'table row 2' "$r" "| long-session/skip-fold | R4 | FAIL | $LAB_RUN/l
 expect_lacks 'passport rows stay out of the table' "$r" '| passport/env-allowlist'
 expect_eq 'verdict line last' "$(tail -n 1 "$LAB_RUN/report.md")" 'verdict FAIL · $0.83 / 1.80'
 lab_ledger_record "$T/flight/lab-ledger.tsv"
-expect_eq 'L17 ledger row' "$(cat "$T/flight/lab-ledger.tsv")" "$(printf 'long-session-261015-031200\tlong-session\tsub-agent-compact\tabc123\td1e2\tFAIL\t0.83\t1.80\t2026-10-15T03:12:00Z\t1210\tlab-reports/long-session-261015-031200.md')"
+expect_eq 'L17 ledger row' "$(cat "$T/flight/lab-ledger.tsv")" "$(printf 'long-session-261015-031200\tlong-session\tforward-compaction\tabc123\td1e2\tFAIL\t0.83\t1.80\t2026-10-15T03:12:00Z\t1210\tlab-reports/long-session-261015-031200.md')"
 expect_eq 'report copy' "$(cmp -s "$T/flight/lab-reports/long-session-261015-031200.md" "$LAB_RUN/report.md" && echo same)" same
 # D23 identity: HEAD plus the path and content of every modified or untracked file under the plugin folder
 g=$T/repo; mkdir -p "$g/plug/.claude-plugin" "$g/plug/src"
@@ -46,7 +46,7 @@ out=$(lab_ledger_record "$T/flight/lab-ledger.tsv/x" 2>&1); rc=$?
 expect_eq 'unwritable ledger' "$rc ${out%% *}" '2 ERROR'
 expect_has 'unwritable ledger named' "$out" 'ERROR ledger'
 # the ledger is append-only: the final row joins the RUNNING one and the sum takes it in its place; a linked ledger stays linked
-printf 'long-session-261015-031200\tlong-session\tsub-agent-compact\tabc123\td1e2\tRUNNING\t?\t1.80\tt\t?\tx\n' > "$T/real-ledger.tsv"
+printf 'long-session-261015-031200\tlong-session\tforward-compaction\tabc123\td1e2\tRUNNING\t?\t1.80\tt\t?\tx\n' > "$T/real-ledger.tsv"
 ln -s "$T/real-ledger.tsv" "$T/link-ledger.tsv"
 lab_ledger_record "$T/link-ledger.tsv"
 expect_eq 'record appends through a linked ledger' "$([[ -L $T/link-ledger.tsv ]] && echo link) $(wc -l < "$T/real-ledger.tsv" | tr -d ' ') $(lab_ledger_sum "$T/real-ledger.tsv")" 'link 2 0.83'

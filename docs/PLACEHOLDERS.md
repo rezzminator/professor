@@ -11,13 +11,11 @@ Every regeneration agent reads this file and applies it uniformly. One canonical
 | Source value | Placeholder |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | the project name — current AND any former/renamed-from brand (a rename orphans the old name in the source, so scrub both) | `{PROJECT_NAME}` |
-| the project tagline | `{PROJECT_TAGLINE}` |
 | the project domain (its `.com` etc.) | `{PROJECT_DOMAIN}` |
 | `Professor` (persona) | **keep `Professor`** — ships as default name with a "rename if you want" note; never placeholder it |
 | the canonical blueprint repo `owner/repo` | `{BLUEPRINT_REPO}` |
 | the blueprint repo owner (GH/GL handle) | `{GH_USER}` |
 | the local blueprint clone path | `{BLUEPRINT_CLONE_PATH}` |
-| the memory-vault directory name (memory-backup scripts; default base `$HOME/work/{MEMORY_VAULT_DIR}`, env override `CLAUDE_MEMORY_REPO`) | `{MEMORY_VAULT_DIR}` |
 
 > Blueprint self-references resolve at install: a user with push access to the canonical repo targets it directly; everyone else targets their own fork.
 
@@ -33,16 +31,14 @@ Each roster entry has: directory, role label, tech stack, package manager, test 
 | one entry's directory | `{project}` | generic — used inside per-project PATTERN blocks |
 | one entry's directory, uppercase/shell-var-safe form | `{PROJECT}` | e.g. `{PROJECT}_STATUS`; sibling of `{project}`. In a rule that names ONE specific entry — `make -C {PROJECT}` infra ops, the `{AI_SERVICE_NAME}` source tree, the public-site paths — it is that entry, and the install-time KEEP/INSTALL-NOTE comment beside the rule says which |
 | one entry's role label | `{PROJECT_ROLE}` | the adopter's own one-line description of what the entry is; the blueprint carries no role names of its own |
-| one entry's stack | `{PROJECT_STACK}` | lang / framework / ORM / UI etc. for that entry |
 | one entry's package manager | `{PROJECT_PKG_MGR}` | |
 | one entry's test runner | `{PROJECT_TEST_RUNNER}` | |
-| one entry's dev port(s) | `{PROJECT_PORT}` | |
 
 A roster carries no fixed roles. The only per-entry attributes beyond the fields above are ownership facts SETUP asks for — which entry owns the shared infra/orchestration (`Makefile`, containers, DB, queue), which owns the migrations dir, which holds the `{AI_SERVICE_NAME}` LLM-calling code, which serves the public site — and a rule conditioned on one of them names the entry through `{PROJECT}` plus its KEEP comment. Role-shaped tokens — a `ROLE_PROJECT` marker (infra / ai / backend / frontend / web) or a per-role `ROLE_STACK` / `ROLE_PKG_MGR` / `ROLE_TEST_RUNNER` / `ROLE_PORT` — are retired and deliberately unregistered, so the token gate fails any template that re-introduces one.
 
 ### Materialization (how SETUP expands the roster)
 
-Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: `commands/per-project/testing-manual.md` (instantiated per entry) and `worktree.sh`/`dev.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
+Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: `commands/per-project/testing-manual.md` (instantiated per entry) and `worktree.sh`/`alloc-ports.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
 
 ### Single-project collapse
 
@@ -55,48 +51,21 @@ These are **NOT hand-filled.** SETUP renders them by expanding the per-project P
 | Token | Concept |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `{ROSTER_DOC_PATHS}` | space-joined roster doc directories |
-| `{PROJECT_TYPING_RULES}` | per-stack typing block (one per roster entry's language) |
 | `{PROJECT_TYPECHECK}` | per-project typecheck command |
 | `{PROJECT_FORMAT}` | per-project format command |
 | `{PROJECT_LINT}` | per-project lint command |
 | `{PROJECT_INSTALL_CMD}` | per-project install command |
-| `{PROJECT_RUN_CMD}` | per-project run command |
+| `{PROJECT_BUILD_CMD}` | per-project build command |
 | `{PROJECT_ENV_FILES}` | per-project env-file set |
-| `{HEALTH_PROBE}` | per-roster health-probe script block SETUP expands |
 | `{ENV_FILE_PROVISION}` | per-roster env-file provisioning block |
-| `{ENV_BOOTSTRAP}` | per-roster env-bootstrap block |
-| `{POST_INSTALL_HOOKS}` | per-roster post-install hook block |
-| `{STATUS_EXTRA_PROBES}` | per-roster extra status probes |
-| `{DEV_PROCESS_PATTERN}` | per-roster dev-process pattern block |
-| `{DEV_PREREQS}` | per-roster dev prerequisites |
+| `{UNIT_RUNNER}` / `{UNIT_TEST_DIR}` | per-project unit-tier runner and test dir (testing manual) |
+| `{INTEGRATION_RUNNER}` / `{INTEGRATION_TEST_DIR}` | per-project integration-tier runner and test dir (testing manual) |
+| `{PARALLEL_FLAG}` | per-project parallel-test-execution flag (testing manual) |
 | `{PORT_DEFAULTS}` | per-roster port-default assignments |
-| `{SEED_PROJECT}` | ownership marker — the entry that owns seeding (`"-"` sentinel when absent); scripts only |
-| `{MIGRATIONS_DIR}` | ownership marker — the migrations dir (`"-"` sentinel when absent) |
-
-### Per-project `CLAUDE.md` decomposition (templates/project/per-project/CLAUDE.md)
-
-This file decomposes the aggregate roster tokens above into individual bullets/headings. Real slots, register as siblings of their aggregate:
-
-| Token | Concept | Sibling of |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `{PROJECT_BUILD_CMD}` | per-project build command (was `{BUILD_CMD}` — see RENAME below) | `{PROJECT_INSTALL_CMD}` / `{PROJECT_RUN_CMD}` family |
-| `{RUNTIME}` | "Runtime: …" bullet, decomposed from `{PROJECT_STACK}` | `{PROJECT_STACK}` |
-| `{FRAMEWORK}` | stack framework name, also reused as a heading ("### {FRAMEWORK} Conventions") | `{PROJECT_STACK}` |
-| `{DATA_LAYER}` | data-layer bullet, decomposed from `{PROJECT_STACK}`; close kinship to `{DATABASE}`/`{ORM}` — maintainer may fold in instead | `{PROJECT_STACK}` |
-| `{UNIT_RUNNER}` / `{UNIT_TEST_DIR}` | per-tier runner+dir pair | `{PROJECT_TEST_RUNNER}` |
-| `{INTEGRATION_RUNNER}` / `{INTEGRATION_TEST_DIR}` | sibling pair | `{PROJECT_TEST_RUNNER}` |
-| `{PARALLEL_FLAG}` | parallel-test-execution flag | test-tier family |
-| `{LOGGER_PATH}` | structured-logger module path | — |
-| `{LOG_LEVEL_ENV}` | env var controlling log verbosity | `{LOGGER_PATH}` |
-| `{RAW_LOG_CALLS}` | banned raw-log call name | `{LOGGER_PATH}` |
-| `{CONVENTION_1}` / `{CONVENTION_2}` | framework-convention bullets | — |
-| `{DATA_ACCESS_RULE}` | data-access rule bullet | — |
-| `{ETHICS_RULE_1}` / `{ETHICS_RULE_2}` | domain ethics-rule bullets | `{SACRED_GROUND}` |
-| `{PROJECT_TREE}` | file-structure diagram slot | — |
 
 ## Tech stack (keep the mechanics, swap the names)
 
-A roster entry's whole stack, package manager and test runner are the per-entry `{PROJECT_STACK}` / `{PROJECT_PKG_MGR}` / `{PROJECT_TEST_RUNNER}` above. The inline tokens below name one component wherever a sentence needs just that component:
+A roster entry's package manager and test runner are the per-entry `{PROJECT_PKG_MGR}` / `{PROJECT_TEST_RUNNER}` above. The inline tokens below name one component wherever a sentence needs just that component:
 
 | Source tech | Placeholder |
 | ------------------------------------------------------------ | ------------------------------------------------------ |
@@ -111,7 +80,7 @@ A roster entry's whole stack, package manager and test runner are the per-entry 
 
 | Source value | Placeholder |
 | ------------------------------------------------------- | ------------------------------------------------------- |
-| Gemini / Google / Vertex AI / `GEMINI_API_KEY` / `AIza` | `{LLM_PROVIDER}` / `{LLM_API_KEY}` / `{LLM_KEY_PREFIX}` |
+| Gemini / Google / Vertex AI / `GEMINI_API_KEY` / `AIza` | `{LLM_API_KEY}` / `{LLM_KEY_PREFIX}` |
 | AssemblyAI | `{TRANSCRIPTION_SERVICE}` |
 | Resend | `{EMAIL_SERVICE}` |
 | `europe-west4` / EU residency | `{DATA_REGION}` |
@@ -120,9 +89,8 @@ A roster entry's whole stack, package manager and test runner are the per-entry 
 
 | Source value | Placeholder |
 | --------------------------------------- | ------------------------------------------------------------------ |
-| a roster entry's dev server port | `{PROJECT_PORT}` (per entry); the whole set is `{PORT_DEFAULTS}` |
-| 5432 / 5433 (db local/test) | `{DB_PORT}` / `{DB_PORT_TEST}` |
-| 4566 / 4567 (queue emulator local/test) | `{QUEUE_PORT}` / `{QUEUE_PORT_TEST}` |
+| 5433 (db test) | `{DB_PORT_TEST}` |
+| 4567 (queue emulator test) | `{QUEUE_PORT_TEST}` |
 
 ## Domain nouns (the `{DOMAIN_NOUN}` family)
 
@@ -147,24 +115,11 @@ The Professor's qualification is fixed prose — "15+ PhDs, one in whatever area
 | Source value | Placeholder |
 | --------------------------------- | ---------------------------------------------- |
 | GDPR | `{REGULATION}` |
-| EU AI Act | `{AI_REGULATION}` |
 | GDPR articles (Art. 17 etc.) | `{REGULATION}` Art. `{N}` — keep the structure |
 | PHI / PII | `{SENSITIVE_DATA}` |
 | MDR / SaMD / NEN 7510 / ISO 27001 | `{DOMAIN_STANDARDS}` |
 | Dutch / NL / BV / KVK | `{JURISDICTION}` / `{LEGAL_ENTITY_TYPE}` |
 | `europe-west4` / EU | `{DATA_REGION}` |
-
-### Tier B archetype slots
-
-The opt-in Tier B commands ship as archetype skeletons whose domain content is one named slot each. SETUP fills these from the interview; a template must never carry the source instance's concrete answer.
-
-| Command | Slots |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `/officer` | `{REGULATION}`, `{REGULATION_FRAMEWORK_DOCS}`, `{ENFORCEMENT_AUTHORITY}`, `{DATA_SUBJECT_RIGHTS}`, `{INCIDENT_NOTIFICATION_TIMELINE}` |
-| `/mentor` | `{MARKET_SEGMENT}`, `{JURISDICTION}`, `{LEGAL_ENTITY_TYPE}`, `{FUNDING_LANDSCAPE}`, `{REGULATORY_BODIES}` |
-| `/marketer` | `{CHANNEL_LANDSCAPE}`, `{TARGET_LANGUAGE}`, `{COMPETITIVE_LANDSCAPE}`, `{INDUSTRY_CONFERENCES}`, `{AUDIENCE_VOCABULARY}`, `{USER_PERSONA}` |
-
-A named regulator, competitor, conference, or association surviving in one of these templates is a leak, not a default — the archetype keeps the SHAPE of the answer, never the answer.
 
 ## Paths (mostly generic pipeline paths — KEEP unchanged)
 
@@ -186,11 +141,11 @@ This makes the codex-touched files a 3-way merge — read all three:
 2. **Current blueprint template** (re-inject the Codex sections/lines/refs that live deleted).
 3. **This map** (apply placeholders).
 
-Codex-touched shipped templates: root `CLAUDE.md` (keep the `# Runtime` → `## Codex` section + `.codex/` refs), `commands/pcm.md` (keep ALL Codex-management: every Critical invariant, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` OUT of the allow-list — generated mirrors are rebuilt by their compiler, never formatted; a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
+Codex-touched shipped templates: `commands/pcm.md` (keep ALL Codex-management: every Critical invariant, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` OUT of the allow-list — generated mirrors are rebuilt by their compiler, never formatted; a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
 
 ## Ignored artifacts (do NOT ship, drop references)
 
-A live-source command, script or rule the blueprint does not ship (`ignore_sources` in `templates/refresh-map.json`) is **out of scope**. When a shipped template (root `CLAUDE.md`, `dev`, `pcm`, `settings.json`) references one, drop that row/rule/line so the blueprint has no dangling pointers.
+A live-source command, script or rule the blueprint does not ship (`ignore_sources` in `templates/refresh-map.json`) is **out of scope**. When a shipped template (`pcm`, `settings.json`) references one, drop that row/rule/line so the blueprint has no dangling pointers.
 
 ## Tokens (additional canonical entries)
 
@@ -201,14 +156,12 @@ These slot into the concept families above — registered here to close prior ga
 | the AI service's own name / codename (the source's internal AI-service brand) | `{AI_SERVICE_NAME}` | Identity |
 | the test database name (e.g. `<project>_test`) | `{TEST_DB_NAME}` | Tech stack |
 | transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
-| illustrative persona example — a domain risk (Three lenses at once, § Rules → Meta) | `{DOMAIN_RISK_EXAMPLE}` | Persona |
 | the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
 | the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
 | the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
 | the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |
 | the cloud CLI forbidden at the execpolicy layer (e.g. `aws`) | `{CLOUD_CLI}` | Tech stack |
-| the CMO character's own name (parallel to the Professor identity slot) | `{MARKETER_NAME}` | Identity |
-| the artifact an ATLAS/compliance finding gets routed to (e.g. the adopter's DPIA) | `{PRIVACY_ASSESSMENT}` | Tier B |
+| the artifact an ATLAS/compliance finding gets routed to (e.g. the adopter's DPIA) | `{PRIVACY_ASSESSMENT}` | Regulation |
 | the persona's founding metaphor (e.g. "the couch meets the terminal") | `{DOMAIN_METAPHOR_A}` | Persona |
 | the N+1-query-joke punchline concept, domain-side | `{DOMAIN_UNCONSCIOUS}` | Persona |
 | the N+1-query-joke setup concept, domain-side | `{DOMAIN_DEFENSE_MECHANISM}` | Persona |

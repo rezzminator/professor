@@ -116,7 +116,7 @@ Header:
 | `LAB_GAP_IF_NOT_INDUCED` | the reason a fault-inducing scenario reads GAP when the fault did not happen |
 | `LAB_LOGGER` | `yes` adds the vitals; `no` skips them |
 | `LAB_DECISIONS` | the decision log the decision verbs read, when an option moves it; `{run}`, `{plugin}` and `{sid}` expand; default `{run}/logs/{plugin}/decisions/{sid}.jsonl` |
-| `lab_options` | the options JSON of a plugin that declares options, written to `pluginConfigs.{plugin}@inline.options`; `{run}` expands. `sub-agent-compact` reads none: its options are `SUB_AGENT_COMPACT_*` variables in `LAB_ENV`, and `vital/options-ignored` fails a run whose settings still carry a JSON option. A `LAB_ENV` variable named in the plugin's own prefix (its name upper snake, then `_`) that no file of the plugin names stops the run before launch, `ERROR option-unknown` |
+| `lab_options` | the options JSON of a plugin that declares options, written to `pluginConfigs.{plugin}@inline.options`; `{run}` expands. `forward-compaction` reads none: its options are `FORWARD_COMPACTION_*` variables in `LAB_ENV`, and `vital/options-ignored` fails a run whose settings still carry a JSON option. A `LAB_ENV` variable named in the plugin's own prefix (its name upper snake, then `_`) that no file of the plugin names stops the run before launch, `ERROR option-unknown` |
 
 Beats: `beat {slug} [--row R] [--needs slug]... -- {verb} [args]`. Slugs are unique in a scenario. The body may use only verbs plus `for`, `if`, `local`, `((` and plain assignments; `tests/scenarios_test.sh` enforces that, the header, and that the caps of all scenarios sum to at most USD 10.
 
@@ -132,7 +132,7 @@ Beats: `beat {slug} [--row R] [--needs slug]... -- {verb} [args]`. Slugs are uni
 | Verb | Arguments | Does |
 | --- | --- | --- |
 | `need_corpus` | name tokens | writes `{run}/work/corpus/{name}.txt` of `tokens × 4` bytes, ending in a unique last word; Claude Code counts these words at about 1.5 tokens per 4 bytes (a 15000 file reads as 22.4k), so size a fill against the measured context, not the argument |
-| `need_agent` | name model tools [flow map] | a project agent in `{run}/work/.claude/agents/`; the map renders as nested `autoCompact:` lines |
+| `need_agent` | name model tools | a project agent in `{run}/work/.claude/agents/` |
 | `need_dir_mode` | path mode | pre-creates a directory with that mode |
 | `need_fixture_plugin` | fixture marketplace | installs `fixtures/{fixture}` into the run's store and enables it in the run settings |
 | `say` | text | types one line; returns at its prompt-submit mark; a line neither the transcript nor the pane holds after 5 s is typed once more |

@@ -25,7 +25,7 @@ func TestClaudePluginsKey(t *testing.T) {
 			name: "absent key keeps the defaults", content: `{"version":2}`,
 			want: []ClaudePlugin{
 				{ID: "cache-live-control"},
-				{ID: "sub-agent-compact"},
+				{ID: "forward-compaction"},
 				{ID: "auto-effort-control"},
 				{ID: "tool-visibility-controller"},
 				{ID: "engine-sync"},

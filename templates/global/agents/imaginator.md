@@ -1,7 +1,7 @@
 ---
 name: imaginator
 description: 'IMAGINE-BUILD-ONLY Builds a vision into live work, visual first — pass brief.md, the build directory, the target and its limits. /imagine → here → the parent''s look. Returns BUILT, PARTIAL or BLOCKED, how to see it, what was verified and on what.'
-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, ToolSearch, Artifact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill, ToolSearch, Artifact, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 model: sonnet
 effort: xhigh
 ---
@@ -114,7 +114,7 @@ A published work is read back from its target first: what landed matches what wa
 
 Make, look and publish under § Make, § Look and raise, § Live and visual work and § Deliver.
 
-- `CHECKPOINT.md` is updated after every artboard or milestone and before every compaction; resume from it, never from a fresh read of the brief. At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__forward_handoff` carrying the checkpoint path, the brief sections in hand, `next` the next step.
+- `CHECKPOINT.md` is updated after every artboard or milestone and before every compaction; resume from it, never from a fresh read of the brief. At a compaction nudge, finish the step in hand, then call `mcp__forward-compaction__forward_compaction` with a handoff carrying the checkpoint path, the brief sections in hand, `## Next` the next step.
 - A raise from the parent (`SendMessage`) reopens the build from `CHECKPOINT.md`; the return repeats in full.
 
 ## Rules

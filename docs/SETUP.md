@@ -12,7 +12,6 @@ Run inside your target project after `pfm init`. The command scaffolds project t
 - [Phase 1 — The interview](#phase-1--the-interview)
 - [Phase 2 — Customization](#phase-2--customization)
 - [Phase 3 — Smoke test](#phase-3--smoke-test)
-- [Phase 4 — Memory backup](#phase-4--memory-backup-optional-opt-in)
 - [Common gotchas](#common-gotchas)
 - [After install](#after-install)
 - [Staying current](#staying-current)
@@ -53,20 +52,19 @@ Claude runs Phase 1 (questions), Phase 2 (local adaptation), then Phase 3 (smoke
 This section is the runnable handoff from `pfm init`; no install slash command exists. Work only in the target project. The blueprint clone is read-only input.
 
 1. Read this file and `docs/PLACEHOLDERS.md` from the blueprint path printed by `pfm init`. Conduct every applicable Phase 1 question below and show the complete local write plan. Wait for the user to type **"go"**.
-2. Write `.professor/manifest.json` with the confirmed answers in its `interview` object, including `blueprint_clone_path`, roster, tool commands, ports, optional roles, and engine choices — `pfm init` writes only `.professor/baseline.json`, so the interview creates `manifest.json` in the format step 11 shows; on a re-run, preserve every field outside `interview` and `tokens`. `manifest.json` is the user-owned install record; `.professor/baseline.json` remains pfm-owned provenance. Beside `interview`, write a `tokens` object: one key per registered install-time token of `docs/PLACEHOLDERS.md` that has one project-wide value, named without braces (`"PROJECT_NAME"`), its value a JSON string (multi-line allowed). A per-roster-entry token — `{PROJECT}`, `{PROJECT_ROLE}`, `{PROJECT_STACK}` and the other roster-entry tokens — goes into `tokens` only in a single-project install; in a multi-project install it has one value per entry and stays for step 3. Lowercase `{project}` and every token under `docs/PLACEHOLDERS.md` § Runtime metavariables stay literal and never go into `tokens`. Then run `pfm init --render`. It validates every key before writing anything (`INVALID <key>: <reason>` exits `1` with nothing written: correct the manifest and run it again), renders each pinned file still exactly as `pfm init` scaffolded it (`RENDERED <local> (<n> substitutions)`, otherwise `SKIP <local>: <reason>`), and names every file still carrying an install-time token as `LEFT <local>: {TOKEN} ...`. These files are now the project's source of truth; do not regenerate them from templates or rewrite `.professor/baseline.json`. Files skipped by `pfm init` as `CONFLICT` stay unpinned and unchanged unless the user explicitly includes them in the plan.
-3. Fill by hand only what the render cannot: the tokens the `LEFT` lines name, the roster expansion ([Phase 2](#phase-2--customization) § Materialization: pattern blocks, `PROJECTS=(…)` arrays, per-entry tokens), and the install's KEEP/INSTALL decisions. Materialize the roster-only sources that `pfm init` deliberately skips:
-   - `templates/project/per-project/CLAUDE.md` → `{project}/CLAUDE.md` for each child project that needs one.
-   - `templates/project/commands/per-project/testing-manual.md` → `.claude/commands/{project}-testing-manual.md`, one per roster entry (`testing-manual.md` for a single-project install), its eleven sections filled from that project's real test layout and commands.
+2. Write `.professor/manifest.json` with the confirmed answers in its `interview` object, including `blueprint_clone_path`, roster, tool commands, ports, compliance answers, and engine choices — `pfm init` writes only `.professor/baseline.json`, so the interview creates `manifest.json` in the format Phase 2 step 10 shows; on a re-run, preserve every field outside `interview` and `tokens`. `manifest.json` is the user-owned install record; `.professor/baseline.json` remains pfm-owned provenance. Beside `interview`, write a `tokens` object: one key per registered install-time token of `docs/PLACEHOLDERS.md` that has one project-wide value, named without braces (`"PROJECT_NAME"`), its value a JSON string (multi-line allowed). A per-roster-entry token — `{PROJECT}`, `{PROJECT_ROLE}`, `{PROJECT_PKG_MGR}` and the other roster-entry tokens — goes into `tokens` only in a single-project install; in a multi-project install it has one value per entry and stays for step 3. Lowercase `{project}` and every token under `docs/PLACEHOLDERS.md` § Runtime metavariables stay literal and never go into `tokens`. Then run `pfm init --render`. It validates every key before writing anything (`INVALID <key>: <reason>` exits `1` with nothing written: correct the manifest and run it again), renders each pinned file still exactly as `pfm init` scaffolded it (`RENDERED <local> (<n> substitutions)`, otherwise `SKIP <local>: <reason>`), and names every file still carrying an install-time token as `LEFT <local>: {TOKEN} ...`. These files are now the project's source of truth; do not regenerate them from templates or rewrite `.professor/baseline.json`. Files skipped by `pfm init` as `CONFLICT` stay unpinned and unchanged unless the user explicitly includes them in the plan.
+3. Fill by hand only what the render cannot: the tokens the `LEFT` lines name, the roster expansion ([Phase 2](#phase-2--customization) § Materialization: pattern blocks, `PROJECTS=(…)` arrays, per-entry tokens), and the install's KEEP/INSTALL decisions. Materialize the roster-only source that `pfm init` deliberately skips: `templates/project/commands/per-project/testing-manual.md` → `.claude/commands/{project}-testing-manual.md`, one per roster entry (`testing-manual.md` for a single-project install), its eleven sections filled from that project's real test layout and commands.
 
    Re-running `pfm init --render` lists what is still `LEFT`; it renders nothing already changed.
-4. Verify that no required token remains, every generated agent reference resolves, and scripts preserve executable mode. If Codex is enabled, run `engine-sync codex build` and `engine-sync codex check` from the target project after the local Claude files are final.
-5. **Close by pinning every file deployed by the interview.** For each local created from a roster-only template, run:
+4. Write the root `CLAUDE.md` with `/quality:claude-md write CLAUDE.md`, the next step `pfm init` prints, from the interview answers; in a roster of 2+, write each child with `/quality:claude-md write {project}/CLAUDE.md`. No template backs an orientation file, so none is pinned.
+5. Verify that no required token remains, every generated agent reference resolves, and scripts preserve executable mode. If Codex is enabled, run `engine-sync codex build` and `engine-sync codex check` from the target project after the local Claude files are final.
+6. **Close by pinning every file deployed by the interview.** For each local created from a roster-only template, run:
 
    ```bash
    pfm update pin --template project/commands/per-project/testing-manual.md <local>
    ```
 
-   Use the matching template path for `project/per-project/CLAUDE.md` and any other interview-deployed template. Many local files may pin the same template. Do not re-pin files scaffolded by `pfm init`; their template-byte pins already exist and local token filling does not invalidate them.
+   Use the matching template path for any other interview-deployed template. Many local files may pin the same template. Do not re-pin files scaffolded by `pfm init`; their template-byte pins already exist and local token filling does not invalidate them.
 
 ---
 
@@ -78,7 +76,7 @@ Claude (in your target project) asks these questions, in this order. Answer them
 
 > What does your project do, in one sentence?
 
-This becomes `{PROJECT_NAME}` and `{PROJECT_TAGLINE}`. Example: "Acme is a developer-tooling platform that watches CI runs and assists the engineer."
+This becomes `{PROJECT_NAME}`. Example: "Acme is a developer-tooling platform that watches CI runs and assists the engineer."
 
 ### 2. Character name & voice (MANDATORY — cannot be skipped)
 
@@ -88,7 +86,7 @@ Most adopters keep Professor as-is. The voice transplants well across domains. I
 
 The Professor (`professor.md`) ships as ONE version: the **session style** loaded on every main-loop turn.
 
-Sacred ground (the topics where humor drops) is collected in question 8 — it feeds the Tier B archetypes; the Professor persona itself stays generic.
+Sacred ground (the topics where humor drops) is collected in question 8; the Professor persona itself stays generic.
 
 ### 3. Project roster
 
@@ -136,7 +134,7 @@ For each subproject, Claude pins these into the agents and scripts:
 - Dev server start command
 - Dependency install command (`pnpm install`, `uv sync`, `cargo build`, etc.)
 
-These go into `worktree.sh`, `dev.sh`, and each project's testing manual.
+These go into `worktree.sh` and each project's testing manual.
 
 ### 5. (retired)
 
@@ -146,49 +144,11 @@ Question 5 (Professor's disciplines) is retired — the persona's qualification 
 
 Question 6 (Council panel) is retired because no Council command ships. Omit `council_panel` from the manifest. The number is kept so later question references stay stable.
 
-### 7. Tier B opt-ins
+### 7. Compliance frame
 
-For each Tier B archetype, opt in or skip. For each opt-in, fill in the placeholders.
+> Do you have regulatory exposure? GDPR, HIPAA, FDA, SOC2, ISO 27001, MiFID, export controls, supply-chain rules, financial reporting? Which jurisdiction and legal-entity type do you operate under?
 
-#### `/officer` — compliance enforcer
-
-> Do you have regulatory exposure? GDPR, HIPAA, FDA, SOC2, ISO 27001, MiFID, export controls, supply-chain rules, financial reporting?
-
-If yes, fill in:
-
-- `{REGULATION}` — the framework name(s)
-- `{ENFORCEMENT_AUTHORITY}` — the body that enforces
-- `{DATA_SUBJECT_RIGHTS}` — the rights framework
-- `{INCIDENT_NOTIFICATION_TIMELINE}` — your breach-notification deadline
-
-If no, skip — most projects don't need this.
-
-#### `/mentor` — business advisor
-
-> Is this a commercial venture? Do you need NL/US/UK/etc. company formation, funding, GTM, regulatory cost/benefit advice?
-
-If yes, fill in:
-
-- `{MARKET_SEGMENT}` — your market
-- `{JURISDICTION}` — country + regions
-- `{LEGAL_ENTITY_TYPE}` — local entity type (BV, LLC, GmbH, Ltd, etc.)
-- `{FUNDING_LANDSCAPE}` — VCs, angels, grants relevant to your space
-- `{REGULATORY_BODIES}` — agencies/laws affecting business operations
-
-If no (open-source, research, hobby), skip.
-
-#### `/marketer` — visibility strategist
-
-> Do you market this product, write content, attend conferences, or run sales/SEO?
-
-If yes, fill in:
-
-- `{CHANNEL_LANDSCAPE}` — channels your audience uses
-- `{TARGET_LANGUAGE}` — primary marketing language (en, nl, de, ja, etc.)
-- `{COMPETITIVE_LANDSCAPE}` — named competitors
-- `{INDUSTRY_CONFERENCES}` — events that matter
-
-If no, skip.
+If yes, fill in `{REGULATION}` (the framework name(s)), `{JURISDICTION}` (country + regions) and `{LEGAL_ENTITY_TYPE}` (BV, LLC, GmbH, Ltd, etc.); the `/audit:*` commands and the `legal` skill shelf read them. If no, skip.
 
 ### 7b. Codex dual-runtime (OPTIONAL)
 
@@ -202,9 +162,7 @@ If no: skip — the entire Codex layer is omitted. No pipeline operation require
 
 > What does "do no harm" mean in your domain? Privacy, safety, correctness, financial integrity, narrative coherence, scientific reproducibility, security?
 
-This becomes `{SACRED_GROUND}` and is referenced by:
-
-- Officer (if opted in — the protected category)
+This becomes `{SACRED_GROUND}`, read by `/audit:security` and the docs hub's `standards.md`.
 
 Be specific. "Privacy" is too vague. "Patient session content and identifying details" is concrete. "Financial transaction integrity at the millisecond level" is concrete. "Scientific data reproducibility for FDA submissions" is concrete.
 
@@ -222,17 +180,16 @@ Claude shows you a summary of all answers + a list of files that will be written
 
 ## Phase 2 — Customization
 
-> **Materialization — how the roster expands.** Several templates carry per-project **PATTERN blocks**, written once with generic `{project}` tokens: the per-project testing manuals `.claude/commands/{project}-testing-manual.md` (plus any specialist agents), and the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh`. For each roster entry, Claude **expands every pattern block once**, substituting that entry's directory, role, stack, package manager, test runner, and port — then fills the `PROJECTS=()` arrays so the scripts iterate the real roster. A roster of one expands each block once; a roster of seven expands it seven times. **Never carry a pattern block for a project the roster does not list** — no installed file may reference a testing manual or an agent for a project that does not exist, and no `{project}` placeholder may remain unexpanded. **Single-project install:** the worktree is the repo root, the `PROJECTS=()` array holds the single entry (or the scripts drop the loop entirely), and cross-project consolidation steps are omitted.
+> **Materialization — how the roster expands.** Several templates carry per-project **PATTERN blocks**, written once with generic `{project}` tokens: the per-project testing manuals `.claude/commands/{project}-testing-manual.md` (plus any specialist agents), and the `PROJECTS=(…)` arrays in `worktree.sh` and `alloc-ports.sh`. For each roster entry, Claude **expands every pattern block once**, substituting that entry's directory, role, stack, package manager, test runner, and port — then fills the `PROJECTS=()` arrays so the scripts iterate the real roster. A roster of one expands each block once; a roster of seven expands it seven times. **Never carry a pattern block for a project the roster does not list** — no installed file may reference a testing manual or an agent for a project that does not exist, and no `{project}` placeholder may remain unexpanded. **Single-project install:** the worktree is the repo root, the `PROJECTS=()` array holds the single entry (or the scripts drop the loop entirely), and cross-project consolidation steps are omitted.
 
 Claude takes your answers and:
 
-1. **Writes root `CLAUDE.md`** to `/quality:claude-md`'s spine — fills in `{PROJECT_NAME}`, `{PROJECT_TAGLINE}`, the other scalar tokens (from `tokens`, through `pfm init --render`) and the optional stake line, keeps or deletes the optional docs map and `# Runtime` → `## Codex` blocks, and keeps the `# Rules` groups (sacred ground, `## Dispatch`, Code, Process, Meta). Emits `{PROJECT_ROSTER}` (one `# Vocabulary` entry per roster entry, plus one per other tracked top-level directory); a single-project install collapses the multi-project framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; the infra rule only if a roster entry owns infra, with that entry's directory as `{PROJECT}` in `make -C {PROJECT}`).
-2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
+1. **Writes root `CLAUDE.md`** with `/quality:claude-md write CLAUDE.md` ([Install interview](#install-interview) step 4): one `# Vocabulary` entry per roster entry, plus one per other tracked top-level directory; a single-project install collapses the multi-project framing to "the project."
+2. **Writes per-project `CLAUDE.md` files** (roster of 2+) with `/quality:claude-md write {project}/CLAUDE.md`, one per entry, carrying that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
 3. **Writes Tier A command files** — `/pcm`, `/audit:*` (the machine-global `/flights:doctor`, `/pfm`, `/quality:*` arrive by `pfm install`). Voice intact, domain content filled.
-4. **Writes Tier B command files** for each opt-in — `/officer`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled through `tokens`. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line. A declined archetype that `pfm init` already scaffolded is deleted, its pin forgotten with `pfm update drop <local>`, then its template silenced with `pfm update ignore <template>`; see [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes).
-5. **Writes root agents** — `gitter` and `pcm` always (`tracer`, `documenter`, `flights-foreman`, `flights-foreman-sonnet`, the standalone user-requested `flights-speccer` outside the build/land lifecycle, `flights-lander` with its children `flights-hunter`, `flights-spec-walker` and `flights-sub-lander`, `reviewer`, `reviewer-pro`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). The GPT twins `gpt-foreman`, `gpt-flights-speccer`, `gpt-flights-lander`, `gpt-reviewer`, `gpt-reviewer-pro`, `gpt-rr`, `gpt-rr-pro`, `gpt-rr-pro-max`, `gpt-agent-investigator`, `gpt-transcript-reader`, `gpt-tracer`, `gpt-sub-tracer`, `sol`, `luna`, `astra` are machine-global too, rendered from their own `templates/global/agents/{name}.md` declarations only when `claude.gptAgents` is true. Use them only with an OpenAI-compatible gateway serving their model IDs; `pfm install` neither bundles nor probes a gateway. [GPT twin setup](design/gpt-twins/gpt-twins.md) covers account paths, model mapping and hand-copy conflicts. Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
-6. **Writes the per-project testing manuals** — for each roster entry, instantiates `.claude/commands/{project}-testing-manual.md` from `templates/project/commands/per-project/testing-manual.md` with that project's tiers, test homes, run commands, gates and traps; the flights agents read it, so no per-project `developer` or `qa` agent ships. Specialists from Q3 are written under `{project}/.claude/agents/` only when the project wants them; no shipped command spawns one by name.
-7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; the project registry `templates/project/skills/sources.json` ships empty (`"source_fetched": {}`): the registry skills are host-global, fetched by `pfm install` as below, so no project clones them. An entry an adopter adds there is **source-fetched** from its canonical public repo into `.claude/skills/{name}/`: the installer clones it, parameterizes where needed, and removes the clone's `.git/` directory so the installed skill is plain files. The reasoning protocols that once shipped as bundled skills — `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. The host-global registry `templates/global/skills/sources.json` is owned by `pfm install`: it shallow-clones each registered repo (its `{GH_USER}` resolved like the theme registry) into `~/.local/share/pfm/install/skills/{name}/`, re-clones the default-branch head into a staging directory and swaps it in whenever `git ls-remote` reports a commit other than the one its record beside the store (`skills/.{name}.commit`) names, or the store lacks a usable root `SKILL.md` (never running git inside a store), and links the store into every Claude account's `skills/` and `~/.agents/skills/`. The table records each subject's source path and its parameterization.
+4. **Writes root agents** — `gitter` and `pcm` always (`tracer`, `documenter`, `flights-foreman`, `flights-foreman-sonnet`, the standalone user-requested `flights-speccer` outside the build/land lifecycle, `flights-lander` with its children `flights-hunter`, `flights-spec-walker` and `flights-sub-lander`, `reviewer`, `reviewer-pro`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). The GPT twins `gpt-foreman`, `gpt-flights-speccer`, `gpt-flights-lander`, `gpt-reviewer`, `gpt-reviewer-pro`, `gpt-rr`, `gpt-rr-pro`, `gpt-rr-pro-max`, `gpt-agent-investigator`, `gpt-transcript-reader`, `gpt-tracer`, `gpt-sub-tracer`, `sol`, `luna`, `astra` are machine-global too, rendered from their own `templates/global/agents/{name}.md` declarations only when `claude.gptAgents` is true. Use them only with an OpenAI-compatible gateway serving their model IDs; `pfm install` neither bundles nor probes a gateway. [GPT twin setup](design/gpt-twins/gpt-twins.md) covers account paths, model mapping and hand-copy conflicts. Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
+5. **Writes the per-project testing manuals** — for each roster entry, instantiates `.claude/commands/{project}-testing-manual.md` from `templates/project/commands/per-project/testing-manual.md` with that project's tiers, test homes, run commands, gates and traps; the flights agents read it, so no per-project `developer` or `qa` agent ships. Specialists from Q3 are written under `{project}/.claude/agents/` only when the project wants them; no shipped command spawns one by name.
+6. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`. Fills the `PROJECTS=(…)` arrays in both from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 6a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; the project registry `templates/project/skills/sources.json` ships empty (`"source_fetched": {}`): the registry skills are host-global, fetched by `pfm install` as below, so no project clones them. An entry an adopter adds there is **source-fetched** from its canonical public repo into `.claude/skills/{name}/`: the installer clones it, parameterizes where needed, and removes the clone's `.git/` directory so the installed skill is plain files. The reasoning protocols that once shipped as bundled skills — `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. The host-global registry `templates/global/skills/sources.json` is owned by `pfm install`: it shallow-clones each registered repo (its `{GH_USER}` resolved like the theme registry) into `~/.local/share/pfm/install/skills/{name}/`, re-clones the default-branch head into a staging directory and swaps it in whenever `git ls-remote` reports a commit other than the one its record beside the store (`skills/.{name}.commit`) names, or the store lacks a usable root `SKILL.md` (never running git inside a store), and links the store into every Claude account's `skills/` and `~/.agents/skills/`. The table records each subject's source path and its parameterization.
 
 | Skill / command | Source | Parameterization |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -249,11 +206,11 @@ Claude takes your answers and:
 | `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md` | Hydrated by RR (Phase 2.5) |
 | `/audit:security` | Command `templates/project/commands/audit/security.md` | Hydrated by RR (Phase 2.5) |
 
-7b. **Installs statusline** — obtains the `pfm` binary and runs `pfm install --yes`; the status line rides interactive Claude chat launches; query launches omit it. Hooks and MCP settings ride managed non-query Claude launches; query launches omit them. The native renderer shows model, fleet counts, context, git, cache state, cost, spend and rate limits; detached refreshers keep network work off the render path. The installer strips pfm-owned legacy account-file entries.
+6b. **Installs statusline** — obtains the `pfm` binary and runs `pfm install --yes`; the status line rides interactive Claude chat launches; query launches omit it. Hooks and MCP settings ride managed non-query Claude launches; query launches omit them. The native renderer shows model, fleet counts, context, git, cache state, cost, spend and rate limits; detached refreshers keep network work off the render path. The installer strips pfm-owned legacy account-file entries.
 
-7b-i. **Installs global settings** — `pfm install` manages `cleanupPeriodDays` and `"prependPlugins": []` in pfm's drop-in in the Claude managed-settings directory, using sudo when required. The empty `prependPlugins` keeps Claude Code 2.1.299+ from seating its built-in security plugin ahead of the person's plugins, which would skip their hooks; install adds it only when absent, never rewrites an existing value, and leaves it out when another managed source already sets it. It preserves other keys and writes no cleanup key into account `settings.json`; doctor inspects the managed file for missing, wrong, missing-`prependPlugins`, non-list-`prependPlugins` and unreadable states.
+6b-i. **Installs global settings** — `pfm install` manages `cleanupPeriodDays` and `"prependPlugins": []` in pfm's drop-in in the Claude managed-settings directory, using sudo when required. The empty `prependPlugins` keeps Claude Code 2.1.299+ from seating its built-in security plugin ahead of the person's plugins, which would skip their hooks; install adds it only when absent, never rewrites an existing value, and leaves it out when another managed source already sets it. It preserves other keys and writes no cleanup key into account `settings.json`; doctor inspects the managed file for missing, wrong, missing-`prependPlugins`, non-list-`prependPlugins` and unreadable states.
 
-7c. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, the docs hub (`docs/_index.md`, `docs/standards.md`) and its `architecture/`, `api/`, `map/` and `features/` clusters, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files, generated mirrors and any repository other than the session's project that has no `.rumdl.toml` of its own (a plugin submodule) are ignored; the session's own project without one gets a stderr hint instead. Add to `.claude/settings.json`:
+6c. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, the docs hub (`docs/_index.md`, `docs/standards.md`) and its `architecture/`, `api/`, `map/` and `features/` clusters, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files, generated mirrors and any repository other than the session's project that has no `.rumdl.toml` of its own (a plugin submodule) are ignored; the session's own project without one gets a stderr hint instead. Add to `.claude/settings.json`:
 
     ```json
     {
@@ -277,23 +234,23 @@ Claude takes your answers and:
 
     `pfm install` also writes rumdl's user config (`$XDG_CONFIG_HOME/rumdl/rumdl.toml`, else `~/.config/rumdl/rumdl.toml`) when none exists, with `[global] cache = false`: a rumdl run that finds no project `.rumdl.toml` then writes no stray `.rumdl_cache`. An existing user config is never rewritten.
 
-7d. **(Opt-in) Installs multi-account fleet tooling** — obtain the versioned binary using [INSTALL.md](../INSTALL.md), then run `pfm install` to preview or `pfm install --yes` to apply. Read-only host checks refuse BLOCK rows before any write; `pfm doctor` prints their fixes. Install creates missing shared store entries, links every account to `~/.claude`, writes global registries once into that store and stages the clone-sourced shim and platform scheduler. Hooks, status line and MCP ride managed non-query Claude launches; query launches omit them. Plugins install once through the primary account. Opt-in MCP and VS Code retain their enablement; VS Code offers **Professor** in its Extensions view and terminal dropdown, with the `PFM` terminal selected as default. Codex homes receive the owned fleet appendix in `developer_instructions`. Claude always has account 1 at `~/.cc/1` by default; explicitly empty Codex and OpenCode rosters remain empty. Custom settings are preserved. The write gate refuses a running name-sync job at once with exit 97; it waits up to 90 s for a running schedule fire, then refuses with exit 97 if the fire is still running. Service activation failures remain errors. Uninstall removes owned registrations and staged assets. Skipped if the user declines.
+6d. **(Opt-in) Installs multi-account fleet tooling** — obtain the versioned binary using [INSTALL.md](../INSTALL.md), then run `pfm install` to preview or `pfm install --yes` to apply. Read-only host checks refuse BLOCK rows before any write; `pfm doctor` prints their fixes. Install creates missing shared store entries, links every account to `~/.claude`, writes global registries once into that store and stages the clone-sourced shim and platform scheduler. Hooks, status line and MCP ride managed non-query Claude launches; query launches omit them. Plugins install once through the primary account. Opt-in MCP and VS Code retain their enablement; VS Code offers **Professor** in its Extensions view and terminal dropdown, with the `PFM` terminal selected as default. Codex homes receive the owned fleet appendix in `developer_instructions`. Claude always has account 1 at `~/.cc/1` by default; explicitly empty Codex and OpenCode rosters remain empty. Custom settings are preserved. The write gate refuses a running name-sync job at once with exit 97; it waits up to 90 s for a running schedule fire, then refuses with exit 97 if the fire is still running. Service activation failures remain errors. Uninstall removes owned registrations and staged assets. Skipped if the user declines.
 
-7d-i. **Harvester plugin** — Harvester installs and registers itself through each engine's native plugin manager; follow the [Harvester install guide](../plugins/harvester/README.md) for Claude Code, Codex and OpenCode. Its MCP server is named `harvester`. Professor does not provision its binary, configure its engines, or expose a Harvester doctor command. The next `pfm install` removes only exact legacy `harvester-professor` registrations that earlier Professor installers wrote. `/reload` remains in the shared command registry.
+6d-i. **Harvester plugin** — Harvester installs and registers itself through each engine's native plugin manager; follow the [Harvester install guide](../plugins/harvester/README.md) for Claude Code, Codex and OpenCode. Its MCP server is named `harvester`. Professor does not provision its binary, configure its engines, or expose a Harvester doctor command. The next `pfm install` removes only exact legacy `harvester-professor` registrations that earlier Professor installers wrote. `/reload` remains in the shared command registry.
 
-7e. **Probes host tooling (git-host bridge)** — checks the install machine for `gh` and `glab` (`command -v`). For each present, writes a one-file index skill at `.claude/skills/host-{gh|glab}/SKILL.md` whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: a GitLab adopter forks + releases through `glab`, a GitHub adopter through `gh`. Machine-specific, so it is generated per install (re-run on each machine), never shipped as a template. Absent tools get no skill.
+6e. **Probes host tooling (git-host bridge)** — checks the install machine for `gh` and `glab` (`command -v`). For each present, writes a one-file index skill at `.claude/skills/host-{gh|glab}/SKILL.md` whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: a GitLab adopter forks + releases through `glab`, a GitHub adopter through `gh`. Machine-specific, so it is generated per install (re-run on each machine), never shipped as a template. Absent tools get no skill.
 
-7f. **Installs themes** — places each Professor theme into `~/.claude/themes/`: every `templates/themes/{name}/` directory is one theme, a profile, found by scanning `templates/themes/` (the source clone's, or for a release install GitHub's contents listing at the release's ref, each file then fetched) — the same fixed file set for every theme (`templates/themes/README.md` § Profiles), assembled into one profile: `name`, `base` and `overrides`, plus the pins for any tmux, Herdr or VS Code key and the profile's VS Code colour theme; every key it omits is derived from the palette, and a key nothing reads, a missing or extra file or a non-canonical one is refused naming the file and the key or line. `pfm theme check [dir…]` runs install's checks on a theme directory, writing nothing. Claude's themes dir gets `name`, `base` and `overrides` alone; pfm keeps the whole profile in `~/.local/share/pfm/install/themes/` for `pfm theme` to read. Install also renders one complete VS Code colour theme per installed theme into the Professor extension, listed in VS Code's Preferences: Color Theme as the `Professor · {name}` group; picking one there runs `pfm theme use`, and a theme picked elsewhere switches a local VS Code window to its Professor theme. A profile is selected with `pfm theme use {name}`, `/theme`, the VS Code picker, or `"theme": "custom:{name}"` in an account's `settings.json`; an installer-owned recorded theme no longer shipped is removed at the next install only when its file is unmodified and no account selects it. If any account still selects it, install reports the account and leaves the theme in place: select another theme with `pfm theme use`, then install again to retire it. Unreadable or invalid account settings also defer retirement and are reported; correct them before retrying. Locally modified theme files remain in place with their recovery ownership retained. Custom themes need Claude Code v2.1.118+. Themes install to the user's home, so they are shared across all the user's projects. `pfm theme on` renders the theme Claude Code is set to into tmux, Herdr and VS Code and keeps them following it.
+6f. **Installs themes** — places each Professor theme into `~/.claude/themes/`: every `templates/themes/{name}/` directory is one theme, a profile, found by scanning `templates/themes/` (the source clone's, or for a release install GitHub's contents listing at the release's ref, each file then fetched) — the same fixed file set for every theme (`templates/themes/README.md` § Profiles), assembled into one profile: `name`, `base` and `overrides`, plus the pins for any tmux, Herdr or VS Code key and the profile's VS Code colour theme; every key it omits is derived from the palette, and a key nothing reads, a missing or extra file or a non-canonical one is refused naming the file and the key or line. `pfm theme check [dir…]` runs install's checks on a theme directory, writing nothing. Claude's themes dir gets `name`, `base` and `overrides` alone; pfm keeps the whole profile in `~/.local/share/pfm/install/themes/` for `pfm theme` to read. Install also renders one complete VS Code colour theme per installed theme into the Professor extension, listed in VS Code's Preferences: Color Theme as the `Professor · {name}` group; picking one there runs `pfm theme use`, and a theme picked elsewhere switches a local VS Code window to its Professor theme. A profile is selected with `pfm theme use {name}`, `/theme`, the VS Code picker, or `"theme": "custom:{name}"` in an account's `settings.json`; an installer-owned recorded theme no longer shipped is removed at the next install only when its file is unmodified and no account selects it. If any account still selects it, install reports the account and leaves the theme in place: select another theme with `pfm theme use`, then install again to retire it. Unreadable or invalid account settings also defer retirement and are reported; correct them before retrying. Locally modified theme files remain in place with their recovery ownership retained. Custom themes need Claude Code v2.1.118+. Themes install to the user's home, so they are shared across all the user's projects. `pfm theme on` renders the theme Claude Code is set to into tmux, Herdr and VS Code and keeps them following it.
 
-8. **Creates directory structure** — `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored).
+7. **Creates directory structure** — `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored).
 
-8a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/build/references/qa-commons.md` → `docs/commands/build/references/qa-commons.md`), so commands that cite a reference doc find it on disk.
+7a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/git/references/gitter-history.md` → `docs/commands/git/references/gitter-history.md`), so commands that cite a reference doc find it on disk.
 
-8b. **(If Codex opted in)** Creates `.codex/` as a pointer layer over `.claude/` — never a restatement of it. Writes `config.toml` (sandbox reach + the `{CODEX_MODEL}`/`{CODEX_REASONING_EFFORT}` pins) and `rules/repo-law.rules` (the execpolicy door lock for non-gitter roles). Runs `engine-sync codex build` to compile every root and per-project Claude source into the Codex mirrors, then `engine-sync codex check` to verify them. Registry changes require a new or reloaded Codex session. If Codex was NOT opted in, this step is skipped entirely.
+7b. **(If Codex opted in)** Creates `.codex/` as a pointer layer over `.claude/` — never a restatement of it. Writes `config.toml` (sandbox reach + the `{CODEX_MODEL}`/`{CODEX_REASONING_EFFORT}` pins) and `rules/repo-law.rules` (the execpolicy door lock for non-gitter roles). Runs `engine-sync codex build` to compile every root and per-project Claude source into the Codex mirrors, then `engine-sync codex check` to verify them. Registry changes require a new or reloaded Codex session. If Codex was NOT opted in, this step is skipped entirely.
 
-9. **Updates `.gitignore`** — adds `.worktrees/`, `tmp/`.
-10. **Maintains `.professor/` state** — `manifest.json` holds the user-owned interview answers, while `baseline.json` holds pfm-owned per-file template pins.
-11. **Writes `.professor/manifest.json`** — created at [Install interview](#install-interview) step 2, before `pfm init --render` reads its `tokens` (`pfm init` leaves only `baseline.json`); on a re-run replace its `interview` and `tokens` objects with the confirmed answers while preserving every other field. Format:
+8. **Updates `.gitignore`** — adds `.worktrees/`, `tmp/`.
+9. **Maintains `.professor/` state** — `manifest.json` holds the user-owned interview answers, while `baseline.json` holds pfm-owned per-file template pins.
+10. **Writes `.professor/manifest.json`** — created at [Install interview](#install-interview) step 2, before `pfm init --render` reads its `tokens` (`pfm init` leaves only `baseline.json`); on a re-run replace its `interview` and `tokens` objects with the confirmed answers while preserving every other field. Format:
 
 **Build roster validation:** no installed file is allowed to carry blueprint example projects that the target repo does not have. The installer must generate testing manuals (and any specialist blocks) only for roster entries, fail if any `{project}` pattern token remains unexpanded, and then verify every referenced `*/.claude/agents/*.md` path exists. A roster of `a` and `b` leaves no block for a `c` the repo does not have.
 
@@ -334,34 +291,22 @@ Claude takes your answers and:
         "dev": "uv run python -m worker"
       }
     },
-    "tier_b": {
-      "officer": {
-        "enabled": true,
-        "regulation": "PCI DSS",
-        "authority": "PCI Security Standards Council",
-        "rights": "customer order privacy",
-        "notification": "contract-defined"
-      },
-      "mentor": {
-        "enabled": true,
-        "market": "fictional retail order tracking",
-        "jurisdiction": "US",
-        "entity": "LLC",
-        "funding": "fictional retail investors",
-        "bodies": "retail trade associations"
-      },
-      "marketer": { "enabled": false }
+    "compliance": {
+      "regulation": "PCI DSS",
+      "jurisdiction": "US",
+      "entity": "LLC"
     },
     "codex": false,
     "ports": { "a": 3000, "db": 5432 }
   },
   "tokens": {
     "PROJECT_NAME": "acme-orders",
-    "PROJECT_TAGLINE": "Example order-tracking service for a fictional shop",
     "SACRED_GROUND": "fictional customer orders and their payment state",
     "DOMAIN_ADJ": "retail",
     "SENSITIVE_DATA": "customer order records",
     "REGULATION": "PCI DSS",
+    "JURISDICTION": "US",
+    "LEGAL_ENTITY_TYPE": "LLC",
     "DATABASE": "SQLite"
   }
 }
@@ -381,88 +326,9 @@ The main-loop session and every executor read a documentation hub that must exis
 
 ## Phase 3 — Smoke test
 
-After install, Claude verifies the project routes through the installed developer gate:
+After install, Claude runs each roster entry's test command from its testing manual, then exercises one small task through the pipeline and watches its project checks. The first run reveals anything missed in adaptation. If something asks the wrong question or runs the wrong command, invoke `/pcm` to fix it at the source.
 
-```
-bash .claude/scripts/dev.sh status
-```
-
-Then exercise one small task through the pipeline and watch its project checks. The first run reveals anything missed in adaptation. If something asks the wrong question or runs the wrong command, invoke `/pcm` to fix it at the source.
-
-Before creating the `professor: install` commit, close the update ledger per [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes): run `pfm doctor --project-updates`; run `pfm update pin --template <template> <local>` for every interview-deployed file, including per-project agents and each child `CLAUDE.md`; and run `pfm update ignore <template>` for every declined or deliberately non-materialized template — Tier B archetypes not opted in, `project/per-project/CLAUDE.md` for a roster of one, and `project/settings-global.json` because nothing installs that template — `cleanupPeriodDays` (and the `prependPlugins` guard) reaches Claude through the `managed-settings.d/pfm.json` drop-in `pfm install` writes and each launch's `--settings`. `pfm update ignore` refuses a template a local file is still pinned to: for a declined template `pfm init` scaffolded (the Tier B archetypes), delete the local file and run `pfm update drop <local>` first, then `pfm update ignore <template>`. `pfm update drop` alone is never how a template is declined — it forgets the pin, and the next report lists the template as `NEW` again. Re-run `pfm doctor --project-updates`; it must exit 0 and end in `clean` before the commit.
-
----
-
-## Phase 4 — Memory backup (optional, opt-in)
-
-Claude tells the adopter what this is, then ASKS whether to set it up — it's opt-in, never automatic.
-
-> **Memory backup** points Claude Code's persistent project memory at ONE private git vault — every project in its own subdirectory — and auto-syncs it. A `SessionStart` hook auto-wires whatever project you open; a `SessionEnd` hook syncs the whole vault. So a machine wipe or a new machine doesn't lose what Claude has learned, across all your projects. Plain git: ~1 second, zero tokens. Set it up now?
-
-If the adopter says **no**, skip the rest of this phase — nothing about the pipeline depends on it.
-
-If **yes**, walk the procedure (full detail + every gotcha in `docs/references/memory-backup.md`):
-
-1. **Create ONE PRIVATE vault repo** (e.g. `<gh-user>/<you>-memory`) on GitHub, and `git init` a local clone at the vault path — `$HOME/work/<vault-dir>` (the `{MEMORY_VAULT_DIR}` config point) or wherever `$CLAUDE_MEMORY_REPO` points. One vault holds every project's memory.
-2. **Configure headless auth** — `gh auth setup-git` (registers `gh` as the credential helper; token in the OS keychain, HTTPS not SSH). Verify with `GIT_TERMINAL_PROMPT=0 git ls-remote origin HEAD` — it returns instantly, no prompt.
-3. **Install the scripts + hooks.** Copy `templates/project/scripts/{memory-wire,memory-consolidate,memory-sync}.sh` to `~/.claude/scripts/` (substitute `{MEMORY_VAULT_DIR}` by hand with its `tokens` value — `pfm init --render` fills only the project's pinned copies). These are user-level — they target `~/.claude/...` across every project, so they ship into `~/.claude/scripts/`, NOT a project's `.claude/`. Then add the `SessionStart` + `SessionEnd` hooks to global `~/.claude/settings.json`:
-
-   ```json
-   {
-     "hooks": {
-       "SessionStart": [
-         {
-           "matcher": "",
-           "hooks": [
-             {
-               "type": "command",
-               "command": "sh $HOME/.claude/scripts/memory-wire.sh"
-             }
-           ]
-         }
-       ],
-       "SessionEnd": [
-         {
-           "matcher": "",
-           "hooks": [
-             {
-               "type": "command",
-               "command": "sh $HOME/.claude/scripts/memory-sync.sh"
-             }
-           ]
-         }
-       ]
-     }
-   }
-   ```
-
-   **Permission-mode pitfall:** editing global `~/.claude/settings.json` is a persistent, code-running config change — under auto-permission mode with `skipAutoPermissionPrompt`, the classifier SILENTLY DENIES it without prompting. So have the USER run this idempotent one-liner themselves (it won't duplicate or clobber existing hooks):
-
-   ```
-   python3 -c "import json,pathlib; p=pathlib.Path.home()/'.claude/settings.json'; d=json.loads(p.read_text()); h=d.setdefault('hooks',{}); h.setdefault('SessionStart',[]).append({'matcher':'','hooks':[{'type':'command','command':'sh \$HOME/.claude/scripts/memory-wire.sh'}]}); h.setdefault('SessionEnd',[]).append({'matcher':'','hooks':[{'type':'command','command':'sh \$HOME/.claude/scripts/memory-sync.sh'}]}); p.write_text(json.dumps(d,indent=2)); print('memory hooks added')"
-   ```
-
-4. **Run the consolidator once** — `sh ~/.claude/scripts/memory-consolidate.sh`. It migrates every existing `~/work/<project>` memory dir into its vault subdir (copy → verify file-for-file → swap for a symlink), skipping any dir already linked (including a legacy single-project root brain). New projects need no manual step — the `SessionStart` hook wires them on first open.
-5. **Test with the test-payload trick.** A clean vault makes the sync a silent no-op — indistinguishable from "never fired" — so stage a deliberate pending change first (bait the hook). Exit cleanly with `/quit`, then confirm a new `pushed` line in `~/.claude/memory-sync.log` AND that the file reached the remote.
-
-Tell the adopter to exit with `/quit` or `/clear` for a guaranteed synchronous flush; a hard window-close still works but leans on the script's self-heal to catch up next session. Full architecture, the single config point, the root-guard, multi-writer safety, all tips, and the new-machine restore steps live in `docs/references/memory-backup.md`.
-
----
-
----
-
-## What if I want to add a Tier B archetype later?
-
-You can opt in any Tier B archetype after install:
-
-```
-claude
-> Add /officer to my Professor install. We're now subject to {REGULATION}.
-```
-
-Claude reads the blueprint's Tier B template for that archetype, runs the relevant subset of the interview, and copies + customizes the file. No reinstall needed.
-
-Same for adding a new Tier A archetype if you build one — `/pcm` copies the template, you parameterize the content, done.
+Before creating the `professor: install` commit, close the update ledger per [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes): run `pfm doctor --project-updates`; run `pfm update pin --template <template> <local>` for every interview-deployed file, including per-project agents; and run `pfm update ignore <template>` for every declined or deliberately non-materialized template — `project/settings-global.json` among them, because nothing installs that template — `cleanupPeriodDays` (and the `prependPlugins` guard) reaches Claude through the `managed-settings.d/pfm.json` drop-in `pfm install` writes and each launch's `--settings`. `pfm update ignore` refuses a template a local file is still pinned to: for a declined template `pfm init` scaffolded, delete the local file and run `pfm update drop <local>` first, then `pfm update ignore <template>`. `pfm update drop` alone is never how a template is declined — it forgets the pin, and the next report lists the template as `NEW` again. Re-run `pfm doctor --project-updates`; it must exit 0 and end in `clean` before the commit.
 
 ---
 
@@ -471,7 +337,7 @@ Same for adding a new Tier A archetype if you build one — `/pcm` copies the te
 1. **Worktree script can't find your tools.** Make sure your shell environment is loaded inside the script — `source ~/.zshrc`, use absolute paths, or pin tool versions in a script-local `PATH`.
 2. **Port allocation false positives.** `lsof -i :PORT` checks aren't always reliable across IPv4/IPv6 — adjust the script if you see false positives on your OS.
 3. **Gitter tries to merge with conflicts unresolved.** That's a gap in your gitter setup; the template handles it, but if you simplified, restore the conflict-detection block.
-4. **Agents writing to permanent docs.** Only the main loop, or the `documenter` agent it dispatches, should write to the docs hub (`docs/_index.md` and the clusters it links) or `{project}/docs/`; a command-owned surface (`docs/business/**`) is written only by its owning command. If another agent tries, that's a `/pcm` fix at the source agent.
+4. **Agents writing to permanent docs.** Only the main loop, or the `documenter` agent it dispatches, should write to the docs hub (`docs/_index.md` and the clusters it links) or `{project}/docs/`. If another agent tries, that's a `/pcm` fix at the source agent.
 5. **`.worktrees/.ports` corrupted.** Manually edit; the format is one whitespace-separated line per pipeline.
 6. **Character feels generic after install.** You probably stripped voice instead of parameterizing content. Voice is non-negotiable — adapt content, preserve character. Invoke `/pcm` and tell it which command lost its voice.
 
@@ -479,7 +345,7 @@ Same for adding a new Tier A archetype if you build one — `/pcm` copies the te
 
 ## After install
 
-- Keep the installed root `CLAUDE.md` § Sacred ground as it stands: only `gitter` writes git, code changes on worktree branches only, nothing merges before its gate.
+- Keep the ground rules the root `CLAUDE.md` was written with as they stand: only `gitter` writes git, code changes on worktree branches only, nothing merges before its gate.
 - Verify the statusline shows model, fleet counts, context %, and git branch in a pfm-launched Claude chat; its command rides the launch settings. `pfm doctor` names missing or displaced host wiring.
 - Send work too large to do directly to a `flights-foreman` tier, land it with `flights-lander`, and meter it with `/flights:doctor`. Run `/pcm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
 
@@ -501,7 +367,7 @@ New Professor versions ship as semver git tags. Each tier stays current from its
 | Tier | Truth | Mechanism |
 | ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Machine-global commands, agents, and skills | Blueprint originals | Symlink-live. `pfm update` advances the recorded tagged clone, rebuilds the binary, runs `pfm install --yes`, and refreshes registrations. |
-| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local file, full stop | Scaffolded once by `pfm init`. Upstream changes are reports to review and hand-apply; pfm never rewrites these files during update. |
+| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local file, full stop | `.claude/**`, docs and scripts scaffolded once by `pfm init`; `CLAUDE.md` written at install by `/quality:claude-md write`. Upstream changes are reports to review and hand-apply; pfm never rewrites these files during update. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, `engine-sync codex build` and `engine-sync codex check`, after changing its local sources. |
 
 Before either tier moves, read every release note between the installed and the target version and merge their `#### → For:` actions — the rule lives in `INSTALL.md` § Updating.

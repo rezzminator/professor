@@ -36,4 +36,4 @@ Sequential to the DPIA, not part of it. If residual risk stays high after all fe
 
 ## {PROJECT_NAME} application
 
-{PROJECT_NAME} processes special-category {SENSITIVE_DATA} at scale through an AI analysis service — a DPIA is squarely required, and the AI dual-phase split applies. This is the home for known gaps and deferred controls that must **stay out** of outsider-facing documents (per the self-check). The authoritative living DPIA is the officer's `dpia.md`.
+{PROJECT_NAME} processes special-category {SENSITIVE_DATA} at scale through an AI analysis service — a DPIA is squarely required, and the AI dual-phase split applies. This is the home for known gaps and deferred controls that must **stay out** of outsider-facing documents (per the self-check).

@@ -1,7 +1,7 @@
 ---
 name: transcript-reader
 description: Reads one past transcript into a complete factual inventory — Claude session or sub-agent, Codex rollout, OpenCode session; pass its path, id, chat name or `{store}#{session}`, optionally `Dir:`, `Lines:` and numbered `Orders:`. Returns one line naming its report file, or SPLIT with line ranges.
-tools: Read, Bash, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Bash, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 visibility:
   visible-to:
     include: [agent-investigator]

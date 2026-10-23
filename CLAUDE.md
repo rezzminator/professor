@@ -2,6 +2,8 @@
 
 This repo is the framework, not an app that uses it: everything under `templates/` is shipped source, one clone away from an adopter's live agent prompts, so every prompt line is production code.
 
+Where Vocabulary, Runtime or On demand disagrees with the code on a path, command or convention, follow the code and name each mismatch in your reply; `# Rules` binds regardless.
+
 # Vocabulary
 
 - machine-global tier: agents, commands and skills symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`, except `templates/global/codex/config.toml` (Codex defaults merged into each Codex home, existing settings winning) and `templates/global/engine-sync.json` (engine-sync's policy, rendered with this host's targets into `~/.claude/engine-sync.json`); a `from:` declaration renders into `templates/generated/agents/`, the fence gate holding it equal to a fresh render · `templates/global/`, `templates/generated/README.md`
@@ -66,6 +68,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 ## Fence
 
 - `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]`, `iso gate` or `iso {run|sim} {command…}` runs in the fence against a worktree under `.worktrees/{flight}/`; it needs a reachable docker daemon.
+- Narrowest test: `.claude/scripts/test.sh <path>[::<selector>]…`, the affected tests and static checks of the paths named; full gate, what done requires: `.claude/scripts/test.sh --full`.
 
 ## CI
 
@@ -73,15 +76,19 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Host
 
-- Every installation on this host — `make host-install`, `pfm install`, a plugin repoint — loads `/pfm:update` first, MANDATORY: it owns the sequence.
+- The host mirror build is `make -C pfm host-install`; `/pfm:update` sequences every installation here.
+
+# On demand
+
+- Before testing a change on `pfm/`: read `.claude/commands/pfm-testing-manual.md`.
 
 # Rules
 
 ## Publication (this repo's sacred ground)
 
 - **No push, tag or release without an explicit request in the current turn.** A finished task, a green build, a "finish it" or a completed release document is NEVER permission; the authorized Git writer publishes only on the user's plain ask in that turn.
-- **`main` is release-only:** all work lands on `develop`; `main` moves only when `/pfm:release` merges the `develop → main` release PR (gitter Phase RELEASE) — GitHub's ruleset and `.githooks/pre-push` refuse every other route; the merge tags the release, and no tag is pushed by hand.
-- **Nothing identifying ships:** no source-project brand, user PII, client domain content or machine-absolute path (`/home/…`, `/Users/…`) in any tracked file; write it clean the first time — `scripts/leak-check.sh` is the backstop, not the plan.
+- **`main` is release-only:** all work lands on `develop`; `main` moves only when `/pfm:release` merges the `develop → main` release PR (gitter Phase RELEASE) — GitHub's ruleset refuses every other route; the merge tags the release, and no tag is pushed by hand · guard `.githooks/pre-push`
+- **Nothing identifying ships:** no source-project brand, user PII, client domain content or machine-absolute path (`/home/…`, `/Users/…`) in any tracked file; write it clean the first time · guard `scripts/leak-check.sh`, run by `.githooks/pre-push`
 - **Template example values are invented placeholders**, NEVER mined from a live private repo.
 - **Version discipline:** `VERSION`, `CHANGELOG.md`, `releases/v{X.Y.Z}.md` and the tag MUST agree; between releases `develop`'s `VERSION` is the next `{X.Y.Z}-alpha`; `/pfm:release` owns the sequence.
 - **Release notes are NEVER written during development:** `/pfm:release` derives them from `develop`'s diff against `main` and its commit messages.
@@ -113,15 +120,14 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Every `catch` and `if err != nil` logs full context and handles or returns the error.
 - Validate at data entry.
 - Follow the package's existing naming and structure; a new directory or pattern only when the task requires it.
-- Install only validated libraries.
 
 ## Process
 
 - Git writes go through registered `gitter`; every other sub-agent is read-only.
 - When `gitter` is unavailable, only the active main Codex chat performs scoped Git writes, and only after the user's explicit authorization in the current turn; publication still needs its own request under § Publication.
 - Commit only code whose tests pass.
-- Prompt files: a task touching `.claude/**`, any `CLAUDE.md` or `templates/**` routes to the `pcm` agent, which loads `/quality:prompt` before the first edit and `/quality:claude-md` before a `CLAUDE.md` edit; theme work, `templates/themes/` included, to `themer`.
-- Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build through `.claude/scripts/dev.sh iso`; a foreman runs only its affected tests per `.claude/commands/pfm-testing-manual.md`; the full gate is the lander's.
+- Prompt files: a task touching `.claude/**`, any `CLAUDE.md` or `templates/**` routes to the `pcm` agent; theme work, `templates/themes/` included, to `themer`.
+- Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build through `.claude/scripts/dev.sh iso`; a foreman runs only its affected tests; the full gate is the lander's.
 - Dev and test runs target fence worktrees, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Template, doc, prompt and config-file changes land on `develop` directly, in the main checkout.
 - A fenced flight closes in order, run by the main chat: once every foreman on the worktree returned, `flights-lander` — its own review, every finding fixed, the full gate once → the authorized Git writer commits to `develop` → the host mirror build under § Host.
@@ -130,7 +136,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 ## Testing
 
-- **Every test runs inside the fence, never on the host:** `.claude/scripts/test.sh <path>…` runs the affected tests before claiming anything works; never report a suite you did not watch run.
-- `test.sh --full`, the full gate, runs once per worktree, right before its merge; a red one is fixed with `test.sh <failing paths>`, then the gate runs once more.
+- Every test runs through `.claude/scripts/test.sh`, which runs it in the fence; the affected tests run before claiming anything works, and only a suite you watched run is reported.
+- The full gate runs once per worktree, right before its merge; a red one is fixed with `test.sh <failing paths>`, then the gate runs once more.
 - A regression test counts only after it was watched failing against the unfixed code.
 - A skipped or filtered suite is a named gap in the report, never a pass.

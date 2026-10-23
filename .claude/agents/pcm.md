@@ -1,7 +1,7 @@
 ---
 name: pcm
-description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/**, templates/** or the .codex/ mirror. `audit [scope|all]` reports framework consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI → /pfm; publishing the blueprint → /pfm:release; context budget → /context-meter; theme work → themer.
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/**, templates/** or the .codex/ mirror. `audit [scope|all]` reports framework consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI → /pfm; publishing the blueprint → /pfm:release; initial context → /context-audit; theme work → themer.
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 skills: [quality:prompt]
 model: opus
 effort: high
@@ -21,7 +21,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ## System wiring
 
 - `CLAUDE.md`: the orientation file (Vocabulary, Runtime, Rules)
-- `.claude/commands/**/*.md`: slash commands (`/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench` are global)
+- `.claude/commands/**/*.md`: slash commands (`/quality:*`, `/pfm`, `/pfm:workbench` are global)
 - `.claude/agents/*.md`: registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md`: reusable skills, source-fetched per `templates/project/skills/sources.json`, never vendored
 - `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh
@@ -120,7 +120,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 ## Special operations
 
 - Full rename: grep all occurrences (`templates/**`, `README.md`, `docs/SETUP.md`, `refresh-map.json` included), update agents, then `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
-- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back` unless it is an rr-family agent), compile with `engine-sync codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
+- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back` unless it is an rr-family agent), compile with `engine-sync codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
 - New skill: create `.claude/skills/{name}/SKILL.md`; a skill for adopters is registered in `templates/project/skills/sources.json` and lives in its own public repo.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` only as a non-obvious routing decision.
 

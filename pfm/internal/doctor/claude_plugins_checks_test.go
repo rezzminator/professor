@@ -19,7 +19,7 @@ import (
 
 var doctorPluginIDs = []string{
 	"cache-live-control@cache-live-control",
-	"sub-agent-compact@sub-agent-compact",
+	"forward-compaction@forward-compaction",
 	"auto-effort-control@auto-effort-control",
 	"tool-visibility-controller@tool-visibility-controller",
 	"engine-sync@engine-sync",
@@ -27,7 +27,7 @@ var doctorPluginIDs = []string{
 
 var doctorDevIDs = []string{
 	"cache-live-control@cache-live-control-dev",
-	"sub-agent-compact@sub-agent-compact-dev",
+	"forward-compaction@forward-compaction-dev",
 	"auto-effort-control@auto-effort-control-dev",
 	"tool-visibility-controller@tool-visibility-controller-dev",
 	"engine-sync@engine-sync-dev",
@@ -260,7 +260,7 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 					"cache-live-control": map[string]any{
 						"source": map[string]any{"source": "github", "repo": "someone-else/cache-live-control"},
 					},
-					"sub-agent-compact": map[string]any{
+					"forward-compaction": map[string]any{
 						"source": map[string]any{"source": "github", "repo": "rezzminator/sub-agent-compact"},
 					},
 					"buddy": map[string]any{"source": map[string]any{"source": "github", "repo": "someone-else/buddy"}},
@@ -279,11 +279,11 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			case "disabled":
 				warnings = 1
 				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not enabled in " + path + " — " +
-					bareNameFix("sub-agent-compact") + "\n"
+					bareNameFix("forward-compaction") + "\n"
 			case "uninstalled":
 				warnings = 1
 				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not installed in " + store + " — " +
-					bareNameFix("sub-agent-compact") + "\n"
+					bareNameFix("forward-compaction") + "\n"
 			case "absent":
 				_, err := installer.ClaudePluginGaps(path, releaseTargets)
 				want = fmt.Sprintf("doctor: claude_plugins skipped: %v (store never set up)\n", err)
@@ -492,7 +492,7 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	names := []string{
 		"cache-live-control",
-		"sub-agent-compact",
+		"forward-compaction",
 		"auto-effort-control",
 		"tool-visibility-controller",
 		"engine-sync",
@@ -890,7 +890,7 @@ func TestEngineSyncHookDoctor(t *testing.T) {
 		warnings int
 	}{
 		{"unset list is the default and silent", pfmconfig.DefaultClaudePlugins(), true, "", 0},
-		{"set list without engine-sync warns", []pfmconfig.ClaudePlugin{{ID: "sub-agent-compact"}}, false, omitted, 1},
+		{"set list without engine-sync warns", []pfmconfig.ClaudePlugin{{ID: "forward-compaction"}}, false, omitted, 1},
 		{"set empty list warns", nil, false, omitted, 1},
 		{"set list with a lookalike name warns", []pfmconfig.ClaudePlugin{{ID: "engine-sync-extra"}}, false, omitted, 1},
 		{"set list with bare engine-sync is silent", []pfmconfig.ClaudePlugin{{ID: "engine-sync"}}, false, "", 0},

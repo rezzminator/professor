@@ -29,20 +29,16 @@ from pathlib import Path
 registry = re.split(r'^## Runtime metavariables', Path('/worktree/docs/PLACEHOLDERS.md').read_text(), flags=re.M)[0]
 tokens = {name: 'lane-fixture' for name in re.findall(r'\{([A-Z][A-Z0-9_]+)\}', registry)}
 tokens.update({
-    'PROJECT_NAME': 'Express Fixture', 'PROJECT_TAGLINE': 'Invented lane project',
+    'PROJECT_NAME': 'Express Fixture',
     'PROJECT_DOMAIN': 'express.lane.invalid', 'BLUEPRINT_REPO': 'fixture/blueprint',
     'GH_USER': 'fixture', 'BLUEPRINT_CLONE_PATH': '/worktree', 'PROJECT_ROSTER': 'express',
-    'PROJECT': 'express', 'PROJECT_ROLE': 'fixture', 'PROJECT_STACK': 'Node.js',
-    'PROJECT_PKG_MGR': 'npm', 'PROJECT_TEST_RUNNER': 'node --test', 'PROJECT_PORT': '3000',
+    'PROJECT': 'express', 'PROJECT_ROLE': 'fixture',
+    'PROJECT_PKG_MGR': 'npm', 'PROJECT_TEST_RUNNER': 'node --test',
     'PROJECT_BUILD_CMD': 'node --check test/fixture.test.js',
     'PROJECT_TYPECHECK': 'node --check test/fixture.test.js', 'PROJECT_FORMAT': ':',
     'PROJECT_LINT': 'node --check test/fixture.test.js', 'PROJECT_INSTALL_CMD': ':',
-    'PROJECT_RUN_CMD': 'node --test', 'PROJECT_ENV_FILES': '-',
-    'HEALTH_PROBE': ':', 'ENV_FILE_PROVISION': ':', 'ENV_BOOTSTRAP': ':',
-    'POST_INSTALL_HOOKS': ':', 'STATUS_EXTRA_PROBES': ':', 'DEV_PROCESS_PATTERN': 'lane-fixture',
-    'DEV_PREREQS': ':', 'PORT_DEFAULTS': 'EXPRESS_PORT=3000',
-    'SEED_PROJECT': '-', 'MIGRATIONS_DIR': '-', 'ROSTER_DOC_PATHS': 'docs/express',
-    'PROJECT_TYPING_RULES': 'Use node assertions.', 'CODEX_MODEL': 'lane-fixture',
+    'PROJECT_ENV_FILES': '-', 'ENV_FILE_PROVISION': ':', 'PORT_DEFAULTS': 'EXPRESS_PORT=3000',
+    'ROSTER_DOC_PATHS': 'docs/express', 'CODEX_MODEL': 'lane-fixture',
     'CODEX_REASONING_EFFORT': 'medium',
 })
 Path('.professor/manifest.json').write_text(json.dumps({
@@ -51,16 +47,9 @@ Path('.professor/manifest.json').write_text(json.dumps({
 PY
 step='pfm init --render'
 pfm init --render .
-step='project roster'
-python3 - <<'PY'
-import re
-from pathlib import Path
-path = Path('.claude/scripts/dev.sh')
-text, count = re.subn(r'(?m)^PROJECTS=\([\s\S]*?\)', 'PROJECTS=(express)', path.read_text(), count=1)
-if count != 1:
-    raise SystemExit('adopt: PROJECTS roster not found')
-path.write_text(text)
-PY
+step='orientation file'
+# Stands in for the interview's `/quality:claude-md write CLAUDE.md` engine turn.
+[ -f CLAUDE.md ] || printf '# Express Fixture — invented lane project\n\n# Vocabulary\n\n- express: the lane fixture — Node.js, `node --test` · `test/`\n' >CLAUDE.md
 step='project update report'
 if report="$(pfm doctor --project-updates 2>&1)"; then rc=0; else rc=$?; fi
 printf '%s\n' "$report"

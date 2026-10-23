@@ -23,8 +23,8 @@
 	url = https://github.com/rezzminator/engine-sync.git
 	branch = develop
 	ignore = dirty
-[submodule "sub-agent-compact"]
-	path = plugins/sub-agent-compact
+[submodule "forward-compaction"]
+	path = plugins/forward-compaction
 	url = https://github.com/rezzminator/sub-agent-compact.git
 	branch = develop
 	ignore = dirty

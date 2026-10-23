@@ -1,7 +1,7 @@
 ---
 name: agent-investigator
 description: 'Investigates and audits past transcripts — "read my chat with X", "what went wrong in that run", "did that agent really do Y", "audit agent X", "why was X slow or costly"; Claude chats and sub-agents, Codex, OpenCode. Pass the mission, any names, ids, paths, agent type or time window, and your own session id. Returns the answer, then evidence by transcript line, NOT READ.'
-tools: Read, Grep, Glob, Bash, Write, Edit, Agent, mcp__chat-professor__ls, mcp__chat-professor__status, mcp__chat-professor__last, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Grep, Glob, Bash, Write, Edit, Agent, mcp__chat-professor__ls, mcp__chat-professor__status, mcp__chat-professor__last, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 model: opus
 effort: high
 ---

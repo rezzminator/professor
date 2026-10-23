@@ -114,7 +114,6 @@ func newProjectUpdatesStore(t *testing.T) string {
 	store := t.TempDir()
 	for relative, content := range map[string]string{
 		"VERSION":                             "0.1.0\n",
-		"templates/project/CLAUDE.md":         "# fixture contract\n",
 		"templates/project/settings.json":     "{}\n",
 		"templates/project/rumdl-policy.toml": "[global]\n",
 	} {

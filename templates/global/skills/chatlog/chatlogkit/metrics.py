@@ -3,6 +3,8 @@
 Unlike the legacy timeline, Codex usage comes only from token_usage_record,
 uniqued by response_id, never from cumulative token_count. Claude usage may
 be joined to a read-only gateway database by the manifest's agent identity.
+OpenCode targets are `{db path}#{session id}` locators; usage comes from that
+session's assistant messages, with cache input and reasoning added to totals.
 """
 import collections
 import json
@@ -13,7 +15,11 @@ import sqlite3
 from datetime import datetime, timezone
 
 from .engines import load
+from .engines import opencode
 from .cost.claude import read
+from .cost.fmt import count
+from .cost import prices
+from .cost.opencode import GATEWAY_PROVIDERS
 from .model import parse_stamp
 from .rows import die, opt
 
@@ -58,16 +64,37 @@ def _read_paths(ev):
     return paths or None
 
 
+def _observe(source, loc):
+    """(size, mtime) of the source and, for an OpenCode store, of its write-ahead log, where a live
+    writer's rows land before a checkpoint moves them into the store file; an absent log is None."""
+    st = os.stat(source)
+    seen = [(st.st_size, st.st_mtime_ns)]
+    if loc:
+        try:
+            wal = os.stat(source + "-wal")
+        except FileNotFoundError:
+            seen.append(None)
+        else:
+            seen.append((wal.st_size, wal.st_mtime_ns))
+    return seen
+
+
 def measure(target, db, book):
-    before = os.stat(target["path"])
-    p = load(target["path"])
-    recs = read(target["path"])
-    after = os.stat(target["path"])
+    loc = opencode.split_locator(target["path"])
+    source = loc[0] if loc else target["path"]
+    before = _observe(source, loc)
+    p = opencode.load(*loc) if loc else load(source)
+    if loc:
+        _, messages, parts = opencode.session_rows(*loc)
+        recs = []
+    else:
+        recs = read(source)
+    after = _observe(source, loc)
     result = dict(target)
     result.update(engine=p.engine, bytes=p.bytes, model=p.meta.get("model"),
                   effort=p.meta.get("effort"), gaps=[], meta=p.meta,
                   measured_utc=datetime.now(timezone.utc).isoformat())
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+    if before != after:
         result["gaps"].append("Source changed during measurement; rerun metrics for a stable per-file observation")
     calls = [e for e in p.events if e.kind == "call" and not e.hidden]
     raw_codex_calls = [(line, r.get("payload") or {}) for line, r in recs if r and r.get("type") == "response_item" and (r.get("payload") or {}).get("type") in ("function_call", "custom_tool_call")]
@@ -131,6 +158,45 @@ def measure(target, db, book):
         result["usage_source"] = "token_usage_record deduplicated by response_id; no cumulative usage added"
         result["cumulative_crosscheck_last_segment_only"] = cumulative
         result["tool_calls_unassigned_after_last_response"] = pending
+    elif p.engine == "opencode":
+        by_msg = collections.defaultdict(list)
+        for part in parts:
+            by_msg[part[1]].append(part)
+        call_lines = {e.line for e in calls}
+        line = 0
+        for mid, _, data in messages:
+            line += 1
+            at = line
+            mine = by_msg[mid]
+            batches_for_message = sum(line + i in call_lines for i in range(1, len(mine) + 1))
+            line += len(mine)
+            msg = opencode._json(data)
+            if msg is None:
+                result["gaps"].append(f"L{at}: unreadable OpenCode message {mid}")
+                continue
+            if msg.get("role") != "assistant":
+                continue
+            batches.append(batches_for_message)
+            model = msg.get("modelID")
+            provider = msg.get("providerID") or ""
+            contexts.append(dict(line=at, model=model, effort=msg.get("variant")))
+            tokens = msg.get("tokens")
+            if not isinstance(tokens, dict):
+                result["gaps"].append(f"L{at}: OpenCode message {mid} missing token usage")
+                continue
+            cache = tokens.get("cache") or {}
+            try:
+                inp, out, reasoning = (count(tokens.get(k)) for k in ("input", "output", "reasoning"))
+                cached, write = (count(cache.get(k)) for k in ("read", "write"))
+            except (ValueError, AttributeError) as e:
+                result["gaps"].append(f"L{at}: OpenCode message {mid} invalid token usage: {e}")
+                continue
+            if not any((inp, out, reasoning, cached, write)):
+                continue  # Synthetic messages have no model usage.
+            usage.append(dict(line=at, response_id=mid, provider=provider, model=model, input_tokens=inp + cached + write,
+                              cached_input_tokens=cached, cache_write_input_tokens=write,
+                              output_tokens=out + reasoning, reasoning_tokens=reasoning))
+        result["usage_source"] = "OpenCode assistant message tokens; input includes cache read/write; output includes reasoning"
     else:
         messages = collections.OrderedDict()
         for line, r in recs:
@@ -186,14 +252,36 @@ def measure(target, db, book):
         result["tokens"] = result["api_equivalent_usd"] = None
     else:
         totals = {k:sum(u[k] or 0 for u in usage) for k in ("input_tokens","cached_input_tokens","output_tokens","reasoning_tokens")}
+        if p.engine == "opencode":
+            totals["cache_write_input_tokens"] = sum(u["cache_write_input_tokens"] for u in usage)
         totals["uncached_input_tokens"] = totals["input_tokens"]-totals["cached_input_tokens"]
         totals["cache_hit_fraction"] = totals["cached_input_tokens"]/totals["input_tokens"] if totals["input_tokens"] else None
         result["tokens"] = totals
         result["first_request"] = usage[0]
         result["last_request"] = usage[-1]
         components = dict(uncached_input=0.0,cached_input=0.0,output=0.0)
+        if p.engine == "opencode":
+            components["cache_write_input"] = 0.0
+            price_book = prices.Book(book, "")
         missing = set()
         for u in usage:
+            if p.engine == "opencode":
+                # The key cost/opencode.py resolves, so metrics and the timeline price a message alike.
+                key = f"{u['provider']}/{u['model']}" if u["provider"] in GATEWAY_PROVIDERS else u["model"]
+                price = price_book.resolve(key)
+                write = u["cache_write_input_tokens"]
+                cost = prices.response_parts(price, (u["input_tokens"] - u["cached_input_tokens"] - write,
+                    u["output_tokens"], u["cached_input_tokens"], write, 0)) if price else None
+                if cost is None:
+                    missing.add("/".join(x for x in (u["provider"], u["model"]) if x) or "(none)")
+                    continue
+                components["uncached_input"] += cost[0]
+                components["output"] += cost[1]
+                components["cache_write_input"] += cost[2] + cost[3]
+                components["cached_input"] += cost[4]
+                if write and price.get("engine") == prices.CLAUDE:
+                    result["gaps"].append(f"L{u['line']}: OpenCode cache write TTL unknown; priced at 5-minute rate")
+                continue
             price = _price(book,u["model"])
             if not price:
                 missing.add(u["model"])

@@ -973,6 +973,125 @@ class OpenCodeKit(Fixture):
         self.assertEqual(oc_engine.split_locator(f"{self.db}#{self.sid}"), (self.db, self.sid))
 
 
+class Metrics(Fixture):
+    def metrics(self, targets, gateway=None):
+        manifest, out = self.path("manifest.json"), self.path("metrics.json")
+        with open(manifest, "w") as f:
+            json.dump(targets, f)
+        args = ["metrics", "--manifest", manifest, "--prices", os.path.join(self.kit, "prices.json"), "--out", out]
+        if gateway:
+            args += ["--gateway", gateway]
+        self.kitcmd(*args)
+        with open(out) as f:
+            return json.load(f)
+
+    def test_opencode_locator_metrics(self):
+        db = self.path("opencode.db")
+        sid = oc_store(db)
+        with sqlite3.connect(db) as con:
+            for mid, session, model, tokens in (
+                ("m04", sid, "claude-sonnet-4-6",
+                 {"input": 100, "output": 20, "reasoning": 5, "cache": {"read": 300, "write": 400}}),
+                ("child-message", "ses_child01", "gpt-5.5",
+                 {"input": 900000, "output": 800000, "cache": {"read": 700000}}),
+            ):
+                con.execute("INSERT INTO message VALUES (?,?,?,?)", (mid, session, 1767261620000, json.dumps(
+                    dict(role="assistant", providerID="anthropic" if model.startswith("claude") else "openai",
+                         modelID=model, tokens=tokens))))
+            con.execute("INSERT INTO part VALUES (?,?,?,?,?)", ("child-tool", "child-message", "ses_child01",
+                        1767261620000, json.dumps(dict(type="tool", tool="bash"))))
+        target = dict(id="manifest-label", path=f"{db}#{sid}")
+        row, = self.metrics([target])
+        self.assertNotIn("failed", row, row)
+        self.assertEqual((row["id"], row["path"], row["engine"]), (target["id"], target["path"], "opencode"))
+        self.assertEqual(row["model_requests_with_usage"], 3)
+        self.assertEqual(row["tools"], {"bash": 1, "task": 1, "write": 1})
+        self.assertEqual((row["tool_calls"], row["rendered_operations"]), (3, 3))
+        self.assertEqual(row["tool_call_lines"], [5, 6, 8])
+        self.assertEqual(row["batch_histogram_including_zero_tool_responses"], {"3": 1, "0": 2})
+        self.assertEqual(row["tokens"], dict(input_tokens=4000, cached_input_tokens=2000,
+                         cache_write_input_tokens=400, output_tokens=105, reasoning_tokens=15,
+                         uncached_input_tokens=2000, cache_hit_fraction=2000 / 4000))
+        self.assertEqual([u["response_id"] for u in row["per_request_usage"]], ["m02", "m03", "m04"])
+        self.assertEqual(row["first_request"]["line"], 4)
+        self.assertEqual(row["last_request"]["line"], 11)
+        self.assertAlmostEqual(row["price_components_usd"]["uncached_input"], 0.0078)
+        self.assertAlmostEqual(row["price_components_usd"]["cached_input"], 0.00094)
+        self.assertAlmostEqual(row["price_components_usd"]["cache_write_input"], 0.0015)
+        self.assertAlmostEqual(row["price_components_usd"]["output"], 0.002775)
+        self.assertAlmostEqual(row["api_equivalent_usd"], 0.013015)
+        self.assertTrue(any("5-minute" in gap for gap in row["gaps"]), row["gaps"])
+        self.assertFalse(any("gateway" in gap for gap in row["gaps"]), row["gaps"])
+
+    def test_metrics_preserve_claude_and_codex_accounting(self):
+        claude, codex, gateway = self.path("claude.jsonl"), self.path("codex.jsonl"), self.path("gateway.db")
+        usage = dict(input_tokens=1200, cached_input_tokens=200, output_tokens=50, reasoning_output_tokens=10)
+        record = x_rec("token_usage_record", dict(response_id="response-one", usage=usage), 17)
+        for path, records in ((claude, claude_records()), (codex, codex_records() + [record, record])):
+            with open(path, "w") as f:
+                f.write("\n".join(json.dumps(r) for r in records) + "\n")
+        with sqlite3.connect(gateway) as con:
+            con.execute("CREATE TABLE requests (id INTEGER, agent_id TEXT, started REAL, ended REAL, status TEXT, "
+                        "attempts INTEGER, error_head TEXT, model TEXT, note TEXT, input_tokens INTEGER, "
+                        "output_tokens INTEGER, cache_read_tokens INTEGER, reasoning_tokens INTEGER, request_id TEXT)")
+            con.execute("INSERT INTO requests VALUES (1, 'claude-agent', 1, 2, '200', 1, NULL, "
+                        "'claude-sonnet-4-6', NULL, 1200, 50, 200, 10, 'request-one')")
+        c, x = self.metrics([dict(id="claude-agent", path=claude), dict(id="codex-agent", path=codex)], gateway)
+        for row, engine, tools, usd in ((c, "claude", 6, 0.00381), (x, "codex", 4, 0.0066)):
+            self.assertNotIn("failed", row, row)
+            self.assertEqual((row["engine"], row["model_requests_with_usage"], row["tool_calls"]), (engine, 1, tools))
+            self.assertEqual(row["tokens"], dict(input_tokens=1200, cached_input_tokens=200, output_tokens=50,
+                             reasoning_tokens=10, uncached_input_tokens=1000, cache_hit_fraction=200 / 1200))
+            self.assertAlmostEqual(row["api_equivalent_usd"], usd)
+            self.assertEqual(row["gaps"], [])
+        self.assertEqual(c["gateway_rows"], 1)
+        self.assertEqual(x["last_request"]["response_id"], "response-one")
+        self.assertEqual(x["batch_histogram_including_zero_tool_responses"], {"4": 1})
+
+    def test_opencode_metrics_report_missing_usage_prices_and_sessions(self):
+        db = self.path("opencode.db")
+        sid = oc_store(db)
+        with sqlite3.connect(db) as con:
+            con.execute("UPDATE message SET data=? WHERE id='m02'", (json.dumps(dict(role="assistant")),))
+            con.execute("UPDATE message SET data=? WHERE id='m03'", (json.dumps(dict(role="assistant",
+                        modelID="unlisted-model", tokens={"input": 7, "output": 3})),))
+        row, absent = self.metrics([dict(id=sid, path=f"{db}#{sid}"), dict(id="absent", path=f"{db}#ses_absent")])
+        self.assertNotIn("failed", row, row)
+        self.assertEqual(row["model_requests_with_usage"], 1)
+        self.assertEqual(row["tokens"]["input_tokens"], 7)
+        self.assertIsNone(row["api_equivalent_usd"])
+        self.assertTrue(any("missing token usage" in gap for gap in row["gaps"]), row["gaps"])
+        self.assertTrue(any("unlisted-model" in gap for gap in row["gaps"]), row["gaps"])
+        self.assertIn("no such opencode session ses_absent", absent["failed"])
+
+    def test_opencode_metrics_resolve_prices_as_the_timeline_does(self):
+        db = self.path("opencode.db")
+        sid = oc_store(db)
+        with sqlite3.connect(db) as con:
+            con.execute("UPDATE message SET data=? WHERE id='m03'", (json.dumps(dict(role="assistant",
+                        providerID="openai", modelID="claude-sonnet-4-6", tokens={"input": 7, "output": 3})),))
+        row, = self.metrics([dict(id=sid, path=f"{db}#{sid}")])
+        self.assertNotIn("failed", row, row)
+        self.assertIsNone(row["api_equivalent_usd"])
+        self.assertTrue(any("openai/claude-sonnet-4-6" in gap for gap in row["gaps"]), row["gaps"])
+
+    def test_opencode_metrics_see_a_write_to_the_store_log(self):
+        from chatlogkit import metrics as kit_metrics
+        db = self.path("opencode.db")
+        sid = oc_store(db)
+        real = oc_engine.session_rows
+
+        def writer_lands(*loc):
+            with open(db + "-wal", "ab") as f:
+                f.write(b"row")
+            return real(*loc)
+        with open(os.path.join(self.kit, "prices.json")) as f:
+            book = json.load(f)
+        with mock.patch.object(kit_metrics.opencode, "session_rows", writer_lands):
+            row = kit_metrics.measure(dict(id=sid, path=f"{db}#{sid}"), None, book)
+        self.assertTrue(any("Source changed" in gap for gap in row["gaps"]), row["gaps"])
+
+
 # -------------------------------------------------------------------------------- the reader's verbs
 
 class Verbs(Fixture):

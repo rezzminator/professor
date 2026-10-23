@@ -40,6 +40,7 @@ USAGE = """chatlog kit: the mechanics of reading transcripts, so a reader only r
                           --tree the spawn tree with calls and USD rolled up per branch
   metrics --manifest FILE --prices FILE --out FILE [--gateway DB]
                           response-id usage, tool batching, waits and per-run audit metrics as JSON
+                          manifest paths: Claude/Codex files or OpenCode {dir}/opencode.db#{session id}
   waits --calls TARGET | [--type-re RE] [--child-re RE] [--since 14d] [--root DIR]... [--host NAME] [--gap S] [--out F]
                           per sub-agent run of the matched types (default the reviewers): its wall,
                           its children's spawn-to-return, its idle while a child was out, its

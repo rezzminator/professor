@@ -1,6 +1,6 @@
 # infra/demo — the live-demo fence
 
-A REAL Professor install inside the dev-fence container: real Claude Code and Codex binaries, real seats (credentials copied in from this host), real pfm built from this checkout, real chats talking through the `chat-professor` and `harvester-professor` MCP servers. Nothing in the container is a stand-in.
+A REAL Professor install inside the dev-fence container: real Claude Code and Codex binaries, real seats (credentials copied in from this host), real pfm built from this checkout, real chats talking through `chat-professor` and the native Harvester plugin. Nothing in the container is a stand-in.
 
 ## Live presentation fence
 

@@ -79,7 +79,7 @@ lane_run() { # lane_run <name> <image> [network] [docker-run args…]
     -e PFM_DEV_FENCE=1 -e IS_SANDBOX=1 -e LANG=C.UTF-8 -e GOFLAGS=-buildvcs=false \
     -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json \
     -e MOCK_ENGINE_SCENARIO=/root/.local/share/pfm-lanes/default.json \
-    -e PFM_PRICES_OFFLINE=1 -e HARVESTER_LOG_LEVEL=debug \
+    -e PFM_PRICES_OFFLINE=1 \
     -e ENGINE_SYNC_BIN=/usr/local/libexec/pfm-lanes/engine-sync \
     -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" \
     -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}" \

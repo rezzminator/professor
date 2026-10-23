@@ -193,7 +193,7 @@ func bareList(names ...string) []pfmconfig.ClaudePlugin {
 // build with no clone are untouched; a list that cannot be read is an error
 // beside the unchanged build, never an empty list.
 func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
-	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort-control", "harvester"}
+	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort-control", "example-plugin"}
 	clone := writeMarketplaceClone(t, names, nil)
 	manifest := func(t *testing.T, content string) string {
 		dir := t.TempDir()
@@ -218,7 +218,7 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 			}}
 		}, []pfmconfig.ClaudePlugin{
 			{ID: "sub-agent-compact"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
-		}, []string{"buddy", "auto-effort-control", "harvester"}, ""},
+		}, []string{"buddy", "auto-effort-control", "example-plugin"}, ""},
 		{"a release reads nothing", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{Version: "0.80.0", SourceRepo: clone, Plugins: defaults, PluginsDefault: true}
 		}, defaults, nil, ""},

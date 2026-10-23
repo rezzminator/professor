@@ -195,9 +195,10 @@ type MCPHTTP struct {
 }
 
 type MCPConfig struct {
-	Servers    map[string]MCPServer
-	HTTP       MCPHTTP
-	ThirdParty map[string]json.RawMessage
+	Servers      map[string]MCPServer
+	OtherServers map[string]json.RawMessage
+	HTTP         MCPHTTP
+	ThirdParty   map[string]json.RawMessage
 }
 
 type EnginePrefs struct {
@@ -247,8 +248,7 @@ type Config struct {
 
 func productionMCPServers() map[string]MCPServer {
 	return map[string]MCPServer{
-		"chat":             {Enabled: false},
-		MCPServerHarvester: {Enabled: false},
+		"chat": {Enabled: false},
 	}
 }
 
@@ -353,7 +353,7 @@ type rawCodexPrefs struct {
 
 type rawMCP struct {
 	ThirdParty map[string]json.RawMessage `json:"thirdParty,omitempty"`
-	Servers    map[string]rawMCPServer    `json:"servers,omitempty"`
+	Servers    map[string]json.RawMessage `json:"servers,omitempty"`
 	HTTP       *rawMCPHTTP                `json:"http,omitempty"`
 	AuthToken  *string                    `json:"authToken,omitempty"`
 }
@@ -903,9 +903,15 @@ func loadWithMCPServers(
 		if raw.MCP.ThirdParty != nil {
 			result.Sources["mcp.thirdParty"] = SourceFile
 		}
-		for name, server := range raw.MCP.Servers {
+		result.MCP.OtherServers = make(map[string]json.RawMessage)
+		for name, rawServer := range raw.MCP.Servers {
 			if _, known := registered[name]; !known {
-				return Config{}, fmt.Errorf("config %s: unknown key %q", result.Path, "mcp.servers."+name)
+				result.MCP.OtherServers[name] = rawServer
+				continue
+			}
+			var server rawMCPServer
+			if err := decodeStrict(rawServer, &server); err != nil {
+				return Config{}, fmt.Errorf("config %s: mcp.servers.%s: %w", result.Path, name, err)
 			}
 			if server.Enabled == nil {
 				return Config{}, fmt.Errorf(
@@ -1365,9 +1371,16 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		}
 		codexHomes = append(codexHomes, value)
 	}
-	servers := make(map[string]any, len(config.MCP.Servers))
+	servers := make(map[string]json.RawMessage, len(config.MCP.Servers)+len(config.MCP.OtherServers))
+	for name, raw := range config.MCP.OtherServers {
+		servers[name] = raw
+	}
 	for name, server := range config.MCP.Servers {
-		servers[name] = map[string]any{jsonKeyEnabled: server.Enabled}
+		encoded, err := json.Marshal(map[string]any{jsonKeyEnabled: server.Enabled})
+		if err != nil {
+			return nil, fmt.Errorf("encode MCP server %s: %w", name, err)
+		}
+		servers[name] = encoded
 	}
 	codexValue := map[string]any{
 		engineKeyYolo:   config.Codex.Yolo,

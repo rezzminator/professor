@@ -7,9 +7,9 @@
 #   1. pfm built from /worktree/pfm into ~/.local/bin (the code under test,
 #      rebuilt every run; the Go caches are volumes, so a warm build is quick),
 #      and engine-sync from the /engine-sync mount, exported as ENGINE_SYNC_BIN.
-#   2. `pfm install` into the container HOME, which provisions the converter
-#      sidecar into the per-worktree harvest volume (a no-op once that
-#      worktree's pinned environment is present).
+#   2. `pfm install` into the container HOME, then build the standalone
+#      harvester from /harvester and run its own `harvester setup` to provision
+#      the converter sidecar into the per-worktree state volume.
 #   3. harvester.config.json with fetch.browser on: the same file a person
 #      writes to opt in, so the rung runs exactly as it does for them.
 #
@@ -54,15 +54,18 @@ bash /worktree/infra/fence/source-clone.sh /worktree "$HOME/.professor" >/tmp/si
 if [[ ! -f "$PFM_CONFIG" ]]; then
   (umask 077; printf '{"version":2,"accounts":[],"claude":{"plugins":[]}}\n' >"$PFM_CONFIG")
 fi
-pfm mcp harvester enable >/tmp/sim-config.log 2>&1 ||
-  fail "enable standalone harvester registration" /tmp/sim-config.log
 (cd "$HOME/.professor" && pfm install --yes --skip-engine codex --skip-themes) >/tmp/sim-install.log 2>&1 ||
-  fail "pfm install (converter sidecar into the harvest volume)" /tmp/sim-install.log
+  fail "pfm install" /tmp/sim-install.log
 [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
   fail "engine-sync on PATH after pfm install (got: $(command -v engine-sync || echo none))" /tmp/sim-install.log
 
 mkdir -p "$HOME/.config/harvester"
 printf '{\n  "fetch": {\n    "browser": true\n  }\n}\n' >"$HOME/.config/harvester/harvester.config.json"
+
+go -C /harvester build -o "$HOME/.local/bin/harvester" ./cmd/harvester >/tmp/sim-harvester-build.log 2>&1 ||
+  fail "harvester build from /harvester" /tmp/sim-harvester-build.log
+harvester setup >/tmp/sim-harvester-setup.log 2>&1 ||
+  fail "harvester setup" /tmp/sim-harvester-setup.log
 
 echo "sim: chrome=\"$chrome\" harvest=$HOME/.local/state/harvester/python browser-rung=on pfm=$(command -v pfm)"
 exec "$@"

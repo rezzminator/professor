@@ -136,7 +136,7 @@ func TestConfigCLIMCPListReportsConfiguredStateAndSource(t *testing.T) {
 	if code := run([]string{"--config", path, "mcp", "ls"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(mcp ls) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if got, want := stdout.String(), "chat\ttrue\tfile\nharvester\tfalse\tdefault\n"; got != want {
+	if got, want := stdout.String(), "chat\ttrue\tfile\n"; got != want {
 		t.Fatalf("run(mcp ls) stdout=%q, want %q", got, want)
 	}
 	if stderr.Len() != 0 {
@@ -148,7 +148,7 @@ func TestConfigCLIMCPStdioRefusesADisabledFamily(t *testing.T) {
 	root := jailTest(t)
 	path := writeConfigFixture(t, root, `{
   "version": 1,
-  "mcp": {"servers": {"chat": {"enabled": false}, "harvester": {"enabled": false}}}
+  "mcp": {"servers": {"chat": {"enabled": false}}}
 }`)
 
 	var stdout, stderr bytes.Buffer

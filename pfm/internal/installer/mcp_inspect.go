@@ -18,7 +18,6 @@ import (
 const (
 	MCPClientAbsent              = "absent"
 	MCPClientPFM                 = "pfm"
-	MCPClientLegacyStandalone    = "legacy-standalone"
 	MCPClientLegacyPFM           = "legacy-pfm"
 	MCPClientForeignRegistration = "foreign-registration"
 	MCPClientUnreadable          = "unreadable"
@@ -26,7 +25,7 @@ const (
 
 // MCPClientCutover is one consumer's visible route for one server. Unreadable
 // is a first-class state so doctor cannot mistake a failed inspection for
-// cutover. Name is the server this report classifies ("professor", "chat", mcpServerHarvester);
+// cutover. Name is the server this report classifies ("professor", "chat");
 // callers that only ever inspect one server may ignore it.
 type MCPClientCutover struct {
 	Client string
@@ -45,29 +44,8 @@ type mcpClientRegistration struct {
 	Env     map[string]string `json:"env" toml:"env"`
 }
 
-// InspectHarvesterClientCutover inspects Codex and the historical project file.
-// It never mutates a foreign registration; doctor turns non-PFM states into an
-// actionable warning for the operator completing the standalone migration.
-func InspectHarvesterClientCutover(home string, port int, codexHomes []string) []MCPClientCutover {
-	if codexHomes == nil {
-		codexHomes = []string{filepath.Join(home, ".codex")}
-	}
-	reports := make([]MCPClientCutover, 0, len(codexHomes)+1)
-	for _, dir := range codexHomes {
-		reports = append(
-			reports,
-			InspectCodexServers(filepath.Join(dir, "config.toml"), home, port, mcpServerHarvester)...)
-	}
-	// Root .mcp.json is historical project-scope standalone-harvester evidence.
-	reports = append(
-		reports,
-		inspectProjectMCPServers(filepath.Join(home, ".mcp.json"), home, port, mcpServerHarvester)...)
-	return reports
-}
-
-// InspectOpenCodeServers classifies the two machine-scope OpenCode MCP
-// registrations. OpenCode accepts JSONC, so this uses the same parser as the
-// writer and reports malformed config as unreadable instead of absent.
+// InspectOpenCodeServers classifies machine-scope OpenCode MCP registrations.
+// Malformed JSONC is unreadable rather than absent.
 func InspectOpenCodeServers(path, home string, port int, names ...string) []MCPClientCutover {
 	base := func(name string) MCPClientCutover {
 		return MCPClientCutover{
@@ -174,8 +152,7 @@ func OpenCodeUnownedEntries(home, path string, names ...string) ([]string, error
 
 // classifyOpenCodeRegistration names one OpenCode entry's state: `professor`
 // is pfm only in the exact local stdio shape install writes; pfm's legacy
-// `chat` (local `pfm mcp chat serve`, or the loopback remote) and `harvester`
-// (the loopback remote) entries are legacy-pfm; anything else is foreign.
+// `chat` entries are legacy-pfm; anything else is foreign.
 func classifyOpenCodeRegistration(name string, registration map[string]any, home string, port int) string {
 	if len(registration) != 3 || registration["enabled"] != true {
 		return MCPClientForeignRegistration
@@ -198,7 +175,7 @@ func classifyOpenCodeRegistration(name string, registration map[string]any, home
 			}, port)
 			wantedBinary := bin
 			if state == MCPClientPFM {
-				wantedBinary = mcpFamilyBinary(home, name)
+				wantedBinary = mcpFamilyBinary(home)
 			}
 			if (state == MCPClientPFM || state == MCPClientLegacyPFM) && argv[0] == wantedBinary {
 				return state
@@ -212,7 +189,7 @@ func classifyOpenCodeRegistration(name string, registration map[string]any, home
 		if sameStrings(command, []string{bin, mcpCommand, chatName, mcpServeCommand}) {
 			return MCPClientLegacyPFM
 		}
-	case name == chatName || name == mcpServerHarvester:
+	case name == chatName:
 		if registration[configTypeKey] == "remote" && registration["url"] == legacyMCPURL(port, name) {
 			return MCPClientLegacyPFM
 		}
@@ -220,8 +197,7 @@ func classifyOpenCodeRegistration(name string, registration map[string]any, home
 	return MCPClientForeignRegistration
 }
 
-// legacyMCPURL is the loopback URL pfm registered under a legacy key (`chat`,
-// `harvester`) before every engine moved to the one stdio `professor`.
+// legacyMCPURL is the loopback URL pfm registered under a legacy key.
 func legacyMCPURL(port int, key string) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/mcp/%s", port, key)
 }
@@ -279,8 +255,11 @@ func inspectProjectMCPServers(path, home string, port int, names ...string) []MC
 			var shape map[string]any
 			decodeErr := json.Unmarshal(encoded, &shape)
 			bin := filepath.Join(home, ".local", "bin", "pfm")
+			if decodeErr == nil && isPFMLegacyClaudeShape(name, shape, bin, port) {
+				report.State = MCPClientLegacyPFM
+			}
 			if report.State == MCPClientPFM &&
-				(decodeErr != nil || !isExactStdioShape(shape, mcpFamilyBinary(home, name), mcpFamilyStdioArgs(name))) {
+				(decodeErr != nil || !isExactStdioShape(shape, mcpFamilyBinary(home), mcpFamilyStdioArgs(name))) {
 				report.State = MCPClientForeignRegistration
 			}
 			if report.State == MCPClientLegacyPFM && (decodeErr != nil ||
@@ -298,7 +277,7 @@ func inspectProjectMCPServers(path, home string, port int, names ...string) []MC
 // reports every name absent; a read or parse failure reports every name
 // unreadable with the error. `professor` is pfm only in the exact table pfm
 // writes (`command = "<home>/.local/bin/pfm"`, `args = mcpStdioArgs`, nothing
-// else); `chat` and `harvester` go through classifyRegistration. pfm and
+// else); legacy keys go through classifyRegistration. pfm and
 // legacy-pfm each prescribe `pfm install --yes`, so a table install's own
 // strip keeps (stripPFMCodexLines) is not pfm's to reinstall away: foreign.
 func InspectCodexServers(path, home string, port int, names ...string) []MCPClientCutover {
@@ -350,7 +329,7 @@ func InspectCodexServers(path, home string, port int, names ...string) []MCPClie
 			report.State = classifyRegistration(name, registration, port)
 			wantedBinary := bin
 			if report.State == MCPClientPFM && isFamilyRegistration(name) {
-				wantedBinary = mcpFamilyBinary(home, name)
+				wantedBinary = mcpFamilyBinary(home)
 			}
 			if (name == professorName || isFamilyRegistration(name)) && registration.Command != wantedBinary {
 				report.State = MCPClientForeignRegistration
@@ -371,10 +350,10 @@ func InspectCodexServers(path, home string, port int, names ...string) []MCPClie
 
 // classifyRegistration is shared by Claude, Codex and OpenCode family inspection. The transport law: every engine registers the
 // stdio `professor` (`<bin> mcp serve --stdio`), so `professor` is pfm only in
-// that shape and any HTTP `professor` is foreign; `chat` and `harvester` are
+// that shape and any HTTP `professor` is foreign; retired names are
 // legacy keys, legacy-pfm only in pfm's own old shapes (the loopback
 // `/mcp/<key>` URL, bare or with the retired 64-hex bearer, and the stdio
-// chat argvs in mcpLegacyChatArgs); a `uv`/`harvest…` harvester is the standalone one.
+// chat argvs in mcpLegacyChatArgs).
 func classifyRegistration(name string, registration mcpClientRegistration, port int) string {
 	typeName := strings.ToLower(strings.TrimSpace(registration.Type))
 	command := strings.TrimSpace(registration.Command)
@@ -388,15 +367,6 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 			(typeName == "" || typeName == stdioProtocol) && slices.Equal(registration.Args, want)
 	}
 	switch name {
-	case "harvester-professor":
-		if stdioArgs(mcpCommand, mcpServeCommand, "--stdio", "--family", mcpServerHarvester) {
-			return MCPClientLegacyPFM
-		}
-		if command == mcpServerHarvester && registration.URL == "" && noExtras &&
-			(typeName == "" || typeName == stdioProtocol) && slices.Equal(registration.Args, []string{mcpCommand}) {
-			return MCPClientPFM
-		}
-		return MCPClientForeignRegistration
 	case "chat-professor":
 		if stdioArgs(mcpFamilyStdioArgs(name)...) {
 			return MCPClientPFM
@@ -407,7 +377,7 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 			return MCPClientLegacyPFM
 		}
 		return MCPClientForeignRegistration
-	case chatName, mcpServerHarvester:
+	case chatName:
 		if registration.URL == legacyMCPURL(port, name) && (typeName == "" || typeName == httpProtocol) &&
 			command == "" && len(registration.Args) == 0 && len(registration.Env) == 0 &&
 			isRetiredPFMHeaders(registration.Headers) {
@@ -418,13 +388,6 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 				return MCPClientLegacyPFM
 			}
 		}
-	}
-	if name != mcpServerHarvester {
-		return MCPClientForeignRegistration
-	}
-	joined := strings.ToLower(strings.Join(registration.Args, " "))
-	if strings.Contains(command, "harvest") || strings.Contains(joined, "harvest") || command == "uv" {
-		return MCPClientLegacyStandalone
 	}
 	return MCPClientForeignRegistration
 }

@@ -124,7 +124,6 @@ func Run(
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
-	skipConversion := flags.Bool("skip-conversion", false, "skip the harvester conversion check")
 	projectUpdates := bindProjectUpdatesFlags(flags)
 	stale := bindStaleFlags(flags)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
@@ -134,7 +133,7 @@ func Run(
 		flags.Usage()
 		return 2
 	}
-	healthFlagSet := *verbose || *skipConversion
+	healthFlagSet := *verbose
 	if code, handled := projectUpdates.dispatch(
 		flags,
 		healthFlagSet || stale.set(),
@@ -386,7 +385,6 @@ func Run(
 		)
 	}
 	tally.warnings += printLeakedProbeHomes(stdout, resolved.SIDDir, dependencies.Clock.Now())
-	tally.failures += printHarvesterDoctor(ctx, stdout, runtime, *skipConversion, dependencies.Runner)
 	tally.summarize(stdout)
 	switch {
 	case tally.failures > 0:

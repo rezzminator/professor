@@ -439,28 +439,17 @@ if requires E2.01-open-seat; then
   bad=""
   toml="$CODEX_HOME/config.toml"
   bin="$HOME/.local/bin/pfm"
-  # M34: both family servers wired over stdio inside the installer-owned fence
+  # M34: chat server wired over stdio inside the installer-owned fence
   # (internal/installer/mcp.go writeMCPCodeConfigAt).
   if [ ! -f "$toml" ]; then
     bad="$bad no $toml — the installer writes the [mcp_servers] fence there;"
   else
     fence="$(sed -n '/^# BEGIN pfm mcp_servers — installer-owned$/,/^# END pfm mcp_servers — installer-owned$/p' "$toml")"
     [ -n "$fence" ] || bad="$bad $toml carries no '# BEGIN/END pfm mcp_servers — installer-owned' fence;"
-    for family in chat harvester; do
-      section="$(awk -v header="[mcp_servers.$family-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
-      if [ "$family" = harvester ]; then
-        want_bin="$HOME/.local/bin/harvester"; want_args='args = ["mcp"]'
-      else
-        want_bin="$bin"; want_args='args = ["mcp", "serve", "--stdio", "--family", "chat"]'
-      fi
-      grep -qF "command = \"$want_bin\"" <<<"$section" &&
-        grep -qF "$want_args" <<<"$section" ||
-        bad="$bad the fence lacks the $family-professor stdio command;"
-      if [ "$family" = harvester ]; then
-        grep -qxF "$(codex_harvester_env_line)" <<<"$section" ||
-          bad="$bad the fence lacks the sixteen harvester runtime environment names;"
-      fi
-    done
+    section="$(awk -v header="[mcp_servers.chat-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
+    grep -qF "command = \"$bin\"" <<<"$section" &&
+      grep -qF 'args = ["mcp", "serve", "--stdio", "--family", "chat"]' <<<"$section" ||
+      bad="$bad the fence lacks the chat-professor stdio command;"
   fi
   # The served surface: three JSON-RPC frames on stdin to the stdio command
   # itself (initialize, notifications/initialized, tools/list) — the same
@@ -486,7 +475,7 @@ if requires E2.01-open-seat; then
       for want in ls status last call whoami new kill unkill name; do
         grep -qx "$want" <<<"$tools" || bad="$bad tools/list lacks $want;"
       done
-      # Compare the chat server roster, leaving the separate harvester tools
+      # Compare the chat server roster, leaving the separate plugin tools
       # out of this chat-server assertion.
       status_tools="$(curl -s -m 5 "http://127.0.0.1:$PORT/status" | jq -r '.servers.chat[]?' 2>/dev/null | sort)"
       if [ -z "$status_tools" ]; then
@@ -497,7 +486,7 @@ if requires E2.01-open-seat; then
     fi
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "config.toml fence wires both family stdio commands at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) chat tools, matching /status"
+    pass "config.toml fence wires the chat stdio command at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) chat tools, matching /status"
   fi
 fi
 

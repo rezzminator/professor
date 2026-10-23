@@ -381,10 +381,7 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 	if enabled.Code != http.StatusNoContent {
 		t.Fatalf("enabled chat status = %d", enabled.Code)
 	}
-	for _, path := range []string{
-		"/mcp/unknown",
-		config.MCPFamilyPath(config.MCPServerHarvester),
-	} {
+	for _, path := range []string{"/mcp/unknown", "/mcp/foreign"} {
 		unknown := httptest.NewRecorder()
 		handler.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 		if unknown.Code != http.StatusNotFound {
@@ -446,9 +443,6 @@ func TestMCPServeChatDisabledRefusesBeforeBindingPort(t *testing.T) {
 
 		runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
 		runtime.Config.MCP.HTTP.Port = port
-		// Enabling the standalone registration never enables the chat daemon.
-		runtime.Config.MCPServers[config.MCPServerHarvester] = config.MCPServer{Enabled: true}
-
 		var stdout, stderr bytes.Buffer
 		if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
 			t.Fatalf("both-disabled serve code = %d, want 1", code)

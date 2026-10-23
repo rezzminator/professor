@@ -172,7 +172,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 	if err := json.Unmarshal([]byte(mcpPayload(t, parsed.MCPConfig)), &mcp); err != nil {
 		t.Fatal(err)
 	}
-	assertFamilyMCP(t, home, parsed.MCPConfig)
+	assertChatMCP(t, home, parsed.MCPConfig)
 	if !strings.HasSuffix(
 		strings.Join(launch.Argv, " "),
 		"--allow-dangerously-skip-permissions --dangerously-skip-permissions",
@@ -465,61 +465,26 @@ func TestRenderQuery(t *testing.T) {
 // assertProfessorMCP holds the --mcp-config file's payload to develop's one professor
 // registration: exactly {type: stdio, command: <home>/.local/bin/pfm,
 // args: [mcp serve --stdio]} under mcpServers.chat-professor, and nothing else.
-func assertFamilyMCP(t *testing.T, home, word string, enabled ...bool) {
+func assertChatMCP(t *testing.T, home, word string) {
 	t.Helper()
 	payload := mcpPayload(t, word)
 	var mcp map[string]map[string]any
 	if err := json.Unmarshal([]byte(payload), &mcp); err != nil {
 		t.Fatalf("mcp=%q: %v", payload, err)
 	}
-	chat, harvester := true, false
-	if len(enabled) == 2 {
-		chat, harvester = enabled[0], enabled[1]
-	}
-	want := map[string]any{}
-	for family, on := range map[string]bool{"chat": chat, "harvester": harvester} {
-		if on {
-			command := "pfm"
-			args := []any{"mcp", "serve", "--stdio", "--family", family}
-			if family == "harvester" {
-				command, args = "harvester", []any{"mcp"}
-			}
-			want[family+"-professor"] = map[string]any{
-				"type":    "stdio",
-				"command": filepath.Join(home, ".local", "bin", command),
-				"args":    args,
-			}
-		}
-	}
+	want := map[string]any{"chat-professor": map[string]any{
+		"type": "stdio", "command": filepath.Join(home, ".local", "bin", "pfm"),
+		"args": []any{"mcp", "serve", "--stdio", "--family", "chat"},
+	}}
 	if len(mcp) != 1 || !reflect.DeepEqual(mcp["mcpServers"], want) {
 		t.Errorf("mcp=%s, want family registrations %#v", payload, want)
 	}
 }
 
-func TestRenderMCPFamilyRegistrations(t *testing.T) {
-	for _, entry := range []struct {
-		name            string
-		chat, harvester bool
-	}{
-		{"chat only", true, false},
-		{"harvester only", false, true},
-		{"both", true, true},
-		{"neither", false, false},
-	} {
-		t.Run(entry.name, func(t *testing.T) {
-			home, machine := renderMachine(t)
-			machine.MCPServers["chat"] = pfmconfig.MCPServer{Enabled: entry.chat}
-			machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: entry.harvester}
-			_, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Account: 1}, machine)
-			if !entry.chat && !entry.harvester {
-				if parsed.MCPConfig != "" {
-					t.Errorf("mcp=%q with every family off", parsed.MCPConfig)
-				}
-				return
-			}
-			assertFamilyMCP(t, home, parsed.MCPConfig, entry.chat, entry.harvester)
-		})
-	}
+func TestRenderMCPRegistration(t *testing.T) {
+	home, machine := renderMachine(t)
+	_, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Account: 1}, machine)
+	assertChatMCP(t, home, parsed.MCPConfig)
 }
 
 func TestRenderAccountOneConfigDir(t *testing.T) {
@@ -550,22 +515,20 @@ func TestRenderAccountOneConfigDir(t *testing.T) {
 
 func TestRenderThirdPartyMCP(t *testing.T) {
 	for _, tc := range []struct {
-		name                        string
-		purpose                     Purpose
-		chat, harvester, thirdParty bool
+		name             string
+		purpose          Purpose
+		chat, thirdParty bool
 	}{
-		{"third party only", PurposeInteractive, false, false, true},
-		{"beside professor", PurposeInteractive, true, false, true},
-		{"beside harvester", PurposeInteractive, false, true, true},
-		{"resume", PurposeResume, false, false, true},
-		{"launcher", PurposeLauncher, false, false, true},
-		{"none", PurposeInteractive, false, false, false},
-		{"query", PurposeQuery, true, true, true},
+		{"third party only", PurposeInteractive, false, true},
+		{"beside professor", PurposeInteractive, true, true},
+		{"resume", PurposeResume, false, true},
+		{"launcher", PurposeLauncher, false, true},
+		{"none", PurposeInteractive, false, false},
+		{"query", PurposeQuery, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home, machine := renderMachine(t)
 			machine.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: tc.chat}
-			machine.MCPServers[pfmconfig.MCPServerHarvester] = pfmconfig.MCPServer{Enabled: tc.harvester}
 			browser := json.RawMessage(
 				`{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}}`,
 			)
@@ -576,32 +539,23 @@ func TestRenderThirdPartyMCP(t *testing.T) {
 				machine.MCP.ThirdParty = map[string]json.RawMessage{"browser": browser, "remote": remote}
 			}
 			_, parsed := renderParsed(t, Request{Purpose: tc.purpose, Home: home, Account: 1}, machine)
-			if tc.purpose == PurposeQuery || (!tc.chat && !tc.harvester && !tc.thirdParty) {
+			if tc.purpose == PurposeQuery || (!tc.chat && !tc.thirdParty) {
 				if parsed.MCPConfig != "" {
 					t.Fatalf("mcp-config = %q, want none", parsed.MCPConfig)
 				}
 				return
 			}
 			want := map[string]json.RawMessage{"browser": browser, "remote": remote}
-			for family, enabled := range map[string]bool{pfmconfig.MCPServerChat: tc.chat, pfmconfig.MCPServerHarvester: tc.harvester} {
-				if enabled {
-					command := "pfm"
-					args := []string{"mcp", "serve", "--stdio", "--family", family}
-					if family == pfmconfig.MCPServerHarvester {
-						command, args = "harvester", []string{"mcp"}
-					}
-					raw, err := json.Marshal(
-						map[string]any{
-							"args":    args,
-							"command": filepath.Join(home, ".local", "bin", command),
-							"type":    "stdio",
-						},
-					)
-					if err != nil {
-						t.Fatal(err)
-					}
-					want[pfmconfig.MCPRegistrationName(family)] = raw
+			if tc.chat {
+				raw, err := json.Marshal(map[string]any{
+					"args":    []string{"mcp", "serve", "--stdio", "--family", "chat"},
+					"command": filepath.Join(home, ".local", "bin", "pfm"),
+					"type":    "stdio",
+				})
+				if err != nil {
+					t.Fatal(err)
 				}
+				want[pfmconfig.MCPRegistrationName(pfmconfig.MCPServerChat)] = raw
 			}
 			encoded, err := json.Marshal(map[string]any{"mcpServers": want})
 			if err != nil {

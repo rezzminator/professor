@@ -315,22 +315,18 @@ func hookSettings(templates []Hook) map[string]any {
 }
 
 // mcpConfig combines third-party entries with the professor registration
-// when the chat or harvester family is enabled.
+// when the chat family is enabled.
 func mcpConfig(home string, machine pfmconfig.Config) map[string]any {
 	servers := make(map[string]any, len(machine.MCP.ThirdParty)+1)
 	for name, entry := range machine.MCP.ThirdParty {
 		servers[name] = entry
 	}
-	for _, family := range []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester} {
+	for _, family := range []string{pfmconfig.MCPServerChat} {
 		if !machine.MCPServers[family].Enabled {
 			continue
 		}
 		command := filepath.Join(home, ".local", "bin", "pfm")
 		args := []string{knobMCP, "serve", "--stdio", "--family", family}
-		if family == pfmconfig.MCPServerHarvester {
-			command = filepath.Join(home, ".local", "bin", "harvester")
-			args = []string{"mcp"}
-		}
 		servers[pfmconfig.MCPRegistrationName(family)] = map[string]any{
 			typeWord:    "stdio",
 			commandWord: command,

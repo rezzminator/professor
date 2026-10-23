@@ -854,26 +854,8 @@ internal/installer TestMCPWritePreservesAnEditDuringBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence
 internal/store TestClearNameReservationsAreUniqueAcrossCaches'
 
-# Both required module race steps use the original cgo invocation and exact named-pass
-# validation. A missing, skipped, renamed or unbuilt test never becomes "no tests to run".
-CHECKS_HARVESTER_RACE_TESTS='internal/harvest TestHarvesterChaos
-internal/harvest TestFetchFailureIsCachedBeforeItsFlightEnds
-internal/harvest TestFetchSizeOnlyLeaderSharesTheWholePage
-internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
-internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
-internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
-internal/harvestmcp TestServiceChaos'
-
 checks_pfm_race() {
   checks_module_race "$1" "$2" pfm github.com/rezzminator/professor/pfm "$CHECKS_PFM_RACE_TESTS"
-}
-
-checks_harvester_race() { # mounted standalone source, gate run directory
-  if [[ ! -r "$1/go.mod" ]]; then
-    fail_step "harvester: race source unavailable: $1/go.mod"
-    return 1
-  fi
-  checks_module_race "$1" "$2" harvester github.com/rezzminator/harvester "$CHECKS_HARVESTER_RACE_TESTS"
 }
 
 # checks_module_race <module dir> <run dir> <scope> <module name> <package/Test lines>
@@ -1125,12 +1107,7 @@ checks_gate_check_map() { # run dir
       return
     fi
   fi
-  local check_map_harvester="$run_dir/check-map-harvester"
-  if ! GOTOOLCHAIN=local go -C /harvester build -o "$check_map_harvester" ./cmd/harvester; then
-    fail_step "templates: check-map harvester build FAILED"
-    return 1
-  fi
-  run "templates: lane↔command map (check-map)" -- env HARVESTER_BIN="$check_map_harvester" bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
+  run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
 }
 
 # gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
@@ -1196,7 +1173,6 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
     steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir" || return 1
     steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir" || return 1
-    steps_add_heavy harvester.race checks_harvester_race /harvester "$run_dir" || return 1
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"

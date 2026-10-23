@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -84,7 +85,7 @@ func pfmMCP(env Env) ([]Row, error) {
 		}
 
 		current := map[string]bool{}
-		for _, family := range []string{config.MCPServerChat, config.MCPServerHarvester} {
+		for _, family := range []string{config.MCPServerChat} {
 			name := config.MCPRegistrationName(family)
 			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, name) {
 				if report.State == installer.MCPClientPFM {
@@ -105,10 +106,6 @@ func pfmMCP(env Env) ([]Row, error) {
 		rows = appendMCPRow(rows, path, legacy)
 		canCutOver := true
 		for _, name := range legacy {
-			if name != "mcpServers.professor" && name != "mcpServers.chat" && name != "mcpServers.harvester" {
-				canCutOver = false
-				continue
-			}
 			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, strings.TrimPrefix(name, "mcpServers.")) {
 				if report.State != installer.MCPClientLegacyPFM {
 					canCutOver = false
@@ -123,7 +120,7 @@ func pfmMCP(env Env) ([]Row, error) {
 	if len(clients) > 0 {
 		severity := Warn
 		for _, client := range clients {
-			if client != "professor" && client != "chat" && client != "harvester" {
+			if !slices.Contains(installer.LegacyMCPNames(), client) {
 				severity = Block
 			}
 		}

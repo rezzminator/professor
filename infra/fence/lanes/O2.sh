@@ -3,7 +3,7 @@
 # the fleet left behind, archives and indexes a real transcript history, drives
 # headless on both engines, reads doctor's Codex-pane rows, crosses the two
 # operator-side seams (reload-while-busy, a dropped seat under a live chat),
-# proves the harvester and its sidecar for real, and ENDS THE MACHINE with
+# ENDS THE MACHINE with
 # `pfm uninstall`. Runs INSIDE a lane container (run.sh), never on a host.
 #
 #   run.sh --lanes O2            solo, from a fresh root
@@ -16,7 +16,7 @@
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
 # Cost: one Claude seat for the stimuli (reap's busy turn, the queued call and
-# reload, the harvester's `ask`), the Codex home for one headless turn, plus —
+# reload), the Codex home for one headless turn, plus —
 # solo only — the storm the prelude raises and kills to make the graveyard, one
 # Claude chat and one Codex chat standing in for E1's and E2's. Roughly 8 short
 # turns.
@@ -967,145 +967,6 @@ else
   fi
 fi
 
-# ─── O2.09 — the harvester and its sidecar, for real on this architecture ───
-
-beat O2.09-harvester
-spends "cc:$SEAT"
-if gap_applies O2.09-harvester; then
-  known O2.09-harvester
-else
-  bad=""
-  # Public-source probes under --network none deliberately fail DNS. Match
-  # only their resolver and fallback endpoints; other ERROR records stay red.
-  expect-log '"msg":"http.out.request","cmd":"harvester".*"comp":"http.out".*"host":"cloudflare-dns.com","path":"/dns-query","err":"dial DoH resolver:'
-  while read -r host path; do
-    expect-log "\"msg\":\"http.out.request\",\"cmd\":\"harvester\".*\"comp\":\"http.out\".*\"host\":\"$host\",\"path\":\"$path\",\"err\":\"DNS resolution failed for $host:"
-  done <<'END_HARVEST_ENDPOINTS'
-www.rfc-editor.org /rfc/rfc2324.txt
-www.w3.org /WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf
-archive.org /wayback/available
-r.jina.ai /https://www.rfc-editor.org/rfc/rfc2324.txt
-defuddle.md /https://www.rfc-editor.org/rfc/rfc2324.txt
-api.openalex.org /works/https://doi.org/10.1371/journal.pmed.0020124
-api.crossref.org /works/10.1371/journal.pmed.0020124
-api.semanticscholar.org /graph/v1/paper/DOI:10.1371/journal.pmed.0020124
-zenodo.org /api/records
-doaj.org /api/search/articles/doi:10.1371/journal.pmed.0020124
-api.core.ac.uk /v3/works/10.1371/journal.pmed.0020124
-api.openaire.eu /search/publications
-journals.plos.org /pmed/article/file
-r.jina.ai /https://journals.plos.org/pmed/article/file
-defuddle.md /https://journals.plos.org/pmed/article/file
-pmc.ncbi.nlm.nih.gov /tools/idconv/api/v1/articles/
-europepmc.org /articles/PMC1182327
-pmc.ncbi.nlm.nih.gov /articles/PMC1182327/
-www.ebi.ac.uk /europepmc/webservices/rest/PMC1182327/fullTextXML
-r.jina.ai /https://europepmc.org/articles/PMC1182327
-defuddle.md /https://europepmc.org/articles/PMC1182327
-www.ncbi.nlm.nih.gov /pmc/utils/oa/oa.fcgi
-r.jina.ai /https://pmc.ncbi.nlm.nih.gov/articles/PMC1182327/
-defuddle.md /https://pmc.ncbi.nlm.nih.gov/articles/PMC1182327/
-r.jina.ai /https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1182327/fullTextXML
-defuddle.md /https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1182327/fullTextXML
-library.oapen.org /rest/search
-openlibrary.org /isbn/9780262033848.json
-directory.doabooks.org /rest/items/find-by-metadata-field
-catalog.hathitrust.org /api/volumes/brief/isbn/9780262033848.json
-END_HARVEST_ENDPOINTS
-  hv_err=/tmp/o2-harvest.err
-  hv_config="$(harvester config path)"
-  if with_restored "$hv_config"; then
-    jq '.cache.dir = "/root/.local/state/harvester/o2-cache"' "$hv_config" >"$hv_config.tmp" &&
-      mv "$hv_config.tmp" "$hv_config" || bad="$bad could not set a writable lane harvester cache in $hv_config;"
-  else
-    bad="$bad could not back up $hv_config before setting a writable cache;"
-  fi
-  url_txt="https://www.rfc-editor.org/rfc/rfc2324.txt"
-  url_pdf="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-  local_doc="$CWD/o2-harvest-local.txt"
-  local_pdf=/harvester/internal/harvestpy/testdata/corpus/raw/binary/scholar-breast-cancer.pdf
-  printf '# Lane O2 local harvest source\n\nThe needle is LOCAL-HARVEST-OK.\n' >"$local_doc"
-  harvest_one() { # harvest_one <what> <source> <must-succeed 0|1> [content-needle] — one --json fetch, judged
-    local what="$1" src="$2" must="$3" needle="${4:-}" out rc err kind status
-    out="$(harvester --json "$src" 2>"$hv_err")"
-    rc=$?
-    if ! printf '%s' "$out" | jq -e '.[0]' >/dev/null 2>&1; then
-      bad="$bad $what ($src): --json printed no result object (exit $rc): $(one_line "$out") $(one_line "$(cat "$hv_err")");"
-      return
-    fi
-    err="$(printf '%s' "$out" | jq -r '.[0].error // empty')"
-    kind="$(printf '%s' "$out" | jq -r '.[0].error_kind // empty')"
-    status="$(printf '%s' "$out" | jq -r '.[0] | if has("cached") then "cached=\(.cached)" else empty end')"
-    if [ -n "$err" ]; then
-      if [ "$must" -eq 1 ]; then
-        bad="$bad $what ($src) failed (exit $rc, kind '${kind:-<none>}'): $err;"
-      elif [ -z "$kind" ] || [ "$kind" = invalid ]; then
-        bad="$bad $what ($src) was not classified as its identifier kind — error_kind '${kind:-<none>}': $err;"
-      elif [ -n "$needle" ] && [ "$kind" != "$needle" ]; then
-        bad="$bad $what ($src) error_kind='$kind' (want $needle): $err;"
-      else
-        noted="$noted $what: resolver reached, named error kind '$kind';"
-      fi
-      return
-    fi
-    [ "$rc" -eq 0 ] || bad="$bad $what ($src) reported no error but harvester exited $rc;"
-    [ -n "$status" ] || bad="$bad $what ($src) succeeded without a cached field;"
-    if [ "$must" -eq 1 ] && [ -z "$(printf '%s' "$out" | jq -r '.[0].content // empty')" ]; then
-      bad="$bad $what ($src) succeeded without content;"
-    elif [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$(printf '%s' "$out" | jq -r '.[0].content // ""')"; then
-      bad="$bad $what ($src) content lacks '$needle' (kind $(printf '%s' "$out" | jq -r '.[0].kind // "?"'), $(printf '%s' "$out" | jq -r '.[0].chars // 0') chars);"
-    fi
-    noted="$noted $what: ok ($(printf '%s' "$out" | jq -r '.[0].kind // "?"'), $status);"
-  }
-  noted=""
-  harvest_one "URL" "$url_txt" 0 dns
-  harvest_one "local path" "$local_doc" 1 "LOCAL-HARVEST-OK"
-  # H9: a local PDF's text exists only if the pinned Python sidecar converted it.
-  harvest_one "PDF via sidecar" "$local_pdf" 1
-  harvest_one "PDF URL" "$url_pdf" 0 dns
-  harvest_one "DOI" "10.1371/journal.pmed.0020124" 0 no_open_copy
-  harvest_one "PMID" "pmid:16060722" 0
-  harvest_one "PMCID" "PMC1182327" 0
-  harvest_one "ISBN" "9780262033848" 0
-  # --include-content=false and --refresh on the local text: the cache answers, then is bypassed.
-  size="$(harvester --include-content=false "$local_doc" 2>&1)"
-  rc=$?
-  [ "$rc" -eq 0 ] || bad="$bad --include-content=false exited $rc: $(one_line "$size");"
-  grep -qE '^size: [0-9]+ chars, ~[0-9]+ tokens$' <<<"$size" ||
-    bad="$bad --include-content=false did not print the size line: $(one_line "$size");"
-  cached="$(harvester --json --include-content=false "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
-  [ "$cached" = true ] || bad="$bad a second fetch of $local_doc reported cached '${cached:-<none>}' (want true);"
-  refresh="$(harvester --json --refresh "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
-  [ "$refresh" = false ] || bad="$bad --refresh reported cached '${refresh:-<none>}' (want false: the cache was bypassed);"
-  harvester >/dev/null 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || bad="$bad harvester with no source exited $rc (want 2, usage);"
-  # H2: ask over a local document; the evidence is harvester's usage line.
-  ask_out="$(harvester ask --engine claude -p "$(mock_steps '{"type":"turn","reply":"HARVEST-ASK","tokens":{"input":100,"output":20}}')" "$local_doc" 2>"$hv_err")"
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    bad="$bad harvester ask exited $rc: $(one_line "$(cat "$hv_err")");"
-  else
-    [ -n "$ask_out" ] || bad="$bad harvester ask exited 0 but printed no answer;"
-    grep -qxF 'harvester ask: usage input=100 cached_input=0 cache_creation=0 output=20' "$hv_err" ||
-      bad="$bad harvester ask printed no usage line with the scripted counts on stderr: $(one_line "$(cat "$hv_err")");"
-  fi
-  harvester ask "$local_doc" >/dev/null 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || bad="$bad harvester ask without -p exited $rc (want 2, usage);"
-  # H9/H12: the sidecar's provisioning as doctor reports it — landed, not skipped.
-  doc="$(harvester doctor 2>&1)"
-  hp="$(printf '%s' "$doc" | grep '^doctor: harvestpy')"
-  [ -n "$hp" ] || bad="$bad harvester doctor printed no harvestpy row — the sidecar's provisioning is unreported;"
-  grep -qE 'harvestpy interpreter=\(file\) .* version=' <<<"$hp" || bad="$bad doctor names no provisioned harvestpy interpreter: $(one_line "$hp");"
-  grep -qF 'live_smoke=(file) healthy' <<<"$hp" || bad="$bad doctor's harvestpy live smoke is not healthy: $(one_line "$(printf '%s' "$hp" | grep -E 'live_smoke|broken' | head -2)");"
-  grep -qE 'harvestpy .*(broken|unavailable|blocked)' <<<"$hp" && bad="$bad a broken harvestpy row: $(one_line "$(printf '%s' "$hp" | grep -E 'broken|unavailable|blocked' | head -1)");"
-  rm -f "$local_doc"
-  restore_now "$hv_config" || bad="$bad could not restore $hv_config;"
-  if [ -n "$bad" ]; then fail "$bad"; else
-    pass "$(uname -s | tr 'A-Z' 'a-z')-$(uname -m):$noted size-only hit, --refresh refresh; ask answered with a usage line; doctor: $(one_line "$(printf '%s' "$hp" | grep -E 'interpreter|live_smoke' | tr '\n' ' ')" | cut -c1-160)"
-  fi
-fi
 
 # ─── O2.10 — uninstall: the end of the machine ──────────────────────────────
 
@@ -1207,7 +1068,7 @@ while IFS= read -r dir; do
   elif [ ! -f "$registry" ]; then
     bad="$bad existing account registry $registry disappeared or became unreadable;"
   else
-    jq -e '(.mcpServers // {}) | (has("chat-professor") or has("harvester-professor")) | not' "$registry" >/dev/null 2>&1 ||
+    jq -e '(.mcpServers // {}) | (has("chat-professor")) | not' "$registry" >/dev/null 2>&1 ||
       bad="$bad $registry still registers a family MCP server or could not be read;"
     registry_data="$(claude_registry_without_family_entries "$registry" 2>&1)" ||
       bad="$bad could not read $registry after uninstall: $(one_line "$registry_data");"
@@ -1225,7 +1086,7 @@ for f in $themes_staged; do
 done
 # I75/I78/I79: the Codex side — command mirror, hooks.json, config.toml.
 if [ -f "$CODEX_HOME/config.toml" ]; then
-  grep -qE 'BEGIN pfm developer_instructions|mcp_servers\.chat|mcp_servers\.harvester' "$CODEX_HOME/config.toml" &&
+  grep -qE 'BEGIN pfm developer_instructions|mcp_servers\.chat' "$CODEX_HOME/config.toml" &&
     bad="$bad $CODEX_HOME/config.toml still carries pfm's prompt/MCP wiring: $(one_line "$(grep -E 'BEGIN pfm developer_instructions|mcp_servers' "$CODEX_HOME/config.toml" | head -1)");"
 fi
 if [ -f "$CODEX_HOME/hooks.json" ]; then

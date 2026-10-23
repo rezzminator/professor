@@ -254,7 +254,7 @@ func TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom(t *testing.T) {
 		options: Options{
 			Home:          home,
 			Stdout:        io.Discard,
-			MCPEnabled:    map[string]bool{"chat": false, "harvester": false},
+			MCPEnabled:    map[string]bool{"chat": false},
 			MCPConfigPath: configPath,
 			Runner:        &loadedRunner{},
 			Sleep:         func(time.Duration) {},

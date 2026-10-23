@@ -122,8 +122,6 @@ type Options struct {
 	// are part of the result (for example rumdl and uv). Runner remains the
 	// compatibility seam for simple command/status probes.
 	ProcessRunner deps.Runner
-	// GoPluginHTTPClient owns verified standalone Go plugin release downloads.
-	GoPluginHTTPClient *http.Client
 
 	MCPEnabled    map[string]bool
 	MCPPort       int

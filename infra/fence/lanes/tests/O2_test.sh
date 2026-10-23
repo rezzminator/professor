@@ -86,7 +86,7 @@ pfm() {
     *) printf 'unexpected pfm call: %s\n' "$*" >&2; return 2 ;;
   esac
 }
-block="$(sed -n '/^beat O2\.08-dropped-seat-with-live-chat$/,/^# .* O2\.09 / { /^# .* O2\.09 /!p; }' "$2")"
+block="$(sed -n '/^beat O2\.08-dropped-seat-with-live-chat$/,/^# .* O2\.10 / { /^# .* O2\.10 /!p; }' "$2")"
 [ -n "$block" ] || exit 2
 [ "${SCRATCH+x}" != x ] || exit 2
 eval "$block"

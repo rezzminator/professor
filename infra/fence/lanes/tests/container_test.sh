@@ -116,8 +116,8 @@ else bad "price refresh knob" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 5 — optional docker arguments follow the network selector before the image.
 : >"$STUB_DOCKER_LOG"
-PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-build pfm-lane-base:cafe01 '' -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy
-if grep -q -- '--label pfm.fence=1 -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy -v ' "$STUB_DOCKER_LOG"; then
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-build pfm-lane-base:cafe01 '' -v fixture-cache:/fixture-cache -e FIXTURE_VALUE=example
+if grep -q -- '--label pfm.fence=1 -v fixture-cache:/fixture-cache -e FIXTURE_VALUE=example -v ' "$STUB_DOCKER_LOG"; then
   ok "lane_run passes optional docker arguments before the image"
 else bad "lane_run optional arguments" "$(cat "$STUB_DOCKER_LOG")"; fi
 
@@ -134,8 +134,7 @@ if grep -qF -- "-e PFM_DEV_ENGINE_SYNC_MISSING=/m/plugins/engine-sync: no go.mod
   ok "lane_run hands an absent engine-sync source's cause to the container"
 else bad "lane_run engine-sync absence" "$(cat "$STUB_DOCKER_LOG")"; fi
 
-if grep -qF -- "-v $T/harvester:/harvester:ro" "$STUB_DOCKER_LOG" &&
-  grep -qF -- "-e HARVESTER_LOG_LEVEL=debug" "$STUB_DOCKER_LOG"; then
+if grep -qF -- "-v $T/harvester:/harvester:ro" "$STUB_DOCKER_LOG"; then
   ok 'lane containers mount the standalone harvester source read-only'
 else bad 'lane container omitted harvester source' "$(cat "$STUB_DOCKER_LOG")"; fi
 shtest_end

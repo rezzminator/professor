@@ -139,7 +139,7 @@ func (installer *engine) cutOverClaudeMCP() error {
 			return fmt.Errorf("parse Claude MCP servers %s: %w", registry.Path, err)
 		}
 		owned := false
-		for _, name := range append(append([]string(nil), mcpLegacyNames...), pfmconfig.MCPRegistrationName(chatName), pfmconfig.MCPRegistrationName(mcpServerHarvester)) {
+		for _, name := range append(LegacyMCPNames(), pfmconfig.MCPRegistrationName(chatName)) {
 			entry, present := servers[name]
 			if !present {
 				continue
@@ -152,7 +152,7 @@ func (installer *engine) cutOverClaudeMCP() error {
 			if isFamilyRegistration(name) {
 				matches = matches || isExactStdioShape(
 					shape,
-					mcpFamilyBinary(installer.options.Home, name),
+					mcpFamilyBinary(installer.options.Home),
 					mcpFamilyStdioArgs(name),
 				)
 			}
@@ -181,7 +181,7 @@ func (installer *engine) cutOverClaudeMCP() error {
 			encoded, err := json.Marshal(
 				map[string]any{
 					configTypeKey:    stdioProtocol,
-					configCommandKey: mcpFamilyBinary(installer.options.Home, name),
+					configCommandKey: mcpFamilyBinary(installer.options.Home),
 					"args":           mcpFamilyStdioArgs(name),
 				},
 			)

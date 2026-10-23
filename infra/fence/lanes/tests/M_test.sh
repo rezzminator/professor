@@ -1,80 +1,15 @@
 #!/usr/bin/env bash
-# Exercise M's search prelude and negative search beat without a fleet or model.
+# Exercise M's registration and transport checks without a fleet or model.
 set -uo pipefail
 SHTEST_TAG=lane-m-test
 source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 LANES="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SUT="${M_SUT:-$LANES/M.sh}"
 source "$LANES/lib.sh"
-SCRATCH="$T/prelude"
-HARVESTER_CFG="$T/harvester.config.json"
-HARVEST_CACHE="$T/cache"
-mkdir -p "$SCRATCH"
-printf '{"ask":{"engine":"codex"}}\n' >"$HARVESTER_CFG"
-lane_abort() { bad 'M prelude aborted' "$*"; return 1; }
-need() { eval "$2" || { eval "$3" && eval "$2"; }; }
-prelude="$(sed -n '/^# Keep the harvester/,/^need "the professor MCP daemon/ { /^need "the professor MCP daemon/!p; }' "$SUT")"
-if [ -n "$prelude" ] && (
-  eval "$prelude" || exit 1
-  printf '%s\n' "${SEARCH_HEALTH_PID:-}" >"$T/search.pid"
-); then
-  SEARCH_HEALTH_PID="$(cat "$T/search.pid")"
-  healthy_url="$(jq -r '.search.searxngURL' "$HARVESTER_CFG")"
-  if curl -fsS -m 2 "$healthy_url/healthz" >"$T/health" 2>"$T/health.err"; then
-    ok 'M prelude configures real healthy loopback search that survives its starting shell for O2'
-  else bad 'M healthy search prelude' "$healthy_url" "$(cat "$T/health.err")"; fi
-  if [ "$(jq -r '.ask.engine' "$HARVESTER_CFG")" = codex ] && [ -w "$HARVEST_CACHE" ]; then
-    ok 'M search setup preserves unrelated settings and a writable cache'
-  else bad 'M search setup config/cache' "$(cat "$HARVESTER_CFG")"; fi
-else
-  healthy_url=''
-  bad 'M search prelude missing or failed' "$prelude"
-fi
-
-negative_calls=0
-mcp_tools() { MCP_TOOLS=search_web; }
-mcp_call() {
-  local endpoint
-  endpoint="$(jq -r '.search.searxngURL' "$HARVESTER_CFG")"
-  MCP_RPCERR='' MCP_ISERR=true
-  if [[ "$4" = *'"limit":21'* ]]; then
-    MCP_TEXT='limit must be between 1 and 20'
-    [ "$endpoint" = "$healthy_url" ] || bad="$bad limit validation retained the negative endpoint;"
-  elif [ "$endpoint" != http://127.0.0.1:9 ]; then
-    MCP_TEXT='unexpected healthy endpoint during negative search'
-  else
-    negative_calls=$((negative_calls + 1))
-    MCP_TEXT='Web search failed: loopback backend unreachable'
-  fi
-}
-one_line() { tr '\n' ' ' <<<"$1"; }
-negative="$(sed -n '/^  # M23\/M24 search_web/,/^  # M25:/ { /^  # M25:/!p; }' "$SUT")"
-bad=''
-eval "$negative"
-if [ -n "$negative" ] && [ "$negative_calls" -eq 1 ] && [ -z "$bad" ] &&
-  [ "$(jq -r '.search.searxngURL' "$HARVESTER_CFG")" = "$healthy_url" ] &&
-  curl -fsS -m 2 "$healthy_url/healthz" >/dev/null 2>&1; then
-  ok 'M24 uses the unreachable backend only for its negative calls and restores healthy search for O2'
-else
-  bad 'M24 search failure scope/restore' "calls=$negative_calls errors=$bad config=$(cat "$HARVESTER_CFG")"
-fi
-mcp_call() { MCP_WHY='fixture transport failure'; return 1; }
-bad=''
-eval "$negative"
-if [[ "$bad" = *'fixture transport failure'* ]] &&
-  [ "$(jq -r '.search.searxngURL' "$HARVESTER_CFG")" = "$healthy_url" ] &&
-  curl -fsS -m 2 "$healthy_url/healthz" >/dev/null 2>&1; then
-  ok 'M24 transport failure remains named and restores the healthy search endpoint'
-else bad 'M24 transport failure restore' "errors=$bad config=$(cat "$HARVESTER_CFG")"; fi
 if grep -q "expect-log 'has no live Codex seat'" "$SUT" &&
   grep -q "grep -q 'has no live Codex seat'" "$SUT" && ! grep -q 'has no live Codex tmux seat' "$SUT"; then
   ok 'M09 expects the backend no-live-Codex-seat wording in its result and log'
 else bad 'M09 stale unknown-thread wording'; fi
-if [ -n "${SEARCH_HEALTH_PID:-}" ]; then
-  kill "$SEARCH_HEALTH_PID" 2>/dev/null || true
-  wait "$SEARCH_HEALTH_PID" 2>/dev/null || true
-fi
-
 # Run the real dependent blocks with the beat dependency/row writer after a failed M05.
 if out="$(bash -s -- "$LANES/lib.sh" "$SUT" "$T/m07" 2>&1 <<'SH'
 set -uo pipefail
@@ -109,7 +44,7 @@ eval "$block"
 block="$(sed -n '/^beat M\.09-chat-tools/,/^# .* M\.10 / { /^# .* M\.10 /!p; }' "$2")"
 [ -n "$block" ] || exit 2
 eval "$block"
-block="$(sed -n '/^beat M\.10-chat-tools-gap/,/^# .* M\.11 / { /^# .* M\.11 /!p; }' "$2")"
+block="$(sed -n '/^beat M\.10-chat-tools-gap/,/^# .* M\.13 / { /^# .* M\.13 /!p; }' "$2")"
 [ -n "$block" ] || exit 2
 eval "$block"
 if lane_end; then exit 1; fi
@@ -171,29 +106,24 @@ if [ "$rc" -eq 0 ] && [ -z "$live_children" ] &&
   grep -q 'M40:.*timed out' <<<"$out" && grep -q 'M55:.*timed out' <<<"$out"; then
   ok 'all four foreground daemon refusal probes bound a non-refusing server, name timeout failures and reap its child'
 else bad 'daemon refusal bounds' "rc=$rc live_children=$live_children" "$out"; fi
-# Keep this oracle independent of the installer and the lane's shared fixture.
-codex_env='env_vars = ["HARVESTER_HOME_DIR", "HARVESTER_CONFIG", "HARVESTER_PYTHON_ROOT", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "HARVESTER_LOG_LEVEL", "HARVESTER_LOG_COMPONENTS", "HARVESTER_LOG_MIRROR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]'
-export CODEX_ENV_FIXTURE="$codex_env"
-for variant in canonical missing-name wrong-command wrong-args reinstall-drops-env foreign-dropped restore-corrupt; do
+for variant in canonical wrong-command wrong-args foreign-dropped restore-corrupt; do
   mkdir -p "$T/codex-$variant"
   out="$(timeout 8 bash -s -- "$LANES/lib.sh" "$SUT" "$T/codex-$variant" "$variant" <<'SH'
 set -uo pipefail
 source "$1"
-SCRATCH="$3" CODEX_HOME="$3/codex" PFM_BIN=/fixture/pfm HARVESTER_BIN=/fixture/harvester
+SCRATCH="$3" CODEX_HOME="$3/codex" PFM_BIN=/fixture/pfm
 mkdir -p "$CODEX_HOME"
-canonical="$(printf '[mcp_servers.chat-professor]\ncommand = "%s"\nargs = ["mcp", "serve", "--stdio", "--family", "chat"]\n[mcp_servers.harvester-professor]\ncommand = "%s"\nargs = ["mcp"]\n%s\n' "$PFM_BIN" "$HARVESTER_BIN" "$CODEX_ENV_FIXTURE")"
+canonical="$(printf '[mcp_servers.chat-professor]\ncommand = "%s"\nargs = ["mcp", "serve", "--stdio", "--family", "chat"]\n' "$PFM_BIN")"
 printf '# BEGIN pfm mcp_servers — installer-owned\n%s\n# END pfm mcp_servers — installer-owned\n' "$canonical" >"$CODEX_HOME/config.toml"
 case "$4" in
-  missing-name) sed -i 's/, "no_proxy"//' "$CODEX_HOME/config.toml" ;;
-  wrong-command) sed -i 's#/fixture/harvester#/fixture/foreign#' "$CODEX_HOME/config.toml" ;;
-  wrong-args) sed -i 's/args = \["mcp"\]/args = ["serve"]/' "$CODEX_HOME/config.toml" ;;
+  wrong-command) sed -i 's#/fixture/pfm#/fixture/foreign#' "$CODEX_HOME/config.toml" ;;
+  wrong-args) sed -i 's/"serve"/"different"/' "$CODEX_HOME/config.toml" ;;
 esac
 variant="$4"
 beat() { :; }; spends() { :; }
 pass() { printf 'PASS %s\n' "$*"; }; fail() { printf 'FAIL %s\n' "$*"; }
 install_again() {
   case "$variant" in
-    reinstall-drops-env) sed -i '/^env_vars = /d' "$TOML" ;;
     foreign-dropped) sed -i '/^\[mcp_servers.professor\]/,$d' "$TOML" ;;
   esac
   printf 'preserve foreign MCP client professor\n'
@@ -201,7 +131,7 @@ install_again() {
 cp() {
   command cp "$@" || return
   if [ "$variant" = restore-corrupt ] && [ "$1" = "$SCRATCH/config.toml.orig" ]; then
-    sed -i '/^env_vars = /d' "$2"
+    sed -i '/^command = /d' "$2"
   fi
 }
 block="$(sed -n '/^beat M\.02-register-codex$/,/^# .* M\.03 / { /^# .* M\.03 /!p; }' "$2")"
@@ -211,32 +141,11 @@ SH
 )"; rc=$?
   if [ "$variant" = canonical ]; then
     if [ "$rc" -eq 0 ] && [[ "$out" = PASS* ]]; then
-      ok 'M02 accepts exact command, args and sixteen inherited names and preserves the foreign registration'
-    else bad 'M02 canonical environment fence' "rc=$rc $out"; fi
+      ok 'M02 accepts the exact chat command and args and preserves the foreign registration'
+    else bad 'M02 canonical chat fence' "rc=$rc $out"; fi
   elif [ "$rc" -eq 0 ] && [[ "$out" = FAIL* ]]; then
     ok "M02 names $variant instead of accepting an incomplete or damaged registration"
   else bad "M02 $variant control" "rc=$rc $out"; fi
-done
-
-for variant in canonical missing-env; do
-  mkdir -p "$T/e2-codex-$variant"
-  out="$(bash -s -- "$LANES/lib.sh" "$LANES/E2.sh" "$T/e2-codex-$variant" "$variant" <<'SH'
-set -uo pipefail
-source "$1"
-toml="$3/config.toml" bin=/fixture/pfm HOME=/fixture
-printf '# BEGIN pfm mcp_servers — installer-owned\n[mcp_servers.chat-professor]\ncommand = "%s"\nargs = ["mcp", "serve", "--stdio", "--family", "chat"]\n[mcp_servers.harvester-professor]\ncommand = "%s"\nargs = ["mcp"]\n%s\n# END pfm mcp_servers — installer-owned\n' "$bin" "$HOME/.local/bin/harvester" "$CODEX_ENV_FIXTURE" >"$toml"
-[ "$4" != missing-env ] || sed -i '/^env_vars = /d' "$toml"
-bad=''
-block="$(sed -n '/^  # M34:/,/^  # The served surface/ { /^  # The served surface/!p; }' "$2")"
-[ -n "$block" ] || exit 2
-eval "$block"
-if [ -z "$bad" ]; then echo PASS; else printf 'FAIL %s\n' "$bad"; fi
-SH
-)"; rc=$?
-  if [ "$rc" -eq 0 ] && { { [ "$variant" = canonical ] && [[ "$out" = PASS* ]]; } ||
-    { [ "$variant" = missing-env ] && [[ "$out" = FAIL* ]]; }; }; then
-    ok "E2 exact harvester environment fixture: $variant"
-  else bad "E2 environment $variant" "rc=$rc $out"; fi
 done
 
 for beat_name in M.14-end-to-end M.15-live-chats-survive-daemon-restart; do
@@ -247,7 +156,7 @@ for beat_name in M.14-end-to-end M.15-live-chats-survive-daemon-restart; do
 set -uo pipefail
 source "$1"
 SCRATCH="$3" CHAT=FIRST E1_CHAT=FIRST E2_CHAT=SECOND E1_WHY='' E2_WHY=''
-RFC_CLAUDE=first.md RFC_CODEX=second.md RFC_E1=first.md RFC_E2=second.md SEAT=1
+SEAT=1
 helpers="$(sed -n '/^E2E_WHY=""$/,/^beat M\.14-end-to-end$/ { /^beat M\.14-end-to-end$/!p; }' "$2")"
 [ -n "$helpers" ] || exit 2
 eval "$helpers"

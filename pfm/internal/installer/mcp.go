@@ -19,18 +19,17 @@ import (
 )
 
 const (
-	mcpCredentialName  = "mcp-auth-token"
-	mcpOwnershipName   = "mcp-ownership.json"
-	mcpFenceBegin      = "# BEGIN pfm mcp_servers — installer-owned"
-	mcpFenceEnd        = "# END pfm mcp_servers — installer-owned"
-	chatName           = "chat"
-	mcpCommand         = "mcp"
-	mcpServeCommand    = "serve"
-	mcpServerHarvester = "harvester"
-	httpProtocol       = "http"
-	professorName      = "professor"
-	stdioProtocol      = "stdio"
-	openCodeLocal      = "local"
+	mcpCredentialName = "mcp-auth-token"
+	mcpOwnershipName  = "mcp-ownership.json"
+	mcpFenceBegin     = "# BEGIN pfm mcp_servers — installer-owned"
+	mcpFenceEnd       = "# END pfm mcp_servers — installer-owned"
+	chatName          = "chat"
+	mcpCommand        = "mcp"
+	mcpServeCommand   = "serve"
+	httpProtocol      = "http"
+	professorName     = "professor"
+	stdioProtocol     = "stdio"
+	openCodeLocal     = "local"
 )
 
 // mcpStdioArgs identifies the legacy combined stdio registration.
@@ -39,10 +38,6 @@ var mcpStdioArgs = []string{mcpCommand, mcpServeCommand, "--stdio"}
 // mcpLegacyChatArgs are the argvs pfm's own legacy stdio chat ran after the
 // absolute pfm path: `pfm mcp chat serve`, and the older bare `pfm mcp`.
 var mcpLegacyChatArgs = [][]string{{mcpCommand, chatName, mcpServeCommand}, {mcpCommand}}
-
-// mcpLegacyNames are the keys pfm registered before the one professor
-// server; install and uninstall remove pfm's own exact shapes under them.
-var mcpLegacyNames = []string{chatName, mcpServerHarvester, professorName}
 
 type mcpOwnership struct {
 	Pending               map[string]map[string]any `json:"pending,omitempty"`
@@ -137,16 +132,8 @@ func isPFMLegacyClaudeShape(name string, registration map[string]any, bin string
 			}
 		}
 		return isPFMHTTPShape(registration, legacyMCPURL(port, name))
-	case mcpServerHarvester:
-		return isPFMHTTPShape(registration, legacyMCPURL(port, name))
-	case "harvester-professor":
-		return isExactStdioShape(
-			registration,
-			bin,
-			[]string{mcpCommand, mcpServeCommand, "--stdio", "--family", mcpServerHarvester},
-		)
 	}
-	return false
+	return isRetiredMCPShape(name, registration, bin, port)
 }
 
 // isExactStdioShape is true for exactly {type: stdio, command: bin, args: want}
@@ -165,7 +152,7 @@ func isExactStdioShape(registration map[string]any, bin string, want []string) b
 
 // isPFMLegacyOpenCodeClient recognizes pfm's own OpenCode registrations under
 // the legacy keys: the local `pfm mcp chat serve` chat entry and the loopback
-// remote chat and harvester entries, each exactly three keys.
+// remote entries, each exactly three keys.
 func (installer *engine) isPFMLegacyOpenCodeClient(name string, registration map[string]any) bool {
 	if len(registration) != 3 || registration["enabled"] != true {
 		return false
@@ -176,10 +163,24 @@ func (installer *engine) isPFMLegacyOpenCodeClient(name string, registration map
 		if name == professorName {
 			return ok && sameStrings(command, append([]string{installer.mcpChatCommand()}, mcpStdioArgs...))
 		}
-		return name == chatName && ok &&
-			sameStrings(command, []string{installer.mcpChatCommand(), mcpCommand, chatName, mcpServeCommand})
+		if name == chatName && ok &&
+			sameStrings(command, []string{installer.mcpChatCommand(), mcpCommand, chatName, mcpServeCommand}) {
+			return true
+		}
+		if !ok || len(command) == 0 {
+			return false
+		}
+		return isRetiredMCPShape(name, map[string]any{
+			configTypeKey: stdioProtocol, configCommandKey: command[0], configArgsKey: command[1:],
+		}, installer.mcpChatCommand(), installer.options.MCPPort)
 	case "remote":
-		return (name == chatName || name == mcpServerHarvester) && registration["url"] == installer.mcpURL(name)
+		return (name == chatName && registration["url"] == installer.mcpURL(name)) ||
+			isRetiredMCPShape(
+				name,
+				map[string]any{configTypeKey: httpProtocol, "url": registration["url"]},
+				installer.mcpChatCommand(),
+				installer.options.MCPPort,
+			)
 	}
 	return false
 }
@@ -223,15 +224,14 @@ func isPFMHTTPShape(registration map[string]any, url string) bool {
 
 // pfmClaudeMCPShape is the one by-shape test of an entry pfm wrote into a
 // Claude file (an account .claude.json or ~/.mcp.json): the legacy chat and
-// harvester shapes, or the exact professor stdio shape. Only chat, harvester
-// and professor are ever matched.
+// retired shapes, or the exact current stdio shape.
 func pfmClaudeMCPShape(name string, registration map[string]any, home string, port int) bool {
 	bin := filepath.Join(home, ".local", "bin", "pfm")
 	if isPFMLegacyClaudeShape(name, registration, bin, port) {
 		return true
 	}
 	return isFamilyRegistration(name) &&
-		isExactStdioShape(registration, mcpFamilyBinary(home, name), mcpFamilyStdioArgs(name))
+		isExactStdioShape(registration, mcpFamilyBinary(home), mcpFamilyStdioArgs(name))
 }
 
 func (installer *engine) writeMCPCodeConfig(names []string) error {
@@ -257,7 +257,7 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	}
 	var generated []string
 	for _, name := range names {
-		body, err := codexStdioBody(mcpFamilyBinary(installer.options.Home, name), name)
+		body, err := codexStdioBody(mcpFamilyBinary(installer.options.Home), name)
 		if err != nil {
 			return fmt.Errorf("encode Codex MCP registration %s: %w", name, err)
 		}
@@ -323,7 +323,7 @@ func (installer *engine) codexMCPYield(raw string) ([]string, map[string]any, st
 
 // stripPFMCodexLines removes every line pfm owns in a Codex config.toml: each
 // paired installer fence with its body, every orphan fence marker, each
-// legacy [mcp_servers.chat] / [mcp_servers.harvester] table whose whole body
+// legacy loopback table whose whole body
 // is the one loopback url line pfm wrote, and a [mcp_servers.professor]
 // table left outside a fence (its END line deleted by hand) whose whole body
 // is professorBody (codexStdioBody) — each with one blank line right after
@@ -352,7 +352,7 @@ func stripPFMCodexLines(lines []string, port int, professorBody []string) []stri
 			removed[index] = true
 		}
 	}
-	for _, name := range mcpLegacyNames {
+	for _, name := range LegacyMCPNames() {
 		if name == professorName {
 			continue
 		}
@@ -360,27 +360,14 @@ func stripPFMCodexLines(lines []string, port int, professorBody []string) []stri
 	}
 	if len(professorBody) > 0 {
 		removeExactCodexTable(lines, removed, professorName, professorBody)
-		for _, family := range []string{chatName, mcpServerHarvester} {
-			body := append([]string(nil), professorBody...)
-			for i, line := range body {
-				if strings.HasPrefix(line, "args = ") {
-					body[i] = strings.Replace(line, `"--stdio"`, `"--stdio", "--family", "`+family+`"`, 1)
-				}
-			}
-			removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(family), body)
-			if family == mcpServerHarvester {
-				for i, line := range body {
-					if strings.HasPrefix(line, "command = ") {
-						body[i] = strings.TrimSuffix(line, `pfm"`) + `harvester"`
-					} else if strings.HasPrefix(line, "args = ") {
-						body[i] = `args = ["mcp"]`
-					}
-				}
-				removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(family), body)
-				body = append(body, codexStdioEnvLine(family))
-				removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(family), body)
+		body := append([]string(nil), professorBody...)
+		for i, line := range body {
+			if strings.HasPrefix(line, "args = ") {
+				body[i] = strings.Replace(line, `"--stdio"`, `"--stdio", "--family", "`+chatName+`"`, 1)
 			}
 		}
+		removeExactCodexTable(lines, removed, pfmconfig.MCPRegistrationName(chatName), body)
+		stripRetiredCodexTables(lines, removed, port, professorBody)
 	}
 	kept := make([]string, 0, len(lines))
 	cut := false
@@ -468,7 +455,7 @@ func (installer *engine) mcpOpenCodeRegistration(names ...string) map[string]any
 	bin := installer.mcpChatCommand()
 	if len(names) > 0 {
 		args = mcpFamilyStdioArgs(names[0])
-		bin = mcpFamilyBinary(installer.options.Home, names[0])
+		bin = mcpFamilyBinary(installer.options.Home)
 	}
 	return map[string]any{
 		"type":           openCodeLocal,
@@ -534,7 +521,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 	}
 	removeNames := map[string]bool{}
 	removedLegacy := []string{}
-	for _, name := range mcpLegacyNames {
+	for _, name := range LegacyMCPNames() {
 		if registration, ok := servers[name].(map[string]any); ok &&
 			installer.isPFMLegacyOpenCodeClient(name, registration) {
 			removeNames[name] = true

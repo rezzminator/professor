@@ -230,7 +230,6 @@ func TestDoctorStaleUsageRejectsMixedFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"--purge"},
 		{"--stale", "--verbose"},
-		{"--stale", "--skip-conversion"},
 		{"--stale", "--project-updates"},
 		{"--stale", "--json"},
 	} {

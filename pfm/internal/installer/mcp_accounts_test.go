@@ -27,7 +27,7 @@ func TestMCPWiresCodexAndOpenCodeWithoutClaudeRegistry(t *testing.T) {
 	e := engine{
 		options: Options{
 			Home: home, CodexHomes: []string{codex}, OpenCodeConfigPath: opencode,
-			MCPEnabled: map[string]bool{"chat": true, "harvester": true}, MCPPort: 8377, Stdout: io.Discard,
+			MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377, Stdout: io.Discard,
 		},
 		apply: true, managedRoot: managedRootForHome(home), stamp: "fixture",
 	}
@@ -39,8 +39,7 @@ func TestMCPWiresCodexAndOpenCodeWithoutClaudeRegistry(t *testing.T) {
 	}
 	for _, path := range []string{filepath.Join(codex, "config.toml"), opencode} {
 		content, err := os.ReadFile(path)
-		if err != nil || !strings.Contains(string(content), "chat-professor") ||
-			!strings.Contains(string(content), "harvester-professor") {
+		if err != nil || !strings.Contains(string(content), "chat-professor") {
 			t.Fatalf("%s lacks the professor MCP server: %s err=%v", path, content, err)
 		}
 	}
@@ -187,96 +186,90 @@ func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(
 
 func TestMCPFamilyRegistrationsPreserveForeignAndCutOverLegacy(t *testing.T) {
 	for _, chat := range []bool{false, true} {
-		for _, harvester := range []bool{false, true} {
-			for _, foreign := range []bool{false, true} {
-				t.Run(fmt.Sprintf("chat=%t/harvester=%t/foreign=%t", chat, harvester, foreign), func(t *testing.T) {
-					home := t.TempDir()
-					codex := filepath.Join(home, ".codex")
-					openCode := OpenCodeConfigPath(home)
-					bin := filepath.Join(home, ".local", "bin", "pfm")
-					command := bin
-					if foreign {
-						command = "operator"
+		for _, foreign := range []bool{false, true} {
+			t.Run(fmt.Sprintf("chat=%t/foreign=%t", chat, foreign), func(t *testing.T) {
+				home := t.TempDir()
+				codex := filepath.Join(home, ".codex")
+				openCode := OpenCodeConfigPath(home)
+				bin := filepath.Join(home, ".local", "bin", "pfm")
+				command := bin
+				if foreign {
+					command = "operator"
+				}
+				writeFixture(
+					t,
+					filepath.Join(codex, "config.toml"),
+					fmt.Sprintf(
+						"[mcp_servers.professor]\ncommand = %q\nargs = [\"mcp\", \"serve\", \"--stdio\"]\n",
+						command,
+					),
+				)
+				writeFixture(
+					t,
+					openCode,
+					fmt.Sprintf(
+						`{"mcp":{"professor":{"type":"local","command":[%q,"mcp","serve","--stdio"],"enabled":true}}}`,
+						command,
+					),
+				)
+				e := engine{
+					options: Options{
+						Home:               home,
+						CodexHomes:         []string{codex},
+						OpenCodeConfigPath: openCode,
+						MCPEnabled:         map[string]bool{"chat": chat},
+						MCPPort:            8377,
+						Stdout:             io.Discard,
+					},
+					apply:       true,
+					managedRoot: managedRootForHome(home),
+					stamp:       "fixture",
+				}
+				if err := e.wireMCP(); err != nil {
+					t.Fatal(err)
+				}
+				var cx struct {
+					Servers map[string]struct {
+						Command string
+						Args    []string
+					} `toml:"mcp_servers"`
+				}
+				if _, err := toml.DecodeFile(filepath.Join(codex, "config.toml"), &cx); err != nil {
+					t.Fatal(err)
+				}
+				oc, err := decodeJSONCObject([]byte(readFixture(t, openCode)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				servers, _ := oc["mcp"].(map[string]any)
+				expected := 0
+				if foreign {
+					expected++
+				}
+				for family, on := range map[string]bool{"chat": chat} {
+					if !on {
+						continue
 					}
-					writeFixture(
-						t,
-						filepath.Join(codex, "config.toml"),
-						fmt.Sprintf(
-							"[mcp_servers.professor]\ncommand = %q\nargs = [\"mcp\", \"serve\", \"--stdio\"]\n",
-							command,
-						),
-					)
-					writeFixture(
-						t,
-						openCode,
-						fmt.Sprintf(
-							`{"mcp":{"professor":{"type":"local","command":[%q,"mcp","serve","--stdio"],"enabled":true}}}`,
-							command,
-						),
-					)
-					e := engine{
-						options: Options{
-							Home:               home,
-							CodexHomes:         []string{codex},
-							OpenCodeConfigPath: openCode,
-							MCPEnabled:         map[string]bool{"chat": chat, "harvester": harvester},
-							MCPPort:            8377,
-							Stdout:             io.Discard,
-						},
-						apply:       true,
-						managedRoot: managedRootForHome(home),
-						stamp:       "fixture",
+					expected++
+					name := family + "-professor"
+					want := []string{"mcp", "serve", "--stdio", "--family", family}
+					wantBin := bin
+					if cx.Servers[name].Command != wantBin || !reflect.DeepEqual(cx.Servers[name].Args, want) {
+						t.Fatalf("Codex %s = %+v", name, cx.Servers[name])
 					}
-					if err := e.wireMCP(); err != nil {
-						t.Fatal(err)
+					registration, ok := servers[name].(map[string]any)
+					if !ok || !sameStrings(registration["command"].([]any), append([]string{wantBin}, want...)) {
+						t.Fatalf("OpenCode %s = %+v", name, registration)
 					}
-					var cx struct {
-						Servers map[string]struct {
-							Command string
-							Args    []string
-						} `toml:"mcp_servers"`
-					}
-					if _, err := toml.DecodeFile(filepath.Join(codex, "config.toml"), &cx); err != nil {
-						t.Fatal(err)
-					}
-					oc, err := decodeJSONCObject([]byte(readFixture(t, openCode)))
-					if err != nil {
-						t.Fatal(err)
-					}
-					servers, _ := oc["mcp"].(map[string]any)
-					expected := 0
-					if foreign {
-						expected++
-					}
-					for family, on := range map[string]bool{"chat": chat, "harvester": harvester} {
-						if !on {
-							continue
-						}
-						expected++
-						name := family + "-professor"
-						want := []string{"mcp", "serve", "--stdio", "--family", family}
-						wantBin := bin
-						if family == "harvester" {
-							want = []string{"mcp"}
-							wantBin = filepath.Join(home, ".local", "bin", "harvester")
-						}
-						if cx.Servers[name].Command != wantBin || !reflect.DeepEqual(cx.Servers[name].Args, want) {
-							t.Fatalf("Codex %s = %+v", name, cx.Servers[name])
-						}
-						registration, ok := servers[name].(map[string]any)
-						if !ok || !sameStrings(registration["command"].([]any), append([]string{wantBin}, want...)) {
-							t.Fatalf("OpenCode %s = %+v", name, registration)
-						}
-					}
-					if len(cx.Servers) != expected || len(servers) != expected {
-						t.Fatalf("installed servers Codex=%+v OpenCode=%+v, want %d", cx.Servers, servers, expected)
-					}
-					if foreign &&
-						(cx.Servers["professor"].Command != "operator" || servers["professor"].(map[string]any)["command"].([]any)[0] != "operator") {
-						t.Fatal("foreign professor changed")
-					}
-				})
-			}
+				}
+				if len(cx.Servers) != expected || len(servers) != expected {
+					t.Fatalf("installed servers Codex=%+v OpenCode=%+v, want %d", cx.Servers, servers, expected)
+				}
+				if foreign &&
+					(cx.Servers["professor"].Command != "operator" || servers["professor"].(map[string]any)["command"].([]any)[0] != "operator") {
+					t.Fatal("foreign professor changed")
+				}
+			})
 		}
 	}
 }
@@ -389,7 +382,7 @@ func TestClaudeMCPFamilyCutover(t *testing.T) {
 						Home:           home,
 						ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}, {ID: 2, ConfigDir: missing}},
 						CodexHomes:     []string{},
-						MCPEnabled:     map[string]bool{"chat": enabled, "harvester": enabled},
+						MCPEnabled:     map[string]bool{"chat": enabled},
 						MCPPort:        8377,
 						Stdout:         &stdout,
 					},
@@ -417,20 +410,16 @@ func TestClaudeMCPFamilyCutover(t *testing.T) {
 					}
 					count := 1
 					if enabled {
-						count = 3
+						count = 2
 					}
 					if len(servers) != count || document["theme"] != "keep" {
 						t.Fatalf("account registry=%s want %d servers", raw, count)
 					}
-					for _, family := range []string{"chat", "harvester"} {
+					for _, family := range []string{"chat"} {
 						if enabled {
 							shape, ok := servers[family+"-professor"].(map[string]any)
 							wantArgs := []string{"mcp", "serve", "--stdio", "--family", family}
 							wantCommand := command
-							if family == "harvester" {
-								wantArgs = []string{"mcp"}
-								wantCommand = filepath.Join(home, ".local", "bin", "harvester")
-							}
 							if !ok ||
 								!isExactStdioShape(
 									shape,

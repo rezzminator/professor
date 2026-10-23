@@ -177,7 +177,7 @@ graph_order() {
     !after {
       if ($0=="pfm.unit") group=1
       else if ($0=="pfm.e2e") group=2
-      else if ($0=="pfm.race" || $0=="harvester.race") group=3
+      else if ($0=="pfm.race") group=3
       else if ($0 ~ /^pfm\.self\./) group=4
       else if ($0 ~ /^templates\.lanes\./) group=5
       else if ($0 ~ /^templates\.demo\./) group=6
@@ -186,14 +186,14 @@ graph_order() {
       previous=group
       next
     }
-    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.(lanes|demo)\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race" || $0=="harvester.race") {exit 1}
+    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.(lanes|demo)\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race") {exit 1}
     END {if (barriers!=1) exit 1}
   ' "$T/registered"
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
 templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
-heavy_names='harvester.race,pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
+heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.mirrors$' "$T/registered")" -eq 1 ] &&
@@ -201,7 +201,7 @@ if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^pfm\.e2e$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.lanes\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/fence/lanes/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
   [ "$(grep -c '^templates\.demo\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/demo/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
-  [ "$(sed -n '1,4p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race,harvester.race' ] &&
+  [ "$(sed -n '1,3p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   [ -z "$(sort "$T/registered" | uniq -d)" ] && graph_order all; then
@@ -209,9 +209,9 @@ if gate_run all >"$T/all.out" &&
 else bad 'all registration' "$(cat "$T/all.out")" "$(cat "$T/registered")"; fi
 
 if PFM_TEST_TIMING_DIR="$T/real-pfm" gate_run pfm >"$T/pfm.out" &&
-  [ "$(sed -n '1,4p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race,harvester.race' ] &&
+  [ "$(sed -n '1,3p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
-  [ "$(sort "$T/heavy" | paste -sd, -)" = 'harvester.race,pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin' ] &&
+  [ "$(sort "$T/heavy" | paste -sd, -)" = 'pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin' ] &&
   graph_order pfm; then
   ok 'pfm graph runs its tests before static checks'
 else bad 'pfm graph' "$(cat "$T/registered")"; fi
@@ -222,9 +222,6 @@ else bad 'pfm.e2e registration' "$(grep '^pfm.e2e' "$T/registered.args")"; fi
 if grep -Fxq "pfm.race checks_pfm_race $REPO_ROOT/pfm $real_run" "$T/registered.args"; then
   ok 'pfm.race is the race step, given the pfm dir and the run dir'
 else bad 'pfm.race registration' "$(grep '^pfm.race' "$T/registered.args")"; fi
-if grep -Fxq "harvester.race checks_harvester_race /harvester $real_run" "$T/registered.args"; then
-  ok 'harvester.race is mandatory in the pfm graph and uses mounted standalone source'
-else bad 'harvester.race registration' "$(grep '^harvester.race' "$T/registered.args")"; fi
 if [ -s "$real_run/profile.tsv" ] && [ -f "$real_run/profile/INDEX.txt" ] && grep -Fq "PROFILE index $real_run/profile/INDEX.txt" "$T/pfm.out"; then
   ok 'the real profile-report.sh summary prints its PROFILE block and writes profile.tsv and profile/INDEX.txt'
 else bad 'real summary' "$(cat "$T/pfm.out")"; fi
@@ -287,7 +284,7 @@ if registry_probe templates '' "$REPO_ROOT" "$T/real-registry" >"$T/real-registr
   [ "$(grep -c '^templates\.lanes\.' "$T/real-registry")" -eq "$(find "$REPO_ROOT/infra/fence/lanes/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ]; then
   ok 'the actual gate enumerator registers M and O2 commands under valid IDs and includes every lane suite'
 else bad 'actual lane suite registration' "$(cat "$T/real-registry.out")" "$(cat "$T/real-registry" 2>/dev/null)"; fi
-for rejected in pfm.unit harvester.race pfm.self.arch-check templates.lanes.root templates.demo.codex_fence_home \
+for rejected in pfm.unit pfm.self.arch-check templates.lanes.root templates.demo.codex_fence_home \
   fixture.go-fail fixture.bound pfm.arch templates.check-map templates.clone templates.test-tests templates.engine-sync-action-tests; do
   rm -f "$T/refused-registry"
   if ! PFM_GATE_FIXTURES=1 registry_probe all "$rejected" "$REPO_ROOT" "$T/refused-registry" >"$T/refused-registry.out" 2>&1 &&
@@ -728,53 +725,6 @@ if grep -Fxq 'gcc pfm' "$T/need.calls" && [ ! -s "$T/unit.calls" ] && [ ! -s "$S
   ok 'pfm.race: no C compiler is a missing toolchain by name, and no go test runs'
 else bad 'pfm.race: no gcc' "$(cat "$T/need.calls")" "$(cat "$T/unit.calls")" "$(cat "$STUB_EVENTS")" "$(cat "$T/race-nogcc.out")"; fi
 
-# Independent original seven-test inventory: module qualification and exact names are required.
-harvest_race_tests='internal/harvest TestHarvesterChaos
-internal/harvest TestFetchFailureIsCachedBeforeItsFlightEnds
-internal/harvest TestFetchSizeOnlyLeaderSharesTheWholePage
-internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
-internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
-internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
-internal/harvestmcp TestServiceChaos'
-if [ "${CHECKS_HARVESTER_RACE_TESTS-}" = "$harvest_race_tests" ] && declare -F checks_harvester_race >/dev/null; then
-  ok 'standalone harvester race selection preserves all seven original regression tests'
-  mkdir -p "$T/fx/harvester"
-  printf 'module github.com/rezzminator/harvester\n' > "$T/fx/harvester/go.mod"
-  harvest_race_case() {
-    local label="$1" stream="$2" want="$3" rd="$T/harvester-race-run" pkg test
-    mkdir -p "$rd"; rm -f "$rd/harvester-race.json"
-    : > "$STUB_EVENTS"; : > "$T/unit.calls"; FAILURES=0
-    if [ "$stream" != ABSENT ]; then
-      while read -r pkg test; do
-        printf '{"Action":"pass","Package":"github.com/rezzminator/harvester/%s","Test":"%s"}\n' "$pkg" "$test"
-      done <<< "$stream" > "$rd/harvester-race.json"
-    fi
-    checks_harvester_race "$T/fx/harvester" "$rd" > "$T/harvester-race.out" 2>&1
-    if grep -Fq "$rd/profile/harvester-race harvester: go test -race (race regressions) -- bash -c" "$T/unit.calls" &&
-      grep -Fq 'CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"' "$T/unit.calls" &&
-      grep -Fq "$rd/harvester-race.json ./internal/harvest/ ./internal/harvestmcp/" "$T/unit.calls" &&
-      [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$rd/harvester-race.json" "$rd/harvester-race.json" "$rd/profile/harvester-race")" ] &&
-      [ "$(grep -v '^  PROFILE ' "$T/harvester-race.out")" = "$want" ] &&
-      { { [ -z "$want" ] && [ "$FAILURES" -eq 0 ]; } || { [ -n "$want" ] && [ "$FAILURES" -eq 1 ]; }; }; then
-      ok "harvester.race: $label"
-    else bad "harvester.race: $label" "$(cat "$T/unit.calls")" "$(cat "$T/harvester-race.out")" "FAILURES=$FAILURES"; fi
-  }
-  harvest_race_case 'all seven exact tests passed' "$harvest_race_tests" ''
-  harvest_race_case 'missing or skipped required test is red' "$(grep -v 'TestServiceChaos' <<< "$harvest_race_tests")" \
-    'FAILSTEP harvester: race — 1 of 7 named test(s) never passed: internal/harvestmcp TestServiceChaos'
-  harvest_race_case 'wrong module/package cannot substitute for required pass' "$(sed 's|internal/harvestmcp TestServiceChaos|internal/harvest TestServiceChaos|' <<< "$harvest_race_tests")" \
-    'FAILSTEP harvester: race — 1 of 7 named test(s) never passed: internal/harvestmcp TestServiceChaos'
-  harvest_race_case 'absent stream names every required test' ABSENT \
-    "FAILSTEP harvester: race — 7 of 7 named test(s) never passed: $(paste -sd, - <<< "$harvest_race_tests" | sed 's/,/, /g')"
-  : > "$T/unit.calls"; FAILURES=0
-  checks_harvester_race "$T/missing-harvester" "$T/harvester-race-run" > "$T/harvester-source.out" 2>&1
-  if [ "$FAILURES" -eq 1 ] && [ ! -s "$T/unit.calls" ] && grep -Fxq "FAILSTEP harvester: race source unavailable: $T/missing-harvester/go.mod" "$T/harvester-source.out"; then
-    ok 'harvester.race: unavailable source is visible and no test command runs'
-  else bad 'harvester.race source unavailable' "$(cat "$T/harvester-source.out")"; fi
-else
-  bad 'standalone harvester mandatory seven-test race runner is missing' "${CHECKS_HARVESTER_RACE_TESTS-<absent>}"
-fi
-
 # checks_pfm_test (iso test pfm): unit and e2e profiled into the one run dir it makes.
 : > "$STUB_EVENTS"; : > "$T/unit.calls"
 PFM_TEST_TIMING_DIR="$T/serial" checks_pfm_test "$T/fx/pfm" >"$T/serial.out"
@@ -798,28 +748,22 @@ export MIRROR_CALLS="$T/mirror.calls"
 cm_reuse="$T/cm-reuse"; mkdir -p "$cm_reuse/bin"; cp "$T/prebuilt-pfm" "$cm_reuse/bin/pfm"
 : > "$T/unit.calls"; : > "$T/go.calls"; FAILURES=0
 STUB_GO_RC=0 checks_gate_check_map "$cm_reuse" >"$T/cm-reuse.out" 2>&1
-if [ "$(sed 's/ |.*//' "$T/go.calls")" = "go -C /harvester build -o $cm_reuse/check-map-harvester ./cmd/harvester" ] && [ "$FAILURES" -eq 0 ] &&
-  [ "$(cat "$T/unit.calls")" = "unset templates: lane↔command map (check-map) -- env HARVESTER_BIN=$cm_reuse/check-map-harvester bash infra/fence/lanes/check-map.sh --pfm $cm_reuse/bin/pfm" ]; then
-  ok 'check-map reuses <run>/bin/pfm and builds the standalone harvester'
+if [ "$(sed 's/ |.*//' "$T/go.calls")" = "" ] && [ "$FAILURES" -eq 0 ] &&
+  [ "$(cat "$T/unit.calls")" = "unset templates: lane↔command map (check-map) -- bash infra/fence/lanes/check-map.sh --pfm $cm_reuse/bin/pfm" ]; then
+  ok 'check-map reuses <run>/bin/pfm'
 else bad 'check-map reuse' "$(cat "$T/go.calls")" "$(cat "$T/unit.calls")" "$(cat "$T/cm-reuse.out")"; fi
 cm_build="$T/cm-build"; mkdir -p "$cm_build"
 : > "$T/unit.calls"; : > "$T/go.calls"; FAILURES=0
 STUB_GO_RC=0 checks_gate_check_map "$cm_build" >"$T/cm-build.out" 2>&1
-if [ "$(sed 's/ |.*//' "$T/go.calls")" = "$(printf 'go -C pfm build -o %s/check-map-pfm ./cmd/pfm\ngo -C /harvester build -o %s/check-map-harvester ./cmd/harvester' "$cm_build" "$cm_build")" ] && [ "$FAILURES" -eq 0 ] &&
-  [ "$(cat "$T/unit.calls")" = "unset templates: lane↔command map (check-map) -- env HARVESTER_BIN=$cm_build/check-map-harvester bash infra/fence/lanes/check-map.sh --pfm $cm_build/check-map-pfm" ]; then
-  ok 'check-map without <run>/bin/pfm builds both MCP binaries'
+if [ "$(sed 's/ |.*//' "$T/go.calls")" = "$(printf 'go -C pfm build -o %s/check-map-pfm ./cmd/pfm' "$cm_build")" ] && [ "$FAILURES" -eq 0 ] &&
+  [ "$(cat "$T/unit.calls")" = "unset templates: lane↔command map (check-map) -- bash infra/fence/lanes/check-map.sh --pfm $cm_build/check-map-pfm" ]; then
+  ok 'check-map without <run>/bin/pfm builds the MCP binary'
 else bad 'check-map build' "$(cat "$T/go.calls")" "$(cat "$T/unit.calls")" "$(cat "$T/cm-build.out")"; fi
 : > "$T/unit.calls"; : > "$T/go.calls"; FAILURES=0
 STUB_GO_RC=1 checks_gate_check_map "$cm_build" >"$T/cm-build-fail.out" 2>&1
 if [ "$FAILURES" -eq 1 ] && [ ! -s "$T/unit.calls" ] && grep -Fxq 'FAILSTEP templates: check-map pfm build FAILED' "$T/cm-build-fail.out"; then
   ok 'a failed check-map pfm build is one red step and no check-map run'
 else bad 'check-map build failure' "$(cat "$T/unit.calls")" "$(cat "$T/cm-build-fail.out")"; fi
-
-: > "$T/unit.calls"; : > "$T/go.calls"; FAILURES=0
-STUB_GO_RC=1 checks_gate_check_map "$cm_reuse" >"$T/cm-harvester-fail.out" 2>&1
-if [ "$FAILURES" -eq 1 ] && [ ! -s "$T/unit.calls" ] && grep -Fxq 'FAILSTEP templates: check-map harvester build FAILED' "$T/cm-harvester-fail.out"; then
-  ok 'a failed standalone harvester build is named and no map derive runs'
-else bad 'check-map harvester build failure' "$(cat "$T/unit.calls")" "$(cat "$T/cm-harvester-fail.out")"; fi
 
 mkdir -p "$REPO_ROOT/templates/global"
 printf '%s\n' '{"version":1,"codex":{"modelMap":{"smart":"fixture-model"}}}' > "$REPO_ROOT/templates/global/engine-sync.json"

@@ -13,8 +13,7 @@ import (
 )
 
 // PrintMCPClientCutover inspects Claude's account .claude.json registries,
-// then reports the historical harvester cutover for Codex and project-scope
-// .mcp.json, distinguishing pfm's legacy entries from user-owned ones. It also
+// distinguishing pfm's legacy entries from user-owned ones. It also
 // checks each Codex account's config.toml and the OpenCode config for family
 // registrations and legacy entries. Claude receives family registrations both
 // at install only in account registries already holding a pfm-owned entry,
@@ -25,39 +24,6 @@ func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 	codexHomes := make([]string, 0, len(runtime.Config.CodexAccounts))
 	for _, account := range runtime.Config.CodexAccounts {
 		codexHomes = append(codexHomes, account.Home)
-	}
-	for _, report := range installer.InspectHarvesterClientCutover(runtime.Paths.Home, runtime.Config.MCP.HTTP.Port, codexHomes) {
-		switch report.State {
-		case installer.MCPClientAbsent, installer.MCPClientPFM:
-			continue
-		case installer.MCPClientUnreadable:
-			warnings++
-			fmt.Fprintf(
-				stdout,
-				"doctor: mcp client=%s harvester=unreadable error=%v path=%s\n",
-				report.Client,
-				report.Error,
-				report.Path,
-			)
-		case installer.MCPClientLegacyPFM:
-			warnings++
-			fmt.Fprintf(
-				stdout,
-				"doctor: mcp client=%s harvester=%s remediation=run pfm install --yes path=%s\n",
-				report.Client,
-				report.State,
-				report.Path,
-			)
-		default:
-			warnings++
-			fmt.Fprintf(
-				stdout,
-				"doctor: mcp client=%s harvester=%s warning=consumer cutover incomplete remediation=repoint to PFM, verify it, then remove the foreign registration path=%s\n",
-				report.Client,
-				report.State,
-				report.Path,
-			)
-		}
 	}
 	for _, home := range codexHomes {
 		warnings += printCodexRow(stdout, runtime, filepath.Join(home, "config.toml"))
@@ -72,7 +38,7 @@ func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 func printOpenCodeRows(stdout io.Writer, runtime config.Runtime) int {
 	home, port := runtime.Paths.Home, runtime.Config.MCP.HTTP.Port
 	warnings := 0
-	for _, family := range []string{config.MCPServerChat, config.MCPServerHarvester} {
+	for _, family := range []string{config.MCPServerChat} {
 		warnings += printOpenCodeFamilyRow(
 			stdout,
 			home,
@@ -97,7 +63,6 @@ func printOpenCodeFamilyRow(stdout io.Writer, home string, port int, name string
 		name,
 		"professor",
 		strings.TrimSuffix(name, "-professor"),
-		config.MCPServerHarvester,
 	), name)
 	base := fmt.Sprintf("doctor: mcp client=opencode config=%s %s=%s%s", path, name, state, legacy)
 	switch {
@@ -114,13 +79,12 @@ func printOpenCodeFamilyRow(stdout io.Writer, home string, port int, name string
 }
 
 // printCodexRow prints one Codex account home's config.toml row: its
-// `professor` state and any pfm legacy `chat` table still present (the
-// harvester key is the cutover check's, so nothing is counted twice). pfm
+// `professor` state and any pfm legacy `chat` table still present. pfm
 // install replaces only the tables it wrote, so a foreign `professor` is named
 // as user-owned; an absent one warns only while an MCP family is enabled.
 func printCodexRow(stdout io.Writer, runtime config.Runtime, path string) int {
 	warnings := 0
-	for _, family := range []string{config.MCPServerChat, config.MCPServerHarvester} {
+	for _, family := range []string{config.MCPServerChat} {
 		warnings += printCodexFamilyRow(
 			stdout,
 			runtime,
@@ -169,8 +133,7 @@ func printCodexFamilyRow(stdout io.Writer, runtime config.Runtime, path, name st
 	return 1
 }
 
-// professorState folds one file's reports — `professor` and the legacy
-// `chat` / `harvester` keys — into the professor state, the ` legacy=<keys>`
+// professorState folds one file's reports — `professor` and legacy keys — into the professor state, the ` legacy=<keys>`
 // suffix (the sorted keys still holding pfm's legacy shape, or ""), and the
 // error that made the file unreadable. A legacy key that is merely not pfm's
 // shape is someone else's entry and not this row's business.
@@ -254,10 +217,8 @@ func printClaudeMCPRows(stdout io.Writer, runtime config.Runtime) int {
 			runtime.Paths.Home,
 			runtime.Config.MCP.HTTP.Port,
 			"chat-professor",
-			"harvester-professor",
 			"professor",
 			"chat",
-			"harvester",
 		)
 		for _, report := range reports {
 			if report.State == installer.MCPClientAbsent {
@@ -284,8 +245,7 @@ func printClaudeMCPRows(stdout io.Writer, runtime config.Runtime) int {
 				fmt.Fprint(stdout, " remediation=run pfm install --yes")
 				warnings++
 			default:
-				if report.Name == config.MCPRegistrationName(config.MCPServerChat) ||
-					report.Name == config.MCPRegistrationName(config.MCPServerHarvester) {
+				if report.Name == config.MCPRegistrationName(config.MCPServerChat) {
 					fmt.Fprint(stdout, " warning=user-owned entry preserved; remove or rename it if unwanted")
 					warnings++
 				} else {

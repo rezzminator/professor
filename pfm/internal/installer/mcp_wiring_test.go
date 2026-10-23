@@ -326,7 +326,6 @@ func TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed(t *testin
   "mcp": {
     // Legacy pfm entries.
     "chat": {"type": "local", "command": ["`+bin+`", "mcp", "chat", "serve"], "enabled": true},
-    "harvester": {"type": "remote", "url": "http://127.0.0.1:8456/mcp/harvester", "enabled": true},
     "manual": {"type": "remote", "url": "https://gateway.example.invalid/mcp", "enabled": true}
   }
 }
@@ -351,9 +350,6 @@ func TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed(t *testin
 	servers, _ := document["mcp"].(map[string]any)
 	if _, ok := servers[chatName]; ok {
 		t.Fatalf("legacy local chat survived:\n%s", raw)
-	}
-	if _, ok := servers[mcpServerHarvester]; ok {
-		t.Fatalf("legacy remote harvester survived:\n%s", raw)
 	}
 	if servers["manual"] == nil || !sameJSONValue(servers[chatRegistrationName], openCodeChatShape(home)) {
 		t.Fatalf("servers=%#v, want manual kept and professor in its local stdio shape", servers)
@@ -398,34 +394,6 @@ func TestMCPInstallRegistersTheStdioChatFamilyInAFreshCodexHome(t *testing.T) {
 	}
 }
 
-func TestInspectHarvesterClientCutoverNamesStandaloneUnreadableAndLegacyPFMCodexStates(t *testing.T) {
-	home := t.TempDir()
-	codex := filepath.Join(home, ".codex")
-	path := filepath.Join(codex, "config.toml")
-	writeFixture(
-		t,
-		path,
-		"[mcp_servers.harvester]\ncommand = \"uv\"\nargs = [\"--directory\", \"/fixture/harvester\", \"run\", \"harvester\"]\n",
-	)
-	reports := InspectHarvesterClientCutover(home, 8377, []string{codex})
-	if len(reports) != 2 || reports[0].Client != "codex" || reports[0].State != MCPClientLegacyStandalone {
-		t.Fatalf("Codex legacy report=%#v", reports)
-	}
-	writeFixture(t, path, "broken = [\n")
-	reports = InspectHarvesterClientCutover(home, 8377, []string{codex})
-	if reports[0].State != MCPClientUnreadable || reports[0].Error == nil ||
-		!strings.Contains(reports[0].Error.Error(), "config.toml") {
-		t.Fatalf("Codex unreadable report=%#v", reports[0])
-	}
-	writeFixture(t, path, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8377/mcp/harvester\"\n")
-	reports = InspectHarvesterClientCutover(home, 8377, []string{codex})
-	if reports[0].State != MCPClientLegacyPFM || reports[0].Error != nil {
-		t.Fatalf("Codex loopback harvester report=%#v, want pfm legacy route", reports[0])
-	}
-}
-
-// TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine pins that the OpenCode
-// writer names the pfm legacy keys it removes, in the Claude writer's words.
 func TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()

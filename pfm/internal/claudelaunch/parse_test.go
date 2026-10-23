@@ -8,8 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestParseRoundTripEveryKnob(t *testing.T) {
@@ -19,7 +17,6 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 	machine.Claude.SubagentStatuslineTrace = true
 	machine.Claude.MaxConcurrentSubagents = 3
 	machine.Claude.SystemPrompt = "professor"
-	machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: true}
 	prompt := filepath.Join(t.TempDir(), "prompt.md")
 	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
 		t.Fatal(err)
@@ -172,7 +169,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Error("status line missing")
 				}
 			case "mcp":
-				assertFamilyMCP(t, home, parsed.MCPConfig, true, true)
+				assertChatMCP(t, home, parsed.MCPConfig)
 			case "permissionMode":
 				if !parsed.Autonomy {
 					t.Error("autonomy missing")

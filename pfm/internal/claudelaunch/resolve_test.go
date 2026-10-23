@@ -35,8 +35,6 @@ func TestResolveSources(t *testing.T) {
 	machine.Sources["claude.theme"] = pfmconfig.SourceFile
 	machine.Sources["claude.autoCompactWindow"] = pfmconfig.SourceFile
 	machine.Sources["claude.helperModel"] = pfmconfig.SourceFile
-	machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: true}
-	machine.Sources["mcp.servers.harvester.enabled"] = pfmconfig.SourceFile
 	prefs := machine.Claude
 	prefs.Theme = "light"
 	prefs.AutoCompactWindow = 50000
@@ -87,8 +85,8 @@ func TestResolveSources(t *testing.T) {
 	if row := get(0, "functionHooks"); row.Won != "constant" || row.Value != "1" {
 		t.Errorf("function hooks=%#v", row)
 	}
-	if row := get(0, "mcp"); row.Won != "config" || row.Value != "harvester" {
-		t.Errorf("mcp=%#v", row)
+	if row := get(0, "mcp"); row.Won != "default" || row.Value != unsetWord {
+		t.Errorf("mcp=%#v, want default unset", row)
 	}
 }
 

@@ -67,8 +67,7 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 			row.Value, row.Won = shellValue()
 		case SourceMachineConfig:
 			row.Value = configValue(knob.Name, prefs, machine)
-			if machine.MCPServerSource(pfmconfig.MCPServerChat) != pfmconfig.SourceDefault ||
-				machine.MCPServerSource(pfmconfig.MCPServerHarvester) != pfmconfig.SourceDefault {
+			if machine.MCPServerSource(pfmconfig.MCPServerChat) != pfmconfig.SourceDefault {
 				row.Won = "config"
 			}
 		}
@@ -169,7 +168,7 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 		return prefs.PermissionMode
 	case knobMCP:
 		var enabled []string
-		for _, name := range []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester} {
+		for _, name := range []string{pfmconfig.MCPServerChat} {
 			if machine.MCPServers[name].Enabled {
 				enabled = append(enabled, name)
 			}

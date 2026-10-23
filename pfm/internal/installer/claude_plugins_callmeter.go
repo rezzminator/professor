@@ -42,19 +42,11 @@ var callmeterEnvPinned = []string{"CGO_ENABLED=0", "GOWORK=off", "GOFLAGS=-mod=r
 // goBinaryPlugins are plugins whose local copies need a matching Go binary.
 var goBinaryPlugins = map[string]struct {
 	binaryPath      func(paths.Env, string, string) (string, error)
-	repository      string
-	releaseBaseEnv  string
 	hookEnvironment bool
 }{
 	callmeterPlugin: {
 		binaryPath:      callmeterBinaryPath,
-		repository:      claudePluginRepository(callmeterPlugin),
 		hookEnvironment: true,
-	},
-	mcpServerHarvester: {
-		binaryPath:     harvesterBinaryPath,
-		repository:     claudePluginRepository(mcpServerHarvester),
-		releaseBaseEnv: "HARVESTER_RELEASE_BASE",
 	},
 }
 

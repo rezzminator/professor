@@ -100,7 +100,7 @@ var retiredNames = []retiredName{
 	{
 		name:      "mcp__professor__",
 		kind:      retiredTool,
-		successor: "mcp__chat-professor__* / mcp__harvester-professor__*",
+		successor: "mcp__chat-professor__* / mcp__plugin_harvester_harvester__*",
 		match:     matchPrefix,
 	},
 	{name: "pfm chat inject", kind: retiredCommand, successor: "pfm chat call", match: matchExact},
@@ -139,11 +139,14 @@ var retiredNames = []retiredName{
 		name: ".claude/commands/pfm/references/audit-scopes.md", kind: retiredPath,
 		successor: ".claude/commands/pcm.md", match: matchExact,
 	},
-	// releases/v0.78.0.md "→ For: every adopter · per project · MCP tool
-	// names": mcp__chat__* and mcp__harvester__* become their
-	// mcp__professor__ forms.
+	// releases/v0.78.0.md retired the former chat tool namespace.
 	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__chat-professor__*", match: matchPrefix},
-	{name: "mcp__harvester__", kind: retiredTool, successor: "mcp__harvester-professor__*", match: matchPrefix},
+	// Standalone plugin registration replaces the server pfm installed.
+	{name: "harvester-professor", kind: retiredTool, successor: "harvester", match: matchExact},
+	{
+		name: "mcp__harvester-professor__", kind: retiredTool,
+		successor: "mcp__plugin_harvester_harvester__*", match: matchPrefix,
+	},
 	// releases/v0.62.0.md "Removed: the host-level /chat:* Claude
 	// slash-command family"; "drive chat through the MCP tools instead".
 	{name: "/chat:", kind: retiredCommand, successor: "mcp__chat-professor__*", match: matchPrefix},

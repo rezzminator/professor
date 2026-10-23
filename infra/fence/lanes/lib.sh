@@ -796,7 +796,7 @@ need() {
 # Compare account identity and foreign MCP data across install/uninstall.
 # Family entries are checked separately against the installer's exact shape.
 claude_registry_without_family_entries() {
-  jq -cS '.mcpServers = ((.mcpServers // {}) | del(."chat-professor", ."harvester-professor"))' "$1"
+  jq -cS '.mcpServers = ((.mcpServers // {}) | del(."chat-professor"))' "$1"
 }
 
 # bundled_themes <templates/themes dir> — the themes the directory ships,
@@ -826,13 +826,8 @@ bundled_themes() {
   printf '%s' "$names"
 }
 
-# Independent expected Codex inheritance fixture, shared by M.02 and E2.06.
-codex_harvester_env_line() {
-  printf '%s\n' 'env_vars = ["HARVESTER_HOME_DIR", "HARVESTER_CONFIG", "HARVESTER_PYTHON_ROOT", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "HARVESTER_LOG_LEVEL", "HARVESTER_LOG_COMPONENTS", "HARVESTER_LOG_MIRROR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]'
-}
-
 # assert_opencode_mcp_registered <pfm-bin> — M.03 and E3.02 are the same
-# assertion body (OpenCode's opencode.jsonc carries both family local stdio
+# assertion body (OpenCode's opencode.jsonc carries chat local stdio
 # entries, and doctor's opencode rows report each family registration healthy): one shared beat body
 # so the two lanes can never drift apart on what "MCP registered" means.
 assert_opencode_mcp_registered() {
@@ -841,23 +836,23 @@ assert_opencode_mcp_registered() {
   if [ ! -f "$oc_cfg" ]; then
     bad="$bad no OpenCode MCP config at $oc_cfg — pfm install --yes did not write it;"
   else
-    for family in chat harvester; do
+    for family in chat; do
       server="$family-professor"
-      _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" --arg family "$family" --arg harvest "$HOME/.local/bin/harvester" \
-        '.mcp[$family + "-professor"] | .type == "local" and .command == (if $family == "harvester" then [$harvest, "mcp"] else [$bin, "mcp", "serve", "--stdio", "--family", $family] end) and .enabled == true' >/dev/null 2>&1 ||
+      _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" --arg family "$family" \
+        '.mcp[$family + "-professor"] | .type == "local" and .command == [$bin, "mcp", "serve", "--stdio", "--family", $family] and .enabled == true' >/dev/null 2>&1 ||
         bad="$bad M36: $oc_cfg $server is not the enabled local family stdio registration;"
     done
   fi
   oc_doctor_out="$(pfm doctor 2>&1)"
   oc_rows="$(printf '%s' "$oc_doctor_out" | grep -F 'client=opencode')"
-  for server in chat-professor harvester-professor; do
+  for server in chat-professor; do
     grep -qE "$server=pfm($|[[:space:]])" <<<"$oc_rows" ||
       bad="$bad M36: pfm doctor's opencode $server MCP row is not healthy: $(one_line "${oc_rows:-no client=opencode row at all}");"
   done
   if [ -n "$bad" ]; then
     fail "$bad"
   else
-    pass "$oc_cfg: both family servers local, enabled, with family stdio commands; doctor reports each registration healthy"
+    pass "$oc_cfg: chat servers local, enabled, with family stdio commands; doctor reports each registration healthy"
   fi
 }
 

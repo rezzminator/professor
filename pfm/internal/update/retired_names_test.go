@@ -42,7 +42,7 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 	writeRetiredFixture(t, root, map[string]string{
 		"scripts/legacy.sh":            "#!/bin/sh\nclaude -p '/wave:refine the spec'\n# gitter Phase: JC-COMMIT\n",
 		".claude/codex-build.json":     "{\n  \"skills\": [],\n  \"tools\": [\"mcp__chat__chat_inject\"]\n}\n",
-		".codex/config.toml":           "[mcp]\nallow = \"mcp__harvester__readPage\"\n",
+		".codex/config.toml":           "[mcp]\nallow = \"chat_inject\"\n",
 		"CLAUDE.md":                    "run /jc first\n",
 		".professor/baseline.json":     "{\"files\": {\".claude/commands/pfm.md\": {}}}\n",
 		"AGENTS.md":                    "/wave\n",
@@ -66,8 +66,8 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 			Successor: "mcp__chat-professor__*",
 		},
 		{
-			Path: ".codex/config.toml", Line: 2, Name: "mcp__harvester__", Kind: "tool",
-			Successor: "mcp__harvester-professor__*",
+			Path: ".codex/config.toml", Line: 2, Name: "chat_inject", Kind: "tool",
+			Successor: "mcp__chat-professor__call",
 		},
 		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
 		{Path: "scripts/legacy.sh", Line: 3, Name: "JC-COMMIT", Kind: "phase", Successor: "COMMIT"},
@@ -93,7 +93,7 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"see ~/.claude/commands/pfm.md and $HOME/.claude/commands/pfm.md",
 		".claude/commands/pcm.md",
 		"/quality:md-forlint check",
-		"mcp__chat-professor__call and mcp__harvester-professor__read",
+		"mcp__chat-professor__call",
 		"spawn super-rr",
 		"import x from 'src/wave.js'; /waveform",
 		"/jcx and /pfm:refresher and /qa:lively",
@@ -746,8 +746,8 @@ func TestChatCallRetiredNames(t *testing.T) {
 		t,
 		root,
 		map[string]string{
-			"old.md": "mcp__professor__chat_inject\npfm chat inject target message\nchat_inject\n",
-			"new.md": "mcp__chat-professor__call\nmcp__harvester-professor__read\npfm chat call target message\n",
+			"old.md": "mcp__chat__call\npfm chat inject target message\nchat_inject\n",
+			"new.md": "mcp__chat-professor__call\npfm chat call target message\n",
 		},
 	)
 	scan := ScanRetiredNames(root, nil)
@@ -758,9 +758,9 @@ func TestChatCallRetiredNames(t *testing.T) {
 		{
 			Path:      "old.md",
 			Line:      1,
-			Name:      "mcp__professor__",
+			Name:      "mcp__chat__",
 			Kind:      "tool",
-			Successor: "mcp__chat-professor__* / mcp__harvester-professor__*",
+			Successor: "mcp__chat-professor__*",
 		},
 		{Path: "old.md", Line: 2, Name: "pfm chat inject", Kind: "command", Successor: "pfm chat call"},
 		{Path: "old.md", Line: 3, Name: "chat_inject", Kind: "tool", Successor: "mcp__chat-professor__call"},

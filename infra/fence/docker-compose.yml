@@ -90,8 +90,6 @@ services:
 #   pfm-dev-gocache    lanes/container.sh, release-rehearsal.sh
 #   pfm-dev-gomod      lanes/container.sh, release-rehearsal.sh
 #   pfm-dev-lintcache  docker-compose.yml (pfm-dev, pfm-sim by extends)
-#   pfm-lane-harvest-cache  lanes/root.sh (via lanes/container.sh)
-#   pfm-lane-uv-cache       lanes/root.sh (via lanes/container.sh)
 volumes:
   pfm-dev-gocache:
     external: true

@@ -8,19 +8,13 @@ import (
 )
 
 func TestMCPServerKey(t *testing.T) {
-	if got := MCPServerKey(MCPServerHarvester); got != "mcp.servers.harvester.enabled" {
-		t.Fatalf("MCPServerKey(harvester) = %q", got)
-	}
 	if got := MCPServerKey(MCPServerChat); got != "mcp.servers.chat.enabled" {
 		t.Fatalf("MCPServerKey(chat) = %q", got)
 	}
 }
 
 func TestMCPFamilyPaths(t *testing.T) {
-	for family, want := range map[string]string{
-		MCPServerChat:      "/mcp/chat-professor",
-		MCPServerHarvester: "/mcp/harvester-professor",
-	} {
+	for family, want := range map[string]string{MCPServerChat: "/mcp/chat-professor"} {
 		if got := MCPFamilyPath(family); got != want {
 			t.Fatalf("MCPFamilyPath(%s) = %q, want %q", family, got, want)
 		}
@@ -41,7 +35,6 @@ func TestValidateThirdParty(t *testing.T) {
 		{"objects", map[string]json.RawMessage{"x": json.RawMessage(` {"type":"stdio","command":"x"} `), "http": json.RawMessage(`{"type":"http","url":"https://example.invalid/mcp"}`), "empty": json.RawMessage(`{}`)}, ""},
 		{"foreign professor", map[string]json.RawMessage{"professor": json.RawMessage(`{}`)}, ""},
 		{"chat registration", map[string]json.RawMessage{"chat-professor": json.RawMessage(`{}`)}, reservedError},
-		{"harvester registration", map[string]json.RawMessage{"harvester-professor": json.RawMessage(`{}`)}, "config " + path + ": mcp.thirdParty.harvester-professor: the name harvester-professor is pfm's own server"},
 		{"string", map[string]json.RawMessage{"x": json.RawMessage(`"y"`)}, objectError},
 		{"array", map[string]json.RawMessage{"x": json.RawMessage(`[]`)}, objectError},
 		{"null", map[string]json.RawMessage{"x": json.RawMessage(`null`)}, objectError},
@@ -65,30 +58,13 @@ func TestValidateThirdParty(t *testing.T) {
 	}
 }
 
-func TestDefaultsRegisterHarvesterDisabledByDefault(t *testing.T) {
-	got := Defaults(filepath.Join(t.TempDir(), "home"), nil)
-	server, ok := got.MCPServers["harvester"]
-	if !ok {
-		t.Fatal("harvester MCP server is not registered")
-	}
-	if server.Enabled {
-		t.Fatal("harvester MCP server is enabled by default")
-	}
-	if got.Source("mcp.servers.harvester.enabled") != SourceDefault {
-		t.Fatalf("harvester source = %q, want default", got.Source("mcp.servers.harvester.enabled"))
-	}
-}
-
-func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
-	registered := map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
-	}
+func TestLoadPreservesUnregisteredMCPServer(t *testing.T) {
+	registered := map[string]MCPServer{"chat": {Enabled: false}}
 	home := filepath.Join(t.TempDir(), "home")
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(
 		path,
-		[]byte(`{"version":1,"mcp":{"servers":{"harvester":{"enabled":true}}}}`),
+		[]byte(`{"version":1,"mcp":{"servers":{"external":{"enabled":true,"extra":"kept"}}}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -98,16 +74,34 @@ func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(mcp) error = %v", err)
 	}
-	if got.MCPServers["chat"].Enabled {
-		t.Fatal("chat became enabled when only harvester was configured")
-	}
-	if !got.MCPServers["harvester"].Enabled {
-		t.Fatal("harvester did not take its configured enabled value")
-	}
 	if got.Source("mcp.servers.chat.enabled") != SourceDefault {
 		t.Fatalf("chat source = %q, want default", got.Source("mcp.servers.chat.enabled"))
 	}
-	if got.MCPServerSource("harvester") != SourceFile {
-		t.Fatalf("harvester source = %q, want %q", got.MCPServerSource("harvester"), SourceFile)
+	if got.MCP.Servers["external"].Enabled {
+		t.Fatal("unregistered server became active")
+	}
+	var gotServer map[string]any
+	if err := json.Unmarshal(got.MCP.OtherServers["external"], &gotServer); err != nil ||
+		gotServer["enabled"] != true || gotServer["extra"] != "kept" {
+		t.Fatalf("unregistered server = %s, want original data", got.MCP.OtherServers["external"])
+	}
+	encoded, err := Marshal(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	var mcp struct {
+		Servers map[string]json.RawMessage `json:"servers"`
+	}
+	if err := json.Unmarshal(roundTrip["mcp"], &mcp); err != nil {
+		t.Fatal(err)
+	}
+	var roundTripServer map[string]any
+	if err := json.Unmarshal(mcp.Servers["external"], &roundTripServer); err != nil ||
+		roundTripServer["enabled"] != true || roundTripServer["extra"] != "kept" {
+		t.Fatalf("marshaled unregistered server = %s", mcp.Servers["external"])
 	}
 }

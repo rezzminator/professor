@@ -247,7 +247,7 @@ func acquireClaudeMCPLock(name string) error {
 // enabledMCPNames lists one registration per enabled family.
 func enabledMCPNames(servers map[string]bool) []string {
 	var names []string
-	for _, family := range []string{chatName, mcpServerHarvester} {
+	for _, family := range []string{chatName} {
 		if servers[family] {
 			names = append(names, pfmconfig.MCPRegistrationName(family))
 		}
@@ -256,36 +256,15 @@ func enabledMCPNames(servers map[string]bool) []string {
 }
 
 func mcpFamilyStdioArgs(name string) []string {
-	if strings.TrimSuffix(name, "-professor") == mcpServerHarvester {
-		return []string{mcpCommand}
-	}
 	return append(append([]string(nil), mcpStdioArgs...), "--family", strings.TrimSuffix(name, "-professor"))
 }
 
 func isFamilyRegistration(name string) bool {
-	return name == pfmconfig.MCPRegistrationName(chatName) || name == pfmconfig.MCPRegistrationName(mcpServerHarvester)
+	return name == pfmconfig.MCPRegistrationName(chatName)
 }
 
-func mcpFamilyBinary(home, name string) string {
-	binary := "pfm"
-	if strings.TrimSuffix(name, "-professor") == mcpServerHarvester {
-		binary = mcpServerHarvester
-	}
-	return filepath.Join(home, ".local", "bin", binary)
-}
-
-// codexStdioEnvLine inherits fixed runtime variable names without recording values.
-func codexStdioEnvLine(name string) string {
-	if strings.TrimSuffix(name, "-professor") != mcpServerHarvester {
-		return ""
-	}
-	names := []string{
-		"HARVESTER_HOME_DIR", "HARVESTER_CONFIG", "HARVESTER_PYTHON_ROOT",
-		"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
-		"HARVESTER_LOG_LEVEL", "HARVESTER_LOG_COMPONENTS", "HARVESTER_LOG_MIRROR",
-		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
-	}
-	return `env_vars = ["` + strings.Join(names, `", "`) + `"]`
+func mcpFamilyBinary(home string) string {
+	return filepath.Join(home, ".local", "bin", "pfm")
 }
 
 // codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
@@ -303,11 +282,6 @@ func codexStdioBody(bin string, names ...string) ([]string, error) {
 			return nil, err
 		}
 		body = append(body, strings.TrimSuffix(encoded, "\n"))
-	}
-	if len(names) > 0 {
-		if environment := codexStdioEnvLine(names[0]); environment != "" {
-			body = append(body, environment)
-		}
 	}
 	return body, nil
 }

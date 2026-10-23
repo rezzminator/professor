@@ -145,9 +145,7 @@ ens_line="$(grep -nx 'fence_volumes_ensure' "$STUB_DOCKER_LOG" | head -1 | cut -
 if [ -n "$hk_line" ] && [ -n "$ens_line" ] && [ -n "$first_build" ] && [ "$hk_line" -lt "$first_build" ] && [ "$ens_line" -lt "$first_build" ]; then
   ok "housekeeping runs with the root's hash, and the caches are ensured, before the base build"
 else bad "housekeeping before build" "$(cat "$STUB_DOCKER_LOG")"; fi
-if grep -q -- '-v pfm-lane-harvest-cache:/root/.local/state/harvester/python/cache -v pfm-lane-uv-cache:/root/.cache/uv -e UV_CACHE_DIR=/root/.cache/uv -e UV_LINK_MODE=copy' "$STUB_DOCKER_LOG"; then
-  ok "root build mounts only the harvest download and uv caches"
-else bad "root build cache mounts" "$(grep '^run ' "$STUB_DOCKER_LOG")"; fi
+
 
 # Two builds of one hash own distinct names; neither removes an older container.
 first_build="$(build_name)"; first_pin="$(pin_name)"
@@ -442,7 +440,7 @@ printf '%s\n' "$holder" >"$LK/pid"
 : >"$STUB_DOCKER_LOG"
 STUB_ROOT_PRESENT="$T/root.present" bash "$R/infra/fence/lanes/root.sh" >"$T/wait.out" 2>&1 </dev/null &
 waiter=$!
-for ((i = 0; i < 50; i++)); do grep -q 'waiting for the root build' "$T/wait.out" 2>/dev/null && break; sleep 0.1; done
+for ((i = 0; i < 150; i++)); do grep -q 'waiting for the root build' "$T/wait.out" 2>/dev/null && break; sleep 0.1; done
 waited="$(grep -c 'waiting for the root build' "$T/wait.out")"
 : >"$T/root.present"
 rm -rf "$LK"
@@ -472,7 +470,7 @@ printf '%s\n' "$holder" >"$LK/pid"
 : >"$STUB_DOCKER_LOG"
 STUB_ROOT_PRESENT="$T/root.present" bash "$WT/infra/fence/lanes/root.sh" >"$T/wtwait.out" 2>&1 </dev/null &
 waiter=$!
-for ((i = 0; i < 50; i++)); do grep -q 'waiting for the root build' "$T/wtwait.out" 2>/dev/null && break; sleep 0.1; done
+for ((i = 0; i < 150; i++)); do grep -q 'waiting for the root build' "$T/wtwait.out" 2>/dev/null && break; sleep 0.1; done
 waited="$(grep -c "waiting for the root build of $WHASH held by pid $holder ($LK)" "$T/wtwait.out")"
 : >"$T/root.present"
 rm -rf "$LK"

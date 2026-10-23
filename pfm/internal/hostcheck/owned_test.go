@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 func settingsFixture(t *testing.T, env Env, path string) {
@@ -144,18 +145,9 @@ func TestPFMMCP(t *testing.T) {
 		env := fixtureEnv(t)
 		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
 		servers := map[string]any{}
-		for _, family := range []string{"chat", "harvester"} {
-			command := filepath.Join(env.Home, ".local", "bin", "pfm")
-			args := []string{"mcp", "serve", "--stdio", "--family", family}
-			if family == "harvester" {
-				command = filepath.Join(env.Home, ".local", "bin", "harvester")
-				args = []string{"mcp"}
-			}
-			servers[family+"-professor"] = map[string]any{
-				"type":    "stdio",
-				"command": command,
-				"args":    args,
-			}
+		servers["chat-professor"] = map[string]any{
+			"type": "stdio", "command": filepath.Join(env.Home, ".local", "bin", "pfm"),
+			"args": []string{"mcp", "serve", "--stdio", "--family", "chat"},
 		}
 		raw, err := json.Marshal(map[string]any{"mcpServers": servers})
 		if err != nil {
@@ -489,5 +481,46 @@ func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
 				t.Fatalf("unaccepted or unreadable rows=%+v", rows)
 			}
 		})
+	}
+}
+
+func TestRetiredMCPPreflightAllowsOwnedCutover(t *testing.T) {
+	checked := 0
+	for _, name := range installer.LegacyMCPNames() {
+		if !strings.HasSuffix(name, "-professor") {
+			continue
+		}
+		for _, oldBinary := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/old-binary=%t", name, oldBinary), func(t *testing.T) {
+				env := fixtureEnv(t)
+				family := strings.TrimSuffix(name, "-professor")
+				binary, args := family, []string{"mcp"}
+				if oldBinary {
+					binary, args = "pfm", []string{"mcp", "serve", "--stdio", "--family", family}
+				}
+				entry := map[string]any{
+					"type": "stdio", "command": filepath.Join(env.Home, ".local", "bin", binary), "args": args,
+				}
+				raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{name: entry}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, filepath.Join(env.Accounts[0].ConfigDir, ".claude.json"), string(raw))
+				ledger, err := json.Marshal(map[string]any{"clients": installer.LegacyMCPNames()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, filepath.Join(env.ManagedRoot, "mcp-ownership.json"), string(ledger))
+				for _, row := range RunAll(env) {
+					if row.Check == checkPFMMCP && row.Severity == Block {
+						t.Fatalf("owned retired registration blocks install before cleanup: %+v", row)
+					}
+				}
+			})
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("retired registration fixtures did not exercise preflight")
 	}
 }

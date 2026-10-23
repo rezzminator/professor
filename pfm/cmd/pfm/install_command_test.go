@@ -3,11 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -204,36 +202,6 @@ func assertManagerConsulted(t *testing.T, logPath string, wantDarwinConsulted bo
 	}
 }
 
-// Match the installer's hermetic release fixture while running the real apply path.
-type installGateHarvesterRelease struct {
-	requests []string
-}
-
-const installGateHarvesterBinary = "#!/bin/sh\n" +
-	"[ \"$*\" = setup ] || exit 2\n" +
-	"printf 'setup\\n' > \"$HOME/harvester-setup\"\n"
-
-func (release *installGateHarvesterRelease) RoundTrip(request *http.Request) (*http.Response, error) {
-	release.requests = append(release.requests, request.URL.String())
-	asset := "harvester_0.1.0_" + goRuntime.GOOS + "_" + goRuntime.GOARCH
-	const base = "https://github.com/rezzminator/harvester/releases/download/v0.1.0/"
-	var content string
-	switch request.URL.String() {
-	case "https://api.github.com/repos/rezzminator/harvester/releases/latest":
-		content = `{"tag_name":"v0.1.0"}`
-	case base + "SHA256SUMS":
-		content = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(installGateHarvesterBinary)), asset)
-	case base + asset:
-		content = installGateHarvesterBinary
-	default:
-		return nil, fmt.Errorf("unexpected install-gate release request: %s", request.URL)
-	}
-	return &http.Response{
-		StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header),
-		Body: io.NopCloser(strings.NewReader(content)), Request: request,
-	}, nil
-}
-
 func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	// Apply now generates prompts in the source clone. Never discover the
 	// read-only test checkout; each subtest owns its default clone under HOME.
@@ -275,14 +243,6 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	})
 
 	t.Run("idle reachable manager applies with yes", func(t *testing.T) {
-		release := &installGateHarvesterRelease{}
-		previous := runInstaller
-		t.Cleanup(func() { runInstaller = previous })
-		runInstaller = func(ctx context.Context, options installer.Options) (installer.Report, error) {
-			options.GoPluginHTTPClient = &http.Client{Transport: release}
-			return previous(ctx, options)
-		}
-		t.Setenv("HARVESTER_RELEASE_BASE", "")
 		home := t.TempDir()
 		configPath := filepath.Join(t.TempDir(), pfmconfig.FileName)
 		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
@@ -303,19 +263,6 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 			t.Fatalf("idle yes code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		assertManagerConsulted(t, logPath, true)
-		asset := "harvester_0.1.0_" + goRuntime.GOOS + "_" + goRuntime.GOARCH
-		const base = "https://github.com/rezzminator/harvester/releases/download/v0.1.0/"
-		wantRequests := []string{
-			"https://api.github.com/repos/rezzminator/harvester/releases/latest",
-			base + "SHA256SUMS", base + asset,
-		}
-		if !reflect.DeepEqual(release.requests, wantRequests) {
-			t.Fatalf("release requests=%v, want %v", release.requests, wantRequests)
-		}
-		setup, err := os.ReadFile(filepath.Join(home, "harvester-setup"))
-		if err != nil || string(setup) != "setup\n" {
-			t.Fatalf("verified Harvester binary setup=%q err=%v", setup, err)
-		}
 	})
 
 	t.Run("running service refuses actionably", func(t *testing.T) {

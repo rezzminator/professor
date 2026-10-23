@@ -232,27 +232,6 @@ func claudePluginSnapshot(configDir, id string) (map[string]any, error) {
 		if err := os.MkdirAll(cachePath, 0o700); err != nil {
 			return nil, fmt.Errorf("create %s: %w", cachePath, err)
 		}
-		if name == "harvester" {
-			launcher := filepath.Join(cachePath, "libexec", name)
-			if err := os.MkdirAll(filepath.Dir(launcher), 0o700); err != nil {
-				return nil, fmt.Errorf("create mock binary plugin launcher directory: %w", err)
-			}
-			script := `#!/bin/sh
-set -eu
-root="${HARVESTER_HOME:-$HOME/.local/share/harvester}"
-stable="$root/bin/harvester"
-mkdir -p "$root/bin"
-if [ ! -x "$stable" ]; then cp "$0" "$stable"; chmod 755 "$stable"; fi
-case "${1:-}" in
-  version) printf 'harvester fixture\n' ;;
-  setup|doctor) ;;
-  *) printf 'mock binary plugin: unsupported command %s\n' "${1:-}" >&2; exit 2 ;;
-esac
-`
-			if err := os.WriteFile(launcher, []byte(script), 0o755); err != nil {
-				return nil, fmt.Errorf("write mock binary plugin launcher %s: %w", launcher, err)
-			}
-		}
 		return map[string]any{"scope": claudeUserScope, "installPath": cachePath}, nil
 	}
 	snapshot := filepath.Join(configDir, "plugins", "cache", marketplace, name, version)

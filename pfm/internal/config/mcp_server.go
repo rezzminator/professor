@@ -8,8 +8,7 @@ import (
 )
 
 const (
-	MCPServerHarvester = "harvester"
-	MCPServerChat      = "chat"
+	MCPServerChat = "chat"
 )
 
 // MCPServerKey names where a registered server's enabled flag is configured.
@@ -34,7 +33,7 @@ func validateThirdParty(path string, entries map[string]json.RawMessage) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if name == MCPRegistrationName(MCPServerChat) || name == MCPRegistrationName(MCPServerHarvester) {
+		if name == MCPRegistrationName(MCPServerChat) {
 			return fmt.Errorf("config %s: mcp.thirdParty.%s: the name %s is pfm's own server", path, name, name)
 		}
 		entry := bytes.TrimSpace(entries[name])

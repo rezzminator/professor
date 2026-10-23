@@ -351,17 +351,6 @@ eq "INDEX: a process inside the race step's root is listed with its full path an
   "$RRACE/profile/race/internal_chat.79 · event exit · exit 1 · wall 2.5s · run delay 0.123s → $RRACE/profile/race/internal_chat.79/exit/DIAGNOSIS.txt" \
   "$(line_with "$(< "$RRACE/profile/INDEX.txt")" "/internal_chat.79 ")"
 
-# Standalone race evidence is a separate named gate step and profile root.
-RHRACE=$T/harvester-racerun/run.RACE
-mkres "$RHRACE/resources.tsv" 30 15
-mkgate "$RHRACE" FAIL PASS harvester.race FAIL 3.0
-mkprof "$RHRACE" harvester.race exit 1 "$(ep 2)" "$(ep 5)" 3.000000 2.000 0 0.000000 0.000000 0.000000
-proc "$RHRACE/profile/harvester-race" internal_harvest.81 exit 1 "" exit
-run_sut summary "$RHRACE"
-eq "harvester race summary exit" 0 "$RC"
-has "failed standalone race points at profile index" " · profiles $RHRACE/profile/INDEX.txt" "$(line_with "$OUT" "PROFILE step harvester.race ")"
-has "standalone race process is indexed under its separate root" "$RHRACE/profile/harvester-race/internal_harvest.81 · event exit · exit 1" "$(< "$RHRACE/profile/INDEX.txt")"
-
 # The one case that reads the real thresholds file: the script at its own location, the judge its PFM names,
 # whatever values pfm/.testcontention.yml holds. It runs on a copy of the run, so $R's own profile.tsv stays;
 # the copy sits outside $T/timing, whose run.* siblings the judge reads for its spin reference.

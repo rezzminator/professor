@@ -215,7 +215,7 @@ else
 fi
 rm -f "$open_log"
 
-# ─── E3.02 — OpenCode MCP wiring: chat and harvester local stdio, doctor row ─
+# ─── E3.02 — OpenCode MCP wiring: chat local stdio, doctor row ─
 # The file pfm's OWN installer registers MCP into: pfm/internal/installer/
 # mcp.go writeMCPOpenCodeJSON, by the same fence discipline as Claude's
 # .claude.json (mcp_accounts.go) and Codex's config.toml (mcp.go wireMCP) —

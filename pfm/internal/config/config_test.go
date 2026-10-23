@@ -157,12 +157,12 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		t.Fatalf("Codex = %#v, want yolo/codex defaults", got.Codex)
 	}
 	if !reflect.DeepEqual(got.MCPServers, map[string]MCPServer{
-		"chat": {Enabled: false}, "harvester": {Enabled: false},
+		"chat": {Enabled: false},
 	}) {
-		t.Fatalf("MCPServers = %#v, want chat and harvester disabled", got.MCPServers)
+		t.Fatalf("MCPServers = %#v, want chat disabled", got.MCPServers)
 	}
 	for _, key := range []string{
-		"version", "accounts", "claude.permissionMode", "claude.binary", "claude.cache1h", "codex.yolo", "codex.binary", "mcp.servers.chat.enabled", "mcp.servers.harvester.enabled",
+		"version", "accounts", "claude.permissionMode", "claude.binary", "claude.cache1h", "codex.yolo", "codex.binary", "mcp.servers.chat.enabled",
 	} {
 		if got.Source(key) != SourceDefault {
 			t.Errorf("Source(%q) = %q, want %q", key, got.Source(key), SourceDefault)
@@ -427,11 +427,6 @@ func TestLoadRejectsUnknownKeysAtEveryConfigLevel(t *testing.T) {
 			name: "server object",
 			json: `{"version":1,"mcp":{"servers":{"chat":{"enabled":false,"mystery":true}}}}`,
 			want: "mystery",
-		},
-		{
-			name: "unregistered server",
-			json: `{"version":1,"mcp":{"servers":{"not-registered":{"enabled":true}}}}`,
-			want: "mcp.servers.not-registered",
 		},
 		{
 			name: "ask engine key",

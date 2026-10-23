@@ -9,7 +9,7 @@
 # Every beat that mutates the install RESTORES what it changed and asserts the
 # restore: a dropped seat is always a spare (never the seat E1 will spend), a
 # moved credential is moved back, a removed overlay is re-installed. The
-# destructive tail — reap, archive, headless, harvester, uninstall — is lane O2,
+# destructive tail — reap, archive, headless, uninstall — is lane O2,
 # which runs last because it tears the machine down.
 #
 # BROKEN STATE: the prelude aborts by name when this container carries no pfm
@@ -90,7 +90,6 @@ if themes="$(bundled_themes "$clone/templates/themes")"; then
 else
   missing="$missing I15 ($themes);"
 fi
-check_path I16 "harvester conversion runtime" "$HOME/.local/state/harvester/python/env"
 check_path I14 "VS Code extension asset" "$MANAGED/vscode/professor/package.json"
 for registry in agents commands skills; do
   [ -d "$SEAT_DIR/$registry" ] || missing="$missing I17/I18/I19 ($SEAT_DIR/$registry absent);"
@@ -408,7 +407,6 @@ else
 fi
 mcp_list="$(pfm mcp ls 2>&1)"
 grep -q $'^chat\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report chat enabled;"
-grep -q $'^harvester\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report harvester enabled;"
 [ -n "$(find "$SEAT_DIR/skills" -maxdepth 2 -type l -o -maxdepth 2 -type d -name '*git*' 2>/dev/null | head -1)" ] ||
   _lane_log_only "   O1.12: no git-bridge skill directory under $SEAT_DIR/skills (I94 reads the global fan-out instead)"
 if [ -n "$bad" ]; then fail "$bad"; else

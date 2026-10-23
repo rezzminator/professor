@@ -63,13 +63,12 @@ var goEnvCache = struct {
 }{values: make(map[string]string)}
 
 type e2eHarness struct {
-	t                 *testing.T
-	repo              string
-	headBinary        string
-	goCache           string
-	goModCache        string
-	previous          *previousBuild
-	harvesterReleases map[string]*harvesterReleaseFixture
+	t          *testing.T
+	repo       string
+	headBinary string
+	goCache    string
+	goModCache string
+	previous   *previousBuild
 }
 
 type commandResult struct {
@@ -427,12 +426,6 @@ func (h *e2eHarness) environment(home string) []string {
 		// Keep the whole-home refusal snapshot free of diagnostic log writes.
 		"PFM_LOG_LEVEL":             "off",
 		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1", "PFM_PRICES_OFFLINE": "1",
-	}
-	if release := h.harvesterReleases[home]; release != nil {
-		values["HTTPS_PROXY"], values["https_proxy"] = release.proxyURL, release.proxyURL
-		values["NO_PROXY"], values["no_proxy"] = "localhost,127.0.0.1", "localhost,127.0.0.1"
-		values["SSL_CERT_FILE"] = release.caFile
-		values["HARVESTER_RELEASE_BASE"] = "https://github.com/rezzminator/harvester/releases/download"
 	}
 	return appendCleanEnv(os.Environ(), values)
 }

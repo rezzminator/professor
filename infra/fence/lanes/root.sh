@@ -245,10 +245,7 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 BASE="$(lane_base_image "$ROOT" "$PIN")" || fatal "the pfm-dev fence image could not be built"
 say "base image $BASE (pinned for this build, so a concurrent dev.sh iso rebuild cannot orphan it)"
-lane_run "$BUILD" "$BASE" '' \
-  -v pfm-lane-harvest-cache:/root/.local/state/harvester/python/cache \
-  -v pfm-lane-uv-cache:/root/.cache/uv \
-  -e UV_CACHE_DIR=/root/.cache/uv -e UV_LINK_MODE=copy || fatal "the fence container would not start from $BASE"
+lane_run "$BUILD" "$BASE" '' || fatal "the fence container would not start from $BASE"
 
 root_failure_diagnostics() { # root_failure_diagnostics <step> <exit> <output-file> [attempt] [retry]
   local dir stamp file

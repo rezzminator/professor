@@ -45,8 +45,7 @@ func runtimeForPort(port int) pfmconfig.Runtime {
 func runtimeForDisabledMCPPort(port int) pfmconfig.Runtime {
 	runtime := runtimeForPort(port)
 	runtime.Config.MCPServers = map[string]pfmconfig.MCPServer{
-		"chat":                       {Enabled: false},
-		pfmconfig.MCPServerHarvester: {Enabled: false},
+		"chat": {Enabled: false},
 	}
 	return runtime
 }
@@ -281,68 +280,24 @@ func TestMCPDaemonDoctorNamesAnUnresponsiveDaemon(t *testing.T) {
 	}
 }
 
-func TestMCPDaemonDoctorComparesMountedFamiliesWithConfig(t *testing.T) {
-	tests := []struct {
-		name         string
-		enabled      map[string]bool
-		mounted      []string
-		wantWarnings int
-		wantFamilies string
-	}{
-		{
-			name:         "standalone registration is not a daemon family",
-			enabled:      map[string]bool{pfmconfig.MCPServerChat: true, pfmconfig.MCPServerHarvester: true},
-			mounted:      []string{pfmconfig.MCPServerChat},
-			wantWarnings: 0,
-		},
-		{
-			name:         "disabled family mounted",
-			enabled:      map[string]bool{pfmconfig.MCPServerChat: true, pfmconfig.MCPServerHarvester: false},
-			mounted:      []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester},
-			wantWarnings: 1,
-			wantFamilies: "doctor: mcp daemon families mounted=chat,harvester enabled=chat" +
-				" — the daemon predates the config; restart it: pfm install --yes",
-		},
-		{
-			name:    "families match",
-			enabled: map[string]bool{pfmconfig.MCPServerChat: true, pfmconfig.MCPServerHarvester: false},
-			mounted: []string{pfmconfig.MCPServerChat},
-		},
+func TestMCPDaemonDoctorComparesMountedChatWithConfig(t *testing.T) {
+	previous := DaemonReachabilityOverride
+	t.Cleanup(func() { DaemonReachabilityOverride = previous })
+	DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
+		return mcpserv.DaemonStatus{
+			PFMVersion: "v1.0.0",
+			PID:        1234,
+			Servers:    map[string][]string{"chat": {"chat_tool"}},
+		}, nil
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			previous := DaemonReachabilityOverride
-			t.Cleanup(func() { DaemonReachabilityOverride = previous })
-			servers := make(map[string][]string, len(test.mounted))
-			for _, family := range test.mounted {
-				servers[family] = []string{family + "_tool"}
-			}
-			DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
-				return mcpserv.DaemonStatus{PFMVersion: "v1.0.0", PID: 1234, Servers: servers}, nil
-			}
-			runtime := runtimeForPort(1)
-			runtime.Config.MCPServers = map[string]pfmconfig.MCPServer{}
-			for family, enabled := range test.enabled {
-				runtime.Config.MCPServers[family] = pfmconfig.MCPServer{Enabled: enabled}
-			}
-
-			var output bytes.Buffer
-			warnings := printMCPDaemonDoctor(&output, runtime)
-			if warnings != test.wantWarnings {
-				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())
-			}
-			if !strings.Contains(output.String(), "doctor: mcp daemon=running pid=1234") {
-				t.Fatalf("output = %q, want the running row", output.String())
-			}
-			if test.wantFamilies == "" {
-				if strings.Contains(output.String(), "families") {
-					t.Fatalf("output = %q, matching families printed a families row", output.String())
-				}
-				return
-			}
-			if !strings.Contains(output.String(), test.wantFamilies+"\n") {
-				t.Fatalf("output = %q, want %q", output.String(), test.wantFamilies)
-			}
-		})
+	runtime := runtimeForPort(1)
+	runtime.Config.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: false}
+	var output bytes.Buffer
+	if warnings := printMCPDaemonDoctor(&output, runtime); warnings != 1 ||
+		!strings.Contains(
+			output.String(),
+			"doctor: mcp daemon families mounted=chat enabled= — the daemon predates the config",
+		) {
+		t.Fatalf("warnings=%d output=%q, want the disabled chat registration to be reported", warnings, output.String())
 	}
 }

@@ -53,7 +53,14 @@ engine_sync_build() { return 0; }
 engine_sync_link_stable() { return 0; }
 SH
 printf '#!/usr/bin/env bash\necho "source-clone: fixture copy failed" >&2\nexit 42\n' >"$T/sim-source/infra/fence/source-clone.sh"
-printf '#!/usr/bin/env bash\nexit 0\n' >"$T/sim-bin/go"
+export SIM_GO_ARGS="$T/sim-go.args"
+cat >"$T/sim-bin/go" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = /harvester ]; then
+  printf '%s\n' "$@" >"$SIM_GO_ARGS"
+  [ "${SIM_BUILD_FAIL:-0}" = 0 ] || { echo 'fixture harvester build failed' >&2; exit 41; }
+fi
+SH
 printf '#!/usr/bin/env bash\necho fixture-chrome\n' >"$T/sim-bin/google-chrome-stable"
 chmod +x "$T/sim-bin/go" "$T/sim-bin/google-chrome-stable"
 sed "s|/worktree|$T/sim-source|g" "$HERE/../../sim-entry.sh" >"$T/sim-entry.sh"
@@ -66,14 +73,13 @@ elif grep -q 'sim: BOOTSTRAP-FAILED — writable source snapshot' "$T/sim-error"
 else
   bad 'sim snapshot failure omitted its bootstrap context or cause'
 fi
-# A healthy simulation uses the alpha installer to build/setup the local plugin.
+# A healthy simulation provisions the standalone plugin independently of pfm.
 printf '#!/usr/bin/env bash\nmkdir -p "$2"\n' >"$T/sim-source/infra/fence/source-clone.sh"
 mkdir -p "$T/sim-home/.local/bin"
 cat >"$T/sim-home/.local/bin/pfm" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$SIM_CALLS"
 case "$*" in
-  'mcp harvester enable') exit 0 ;;
   'install --yes --skip-engine codex --skip-themes')
     [ "${SIM_INSTALL_FAIL:-0}" = 0 ] || { echo 'fixture install failed' >&2; exit 42; }
     if [ -n "${SIM_EXPECT_CONFIG:-}" ]; then
@@ -88,14 +94,23 @@ case "$*" in
   *) exit 2 ;;
 esac
 SH
+cat >"$T/sim-home/.local/bin/harvester" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$SIM_CALLS"
+[ "$*" = setup ] || exit 2
+[ "${SIM_SETUP_FAIL:-0}" = 0 ] || { echo 'fixture harvester setup failed' >&2; exit 43; }
+jq -e '.fetch.browser == true' "$HOME/.config/harvester/harvester.config.json" >/dev/null
+SH
+chmod +x "$T/sim-home/.local/bin/harvester"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$T/sim-home/.local/bin/engine-sync"
 chmod +x "$T/sim-home/.local/bin/pfm" "$T/sim-home/.local/bin/engine-sync"
 if HOME="$T/sim-home" SIM_CALLS="$T/sim.calls" PFM_CONFIG="$T/sim-config.json" \
   PATH="$T/sim-home/.local/bin:$T/sim-bin:$PATH" bash "$T/sim-entry.sh" touch "$T/caller-ran" >"$T/sim-healthy" 2>&1 &&
   [ -f "$T/caller-ran" ] &&
-  [ "$(cat "$T/sim.calls")" = "$(printf 'mcp harvester enable\ninstall --yes --skip-engine codex --skip-themes')" ] &&
+  cmp -s "$SIM_GO_ARGS" <(printf '%s\n' -C /harvester build -o "$T/sim-home/.local/bin/harvester" ./cmd/harvester) &&
+  [ "$(cat "$T/sim.calls")" = "$(printf 'install --yes --skip-engine codex --skip-themes\nsetup')" ] &&
   grep -q 'browser-rung=on' "$T/sim-healthy"; then
-  ok 'sim enables the standalone registration before installer provisioning and runs its caller'
+  ok 'sim installs pfm, builds the standalone plugin with exact source/output argv, and runs setup before its caller'
 else bad 'sim standalone plugin bootstrap' "$(cat "$T/sim-healthy")"; fi
 printf '{"accounts":[{"id":7}],"claude":{"plugins":["fixture"]}}\n' >"$T/sim-config.json"
 cp "$T/sim-config.json" "$T/expected-config.json"
@@ -105,7 +120,7 @@ if HOME="$T/sim-home" SIM_CALLS="$T/sim.calls" PFM_CONFIG="$T/sim-config.json" \
   cmp -s "$T/sim-config.json" "$T/expected-config.json"; then
   ok 'sim preserves an existing account/plugin config instead of replacing it with its fresh fixture'
 else bad 'sim existing config changed' "$(cat "$T/sim-preserved")"; fi
-rm "$T/caller-ran"
+rm -f "$T/caller-ran"
 if HOME="$T/sim-home" SIM_CALLS="$T/sim.calls" PFM_CONFIG="$T/sim-config.json" \
   SIM_INSTALL_FAIL=1 PATH="$T/sim-home/.local/bin:$T/sim-bin:$PATH" \
   bash "$T/sim-entry.sh" touch "$T/caller-ran" >"$T/sim-install-error" 2>&1; then
@@ -114,4 +129,23 @@ elif grep -q 'sim: BOOTSTRAP-FAILED — pfm install' "$T/sim-install-error" &&
   grep -q 'fixture install failed' "$T/sim-install-error" && [ ! -e "$T/caller-ran" ]; then
   ok 'sim still refuses its caller on a named installer failure'
 else bad 'sim installer failure lost its cause or ran the caller' "$(cat "$T/sim-install-error")"; fi
+rm -f "$T/caller-ran"
+if HOME="$T/sim-home" SIM_CALLS="$T/sim.calls" PFM_CONFIG="$T/sim-config.json" \
+  SIM_SETUP_FAIL=1 SIM_EXPECT_CONFIG="$T/expected-config.json" PATH="$T/sim-home/.local/bin:$T/sim-bin:$PATH" \
+  bash "$T/sim-entry.sh" touch "$T/caller-ran" >"$T/sim-setup-error" 2>&1; then
+  bad 'sim accepted failed standalone setup'
+elif grep -q 'sim: BOOTSTRAP-FAILED — harvester setup' "$T/sim-setup-error" &&
+  grep -q 'fixture harvester setup failed' "$T/sim-setup-error" && [ ! -e "$T/caller-ran" ]; then
+  ok 'sim names standalone setup failure and refuses its caller'
+else bad 'sim setup failure lost its cause or ran the caller' "$(cat "$T/sim-setup-error")"; fi
+rm -f "$T/caller-ran"; : >"$T/sim.calls"
+if HOME="$T/sim-home" SIM_CALLS="$T/sim.calls" PFM_CONFIG="$T/sim-config.json" \
+  SIM_BUILD_FAIL=1 SIM_EXPECT_CONFIG="$T/expected-config.json" PATH="$T/sim-home/.local/bin:$T/sim-bin:$PATH" \
+  bash "$T/sim-entry.sh" touch "$T/caller-ran" >"$T/sim-build-error" 2>&1; then
+  bad 'sim accepted failed standalone build'
+elif grep -q 'sim: BOOTSTRAP-FAILED — harvester build from /harvester' "$T/sim-build-error" &&
+  grep -q 'fixture harvester build failed' "$T/sim-build-error" && [ ! -e "$T/caller-ran" ] &&
+  [ "$(cat "$T/sim.calls")" = 'install --yes --skip-engine codex --skip-themes' ]; then
+  ok 'sim names standalone build failure and refuses setup and its caller'
+else bad 'sim build failure lost its cause or ran setup/caller' "$(cat "$T/sim-build-error")"; fi
 shtest_end

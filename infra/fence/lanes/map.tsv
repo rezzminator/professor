@@ -14,10 +14,6 @@ mcp__chat-professor__save	M	M.10-chat-tools-gap
 mcp__chat-professor__status	M	M.09-chat-tools
 mcp__chat-professor__unkill	M	M.10-chat-tools-gap
 mcp__chat-professor__whoami	M	M.09-chat-tools
-mcp__harvester-professor__download_file	M	M.11-harvester-tools
-mcp__harvester-professor__read	M	M.11-harvester-tools
-mcp__harvester-professor__search_literature	M	M.11-harvester-tools
-mcp__harvester-professor__search_web	M	M.11-harvester-tools
 pfm archive	O2	O2.02-archive
 pfm chat ask	E1	E1.15-ask
 pfm chat ask	E2	E2.07-call-ask-watch

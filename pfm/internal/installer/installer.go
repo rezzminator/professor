@@ -33,8 +33,6 @@ type engine struct {
 	// engineSyncAbsent is set when an uninstall found no engine-sync binary:
 	// the global file then stays with the Codex roles, holding their targets.
 	engineSyncAbsent bool
-	// mcpDaemonRefreshAttempted prevents a second refresh after a plugin handoff.
-	mcpDaemonRefreshAttempted bool
 	// engineSyncExec and engineSyncDeadline are the test seams of the
 	// engine-sync runner: its process runner and the deadline of `global`;
 	// nil and zero are the real process table and engineSyncGlobalTimeout.
@@ -297,17 +295,14 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.retireMigrationJournal()
 	installer.retireStateDirs()
 	installer.expireStateBackups()
-	mcpErr := installer.installHarvester(ctx)
-	if mcpErr == nil {
-		mcpErr = installer.wireMCP()
-	}
+	mcpErr := installer.wireMCP()
 	// A host build replaces the binary without changing the unit file, and MCP
 	// client wiring can change without changing either. enable --now leaves an
 	// already-running process untouched, so always restart the enabled Linux
 	// daemon after its complete config/client transaction has landed.
 	// A restart that does not come back fails the run after every later step
 	// has landed, like a failed plugin install.
-	if !installer.mcpDaemonRefreshAttempted && !schedulerIsLaunchd && installer.apply &&
+	if !schedulerIsLaunchd && installer.apply &&
 		installer.options.MCPEnabled[chatName] &&
 		installer.userManagerAvailable(ctx) {
 		installer.deferFailure(installer.restartMCPUnit(ctx))

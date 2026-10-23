@@ -482,6 +482,29 @@ func TestTabStatusExplicitRenameBeforeFirstPaintWaitsForSource(t *testing.T) {
 	}
 }
 
+func TestTabStatusAutomaticTitleBeforeFirstPaintReplacesLaunchLabel(t *testing.T) {
+	f := newTabStatusFixture()
+	dir := t.TempDir()
+	d := tabObservation("idle")
+	if err := writeSoleTabLabel(context.Background(), "endpoint", dir, d.Tab,
+		"New Claude chat", false, func() uint64 { return 1 }, f.call); err != nil {
+		t.Fatal(err)
+	}
+	for _, tick := range []struct{ source, want string }{
+		{"CPU pegging investigation", "CPU pegging investigation"}, // AI title, no user name.
+		{"CPU pegging investigation", "CPU pegging investigation"},
+		{"Later title", "Later title"},
+	} {
+		d.Name, d.UserName, d.UserKnown = tick.source, "", true
+		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+			t.Fatal(err)
+		}
+		if want := DecoratedTabLabel(tick.want, "idle", "emoji", 0, TabGlyphs{}); f.label != want {
+			t.Fatalf("source %q: label = %q, want %q", tick.source, f.label, want)
+		}
+	}
+}
+
 func TestTabStatusTopologyAndGeneration(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

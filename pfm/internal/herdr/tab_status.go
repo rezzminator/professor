@@ -290,10 +290,11 @@ func reconcileTab(
 				// tab with no label holds none of the user's: pfm's name stays.
 				record.Base, record.Seen, record.UserSet = tab.Label, d.Name, true
 			case record.Seen == "":
-				// A launch/re-announce can predate the first user title. Follow
-				// that source-backed title now; a user's label or an unproved
-				// automatic name still starts from the existing baseline.
-				if !record.UserSet && !record.UnseenExplicit && d.UserKnown && d.UserName != "" && d.Name != "" {
+				// A launch/re-announce can predate the first title, a user's or an
+				// automatic one (an AI title). Follow that source-backed title now;
+				// a user's label, a pending explicit rename or a name not yet read
+				// from its source still starts from the existing baseline.
+				if !record.UserSet && !record.UnseenExplicit && d.UserKnown && d.Name != "" {
 					record.Base = d.Name
 				}
 				record.Seen = d.Name

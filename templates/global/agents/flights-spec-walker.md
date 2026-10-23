@@ -3,7 +3,7 @@ name: flights-spec-walker
 description: FLIGHTS-LANDER-ONLY Finds code breaking spec rows — a range of a request's numbered rows, each traced to its code in every state, value and fallback it names. Spawned by flights-lander. Returns candidate findings tied to verbatim lines, and the rows held or not found.
 visibility:
   visible-to:
-    include: [flights-lander, gpt-flights-lander]
+    include: [flights-lander]
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---

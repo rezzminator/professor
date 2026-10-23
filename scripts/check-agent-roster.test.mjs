@@ -136,18 +136,6 @@ for (const header of ['engines:\n  codex: false\n  opencode: false', 'requires: 
   });
 }
 
-for (const capabilities of [[], ['gpt-agents']]) {
-  test(`five shipped local GPT registrations respect engine and capability policy: ${capabilities.length ? 'enabled' : 'disabled'}`, (t) => {
-    const files = Object.fromEntries(['gpt-changelogger', 'gpt-gitter', 'gpt-pcm', 'gpt-releaser', 'gpt-themer'].map((name) => {
-      const path = `.claude/agents/${name}.md`;
-      return [path, readFileSync(join(ROOT, path), 'utf8')];
-    }));
-    const result = check(fixture(t, {}, { version: 1 }, { targets: { capabilities } }, files));
-    assert.equal(result.status, 0, result.out);
-    assert.ok(result.out.includes(`${2 + capabilities.length} Codex and ${2 + capabilities.length} OpenCode agents match source`), result.out);
-  });
-}
-
 for (const [name, path, header, status, message] of [
   ["project from", ".claude/agents/local.md", "from: general-purpose", 5, /SOURCE REJECTED — python3 .*machine scope only/],
   ["project abstract", ".claude/agents/local.md", "abstract: true", 5, /SOURCE REJECTED — python3 .*machine scope only/],
@@ -452,44 +440,8 @@ for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
   });
 }
 
-// The GPT twins are derived agents: their machine-scoped .md declarations name their base, engine-sync renders
-// them, and a host that opts in with --capability gpt-agents links them. The properties below are therefore
-// pinned against what engine-sync RENDERS from the shipped declaration, never against a source file.
 const CAPABILITY = 'gpt-agents';
-const gitterEngines = {
-  codex: { model: 'gpt-6-luna', sandbox: 'inherit' },
-  opencode: { model: 'openai/gpt-6.1-sol-fast', permission: { bash: { 'git *': 'allow' } } },
-};
-const twins = [
-  ['gpt-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
-  ['gpt-flights-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
-  ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
-  ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
-  ['gpt-rr', 'gpt-6.1-sol', 'low', 'rr'],
-  ['gpt-rr-pro', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro'],
-  ['gpt-rr-pro-max', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro-max'],
-  ['gpt-agent-investigator', 'gpt-6.1-sol', 'high', 'agent-investigator'],
-  ['gpt-transcript-reader', 'gpt-6-luna', 'medium', 'transcript-reader'],
-  ['gpt-tracer', 'gpt-6.1-sol', 'high', 'tracer'],
-  ['gpt-sub-tracer', 'gpt-6-luna', 'medium', 'sub-tracer'],
-  ['gpt-clone-distiller', 'gpt-6.1-sol', 'high', 'clone-distiller'],
-  ['gpt-collector', 'gpt-6.1-sol', 'high', 'collector'],
-  ['gpt-conflict-resolver', 'gpt-6.1-sol', 'high', 'conflict-resolver'],
-  ['gpt-documenter', 'gpt-6.1-sol', 'high', 'documenter'],
-  ['gpt-pcm', 'gpt-6.1-sol', 'high'],
-  ['gpt-flights-hunter', 'gpt-6.1-sol', 'high', 'flights-hunter'],
-  ['gpt-flights-spec-walker', 'gpt-6.1-sol', 'high', 'flights-spec-walker'],
-  ['gpt-flights-sub-lander', 'gpt-6.1-sol', 'high', 'flights-sub-lander'],
-  ['gpt-gitter', 'gpt-6.1-sol', 'high', 'gitter'],
-  ['gpt-imaginator', 'gpt-6.1-sol', 'high', 'imaginator'],
-  ['gpt-sub-rr', 'gpt-6.1-sol', 'high', 'sub-rr'],
-  ['gpt-reviewer-nt', 'gpt-6.1-sol', 'high', 'reviewer', 'reviewer-nt'],
-  ['sol', 'gpt-6.1-sol', 'high'],
-  ['luna', 'gpt-6-luna', 'medium'],
-  ['astra', 'gpt-6-astra', 'high'],
-];
 const otherVariants = ['flights-foreman-sonnet', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
-const configDir = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}';
 const renderErrors = /SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING|FRONTMATTER-INVALID/;
 
 // `engine-sync global` over the shipped declaration, into a jail home and Codex home: the real machine
@@ -561,7 +513,7 @@ test('the shipped variants render with zero errors with and without the gpt-agen
   }
 });
 
-test('only exact gitter and gpt-gitter mirrors retain Git write permissions', () => {
+test('only the exact gitter mirror retains Git write permissions', () => {
   const render = renderShipped([CAPABILITY]);
   const dir = join(render.home, '.config/opencode/agents');
   const allowed = [];
@@ -569,135 +521,12 @@ test('only exact gitter and gpt-gitter mirrors retain Git write permissions', ()
     const fm = parseFrontmatter(file, readFileSync(join(dir, file), 'utf8'));
     if (fm.permission?.bash?.['git *'] === 'allow') allowed.push(file.slice(0, -3));
   }
-  assert.deepEqual(allowed.sort(), ['gitter', 'gpt-gitter']);
-  for (const name of ['gitter', 'gpt-gitter']) {
+  assert.deepEqual(allowed.sort(), ['gitter']);
+  for (const name of ['gitter']) {
     const codex = readFileSync(join(render.home, '.codex/agents', `${name}.toml`), 'utf8');
     assert.doesNotMatch(codex, /^sandbox_mode\s*=/m, `${name}: sandbox inherit must emit no sandbox_mode`);
   }
 });
-
-test('the gpt-agents capability decides whether the GPT twins are linked', () => {
-  const on = renderShipped([CAPABILITY]);
-  const off = renderShipped([]);
-  for (const [name] of twins) {
-    assert.ok(renderedText(on, name), `${name}: not rendered with --capability ${CAPABILITY}`);
-    assert.equal(renderedText(off, name), null, `${name}: linked without the capability`);
-    // The doctor row: `ok agent SKIPPED all {name} {path} (requires {capability} unmet)`.
-    assert.match(off.doctor.out, new RegExp(`agent SKIPPED all ${name} \\S+ \\(requires ${CAPABILITY} unmet\\)`),
-      `${name}: not reported SKIPPED`);
-    assert.doesNotMatch(on.doctor.out, new RegExp(`agent SKIPPED all ${name} `), `${name}: SKIPPED although the capability is declared`);
-  }
-});
-
-test('gpt-pcm registers the project PCM owner with its runtime skills and fail-closed GPT routing', () => {
-  const render = renderShipped([CAPABILITY]);
-  const text = renderedText(render, 'gpt-pcm');
-  assert.ok(text, 'gpt-pcm: the rendered registration is missing');
-  const fm = parseFrontmatter('gpt-pcm', text);
-  const project = parseFrontmatter('project gpt-pcm', readFileSync(join(ROOT, 'templates/project/agents/gpt-pcm.md'), 'utf8'));
-  for (const key of ['tools', 'skills', 'model', 'effort', 'requires', 'engines', 'autoCompact'])
-    assert.deepEqual(fm[key], project[key], `gpt-pcm: project registration ${key} drifted`);
-  assert.equal(realpathSync(renderedPath(render, 'gpt-pcm')),
-    join(render.home, 'source/templates/generated/agents/gpt-pcm.md'));
-  assert.match(text, /Read this repository's `\.claude\/agents\/pcm\.md` in full before acting/);
-  assert.match(text, /execute its protocol, including skills, checks, refusals and report format/);
-  assert.match(text, /BLOCKED: project pcm manual unreadable/);
-  assert.match(text, /BLOCKED: GPT role unavailable: \{role\}/);
-  assert.match(text, /`general-purpose` and `Explore` use `sol`/);
-  assert.match(text, /manual's model/);
-  assert.match(text, /Registry discovery requires a new session or user-authorized reload/);
-  assert.match(text, /Git writes remain with the authorized Git writer/);
-  for (const caller of ['gpt-documenter', 'gpt-foreman'])
-    assert.ok(renderedText(render, caller).includes('`gpt-pcm`'), `${caller}: PCM ownership route missing`);
-});
-
-// A fifth field names the rendered variant a twin derives from when it is not the role's own manual.
-for (const [name, model, effort, role, base] of twins) {
-  test(`${name} renders its runtime and portable role contract`, () => {
-    const render = renderShipped([CAPABILITY]);
-    const text = renderedText(render, name);
-    assert.ok(text, `${name}: the rendered agent is missing`);
-    const fm = parseFrontmatter(name, text);
-    assert.equal(fm.name, name);
-    assert.equal(fm.model, `${model}[1m]`);
-    assert.equal(fm.effort, effort);
-    assert.deepEqual(fm.engines, role === 'gitter' ? gitterEngines : { codex: false, opencode: false });
-    assert.deepEqual(fm.requires, [CAPABILITY]);
-    assert.deepEqual(fm.autoCompact, { forceAt: '230k', nudgeFrom: '190k', nudgeEvery: '20k' });
-    // The cap is 15 KiB for a twin of the general-purpose worker; a twin of a role manual may grow by the
-    // renames and the return law (2 KiB) over the larger of 15 KiB and the manual it derives from.
-    const original = role ? readFileSync(join(ROOT, 'templates/global/agents', `${role}.md`), 'utf8') : '';
-    const cap = role ? Math.max(15 * 1024, Buffer.byteLength(original)) + 2 * 1024 : 15 * 1024;
-    assert.ok(Buffer.byteLength(text) <= cap, `${name}: ${Buffer.byteLength(text)} bytes exceeds the agent size cap ${cap}`);
-    assert.doesNotMatch(text, /\/(Users|home|root)\/|\/private\//, `${name}: carries a machine-absolute path`);
-    assert.ok(!text.includes(render.home), `${name}: carries the render's home directory`);
-    for (const stray of (role === 'gitter' ? [] : filesNamed(render.home, name)).filter((path) => !path.startsWith(join(render.home, '.claude/agents'))
-      && !path.startsWith(`${join(render.home, 'source')}/`) && !path.includes('/generated/claude-agents/')))
-      assert.fail(`${name}: ${stray} is a Codex role or an OpenCode agent; a GPT twin is Claude-only`);
-    if (!role) {
-      assert.equal(fm.role, undefined, `${name}: a general-purpose worker has no role`);
-      return;
-    }
-    assert.equal(fm.role, role);
-    // Expected routes are independent of the declaration being judged. Paths and skill names stay canonical.
-    const routes = {
-      'flights-foreman': { 'flights-foreman': 'gpt-foreman', 'flights-foreman-sonnet': 'gpt-foreman', documenter: 'gpt-documenter', pcm: 'gpt-pcm' },
-      'flights-lander': Object.fromEntries(['flights-hunter', 'flights-spec-walker', 'flights-sub-lander'].map(n => [n, `gpt-${n}`])),
-      rr: { 'sub-rr': 'gpt-sub-rr', 'clone-distiller': 'gpt-clone-distiller' },
-      'rr-pro': { 'sub-rr': 'gpt-sub-rr', 'clone-distiller': 'gpt-clone-distiller' },
-      'rr-pro-max': { 'sub-rr': 'gpt-sub-rr', 'clone-distiller': 'gpt-clone-distiller' },
-      'agent-investigator': { 'transcript-reader': 'gpt-transcript-reader', Haiku: 'GPT luna' },
-      tracer: { 'sub-tracer': 'gpt-sub-tracer', Haiku: 'GPT luna' },
-      'sub-tracer': { 'sub-tracer': 'gpt-sub-tracer', tracer: 'gpt-tracer' },
-      reviewer: { tracer: 'gpt-tracer' }, 'reviewer-pro': { tracer: 'gpt-tracer' },
-      'clone-distiller': { tracer: 'gpt-tracer' },
-      documenter: { documenter: 'gpt-documenter', pcm: 'gpt-pcm' },
-      gitter: { 'conflict-resolver': 'gpt-conflict-resolver' },
-    }[base ?? role] ?? {};
-    const canonical = renderedText(render, base ?? role);
-    assert.ok(canonical, `${name}: missing canonical rendered manual`);
-    const canonicalFm = parseFrontmatter(base ?? role, canonical);
-    const expectedTools = canonicalFm.tools?.split(',').map(t => t.trim()).filter(t => !t.startsWith('mcp__auto-effort-control__'));
-    if (expectedTools) assert.deepEqual(fm.tools?.split(',').map(t => t.trim()), expectedTools, `${name}: non-effort tools drifted`);
-    else assert.ok(fm.tools && !fm.tools.includes('mcp__auto-effort-control__'), `${name}: inherited all tools instead of pinning a GPT-safe list`);
-    for (const key of ['skills', 'hooks']) assert.deepEqual(fm[key], canonicalFm[key], `${name}: runtime ${key} drifted`);
-    let manual = bodyOf(canonical);
-    if (Object.keys(routes).length) manual = manual.replace(
-      new RegExp(`(^|[^A-Za-z0-9_./:-])(${Object.keys(routes).join('|')})(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`, 'g'),
-      (_, before, agent) => `${before}${routes[agent]}`);
-    const noEffortTools = 'Your effort is set by your definition; you hold no effort tools.';
-    if (role === 'flights-foreman' || role === 'documenter')
-      manual = manual.replace(/(^## Effort\n\n)[^\n]*(\n)/m, `$1${noEffortTools}$2`);
-    const gptProvider = 'Select only the registered GPT equivalent of each required role; both foreman tiers use `gpt-foreman`. Omit the Agent `model` override and pass GPT-only routing in every child brief. If unavailable or inaccessible, return `BLOCKED: GPT role unavailable: {role}`; never substitute an Anthropic agent or skip the step.';
-    if (role.startsWith('flights-') && ['flights-foreman', 'flights-lander'].includes(role))
-      manual = manual.replace(/(^## Provider\n\n)[^\n]*(\n)/m, `$1${gptProvider}$2`);
-    assert.ok(bodyOf(text).trimEnd().endsWith(manual.trimEnd()), `${name}: the full canonical manual was not preserved with only declared route/effort/provider changes`);
-    assert.ok(text.includes('BLOCKED: GPT role unavailable: {role}'), `${name}: missing fail-closed provider routing`);
-    if (role === 'rr') {
-      assert.ok(text.includes('subagent_type: "gpt-sub-rr"'), `${name}: web digger is not GPT`);
-      if (base) assert.ok(text.includes('`gpt-clone-distiller`'), `${name}: repository digger is not GPT`);
-      const kid = parseFrontmatter('gpt-sub-rr', renderedText(render, 'gpt-sub-rr'));
-      assert.deepEqual(kid.visibility['visible-to'].include, ['gpt-rr', 'gpt-rr-pro', 'gpt-rr-pro-max']);
-    }
-    if (role === 'flights-lander') {
-      assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),
-        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent', 'SendMessage',
-         'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'],
-        `${name}: tools must match the lander's (Agent: its review dispatch; SendMessage: a critical decision to main)`);
-      for (const child of ['flights-hunter', 'flights-spec-walker', 'flights-sub-lander']) {
-        assert.ok(text.includes(`subagent_type: gpt-${child}`), `${name}: does not spawn GPT ${child}`);
-        const kid = parseFrontmatter(`gpt-${child}`, renderedText(render, `gpt-${child}`));
-        assert.deepEqual(kid.visibility['visible-to'].include, [name], `${child}: not the GPT lander's alone`);
-      }
-    }
-    if (role === 'flights-foreman') {
-      // A GPT foreman's foreman children are GPT: both foreman tiers render as itself.
-      assert.ok(text.includes('`gpt-documenter`') && text.includes('`gpt-pcm`'), `${name}: documenter/pcm routes are not GPT`);
-      assert.ok(text.includes('`gpt-foreman` when the path is clear'), `${name}: its split line does not name gpt-foreman`);
-      assert.doesNotMatch(text, /flights-foreman-sonnet|gpt-foreman-sonnet|gpt-flights-fore/, `${name}: a Claude foreman tier or the old GPT name appears`);
-    }
-  });
-}
 
 // auto-effort-control steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
 // its buttons: exactly these Claude roles hold both; every other rendered agent, each GPT twin, pcm and releaser neither.
@@ -742,13 +571,6 @@ test('effort permission gate evaluates native exclusions without reducing inheri
     assert.throws(() => assertEffortPermission('unapproved', `---\nname: unapproved\ndisallowedTools: ${JSON.stringify(denied)}\n---\nRead.\n`));
   }
   assert.throws(() => assertEffortPermission('reviewer', `---\nname: reviewer\neffortControl: true\ndisallowedTools: [${effortButtons[0]}]\n---\nReview.\n`));
-  const render = renderShipped([CAPABILITY]);
-  for (const name of ['astra', 'sol', 'luna']) {
-    const fm = parseFrontmatter(name, renderedText(render, name));
-    assert.equal(fm.tools, undefined, `${name}: unrelated inherited capabilities narrowed`);
-    assert.equal(fm.effortControl, undefined, `${name}: must not be automatically steered`);
-    assert.deepEqual(fm.disallowedTools, effortButtons, `${name}: exclude exactly the effort buttons`);
-  }
 });
 
 test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pcm or releaser', () => {
@@ -759,24 +581,11 @@ test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pc
     ...['.claude/agents/pcm.md', '.claude/agents/releaser.md', 'templates/project/agents/pcm.md']
       .map((path) => [path, readFileSync(join(ROOT, path), 'utf8')]),
   ];
-  for (const [name] of twins)
-    assert.ok(agents.some(([agent]) => agent === name), `${name}: not rendered, so its lack of buttons is unproven`);
   const steered = [];
   for (const [name, text] of agents) {
     if (assertEffortPermission(name, text)) steered.push(name);
   }
   assert.deepEqual(steered.sort(), [...effortSteered.keys()].sort(), 'an approved steered role was not rendered');
-  // A twin pins its own tools to drop the buttons: the rest stays its role's list.
-  // A role with no tools line inherits every tool, so its twin pins a list of its own that holds no button.
-  const toolsOf = (name) => parseFrontmatter(name, renderedText(render, name)).tools?.split(',').map((tool) => tool.trim());
-  for (const [name, , , role, base] of twins.filter(([, , , role]) => effortSteered.has(role))) {
-    const roleTools = toolsOf(base ?? role);
-    if (roleTools === undefined) {
-      assert.ok(toolsOf(name)?.length > 0, `${name}: ${role} lists no tools, so the twin must pin its own list`);
-      assert.deepEqual(toolsOf(name).filter((tool) => effortButtons.includes(tool)), [], `${name}: holds effort buttons`);
-    } else
-      assert.deepEqual(toolsOf(name), roleTools.filter((tool) => !effortButtons.includes(tool)), `${name}: tools drifted from ${role}`);
-  }
 });
 
 // sub-agent-compact registers `compact` only while forwardHandoffTool is off, and Professor runs it on:
@@ -797,59 +606,10 @@ test('every shipped agent naming sub-agent-compact holds forward_handoff and loo
   assert.ok(handing > 0, 'no shipped agent names a sub-agent-compact tool: the scan read nothing');
 });
 
-// Project roles cannot use machine inheritance. The loader keeps the canonical body on disk;
-// registration must carry every runtime tool/skill/hook, never source role metadata.
-const projectTwins = ['changelogger', 'gitter', 'pcm', 'releaser', 'themer'];
-test('project GPT wrappers preserve runtime metadata and close independent provider doors', () => {
-  for (const role of projectTwins) {
-    const source = readFileSync(join(ROOT, '.claude/agents', `${role}.md`), 'utf8');
-    const text = readFileSync(join(ROOT, '.claude/agents', `gpt-${role}.md`), 'utf8');
-    const canonical = parseFrontmatter(role, source);
-    const twin = parseFrontmatter(`gpt-${role}`, text);
-    assert.equal(twin.name, `gpt-${role}`);
-    assert.equal(twin.model, 'gpt-6.1-sol[1m]');
-    assert.equal(twin.effort, 'high');
-    for (const key of ['tools', 'skills', 'hooks']) assert.deepEqual(twin[key], canonical[key], `${role}: runtime ${key} drift`);
-    assert.equal(twin.from, undefined); assert.equal(twin.role, undefined);
-    assert.deepEqual(twin.engines, role === 'gitter' ? gitterEngines : { codex: false, opencode: false });
-    assert.ok(text.includes(`.claude/agents/${role}.md`) && text.includes('in full before acting'), `${role}: missing full manual loader`);
-    assert.ok(text.includes('BLOCKED: GPT role unavailable: {role}') && text.includes('Omit the Agent `model` override'), `${role}: missing GPT-only routing/refusal`);
-    assert.ok(text.includes('new session or user-authorized reload'), `${role}: assumes registration hot reload`);
-    if (role === 'pcm') {
-      assert.ok(text.includes('Explore') && text.includes('`sol`'), 'pcm: Explore needs its independent GPT route');
-      assert.ok(text.includes('model: haiku') && text.includes('explicit model overrides'), 'pcm: the separate haiku door is open');
-    }
-    if (role === 'gitter') {
-      assert.deepEqual(twin.visibility.agents.include, ['gpt-conflict-resolver']);
-      assert.ok(text.includes('GitGuard') && text.includes('BLOCKED: gpt-gitter native GitGuard identity unproven'));
-      assert.ok(text.includes('worktree prune -n') && text.includes('"$HOME/.local/bin/pfm" internal git-guard'), 'gitter: GitGuard admission lacks its runnable proof');
-    }
-    if (role === 'changelogger') assert.deepEqual(twin.visibility['visible-to'].include, ['gpt-releaser']);
-    if (['pcm', 'gitter'].includes(role))
-      assert.equal(text, readFileSync(join(ROOT, 'templates/project/agents', `gpt-${role}.md`), 'utf8'), `${role}: shipped wrapper differs`);
-  }
-});
-
-test('GPT helper visibility admits every mapped caller', () => {
-  const render = renderShipped([CAPABILITY]);
-  for (const [child, callers] of [
-    ['gpt-conflict-resolver', ['gpt-gitter']],
-    ['gpt-tracer', ['main', 'gpt-reviewer', 'gpt-reviewer-pro', 'gpt-foreman', 'gpt-flights-lander', 'gpt-clone-distiller', 'gpt-changelogger']],
-    ['gpt-reviewer', ['main', 'gpt-releaser']],
-  ]) {
-    const fm = parseFrontmatter(child, renderedText(render, child));
-    assert.deepEqual(fm.visibility['visible-to'].include, callers, `${child}: caller visibility`);
-  }
-  const git = parseFrontmatter('gpt-gitter', renderedText(render, 'gpt-gitter'));
-  assert.deepEqual(git.visibility.agents.include, ['gpt-conflict-resolver']);
-  assert.ok(renderedText(render, 'gpt-gitter').includes('.claude/agents/gitter.md'), 'global gitter lost project delegation');
-});
-
 test('canonical investigation and trace visibility stays separate from GPT helpers', () => {
   const render = renderShipped([CAPABILITY]);
   for (const [child, callers] of [
-    ['transcript-reader', ['agent-investigator']], ['gpt-transcript-reader', ['gpt-agent-investigator']],
-    ['sub-tracer', ['tracer', 'sub-tracer']], ['gpt-sub-tracer', ['gpt-tracer', 'gpt-sub-tracer']],
+    ['transcript-reader', ['agent-investigator']], ['sub-tracer', ['tracer', 'sub-tracer']],
   ]) {
     const text = renderedText(render, child);
     assert.ok(text, `${child}: no rendered helper`);

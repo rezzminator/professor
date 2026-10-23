@@ -1,7 +1,7 @@
 ---
 name: clone-distiller
 description: 'Clones an external repository and investigates its code — "how does project X do Y", "learn X''s pattern for Z", "find where X handles W", "how did that change over time". Pass the repo URL, numbered questions, a Goal line, optional Ref, History, OUT-DIR. Returns the result file path, a commit-linked finding per question, rabbit holes. This repo → tracer.'
-tools: Bash, Read, Grep, Glob, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Bash, Read, Grep, Glob, Agent, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 skills: [tracer:use]
 model: opus
 effort: medium

@@ -164,7 +164,7 @@ func cacheRecordVersions(t *testing.T, configDir, id string) []string {
 // differs from the checkout is a warning to bump the version, since Claude
 // re-snapshots by version only; a preview names each update and runs none.
 func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
-	const name = "sub-agent-compact"
+	const name = "forward-compaction"
 	id := devID(name)
 	hook := "export const hook = '" + name + "'\n"
 	for _, test := range []struct {

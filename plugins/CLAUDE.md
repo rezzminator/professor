@@ -9,7 +9,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - buddy: an ASCII companion above the prompt that reacts to the work and answers `/buddy` · `buddy/`
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`
 - callmeter: records every tool call, request, agent and turn into SQLite through a Go binary behind every hook · `callmeter/`
-- sub-agent-compact: per-party compaction policy, nudges, and self-compaction at a milestone the model picks · `sub-agent-compact/`
+- forward-compaction: compaction where the model writes its own handoff — the main chat and every sub-agent through one tool — and everything after the call stays verbatim · `forward-compaction/`
 - engine-sync: the Codex and OpenCode mirror writer pfm execs · `engine-sync/`
 - harvester: shared engine MCP daemon and one-shot web/document CLI pfm registers as `harvester-professor` · `harvester/`
 - installable plugin: the directory Claude Code installs, inside each checkout · `{name}/plugins/{name}/`
@@ -31,7 +31,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - An alpha `pfm install` installs every plugin `.claude-plugin/marketplace.json` lists as `{name}@{name}-dev`, copied from `{name}/plugins/{name}` here (or under `claude.pluginCheckoutRoot` when set) into `~/.local/share/{name}-dev`, and disables its GitHub copies.
 - On alpha, `claude.plugins` in `pfm.config.json` is the enabled set, every marketplace plugin when unset; a plugin it leaves out installs disabled; a full `name@marketplace` id there is installed as named, never copied.
 - A plugin option is also an environment variable `{PLUGIN}_{OPTION}`, both names upper snake (`AUTO_EFFORT_CONTROL_FLOOR`): variable > the plugin's own option (`pluginConfigs`, `/config`, callmeter's `config.json`) > default; each plugin's README lists its settings.
-- sub-agent-compact and buddy declare no `userConfig`: sub-agent-compact reads only its `SUB_AGENT_COMPACT_*` variables, set from `claude.env`; buddy reads no variable and keeps every setting in `${XDG_CONFIG_HOME:-$HOME/.config}/buddy/config.json`.
+- forward-compaction and buddy declare no `userConfig`: forward-compaction takes its options only from its `FORWARD_COMPACTION_*` variables, set from `claude.env`; buddy reads no variable and keeps every setting in `${XDG_CONFIG_HOME:-$HOME/.config}/buddy/config.json`.
 - `pfm install` writes `claude.env` from `pfm.config.json` into the primary seat's `settings.json` `env`, which every seat shares, owning only the keys it wrote (ledger `~/.local/share/pfm/install/claude-env-ownership.json`); `pfm doctor` reports a key changed or dropped by hand.
 - On alpha, pfm builds callmeter from its source checkout into its versioned binary home before refreshing its plugin copy.
 - `pfm install` provisions harvester independently of Claude: alpha builds from source, stable verifies release checksums; `~/.local/bin/harvester` links its stable binary for every engine.

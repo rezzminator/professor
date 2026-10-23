@@ -1,7 +1,7 @@
 ---
 name: pcm
 description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; initial context → /context-audit.
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 skills: [quality:prompt]
 model: opus
 effort: high
@@ -126,7 +126,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 ## Special operations
 
 - Full rename: grep all occurrences, update agents, commands and `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
-- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back` unless it is an rr-family agent), compile with `engine-sync codex build .`; update the pipeline if needed.
+- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back` unless it is an rr-family agent), compile with `engine-sync codex build .`; update the pipeline if needed.
 - New skill: create `.claude/skills/{name}/SKILL.md`.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` § Rules only as a non-obvious call.
 

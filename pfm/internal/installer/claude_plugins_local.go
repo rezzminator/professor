@@ -652,6 +652,11 @@ var retiredClaudePlugins = map[string][]string{
 		"effort-live-control@professor",
 		"effort-live-control@rezzminator",
 	},
+	"forward-compaction": {
+		"sub-agent-compact@professor",
+		"sub-agent-compact@sub-agent-compact",
+		"sub-agent-compact@sub-agent-compact-dev",
+	},
 }
 
 // planRetiredPluginDisable plans the settings.json edit that retires every

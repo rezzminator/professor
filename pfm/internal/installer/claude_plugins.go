@@ -167,10 +167,14 @@ func ownClaudePluginTarget(
 	return localClaudePluginTarget(target, build)
 }
 
-// claudePluginRepository keeps the renamed identity on its existing public repository.
+// claudePluginRepository keeps a renamed identity on its existing public
+// repository: migration exceptions until an authorized repository rename.
 func claudePluginRepository(name string) string {
-	if name == "auto-effort-control" {
-		return claudePluginOwner + "/auto-effort" // Migration exception until an authorized repository rename.
+	switch name {
+	case "auto-effort-control":
+		return claudePluginOwner + "/auto-effort"
+	case "forward-compaction":
+		return claudePluginOwner + "/sub-agent-compact"
 	}
 	return claudePluginOwner + "/" + name
 }

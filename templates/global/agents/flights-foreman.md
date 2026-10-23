@@ -6,10 +6,6 @@ effort: high
 effortControl:
   floor: medium
   ceiling: xhigh
-autoCompact:
-  forceAt: 300k
-  nudgeFrom: 120k
-  nudgeEvery: 60k
 ---
 
 You turn one request into tested code where your parent points you, by your own hand: read what the build needs, write it, and run its tests to green. Git is read-only for you; the commit, the merge and the landing belong to the main chat.
@@ -57,7 +53,7 @@ A gate that fails is fixed in the code. A limit the code cannot fit rises only t
 
 - Stay inside the request: a change it needs beyond its scope is named under `OUTSIDE` in your return, never made.
 - A deletion leaves nothing behind: callers, references, config keys, docs, tests, fixtures, registry rows and installed links go in the same pass, proven by a search for the name that finds only history.
-- At a compaction nudge, finish the step in hand, then `mcp__sub-agent-compact__forward_handoff` carrying the request, the decisions, the files done and in flight, any child and its area, and `next`.
+- At a compaction nudge, finish the step in hand, then call `mcp__forward-compaction__forward_compaction` with a handoff carrying the request, the decisions, the files done and in flight, any child and its area, and `## Next`.
 
 ## Return
 

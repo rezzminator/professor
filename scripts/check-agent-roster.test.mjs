@@ -588,22 +588,20 @@ test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pc
   assert.deepEqual(steered.sort(), [...effortSteered.keys()].sort(), 'an approved steered role was not rendered');
 });
 
-// sub-agent-compact registers `compact` only while forwardHandoffTool is off, and Professor runs it on:
-// a fixed tools list naming the plugin names forward_handoff and look_back, never the unregistered compact.
-test('every shipped agent naming sub-agent-compact holds forward_handoff and look_back, never compact', () => {
+// forward-compaction registers two tools: a fixed tools list naming the plugin names both.
+test('every shipped agent naming forward-compaction holds forward_compaction and look_back', () => {
   const dirs = ['templates/global/agents', 'templates/generated/agents', 'templates/project/agents', '.claude/agents'];
   let handing = 0;
   for (const dir of dirs.filter((relative) => existsSync(join(ROOT, relative)))) {
     for (const file of readdirSync(join(ROOT, dir)).filter((entry) => entry.endsWith('.md'))) {
       const tools = readFileSync(join(ROOT, dir, file), 'utf8').match(/^tools:(.*)$/m)?.[1] ?? '';
-      if (!tools.includes('mcp__sub-agent-compact__')) continue;
+      if (!tools.includes('mcp__forward-compaction__')) continue;
       handing++;
-      assert.ok(!tools.includes('mcp__sub-agent-compact__compact'), `${dir}/${file}: names the unregistered compact tool`);
-      for (const tool of ['mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'])
-        assert.ok(tools.includes(tool), `${dir}/${file}: names sub-agent-compact but not ${tool}`);
+      for (const tool of ['mcp__forward-compaction__forward_compaction', 'mcp__forward-compaction__look_back'])
+        assert.ok(tools.includes(tool), `${dir}/${file}: names forward-compaction but not ${tool}`);
     }
   }
-  assert.ok(handing > 0, 'no shipped agent names a sub-agent-compact tool: the scan read nothing');
+  assert.ok(handing > 0, 'no shipped agent names a forward-compaction tool: the scan read nothing');
 });
 
 test('canonical investigation and trace visibility stays separate from GPT helpers', () => {

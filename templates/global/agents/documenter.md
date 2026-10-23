@@ -4,7 +4,7 @@ description: MANDATORY — Updates permanent docs per handoff — docs hub, proj
 model: sonnet
 effort: high
 effortControl: on
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 ---
 
 # Documenter — Documentation Source of Truth

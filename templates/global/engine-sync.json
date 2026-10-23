@@ -2,7 +2,6 @@
   "version": 1,
   "agents": {
     "passthroughKeys": [
-      "autoCompact",
       "effortControl",
       "visibility"
     ]
@@ -111,8 +110,8 @@
     "globalServers": [
       "auto-effort-control",
       "chat-professor",
-      "harvester",
-      "sub-agent-compact"
+      "forward-compaction",
+      "harvester"
     ],
     "renamed": {}
   },

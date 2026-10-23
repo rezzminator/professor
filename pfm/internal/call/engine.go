@@ -473,7 +473,7 @@ func (engine *Engine) callRequest(
 		return refused(
 			CodeUndelivered,
 			"ABORT: /compact is never called — pfm never types a compaction: "+
-				"Claude compacts through the sub-agent-compact plugin, Codex and OpenCode "+
+				"Claude compacts through the forward-compaction plugin, Codex and OpenCode "+
 				"through their own auto-compaction. Nothing was typed.",
 		), nil
 	}
@@ -1257,7 +1257,7 @@ func (engine *Engine) checkSteerChain(request Request) (Result, bool) {
 		if isCompactCommand(steer) {
 			return refused(
 				CodeUndelivered,
-				"ERROR: a then steer must not itself start with /compact — compact-steering-into-compact recurses and loses the thread. pfm never types a compaction: Claude compacts through the sub-agent-compact plugin, Codex and OpenCode through their own auto-compaction. Nothing was typed.",
+				"ERROR: a then steer must not itself start with /compact — compact-steering-into-compact recurses and loses the thread. pfm never types a compaction: Claude compacts through the forward-compaction plugin, Codex and OpenCode through their own auto-compaction. Nothing was typed.",
 			), false
 		}
 	}
@@ -1270,7 +1270,7 @@ func (engine *Engine) checkSteerChain(request Request) (Result, bool) {
 	if len(request.Then) == 0 {
 		return refused(
 			6,
-			"ABORT: a /compact call requires exactly one then steer — compaction ends at an idle prompt with no turn fired, stranding the target. pfm never types a compaction: Claude compacts through the sub-agent-compact plugin, Codex and OpenCode through their own auto-compaction. Nothing was typed.",
+			"ABORT: a /compact call requires exactly one then steer — compaction ends at an idle prompt with no turn fired, stranding the target. pfm never types a compaction: Claude compacts through the forward-compaction plugin, Codex and OpenCode through their own auto-compaction. Nothing was typed.",
 		), false
 	}
 	return Result{}, true

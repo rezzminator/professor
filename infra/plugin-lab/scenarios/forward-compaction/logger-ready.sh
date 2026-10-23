@@ -1,6 +1,6 @@
 # S1: one turn; the plugin's first row under PLUGIN_LOG_DIR is the decision log's start (R1).
 # shellcheck shell=bash disable=SC2034
-LAB_PLUGIN=sub-agent-compact
+LAB_PLUGIN=forward-compaction
 LAB_ROWS=(R1)
 LAB_MODEL=haiku
 LAB_CAP_USD=0.25

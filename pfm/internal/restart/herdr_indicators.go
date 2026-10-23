@@ -82,14 +82,15 @@ func (finder *discoverer) staleHerdrIndicators() ([]staleIndicator, error) {
 	return stale, nil
 }
 
-// ConvergeHerdrIndicators replaces stale painters, never their Herdr server or an absent painter.
-func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, error) {
+// ConvergeHerdrIndicators replaces stale painters, never their Herdr server or an absent painter;
+// the bool reports whether it stopped and restarted any.
+func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, bool, error) {
 	stale, err := (&discoverer{deps: dependencies}).staleHerdrIndicators()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if len(stale) == 0 {
-		return "Herdr indicator process enumeration confirms no stale painter", nil
+		return "Herdr indicator process enumeration confirms no stale painter", false, nil
 	}
 	stopper := processStopper{
 		procs: dependencies.Procs, signal: dependencies.Signal,
@@ -99,22 +100,25 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, er
 	environments := map[string][]string{}
 	for _, painter := range stale {
 		if painter.Start == 0 {
-			return "", fmt.Errorf("herdr indicator pid %d: start identity unavailable", painter.PID)
+			return "", false, fmt.Errorf("herdr indicator pid %d: start identity unavailable", painter.PID)
 		}
 		env, err := dependencies.Procs.Environ(painter.PID)
 		if err != nil {
-			return "", fmt.Errorf("herdr indicator pid %d environment: %w", painter.PID, err)
+			return "", false, fmt.Errorf("herdr indicator pid %d environment: %w", painter.PID, err)
 		}
 		same, err := stopper.same(painter.process)
 		if err != nil {
-			return "", fmt.Errorf("herdr indicator pid %d environment identity: %w", painter.PID, err)
+			return "", false, fmt.Errorf("herdr indicator pid %d environment identity: %w", painter.PID, err)
 		}
 		if !same {
-			return "", fmt.Errorf("herdr indicator pid %d: identity changed while reading environment", painter.PID)
+			return "", false, fmt.Errorf(
+				"herdr indicator pid %d: identity changed while reading environment",
+				painter.PID,
+			)
 		}
 		socket := env["HERDR_SOCKET_PATH"]
 		if !filepath.IsAbs(socket) {
-			return "", fmt.Errorf(
+			return "", false, fmt.Errorf(
 				"herdr indicator pid %d: missing or nonabsolute HERDR_SOCKET_PATH %q",
 				painter.PID,
 				socket,
@@ -139,7 +143,7 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, er
 			return true, nil
 		}
 		if _, err := stopper.stop(ctx, painter.process); err != nil {
-			return "", fmt.Errorf("stop stale Herdr indicator: %w", err)
+			return "", false, fmt.Errorf("stop stale Herdr indicator: %w", err)
 		}
 	}
 	sockets := make([]string, 0, len(environments))
@@ -153,8 +157,12 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, er
 			[]string{dependencies.Executable, internalCommand, herdr.IndicatorVerb},
 			deps.StartOptions{Detach: true, Env: environments[socket]},
 		); err != nil {
-			return "", fmt.Errorf("start Herdr indicator for socket %s: %w", socket, err)
+			return "", false, fmt.Errorf("start Herdr indicator for socket %s: %w", socket, err)
 		}
 	}
-	return fmt.Sprintf("replaced %d stale Herdr indicator painter(s) on %d socket(s)", len(stale), len(sockets)), nil
+	return fmt.Sprintf(
+		"replaced %d stale Herdr indicator painter(s) on %d socket(s)",
+		len(stale),
+		len(sockets),
+	), true, nil
 }

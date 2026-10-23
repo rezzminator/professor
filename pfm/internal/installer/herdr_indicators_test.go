@@ -100,8 +100,8 @@ func TestInstallRefreshesStaleHerdrIndicators(t *testing.T) {
 		!slices.Contains(start.Opts.Env, "HERDR_SOCKET_PATH=/fixture/herdr.sock") {
 		t.Fatalf("painter start = %+v", start)
 	}
-	if !strings.Contains(output.String(), "Herdr indicator") {
-		t.Fatalf("refresh not reported: %s", output.String())
+	if !strings.Contains(output.String(), "  change  replaced 1 stale Herdr indicator") {
+		t.Fatalf("refresh not reported as a change: %s", output.String())
 	}
 }
 

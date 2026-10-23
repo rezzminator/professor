@@ -24,9 +24,12 @@ func (installer *engine) convergeHerdrIndicators(ctx context.Context) error {
 	if installer.options.herdrIndicatorDeps != nil {
 		dependencies = *installer.options.herdrIndicatorDeps
 	}
-	detail, err := restart.ConvergeHerdrIndicators(ctx, dependencies)
+	detail, replaced, err := restart.ConvergeHerdrIndicators(ctx, dependencies)
 	if err != nil {
 		return installer.fail(fmt.Errorf("refresh Herdr indicators: %w", err))
+	}
+	if replaced {
+		return installer.change(detail, nil)
 	}
 	installer.ok(detail)
 	return nil

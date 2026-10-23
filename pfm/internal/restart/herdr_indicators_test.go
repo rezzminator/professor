@@ -138,7 +138,7 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 			}
 			runner.ScriptStart([]string{binary}, 99, nil, startErr)
 			dependencies := Deps{Procs: k, Signal: k.signal, Clock: newTickClock(), Runner: runner, Executable: binary}
-			detail, err := ConvergeHerdrIndicators(context.Background(), dependencies)
+			detail, replaced, err := ConvergeHerdrIndicators(context.Background(), dependencies)
 			if wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), wantErr) {
 					t.Fatalf("error = %v, want %s", err, wantErr)
@@ -154,8 +154,8 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 			if err != nil {
 				t.Fatalf("converge: %v", err)
 			}
-			if len(k.sent()) != wantStops || len(runner.Starts()) != wantStarts {
-				t.Fatalf("signals=%v starts=%v detail=%s", k.sent(), runner.Starts(), detail)
+			if len(k.sent()) != wantStops || len(runner.Starts()) != wantStarts || replaced != (wantStarts > 0) {
+				t.Fatalf("signals=%v starts=%v detail=%s replaced=%v", k.sent(), runner.Starts(), detail, replaced)
 			}
 			for _, start := range runner.Starts() {
 				if !slices.Equal(start.Argv, []string{binary, "internal", "herdr-indicators"}) || !start.Opts.Detach ||

@@ -110,7 +110,7 @@ About one in ten of the world's top 10,000 websites now tells AI crawlers to sta
   <img src="docs/img/cards/harv.webp" alt="Harvester: a fetch climbs the ladder on a live stage — every source it touched lit, every step logged with its reason, the result box with the character count and the trace; then the next scenario" width="900">
 </p>
 
-A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `harvester ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. Harvester's source is a standalone Go plugin in `plugins/harvester/`. The same surface is available through the `harvester-professor` MCP server, with bare tools such as `read`, `search_literature` and `search_web`; each client launches `harvester mcp` as a stdio proxy to the persistent daemon. The browser rung never solves anything interactive.
+A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `harvester ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. Harvester is a standalone Go plugin in `plugins/harvester/`. Its native engine plugins register the `harvester` MCP server and launch `harvester mcp` as a stdio proxy to the persistent daemon; the [plugin guide](plugins/harvester/README.md) lists each engine's measured tool names and install route. The browser rung never solves anything interactive.
 
 ### 5. One contract, three runtimes
 
@@ -165,7 +165,7 @@ The checkout is pinned to the latest semantic version tag. A maintainer checkout
 Jumping several versions on one host? [UPGRADING.md](UPGRADING.md) prints the host fixes in apply order with `pfm install --check --plan`, and covers single-account gateway hosts.
 
 > [!WARNING]
-> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `chat-professor` and `harvester-professor` MCP servers ship disabled — `mcp.servers.chat.enabled` for chat, `mcp.servers.harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
+> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `chat-professor` MCP server ships disabled through `mcp.servers.chat.enabled`. Harvester is installed and enabled separately through its native engine plugins; `pfm` does not control that registration.
 
 ---
 
@@ -202,7 +202,7 @@ One Go binary with embedded installer assets. Beyond the six moments above:
 <details>
 <summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.27.1+ for source builds</summary>
 
-From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `python3` (checked, never installed by `pfm install`), `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl`/`security` on macOS. A clone host also needs the [engine-sync binary](#plugins). Go **1.27.1 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. `pfm install` installs the Harvester plugin and runs `harvester setup` to provision its pinned `uv` and CPython environment; `--offline` passes through to setup. Themes can be skipped with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-plugin-setup-and-optional-components) before applying. Harvester configuration and testing are documented in the standalone plugin repository at `plugins/harvester/README.md`.
+From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `python3` (checked, never installed by `pfm install`), `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl`/`security` on macOS. A clone host also needs the [engine-sync binary](#plugins). Go **1.27.1 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. Themes can be skipped with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-plugin-setup-and-optional-components) before applying. Harvester's native install routes, configuration and testing are documented in its [plugin guide](plugins/harvester/README.md).
 
 </details>
 

@@ -62,7 +62,7 @@ pfm/
     index call kill mcpserv naming nudge professor reap recovery reload resolve sky spawn stale stats
     statusline testjail theme transcript ui update updatecheck usagehook     # unchanged
 
-`plugins/harvester/` is a separate Go module outside `pfm/`; it owns Harvester source, conversion, its persistent daemon, and the stdio proxy exposed to MCP clients. PFM integrates it through install, config migration, enablement, and doctor delegation.
+`plugins/harvester/` is a separate Go module outside `pfm/`; it owns Harvester source, conversion, its persistent daemon, native Claude Code/Codex/OpenCode plugin manifests, and the stdio proxy exposed to MCP clients. PFM has no active Harvester integration; its installer only removes exact legacy registrations written by earlier Professor installs.
 ```
 
 Gone after P2c: `pfm/shim/`, `pfm/internal/shared/`, `pfm/internal/tmuxfmt/`, `pfm/internal/engine/matchutil/`, `pfm/internal/chatkeys/`, `pfm/HARVESTER.md`, `pfm/HEADLESS.md` (and, from P2b, `pfm/prompts/`, `pfm/internal/dream/`).

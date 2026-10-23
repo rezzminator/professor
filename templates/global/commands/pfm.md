@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop|accept`), `pfm install --yes`, `pfm doctor`, chat MCP and `harvester mcp|status|stop` routing, config location; load for any `pfm` verb or question. Not for editing framework files → the `pcm` agent.
+description: Operates the fleet CLI — `pfm` verb map, adopter updates (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop|accept`), `pfm install --yes`, `pfm doctor`, chat MCP; load for any `pfm` verb or question. Not for editing framework files → the `pcm` agent.
 argument-hint: [verb|question]
 ---
 
@@ -8,7 +8,7 @@ argument-hint: [verb|question]
 
 $ARGUMENTS
 
-`pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, harvester MCP registration, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store: `{BLUEPRINT_CLONE_PATH}` (default `~/.professor`; `.professor/manifest.json` can point elsewhere).
+`pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store: `{BLUEPRINT_CLONE_PATH}` (default `~/.professor`; `.professor/manifest.json` can point elsewhere).
 
 For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`.
 
@@ -54,19 +54,11 @@ engine-sync, the `engine-sync` plugin's binary (on PATH after `pfm install`), is
 
 ## Host integration
 
-`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands and skills from `{BLUEPRINT_CLONE_PATH}`; saving a global template IS the deploy. Harvester binary provisioning also runs on Codex-only and OpenCode-only hosts: alpha builds its source checkout, stable downloads a checksum-verified release; the Claude plugin is optional. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
+`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands and skills from `{BLUEPRINT_CLONE_PATH}`; saving a global template IS the deploy. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
 
 ## Chat: MCP first, shell for the rest
 
 Inside a chat, the `mcp__chat-professor__*` MCP tools are preferred for `call`, `last`, `ls`, `status`, `whoami`, `new`, and `save`. `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat call` refuses `/compact`: pfm never types a compaction. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
-
-## Harvest: MCP first, CLI for batches
-
-Inside a chat, the `mcp__harvester-professor__*` tools (`mcp__harvester-professor__read` (its `files` field local server only), `mcp__harvester-professor__download_file`, `mcp__harvester-professor__search_literature`, `mcp__harvester-professor__search_web` (only when a search backend is configured)) answer per item; `harvester [--refresh] [--include-content=false] [--ocr-language latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|path|identifier>...`, `harvester download-file [--json] [--header 'Name: value']... <url>...` and `harvester search [--type any|paper|book] [--limit N] [--json] <query>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
-
-`harvester mcp` is a thin stdio proxy to one persistent daemon shared by Claude, Codex and OpenCode; it starts the daemon on demand and replaces outdated versions. `harvester status` reports it; `harvester stop` drains it. The batch CLI runs one-shot.
-
-`harvester config path|show` reads the plugin's own configuration. `pfm mcp harvester enable|disable` controls only MCP registration through `mcp.servers.harvester.enabled`.
 
 ## Config
 

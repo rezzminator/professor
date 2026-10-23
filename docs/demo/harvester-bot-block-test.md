@@ -1,6 +1,6 @@
 # Harvester vs. real bot-blocking sites — a live test
 
-Method: confirmed each site's actual robots.txt disallow rules for AI crawlers via `curl` (public, unauthenticated — no bypass involved), then fetched the live homepage through `mcp__harvester__fetch` with `refresh: true` (cache bypassed) on 2026-09-13. Harvester never declares itself as GPTBot/ClaudeBot/etc. — it fetches under a Chrome-impersonation fingerprint, so robots.txt's AI-bot rules don't even apply to it; the real test is the site's technical bot-management (Akamai/Cloudflare/PerimeterX), not the honor-system file.
+Method: confirmed each site's actual robots.txt disallow rules for AI crawlers via `curl` (public, unauthenticated — no bypass involved), then fetched the live homepage with `refresh: true` (cache bypassed) on 2026-09-13. Harvester never declares itself as GPTBot/ClaudeBot/etc. — it fetches under a Chrome-impersonation fingerprint, so robots.txt's AI-bot rules don't even apply to it; the real test is the site's technical bot-management (Akamai/Cloudflare/PerimeterX), not the honor-system file.
 
 ## robots.txt confirmed (curl, live)
 

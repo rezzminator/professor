@@ -121,7 +121,7 @@ Fix: `remove {items} from {path} (each hook entry running that command and each 
 
 **Severity:** BLOCK
 
-Looks at every existing file from `installer.ClaudeUserRegistries(home, accounts, "")`, `{home}/.claude.json`, `{home}/.mcp.json`, once per physical file; plus `{managed}/mcp-ownership.json` `clients`. The installer uses the same registry inspector to remove exact pfm-owned legacy entries and reconcile enabled family entries without creating absent registry files. Doctor reports account registry state, foreign `professor` entries and unreadable files. Modern owned `chat-professor` and `harvester-professor` registrations produce no `pfm-mcp` row; only legacy pfm state is blocking. For a legacy entry, the existing Problem is `carries pfm mcpServers.<legacy-name>` and its Fix is `remove mcpServers.<legacy-name> from <path>; pfm’s server rides --mcp-config at launch`. Rerunning `pfm install` is also a supported cutover path; it removes exact pfm-owned legacy entries and reconciles modern family entries. A ledger name counts only when the current entry equals a recorded entry under a ledger key resolving to that file, ignoring an empty `env`; pfm command shapes count independently. The names-only `clients` list never decides entry ownership.
+Looks at every existing file from `installer.ClaudeUserRegistries(home, accounts, "")`, `{home}/.claude.json`, `{home}/.mcp.json`, once per physical file; plus `{managed}/mcp-ownership.json` `clients`. The installer uses the same registry inspector to remove exact pfm-owned legacy entries and reconcile enabled family entries without creating absent registry files. Doctor reports account registry state, foreign `professor` entries and unreadable files. The active `chat-professor` registration produces no `pfm-mcp` row; exact retired `harvester-professor` shapes are removed by install. For a legacy entry, the existing Problem is `carries pfm mcpServers.<legacy-name>` and its Fix is `remove mcpServers.<legacy-name> from <path>; pfm’s server rides --mcp-config at launch`. Rerunning `pfm install` removes exact pfm-owned legacy entries and reconciles chat. A ledger name counts only when the current entry equals a recorded entry under a ledger key resolving to that file, ignoring an empty `env`; pfm command shapes count independently. The names-only `clients` list never decides entry ownership.
 
 Problem: `carries pfm mcpServers.<legacy-name>`; ledger: `mcp-ownership.json still records pfm clients`.
 
@@ -268,7 +268,7 @@ Fix: `keep it; pfm doctor names it until a pfm release classifies it`.
 
 **Severity:** WARN
 
-Looks at top-level `mcpServers` names in every existing `{acct}/.claude.json` and `{home}/.claude.json`, excluding the modern owned `chat-professor` and `harvester-professor` entries, which produce no third-party row. Foreign `professor` entries are preserved by install and reported by doctor; unreadable registries are surfaced as unreadable rather than absent.
+Looks at top-level `mcpServers` names in every existing `{acct}/.claude.json` and `{home}/.claude.json`, excluding the modern owned `chat-professor` entry, which produces no third-party row. Harvester's native plugin registration is outside these pfm MCP registries. Foreign `professor` entries are preserved by install and reported by doctor; unreadable registries are surfaced as unreadable rather than absent.
 
 Problem: `mcpServers.{name} is declared outside pfm`.
 

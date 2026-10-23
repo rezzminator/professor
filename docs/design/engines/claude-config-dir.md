@@ -29,7 +29,7 @@
 - **pfm wires shared links.** Install creates missing links. A link to existing data outside the store is kept and named for a merge; a dangling link or a link to the wrong store entry is repointed atomically, without touching its old target, only when that account has no live chat. An aliased account is skipped. Doctor checks the store and every account's links.
 - **Unknown entries stay where they are.** A name on neither list reports `UNCLASSIFIED`; pfm does not share or delete it. `EntryClass` also recognises ignored entries: `ide`, `.cc-new-children`, `.cc-pane-children`, `settings.local.json`, and Claude Code's own runtime entries `debug`, `daemon.lock`, `daemon.status.json`, `.claude.json.lock` (the state file's transient write lock), `tmp`. A dir named after an installed plugin is that plugin's and reports nothing. A regular `*.md` file at the store's top level is the user's own instruction material, shared by construction, and reports nothing; the same name in an account reports `UNCLASSIFIED`.
 - **Settings are shared by link.** Claude layers the shared user settings under project files, launch settings and managed policy. Per-account launch overrides live in `pfm.config.json`.
-- **MCP definitions ride the launch.** `mcp.thirdParty` supplies operator servers beside pfm's `chat-professor` and `harvester-professor` entries. Trust, onboarding and login remain Claude's per-account state.
+- **PFM MCP definitions ride the launch.** `mcp.thirdParty` supplies operator servers beside pfm's `chat-professor` entry. Native plugin servers, including Harvester's `harvester` server, belong to Claude's plugin registry. Trust, onboarding and login remain Claude's per-account state.
 - **Retention applies outside pfm too.** The managed `cleanupPeriodDays` protects launches through other paths.
 - **A managed drop-in must not demote the person's plugins.** Claude Code 2.1.299+ seats its built-in `cc-plugin-sec-default@builtin` ahead of the person's plugins on any machine with managed settings unless a managed `prependPlugins` is set, and the seated plugin skips user-tier plugin hooks. pfm's drop-in carries `"prependPlugins": []` so it is not seated.
 
@@ -112,9 +112,9 @@ A settings `env` value overrides the shell's value; a flag overrides its setting
 
 ## MCP servers
 
-`--mcp-config` carries every `mcp.thirdParty` entry, plus pfm's `chat-professor` and/or `harvester-professor` server when the corresponding family is enabled. Third-party entries remain present when both families are off. The key is a map from server name to a JSON object in Claude's `mcpServers` shape; validation reserves both pfm server names.
+`--mcp-config` carries every `mcp.thirdParty` entry, plus pfm's `chat-professor` server when that family is enabled. Third-party entries remain present when chat is off. The key is a map from server name to a JSON object in Claude's `mcpServers` shape; validation reserves the pfm-owned name `chat-professor`.
 
-Install inspects existing account `.claude.json` files found through configured accounts, the account roster, ambient config and default paths. It removes only exact pfm-owned legacy entries, emits or reconciles enabled `chat-professor` and `harvester-professor` entries, preserves and reports foreign `professor` entries, and does not create absent registry files. Doctor reuses this inspector and reports each account's registry state, foreign entries and unreadable files.
+Install inspects existing account `.claude.json` files found through configured accounts, the account roster, ambient config and default paths. It removes exact pfm-owned legacy entries, including retired `harvester-professor` registrations, reconciles the enabled `chat-professor` entry, preserves and reports foreign `professor` entries, and does not create absent registry files. Doctor reuses this inspector and reports each account's registry state, foreign entries and unreadable files.
 
 ## Launches outside pfm
 

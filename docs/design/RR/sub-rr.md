@@ -21,7 +21,7 @@
 | Kind | original agent, `templates/global/agents/sub-rr.md`, linked by `pfm install` |
 | Class | `RR-ONLY` |
 | Model, effort | `haiku`, `medium` |
-| Tools | `WebSearch, WebFetch, Write, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` |
+| Tools | `WebSearch, WebFetch, Write, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web` (Claude Code names) |
 | Spawns | nothing — it holds no `Agent` |
 | Writes | one file, the `Report:` path in its brief, by one `Write` as its last call; it holds no `Edit`, `Read` or `Bash` |
 

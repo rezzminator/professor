@@ -2,7 +2,7 @@
 
 Two independent things live in this repo. Install what you need.
 
-- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `chat-professor` and `harvester-professor` MCP servers, multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
+- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `chat-professor` MCP server and multi-account tooling. Binary or source, touches only your `$HOME`, no project files. Harvester is an independent plugin; see its [native install guide](plugins/harvester/README.md).
 - **Professor, the discipline layer** — `CLAUDE.md`, agents, commands, the pipeline. Installed into YOUR project through a Claude-guided interview.
 
 Shortest path first.
@@ -82,18 +82,17 @@ For a filtered network that cannot reach a Go module host or proxy, use this bin
 
 ### Preview, plugin setup, and optional components
 
-Bare `pfm install` is a read-only preview. Review its planned writes and the Harvester setup line before applying the identical flag set with `--yes`:
+Bare `pfm install` is a read-only preview. Review its planned writes before applying the identical flag set with `--yes`:
 
 ```bash
 pfm install --skip-engine codex --skip-themes
 pfm install --yes --skip-engine codex --skip-themes
 ```
 
-- Harvester is installed as a plugin binary and `pfm install` runs `harvester setup`; `--offline` asks setup to use local caches without downloads. A setup failure is reported by install.
 - `--skip-engine codex` suppresses the Codex dependency probe and Codex mirror/hooks. It does not alter Claude or OpenCode surfaces.
 - `--skip-themes` suppresses theme installation. Themes are the Professor profiles in `templates/themes/`: every `{name}/` directory there, found by scanning, installs as `~/.claude/themes/{name}.json`. Each also becomes a `Professor · {name}` VS Code colour theme in the Professor extension, rendered from the installed files on every install, `--skip-themes` included, so the extension keeps listing what is already installed.
 
-Harvester provisions its pinned `uv` and CPython environment under its own state root. Required downloads and disk space vary by platform and lock revision; the install preview is the authoritative plan for the host.
+Harvester installs and provisions its own binary and conversion environment through its native plugin launcher. See the [plugin guide](plugins/harvester/README.md) for the engine commands, prerequisites and offline behavior.
 
 Theme fetch failures are visible nonfatal skips, so the rest of the install can continue. A locally modified theme is preserved and reported as drift rather than overwritten. On uninstall, only theme files recorded as installer-owned in the ownership ledger are removed.
 
@@ -195,7 +194,7 @@ GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -l
 
 Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
 
-The source build has the same Harvester setup behavior as the [preview/apply block above](#preview-plugin-setup-and-optional-components). Then run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
+After the source build, run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
 ```bash
 cd "$HOME/.professor"
@@ -246,7 +245,7 @@ One writer per surface — the law that keeps the two installers from fighting o
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, the Professor profiles (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/{profile}.json` for every profile directory in `templates/themes/`, their whole copies under `~/.local/share/pfm/install/themes/`, and one VS Code colour theme each in the Professor extension's `themes/`; exact ownership is recorded in the install ledger |
-| MCP client registrations (`chat-professor`, `harvester-professor`) | `pfm install` | Claude receives enabled pfm servers and `mcp.thirdParty` through `--mcp-config` on managed non-query launches; query launches omit them. Install also inspects existing account `.claude.json` files found through configured accounts, the account roster, ambient config and default paths; it replaces exact pfm-owned legacy registrations with enabled family entries only in registries containing a pfm-owned registration. Foreign entries are preserved and reported; registries with no pfm-owned entry stay unchanged, and absent files stay uncreated. Doctor reuses the inspector and reports account state, foreign entries and unreadable files. Codex receives owned `mcp_servers` entries in `config.toml`; OpenCode receives entries in `opencode.jsonc`. pfm emits a server registration only while its family is enabled. |
+| MCP client registrations (`chat-professor`) | `pfm install` | Claude receives the enabled PFM server and `mcp.thirdParty` through `--mcp-config` on managed non-query launches; query launches omit them. Install removes exact retired `harvester-professor` entries that earlier Professor installers wrote, while preserving other registrations. Codex receives the owned chat `mcp_servers` entry in `config.toml`; OpenCode receives its chat entry in `opencode.jsonc`. The native Harvester plugins manage their own registrations. |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 

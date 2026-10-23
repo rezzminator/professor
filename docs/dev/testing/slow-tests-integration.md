@@ -40,14 +40,6 @@ jailTest; newTaggedBuildFixture runs git; update.Run builds/runs candidate actio
 
 A — update verification crosses the fixture repository and candidate process boundary.
 
-### TestInstallHarvesterLinksBinaryAndPropagatesOffline
-
-**Source:** [pfm/cmd/pfm/update_command_test.go](../../../pfm/cmd/pfm/update_command_test.go) line 16 · **Observed:** 1.93s · **Class:** build/git subprocess
-
-jailTest; tagged fixture git; update.Run; exec.Command(canonical, version); branch/revision checks.
-
-A — real candidate build and executable invocation are exercised.
-
 ### TestStressResolveSixtySocketsTwoHundredPanes
 
 **Source:** [pfm/internal/resolve/tmux_jail_test.go](../../../pfm/internal/resolve/tmux_jail_test.go) line 326 · **Observed:** 12.93s · **Class:** process/tmux

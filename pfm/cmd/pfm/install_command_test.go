@@ -203,6 +203,7 @@ func assertManagerConsulted(t *testing.T, logPath string, wantDarwinConsulted bo
 }
 
 func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
+	t.Setenv(paths.EnvProcRoot, t.TempDir())
 	// Apply now generates prompts in the source clone. Never discover the
 	// read-only test checkout; each subtest owns its default clone under HOME.
 	t.Chdir(t.TempDir())

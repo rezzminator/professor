@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/restart"
 )
 
 // ErrNameSyncRunning refuses a mutating install while the Linux name-sync
@@ -66,6 +67,8 @@ type OutputRunner interface {
 
 type Options struct {
 	Mode Mode
+	// herdrIndicatorDeps replaces the process-table, signal and start doors in tests.
+	herdrIndicatorDeps *restart.Deps
 	// LeaveVSCodeColors permits uninstall to leave known extension-owned keys;
 	// their recovery records remain on disk. Other restore failures still stop it.
 	LeaveVSCodeColors     bool

@@ -312,6 +312,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireLogDefault())
 	installer.deferFailure(installer.wireShell(false))
 	installer.deferFailure(installer.wireHerdrShell(false))
+	installer.deferFailure(installer.convergeHerdrIndicators(ctx))
 	installer.deferFailure(installer.wireVSCode())
 	installer.deferFailure(installer.writeUpdateMetadata())
 	// Like a failed plugin install, a refused login default is reported at

@@ -330,6 +330,13 @@ func Run(
 	)
 	tally.warnings += backendWarnings
 	tally.failures += backendFailures
+	indicatorWarnings, indicatorFailures := printHerdrIndicatorsDoctor(
+		stdout,
+		resolved.Home,
+		gather.NewProcFS(resolved.ProcRoot),
+	)
+	tally.warnings += indicatorWarnings
+	tally.failures += indicatorFailures
 	tally.warnings += printHerdrReporterErrors(stdout, paths.HerdrLockDir(resolved.Home), dependencies.Clock.Now())
 	tally.warnings += printHerdrSeatOwnership(ctx, stdout, resolved)
 	hostWarnings, hostFailures := printHostChecks(stdout, runtime, dependencies.Clock.Now())

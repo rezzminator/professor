@@ -4,11 +4,8 @@ name: Plugin Security Scan
 # awesome-ai-plugins catalog applies, so the source-side score is reproducible.
 
 on:
-  push:
-    branches:
-      - main
-      - develop
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:

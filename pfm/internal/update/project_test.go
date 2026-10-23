@@ -189,13 +189,13 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, ".professor", "manifest.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFixtureFile(t, project, "CLAUDE.md", "# local\n")
+	writeProjectFixtureFile(t, project, ".claude/settings.json", "{\"local\": true}\n")
 	writeProjectFixtureFile(t, project, ".claude/commands/dev.md", "---\nname: dev\n---\nlocal\n")
 	home := t.TempDir()
 	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	headSHA := projectGitShortSHA(t, store)
 
-	const planSize = 11
+	const planSize = 10
 
 	var stdout, stderr bytes.Buffer
 	if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
@@ -313,12 +313,11 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 	noGitStore := t.TempDir()
 	for relative, content := range map[string]string{
 		"VERSION":                                                          "0.65.0\n",
-		"templates/project/CLAUDE.md":                                      "# x\n",
 		"templates/project/settings.json":                                  "{}\n",
 		"templates/project/rumdl-policy.toml":                              "[global]\n",
 		"templates/project/commands/dev.md":                                "old\n",
 		"templates/project/agents/gitter.md":                               "body\n",
-		"templates/project/scripts/dev.sh":                                 "#!/usr/bin/env bash\n",
+		"templates/project/scripts/worktree.sh":                            "#!/usr/bin/env bash\n",
 		"templates/project/skills/legal/SKILL.md":                          "body\n",
 		"templates/project/epics/TEMPLATE.md":                              "# Epic\n",
 		"templates/project/codex/config.toml":                              "model=\"x\"\n",

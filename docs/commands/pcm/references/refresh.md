@@ -12,7 +12,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ## Contents
 
-- [Three tiers](#three-tiers)
+- [Tiers](#tiers)
 - [Source files to mine](#1-source-files-to-mine)
 - [Tier-aware transformations](#2-tier-aware-transformations)
 - [Output structure](#3-output-structure)
@@ -23,22 +23,20 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ---
 
-## Three Tiers
+## Tiers
 
 | Tier | Description | Ships | Gets parameterized |
 | ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
 | **A — Universal archetypes** | Personalities that work in any domain. Voice IS value. | Full character, structure, identity | Domain REFERENCES inside the character (the Professor's PhDs, a persona's stack traces) |
-| **B — Domain archetypes** | Roles every project needs, content domain-shaped | Archetype skeleton: identity, voice, charter, modes, doc structure | Regulation, knowledge domain, user persona, market segment — filled via interview |
 | **C — Pure mechanics** | Infrastructure agents and plumbing | Mechanics only — no character | Tech-specific commands (test runner, package manager, build tool) |
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:doctor`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:doctor`, `/save` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
 - Voice/tone of every Tier A character
-- Archetype identity of Tier B commands
 - Pipeline mechanics (planner → architect → developer → QA → gitter; worktree isolation; only-gitter-touches-git; QA gates pre+post merge; path variables)
 - Discipline frame (zero-tolerance tests, mock policy, never-destructive-git, never-edit-main)
 
@@ -51,7 +49,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 - domain/user nouns (the project's subject matter, its users, its work units) → `{DOMAIN_NOUN}`, `{USER_NOUN}`
 - the project's regulatory frame, jurisdiction, and legal-entity type → `{REGULATION}`, `{JURISDICTION}`, `{LEGAL_ENTITY_TYPE}`
 - All tech specifics (transcription/AI providers, frameworks, ORMs, mobile/web stacks, API layers, databases, infra/cloud/hosting) → `{TECH_STACK_PLACEHOLDER}` per role
-- Ports → `{PROJECT_PORT}` / `{PORT_DEFAULTS}`; package managers/test runners → `{PROJECT_PKG_MGR}`, `{PROJECT_TEST_RUNNER}`
+- Ports → `{PORT_DEFAULTS}`; package managers/test runners → `{PROJECT_PKG_MGR}`, `{PROJECT_TEST_RUNNER}`
 - Blueprint self-references (`{BLUEPRINT_REPO}`, `{GH_USER}`, `{BLUEPRINT_CLONE_PATH}`) → resolved at install: a user with push access to the canonical repo targets it directly; everyone else targets their own fork
 
 Character names (Professor, and any persona the install adds) ship as **default names with "rename if you want" instruction**. Concrete beats abstract.
@@ -62,7 +60,7 @@ Character names (Professor, and any persona the install adds) ship as **default 
 
 From the project repo:
 
-- `CLAUDE.md` (root), `.claude/agents/*.md`, `.claude/commands/*.md` (Tier A+B, including command directories like `.claude/commands/pfm/`, `.claude/commands/audit/`), `.claude/skills/*/SKILL.md` (bundled + domain-hydrated only — see next bullet), `.claude/scripts/*.sh`
+- `.claude/agents/*.md`, `.claude/commands/*.md` (Tier A, including command directories like `.claude/commands/pfm/`, `.claude/commands/audit/`), `.claude/skills/*/SKILL.md` (bundled + domain-hydrated only — see next bullet), `.claude/scripts/*.sh`
 - **Source-fetched skills** (host-global: `god-speed`) — never vendor a `SKILL.md` copy for these; they live in their own canonical repos and a stale copy is the exact drift this avoids. Refresh maintains only the registries, `templates/global/skills/sources.json` and `templates/project/skills/sources.json` (name → repo); `pfm install` fetches the host-global ones.
 - `docs/epics/` structure — Epics section of CLAUDE.md, manifest format, lifecycle, ownership rules
 - docs hub scaffold — the hub `docs/_index.md` format, the `standards.md` skeleton, and the cluster convention (structure only, NEVER doc content — every adopter's documentation body is their own)
@@ -71,14 +69,6 @@ From the project repo:
 ## 2. Tier-aware transformations
 
 **Tier A:** KEEP voice/tone/structure/character/pipeline mechanics. REPLACE project identifiers + tech specifics with placeholders (the Professor's qualification is fixed prose — "15+ PhDs, one in whatever area the work touches" — a discipline roster found live genericizes to that line, never to slots). KEEP Epics section structure (manifest format, lifecycle, ownership rules) — it is domain-agnostic. **Persona voice is load-bearing — PARAMETERIZE a persona's generic sections (swap domain refs for placeholders); NEVER delete or trim them.** Worked voice examples and the Verdict examples ARE the value; mirror the live persona section-for-section, genericized — a thinned persona ships a weaker character. When a live persona carries a section the blueprint lacks, add it (genericized), never drop it.
-
-**Tier B:** KEEP archetype skeleton. REPLACE domain content with named placeholders:
-
-- **Officer:** `{REGULATION}`, `{REGULATION_FRAMEWORK_DOCS}`, `{ENFORCEMENT_AUTHORITY}`, `{DATA_SUBJECT_RIGHTS}`, `{INCIDENT_NOTIFICATION_TIMELINE}`
-- **PM:** `{USER_PERSONA}`, `{PRODUCT_DOMAIN}`, `{USER_DAILY_WORKFLOW}`, `{USER_PAIN_POINTS}`
-- **Mentor:** `{MARKET_SEGMENT}`, `{JURISDICTION}`, `{LEGAL_ENTITY_TYPE}`, `{FUNDING_LANDSCAPE}`, `{REGULATORY_BODIES}`
-- **Marketer:** `{CHANNEL_LANDSCAPE}`, `{TARGET_LANGUAGE}`, `{COMPETITIVE_LANDSCAPE}`, `{INDUSTRY_CONFERENCES}`
-- **KM:** `{KNOWLEDGE_DOMAIN}`, `{KNOWLEDGE_TAXONOMY}`, `{KNOWLEDGE_CONSUMERS}`, `{SOURCE_AUTHORITIES}`
 
 **Tier C:** Strip tech specifics, keep structure, no character.
 
@@ -93,7 +83,7 @@ professor/            ← this repo
     ├── refresh-map.json
     ├── themes/       (curated Professor themes, one profile per {name}.json — no live source)
     ├── global/       (machine-global originals — agents/, commands/, skills/; `pfm install` symlinks them into engine registries; agent `.toml` twins are release-generated beside their originals and out of this map's scope)
-    └── project/      (per-install templates — CLAUDE.md, agents/, commands/, skills/, scripts/, docs-hub/, docs-commands/, epics/, codex/)
+    └── project/      (per-install templates — agents/, commands/, skills/, scripts/, docs-hub/, docs-commands/, epics/, codex/)
 ```
 
 Rosters live in the tree, not here — `ls` the scope dir and read `refresh-map.json` for each file's live source or `curated` ruling. One annotation governs the refresh pass: source-fetched skills (each scope's `skills/sources.json`) are cloned from their canonical repos at install and never vendored.
@@ -109,7 +99,7 @@ Exports an interview Claude conducts before touching files. Structure:
 3. Project structure (single/monorepo, subproject count + purpose)
 4. Tech stack per (sub)project (lang, framework, pkg mgr, test runner, build tool, DB, infra)
 5. Professor's disciplines (10+ PhDs — what fits your domain?)
-6. Tier B opt-ins: Officer (regulations?), KM (domain?), PM (persona?), Mentor (market+jurisdiction?), Marketer (channels+language?)
+6. Compliance frame (regulation, jurisdiction, legal-entity type)
 7. Sacred ground ("do no harm" in your domain)
 
 **Phase 2 — Customization:** Rewrite every template replacing placeholders with interview answers. The per-project blocks MUST be materialized from the actual project roster: one testing manual per entry, a specialist block only where that project wants one; delete every block for a project the roster does not list, and fail if any referenced agent or manual path does not exist.
@@ -120,7 +110,6 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 | Skill | What's universal (ships) | What's project-specific (hydrated by RR) |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Three lenses at once (`templates/project/CLAUDE.md` § Rules → Meta) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
 | `audit:code-hygiene` | Category structure (ghost fields, dead code, stale deps, arch smells, type safety, naming, quality) | Per-category detection patterns, file paths, known hotspots, linter coverage gaps, project-specific report examples |
 | `audit:security` | OWASP category structure (8A-8I), severity guide, report format | Domain-specific PHI/data sensitivity rules, external API checks, framework-specific vulnerabilities, compliance-driven sub-categories |
 
@@ -134,7 +123,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 ## Category N — {category name}
 
 > **KNOWLEDGE BASE EMPTY** — This section needs project-specific detection patterns.
-> Run the three-lens review (`CLAUDE.md` § Rules → Meta, "Three lenses at once") or `/audit:code-hygiene` after the codebase has enough code to analyze.
+> Run `/audit:code-hygiene` after the codebase has enough code to analyze.
 > The Professor will surface this gap: "Knowledge base is empty, waiting for user specification to fill it in."
 ```
 
@@ -144,7 +133,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 **Phase 2.6 — Host tooling probe (git-host bridge):** Check the install machine for `gh` and `glab` (`command -v`). For each present, write a one-file host command at `.claude/commands/h/{gh|glab}.md` (the `h:` host namespace) whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: an adopter on GitLab forks + releases professor through `/h:glab`, a GitHub adopter through `/h:gh`, and `/pfm:release` and gitter read this marker to target the right host. These host-local bridges are KEEP-LOCAL — excluded from the portable blueprint. Absent tools get no command. Then resolve the blueprint repo target: if the user has push access to the canonical repo, set `{BLUEPRINT_REPO}`/`{GH_USER}`/`{BLUEPRINT_CLONE_PATH}` to it; otherwise have them fork it and use the fork.
 
-**Phase 3 — Smoke test:** Run `bash .claude/scripts/dev.sh status`, then one tiny `flights-foreman-sonnet` fix and watch its project checks.
+**Phase 3 — Smoke test:** Run each roster entry's test command from its testing manual, then one tiny `flights-foreman-sonnet` fix and watch its project checks.
 
 ## 5. Public README
 
@@ -158,7 +147,7 @@ If the repo-root `README.md` is missing → write it from the template below. If
 One-paragraph pitch: portable .claude/ that turns Claude Code into a self-disciplined engineering team with character. Personality is load-bearing.
 
 ## What you get
-- Full cast (Professor, Audit + Tier B opt-ins)
+- Full cast (Professor, Audit)
 - Pipeline (planner→architect→developer→QA→gitter)
 - Worktree isolation + port allocation
 - Single git owner (gitter)
@@ -173,9 +162,6 @@ install pfm, cd your-project, `pfm init .`, claude → follow the printed SETUP.
 
 ## The cast — Tier A
 Professor, /pfm, /flights:doctor
-
-## Tier B (opt-in)
-/officer, /mentor, /marketer
 
 ## The five load-bearing walls
 1. Only gitter touches git
@@ -206,7 +192,7 @@ MIT
 
 ```
 Refresh pass complete in templates/project/. {N} files updated, {M} unchanged.
-Tier A: {count} | Tier B: {count} | Tier C: {count}
+Tier A: {count} | Tier C: {count}
 Sources mined: {list}
 Generalizations: identifiers→placeholders {count}, tech→placeholders {count}, domain→slots {count}
 Character preservation: Professor ✓

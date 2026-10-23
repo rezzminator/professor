@@ -1,12 +1,10 @@
 package hostcheck
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -309,81 +307,6 @@ func TestOwnershipLedgerUnreadable(t *testing.T) {
 			}
 		})
 	}
-}
-
-func historicalHelper(t *testing.T, newName string) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test file")
-	}
-	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	content, err := os.ReadFile(filepath.Join(root, "templates", "project", "scripts", newName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content = bytes.Replace(content, []byte("# "+newName+" —"), []byte("# cc-"+newName+" —"), 1)
-	content = bytes.Replace(
-		content,
-		[]byte("SessionStart hook (memory-wire.sh)"),
-		[]byte("SessionStart hook (cc-memory-wire.sh)"),
-		1,
-	)
-	return string(bytes.Replace(content, []byte("{MEMORY_VAULT_DIR}"), []byte("invented-vault"), 1))
-}
-
-func TestMemoryHelpers(t *testing.T) {
-	for _, name := range []string{"memory-wire.sh", "memory-consolidate.sh"} {
-		t.Run(name, func(t *testing.T) {
-			env := fixtureEnv(t)
-			path := filepath.Join(env.Accounts[0].ConfigDir, "scripts", "cc-"+name)
-			content := historicalHelper(t, name)
-			writeFile(t, path, content)
-			target := filepath.Join(env.Accounts[0].ConfigDir, "scripts", name)
-			assertRows(
-				t,
-				detect(t, "memory-helpers", env),
-				Row{
-					Block,
-					"memory-helpers",
-					path,
-					"pfm's memory helper under its retired name",
-					"mv " + path + " " + target + ", then replace " + path + " with " + target + " in every hook command of " + filepath.Join(
-						env.Accounts[0].ConfigDir,
-						"settings.json",
-					),
-				},
-			)
-		})
-		t.Run(name+"-customized", func(t *testing.T) {
-			env := fixtureEnv(t)
-			path := filepath.Join(env.Accounts[0].ConfigDir, "scripts", "cc-"+name)
-			writeFile(t, path, historicalHelper(t, name)+"# edited\n")
-			assertRows(t, detect(t, "memory-helpers", env))
-		})
-	}
-	t.Run("unreadable-continues", func(t *testing.T) {
-		env := fixtureEnv(t)
-		writeFile(t, filepath.Join(env.Store, "scripts"), "file")
-		path := filepath.Join(env.Accounts[0].ConfigDir, "scripts", "cc-memory-wire.sh")
-		writeFile(t, path, historicalHelper(t, "memory-wire.sh"))
-		rows := detect(t, "memory-helpers", env)
-		if len(rows) != 3 {
-			t.Fatalf("rows=%v", rows)
-		}
-		for i, name := range []string{"cc-memory-wire.sh", "cc-memory-consolidate.sh"} {
-			assertUnreadable(
-				t,
-				rows[i:i+1],
-				"memory-helpers",
-				filepath.Join(env.Store, "scripts", name),
-				syscall.ENOTDIR,
-			)
-		}
-		if rows[2].Path != path || rows[2].Severity != Block {
-			t.Fatalf("later=%v", rows[2])
-		}
-	})
 }
 
 func TestThirdPartyMCP(t *testing.T) {

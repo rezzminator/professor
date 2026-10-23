@@ -573,7 +573,6 @@ func (h *e2eHarness) assertInit(project, source string) {
 	}
 	sha := strings.TrimSpace(shaResult.stdout)
 	for _, mapping := range []struct{ source, target string }{
-		{"CLAUDE.md", "CLAUDE.md"},
 		{"settings.json", ".claude/settings.json"},
 	} {
 		h.assertInitFile(
@@ -638,8 +637,7 @@ func (h *e2eHarness) assertInitFile(source, target, local, template, sha string)
 		),
 	)
 	marked := false
-	if local != "CLAUDE.md" && local != "AGENTS.md" && strings.HasSuffix(local, ".md") &&
-		bytes.HasPrefix(want, []byte("---\n")) {
+	if strings.HasSuffix(local, ".md") && bytes.HasPrefix(want, []byte("---\n")) {
 		prefix := append([]byte("---\n"), marker...)
 		if !bytes.HasPrefix(got, prefix) {
 			h.t.Fatalf("init scaffold failed; differing paths: %s; exact frontmatter marker absent", local)

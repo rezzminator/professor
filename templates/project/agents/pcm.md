@@ -25,7 +25,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - `.claude/agents/*.md`: root agents (`gitter`, `pcm`) and any `{proj}-{role}` specialist wrappers; machine-global agents live in `~/.claude/agents/`
 - `.claude/commands/{project}-testing-manual.md`: one per project, its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md`: reusable skills
-- `.claude/scripts/*.{sh,mjs}`: worktree.sh, alloc-ports.sh, dev.sh
+- `.claude/scripts/*.{sh,mjs}`: worktree.sh, alloc-ports.sh
 - the engine-sync plugin's hooks (`hook claude mark|stop|start`): registered by the plugin's own `hooks.json`, no file under `.claude/scripts/`
 - `{project}/.claude/agents/*.md`, `{project}/CLAUDE.md`: child project agents and conventions. A `{project}` held as a git submodule lands its commits in the child repo; the root repo pins a pointer (gitter-owned).
 - `docs/commands/{cmd}/references/`: command-owned reference docs (`$CDOCS/$CMD/$REFS/`); `docs/_index.md`: the hub of the cross-project reference clusters; `docs/facts/`: user-ruled system facts

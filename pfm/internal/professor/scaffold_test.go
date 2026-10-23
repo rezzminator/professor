@@ -22,7 +22,6 @@ func newScaffoldFixtureStore(t *testing.T) string {
 	root := t.TempDir()
 	files := map[string]string{
 		"VERSION":                             "0.1.0\n",
-		"templates/project/CLAUDE.md":         "# fixture contract\n",
 		"templates/project/settings.json":     "{}\n",
 		"templates/project/rumdl-policy.toml": "[global]\n",
 	}
@@ -168,7 +167,7 @@ func TestScaffoldRefusesTwoTemplatesForOneLocalPath(t *testing.T) {
 			t.Fatalf("Scaffold() err = %q, want it to name %s", err, want)
 		}
 	}
-	if _, statErr := os.Stat(filepath.Join(target, "CLAUDE.md")); !errors.Is(statErr, fs.ErrNotExist) {
-		t.Fatalf("a refused store still deployed CLAUDE.md (stat err %v)", statErr)
+	if _, statErr := os.Stat(filepath.Join(target, ".claude", "settings.json")); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("a refused store still deployed .claude/settings.json (stat err %v)", statErr)
 	}
 }

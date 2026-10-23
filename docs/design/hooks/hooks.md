@@ -38,7 +38,6 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 | --- | --- | --- | --- |
 | Claude | every interactive launch, `--settings` `hooks` | 23 hooks, 23 registrations (pfm-owned): launcher-repair, resume-unkill, usage, clear-kill, clear-name-start, clear-name-prompt, exit-close, git-guard, store-guard, rr-dir, epic-inject, reload-intercept, exit-intercept, herdr-start, herdr-working-prompt, herdr-working-tool, herdr-working-tool-failure, herdr-blocked, herdr-notification, herdr-idle, herdr-agent-start, herdr-agent-stop, herdr-end | `claudelaunch.Render` |
 | Claude | project `.claude/settings.json` | 1 in the template (`format-md.sh`) | `pfm init`, then the adopter |
-| Claude | operator's own, documented | 2 (memory backup, opt-in) | the adopter, by hand |
 | Codex | `{codex home}/hooks.json` | 8 owned (`resume-unkill`, `SessionStart` matcher `resume`; the seven [Herdr reporter](#herdr-reporter) handlers), with recorded trust; 2 retired shapes removed | `pfm install` |
 | OpenCode | plugin staged beside the fleet cache, listed in `OPENCODE_CONFIG_CONTENT`'s `plugin` array | 0 hooks, 1 plugin (the [Herdr reporter](#herdr-reporter)) | `pfm install` stages it; every pfm OpenCode chat loads it |
 
@@ -95,8 +94,6 @@ Source `templates/project/settings.json`, scaffolded to `.claude/settings.json` 
 | `format-md.sh` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:19` | Formats the Professor-owned `.md` just written under `.rumdl.toml` (`templates/project/scripts/format-md.sh:4-6`) | Exits 2 with introduced UNFIXED lines against the committed file or a failed step; exits 0 when clean, when only standing issues remain, when jq or rumdl is missing (with a stderr installation hint), or when the file's repository has no `.rumdl.toml` (silent for any repository other than the session's project, a nested one such as a plugin submodule included; a stderr line for the session's own project, or when `CLAUDE_PROJECT_DIR` resolves to no repository) (`format-md.sh:8-24`) |
 
 The Codex and OpenCode mirror hooks come from the engine-sync Claude plugin, never from a project script (`plugins/engine-sync/hooks/hooks.json`): `PostToolUse` matcher `Write|Edit` runs `engine-sync hook claude mark`, which marks the project's Codex and OpenCode mirrors dirty; `Stop` runs `engine-sync hook claude stop`, which builds and checks both mirrors when dirty and reports a failure as a `systemMessage`; `SessionStart` (async) runs `engine-sync hook claude start`, which rebuilds a stale project and runs `global` when targets exist. pfm's default `claude.plugins` lists `engine-sync`, and `pfm doctor` warns `claude.plugins omits engine-sync` when a set list leaves it out. This repo's own `.claude/settings.json` carries `format-md.sh` only (`PostToolUse`). A long-turn notification is the operator's own hook, never a template one.
-
-The memory-backup hooks are documented for the adopter to install by hand into the account `settings.json`: `memory-wire.sh` on `SessionStart` and `memory-sync.sh` on `SessionEnd` (`docs/references/memory-backup.md:60-63`, `docs/SETUP.md:429-463`). They are the operator's own once installed, and pfm writes no key of that file.
 
 ## Codex
 
@@ -311,4 +308,4 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 | This repo's install | `.claude/settings.json`, `.claude/scripts/` | The project tier this repo runs |
 | The engine adapters | `.claude/engine-sync.json` | What Codex and OpenCode are told about hooks |
 | The CLI surface | `docs/dev/pfm-surface.md` | The `doctor`, `install` and `internal` rows |
-| The setup docs | `docs/SETUP.md`, `docs/references/memory-backup.md` | What an adopter is told to install |
+| The setup docs | `docs/SETUP.md` | What an adopter is told to install |

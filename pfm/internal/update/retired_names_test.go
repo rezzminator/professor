@@ -245,8 +245,8 @@ func projectReportNoScan(root, home string, jsonOutput bool, stdout *bytes.Buffe
 	return professor.RunProjectUpdates(root, home, jsonOutput, stdout, nil)
 }
 
-// retiredThisRelease is one line per name v0.80.0 and the imagine rename
-// retire, each in the form an adopter's file writes it, with the hit the scan
+// retiredThisRelease is one line per name v0.80.0, the imagine rename, the
+// context-audit skill and the project-template prune retire, each in the form an adopter's file writes it, with the hit the scan
 // owes it.
 var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"spawn tracer-pro for the review", "tracer-pro", "agent", "tracer"},
@@ -299,6 +299,10 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"load the imagine-core skill", "imagine-core", "skill", "the imaginator agent"},
 	{"run /imagine:evolve weekly", "/imagine:evolve", "command", ""},
 	{"spawn imagine-historian to mine it", "imagine-historian", "agent", ""},
+	{"run /context-meter for the budget", "/context-meter", "command", "/context-audit"},
+	{"ask /mentor about funding", "/mentor", "command", ""},
+	{"type /marketer audit", "/marketer", "command", ""},
+	{"route it to /officer.", "/officer", "command", ""},
 }
 
 // TestRetiredNamesPinEveryNameThisReleaseRetires: a project file naming any
@@ -356,6 +360,7 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 		"agents/imaginator.md and `imaginator` agent and `imaginator` sub-agent and imagine agents",
 		`subagent_type: "ultimate-pro" and subagent_type: ultimately`,
 		"agents/ultimate-pro.md and `ultimate-pro` agent and ultimate agents",
+		"/context-audit and /context-meters; /mentorship, /marketers and /officers; a mentor, an officer",
 	} {
 		if hits := retiredNameHits("f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)

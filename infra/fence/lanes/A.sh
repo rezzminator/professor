@@ -239,10 +239,10 @@ INIT_DIR="$HOME/lane-a-init"
 rm -rf "$INIT_DIR"
 mkdir -p "$INIT_DIR"
 bad=""
-# The expected count comes from the store itself: the eleven init mappings
-# (internal/professor/scaffold.go initTemplatePaths), agents minus per-project.
+# The expected count comes from the store itself: the ten init mappings
+# (internal/professor/scaffold.go initTemplatePaths), commands minus per-project.
 expected=0
-for single in CLAUDE.md settings.json rumdl-policy.toml; do
+for single in settings.json rumdl-policy.toml; do
   [ -f "$STORE_T/project/$single" ] && expected=$((expected + 1))
 done
 expected=$((expected + $(find "$STORE_T/project/agents" "$STORE_T/project/scripts" "$STORE_T/project/skills" \
@@ -258,9 +258,11 @@ grep -qxF "deployed $expected project files; baseline: $INIT_DIR/.professor/base
   bad="$bad want 'deployed $expected project files; baseline: …' (store has $expected mapped files), got: $(printf '%s' "$out" | grep '^deployed' | head -1);"
 grep -qF "follow $SOURCE_REPO/docs/SETUP.md § Install interview" <<<"$out" ||
   bad="$bad the handoff line does not name $SOURCE_REPO/docs/SETUP.md;"
+grep -qxF 'next: write CLAUDE.md with /quality:claude-md write CLAUDE.md' <<<"$out" ||
+  bad="$bad no 'next: write CLAUDE.md with /quality:claude-md write CLAUDE.md' line;"
 pinned="$(jq '.files | length' "$INIT_DIR/.professor/baseline.json" 2>/dev/null)"
 [ "$pinned" = "$expected" ] || bad="$bad baseline.json pins ${pinned:-<unreadable>} file(s), want $expected;"
-for local_path in CLAUDE.md .claude/settings.json .rumdl.toml .claude/agents/gitter.md docs/_index.md; do
+for local_path in .claude/settings.json .rumdl.toml .claude/agents/gitter.md docs/_index.md; do
   [ -f "$INIT_DIR/$local_path" ] || bad="$bad $local_path not deployed;"
 done
 for dir in .claude/commands .claude/scripts .claude/skills docs/epics .codex docs/commands; do
@@ -269,7 +271,7 @@ done
 [ -e "$INIT_DIR/.claude/commands/per-project" ] && bad="$bad .claude/commands/per-project was deployed (P5: the testing manual is interview-deployed, one per roster entry);"
 grep -q 'format-md.sh' "$INIT_DIR/.claude/settings.json" 2>/dev/null ||
   bad="$bad .claude/settings.json does not ship the format-md.sh hook (P2);"
-[ -x "$INIT_DIR/.claude/scripts/dev.sh" ] || bad="$bad .claude/scripts/dev.sh lost its executable mode (P6);"
+[ -x "$INIT_DIR/.claude/scripts/worktree.sh" ] || bad="$bad .claude/scripts/worktree.sh lost its executable mode (P6);"
 # P32: [dir] [--force] — a re-init refuses to rewrite the baseline; --force overwrites.
 again="$(pfm init "$INIT_DIR" 2>&1)"
 again_rc=$?
@@ -288,7 +290,7 @@ grep -q "^deployed $expected project files" <<<"$forced" || bad="$bad --force di
 pfm init "$INIT_DIR" extra >/dev/null 2>&1
 [ $? -eq 2 ] || bad="$bad pfm init with two positionals did not exit 2 (usage);"
 # pfm init --render: a second scratch project, scaffolded fresh, gets a
-# manifest supplying the token the store's CLAUDE.md carries ({PROJECT_NAME}).
+# manifest supplying the token the store's docs-hub/_index.md carries ({PROJECT_NAME}).
 RENDER_DIR="$HOME/lane-a-render"
 rm -rf "$RENDER_DIR"
 mkdir -p "$RENDER_DIR"
@@ -300,23 +302,23 @@ printf '{"tokens":{"PROJECT_NAME":"lane-a-renderword"}}\n' >"$RENDER_DIR/.profes
 render1="$(cd "$RENDER_DIR" && pfm init --render 2>&1)"
 render1_rc=$?
 [ "$render1_rc" -eq 0 ] || bad="$bad pfm init --render exited $render1_rc ($(one_line "$render1"));"
-grep -q '^RENDERED CLAUDE.md' <<<"$render1" || bad="$bad pfm init --render printed no 'RENDERED CLAUDE.md' line: $(one_line "$render1");"
-grep -qF 'lane-a-renderword' "$RENDER_DIR/CLAUDE.md" 2>/dev/null || bad="$bad $RENDER_DIR/CLAUDE.md does not carry the rendered value lane-a-renderword;"
+grep -q '^RENDERED docs/_index.md ' <<<"$render1" || bad="$bad pfm init --render printed no 'RENDERED docs/_index.md' line: $(one_line "$render1");"
+grep -qF 'lane-a-renderword' "$RENDER_DIR/docs/_index.md" 2>/dev/null || bad="$bad $RENDER_DIR/docs/_index.md does not carry the rendered value lane-a-renderword;"
 render2="$(cd "$RENDER_DIR" && pfm init --render 2>&1)"
 render2_rc=$?
 [ "$render2_rc" -eq 0 ] || bad="$bad a second pfm init --render exited $render2_rc ($(one_line "$render2"));"
 grep -q '^RENDERED' <<<"$render2" && bad="$bad a second pfm init --render still printed a RENDERED line: $(one_line "$render2");"
-before_sha="$(sha256sum "$RENDER_DIR/CLAUDE.md" | cut -d' ' -f1)"
+before_sha="$(sha256sum "$RENDER_DIR/docs/_index.md" | cut -d' ' -f1)"
 printf '{"tokens":{"SHA":"lane-a-badtoken"}}\n' >"$RENDER_DIR/.professor/manifest.json"
 render3="$(cd "$RENDER_DIR" && pfm init --render 2>&1)"
 render3_rc=$?
 [ "$render3_rc" -eq 1 ] || bad="$bad pfm init --render with manifest key SHA exited $render3_rc, want 1;"
 grep -qF 'INVALID SHA' <<<"$render3" || bad="$bad pfm init --render with manifest key SHA did not print 'INVALID SHA': $(one_line "$render3");"
-after_sha="$(sha256sum "$RENDER_DIR/CLAUDE.md" | cut -d' ' -f1)"
-[ "$before_sha" = "$after_sha" ] || bad="$bad the INVALID SHA render changed $RENDER_DIR/CLAUDE.md;"
+after_sha="$(sha256sum "$RENDER_DIR/docs/_index.md" | cut -d' ' -f1)"
+[ "$before_sha" = "$after_sha" ] || bad="$bad the INVALID SHA render changed $RENDER_DIR/docs/_index.md;"
 rm -rf "$RENDER_DIR"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "pfm init deployed $expected files into the eleven roster targets (per-project skipped, hooks and exec modes shipped); re-init refused to rewrite the baseline and kept ${repinned:-?} pin(s); --force redeployed all; pfm init --render rendered CLAUDE.md's {PROJECT_NAME} once, was a no-op on a second run, and refused the runtime metavariable SHA without touching the file"
+  pass "pfm init deployed $expected files into the ten roster targets (per-project skipped, hooks and exec modes shipped, the CLAUDE.md next line printed); re-init refused to rewrite the baseline and kept ${repinned:-?} pin(s); --force redeployed all; pfm init --render rendered docs/_index.md's {PROJECT_NAME} once, was a no-op on a second run, and refused the runtime metavariable SHA without touching the file"
 fi
 
 # ─── A.02 — Phase-2 territory is never deployed by pfm ──────────────────────
@@ -329,7 +331,7 @@ if requires A.01-scaffold; then
     .claude/settings-global.json settings-global.json .claude/skills/host-gh/SKILL.md .claude/skills/host-glab/SKILL.md; do
     [ -e "$INIT_DIR/$never" ] && bad="$bad $never exists after a bare pfm init;"
   done
-  for tmpl in project/per-project/CLAUDE.md project/commands/per-project/testing-manual.md project/settings-global.json; do
+  for tmpl in project/commands/per-project/testing-manual.md project/settings-global.json; do
     [ -f "$STORE_T/$tmpl" ] || bad="$bad the store has no $tmpl (the never-deployed template this beat asserts on is gone);"
     jq -e --arg t "$tmpl" '.files | to_entries[] | select(.value.template == $t)' "$INIT_DIR/.professor/baseline.json" >/dev/null 2>&1 &&
       bad="$bad $tmpl is PINNED by a bare pfm init;"
@@ -341,7 +343,7 @@ if requires A.01-scaffold; then
   chk="$(cd "$INIT_DIR" && pfm doctor --project-updates 2>&1)"
   chk_rc=$?
   [ "$chk_rc" -eq 1 ] || bad="$bad pfm doctor --project-updates in the bare init exited $chk_rc, want 1 (the never-deployed templates are NEW);"
-  for tmpl in project/per-project/CLAUDE.md project/commands/per-project/testing-manual.md project/settings-global.json; do
+  for tmpl in project/commands/per-project/testing-manual.md project/settings-global.json; do
     grep -qF "    $tmpl — adopt: copy/adapt it locally, then pfm update pin --template $tmpl <local> — or ignore" <<<"$chk" ||
       bad="$bad check does not list $tmpl as NEW with its adopt line;"
   done
@@ -350,7 +352,7 @@ if requires A.01-scaffold; then
   [ "$(count_of "$chk" NEW)" = "$unmapped" ] ||
     bad="$bad check counts NEW $(count_of "$chk" NEW), want $unmapped (every store file outside the init mapping);"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "a bare pfm init deployed none of per-project/CLAUDE.md, commands/per-project/testing-manual.md, settings-global.json or a host git-bridge skill; check lists exactly those $unmapped unmapped templates as NEW (exit 3)"
+    pass "a bare pfm init deployed none of commands/per-project/testing-manual.md, settings-global.json or a host git-bridge skill; check lists exactly those $unmapped unmapped templates as NEW (exit 3)"
   fi
 fi
 rm -rf "$INIT_DIR"
@@ -504,7 +506,7 @@ else
   jq -e --arg l "$D_L2" '.files[$l].kept == null' "$BASELINE" >/dev/null 2>&1 ||
     bad="$bad pin --unkeep left the keep recorded for $D_L2;"
   printf '%s\n' 'run /jc now' >"$EXPRESS/lane-a-retired.txt"
-  step "accept a path no hit lives at" 1 "covers no retired-name hit" pfm update accept lane-a-nothing-here --reason "no hit"
+  step "accept a path no hit lives at" 1 "covers no matching retired-name hit" pfm update accept lane-a-nothing-here --reason "no hit"
   step "accept without a reason" 2 "" pfm update accept lane-a-retired.txt
   step "accept lane-a-retired.txt" 0 "accepted retired-name hits under 1 path(s)" pfm update accept lane-a-retired.txt --reason "lane-a record"
   acc_rep="$(in_express pfm doctor --project-updates)"
@@ -1005,45 +1007,23 @@ else
   fi
 fi
 
-# ─── A.12 — express's own dev.sh and suite ──────────────────────────────────
+# ─── A.12 — express's own suite ─────────────────────────────────────────────
 
-beat A.12-dev-suite
+beat A.12-suite
 spends none
 bad=""
-DEV_SH="$EXPRESS/.claude/scripts/dev.sh"
-if [ ! -x "$DEV_SH" ]; then
-  fail "no executable $DEV_SH in express (the scaffold ships it; the interview fills its roster)"
-else
-  st="$(in_express bash .claude/scripts/dev.sh status)"
-  st_rc=$?
-  if grep -q 'PROJECTS roster is empty' <<<"$st"; then
-    bad="$bad dev.sh status exited $st_rc: the interview left the PROJECTS roster empty ('PROJECTS roster is empty — SETUP fills one entry per server-bearing roster project');"
-  else
-    [ "$st_rc" -eq 0 ] || bad="$bad dev.sh status exited $st_rc ($(one_line "$st" | cut -c1-200));"
-    grep -q 'Dev server status' <<<"$st" || bad="$bad dev.sh status printed no 'Dev server status' header;"
-    if ! grep -qx 'NO_SERVERS=true' <<<"$st" && ! { grep -qx -- '---REPORT---' <<<"$st" && grep -qx -- '---END---' <<<"$st"; }; then
-      bad="$bad dev.sh status printed neither NO_SERVERS=true nor a ---REPORT---/---END--- block: $(one_line "$st" | cut -c1-200);"
-    fi
-  fi
-  # `test` is not a dev.sh mode: the script refuses it by name with its usage
-  # line (exit 1), and the suite runs by the interview's own test command.
-  tm="$(in_express bash .claude/scripts/dev.sh test)"
-  tm_rc=$?
-  [ "$tm_rc" -eq 1 ] && grep -q '^Usage: .*{up|kill|restart' <<<"$tm" ||
-    bad="$bad dev.sh test exited $tm_rc without the named Usage refusal ($(one_line "$tm" | cut -c1-160));"
-  test_cmd="$(jq -r '[.interview.tech_commands // {} | .. | objects | .test? // empty] | map(select(. != "" and . != "skip" and . != "-")) | first // empty' "$MANIFEST" 2>/dev/null)"
-  [ -n "$test_cmd" ] || test_cmd="npm test"
-  suite="$(cd "$EXPRESS" && timeout 900 bash -c "$test_cmd" 2>&1)"
-  suite_rc=$?
-  if [ "$suite_rc" -eq 124 ]; then
-    bad="$bad express's suite ('$test_cmd') did not finish in 900s;"
-  elif [ "$suite_rc" -ne 0 ]; then
-    bad="$bad express's suite ('$test_cmd') exited $suite_rc: $(one_line "$(printf '%s\n' "$suite" | tail -5)" | cut -c1-240);"
-  fi
-  if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after the suite: $(one_line "$after");"; fi
-  if [ -n "$bad" ]; then fail "$bad"; else
-    pass "dev.sh status exit 0 with its named markers ($(printf '%s' "$st" | grep -oE 'NO_SERVERS=true|---REPORT---' | head -1)); 'test' refused by the Usage line (no such mode); express's own suite '$test_cmd' exit 0 ($(printf '%s' "$suite" | grep -cE 'passing|✓|ok ' ) passing-shaped line(s))"
-  fi
+test_cmd="$(jq -r '[.interview.tech_commands // {} | .. | objects | .test? // empty] | map(select(. != "" and . != "skip" and . != "-")) | first // empty' "$MANIFEST" 2>/dev/null)"
+[ -n "$test_cmd" ] || test_cmd="npm test"
+suite="$(cd "$EXPRESS" && timeout 900 bash -c "$test_cmd" 2>&1)"
+suite_rc=$?
+if [ "$suite_rc" -eq 124 ]; then
+  bad="$bad express's suite ('$test_cmd') did not finish in 900s;"
+elif [ "$suite_rc" -ne 0 ]; then
+  bad="$bad express's suite ('$test_cmd') exited $suite_rc: $(one_line "$(printf '%s\n' "$suite" | tail -5)" | cut -c1-240);"
+fi
+if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after the suite: $(one_line "$after");"; fi
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "express's own suite '$test_cmd' exit 0 ($(printf '%s' "$suite" | grep -cE 'passing|✓|ok ' ) passing-shaped line(s))"
 fi
 
 # ─── A.13 — the OpenCode compile layer for adopters: build, check, doctor ───

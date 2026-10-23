@@ -159,6 +159,14 @@ var retiredNames = []retiredName{
 	// Commit "remove /rnd end to end": the project-scope research command and
 	// its former /rnd:hammer and /rnd:referee sub-commands have no successor.
 	{name: "/rnd", kind: retiredCommand, match: matchFamily},
+	// Commit db16bb63 "replace context-meter and context-audit commands with
+	// one user-only initial-context audit skill".
+	{name: "/context-meter", kind: retiredCommand, successor: "/context-audit", match: matchExact},
+	// Commit "prune project templates": the project-tier /mentor, /marketer and
+	// /officer command templates are gone, with no successor.
+	{name: "/mentor", kind: retiredCommand, match: matchExact},
+	{name: "/marketer", kind: retiredCommand, match: matchExact},
+	{name: "/officer", kind: retiredCommand, match: matchExact},
 	{name: "mono-architect", kind: retiredAgent, match: matchExact},
 	{name: "mono-documenter", kind: retiredAgent, match: matchExact},
 	{name: "mono-planner", kind: retiredAgent, match: matchExact},

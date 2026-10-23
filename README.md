@@ -186,7 +186,7 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 
 With `"gptAgents": true` under `claude` in the machine config `pfm.config.json`, `pfm install` renders and links the GPT equivalents of every machine-global Professor role, plus the general-purpose `sol`, `luna`, `astra`. Both foreman tiers use `gpt-foreman`; GPT children stay on GPT and unavailable required roles report `BLOCKED`. Project roles use registered manual-loading wrappers: the portable `gpt-pcm` and `gpt-gitter`, and this repository's `gpt-changelogger`, `gpt-releaser`, `gpt-themer`. Registration grants no GitGuard authority. Invoking them requires a gateway serving their model IDs; installation does not. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) routes those IDs over your ChatGPT login. [Complete role inventory, setup and ownership](docs/design/gpt-twins/gpt-twins.md).
 
-Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf.
+A legal skill shelf ships for teams that want one.
 
 ---
 

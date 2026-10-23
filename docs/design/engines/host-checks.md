@@ -48,7 +48,6 @@ The table gives one row per detector; exact problems and fixes follow under each
 | `legacy-cache-db` | BLOCK | legacy cache and siblings | old database path | move or remove |
 | `pfm-settings` | BLOCK | physical user settings | duplicate pfm launch values | remove owned keys |
 | `pfm-mcp` | BLOCK | registries and ownership | legacy pfm `mcpServers` entry or stale ownership state | use the printed legacy-entry fix; `pfm install` also applies the cutover |
-| `memory-helpers` | BLOCK | fingerprinted scripts | retired helper name | rename and edit hooks |
 | `staged-shim` | BLOCK | shell source lines | retired staged shim | delete old source line |
 | `staged-prompts` | WARN | managed prompt dir | retired prompt staging | remove when unused |
 | `shared-db` | WARN | old shared database | retired file | remove |
@@ -126,16 +125,6 @@ Looks at every existing file from `installer.ClaudeUserRegistries(home, accounts
 Problem: `carries pfm mcpServers.<legacy-name>`; ledger: `mcp-ownership.json still records pfm clients`.
 
 Fix: `remove mcpServers.<legacy-name> from <path>; pfm’s server rides --mcp-config at launch`; ledger: `remove "clients" from {path}`. These diagnostics apply only to legacy entries; modern owned family entries produce no `pfm-mcp` row. Rerunning `pfm install` is also a supported cutover path.
-
-### memory-helpers
-
-**Severity:** BLOCK
-
-Looks at `{dir}/scripts/cc-memory-wire.sh`, `cc-memory-consolidate.sh` for `{store}` and every `{acct}`; a regular file whose normalized fingerprint matches.
-
-Problem: `pfm's memory helper under its retired name`.
-
-Fix: `mv {path} {dir}/scripts/{new}, then replace {path} with {dir}/scripts/{new} in every hook command of {dir}/settings.json`.
 
 ### staged-shim
 

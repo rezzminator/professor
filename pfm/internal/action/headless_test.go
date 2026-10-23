@@ -396,6 +396,17 @@ func TestHeadlessCodexRetainsStructuredSeatRecipe(t *testing.T) {
 func TestPlanCodexResolvesBareRosterTierToCodexModelID(t *testing.T) {
 	home := t.TempDir()
 	testjail.StageGlobalAgents(t, home)
+	// Professor ships no Codex-model agents, so the bare tiers resolve through personas staged here.
+	for name, model := range map[string]string{"astra": "gpt-6-astra", "sol": "gpt-6-sol", "luna": "gpt-6-luna"} {
+		persona := "---\nname: " + name + "\nmodel: " + model + "\n---\n"
+		if err := os.WriteFile(
+			filepath.Join(home, ".claude", "agents", name+".md"),
+			[]byte(persona),
+			0o644,
+		); err != nil {
+			t.Fatalf("stage %s persona: %v", name, err)
+		}
+	}
 	machine := testMachineConfig(home)
 	for tier, want := range map[string]string{"astra": "gpt-6-astra", "gpt-6-astra": "gpt-6-astra"} {
 		plan, err := PlanCodex(HeadlessRequest{

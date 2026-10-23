@@ -39,7 +39,7 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 | --- | --- |
 | SETUP | inline below — create one isolated worktree from the caller's exact base |
 | COMMIT | inline below — the standard scoped commit in the named checkout |
-| MERGE | inline below — land a clean, verified worktree branch on clean `develop` |
+| MERGE | inline below — land a clean, verified worktree branch on `develop` |
 | PUSH | inline below — hard-gated by § Remote Publication Boundary |
 | PULL | inline below |
 | TAG | inline below — hard-gated by § Remote Publication Boundary |
@@ -51,7 +51,7 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 
 **COMMIT** — in the caller's named checkout, run `git status --short` first; no changes → say "No changes to commit" and stop. Stage and commit per § Scoped-commit discipline with the message convention below. Split unrelated work into separate commits: engine code and shipped-template changes are different commits with different scopes, even in one turn.
 
-**MERGE** — verify the source worktree is clean, its fenced gate is named and green, and the `develop` checkout is clean. A brief naming a `REPORT_PATH` (a merge-gating `reviewer` report): refuse while that file is absent or any finding in it is not `resolved` or `waived`. Fetch only when the caller requests or freshness is necessary, then prove the source branch contains current `develop`; one that does not is synced instead (§ Conflicts), never rebased. Fast-forward on the target checkout with `git -C {repo} merge --ff-only {branch}` so `develop`'s reflog records `merge {branch}: …`. Verify both refs and both worktrees, then run § Worktree close and § Sweep in this same dispatch. A source worktree still registered without a keep lock means MERGE is unfinished; return § Worktree close's final line last.
+**MERGE** — verify the source worktree is clean and its fenced gate is named and green. A brief naming a `REPORT_PATH` (a merge-gating `reviewer` report): refuse while that file is absent or any finding in it is not `resolved` or `waived`. Fetch only when the caller requests or freshness is necessary, then prove the source branch contains current `develop`; one that does not is synced instead (§ Conflicts), never rebased. A dirty target checkout never blocks a fast-forward: record the target's `git status --porcelain=v1` and SHA-256 of `git diff`, then run `git -C {repo} merge --ff-only {branch}` so `develop`'s reflog records `merge {branch}: …`. Git's refusal to overwrite a dirty tracked or untracked path is a STOP naming the overlapping paths, never a stash, reset or clean. After the merge, prove the target's status and diff hash unchanged; a failed read or mismatch is a STOP with the evidence, never a rollback of foreign work. Never stage, commit, stash or discard foreign uncommitted work. Verify both refs and both worktrees, then run § Worktree close and § Sweep in this same dispatch. A source worktree still registered without a keep lock means MERGE is unfinished; return § Worktree close's final line last.
 
 **PULL** — uncommitted changes present → warn ("Uncommitted changes — pull may cause conflicts. Stash or commit first."), then proceed. `git pull`; conflicts per § Conflicts, any other failure: report and stop.
 

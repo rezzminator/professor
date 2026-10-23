@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // SchemaVersion is the user_version this build stamps on the shared database.
@@ -207,6 +208,59 @@ func hasRemindersTable(ctx context.Context, db *sql.DB) (bool, error) {
 		return false, fmt.Errorf("read shared database tables: %w", err)
 	}
 	return count == 1, nil
+}
+
+// retireMovedTmuxSeats repairs tmux rows superseded by a newer live Herdr row.
+// The read-only precheck keeps ordinary database opens away from the migration lock.
+func retireMovedTmuxSeats(ctx context.Context, db *sql.DB, path string) (returnErr error) {
+	pending, err := hasMovedTmuxSeats(ctx, db)
+	if err != nil || !pending {
+		return err
+	}
+	unlock, err := LockMigration(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	if pending, err := hasMovedTmuxSeats(ctx, db); err != nil || !pending {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin moved tmux seat repair on shared database %s: %w", path, err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("roll back moved tmux seat repair: %w", err))
+		}
+	}()
+	const query = `DELETE FROM seat AS tmux WHERE tmux.backend='tmux' AND tmux.session_id!='' AND EXISTS (
+ SELECT 1 FROM seat AS herdr WHERE herdr.backend='herdr' AND herdr.state='live'
+ AND herdr.session_id=tmux.session_id AND herdr.updated_at>=tmux.updated_at)`
+	op := obs.SQL(ctx, kind, query)
+	result, err := tx.ExecContext(ctx, query)
+	op.End(rowsAffected(result, err), err)
+	if err != nil {
+		return fmt.Errorf("delete moved tmux seats from shared database %s: %w", path, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit moved tmux seat repair on shared database %s: %w", path, err)
+	}
+	return nil
+}
+
+func hasMovedTmuxSeats(ctx context.Context, db *sql.DB) (bool, error) {
+	const query = `SELECT EXISTS(SELECT 1 FROM seat AS tmux WHERE tmux.backend='tmux' AND tmux.session_id!='' AND EXISTS (
+ SELECT 1 FROM seat AS herdr WHERE herdr.backend='herdr' AND herdr.state='live'
+ AND herdr.session_id=tmux.session_id AND herdr.updated_at>=tmux.updated_at))`
+	op := obs.SQL(ctx, kind, query)
+	var pending bool
+	err := db.QueryRowContext(ctx, query).Scan(&pending)
+	op.End(-1, err)
+	if err != nil {
+		return false, fmt.Errorf("check moved tmux seats: %w", err)
+	}
+	return pending, nil
 }
 
 // LockMigration serializes one database file's schema upgrade across

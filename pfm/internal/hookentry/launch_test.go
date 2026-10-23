@@ -21,8 +21,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestLaunchPassThroughPredicate(t *testing.T) {
@@ -55,7 +57,11 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if got := launchPassThrough(test.arguments, test.tmux, test.forced); got != test.want {
+			if got := launchPassThrough(
+				test.arguments,
+				resolve.Identity{Backend: "tmux", SocketPath: pfmtmux.SocketPath(test.tmux)},
+				test.forced,
+			); got != test.want {
 				t.Fatalf(
 					"launchPassThrough(%q, %q, %t) = %t, want %t",
 					test.arguments,
@@ -383,6 +389,9 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", test.ambient)
 			t.Setenv("TMUX", test.tmux)
+			if test.tmux != "" {
+				proveLauncherTmux(t)
+			}
 			t.Setenv("PFM_LAUNCH_PASSTHROUGH", test.forced)
 			inherited := os.Environ()
 			var got []string
@@ -672,6 +681,9 @@ func TestLaunchPassthroughDropsTheHerdrPaneOfAHeadlessRunOnly(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 			t.Setenv("TMUX", test.tmux)
+			if test.tmux != "" {
+				proveLauncherTmux(t)
+			}
 			t.Setenv("TMUX_PANE", "%1")
 			t.Setenv("PFM_LAUNCH_PASSTHROUGH", test.forced)
 			for _, entry := range herdrEnv {
@@ -704,4 +716,14 @@ func TestLaunchPassthroughDropsTheHerdrPaneOfAHeadlessRunOnly(t *testing.T) {
 			}
 		})
 	}
+}
+
+func proveLauncherTmux(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\nprintf 'cc-fixture " + strconv.Itoa(os.Getpid()) + "\\n'\n"
+	if err := testjail.WriteExecutable(filepath.Join(dir, "tmux"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

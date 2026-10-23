@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -41,7 +40,6 @@ type Engine struct {
 	spawner       ThenSpawner
 	options       Options
 	whoami        SelfIdentifier
-	codexSeat     SelfIdentifier
 	binaries      map[pfmengine.ID]string
 	accountEmojis []string
 	recorder      func(context.Context, fleetdb.CommsEvent) error
@@ -52,16 +50,6 @@ type Engine struct {
 	requestIdentity *resolve.Identity
 	// env is Dependencies.Env, defaulting to paths.OSEnv{}.
 	env paths.Env
-	// senderSelf is this process's own identity, resolved at most once: the
-	// session and id cannot change while we run. Its Label is final only
-	// when it was handed to us (options.Sender, the stated environment);
-	// with senderLive the label is read afresh for every delivery from
-	// senderSeat, because a name CAN change while we run — name renames
-	// at will, and an MCP server lives for days.
-	senderOnce sync.Once
-	senderSelf Sender
-	senderSeat resolve.Identity
-	senderLive bool
 }
 
 // senderKey pins one delivery's sender in its context (withSender).
@@ -119,7 +107,10 @@ func New(dependencies Dependencies) (*Engine, error) {
 		options.ThenLogRoot = tempRoot(dependencies.Env)
 	}
 	if dependencies.Identifier == nil {
-		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+		environment := resolve.CallerEnvironmentFrom(dependencies.Env)
+		identifier, err := resolve.NewWhoami(
+			resolve.WhoamiDependencies{Environment: &environment, CodexSeats: dependencies.CodexSeats},
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +123,6 @@ func New(dependencies Dependencies) (*Engine, error) {
 		spawner:       dependencies.Spawner,
 		options:       options,
 		whoami:        dependencies.Identifier,
-		codexSeat:     dependencies.CodexSeat,
 		binaries:      cloneEngineBinaries(binaries.Values),
 		accountEmojis: append([]string(nil), dependencies.AccountEmojis...),
 		recorder:      dependencies.Recorder,
@@ -146,9 +136,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 // every Codex thread, so the long-lived engine must never cache one caller's
 // sender or use it to resolve another caller's "self" target.
 //
-// The engine is rebuilt field-by-field instead of copying Engine: senderOnce
-// is a sync.Once and may already have been used by the shared engine. The
-// scoped copy starts with a fresh sender cache and an explicit sender.
+// The scoped engine carries the validated caller and an explicit sender.
 func (engine *Engine) WithIdentity(identity resolve.Identity, label string) *Engine {
 	requestIdentity := identity
 	sender := &Sender{
@@ -390,8 +378,8 @@ func (engine *Engine) resolveWithOptions(
 	}
 	seat, code, detail, err := (resolve.Ladder{
 		Roster: roster, Raw: engine.resolver, Self: engine.whoami,
-		CodexSelf: engine.codexSeat, RequestIdentity: engine.requestIdentity,
-		Env: engine.env, Session: engine.tmux,
+		RequestIdentity: engine.requestIdentity,
+		Env:             engine.env, Session: engine.tmux,
 	}).Resolve(ctx, name, options)
 	return targetFromSeat(seat), code, detail, err
 }
@@ -1427,42 +1415,21 @@ func unsignedFooter(sender Sender) string {
 	return footer
 }
 
-// sender answers who WE are. The identity — session and id — is resolved at
-// most once per process: the caller's override (tests, the MCP surface), then
-// the STATED sender, then live derivation from this process. The LABEL of a
-// derived sender is read afresh per delivery (pinned by withSender at each
-// door), never remembered: one MCP server serves a chat for days, and a
-// label cached at its first delivery outlived a blank first screen AND every
-// rename after it — LUNA:ORCHESTRATOR signed twenty-three messages as its
-// socket because its server's first capture, seconds after a reload, showed
-// no statusline yet.
-//
-// The stated rung exists because derivation is only possible where the chat
-// is. A --then waiter is spawned with setsid, which severs the process chain
-// ancestry recovery walks; a codex tool shell carries no $TMUX and no session
-// id of its own (codex scrubs its command environment), so a codex-origin
-// waiter has NOTHING left to derive from and every steer it delivered went out
-// UNSIGNED. The origin resolves identity while it still can and hands it down,
-// which is why this is also resolved for a `/`-prefixed primary: that message
-// is exempt from signing, but its steers are not.
+// sender resolves each delivery once through its context. Only an explicitly
+// supplied or inherited sender bypasses Identify; failed identities are retried.
 func (engine *Engine) sender(ctx context.Context) Sender {
 	if pinned, ok := ctx.Value(senderKey{}).(Sender); ok {
 		return pinned
 	}
-	engine.senderOnce.Do(func() {
-		if engine.options.Sender != nil {
-			engine.senderSelf = *engine.options.Sender
-			return
-		}
-		if stated, ok := statedSender(engine.env); ok {
-			engine.senderSelf = stated
-			return
-		}
-		engine.senderSelf, engine.senderSeat, engine.senderLive = engine.detectSender(ctx)
-	})
-	sender := engine.senderSelf
-	if engine.senderLive {
-		sender.Label = engine.senderLabel(ctx, engine.senderSeat)
+	if engine.options.Sender != nil {
+		return *engine.options.Sender
+	}
+	if stated, ok := statedSender(engine.env); ok {
+		return stated
+	}
+	sender, identity, live := engine.detectSender(ctx)
+	if live {
+		sender.Label = engine.senderLabel(ctx, identity)
 	}
 	return sender
 }
@@ -1492,25 +1459,16 @@ func statedSender(env paths.Env) (Sender, bool) {
 // is read from, and whether it is live at all: a sender with no seat has no
 // label to read and signs by its session id alone.
 func (engine *Engine) detectSender(ctx context.Context) (Sender, resolve.Identity, bool) {
-	sender := Sender{UUID: engine.env.Get("CLAUDE_CODE_SESSION_ID")}
 	identity, err := engine.whoami.Identify(ctx)
-	if (err != nil || identity.Session == "") &&
-		engine.codexSeat != nil &&
-		engine.env.Get(resolve.CodexThreadEnv) != "" &&
-		engine.env.Get(resolve.ClaudeSessionEnv) == "" {
-		identity, err = engine.codexSeat.Identify(ctx)
+	if err != nil {
+		engine.warnf("pfm: identify message sender: %v\n", err)
+		return Sender{}, resolve.Identity{}, false
 	}
-	if err != nil || identity.Session == "" {
-		return sender, resolve.Identity{}, false
+	if identity.Session == "" {
+		engine.warnf("pfm: identify message sender: resolved caller has no session\n")
+		return Sender{}, resolve.Identity{}, false
 	}
-	if sender.UUID == "" && identity.Engine == string(pfmengine.Codex) {
-		sender.UUID = identity.ID
-	}
-	if identity.ID == "" {
-		identity.ID = sender.UUID
-	}
-	sender.Session = identity.Session
-	return sender, identity, true
+	return Sender{Session: identity.Session, UUID: identity.ID}, identity, true
 }
 
 // senderLabel answers what this chat is CALLED, in the order a peer's reply

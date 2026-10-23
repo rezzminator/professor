@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -24,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -75,7 +75,8 @@ func proxyTestService(marker string, rows []compose.Row, calls *[][]string) *Ser
 		last:   chat.LastResult{Text: marker + " self answer\n"}, resolveScopedSelf: true,
 	}
 	return newService(marker, &backend{
-		chat: verbs, runtimeIdentity: "sha256:proxy-test",
+		paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+		chat:  verbs, runtimeIdentity: "sha256:proxy-test",
 		dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
 			*calls = append(*calls, append([]string(nil), args...))
 			_, _ = io.WriteString(stdout, marker+"\n")
@@ -119,7 +120,7 @@ func TestStdioProxyReinitializesAfterDaemonReplacement(t *testing.T) {
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
@@ -463,7 +464,7 @@ func TestStdioProxyAllowsHealthyCallsPastRetryWindow(t *testing.T) {
 
 func TestStdioProxyAllowsExistingMaximumCaptureResponse(t *testing.T) {
 	t.Parallel()
-	service := newService("test", &backend{chat: &fakeChatVerbs{
+	service := newService("test", &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
 		last: chat.LastResult{Text: strings.Repeat("x", maxCaptureBytes)},
 	}})
 	server := httptest.NewServer(proxyTestDaemon(service))
@@ -488,7 +489,7 @@ func TestStdioProxyAllowsExistingMaximumCaptureResponse(t *testing.T) {
 
 func TestStdioProxyAllowsEscapedMaximumCaptureResponse(t *testing.T) {
 	t.Parallel()
-	service := newService("test", &backend{chat: &fakeChatVerbs{
+	service := newService("test", &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
 		last: chat.LastResult{Text: strings.Repeat("<", maxCaptureBytes)},
 	}})
 	server := httptest.NewServer(proxyTestDaemon(service))
@@ -527,14 +528,6 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := filepath.Join(root, "tmux", "cc-proxy-split")
-	command := exec.Command(
-		"tmux", "-S", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "proxy-split", "sleep 120",
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start tmux: %v: %s", err, output)
-	}
-	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socket, "kill-server").Run() })
 	if err := os.WriteFile(
 		filepath.Join(root, "sid", "cc-proxy-split.%0"),
 		[]byte(transcript+"\n"),
@@ -542,19 +535,34 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TMUX", socket+",1,0")
-	t.Setenv("TMUX_PANE", "%0")
-	t.Setenv(resolve.ClaudeSessionEnv, "")
-	t.Setenv(resolve.CodexThreadEnv, "")
+	previous := proxyWhoami
+	proxyWhoami = resolve.WhoamiDependencies{
+		Environment: &resolve.WhoamiEnvironment{TMUX: socket + ",1,0", TMUXPane: "%0"},
+		Namer:       stdioTestNamer("proxy-split"),
+		SelfPID:     4100,
+		Processes:   stdioTestProcessTree{},
+	}
+	t.Cleanup(func() { proxyWhoami = previous })
 	var warnings proxyTestBuffer
 	proxy := newStdioProxy(context.Background(), "unused", &warnings)
-	if proxy.identity == nil || proxy.identity.ID != id || proxy.identity.Pane != "%0" {
-		t.Fatalf(
-			"proxy identity = %+v, want transcript %q on pane %%0; warnings: %s",
-			proxy.identity,
-			id,
-			warnings.String(),
-		)
+	var received map[string]any
+	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","id":2,"result":{}}`)),
+		}, nil
+	})}
+	var output bytes.Buffer
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
+	params, _ := received["params"].(map[string]any)
+	meta, _ := params["_meta"].(map[string]any)
+	identity, _ := meta["pfmProxy"].(map[string]any)
+	if identity["id"] != id || identity["pane"] != "%0" {
+		t.Fatalf("proxy identity=%v, want transcript %q on pane %%0; warnings: %s", identity, id, warnings.String())
 	}
 }
 
@@ -669,9 +677,11 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.sidDir = t.TempDir()
-	proxy.identity = &ProxyIdentity{
-		Version: ProxyWireVersion, Session: "cc-seat", SocketPath: "/tmp/tmux-1000/cc-seat",
-		SocketName: "cc-seat", Pane: "%7", Engine: "claude", ID: "session-id", Source: "tmux",
+	proxy.identify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{
+			Session: "cc-seat", SocketPath: "/tmp/tmux-1000/cc-seat",
+			SocketName: "cc-seat", Pane: "%7", Engine: "claude", ID: "session-id", Source: "tmux",
+		}, nil
 	}
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
@@ -723,9 +733,11 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	writeCrumb("conversation-a")
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.sidDir = sidDir
-	proxy.identity = &ProxyIdentity{
-		Version: ProxyWireVersion, Session: "seat", SocketName: socket,
-		Pane: "%1", Engine: "claude", ID: "conversation-a",
+	proxy.identify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{
+			Session: "seat", SocketName: socket,
+			Pane: "%1", Engine: "claude", ID: "conversation-a",
+		}, nil
 	}
 	var output bytes.Buffer
 	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
@@ -749,7 +761,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	missingParams := received[2]["params"].(map[string]any)
 	missingMeta := missingParams["_meta"].(map[string]any)
 	missingIdentity := missingMeta["pfmProxy"].(map[string]any)
-	if missingIdentity["id"] != "" {
+	if id, _ := missingIdentity["id"].(string); id != "" {
 		t.Fatalf("missing current crumb replayed cached id: %+v", missingIdentity)
 	}
 	if err := os.Mkdir(crumb, 0o700); err != nil {
@@ -796,7 +808,7 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
@@ -804,7 +816,7 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	harness.write(t, proxyTestToolCall(2, "whoami", `{}`))
 	whoami := proxyTestStructured(t, harness.read(t))
 	message, _ := whoami["message"].(string)
-	if whoami["status"] != "not_found" || !strings.Contains(message, "cannot derive who is calling") {
+	if whoami["status"] != "not_found" || !strings.Contains(message, "not inside a pfm chat") {
 		t.Fatalf("unresolved proxy identity = %+v, want the daemon's named refusal", whoami)
 	}
 }
@@ -915,4 +927,37 @@ func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
 		}
 		assertOwnWarn(t, recorder)
 	})
+}
+
+func TestBirthProxyResolvesEveryRequest(t *testing.T) {
+	previous := proxyWhoami
+	environment := &resolve.WhoamiEnvironment{}
+	proxyWhoami = resolve.WhoamiDependencies{
+		Environment: environment,
+		Namer:       stdioTestNamer("cc-seat"),
+		SelfPID:     4100,
+		Processes:   stdioTestProcessTree{},
+	}
+	t.Cleanup(func() { proxyWhoami = previous })
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":2,"result":{}}`)
+	}))
+	defer server.Close()
+	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	environment.TMUX = "/tmp/tmux-1000/cc-seat,1,0"
+	environment.TMUXPane = "%7"
+	environment.CodexThreadID = "thread-a"
+	var output bytes.Buffer
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
+	params := received["params"].(map[string]any)
+	meta, _ := params["_meta"].(map[string]any)
+	identity, _ := meta["pfmProxy"].(map[string]any)
+	if identity["session"] != "cc-seat" {
+		t.Fatalf("forwarded identity=%+v, want request's current seat", identity)
+	}
 }

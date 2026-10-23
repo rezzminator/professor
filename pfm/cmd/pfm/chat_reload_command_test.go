@@ -596,19 +596,27 @@ func TestNativeChatReloadSchedulesResolvedPane(t *testing.T) {
 				err := db.PutSeat(
 					context.Background(),
 					fleetdb.Seat{
-						SeatID:      "native",
-						SessionID:   "native-session",
-						Backend:     "herdr",
-						Engine:      "cc",
-						State:       "live",
-						HerdrSocket: socket,
-						HerdrPane:   "w6:p3",
+						SeatID:         "native",
+						SessionID:      "native-session",
+						Backend:        "herdr",
+						Engine:         "cc",
+						State:          "live",
+						HerdrSocket:    socket,
+						HerdrPane:      "w6:p3",
+						HerdrWorkspace: "w6", HerdrTerminalID: "fixture-w6:p3", SeatHostPID: 42, SeatHostStart: 100,
 					},
 				)
 				closeErr := db.Close()
 				if err != nil || closeErr != nil {
 					t.Fatalf("seed: %v %v", err, closeErr)
 				}
+			}
+			if mode == "ambient" {
+				writeScheduleRestartHost(t, runtime.Paths.ProcRoot, "native")
+				setCLICallerParent(t, 42)
+				(&scheduleRestartHerdr{t: t, proc: runtime.Paths.ProcRoot, pane: "w6:p3", seatID: "native"}).serve(
+					socket,
+				)
 			}
 			started := false
 			previous := startReloadWorker

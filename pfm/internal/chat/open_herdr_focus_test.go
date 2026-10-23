@@ -153,18 +153,19 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 				`pane.move {"destination":{"split":"right","tab_id":"w6:t2","target_pane_id":"w6:p5","type":"tab"},"focus":true,"pane_id":"w6:p3"}`,
 			},
 		},
-		{name: "an unproved own pane", caller: "w6:p5", callerTab: "w6:t2", unproved: true, diagnostic: "ownership unproved"},
+		{name: "an unproved own pane", caller: "w6:p5", callerTab: "w6:t2", unproved: true, diagnostic: "does not front Herdr pane"},
 		{
 			name: "a caller pane hosting a chat", caller: "w6:p5", callerTab: "w6:t2", callerHostsChat: true,
 			want: []string{`agent.focus {"target":"w6:p3"}`},
 		},
 		{
-			name: "a caller inside tmux", caller: "w6:p5", callerTab: "w6:t2", tmux: "/tmp/tmux-1/default,1,0",
-			want: []string{`agent.focus {"target":"w6:p3"}`},
+			name: "stale TMUX in Herdr", caller: "w6:p5", callerTab: "w6:t2", tmux: "/tmp/tmux-1/default,1,0",
+			want: []string{`pane.move {"destination":{"split":"right","tab_id":"w6:t2","target_pane_id":"w6:p5","type":"tab"},"focus":true,"pane_id":"w6:p3"}`, `pane.close {"pane_id":"w6:p5"}`},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testjail.Fleet(t)
+			nativeChatRestoredCaller(t, true)
 			var mutations []string
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				var pane string
@@ -180,12 +181,12 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 					if pane == tc.caller {
 						foreground := []any{map[string]any{"pid": os.Getpid(), "name": "pfm"}}
 						if tc.unproved {
-							foreground = []any{map[string]any{"pid": 1, "name": "zsh"}}
+							foreground = []any{map[string]any{"pid": 700001, "name": "zsh"}}
 						}
 						return map[string]any{
 							"type": "pane_process_info",
 							"process_info": map[string]any{
-								"pane_id": pane, "shell_pid": 1, "foreground_processes": foreground,
+								"pane_id": pane, "shell_pid": 41, "foreground_processes": foreground,
 							},
 						}, ""
 					}
@@ -379,10 +380,23 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 						return nil, "pane_not_found"
 					}
 					return testjail.HerdrPaneInfo(pane), ""
-				case "pane.process_info":
+				case "pane.list":
 					return map[string]any{
-						"type":         "pane_process_info",
-						"process_info": map[string]any{"pane_id": pane, "shell_pid": 700001},
+						"type":  "pane_list",
+						"panes": []any{testjail.HerdrPaneInfo("w6:p9")["pane"]},
+					}, ""
+				case "pane.process_info":
+					shell := 700001
+					if tc.callerHostsChat {
+						shell = 41
+					}
+					return map[string]any{
+						"type": "pane_process_info",
+						"process_info": map[string]any{
+							"pane_id":              pane,
+							"shell_pid":            shell,
+							"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
+						},
 					}, ""
 				case "pane.rename":
 					var label string
@@ -407,7 +421,11 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 			if tc.callerHostsChat {
 				nativeChatCallerHostsChat(t, db, socket, "w6:p9")
 			}
-			nativeChatRestoredCaller(t, true)
+			if tc.callerHostsChat {
+				nativeChatRestoredCaller(t, true, 41)
+			} else {
+				nativeChatRestoredCaller(t, true)
+			}
 			t.Setenv("HERDR_ENV", "1")
 			t.Setenv("HERDR_SOCKET_PATH", socket)
 			t.Setenv("HERDR_PANE_ID", "w6:p9")

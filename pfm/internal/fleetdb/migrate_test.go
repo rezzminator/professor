@@ -94,6 +94,94 @@ func TestSharedOpenUpgradesSupportedSchemasAndPreservesKills(t *testing.T) {
 	}
 }
 
+func TestSharedOpenRepairsMovedTmuxSeatsWithoutSchemaBump(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	values := paths.Values{StateDB: path}
+	seed := OpenSharedState(ctx, values)
+	for _, seat := range []Seat{
+		{SeatID: "tmux-s1", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 100},
+		{SeatID: "herdr-s1", SessionID: "S1", Backend: "herdr", State: "live", HerdrSocket: "/h.sock", HerdrPane: "w1:p1", UpdatedAt: 200},
+		{SeatID: "tmux-s2", SessionID: "S2", Backend: "tmux", State: "live", UpdatedAt: 300},
+		{SeatID: "herdr-s2", SessionID: "S2", Backend: "herdr", State: "live", HerdrSocket: "/h.sock", HerdrPane: "w1:p2", UpdatedAt: 200},
+		{SeatID: "tmux-s3", SessionID: "S3", Backend: "tmux", State: "live", UpdatedAt: 100},
+		{SeatID: "herdr-s3", SessionID: "S3", Backend: "herdr", State: "lost", HerdrSocket: "/h.sock", HerdrPane: "w1:p3", UpdatedAt: 200},
+		{SeatID: "tmux-empty", Backend: "tmux", State: "live"},
+	} {
+		if _, err := seed.db.ExecContext(ctx,
+			"INSERT INTO seat ("+seatColumns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+			seatValues(seat)...,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	state := OpenSharedState(ctx, values)
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		id   string
+		want bool
+	}{{"tmux-s1", false}, {"tmux-s2", true}, {"tmux-s3", true}, {"tmux-empty", true}} {
+		if _, found, err := state.Seat(ctx, test.id); err != nil || found != test.want {
+			t.Errorf("seat %s found=%v err=%v want %v", test.id, found, err, test.want)
+		}
+	}
+	var version int
+	if err := state.db.QueryRowContext(ctx, "PRAGMA user_version").
+		Scan(&version); err != nil ||
+		version != SchemaVersion {
+		t.Fatalf("user_version=%d err=%v want %d", version, err, SchemaVersion)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	release, err := LockMigration(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, cancel := context.WithTimeout(ctx, time.Second)
+	again := OpenSharedState(waiting, values)
+	openedErr := again.Degraded()
+	closeErr := again.Close()
+	cancel()
+	releaseErr := release()
+	if err := errors.Join(openedErr, closeErr, releaseErr); err != nil {
+		t.Fatalf("second clean open took migration lock: %v", err)
+	}
+	state = OpenSharedState(ctx, values)
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.PutSeat(
+		ctx,
+		Seat{SeatID: "tmux-s1", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 300},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.db.ExecContext(ctx, "UPDATE seat SET updated_at=100 WHERE seat_id='tmux-s1'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".migrate.lock"); !os.IsNotExist(err) {
+		t.Fatalf("second open left/took migration lock: %v", err)
+	}
+
+	readonly := OpenSharedStateReadOnly(ctx, values)
+	defer func() { _ = readonly.Close() }()
+	if err := readonly.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := readonly.Seat(ctx, "tmux-s1"); err != nil || !found {
+		t.Fatalf("read-only open repaired stale tmux row: found=%v err=%v", found, err)
+	}
+}
+
 // TestSharedOpenMigratesAtOpenUnderTheMigrationLock: an open that must add
 // hidden.revision or rename reminders to schedules waits for the migration
 // lock, so two first openers never both apply it; a file that already has both

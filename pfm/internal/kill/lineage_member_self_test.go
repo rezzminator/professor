@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -16,8 +18,8 @@ import (
 // never runs the indexer first (fleet.ResolveRow's comment: "a
 // caller resolving one id for a kill has no business reconciling the whole
 // filesystem index"). --self identifies the live pane by the rollout file
-// its FD holds (identifyCodexSelf), extracts an id from the FILENAME alone
-// (dataID) — the member's own — and then asks database.CodexLineage for its
+// its FD holds (the identity resolver), extracts an id from the FILENAME alone
+// (the filename) — the member's own — and then asks database.CodexLineage for its
 // root, which can only answer from what is ALREADY indexed. An unindexed
 // member's session_id link exists only in the file's own header, so
 // CodexLineage reports "not found" and the kill lands on the member's own
@@ -80,6 +82,12 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 				environ: map[int]map[string]string{},
 			}
 			manager, err := New(database, Dependencies{
+				ResolveTarget: func(_ context.Context, identity resolve.Identity) (Target, error) {
+					if identity.ID != memberID || identity.Pane != "%9" {
+						t.Fatalf("unproved caller projection: %+v", identity)
+					}
+					return Target{ID: memberID, Engine: pfmengine.Codex, DataPath: memberPath}, nil
+				},
 				ProcFS:  proc,
 				Tmux:    &fakeTmux{panePID: 11},
 				Spawner: &captureSpawner{},
@@ -89,13 +97,17 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			target, err := manager.Kill(ctx, Request{
-				Self: true,
-				Environment: SelfEnvironment{
-					TMUX:     filepath.Join(jail.tmuxDir, "cx-800-1-1") + ",6,0",
-					TMUXPane: "%9",
+			manager.identifier = killTestIdentity{
+				identity: resolve.Identity{
+					Backend:    "tmux",
+					ID:         memberID,
+					Engine:     string(pfmengine.Codex),
+					SocketPath: filepath.Join(jail.tmuxDir, "cx-800-1-1"),
+					SocketName: "cx-800-1-1",
+					Pane:       "%9",
 				},
-			})
+			}
+			target, err := manager.Kill(ctx, Request{Self: true})
 			if err != nil {
 				t.Fatalf("self-kill on an unindexed lineage member: %v", err)
 			}

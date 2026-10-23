@@ -212,9 +212,9 @@ func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
 		}
 	})
 
-	t.Run("metadata-free raw pane retains ambient resolution", func(t *testing.T) {
+	t.Run("metadata-free raw pane refuses an unproved environment", func(t *testing.T) {
 		got, found, err := Resolve(context.Background(), "%3", io.Discard, nil)
-		if err != nil || !found || got.Socket != filepath.Base(daemonSocket) || got.Pane != "%3" {
+		if !errors.Is(err, resolve.ErrNotInChat) || found || got != (headless.Chat{}) {
 			t.Fatalf("Resolve(ambient %%3) = %+v found=%t err=%v", got, found, err)
 		}
 	})
@@ -251,35 +251,7 @@ func TestAmbientSplitSelfEnrichmentKeepsTheLivePane(t *testing.T) {
 	}
 }
 
-// TestSeatIdentityIsOnlyTheLastRung pins the refusals that keep an INHERITED
-// CODEX_THREAD_ID from naming anyone: no thread id, a Claude session of the
-// process's own, or a thread the fleet binds to no live socket — each is "no
-// seat identity", never a handle nobody can reply to.
-func TestSeatIdentityIsOnlyTheLastRung(t *testing.T) {
-	testjail.Fleet(t)
-	ctx := context.Background()
-	t.Setenv(resolve.ClaudeSessionEnv, "")
-	t.Setenv(resolve.CodexThreadEnv, "")
-	if identity, found := SeatIdentity(ctx, nil); found {
-		t.Fatalf("SeatIdentity() without a thread = %+v", identity)
-	}
-	t.Setenv(resolve.CodexThreadEnv, "019f-inherited")
-	t.Setenv(resolve.ClaudeSessionEnv, "a-claude-session")
-	if identity, found := SeatIdentity(ctx, nil); found {
-		t.Fatalf("SeatIdentity() under a Claude session = %+v", identity)
-	}
-	t.Setenv(resolve.ClaudeSessionEnv, "")
-	// SeatIdentity folds a scan error into "no seat"; prove the scan ran, so
-	// this case is "no live socket hosts the thread", not "could not look".
-	if _, err := Rows(ctx, io.Discard, nil); err != nil {
-		t.Fatalf("fleet scan failed, so the next case would pass vacuously: %v", err)
-	}
-	if identity, found := SeatIdentity(ctx, nil); found {
-		t.Fatalf("SeatIdentity() for a thread no live socket hosts = %+v", identity)
-	}
-}
-
-func TestCodexSeatIdentityKeepsNativeAddressAndRejectsUnusableRows(t *testing.T) {
+func TestCodexSeatsKeepNativeAddressAndRejectsUnusableRows(t *testing.T) {
 	values := paths.Values{TmuxDir: "/jail/tmux"}
 	native := compose.Row{
 		Kind: compose.LiveCodex, ID: "thread-native", Name: "Native", SessionName: "Native",
@@ -311,7 +283,12 @@ func TestCodexSeatIdentityKeepsNativeAddressAndRejectsUnusableRows(t *testing.T)
 			if tc.duplicate {
 				rows = append(rows, row)
 			}
-			identity, found := codexSeatIdentity(rows, values, native.ID)
+			seats, err := codexSeatsFromRows(rows, values)
+			identity := resolve.Identity{}
+			if err == nil {
+				identity, err = resolve.CodexThreadSeat(native.ID, seats)
+			}
+			found := err == nil
 			if found != tc.want {
 				t.Fatalf("identity = %+v found=%t, want found=%t", identity, found, tc.want)
 			}
@@ -423,3 +400,37 @@ func TestResolvedHandleSurvivesNativeSessionReplacement(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexIdentityScanFailureIsReported(t *testing.T) {
+	testjail.Fleet(t)
+	t.Setenv(resolve.CodexThreadEnv, "019a2b")
+	t.Setenv(resolve.ClaudeSessionEnv, "")
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
+	environment := resolve.WhoamiEnvironment{CodexThreadID: "019a2b"}
+	identifier, err := resolve.NewWhoami(
+		resolve.WhoamiDependencies{
+			Environment: &environment,
+			Processes:   emptyIdentityProcesses{},
+			TmuxDir:     t.TempDir(),
+			CodexSeats:  CodexSeats(nil),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = identifier.Identify(
+		context.Background(),
+	); err == nil || errors.Is(err, resolve.ErrNotInChat) ||
+		!strings.Contains(err.Error(), "Codex identity store") {
+		t.Fatalf("scan error became absence: %v", err)
+	}
+}
+
+type emptyIdentityProcesses struct{}
+
+func (emptyIdentityProcesses) Environ(int) (map[string]string, error) { return nil, nil }
+func (emptyIdentityProcesses) Parent(int) (int, error)                { return 1, nil }

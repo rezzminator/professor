@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -32,20 +33,28 @@ func printSelectedHerdrBackendDoctor(
 	backend := cfg.Chat.Backend
 	backendReason := "selects " + backend
 	if backend == spawn.BackendAuto {
-		backend = spawn.AutoBackend(dependencies.Env.Get(herdr.EnvMarker), dependencies.Env.Get(herdr.EnvSocket),
-			dependencies.Env.Get(herdr.EnvPane), dependencies.Env.Get("TMUX"))
-		backendReason = "resolves to tmux here: not inside a Herdr pane"
-		if dependencies.Env.Get("TMUX") != "" {
-			backendReason = "resolves to tmux here: inside tmux (TMUX is set)"
+		environment := resolve.CallerEnvironmentFrom(dependencies.Env)
+		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{Environment: &environment})
+		var caller resolve.Identity
+		if err == nil {
+			caller, err = identifier.Identify(ctx)
 		}
+		choice, placeErr := spawn.Place(ctx, "doctor", spawn.BackendAuto, caller, err)
+		if placeErr != nil {
+			fmt.Fprintf(stdout, "doctor: herdr backend UNRESOLVED — %v\n", placeErr)
+			return 0, 1
+		}
+		backend = choice.Backend
+		backendReason = "resolves to tmux here: no proven Herdr caller"
 		if backend == spawn.BackendHerdr {
 			fmt.Fprintf(
 				stdout,
-				"doctor: herdr backend CHECKING — chat.backend=auto (%s) resolved to Herdr from the pane environment\n",
+				"doctor: herdr backend CHECKING — chat.backend=auto (%s) resolved to Herdr from the proven caller\n",
 				cfg.Source("chat.backend"),
 			)
 		}
 	}
+
 	if backend == spawn.BackendHerdr {
 		return printHerdrBackendDoctor(ctx, stdout, dependencies, lifetimeUnverified)
 	}

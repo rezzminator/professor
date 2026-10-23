@@ -7,6 +7,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -160,6 +161,7 @@ type CommandRunner interface {
 
 // Dependencies replace every effect boundary in jailed tests.
 type Dependencies struct {
+	Identify  func(context.Context) (resolve.Identity, error)
 	Tmux      TmuxClient
 	Processes ProcessTable
 	Gate      Gate
@@ -179,6 +181,7 @@ type HealFunc func(ctx context.Context, threadID string) string
 // Executor performs preparations and returns the only line the caller may
 // write to stdout.
 type Executor struct {
+	identify  func(context.Context) (resolve.Identity, error)
 	tmux      TmuxClient
 	processes ProcessTable
 	gate      Gate

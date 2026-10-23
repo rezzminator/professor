@@ -29,7 +29,9 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		flags.Usage()
 		return 2
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, err := resolve.NewWhoami(
+		resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(firstRuntime(runtimes))},
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm whoami: %v\n", err)
 		return 1
@@ -37,12 +39,8 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	ctx := context.Background()
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
-		seat, found := pfmchat.SeatIdentity(ctx, firstRuntime(runtimes))
-		if !found {
-			fmt.Fprintf(stderr, "%v\n", err)
-			return 1
-		}
-		identity = seat
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
 	}
 	if *asJSON {
 		encoded, err := json.Marshal(identity)

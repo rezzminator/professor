@@ -86,13 +86,10 @@ func runRun(
 	if requestedBackend == "" {
 		requestedBackend = runtime.Config.Chat.Backend
 	}
-	birth, birthErr := pfmchat.BirthBackend(ctx, requestedBackend, env)
+	birth, birthErr := pfmchat.BirthBackend(ctx, "cli.new", requestedBackend)
 	if birthErr != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", birthErr)
 		return 1
-	}
-	if birth.Warning != "" {
-		fmt.Fprintln(stderr, birth.Warning)
 	}
 	if *timeout < 0 || *settle < 0 || (*attach && *await) {
 		flags.Usage()

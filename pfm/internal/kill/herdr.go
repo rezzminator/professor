@@ -20,23 +20,16 @@ import (
 )
 
 const (
-	herdrPaneKey = "pane_id"
-	herdrBackend = "herdr"
+	herdrPaneKey  = "pane_id"
+	herdrBackend  = "herdr"
+	liveSeatState = "live"
 )
 
 // herdrTarget resolves ownership before the index fallback: a new native engine
 // can be live before it has flushed any transcript. Environment is not routing.
 func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Target, bool, error) {
-	// A native chat names itself by the address its process inherited. The
-	// saved owner is looked up by that pane first; a pane the chat has moved
-	// from still resolves through its session, and both go through the same
-	// supervisor and alias proof as an explicit address.
-	nativeSelf := request.Self && request.Environment.Native()
+	nativeSelf := request.Self
 	owner := request.ID
-	if nativeSelf {
-		request.SocketName, request.PaneID = request.Environment.HerdrSocket, request.Environment.HerdrPane
-		owner = request.Environment.ClaudeSessionID
-	}
 	if (request.SocketName == "") != (request.PaneID == "") {
 		return Target{}, false, fmt.Errorf("resolved live address requires socket and pane")
 	}
@@ -46,7 +39,7 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 	switch {
 	case request.SocketName != "" && request.PaneID != "":
 		seat, found, err = manager.database.Shared().SeatByPane(ctx, request.SocketName, request.PaneID)
-	case request.ID != "" && !request.Self:
+	case request.ID != "":
 		seat, found, err = manager.database.Shared().SeatBySession(ctx, request.ID)
 	default:
 		return Target{}, false, nil
@@ -64,7 +57,7 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 		if lookupErr != nil {
 			return Target{}, false, fmt.Errorf("resolve moved native kill owner: %w", lookupErr)
 		}
-		if ok && candidate.Backend == herdrBackend && candidate.State == "live" &&
+		if ok && candidate.Backend == herdrBackend && candidate.State == liveSeatState &&
 			candidate.HerdrSocket == request.SocketName {
 			values, err := paths.Resolve()
 			if err != nil {
@@ -113,7 +106,7 @@ func (manager *Manager) herdrTarget(ctx context.Context, request Request) (Targe
 			seat, found = proved, true
 		}
 	}
-	if !found || seat.Backend != herdrBackend || seat.State != "live" {
+	if !found || seat.Backend != herdrBackend || seat.State != liveSeatState {
 		if nativeSelf {
 			return Target{}, false, fmt.Errorf(
 				"could not identify this native chat: no live seat for Herdr pane %s on %s",

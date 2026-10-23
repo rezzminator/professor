@@ -71,8 +71,12 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 						return nil, "permission_denied"
 					}
 					return map[string]any{
-						"type":         "pane_process_info",
-						"process_info": map[string]any{"pane_id": pane, "shell_pid": 700001},
+						"type": "pane_process_info",
+						"process_info": map[string]any{
+							"pane_id":              pane,
+							"shell_pid":            700001,
+							"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
+						},
 					}, ""
 
 				case "tab.get":
@@ -457,8 +461,12 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 			return testjail.HerdrPaneInfo("w9:p2"), ""
 		case "pane.process_info":
 			return map[string]any{
-				"type":         "pane_process_info",
-				"process_info": map[string]any{"pane_id": "w9:p2", "shell_pid": 700001},
+				"type": "pane_process_info",
+				"process_info": map[string]any{
+					"pane_id":              "w9:p2",
+					"shell_pid":            700001,
+					"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
+				},
 			}, ""
 		case "tab.get":
 			return map[string]any{
@@ -533,8 +541,12 @@ func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
 			return testjail.HerdrPaneInfo("w9:p2"), ""
 		case "pane.process_info":
 			return map[string]any{
-				"type":         "pane_process_info",
-				"process_info": map[string]any{"pane_id": "w9:p2", "shell_pid": 700001},
+				"type": "pane_process_info",
+				"process_info": map[string]any{
+					"pane_id":              "w9:p2",
+					"shell_pid":            700001,
+					"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
+				},
 			}, ""
 		case "tab.get":
 			return map[string]any{
@@ -626,13 +638,16 @@ func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
 	}
 }
 
-func nativeChatRestoredCaller(t *testing.T, inside bool) {
+func nativeChatRestoredCaller(t *testing.T, inside bool, parents ...int) {
 	t.Helper()
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
 	parent := 700001
+	if len(parents) > 0 {
+		parent = parents[0]
+	}
 	if !inside {
 		parent = 700002
 	}

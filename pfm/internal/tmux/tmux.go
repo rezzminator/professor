@@ -18,6 +18,12 @@ import (
 // Binary is the executable name shared by every tmux caller.
 const Binary = "tmux"
 
+// SocketPath returns the server socket component of a TMUX value.
+func SocketPath(value string) string {
+	socket, _, _ := strings.Cut(value, ",")
+	return socket
+}
+
 // CouldNotRun reports whether err means tmux itself never started — the
 // binary is absent from PATH, a configured path does not exist, or it is not
 // executable — as opposed to a tmux that ran and failed against one server.

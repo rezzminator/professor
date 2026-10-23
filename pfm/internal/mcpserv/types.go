@@ -122,6 +122,7 @@ const codeCapability = 10
 // KeysOutput is the structured receipt for keys.
 type KeysOutput struct {
 	Status     string   `json:"status"`
+	Message    string   `json:"message,omitempty"`
 	Code       int      `json:"code"`
 	SocketPath string   `json:"socket_path,omitempty"`
 	Pane       string   `json:"pane,omitempty"`

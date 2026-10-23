@@ -56,13 +56,10 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 		fmt.Fprintf(stderr, "pfm chat open: restored seat: %v\n", err)
 		return 1
 	}
-	choice, err := BirthBackend(ctx, spawn.BackendAuto, paths.OSEnv{})
+	choice, err := BirthBackend(ctx, "restored", spawn.BackendAuto)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored backend: %v\n", err)
 		return 1
-	}
-	if choice.Warning != "" {
-		fmt.Fprintln(stderr, choice.Warning)
 	}
 	if choice.Backend != spawn.BackendHerdr {
 		return OpenID(ctx, id, stdout, stderr, &effective)

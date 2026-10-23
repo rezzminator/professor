@@ -2,6 +2,7 @@ package mcpserv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -106,29 +107,30 @@ func (service *Service) issueReporter(
 			Engine:  caller.identity.Engine,
 		}
 	}
-	if err != nil {
-		// The scan that would have named this reporter could not run. Filing
-		// under UNIDENTIFIED here would say "we looked and found nobody" about
-		// a lookup that never completed, so the issue keeps a sentinel of its
-		// own and the cause is recorded rather than dropped on the floor.
-		scoped := obs.Component(ctx, compMCP)
-		obs.Logger(scoped).LogAttrs(scoped, slog.LevelError, "mcp.caller",
-			slog.String("op", "resolve"),
-			slog.String("tool", "servicedesk"),
-			slog.String(obs.FieldErr, err.Error()),
-		)
-		return issueReporter{Session: reporterLookupFailed}
+	if err == nil && caller.err != nil && !errors.Is(caller.err, resolve.ErrNotInChat) &&
+		!errors.Is(caller.err, resolve.ErrNotRegistered) {
+		err = caller.err
 	}
+	if err != nil {
+		return issueReporterFailure(ctx, err)
+	}
+
 	if !service.backend.allowAmbientIdentity {
 		return issueReporter{Session: fleetdb.UnidentifiedSender}
 	}
-	identifier, identifierErr := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, identifierErr := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: service.backend.codexSeats})
 	if identifierErr != nil {
-		return issueReporter{Session: fleetdb.UnidentifiedSender}
+		return issueReporterFailure(ctx, fmt.Errorf("build ambient issue reporter identity: %w", identifierErr))
 	}
 	identity, identifyErr := identifier.Identify(ctx)
-	if identifyErr != nil || identity.Session == "" {
-		return issueReporter{Session: fleetdb.UnidentifiedSender}
+	if identifyErr != nil {
+		if errors.Is(identifyErr, resolve.ErrNotInChat) || errors.Is(identifyErr, resolve.ErrNotRegistered) {
+			return issueReporter{Session: fleetdb.UnidentifiedSender}
+		}
+		return issueReporterFailure(ctx, fmt.Errorf("resolve ambient issue reporter: %w", identifyErr))
+	}
+	if identity.Session == "" {
+		return issueReporterFailure(ctx, fmt.Errorf("resolve ambient issue reporter: caller has no session"))
 	}
 	reporter := issueReporter{
 		Session: identity.Session,
@@ -148,4 +150,11 @@ func (service *Service) issueReporter(
 		}
 	}
 	return reporter
+}
+
+func issueReporterFailure(ctx context.Context, err error) issueReporter {
+	scoped := obs.Component(ctx, compMCP)
+	obs.Logger(scoped).
+		LogAttrs(scoped, slog.LevelError, "mcp.caller", slog.String("op", "resolve"), slog.String("tool", "servicedesk"), slog.String(obs.FieldErr, err.Error()))
+	return issueReporter{Session: reporterLookupFailed}
 }

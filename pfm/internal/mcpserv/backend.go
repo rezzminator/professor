@@ -301,6 +301,8 @@ type callerIdentity struct {
 	present  bool
 	valid    bool
 	detail   string
+	err      error
+	absent   bool
 }
 
 func (current *backend) proxySeatMatches(proxy ProxyIdentity, row ChatRow) (selected bool, detail string) {
@@ -308,13 +310,7 @@ func (current *backend) proxySeatMatches(proxy ProxyIdentity, row ChatRow) (sele
 		return current.proxySocketMatches(proxy, row)
 	}
 	conflicts := make([]string, 0, 4)
-	if proxy.ID != "" && row.ID != "" {
-		if row.ID == proxy.ID {
-			selected = true
-		} else {
-			conflicts = append(conflicts, fmt.Sprintf("id %q does not match live id %q", proxy.ID, row.ID))
-		}
-	}
+
 	if proxy.Pane != "" && row.Pane != "" {
 		if row.Pane == proxy.Pane {
 			selected = true
@@ -348,23 +344,6 @@ func (current *backend) proxySocketMatches(proxy ProxyIdentity, row ChatRow) (se
 		}
 	}
 	if proxy.SocketPath != "" {
-		// Production backends enter through newBackendConfigured, which requires
-		// a trusted tmux directory. Package tests also build deliberately partial
-		// backends around fake verbs; retain their basename-only fixture seam
-		// without making it reachable from the configured server.
-		if current.paths.TmuxDir == "" && row.Backend != spawn.BackendHerdr {
-			pathSocket := filepath.Base(proxy.SocketPath)
-			if row.Socket == pathSocket {
-				selected = true
-			} else {
-				conflicts = append(conflicts, fmt.Sprintf(
-					"socketPath basename %q does not match live socket %q",
-					pathSocket,
-					row.Socket,
-				))
-			}
-			return selected, strings.Join(conflicts, "; ")
-		}
 		rowSocketPath, err := current.rowSocketPath(row)
 		switch {
 		case err != nil:
@@ -393,10 +372,40 @@ func (current *backend) proxySessionMatches(
 	row ChatRow,
 ) (matched bool, detail string) {
 	seatSelected, seatDetail := current.proxySeatMatches(proxy, row)
+	rowBackend := row.Backend
+	if rowBackend == "" {
+		rowBackend = spawn.BackendTmux
+	}
+	if row.Session == proxy.Session && (proxy.Backend != "" || proxy.SocketPath != "" || proxy.Pane != "") {
+		path, err := current.rowSocketPath(row)
+		if err != nil {
+			return false, fmt.Sprintf("MCP caller live location: %v", err)
+		}
+		if (proxy.Backend != "" && proxy.Backend != rowBackend) ||
+			(proxy.SocketPath != "" && filepath.Clean(proxy.SocketPath) != filepath.Clean(path)) ||
+			(row.Kind != compose.LiveSplit.String() && proxy.Pane != "" && proxy.Pane != row.Pane) {
+			return false, fmt.Sprintf(
+				"MCP caller location disagrees with its live chat: payload %s %s %s, row %s %s %s",
+				proxy.Backend,
+				proxy.SocketPath,
+				proxy.Pane,
+				rowBackend,
+				path,
+				row.Pane,
+			)
+		}
+	}
+
+	if proxy.SeatID != "" && proxy.SeatID != row.SeatID {
+		if row.Session == proxy.Session {
+			return false, fmt.Sprintf("MCP caller seat %q disagrees with live seat %q", proxy.SeatID, row.SeatID)
+		}
+		return false, ""
+	}
 	sessionSelected := row.Session != "" && row.Session == proxy.Session
-	targeted := sessionSelected || seatSelected
+	targeted := sessionSelected
 	if row.Kind == compose.LiveSplit.String() && (proxy.SocketName != "" || proxy.SocketPath != "") {
-		targeted = true
+		targeted = seatSelected || seatDetail != ""
 	}
 	if !targeted {
 		return false, ""
@@ -437,6 +446,22 @@ func (current *backend) callerForRequest(
 		}
 		caller := callerIdentity{present: true, detail: detail}
 		if detail != "" {
+			caller.err = fmt.Errorf("%s", detail)
+			return caller, nil
+		}
+		if proxy.Error != nil {
+			caller.err = proxy.Error
+			caller.detail = proxy.Error.Message
+			caller.absent = proxy.Error.Kind == proxyNotInChat
+			if proxy.Error.Kind == statusNotRegistered {
+				caller.identity = resolve.Identity{
+					Backend:        proxy.Backend,
+					SocketPath:     proxy.SocketPath,
+					SocketName:     proxy.SocketName,
+					Pane:           proxy.Pane,
+					HerdrWorkspace: proxy.HerdrWorkspace,
+				}
+			}
 			return caller, nil
 		}
 		var proxyEngine pfmengine.ID
@@ -472,6 +497,7 @@ func (current *backend) callerForRequest(
 			}
 			if row.BackendError != "" {
 				caller.detail = fmt.Sprintf("MCP caller backend failed: %s", row.BackendError)
+				caller.err = fmt.Errorf("%s", caller.detail)
 				return caller, nil
 			}
 			matches = append(matches, *row)
@@ -479,12 +505,15 @@ func (current *backend) callerForRequest(
 		if len(matches) == 0 {
 			if conflictDetail != "" {
 				caller.detail = conflictDetail
+				caller.err = fmt.Errorf("%s", conflictDetail)
 			} else {
 				caller.detail = fmt.Sprintf("MCP _meta.pfmProxy session %q matched no live chat", proxy.Session)
+				caller.err = resolve.ErrNotInChat
 			}
 			return caller, nil
 		}
 		if len(matches) != 1 {
+			caller.err = resolve.ErrAmbiguous
 			caller.detail = fmt.Sprintf(
 				"MCP _meta.pfmProxy session %q matched %d live chats",
 				proxy.Session,
@@ -582,34 +611,15 @@ func (current *backend) callerForRequest(
 			)
 			caller.row.Pane = proxy.Pane
 		}
-		caller.identity = proxy.callerIdentity()
-		caller.identity.Backend = caller.row.Backend
-		caller.identity.SeatID = caller.row.SeatID
-		caller.identity.HerdrWorkspace = caller.row.HerdrWorkspace
-		if caller.identity.ID == "" {
-			// OpenCode currently supplies no engine conversation id through
-			// whoami. The matched live row still has the stable target that
-			// caller-bound CLI verbs need.
-			caller.identity.ID = caller.row.ID
+		caller.identity, err = current.identityFromRow(caller.row)
+		if err != nil {
+			return caller, fmt.Errorf("resolve MCP proxy session %q: %w", proxy.Session, err)
 		}
-		if caller.identity.SocketName == "" {
-			caller.identity.SocketName = caller.row.Socket
+		if proxy.ID != "" {
+			caller.identity.ID = proxy.ID
 		}
-		if caller.identity.SocketPath == "" {
-			socketPath, socketErr := current.rowSocketPath(caller.row)
-			if socketErr != nil {
-				return caller, fmt.Errorf(
-					"resolve MCP proxy session %q matched socket %q: %w",
-					proxy.Session,
-					caller.row.Socket,
-					socketErr,
-				)
-			}
-			caller.identity.SocketPath = socketPath
-		}
-		if caller.identity.Pane == "" {
-			caller.identity.Pane = caller.row.Pane
-		}
+		caller.identity.Source = "mcp-proxy"
+
 		caller.valid = true
 		return caller, nil
 	}
@@ -624,50 +634,28 @@ func (current *backend) callerForRequest(
 	if err != nil {
 		return caller, fmt.Errorf("resolve MCP caller thread %q: list live chats: %w", threadID, err)
 	}
-	var match ChatRow
-	count := 0
+	seats := current.codexSeatsFromRows(listed.Rows)
+	identity, seatErr := resolve.CodexThreadSeat(threadID, seats)
+	if seatErr != nil {
+		caller.err = seatErr
+		caller.detail = seatErr.Error()
+		return caller, nil
+	}
 	for index := range listed.Rows {
 		row := &listed.Rows[index]
-		if row.ID != threadID || row.Engine != pfmengine.Codex || row.Killed ||
-			row.Kind != compose.LiveCodex.String() ||
-			row.Session == "" || row.Socket == "" || row.Pane == "" {
-			continue
+		if row.ID == threadID && row.Engine == pfmengine.Codex && !row.Killed &&
+			row.Kind == compose.LiveCodex.String() {
+			caller.row = *row
+			break
 		}
-		match = *row
-		count++
 	}
-	if count == 0 {
-		caller.detail = fmt.Sprintf("MCP _meta.threadId %q has no live Codex seat", threadID)
-		return caller, nil
-	}
-	if count != 1 {
-		caller.detail = fmt.Sprintf("MCP _meta.threadId %q matched %d live Codex seats", threadID, count)
-		return caller, nil
-	}
-	if match.BackendError != "" {
-		caller.detail = fmt.Sprintf("MCP caller backend failed: %s", match.BackendError)
-		return caller, nil
-	}
-	// rowSocketPath keeps a native Herdr seat's absolute socket as it is; only
-	// a tmux row's socket is a name under the tmux directory.
-	socketPath, err := current.rowSocketPath(match)
+	caller.identity, err = current.identityFromRow(caller.row)
 	if err != nil {
-		caller.detail = fmt.Sprintf("MCP _meta.threadId %q has an invalid seat socket: %v", threadID, err)
-		return caller, nil
+		return caller, fmt.Errorf("resolve MCP caller thread %q: %w", threadID, err)
 	}
-	caller.row = match
-	caller.identity = resolve.Identity{
-		Backend:        match.Backend,
-		SeatID:         match.SeatID,
-		HerdrWorkspace: match.HerdrWorkspace,
-		Session:        match.Session,
-		SocketPath:     socketPath,
-		SocketName:     filepath.Base(socketPath),
-		Pane:           match.Pane,
-		Engine:         string(match.Engine),
-		ID:             match.ID,
-		Source:         "mcp-thread-meta",
-	}
+	caller.identity.Recovered = identity.Recovered
+	caller.identity.Source = "mcp-thread-meta"
+
 	caller.valid = true
 	return caller, nil
 }
@@ -679,4 +667,71 @@ func containsControl(value string) bool {
 		}
 	}
 	return false
+}
+
+func (current *backend) identityFromRow(row ChatRow) (resolve.Identity, error) {
+	socketPath, err := current.rowSocketPath(row)
+	if err != nil {
+		return resolve.Identity{}, fmt.Errorf("live chat %q socket: %w", row.Session, err)
+	}
+	backend := row.Backend
+	if backend == "" {
+		backend = spawn.BackendTmux
+	}
+	session := row.Session
+	if session == "" {
+		session = row.SeatID
+	}
+	return resolve.Identity{
+		Backend:        backend,
+		SeatID:         row.SeatID,
+		HerdrWorkspace: row.HerdrWorkspace,
+		Session:        session,
+		SocketPath:     socketPath,
+		SocketName:     filepath.Base(socketPath),
+		Pane:           row.Pane,
+		Engine:         string(row.Engine),
+		ID:             row.ID,
+	}, nil
+}
+
+func (current *backend) codexSeats(ctx context.Context) ([]resolve.CodexSeat, error) {
+	listed, err := current.listUnbounded(ctx, LSInput{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("list live Codex seats: %w", err)
+	}
+	return current.codexSeatsFromRows(listed.Rows), nil
+}
+
+func (current *backend) codexSeatsFromRows(rows []ChatRow) []resolve.CodexSeat {
+	seats := make([]resolve.CodexSeat, 0, len(rows))
+	for index := range rows {
+		row := &rows[index]
+		if row.Engine != pfmengine.Codex || row.Killed || row.Kind != compose.LiveCodex.String() {
+			continue
+		}
+		socketPath, err := current.rowSocketPath(*row)
+		backendError := row.BackendError
+		if err != nil {
+			backendError = fmt.Sprintf("%s live chat %q socket: %v", backendError, row.Session, err)
+		}
+		backend := row.Backend
+		if backend == "" {
+			backend = spawn.BackendTmux
+		}
+		seats = append(
+			seats,
+			resolve.CodexSeat{
+				ThreadID:       row.ID,
+				Backend:        backend,
+				SeatID:         row.SeatID,
+				SessionName:    row.Session,
+				SocketPath:     socketPath,
+				Pane:           row.Pane,
+				HerdrWorkspace: row.HerdrWorkspace,
+				BackendError:   backendError,
+			},
+		)
+	}
+	return seats
 }

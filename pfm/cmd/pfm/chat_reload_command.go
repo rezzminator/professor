@@ -552,19 +552,18 @@ func reloadTarget(
 		}
 		return path, panes[0].ID, panes[0], 0
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	environment := resolve.CallerEnvironmentFrom(defaultEnv(env))
+	identifier, err := resolve.NewWhoami(
+		resolve.WhoamiDependencies{Environment: &environment, CodexSeats: pfmchat.CodexSeats(&runtime)},
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return "", "", reload.Pane{}, 1
 	}
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
-		recovered, found := pfmchat.SeatIdentity(ctx, &runtime)
-		if !found {
-			fmt.Fprintf(stderr, "pfm chat reload: couldn't identify this chat: %v\n", err)
-			return "", "", reload.Pane{}, 1
-		}
-		identity = recovered
+		fmt.Fprintf(stderr, "pfm chat reload: couldn't identify this chat: %v\n", err)
+		return "", "", reload.Pane{}, 1
 	}
 	return reloadTargetFromIdentity(ctx, identity, tmux, stderr, env)
 }
@@ -582,9 +581,6 @@ func reloadTargetFromIdentity(
 	env = defaultEnv(env)
 	path := identity.SocketPath
 	pane := identity.Pane
-	if pane == "" {
-		pane = env.Get("TMUX_PANE")
-	}
 	panes, err := tmux.ListPanes(ctx, path)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: list panes: %v\n", err)

@@ -16,9 +16,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -84,13 +84,23 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	if log == nil {
 		log = os.Stderr
 	}
+	identifier := dependencies.Identifier
+	if identifier == nil {
+		var err error
+		identifier, err = resolve.NewWhoami(resolve.WhoamiDependencies{})
+		if err != nil {
+			return nil, fmt.Errorf("construct kill identity resolver: %w", err)
+		}
+	}
 	return &Manager{
-		log:      log,
-		database: database,
-		proc:     proc,
-		tmux:     tmux,
-		spawner:  spawner,
-		now:      now,
+		identifier:    identifier,
+		resolveTarget: dependencies.ResolveTarget,
+		log:           log,
+		database:      database,
+		proc:          proc,
+		tmux:          tmux,
+		spawner:       spawner,
+		now:           now,
 		paths: resolvedPaths{
 			home:       resolved.Home,
 			sidDir:     resolved.SIDDir,
@@ -200,23 +210,6 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 	return fmt.Errorf("pane %s still alive after kill", target.PaneID)
 }
 
-// Environment reads the caller values used by --self, through env
-// (pfm/TESTPLAN.md § Seams, paths.Env); nil reads the real process
-// environment.
-func Environment(env paths.Env) SelfEnvironment {
-	if env == nil {
-		env = paths.OSEnv{}
-	}
-	return SelfEnvironment{
-		TMUX:            env.Get("TMUX"),
-		TMUXPane:        env.Get("TMUX_PANE"),
-		ClaudeSessionID: env.Get("CLAUDE_CODE_SESSION_ID"),
-		HerdrMarker:     env.Get(herdr.EnvMarker),
-		HerdrSocket:     env.Get(herdr.EnvSocket),
-		HerdrPane:       env.Get(herdr.EnvPane),
-	}
-}
-
 // Kill records a permanent kill and starts the detached exit finisher
 // whenever the target resolves to a live tmux pane — hiding a live chat
 // always ends it, because a hidden row left running is a chat nobody can see
@@ -231,6 +224,25 @@ func (manager *Manager) Kill(
 ) (target Target, err error) {
 	trail := killTrail(ctx)
 	defer func() { killed(trail, requestShape(request), err) }()
+	var self resolve.Identity
+	if request.Self {
+		identifier := request.Identifier
+		if identifier == nil {
+			identifier = manager.identifier
+		}
+		self, err = identifier.Identify(ctx)
+		if err != nil {
+			return Target{}, fmt.Errorf("identify kill caller: %w", err)
+		}
+		if self.Engine == string(pfmengine.OpenCode) {
+			return Target{}, fmt.Errorf("self-kill is not supported for OpenCode chats (socket %s): "+
+				"OpenCode exports no session id, so this pane cannot name itself — "+
+				"kill it by name or id from another chat", self.SocketName)
+		}
+		if self.Backend == herdrBackend {
+			request.ID, request.SocketName, request.PaneID = self.ID, self.SocketPath, self.Pane
+		}
+	}
 	target, native, err := manager.herdrTarget(ctx, request)
 	if err != nil {
 		return Target{}, err
@@ -239,7 +251,49 @@ func (manager *Manager) Kill(
 	case native:
 		// The durable seat supplies identity and address before the index exists.
 	case request.Self:
-		target, err = manager.IdentifySelf(ctx, request.Environment)
+		if manager.resolveTarget != nil && (self.ID == "" || self.Engine == string(pfmengine.Codex)) {
+			projected, projectErr := manager.resolveTarget(ctx, self)
+			if projectErr != nil {
+				return Target{}, fmt.Errorf("resolve kill caller target: %w", projectErr)
+			}
+			if projected.ID != "" {
+				self.ID = projected.ID
+			}
+			if projected.Engine != "" {
+				self.Engine = string(projected.Engine)
+			}
+			if request.RolloutPath == "" {
+				request.RolloutPath = projected.DataPath
+			}
+		}
+		if self.ID == "" {
+			seats, lookupErr := manager.database.Shared().Seats(ctx)
+			if lookupErr != nil {
+				return Target{}, fmt.Errorf("read kill caller target: %w", lookupErr)
+			}
+			matches := 0
+			for index := range seats {
+				seat := &seats[index]
+				if seat.Backend != "tmux" || seat.State != liveSeatState ||
+					seat.TmuxSocket != self.SocketPath && seat.TmuxSocket != self.SocketName ||
+					seat.TmuxPane != self.Pane {
+					continue
+				}
+				matches++
+				self.ID, self.Engine = seat.SessionID, seat.Engine
+			}
+			if matches != 1 || self.ID == "" {
+				return Target{}, fmt.Errorf(
+					"kill caller pane %s on %s has no unique registered conversation",
+					self.Pane,
+					self.SocketPath,
+				)
+			}
+		}
+		target, err = manager.lookupTarget(ctx, self.ID, pfmengine.ID(self.Engine), request.RolloutPath)
+		if err == nil {
+			target.SocketPath, target.SocketName, target.PaneID = self.SocketPath, self.SocketName, self.Pane
+		}
 	case request.ID != "":
 		target, err = manager.lookupTarget(ctx, request.ID, request.Engine, request.RolloutPath)
 	case request.SocketName != "" && request.PaneID != "":
@@ -700,7 +754,7 @@ func (manager *Manager) codexTarget(
 }
 
 // resolveUnindexedCodexParent reads rolloutPath's own session_meta header —
-// the shared shape identifyCodexSelf and the CLI's own row lookup both hit —
+// the shared shape the identity resolver and the CLI's own row lookup both hit —
 // for the conversation it resumes from: the ONLY place that link exists
 // before the indexer has parsed the file into the fleet database. It
 // answers found=true only when THAT parent id itself resolves to a real,
@@ -724,14 +778,4 @@ func (manager *Manager) resolveUnindexedCodexParent(
 		ID:       lineage.RootID,
 		DataPath: lineage.Newest.Path,
 	}, true
-}
-
-func parseTMUX(value string) (socketPath, socketName string) {
-	if comma := strings.IndexByte(value, ','); comma >= 0 {
-		value = value[:comma]
-	}
-	if value == "" {
-		return "", ""
-	}
-	return value, filepath.Base(value)
 }

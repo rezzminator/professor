@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // A Codex hook never names its pane through its own environment: a bare
@@ -191,7 +192,7 @@ func (reporter *herdrReporter) registerCodexPane(session, path string) (codexPan
 // setTarget names the pane a TUI's environment was started in: a tmux pane
 // when both TMUX and TMUX_PANE are set, else a Herdr pane, else none.
 func (pane *codexPane) setTarget(environment map[string]string) {
-	socket, _, _ := strings.Cut(environment["TMUX"], ",")
+	socket := pfmtmux.SocketPath(environment["TMUX"])
 	if socket != "" && environment["TMUX_PANE"] != "" {
 		pane.TmuxSocket, pane.TmuxPane = socket, environment["TMUX_PANE"]
 		return

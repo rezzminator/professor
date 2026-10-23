@@ -2,15 +2,11 @@ package spawn
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"strings"
-	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const (
@@ -20,128 +16,66 @@ const (
 )
 
 // BackendChoice is the immutable birth location chosen for a chat.
-type BackendChoice struct{ Backend, HerdrSocket, HerdrPane, HerdrWorkspace, Warning string }
-
-type backendEnvironment struct {
-	Requested, Marker, Socket, Pane, TMUX string
-	Requester                             *fleetdb.Seat
+type BackendChoice struct {
+	Backend, HerdrSocket, HerdrPane, HerdrWorkspace string
+	InPlace                                         bool
 }
 
-// ChooseBackend applies an explicit/config backend or the auto birth rule.
-func ChooseBackend(
+// Place chooses a birth from the caller's proven identity; it never probes or
+// turns an unresolved caller into a tmux birth.
+func Place(
 	ctx context.Context,
-	requested string,
-	environ []string,
-	requester *fleetdb.Seat,
-) (BackendChoice, error) {
-	values := make(map[string]string)
-	for _, entry := range environ {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			values[key] = value
-		}
-	}
-	env := backendEnvironment{
-		Requested: requested,
-		Marker:    values[herdr.EnvMarker],
-		Socket:    values[herdr.EnvSocket],
-		Pane:      values[herdr.EnvPane],
-		TMUX:      values["TMUX"],
-		Requester: requester,
-	}
-	var canonical struct {
-		Type string `json:"type"`
-		Pane struct {
-			ID        string `json:"pane_id"`
-			Workspace string `json:"workspace_id"`
-		} `json:"pane"`
-	}
-	choice, err := selectBackend(env, func(socket, pane string) error {
-		probe, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		defer cancel()
-		body, err := herdr.SeatRequest(probe, socket, "pane.get", map[string]string{"pane_id": pane})
-		var dial *net.OpError
-		if errors.As(err, &dial) {
-			return dial
-		}
-		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(body, &canonical); err != nil {
-			return fmt.Errorf("decode Herdr pane probe: %w", err)
-		}
-		if canonical.Type != "pane_info" || canonical.Pane.ID == "" || canonical.Pane.Workspace == "" ||
-			!strings.HasPrefix(canonical.Pane.ID, canonical.Pane.Workspace+":") {
-			return fmt.Errorf("herdr pane probe for %s returned malformed identity: %s", pane, body)
-		}
-		return nil
-	})
-	if err == nil && choice.Backend == BackendHerdr {
-		choice.HerdrPane = canonical.Pane.ID
-		choice.HerdrWorkspace = canonical.Pane.Workspace
-	}
-	return choice, err
-}
-
-func selectBackend(env backendEnvironment, probe func(string, string) error) (BackendChoice, error) {
-	requested := env.Requested
+	door, requested string,
+	caller resolve.Identity,
+	callerErr error,
+) (choice BackendChoice, err error) {
 	if requested == "" {
 		requested = BackendAuto
 	}
+	defer func() {
+		callerError := ""
+		if callerErr != nil {
+			callerError = callerErr.Error()
+		}
+		fields := []any{
+			"door", door, "requested", requested, "caller_backend", caller.Backend,
+			"caller_socket", caller.SocketPath, "caller_pane", caller.Pane, "caller_workspace", caller.HerdrWorkspace,
+			"caller_fronted", caller.Fronted, "caller_source", caller.Source, "caller_err", callerError,
+			"chosen", choice.Backend, "in_place", choice.InPlace,
+		}
+		if err != nil {
+			fields = append(fields, "place_err", err.Error())
+		}
+		obs.Logger(ctx).InfoContext(ctx, "chat.placement", fields...)
+	}()
 	if requested != BackendAuto && requested != BackendTmux && requested != BackendHerdr {
 		return BackendChoice{}, fmt.Errorf("backend %q: want auto, tmux or herdr", requested)
 	}
-	tmux := BackendChoice{Backend: BackendTmux}
 	if requested == BackendTmux {
-		return tmux, nil
+		return BackendChoice{Backend: BackendTmux}, nil
 	}
-	workspace := ""
-	if env.Requester != nil {
-		if env.Requester.Backend == BackendTmux && requested == BackendAuto {
-			return tmux, nil
+	if callerErr != nil && !errors.Is(callerErr, resolve.ErrNotInChat) &&
+		!errors.Is(callerErr, resolve.ErrNotRegistered) {
+		return BackendChoice{}, fmt.Errorf("place chat: caller unresolved: %w", callerErr)
+	}
+	if caller.Backend == BackendHerdr && !errors.Is(callerErr, resolve.ErrNotInChat) {
+		if caller.SocketPath == "" || caller.Pane == "" || caller.HerdrWorkspace == "" {
+			return BackendChoice{}, fmt.Errorf("place chat: caller has incomplete Herdr location")
 		}
-		if env.Requester.Backend == BackendHerdr {
-			env.Marker = "1"
-			env.Socket = env.Requester.HerdrSocket
-			env.Pane = env.Requester.HerdrPane
-			env.TMUX = ""
-			workspace = env.Requester.HerdrWorkspace
+		return BackendChoice{
+			Backend:        BackendHerdr,
+			HerdrSocket:    caller.SocketPath,
+			HerdrPane:      caller.Pane,
+			HerdrWorkspace: caller.HerdrWorkspace,
+			InPlace:        errors.Is(callerErr, resolve.ErrNotRegistered) && caller.Fronted,
+		}, nil
+	}
+	if requested == BackendHerdr {
+		reason := callerErr
+		if reason == nil {
+			reason = fmt.Errorf("caller backend %q", caller.Backend)
 		}
+		return BackendChoice{}, fmt.Errorf("herdr backend needs a caller in a Herdr pane: %w", reason)
 	}
-	if requested == BackendAuto && AutoBackend(env.Marker, env.Socket, env.Pane, env.TMUX) == BackendTmux {
-		return tmux, nil
-	}
-	if env.Socket == "" || env.Pane == "" {
-		return BackendChoice{}, fmt.Errorf("herdr backend requires HERDR_SOCKET_PATH and HERDR_PANE_ID")
-	}
-	if err := probe(env.Socket, env.Pane); err != nil {
-		state := "probe failed"
-		var transport *net.OpError
-		if errors.As(err, &transport) {
-			state = "unreachable"
-		}
-		if requested == BackendHerdr {
-			return BackendChoice{}, fmt.Errorf("herdr pane %s %s (%w)", env.Pane, state, err)
-		}
-		tmux.Warning = fmt.Sprintf("pfm: Herdr pane %s %s (%v) — starting in tmux", env.Pane, state, err)
-		return tmux, nil
-	}
-	if workspace == "" {
-		workspace, _, _ = strings.Cut(env.Pane, ":")
-	}
-	return BackendChoice{
-		Backend:        BackendHerdr,
-		HerdrSocket:    env.Socket,
-		HerdrPane:      env.Pane,
-		HerdrWorkspace: workspace,
-	}, nil
-}
-
-// AutoBackend selects the auto candidate from the pane environment, before the
-// live probe. Callers with a requester seat apply its overrides first.
-func AutoBackend(marker, socket, pane, tmux string) string {
-	if tmux != "" || marker != "1" || socket == "" || pane == "" {
-		return BackendTmux
-	}
-	return BackendHerdr
+	return BackendChoice{Backend: BackendTmux}, nil
 }

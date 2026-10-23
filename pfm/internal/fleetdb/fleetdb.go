@@ -183,6 +183,10 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate seat ownership: %w", err)
 	}
+	if err := retireMovedTmuxSeats(ctx, db, path); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("repair moved tmux seats: %w", err)
+	}
 	return db, nil
 }
 

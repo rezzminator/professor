@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -19,6 +20,7 @@ func RecordTmuxSeat(ctx context.Context, values paths.Values, seat fleetdb.Seat)
 	seat.TmuxSocket = socket
 	seat.Backend = BackendTmux
 	seat.State = "live"
+	seat.UpdatedAt = clock.Real.Now().Unix()
 	if seat.SeatID == "" {
 		seat.SeatID = filepath.Base(socket)
 	}

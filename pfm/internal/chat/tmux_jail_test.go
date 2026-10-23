@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -253,6 +254,7 @@ func TestAmbientClaudeSplitSelfRetainsItsExactPane(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	seedCallerPaneAncestry(t, root, socket, "%1")
 	t.Setenv("TMUX", socket+",1,0")
 	t.Setenv("TMUX_PANE", "%1")
 	t.Setenv(resolve.ClaudeSessionEnv, second)
@@ -295,10 +297,38 @@ func TestAmbientSelfWithoutExportedIDEnrichesFromItsExactSocket(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	seedCallerPaneAncestry(t, root, socket, "%0")
 	t.Setenv("TMUX", socket+",1,0")
 	t.Setenv("TMUX_PANE", "%0")
 	self, err := Target(context.Background(), "self", nil)
 	if err != nil || self.ID != id || self.Path != transcriptPath || self.Pane != "%0" {
 		t.Fatalf("Target(self) = %+v err=%v, want enriched exact pane and transcript", self, err)
+	}
+}
+
+// The test process runs outside tmux; its jailed process table models the shell
+// ancestry that a real tool shell in this fixture pane would have.
+func seedCallerPaneAncestry(t *testing.T, root, socket, pane string) {
+	t.Helper()
+	output, err := exec.Command("tmux", "-S", socket, "display-message", "-p", "-t", pane, "#{pane_pid}").Output()
+	if err != nil {
+		t.Fatalf("read fixture pane pid: %v", err)
+	}
+	parent, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		t.Fatalf("parse fixture pane pid: %v", err)
+	}
+	for pid, ppid := range map[int]int{os.Getpid(): parent, parent: 1} {
+		dir := filepath.Join(root, "proc", strconv.Itoa(pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		stat := fmt.Sprintf("%d (fixture) S %d 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 0 20 0 1\n", pid, ppid)
+		if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(stat), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "environ"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

@@ -179,7 +179,8 @@ func TestCallerScopedSelfReachesMutationDispatchWithoutRedirectingExplicitTarget
 	var calls [][]string
 	var scopedIDs []string
 	service := newService("test", &backend{
-		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+		paths: paths.Values{TmuxDir: "/tmp/tmux"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
 		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			if scoped, ok := chat.ScopedSelf(ctx); ok {
@@ -809,7 +810,8 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
 	}}
 	seat := headless.Chat{
-		Name: "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: "/work/exit",
+		Backend: "tmux",
+		Name:    "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: "/work/exit",
 		Socket: "cc-seat", Session: "cc-seat", Pane: "%7", Live: true,
 	}
 	tests := []struct {
@@ -858,7 +860,8 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 			}
 			var dispatched [][]string
 			service := newService("test", &backend{
-				chat: verbs,
+				paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+				chat:  verbs,
 				dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
 					dispatched = append(dispatched, append([]string(nil), args...))
 					_, _ = io.WriteString(stdout, "killed\n")

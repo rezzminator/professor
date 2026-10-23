@@ -322,10 +322,12 @@ func (f *scheduleRestartHerdr) respond(method string, params map[string]json.Raw
 		_ = json.Unmarshal(params["pane_id"], &pane)
 		return testjail.HerdrPaneInfo(pane)
 	case "pane.process_info":
+		var pane string
+		_ = json.Unmarshal(params["pane_id"], &pane)
 		return map[string]any{
 			"type": "pane_process_info",
 			"process_info": map[string]any{
-				"pane_id": f.pane, "shell_pid": 41,
+				"pane_id": pane, "shell_pid": 41,
 				"foreground_processes": []any{map[string]any{"pid": os.Getpid(), "argv0": "pfm"}},
 			},
 		}

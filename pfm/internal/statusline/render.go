@@ -16,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -568,7 +569,7 @@ func pfmSocket(runtime Runtime) (string, bool) {
 	if tmux == "" {
 		return "", false
 	}
-	socketPath := strings.SplitN(tmux, ",", 2)[0]
+	socketPath := pfmtmux.SocketPath(tmux)
 	if filepath.Clean(filepath.Dir(socketPath)) != filepath.Clean(runtime.TmuxDir) {
 		return "", false
 	}
@@ -589,7 +590,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	if tmux == "" || transcriptPath == "" {
 		return
 	}
-	socket := strings.SplitN(tmux, ",", 2)[0]
+	socket := pfmtmux.SocketPath(tmux)
 	socket = filepath.Base(socket)
 	if socket == "." || socket == "" {
 		return

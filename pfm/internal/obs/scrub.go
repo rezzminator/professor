@@ -86,6 +86,20 @@ var declaredKeys = map[string]bool{
 	"pane":     true,
 	"window":   true,
 	"session":  true,
+	// Placement inputs and result contain locations and resolver diagnostics.
+	"door":             true,
+	"requested":        true,
+	"caller_backend":   true,
+	"caller_socket":    true,
+	"caller_pane":      true,
+	"caller_workspace": true,
+	"caller_fronted":   true,
+	"caller_source":    true,
+	"caller_err":       true,
+	"chosen":           true,
+	"in_place":         true,
+	"place_err":        true,
+
 	// The argument and result SHAPE fields the middleware doors report
 	// (spec § Middleware): a count, a name, a code — never the value itself.
 	"argc":    true,

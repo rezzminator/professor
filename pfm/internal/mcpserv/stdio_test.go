@@ -533,9 +533,14 @@ func stdioTestSession(t *testing.T, professor *FamilyServers, options StdioOptio
 // stdioTestNamer answers every tmux session-name lookup with one name.
 type stdioTestNamer string
 
-func (namer stdioTestNamer) SessionName(context.Context, string, string) (string, error) {
-	return string(namer), nil
+func (namer stdioTestNamer) SessionPane(context.Context, string, string) (string, int, error) {
+	return string(namer), 4100, nil
 }
+
+type stdioTestProcessTree struct{}
+
+func (stdioTestProcessTree) Parent(int) (int, error)                { return 0, nil }
+func (stdioTestProcessTree) Environ(int) (map[string]string, error) { return map[string]string{}, nil }
 
 // A Codex caller's _meta.threadId crosses the stdio forwarder unchanged, beside
 // the pfmProxy identity the forwarder adds, and skips the Claude crumb refresh
@@ -546,7 +551,7 @@ func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 		Environment: &resolve.WhoamiEnvironment{
 			TMUX: "/tmp/tmux-1000/cc-seat,1,0", TMUXPane: "%7", ClaudeSessionID: "session-claude",
 		},
-		Namer: stdioTestNamer("cc-seat"),
+		Namer: stdioTestNamer("cc-seat"), SelfPID: 4100, Processes: stdioTestProcessTree{},
 	}
 	t.Cleanup(func() { proxyWhoami = previous })
 

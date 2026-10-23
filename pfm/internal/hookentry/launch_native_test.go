@@ -33,9 +33,7 @@ func TestLaunchNativeBackendRefusal(t *testing.T) {
 		config.Runtime{},
 		env,
 	)
-	if rc != 1 ||
-		!strings.Contains(stderr.String(), "Herdr pane w6:p3 unreachable") &&
-			!strings.Contains(stderr.String(), "herdr pane w6:p3 unreachable") {
+	if rc != 1 || !strings.Contains(stderr.String(), "herdr backend needs a caller in a Herdr pane") {
 		t.Fatalf("explicit native backend = %d %q", rc, &stderr)
 	}
 	if stdout.Len() != 0 {
@@ -60,7 +58,7 @@ func TestLaunchNativeRefusesOccupiedPane(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	rc := launchNative(
-		spawn.BackendChoice{Backend: "herdr", HerdrSocket: seat.HerdrSocket, HerdrPane: seat.HerdrPane},
+		spawn.BackendChoice{Backend: "herdr", InPlace: true, HerdrSocket: seat.HerdrSocket, HerdrPane: seat.HerdrPane},
 		claudelaunch.Request{
 			Binary: "/bin/echo",
 			Home:   root,
@@ -98,7 +96,7 @@ func TestLaunchNativeReexecsExactSupervisorRole(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	rc := launchNative(
-		spawn.BackendChoice{Backend: "herdr", HerdrSocket: "/fixture.sock", HerdrPane: "w1:p1"},
+		spawn.BackendChoice{Backend: "herdr", InPlace: true, HerdrSocket: "/fixture.sock", HerdrPane: "w1:p1"},
 		claudelaunch.Request{Binary: "/bin/echo", Home: root},
 		root,
 		&bytes.Buffer{},
@@ -107,5 +105,30 @@ func TestLaunchNativeReexecsExactSupervisorRole(t *testing.T) {
 	)
 	if !called || rc != 1 || !strings.Contains(stderr.String(), "fixture exec stopped") {
 		t.Fatalf("launch never reexeced supervisor: called=%v rc=%d err=%s", called, rc, &stderr)
+	}
+}
+
+func TestLaunchNativeNewTabRefusesBirthFailure(t *testing.T) {
+	root := t.TempDir()
+	values := paths.Values{Home: root, StateDB: filepath.Join(root, "pfm.db")}
+	var stderr bytes.Buffer
+	code := launchNative(
+		spawn.BackendChoice{
+			Backend:        "herdr",
+			HerdrSocket:    filepath.Join(root, "absent.sock"),
+			HerdrPane:      "w1:p1",
+			HerdrWorkspace: "w1",
+		},
+		claudelaunch.Request{
+			Binary: "/bin/echo",
+			Home:   root,
+		},
+		root,
+		&bytes.Buffer{},
+		&stderr,
+		config.Runtime{Paths: values},
+	)
+	if code != 1 || !strings.Contains(stderr.String(), "birth native chat:") {
+		t.Fatalf("new tab failure code=%d stderr=%s", code, &stderr)
 	}
 }

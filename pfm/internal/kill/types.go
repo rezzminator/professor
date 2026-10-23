@@ -8,28 +8,9 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
-
-// SelfEnvironment contains only the caller state used for self-identification.
-type SelfEnvironment struct {
-	TMUX            string
-	TMUXPane        string
-	ClaudeSessionID string
-	// HerdrMarker, HerdrSocket and HerdrPane are the Herdr variables a native
-	// chat process inherits. They name a seat to look up, never prove it.
-	HerdrMarker string
-	HerdrSocket string
-	HerdrPane   string
-}
-
-// Native reports a chat running directly in a Herdr pane: Herdr's marker and
-// address with no tmux client around it. A tmux-in-Herdr chat keeps its tmux
-// identity.
-func (environment SelfEnvironment) Native() bool {
-	return environment.TMUX == "" && environment.HerdrMarker == "1" &&
-		environment.HerdrSocket != "" && environment.HerdrPane != ""
-}
 
 // Target is one kill identity and its optional live tmux address.
 type Target struct {
@@ -52,8 +33,9 @@ func AddressOnly(target Target) bool {
 
 // Request describes a public kill invocation.
 type Request struct {
-	ID   string
-	Self bool
+	Identifier resolve.SelfIdentifier
+	ID         string
+	Self       bool
 	// Engine names the chat engine when the caller already knows it because it
 	// is looking at the row — the picker. It vouches for a chat the index has
 	// not caught up with, which is every freshly spawned agent: their
@@ -73,10 +55,9 @@ type Request struct {
 	// their `kill self --exit` call can name the pane it owns. SocketName stays
 	// the immutable tmux socket name; the manager derives its path inside the
 	// configured tmux directory and accepts no caller-supplied path.
-	SocketName  string
-	PaneID      string
-	Exit        bool
-	Environment SelfEnvironment
+	SocketName string
+	PaneID     string
+	Exit       bool
 }
 
 // ExitArgs are serialized onto the internal kill-exit argv.
@@ -129,18 +110,21 @@ type Refresher interface {
 
 // Dependencies replaces process/tmux/time boundaries in tests.
 type Dependencies struct {
-	Paths        paths.Values
-	ClaudeRoots  []string
-	CodexHomes   []string
-	ConfigPath   string
-	ProcFS       gather.ProcFS
-	Tmux         TmuxClient
-	Spawner      ExitSpawner
-	Now          func() time.Time
-	Executable   string
-	Delay        time.Duration
-	PollEvery    time.Duration
-	PollAttempts int
+	// ResolveTarget enriches a proven tmux caller from current fleet rows.
+	ResolveTarget func(context.Context, resolve.Identity) (Target, error)
+	Identifier    resolve.SelfIdentifier
+	Paths         paths.Values
+	ClaudeRoots   []string
+	CodexHomes    []string
+	ConfigPath    string
+	ProcFS        gather.ProcFS
+	Tmux          TmuxClient
+	Spawner       ExitSpawner
+	Now           func() time.Time
+	Executable    string
+	Delay         time.Duration
+	PollEvery     time.Duration
+	PollAttempts  int
 	// IdleAttempts bounds the finisher's wait, PollEvery apart, for the
 	// chat's running turn to end before it types the exit command.
 	IdleAttempts int
@@ -159,6 +143,8 @@ type Dependencies struct {
 
 // Manager performs public kill operations.
 type Manager struct {
+	resolveTarget   func(context.Context, resolve.Identity) (Target, error)
+	identifier      resolve.SelfIdentifier
 	log             io.Writer
 	database        *store.Store
 	proc            gather.ProcFS

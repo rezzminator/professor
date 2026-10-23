@@ -230,6 +230,7 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	// The calling chat is identified AMBIENTLY here, exactly as a real caller
 	// inside tmux is: $TMUX names the socket, $TMUX_PANE names the pane, and
 	// no --sock is typed on the command line.
+	proveCLIFixtureCaller(t, socket, pane)
 	t.Setenv("TMUX", socket+",1,0")
 	t.Setenv("TMUX_PANE", pane)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")

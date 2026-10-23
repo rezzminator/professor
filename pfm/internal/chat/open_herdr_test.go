@@ -26,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -111,14 +112,21 @@ func nativeChatSeat(t *testing.T, socket, state string) (config.Runtime, *fleetd
 }
 
 // nativeChatHost seeds the actual ProcFS producer shape, not an engine-name hint.
-func nativeChatHost(t *testing.T, db *fleetdb.Store, seat fleetdb.Seat, alive bool) fleetdb.Seat {
+func nativeChatHost(t *testing.T, db *fleetdb.Store, seat fleetdb.Seat, alive bool, hostPIDs ...int) fleetdb.Seat {
 	t.Helper()
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	seat.SeatHostPID, seat.SeatHostStart = 42, 100
+	hostPID := 42
+	if len(hostPIDs) > 0 {
+		hostPID = hostPIDs[0]
+	}
+	seat.SeatHostPID, seat.SeatHostStart = hostPID, 100
 	seat.HerdrTerminalID = "fixture-w6:p3"
+	if len(hostPIDs) > 0 {
+		seat.HerdrTerminalID = "fixture-" + seat.HerdrPane
+	}
 	if err := db.PutSeat(context.Background(), seat); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +139,7 @@ func nativeChatHost(t *testing.T, db *fleetdb.Store, seat fleetdb.Seat, alive bo
 	if err := os.WriteFile(filepath.Join(values.ProcRoot, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for pid, parent := range map[int]int{41: 1, 42: 41} {
+	for pid, parent := range map[int]int{41: 1, hostPID: 41} {
 		dir := filepath.Join(values.ProcRoot, fmt.Sprint(pid))
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -146,7 +154,7 @@ func nativeChatHost(t *testing.T, db *fleetdb.Store, seat fleetdb.Seat, alive bo
 			t.Fatal(err)
 		}
 		argv := "/bin/sh\x00"
-		if pid == 42 {
+		if pid == hostPID {
 			argv = "/fixture/pfm\x00internal\x00seat-host\x00" + seat.SeatID + "\x00"
 		}
 		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(argv), 0o600); err != nil {
@@ -161,24 +169,38 @@ func nativeChatHost(t *testing.T, db *fleetdb.Store, seat fleetdb.Seat, alive bo
 func nativeChatCallerHostsChat(t *testing.T, db *fleetdb.Store, socket, pane string) {
 	t.Helper()
 	workspace, _, _ := strings.Cut(pane, ":")
-	if err := db.PutSeat(context.Background(), fleetdb.Seat{
+	seat := fleetdb.Seat{
 		SeatID: "caller-seat", SessionID: "11111111-1111-4111-8111-111111111111", Engine: string(pfmengine.Claude),
 		Backend: "herdr", HerdrSocket: socket, HerdrPane: pane, HerdrWorkspace: workspace, State: "live",
-	}); err != nil {
-		t.Fatal(err)
 	}
+	nativeChatHost(t, db, seat, true, 43)
 }
 
 func nativeChatProof(req nativeChatRequest, pane string) (any, string, bool) {
+	var requested string
+	_ = json.Unmarshal(req.Params["pane_id"], &requested)
+	if requested == "" {
+		requested = pane
+	}
 	switch req.Method {
+	case "pane.get":
+		return testjail.HerdrPaneInfo(requested), "", true
 	case "pane.list":
 		info := testjail.HerdrPaneInfo(pane)["pane"].(map[string]any)
 		info["terminal_id"] = "fixture-w6:p3"
-		return map[string]any{"type": "pane_list", "panes": []any{info}}, "", true
+		panes := []any{info}
+		if caller := os.Getenv("HERDR_PANE_ID"); caller != "" && caller != pane {
+			panes = append(panes, testjail.HerdrPaneInfo(caller)["pane"])
+		}
+		return map[string]any{"type": "pane_list", "panes": panes}, "", true
 	case "pane.process_info":
 		return map[string]any{
-			"type":         "pane_process_info",
-			"process_info": map[string]any{"pane_id": pane, "shell_pid": 41},
+			"type": "pane_process_info",
+			"process_info": map[string]any{
+				"pane_id":              requested,
+				"shell_pid":            41,
+				"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
+			},
 		}, "", true
 	}
 	return nil, "", false
@@ -422,9 +444,11 @@ func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
 			t.Setenv("TMUX", "")
 			ctx := context.Background()
 			if strings.HasPrefix(backend, "herdr") {
-				ctx = WithResolvedSelf(
+				ctx = WithCaller(
 					ctx,
-					headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p8", HerdrWorkspace: "w6"},
+					"open.herdr",
+					resolve.Identity{Backend: "herdr", SocketPath: socket, Pane: "w6:p8", HerdrWorkspace: "w6"},
+					nil,
 				)
 			}
 			fake := &fakeOpenTmux{alive: map[string]bool{}}
@@ -711,8 +735,8 @@ func TestRetireOtherHerdrViewsSparesAViewFromAnAgentPane(t *testing.T) {
 	}{
 		{name: "a plain caller pane", wantStderr: "other Herdr views of this chat stay: read @pfm_herdr"},
 		{name: "a caller pane hosting a chat", callerHostsChat: true},
-		{name: "a caller inside tmux", tmux: "/tmp/tmux-1/default,1,0"},
-		{name: "a pane this process does not front", unproved: true, wantStderr: "ownership unproved"},
+		{name: "stale TMUX in a Herdr pane", tmux: "/tmp/tmux-1/default,1,0", wantStderr: "other Herdr views of this chat stay: read @pfm_herdr"},
+		{name: "a pane this process does not front", unproved: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -723,6 +747,15 @@ func TestRetireOtherHerdrViewsSparesAViewFromAnAgentPane(t *testing.T) {
 			var asked []string
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				asked = append(asked, req.Method)
+				if req.Method == "pane.get" {
+					return testjail.HerdrPaneInfo("w6:p3"), ""
+				}
+				if req.Method == "pane.list" {
+					return map[string]any{
+						"type":  "pane_list",
+						"panes": []any{testjail.HerdrPaneInfo("w6:p3")["pane"]},
+					}, ""
+				}
 				if req.Method != "pane.process_info" {
 					return nil, "unexpected_method"
 				}
@@ -731,7 +764,7 @@ func TestRetireOtherHerdrViewsSparesAViewFromAnAgentPane(t *testing.T) {
 					pid = 1
 				}
 				return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
-					"pane_id": "w6:p3", "shell_pid": 1, "foreground_processes": []any{map[string]any{"pid": pid}},
+					"pane_id": "w6:p3", "shell_pid": 41, "foreground_processes": []any{map[string]any{"pid": pid}},
 				}}, ""
 			})
 			if tc.callerHostsChat {
@@ -755,9 +788,6 @@ func TestRetireOtherHerdrViewsSparesAViewFromAnAgentPane(t *testing.T) {
 			if tc.wantStderr == "" && stderr.Len() != 0 ||
 				tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr=%q, want %q", stderr.String(), tc.wantStderr)
-			}
-			if (tc.callerHostsChat || tc.tmux != "") && len(asked) != 0 {
-				t.Fatalf("a caller that retires nothing asked Herdr %q", asked)
 			}
 		})
 	}

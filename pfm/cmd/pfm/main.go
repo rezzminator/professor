@@ -24,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
 	modelcostcmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/restart"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
@@ -345,6 +346,11 @@ func runKill(ctx context.Context, args []string, stdout, stderr io.Writer, runti
 		return code
 	}
 	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
+	identifier, identityErr := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(&runtime)})
+	if identityErr != nil {
+		fmt.Fprintf(stderr, "pfm chat kill: %v\n", identityErr)
+		return 1
+	}
 	id := ""
 	var engine pfmengine.ID
 	rolloutPath := ""
@@ -369,6 +375,7 @@ func runKill(ctx context.Context, args []string, stdout, stderr io.Writer, runti
 		paneID = address.PaneID
 	}
 	target, err := manager.Kill(ctx, kill.Request{
+		Identifier:  identifier,
 		ID:          id,
 		Engine:      engine,
 		RolloutPath: rolloutPath,
@@ -376,7 +383,6 @@ func runKill(ctx context.Context, args []string, stdout, stderr io.Writer, runti
 		PaneID:      paneID,
 		Self:        *self,
 		Exit:        *exit,
-		Environment: kill.Environment(paths.OSEnv{}),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)

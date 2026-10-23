@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -17,28 +18,45 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestBirthBackendHonorsRequestBoundary(t *testing.T) {
-	env := &paths.MapEnv{
-		Values: map[string]string{
-			"HERDR_ENV":         "1",
-			"HERDR_SOCKET_PATH": "/unreachable/herdr.sock",
-			"HERDR_PANE_ID":     "w6:p3",
-		},
-	}
-	for _, ctx := range []context.Context{
-		spawn.WithBackendEnvironment(context.Background(), nil),
-		WithResolvedSelf(context.Background(), headless.Chat{Backend: "tmux"}),
-		WithResolvedSelf(context.Background(), headless.Chat{}),
+	failure := errors.New("caller read failed")
+	for _, tc := range []struct {
+		name     string
+		identity resolve.Identity
+		err      error
+		backend  string
+	}{
+		{name: "outside", err: resolve.ErrNotInChat, backend: "tmux"},
+		{name: "tmux", identity: resolve.Identity{Backend: "tmux"}, backend: "tmux"},
+		{name: "native", identity: resolve.Identity{Backend: "herdr", SocketPath: "/h/herdr.sock", Pane: "wC:p24", HerdrWorkspace: "wC"}, backend: "herdr"},
+		{name: "failed read", err: failure},
 	} {
-		choice, err := BirthBackend(ctx, "auto", env)
-		if err != nil || choice.Backend != "tmux" || choice.Warning != "" {
-			t.Fatalf("request boundary choice=%+v err=%v", choice, err)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, recorder := obs.Test(t)
+			ctx = WithCaller(ctx, "mcp.new", tc.identity, tc.err)
+			choice, err := BirthBackend(ctx, "cli.new", "auto")
+			if tc.backend == "" {
+				if !errors.Is(err, failure) {
+					t.Fatalf("choice=%+v error=%v", choice, err)
+				}
+			} else if err != nil || choice.Backend != tc.backend {
+				t.Fatalf("choice=%+v error=%v", choice, err)
+			}
+			records := recorder.Records()
+			if len(records) != 1 {
+				t.Fatalf("placement logs=%+v", records)
+			}
+			if door, _ := records[0].Field("door"); door != "mcp.new" {
+				t.Fatalf("door=%v", door)
+			}
+		})
 	}
 }
 
@@ -67,15 +85,25 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 				switch req.Method {
 				case "ping":
 					return map[string]any{"type": "pong", "protocol": 22, "version": "fixture"}, ""
+				case "pane.get":
+					var pane string
+					_ = json.Unmarshal(req.Params["pane_id"], &pane)
+					return testjail.HerdrPaneInfo(pane), ""
 				case "pane.list":
 					return map[string]any{
 						"type":  "pane_list",
 						"panes": []any{testjail.HerdrPaneInfo("w6:p9")["pane"]},
 					}, ""
 				case "pane.process_info":
+					var pane string
+					_ = json.Unmarshal(req.Params["pane_id"], &pane)
 					return map[string]any{
-						"type":         "pane_process_info",
-						"process_info": map[string]any{"pane_id": "w6:p9", "shell_pid": 41},
+						"type": "pane_process_info",
+						"process_info": map[string]any{
+							"pane_id":              pane,
+							"shell_pid":            41,
+							"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
+						},
 					}, ""
 				case "pane.read":
 					screen := "❯ "

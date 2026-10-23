@@ -44,7 +44,7 @@ var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) 
 		target = identity.Session
 	}
 	if identity.SocketPath == "" || target == "" {
-		return "", resolve.ErrNoTmux
+		return "", resolve.ErrNotInChat
 	}
 	return (pfmcall.TmuxCaller{}).WindowName(ctx, identity.SocketPath, target)
 }

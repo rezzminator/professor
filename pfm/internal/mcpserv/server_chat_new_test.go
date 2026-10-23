@@ -20,7 +20,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -595,5 +597,160 @@ func TestChatNewWorkbenchNameSchema(t *testing.T) {
 	}
 	if !strings.Contains(schema.Properties["name"].Description, "inside a workbench, empty takes its next {name}:{n}") {
 		t.Fatalf("name schema: %s", raw)
+	}
+}
+
+func TestBirthNewErrorPayload(t *testing.T) {
+	calls := 0
+	var choice spawn.BackendChoice
+	var placeErr error
+	service := newService(
+		"test",
+		&backend{dispatch: func(ctx context.Context, _ []string, _, _ io.Writer) int {
+			calls++
+			choice, placeErr = chat.BirthBackend(ctx, "new-test", "auto")
+			return 0
+		}},
+	)
+	protocol := connectInMemory(t, service.Server())
+	output := callToolWithMeta[ActionOutput](
+		t,
+		protocol.clientSession,
+		"new",
+		mcp.Meta{
+			"pfmProxy": map[string]any{
+				"v":              1,
+				"backend":        "herdr",
+				"socketPath":     "/h/herdr.sock",
+				"pane":           "wC:p24",
+				"herdrWorkspace": "wC",
+				"error":          map[string]any{"kind": "not_registered", "message": "not registered"},
+			},
+		},
+		NewInput{Name: "probe-a"},
+	)
+	if output.Status != "ok" ||
+		output.Message != "caller seat not registered yet; born in a new tab of Herdr workspace wC" ||
+		calls != 1 || placeErr != nil || choice.Backend != "herdr" || choice.HerdrWorkspace != "wC" || choice.InPlace {
+		t.Fatalf("new=%+v calls=%d choice=%+v err=%v", output, calls, choice, placeErr)
+	}
+}
+
+func TestBirthNewFailedCaller(t *testing.T) {
+	calls := 0
+	service := newService(
+		"test",
+		&backend{dispatch: func(context.Context, []string, io.Writer, io.Writer) int { calls++; return 0 }},
+	)
+	protocol := connectInMemory(t, service.Server())
+	result, err := protocol.clientSession.CallTool(
+		context.Background(),
+		&mcp.CallToolParams{
+			Name:      "new",
+			Arguments: NewInput{Name: "probe-a"},
+			Meta: mcp.Meta{
+				"pfmProxy": map[string]any{
+					"v":     1,
+					"error": map[string]any{"kind": "failed", "message": "herdr timed out"},
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(result.Content)
+	if !result.IsError || !strings.Contains(string(raw), "new: resolve caller: herdr timed out") || calls != 0 {
+		t.Fatalf("result=%s calls=%d", raw, calls)
+	}
+}
+
+func TestBirthNewHerdrCallerPlacement(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "placement.jsonl")
+	_, finish := obs.OpenLog(
+		context.Background(),
+		obs.Settings{Cmd: "test", Version: "test", Level: "info", Path: logPath, Stderr: io.Discard},
+	)
+	defer finish(0)
+	var choice spawn.BackendChoice
+	var placeErr error
+	service := newService(
+		"test",
+		&backend{
+			chat: &fakeChatVerbs{
+				listed: chat.ListResult{
+					Rows: []compose.Row{
+						{
+							Backend:        "herdr",
+							SeatID:         "87caf6bf",
+							SessionName:    "87caf6bf",
+							Kind:           compose.LiveClaude,
+							Socket:         "/h/herdr.sock",
+							PaneID:         "wC:p24",
+							HerdrWorkspace: "wC",
+						},
+					},
+				},
+			},
+			dispatch: func(ctx context.Context, _ []string, _, _ io.Writer) int {
+				choice, placeErr = chat.BirthBackend(ctx, "mcp-test", "auto")
+				return 0
+			},
+		},
+	)
+	protocol := connectInMemory(t, service.Server())
+	output := callToolWithMeta[ActionOutput](
+		t,
+		protocol.clientSession,
+		"new",
+		mcp.Meta{
+			"pfmProxy": map[string]any{
+				"v":              1,
+				"session":        "87caf6bf",
+				"backend":        "herdr",
+				"seatId":         "87caf6bf",
+				"socketPath":     "/h/herdr.sock",
+				"socketName":     "herdr.sock",
+				"pane":           "wC:p24",
+				"herdrWorkspace": "wC",
+				"engine":         "claude",
+			},
+		},
+		NewInput{Name: "probe-a"},
+	)
+	if placeErr != nil || output.Status != "ok" || choice.Backend != "herdr" || choice.HerdrSocket != "/h/herdr.sock" ||
+		choice.InPlace ||
+		choice.HerdrWorkspace != "wC" {
+		t.Fatalf("new=%+v choice=%+v err=%v", output, choice, placeErr)
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	placements := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.Contains(line, `"msg":"chat.placement"`) {
+			continue
+		}
+		placements++
+		if !strings.Contains(line, `"door":"mcp.new"`) || !strings.Contains(line, `"chosen":"herdr"`) {
+			t.Errorf("placement: %s", line)
+		}
+	}
+	if placements != 1 {
+		t.Fatalf("placement records=%d, want one: %s", placements, raw)
+	}
+}
+
+func TestBirthNewWithoutMetaPlacesInTmux(t *testing.T) {
+	var choice spawn.BackendChoice
+	var placeErr error
+	service := newService("test", &backend{dispatch: func(ctx context.Context, _ []string, _, _ io.Writer) int {
+		choice, placeErr = chat.BirthBackend(ctx, "new-test", "auto")
+		return 0
+	}})
+	_, output, err := service.chatNew(context.Background(), nil, NewInput{Name: "probe-a"})
+	if err != nil || placeErr != nil || output.Status != "ok" || choice.Backend != "tmux" {
+		t.Fatalf("new=%+v choice=%+v err=%v placeErr=%v", output, choice, err, placeErr)
 	}
 }

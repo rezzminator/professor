@@ -150,8 +150,10 @@ func TestRenameHerdrLabelsTheSeatsSoleTab(t *testing.T) {
 			testjail.Fleet(t)
 			renamed := make(chan string, 4)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
-				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
-					return value, code
+				if req.Method != "pane.get" {
+					if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+						return value, code
+					}
 				}
 				if req.Method == "tab.rename" {
 					var label string

@@ -6,6 +6,8 @@ A baseline entry that a wave ADDED (not measured from the old tree) carries its 
 
 - C11 `internal/paths/paths.go`: the legacy `fleet.db` literal (`legacyDBName`, read through `paths.LegacyStateDB` and `paths.LegacyCacheDB`) is how the legacy-database host checks and the create refusal find the old files.
 - C17 `parse`, `render`, `renderheadless`, `resolve` in `internal/claudelaunch/`: Parse/Render/RenderHeadless/Resolve are the names docs/design/engines/claude-launch.md mandates.
+- C17 `internal/tmux/tmux.go` `SocketPath(value string)` parses the socket from a `TMUX` environment value; `internal/paths/paths.go` `SocketPath(socket string) (string, error)` resolves and validates a socket path. The shared name is required by the spec, and these distinct contracts stay in their respective packages.
+- C17 `internal/gather/tmuxprobe.go` `TmuxServerGone(err error)` exports the existing dead-server classifier for identity proof; `internal/kill/tmux.go` `tmuxServerGone(message string)` classifies kill outcomes and remains outside that proof contract.
 - C23 `internal/statusline/cache_window.go`: the statusline writes nothing to stdout but the rendered line, so launch-record failures go to stderr beside the visible `💾⚠` segment marker.
 - C13 `internal/claudelaunch/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C9 keeps the package comment required.
 - C13 `internal/hostfixture/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C9 keeps the package comment required.

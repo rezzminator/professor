@@ -112,7 +112,7 @@ func runChatWithRuntime(
 	case "name":
 		return runChatNameContext(ctx, rest, stdout, stderr, runtime)
 	case "kill":
-		return runChatKillContext(ctx, rest, stdout, stderr, paths.OSEnv{}, runtime)
+		return runChatKillContext(ctx, rest, stdout, stderr, runtime)
 	case "unkill":
 		return runChatUnkillContext(ctx, rest, stdout, stderr, runtime)
 	case "end":

@@ -13,6 +13,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrDeps) int {
@@ -64,7 +65,7 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 func (reporter *herdrReporter) tmuxOrigin() {
 	reporter.tmuxPane = reporter.deps.getenv("TMUX_PANE")
 	if reporter.options.socket == "" {
-		reporter.options.socket, _, _ = strings.Cut(reporter.deps.getenv("TMUX"), ",")
+		reporter.options.socket = tmux.SocketPath(reporter.deps.getenv("TMUX"))
 	}
 }
 

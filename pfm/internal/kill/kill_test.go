@@ -317,13 +317,18 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	}
 
 	socketPath := filepath.Join(jail.tmuxDir, "cc-100-1-1")
+	manager.identifier = killTestIdentity{
+		identity: resolve.Identity{
+			Backend:    "tmux",
+			ID:         claudeID,
+			Engine:     string(pfmengine.Claude),
+			SocketPath: socketPath,
+			SocketName: filepath.Base(socketPath),
+			Pane:       "%3",
+		},
+	}
 	target, err := manager.Kill(ctx, Request{
 		Self: true,
-		Environment: SelfEnvironment{
-			TMUX:            socketPath + ",1,0",
-			TMUXPane:        "%3",
-			ClaudeSessionID: claudeID,
-		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -334,13 +339,18 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	assertKilled(t, database, claudeID, pfmengine.Claude, now.Unix())
 
 	cxSocket := filepath.Join(jail.tmuxDir, "cx-200-1-1")
-	target, err = manager.Kill(ctx, Request{
-		Self: true,
-		Exit: true,
-		Environment: SelfEnvironment{
-			TMUX:     cxSocket + ",2,0",
-			TMUXPane: "%8",
+	manager.identifier = killTestIdentity{
+		identity: resolve.Identity{
+			Backend:    "tmux",
+			ID:         codexID,
+			Engine:     string(pfmengine.Codex),
+			SocketPath: cxSocket,
+			SocketName: filepath.Base(cxSocket),
+			Pane:       "%8",
 		},
+	}
+	target, err = manager.Kill(ctx, Request{
+		Self: true, Exit: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -374,131 +384,6 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 // A Codex session that writes no rollout file — the normal shape of a
 // paginated thread since Codex 0.146.1 — holds no rollout file descriptor,
 // so pid ancestry alone cannot name it. It must still be able to kill ITSELF.
-func TestManagerStoreOnlyCodexSelfKills(t *testing.T) {
-	jail := newKillJail(t)
-	database := jail.open(t)
-	ctx := context.Background()
-
-	threadID := "55555555-5555-4555-8555-555555555555"
-	writeCodexStateThread(
-		t,
-		filepath.Join(jail.codexHome, "state_0.sqlite"),
-		threadID,
-		"/work/store-only",
-		"",
-		1_700_000_000,
-	)
-
-	tmux := &fakeTmux{panePID: 11}
-	proc := &fakeProc{
-		pids:    []int{30},
-		cmdline: map[int][]string{30: {"codex"}},
-		links: map[int][]gather.FDLink{
-			30: {{FD: 3, Target: "/dev/null"}},
-		},
-		stats: map[int]gather.ProcStat{30: {ParentPID: 11}},
-		environ: map[int]map[string]string{
-			30: {resolve.CodexThreadEnv: threadID},
-		},
-	}
-	now := time.Unix(1_700_000_500, 0)
-	manager, err := New(database, Dependencies{
-		ProcFS:  proc,
-		Tmux:    tmux,
-		Spawner: &captureSpawner{},
-		Now:     func() time.Time { return now },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	target, err := manager.Kill(ctx, Request{
-		Self: true,
-		Environment: SelfEnvironment{
-			TMUX:     filepath.Join(jail.tmuxDir, "cx-600-1-1") + ",4,0",
-			TMUXPane: "%9",
-		},
-	})
-	if err != nil {
-		t.Fatalf("store-only Codex self-kill: %v", err)
-	}
-	if target.ID != threadID || target.Engine != pfmengine.Codex {
-		t.Fatalf("store-only Codex target = %#v", target)
-	}
-	// No rollout row exists for this thread — it lives only in Codex's own
-	// state sqlite — so the fleet index cannot name its engine.
-	assertKilled(t, database, threadID, "", now.Unix())
-}
-
-// A paginated thread that wrote a rollout file earlier but no longer holds it
-// open is named by the state store's own rollout_path, not by a file walk.
-func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
-	jail := newKillJail(t)
-	database := jail.open(t)
-	ctx := context.Background()
-
-	threadID := "55555555-5555-4555-8555-555555555555"
-	rolloutID := "66666666-6666-4666-8666-666666666666"
-	rolloutPath := filepath.Join(
-		jail.codexHome,
-		"sessions",
-		"2026",
-		"07",
-		"rollout-2026-07-27T10-00-00-"+rolloutID+".jsonl",
-	)
-	writeCodexStateThread(
-		t,
-		filepath.Join(jail.codexHome, "state_0.sqlite"),
-		threadID,
-		"/work/paginated",
-		rolloutPath,
-		1_700_000_000,
-	)
-
-	now := time.Unix(1_700_000_500, 0)
-	manager, err := New(database, Dependencies{
-		ProcFS: &fakeProc{
-			pids:    []int{30},
-			cmdline: map[int][]string{30: {"codex"}},
-			links: map[int][]gather.FDLink{
-				30: {{FD: 3, Target: "/dev/null"}},
-			},
-			stats: map[int]gather.ProcStat{30: {ParentPID: 11}},
-			environ: map[int]map[string]string{
-				30: {resolve.CodexThreadEnv: threadID},
-			},
-		},
-		Tmux:    &fakeTmux{panePID: 11},
-		Spawner: &captureSpawner{},
-		Now:     func() time.Time { return now },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	target, err := manager.Kill(ctx, Request{
-		Self: true,
-		Environment: SelfEnvironment{
-			TMUX:     filepath.Join(jail.tmuxDir, "cx-700-1-1") + ",5,0",
-			TMUXPane: "%9",
-		},
-	})
-	if err != nil {
-		t.Fatalf("paginated Codex self-kill: %v", err)
-	}
-	if target.ID != rolloutID || target.DataPath != rolloutPath {
-		t.Fatalf(
-			"paginated Codex target = %#v, want id %q from the state store",
-			target,
-			rolloutID,
-		)
-	}
-	assertKilled(t, database, rolloutID, "", now.Unix())
-}
-
-// AdvanceCodexPane is the reconcile step itself: the binding MOVES to
-// whatever the pane's status line shows on every pass, and reports the
-// thread it moved off of so the caller can decide whether that is a clear.
 func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
@@ -545,56 +430,6 @@ func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 	}
 }
 
-func TestManagerClaudeCrumbPrecedenceWritesNullBaseline(t *testing.T) {
-	jail := newKillJail(t)
-	database := jail.open(t)
-	socketName := "cc-300-1-1"
-	paneID := "%5"
-	socketID := "33333333-3333-4333-8333-333333333333"
-	paneIDValue := "44444444-4444-4444-8444-444444444444"
-	writeTestFile(
-		t,
-		filepath.Join(jail.sidDir, socketName),
-		"/jail/"+socketID+".jsonl\n",
-	)
-	writeTestFile(
-		t,
-		filepath.Join(jail.sidDir, socketName+"."+paneID),
-		"/jail/"+paneIDValue+".jsonl\n",
-	)
-	manager, err := New(database, Dependencies{
-		ProcFS:  &fakeProc{},
-		Tmux:    &fakeTmux{},
-		Spawner: &captureSpawner{},
-		Now:     func() time.Time { return time.Unix(25, 0) },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	target, err := manager.Kill(context.Background(), Request{
-		Self: true,
-		Environment: SelfEnvironment{
-			TMUX:     filepath.Join(jail.tmuxDir, socketName) + ",1,0",
-			TMUXPane: paneID,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if target.ID != paneIDValue {
-		t.Fatalf("crumb selected %q, want pane crumb %q", target.ID, paneIDValue)
-	}
-	killed, found, err := database.Killed(context.Background(), paneIDValue)
-	if err != nil || !found {
-		t.Fatalf("Killed() found=%v err=%v", found, err)
-	}
-	if killed.BaselinePrompts != nil {
-		t.Fatalf("baseline = %v, want an explicit kill to stay permanent", *killed.BaselinePrompts)
-	}
-}
-
-// A kill is permanent: new prompts on the transcript never bring the chat
-// back, and only an explicit unkill does.
 func TestKilledChatStaysKilledAsItGrowsUntilUnkill(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
@@ -1345,5 +1180,82 @@ func TestKillingAnUnknownIDStillFailsWithoutAnEngine(t *testing.T) {
 	}
 	if _, found, err := database.Killed(ctx, "no-such-chat"); err != nil || found {
 		t.Fatalf("Killed() found = %v, error = %v; want nothing recorded", found, err)
+	}
+}
+
+type killTestIdentity struct {
+	identity resolve.Identity
+	err      error
+}
+
+func (i killTestIdentity) Identify(context.Context) (resolve.Identity, error) {
+	return i.identity, i.err
+}
+
+func TestKillSelfEnrichesAProvenPaneFromItsSeat(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	ctx := context.Background()
+	const id = "c1111111-1111-4111-8111-111111111111"
+	socket := filepath.Join(jail.tmuxDir, "cc-100-1-1")
+	if err := database.Shared().
+		PutSeat(ctx, fleetdb.Seat{SeatID: "cc-100-1-1", SessionID: id, Engine: string(pfmengine.Claude), Backend: "tmux", TmuxSocket: socket, TmuxPane: "%3", State: "live"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(
+		database,
+		Dependencies{
+			Spawner: &captureSpawner{},
+			Tmux:    &fakeTmux{},
+			Identifier: killTestIdentity{
+				identity: resolve.Identity{
+					Backend:    "tmux",
+					SocketPath: socket,
+					SocketName: filepath.Base(socket),
+					Pane:       "%3",
+					Engine:     string(pfmengine.Claude),
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := manager.Kill(ctx, Request{Self: true})
+	if err != nil || target.ID != id || target.SocketPath != socket {
+		t.Fatalf("kill self=%+v err=%v", target, err)
+	}
+}
+
+func TestKillKnownClaudeSelfNeedsNoFleetRow(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	const id = "c1111111-1111-4111-8111-111111111111"
+	manager, err := New(
+		database,
+		Dependencies{
+			Spawner: &captureSpawner{},
+			Tmux:    &fakeTmux{},
+			Identifier: killTestIdentity{
+				identity: resolve.Identity{
+					Backend:    "tmux",
+					ID:         id,
+					Engine:     string(pfmengine.Claude),
+					SocketPath: filepath.Join(jail.tmuxDir, "cc-100-1-1"),
+					SocketName: "cc-100-1-1",
+					Pane:       "%3",
+				},
+			},
+			ResolveTarget: func(context.Context, resolve.Identity) (Target, error) {
+				return Target{}, errors.New("a known Claude caller needs no fleet row")
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := manager.Kill(context.Background(), Request{Self: true})
+	if err != nil || target.ID != id {
+		t.Fatalf("known Claude self=%+v err=%v", target, err)
 	}
 }

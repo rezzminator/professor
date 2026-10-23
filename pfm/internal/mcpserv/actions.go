@@ -111,16 +111,22 @@ func (service *Service) chatNew(
 	if err := naming.ValidateLabel(input.Name); err != nil {
 		return nil, ActionOutput{}, err
 	}
-	ctx = spawn.WithBackendEnvironment(ctx, nil)
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
-	if !caller.valid && caller.present {
-		if refused, detail := service.selfCallerRefusal(caller); refused {
-			return nil, ActionOutput{}, fmt.Errorf("new: resolve caller: %s", detail)
-		}
+	callerErr := caller.err
+	if !caller.present {
+		callerErr = resolve.ErrNotInChat
 	}
+	if !caller.valid && caller.present && !errors.Is(callerErr, resolve.ErrNotRegistered) && !caller.absent {
+		return nil, ActionOutput{}, fmt.Errorf("new: resolve caller: %s", caller.detail)
+	}
+	if errors.Is(callerErr, resolve.ErrNotRegistered) &&
+		(caller.identity.Backend != spawn.BackendHerdr || !filepath.IsAbs(caller.identity.SocketPath) || caller.identity.Pane == "" || caller.identity.HerdrWorkspace == "") {
+		return nil, ActionOutput{}, fmt.Errorf("new: resolve caller: %s", caller.detail)
+	}
+	ctx = chat.WithCaller(ctx, "mcp.new", caller.identity, callerErr)
 	var self headless.Chat
 	if caller.valid {
 		self, err = service.resolvedSelf(ctx, caller)
@@ -251,6 +257,12 @@ func (service *Service) chatNew(
 		args = append(args, input.Prompt)
 	}
 	result, output, returnErr = service.cliAction(ctx, args...)
+	if returnErr == nil && output.Code == 0 && errors.Is(callerErr, resolve.ErrNotRegistered) {
+		output.Message = fmt.Sprintf(
+			"caller seat not registered yet; born in a new tab of Herdr workspace %s",
+			caller.identity.HerdrWorkspace,
+		)
+	}
 	if nameClaim.Name != "" && returnErr == nil && output.Code == 0 {
 		if commitErr := nameClaim.Commit(); commitErr != nil {
 			returnErr = fmt.Errorf("new: commit automatic name %s: %w", nameClaim.Name, commitErr)
@@ -274,7 +286,7 @@ func (service *Service) chatOpen(
 ) (*mcp.CallToolResult, ActionOutput, error) {
 	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
-		return nil, ActionOutput{}, err
+		return nil, callerActionFailure(err), err
 	}
 	return service.chatOpenDetached(ctx, target)
 }
@@ -344,7 +356,7 @@ func (service *Service) chatName(
 	}
 	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
-		return nil, ActionOutput{}, err
+		return nil, callerActionFailure(err), err
 	}
 	return service.cliAction(ctx, chatCommand, "name", target, input.Name)
 }
@@ -356,7 +368,7 @@ func (service *Service) chatKill(
 ) (*mcp.CallToolResult, ActionOutput, error) {
 	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
-		return nil, ActionOutput{}, err
+		return nil, callerActionFailure(err), err
 	}
 	args := []string{chatCommand, "kill", target}
 	if input.Exit {
@@ -389,7 +401,8 @@ func (service *Service) chatExit(
 				detail = noAmbientCallerRemedy
 			}
 		}
-		return nil, ActionOutput{}, fmt.Errorf("exit: nothing ended: %s", detail)
+		failure := callerRefusal{status: identityFailureStatus(caller.err), message: "exit: nothing ended: " + detail}
+		return nil, callerActionFailure(failure), failure
 	}
 	self, err := service.resolvedSelf(ctx, caller)
 	if err != nil {
@@ -425,7 +438,7 @@ func (service *Service) chatUnkill(
 ) (*mcp.CallToolResult, ActionOutput, error) {
 	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
-		return nil, ActionOutput{}, err
+		return nil, callerActionFailure(err), err
 	}
 	return service.cliTargetAction(ctx, "unkill", target)
 }
@@ -453,8 +466,9 @@ func (service *Service) chatSave(
 	}
 	needsCaller := !filepath.IsAbs(target) || transcriptPath == "" || !filepath.IsAbs(transcriptPath)
 	if !caller.valid {
-		if refused, detail := service.selfCallerRefusal(caller); needsCaller && refused {
-			return nil, ActionOutput{}, fmt.Errorf("save: resolve caller: %s", detail)
+		if refusal, detail := service.selfCallerRefusal(caller); needsCaller && refusal != "" {
+			failure := callerRefusal{status: refusal, message: "save: resolve caller: " + detail}
+			return nil, callerActionFailure(failure), failure
 		}
 	} else {
 		self, resolveErr := service.resolvedSelf(ctx, caller)
@@ -518,11 +532,11 @@ func (service *Service) cliTargetForRequest(
 	// The present/valid/ambient tri-state is decided in exactly one place —
 	// selfCallerRefusal (server.go) — so this door and every handler that
 	// refuses "self" can never drift apart on what counts as identity.
-	if refused, detail := service.selfCallerRefusal(caller); refused {
+	if refusal, detail := service.selfCallerRefusal(caller); refusal != "" {
 		if !isSelf {
-			return ctx, "", fmt.Errorf("resolve MCP raw pane: %s", detail)
+			return ctx, "", callerRefusal{status: refusal, message: "resolve MCP raw pane: " + detail}
 		}
-		return ctx, "", fmt.Errorf("resolve MCP self: %s", detail)
+		return ctx, "", callerRefusal{status: refusal, message: "resolve MCP self: " + detail}
 	}
 	if !caller.valid {
 		// Not refused and not valid is the stdio server's ambient case: the

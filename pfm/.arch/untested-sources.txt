@@ -36,7 +36,6 @@ internal/engine/codex/capabilities.go
 internal/engine/codex/match.go
 internal/engine/opencode/index.go
 internal/engine/opencode/match.go
-internal/fleet/killmanager.go
 internal/gather/agents.go
 internal/gather/claudeproc.go
 internal/gather/codex_held_root.go
@@ -68,7 +67,6 @@ internal/installer/settings_ownership.go
 internal/kill/doc.go
 internal/kill/lineage.go
 internal/kill/manager.go
-internal/kill/self.go
 internal/kill/spawn.go
 internal/kill/types.go
 internal/mcpserv/types.go

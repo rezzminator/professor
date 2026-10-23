@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // newIssuesTestService builds a Service with an isolated shared database and
@@ -322,5 +323,42 @@ func TestIssueInputCarriesNoReporterIdentityField(t *testing.T) {
 			names,
 			want,
 		)
+	}
+}
+
+func TestIssueReporterKeepsCallerLookupFailureDistinct(t *testing.T) {
+	for _, source := range []string{"proxy", "ambient"} {
+		t.Run(source, func(t *testing.T) {
+			service := newIssuesTestService(t)
+			var request *mcp.CallToolRequest
+			if source == "proxy" {
+				request = &mcp.CallToolRequest{
+					Params: &mcp.CallToolParamsRaw{
+						Meta: mcp.Meta{
+							"pfmProxy": map[string]any{
+								"v":     1,
+								"error": map[string]any{"kind": "failed", "message": "Herdr caller read failed"},
+							},
+						},
+					},
+				}
+			} else {
+				service.backend.allowAmbientIdentity = true
+				t.Setenv("PATH", t.TempDir())
+				t.Setenv("TMUX", "/tmp/tmux-unavailable/cc-caller,1,0")
+				t.Setenv("TMUX_PANE", "%1")
+				t.Setenv("HERDR_SOCKET_PATH", "")
+				t.Setenv("HERDR_PANE_ID", "")
+				t.Setenv(resolve.CodexThreadEnv, "")
+			}
+			ctx, recorder := obs.Test(t)
+			reporter := service.issueReporter(ctx, request)
+			if reporter.Session != reporterLookupFailed {
+				t.Fatalf("%s failed lookup reporter=%+v, want %s", source, reporter, reporterLookupFailed)
+			}
+			if !strings.Contains(recorder.Raw(), `"msg":"mcp.caller"`) {
+				t.Fatalf("failed lookup not logged: %s", recorder.Raw())
+			}
+		})
 	}
 }

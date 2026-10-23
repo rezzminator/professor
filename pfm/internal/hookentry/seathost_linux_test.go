@@ -762,7 +762,9 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 						if err != nil {
 							continue
 						}
-						if len(argv) != 4 || argv[1] != "internal" || argv[2] != "seat-host" {
+						host := len(argv) == 4 && argv[1] == "internal" && argv[2] == "seat-host"
+						launch := len(argv) == 2 && argv[1] == "-test.run=^TestSeatHostPTY$"
+						if !host && !launch {
 							continue
 						}
 						env, err := proc.Environ(pid)
@@ -776,8 +778,11 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 						break
 					}
 					result = map[string]any{
-						"type":         "pane_process_info",
-						"process_info": map[string]any{"pane_id": pane, "shell_pid": shell},
+						"type": "pane_process_info",
+						"process_info": map[string]any{
+							"pane_id": pane, "shell_pid": shell,
+							"foreground_processes": []any{map[string]any{"pid": shell}},
+						},
 					}
 				}
 

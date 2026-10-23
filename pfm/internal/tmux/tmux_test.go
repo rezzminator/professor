@@ -124,3 +124,16 @@ func TestCouldNotRunClassifiesHostfixtureNoTmuxsLookPathError(t *testing.T) {
 		t.Fatalf("CouldNotRun(%v) = false, want true for NoTmux's scripted ENOENT", err)
 	}
 }
+
+func TestSocketPath(t *testing.T) {
+	for _, tc := range []struct{ value, want string }{
+		{"/tmp/tmux-1000/cc-1,4242,0", "/tmp/tmux-1000/cc-1"},
+		{"", ""},
+		{",4242,0", ""},
+		{"/tmp/tmux-1000/cc-1", "/tmp/tmux-1000/cc-1"},
+	} {
+		if got := SocketPath(tc.value); got != tc.want {
+			t.Errorf("SocketPath(%q)=%q, want %q", tc.value, got, tc.want)
+		}
+	}
+}

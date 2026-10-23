@@ -6,18 +6,25 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 var (
 	exitCloseTerminals = kill.CloseTerminals
-	exitCloseEnv       = paths.OSEnv{}.Get
-	exitCloseInFlight  = reload.InFlight
+	exitCloseIdentify  = func(ctx context.Context) (resolve.Identity, error) {
+		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+		if err != nil {
+			return resolve.Identity{}, err
+		}
+		return identifier.Identify(ctx)
+	}
+	exitCloseInFlight = reload.InFlight
 )
 
 // ExitClose closes the terminal viewport after a human-requested Claude exit.
@@ -33,19 +40,16 @@ func ExitClose(stdin io.Reader, stderr io.Writer) int {
 	if hook.Event != "SessionEnd" || hook.Reason != "prompt_input_exit" {
 		return 0
 	}
-	socketPath, _, found := strings.Cut(exitCloseEnv("TMUX"), ",")
-	if !found || socketPath == "" {
+	identity, err := exitCloseIdentify(context.Background())
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal exit-close: left open — %v\n", err)
 		return 0
 	}
+	if identity.Backend != spawn.BackendTmux {
+		return 0
+	}
+	socketPath, pane := identity.SocketPath, identity.Pane
 	if _, fleet := pfmengine.FromSocket(filepath.Base(socketPath)); !fleet {
-		return 0
-	}
-	pane := exitCloseEnv("TMUX_PANE")
-	if pane == "" {
-		fmt.Fprintln(
-			stderr,
-			"pfm internal exit-close: left open — TMUX_PANE unset, cannot tell a reload's /exit from a human's",
-		)
 		return 0
 	}
 	resolved, err := paths.Resolve()

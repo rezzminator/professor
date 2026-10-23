@@ -15,31 +15,38 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
-// BirthBackend adapts a verified request-local caller to the backend selector.
-func BirthBackend(ctx context.Context, requested string, env paths.Env) (spawn.BackendChoice, error) {
-	var requester *fleetdb.Seat
-	if self, ok := ScopedSelf(ctx); ok {
-		backend := self.Backend
-		if backend == "" {
-			backend = spawn.BackendTmux
+type callerKey struct{}
+
+type birthCaller struct {
+	door     string
+	identity resolve.Identity
+	err      error
+}
+
+// WithCaller carries a request's caller, including a failed lookup, to its birth.
+func WithCaller(ctx context.Context, door string, identity resolve.Identity, err error) context.Context {
+	return context.WithValue(ctx, callerKey{}, birthCaller{door: door, identity: identity, err: err})
+}
+
+// BirthBackend obtains the request caller or identifies the local process, then places once.
+func BirthBackend(ctx context.Context, door, requested string) (spawn.BackendChoice, error) {
+	caller, carried := ctx.Value(callerKey{}).(birthCaller)
+	if !carried {
+		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(nil)})
+		if err != nil {
+			caller.err = err
+		} else {
+			caller.identity, caller.err = identifier.Identify(ctx)
 		}
-		requester = &fleetdb.Seat{
-			Backend:        backend,
-			HerdrSocket:    self.Socket,
-			HerdrPane:      self.Pane,
-			HerdrWorkspace: self.HerdrWorkspace,
-		}
+	} else if caller.door != "" {
+		door = caller.door
 	}
-	var environ []string
-	for _, key := range []string{"TMUX", "HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"} {
-		environ = append(environ, key+"="+env.Get(key))
-	}
-	return spawn.ChooseBackend(ctx, requested, spawn.BackendEnvironment(ctx, environ), requester)
+	return spawn.Place(ctx, door, requested, caller.identity, caller.err)
 }
 
 // BirthHerdr creates and reports a native seat without fabricating a tmux handle.
@@ -226,4 +233,8 @@ func nativeBirthTarget(
 	}
 	// No transcript yet is a live startup seat, not an absent conversation.
 	return target, true, nil
+}
+
+func nativeLocation(seat fleetdb.Seat) string {
+	return fmt.Sprintf("%s lives in Herdr pane %s (%s)", seat.Name, seat.HerdrPane, seat.HerdrSocket)
 }

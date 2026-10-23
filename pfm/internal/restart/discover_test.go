@@ -13,6 +13,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	herdrpkg "github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -166,6 +167,12 @@ func TestDryRunNamesTheWorkerARealRunStarts(t *testing.T) {
 // directly in a Herdr pane (no TMUX), the restart still ends that chat last,
 // found by the --self identity's Herdr socket and pane.
 func TestAHerdrLaunchingChatEndsLastOfTheChats(t *testing.T) {
+	original := restartIdentify
+	t.Cleanup(func() { restartIdentify = original })
+	restartIdentify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{Backend: "herdr", SocketPath: "/run/herdr.sock", Pane: "w1:p2"}, nil
+	}
+
 	t.Setenv("TMUX", "")
 	t.Setenv(herdrpkg.EnvMarker, "1")
 	t.Setenv(herdrpkg.EnvSocket, "/run/herdr.sock")
@@ -182,7 +189,11 @@ func TestAHerdrLaunchingChatEndsLastOfTheChats(t *testing.T) {
 		{Engine: pfmengine.Codex, Name: "builder", ID: "sess-build", Socket: "pfm-cx-builder", Pane: "%1"},
 	}}
 	dependencies := testDeps(t, &hostRunner{}, newKernel(), fleet)
-	dependencies.LaunchedFrom = launchingChat()
+	var identifyErr error
+	dependencies.LaunchedFrom, identifyErr = launchingChat()
+	if identifyErr != nil {
+		t.Fatal(identifyErr)
+	}
 	plan := BuildPlan(context.Background(), dependencies)
 	var chats []string
 	for index := range plan.Units {

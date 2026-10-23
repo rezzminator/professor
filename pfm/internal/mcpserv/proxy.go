@@ -18,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -44,7 +45,7 @@ type stdioProxy struct {
 	endpoint                string
 	sidDir                  string
 	warnings                io.Writer
-	identity                *ProxyIdentity
+	identify                func(context.Context) (resolve.Identity, error)
 	client                  *http.Client
 	clock                   clock.Clock
 	retryWindow             time.Duration
@@ -106,41 +107,24 @@ func newStdioProxy(ctx context.Context, address string, warnings io.Writer) *std
 		requests:     make(map[string]*proxyRequestState),
 		requestTails: make(map[string]*proxyRequestState),
 	}
-	identifier, err := resolve.NewWhoami(proxyWhoami)
-	if err != nil {
-		proxy.warn("build caller identity resolver: %v; forwarding without _meta.pfmProxy", err)
-		return proxy
+	proxy.identify = func(ctx context.Context) (resolve.Identity, error) {
+		dependencies := proxyWhoami
+		if dependencies.CodexSeats == nil {
+			dependencies.CodexSeats = chat.CodexSeats(nil)
+		}
+		identifier, err := resolve.NewWhoami(dependencies)
+		if err != nil {
+			return resolve.Identity{}, fmt.Errorf("build caller identity resolver: %w", err)
+		}
+		return identifier.Identify(ctx)
 	}
-	identity, err := identifier.Identify(ctx)
+	resolved, err := paths.Resolve()
 	if err != nil {
-		proxy.warn("resolve caller identity: %v; forwarding without _meta.pfmProxy", err)
-		return proxy
-	}
-	resolved, resolveErr := paths.Resolve()
-	if resolveErr == nil {
+		proxy.warn("resolve caller transcript paths: %v", err)
+	} else {
 		proxy.sidDir = resolved.SIDDir
 	}
-	if identity.ID == "" {
-		if resolveErr != nil {
-			proxy.warn("resolve caller transcript paths: %v; forwarding seat without transcript id", resolveErr)
-		} else {
-			id, _, crumbErr := reload.SessionFromCrumb(
-				resolved.SIDDir,
-				identity.SocketName,
-				identity.Pane,
-			)
-			if crumbErr != nil {
-				proxy.warn("resolve caller transcript crumb: %v; forwarding seat without transcript id", crumbErr)
-			} else {
-				identity.ID = id
-			}
-		}
-	}
-	proxy.identity = &ProxyIdentity{
-		Version: ProxyWireVersion, Session: identity.Session, SocketPath: identity.SocketPath,
-		SocketName: identity.SocketName, Pane: identity.Pane, Engine: identity.Engine,
-		ID: identity.ID, Source: identity.Source,
-	}
+
 	return proxy
 }
 
@@ -328,17 +312,37 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 		proxy.storeHandshake(frame.Method, raw)
 	}
 	forwarded := raw
-	if frame.Method == "tools/call" && proxy.identity != nil {
-		identity := *proxy.identity
+	if frame.Method == "tools/call" {
+		resolved, identifyErr := proxy.identify(ctx)
+		identity := ProxyIdentity{
+			Version:        ProxyWireVersion,
+			Session:        resolved.Session,
+			Backend:        resolved.Backend,
+			SeatID:         resolved.SeatID,
+			HerdrWorkspace: resolved.HerdrWorkspace,
+			SocketPath:     resolved.SocketPath,
+			SocketName:     resolved.SocketName,
+			Pane:           resolved.Pane,
+			Engine:         resolved.Engine,
+			ID:             resolved.ID,
+			Source:         resolved.Source,
+		}
+		if identifyErr != nil {
+			kind := proxyErrorKind(identifyErr)
+			if kind != statusNotRegistered {
+				identity = ProxyIdentity{Version: ProxyWireVersion}
+			}
+			identity.Error = &ProxyIdentityError{Kind: kind, Message: identifyErr.Error()}
+		}
 		explicitThreadID, err := proxyCallHasThreadID(raw)
 		if err != nil {
 			proxy.answerFailure(output, frame.ID, fmt.Errorf("inspect caller thread metadata: %w", err))
 			return
 		}
-		// Only a chat tool acts on the caller's current transcript; every
-		// other call carries the identity resolved at start.
+		// Claude may change transcripts while keeping its seat.
 		engine, engineErr := pfmengine.Parse(identity.Engine)
-		if !explicitThreadID && proxy.isChatToolCall(frame) && engineErr == nil && engine == pfmengine.Claude {
+		if identifyErr == nil && !explicitThreadID && proxy.isChatToolCall(frame) && engineErr == nil &&
+			engine == pfmengine.Claude {
 			if !filepath.IsAbs(proxy.sidDir) {
 				proxy.answerFailure(
 					output,

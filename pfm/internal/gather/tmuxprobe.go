@@ -63,11 +63,11 @@ func optionUnset(err error, name string) bool {
 	return false
 }
 
-// serverGone reads tmux's own words for a socket with nothing behind it. The
+// TmuxServerGone reads tmux's own words for a socket with nothing behind it. The
 // exit status alone cannot say it — tmux exits 1 for every failure and writes
 // the reason to stderr, which exec keeps on the ExitError rather than in the
 // error message.
-func serverGone(err error) bool {
+func TmuxServerGone(err error) bool {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) {
 		return false
@@ -212,7 +212,7 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 			// Both probes agree there is nothing behind the socket: say so in a
 			// form the caller can classify, since the bare ExitError reads only
 			// "exit status 1".
-			if serverGone(err) && serverGone(legacyErr) {
+			if TmuxServerGone(err) && TmuxServerGone(legacyErr) {
 				return nil, fmt.Errorf("%w: %s", ErrServerGone, socket)
 			}
 			if serverEmpty(err) && serverEmpty(legacyErr) {
@@ -327,7 +327,7 @@ func parseLegacyPaneOutput(socket string, output []byte) ([]ProbePane, error) {
 func (tmux TmuxProbe) ServerPID(ctx context.Context, socket string) (int, error) {
 	output, err := tmux.probeCommand(ctx, socket, "display-message", "-p", "#{pid}").Output()
 	if err != nil {
-		if serverGone(err) {
+		if TmuxServerGone(err) {
 			return 0, fmt.Errorf("read tmux server pid on %s: %w", socket, ErrServerGone)
 		}
 		return 0, fmt.Errorf("read tmux server pid on %s: %w", socket, withStderr(err))
@@ -460,7 +460,7 @@ func (tmux TmuxProbe) ShowGlobalOption(
 	command := tmux.probeCommand(ctx, socket, "show", "-gv", name)
 	output, err := command.Output()
 	if err != nil {
-		if serverGone(err) {
+		if TmuxServerGone(err) {
 			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrServerGone)
 		}
 		if optionUnset(err, name) {

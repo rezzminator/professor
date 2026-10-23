@@ -2,6 +2,7 @@ package mcpserv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -31,6 +32,7 @@ const (
 	maxCaptureBytes     = 4 << 20
 	statusNotFound      = "not_found"
 	statusAmbiguous     = "ambiguous"
+	statusNotRegistered = "not_registered"
 	// statusDead is the answer for a target that RESOLVED and then could not
 	// be driven or read — pfmcall.CodeDead. It is deliberately not
 	// statusNotFound: a chat that exists and whose pane vanished mid-call is
@@ -285,17 +287,17 @@ const noAmbientCallerRemedy = "MCP request has no _meta.threadId, and this " +
 	"that process IS the chat. A Codex chat should resolve automatically; " +
 	"if it does not, its MCP client is not attaching _meta.threadId to this call."
 
-func (service *Service) selfCallerRefusal(caller callerIdentity) (bool, string) {
+func (service *Service) selfCallerRefusal(caller callerIdentity) (string, string) {
 	if caller.valid {
-		return false, ""
+		return "", ""
 	}
 	if caller.present {
-		return true, caller.detail
+		return identityFailureStatus(caller.err), caller.detail
 	}
 	if !service.backend.allowAmbientIdentity {
-		return true, noAmbientCallerRemedy
+		return statusNotFound, noAmbientCallerRemedy
 	}
-	return false, ""
+	return "", ""
 }
 
 // callerForRequest binds a valid Codex _meta.threadId to a fresh call
@@ -352,11 +354,12 @@ func (service *Service) chatKeys(
 	if err != nil {
 		return nil, KeysOutput{}, err
 	}
-	if refused, _ := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
+	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
 		return nil, KeysOutput{
-			Status: statusNotFound,
-			Code:   pfmcall.CodeUnknown,
-			Keys:   append([]string(nil), input.Keys...),
+			Status:  refusal,
+			Message: detail,
+			Code:    pfmcall.CodeUnknown,
+			Keys:    append([]string(nil), input.Keys...),
 		}, nil
 	}
 	target, code, detail, err := callEngine.Resolve(ctx, input.Target)
@@ -461,8 +464,8 @@ func (service *Service) chatResolve(
 	if err != nil {
 		return nil, ResolveOutput{}, err
 	}
-	if refused, detail := service.selfCallerRefusal(caller); relative && refused {
-		return nil, ResolveOutput{Status: statusNotFound, Code: 1, Candidates: detail}, nil
+	if refusal, detail := service.selfCallerRefusal(caller); relative && refusal != "" {
+		return nil, ResolveOutput{Status: refusal, Code: 1, Candidates: detail}, nil
 	}
 	type kindResolver interface {
 		ResolveKind(context.Context, string, resolve.Kind, string) (pfmcall.Target, int, string, error)
@@ -507,9 +510,9 @@ func (service *Service) chatCall(
 	if err != nil {
 		return nil, CallOutput{}, err
 	}
-	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
+	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
 		return nil, CallOutput{
-			Status: statusNotFound, Code: pfmcall.CodeUnknown, Message: detail,
+			Status: refusal, Code: pfmcall.CodeUnknown, Message: detail,
 		}, nil
 	}
 	result, err := callEngine.Call(ctx, pfmcall.Request{
@@ -577,11 +580,11 @@ func (service *Service) chatWhoami(
 ) (*mcp.CallToolResult, WhoamiOutput, error) {
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
-		return nil, WhoamiOutput{}, err
+		return nil, whoamiFailure(resolve.Identity{}, err, err.Error()), nil
 	}
 	if caller.present {
 		if !caller.valid {
-			return nil, WhoamiOutput{Status: statusNotFound, Message: caller.detail}, nil
+			return nil, whoamiFailure(caller.identity, caller.err, caller.detail), nil
 		}
 		identity := caller.identity
 		return nil, WhoamiOutput{
@@ -602,19 +605,13 @@ func (service *Service) chatWhoami(
 			Message: noAmbientCallerRemedy,
 		}, nil
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: service.backend.codexSeats})
 	if err != nil {
-		return nil, WhoamiOutput{}, err
+		return nil, whoamiFailure(resolve.Identity{}, err, err.Error()), nil
 	}
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
-		return nil, WhoamiOutput{
-			Status:  statusNotFound,
-			Engine:  identity.Engine,
-			ID:      identity.ID,
-			Source:  identity.Source,
-			Message: err.Error(),
-		}, nil
+		return nil, whoamiFailure(identity, err, err.Error()), nil
 	}
 	return nil, WhoamiOutput{
 		Status:     "ok",
@@ -657,8 +654,8 @@ func (service *Service) chatCapture(
 	if err != nil {
 		return nil, CaptureOutput{}, err
 	}
-	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
-		return nil, CaptureOutput{Status: statusNotFound, Code: pfmcall.CodeUnknown, Message: detail}, nil
+	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
+		return nil, CaptureOutput{Status: refusal, Code: pfmcall.CodeUnknown, Message: detail}, nil
 	}
 	target, text, code, detail, err := callEngine.Capture(
 		ctx,
@@ -721,4 +718,43 @@ func tailBytes(text string, budget int) string {
 		cut++
 	}
 	return text[cut:]
+}
+
+func identityFailureStatus(err error) string {
+	switch {
+	case errors.Is(err, resolve.ErrNotRegistered):
+		return statusNotRegistered
+	case errors.Is(err, resolve.ErrAmbiguous):
+		return statusAmbiguous
+	case err == nil || errors.Is(err, resolve.ErrNotInChat):
+		return statusNotFound
+	default:
+		return statusError
+	}
+}
+
+func whoamiFailure(identity resolve.Identity, err error, message string) WhoamiOutput {
+	return WhoamiOutput{
+		Status:     identityFailureStatus(err),
+		SocketPath: identity.SocketPath,
+		SocketName: identity.SocketName,
+		Pane:       identity.Pane,
+		Engine:     identity.Engine,
+		ID:         identity.ID,
+		Source:     identity.Source,
+		Message:    message,
+	}
+}
+
+type callerRefusal struct{ status, message string }
+
+func (refusal callerRefusal) Error() string { return refusal.message }
+
+func callerActionFailure(err error) ActionOutput {
+	status := statusError
+	var refusal callerRefusal
+	if errors.As(err, &refusal) {
+		status = refusal.status
+	}
+	return ActionOutput{Status: status, Code: 1, Message: err.Error()}
 }

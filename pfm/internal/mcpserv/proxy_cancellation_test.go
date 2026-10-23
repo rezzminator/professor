@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 type proxyCancellationClock struct {
@@ -35,7 +36,7 @@ func TestStdioProxyCancellationStopsUndeliveredRetry(t *testing.T) {
 	var attempts atomic.Int32
 	var mutations atomic.Int32
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.retryDelay = 200 * time.Millisecond
 	proxy.retryWindow = time.Second
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
@@ -78,7 +79,7 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 	var attempts atomic.Int32
 	var mutations atomic.Int32
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.clock = testClock
 	proxy.retryDelay = time.Second
 	proxy.retryWindow = time.Minute
@@ -164,7 +165,7 @@ func TestStdioProxyReusesCancelledStartedRequestID(t *testing.T) {
 	t.Cleanup(release)
 	var calls atomic.Int32
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.sessionID = "session-current"
 	proxy.protocol = "2025-06-18"
 	proxy.sessionGeneration = 7
@@ -247,7 +248,7 @@ func TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe(t *testing.T)
 	DaemonProbeTimeoutOverride = 30 * time.Second
 	t.Cleanup(func() { DaemonProbeTimeoutOverride = previous })
 	proxy := newStdioProxy(context.Background(), listener.Addr().String(), io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
 	proxy.retryDelay = time.Millisecond
 	proxy.retryWindow = time.Minute

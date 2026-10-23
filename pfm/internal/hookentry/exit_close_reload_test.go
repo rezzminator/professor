@@ -10,11 +10,12 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func TestRunExitCloseLeavesTheTerminalWhileAReloadIsInFlight(t *testing.T) {
-	original, originalEnv := exitCloseTerminals, exitCloseEnv
-	t.Cleanup(func() { exitCloseTerminals, exitCloseEnv = original, originalEnv })
+	original, originalEnv := exitCloseTerminals, exitCloseIdentify
+	t.Cleanup(func() { exitCloseTerminals, exitCloseIdentify = original, originalEnv })
 	home := t.TempDir()
 	sidDir := filepath.Join(home, "sid")
 	t.Setenv("PFM_HOME", home)
@@ -37,16 +38,10 @@ func TestRunExitCloseLeavesTheTerminalWhileAReloadIsInFlight(t *testing.T) {
 		called = true
 		return nil, nil, nil
 	}
-	exitCloseEnv = func(key string) string {
-		switch key {
-		case "TMUX":
-			return "/tmp/tmux-501/" + socket + ",9999,0"
-		case "TMUX_PANE":
-			return pane
-		default:
-			return ""
-		}
+	exitCloseIdentify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{Backend: "tmux", SocketPath: "/tmp/tmux-501/" + socket, Pane: pane}, nil
 	}
+
 	payload := `{"hook_event_name":"SessionEnd","reason":"prompt_input_exit"}`
 	var stderr bytes.Buffer
 	if code := ExitClose(strings.NewReader(payload), &stderr); code != 0 {

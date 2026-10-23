@@ -57,7 +57,7 @@ func TestLadderOrderAndFailureKinds(t *testing.T) {
 		{
 			name: "self no seat", target: "self", wantCode: CodeUnknown,
 			wantDetail: "self target has no live tmux seat",
-			ladder:     Ladder{Self: ladderIdentity{err: ErrNoTmux}},
+			ladder:     Ladder{Self: ladderIdentity{err: ErrNotInChat}},
 		},
 		{
 			name: "self probe broke", target: "self", wantCode: CodeUndelivered, wantErr: true,
@@ -65,9 +65,7 @@ func TestLadderOrderAndFailureKinds(t *testing.T) {
 		},
 		{
 			name: "raw pane", target: "%7", wantPane: "%7",
-			ladder: Ladder{Env: &paths.MapEnv{Values: map[string]string{
-				"CHAT_CALL_SOCKET": "/tmp/cx-seat",
-			}}},
+			ladder: Ladder{Self: ladderIdentity{identity: Identity{Backend: "tmux", SocketPath: "/tmp/cx-seat"}}},
 		},
 		{
 			name: "raw pane no socket", target: "%7", wantCode: CodeUnknown,
@@ -206,20 +204,14 @@ func TestLadderRawPaneSocketScopeAndAmbientFallback(t *testing.T) {
 		}
 	})
 
-	t.Run("ambient socket precedence remains unchanged", func(t *testing.T) {
-		seat, code, detail, err := (Ladder{Env: ambience}).Resolve(
-			context.Background(), "%2", LadderOptions{},
+	t.Run("ambient raw panes use caller identity", func(t *testing.T) {
+		seat, code, detail, err := (Ladder{Env: ambience, Self: ladderIdentity{identity: Identity{Backend: "tmux", SocketPath: "/tmp/cx-proven"}}}).Resolve(
+			context.Background(),
+			"%2",
+			LadderOptions{},
 		)
-		if err != nil || code != 0 || detail != "" || seat.SocketPath != "/tmp/cx-inject" || seat.Pane != "%2" {
-			t.Fatalf("ambient raw pane = seat=%+v code=%d detail=%q err=%v", seat, code, detail, err)
-		}
-
-		ambience.Values["CHAT_CALL_SOCKET"] = ""
-		seat, code, detail, err = (Ladder{Env: ambience}).Resolve(
-			context.Background(), "%3", LadderOptions{},
-		)
-		if err != nil || code != 0 || detail != "" || seat.SocketPath != "/tmp/cx-tmux" || seat.Pane != "%3" {
-			t.Fatalf("ambient TMUX raw pane = seat=%+v code=%d detail=%q err=%v", seat, code, detail, err)
+		if err != nil || code != 0 || detail != "" || seat.SocketPath != "/tmp/cx-proven" {
+			t.Fatalf("raw pane: %+v %d %q %v", seat, code, detail, err)
 		}
 	})
 }

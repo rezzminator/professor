@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -12,6 +11,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // PrimaryAccount resolves the fleet DB's meta row first, then the
@@ -61,10 +61,7 @@ func CurrentSocket() string {
 
 // CurrentSocketFrom applies the TMUX parsing rule over an injected environment.
 func CurrentSocketFrom(env paths.Env) string {
-	value := env.Get("TMUX")
-	if comma := strings.IndexByte(value, ','); comma >= 0 {
-		value = value[:comma]
-	}
+	value := pfmtmux.SocketPath(env.Get("TMUX"))
 	if value == "" {
 		return ""
 	}

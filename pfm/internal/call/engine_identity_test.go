@@ -33,6 +33,7 @@ func TestReviewRawPaneKeepsProxySocket(t *testing.T) {
 
 func TestWithIdentityRawPaneIsolationAndAmbientControl(t *testing.T) {
 	base := newTestEngine(t, "cx-daemon", &fakeTmux{})
+	base.whoami = fakeIdentifier{identity: resolve.Identity{Backend: "tmux", SocketPath: "/tmp/tmux-jail/cx-proven"}}
 	t.Setenv("CHAT_CALL_SOCKET", "/tmp/tmux-jail/cx-daemon-call")
 	t.Setenv("TMUX", "/tmp/tmux-jail/cx-daemon-tmux,3,0")
 
@@ -52,7 +53,7 @@ func TestWithIdentityRawPaneIsolationAndAmbientControl(t *testing.T) {
 	}{
 		{name: "first caller", engine: first, wantSocket: "/tmp/tmux-jail/cx-first"},
 		{name: "second caller", engine: second, wantSocket: "/tmp/tmux-jail/cx-second"},
-		{name: "ambient base", engine: base, wantSocket: "/tmp/tmux-jail/cx-daemon-call"},
+		{name: "ambient base", engine: base, wantSocket: "/tmp/tmux-jail/cx-proven"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			target, code, detail, err := testCase.engine.Resolve(context.Background(), "%2")

@@ -24,10 +24,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -55,7 +55,12 @@ func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	}
 	ctx := context.Background()
 	if *dryRun {
-		dependencies := LiveDeps(runtime, stderr, nil, launchingChat())
+		launched, err := launchingChat()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm restart: identify launcher: %v\n", err)
+			return 1
+		}
+		dependencies := LiveDeps(runtime, stderr, nil, launched)
 		dependencies.DryRun = true
 		plan := BuildPlan(ctx, dependencies)
 		plan.Print(stdout)
@@ -125,16 +130,26 @@ func (address chatAddress) holds(chat headless.Chat) bool {
 // the same caller identity `pfm kill --self` resolves: a chat directly in a
 // Herdr pane by its Herdr socket and pane, a tmux chat by its socket; zero
 // outside every chat.
-func launchingChat() chatAddress {
-	self := kill.Environment(paths.OSEnv{})
-	if self.Native() {
-		return chatAddress{Socket: self.HerdrSocket, Pane: self.HerdrPane}
+var restartIdentify = func(ctx context.Context) (resolve.Identity, error) {
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(nil)})
+	if err != nil {
+		return resolve.Identity{}, err
 	}
-	if self.TMUX == "" {
-		return chatAddress{}
+	return identifier.Identify(ctx)
+}
+
+func launchingChat() (chatAddress, error) {
+	identity, err := restartIdentify(context.Background())
+	if errors.Is(err, resolve.ErrNotInChat) {
+		return chatAddress{}, nil
 	}
-	socket, _, _ := strings.Cut(self.TMUX, ",")
-	return chatAddress{Socket: filepath.Base(socket)}
+	if err != nil {
+		return chatAddress{}, fmt.Errorf("resolve launching chat: %w", err)
+	}
+	if identity.Backend == spawn.BackendHerdr {
+		return chatAddress{Socket: identity.SocketPath, Pane: identity.Pane}, nil
+	}
+	return chatAddress{Socket: filepath.Base(identity.SocketPath)}, nil
 }
 
 // restartWorkerEnv is the worker's environment: this one, minus every
@@ -163,7 +178,12 @@ func launchFront(ctx context.Context, stdout, stderr io.Writer, runtime config.R
 		argv = append(argv, "--config", runtime.Config.Path)
 	}
 	argv = append(argv, "internal", WorkerCommand, "--front", strconv.Itoa(os.Getpid()))
-	if launched := launchingChat(); launched.Socket != "" {
+	launched, err := launchingChat()
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm restart: identify launcher: %v\n", err)
+		return 1
+	}
+	if launched.Socket != "" {
 		argv = append(argv, "--launched-from", launched.Socket)
 		if launched.Pane != "" {
 			argv = append(argv, "--launched-pane", launched.Pane)

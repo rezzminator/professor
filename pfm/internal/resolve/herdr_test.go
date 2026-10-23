@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -23,7 +26,7 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 		pid   int
 		want  bool
 	}{
-		{"history-failed", true, 40, true}, {"history-lost", true, 40, true}, {"history-dead-host", true, 40, true}, {"history-live-host", true, 40, false}, {"live-terminal-ambiguous", true, 40, false}, {"verified", true, 40, true}, {"legacy-live", true, 40, true}, {"legacy-recycled", true, 40, false}, {"saved-host-dead", true, 40, false}, {"saved-host-argv", true, 40, false}, {"saved-host-reused", true, 40, false}, {"moved", true, 40, true}, {"canonical-env", true, 40, true}, {"stale-alias-row", true, 40, true}, {"recycled", true, 40, false}, {"unnamed", true, 40, true}, {"unrelated", true, 88, false}, {"unrecorded", false, 40, false}, {"seatless-unreachable", false, 40, false}, {"seatless-gone", false, 40, false}, {"recorded-probe-failed", true, 40, false}, {"omitted", true, 0, false}, {"empty", true, 0, false},
+		{"own-lost", true, 40, false}, {"stale-tmux", true, 40, true}, {"history-failed", true, 40, true}, {"history-lost", true, 40, true}, {"history-dead-host", true, 40, true}, {"history-live-host", true, 40, false}, {"live-terminal-ambiguous", true, 40, false}, {"verified", true, 40, true}, {"legacy-live", true, 40, true}, {"legacy-recycled", true, 40, false}, {"saved-host-dead", true, 40, false}, {"saved-host-argv", true, 40, false}, {"saved-host-reused", true, 40, false}, {"moved", true, 40, true}, {"canonical-env", true, 40, true}, {"stale-alias-row", true, 40, true}, {"recycled", true, 40, false}, {"unnamed", true, 40, true}, {"unrelated", true, 88, false}, {"unrecorded", false, 40, false}, {"seatless-unreachable", false, 40, false}, {"seatless-gone", false, 40, false}, {"recorded-probe-failed", true, 40, false}, {"omitted", true, 0, false}, {"empty", true, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -122,9 +125,19 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				}
 			}()
 			t.Setenv("TMUX", "")
+			if tc.name == "stale-tmux" {
+				t.Setenv("TMUX", "/tmp/dead,1,0")
+				t.Setenv("TMUX_PANE", "%3")
+			}
 			t.Setenv("TMUX_PANE", "")
+			if tc.name == "stale-tmux" {
+				t.Setenv("TMUX_PANE", "%3")
+			}
 			t.Setenv("HERDR_ENV", "1")
 			t.Setenv("HERDR_SOCKET_PATH", socket)
+			if tc.name == "unrecorded" {
+				t.Setenv(ClaudeSessionEnv, "not-yet-registered")
+			}
 			t.Setenv("HERDR_PANE_ID", "w6:p3")
 			if tc.name == "canonical-env" || strings.HasPrefix(tc.name, "history-") ||
 				tc.name == "live-terminal-ambiguous" {
@@ -141,6 +154,10 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				}
 			})
 			name, session := "REVIEW", "REVIEW"
+			seatState := "live"
+			if tc.name == "own-lost" {
+				seatState = "lost"
+			}
 			if tc.name == "unnamed" {
 				name, session = "", "seat1"
 			}
@@ -156,7 +173,7 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				if err := state.PutSeat(
 					context.Background(),
 					fleetdb.Seat{
-						State:           "live",
+						State:           seatState,
 						SeatID:          "seat1",
 						SessionID:       "sid1",
 						Engine:          "cc",
@@ -219,10 +236,19 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			var namer SessionNamer
+			if tc.name == "stale-tmux" {
+				namer = erroringNamer{err: &exec.ExitError{Stderr: []byte("no server running on /tmp/dead")}}
+			}
+			selfPID := 99
+			if tc.name == "unrecorded" || tc.name == "own-lost" {
+				selfPID = 40
+			}
 			identifier, err := NewWhoami(
 				WhoamiDependencies{
+					Namer:     namer,
 					Processes: fakeProcTree{parents: map[int]int{99: 40, 40: 20, 20: 10, 10: 1}},
-					SelfPID:   99,
+					SelfPID:   selfPID,
 					TmuxDir:   t.TempDir(),
 				},
 			)
@@ -230,6 +256,38 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				t.Fatal(err)
 			}
 			identity, err := identifier.Identify(context.Background())
+			if tc.name == "own-lost" {
+				if !errors.Is(err, ErrNotRegistered) || !strings.Contains(err.Error(), "seat1 is lost") ||
+					!identity.Fronted {
+					t.Fatalf("lost pane identity=%+v err=%v", identity, err)
+				}
+				return
+			}
+			if tc.name == "unrecorded" {
+				if !errors.Is(err, ErrNotRegistered) || identity.Backend != "herdr" || identity.Pane != "w6:p3" ||
+					!identity.Fronted {
+					t.Fatalf("unregistered pane lost location: identity=%+v err=%v", identity, err)
+				}
+				return
+			}
+			if tc.name == "seatless-unreachable" {
+				if err == nil || errors.Is(err, ErrNotInChat) {
+					t.Fatalf("failed read rendered as absence: identity=%+v err=%v", identity, err)
+				}
+				return
+			}
+			if tc.name == "recycled" {
+				if !errors.Is(err, ErrNotRegistered) {
+					t.Fatalf("recycled pane: %+v %v", identity, err)
+				}
+				return
+			}
+			if tc.name == "live-terminal-ambiguous" || tc.name == "history-live-host" {
+				if !errors.Is(err, ErrAmbiguous) {
+					t.Fatalf("owners: identity=%+v err=%v", identity, err)
+				}
+				return
+			}
 			if !tc.want {
 				if tc.name == "omitted" {
 					if err == nil || !strings.Contains(err.Error(), "foreground_processes missing or null") {
@@ -248,7 +306,7 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 					}
 					return
 				}
-				if !errors.Is(err, ErrNoTmux) || !strings.Contains(err.Error(), "nor a pfm Herdr seat") {
+				if !errors.Is(err, ErrNotInChat) {
 					t.Fatalf("identity=%+v err=%v", identity, err)
 				}
 				return
@@ -264,5 +322,63 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				t.Fatalf("canonical row=%+v err=%v", row, e)
 			}
 		})
+	}
+}
+
+func TestHerdrCallerTimeoutIsFailedRead(t *testing.T) {
+	testjail.Fleet(t)
+	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+	identifier, err := NewWhoami(
+		WhoamiDependencies{
+			Environment: &WhoamiEnvironment{HerdrSocket: socket, HerdrPane: "wC:p24"},
+			SelfPID:     4100,
+			Processes:   fakeProcTree{parents: map[int]int{4100: 1}},
+			TmuxDir:     t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err = identifier.Identify(ctx)
+	if err == nil || !strings.Contains(err.Error(), "look up the caller: herdr pane wC:p24:") ||
+		errors.Is(err, ErrNotInChat) ||
+		errors.Is(err, ErrNotRegistered) ||
+		errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("failed read=%v", err)
+	}
+}
+
+func TestHerdrCallerDeadlineWrapsItsCause(t *testing.T) {
+	identifier, err := NewWhoami(
+		WhoamiDependencies{
+			Environment: &WhoamiEnvironment{HerdrSocket: filepath.Join(t.TempDir(), "herdr.sock"), HerdrPane: "wC:p24"},
+			Processes:   fakeProcTree{parents: map[int]int{4100: 1}},
+			SelfPID:     4100,
+			TmuxDir:     t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err = identifier.Identify(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrNotInChat) {
+		t.Fatalf("deadline lost: %v", err)
 	}
 }

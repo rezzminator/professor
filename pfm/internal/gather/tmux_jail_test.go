@@ -261,7 +261,7 @@ func TestServerGoneReadsTmuxOwnWords(t *testing.T) {
 	if err.Error() != "exit status 1" {
 		t.Logf("note: tmux error text is %q", err.Error())
 	}
-	if !serverGone(err) {
+	if !TmuxServerGone(err) {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			t.Fatalf("tmux said %q and serverGone missed it", string(exit.Stderr))

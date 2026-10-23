@@ -1,6 +1,6 @@
 ---
 name: pcm
-description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/**, templates/** or the .codex/ mirror. `audit [scope|all]` reports framework consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI → /pfm; publishing the blueprint → /pfm:release; context budget → /context-meter; theme work → themer.
+description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/**, templates/** or the .codex/ mirror. `audit [scope|all]` reports framework consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI → /pfm; publishing the blueprint → /pfm:release; initial context → /context-audit; theme work → themer.
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 skills: [quality:prompt]
 model: opus
@@ -21,7 +21,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ## System wiring
 
 - `CLAUDE.md`: the orientation file (Vocabulary, Runtime, Rules)
-- `.claude/commands/**/*.md`: slash commands (`/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench` are global)
+- `.claude/commands/**/*.md`: slash commands (`/quality:*`, `/pfm`, `/pfm:workbench` are global)
 - `.claude/agents/*.md`: registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md`: reusable skills, source-fetched per `templates/project/skills/sources.json`, never vendored
 - `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh

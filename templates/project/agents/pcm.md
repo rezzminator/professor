@@ -1,6 +1,6 @@
 ---
 name: pcm
-description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; context budget → /context-meter.
+description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; initial context → /context-audit.
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 skills: [quality:prompt]
 model: opus
@@ -21,7 +21,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ## System wiring
 
 - `CLAUDE.md`: the orientation file (Vocabulary, Runtime, Rules)
-- `.claude/commands/*.md`: project slash commands (`/pcm`, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
+- `.claude/commands/*.md`: project slash commands (`/pcm`, …); machine-global commands (`/flights:*`, `/quality:*`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
 - `.claude/agents/*.md`: root agents (`gitter`, `pcm`) and any `{proj}-{role}` specialist wrappers; machine-global agents live in `~/.claude/agents/`
 - `.claude/commands/{project}-testing-manual.md`: one per project, its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md`: reusable skills

@@ -118,12 +118,6 @@
     "global/engine-sync.json": {
       "curated": true
     },
-    "global/commands/context-audit.md": {
-      "curated": true
-    },
-    "global/commands/context-meter.md": {
-      "curated": true
-    },
     "global/commands/h/gh.md": {
       "curated": true
     },
@@ -176,6 +170,9 @@
       "curated": true
     },
     "global/skills/done-herewith/SKILL.md": {
+      "curated": true
+    },
+    "global/skills/context-audit/SKILL.md": {
       "curated": true
     },
     "global/skills/dude/SKILL.md": {

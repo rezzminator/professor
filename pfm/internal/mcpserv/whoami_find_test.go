@@ -235,3 +235,19 @@ func TestBirthSelfFailureStatuses(t *testing.T) {
 
 	}
 }
+
+func TestWhoamiMalformedCallerIsAnError(t *testing.T) {
+	service := newService("test", &backend{})
+	for name, meta := range map[string]mcp.Meta{
+		"engine": {"pfmProxy": map[string]any{"v": 1, "session": "caller", "engine": "bogus"}},
+		"thread": {"threadId": 42},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: meta}}
+			_, out, err := service.chatWhoami(context.Background(), request, WhoamiInput{})
+			if err != nil || out.Status != statusError || out.Message == "" {
+				t.Fatalf("malformed caller = %+v, %v; want error with detail", out, err)
+			}
+		})
+	}
+}

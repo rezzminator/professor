@@ -224,6 +224,7 @@ func TestHerdrTmuxSeatFailurePreservesBridge(t *testing.T) {
 		{"delete", "end"},
 	} {
 		t.Run(test.failure+"/"+test.event, func(t *testing.T) {
+			t.Parallel()
 			rig := newChatRig(t)
 			rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
 			values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}

@@ -74,8 +74,8 @@ func TmuxServerGone(err error) bool {
 	}
 	stderr := string(exit.Stderr)
 	return strings.Contains(stderr, "no server running") ||
-		strings.Contains(stderr, "error connecting to") ||
-		strings.Contains(stderr, "No such file or directory")
+		strings.Contains(stderr, "error connecting to") &&
+			(strings.Contains(stderr, "No such file or directory") || strings.Contains(stderr, "Connection refused"))
 }
 
 // ErrServerEmpty marks a probe whose server answered but holds no session and

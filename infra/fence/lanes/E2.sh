@@ -534,7 +534,7 @@ if requires E2.01-open-seat; then
   id="$(live_field "$CHAT" 2)"
   # Codex tool shells are served by app-server and carry no TMUX — only
   # CODEX_THREAD_ID names the caller (cmd/pfm/chat_command.go runChatKill →
-  # chat.SeatIdentity). Driven from this shell with exactly that environment.
+  # resolve.Whoami.Identify). Driven from this shell with exactly that environment.
   for alias in self me; do
     out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id" pfm chat kill "$alias" --exit 2>&1)"
     rc=$?

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -85,7 +86,7 @@ func TestProcTreeParentUsesInjectedProcFS(t *testing.T) {
 func (tree fakeProcTree) Environ(pid int) (map[string]string, error) {
 	environment, found := tree.environments[pid]
 	if !found {
-		return nil, errors.New("no environ")
+		return nil, os.ErrNotExist
 	}
 	return environment, nil
 }
@@ -453,5 +454,61 @@ func TestIdentifyMissingTmuxIsFailedRead(t *testing.T) {
 	if !pfmtmux.CouldNotRun(err) || errors.Is(err, ErrNotInChat) || errors.Is(err, ErrNotRegistered) ||
 		errors.Is(err, ErrAmbiguous) {
 		t.Fatalf("missing binary became absence: %v", err)
+	}
+}
+
+func TestIdentifyDistinguishesMissingTmuxServerFromReadFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, stderr string
+		gone         bool
+	}{
+		{"permission denied", "error connecting to /tmp/cc-probe (Permission denied)", false},
+		{"unknown connection failure", "error connecting to /tmp/cc-probe (Resource temporarily unavailable)", false},
+		{"missing socket", "error connecting to /tmp/cc-probe (No such file or directory)", true},
+		{"refused connection", "error connecting to /tmp/cc-probe (Connection refused)", true},
+		{"no server", "no server running on /tmp/cc-probe", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failure := &exec.ExitError{Stderr: []byte(tc.stderr)}
+			identifier, err := NewWhoami(WhoamiDependencies{
+				Environment: &WhoamiEnvironment{TMUX: "/tmp/cc-probe,1,0", TMUXPane: "%3"},
+				Namer:       erroringNamer{err: failure},
+				Processes:   fakeProcTree{parents: map[int]int{4300: 1}},
+				SelfPID:     4300, TmuxDir: t.TempDir(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = identifier.Identify(context.Background())
+			if errors.Is(err, ErrNotInChat) != tc.gone || !tc.gone && !errors.Is(err, failure) {
+				t.Fatalf(
+					"Identify with %q returned %v; want gone=%t and read failures preserved",
+					tc.stderr,
+					err,
+					tc.gone,
+				)
+			}
+		})
+	}
+}
+
+type environmentDeniedTree struct{ fakeProcTree }
+
+func (environmentDeniedTree) Environ(int) (map[string]string, error) {
+	return nil, os.ErrPermission
+}
+
+func TestIdentifyPreservesAncestryEnvironmentReadFailure(t *testing.T) {
+	identifier, err := NewWhoami(WhoamiDependencies{
+		Environment: &WhoamiEnvironment{},
+		Processes:   environmentDeniedTree{fakeProcTree{parents: map[int]int{4300: 1}}},
+		SelfPID:     4300, TmuxDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = identifier.Identify(context.Background())
+	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotInChat) {
+		t.Fatalf("unreadable environment became absence: %v", err)
 	}
 }

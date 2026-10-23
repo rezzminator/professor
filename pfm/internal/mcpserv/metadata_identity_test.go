@@ -492,30 +492,31 @@ func TestMCPMetadataIdentityRefusesMissingUnknownAndMalformedValues(t *testing.T
 	service := metadataIdentityService(t)
 	client := connectInMemory(t, service.Server())
 	tests := []struct {
-		name string
-		meta mcp.Meta
+		name   string
+		meta   mcp.Meta
+		status string
 	}{
-		{name: "missing", meta: nil},
-		{name: "unknown", meta: mcp.Meta{"threadId": "not-a-live-thread"}},
-		{name: "non-string", meta: mcp.Meta{"threadId": 7}},
-		{name: "empty", meta: mcp.Meta{"threadId": ""}},
-		{name: "outer whitespace", meta: mcp.Meta{"threadId": " thread-a "}},
-		{name: "control character", meta: mcp.Meta{"threadId": "thread-a\n"}},
-		{name: "wrong key spelling", meta: mcp.Meta{"thread_id": "thread-a"}},
+		{name: "missing", meta: nil, status: statusNotFound},
+		{name: "unknown", meta: mcp.Meta{"threadId": "not-a-live-thread"}, status: statusNotFound},
+		{name: "non-string", meta: mcp.Meta{"threadId": 7}, status: statusError},
+		{name: "empty", meta: mcp.Meta{"threadId": ""}, status: statusError},
+		{name: "outer whitespace", meta: mcp.Meta{"threadId": " thread-a "}, status: statusError},
+		{name: "control character", meta: mcp.Meta{"threadId": "thread-a\n"}, status: statusError},
+		{name: "wrong key spelling", meta: mcp.Meta{"thread_id": "thread-a"}, status: statusNotFound},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			whoami := callToolWithMeta[WhoamiOutput](
 				t, client.clientSession, "whoami", test.meta, WhoamiInput{},
 			)
-			if whoami.Status != "not_found" || whoami.Session != "" {
-				t.Fatalf("whoami = %+v, want honest not-found", whoami)
+			if whoami.Status != test.status || whoami.Session != "" {
+				t.Fatalf("whoami = %+v, want %s", whoami, test.status)
 			}
 			captured := callToolWithMeta[CaptureOutput](
 				t, client.clientSession, "capture", test.meta, CaptureInput{Target: "self"},
 			)
-			if captured.Status != "not_found" || captured.Code == 0 || captured.Text != "" {
-				t.Fatalf("capture = %+v, want honest not-found", captured)
+			if captured.Status != test.status || captured.Code == 0 || captured.Text != "" {
+				t.Fatalf("capture = %+v, want %s", captured, test.status)
 			}
 			called := callToolWithMeta[CallOutput](
 				t, client.clientSession, "call", test.meta, CallInput{

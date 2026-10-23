@@ -26,7 +26,7 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 		pid   int
 		want  bool
 	}{
-		{"own-lost", true, 40, false}, {"stale-tmux", true, 40, true}, {"history-failed", true, 40, true}, {"history-lost", true, 40, true}, {"history-dead-host", true, 40, true}, {"history-live-host", true, 40, false}, {"live-terminal-ambiguous", true, 40, false}, {"verified", true, 40, true}, {"legacy-live", true, 40, true}, {"legacy-recycled", true, 40, false}, {"saved-host-dead", true, 40, false}, {"saved-host-argv", true, 40, false}, {"saved-host-reused", true, 40, false}, {"moved", true, 40, true}, {"canonical-env", true, 40, true}, {"stale-alias-row", true, 40, true}, {"recycled", true, 40, false}, {"unnamed", true, 40, true}, {"unrelated", true, 88, false}, {"unrecorded", false, 40, false}, {"seatless-unreachable", false, 40, false}, {"seatless-gone", false, 40, false}, {"recorded-probe-failed", true, 40, false}, {"omitted", true, 0, false}, {"empty", true, 0, false},
+		{"malformed-pid", false, 0, false}, {"direct-terminal-ambiguous", true, 40, false}, {"own-lost", true, 40, false}, {"stale-tmux", true, 40, true}, {"history-failed", true, 40, true}, {"history-lost", true, 40, true}, {"history-dead-host", true, 40, true}, {"history-live-host", true, 40, false}, {"live-terminal-ambiguous", true, 40, false}, {"verified", true, 40, true}, {"legacy-live", true, 40, true}, {"legacy-recycled", true, 40, false}, {"saved-host-dead", true, 40, false}, {"saved-host-argv", true, 40, false}, {"saved-host-reused", true, 40, false}, {"moved", true, 40, true}, {"canonical-env", true, 40, true}, {"stale-alias-row", true, 40, true}, {"recycled", true, 40, false}, {"unnamed", true, 40, true}, {"unrelated", true, 88, false}, {"unrecorded", false, 40, false}, {"seatless-unreachable", false, 40, false}, {"seatless-gone", false, 40, false}, {"recorded-probe-failed", true, 40, false}, {"omitted", true, 0, false}, {"empty", true, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -101,10 +101,13 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 							_ = json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "ok": true, "result": body})
 							return
 						}
-						if tc.name == "omitted" || tc.name == "empty" {
+						if tc.name == "omitted" || tc.name == "empty" || tc.name == "malformed-pid" {
 							processes := ""
 							if tc.name == "empty" {
 								processes = `,"foreground_processes":[]`
+							}
+							if tc.name == "malformed-pid" {
+								processes = `,"foreground_processes":[{}]`
 							}
 							_, _ = fmt.Fprintf(
 								conn,
@@ -208,7 +211,8 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if strings.HasPrefix(tc.name, "history-") || tc.name == "live-terminal-ambiguous" {
+			if strings.HasPrefix(tc.name, "history-") || tc.name == "live-terminal-ambiguous" ||
+				tc.name == "direct-terminal-ambiguous" {
 				own, ok, err := state.Seat(context.Background(), "seat1")
 				if err != nil || !ok {
 					t.Fatal(err)
@@ -229,7 +233,7 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 					other.SeatHostPID = 20
 					other.SeatHostStart = 9
 				}
-				if tc.name == "live-terminal-ambiguous" {
+				if tc.name == "live-terminal-ambiguous" || tc.name == "direct-terminal-ambiguous" {
 					other.State = "live"
 				}
 				if err := state.PutSeat(context.Background(), other); err != nil {
@@ -263,6 +267,12 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				}
 				return
 			}
+			if tc.name == "malformed-pid" {
+				if err == nil || errors.Is(err, ErrNotInChat) {
+					t.Fatalf("malformed pid became absence: %+v %v", identity, err)
+				}
+				return
+			}
 			if tc.name == "unrecorded" {
 				if !errors.Is(err, ErrNotRegistered) || identity.Backend != "herdr" || identity.Pane != "w6:p3" ||
 					!identity.Fronted {
@@ -282,7 +292,8 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				}
 				return
 			}
-			if tc.name == "live-terminal-ambiguous" || tc.name == "history-live-host" {
+			if tc.name == "live-terminal-ambiguous" || tc.name == "direct-terminal-ambiguous" ||
+				tc.name == "history-live-host" {
 				if !errors.Is(err, ErrAmbiguous) {
 					t.Fatalf("owners: identity=%+v err=%v", identity, err)
 				}

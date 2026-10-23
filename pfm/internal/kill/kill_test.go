@@ -2,7 +2,6 @@ package kill
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -996,50 +995,6 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// writeCodexStateThread builds a scratch Codex state store holding one live
-// user thread, using the real schema captured from a live 0.146.1 store. The
-// "sqlite" driver is registered by the store package this test already links.
-func writeCodexStateThread(
-	t *testing.T,
-	path, id, cwd, rolloutPath string,
-	createdAt int64,
-) {
-	t.Helper()
-	schema, err := os.ReadFile(
-		filepath.Join("..", "..", "testdata", "codex-state-schema.sql"),
-	)
-	if err != nil {
-		t.Fatalf("read Codex state schema: %v", err)
-	}
-	database, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("create scratch Codex state store: %v", err)
-	}
-	defer func() {
-		if err := database.Close(); err != nil {
-			t.Errorf("close database: %v", err)
-		}
-	}()
-	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, string(schema)); err != nil {
-		t.Fatalf("apply Codex state schema: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `
-INSERT INTO threads (
-  id, rollout_path, created_at, updated_at, source, model_provider, cwd,
-  title, sandbox_policy, approval_mode, thread_source, history_mode
-) VALUES (?, ?, ?, ?, 'cli', 'openai', ?, '', 'workspace-write',
-  'on-request', 'user', 'legacy')`,
-		id,
-		rolloutPath,
-		createdAt,
-		createdAt,
-		cwd,
-	); err != nil {
-		t.Fatalf("insert scratch Codex thread %q: %v", id, err)
 	}
 }
 

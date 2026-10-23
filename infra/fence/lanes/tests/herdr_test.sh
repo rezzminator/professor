@@ -166,7 +166,11 @@ jq -e '.result.snapshot.protocol == 22 and .result.snapshot.version == "0.9.5"' 
 ws="$(herdr --session lane-H workspace create --label H --cwd "$ROOT/project" --no-focus)"
 export HERDR_PANE_ID="$(jq -er '.result.root_pane.pane_id' <<<"$ws")" HERDR_WORKSPACE_ID="$(jq -er '.result.workspace.workspace_id' <<<"$ws")"
 tmux_witness >"$ROOT/tmux-before"
-out="$("$PFM_BIN" chat new --name H_GO --engine cc --account 1 --cwd "$ROOT/project" --backend herdr)" || fail_control 'native birth'
+out="$(h_run_in_pane "$HERDR_PANE_ID" "$PFM_BIN" chat new --name H_GO --engine cc --account 1 --cwd "$ROOT/project" --backend herdr)" || fail_control 'native birth'
+code=0
+probe="$(h_run_in_pane "$HERDR_PANE_ID" sh -c 'printf caller-status; exit 7')" || code=$?
+[ "$code" = 7 ] && [ "$probe" = caller-status ] || fail_control "pane command status/output code=$code output=$probe"
+passed 'actual caller pane preserves command output and nonzero status'
 printf '%s\n' "$out"
 child="$(awk -F'\t' '$3 == "herdr" {print $5}' <<<"$out")"
 [ -n "$child" ] || fail_control 'birth returned no Herdr pane'
@@ -325,8 +329,15 @@ if [ "$rc" = 0 ]; then ok "fake PTY empty-composer guard receives exact prompt";
 # Drive the actual delivery-birth loop: only the tmux recipient uses the lane TUI mock.
 awk '/^for birth / {copy=1} copy {print} copy && /^done$/ {exit}' "$LANES/H.sh" >"$T/delivery-birth.sh"
 out="$(WITNESS="$T/delivery-birth.sh" bash -c '
-  PFM_CONFIG=native-config H_MOCK_CONFIG=mock-config SEAT=1 LANE_LOG=/dev/null
+  PFM_CONFIG=native-config H_MOCK_CONFIG=mock-config SEAT=1 LANE_LOG=/dev/null HERDR_PANE_ID=w1:p1
   pfm() { local name; while [ "$#" -gt 0 ]; do if [ "$1" = --name ]; then name="$2"; break; fi; shift; done; printf "%s=%s\n" "$name" "$PFM_CONFIG" >&3; }
+  h_run_in_pane() {
+    shift
+    [ "$1" = env ] || return 1
+    shift
+    local assignment="$1"; shift
+    PFM_CONFIG="${assignment#PFM_CONFIG=}" "$@"
+  }
   lane_abort() { echo ABORT >&3; }
   source "$WITNESS"
 ' 3>&1)"; rc=$?

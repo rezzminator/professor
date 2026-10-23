@@ -55,7 +55,7 @@ h_tmux_servers() {
 }
 h_tmux_servers >"$H_FIXTURE/tmux-before" || lane_abort "tmux baseline probe failed"
 beat H.birth
-out="$(pfm chat new --name H_MAIN --engine cc --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
+out="$(h_run_in_pane "$HERDR_PANE_ID" pfm chat new --name H_MAIN --engine cc --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
 printf '%s\n' "$out" | tee -a "$LANE_LOG"
 if [ "$rc" -eq 0 ] && grep -q $'\therdr\t' <<<"$out"; then pass "real Herdr birth $out"; else fail "native birth rc=$rc $out"; fi
 H_PANE="$(awk -F'\t' '$3 == "herdr" {print $5}' <<<"$out")"
@@ -165,7 +165,7 @@ h_survivor() {
 h_lifecycle() {
   local out rc victim_sid victim_pane victim_seat
   beat H.end
-  out="$(pfm chat new --name H_END --engine cc --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
+  out="$(h_run_in_pane "$HERDR_PANE_ID" pfm chat new --name H_END --engine cc --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
   printf 'H end victim birth rc=%s %s\n' "$rc" "$out" | tee -a "$LANE_LOG"
   victim_pane="$(awk -F'\t' '$3 == "herdr" {print $5}' <<<"$out")"
   victim_sid="$(sqlite3 "$H_DB" "select session_id from seat where herdr_pane='$victim_pane';")"
@@ -182,7 +182,7 @@ h_lifecycle() {
   local action killed
   for action in kill exit; do
     beat "H.$action"
-    out="$(pfm chat new --name "H_${action^^}" --engine cc --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
+    out="$(h_run_in_pane "$HERDR_PANE_ID" pfm chat new --name "H_${action^^}" --engine cc --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
     victim_pane="$(awk -F'\t' '$3 == "herdr" {print $5}' <<<"$out")"
     victim_sid="$(sqlite3 "$H_DB" "select session_id from seat where herdr_pane='$victim_pane';")"
     if [ "$rc" != 0 ] || [ -z "$victim_sid" ]; then fail "$action victim precondition rc=$rc $out"; continue; fi
@@ -663,7 +663,7 @@ for birth in 'tmux H_T_SENDER' 'tmux H_T_TARGET' 'herdr H_H_TARGET'; do
   read -r backend name <<<"$birth"
   birth_config="$PFM_CONFIG"
   [ "$name" != H_T_TARGET ] || birth_config="$H_MOCK_CONFIG"
-  PFM_CONFIG="$birth_config" pfm chat new --name "$name" --engine cc --account "$SEAT" --cwd /work/express --backend "$backend" >>"$LANE_LOG" 2>&1 || lane_abort "cannot create $name"
+  h_run_in_pane "$HERDR_PANE_ID" env PFM_CONFIG="$birth_config" pfm chat new --name "$name" --engine cc --account "$SEAT" --cwd /work/express --backend "$backend" >>"$LANE_LOG" 2>&1 || lane_abort "cannot create $name"
 done
 h_identity() {
   pfm ls --tsv >"$H_FIXTURE/fleet.tsv" && awk -F'\t' -v n="$1" '$1 == "live-claude" && $5 == n {print $2 "\t" $11; found=1; exit} END {exit !found}' "$H_FIXTURE/fleet.tsv"
@@ -703,7 +703,7 @@ h_outcome_matches() {
 }
 h_raw_outcomes() {
   local result rc raw_pane identity sid sock pane gate prompt capture
-  result="$(PFM_CONFIG="$H_MOCK_CONFIG" pfm chat new --name H_RAW_CX --engine codex --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
+  result="$(h_run_in_pane "$HERDR_PANE_ID" env PFM_CONFIG="$H_MOCK_CONFIG" pfm chat new --name H_RAW_CX --engine codex --account "$SEAT" --cwd /work/express --backend herdr 2>&1)"; rc=$?
   printf 'H codex birth rc=%s %s\n' "$rc" "$result" | tee -a "$LANE_LOG"
   [ "$rc" = 0 ] || { fail "Codex mock birth failed"; return; }
   raw_pane="$(awk -F'\t' '$3 == "herdr" {print $5}' <<<"$result")"

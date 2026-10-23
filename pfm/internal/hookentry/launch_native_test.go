@@ -3,7 +3,10 @@ package hookentry
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +15,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestLaunchNativeBackendRefusal(t *testing.T) {
@@ -130,5 +135,87 @@ func TestLaunchNativeNewTabRefusesBirthFailure(t *testing.T) {
 	)
 	if code != 1 || !strings.Contains(stderr.String(), "birth native chat:") {
 		t.Fatalf("new tab failure code=%d stderr=%s", code, &stderr)
+	}
+}
+
+func TestLaunchNativeNewTabPreservesContinuationsAndLaunchMetadata(t *testing.T) {
+	for _, args := range [][]string{{"--continue"}, {"--resume"}, {"--resume", "parent", "--fork-session"}, {"--session-id", "known-session"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(testjail.ShortRoot(t), "native.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			go func() {
+				for {
+					conn, err := listener.Accept()
+					if err != nil {
+						return
+					}
+					func() {
+						defer func() { _ = conn.Close() }()
+						var request struct {
+							ID     string
+							Method string
+						}
+						if json.NewDecoder(conn).Decode(&request) != nil {
+							return
+						}
+						var result any = map[string]any{"type": "pong", "version": "fixture", "protocol": herdr.SupportedProtocol}
+						if request.Method == "layout.apply" {
+							result = map[string]any{
+								"layout": map[string]any{
+									"workspace_id": "w1",
+									"root":         map[string]any{"type": "pane", "pane_id": "w1:p2"},
+								},
+							}
+						}
+						_ = json.NewEncoder(conn).Encode(map[string]any{"id": request.ID, "ok": true, "result": result})
+					}()
+				}
+			}()
+			cache := true
+			var stderr bytes.Buffer
+			code := launchNative(
+				spawn.BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w1:p1", HerdrWorkspace: "w1"},
+				claudelaunch.Request{
+					Binary:  "/bin/echo",
+					Home:    values.Home,
+					Args:    args,
+					Account: 2,
+					Cache1H: &cache,
+				},
+				values.Home,
+				io.Discard,
+				&stderr,
+				config.Runtime{Paths: values},
+			)
+			if code != 0 {
+				t.Fatalf("continuation birth code=%d: %s", code, &stderr)
+			}
+			state := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() { _ = state.Close() }()
+			seats, err := state.Seats(context.Background())
+			if err != nil || len(seats) != 1 || seats[0].SessionID == "" {
+				t.Fatalf("birth seats=%+v err=%v", seats, err)
+			}
+			if args[0] == "--session-id" {
+				launches, err := fleetdb.OpenLaunches(context.Background(), values)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = launches.Close() }()
+				record, err := launches.LaunchFor(context.Background(), "known-session")
+				if err != nil || record.Account != 2 || !record.Cache1H {
+					t.Fatalf("new tab lost launch metadata: %+v err=%v", record, err)
+				}
+			}
+		})
 	}
 }

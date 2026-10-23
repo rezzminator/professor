@@ -90,10 +90,15 @@ func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrCla
 		},
 		terminal: pane.Terminal,
 	}
+	for _, pid := range pids {
+		if pid <= 0 {
+			return failure(fmt.Errorf("malformed foreground process pid %d", pid))
+		}
+	}
 	nearest := -1
 	for index, ancestor := range chain {
 		for _, pid := range pids {
-			if pid <= 0 || pid != ancestor {
+			if pid != ancestor {
 				continue
 			}
 			if nearest < 0 || index < nearest {
@@ -127,47 +132,50 @@ func (identifier *Whoami) identifyHerdr(ctx context.Context, claim herdrClaim) (
 	if err != nil {
 		return identity, fmt.Errorf("look up the caller: find Herdr seat: %w", err)
 	}
-	if !found || seat.HerdrTerminalID != "" && seat.HerdrTerminalID != claim.terminal {
+	if found && seat.HerdrTerminalID != "" && seat.HerdrTerminalID != claim.terminal {
 		found = false
-		var unregistered *fleetdb.Seat
-		seats, err := state.Seats(ctx)
-		if err != nil {
-			return identity, fmt.Errorf("look up the caller: find Herdr terminal: %w", err)
+	}
+	var unregistered *fleetdb.Seat
+	seats, err := state.Seats(ctx)
+	if err != nil {
+		return identity, fmt.Errorf("look up the caller: find Herdr terminal: %w", err)
+	}
+	for i := range seats {
+		candidate := &seats[i]
+		if found && candidate.SeatID == seat.SeatID {
+			continue
 		}
-		for i := range seats {
-			candidate := &seats[i]
-			if candidate.Backend != nativeHerdrBackend || candidate.HerdrSocket != identity.SocketPath ||
-				candidate.HerdrTerminalID != claim.terminal {
+		if candidate.Backend != nativeHerdrBackend || candidate.HerdrSocket != identity.SocketPath ||
+			candidate.HerdrTerminalID != claim.terminal {
+			continue
+		}
+		if candidate.State != nativeHerdrLiveState {
+			if candidate.SeatHostPID == 0 {
+				if candidate.HerdrPane == identity.Pane {
+					unregistered = candidate
+				}
 				continue
 			}
-			if candidate.State != nativeHerdrLiveState {
-				if candidate.SeatHostPID == 0 {
-					if candidate.HerdrPane == identity.Pane {
-						unregistered = candidate
-					}
-					continue
-				}
-				dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), *candidate)
-				if err != nil {
-					return identity, fmt.Errorf("prove historical caller seat %s retired: %w", candidate.SeatID, err)
-				}
-				if dead {
-					continue
-				}
+			dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), *candidate)
+			if err != nil {
+				return identity, fmt.Errorf("prove historical caller seat %s retired: %w", candidate.SeatID, err)
 			}
-			if found {
-				return identity, fmt.Errorf("%w: herdr caller terminal has multiple durable owners", ErrAmbiguous)
+			if dead {
+				continue
 			}
-			seat, found = *candidate, true
 		}
-		if !found && unregistered != nil {
-			return identity, fmt.Errorf(
-				"%w: herdr seat %s is %s",
-				ErrNotRegistered,
-				unregistered.SeatID,
-				unregistered.State,
-			)
+		if found {
+			return identity, fmt.Errorf("%w: herdr caller terminal has multiple durable owners", ErrAmbiguous)
 		}
+		seat, found = *candidate, true
+	}
+	if !found && unregistered != nil {
+		return identity, fmt.Errorf(
+			"%w: herdr seat %s is %s",
+			ErrNotRegistered,
+			unregistered.SeatID,
+			unregistered.State,
+		)
 	}
 	if !found || seat.Backend != nativeHerdrBackend ||
 		seat.HerdrTerminalID != "" && seat.HerdrTerminalID != claim.terminal {

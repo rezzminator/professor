@@ -83,6 +83,20 @@ func launchNative(
 	// The supervisor, not a birth-door process, applies the saved ledger policy.
 	environment = append(environment, paths.EnvStateDB+"="+runtime.Paths.StateDB)
 	ctx := context.Background()
+	provisional := identity
+	if provisional == "" {
+		provisional = id
+	}
+	if identity != "" {
+		if err := fleetdb.RecordLaunch(
+			ctx,
+			runtime.Paths,
+			fleetdb.Launch{SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: launch.Cache1H},
+			clock.Real.Now().Unix(),
+		); err != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, err)
+		}
+	}
 	if !choice.InPlace {
 		_, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
 			Choice: choice,
@@ -94,7 +108,7 @@ func launchNative(
 				CWD:        cwd,
 				CostLedger: prefs.CostLedger,
 			},
-			Seat: fleetdb.Seat{SessionID: identity, Engine: string(pfmengine.Claude), Name: request.Name},
+			Seat: fleetdb.Seat{SessionID: provisional, Engine: string(pfmengine.Claude), Name: request.Name},
 		})
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: birth native chat: %v\n", err)
@@ -152,16 +166,7 @@ func launchNative(
 		fmt.Fprintf(stderr, "pfm internal launch: close native seat state: %v\n", err)
 		return 1
 	}
-	if identity != "" {
-		if err := fleetdb.RecordLaunch(
-			ctx,
-			runtime.Paths,
-			fleetdb.Launch{SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: launch.Cache1H},
-			clock.Real.Now().Unix(),
-		); err != nil {
-			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, err)
-		}
-	}
+
 	executable, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: resolve running executable: %v\n", err)

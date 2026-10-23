@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -498,9 +499,14 @@ func prepareOpen(
 	if ctx.Value(restoredOpenKey{}) == true {
 		gate = restoredGate{}
 	}
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(&effective)})
+	if err != nil {
+		return nil, action.Request{}, NameReservation{}, errors.Join(err, claim.Release())
+	}
 	executor, err := newOpenExecutor(action.Dependencies{
-		Gate:   gate,
-		Stderr: stderr,
+		Identify: identifier.Identify,
+		Gate:     gate,
+		Stderr:   stderr,
 		Heal: func(ctx context.Context, threadID string) string {
 			return heal.Thread(ctx, healCodexRoot, threadID)
 		},

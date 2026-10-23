@@ -221,10 +221,7 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 	if ancestryErr != nil {
 		return identity, fmt.Errorf("look up the caller: process ancestry: %w", ancestryErr)
 	}
-	recovered, found, err := identifier.recoverFromAncestry(ctx, identity, chain)
-	if err != nil {
-		return identity, err
-	}
+	recovered, found, recoveryErr := identifier.recoverFromAncestry(ctx, identity, chain)
 	if found {
 		return recovered, nil
 	}
@@ -234,7 +231,14 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		if err != nil {
 			return identity, fmt.Errorf("look up the caller: list Codex seats: %w", err)
 		}
-		return CodexThreadSeat(identifier.environment.CodexThreadID, seats)
+		codex, err := CodexThreadSeat(identifier.environment.CodexThreadID, seats)
+		if errors.Is(err, ErrNotInChat) && recoveryErr != nil {
+			return identity, recoveryErr
+		}
+		return codex, err
+	}
+	if recoveryErr != nil {
+		return identity, recoveryErr
 	}
 	stale := make([]string, 0, 2)
 	if tmuxStale != "" {
@@ -294,9 +298,13 @@ func (identifier *Whoami) recoverFromAncestry(
 	identity Identity,
 	chain []int,
 ) (Identity, bool, error) {
+	var readErr error
 	for _, pid := range chain {
 		environment, err := identifier.processes.Environ(pid)
 		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ESRCH) && readErr == nil {
+				readErr = fmt.Errorf("look up the caller: read environment of pid %d: %w", pid, err)
+			}
 			continue
 		}
 		found, index, _, err := identifier.proveTmux(
@@ -339,7 +347,7 @@ func (identifier *Whoami) recoverFromAncestry(
 			}
 		}
 	}
-	return identity, false, nil
+	return identity, false, readErr
 }
 
 func (identifier *Whoami) ancestors() ([]int, error) {

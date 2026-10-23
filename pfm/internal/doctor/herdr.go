@@ -13,6 +13,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -34,7 +35,9 @@ func printSelectedHerdrBackendDoctor(
 	backendReason := "selects " + backend
 	if backend == spawn.BackendAuto {
 		environment := resolve.CallerEnvironmentFrom(dependencies.Env)
-		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{Environment: &environment})
+		identifier, err := resolve.NewWhoami(
+			resolve.WhoamiDependencies{Environment: &environment, CodexSeats: chat.CodexSeats(nil)},
+		)
 		var caller resolve.Identity
 		if err == nil {
 			caller, err = identifier.Identify(ctx)

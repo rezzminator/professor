@@ -433,7 +433,12 @@ func (current *backend) proxySessionMatches(
 func (current *backend) callerForRequest(
 	ctx context.Context,
 	meta map[string]any,
-) (callerIdentity, error) {
+) (caller callerIdentity, returnErr error) {
+	defer func() {
+		if caller.present && !caller.valid && caller.err == nil && caller.detail != "" {
+			caller.err = errors.New(caller.detail)
+		}
+	}()
 	raw, present := meta["threadId"]
 	if !present {
 		proxyRaw, proxyPresent := meta["pfmProxy"]
@@ -623,7 +628,7 @@ func (current *backend) callerForRequest(
 		caller.valid = true
 		return caller, nil
 	}
-	caller := callerIdentity{present: true}
+	caller = callerIdentity{present: true}
 	threadID, ok := raw.(string)
 	if !ok || strings.TrimSpace(threadID) == "" ||
 		strings.TrimSpace(threadID) != threadID || containsControl(threadID) {

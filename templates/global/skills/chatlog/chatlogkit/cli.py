@@ -157,7 +157,8 @@ def entry(args):
         p = parse(kit["target"], kit["path"])
     except Failure as e:
         die(f"FAILED entry {kit['path']} — {str(e)[:600]}")
-    evs = [ev for ev in p.events if ev.line == n and not ev.hidden]
+    # Explicit transcript addresses can recover wrappers folded into their completed actions.
+    evs = [ev for ev in p.events if ev.line == n and (not ev.hidden or m.group(1).upper() == "L")]
     if not evs:
         die(f"KIT FAILED — entry L{n}: no rendered event at that transcript line (dropped or collapsed; "
             f"the DROPPED rows count them)")

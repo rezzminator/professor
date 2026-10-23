@@ -708,6 +708,31 @@ def codex_records():
 
 
 class CodexKit(Fixture):
+    def test_entry_recovers_session_launch_instructions_without_expanding_digest(self):
+        recs = codex_records()
+        recs[0]["payload"]["base_instructions"] = {"text": "Exact launch instructions\nSecond line"}
+        self.prep(self.write_rollout(recs))
+        self.assertNotIn("Exact launch instructions", "\n".join(self.digest()))
+        out = self.kitcmd("entry", self.dir, "L1").stdout.splitlines()
+        self.assertEqual(out[0], "ENTRY L1 2026-01-01T10:00:00.000Z NOTE SESSION_META")
+        self.assertEqual(json.loads(out[1]), recs[0]["payload"])
+
+    def test_entry_recovers_a_folded_mixed_action_wrapper(self):
+        script = 'text(await tools.apply_patch("patch")); text(await tools.exec_command({cmd:"capture",yield_time_ms:1000}));'
+        recs = [x_rec("session_meta", {"id": "folded", "cwd": "/fx"}, 0),
+                x_rec("response_item", {"type": "custom_tool_call", "name": "exec", "call_id": "mixed",
+                                        "input": script}, 1),
+                x_rec("event_msg", {"type": "item_completed", "item": {
+                    "type": "FileChange", "changes": {"/fx/file.py": {"type": "update", "unified_diff": "+x"}},
+                    "status": "completed"}}, 2),
+                x_rec("response_item", {"type": "custom_tool_call_output", "call_id": "mixed",
+                                        "output": '{"session_id":75180}'}, 3)]
+        self.prep(self.write_rollout(recs))
+        self.assertNotIn("yield_time_ms", "\n".join(self.digest()))
+        out = self.kitcmd("entry", self.dir, "L2").stdout
+        self.assertIn(script, out)
+        self.assertIn('{"session_id":75180}', out)
+
     def test_header_uses_latest_turn_context(self):
         recs = codex_records()
         recs.insert(1, x_rec("turn_context", {"model": "parent-model", "effort": "medium"}, 0))

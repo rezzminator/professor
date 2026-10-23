@@ -53,11 +53,47 @@ def record(p, n, obj):
     ts = _stamp_of(obj.get("timestamp")) if truthy(obj.get("timestamp")) else _stamp_of(payload.get("timestamp"))
     p.stamp(ts)
     label = kind + "/" + pk if pk else kind
+    _inherit_edge(p, n, kind, pk, payload)
+    before = len(p.events)
+    _record(p, n, ts, kind, pk, label, payload)
+    if getattr(p, "inherit", None) and p.inherit[1] is None:
+        for ev in p.events[before:]:
+            if ev.kind == PROMPT:
+                ev.mech.add("INHERITED")
+
+
+def _inherit_edge(p, n, kind, pk, payload):
+    """A forked child (session_meta forked_from_id) carries its parent's history first: the parent's
+    session_meta opens it, the child's own task (its first inter-agent message, else the second
+    task_started) closes it; p.inherit is [first line, last line or None while open]."""
+    if kind == "session_meta":
+        parent = payload.get("forked_from_id")
+        if truthy(parent) and "forked_from" not in p.meta:
+            p.meta["forked_from"] = pystr(parent)
+        elif p.meta.get("forked_from") and pystr(payload.get("id")) == p.meta["forked_from"]:
+            p.inherit, p.inherit_starts = [n, None], 0
+        return
+    if not getattr(p, "inherit", None) or p.inherit[1] is not None:
+        return
+    if kind == "inter_agent_communication_metadata" or (kind == "response_item" and pk == "agent_message"):
+        p.inherit[1] = n - 1
+    elif kind == "event_msg" and pk == "task_started":
+        p.inherit_starts += 1
+        if p.inherit_starts == 2:
+            p.inherit[1] = n - 1
+
+
+def _record(p, n, ts, kind, pk, label, payload):
     if kind == "session_meta":
         _set_or(p, "session", payload.get("id"), get(payload, "session_id"))
         p.set_meta_value("cwd", get(payload, "cwd"))
         p.set_meta_value("cli", get(payload, "cli_version"))
         p.mark(n, HEADER, kind)
+        # Keep the digest header compact, but let entry L{n} recover the launch
+        # instructions and settings just as it recovers folded tool wrappers.
+        ev = Event(n, ts, NOTE, text=dumps(payload), sub="SESSION_META")
+        ev.hidden = True
+        p.events.append(ev)
     elif kind == "turn_context":
         settings = get(get(payload, "collaboration_mode"), "settings")
         settings = settings if isinstance(settings, dict) else {}
@@ -75,6 +111,8 @@ def record(p, n, obj):
         p.add(ev, label)
     elif kind == "response_item" and pk == "message":
         _message(p, n, ts, label, payload)
+    elif kind == "response_item" and pk == "agent_message":
+        _agent_message(p, n, ts, label, payload)
     elif kind == "response_item" and pk in ("function_call", "custom_tool_call"):
         name = pystr(payload["name"]) if "name" in payload else "?"
         inp = payload.get("arguments" if pk == "function_call" else "input")
@@ -128,6 +166,23 @@ def _message(p, n, ts, label, payload):
         p.mark(n, SKIPPED, label + ":user (injected context)")
     else:
         p.mark(n, SKIPPED, label + ":" + role)
+
+
+def _agent_message(p, n, ts, label, payload):
+    """A message between Codex agents (a sub-agent's return, a send_message to a sibling): its sender,
+    recipient and plain text are kept; an encrypted payload is named, never decoded."""
+    author = pystr(payload["author"]) if truthy(payload.get("author")) else "?"
+    recipient = pystr(payload["recipient"]) if truthy(payload.get("recipient")) else "?"
+    content = payload.get("content") if isinstance(payload.get("content"), list) else []
+    plain = " ".join(pystr(c["text"]) for c in content
+                     if isinstance(c, dict) and c.get("type") in ("input_text", "output_text", "text")
+                     and truthy(c.get("text")))
+    plain = re.sub(r"\s+", " ", plain).strip()
+    encrypted = any(isinstance(c, dict) and c.get("type") == "encrypted_content" for c in content)
+    text = f"AGENT MESSAGE {author} → {recipient}" + (f" · {plain}" if plain else "")
+    if encrypted:
+        text += " · [payload encrypted]"
+    p.add(Event(n, ts, NOTE, text=text, sub="AGENT-MESSAGE"), label)
 
 
 def tool_output(output):

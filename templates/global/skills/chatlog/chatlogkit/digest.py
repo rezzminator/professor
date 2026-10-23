@@ -142,6 +142,11 @@ def header_rows(p, req, shown):
     else:
         source = f"FILE {p.path} · {p.bytes} bytes · {p.records} records · cwd {meta('cwd', '?')} (shown as ./)"
     rows = [first, source]
+    if p.meta.get("forked_from"):
+        span_in = getattr(p, "inherit", None)
+        where = (f" · L{span_in[0]}-L{span_in[1] if span_in[1] is not None else '?'} carry the parent's history "
+                 "(labelled INHERITED, never the child's brief)") if span_in else ""
+        rows.append(f"FORKED from {p.meta['forked_from']}{where}")
     if p.title:
         rows.append("NAME " + p.title)
     if p.t0 is None:

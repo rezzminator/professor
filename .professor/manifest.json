@@ -98,7 +98,7 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "2b050225554d1143a8f219e57c8e478acf2ec7d740ac3e6ad8021f2f047fa62e",
-    ".claude/agents/gitter.md": "da6a1d4b9955563105ccc2ad1b1fb151345bbb13541049c66c9c9c112e5db04e",
+    ".claude/agents/gitter.md": "4c337ed166268ff575e5ced6d2ba67112affda1fb30aed81844bc4a9b5c86ff0",
     ".claude/agents/gpt-changelogger.md": "f6383197ebda4c0d9f8db11a0da7dcc5ee3218355511fc6188cfad5c537d09cc",
     ".claude/agents/gpt-gitter.md": "853085027c03ee56c4275d2ff00f1361db892920d7ed213f70cdeb1df296cfc5",
     ".claude/agents/gpt-pcm.md": "416b2162318864272b881ddde92b1cd4b933e54d2ee8f4f0f6bef3b9f9c9f300",

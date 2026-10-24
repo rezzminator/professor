@@ -77,14 +77,17 @@ func cacheKeepwarmShield(runtime Runtime, sessionID string) string {
 	if state.stale || !state.found {
 		return ""
 	}
-	// One word for what the plugin is doing: waiting while it keeps a wait warm.
+	// One word for what the plugin is doing; "on" is only its enabled flag with
+	// nothing to keep warm, so it shows nothing.
 	switch state.record.State {
 	case "warming":
 		return " " + cWarn + "🛡 waiting" + reset
 	case "stopped":
 		return " " + cBad + "🛡 stopped" + reset
+	case keepwarmOff:
+		return " " + cMuted + "🛡 off" + reset
 	}
-	return " " + cMuted + "🛡 " + state.record.State + reset
+	return ""
 }
 
 func readKeepwarmState(

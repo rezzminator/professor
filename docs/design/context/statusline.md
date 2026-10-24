@@ -141,7 +141,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 ### cacheKeepwarmShield
 
-When the cache-keepwarm plugin keeps a state file for the session, the main line's cache segment ends with a shield after the countdown and the hit share: `💾1h✓59m:28s 94% 🛡 waiting`. The plugin writes the file and pfm only reads it, on every render, inside `cacheWindowSegment` (`pfm/internal/statusline/cache_window.go`). The record is one JSON object, schema `v` 1:
+When the cache-keepwarm plugin's state file for the session shows it doing something — keeping a wait warm, stopped or off — the main line's cache segment ends with a shield after the countdown and the hit share: `💾1h✓59m:28s 94% 🛡 waiting`. The plugin writes the file and pfm only reads it, on every render, inside `cacheWindowSegment` (`pfm/internal/statusline/cache_window.go`). The record is one JSON object, schema `v` 1:
 
 | Field | Holds |
 | --- | --- |
@@ -163,13 +163,13 @@ The path is the resolver's (`paths.CacheKeepwarmStateFile(env, home, sessionID)`
 | --- | --- |
 | no file | no shield |
 | `warming`, amber | `🛡 waiting`: the plugin keeps a wait warm |
-| `on`, muted | `🛡 on` |
+| `on`: enabled, nothing to keep warm | no shield, as without the plugin |
 | `stopped`, red | `🛡 stopped` |
 | `off`, muted | `🛡 off` |
 | a valid record whose `pid` is dead, not a Claude process, a zombie, or a process started more than 2 s after `updatedAt` (a reused pid) | no shield, as without the plugin |
 | unreadable, unparsable, a `v` other than 1, an unknown `state`, a schema violation, or a probe that failed to run, red | `🛡 ERR`, and one stderr line naming the path and the cause |
 
-The payload's `session_id` selects the file; an empty session id names no file. State roots must be absolute. The shield is one word: `pokes`, `nextAt` and `protectingTokensEq` are validated but not shown. A record never expires by age: a quiet session's record stays valid, so only the pid decides whether the shield shows. A shield remains visible even when no cache countdown is available.
+The payload's `session_id` selects the file; an empty session id names no file. State roots must be absolute. The shield is one word: `pokes`, `nextAt` and `protectingTokensEq` are validated but not shown. A record never expires by age: a quiet session's record stays valid, so only the pid decides whether the record counts; its `state` then decides whether a shield shows. A shield remains visible even when no cache countdown is available.
 
 ## Palette and glyphs
 

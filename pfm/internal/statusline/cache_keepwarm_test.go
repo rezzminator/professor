@@ -91,7 +91,7 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 		reborn, relativeDir                              bool
 	}{
 		{name: "warming", state: "warming", want: "🛡 waiting", color: cWarn},
-		{name: "on remains valid while quiet", state: "on", want: "🛡 on", color: cMuted},
+		{name: "on with nothing to keep warm shows no shield", state: "on"},
 		{
 			name:   "stopped",
 			state:  "stopped",

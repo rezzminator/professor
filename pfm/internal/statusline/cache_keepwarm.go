@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -47,7 +46,7 @@ type keepwarmState struct {
 	err          error
 }
 
-func cacheKeepwarmShield(runtime Runtime, now time.Time, sessionID string) string {
+func cacheKeepwarmShield(runtime Runtime, sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
@@ -74,44 +73,18 @@ func cacheKeepwarmShield(runtime Runtime, now time.Time, sessionID string) strin
 		}
 		return " " + cBad + "🛡 ERR" + reset
 	}
-	if state.stale {
-		return " " + cMuted + "🛡 ?" + reset
-	}
-	if !state.found {
+	// A record no live writer vouches for reads as if the plugin were not installed.
+	if state.stale || !state.found {
 		return ""
 	}
-	record := state.record
-	color, text := cMuted, "🛡 "+record.State
-	switch record.State {
+	// One word for what the plugin is doing: waiting while it keeps a wait warm.
+	switch state.record.State {
 	case "warming":
-		color, text = cWarn, "🛡"
-		if record.Pokes != nil {
-			text += fmt.Sprintf(" %d/%d", record.Pokes.Count, record.Pokes.Max)
-		}
-		if record.NextAt != nil {
-			remaining := time.UnixMilli(*record.NextAt).Sub(now)
-			next := "<1m"
-			if remaining >= time.Minute {
-				next = fmt.Sprintf("%dm", int64(remaining/time.Minute))
-			}
-			text += " ⟳" + next
-		}
-		if record.Protecting != nil {
-			thousands := math.Round(*record.Protecting / 1000)
-			savings := fmt.Sprintf("%.0fk", thousands)
-			if thousands >= 1000 {
-				savings = fmt.Sprintf("%.1fM", math.Round(*record.Protecting/100000)/10)
-			}
-			text += " guards ≈" + savings
-		}
+		return " " + cWarn + "🛡 waiting" + reset
 	case "stopped":
-		color, text = cBad, "🛡"
-		if record.Pokes != nil {
-			text += fmt.Sprintf(" %d/%d", record.Pokes.Count, record.Pokes.Max)
-		}
-		text += " ✕"
+		return " " + cBad + "🛡 stopped" + reset
 	}
-	return " " + color + text + reset
+	return " " + cMuted + "🛡 " + state.record.State + reset
 }
 
 func readKeepwarmState(

@@ -141,7 +141,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 ### cacheKeepwarmShield
 
-When the cache-keepwarm plugin keeps a state file for the session, the main line's cache segment ends with a shield after the countdown and the hit share: `💾1h✓59m:28s 94% 🛡 2/4 ⟳3m guards ≈329k`. The plugin writes the file and pfm only reads it, on every render, inside `cacheWindowSegment` (`pfm/internal/statusline/cache_window.go`). The record is one JSON object, schema `v` 1:
+When the cache-keepwarm plugin keeps a state file for the session, the main line's cache segment ends with a shield after the countdown and the hit share: `💾1h✓59m:28s 94% 🛡 waiting`. The plugin writes the file and pfm only reads it, on every render, inside `cacheWindowSegment` (`pfm/internal/statusline/cache_window.go`). The record is one JSON object, schema `v` 1:
 
 | Field | Holds |
 | --- | --- |
@@ -162,14 +162,14 @@ The path is the resolver's (`paths.CacheKeepwarmStateFile(env, home, sessionID)`
 | State | Shield reads |
 | --- | --- |
 | no file | no shield |
-| `warming`, amber | `🛡 2/4 ⟳3m guards ≈329k`: pokes `count/max`, the time to `nextAt`, the tokens the cache guards |
+| `warming`, amber | `🛡 waiting`: the plugin keeps a wait warm |
 | `on`, muted | `🛡 on` |
-| `stopped`, red | `🛡 4/4 ✕` |
+| `stopped`, red | `🛡 stopped` |
 | `off`, muted | `🛡 off` |
-| a valid record whose `pid` is dead, not a Claude process, a zombie, or a process started more than 2 s after `updatedAt` (a reused pid), muted | `🛡 ?` |
+| a valid record whose `pid` is dead, not a Claude process, a zombie, or a process started more than 2 s after `updatedAt` (a reused pid) | no shield, as without the plugin |
 | unreadable, unparsable, a `v` other than 1, an unknown `state`, a schema violation, or a probe that failed to run, red | `🛡 ERR`, and one stderr line naming the path and the cause |
 
-The payload's `session_id` selects the file; an empty session id names no file. State roots must be absolute. The time to `nextAt` floors to whole minutes (`⟳3m`) and reads `<1m` under a minute, including overdue times. The guarded tokens round to thousands (`≈329k`) and read in one-decimal `M` once that rounds to 1000k (`≈1.0M`, `≈1.3M`). A null measurement omits its own piece: null `pokes`, `nextAt` and `protectingTokensEq` produce just `🛡` while warming. A record never expires by age: a quiet session's record stays valid, so only the pid decides `🛡 ?`. A shield remains visible even when no cache countdown is available.
+The payload's `session_id` selects the file; an empty session id names no file. State roots must be absolute. The shield is one word: `pokes`, `nextAt` and `protectingTokensEq` are validated but not shown. A record never expires by age: a quiet session's record stays valid, so only the pid decides whether the shield shows. A shield remains visible even when no cache countdown is available.
 
 ## Palette and glyphs
 

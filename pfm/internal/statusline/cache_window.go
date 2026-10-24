@@ -41,7 +41,7 @@ func cacheWindowSegment(
 	sessionID string,
 ) string {
 	text := cacheWindowText(runtime, now, transcriptPath, hit, harness, sessionID)
-	shield := cacheKeepwarmShield(runtime, now, sessionID)
+	shield := cacheKeepwarmShield(runtime, sessionID)
 	if text == "" && shield != "" {
 		return sep + strings.TrimPrefix(shield, " ")
 	}

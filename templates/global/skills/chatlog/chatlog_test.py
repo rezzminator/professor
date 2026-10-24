@@ -1176,5 +1176,14 @@ class Entry(Fixture):
         self.assertIn("prep TARGET", done.stdout + done.stderr)
 
 
+class CleanLine(unittest.TestCase):
+    def test_notification_collapses_but_a_quoting_prompt_keeps_its_text(self):
+        from chatlogkit.digest import clean
+        note = "L5 04:56:27 NOTE <task-notification><status>done</status><summary>s</summary></task-notification>"
+        self.assertEqual(clean(note), "L5 04:56:27 NOTE task-notification · done · s")
+        facts = "L6 04:56:39 PROMPT [forward-compaction: facts] Compacted. <task-notification><summary>x</summary>"
+        self.assertTrue(clean(facts).startswith("L6 04:56:39 PROMPT [forward-compaction: facts]"))
+
+
 if __name__ == "__main__":
     unittest.main()

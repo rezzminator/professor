@@ -710,11 +710,15 @@ func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Du
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
 		return
 	}
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	held, err := takeStatuslineRefreshLock(lockPath, runtime.now(), ttl)
 	if err != nil {
+		obs.Logger(context.Background()).
+			Warn("take statusline refresh lock", "kind", kind, "path", lockPath, obs.FieldErr, err.Error())
 		return
 	}
-	_ = lock.Close()
+	if !held {
+		return
+	}
 	// Bound failed/missing-Codex retries too; an absent cache must not spawn
 	// another app-server on every Claude statusline update after a failed fetch.
 	if err := atomicfile.Write(attemptPath, nil, 0o600); err != nil {

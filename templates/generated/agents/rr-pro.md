@@ -3,7 +3,7 @@
 name: rr-pro
 role: rr
 description: rr tier 2 on opus medium
-tools: WebSearch, WebFetch, Write, Agent, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web
+tools: WebSearch, WebFetch, Write, Agent, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 model: opus
 effort: medium
 ---

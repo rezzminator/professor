@@ -1,7 +1,7 @@
 ---
 name: rr
 description: 'Maps a query''s knowledge area — tier 1, the default: rr → rr-pro → rr-pro-max. Delegate for "rr", "quick research", "profile X" when one web search will not do. Returns the saved .professor/RR/{slug}-{date}/{slug}.md path first, then the cited answer, the rabbit holes left open and each digger''s report.'
-tools: WebSearch, WebFetch, Write, Agent, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web
+tools: WebSearch, WebFetch, Write, Agent, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 model: opus
 effort: low
 ---

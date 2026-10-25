@@ -4,7 +4,7 @@ description: FLIGHTS-LANDER-ONLY Finds one diff cluster's defects — the change
 visibility:
   visible-to:
     include: [flights-lander]
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 model: opus
 ---
 

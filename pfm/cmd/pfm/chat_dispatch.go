@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
@@ -434,6 +437,9 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 	flags := cli.NewFlagSet(
 		"chat call",
 		"usage: pfm chat call [--force-now] [--then STEER]... [--file PATH] [--allow-unsigned] <target> <message>\n"+
+			"       pfm chat call [flags] --to TARGET[,TARGET...] [--to TARGET]... <message>\n"+
+			"       several targets are a broadcast: delivered in parallel, one report per target,\n"+
+			"       exit 0 only when every target took it\n"+
 			"       `/compact` is refused here — pfm never types a compaction",
 		stderr,
 	)
@@ -445,6 +451,13 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 	messageFile := flags.String("file", "", "read the message from a file")
 	var steers cli.StringList
 	flags.Var(&steers, thenAction, "follow-up steer; repeat for a chain")
+	var targets []string
+	toGiven := false
+	flags.Func("to", "target chat; repeat or comma-separate for a broadcast", func(value string) error {
+		toGiven = true
+		targets = appendCallTargets(targets, strings.Split(value, ","))
+		return nil
+	})
 	// Parse only flags before the name; the message may start with a dash.
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -460,33 +473,38 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 		flags.Usage()
 		return 2
 	}
-	positional := flags.Args()
-	if len(positional) >= 2 && positional[1] == "--file" {
-		if filePath != "" {
-			return refuse("--file given twice")
+	body := flags.Args()
+	if !toGiven {
+		if len(body) >= 2 && body[1] == "--file" {
+			if filePath != "" {
+				return refuse("--file given twice")
+			}
+			if len(body) < 3 {
+				return refuse("--file needs a path")
+			}
+			filePath = body[2]
+			body = append([]string{body[0]}, body[3:]...)
 		}
-		if len(positional) < 3 {
-			return refuse("--file needs a path")
+		if len(body) == 0 {
+			return refuse("no target chat given")
 		}
-		filePath = positional[2]
-		positional = append([]string{positional[0]}, positional[3:]...)
+		targets, body = body[:1], body[1:]
+	}
+	if len(targets) == 0 {
+		return refuse("no target chat given")
 	}
 	if filePath != "" {
 		// A blank message beside --file is how a loop passes "no inline
 		// body"; only a real one conflicts with the file.
-		if len(positional) > 1 && strings.TrimSpace(strings.Join(positional[1:], "")) != "" {
+		if strings.TrimSpace(strings.Join(body, "")) != "" {
 			return refuse("--file and a message argument both given; pass one")
 		}
-		positional = positional[:min(1, len(positional))]
+		body = nil
 	}
-	if len(positional) == 0 {
-		return refuse("no target chat given")
-	}
-	if filePath == "" && len(positional) < 2 {
+	if filePath == "" && len(body) == 0 {
 		return refuse("no message given; pass <message> or --file PATH")
 	}
-	targetName := positional[0]
-	message := strings.Join(positional[1:], " ")
+	message := strings.Join(body, " ")
 	if filePath != "" {
 		content, err := os.ReadFile(filePath)
 		if err != nil {
@@ -499,8 +517,85 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 		fmt.Fprintln(stderr, "pfm chat call: refusing to call an empty message")
 		return 2
 	}
+	call := headlessCall{
+		message: message, force: force, allowUnsigned: allowUnsigned,
+		fileBacked: filePath != "", steers: steers,
+	}
+	if len(targets) == 1 {
+		return callOneHeadless(call, targets[0], stdout, stderr, runtimes...)
+	}
+	return broadcastHeadlessCall(targets, func(target string, out, errOut io.Writer) int {
+		return callOneHeadless(call, target, out, errOut, runtimes...)
+	}, stdout, stderr)
+}
+
+// appendCallTargets adds each named target once, trimmed, skipping blanks: a
+// target listed twice would receive the message twice.
+func appendCallTargets(targets, names []string) []string {
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" && !slices.Contains(targets, name) {
+			targets = append(targets, name)
+		}
+	}
+	return targets
+}
+
+// broadcastHeadlessCall delivers to every target at once — a busy target
+// waits for idle on its own, never holding up the rest — then prints each
+// target's report in the order given and a delivered N/M summary.
+func broadcastHeadlessCall(
+	targets []string,
+	deliver func(target string, stdout, stderr io.Writer) int,
+	stdout, stderr io.Writer,
+) int {
+	type report struct {
+		out, err bytes.Buffer
+		code     int
+	}
+	reports := make([]report, len(targets))
+	var wait sync.WaitGroup
+	for index, target := range targets {
+		wait.Go(func() {
+			reports[index].code = deliver(target, &reports[index].out, &reports[index].err)
+		})
+	}
+	wait.Wait()
+	var failed []string
+	for index, target := range targets {
+		current := &reports[index]
+		if current.code == 0 {
+			fmt.Fprintf(stdout, "=== %s: delivered\n", target)
+		} else {
+			failed = append(failed, target)
+			fmt.Fprintf(stderr, "=== %s: FAILED (exit %d)\n", target, current.code)
+		}
+		_, _ = stdout.Write(current.out.Bytes())
+		_, _ = stderr.Write(current.err.Bytes())
+	}
+	delivered := len(targets) - len(failed)
+	if len(failed) == 0 {
+		fmt.Fprintf(stdout, "pfm chat call: broadcast delivered %d/%d\n", delivered, len(targets))
+		return 0
+	}
+	fmt.Fprintf(
+		stderr,
+		"pfm chat call: broadcast delivered %d/%d; not delivered: %s\n",
+		delivered, len(targets), strings.Join(failed, ", "),
+	)
+	return codeUndelivered
+}
+
+// headlessCall is one parsed `pfm chat call`, sent to each of its targets.
+type headlessCall struct {
+	message                          string
+	force, allowUnsigned, fileBacked bool
+	steers                           []string
+}
+
+func callOneHeadless(call headlessCall, targetName string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+	message, force, steers := call.message, call.force, call.steers
 	ctx := context.Background()
-	engine, err := pfmchat.NewCallEngine(allowUnsigned, firstRuntime(runtimes))
+	engine, err := pfmchat.NewCallEngine(call.allowUnsigned, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat call: %v\n", err)
 		return codeUndelivered
@@ -509,7 +604,7 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 		Target:     targetName,
 		Message:    message,
 		ForceNow:   force,
-		FileBacked: filePath != "",
+		FileBacked: call.fileBacked,
 		Then:       steers,
 	})
 	if err != nil {

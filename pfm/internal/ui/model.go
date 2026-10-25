@@ -750,10 +750,10 @@ func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 		}
 	case "c":
 		model.statsSort = StatsSortCPU
-		model.sortStats(model.selectedStatsKey())
+		model.sortStats(model.selectedStatsKey(), model.selectedDockerKey())
 	case "m":
 		model.statsSort = StatsSortRAM
-		model.sortStats(model.selectedStatsKey())
+		model.sortStats(model.selectedStatsKey(), model.selectedDockerKey())
 	}
 	return model, nil
 }
@@ -837,20 +837,12 @@ func (model *Model) wakeSky() tea.Cmd {
 	return skyTickCmd(skyTickBaseInterval)
 }
 
-// liveSeatKey keeps native panes independent even when they share one server socket.
-func liveSeatKey(row compose.Row) string {
-	if row.Backend == "herdr" {
-		return row.Socket + "\x00" + row.PaneID
-	}
-	return row.Socket
-}
-
 func trackedChatSockets(rows []compose.Row) map[string]bool {
 	sockets := make(map[string]bool)
 	for index := range rows {
 		row := &rows[index]
 		if row.Socket != "" && isNameGroupRow(row.Kind) {
-			sockets[liveSeatKey(*row)] = true
+			sockets[compose.LiveSeatKey(*row)] = true
 		}
 	}
 	return sockets
@@ -917,45 +909,73 @@ func statsWaitCmd(generation uint64, interval time.Duration) tea.Cmd {
 }
 
 func (model *Model) applyStats(snapshot pfmstats.Snapshot) {
-	follow := model.selectedStatsKey()
+	follow, followDocker := model.selectedStatsKey(), model.selectedDockerKey()
 	model.stats = snapshot
 	model.adoptClock(snapshot.SampleTime)
-	model.sortStats(follow)
+	model.sortStats(follow, followDocker)
 	innerWidth, innerHeight := model.limitViewportDimensions()
 	model.limitsOffset = min(model.limitsOffset, maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight))
 }
 
-func (model *Model) sortStats(follow string) {
-	sort.SliceStable(model.stats.Chats, func(left, right int) bool {
+// sortStats orders both subtabs by the chosen key, busiest first, and keeps
+// each cursor on the row it was on, wherever that row moved or the list shrank.
+func (model *Model) sortStats(follow, followDocker string) {
+	chats := model.stats.Chats
+	sort.SliceStable(chats, func(left, right int) bool {
 		if model.statsSort == StatsSortRAM {
-			if model.stats.Chats[left].RSSBytes != model.stats.Chats[right].RSSBytes {
-				return model.stats.Chats[left].RSSBytes > model.stats.Chats[right].RSSBytes
+			if chats[left].RSSBytes != chats[right].RSSBytes {
+				return chats[left].RSSBytes > chats[right].RSSBytes
 			}
-		} else if model.stats.Chats[left].CPUPercent != model.stats.Chats[right].CPUPercent {
-			return model.stats.Chats[left].CPUPercent > model.stats.Chats[right].CPUPercent
+		} else if chats[left].CPUPercent != chats[right].CPUPercent {
+			return chats[left].CPUPercent > chats[right].CPUPercent
 		}
-		return model.stats.Chats[left].Socket < model.stats.Chats[right].Socket
+		return chats[left].Seat < chats[right].Seat
 	})
-	if len(model.stats.Chats) == 0 {
-		model.statsCursor = 0
-		return
-	}
-	if follow != "" {
-		for index := range model.stats.Chats {
-			if model.stats.Chats[index].Socket == follow {
-				model.statsCursor = index
-				return
+	docker := model.stats.Docker
+	sort.SliceStable(docker, func(left, right int) bool {
+		if model.statsSort == StatsSortRAM {
+			if docker[left].MemoryBytes != docker[right].MemoryBytes {
+				return docker[left].MemoryBytes > docker[right].MemoryBytes
 			}
+		} else if docker[left].CPUPercent != docker[right].CPUPercent {
+			return docker[left].CPUPercent > docker[right].CPUPercent
+		}
+		if docker[left].Name != docker[right].Name {
+			return docker[left].Name < docker[right].Name
+		}
+		return docker[left].ID < docker[right].ID
+	})
+	model.statsCursor = followCursor(model.statsCursor, len(chats), func(index int) bool {
+		return follow != "" && chats[index].Seat == follow
+	})
+	model.statsDockerCursor = followCursor(model.statsDockerCursor, len(docker), func(index int) bool {
+		return followDocker != "" && docker[index].ID == followDocker
+	})
+}
+
+// followCursor returns the index matching the followed row, else the old
+// cursor clamped into a list of length rows.
+func followCursor(cursor, rows int, followed func(int) bool) int {
+	for index := range rows {
+		if followed(index) {
+			return index
 		}
 	}
-	model.statsCursor = min(model.statsCursor, len(model.stats.Chats)-1)
+	return max(0, min(cursor, rows-1))
 }
 
 func (model Model) selectedStatsKey() string {
 	if model.statsCursor < 0 || model.statsCursor >= len(model.stats.Chats) {
 		return ""
 	}
-	return model.stats.Chats[model.statsCursor].Socket
+	return model.stats.Chats[model.statsCursor].Seat
+}
+
+func (model Model) selectedDockerKey() string {
+	if model.statsDockerCursor < 0 || model.statsDockerCursor >= len(model.stats.Docker) {
+		return ""
+	}
+	return model.stats.Docker[model.statsDockerCursor].ID
 }
 
 func (model *Model) updateQuery(value string) {

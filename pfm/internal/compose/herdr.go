@@ -7,6 +7,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
+const herdrBackend = "herdr"
+
 // herdrRows joins native seats before the shared kill and view eligibility pass.
 // Seats are distinct addresses even when they share one transcript; they must
 // not participate in tmux's newest-server collapse.
@@ -15,7 +17,7 @@ func (current *composer) herdrRows() []Row {
 	for index := range current.input.HerdrSeats {
 		native := &current.input.HerdrSeats[index]
 		seat := &native.Seat
-		if seat.Backend != "herdr" {
+		if seat.Backend != herdrBackend {
 			continue
 		}
 		row := Row{ID: seat.SessionID}
@@ -41,7 +43,7 @@ func (current *composer) herdrRows() []Row {
 			row.Kind = Booting
 			row.BackendError = fmt.Sprintf("HERDR ERROR %s: unknown engine %q", seat.HerdrSocket, seat.Engine)
 		}
-		row.Backend = "herdr"
+		row.Backend = herdrBackend
 		row.SeatID = seat.SeatID
 		row.LostNote = seat.LostNote
 		row.HerdrWorkspace = seat.HerdrWorkspace
@@ -71,6 +73,10 @@ func (current *composer) herdrRows() []Row {
 		}
 		if native.Err != nil {
 			row.BackendError = native.Err.Error()
+		} else if seat.State == "live" && seat.SeatHostPID > 0 {
+			// The probe proved this supervisor alive inside the pane; the
+			// engine runs beneath it. The shared Herdr server is no seat's.
+			row.PanePIDs = []int{seat.SeatHostPID}
 		}
 		rows = append(rows, row)
 	}

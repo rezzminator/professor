@@ -522,8 +522,9 @@ A hand-linked `extensions/professor` directory is never loaded on its own: moder
 | Refresh that DROPS the selected row → cursor falls back safely | JAIL | `ui/model.go:390-399` | B2 |
 | Window resize re-widths the query field | JAIL | `ui/model.go:123-127` | |
 | Footer legend matches the real bindings | JAIL | `ui/render.go:122-125` | |
-| every Stats subtab renders labeled column headers | JAIL | `ui/stats_test.go`, `ui/render.go` | |
-| agent rows are orange rather than Codex magenta; Stats labels and values use semantic colors | JAIL | `ui/golden_test.go`, `ui/stats_test.go`, `ui/render.go` | |
+| every Stats subtab renders labeled column headers | JAIL | `ui/stats_test.go`, `ui/stats.go` | |
+| agent rows are orange rather than Codex magenta; Stats labels and values use semantic colors | JAIL | `ui/golden_test.go`, `ui/stats_test.go`, `ui/stats.go` | |
+| Stats Chats has one row per live seat (`compose.LiveSeatKey`: Herdr panes sharing a server socket stay apart), a Herdr seat rooted at its proven seat-host PID with tokens per seat; a seat with no process renders dashes, a host without PSI reads `PSI n/a`, readings before the first sample `…`; both subtabs sort by `c`/`m` with a `↓` marker, keep their cursor on its row and page-scroll with a `stats a-b/n` title; an unlimited container's MEM% is its share of host RAM | JAIL | `compose/herdr_stats_test.go`, `stats/stats_seat_test.go`, `ui/stats_audit_test.go` | |
 | Stats Chats renders lifetime-traffic `TOKENS` plus rolling one-minute live `TOK/MIN`; first sample is `…`, idle is `–`, and transcript/session discontinuities reset | JAIL | `stats/stats_test.go`, `stats/tokens.go`, `ui/stats_test.go`, `ui/golden_test.go` | |
 | Stats Docker begins with cached container `NAME` and `IMAGE`, then cgroup metrics | JAIL | `stats/docker_identity_test.go`, `stats/docker_identity.go`, `ui/stats_test.go` | |
 | the two-second Stats sampler delta-parses transcript growth and performs at most one Docker API identity lookup per new cgroup id | JAIL | `stats/stats_test.go`, `stats/docker_identity_test.go` | |

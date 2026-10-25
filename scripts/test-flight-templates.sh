@@ -78,7 +78,7 @@ class FlightContracts(unittest.TestCase):
             self.assertIn(f'subagent_type: {child}', lander, f'the lander spawns {child}')
             head = text(child).split('---\n', 2)[1]
             self.assertIn('include: [flights-lander]', head, f'{child}: visible to the lander alone')
-            self.assertRegex(head, r'(?m)^tools: Read, Grep, Glob, Bash$', f'{child}: read-only tools')
+            self.assertRegex(head, r'(?m)^tools: Read, Grep, Glob, Bash(, mcp__forward-compaction__(forward_compaction|look_back))*$', f'{child}: read-only tools, forward-compaction its only addition')
 
     def test_reviewers_size_untracked_source(self):
         for name in ('reviewer', 'reviewer-pro'):

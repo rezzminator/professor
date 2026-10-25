@@ -332,6 +332,14 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 		strings.Contains(stdout.String(), "called LIVE into") {
 		t.Fatalf("target-followed receipt lost file-backed provenance: %q", stdout.String())
 	}
+	// A broadcast loop passes --file with a blank message argument: that
+	// blank is no body, never a usage refusal (42 calls failed on it).
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"chat", "call", "--file", compatPath, fileSession, ""}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "FILE-BACKED") {
+		t.Fatalf("--file with a blank message exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
 	compatCapture := exec.Command("tmux", "-L", fileSocket, "capture-pane", "-t", fileSession, "-p", "-J", "-S", "-")
 	compatCapture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root, "HOME="+home)
 	compatOutput, err := compatCapture.Output()
@@ -633,5 +641,29 @@ func TestChatCallResumeRefusesLiveSocketCrumbSession(t *testing.T) {
 	}
 	if string(raw) != line {
 		t.Fatalf("crumb guard mutated transcript: %q", raw)
+	}
+}
+
+// A refused call says which argument is wrong, never only the usage text.
+func TestChatCallRefusalsNameTheirReason(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "message.txt")
+	if err := os.WriteFile(path, []byte("body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--file", path, "target", "inline body"}, "--file and a message argument both given"},
+		{[]string{"target", "--file", path, "inline body"}, "--file and a message argument both given"},
+		{[]string{"--file", path, "target", "--file", path}, "--file given twice"},
+		{[]string{"target"}, "no message given"},
+		{[]string{}, "no target chat given"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(append([]string{"chat", "call"}, tc.args...), &stdout, &stderr)
+		if code != 2 || !strings.Contains(stderr.String(), tc.want) {
+			t.Fatalf("%q: exit=%d stderr=%q, want 2 naming %q", tc.args, code, stderr.String(), tc.want)
+		}
 	}
 }

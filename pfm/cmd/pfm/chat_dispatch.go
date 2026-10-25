@@ -453,29 +453,41 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 		fmt.Fprintln(stderr, "pfm chat call: --no-sig is retired; delivery signatures remain enabled")
 	}
 	filePath := *messageFile
-	trailingFile := flags.NArg() >= 2 && flags.Arg(1) == "--file"
-	if trailingFile {
-		if filePath != "" || flags.NArg() != 3 {
-			flags.Usage()
-			return 2
-		}
-		filePath = flags.Arg(2)
-	}
-	minimum := 2
-	if filePath != "" {
-		minimum = 1
-	}
-	if flags.NArg() < minimum {
+	// Every refusal names its reason: a bare usage text sent a 42-chat
+	// broadcast loop guessing at which argument it had wrong.
+	refuse := func(reason string) int {
+		fmt.Fprintf(stderr, "pfm chat call: %s\n", reason)
 		flags.Usage()
 		return 2
 	}
-	targetName := flags.Arg(0)
-	message := strings.Join(flags.Args()[1:], " ")
-	if filePath != "" {
-		if !trailingFile && flags.NArg() != 1 {
-			flags.Usage()
-			return 2
+	positional := flags.Args()
+	if len(positional) >= 2 && positional[1] == "--file" {
+		if filePath != "" {
+			return refuse("--file given twice")
 		}
+		if len(positional) < 3 {
+			return refuse("--file needs a path")
+		}
+		filePath = positional[2]
+		positional = append([]string{positional[0]}, positional[3:]...)
+	}
+	if filePath != "" {
+		// A blank message beside --file is how a loop passes "no inline
+		// body"; only a real one conflicts with the file.
+		if len(positional) > 1 && strings.TrimSpace(strings.Join(positional[1:], "")) != "" {
+			return refuse("--file and a message argument both given; pass one")
+		}
+		positional = positional[:min(1, len(positional))]
+	}
+	if len(positional) == 0 {
+		return refuse("no target chat given")
+	}
+	if filePath == "" && len(positional) < 2 {
+		return refuse("no message given; pass <message> or --file PATH")
+	}
+	targetName := positional[0]
+	message := strings.Join(positional[1:], " ")
+	if filePath != "" {
 		content, err := os.ReadFile(filePath)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat call: read --file: %v\n", err)

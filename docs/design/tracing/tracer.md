@@ -21,7 +21,6 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 | --- | --- | --- |
 | Lead | `templates/global/agents/tracer.md` | `sonnet`, `high` |
 | Reader | `templates/global/agents/sub-tracer.md` | `haiku`, `low` |
-| GPT twins | `templates/global/agents/gpt-tracer.md`, `templates/global/agents/gpt-sub-tracer.md`, rendered into `templates/generated/agents/` ([GPT twins](../gpt-twins/gpt-twins.md)) | `gpt-6.1-sol[1m]`, `high`; `gpt-6-luna[1m]`, `medium` |
 | Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `loom.py`, the `loom*.html` and `book*.html` page parts with `loom.css`, `tracetree_test.py`, `SKILL.md` | — |
 | Caller's manual | `templates/global/commands/tracer/use.md`, preloaded by agent frontmatter `skills: [tracer:use]` | — |
 
@@ -125,7 +124,6 @@ What the tree rests on, each observed in the lab:
 `tracer` runs on `sonnet` at `high` effort; its sub-tracers on `haiku` at `low`. On the single-agent body before the tree, it cost 43% of an `opus` lead's price at 98% of its accuracy and 58% of its clean blocks ([tracer bench](tracer-bench.md#against-an-opus-lead)).
 
 - The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
-- The GPT twins `gpt-tracer` on `gpt-6.1-sol[1m]` and `gpt-sub-tracer` on `gpt-6-luna[1m]` run the same manuals, the GPT tracer spawning GPT sub-tracers alone ([GPT twins](../gpt-twins/gpt-twins.md)). An earlier pair on `gpt-6-sol` and `gpt-6-luna`, over 85 field runs, cited a line past the file's end on 8.3% of hops against `tracer`'s 0.11%, and had 0.84% of hops rejected against 0.17% ([Field runs](tracer-bench.md#field-runs)); the `gpt-6.1-sol` pair is unbenched.
 - Codex: `tracer` and `sub-tracer` carry `engines.codex.sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not.
 
 ## Open items

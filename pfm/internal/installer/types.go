@@ -139,7 +139,9 @@ type Options struct {
 	Version string
 	// ClaudePluginCheckoutRoot is claude.pluginCheckoutRoot; empty when unset.
 	ClaudePluginCheckoutRoot string
-	// GptAgents is the machine-wide gpt twin and hook asset opt-in.
+	// GptAgents is claude.gptAgents: the machine-wide switch declaring the engine-sync
+	// capability gpt-agents (engine-sync installs only agents that require it). Off by
+	// default; no agent requires it today.
 	GptAgents bool
 	// AdoptAgents is pfm install --adopt-agents: engine-sync global adopts an
 	// unowned regular file sitting at a declared agent's path.

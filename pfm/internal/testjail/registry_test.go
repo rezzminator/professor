@@ -20,7 +20,7 @@ func TestStageGlobalAgentsLinksTheSources(t *testing.T) {
 	}
 	// A declaration is staged as a rendered-agent stand-in, not a raw Claude source.
 	for _, row := range []struct{ name, role string }{
-		{"gpt-foreman", "flights-foreman"}, {"gpt-reviewer", "reviewer"},
+		{"flights-foreman-sonnet", "flights-foreman"}, {"reviewer-nt", "reviewer"},
 	} {
 		data, err := os.ReadFile(filepath.Join(home, ".claude", "agents", row.name+".md"))
 		if err != nil || !strings.Contains(string(data), "role: "+row.role+"\n") {

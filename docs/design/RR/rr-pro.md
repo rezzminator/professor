@@ -20,7 +20,7 @@
 | Tools | `WebSearch, WebFetch, Write, Agent, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web` (Claude Code names inherited from `rr.md`) |
 | Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
 | Writes | the run's plan and synthesis, `plan.md` and `{slug}.md` in its run directory under the `RR-DIR:` line (`rr.md` § The document) |
-| Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max\|gpt-rr\|gpt-rr-pro\|gpt-rr-pro-max` |
+| Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |
 
 Description, verbatim: `rr tier 2 on opus medium`
 

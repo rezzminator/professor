@@ -30,56 +30,14 @@
     ".claude/commands/prod-deploy.md",
     ".claude/scripts/prod-deploy-watch.sh",
     ".claude/agents/changelogger.md",
-    ".claude/agents/gpt-changelogger.md",
     ".claude/agents/releaser.md",
-    ".claude/agents/gpt-releaser.md",
-    ".claude/agents/themer.md",
-    ".claude/agents/gpt-themer.md"
+    ".claude/agents/themer.md"
   ],
   "templates": {
-    "global/agents/astra.md": {
-      "curated": true
-    },
     "global/agents/documenter.md": {
       "curated": true
     },
     "global/agents/flights-foreman-sonnet.md": {
-      "curated": true
-    },
-    "global/agents/gpt-agent-investigator.md": {
-      "curated": true
-    },
-    "global/agents/gpt-foreman.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-lander.md": {
-      "curated": true
-    },
-    "global/agents/gpt-reviewer-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-reviewer.md": {
-      "curated": true
-    },
-    "global/agents/gpt-rr.md": {
-      "curated": true
-    },
-    "global/agents/gpt-rr-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-rr-pro-max.md": {
-      "curated": true
-    },
-    "global/agents/gpt-sub-tracer.md": {
-      "curated": true
-    },
-    "global/agents/gpt-tracer.md": {
-      "curated": true
-    },
-    "global/agents/gpt-transcript-reader.md": {
-      "curated": true
-    },
-    "global/agents/luna.md": {
       "curated": true
     },
     "global/agents/reviewer-nt.md": {
@@ -89,9 +47,6 @@
       "curated": true
     },
     "global/agents/rr-pro.md": {
-      "curated": true
-    },
-    "global/agents/sol.md": {
       "curated": true
     },
     "global/agents/reviewer-pro.md": {
@@ -116,12 +71,6 @@
       "curated": true
     },
     "global/engine-sync.json": {
-      "curated": true
-    },
-    "global/commands/context-audit.md": {
-      "curated": true
-    },
-    "global/commands/context-meter.md": {
       "curated": true
     },
     "global/commands/h/gh.md": {
@@ -178,16 +127,14 @@
     "global/skills/done-herewith/SKILL.md": {
       "curated": true
     },
+    "global/skills/context-audit/SKILL.md": {
+      "curated": true
+    },
     "global/skills/dude/SKILL.md": {
       "curated": true
     },
     "global/skills/sources.json": {
       "curated": true
-    },
-    "project/CLAUDE.md": {
-      "sources": {
-        "CLAUDE.md": "64fe5af625d151b0218fa1cd6b893f733ddaf27f7478a8ba7da7295f9aa70d6f"
-      }
     },
     "project/agents/gitter.md": {
       "sources": {
@@ -210,9 +157,6 @@
     "project/codex/rules/repo-law.rules": {
       "curated": true
     },
-    "project/codex/skills/chat/SKILL.md": {
-      "curated": true
-    },
     "project/commands/audit/code-hygiene.md": {
       "sources": {
         ".claude/commands/audit/code-hygiene.md": "1728e61cf51b0be4e254c52dd94e01348afddd8e4952cbbeaa031234a5a4eef1"
@@ -223,30 +167,12 @@
         ".claude/commands/audit/security.md": "9e31c001184143838657407a8ce251cd50511209e0ddc4c99c8c8a680167f877"
       }
     },
-    "project/commands/marketer.md": {
-      "sources": {
-        ".claude/commands/marketer.md": "0ab86d1dc0624d2a3bff8ed76274d32984b0ac3dc0983b29ce50e92da2ed0e41"
-      }
-    },
-    "project/commands/mentor.md": {
-      "sources": {
-        ".claude/commands/mentor.md": "9785b49b0f17db974bbdf4ccf5180152a841d252722ad5f29b0f6244c4ca5737"
-      }
-    },
-    "project/commands/officer.md": {
-      "sources": {
-        ".claude/commands/officer.md": "475b331a0f722eb21e27db31d704947fabdb2f445216dfb2d64b2ead84922132"
-      }
-    },
     "project/commands/pcm.md": {
       "sources": {
         ".claude/commands/pcm.md": "80ed770caa8bfc1b798c17427148e79912880e67609ca5076cd274473f68af9c"
       }
     },
     "project/commands/per-project/testing-manual.md": {
-      "curated": true
-    },
-    "project/docs-commands/build/references/qa-commons.md": {
       "curated": true
     },
     "project/docs-commands/git/references/gitter-history.md": {
@@ -286,11 +212,6 @@
     "project/epics/TEMPLATE.md": {
       "curated": true
     },
-    "project/per-project/CLAUDE.md": {
-      "sources": {
-        "{project:backend}/CLAUDE.md": "72080fc35f119da41761a5bdbaa368a31052935747b31c4a7038e0122984ee5a"
-      }
-    },
     "project/rumdl-policy.toml": {
       "curated": true
     },
@@ -302,14 +223,6 @@
         ".claude/scripts/checkpoint.sh": "8184d92715dd35504d17af80a5111d6ea1989047f59bd50c051f3fe65ec178dc"
       }
     },
-    "project/scripts/dev.sh": {
-      "sources": {
-        ".claude/scripts/dev.sh": "781ecd67e1728446d6a1f238a0dcee3386982ba3df853faa84c72aaa3408a0c2"
-      }
-    },
-    "project/scripts/drain-wait.sh": {
-      "curated": true
-    },
     "project/scripts/format-md.sh": {
       "curated": true
     },
@@ -317,15 +230,6 @@
       "sources": {
         ".claude/scripts/git-lock.sh": "05fafa1527026175f8cbaca74fc03155f2a6bb359304f826a830e44b3e798b43"
       }
-    },
-    "project/scripts/memory-consolidate.sh": {
-      "curated": true
-    },
-    "project/scripts/memory-sync.sh": {
-      "curated": true
-    },
-    "project/scripts/memory-wire.sh": {
-      "curated": true
     },
     "project/scripts/worktree.sh": {
       "curated": true
@@ -406,58 +310,7 @@
     "themes/README.md": {
       "curated": true
     },
-    "global/agents/shared/gpt.md": {
-      "curated": true
-    },
-    "global/agents/shared/gpt-flights.md": {
-      "curated": true
-    },
-    "global/agents/shared/gpt-worker.md": {
-      "curated": true
-    },
     "global/agents/shared/repo-lane.md": {
-      "curated": true
-    },
-    "global/agents/gpt-clone-distiller.md": {
-      "curated": true
-    },
-    "global/agents/gpt-collector.md": {
-      "curated": true
-    },
-    "global/agents/gpt-conflict-resolver.md": {
-      "curated": true
-    },
-    "global/agents/gpt-documenter.md": {
-      "curated": true
-    },
-    "global/agents/gpt-pcm.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-hunter.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-spec-walker.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-sub-lander.md": {
-      "curated": true
-    },
-    "global/agents/gpt-gitter.md": {
-      "curated": true
-    },
-    "global/agents/gpt-imaginator.md": {
-      "curated": true
-    },
-    "global/agents/gpt-sub-rr.md": {
-      "curated": true
-    },
-    "global/agents/gpt-reviewer-nt.md": {
-      "curated": true
-    },
-    "project/agents/gpt-gitter.md": {
-      "curated": true
-    },
-    "project/agents/gpt-pcm.md": {
       "curated": true
     }
   }

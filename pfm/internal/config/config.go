@@ -110,7 +110,9 @@ type ClaudePrefs struct {
 	PluginCheckoutRoot string
 	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
 	CostLedger bool
-	// GptAgents opts into gpt twins and their managed hook assets machine-wide.
+	// GptAgents is claude.gptAgents: the machine-wide switch declaring the engine-sync
+	// capability gpt-agents (engine-sync installs only agents that require it). Off by
+	// default; no agent requires it today.
 	GptAgents bool
 	// SubagentStatuslineTrace is claude.subagentStatuslineTrace: the machine-wide switch that
 	// launches Claude with the sub-agent status line's trace on. Off by default.

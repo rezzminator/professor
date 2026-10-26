@@ -57,7 +57,6 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 | `flights-hunter`, `flights-spec-walker`, `flights-sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
 | `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
-- **GPT twins:** `gpt-foreman` (sol, high, no effort buttons), `gpt-flights-lander` (sol, high) and `gpt-flights-speccer` (sol, xhigh) run the same protocols; their children stay on GPT.
 - **The speccer is user-invoked:** the user, or the main chat on the user's request, calls it independently. No foreman, lander or command hands work to it; it returns to its caller and hands off to nobody. Its spec, research and calibration files live in its flight directory, outside the message-only build/land protocol.
 - **Landers are spawned only by the main chat.**
 - **`tracer` and `gitter`** are fleet agents the family uses; they are not its members.
@@ -168,7 +167,7 @@ The `auto-effort-control` plugin gives an agent whose frontmatter carries `effor
 | `flights-foreman`, `flights-foreman-sonnet` | `on` (floor medium, ceiling xhigh), both starting at high |
 | `reviewer`, `reviewer-pro`, `reviewer-nt`, `documenter` | `on` |
 
-A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. No `gpt-*` twin carries it: each GPT twin pins a `tools:` line without the buttons and unsets the key (see [gpt-twins.md](../gpt-twins/gpt-twins.md#declarations)); nor does `pcm` or `releaser`. `flights-lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
+A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. Neither `pcm` nor `releaser` carries it. `flights-lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
 
 ## Decisions
 
@@ -197,7 +196,7 @@ The deepest chain is main → foreman → child foreman → tracer → sub-trace
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/flights-*.md` and the `from:` foreman tier, GPT twins in `templates/global/agents/gpt-*.md`, rendered into `templates/generated/agents/` | The protocols |
+| The agents | `templates/global/agents/flights-*.md` and the `from:` foreman tier, rendered into `templates/generated/agents/` | The protocols |
 | The lander's kit | `templates/global/skills/lander-inventory/` | The inventory and the computed spawn |
 | The command | `templates/global/commands/flights/doctor.md` | The meter |
 | The measurement | `pfm tokens --tree` in `pfm/internal/tokens/` | The measure's numbers |

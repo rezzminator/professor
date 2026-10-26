@@ -2,7 +2,7 @@
 name: gitter
 description: The only agent that writes git — every other agent is read-only. Delegate each worktree setup, commit, merge, push, pull or release by Phase (SETUP, COMMIT, MERGE, PUSH, PULL, RELEASE) or freeform. Returns the verified refs. Push and release run only when the caller's brief orders them; main moves only via the release PR, whose merge tags the release.
 model: sonnet
-tools: Read, Write, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Bash, Glob, Grep, Agent, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 visibility:
   agents:
     include: [conflict-resolver]

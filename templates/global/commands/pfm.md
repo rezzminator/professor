@@ -58,7 +58,7 @@ engine-sync, the `engine-sync` plugin's binary (on PATH after `pfm install`), is
 
 ## Chat: MCP first, shell for the rest
 
-Inside a chat, the `mcp__chat-professor__*` MCP tools are preferred for `call`, `last`, `ls`, `status`, `whoami`, `new`, and `save`. `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat call` refuses `/compact`: pfm never types a compaction. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
+Inside a chat, the `mcp__chat-professor__*` MCP tools are preferred for `call`, `last`, `ls`, `status`, `whoami`, `new`, and `save`. `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat call` refuses `/compact`: pfm never types a compaction. `pfm chat call --to a,b` (or repeated `--to`; MCP `call{targets:[…]}`) broadcasts in parallel, one report per target in the order given, and exits 6 unless every target took it. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
 
 ## Config
 

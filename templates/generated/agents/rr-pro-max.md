@@ -3,7 +3,7 @@
 name: rr-pro-max
 role: rr
 description: rr tier 3 on opus medium
-tools: WebSearch, WebFetch, Write, Agent, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web, Read
+tools: WebSearch, WebFetch, Write, Agent, mcp__plugin_harvester_harvester__read, mcp__plugin_harvester_harvester__search_literature, mcp__plugin_harvester_harvester__search_web, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, Read
 model: opus
 effort: medium
 ---

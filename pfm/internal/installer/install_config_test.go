@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -63,12 +64,12 @@ func TestInstallConfig(t *testing.T) {
 				clone = t.TempDir()
 				wantTheme, wantSeed = "seeded", example
 			}
-			before := snapshotMemoryMigrationTree(t, home)
+			before := snapshotTree(t, home)
 			got, seeded, err := InstallConfig(runtime, &paths.MapEnv{}, clone)
 			if err != nil || got.Theme != wantTheme || seeded != wantSeed {
 				t.Fatalf("config=%+v seeded=%q err=%v", got, seeded, err)
 			}
-			if !reflect.DeepEqual(before, snapshotMemoryMigrationTree(t, home)) {
+			if !reflect.DeepEqual(before, snapshotTree(t, home)) {
 				t.Fatal("read-only config changed home")
 			}
 			if wantTheme == "original" && !reflect.DeepEqual(got, runtime.Config) {
@@ -307,4 +308,47 @@ func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
 			t.Errorf("seed claude.%s = %q, want %q", key, got, want)
 		}
 	}
+}
+
+// snapshotTree records every path under root with its mode and content, so a read-only call can be proven to leave the tree as it was.
+func snapshotTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	snapshot := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, _ os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			snapshot[relative] = fmt.Sprintf("symlink:%o:%s", info.Mode().Perm(), target)
+		case info.IsDir():
+			snapshot[relative] = fmt.Sprintf("dir:%o", info.Mode().Perm())
+		default:
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			snapshot[relative] = fmt.Sprintf("file:%o:%x", info.Mode().Perm(), content)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }

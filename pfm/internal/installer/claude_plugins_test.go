@@ -28,7 +28,7 @@ type testPlugin struct{ Name, Source, ID string }
 // testPlugins is claude.plugins' default as these tests spell it out.
 var testPlugins = []testPlugin{
 	{Name: "cache-live-control", Source: "rezzminator/cache-live-control", ID: "cache-live-control@cache-live-control"},
-	{Name: "sub-agent-compact", Source: "rezzminator/sub-agent-compact", ID: "sub-agent-compact@sub-agent-compact"},
+	{Name: "forward-compaction", Source: "rezzminator/sub-agent-compact", ID: "forward-compaction@forward-compaction"},
 	{
 		Name:   "auto-effort-control",
 		Source: "rezzminator/auto-effort",
@@ -244,7 +244,7 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
+		`"forward-compaction@forward-compaction":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
 		`"engine-sync@engine-sync":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeInstalledPlugins(
@@ -269,7 +269,7 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 			t.Fatalf("already-enabled account ran %v\n%s", call, out.String())
 		}
 	}
-	wantOK := "ok      claude plugin sub-agent-compact@sub-agent-compact installed and enabled in " + first
+	wantOK := "ok      claude plugin forward-compaction@forward-compaction installed and enabled in " + first
 	if !strings.Contains(out.String(), wantOK) {
 		t.Fatalf("no ok line for the enabled account:\n%s", out.String())
 	}
@@ -487,7 +487,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
+		`"forward-compaction@forward-compaction":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
 		`"engine-sync@engine-sync":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
@@ -570,25 +570,25 @@ func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
 func TestEnsureClaudePluginsFailureNamesThePluginAndOthersContinue(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	runner := &pluginRunner{fail: map[string]string{
-		first + " plugin marketplace add rezzminator/sub-agent-compact":  "marketplace unreachable",
-		first + " plugin install sub-agent-compact@sub-agent-compact -y": "plugin not found",
+		first + " plugin marketplace add rezzminator/sub-agent-compact":    "marketplace unreachable",
+		first + " plugin install forward-compaction@forward-compaction -y": "plugin not found",
 	}}
 	var out bytes.Buffer
 	err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(context.Background())
 	if err == nil || !strings.Contains(err.Error(), first) {
 		t.Fatalf("err=%v, want a failure naming %s\n%s", err, first, out.String())
 	}
-	wantLine := "FAIL    claude plugin sub-agent-compact@sub-agent-compact in " + first
+	wantLine := "FAIL    claude plugin forward-compaction@forward-compaction in " + first
 	if !strings.Contains(out.String(), wantLine) || !strings.Contains(out.String(), "plugin not found") {
 		t.Fatalf("output missing %q with stderr:\n%s", wantLine, out.String())
 	}
 	// A bare name that fails to install names the entry, the repository pfm
 	// tried and the repair, in the install's own FAIL line.
 	for _, want := range []string{
-		`claude.plugins entry "sub-agent-compact"`,
+		`claude.plugins entry "forward-compaction"`,
 		"github.com/rezzminator/sub-agent-compact",
 		"fix or remove the entry in claude.plugins if that repository does not exist",
-		BareClaudePluginRepair("sub-agent-compact"),
+		BareClaudePluginRepair("forward-compaction"),
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("FAIL line lacks %q:\n%s", want, out.String())
@@ -630,7 +630,7 @@ func TestEnsureClaudePluginsDryRunSaysWhatWouldRun(t *testing.T) {
 	}
 	want := "change  run CLAUDE_CONFIG_DIR=" + first + " " + binary +
 		" plugin marketplace add rezzminator/sub-agent-compact && " + binary +
-		" plugin install sub-agent-compact@sub-agent-compact -y"
+		" plugin install forward-compaction@forward-compaction -y"
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("output missing %q:\n%s", want, out.String())
 	}
@@ -853,26 +853,32 @@ func TestClaudePluginStepFailsUnreadableState(t *testing.T) {
 	}
 }
 
-func TestClaudePluginGapsNamesEnabledLegacyEffort(t *testing.T) {
+func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 	for _, row := range []struct {
-		id      string
-		enabled bool
-		warning bool
+		id        string
+		enabled   bool
+		warning   bool
+		successor string
 	}{
-		{"agent-effort@agent-effort", true, true},
-		{"agent-effort@agent-effort-dev", true, true},
-		{"agent-effort@agent-effort", false, false},
-		{"agent-effort@professor", true, true},
-		{"agent-effort@rezzminator", true, true},
-		{"auto-effort@auto-effort", true, true},
-		{"auto-effort@auto-effort-dev", true, true},
-		{"auto-effort@professor", true, true},
-		{"auto-effort@rezzminator", true, true},
-		{"effort-live-control@effort-live-control", true, true},
-		{"effort-live-control@effort-live-control-dev", true, true},
-		{"effort-live-control@professor", true, true},
-		{"effort-live-control@rezzminator", true, true},
-		{"auto-effort-control@auto-effort-control", true, false},
+		{"agent-effort@agent-effort", true, true, "auto-effort-control"},
+		{"agent-effort@agent-effort-dev", true, true, "auto-effort-control"},
+		{"agent-effort@agent-effort", false, false, "auto-effort-control"},
+		{"agent-effort@professor", true, true, "auto-effort-control"},
+		{"agent-effort@rezzminator", true, true, "auto-effort-control"},
+		{"auto-effort@auto-effort", true, true, "auto-effort-control"},
+		{"auto-effort@auto-effort-dev", true, true, "auto-effort-control"},
+		{"auto-effort@professor", true, true, "auto-effort-control"},
+		{"auto-effort@rezzminator", true, true, "auto-effort-control"},
+		{"effort-live-control@effort-live-control", true, true, "auto-effort-control"},
+		{"effort-live-control@effort-live-control-dev", true, true, "auto-effort-control"},
+		{"effort-live-control@professor", true, true, "auto-effort-control"},
+		{"effort-live-control@rezzminator", true, true, "auto-effort-control"},
+		{"auto-effort-control@auto-effort-control", true, false, "auto-effort-control"},
+		{"sub-agent-compact@sub-agent-compact", true, true, "forward-compaction"},
+		{"sub-agent-compact@sub-agent-compact-dev", true, true, "forward-compaction"},
+		{"sub-agent-compact@sub-agent-compact-dev", false, false, "forward-compaction"},
+		{"sub-agent-compact@professor", true, true, "forward-compaction"},
+		{"forward-compaction@forward-compaction", true, false, "forward-compaction"},
 	} {
 		t.Run(fmt.Sprintf("%s enabled=%v", row.id, row.enabled), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")
@@ -891,8 +897,9 @@ func TestClaudePluginGapsNamesEnabledLegacyEffort(t *testing.T) {
 			if row.warning {
 				want = []ClaudePluginGap{
 					{
-						Problem: "plugin " + row.id + " retired (now auto-effort-control) but still enabled in " + path,
-						Fix:     "claude plugin uninstall " + row.id + " --scope user; if claude.plugins still lists it, replace that entry with auto-effort-control",
+						Problem: "plugin " + row.id + " retired (now " + row.successor + ") but still enabled in " + path,
+						Fix: "claude plugin uninstall " + row.id + " --scope user; if claude.plugins still lists it, replace that entry with " +
+							row.successor,
 					},
 				}
 			}

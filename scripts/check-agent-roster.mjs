@@ -287,7 +287,7 @@ function artifactPermissions(path, runtime) {
     throw new Error(`cannot read structured ${runtime} permissions in ${path}: ${parsed.error || parsed.stderr.trim() || `exit ${parsed.status}`}`);
   return JSON.parse(parsed.stdout);
 }
-for (const writer of ["gitter", "gpt-gitter"]) {
+for (const writer of ["gitter"]) {
   const source = sourceInventory(join(ROOT, ".claude/agents")).find((row) => row.name === writer);
   if (codexExpected.includes(writer)) {
     const path = join(ROOT, `.codex/agents/${writer}.toml`);

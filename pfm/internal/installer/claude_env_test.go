@@ -17,7 +17,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-const envKey = "SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL"
+const envKey = "FORWARD_COMPACTION_CEILING_NATIVE"
 
 // chatDuringChange is install's output that plays a chat writing path the
 // moment a change line is printed: between pfm's read and its rename.
@@ -173,15 +173,15 @@ func TestEnsureClaudeEnv(t *testing.T) {
 		},
 		{
 			name: "a key no plugin's prefix names warns and is still set", apply: true,
-			env:   map[string]string{"NOPE_X": "1", "SUB_AGENT_COMPACT": "2"},
+			env:   map[string]string{"NOPE_X": "1", "FORWARD_COMPACTION": "2"},
 			given: state{store: `{}`, linked: true},
 			lines: []string{
 				"  warn    claude.env NOPE_X: no plugin pfm installs is named by its prefix",
-				"  change  claude.env: set NOPE_X, SUB_AGENT_COMPACT in {seat}",
+				"  change  claude.env: set FORWARD_COMPACTION, NOPE_X in {seat}",
 			},
-			absent:    []string{"claude.env SUB_AGENT_COMPACT:"},
-			wantStore: `{"NOPE_X":"1","SUB_AGENT_COMPACT":"2"}`,
-			wantOwned: map[string]map[string]string{"{store}": {"NOPE_X": "1", "SUB_AGENT_COMPACT": "2"}},
+			absent:    []string{"claude.env FORWARD_COMPACTION:"},
+			wantStore: `{"NOPE_X":"1","FORWARD_COMPACTION":"2"}`,
+			wantOwned: map[string]map[string]string{"{store}": {"NOPE_X": "1", "FORWARD_COMPACTION": "2"}},
 			wantMode:  0o644,
 		},
 		{
@@ -618,7 +618,7 @@ func TestClaudeEnvTransactionRejectsConcurrentInstaller(t *testing.T) {
 func TestClaudeEnvRecordsExplicitInstallTarget(t *testing.T) {
 	home := t.TempDir()
 	custom := filepath.Join(home, "custom", "settings.json")
-	writeFixture(t, custom, `{"env":{"SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL":"1"}}`)
+	writeFixture(t, custom, `{"env":{"FORWARD_COMPACTION_CEILING_NATIVE":"1"}}`)
 	inst := &engine{
 		options: Options{
 			Home:      home,

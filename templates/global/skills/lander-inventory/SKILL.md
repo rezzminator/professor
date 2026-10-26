@@ -3,7 +3,7 @@ name: lander-inventory
 description: Internal kit of flights-lander — lander-inventory.py lists what a diff left behind (LEFT, LITERAL, GONE rows) and computes the review's spawn PLAN. Not invoked directly — ask flights-lander.
 visibility:
   visible-to:
-    include: [flights-lander, gpt-flights-lander]
+    include: [flights-lander]
 ---
 
 # lander-inventory

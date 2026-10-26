@@ -123,8 +123,6 @@ Run `pfm` for the interactive picker. Its colors are enabled independently of in
 
 Use `pfm`, `pfm chat open <target>` and the picker’s account selector. Reload your shell after installing the clone-sourced shim. Credentials and per-account state stay in each account directory; transcripts and the other shared entries live in `~/.claude`.
 
-Optional memory helpers use `memory-wire.sh` and `memory-consolidate.sh`. The `memory-helpers` host check refuses recognized copies under their old names and prints the moves and hook edits; run those fixes before installation. Helpers are never executed by the check.
-
 **Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` covers host checks (a BLOCK row exits 4), existence of an explicit `--config` (missing exits 1), required dependencies (failure exits 1), and both name-sync and schedule-fire jobs. A running name-sync job exits 4 at once. A running schedule fire is waited out: the check pauses for up to 90 s and prints nothing meanwhile, then exits 4 if the fire is still running. A scheduler it cannot probe prints a `skip` line and the check still passes if the other checks pass. It stops before the config seed and the installer's own plan pass, so exit 0 is no promise that `pfm install --yes` will not refuse.
 
 A mutating install refuses a running name-sync job at once with exit 97. It waits up to 90 s for a running schedule fire, then refuses with exit 97 if the fire is still running. Wait for the job to finish, or stop it before retrying: on Linux, `systemctl --user stop pfm-name-sync.service` or `systemctl --user stop pfm-schedule.service`; on macOS, `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` or `launchctl bootout gui/$(id -u)/com.professor.pfm.schedule`. Installation does not move legacy config or databases; `pfm doctor` prints those fixes.
@@ -220,13 +218,13 @@ pfm init .
 claude
 ```
 
-Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install interview** section. Claude interviews you — structure, stack, optional roles, persona, and host extras — shows the full write plan, waits for you to type **"go"**, then applies it: records your answers in `.professor/manifest.json`, fills the install-time tokens once through `pfm init --render`, adapts the scaffolded local files to your roster and structure, and deploys and pins per-project agents. Ten to fifteen minutes, commits nothing.
+Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install interview** section. Claude interviews you — structure, stack, compliance frame, persona, and host extras — shows the full write plan, waits for you to type **"go"**, then applies it: records your answers in `.professor/manifest.json`, fills the install-time tokens once through `pfm init --render`, adapts the scaffolded local files to your roster and structure, and deploys and pins per-project agents. Ten to fifteen minutes, commits nothing.
 
 **Guarantees, stated by the installer up front:**
 
 - Never commits, pushes, or runs `git add` — files only; you review and commit.
 - Never overwrites an existing project file by default — `pfm init` reports `CONFLICT` and leaves that path unpinned; `--force` is the explicit overwrite choice.
-- Never installs an opt-in piece — Tier B roles, Codex, statusline, hooks, host fleet, memory backup — without an explicit yes.
+- Never installs an opt-in piece — Codex, statusline, hooks, host fleet — without an explicit yes.
 - Never touches a path outside the plan.
 
 **Full protocol:** [`docs/SETUP.md`](./docs/SETUP.md) — the interview questions, pre-flight checks, existing-doc re-homing rules, generation steps, and verification. [`docs/PLACEHOLDERS.md`](./docs/PLACEHOLDERS.md) is the substitution law. Read both before writing any file.
@@ -242,7 +240,7 @@ One writer per surface — the law that keeps the two installers from fighting o
 | State and cache databases | The operator, using `pfm doctor` fixes | `~/.local/state/pfm/pfm.db` and `pfm-cache.db` beside it; close chats and stop services before moving an old database and its WAL/SHM siblings. |
 | Claude shared store and account links | `pfm install` | Missing store entries are created in `~/.claude`; each account links every shared entry there. Existing contents are kept. |
 | Claude plugins | `pfm install` through `claude plugin install` | Installed once through the selected primary account; `settings.json` and `plugins/installed_plugins.json` resolve to the shared store. A failed plugin command keeps its writes and reports the failure. |
-| Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
+| Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation and writes every `CLAUDE.md` with `/quality:claude-md write` | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, the Professor profiles (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/{profile}.json` for every profile directory in `templates/themes/`, their whole copies under `~/.local/share/pfm/install/themes/`, and one VS Code colour theme each in the Professor extension's `themes/`; exact ownership is recorded in the install ledger |
 | MCP client registrations (`chat-professor`) | `pfm install` | Claude receives the enabled PFM server and `mcp.thirdParty` through `--mcp-config` on managed non-query launches; query launches omit them. Install removes exact retired `harvester-professor` entries that earlier Professor installers wrote, while preserving other registrations. Codex receives the owned chat `mcp_servers` entry in `config.toml`; OpenCode receives its chat entry in `opencode.jsonc`. The native Harvester plugins manage their own registrations. |

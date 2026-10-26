@@ -2,76 +2,36 @@ package installer
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-// Claude Code runs an installed directory-marketplace plugin from a snapshot:
-// install and update copy the marketplace copy into
+// Claude Code install and update copy a directory-marketplace plugin into
 // {config}/plugins/cache/{marketplace}/{name}/{version} and record that
-// installPath and version per scope in plugins/installed_plugins.json. It takes
-// a new snapshot only when the version changes, so a refreshed -dev copy reaches
-// a chat only through `claude plugin update` after a version bump; a chat
-// already running keeps the snapshot it loaded, which Claude leaves on disk.
+// installPath and version per scope in plugins/installed_plugins.json, a new
+// snapshot only when the version changes. A session never runs that snapshot:
+// a plugin whose entry source is a path in a directory marketplace, every -dev
+// copy's, is read in place from the copy, CLAUDE_PLUGIN_ROOT included (Claude
+// Code 2.1.300-2.1.310, probed), so a refreshed copy reaches every new chat and
+// /reload-plugins at its version. Only the recorded version is kept current.
 
-// pluginCacheSkipped names the entries a snapshot and its checkout are
-// compared without: what the copy leaves out, and the marker Claude drops into
-// a snapshot no entry points at any more.
-func pluginCacheSkipped(name string) bool { return pluginCopySkipped(name) || name == ".orphaned_at" }
-
-// claudeGeneratedTypings says whether rel lies under .claude-plugin/types/,
-// where Claude Code writes the typings of its own build into a checkout and,
-// separately, into each snapshot (plugins gitignore it): the two differ there
-// whenever Claude Code's build does, with no plugin change behind it.
-func claudeGeneratedTypings(rel string) bool {
-	return strings.HasPrefix(filepath.ToSlash(rel), ".claude-plugin/types/")
-}
-
-// pluginCacheDigest maps every file under root to its content hash; modes are
-// left out, the snapshot being Claude's copy, not pfm's.
-func pluginCacheDigest(root string) (map[string]string, error) {
-	digest := map[string]string{}
-	err := walkPluginTree(root, pluginCacheSkipped, func(rel, path string, info fs.FileInfo) error {
-		if info.IsDir() || claudeGeneratedTypings(rel) {
-			return nil
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		sum := sha256.Sum256(content)
-		digest[rel] = hex.EncodeToString(sum[:])
-		return nil
-	})
-	return digest, err
-}
-
-// claudePluginCache is a local target's snapshots in one account dir against
-// its checkout: the checkout's version, every entry recording another, and a
-// gap per snapshot at that version whose content differs. A checkout naming
-// no version is unversioned: Claude caches by version, so nothing is compared.
+// claudePluginCache is a local target's install record entries in one account
+// dir against its checkout: the checkout's version and every entry recording
+// another. A checkout naming no version is unversioned: Claude caches by
+// version, so nothing is compared.
 type claudePluginCache struct {
 	target      ClaudePluginTarget
 	record      string
 	want        string
 	unversioned bool
 	behind      []claudePluginInstall
-	drifted     []ClaudePluginGap
 }
 
-// readClaudePluginCache reads target's snapshots in configDir. An entry whose
-// installPath is gone has no content to compare: ClaudePluginsNotInstalled
-// reports an id none of whose snapshots exists.
+// readClaudePluginCache reads target's install record entries in configDir.
 func readClaudePluginCache(configDir string, target ClaudePluginTarget) (claudePluginCache, error) {
 	cache := claudePluginCache{
 		target: target,
@@ -89,31 +49,9 @@ func readClaudePluginCache(configDir string, target ClaudePluginTarget) (claudeP
 		cache.unversioned = true
 		return cache, nil
 	}
-	var source map[string]string
-	compared := map[string]bool{}
 	for _, entry := range entries {
 		if entry.version() != cache.want {
 			cache.behind = append(cache.behind, entry)
-			continue
-		}
-		if entry.InstallPath == "" || compared[entry.InstallPath] {
-			continue
-		}
-		compared[entry.InstallPath] = true
-		if _, err := os.Stat(entry.InstallPath); errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if source == nil {
-			if source, err = pluginCacheDigest(target.Checkout); err != nil {
-				return cache, fmt.Errorf("read checkout %s: %w", target.Checkout, err)
-			}
-		}
-		snapshot, err := pluginCacheDigest(entry.InstallPath)
-		if err != nil {
-			return cache, fmt.Errorf("read cache %s: %w", entry.InstallPath, err)
-		}
-		if !maps.Equal(source, snapshot) {
-			cache.drifted = append(cache.drifted, cache.driftGap(entry))
 		}
 	}
 	return cache, nil
@@ -157,22 +95,11 @@ func (cache claudePluginCache) unversionedGap() ClaudePluginGap {
 	}
 }
 
-// driftGap names a snapshot at the checkout's version whose content differs:
-// an update leaves it, so only a version bump moves it.
-func (cache claudePluginCache) driftGap(entry claudePluginInstall) ClaudePluginGap {
-	return ClaudePluginGap{
-		Problem: fmt.Sprintf("plugin %s cache %s differs from %s at version %s",
-			cache.target.ID, EscapeControl(entry.InstallPath), cache.target.Checkout, EscapeControl(cache.want)),
-		Fix: "bump the version in " + filepath.Join(cache.target.Checkout, ".claude-plugin", "plugin.json") +
-			": Claude caches by version; then " + ClaudePluginRepair,
-	}
-}
-
 // ClaudePluginCacheGaps names, for every local target in configDir, each
-// install record entry behind its checkout's version, each snapshot at that
-// version whose content differs from the checkout, and a recorded target
-// whose checkout names no version. A record, checkout or
-// snapshot that cannot be read is an error naming its target, never an answer.
+// install record entry behind its checkout's version and a recorded target
+// whose checkout names no version. A snapshot's content is never compared:
+// Claude reads the copy in place. A record or checkout that cannot be read is
+// an error naming its target, never an answer.
 func ClaudePluginCacheGaps(configDir string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
 	var gaps []ClaudePluginGap
 	var failures []error
@@ -192,7 +119,6 @@ func ClaudePluginCacheGaps(configDir string, targets []ClaudePluginTarget) ([]Cl
 		for _, entry := range cache.behind {
 			gaps = append(gaps, cache.behindGap(entry))
 		}
-		gaps = append(gaps, cache.drifted...)
 	}
 	return gaps, errors.Join(failures...)
 }
@@ -228,9 +154,8 @@ func (cache claudePluginCache) updateDir(entry claudePluginInstall) (dir, repair
 // --scope {scope} -y`, once per scope and project, then reads the record back:
 // an entry still behind is an error naming both versions. An entry pfm cannot
 // move, or whose update fails, is an error too, the rest still updated. A
-// snapshot at the checkout's version whose content differs is a warning, after
-// the updates as before them: an update leaves it. A checkout naming no
-// version is a skip line: Claude caches by version, so nothing is checked.
+// checkout naming no version is a skip line: Claude caches by version, so
+// nothing is checked.
 func (installer *engine) ensureClaudePluginCache(
 	ctx context.Context,
 	run *claudePluginRun,
@@ -245,7 +170,6 @@ func (installer *engine) ensureClaudePluginCache(
 		installer.skip(fmt.Sprintf("claude plugin %s in %s: %s — %s", target.ID, run.dir, gap.Problem, gap.Fix))
 		return nil
 	}
-	installer.warnClaudePluginDrift(run, target, cache)
 	if len(cache.behind) == 0 {
 		return nil
 	}
@@ -293,21 +217,5 @@ func (installer *engine) ensureClaudePluginCache(
 			failures = append(failures, errors.New(after.behindGap(entry).Problem+" after claude plugin update"))
 		}
 	}
-	after.drifted = slices.DeleteFunc(after.drifted, func(gap ClaudePluginGap) bool {
-		return slices.Contains(cache.drifted, gap)
-	})
-	installer.warnClaudePluginDrift(run, target, after)
 	return errors.Join(failures...)
-}
-
-// warnClaudePluginDrift prints a warning per snapshot at the checkout's
-// version whose content differs from the checkout.
-func (installer *engine) warnClaudePluginDrift(
-	run *claudePluginRun,
-	target *ClaudePluginTarget,
-	cache claudePluginCache,
-) {
-	for _, gap := range cache.drifted {
-		installer.say("  warn    claude plugin %s in %s: %s — %s", target.ID, run.dir, gap.Problem, gap.Fix)
-	}
 }

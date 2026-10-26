@@ -98,7 +98,6 @@ func Detectors() []Detector {
 		{"legacy-cache-db", detectLegacyCacheDB},
 		{"pfm-settings", pfmSettings},
 		{checkPFMMCP, pfmMCP},
-		{"memory-helpers", memoryHelpers},
 		{"staged-shim", stagedShim},
 		{"staged-prompts", stagedPrompts},
 		{"shared-db", sharedDB},

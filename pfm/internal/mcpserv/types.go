@@ -80,14 +80,29 @@ type ResolveOutput struct {
 
 // CallInput requests guarded live delivery.
 type CallInput struct {
-	Target   string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
+	Target   string   `json:"target,omitempty" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane; give this or targets"`
+	Targets  []string `json:"targets,omitempty" jsonschema:"several targets for a broadcast, delivered in parallel, each reported in results; joined with target when both are given"`
 	Message  string   `json:"message" jsonschema:"message to type and submit"`
 	ForceNow bool     `json:"force_now,omitempty" jsonschema:"interrupt a busy target with Escape before delivery"`
 	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here"`
 }
 
-// CallOutput is a stable MCP representation of pfmcall.Result.
+// CallOutput is a stable MCP representation of pfmcall.Result; a broadcast
+// adds one result per target.
 type CallOutput struct {
+	CallDelivery
+	// Results holds a broadcast's per-target outcomes, in the order given.
+	Results []TargetCallOutput `json:"results,omitempty"`
+}
+
+// TargetCallOutput is one broadcast target's outcome.
+type TargetCallOutput struct {
+	Target string `json:"target"`
+	CallDelivery
+}
+
+// CallDelivery is one delivery's outcome.
+type CallDelivery struct {
 	Status        string `json:"status"`
 	Code          int    `json:"code"`
 	Message       string `json:"message"`

@@ -54,11 +54,6 @@ class FlightContracts(unittest.TestCase):
             self.assertIn('effortControl:', head, f'{name}: steered by auto-effort-control')
             self.assertNotRegex(head, r'(?m)^tools:', f'{name}: no tools line, so it inherits every tool and the effort buttons')
 
-    def test_claude_flights_spawn_claude(self):
-        rule = '## Provider\n\nYou are a Claude agent: every agent you spawn is a Claude agent.'
-        for name in ('flights-foreman', 'flights-foreman-sonnet', 'flights-lander'):
-            self.assertIn(rule, text(name), f'{name}: the Claude spawn rule')
-
     def test_one_blocking_wait_past_ten_minutes(self):
         for name in ('flights-foreman', 'flights-foreman-sonnet', 'flights-lander'):
             body = text(name)
@@ -77,8 +72,8 @@ class FlightContracts(unittest.TestCase):
         for child in ('flights-hunter', 'flights-spec-walker', 'flights-sub-lander'):
             self.assertIn(f'subagent_type: {child}', lander, f'the lander spawns {child}')
             head = text(child).split('---\n', 2)[1]
-            self.assertIn('include: [flights-lander, gpt-flights-lander]', head, f'{child}: visible to both landers alone')
-            self.assertRegex(head, r'(?m)^tools: Read, Grep, Glob, Bash$', f'{child}: read-only tools')
+            self.assertIn('include: [flights-lander]', head, f'{child}: visible to the lander alone')
+            self.assertRegex(head, r'(?m)^tools: Read, Grep, Glob, Bash(, mcp__forward-compaction__(forward_compaction|look_back))*$', f'{child}: read-only tools, forward-compaction its only addition')
 
     def test_reviewers_size_untracked_source(self):
         for name in ('reviewer', 'reviewer-pro'):

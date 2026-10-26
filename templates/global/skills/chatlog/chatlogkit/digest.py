@@ -250,7 +250,8 @@ def clean(line):
     m = EVENT_LINE.match(line)
     if not m:
         return line
-    if "<task-notification>" in line:
+    # only a message that IS a notification collapses; one quoting it (a wake's facts) keeps its text
+    if line[m.end():].lstrip().startswith("<task-notification>"):
         tail = line[line.index("<task-notification>"):]
         s, u = NOTIF_STATUS.search(tail), NOTIF_SUMMARY.search(tail)
         st = s.group(1).strip() if s else "?"

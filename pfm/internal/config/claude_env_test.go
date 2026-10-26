@@ -30,9 +30,9 @@ func TestClaudeEnvKey(t *testing.T) {
 		},
 		{
 			name:    "upper-snake names with string values",
-			content: `{"version":2,"claude":{"env":{"SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL":"1","BUDDY_MODEL":"opus","X9":""}}}`,
+			content: `{"version":2,"claude":{"env":{"FORWARD_COMPACTION_CEILING_NATIVE":"1","BUDDY_MODEL":"opus","X9":""}}}`,
 			want: map[string]string{
-				"SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL": "1", "BUDDY_MODEL": "opus", "X9": "",
+				"FORWARD_COMPACTION_CEILING_NATIVE": "1", "BUDDY_MODEL": "opus", "X9": "",
 			},
 			source: SourceFile,
 		},

@@ -102,7 +102,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 
 ## Lane A — adopter
 
-- `A.01-scaffold` · the scaffold roster lands from `pfm init` (CLAUDE.md, settings, commands, agents, scripts, skills, epics, codex + docs mirrors); `pfm init --render` fills a second scratch project's install-time tokens from its manifest · spends none
+- `A.01-scaffold` · the scaffold roster lands from `pfm init` (settings, commands, agents, scripts, skills, epics, codex + docs mirrors; its next line names `/quality:claude-md write`); `pfm init --render` fills a second scratch project's install-time tokens from its manifest · spends none
 - `A.02-phase2-never-deployed` · Phase-2-only scaffold is confirmed never auto-deployed by `pfm` · spends none
 - `A.03-baseline-pin` · `.professor/baseline.json` pins the install · spends none
 - `A.04-project-updates` · `pfm doctor --project-updates` is clean; every status class is exercised · spends none
@@ -113,7 +113,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `A.09-codex-agents` · `engine-sync codex agents` compiles the global agent mirror · spends none
 - `A.10-symlinked-blueprint` · a symlinked blueprint is reached correctly through `pfm update` (P10.1 class, update side) · spends none
 - `A.11-plugin-hook` · the engine-sync plugin's hooks.json registers mark on a Write or Edit, stop and start; a mock chat's Edit of `.claude/**` is admitted, the plugin's own PostToolUse command (the mock engine loads no plugin, so the lane runs it) sets the engine-sync dirty flag and its Stop command recompiles `AGENTS.md` and clears it · spends cc:$SEAT
-- `A.12-dev-suite` · `bash .claude/scripts/dev.sh status` reports express's servers; `dev.sh test` is refused as an unsupported mode; the interview's test command runs express's own suite · spends none
+- `A.12-suite` · the interview's test command runs express's own suite · spends none
 - `A.13-opencode-layer` · the OpenCode compile layer for adopters: `engine-sync opencode build|check|doctor` all PASS over the adopter project · spends none
 - `A.14-release-notice` · the picker's cached release-notice refreshes · spends none
 - `A.15-fleet-unchanged-by-update` · **cross-lane** — `pfm update` + the hook rewrite while the fleet is up: `pfm ls` rows and every live chat's hook ownership are unchanged · spends cc:$SEAT

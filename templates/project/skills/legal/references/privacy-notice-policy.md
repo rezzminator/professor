@@ -42,4 +42,4 @@ A translation gap is a compliance gap — every mandatory disclosure must appear
 
 ## {PROJECT_NAME} application
 
-{PROJECT_NAME} needs a {SUBJECT_NOUN}-facing consent notice and a {USER_NOUN}/{ORG_UNIT}-facing policy. Universal up-front consent at signup is the architecture — the notice documents and informs that consent, it is not a per-feature runtime flag (see the officer's Consent Architecture). The AI-analysis transparency and automated-processing disclosures are mandatory here. The notice is outsider-facing: describe components by function (the AI analysis service, the application database), never internal names, per the officer's authoring rules.
+{PROJECT_NAME} needs a {SUBJECT_NOUN}-facing consent notice and a {USER_NOUN}/{ORG_UNIT}-facing policy. Universal up-front consent at signup is the architecture — the notice documents and informs that consent, it is not a per-feature runtime flag. The AI-analysis transparency and automated-processing disclosures are mandatory here. The notice is outsider-facing: describe components by function (the AI analysis service, the application database), never internal names.

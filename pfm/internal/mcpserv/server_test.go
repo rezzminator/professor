@@ -340,6 +340,20 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Fatalf("post-call capture = %+v", after)
 	}
 
+	// A broadcast reports each target on its own; one refusal never hides
+	// the delivery beside it.
+	broadcast := callTool[CallOutput](t, session, "call", CallInput{
+		Targets: []string{"Fixture Label", jail.selectorSession, "Fixture Label"},
+		Message: "hello broadcast",
+	})
+	if broadcast.Status != "partial" || broadcast.Code != 6 || len(broadcast.Results) != 2 ||
+		broadcast.Results[0].Target != "Fixture Label" || broadcast.Results[0].Status != "delivered" ||
+		!strings.Contains(broadcast.Results[0].Proof, "USER:hello broadcast") ||
+		broadcast.Results[1].Target != jail.selectorSession || broadcast.Results[1].Status != "refused" ||
+		!strings.Contains(broadcast.Message, "broadcast delivered 1/2; not delivered: "+jail.selectorSession) {
+		t.Fatalf("broadcast = %+v\nstderr:\n%s", broadcast, serverStderr.String())
+	}
+
 	selectorBefore := callTool[CaptureOutput](t, session, "capture",
 		CaptureInput{Target: jail.selectorSession})
 	selector := callTool[CallOutput](t, session, "call", CallInput{

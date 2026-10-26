@@ -400,7 +400,6 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 | --- | --- | --- |
 | `/quality:llm-codebase` | the source-tree layout and its mechanical gates | the three-state protocol as it stands; this suite's `size`, `clones` and budget rows run in its own script |
 | the project's testing manual | one project's test mechanics — where a test lives, run commands, environments, cleanup, concurrency, the local traps — and the per-change duty | this command carries the design law for every tier; the manual's § Lanes and registries carries the per-change duty and § What not to test the refused shapes, in the manual's own words for its stack |
-| `qa-commons.md` | the generic rules every project's test gates share | nothing; its rules stand as they are and this command does not rely on them |
 
 ## Surfaces that stay in sync
 

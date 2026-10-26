@@ -165,7 +165,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("resolve", service.chatResolve))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "call",
-		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / call into chat X\" ask. Call call{target:\"my-chat\", message:\"…\"}; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke.",
+		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / call into chat X\" ask. Call call{target:\"my-chat\", message:\"…\"}; a broadcast passes targets:[\"a\",\"b\"], delivered in parallel; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke. A broadcast returns results, one per target, and status delivered only when all took it, else partial or undelivered; a target whose delivery itself broke reports status error in results, never a tool error.",
 		Annotations: mutating,
 	}, obs.Tool("call", service.chatCall))
 	mcp.AddTool(server, &mcp.Tool{
@@ -499,75 +499,6 @@ func (service *Service) chatResolve(
 		Status: status, Code: code, SocketPath: target.SocketPath,
 		Pane: target.Pane, Candidates: detail,
 	}, nil
-}
-
-func (service *Service) chatCall(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input CallInput,
-) (*mcp.CallToolResult, CallOutput, error) {
-	callEngine, caller, err := service.callEngineForRequest(ctx, request)
-	if err != nil {
-		return nil, CallOutput{}, err
-	}
-	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
-		return nil, CallOutput{
-			Status: refusal, Code: pfmcall.CodeUnknown, Message: detail,
-		}, nil
-	}
-	result, err := callEngine.Call(ctx, pfmcall.Request{
-		Target:   input.Target,
-		Message:  input.Message,
-		ForceNow: input.ForceNow,
-		Then:     input.Then,
-	})
-	output := outputFromCall(result)
-	if caller.present && !caller.valid && caller.detail != "" &&
-		strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) {
-		// The request did carry an identity that failed to bind: name why, so
-		// a binding failure never reads as "no identity was sent".
-		output.Message += " The request's own caller identity did not bind: " + caller.detail
-	}
-	return nil, output, err
-}
-
-// mcpUnsignedMessage restates pfmcall.ErrUnsigned's refusal for an MCP
-// caller. The engine's own wording (call/body.go) is CLI-oriented — it
-// tells the reader to set an environment variable or pass --allow-unsigned,
-// both unreachable from an MCP tool call, and it blames a detached process
-// chain that is not what happened here. The daemon-level cause is real (this
-// process still derived no identity of its own), so only the remedy half is
-// replaced with one an MCP caller can act on.
-func mcpUnsignedMessage() string {
-	return pfmcall.ErrUnsigned.Error() +
-		": this process derived no identity of its own, so the recipient " +
-		"would be asked to act on an instruction from nobody. " +
-		noAmbientCallerRemedy
-}
-
-func outputFromCall(result pfmcall.Result) CallOutput {
-	message := result.Message
-	if strings.Contains(message, pfmcall.ErrUnsigned.Error()) {
-		message = mcpUnsignedMessage()
-	}
-	return CallOutput{
-		Status:        result.Status,
-		Code:          result.Code,
-		Message:       message,
-		SocketPath:    result.SocketPath,
-		Pane:          result.Pane,
-		Proof:         result.Proof,
-		Busy:          result.Busy,
-		Interrupted:   result.Interrupted,
-		DraftStashed:  result.DraftStashed,
-		Typed:         result.Typed,
-		SubmitRetries: result.SubmitRetries,
-		Steers:        result.Steers,
-		SteerLog:      result.SteerLog,
-		Unsigned:      result.Unsigned,
-		AutoFilePath:  result.AutoFilePath,
-		LiteralChunks: result.LiteralChunks,
-	}
 }
 
 // chatWhoami answers with the requesting chat's identity. Codex sends its

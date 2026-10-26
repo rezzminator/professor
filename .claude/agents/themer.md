@@ -1,7 +1,7 @@
 ---
 name: themer
 description: 'Owns pfm profiles, file to pixel — "make a new pfm theme", restyle a profile or one surface, a colour or glyph rendering wrong on screen, pfm''s theme engine code. Pass the ask, the profile, what is seen, a .worktrees/{flight}/ worktree for Go. Returns DONE, PARTIAL, QUESTION or BLOCKED, files, check rows, screen evidence. Not for switching → `pfm theme use`.'
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 model: opus
 effort: high
 ---

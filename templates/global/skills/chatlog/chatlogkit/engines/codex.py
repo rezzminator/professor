@@ -16,6 +16,7 @@ TYPES = ("session_meta", "response_item", "event_msg", "turn_context", "world_st
 EXEC_FOLDED = "response_item/custom_tool_call exec script (shown as its actions)"
 EXIT_CODE = re.compile(r"(?:Process exited with code|Exit code:?)[\s\x85\xa0\x1c-\x1f]*(-?[0-9]+)")
 SHELL_TOOLS = ("exec_command", "shell", "local_shell")
+EXEC_SESSION = re.compile(r'"session_id"\s*:\s*([0-9]+)')
 SPAWN_TOOLS = ("spawn_agent",)
 NA = {"NOTICE": "Codex has no task-notification record",
       "HOOK": "the kit renders no Codex hook record",
@@ -233,6 +234,10 @@ def _output(p, n, ts, label, payload):
                 p.mark(ev.line, SKIPPED, EXEC_FOLDED)
                 p.mark(n, SKIPPED, EXEC_FOLDED.replace("custom_tool_call", "custom_tool_call_output", 1))
                 return
+            # a command yielded past its script's end completes later as its own item: remember the
+            # unified-exec session it runs in, so that item folds this script instead of doubling it
+            for sid in EXEC_SESSION.findall(text):
+                p.late_wrappers[sid] = (ev, n)
             break
     p.mark(n, "rendered", label)
 
@@ -245,7 +250,20 @@ def _item_completed(p, n, ts, label, payload):
         note = " (duplicate of its response_item)" if kind in DUPLICATE else ""
         p.mark(n, SKIPPED, label + ":" + kind + note)
         return
+    # a command run in another directory than the session's says so: a worktree run that execs in
+    # the root checkout is otherwise indistinguishable from one that stays in its lane
+    item_cwd = pystr(item["cwd"]).replace("file://", "").rstrip("/") if truthy(item.get("cwd")) else ""
+    session_cwd = pystr(p.meta.get("cwd", "")).replace("file://", "").rstrip("/")
+    pid = pystr(item["process_id"]) if truthy(item.get("process_id")) else ""
+    late = p.late_wrappers.pop(pid, None) if pid else None
+    if late is not None and actions:
+        wrapper, out_line = late
+        wrapper.hidden = True
+        p.mark(wrapper.line, SKIPPED, EXEC_FOLDED)
+        p.mark(out_line, SKIPPED, EXEC_FOLDED.replace("custom_tool_call", "custom_tool_call_output", 1))
     for a in actions:
+        if item_cwd and item_cwd != session_cwd and getattr(a, "name", None) == "exec":
+            a.text = f"[cwd {item_cwd}] " + a.text
         p.add(a, label + ":" + kind)
     if p.wrappers:
         p.wrappers[-1].children += len(actions)
@@ -292,7 +310,12 @@ def _item(n, ts, item):
                     diff = pystr(value[k])
                     break
             plus = minus = 0
+            # an add carries the raw file text, unprefixed: every line is added
+            added = not truthy(value.get("unified_diff")) and truthy(value.get("content"))
             for line in diff.splitlines():
+                if added:
+                    plus += 1
+                    continue
                 if line.startswith("+") and not line.startswith("+++"):
                     plus += 1
                 elif line.startswith("-") and not line.startswith("---"):

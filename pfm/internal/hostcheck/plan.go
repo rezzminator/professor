@@ -49,7 +49,7 @@ var phaseClasses = map[phase]string{
 	phaseConfig:   "legacy-config pre-split-config",
 	phaseDatabase: "legacy-state-db legacy-cache-db",
 	phaseStore:    "account-is-store store-identity account-entry-real home-state-file",
-	phaseWiring: "pfm-settings pfm-mcp memory-helpers staged-shim third-party-mcp " +
+	phaseWiring: "pfm-settings pfm-mcp staged-shim third-party-mcp " +
 		"function-hook-modules shell-claude-env",
 	phaseCleanup: "staged-prompts shared-db stray-dir unclassified " +
 		"stale-state-tmp beside-backup",

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -61,6 +62,33 @@ class ClaudeChainTest(Sandbox):
         self.assertEqual([r[6] for r in hop], [os.path.realpath(os.path.join(self.proj, "extra.md"))])
         self.assertTrue(any(r[0] == "ERROR" and "no transcript" in r[1] for r in rows), rows)
         self.assertTrue(any(r[0] == "ERROR" and "usage store unreadable" in r[1] for r in rows), rows)
+
+    def test_directory_marketplace_plugin_reads_its_folder(self):
+        cfg, mkt = os.path.join(self.home, "cfg"), os.path.join(self.home, "mkt")
+        skill = "---\nname: %s\ndescription: %s skill\n---\n"
+        self.write("cfg/settings.json", '{"enabledPlugins": {"pp@pp-dev": true, "gh@gh": true}}')
+        self.write("cfg/plugins/installed_plugins.json", json.dumps({"plugins": {
+            "pp@pp-dev": [{"scope": "user", "installPath": cfg + "/plugins/cache/pp-dev/pp/1.0.0"}],
+            "gh@gh": [{"scope": "user", "installPath": cfg + "/plugins/cache/gh/gh/2.0.0"}]}}))
+        self.write("cfg/plugins/known_marketplaces.json", json.dumps({
+            "pp-dev": {"source": {"source": "directory", "path": mkt}},
+            "gh": {"source": {"source": "github", "repo": "o/gh"}}}))
+        self.write("mkt/.claude-plugin/marketplace.json", '{"plugins": [{"name": "pp", "source": "./plugins/pp"}]}')
+        self.write("mkt/plugins/pp/skills/folderonly/SKILL.md", skill % ("folderonly", "folder"))
+        self.write("cfg/plugins/cache/pp-dev/pp/1.0.0/skills/cacheonly/SKILL.md", skill % ("cacheonly", "cache"))
+        self.write("cfg/plugins/cache/gh/gh/2.0.0/skills/released/SKILL.md", skill % ("released", "released"))
+        rows = self.run_audit("--engine", "claude", CLAUDE_CONFIG_DIR=cfg)
+        names = sorted(os.path.basename(os.path.dirname(r[6])) for r in rows if r[0] == "LAYER" and r[1] == "plugin skill")
+        self.assertEqual(names, ["folderonly", "released"], rows)
+
+    def test_directory_marketplace_without_the_plugin_reads_as_error(self):
+        cfg, mkt = os.path.join(self.home, "cfg"), os.path.join(self.home, "mkt")
+        self.write("cfg/settings.json", '{"enabledPlugins": {"pp@pp-dev": true}}')
+        self.write("cfg/plugins/installed_plugins.json", json.dumps({"plugins": {
+            "pp@pp-dev": [{"scope": "user", "installPath": cfg + "/plugins/cache/pp-dev/pp/1.0.0"}]}}))
+        self.write("cfg/plugins/known_marketplaces.json", json.dumps({"pp-dev": {"source": {"source": "directory", "path": mkt}}}))
+        rows = self.run_audit("--engine", "claude", CLAUDE_CONFIG_DIR=cfg)
+        self.assertTrue(any(r[0] == "ERROR" and "pp-dev" in r[1] and "pp" in r[1] for r in rows), rows)
 
 
 if __name__ == "__main__":

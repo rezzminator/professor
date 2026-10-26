@@ -36,8 +36,8 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - On alpha, pfm builds callmeter from its source checkout into its versioned binary home before refreshing its plugin copy.
 - `pfm install` provisions harvester independently of Claude: alpha builds from source, stable verifies release checksums; `~/.local/bin/harvester` links its stable binary for every engine.
 - `pfm install` copies no engine-sync binary, its plugin copy carrying only the wrapper: `make -C pfm host-install` builds one from `engine-sync/` on disk into `{engine-sync home}/versions/{version}/engine-sync` and points the stable link `bin/engine-sync`, which pfm execs, at it (`pfm/scripts/install-engine-sync.sh`); the wrapper the hooks run downloads its plugin version's checksum-verified release binary on first run, runs that, and links the stable path only when no newer version holds it; `ENGINE_SYNC_BIN` points pfm and the hooks at a local build; the fence builds its own from `engine-sync/`.
-- Chats run Claude Code's versioned cache `{config}/plugins/cache/{name}-dev/{name}/{version}`, never the `-dev` copy: a copy refresh alone reaches no chat, and a content change reaches the cache only with a version bump.
-- `pfm install` moves each stale cache entry with `claude plugin update`: a new chat gets the new version at once, an open chat on `/reload-plugins`; a running chat keeps its old snapshot, marked `.orphaned_at`.
+- Chats run each `{name}@{name}-dev` plugin from its folder, the `-dev` copy `~/.local/share/{name}-dev/plugins/{name}` (a `directory` marketplace), never from `{config}/plugins/cache/`: a copy refresh reaches a new chat or an open chat's `/reload-plugins` with no version bump, and a running chat's next hook call can already run the new files.
+- A released `{name}@{name}` (stable) runs from Claude Code's versioned cache `{config}/plugins/cache/{name}/{name}/{version}`.
 
 # Rules
 

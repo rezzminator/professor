@@ -106,11 +106,19 @@ def claude():
             probe(next(iter(glob.glob(f'{CFG}/skills/{s}/SKILL.md') + glob.glob(f'{P}/.claude/skills/{s}/SKILL.md') + glob.glob(f'{P}/.claude/commands/{c}.md') + glob.glob(f'{CFG}/commands/{c}.md')), f'{s} (missing)'), 'preloaded skill')
             if L[-1][0] == 'preloaded skill': L[-1][2] = fm(L[-1][2])[1]  # the body loads, the frontmatter does not
     tools = agent.get('tools', '') if LOOP != 'main' else ''
-    plug = []
+    plug, mk = [], json.loads(rd(CFG + '/plugins/known_marketplaces.json') or '{}')
+    def plugdir(name, r):  # a directory marketplace's plugin loads from its folder, never its cache; any other from its cache
+        n, m = name.split('@')
+        src = mk.get(m, {}).get('source', {})
+        if src.get('source') != 'directory': return r['installPath']
+        e = next((e for e in json.loads(rd(src['path'] + '/.claude-plugin/marketplace.json') or '{"plugins":[]}')['plugins'] if e.get('name') == n), {})
+        if isinstance(e.get('source'), str): return os.path.normpath(os.path.join(src['path'], e['source']))
+        out('ERROR', f'directory marketplace {m}: no folder for plugin {n} in {src["path"]}/.claude-plugin/marketplace.json — its listings not read')
     for name, rows in json.loads(rd(CFG + '/plugins/installed_plugins.json') or '{"plugins":{}}')['plugins'].items():
         if S.get('enabledPlugins', {}).get(name):
             r = next((r for r in rows if r.get('scope') == 'user' or P.startswith(r.get('projectPath', '\0'))), None)
-            if r: plug.append((name.split('@')[0], r['installPath']))
+            ip = plugdir(name, r) if r else None
+            if ip: plug.append((name.split('@')[0], ip))
     out('PROBE', 'plugins', f'{len(plug)} enabled and installed for this project')
     cmdname = lambda base: lambda f, d: os.path.relpath(f, base)[:-3].replace('/', ':')
     if not tools or 'Skill' in tools:

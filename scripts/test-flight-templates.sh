@@ -54,11 +54,6 @@ class FlightContracts(unittest.TestCase):
             self.assertIn('effortControl:', head, f'{name}: steered by auto-effort-control')
             self.assertNotRegex(head, r'(?m)^tools:', f'{name}: no tools line, so it inherits every tool and the effort buttons')
 
-    def test_claude_flights_spawn_claude(self):
-        rule = '## Provider\n\nYou are a Claude agent: every agent you spawn is a Claude agent.'
-        for name in ('flights-foreman', 'flights-foreman-sonnet', 'flights-lander'):
-            self.assertIn(rule, text(name), f'{name}: the Claude spawn rule')
-
     def test_one_blocking_wait_past_ten_minutes(self):
         for name in ('flights-foreman', 'flights-foreman-sonnet', 'flights-lander'):
             body = text(name)

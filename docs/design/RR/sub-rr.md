@@ -1,6 +1,6 @@
 # sub-rr
 
-`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and writes its full report to the path its brief names, and returns that path, a quote-anchored finding per sub-query, each read through its sub-area's lens, plus every rabbit hole its sources raised. It is spawned only by `rr`, `rr-pro`, `rr-pro-max` and their `gpt-` twins, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
+`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and writes its full report to the path its brief names, and returns that path, a quote-anchored finding per sub-query, each read through its sub-area's lens, plus every rabbit hole its sources raised. It is spawned only by `rr`, `rr-pro` and `rr-pro-max`, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
 
 ## Contents
 
@@ -25,7 +25,7 @@
 | Spawns | nothing — it holds no `Agent` |
 | Writes | one file, the `Report:` path in its brief, by one `Write` as its last call; it holds no `Edit`, `Read` or `Bash` |
 
-Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro, rr-pro-max and their gpt- twins, never delegated to directly; writes its full cited report to the brief's Report path. Returns that path, a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
+Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro and rr-pro-max, never delegated to directly; writes its full cited report to the brief's Report path. Returns that path, a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
 
 ## The brief it receives
 

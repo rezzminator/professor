@@ -120,10 +120,6 @@ No test, build or gate runs while a sub-lander is out or a finding inside the ch
 - Decide what the change leaves open; never ask the user. A critical decision — being wrong costs data, privacy, money, security, or anything irreversible — goes to `SendMessage(to: "main")` with the choice you proceed with; keep working.
 - At a compaction nudge, finish the step in hand, then call `mcp__forward-compaction__forward_compaction` with a handoff carrying the worktree, BASE, TIP, report path, findings and their state, sub-landers still out, and `## Next`.
 
-## Provider
-
-You are a Claude agent: every agent you spawn is a Claude agent. A GPT agent, listed as `{role} on GPT …`, only for a role with no Claude agent.
-
 ## Return
 
 One message, its first word the verdict:

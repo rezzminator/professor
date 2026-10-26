@@ -32,7 +32,7 @@ A change lands in this file first, then in the templates, then in every surface 
 | `rr-pro-max` | variant of `rr` | As `rr-pro`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [rr-pro-max.md](rr-pro-max.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, writes its full report into the run directory, returns the report's path, findings and rabbit holes | collector (`haiku`), effort `medium` | [sub-rr.md](sub-rr.md) |
 | `clone-distiller` | agent | The general repository digger, the code lane of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [clone-distiller.md](../clone-distiller/clone-distiller.md) |
-| `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max\|gpt-rr\|gpt-rr-pro\|gpt-rr-pro-max` | `pfm internal rr-dir` | this file |
+| `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max` | `pfm internal rr-dir` | this file |
 
 The leads differ in their caps and in the repository lane, which sends a sub-area whose answer lives in a repository's code to `clone-distiller` ([clone-distiller.md](../clone-distiller/clone-distiller.md), § Who spawns it); every other line of the body is `rr.md`'s:
 
@@ -228,7 +228,7 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 | Surface | File | Holds |
 | --- | --- | --- |
 | The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `clone-distiller.md`, `rr-pro.md`, `rr-pro-max.md`, `shared/repo-lane.md` | The three protocols, the lens rules in `rr.md` step 2 and step 4, and the digger's side in `sub-rr.md`; the `rr-pro` and `rr-pro-max` overrides of `rr.md`'s § Budget and § Spawning, each hash-pinned, and their repository lane, the shared file `shared/repo-lane.md` |
-| The rendered variants | `templates/generated/agents/` (tracked), linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro`, `rr-pro-max`, `gpt-rr`, `gpt-rr-pro` and `gpt-rr-pro-max`, re-rendered by `pfm install` (`engine-sync global`) after every edit of `rr.md` or `shared/repo-lane.md`; the fence step `templates.generated-agents` fails when the tracked files differ from a fresh render |
+| The rendered variants | `templates/generated/agents/` (tracked), linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro` and `rr-pro-max`, re-rendered by `pfm install` (`engine-sync global`) after every edit of `rr.md` or `shared/repo-lane.md`; the fence step `templates.generated-agents` fails when the tracked files differ from a fresh render |
 | The hook | `pfm internal rr-dir`, registered by `HookTemplates` in `pfm/internal/claudelaunch/hooks.go` (matcher `HookRRDirMatcher`) | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
 | The ignore lines | `.gitignore` | `sub-rr/` and `clone-distiller/` under each run directory stay machine-local |
 | This directory | `docs/design/RR/` | This file and one file per other member |

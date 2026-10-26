@@ -30,56 +30,14 @@
     ".claude/commands/prod-deploy.md",
     ".claude/scripts/prod-deploy-watch.sh",
     ".claude/agents/changelogger.md",
-    ".claude/agents/gpt-changelogger.md",
     ".claude/agents/releaser.md",
-    ".claude/agents/gpt-releaser.md",
-    ".claude/agents/themer.md",
-    ".claude/agents/gpt-themer.md"
+    ".claude/agents/themer.md"
   ],
   "templates": {
-    "global/agents/astra.md": {
-      "curated": true
-    },
     "global/agents/documenter.md": {
       "curated": true
     },
     "global/agents/flights-foreman-sonnet.md": {
-      "curated": true
-    },
-    "global/agents/gpt-agent-investigator.md": {
-      "curated": true
-    },
-    "global/agents/gpt-foreman.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-lander.md": {
-      "curated": true
-    },
-    "global/agents/gpt-reviewer-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-reviewer.md": {
-      "curated": true
-    },
-    "global/agents/gpt-rr.md": {
-      "curated": true
-    },
-    "global/agents/gpt-rr-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-rr-pro-max.md": {
-      "curated": true
-    },
-    "global/agents/gpt-sub-tracer.md": {
-      "curated": true
-    },
-    "global/agents/gpt-tracer.md": {
-      "curated": true
-    },
-    "global/agents/gpt-transcript-reader.md": {
-      "curated": true
-    },
-    "global/agents/luna.md": {
       "curated": true
     },
     "global/agents/reviewer-nt.md": {
@@ -89,9 +47,6 @@
       "curated": true
     },
     "global/agents/rr-pro.md": {
-      "curated": true
-    },
-    "global/agents/sol.md": {
       "curated": true
     },
     "global/agents/reviewer-pro.md": {
@@ -355,58 +310,7 @@
     "themes/README.md": {
       "curated": true
     },
-    "global/agents/shared/gpt.md": {
-      "curated": true
-    },
-    "global/agents/shared/gpt-flights.md": {
-      "curated": true
-    },
-    "global/agents/shared/gpt-worker.md": {
-      "curated": true
-    },
     "global/agents/shared/repo-lane.md": {
-      "curated": true
-    },
-    "global/agents/gpt-clone-distiller.md": {
-      "curated": true
-    },
-    "global/agents/gpt-collector.md": {
-      "curated": true
-    },
-    "global/agents/gpt-conflict-resolver.md": {
-      "curated": true
-    },
-    "global/agents/gpt-documenter.md": {
-      "curated": true
-    },
-    "global/agents/gpt-pcm.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-hunter.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-spec-walker.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights-sub-lander.md": {
-      "curated": true
-    },
-    "global/agents/gpt-gitter.md": {
-      "curated": true
-    },
-    "global/agents/gpt-imaginator.md": {
-      "curated": true
-    },
-    "global/agents/gpt-sub-rr.md": {
-      "curated": true
-    },
-    "global/agents/gpt-reviewer-nt.md": {
-      "curated": true
-    },
-    "project/agents/gpt-gitter.md": {
-      "curated": true
-    },
-    "project/agents/gpt-pcm.md": {
       "curated": true
     }
   }

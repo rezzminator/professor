@@ -67,6 +67,5 @@ Run on real transcripts on this host: a `tracer` audit, a 56 MB main chat (diges
 | Surface | File |
 | --- | --- |
 | The agents | `templates/global/agents/agent-investigator.md`, `templates/global/agents/transcript-reader.md` |
-| The GPT twins | `templates/global/agents/gpt-agent-investigator.md`, `templates/global/agents/gpt-transcript-reader.md`, rendered into `templates/generated/agents/` ([GPT twins](../gpt-twins/gpt-twins.md)) |
 | The kit | `templates/global/skills/chatlog/chatlog.py`, `templates/global/skills/chatlog/chatlogkit/`, `templates/global/skills/chatlog/chatlog_test.py`, `templates/global/skills/chatlog/census_test.py`, `templates/global/skills/chatlog/waits_test.py`, `templates/global/skills/chatlog/SKILL.md` |
 | The report timestamp metavariable | `docs/PLACEHOLDERS.md` (`{HHMMSS}`) |

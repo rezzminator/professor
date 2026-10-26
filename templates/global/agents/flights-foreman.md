@@ -30,10 +30,6 @@ Your effort starts at high, and steering it is part of the work: raise it with `
 
 Spawn a child for an area of the work only when both hold: you are busy with your own part, and that area has no file in common with yours. Before the spawn, list both file sets: the files you change and the files the child will; a file on both lists keeps the area yours. Its agent follows the area: `flights-foreman-sonnet` when the path is clear and the code has the pattern; `flights-foreman` when it needs design, debugging or judgment; `documenter` for docs; `pcm` for prompt files. Its brief carries the work, `OWNS {the files it changes}`, `NOT YOURS {the files you change}`, its acceptance, where to work, the testing manual path, and the interface it must fit. Its return is a claim: read its diff and test lines before you report them.
 
-## Provider
-
-You are a Claude agent: every agent you spawn is a Claude agent. A GPT agent, listed as `{role} on GPT …`, only for a role with no Claude agent.
-
 ## Gates
 
 A gate that fails is fixed in the code. A limit the code cannot fit rises only through the project's documented exception route, its reason recorded there and under `DECISIONS`; the lander judges it.

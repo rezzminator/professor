@@ -25,7 +25,6 @@ The lander takes one worktree's whole change after every foreman on it has retur
 | `flights-hunter` | opus | both landers | hunts defects inside one cluster of the production diff |
 | `flights-spec-walker` | sonnet | both landers | holds a range of the request's numbered rows against the code |
 | `flights-sub-lander` | haiku | both landers | follows inventory rows or threads past the diff and flags each |
-| `gpt-flights-lander` | gpt-6.1-sol · high | the main chat | the same manual on GPT, spawning the same Claude children |
 
 Only the main chat spawns a lander. The children are read-only (`Read, Grep, Glob, Bash`, Bash for `grep`, `sed -n` and read-only `git`), write nothing and judge nothing: each returns candidates or flags for the lander to verify.
 
@@ -138,6 +137,5 @@ This lander's review phase (`STOP_AT review`), two runs per flight, scored again
 ## Declaration
 
 - `templates/global/agents/flights-lander.md`: opus at effort medium, no `effortControl` and no effort buttons; its `tools:` line holds `Agent` (the children and gitter) and `SendMessage` (gitter's conflict hand-back, a critical decision to main).
-- `templates/global/agents/flights-{hunter,spec-walker,sub-lander}.md`: Claude originals, each `visible-to` `flights-lander` and `gpt-flights-lander`.
+- `templates/global/agents/flights-{hunter,spec-walker,sub-lander}.md`: Claude originals, each `visible-to` `flights-lander`.
 - `templates/global/skills/lander-inventory/`: the inventory kit, its `SKILL.md` visible to both landers.
-- `gpt-flights-lander`: a `from: flights-lander` declaration, rendered to `templates/generated/agents/gpt-flights-lander.md`; it renames nothing, so its children stay Claude agents.

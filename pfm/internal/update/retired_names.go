@@ -191,7 +191,8 @@ var retiredNames = []retiredName{
 	// Commit f0c88ffb "tracer-rr is clone-distiller".
 	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
 	// Commit 3b401f24: the twin agents take their originals' full names; terra retires.
-	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
+	// No successor: gpt-flights-lander, the name gpt-lander once took, retired with the twins.
+	{name: "gpt-lander", kind: retiredAgent, match: matchExact},
 	{name: "gpt-executor", kind: retiredAgent, match: matchExact},
 	// The flights family cut (docs/design/flights/flights.md § The family): the
 	// foreman-pro twins, the mechanical executors and the speccer retire, and

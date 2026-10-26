@@ -291,17 +291,17 @@ function cleanVerdictStub(f) {
 }
 
 for (const [runtime, corrupt] of [
-  ['opencode', '---\nname: gpt-gitter\npermission:\n  bash:\n    "git *": deny\n---\nThe body says "git *": allow, but the permission denies it.\n'],
-  ...['read-only', 'workspace-write', 'unknown'].map((mode) => ['codex', `name = "gpt-gitter"\nsandbox_mode = "${mode}"\n`]),
+  ['opencode', '---\nname: gitter\npermission:\n  bash:\n    "git *": deny\n---\nThe body says "git *": allow, but the permission denies it.\n'],
+  ...['read-only', 'workspace-write', 'unknown'].map((mode) => ['codex', `name = "gitter"\nsandbox_mode = "${mode}"\n`]),
 ]) {
   test(`structured writer permission corruption fails despite clean compiler: ${runtime} ${corrupt}`, (t) => {
-    const source = '---\nname: gpt-gitter\ndescription: Writer fixture\nmodel: smart\nengines:\n  codex:\n    sandbox: inherit\n  opencode:\n    permission:\n      bash:\n        "git *": allow\n---\nWrite git.\n';
-    const f = fixture(t, {}, { version: 1 }, {}, { '.claude/agents/gpt-gitter.md': source });
-    f.put(runtime === 'codex' ? '.codex/agents/gpt-gitter.toml' : '.opencode/agent/gpt-gitter.md', corrupt);
+    const source = '---\nname: gitter\ndescription: Writer fixture\nmodel: smart\nengines:\n  codex:\n    sandbox: inherit\n  opencode:\n    permission:\n      bash:\n        "git *": allow\n---\nWrite git.\n';
+    const f = fixture(t, {}, { version: 1 }, {}, { '.claude/agents/gitter.md': source });
+    f.put(runtime === 'codex' ? '.codex/agents/gitter.toml' : '.opencode/agent/gitter.md', corrupt);
     cleanVerdictStub(f);
     const result = check(f);
     assert.equal(result.status, 1, result.out);
-    assert.match(result.out, new RegExp(`${runtime}: gpt-gitter`));
+    assert.match(result.out, new RegExp(`${runtime}: gitter`));
   });
 }
 
@@ -352,7 +352,7 @@ test("sources that define no agent name what the comparison could not do", (t) =
   assert.match(result.out, /opencode: the sources under \.claude\/agents \(root and child projects\) define no registered agent/);
 });
 
-for (const writer of ['gitter', 'gpt-gitter']) {
+for (const writer of ['gitter']) {
   const source = `---\nname: ${writer}\ndescription: Fixture Git writer\nmodel: smart\ntools: Read, Write, Bash\nengines:\n  codex:\n    sandbox: inherit\n  opencode:\n    permission:\n      bash:\n        "git *": allow\n---\nPerform the assigned Git phase.\n`;
   test(`${writer} emitted permissions satisfy the local roster check`, (t) => {
     const f = fixture(t, {}, { version: 1 }, {}, { [`.claude/agents/${writer}.md`]: source });
@@ -529,7 +529,7 @@ test('only the exact gitter mirror retains Git write permissions', () => {
 });
 
 // auto-effort-control steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
-// its buttons: exactly these Claude roles hold both; every other rendered agent, each GPT twin, pcm and releaser neither.
+// its buttons: exactly these Claude roles hold both; every other rendered agent, pcm and releaser neither.
 const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort-control__${tool}`);
 const foremanEffort = { floor: 'medium', ceiling: 'xhigh' };
 const effortSteered = new Map([
@@ -573,7 +573,7 @@ test('effort permission gate evaluates native exclusions without reducing inheri
   assert.throws(() => assertEffortPermission('reviewer', `---\nname: reviewer\neffortControl: true\ndisallowedTools: [${effortButtons[0]}]\n---\nReview.\n`));
 });
 
-test('effort buttons ride exactly the steered Claude roles, never a GPT twin, pcm or releaser', () => {
+test('effort buttons ride exactly the steered Claude roles, never another rendered agent, pcm or releaser', () => {
   const render = renderShipped([CAPABILITY]);
   const dir = join(render.home, '.claude/agents');
   const agents = [

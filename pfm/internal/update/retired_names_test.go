@@ -821,7 +821,7 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct{ line, name, successor, definition string }{
 		{"spawn gpt-foreman", "", "", ""},
-		{"spawn gpt-lander", "gpt-lander", "gpt-flights-lander", ""},
+		{"spawn gpt-lander", "gpt-lander", "", ""},
 		{"spawn gpt-executor", "gpt-executor", "", ""},
 		{`subagent_type: "terra"`, `subagent_type: "terra"`, "", ""},
 		{`subagent_type:"terra"`, `subagent_type:"terra"`, "", ""},
@@ -860,8 +860,8 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 }
 
 // TestRetiredNamesReportTheFlightsCut: every agent and command the flights
-// family cut retires is a hit with no successor, and the live names beside
-// them — the current foremen, gpt-foreman, /flights:doctor — are none.
+// family cut retires is a hit with no successor, and the names beside them
+// that only share a prefix — the current foremen, gpt-foreman, /flights:doctor — are none.
 func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 	t.Parallel()
 	rows := []struct{ line, name, kind, successor string }{

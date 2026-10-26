@@ -329,6 +329,7 @@ type daemonRaceKernel struct {
 	identities        map[int]daemonRaceIdentity
 	executableErrors  map[int]error
 	environmentErrors map[int]error
+	emptyEnvironments map[int]bool
 	executablePaths   map[int]string
 	configPaths       map[int]string
 	identityCalls     int
@@ -360,6 +361,10 @@ func (kernel *daemonRaceKernel) Environ(pid int) (map[string]string, error) {
 	if err := kernel.environmentErrors[kernel.environmentCalls]; err != nil {
 		return nil, err
 	}
+	if kernel.emptyEnvironments[kernel.environmentCalls] {
+		// An exiting process's /proc/{pid}/environ reads empty, without an error.
+		return map[string]string{}, nil
+	}
 	if path, ok := kernel.configPaths[kernel.environmentCalls]; ok {
 		return map[string]string{"PFM_CONFIG": path}, nil
 	}
@@ -372,6 +377,7 @@ func TestConvergeMCPDaemonExitRacesPreserveLiveFailures(t *testing.T) {
 		identities        map[int]daemonRaceIdentity
 		executableErrors  map[int]error
 		environmentErrors map[int]error
+		emptyEnvironments map[int]bool
 		executablePaths   map[int]string
 		configPaths       map[int]string
 		recycle           bool
@@ -392,6 +398,8 @@ func TestConvergeMCPDaemonExitRacesPreserveLiveFailures(t *testing.T) {
 		{name: "executable missing during verify after exit", executableErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
 		{name: "executable missing during verify after zombie", executableErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {identity: gather.ProcessIdentity{Zombie: true}}}},
 		{name: "environment missing during verify after exit", environmentErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
+		{name: "environment empty during verify after exit", emptyEnvironments: map[int]bool{2: true}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
+		{name: "transient empty environment recovers", emptyEnvironments: map[int]bool{2: true}, wantSignals: []string{"29 terminated"}},
 		{name: "transient executable missing recovers", executableErrors: map[int]error{2: fs.ErrNotExist}, wantSignals: []string{"29 terminated"}},
 		{name: "transient environment missing recovers", environmentErrors: map[int]error{2: fs.ErrNotExist}, wantSignals: []string{"29 terminated"}},
 		{name: "identity permission remains error", identities: map[int]daemonRaceIdentity{3: {err: fs.ErrPermission}}, wantErr: "permission"},
@@ -414,6 +422,7 @@ func TestConvergeMCPDaemonExitRacesPreserveLiveFailures(t *testing.T) {
 				identities:        tc.identities,
 				executableErrors:  tc.executableErrors,
 				environmentErrors: tc.environmentErrors,
+				emptyEnvironments: tc.emptyEnvironments,
 				executablePaths:   tc.executablePaths,
 				configPaths:       tc.configPaths,
 			}

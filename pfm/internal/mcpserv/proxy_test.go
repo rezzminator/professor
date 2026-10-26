@@ -577,7 +577,7 @@ func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
 		call string
 	}{
 		{name: "chat call refused", call: "new"},
-		{name: "servicedesk call refused", call: "servicedesk"},
+		{name: "kill call refused", call: killToolName},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			var routeCalls, firstSendProbes atomic.Int32

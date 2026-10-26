@@ -243,6 +243,7 @@ func newInstallerOptions(
 		options.RequireManagedCleanup = runtime.Config.Claude.RequireManagedCleanup
 		options.Home = runtime.Paths.Home
 		options.StateDB = runtime.Paths.StateDB
+		options.ProcRoot = runtime.Paths.ProcRoot
 		options.MCPEnabled = make(map[string]bool, len(runtime.Config.MCPServers))
 		for name, server := range runtime.Config.MCPServers {
 			options.MCPEnabled[name] = server.Enabled

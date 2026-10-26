@@ -309,6 +309,158 @@ func TestSharedMigrationFromV1PreservesRowsAndBacksUp(t *testing.T) {
 	}
 }
 
+// retiredIssuesSeed is a version-6 file still holding the retired issues ledger.
+func retiredIssuesSeed(rows int) string {
+	seed := v3Schema + migrationV5 + migrationV6 + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" +
+		scheduleOnceDDL + ";" + `
+CREATE TABLE issues(id INTEGER PRIMARY KEY, at_ns INTEGER NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL);
+CREATE INDEX issues_at ON issues(at_ns);
+INSERT INTO hidden(uuid,hidden_at) VALUES('keep',77);
+PRAGMA user_version=6;`
+	for row := range rows {
+		seed += fmt.Sprintf("INSERT INTO issues(at_ns,title,detail) VALUES(%d,'filed','kept in the backup');", row)
+	}
+	return seed
+}
+
+func countIssueObjects(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name LIKE 'issues%'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+// A writable open drops the retired issues ledger with no schema bump, copying
+// the file aside first when the table holds rows.
+func TestSharedOpenDropsTheRetiredIssuesTable(t *testing.T) {
+	t.Parallel()
+	for _, rows := range []int{2, 0} {
+		t.Run(fmt.Sprintf("rows=%d", rows), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "pfm.db")
+			seedSharedState(t, path, retiredIssuesSeed(rows))
+			state := OpenSharedState(ctx, paths.Values{StateDB: path})
+			if err := state.Degraded(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := state.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			var version, hidden int
+			if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 6 {
+				t.Fatalf("user_version=%d err=%v, want 6: the drop needs no bump", version, err)
+			}
+			if count := countIssueObjects(t, state.db); count != 0 {
+				t.Fatalf("issues objects=%d, want the table and its index dropped", count)
+			}
+			if err := state.db.QueryRow("SELECT hidden_at FROM hidden WHERE uuid='keep'").
+				Scan(&hidden); err != nil || hidden != 77 {
+				t.Fatalf("hidden row=%d err=%v, want the kill kept", hidden, err)
+			}
+			backupPath := path + ".bak-before-issues-drop"
+			if rows == 0 {
+				if _, err := os.Stat(backupPath); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("empty ledger backup stat err=%v, want none written", err)
+				}
+				return
+			}
+			backup, err := sql.Open("sqlite", backupPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := backup.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			var kept int
+			if err := backup.QueryRow("SELECT count(*) FROM issues").Scan(&kept); err != nil || kept != rows {
+				t.Fatalf("backup issues=%d err=%v, want %d", kept, err, rows)
+			}
+		})
+	}
+}
+
+// A row filed after the backup, by an older pfm still running, keeps the table:
+// the drop recounts under its write lock and drops only the backed-up count.
+func TestSharedIssuesDropRefusesARowFiledAfterItsBackup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	seedSharedState(t, path, retiredIssuesSeed(1))
+	db, err := sqlitedb.OpenReadWrite(path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	dropped, err := dropIssuesHolding(ctx, db, path, 0)
+	if err != nil || dropped {
+		t.Fatalf("drop with one unbacked row: dropped=%v err=%v, want kept", dropped, err)
+	}
+	if count := countIssueObjects(t, db); count != 2 {
+		t.Fatalf("issues objects=%d after a changed count, want the table and index kept", count)
+	}
+	if dropped, err := dropIssuesHolding(ctx, db, path, 1); err != nil || !dropped {
+		t.Fatalf("drop at the backed-up count: dropped=%v err=%v, want dropped", dropped, err)
+	}
+	if count := countIssueObjects(t, db); count != 0 {
+		t.Fatalf("issues objects=%d after the drop, want none", count)
+	}
+}
+
+// A backup that cannot be written leaves the ledger in place and fails the open.
+func TestSharedOpenKeepsTheIssuesTableWhenItsBackupFails(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	seedSharedState(t, path, retiredIssuesSeed(1))
+	if err := os.Mkdir(path+".bak-before-issues-drop", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := OpenSharedState(ctx, paths.Values{StateDB: path})
+	err := state.Degraded()
+	if closeErr := state.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "keep retired issues before their drop") {
+		t.Fatalf("open with an unwritable backup: %v, want the named backup failure", err)
+	}
+	db, openErr := sqlitedb.OpenReadOnly(path, time.Second)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer func() { _ = db.Close() }()
+	if count := countIssueObjects(t, db); count != 2 {
+		t.Fatalf("issues objects=%d after a failed backup, want the table and index kept", count)
+	}
+}
+
+// A read-only open never drops the ledger.
+func TestSharedReadOnlyOpenLeavesTheIssuesTable(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	seedSharedState(t, path, retiredIssuesSeed(1))
+	state := OpenSharedStateReadOnly(ctx, paths.Values{StateDB: path})
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.KilledAt(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if count := countIssueObjects(t, state.db); count != 2 {
+		t.Fatalf("issues objects=%d after a read-only open, want them kept", count)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSharedMigrationBackupFailureLeavesV1(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

@@ -57,7 +57,6 @@ BULLETS {section} {n} · …
 ACTIONS before {n} · after {n} · per-project {n} · stops {n}
 LEDGER {commits} commits · {bulleted} to bullets · {none} none
 TRACER {questions asked} — {answers used}
-RETRO {lesson} | none
 ```
 
 Every statement in the note traces to a commit in the range; a change you cannot trace to one is left out and named in your return.

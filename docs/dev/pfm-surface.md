@@ -36,7 +36,6 @@ Current operator and integration surface. Legend: **●** established · **◆**
 | ● `heal` | `pfm heal` | Codex projection heal. A wedged/midline cursor whose rollout is not canonically ordinalled is reported NONCANONICAL, and one whose rollout could not be read end to end is UNSCANNED — neither is ever deleted, since a rebuild from zero fails on the same record until Codex >= 0.154.0 projects past it. |
 | ● `reap` | `pfm reap …` | Unchanged. |
 | ✚ `restart` | `pfm restart [--dry-run]` | Restarts PFM's live work in dependency order. It ends every live Claude, Codex and OpenCode chat (never brought back; the chat that typed the restart is ended last), stops each chat's cost sink and stdio MCP server, stops the Herdr server and its processes, stops PFM's launchd agents (`com.professor.pfm.*`) or systemd user units (`pfm-*`), stops the loopback MCP daemon only when its service unit does not supervise it, then stops remaining PFM processes. It reads process, service-manager and Herdr state before stopping anything; a failed read fails that find and never means stopped. It restarts only services and the daemon that were running, verifies each start, and never starts chats. A timer- or path-triggered service is left to its trigger when that trigger was up too, and started directly when every trigger stays stopped. A daemon unit that was stopped supervises nothing, so a hand-run daemon restarts by pid; if service discovery fails, supervision is unknown and the daemon is left running with a failed find. A plain run uses a detached worker (`pfm internal restart-run`), logs under `{state}/restart/`, and follows the log so the invoking chat can exit; every step reports its own result, failures are named, and the exit is 1. It ends with one line per ended chat (engine, name, session id). `--dry-run` lists each unit, how it was found and how it would stop or start; starts say `restart (was up: {state})`, stopped units get a `keep` line, and no state changes (exit 1 when a find failed). |
-| ✚ `issues` | `pfm issues [--all] [--json]` | Reads the servicedesk complaint ledger that agents file through `servicedesk`. Default view is open issues only; `--all` includes closed ones. The three states stay visibly distinct: an empty ledger prints `no open issues` and exits 0, a store that could not be read prints the cause on stderr and exits 1 (a failed look is never rendered as an empty one), and `--json` always emits an array so a script reading structured output gets `[]` rather than a prose sentence. |
 | ✚ `model-cost` | `pfm model-cost [--json] [--force] MODEL_ID \| --all \| --check` | The one model price table and command; see [`pfm model-cost`](#pfm-model-cost). |
 | ✚ `theme` | `pfm theme [status\|sync [--force]\|on\|off] [--json]` | Claude Code's theme, read-only, rendered into tmux, Herdr and VS Code, read back per surface at one generation; the follower keeps them following. Inert until `on`; exit `0` ok, `1` DRIFT/ERROR or a failed run, `2` usage; see `docs/design/engines/theme-sync.md`. |
 | ● `run` | `pfm run …` | Chat-spawn plumbing (backs `chat new`). Unchanged. |
@@ -123,7 +122,7 @@ If an enabled family fails configuration, its server still lists that family's n
 
 #### Family chat
 
-Toggled by `mcp.servers.chat.enabled`; `servicedesk` belongs to this family and follows its toggle.
+Toggled by `mcp.servers.chat.enabled`.
 
 The chat MCP family has no transcript-reading verbs: old-transcript inspection goes to the `agent-investigator` agent or `/chatlog`, while the CLI `read` and `find` verbs and `pfm transcript show` stay shell commands. `save` and the live-state tools (`last`, `status`, `capture`) stay MCP tools.
 
@@ -143,7 +142,6 @@ The chat MCP family has no transcript-reading verbs: old-transcript inspection g
 | `save` | ✚ | `{target, transcript?}` | Appends a transcript + environment snapshot to a FILE — `target` is a path, never a chat, and a bare word is refused. |
 | `whoami` | ● | `{}` | Caller identity. |
 | `resolve` | ● | `{kind, name}` | Resolved target. |
-| `servicedesk` | ✚ | `{title, detail, severity?, area?}` | Files a durable complaint about Professor itself for a human to triage later. Reporter identity is CAPTURED the same way `call` captures a sender, never accepted as tool input, so a model can complain but never forge who is complaining; a reporter that cannot be derived stores the `UNIDENTIFIED` sentinel rather than a blank column. Read the ledger back with `pfm issues`. |
 
 Deliberately NOT exposed: `end`, `modal`, `watch`, `stream`, `recover`, and `history` — interactive/plumbing; the absence is stated in the server docstring.
 

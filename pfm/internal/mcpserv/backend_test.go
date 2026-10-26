@@ -964,11 +964,4 @@ func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
 	if created.Status != "ok" || !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("proxied new = %+v, dispatch calls = %q", created, calls)
 	}
-
-	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: meta}}
-	reporter := service.issueReporter(context.Background(), request)
-	if reporter.Session != "cc-seat" || reporter.Label != "Proxy Claude" || reporter.UUID != "session-id" ||
-		reporter.CWD != "/work/proxy" || reporter.Engine != string(pfmengine.Claude) {
-		t.Fatalf("proxied issue reporter = %+v", reporter)
-	}
 }

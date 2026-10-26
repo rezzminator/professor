@@ -21,7 +21,6 @@ Operator verbs:
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - index: refresh the transcript index
 - whoami: this chat's own tmux session name
-- issues: servicedesk complaints filed through `servicedesk`
 - reap: classify the socket graveyard; `--apply` reclaims it
 - archive: move killed chats and old subagent transcripts out of sight, reversibly
 - heal: report or repair wedged Codex history projections

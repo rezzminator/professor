@@ -114,5 +114,4 @@ After `gitter` Phase RELEASE, read-only:
 {item} · {code|docs|notes|rerun} · {path:line or report#F{n}} · {one line}
 ARTIFACT {the phase's verdict file}
 DISPATCHED {n} agents, {m} returns
-RETRO {lesson} | none
 ```

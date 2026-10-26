@@ -78,7 +78,6 @@ Read-only, after `gitter` Phase RELEASE:
 {item} · {code|docs|notes|rerun} · {path:line or report#F{n}} · {one line}
 ARTIFACT {the phase's verdict file}
 DISPATCHED {n} agents, {m} returns
-RETRO {lesson} | none
 ```
 
 At your 45th call: `FAILED {PHASE}: cap`, what landed, and the next step; REVIEW preserves its unfinished work in `DIR/review/progress.md` for `resume`. A command that would not run is `FAILED {PHASE}: {command} — {error}`, never an empty result.

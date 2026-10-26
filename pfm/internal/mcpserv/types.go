@@ -272,20 +272,3 @@ type SaveInput struct {
 	Target     string `json:"target" jsonschema:"FILE PATH to append the snapshot to (not a chat) — must contain a directory separator, e.g. ./notes/session.md"`
 	Transcript string `json:"transcript,omitempty" jsonschema:"path of the transcript .jsonl to dump; defaults to the calling chat's own transcript"`
 }
-
-// IssueInput is one agent complaint filed against Professor itself. Reporter
-// identity is never accepted here — servicedesk captures it the same
-// way call captures a sender, so a model can complain but never say
-// who is complaining.
-type IssueInput struct {
-	Title    string `json:"title" jsonschema:"short one-line issue title"`
-	Detail   string `json:"detail" jsonschema:"full issue body: what went wrong, what was expected, and the surface it happened on"`
-	Severity string `json:"severity,omitempty" jsonschema:"low, medium, or high; defaults to medium"`
-	Area     string `json:"area,omitempty" jsonschema:"free text naming the command, agent, file, or surface this is about"`
-}
-
-// IssueOutput is servicedesk's receipt: the filed issue's stable id.
-type IssueOutput struct {
-	Status string `json:"status"`
-	ID     int64  `json:"id,omitempty"`
-}

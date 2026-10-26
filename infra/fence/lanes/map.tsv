@@ -106,7 +106,6 @@ pfm internal statusline	E1	E1.23-launcher
 pfm internal then	E1	E1.07-reload-then
 pfm internal tmux-title-renudge	O2	O2.05-internal-plumbing
 pfm internal update-check	A	A.14-release-notice
-pfm issues	O1	O1.13-misc-ops
 pfm log	O2	O2.05b-activity-log
 pfm ls	A	A.15-fleet-unchanged-by-update
 pfm ls	F	F.06-ls-rows
@@ -137,7 +136,6 @@ pfm update pin	A	A.05-update-verbs
 pfm usage-hook	O1	O1.13-misc-ops
 pfm version	O1	O1.13-misc-ops
 pfm whoami	O1	O1.13-misc-ops
-mcp__chat-professor__servicedesk	M	M.10-chat-tools-gap
 pfm chat new	H	H.birth
 pfm internal seat-host	H	H.seat-host
 pfm chat call	H	H.native-call

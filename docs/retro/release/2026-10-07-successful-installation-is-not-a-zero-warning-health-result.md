@@ -1,5 +1,0 @@
-# 2026-10-07 — successful installation is not a zero-warning health result
-
-Observed: the repaired update and explicit installer both exited 0, but final `pfm doctor` exited 1 with 112 warnings and no failure rows. Account links were healthy, managed plugins were healthy, and the reminder scheduler was armed with no overdue or failed jobs. Two warnings were the deferred account-cache migration above; the remainder included retained operator/plugin files and backups, stale state, an orphaned-kill audit, an unfollowable pane, and a browser worker that reprovisions on its next browser fetch. The release's blanket "doctor exits 0" action was not achieved. No unrelated operator data was deleted or warning filter changed to manufacture a clean result.
-
-Amend: release actions should distinguish blocking failures, actionable migration warnings, explicitly retained operator state and deferred runtime provisioning. Preserve the full private diagnostic record; publish only a sanitized incident summary. Installation success, migration completion and a zero-warning doctor are three different acceptance checks.

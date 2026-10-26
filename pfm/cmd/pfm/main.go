@@ -66,7 +66,7 @@ var topLevelSubcommands = []string{
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
-	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
+	mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
 	"model-cost", "tokens", transcriptCommand, "theme", restartCommand,
 }
 
@@ -196,8 +196,6 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runInit(args[1:], stdout, stderr, runtime)
 	case "whoami":
 		return runWhoami(args[1:], stdout, stderr, runtime)
-	case "issues":
-		return runIssues(args[1:], stdout, stderr, runtime)
 	case "mcp":
 		return runMCP(args[1:], stdout, stderr, runtime)
 	case pfmengine.MustLookup(pfmengine.Codex).LongName, pfmengine.MustLookup(pfmengine.OpenCode).LongName:
@@ -222,7 +220,6 @@ func printUsage(w io.Writer) {
 		"  headless  run Claude or OpenCode through one isolated process interface",
 		"  index     refresh the transcript index",
 		"  whoami    print this chat's own tmux session name",
-		"  issues    list servicedesk complaints filed through the servicedesk MCP tool",
 		"  reap      classify the socket graveyard; --apply reclaims it",
 		"  archive   move killed chats and old subagent transcripts out of sight, reversibly",
 		"  heal      report or repair wedged Codex history projections",

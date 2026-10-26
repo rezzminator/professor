@@ -991,7 +991,7 @@ if requires M.07-stdio-transports; then
   fi
 fi
 
-# ─── M.10 — open / name / kill / unkill / exit / save / servicedesk ───
+# ─── M.10 — open / name / kill / unkill / exit / save ───
 
 beat M.10-chat-tools-gap
 spends "cc:$SEAT"
@@ -1001,8 +1001,6 @@ target "$NEW_CHAT"
 expect-log 'CLAUDE_CODE_SESSION_ID is not set'
 expect-log 'is not a file path'
 expect-log 'name must be one non-empty line'
-expect-log 'severity must be'
-expect-log 'title is required'
 expect-log 'chat unkill exited 4'
 expect-log 'chat unkill exited 1'
 expect-log 'is not killed; nothing was unkilled'
@@ -1154,29 +1152,8 @@ if requires M.09-chat-tools; then
     else
       bad="$bad M17e: exit with a target: $MCP_WHY;"
     fi
-    # M20 servicedesk — filed under UNIDENTIFIED from the daemon, read back from pfm issues
-    issue_title="lane M issue $$ $(date +%s)"
-    if mcp_call http chat-professor servicedesk "$(jq -cn --arg t "$issue_title" '{title: $t, detail: "filed by the lane M direct client; safe to close", severity: "low", area: "lanes/M"}')"; then
-      issue_id="$(sfield .id)"
-      [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = ok ] && [ "${issue_id:-0}" -gt 0 ] 2>/dev/null || bad="$bad M20: servicedesk answered isError=$MCP_ISERR status $(sfield .status) id '$issue_id';"
-      issues="$(pfm issues --json 2>&1)"
-      printf '%s' "$issues" | jq -e --arg t "$issue_title" '.[] | select(.Title == $t and .ReporterSession == "UNIDENTIFIED")' >/dev/null 2>&1 ||
-        bad="$bad M20: pfm issues --json carries no row titled '$issue_title' with ReporterSession UNIDENTIFIED: $(one_line "$(printf '%s' "$issues" | jq -c --arg t "$issue_title" '[.[] | select(.Title == $t) | {ID, ReporterSession}]' 2>/dev/null || echo "$issues")" | cut -c1-160);"
-    else
-      bad="$bad M20: servicedesk: $MCP_WHY;"
-    fi
-    if mcp_call http chat-professor servicedesk '{"title":"","detail":"x"}'; then
-      [ "$MCP_ISERR" = true ] && grep -q 'title is required' <<<"$MCP_TEXT" || bad="$bad M20: an empty title was not refused by name: $(one_line "$MCP_TEXT");"
-    else
-      bad="$bad M20: servicedesk empty title: $MCP_WHY;"
-    fi
-    if mcp_call http chat-professor servicedesk '{"title":"x","detail":"y","severity":"urgent"}'; then
-      [ "$MCP_ISERR" = true ] && grep -q 'severity must be' <<<"$MCP_TEXT" || bad="$bad M20: an unknown severity was not refused by name: $(one_line "$MCP_TEXT");"
-    else
-      bad="$bad M20: servicedesk bad severity: $MCP_WHY;"
-    fi
     if [ -n "$bad" ]; then fail "$bad${notes:+ · notes:$notes}"; else
-      pass "name → row renamed and back · kill → killed=true and resumable, unkill → false, kill{exit} refuses without a self pane, unkill of an unkilled chat refused · open → live row · save refuses a bare word, writes $save_file · issue $issue_id filed as UNIDENTIFIED and read back from pfm issues${notes:+ · notes:$notes}"
+      pass "name → row renamed and back · kill → killed=true and resumable, unkill → false, kill{exit} refuses without a self pane, unkill of an unkilled chat refused · open → live row · save refuses a bare word, writes $save_file${notes:+ · notes:$notes}"
     fi
   fi
 fi

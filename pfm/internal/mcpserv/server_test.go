@@ -950,3 +950,11 @@ func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
 		})
 	}
 }
+
+// The chat server's routing text, byte for byte: every clause names a tool it registers.
+func TestChatInstructionsPinTheRoutingText(t *testing.T) {
+	want := "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+	if chatInstructions != want {
+		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", chatInstructions, want)
+	}
+}

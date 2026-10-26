@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := 1
+	defaultProcRoot = procRoot
 	if err := os.Setenv(paths.EnvProcRoot, procRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "installer process jail environment: %v\n", err)
 	} else {

@@ -48,9 +48,9 @@ Each step ends on its check. A STOP ends the run with § Report so far; a step n
    - Check: `git -C REPO merge-base --is-ancestor origin/develop HEAD` exits 0, no plugin shows `-` in `git -C REPO submodule status`, each plugin HEAD is at or past its `G` or recorded installed from disk (dirty, ahead, diverged, unfetched), nothing pushed.
 
 2. Preflight, read-only.
-   - Load: `uptime` and `nproc`; the 1-minute load and its per-core figure go in the report and on every red that follows. Near 50 the load fakes install-check refusals and gate TIMEOUTs on this host: wait for normal load, or go on.
+   - Load: `uptime` and `getconf _NPROCESSORS_ONLN`; the 1-minute load and its per-core figure go in the report and on every red that follows. Near 50 the load fakes install-check refusals and gate TIMEOUTs on this host: wait for normal load, or go on.
    - Host check: `pfm install --check --plan`. Exit 0 is clean; 4 is standing BLOCK rows, reported verbatim, then STOP: a BLOCK is never overridden, and a move-aside it names runs only on the user's word, the data kept; any other exit, 1 included, is the check broken, not the host clean: STOP.
-   - Stale binaries: `pgrep -x pfm` exits 0, or 1 when none runs, any other exit a failed read; then `for pid in $(pgrep -x pfm); do echo "$pid $(readlink /proc/$pid/exe) $(ps -o etimes=,args= -p $pid)"; done`: a `(deleted)` target is a process on a replaced binary, an empty target unreadable, never current.
+   - Stale binaries: `pgrep -x pfm` exits 0, or 1 when none runs, any other exit a failed read; then `P=$(ls -iL ~/.local/bin/pfm | awk '{print $1}'); echo "installed ${P:-unreadable}"; [ -n "$P" ] && for pid in $(pgrep -x pfm); do i=$({ ls -iL /proc/$pid/exe 2>/dev/null || lsof -a -p $pid -d txt -Fin | awk '/^i/{i=substr($0,2)} /^n.*\/pfm( \(deleted\))?$/{print i; exit}'; } | awk '{print $1}'); case "$i" in "") s=unreadable;; "$P") s=current;; *) s=stale;; esac; echo "$pid $s $(ps -o etime=,args= -p $pid)"; done`, comparing each process's program-text inode (Linux `/proc`, macOS `lsof`) with the installed binary's: `stale` is a process on a replaced binary; `unreadable` (no `/proc` and no `lsof`, or no permission) is never current; `installed unreadable` is a failed read.
 
 3. Repoint, alpha only.
    1. Remote read, per plugin. Synced, step 1's fetch is the read, never a second fetch. Unsynced, every mode reads without a ref write: `git -C REPO/plugins/{p} ls-remote origin refs/heads/develop` gives the `origin/develop` head, `ls-remote --tags --sort=-v:refname origin '*-alpha*'` the alpha tags, its first line the newest tag's commit (an annotated tag's `^{}` line sorts first). A failure records that plugin installed from disk, pin unchanged, the failure named; an empty tag list at exit 0 is no alpha tag.
@@ -71,7 +71,7 @@ Each step ends on its check. A STOP ends the run with § Report so far; a step n
    - `install-guard: REFUSED`: the installed pfm carries patches HEAD lacks, typically another chat's worktree build. Report the refusal verbatim with `git -C REPO branch -a --contains REV` and what installing would drop; `install-guard: cannot verify` is an unverified downgrade check, never a pass. A refusing install check is reported verbatim. `FORCE=1` and `SKIP_INSTALL_CHECK=1` run only on the user's word.
    - `required dependency preflight failed` at high load: check `uptime`, retry once at normal load before chasing a dependency.
    - A refusal over a stray `~/.claude/.claude.json` comes from a `claude` run with `CLAUDE_CONFIG_DIR=$HOME/.claude`: a BLOCK under step 2's rule. Any `claude` command this update runs keeps the chat's own `CLAUDE_CONFIG_DIR`.
-   - Check: `pfm version` prints `pfm {VERSION}`; rerun step 2's stale-binary loop and report the `(deleted)` processes by count, oldest age and pid. A `pfm ls` picker among them rewrites pre-fix state on every refresh, so no verification counts until it restarts: name its pid and age and ask the user to restart it; the others need no restart.
+   - Check: `pfm version` prints `pfm {VERSION}`; rerun step 2's stale-binary loop and report the `stale` processes by count, oldest age and pid. A `pfm ls` picker among them rewrites pre-fix state on every refresh, so no verification counts until it restarts: name its pid and age and ask the user to restart it; the others need no restart.
 
 6. Install: `pfm install --yes`. Read every row:
    - The `summary changed=… ok=… skipped=…` line and its FAIL count; a non-zero exit is red.
@@ -103,7 +103,7 @@ The fence is Linux with GNU coreutils: host-run plugin shell can pass every gate
 ```text
 Host update {date} — {alpha|stable} {VERSION} @ {develop sha7}{ — check only}
 Sync: branch develop · in-progress none|{op} · foreign dirty {n} · {REPO {old7}→{new7}|unchanged · {p} {old7}→{new7}|unchanged|initialised|from disk ({dirty {n}|{N} ahead of origin/develop|diverged from {G7}|fetch failed})[, …] · nothing pushed | fetch and moves skipped on the user's word}
-Preflight: load {1-min} on {nproc} cores ({per-core}/core) · host check exit {n} · stale pfm {n} ({pids}), oldest {age}{, picker {pid}} | none
+Preflight: load {1-min} on {cores} cores ({per-core}/core) · host check exit {n} · stale pfm {n} ({pids}), oldest {age}{, picker {pid}} | none
 Repoint: {p} {G7}→{T7} ({tag|origin/develop, no alpha tag}){, unverified: needs the fetch} | {p} unchanged{, {N} ahead of {tag|origin/develop, unpushed}} | {p} from disk at {HEAD7} ({N} commits origin lacks, dirty {n}{, {why}}), pin {G7} unchanged | {p} uninitialised, plan unread
 Commit: {sha7} on develop, not pushed | none
 Gate: templates {PASS|FAIL} · pfm {PASS|FAIL|not needed}{ — gaps} | skipped on the user's word, gap: develop installed ungated

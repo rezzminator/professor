@@ -462,7 +462,9 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	if want := "1.0K/1.0M Σ$0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
-	if want := "1.0K/1.0M Σ$1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
+	// the payload's 1.0K shows 0% of the window, so the gauge reads the transcript's call:
+	// its last executor iteration (2 + 87829 + 890), never the top level's sum of both
+	if want := "88.7K/1.0M Σ$1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
 	}
 }
@@ -505,6 +507,8 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
 			// the row is read inside the minute after the turn ended, before a finished row collapses
 			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
+			// the payload's 1K beats the transcript's call; the catalog this test never
+			// writes leaves the gpt window unknown
 			if !strings.Contains(got, "1.0K/? ctx missing "+tc.want+"│") {
 				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
 			}

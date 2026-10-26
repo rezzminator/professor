@@ -78,7 +78,7 @@ Procedures and reference docs one task needs, each behind the trigger that requi
 
 ## Rules
 
-- Admission: the code cannot show it; no mechanism enforces it — or a hook does, and the rule is one line naming the route the hook permits; its absence causes a mistake, shown by a recorded recurrence (retro entry, review finding, repeated correction), sacred ground excepted; it is concrete enough to verify.
+- Admission: the code cannot show it; no mechanism enforces it — or a hook does, and the rule is one line naming the route the hook permits; its absence causes a mistake, shown by a recorded recurrence (review finding, repeated correction), sacred ground excepted; it is concrete enough to verify.
 - The sacred-ground `##` comes first — secrets, personal data, publication, whatever the project marks sacred — and is the only place `NEVER` and `MUST` appear.
 - Each sacred rule ends with its guard: ``· guard `{hook, guard or test path}` ``. A sacred rule keeps its line beside its guard; one with no guard stays and is reported `ADVISORY` — a named risk, not a reject.
 - Every other rule is phrased positively and names the tool, command or path to use.

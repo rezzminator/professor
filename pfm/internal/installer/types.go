@@ -293,6 +293,12 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 	return result.Stdout, nil
 }
 
+// defaultProcRoot is the process table an install reads when neither
+// Options.ProcRoot nor its Env names one. The package's TestMain points it at an
+// empty jail, so a test whose fake Env omits PFM_PROC_ROOT never reads, or
+// signals, the processes of a suite running beside it.
+var defaultProcRoot = "/proc"
+
 func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.SourceRepo != "" {
 		abs, err := filepath.Abs(options.SourceRepo)
@@ -327,7 +333,7 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.ProcRoot == "" {
 		options.ProcRoot = options.Env.Get(paths.EnvProcRoot)
 		if options.ProcRoot == "" {
-			options.ProcRoot = "/proc"
+			options.ProcRoot = defaultProcRoot
 		}
 	}
 	if options.MCPPort == 0 {

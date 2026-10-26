@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/restart"
 )
 
@@ -154,5 +155,19 @@ func TestInstallHerdrIndicatorConvergenceNoopsAndErrors(t *testing.T) {
 				t.Fatalf("signals=%v starts=%v", kernel.signals, runner.Starts())
 			}
 		})
+	}
+}
+
+// A fake Env without PFM_PROC_ROOT must resolve to the package's process jail:
+// "/proc" here is the fence's live table, where another suite's painter runs.
+func TestInstallOptionsWithFakeEnvStayInProcessJail(t *testing.T) {
+	options, err := normalizeInstallerOptions(
+		Options{Home: t.TempDir(), Env: &paths.MapEnv{}, StateDB: filepath.Join(t.TempDir(), "pfm.db")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.ProcRoot == "/proc" || options.ProcRoot != os.Getenv(paths.EnvProcRoot) {
+		t.Fatalf("ProcRoot = %q, want the package jail %q", options.ProcRoot, os.Getenv(paths.EnvProcRoot))
 	}
 }

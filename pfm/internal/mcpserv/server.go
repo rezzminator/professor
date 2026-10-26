@@ -50,11 +50,11 @@ var chatToolNames = []string{
 	"call", "capture", "exit",
 	"keys", killToolName, lastToolName, "ls", "name",
 	newToolName, "open", "resolve",
-	saveToolName, "servicedesk", "status", "unkill", "whoami",
+	saveToolName, "status", "unkill", "whoami",
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+const chatInstructions = "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -234,11 +234,6 @@ func (service *Service) registerTools(server *mcp.Server) {
 		Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.",
 		Annotations: mutating,
 	}, obs.Tool(saveToolName, service.chatSave))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "servicedesk",
-		Description: "Files a durable complaint about Professor itself for a human to triage — a command, agent, hook, or tool that misbehaved. Call servicedesk{title:\"one line\", detail:\"what went wrong, what was expected, where\", area:\"/pfm\"}. Reporter identity is captured, never supplied. Returns status ok with the issue id; a tool error = title or detail missing, unknown severity, or the write failed — nothing was filed. Not for a bug in the user's own project.",
-		Annotations: mutating,
-	}, obs.Tool("servicedesk", service.issueServicedesk))
 }
 
 type requestScopedCallEngine interface {

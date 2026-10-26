@@ -19,7 +19,8 @@ import (
 // Every pfm refuses a file stamped newer than its own, so a column an older
 // pfm's statements survive (they name their columns, and its default fills
 // their inserts) is added at open with no bump: addColumnAtOpen; a table
-// rename likewise: renameRemindersTable.
+// rename likewise: renameRemindersTable; a retired table's drop likewise:
+// dropRetiredIssuesTable.
 const SchemaVersion = 6
 
 // RetiredSchemaVersion reserves the version stamped by a develop build that
@@ -199,6 +200,100 @@ func renameRemindersTable(ctx context.Context, db *sql.DB, path string) (returnE
 	return nil
 }
 
+// dropRetiredIssuesTable drops the retired issues ledger from a file that still
+// holds it, once its rows are copied to {path}.bak-before-issues-drop. It
+// re-reads the tables under the migration lock, or two first openers would both
+// drop; a file without the table opens without taking the lock.
+func dropRetiredIssuesTable(ctx context.Context, db *sql.DB, path string) (returnErr error) {
+	present, err := hasTable(ctx, db, "issues")
+	if err != nil || !present {
+		return err
+	}
+	unlock, err := LockMigration(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	if present, err := hasTable(ctx, db, "issues"); err != nil || !present {
+		return err
+	}
+	// An older pfm still running beside this one can file a row between the
+	// backup and the drop, so the drop recounts under the write lock and a
+	// changed count backs the file up again.
+	for attempt := 1; ; attempt++ {
+		var rows int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM issues").Scan(&rows); err != nil {
+			return fmt.Errorf("count retired issues on shared database %s: %w", path, err)
+		}
+		if rows > 0 {
+			backup, err := backupBeside(ctx, db, path, path+".bak-before-issues-drop")
+			if err != nil {
+				return fmt.Errorf("keep retired issues before their drop: %w", err)
+			}
+			obs.Logger(ctx).Info("fleet.issues.retired", "path", path, "rows", rows, "backup", backup)
+		}
+		dropped, err := dropIssuesHolding(ctx, db, path, rows)
+		if err != nil || dropped {
+			return err
+		}
+		if attempt == 3 {
+			return fmt.Errorf(
+				"drop retired issues table on shared database %s: rows kept arriving during %d backups", path, attempt,
+			)
+		}
+	}
+}
+
+// dropIssuesHolding drops the issues table only while it still holds the
+// backed-up row count, under an immediate write lock so no row lands between
+// the count and the drop; a changed count drops nothing and reports false.
+func dropIssuesHolding(ctx context.Context, db *sql.DB, path string, backedUp int) (dropped bool, returnErr error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return false, fmt.Errorf("drop retired issues table on shared database %s: connection: %w", path, err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, conn.Close()) }()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return false, fmt.Errorf("drop retired issues table on shared database %s: lock: %w", path, err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if _, err := conn.ExecContext(context.Background(), "ROLLBACK"); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("drop retired issues table: release lock: %w", err))
+		}
+	}()
+	var rows int
+	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM issues").Scan(&rows); err != nil {
+		return false, fmt.Errorf("recount retired issues on shared database %s: %w", path, err)
+	}
+	if rows != backedUp {
+		obs.Logger(ctx).Warn("fleet.issues.changed", "path", path, "backed_up", backedUp, "rows", rows)
+		return false, nil
+	}
+	if _, err := conn.ExecContext(ctx, "DROP TABLE issues"); err != nil {
+		return false, fmt.Errorf("drop retired issues table on shared database %s: %w", path, err)
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return false, fmt.Errorf("commit retired issues drop on shared database %s: %w", path, err)
+	}
+	committed = true
+	return true, nil
+}
+
+// hasTable reports whether the file holds the named table.
+func hasTable(ctx context.Context, db *sql.DB, name string) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", name,
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("read shared database tables: %w", err)
+	}
+	return count == 1, nil
+}
+
 // hasRemindersTable reports a reminders table still waiting for its rename.
 func hasRemindersTable(ctx context.Context, db *sql.DB) (bool, error) {
 	var count int
@@ -324,26 +419,31 @@ func flockWait(ctx context.Context, file *os.File, lockPath string) error {
 
 // BackupBeforeMigration checkpoints WAL and copies the database before its
 // first pending migration. An existing backup is preserved with a suffix.
-func BackupBeforeMigration(
-	ctx context.Context, db *sql.DB, path string, next int, existed bool,
-) (returnErr error) {
+func BackupBeforeMigration(ctx context.Context, db *sql.DB, path string, next int, existed bool) error {
 	if !existed {
 		return nil
 	}
+	_, err := backupBeside(ctx, db, path, fmt.Sprintf("%s.bak-before-v%d", path, next))
+	return err
+}
+
+// backupBeside checkpoints WAL and copies the database to base, or to base
+// with a numeric suffix when an earlier backup holds that name, and returns the
+// path it wrote.
+func backupBeside(ctx context.Context, db *sql.DB, path, base string) (written string, returnErr error) {
 	if err := checkpointBeforeBackup(ctx, db); err != nil {
-		return fmt.Errorf("backup %s: %w", path, err)
+		return "", fmt.Errorf("backup %s: %w", path, err)
 	}
 	// Keep other writers from checkpointing into the main file while it is
 	// copied. The checkpoint precedes this lock so it can finish normally.
 	if _, err := db.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return fmt.Errorf("backup %s: lock database: %w", path, err)
+		return "", fmt.Errorf("backup %s: lock database: %w", path, err)
 	}
 	defer func() {
 		if _, err := db.ExecContext(context.Background(), "ROLLBACK"); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("backup %s: release lock: %w", path, err))
 		}
 	}()
-	base := fmt.Sprintf("%s.bak-before-v%d", path, next)
 	target := base
 	for suffix := 1; ; suffix++ {
 		info, err := os.Stat(target)
@@ -351,16 +451,16 @@ func BackupBeforeMigration(
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("backup %s: inspect %s: %w", path, target, err)
+			return "", fmt.Errorf("backup %s: inspect %s: %w", path, target, err)
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("backup %s: %s is not a regular file", path, target)
+			return "", fmt.Errorf("backup %s: %s is not a regular file", path, target)
 		}
 		target = fmt.Sprintf("%s.%d", base, suffix)
 	}
 	source, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("backup %s: open source: %w", path, err)
+		return "", fmt.Errorf("backup %s: open source: %w", path, err)
 	}
 	defer func() {
 		if err := source.Close(); err != nil {
@@ -370,9 +470,9 @@ func BackupBeforeMigration(
 	// The source is stable after the checkpoint while this migration owns the
 	// store connection; WriteFrom publishes an atomic copy beside it.
 	if _, err := atomicfile.WriteFrom(target, source, 0o600, 0); err != nil {
-		return fmt.Errorf("backup %s to %s: %w", path, target, err)
+		return "", fmt.Errorf("backup %s to %s: %w", path, target, err)
 	}
-	return nil
+	return target, nil
 }
 
 // checkpointBeforeBackup waits out brief read snapshots. Disable SQLite's

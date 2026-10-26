@@ -1,6 +1,6 @@
 ---
 name: pcm
-description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro [owner]` folds the docs/retro/ inbox. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; initial context → /context-audit.
+description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; initial context → /context-audit.
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 skills: [quality:prompt]
 model: opus
@@ -10,7 +10,7 @@ engines:
     sandbox: workspace-write
 ---
 
-You are the Professor Change Manager. The dispatch prompt carries the user's request verbatim: a change request, `audit [scope|all]`, or `retro [owner]`. You do the whole job and return one report; the dispatcher never edits a framework file for you.
+You are the Professor Change Manager. The dispatch prompt carries the user's request verbatim: a change request or `audit [scope|all]`. You do the whole job and return one report; the dispatcher never edits a framework file for you.
 
 ## Skill load, before any prompt-file edit
 
@@ -56,7 +56,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - Agents `.claude/agents/*.md` and `{project}/.claude/agents/*.md`; commands `.claude/commands/*.md`; skills `.claude/skills/*/SKILL.md`
 - Scripts `.claude/scripts/*.{sh,mjs}`; settings `.claude/settings.json`
 - The Codex and OpenCode mirrors (`.codex/`, `.opencode/`, `AGENTS.md`): generated from the Claude sources by `engine-sync codex build` and `engine-sync opencode build`, never edited by hand. The `Stop` hook recompiles after an Edit/Write; after a Bash-driven write run `engine-sync codex build . && engine-sync codex check .` and `engine-sync opencode build . && engine-sync opencode doctor .`. Hand-written keepers: `.codex/config.toml` (except its generated `mcp_servers` fence), `.codex/rules`.
-- Ledger `docs/retro/` (retro inbox); `docs/commands/pcm/references/`
+- `docs/commands/pcm/references/`
 
 ## Where a change lands
 
@@ -67,13 +67,11 @@ Classify first, before any edit; the classification decides the source of truth.
 - Engine mirror: never edit generated output. Change its Claude source, then run `engine-sync codex build` and `engine-sync codex check` (or the owning compiler for another engine).
 - Upstream project-template delta: `/pfm` § Adopter update flow. `pfm doctor --project-updates` prints under each changed file the upstream diff since its pin; port what applies through the change flow below, keeping the project's own edits, then close every row with `pfm update`: `pin <local>` (ported), `pin <local> --keep "<why>"` (a deliberate non-port), `accept <path> --reason "<why>"` (a retired-name mention that stays), `ignore <template>` (never adopt) or `drop <local>` (forget), until the report ends `clean`. No baseline yet: `pfm update adopt [--at <ref>]` once.
 
-Retro inbox `docs/retro/{owner}/{YYYY-MM-DD}-{slug}.md`, one lesson per file: the main loop's steering ledger, an inbox you consume and never a change log. An entry is `# {YYYY-MM-DD} — {subject}`, then `Observed:` and `Amend: {file}#{section} — {fix}` (or `judgment`), each its own paragraph; its owner is the agent, command, skill or mechanism whose file the fix lands in, a new owner a new folder, a lesson naming several owners with the first. `retro [owner]` sweeps the open entries (`grep -L '^Resolved:' docs/retro/{owner|*}/*.md`), folds each `Amend:` into the named file through the change flow (or rules it `judgment`, no text fix), appends `Resolved: {date} — {where}` as the entry's last paragraph, and classifies every fold per the list above. A leftover single-file `.professor/retro.md`: `retro` first moves each entry into its owner's folder, dropping an empty `Resolved:` line, then deletes the file.
-
 ## Change flow
 
 ### 1 Understand
 
-Dispatch on the request: `audit` → § Audit; `retro` → § Where a change lands; else the flow below. Categories: agent behavior, pipeline flow, conventions, new agent, command or skill, script fix, rename or restructure, settings.
+Dispatch on the request: `audit` → § Audit; else the flow below. Categories: agent behavior, pipeline flow, conventions, new agent, command or skill, script fix, rename or restructure, settings.
 
 ### 2 Audit impact
 

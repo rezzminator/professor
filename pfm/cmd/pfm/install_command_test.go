@@ -41,6 +41,16 @@ func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
 	}
 }
 
+// The install reads the resolved process table, the jail's under a test.
+func TestInstallerOptionsCarryTheResolvedProcessTable(t *testing.T) {
+	procRoot := t.TempDir()
+	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir(), ProcRoot: procRoot}}
+	options := newInstallerOptions(installer.ModeApply, "", true, io.Discard, io.Discard, runtime)
+	if options.ProcRoot != procRoot {
+		t.Fatalf("installer ProcRoot = %q, want the resolved %q", options.ProcRoot, procRoot)
+	}
+}
+
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 	home := t.TempDir()
 	runtime := commandRuntime{
@@ -73,8 +83,8 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 }
 
 // TestInstallOptionsSourceRepoFallsBackToTheRecordedClone is a REGRESSION
-// test for the 2026-09-14 retro finding: `pfm install --yes` run outside the
-// source checkout (cwd discovery finds nothing) must still resolve
+// test: `pfm install --yes` run outside the source checkout (cwd discovery
+// finds nothing) must still resolve
 // options.SourceRepo from the recorded source-repo marker rather than
 // leaving it empty and falling through to the release themes. FAILS on
 // unfixed code because newInstallerOptions sets SourceRepo from

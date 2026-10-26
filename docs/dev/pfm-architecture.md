@@ -113,7 +113,7 @@ One term per concept, spelled the same in the directory, the identifier, the wir
 | Concept | Canonical term | Directory / identifier | Wire key | Today's divergence |
 | --- | --- | --- | --- | --- |
 | Rebuildable transcript index | index DB | `internal/store` · `paths.Values.IndexDB` | file `~/.local/state/pfm/index.db` · env `PFM_INDEX_DB` | file is `fleet.db`, field `DB`, env `PFM_DB` |
-| Operator decisions (kills, children, comms, issues, branch seats) | fleet DB | `internal/fleetdb` · `paths.Values.FleetDB` | file `~/.cc/fleet.db` · env `PFM_FLEET_DB` | package `shared`, field `SharedDB`, env `PFM_SHARED_DB`; `installer.go:2266` re-spells the path |
+| Operator decisions (kills, children, comms, branch seats) | fleet DB | `internal/fleetdb` · `paths.Values.FleetDB` | file `~/.cc/fleet.db` · env `PFM_FLEET_DB` | package `shared`, field `SharedDB`, env `PFM_SHARED_DB`; `installer.go:2266` re-spells the path |
 | One operation on one chat | verb | `internal/chat/<verb>.go` · `chat.Verbs` | CLI `pfm chat <verb>` · MCP `chat_<verb>` (`-` → `_`) | verbs live in `cmd/pfm/*_command.go`; dispatch sits in `headless_command.go:85`; `pfm headless <verb>` is a second entry to every verb, with the aliases `run`→`new` and `transcript`→`read` (`headless_command.go:54-61`) |
 | Resolved paths + config for one process | Runtime | `internal/config` · `config.Runtime` (`LoadRuntime`, `RuntimeOrDefault`) | — | `mcpserv.Runtime` (a second shape; `commandRuntime` is now an alias) |
 | A `pfm internal` entrypoint (hooks are the subset with a harness event) | entry | `internal/hooks/table.go` · `hooks.Table` | argv `pfm internal <entry>` (unchanged — installed wiring depends on it) | if-chain at `main.go:381`; usage lists 8 of 19 |

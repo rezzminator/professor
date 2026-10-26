@@ -93,5 +93,4 @@ BULLETS {section} {n} …
 ACTIONS before {n} · after {n} · per-project {n} · stops {n}
 LEDGER {commits} commits · {bulleted} to bullets · {none} none
 TRACER {questions asked} — {answers used}
-RETRO {lesson} | none
 ```

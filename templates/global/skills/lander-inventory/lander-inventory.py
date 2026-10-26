@@ -19,7 +19,7 @@ import re, subprocess, sys
 from collections import defaultdict
 
 TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_\-]*[A-Za-z0-9_]")
-HISTORY = re.compile(r"(^|/)(CHANGELOG[^/]*|releases/|docs/retro/|testdata/|\.professor/RR/)|retired", re.I)
+HISTORY = re.compile(r"(^|/)(CHANGELOG[^/]*|releases/|testdata/|\.professor/RR/)|retired", re.I)
 HEX = re.compile(r"^[0-9a-f]{6,}$")
 PROSE = re.compile(r"\.(md|txt|rst)$")
 MAX_LEFT, MAX_LOC, MAX_SWAP = 60, 6, 120

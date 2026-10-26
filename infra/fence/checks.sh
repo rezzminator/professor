@@ -177,11 +177,11 @@ checks_templates_scratch_paths() {
     fail_step "scratch-path policy: the tracked-file list could not be read from git — nothing was scanned"
   else
     # Excluded, and SAID so rather than filtered in silence: shipped release
-    # notes, the retro ledger, generated mirrors, and the two measurement
+    # notes, generated mirrors, and the two measurement
     # records that name where a past capture actually landed — rewriting
     # those would misstate history. An exclusion that hides its own work is
     # the next bug, so the count and the list are printed on every run.
-    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|docs/retro/|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
+    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
     # grep needs /dev/null as a second operand: BSD xargs runs the utility
     # even on empty input, and a bare `grep PATTERN` then reads stdin and
     # hangs the gate forever instead of reporting an empty sweep.
@@ -189,7 +189,7 @@ checks_templates_scratch_paths() {
       < "$TMP_BASE/templates/tracked.z" 2>/dev/null || true)
     strays=$(printf '%s\n' "$all_hits" | grep -vE "$exclude" | grep -v '^$' || true)
     excluded=$(printf '%s\n' "$all_hits" | grep -cE "$exclude" || true)
-    info "scratch-path scan: $excluded historical-record path(s) excluded by name (release notes, retro ledger, mirrors, measurement records)"
+    info "scratch-path scan: $excluded historical-record path(s) excluded by name (release notes, mirrors, measurement records)"
     if [[ -z "$strays" ]]; then
       ok "no tracked file names a migrated scratch purpose under a repo-local tmp/"
     else

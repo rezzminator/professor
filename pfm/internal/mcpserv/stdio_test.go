@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,24 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+// newStdioTestService builds a Service with an isolated shared database and
+// AllowAmbientIdentity left at its zero value (false), the shared HTTP
+// daemon's real posture.
+func newStdioTestService(t *testing.T) *Service {
+	t.Helper()
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewConfigured("test", nil, Runtime{Paths: resolved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	return service
+}
+
 type stdioTestRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (roundTrip stdioTestRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -44,7 +63,7 @@ func (roundTrip stdioTestRoundTripFunc) RoundTrip(request *http.Request) (*http.
 // replaced-executable guard cancels the context and relies on the return to
 // exit the process.
 func TestRunStdioReturnsOnCancelWhileInputStaysOpen(t *testing.T) {
-	professor := stdioTestProfessor(t, newIssuesTestService(t))
+	professor := stdioTestProfessor(t, newStdioTestService(t))
 	input, holdOpen := io.Pipe()
 	defer func() { _ = holdOpen.Close() }()
 
@@ -732,7 +751,7 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 					t.Fatalf("warnings = %q, want %q", warnings.String(), want)
 				}
 				for _, name := range names {
-					if strings.HasPrefix(name, "chat_") || name == "servicedesk" {
+					if strings.HasPrefix(name, "chat_") || slices.Contains(ToolNames(), name) {
 						t.Fatalf("tools/list = %v, lists %s from the family this config disables", names, name)
 					}
 				}

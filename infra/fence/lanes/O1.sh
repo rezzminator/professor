@@ -429,7 +429,6 @@ run_ok() { # run_ok <what> <cmd…>
 run_ok "pfm version" pfm version
 run_ok "pfm config show" pfm config show
 run_ok "pfm config validate" pfm config validate
-run_ok "pfm issues" pfm issues
 # whoami OUTSIDE a chat must refuse by name, never invent a session.
 who="$(pfm whoami 2>&1)"
 who_rc=$?
@@ -446,7 +445,7 @@ usage_out="$(printf '{"session_id":"lane-no-such-session","prompt":"hello"}' | p
 usage_rc=$?
 [ "$usage_rc" -eq 0 ] || bad="$bad pfm usage-hook is not fail-open: exit $usage_rc ($(one_line "$usage_out"));"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "version/config show/config validate/issues answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
+  pass "version/config show/config validate answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
 fi
 
 # ─── O1.15 — model-cost offline surface ────────────────────────────────────

@@ -77,7 +77,8 @@ def mechanical(dig, spans):
                 rows.append((d, "HANDOFF", "-"))
             if ev.name in SPAWN_TOOLS or "SPAWN" in ev.mech:
                 rows.append((d, "SPAWN", "-"))
-            paths = event_writes(ev)
+            # an engine-known write (Edit, Write) whose call failed wrote nothing
+            paths = [] if ev.writes is not None and ev.err else event_writes(ev)
             if paths:
                 rows.append((d, "WRITE", "-"))
                 writes.append({"D": first, "L": ev.line, "tool": ev.name, "paths": paths})

@@ -1185,5 +1185,14 @@ class CleanLine(unittest.TestCase):
         self.assertTrue(clean(facts).startswith("L6 04:56:39 PROMPT [forward-compaction: facts]"))
 
 
+class CodeModeWrites(unittest.TestCase):
+    def test_exec_wrapper_cmd_literal_is_parsed(self):
+        from types import SimpleNamespace
+        from chatlogkit.writes import event_writes
+        ev = SimpleNamespace(writes=None, cmd=False, name="exec",
+                             text='const r = await tools.exec_command({cmd:"python x.py > /work/a.txt\\necho hi >> /work/b.log", yield_time_ms: 1000});')
+        self.assertEqual(event_writes(ev), ["/work/a.txt", "/work/b.log"])
+
+
 if __name__ == "__main__":
     unittest.main()

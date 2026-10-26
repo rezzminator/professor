@@ -15,7 +15,8 @@ import (
 
 // NativeSeats reads the same durable native seats for every fleet surface.
 // Non-live rows retain their failure without probing an address they no longer
-// own; live probe failures remain rows as well as scan errors.
+// own; a positively dead seat arrives non-live from the probe and is such a row.
+// Live probe failures, unknown ownership included, remain rows and scan errors.
 func NativeSeats(ctx context.Context, values paths.Values, readOnly bool) ([]gather.HerdrSeat, []string, error) {
 	durable, err := fleetdb.ReadSeats(ctx, values)
 	if err != nil {

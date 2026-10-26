@@ -45,7 +45,7 @@ func bareNameFix(name string) string {
 
 // writeDoctorCache records id at version in dir's plugins/installed_plugins.json,
 // which writeDoctorInstalledPlugins wrote, its installPath holding files: the
-// snapshot Claude runs it from.
+// snapshot Claude records for it.
 func writeDoctorCache(t *testing.T, dir, id, version string, files map[string]string) {
 	t.Helper()
 	path := filepath.Join(dir, "plugins", "installed_plugins.json")
@@ -660,7 +660,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			checkout := filepath.Join(root, names[0], "plugins", names[0])
 			switch state {
 			case "alpha cache behind", "alpha cache behind with its snapshot gone":
-				// The checkout moved to 2.0.0; Claude still runs its 1.0.0 snapshot.
+				// The checkout moved to 2.0.0; Claude still records its 1.0.0 snapshot.
 				for _, dir := range []string{checkout, mirror(names[0])} {
 					if err := os.WriteFile(
 						filepath.Join(dir, manifest),
@@ -678,10 +678,14 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					}
 				}
 			case "alpha cache unreadable":
-				if err := os.Symlink(filepath.Join(home, "nowhere"), filepath.Join(cache, "gone")); err != nil {
-					t.Fatal(err)
+				// The checkout's version cannot be read, so the record is never compared.
+				for _, dir := range []string{checkout, mirror(names[0])} {
+					if err := os.WriteFile(filepath.Join(dir, manifest), []byte("{"), 0o600); err != nil {
+						t.Fatal(err)
+					}
 				}
 			case "alpha cache differs":
+				// Claude reads a -dev copy in place, never this snapshot: no gap.
 				writeDoctorCache(t, store, doctorDevIDs[0], "1.0.0", map[string]string{
 					manifest: "{\"old\":1}", filepath.Join("node_modules", "dep.js"): "x", ".orphaned_at": "1",
 				})
@@ -716,11 +720,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					checkout+" is 2.0.0 — run pfm install --yes\n", 1
 			case "alpha cache unreadable":
 				want, failures = "doctor: claude_plugins could not read the plugin cache: plugin "+doctorDevIDs[0]+
-					" cache: read cache "+cache+": stat "+filepath.Join(cache, "gone")+": no such file or directory\n", 1
-			case "alpha cache differs":
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" cache "+cache+" differs from "+
-					checkout+" at version 1.0.0 — bump the version in "+filepath.Join(checkout, manifest)+
-					": Claude caches by version; then run pfm install --yes\n", 1
+					" cache: parse "+filepath.Join(checkout, manifest)+": unexpected end of JSON input\n", 1
 			case "alpha cache unversioned":
 				record := filepath.Join(store, "plugins", "installed_plugins.json")
 				plugin := filepath.Join(checkout, manifest)

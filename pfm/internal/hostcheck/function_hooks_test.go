@@ -119,3 +119,97 @@ func TestFunctionHookModulesUnreadablePluginRecordIsReportedNotClean(t *testing.
 		t.Fatalf("row=%+v, want BLOCK at %s", row, record)
 	}
 }
+
+// installDirectoryPlugin records plugin@market as installed from a snapshot
+// without hook modules while market is a directory marketplace whose folder
+// ./plugins/plugin declares them (or not): Claude Code runs the folder.
+func installDirectoryPlugin(t *testing.T, dir, plugin, market string, folderModules, listed bool) (root string) {
+	t.Helper()
+	root = filepath.Join(t.TempDir(), market)
+	snapshot := filepath.Join(dir, "plugins", "cache", market, plugin)
+	writeFile(t, filepath.Join(snapshot, "hooks", "hooks.json"), `{"hooks":{}}`)
+	if folderModules {
+		writeFile(t, filepath.Join(root, "plugins", plugin, "hooks", "hooks.json"), `{"modules":["./plugin.ts"]}`)
+	}
+	if listed {
+		writeFile(t, filepath.Join(root, ".claude-plugin", "marketplace.json"),
+			`{"name":"`+market+`","plugins":[{"name":"`+plugin+`","source":"./plugins/`+plugin+`"}]}`)
+	}
+	id := plugin + "@" + market
+	writeFile(t, filepath.Join(dir, "plugins", "installed_plugins.json"),
+		`{"version":2,"plugins":{"`+id+`":[{"scope":"user","installPath":"`+snapshot+`"}]}}`)
+	writeFile(t, filepath.Join(dir, "plugins", "known_marketplaces.json"),
+		`{"`+market+`":{"source":{"source":"directory","path":"`+root+`"}}}`)
+	return root
+}
+
+func TestFunctionHookModulesDirectoryMarketplaceReadsItsFolderNotTheSnapshot(t *testing.T) {
+	env := fixtureEnv(t)
+	writeFile(t, accountStateFile(env), `{}`)
+	installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "buddy-dev", true, true)
+	row := onlyRow(t, detect(t, "function-hook-modules", env))
+	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@buddy-dev")
+}
+
+func TestFunctionHookModulesDirectoryMarketplaceFolderWithoutModulesIsClean(t *testing.T) {
+	env := fixtureEnv(t)
+	writeFile(t, accountStateFile(env), `{}`)
+	dir := env.Accounts[0].ConfigDir
+	installDirectoryPlugin(t, dir, "buddy", "buddy-dev", false, true)
+	snapshot := filepath.Join(dir, "plugins", "cache", "buddy-dev", "buddy", "hooks", "hooks.json")
+	writeFile(t, snapshot, `{"modules":["./old.ts"]}`)
+	assertRows(t, detect(t, "function-hook-modules", env))
+}
+
+func TestFunctionHookModulesGithubMarketplaceStillReadsInstallPath(t *testing.T) {
+	env := fixtureEnv(t)
+	dir := env.Accounts[0].ConfigDir
+	writeFile(t, accountStateFile(env), `{}`)
+	installModulePlugin(t, dir, "buddy@buddy", true)
+	writeFile(t, filepath.Join(dir, "plugins", "known_marketplaces.json"),
+		`{"buddy":{"source":{"source":"github","repo":"owner/buddy"}}}`)
+	row := onlyRow(t, detect(t, "function-hook-modules", env))
+	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@buddy")
+}
+
+func TestFunctionHookModulesUnresolvableDirectoryFolderIsReportedNotClean(t *testing.T) {
+	env := fixtureEnv(t)
+	writeFile(t, accountStateFile(env), `{}`)
+	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "buddy-dev", true, false)
+	manifest := filepath.Join(root, ".claude-plugin", "marketplace.json")
+	row := onlyRow(t, detect(t, "function-hook-modules", env))
+	if row.Severity != Warn || row.Path != manifest {
+		t.Fatalf("row=%+v, want WARN at %s", row, manifest)
+	}
+	assertContains(t, "problem", row.Problem, "buddy@buddy-dev", "unknown")
+}
+
+func TestFunctionHookModulesUnlistedDirectoryPluginIsReportedNotClean(t *testing.T) {
+	env := fixtureEnv(t)
+	writeFile(t, accountStateFile(env), `{}`)
+	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "buddy-dev", true, false)
+	writeFile(
+		t,
+		filepath.Join(root, ".claude-plugin", "marketplace.json"),
+		`{"plugins":[{"name":"other","source":"./plugins/other"}]}`,
+	)
+	row := onlyRow(t, detect(t, "function-hook-modules", env))
+	if row.Severity != Warn {
+		t.Fatalf("row=%+v, want WARN", row)
+	}
+	assertContains(t, "problem", row.Problem, "lists no folder source for plugin buddy", "unknown")
+}
+
+func TestFunctionHookModulesUnparsableKnownMarketplacesIsReportedNotClean(t *testing.T) {
+	env := fixtureEnv(t)
+	dir := env.Accounts[0].ConfigDir
+	writeFile(t, accountStateFile(env), `{}`)
+	installModulePlugin(t, dir, "buddy@buddy", true)
+	known := filepath.Join(dir, "plugins", "known_marketplaces.json")
+	writeFile(t, known, `{nope`)
+	row := onlyRow(t, detect(t, "function-hook-modules", env))
+	if row.Severity != Warn || row.Path != known {
+		t.Fatalf("row=%+v, want WARN at %s", row, known)
+	}
+	assertContains(t, "problem", row.Problem, "cannot parse", "unknown")
+}

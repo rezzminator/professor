@@ -173,7 +173,7 @@ func printClaudePluginsDoctor(
 			Problem: "plugin " + id + " not installed in " + store, Fix: installer.ClaudePluginRepair,
 		})
 	}
-	// Claude runs an installed -dev copy from its snapshot, which a refreshed copy does not move;
+	// Claude records each installed -dev copy's version, which a refreshed copy does not move;
 	// a target not installed is named above, its install the one repair.
 	installedTargets := slices.DeleteFunc(slices.Clone(targets), func(target installer.ClaudePluginTarget) bool {
 		return slices.Contains(missing, target.ID)

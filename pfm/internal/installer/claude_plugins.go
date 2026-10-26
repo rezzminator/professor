@@ -448,8 +448,8 @@ func (installer *engine) ensureClaudePluginTarget(
 		}
 	}
 	if target.Local && installed {
-		// Claude runs an installed copy from its snapshot, which moves only here
-		// and at the install above.
+		// Claude records an installed copy's version, which moves only here and
+		// at the install above.
 		if err := installer.ensureClaudePluginCache(ctx, run, target); err != nil {
 			fail(err)
 		}

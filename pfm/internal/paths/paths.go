@@ -27,8 +27,14 @@ const (
 	SIDEffortPrefix = "statusline-effort-"
 	// SIDKillExitLogPrefix names the detached kill-exit finisher's log,
 	// SIDKillExitLogPrefix+socketName+".log", beside reload's worker logs
-	// (reload-{socket}.log); the doctor's crumb audit accepts both.
+	// (reload-{socket}.log for a tmux chat, SIDReloadHerdrPrefix+seat+".log"
+	// for a native one); the doctor's crumb audit accepts all of them.
 	SIDKillExitLogPrefix = "kill-exit-"
+	// SIDReloadHerdrPrefix names a native Herdr chat's reload schedule,
+	// SIDReloadHerdrPrefix+seat+".pid" (the scheduled worker's record) and
+	// SIDReloadHerdrPrefix+seat+".log" (its log); the doctor's crumb audit
+	// accepts both, and ending the seat removes both.
+	SIDReloadHerdrPrefix = "reload-herdr-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
 	// a crash can leave one behind, so the crumb audit accepts it.
@@ -67,8 +73,8 @@ const (
 	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
 	// it so no test reaches a public repository.
 	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
-	// EnvThemesOffline=1 stops pfm install from fetching a release theme
-	// manifest or remote theme file; themes bundled in the source clone still install.
+	// EnvThemesOffline=1 stops pfm install from downloading the release
+	// profiles; the profiles in the source clone still install.
 	// The test harness sets it so no test fetches themes from a public repository.
 	EnvThemesOffline = "PFM_THEMES_OFFLINE"
 	// EnvPricesOffline=1 stops every price refresh — pfm model-cost, pfm
@@ -125,7 +131,12 @@ const (
 	EnvLogLevel      = "PFM_LOG_LEVEL"
 	EnvLogComponents = "PFM_LOG_COMPONENTS"
 	EnvLogMirror     = "PFM_LOG"
-	defaultTmpDir    = "/tmp"
+	// EnvAutoEffortStateFile is the auto-effort-control plugin's own variable naming
+	// its per-session state file (AutoEffortStateFile); pfm only reads it.
+	EnvAutoEffortStateFile = "AUTO_EFFORT_CONTROL_STATE_FILE"
+	// EnvLegacyAutoEffortStateFile remains an explicit migration alias.
+	EnvLegacyAutoEffortStateFile = "AUTO_EFFORT_STATE_FILE"
+	defaultTmpDir                = "/tmp"
 )
 
 const sourceRepoMarkerName = "source-repo"
@@ -141,12 +152,6 @@ var (
 	ErrNoSourceRepoMarker = errors.New("no source repository recorded")
 	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
 )
-
-// CallCapTallyDir holds `pfm internal call-cap`'s request tallies, one per
-// transcript, so each hook run reads only what its agent appended since.
-func CallCapTallyDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "call-cap")
-}
 
 // PricesStampPath is the record of the last price check that confirmed the
 // clone's prices.json, kept outside the clone so a check never dirties it.
@@ -221,18 +226,18 @@ func ReadSourceRepoMarker(home string) (string, error) {
 	return repo, nil
 }
 
-// ComposedHarnessPrompt locates the installed engine prompt in the recorded clone.
-func ComposedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
+// GeneratedHarnessPrompt locates the installed engine prompt in the recorded clone.
+func GeneratedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
 	repo, err := ReadSourceRepoMarker(home)
 	if err != nil {
-		return "", fmt.Errorf("resolve composed harness prompt: %w", err)
+		return "", fmt.Errorf("resolve generated harness prompt: %w", err)
 	}
-	return ComposedHarnessPromptIn(repo, id), nil
+	return GeneratedHarnessPromptIn(repo, id), nil
 }
 
-// ComposedHarnessPromptIn locates the engine prompt in the given clone.
-func ComposedHarnessPromptIn(repo string, id pfmengine.ID) string {
-	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md")
+// GeneratedHarnessPromptIn locates the engine prompt in the given clone.
+func GeneratedHarnessPromptIn(repo string, id pfmengine.ID) string {
+	return filepath.Join(repo, "pfm", "harness-prompts", "generated", pfmengine.MustLookup(id).LongName+".md")
 }
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,
@@ -399,6 +404,36 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
+// ServicePath is the ONE search path every pfm service runs on — the
+// installer's launchd agents and systemd units, and the theme follower. A
+// service manager starts jobs on a bare PATH (launchd: /usr/bin:/bin:/usr/sbin:/sbin)
+// that sees neither ~/.local/bin (pfm, claude, herdr) nor Homebrew
+// (/opt/homebrew/bin on Apple silicon, /usr/local/bin on Intel), where tmux
+// lives — so a daemon that probes the fleet finds no tmux, and a fleet it
+// cannot see reads as empty. Every unit renders it from here; none spells a
+// PATH of its own.
+func ServicePath(home string) string {
+	return strings.Join([]string{
+		filepath.Join(home, ".local", "bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	}, ":")
+}
+
+// AgentLauncher is the one executable every pfm-written launchd agent names as
+// ProgramArguments[0]: a fixed shell script that execs the installed pfm. macOS
+// Background Task Management keys a launch item on the code identity of that
+// first argument, and an ad-hoc-signed pfm is a new identity on every build —
+// so an agent naming pfm itself raised an "App Background Activity" advisory
+// per rebuild. The script never changes, so neither does the item.
+func AgentLauncher(home string) string {
+	return filepath.Join(home, ".local", "libexec", "pfm", "pfm-agent")
+}
+
 // Resolve returns the standard host paths with all K4 test-jail overrides
 // applied. It only computes pathnames; it does not access the filesystem.
 func DefaultStateDB(home string) string {
@@ -408,6 +443,18 @@ func DefaultStateDB(home string) string {
 // OpenCodeWorkbenchPlugin is the seat plugin staged beside the fleet cache.
 func OpenCodeWorkbenchPlugin(home string) string {
 	return filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-workbench-plugin.mjs")
+}
+
+// HerdrLockDir holds the per-chat-session lock files the Herdr reporter
+// serializes on, its error logs and the Codex pane registry.
+func HerdrLockDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "herdr")
+}
+
+// OpenCodeHerdrPlugin is the Herdr reporter plugin staged beside the fleet
+// cache; every pfm OpenCode chat loads it.
+func OpenCodeHerdrPlugin(home string) string {
+	return filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-herdr-plugin.mjs")
 }
 
 func DefaultCacheDB(home string) string {
@@ -425,20 +472,6 @@ var ErrLegacyPending = errors.New("legacy database not migrated")
 // moving it to DefaultStateDB.
 func LegacyStateDB(home string) string {
 	return filepath.Join(home, ".cc", legacyDBName)
-}
-
-// HarvesterCacheDir is the harvester's one default cache directory (used when
-// harvester.config.json sets no cache.dir): <home>/.professor/.harvester-cache.
-// It holds persistent read handles, so it lives under the home, never
-// a temp directory.
-func HarvesterCacheDir(home string) string {
-	return filepath.Join(home, ".professor", ".harvester-cache")
-}
-
-// LegacyHarvesterCacheDir names the pre-rename default cache directory;
-// pfm doctor gives the fix for moving it to HarvesterCacheDir.
-func LegacyHarvesterCacheDir(home string) string {
-	return filepath.Join(home, ".professor", ".cache")
 }
 
 // LegacyCacheDB names the old cache database; pfm doctor gives the fix for
@@ -525,10 +558,81 @@ func CostLedgerDir(env Env, home string) string {
 	return EnvOrFrom(env, EnvCostLedgerDir, filepath.Join(home, ".local", "state", "pfm", "cost-ledger"))
 }
 
+// AutoEffortStateFile is the auto-effort-control plugin's state file for one session,
+// by the plugin's own rule: EnvAutoEffortStateFile (trimmed, blank is unset; a leading
+// `~/` is home), else state.json under the home's auto-effort-control state directory;
+// the session id, every character outside [A-Za-z0-9_-] made `_` (one per
+// UTF-16 unit, as the plugin's JavaScript counts), goes before the file name's
+// last extension, or after a name without one (sessionLogPath in the plugin's
+// src/log.ts). A path set only through the plugin's own options is not seen.
+func AutoEffortStateFile(env Env, home, sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", errors.New("auto-effort-control state file: empty session id")
+	}
+	file := strings.TrimSpace(env.Get(EnvAutoEffortStateFile))
+	legacy := strings.TrimSpace(env.Get(EnvLegacyAutoEffortStateFile))
+	if file != "" && legacy != "" && file != legacy {
+		return "", fmt.Errorf(
+			"%s conflicts with %s: migrate the legacy state-file override",
+			EnvLegacyAutoEffortStateFile,
+			EnvAutoEffortStateFile,
+		)
+	}
+	if file == "" {
+		file = legacy
+	}
+	if file == "" {
+		file = "~/.local/state/auto-effort-control/state.json"
+	}
+	if file == "~" || strings.HasPrefix(file, "~/") {
+		if home == "" {
+			return "", fmt.Errorf("auto-effort-control state file %s: the home directory is unknown", file)
+		}
+		file = strings.TrimRight(home, "/") + file[1:]
+	}
+	// The producer diagnoses and rejects destinations in the read-only retired trees.
+	clean := filepath.ToSlash(filepath.Clean(file)) + "/"
+	if strings.Contains(clean, "/.local/state/auto-effort/") ||
+		strings.Contains(clean, "/.local/state/effort-live-control/") {
+		if home == "" {
+			return "", errors.New("auto-effort-control state file: the home directory is unknown")
+		}
+		file = filepath.Join(home, ".local", "state", "auto-effort-control", "state.json")
+	}
+	var safe strings.Builder
+	for _, char := range sessionID {
+		switch {
+		case char >= 'A' && char <= 'Z',
+			char >= 'a' && char <= 'z',
+			char >= '0' && char <= '9',
+			char == '_',
+			char == '-':
+			safe.WriteRune(char)
+		case char > 0xFFFF:
+			safe.WriteString("__")
+		default:
+			safe.WriteByte('_')
+		}
+	}
+	slash := strings.LastIndex(file, "/")
+	dir, name := file[:slash+1], file[slash+1:]
+	dot := strings.LastIndex(name, ".")
+	if dot <= 0 {
+		return dir + name + "." + safe.String(), nil
+	}
+	return dir + name[:dot] + "." + safe.String() + name[dot:], nil
+}
+
 // CostSinkLog is the file the detached cost sink logs its failures to, beside
 // the activity log, so `pfm doctor` can show the cause of a sink that stopped.
 func CostSinkLog(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "log", "cost-sink.log")
+}
+
+// SubagentStatuslineTrace is the opt-in structural trace beside the cost sink
+// and activity logs. It never holds prompts, labels or transcript bodies.
+func SubagentStatuslineTrace(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "log", "subagent-statusline.jsonl")
 }
 
 // LegacyHarnessPromptsDir identifies the former managed prompt directory.
@@ -599,8 +703,8 @@ func SkillSourcesOfflineIn(env Env) bool {
 	return env.Get(EnvSkillSourcesOffline) == "1"
 }
 
-// ThemesOffline reports EnvThemesOffline=1: pfm install reads bundled themes
-// from the source clone but skips remote theme fetches.
+// ThemesOffline reports EnvThemesOffline=1: pfm install reads the profiles
+// in the source clone but downloads no release profile.
 func ThemesOffline() bool {
 	return ThemesOfflineIn(OSEnv{})
 }

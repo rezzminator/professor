@@ -9,7 +9,7 @@
 # Every beat that mutates the install RESTORES what it changed and asserts the
 # restore: a dropped seat is always a spare (never the seat E1 will spend), a
 # moved credential is moved back, a removed overlay is re-installed. The
-# destructive tail — reap, archive, headless, harvester, uninstall — is lane O2,
+# destructive tail — reap, archive, headless, uninstall — is lane O2,
 # which runs last because it tears the machine down.
 #
 # BROKEN STATE: the prelude aborts by name when this container carries no pfm
@@ -33,7 +33,7 @@ lane_begin O1
 # ── prelude ─────────────────────────────────────────────────────────────────
 lane_require_seat_ops "$CONFIG"
 
-need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
+need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "bash /worktree/infra/fence/source-clone.sh /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it"
 need "the managed install root $MANAGED" "[ -d '$MANAGED' ]" "(cd '$BLUEPRINT' && pfm install --yes)" ||
   lane_abort "pfm install has never completed in this container"
@@ -75,27 +75,28 @@ check_path I22 "MCP ownership ledger" "$MANAGED/mcp-ownership.json"
 clone="$(cat "$MANAGED/source-repo" 2>/dev/null)"
 check_path I11 "clone-sourced pfm.zsh shim" "$clone/pfm/internal/installer/assets/shim/pfm.zsh"
 grep -Fq "$clone/pfm/internal/installer/assets/shim/pfm.zsh" "$HOME/.zshrc" 2>/dev/null || missing="$missing I11 (~/.zshrc does not source the clone shim);"
-check_path I7 "composed Codex prompt" "$clone/pfm/harness-prompts/composed/codex.md"
-check_path I9 "composed Claude prompt" "$clone/pfm/harness-prompts/composed/claude.md"
+check_path I7 "generated Codex prompt" "$clone/pfm/harness-prompts/generated/codex.md"
+check_path I9 "generated Claude prompt" "$clone/pfm/harness-prompts/generated/claude.md"
 check_path I8 "harness-prompt baseline" "$clone/pfm/harness-prompts/claude/baselines/harness-original.sha256"
-# The assets whose destination the installer computes are SEARCHED, and the
-# roots searched are named on failure — "nothing there" is never "failed to look".
-ROOTS="$HOME/.local/share/pfm $HOME/.local/bin $SEAT_DIR $CODEX_HOME $HOME/.claude"
-# The glob is a PATH suffix, not a bare name.
-find_asset() { # find_asset <id> <what> <path-suffix-glob>
-  local hit
-  hit="$(find $ROOTS -maxdepth 6 -path "*/$3" 2>/dev/null | head -1)"
-  [ -n "$hit" ] || missing="$missing $1 ($2: no '*/$3' under $ROOTS);"
-}
-find_asset I15 "Claude Code professor theme" 'professor-*.json'
-check_path I16 "harvestpy runtime" "$HOME/.local/state/pfm/harvest-python/env"
+# I15: every bundled theme profile, its palette in Claude's themes dir and its
+# whole profile in pfm's install dir, the names read from the clone's
+# templates/themes/ — an unreadable directory is named, never read as "no
+# themes to check".
+if themes="$(bundled_themes "$clone/templates/themes")"; then
+  while IFS= read -r t; do
+    check_path I15 "Claude Code theme palette $t" "$HOME/.claude/themes/$t.json"
+    check_path I15 "pfm theme profile $t" "$MANAGED/themes/$t.json"
+  done <<<"$themes"
+else
+  missing="$missing I15 ($themes);"
+fi
 check_path I14 "VS Code extension asset" "$MANAGED/vscode/professor/package.json"
 for registry in agents commands skills; do
   [ -d "$SEAT_DIR/$registry" ] || missing="$missing I17/I18/I19 ($SEAT_DIR/$registry absent);"
 done
 [ -d "$CODEX_HOME/agents" ] || missing="$missing I20 (no Codex agents mirror at $CODEX_HOME/agents);"
 if [ -n "$missing" ]; then fail "$missing"; else
-  pass "every contracted overlay, per-seat card, marker and registry is staged (searched: $ROOTS)"
+  pass "every contracted overlay, per-seat card, marker, registry and bundled theme profile is staged"
 fi
 
 # ─── O1.02a — install owns every account link ──────────────────────────────
@@ -142,10 +143,13 @@ else
     fail "$settings is not a valid settings object"
   else
     missing=""
-    for verb in launcher-repair clear-kill exit-close explore-deny git-guard store-guard epic-inject reload-intercept exit-intercept; do
+    for verb in launcher-repair clear-kill exit-close git-guard store-guard epic-inject reload-intercept exit-intercept; do
       grep -q -- "$verb" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $verb;"
     done
     grep -q 'usage-hook' "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template usage-hook;"
+    for row in herdr-start herdr-working-prompt herdr-working-tool herdr-working-tool-failure herdr-blocked herdr-notification herdr-idle herdr-end; do
+      grep -q -- "\"$row\"" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $row;"
+    done
     if [ -f "$CODEX_HOME/config.toml" ]; then
       grep -q '^developer_instructions = ' "$CODEX_HOME/config.toml" ||
         missing="$missing codex fleet prompt absent from developer_instructions in $CODEX_HOME/config.toml;"
@@ -326,8 +330,9 @@ fi
 
 beat O1.10-doctor-exit-contract
 spends none
-clean_rc=0
-pfm doctor >/dev/null 2>&1 || clean_rc=$?
+# O1.09 just ran doctor on this same healthy state; no mutation separates
+# these beats. Reuse its baseline, retaining the broken and repaired probes.
+clean_rc="$doc_rc"
 overlay="$HOME/.local/bin/pfm-statusline"
 bad="" broken_out="" broken_rc=""
 if with_restored "$overlay"; then
@@ -386,11 +391,22 @@ settings_tmp="$(mktemp)"
 jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$settings_tmp" &&
   cat "$settings_tmp" >"$SEAT_DIR/settings.json" || bad="$bad could not remove the foreign settings key;"
 rm -f "$settings_tmp"
-[ -n "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
-  bad="$bad no professor-*.json theme under $HOME/.claude/themes;"
+# Themes: each bundled profile's Claude file carries the palette keys alone
+# (name, base, overrides — no surfaces pin reaches Claude); pfm's copy is whole.
+if themes="$(bundled_themes "$BLUEPRINT/templates/themes")"; then
+  while IFS= read -r t; do
+    keys="$(jq -c 'keys' "$HOME/.claude/themes/$t.json" 2>&1)" ||
+      { bad="$bad theme $t: $HOME/.claude/themes/$t.json unreadable ($(one_line "$keys"));"; continue; }
+    [ "$keys" = '["base","name","overrides"]' ] || bad="$bad theme $t: Claude's file carries keys $keys, want [base,name,overrides];"
+    jq -e --slurpfile claude "$HOME/.claude/themes/$t.json" '{name, base, overrides} == ($claude[0] | {name, base, overrides})' \
+      "$MANAGED/themes/$t.json" >/dev/null 2>&1 ||
+      bad="$bad theme $t: pfm's profile $MANAGED/themes/$t.json is absent or its palette differs from Claude's file;"
+  done <<<"$themes"
+else
+  bad="$bad $themes;"
+fi
 mcp_list="$(pfm mcp ls 2>&1)"
 grep -q $'^chat\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report chat enabled;"
-grep -q $'^harvester\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report harvester enabled;"
 [ -n "$(find "$SEAT_DIR/skills" -maxdepth 2 -type l -o -maxdepth 2 -type d -name '*git*' 2>/dev/null | head -1)" ] ||
   _lane_log_only "   O1.12: no git-bridge skill directory under $SEAT_DIR/skills (I94 reads the global fan-out instead)"
 if [ -n "$bad" ]; then fail "$bad"; else
@@ -413,7 +429,6 @@ run_ok() { # run_ok <what> <cmd…>
 run_ok "pfm version" pfm version
 run_ok "pfm config show" pfm config show
 run_ok "pfm config validate" pfm config validate
-run_ok "pfm issues" pfm issues
 # whoami OUTSIDE a chat must refuse by name, never invent a session.
 who="$(pfm whoami 2>&1)"
 who_rc=$?
@@ -430,7 +445,7 @@ usage_out="$(printf '{"session_id":"lane-no-such-session","prompt":"hello"}' | p
 usage_rc=$?
 [ "$usage_rc" -eq 0 ] || bad="$bad pfm usage-hook is not fail-open: exit $usage_rc ($(one_line "$usage_out"));"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "version/config show/config validate/issues answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
+  pass "version/config show/config validate answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
 fi
 
 # ─── O1.15 — model-cost offline surface ────────────────────────────────────
@@ -470,8 +485,12 @@ beat O1.16-tokens
 spends none
 bad=""
 help_out="$(pfm tokens --help 2>&1)"; help_rc=$?
-if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--flight' <<<"$help_out" || ! grep -q -- '--timeline' <<<"$help_out"; then
-  bad="$bad pfm tokens --help lacks --codex, --flight or --timeline (exit $help_rc): $(one_line "$help_out");"
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--tree' <<<"$help_out" || ! grep -q -- '--worktree' <<<"$help_out"; then
+  bad="$bad pfm tokens --help lacks --codex, --tree or --worktree (exit $help_rc): $(one_line "$help_out");"
+fi
+pair_out="$(pfm tokens --tree some-id --worktree /w 2>&1)"; pair_rc=$?
+if [ "$pair_rc" -ne 2 ] || ! grep -qF -- '--worktree and --base go together' <<<"$pair_out"; then
+  bad="$bad pfm tokens --tree --worktree without --base exited $pair_rc, want 2 naming the pair: $(one_line "$pair_out");"
 fi
 since_out="$(pfm tokens --since 3x 2>&1)"; since_rc=$?
 if [ "$since_rc" -ne 2 ] || ! grep -qF -- '--since wants' <<<"$since_out"; then
@@ -486,10 +505,14 @@ empty_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --root "$tokens_root" 2>&1)"; empty
 if [ "$empty_rc" -ne 0 ] || ! grep -q '^TOKEN AUDIT · ' <<<"$empty_out"; then
   bad="$bad pfm tokens over an empty root did not print its report (exit $empty_rc): $(one_line "$empty_out");"
 fi
+tree_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --tree no-such-id --root "$tokens_root" 2>&1)"; tree_rc=$?
+if [ "$tree_rc" -ne 1 ] || ! grep -qF -- '--tree no-such-id: no session or agent transcript' <<<"$tree_out"; then
+  bad="$bad pfm tokens --tree over an empty root exited $tree_rc, want 1 naming the missing id: $(one_line "$tree_out");"
+fi
 rm -rf "$tokens_root"
 # The report's numbers are proven by the golden replay of internal/tokens.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "tokens help names --codex/--flight/--timeline; a bad --since exits 2; an unreadable --root exits 1; an empty root prints its report"
+  pass "tokens help names --codex/--tree/--worktree; a bad --since and a lone --worktree exit 2; an unreadable --root exits 1; an empty root prints its report; an unknown --tree id exits 1"
 fi
 
 # ─── O1.17 — transcript offline surface ────────────────────────────────────
@@ -498,7 +521,7 @@ beat O1.17-transcript
 spends none
 bad=""
 help_out="$(pfm transcript --help 2>&1)"; help_rc=$?
-if [ "$help_rc" -ne 0 ] || ! grep -q -- 'show,counts,types,locate,agents' <<<"$help_out"; then
+if [ "$help_rc" -ne 0 ] || ! grep -q -- 'show,locate,agents' <<<"$help_out"; then
   bad="$bad pfm transcript --help lacks its verbs (exit $help_rc): $(one_line "$help_out");"
 fi
 verb_out="$(pfm transcript list x 2>&1)"; verb_rc=$?
@@ -520,6 +543,110 @@ rm -rf "$transcript_dir"
 # The digest's bytes are proven by the golden replay of internal/transcript/digest.
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "transcript help names its verbs; an unknown verb exits 2; a fixture digests; an id nothing holds exits 1 NOT FOUND"
+fi
+
+# ─── O1.18 — theme offline surface ─────────────────────────────────────────
+# No host app is present in the lane: the verb's own surface only — the off
+# line of a home that never ran `pfm theme on`, the retired verbs' refusals and
+# `on` refusing a home with no Claude account.
+beat O1.18-theme
+spends none
+bad=""
+status_out="$(pfm theme status 2>&1)"; status_rc=$?
+if [ "$status_rc" -ne 0 ] || [ "$status_out" != "pfm theme: off — pfm theme on turns it on" ]; then
+  bad="$bad pfm theme status in a home that never ran on exited $status_rc, want 0 and the off line: $(one_line "$status_out");"
+fi
+bare_out="$(pfm theme 2>&1)"; bare_rc=$?
+if [ "$bare_rc" -ne 0 ] || [ "$bare_out" != "$status_out" ]; then
+  bad="$bad bare pfm theme is not pfm theme status (exit $bare_rc): $(one_line "$bare_out");"
+fi
+for retired in ls set; do
+  retired_out="$(pfm theme "$retired" 2>&1)"; retired_rc=$?
+  if [ "$retired_rc" -ne 2 ] || ! grep -qF "unknown subcommand \"$retired\"" <<<"$retired_out"; then
+    bad="$bad pfm theme $retired exited $retired_rc, want 2 naming the unknown subcommand: $(one_line "$retired_out");"
+  fi
+done
+verb_out="$(pfm theme paint 2>&1)"; verb_rc=$?
+if [ "$verb_rc" -ne 2 ] || ! grep -qF 'unknown subcommand "paint"' <<<"$verb_out"; then
+  bad="$bad pfm theme paint exited $verb_rc, want 2 naming the unknown subcommand: $(one_line "$verb_out");"
+fi
+sync_out="$(pfm theme sync 2>&1)"; sync_rc=$?
+if [ "$sync_rc" -ne 0 ] || [ "$sync_out" != "$status_out" ]; then
+  bad="$bad pfm theme sync with the sync never on exited $sync_rc, want 0 and the off line: $(one_line "$sync_out");"
+fi
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "status and sync with no state print the off line (exit 0), bare theme is status; the retired ls and set verbs and an unknown verb exit 2"
+fi
+
+# ─── O1.19 — restart plan, read-only ───────────────────────────────────────
+# The dry run only: it finds every family, prints the ordered plan and starts
+# no worker. The real restart ends every chat, so no lane runs it, nor the
+# internal worker past its usage refusal.
+beat O1.19-restart-dry-run
+spends none
+bad=""
+plan_out="$(pfm restart --dry-run 2>&1)"; plan_rc=$?
+if [ "$plan_rc" -ne 0 ] && [ "$plan_rc" -ne 1 ]; then
+  bad="$bad pfm restart --dry-run exited $plan_rc, want 0 (every family found) or 1 (a find named FAILED): $(one_line "$plan_out");"
+fi
+[ "$(printf '%s\n' "$plan_out" | head -n 1)" = "restart plan: stop downstream first, then start upstream first only what was running before; chats are not brought back" ] ||
+  bad="$bad the dry run does not open with the plan header: $(one_line "$plan_out");"
+for family in chats chat-helpers herdr services mcp-daemon search-backend pfm; do
+  grep -qE "^find +$family +(ok|FAILED) " <<<"$plan_out" || bad="$bad the plan has no find line for $family;"
+done
+if [ "$plan_rc" -eq 1 ] && ! grep -qE '^find +[a-z-]+ +FAILED ' <<<"$plan_out"; then
+  bad="$bad the dry run exited 1 without naming a failed find;"
+fi
+grep -qE '^last +pfm +the restart worker a plain pfm restart detaches' <<<"$plan_out" ||
+  bad="$bad the plan does not name its last pfm process;"
+if ls "$(dirname "${PFM_STATE_DB:-$HOME/.local/state/pfm/pfm.db}")/restart"/restart-*.log >/dev/null 2>&1; then
+  bad="$bad the dry run spawned a restart worker (a restart-*.log exists);"
+fi
+usage_out="$(pfm restart now 2>&1)"; usage_rc=$?
+if [ "$usage_rc" -ne 2 ] || ! grep -qF 'usage: pfm restart [--dry-run]' <<<"$usage_out"; then
+  bad="$bad pfm restart now exited $usage_rc, want 2 and the usage line: $(one_line "$usage_out");"
+fi
+worker_out="$(pfm internal restart-run 2>&1)"; worker_rc=$?
+if [ "$worker_rc" -ne 2 ] || ! grep -qF 'usage: pfm internal restart-run --front PID' <<<"$worker_out"; then
+  bad="$bad pfm internal restart-run with no --front exited $worker_rc, want 2 and its usage: $(one_line "$worker_out");"
+fi
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "the dry run opens with the plan header, finds all seven families (exit $plan_rc), names its last process and starts no worker; an argument exits 2 with the usage, and so does the internal worker without --front"
+fi
+
+# ─── O1.20 — cross-engine extension switch ────────────────────────────────
+beat O1.20-extensions
+spends none
+bad=""
+extension_backup="$(mktemp)"
+cp "$CONFIG" "$extension_backup"
+for enabled in true false; do
+  python3 - "$CONFIG" "$enabled" <<'PYEXT'
+import json,sys
+p=sys.argv[1]
+with open(p) as f: config=json.load(f)
+config["extensions"]={"ponytail":{"enabled":sys.argv[2]=="true","engines":["claude","codex","opencode"],"env":{"PONYTAIL_SUBAGENT_MATCHER":"^fixture$"},"options":{"ledger":False}}}
+with open(p,"w") as f: json.dump(config,f)
+PYEXT
+  extension_out="$(install_again)"; extension_rc=$?
+  [ "$extension_rc" -eq 0 ] || bad="$bad extension $enabled install exited $extension_rc: $(one_line "$extension_out");"
+  extension_doctor="$(pfm doctor 2>&1)"
+  for engine in claude codex opencode; do
+    for aspect in installed enabled options env; do
+      grep -qF "doctor: extension ponytail/$engine $aspect" <<<"$extension_doctor" || bad="$bad extension $enabled $engine lacks $aspect doctor row;"
+    done
+  done
+  grep -qF 'doctor: extension ponytail/codex hook trust' <<<"$extension_doctor" || bad="$bad extension $enabled lacks hook trust row;"
+  if grep -E '^doctor: extension(s| )' <<<"$extension_doctor" | grep -q 'FAIL'; then
+    bad="$bad extension $enabled doctor drift: $(one_line "$(grep -E '^doctor: extension(s| )' <<<"$extension_doctor")");"
+  fi
+done
+cp "$extension_backup" "$CONFIG"
+rm -f "$extension_backup"
+restore_out="$(install_again)"; restore_rc=$?
+[ "$restore_rc" -eq 0 ] || bad="$bad restoring extension config failed ($restore_rc): $(one_line "$restore_out");"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "extension ON/OFF converges all engines and every doctor aspect, original config restored"
 fi
 
 lane_end

@@ -68,14 +68,10 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 	ensureStaleSuccessor(t, runtime.Config.Path)
 	ensureStaleSuccessor(t, runtime.Paths.StateDB)
 	ensureStaleSuccessor(t, runtime.Paths.CacheDB)
-	if err := os.MkdirAll(paths.HarvesterCacheDir(home), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	seeded := map[string]string{}
 	seeded[filepath.Join(legacyConfigDir, config.FileName)] = "legacy-config-dir"
 	seeded[paths.LegacyStateDB(home)] = "legacy-state-db"
 	seeded[paths.LegacyCacheDB(home)] = "legacy-cache-db"
-	seeded[filepath.Join(paths.LegacyHarvesterCacheDir(home), "page.json")] = "legacy-harvester-cache"
 	seeded[filepath.Join(installer.ManagedRoot(home), "harness-prompts", "a.md")] = "staged-prompts"
 	seeded[filepath.Join(home, ".local", "state", "pfm", "shared.db")] = "shared-db"
 	seeded[filepath.Join(store, "settings.json"+staleStamp)] = "install-backup"
@@ -110,7 +106,7 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 // the retired directory holding it.
 func listedPath(seeded, kind string) string {
 	switch kind {
-	case "legacy-config-dir", "legacy-harvester-cache", "staged-prompts", "dead-account-dir", "retired-chat-skills",
+	case "legacy-config-dir", "staged-prompts", "dead-account-dir", "retired-chat-skills",
 		"retired-generated-store":
 		return filepath.Dir(seeded)
 	case "retired-migration-journal":
@@ -234,7 +230,6 @@ func TestDoctorStaleUsageRejectsMixedFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"--purge"},
 		{"--stale", "--verbose"},
-		{"--stale", "--skip-harvest"},
 		{"--stale", "--project-updates"},
 		{"--stale", "--json"},
 	} {

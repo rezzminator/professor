@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
@@ -30,7 +30,7 @@ func assetFiles() ([]assetFile, error) {
 			return nil
 		}
 		relative := strings.TrimPrefix(name, "assets/")
-		if relative == "shim/pfm.zsh" {
+		if relative == "shim/pfm.zsh" || relative == herdrShellAsset {
 			return nil
 		}
 		if !schedulerAsset(relative) {
@@ -111,31 +111,13 @@ func foldReloadUsage(usage string) string {
 // unit — takes its PATH.
 const servicePathMarker = "__PFM_SERVICE_PATH__"
 
-// servicePath is the ONE search path every pfm service runs on. A service
-// manager starts jobs on a bare PATH (launchd: /usr/bin:/bin:/usr/sbin:/sbin)
-// that sees neither ~/.local/bin (pfm, claude) nor Homebrew (/opt/homebrew/bin
-// on Apple silicon, /usr/local/bin on Intel), where tmux lives — so a daemon
-// that probes the fleet finds no tmux, and a fleet it cannot see reads as
-// empty. Every unit renders it from here; none spells a PATH of its own.
-func servicePath(home string) string {
-	return strings.Join([]string{
-		filepath.Join(home, ".local", "bin"),
-		"/opt/homebrew/bin",
-		"/usr/local/bin",
-		"/usr/bin",
-		"/bin",
-		"/usr/sbin",
-		"/sbin",
-	}, ":")
-}
-
 // renderServicePath fills a unit's servicePathMarker; a unit without one is
 // returned unchanged.
 func renderServicePath(content []byte, home string) ([]byte, error) {
 	if !strings.Contains(string(content), servicePathMarker) {
 		return content, nil
 	}
-	rendered, err := replaceSingleAssetMarker(string(content), servicePathMarker, servicePath(home))
+	rendered, err := replaceSingleAssetMarker(string(content), servicePathMarker, paths.ServicePath(home))
 	if err != nil {
 		return nil, err
 	}

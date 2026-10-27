@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,12 +28,29 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+// newStdioTestService builds a Service with an isolated shared database and
+// AllowAmbientIdentity left at its zero value (false), the shared HTTP
+// daemon's real posture.
+func newStdioTestService(t *testing.T) *Service {
+	t.Helper()
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewConfigured("test", nil, Runtime{Paths: resolved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	return service
+}
 
 type stdioTestRoundTripFunc func(*http.Request) (*http.Response, error)
 
@@ -45,7 +63,7 @@ func (roundTrip stdioTestRoundTripFunc) RoundTrip(request *http.Request) (*http.
 // replaced-executable guard cancels the context and relies on the return to
 // exit the process.
 func TestRunStdioReturnsOnCancelWhileInputStaysOpen(t *testing.T) {
-	professor := stdioTestProfessor(t, newIssuesTestService(t))
+	professor := stdioTestProfessor(t, newStdioTestService(t))
 	input, holdOpen := io.Pipe()
 	defer func() { _ = holdOpen.Close() }()
 
@@ -534,47 +552,14 @@ func stdioTestSession(t *testing.T, professor *FamilyServers, options StdioOptio
 // stdioTestNamer answers every tmux session-name lookup with one name.
 type stdioTestNamer string
 
-func (namer stdioTestNamer) SessionName(context.Context, string, string) (string, error) {
-	return string(namer), nil
+func (namer stdioTestNamer) SessionPane(context.Context, string, string) (string, int, error) {
+	return string(namer), 4100, nil
 }
 
-func TestRunStdioForwardsHarvesterOnlyWithoutRuntimeIdentity(t *testing.T) {
-	root := testjail.Fleet(t)
-	daemonProfessor := newTestProfessor(t, FamilyServerOptions{Harvester: newTestHarvester(t, harvestmcp.Runtime{})})
-	roster := daemonProfessor.Servers()[pfmconfig.MCPServerHarvester]
-	daemon := NewDaemonHandler(DaemonOptions{
-		Version: "test", Endpoint: "test",
-		Harvester:      daemonProfessor.FamilyHandler(pfmconfig.MCPServerHarvester),
-		HarvesterTools: roster,
-	})
-	var professorRequests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == pfmconfig.MCPFamilyPath(pfmconfig.MCPServerHarvester) {
-			professorRequests.Add(1)
-		}
-		daemon.ServeHTTP(writer, request)
-	}))
-	defer server.Close()
+type stdioTestProcessTree struct{}
 
-	local := newTestProfessor(t, FamilyServerOptions{Harvester: newTestHarvester(t, harvestmcp.Runtime{})})
-	var warnings proxyTestBuffer
-	session := stdioTestSession(t, local, StdioOptions{
-		DaemonAddress: proxyTestAddress(server), Home: filepath.Join(root, "home"), Warnings: &warnings,
-	})
-	if names := sessionToolNames(t, session); !reflect.DeepEqual(names, sortedRoster(roster)) {
-		t.Fatalf("forwarded tools/list = %v, want the daemon's harvester roster %v", names, sortedRoster(roster))
-	}
-	if professorRequests.Load() == 0 {
-		t.Fatalf(
-			"daemon %s received no request; warnings: %s",
-			pfmconfig.MCPFamilyPath(pfmconfig.MCPServerHarvester),
-			warnings.String(),
-		)
-	}
-	if strings.Contains(warnings.String(), "using in-process MCP") {
-		t.Fatalf("harvester-only daemon fell back in process: %s", warnings.String())
-	}
-}
+func (stdioTestProcessTree) Parent(int) (int, error)                { return 0, nil }
+func (stdioTestProcessTree) Environ(int) (map[string]string, error) { return map[string]string{}, nil }
 
 // A Codex caller's _meta.threadId crosses the stdio forwarder unchanged, beside
 // the pfmProxy identity the forwarder adds, and skips the Claude crumb refresh
@@ -585,7 +570,7 @@ func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 		Environment: &resolve.WhoamiEnvironment{
 			TMUX: "/tmp/tmux-1000/cc-seat,1,0", TMUXPane: "%7", ClaudeSessionID: "session-claude",
 		},
-		Namer: stdioTestNamer("cc-seat"),
+		Namer: stdioTestNamer("cc-seat"), SelfPID: 4100, Processes: stdioTestProcessTree{},
 	}
 	t.Cleanup(func() { proxyWhoami = previous })
 
@@ -676,16 +661,7 @@ func TestRunStdioResolvesCodexCallerInProcess(t *testing.T) {
 	}
 }
 
-// The daemon mounts chat and harvester. A stdio server forwards only when its
-// config enables exactly those families and every one configured: a family
-// that failed locally, or a daemon family this config disables, keeps it in
-// process — the failed family's tools answer the configuration error, the
-// disabled family's tools are never listed — and one stderr line says why.
 func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
-	harvesterFailed := FailedFamily{
-		Family: pfmconfig.MCPServerHarvester, Tools: harvesterRosterNoSearch,
-		Err: errors.New("harvester config broken"), ConfigPath: "/pfm/config.json",
-	}
 	chatFailed := FailedFamily{
 		Family: pfmconfig.MCPServerChat, Tools: ToolNames(),
 		Err: errors.New("chat config broken"), ConfigPath: "/pfm/config.json",
@@ -694,7 +670,6 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 		name        string
 		family      string
 		chat        bool
-		harvester   bool
 		failed      []FailedFamily
 		call        string
 		wantForward bool
@@ -702,27 +677,11 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 		wantWarning string
 	}{
 		{
-			name: "local chat failed", family: pfmconfig.MCPServerChat, harvester: true, failed: []FailedFamily{chatFailed},
+			name: "local chat failed", family: pfmconfig.MCPServerChat, failed: []FailedFamily{chatFailed},
 			call: "ls", wantError: "chat config broken",
 			wantWarning: "family chat failed to configure locally; using in-process MCP",
 		},
-		{
-			name: "local harvester failed", family: pfmconfig.MCPServerHarvester, chat: true, failed: []FailedFamily{harvesterFailed},
-			call: "read", wantError: "harvester config broken",
-			wantWarning: "family harvester failed to configure locally; using in-process MCP",
-		},
-		{
-			name: "harvester proxy is independent of daemon chat", family: pfmconfig.MCPServerHarvester, harvester: true, wantForward: true,
-		},
-		{name: "families and runtime match", family: pfmconfig.MCPServerChat, chat: true, harvester: true, call: "ls", wantForward: true},
-		{
-			name: "healthy chat with failed harvester", family: pfmconfig.MCPServerChat,
-			chat: true, failed: []FailedFamily{harvesterFailed}, call: "ls", wantForward: true,
-		},
-		{
-			name: "healthy harvester with failed chat", family: pfmconfig.MCPServerHarvester,
-			harvester: true, failed: []FailedFamily{chatFailed}, wantForward: true,
-		},
+		{name: "chat and runtime match", family: pfmconfig.MCPServerChat, chat: true, call: "ls", wantForward: true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -732,14 +691,11 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 			}
 			var daemonCalls [][]string
 			daemonProfessor := newTestProfessor(t, FamilyServerOptions{
-				Chat:      proxyTestService("daemon", nil, &daemonCalls),
-				Harvester: newTestHarvester(t, harvestmcp.Runtime{}),
+				Chat: proxyTestService("daemon", nil, &daemonCalls),
 			})
 			daemon := NewDaemonHandler(DaemonOptions{
 				Version: "test", Endpoint: "test",
 				Chat:                daemonProfessor.FamilyHandler(pfmconfig.MCPServerChat),
-				Harvester:           daemonProfessor.FamilyHandler(pfmconfig.MCPServerHarvester),
-				HarvesterTools:      daemonProfessor.Servers()[pfmconfig.MCPServerHarvester],
 				ChatRuntimeIdentity: "sha256:proxy-test",
 			})
 			var professorRequests atomic.Int32
@@ -756,9 +712,6 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 				var localCalls [][]string
 				options.Chat = proxyTestService("local", nil, &localCalls)
 			}
-			if row.harvester {
-				options.Harvester = newTestHarvester(t, harvestmcp.Runtime{})
-			}
 			var warnings proxyTestBuffer
 			address := proxyTestAddress(server)
 			session := stdioTestSession(t, newTestProfessor(t, options), StdioOptions{
@@ -772,12 +725,6 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 				}
 				if professorRequests.Load() == 0 {
 					t.Fatalf("daemon saw no selected-family POST; warnings: %s", warnings.String())
-				}
-				if row.call == "" {
-					if len(names) != len(harvesterRosterNoSearch) {
-						t.Fatalf("harvester proxy roster=%v", names)
-					}
-					return
 				}
 				result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 					Name: row.call, Arguments: map[string]any{},
@@ -804,7 +751,7 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 					t.Fatalf("warnings = %q, want %q", warnings.String(), want)
 				}
 				for _, name := range names {
-					if strings.HasPrefix(name, "chat_") || name == "servicedesk" {
+					if strings.HasPrefix(name, "chat_") || slices.Contains(ToolNames(), name) {
 						t.Fatalf("tools/list = %v, lists %s from the family this config disables", names, name)
 					}
 				}
@@ -828,7 +775,7 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 }
 
 func TestRunStdioFallsBackWhenDaemonLacksSelectedFamilyRoute(t *testing.T) {
-	for _, family := range []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester} {
+	for _, family := range []string{pfmconfig.MCPServerChat} {
 		t.Run(family, func(t *testing.T) {
 			testjail.Fleet(t)
 			resolved, err := paths.Resolve()
@@ -837,16 +784,13 @@ func TestRunStdioFallsBackWhenDaemonLacksSelectedFamilyRoute(t *testing.T) {
 			}
 			var calls [][]string
 			local := newTestProfessor(t, FamilyServerOptions{
-				Chat:      proxyTestService("local", nil, &calls),
-				Harvester: newTestHarvester(t, harvestmcp.Runtime{}),
+				Chat: proxyTestService("local", nil, &calls),
 			})
 			status := NewDaemonHandler(DaemonOptions{
 				Version: "old", Chat: local.FamilyHandler(pfmconfig.MCPServerChat),
-				Harvester:           local.FamilyHandler(pfmconfig.MCPServerHarvester),
-				HarvesterTools:      local.Servers()[pfmconfig.MCPServerHarvester],
 				ChatRuntimeIdentity: "sha256:proxy-test",
 			})
-			// A pre-cutover daemon advertises both families but only mounts old routes.
+			// A pre-cutover daemon advertises chat but only mounts old routes.
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				if request.URL.Path == "/status" {
 					status.ServeHTTP(writer, request)

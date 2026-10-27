@@ -370,6 +370,7 @@ func TestDocumentStatesTheServedTableAndItsRefresh(t *testing.T) {
 		},
 		Origin:   pricing.Origin{From: pricing.FromFile, File: "/clone/prices.json", FileError: errors.New("stale")},
 		Override: &pricing.Override{Path: "/cfg/pfm.prices.json", Rows: 2},
+		Billing:  pricing.Billing{Route: "bedrock", Region: "geo", Configured: true, Multiplier: 1.1},
 	}
 	refreshed := PriceDocument(
 		prices,
@@ -383,6 +384,9 @@ func TestDocumentStatesTheServedTableAndItsRefresh(t *testing.T) {
 		refreshed.Override == nil ||
 		refreshed.Override.Rows != 2 {
 		t.Fatalf("Document header = %+v", refreshed)
+	}
+	if refreshed.Billing == nil || *refreshed.Billing != prices.Billing {
+		t.Fatalf("Document lost the billing selection: %+v", refreshed.Billing)
 	}
 	if r := refreshed.Refresh; r.Status != StatusRefreshed || r.Changed == nil || !*r.Changed || r.Persisted == nil ||
 		*r.Persisted ||

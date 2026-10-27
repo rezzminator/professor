@@ -153,7 +153,7 @@ func (model Model) chatsFooterKeys(compact bool) (first, second []span) {
 func (model Model) renderFooter(width int) string {
 	if model.tab == TabStats {
 		first := " ↑↓ focus/rows  ←→ focused tab  c CPU sort  m RAM sort"
-		second := " esc cancel · live samples every 2s only while Stats is focused"
+		second := " tab/shift+tab cycle tabs · esc cancel · live samples every 2s only while Stats is focused"
 		return dimStyle.Render(fillLine(first, width)) + "\n" +
 			dimStyle.Render(fillLine(second, width))
 	}

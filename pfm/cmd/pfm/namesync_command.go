@@ -9,12 +9,15 @@ import (
 	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/themecmd"
 )
 
 // runNameSync converges every live chat's tmux WINDOW name — the fleet's DNS
@@ -71,11 +74,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 1
 	}
 	// Only an explicit --apply lets the gather pass perform its planned renames.
-	live, err := fleet.Gather(ctx, database, environment, data,
-		!*apply,
-		fleet.PrintWarn(stderr),
-		stderr,
-	)
+	live, err := fleet.Gather(ctx, database, environment, data, !*apply, fleet.PrintWarn(stderr), stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
@@ -105,13 +104,13 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	}
 	titlesTmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
 	titlesUnverified := convergeChatServerOptions(
-		ctx,
-		titlesTmux,
-		liveSockets(live.Panes),
-		environment.Config.Tmux.Titles,
-		stdout,
-		stderr,
+		ctx, titlesTmux, liveSockets(live.Panes), environment.Config.Tmux.Titles,
+		filepath.Join(environment.Paths.Home, ".local", "bin", "pfm"), stdout, stderr,
 	)
+	titlesUnverified += reannounceChatServers(
+		ctx, hookentry.HerdrReannounce, environment.Paths.TmuxDir, liveSockets(live.Panes), stdout, stderr,
+	)
+	titlesUnverified += themecmd.ConvergeTmux(ctx, environment.Paths, liveSockets(live.Panes), stdout, stderr)
 	if titlesUnverified != 0 {
 		fmt.Fprintf(stdout, "tmux options unverified: %d\n", titlesUnverified)
 	}
@@ -120,7 +119,8 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if unverified != 0 {
 		fmt.Fprintf(stdout, "windows unverified: %d\n", unverified)
 	}
-	if titlesUnverified != 0 || unverified != 0 {
+	nativeOK := pfmchat.ConvergeHerdrNames(ctx, database, runtime.Paths, stderr)
+	if !nativeOK || titlesUnverified != 0 || unverified != 0 {
 		return 1
 	}
 	return 0
@@ -205,12 +205,12 @@ func convergeChatServerOptions(
 	ctx context.Context,
 	tmux gather.TmuxProbe,
 	sockets []string,
-	titles pfmconfig.TmuxTitles,
+	titles pfmconfig.TmuxTitles, pfmBinary string,
 	stdout, stderr io.Writer,
 ) (unverified int) {
 	converged := 0
 	for _, socket := range sockets {
-		transitions, err := tmux.ConvergeGlobalOptions(ctx, socket, pfmconfig.ChatServerOptions(&titles))
+		transitions, err := tmux.ConvergeGlobalOptions(ctx, socket, pfmconfig.ChatServerOptions(&titles, pfmBinary))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm name-sync: tmux options %s: %v\n", socket, err)
 			unverified++
@@ -229,5 +229,44 @@ func convergeChatServerOptions(
 		}
 	}
 	fmt.Fprintf(stdout, "tmux options converged: %d\n", converged)
+	return unverified
+}
+
+// herdrReannouncer brings one chat server's chats back onto Herdr and returns
+// the pane ids it reached (hookentry.HerdrReannounce); its errors name the
+// socket they are about.
+type herdrReannouncer func(ctx context.Context, socket string) ([]string, error)
+
+// reannounceChatServers runs, once the servers' options have converged, the
+// Herdr adoption and stored-state report of each live chat server, so a chat
+// that predates the hooks or a Herdr restart heals on the next scheduled
+// name-sync. A server whose chats reached n > 0 panes is named with them; a
+// host with no Herdr, or a server with no client in a Herdr pane, prints
+// nothing. A failure is named on stderr without stopping the pass and counted
+// unverified, as the options' failures are. The sockets are names under
+// tmuxDir.
+func reannounceChatServers(
+	ctx context.Context,
+	reannounce herdrReannouncer,
+	tmuxDir string,
+	sockets []string,
+	stdout, stderr io.Writer,
+) (unverified int) {
+	for _, socket := range sockets {
+		panes, err := reannounce(ctx, filepath.Join(tmuxDir, socket))
+		if len(panes) > 0 {
+			fmt.Fprintf(
+				stdout,
+				"herdr re-announce %s: %d client(s) %s\n",
+				socket,
+				len(panes),
+				strings.Join(panes, ", "),
+			)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
+			unverified++
+		}
+	}
 	return unverified
 }

@@ -132,9 +132,15 @@ func nextSettingsHookOwnership(
 	return next
 }
 
+// installerOwnedHookTemplates is every hook row the installer owns: the Claude
+// launch templates and the Codex Herdr reporter handlers.
+func installerOwnedHookTemplates(home string) []ExpectedHook {
+	return append(claudeHookTemplates(home), codexHerdrHooks(home)...)
+}
+
 func installerOwnedHookCommand(command, pfmBinary string) bool {
 	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
-	for _, hook := range claudeHookTemplates(home) {
+	for _, hook := range installerOwnedHookTemplates(home) {
 		if hook.Command == command {
 			return true
 		}
@@ -144,7 +150,7 @@ func installerOwnedHookCommand(command, pfmBinary string) bool {
 
 func installerOwnedHookKey(key settingsHookKey, pfmBinary string) bool {
 	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
-	for _, hook := range claudeHookTemplates(home) {
+	for _, hook := range installerOwnedHookTemplates(home) {
 		if hook.Event == key.Event && hook.Matcher == key.Matcher && hook.Command == key.Command {
 			return true
 		}

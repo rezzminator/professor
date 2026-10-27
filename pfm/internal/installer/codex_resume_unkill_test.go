@@ -4,24 +4,43 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+// fakeCodexAppServer answers `codex app-server` over stdio: initialize, hooks/list
+// from the listing file (one JSON hook object per line, "@STATUS@" in each
+// standing for untrusted until a config/value/write named the hook's key, then
+// trusted), and config/value/write. Every request line is appended to the log.
 const fakeCodexAppServer = `#!/bin/sh
 LOG='@LOG@'
+LISTING='@LISTING@'
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$LOG"
   case "$line" in
     *'"method":"initialize"'*) printf '%s\n' '{"id":0,"result":{}}' ;;
     *'"method":"hooks/list"'*)
-      status=untrusted
-      if grep -q '"method":"config/value/write"' "$LOG"; then status=trusted; fi
-      printf '{"id":1,"result":{"data":[{"hooks":[{"key":"@ACCOUNT@/hooks.json:session_start:0:1","handlerType":"command","command":"echo personal","sourcePath":"@ACCOUNT@/hooks.json","source":"user","currentHash":"sha256:other","eventName":"sessionStart","matcher":"resume","enabled":true,"trustStatus":"untrusted"},{"key":"@ACCOUNT@/hooks.json:session_start:0:0","handlerType":"command","command":"@COMMAND@","sourcePath":"@ACCOUNT@/hooks.json","source":"user","currentHash":"sha256:deadbeef","eventName":"sessionStart","matcher":"resume","enabled":true,"trustStatus":"%s"}]}]}}\n' "$status" ;;
+      printf '{"id":1,"result":{"data":[{"hooks":['
+      first=1
+      exec 3< "$LISTING"
+      while IFS= read -r entry <&3; do
+        key=${entry#*\"key\":\"}
+        key=${key%%\"*}
+        status=untrusted
+        if grep -F 'config/value/write' "$LOG" | grep -qF "$key\\\""; then status=trusted; fi
+        if [ "$first" = 0 ]; then printf ','; fi
+        first=0
+        printf '%s' "$entry" | sed "s/@STATUS@/$status/"
+      done
+      exec 3<&-
+      printf ']}]}}\n' ;;
     *'"method":"config/value/write"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
   esac
 done
@@ -29,9 +48,76 @@ done
 
 const personalStopHook = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`
 
+// snakeEvent is the event as a native hook key spells it ("PostToolUse" ->
+// "post_tool_use").
+func snakeEvent(event string) string {
+	var out strings.Builder
+	for index, r := range event {
+		if r >= 'A' && r <= 'Z' {
+			if index > 0 {
+				out.WriteByte('_')
+			}
+			r += 'a' - 'A'
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
+// nativeListing renders the hooks/list entries (one JSON object per line) of a
+// hooks.json body, the way the real Codex lists them: camelCase eventName, a
+// null matcher when the entry has none, the key of the handler's place.
+func nativeListing(t *testing.T, account string, hooksJSON []byte) string {
+	t.Helper()
+	var document struct {
+		Hooks map[string][]struct {
+			Matcher *string `json:"matcher"`
+			Hooks   []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(hooksJSON, &document); err != nil {
+		t.Fatal(err)
+	}
+	events := make([]string, 0, len(document.Hooks))
+	for event := range document.Hooks {
+		events = append(events, event)
+	}
+	sort.Strings(events)
+	var listing strings.Builder
+	for _, event := range events {
+		for matcherIndex, entry := range document.Hooks[event] {
+			for handlerIndex, handler := range entry.Hooks {
+				matcher := "null"
+				if entry.Matcher != nil && *entry.Matcher != "" {
+					matcher = strconv.Quote(*entry.Matcher)
+				}
+				key := fmt.Sprintf("%s/hooks.json:%s:%d:%d", account, snakeEvent(event), matcherIndex, handlerIndex)
+				hash := "sha256:" + snakeEvent(event)
+				if strings.HasSuffix(handler.Command, " internal resume-unkill") {
+					hash = "sha256:deadbeef"
+				}
+				if strings.HasPrefix(handler.Command, "echo ") {
+					hash = "sha256:other"
+				}
+				fmt.Fprintf(
+					&listing,
+					`{"key":%q,"handlerType":"command","command":%q,"sourcePath":%q,"source":"user",`+
+						`"currentHash":%q,"eventName":%q,"matcher":%s,"enabled":true,"trustStatus":"@STATUS@"}`+"\n",
+					key, handler.Command, account+"/hooks.json", hash,
+					strings.ToLower(event[:1])+event[1:], matcher,
+				)
+			}
+		}
+	}
+	return listing.String()
+}
+
 // stageResumeUnkillAccount lays down a Codex account whose hooks.json holds one
 // personal Stop hook, and the fake `codex app-server` that answers hook
-// discovery with the handler's real key shape. It returns the physical account,
+// discovery with the real key shape of every handler the install writes beside
+// it (resume-unkill and the Herdr reporter's). It returns the physical account,
 // the fake binary and the request log it appends to.
 func stageResumeUnkillAccount(t *testing.T, home string) (account, binary, requestLog string) {
 	t.Helper()
@@ -41,10 +127,14 @@ func stageResumeUnkillAccount(t *testing.T, home string) (account, binary, reque
 	if err != nil {
 		t.Fatal(err)
 	}
+	installed, _, _, err := updateCodexHooks([]byte(personalStopHook), home, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing := filepath.Join(home, "hooks-listing.jsonl")
+	writeFixture(t, listing, nativeListing(t, physical, installed))
 	requestLog = filepath.Join(home, "app-server.log")
-	script := strings.NewReplacer(
-		"@LOG@", requestLog, "@ACCOUNT@", physical, "@COMMAND@", resumeUnkillCommand(home),
-	).Replace(fakeCodexAppServer)
+	script := strings.NewReplacer("@LOG@", requestLog, "@LISTING@", listing).Replace(fakeCodexAppServer)
 	binary = filepath.Join(home, "fake-codex")
 	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -95,9 +185,14 @@ func TestCodexResumeUnkillHookIsWrittenOnceKeepsPersonalHooksAndIsOwned(t *testi
 		t.Fatal(err)
 	}
 	entries := document.Hooks["SessionStart"]
-	if len(entries) != 1 || entries[0].Matcher != "resume" || len(entries[0].Hooks) != 1 ||
+	// The Herdr reporter's SessionStart handler is its own matcher-less entry
+	// after the resume entry (codex_hooks_herdr_test.go pins its shape).
+	if len(entries) != 2 || entries[0].Matcher != "resume" || len(entries[0].Hooks) != 1 ||
 		entries[0].Hooks[0].Type != "command" || entries[0].Hooks[0].Timeout != 30 {
-		t.Fatalf("SessionStart entries=%+v, want one resume entry holding one command handler, timeout 30", entries)
+		t.Fatalf(
+			"SessionStart entries=%+v, want the resume entry holding one command handler, timeout 30, then the Herdr entry",
+			entries,
+		)
 	}
 	if got := hookCommandCount(t, raw, "Stop", "echo personal"); got != 1 {
 		t.Fatalf("personal Stop hook lost:\n%s", raw)
@@ -113,7 +208,7 @@ func TestCodexResumeUnkillHookIsWrittenOnceKeepsPersonalHooksAndIsOwned(t *testi
 		t.Fatalf("ownership ledger counts %d for the resume-unkill hook, want 1: %v", got, ownership)
 	}
 	if !strings.Contains(first.String(), "skip    Codex hook trust not recorded for "+account+
-		": no Codex binary configured — the resume-unkill hook stays untrusted") {
+		": no Codex binary configured — the owned hooks stay untrusted") {
 		t.Fatalf("a missing Codex binary was not said out loud:\n%s", first.String())
 	}
 
@@ -144,16 +239,17 @@ func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 	if err := json.Unmarshal([]byte(receiptRaw), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if len(receipt) != 1 || receipt[key] != "sha256:deadbeef" {
-		t.Fatalf("receipt=%v, want only %s -> sha256:deadbeef", receipt, key)
+	// Every handler pfm owns is trusted: resume-unkill and the seven Herdr ones.
+	if len(receipt) != 8 || receipt[key] != "sha256:deadbeef" {
+		t.Fatalf("receipt=%v, want eight handlers incl. %s -> sha256:deadbeef", receipt, key)
 	}
 	logged := readFixture(t, requestLog)
-	if got := strings.Count(logged, `"method":"config/value/write"`); got != 1 ||
+	if got := strings.Count(logged, `"method":"config/value/write"`); got != 8 ||
 		!strings.Contains(logged, `"keyPath":"hooks.state.\"`+key+`\""`) ||
 		!strings.Contains(logged, `"trusted_hash":"sha256:deadbeef"`) {
 		t.Fatalf("config/value/write requests=%d, want one carrying the hooks.state key and hash:\n%s", got, logged)
 	}
-	if !strings.Contains(transcript.String(), "change  trust resume-unkill hook "+account) {
+	if !strings.Contains(transcript.String(), "change  trust Codex hooks "+account) {
 		t.Fatalf("trust step not reported:\n%s", transcript.String())
 	}
 
@@ -161,12 +257,13 @@ func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 	if err := resumeUnkillEngine(home, account, binary, ModeApply, &again).wireCodexHooks(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(readFixture(t, requestLog), `"method":"config/value/write"`); got != 1 {
+	if got := strings.Count(readFixture(t, requestLog), `"method":"config/value/write"`); got != 8 {
 		t.Fatalf("a trusted hook was written again: %d config/value/write requests", got)
 	}
 	// A trust already recorded is no change: a repeat install stays changed=0.
 	if strings.Contains(again.String(), "change  ") ||
-		!strings.Contains(again.String(), "ok      resume-unkill hook trusted in "+account) {
+		!strings.Contains(again.String(), "ok      resume-unkill hook trusted in "+account) ||
+		!strings.Contains(again.String(), "ok      herdr-working-PostToolUse hook trusted in "+account) {
 		t.Fatalf("a repeat install reported the recorded trust as a change:\n%s", again.String())
 	}
 }
@@ -203,7 +300,7 @@ func TestCodexResumeUnkillHookAndTrustAreRemovedOnUninstall(t *testing.T) {
 		!strings.Contains(config, "model = 'personal'") {
 		t.Fatalf("uninstall edited config.toml wrongly:\n%s", config)
 	}
-	if !strings.Contains(transcript.String(), "change  remove resume-unkill hook trust "+account) {
+	if !strings.Contains(transcript.String(), "change  remove Codex hook trust "+account) {
 		t.Fatalf("trust removal not reported:\n%s", transcript.String())
 	}
 }
@@ -301,8 +398,9 @@ func TestCodexResumeUnkillReplacesOwnedStaleCommandAndKeepsForeignLookalike(t *t
 				t.Fatal(err)
 			}
 			current := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
-			if len(ledger[physicalSettingsPath(path)]) != 1 || ledger[physicalSettingsPath(path)][current] != 1 {
-				t.Fatalf("ledger=%v, want ownership of current handler", ledger)
+			staleKey := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: stale}
+			if ledger[physicalSettingsPath(path)][current] != 1 || ledger[physicalSettingsPath(path)][staleKey] != 0 {
+				t.Fatalf("ledger=%v, want ownership of the current handler and none of the stale one", ledger)
 			}
 		})
 	}

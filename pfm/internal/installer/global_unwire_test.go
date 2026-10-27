@@ -72,6 +72,45 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 	}
 }
 
+func TestTemplateSkillCleanupInBothRegistries(t *testing.T) {
+	t.Parallel()
+	for _, action := range []string{"unwire", "retire removed template"} {
+		t.Run(action, func(t *testing.T) {
+			// Removing SKILL.md while the directory remains exercises ORPHAN, not just DEAD.
+			t.Parallel()
+			home := t.TempDir()
+			var output bytes.Buffer
+			installer, store, _ := globalFanoutEngine(t, home, true, &output)
+			source := filepath.Join(installer.options.SourceRepo, "templates", "global", "skills", "beta")
+			registries := []string{filepath.Join(store, "skills"), filepath.Join(home, ".agents", "skills")}
+			for _, registry := range registries {
+				target := filepath.Join(registry, "beta")
+				symlinkFixture(t, source, target)
+				assertFanoutLink(t, target, source)
+				writeFixture(t, filepath.Join(registry, "mine", "SKILL.md"), "user skill\n")
+			}
+			var err error
+			if action == "unwire" {
+				err = installer.unwireGlobalRegistries()
+			} else {
+				if err := os.Remove(filepath.Join(source, "SKILL.md")); err != nil {
+					t.Fatal(err)
+				}
+				err = installer.retireDeadRegistryLinks()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, registry := range registries {
+				requireNoPath(t, filepath.Join(registry, "beta"), "cleanup left template link")
+				if got := readFixture(t, filepath.Join(registry, "mine", "SKILL.md")); got != "user skill\n" {
+					t.Fatalf("cleanup changed user skill: %q", got)
+				}
+			}
+		})
+	}
+}
+
 // TestUninstallRemovesGlobalAgentLinks checks store agent links are unwired.
 func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 	t.Parallel()

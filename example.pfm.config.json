@@ -1,6 +1,11 @@
 {
   "version": 2,
   "theme": "default",
+  "chat": {
+    "backend": "auto",
+    "herdrTabStatus": "emoji",
+    "herdrTabPriority": false
+  },
   "state": {
     "db": "~/.local/state/pfm/pfm.db",
     "cacheDb": "~/.local/state/pfm/pfm-cache.db"
@@ -11,6 +16,7 @@
     "theme": null,
     "cache1h": true,
     "nativeCursor": false,
+    "remoteControl": true,
     "systemPrompt": null,
     "webSearchesPerSession": 9007199254740991,
     "autoCompactWindow": 100000,
@@ -23,14 +29,15 @@
     "pluginCheckoutRoot": null,
     "plugins": [
       "cache-live-control",
-      "sub-agent-compact",
-      "effort-live-control",
+      "forward-compaction",
+      "auto-effort-control",
       "tool-visibility-controller",
       "engine-sync"
     ],
     "env": {},
     "costLedger": true,
-    "gptAgents": false
+    "gptAgents": false,
+    "subagentStatuslineTrace": false
   },
   "codex": {
     "yolo": true,

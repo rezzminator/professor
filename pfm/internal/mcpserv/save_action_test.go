@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -81,7 +82,8 @@ func TestChatSaveResolvesCallerRelativePathsAndScopesRepository(t *testing.T) {
 	var calls [][]string
 	var scoped []string
 	service := newService("test", &backend{
-		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		paths: paths.Values{TmuxDir: "/tmp/tmux"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			self, ok := chat.ScopedSelf(ctx)
@@ -136,6 +138,7 @@ func TestChatSaveDefaultsToExactIndexedCallerTranscript(t *testing.T) {
 	}
 	var calls [][]string
 	service := newService("test", &backend{
+		paths:    paths.Values{TmuxDir: "/tmp/tmux"},
 		database: database,
 		chat:     &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 		dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
@@ -191,7 +194,8 @@ func TestChatSaveKeepsExplicitAbsolutePathSpellingForValidCaller(t *testing.T) {
 	}
 	var calls [][]string
 	service := newService("test", &backend{
-		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		paths: paths.Values{TmuxDir: "/tmp/tmux"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 		dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			return 0
@@ -245,7 +249,7 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 			name:        "invalid caller metadata",
 			request:     &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "missing"}}},
 			input:       SaveInput{Target: "./notes/chat.md", Transcript: "/transcripts/chat.jsonl"},
-			wantMessage: "has no live Codex tmux seat",
+			wantMessage: "no live Codex seat holds thread",
 		},
 		{
 			name: "missing caller cwd",
@@ -286,7 +290,8 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 				rows = append(rows, test.row)
 			}
 			service := newService("test", &backend{
-				chat: &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+				paths: paths.Values{TmuxDir: "/tmp/tmux"},
+				chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
 				dispatch: func(context.Context, []string, io.Writer, io.Writer) int {
 					dispatched = true
 					return 0
@@ -318,7 +323,8 @@ func TestChatSaveKeepsInterleavedCallerContextsIsolated(t *testing.T) {
 	var calls [][]string
 	var scopedCWDs []string
 	service := newService("test", &backend{
-		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+		paths: paths.Values{TmuxDir: "/tmp/tmux"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
 		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			self, ok := chat.ScopedSelf(ctx)
@@ -353,7 +359,9 @@ func TestChatSaveKeepsInterleavedCallerContextsIsolated(t *testing.T) {
 
 func TestChatSaveNamesCallerListingAndTranscriptLookupFailures(t *testing.T) {
 	t.Run("listing", func(t *testing.T) {
-		service := newService("test", &backend{chat: &fakeChatVerbs{err: errors.New("list failed")}})
+		service := newService("test", &backend{
+			paths: paths.Values{TmuxDir: "/tmp/tmux"}, chat: &fakeChatVerbs{err: errors.New("list failed")},
+		})
 		request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "caller-id"}}}
 		_, _, err := service.chatSave(context.Background(), request, SaveInput{
 			Target: "./notes/chat.md", Transcript: "/transcripts/chat.jsonl",
@@ -378,6 +386,7 @@ func TestChatSaveNamesCallerListingAndTranscriptLookupFailures(t *testing.T) {
 			SessionName: "cc-caller", Socket: "cc-caller", PaneID: "%1",
 		}
 		service := newService("test", &backend{
+			paths:    paths.Values{TmuxDir: "/tmp/tmux"},
 			database: database,
 			chat:     &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 		})

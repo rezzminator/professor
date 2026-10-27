@@ -8,17 +8,15 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestParseRoundTripEveryKnob(t *testing.T) {
 	home, machine := renderMachine(t)
 	machine.Claude.Theme = "dark"
 	machine.Claude.NativeCursor = true
+	machine.Claude.SubagentStatuslineTrace = true
 	machine.Claude.MaxConcurrentSubagents = 3
 	machine.Claude.SystemPrompt = "professor"
-	machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: true}
 	prompt := filepath.Join(t.TempDir(), "prompt.md")
 	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
 		t.Fatal(err)
@@ -93,9 +91,17 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.PromptFile != prompt {
 					t.Errorf("prompt=%q", parsed.PromptFile)
 				}
+			case "remoteControl":
+				if !parsed.RemoteControl || parsed.RemoteControlName != "named" {
+					t.Errorf("remote control=%v name=%q", parsed.RemoteControl, parsed.RemoteControlName)
+				}
 			case "nativeCursor":
 				if parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"] != "1" {
 					t.Error("cursor missing")
+				}
+			case "subagentStatuslineTrace":
+				if parsed.SettingsEnv["PFM_SUBAGENT_STATUSLINE_TRACE"] != "1" {
+					t.Error("sub-agent status line trace missing")
 				}
 			case "maxSubagentSpawnDepth":
 				if parsed.SettingsEnv["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] != "8" {
@@ -163,7 +169,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Error("status line missing")
 				}
 			case "mcp":
-				assertFamilyMCP(t, home, parsed.MCPConfig, true, true)
+				assertChatMCP(t, home, parsed.MCPConfig)
 			case "permissionMode":
 				if !parsed.Autonomy {
 					t.Error("autonomy missing")

@@ -17,10 +17,19 @@ func answerCLI(proc *process) (int, bool) {
 		fmt.Fprintf(proc.stdout, "mock-engine: %s doctor — fixture engine, nothing checked\n", proc.engine)
 		return 0, true
 	}
+	if proc.engine == engineCodex && args[0] == "plugin" {
+		return answerCodexPluginCLI(proc), true
+	}
 	if proc.engine != engineClaude || args[0] != "plugin" {
 		return 0, false
 	}
 	switch {
+	case len(args) == 5 && args[1] == "uninstall" && args[3] == claudeScopeFlag && args[4] == claudeUserScope:
+		if err := removeClaudePlugin(claudeConfigDir(proc), args[2]); err != nil {
+			fmt.Fprintf(proc.stderr, "mock-engine: %v\n", err)
+			return ExitUsage, true
+		}
+		return 0, true
 	case len(args) == 4 && args[1] == "marketplace" && args[2] == "add":
 		configDir := claudeConfigDir(proc)
 		name, err := recordClaudeMarketplace(configDir, args[3])
@@ -44,7 +53,7 @@ func answerCLI(proc *process) (int, bool) {
 			configDir,
 		)
 		return 0, true
-	case (len(args) == 3 || len(args) == 4 && args[3] == "-y") && args[1] == "install":
+	case (len(args) == 3 || len(args) == 4 && args[3] == "-y" || len(args) == 6 && args[3] == "-y" && args[4] == claudeScopeFlag && args[5] == claudeUserScope) && args[1] == "install":
 		configDir := claudeConfigDir(proc)
 		if err := recordClaudePlugin(configDir, args[2]); err != nil {
 			fmt.Fprintf(proc.stderr, "mock-engine: %v\n", err)
@@ -57,7 +66,7 @@ func answerCLI(proc *process) (int, bool) {
 			configDir,
 		)
 		return 0, true
-	case len(args) == 6 && args[1] == "update" && args[3] == "--scope" && args[4] == claudeUserScope &&
+	case len(args) == 6 && args[1] == "update" && args[3] == claudeScopeFlag && args[4] == claudeUserScope &&
 		args[5] == "-y":
 		configDir := claudeConfigDir(proc)
 		if err := updateClaudePlugin(configDir, args[2]); err != nil {
@@ -113,6 +122,7 @@ func readPluginDocument(path string) (map[string]any, error) {
 // empty snapshot at plugins/cache/{id} with no version.
 
 const (
+	claudeScopeFlag        = "--scope"
 	claudeUserScope        = "user"
 	claudeSourceKey        = "source"
 	claudeDirectorySource  = "directory"
@@ -314,4 +324,44 @@ func updateClaudePlugin(configDir, id string) error {
 		return err
 	}
 	return writePluginDocument(installedPath, installed)
+}
+
+func removeClaudePlugin(configDir, id string) error {
+	path := filepath.Join(configDir, "plugins", "installed_plugins.json")
+	installed, err := readPluginDocument(path)
+	if err != nil {
+		return err
+	}
+	plugins, _ := installed["plugins"].(map[string]any)
+	entries, _ := plugins[id].([]any)
+	kept := []any{}
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if entry["scope"] != claudeUserScope {
+			kept = append(kept, raw)
+			continue
+		}
+		cache, _ := entry["installPath"].(string)
+		if cache != "" {
+			if err := os.RemoveAll(cache); err != nil {
+				return fmt.Errorf("remove fixture plugin cache %s: %w", cache, err)
+			}
+		}
+	}
+	if len(kept) > 0 {
+		plugins[id] = kept
+	} else {
+		delete(plugins, id)
+	}
+	if err := writePluginDocument(path, installed); err != nil {
+		return err
+	}
+	settingsPath := filepath.Join(configDir, "settings.json")
+	settings, err := readPluginDocument(settingsPath)
+	if err != nil {
+		return err
+	}
+	enabled, _ := settings["enabledPlugins"].(map[string]any)
+	delete(enabled, id)
+	return writePluginDocument(settingsPath, settings)
 }

@@ -15,8 +15,13 @@
   RunAtLoad stays false: the first tick lands within 5 minutes, and a fire
   racing login would call a fleet that has not started.
 
+  ProgramArguments[0] is the one stable launcher script (agentlauncher), never
+  pfm itself: macOS Background Task Management treats a rebuilt, ad-hoc-signed
+  pfm as a new item and posts an advisory per build; the launcher execs pfm and
+  never changes.
+
   PATH is rendered at install from the one service search path every pfm unit
-  shares (installer servicePath): launchd's bare PATH cannot see Homebrew's
+  shares (paths.ServicePath): launchd's bare PATH cannot see Homebrew's
   tmux.
 
   StandardOutPath / StandardErrorPath land this job's own stdout/stderr in
@@ -29,7 +34,7 @@
 	<string>com.professor.pfm.schedule</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>__PFM_HOME__/.local/bin/pfm</string>
+		<string>__PFM_AGENT_LAUNCHER__</string>
 		<string>internal</string>
 		<string>schedule-fire</string>
 	</array>

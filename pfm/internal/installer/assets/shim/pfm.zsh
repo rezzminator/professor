@@ -119,7 +119,8 @@ _pfm_tui_call() {
 
 # A harness typed straight into a terminal closes that terminal on exit, exactly as a fleet
 # chat does. claude bypasses recursion by calling the managed absolute launcher path, while
-# codex uses `command` to resolve the external command without re-entering this wrapper.
+# codex delegates to the managed launch door, which resolves the real binary, carries extension
+# env, and selects --no-daemon for a TUI without an explicit transport.
 # Only this shell's own typing is affected — pfm, hooks and scripts exec the binary and never
 # see these functions. An agent tool shell replays a snapshot that keeps `claude`/`codex` but drops
 # every `_`-prefixed helper, and is not interactive — the guard keeps it from calling them.
@@ -131,7 +132,7 @@ claude() {
 }
 
 codex() {
-  command codex "$@"
+  "$HOME/.local/bin/pfm" internal codex-launch "$@"
   local exit_status=$?
   [[ -o interactive ]] && _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
   return "$exit_status"
@@ -180,6 +181,52 @@ _pfm_selfswitch() {
   fi
   return 0
 }
+
+# Herdr shell reporter. A plain shell or server pane in Herdr reports a command that ran at least
+# PFM_HERDR_LONG_COMMAND_SECS whole seconds (default 10, also for a non-number) when it finishes: the
+# pane's title shows the command, its exit status and duration; output never reports, and the next
+# command or the shell's exit clears it. The shell only times the command: `pfm internal herdr-shell` finds the pane
+# running this shell and reports it (a failure is
+# a line in the Herdr reporter error log `pfm doctor` reads), in the background so the prompt never
+# waits. A pfm chat's own tmux pane ($TMUX set) reports through pfm's chat reporter instead, and
+# PFM_HERDR_SHELL_REPORT=0 turns this off.
+if [[ -o interactive && "${HERDR_ENV:-}" == 1 && -z "${TMUX:-}" ]]; then
+  zmodload zsh/datetime
+  autoload -Uz add-zsh-hook
+  typeset -g _pfm_herdr_started= _pfm_herdr_command= _pfm_herdr_reported=
+
+  # The next command, or the shell's exit (a nested zsh left by Ctrl-D runs no preexec), clears the
+  # finished run it reported.
+  _pfm_herdr_release() {
+    [[ -n $_pfm_herdr_reported ]] || return 0
+    _pfm_herdr_reported=
+    "$HOME/.local/bin/pfm" internal herdr-shell release --pid $$ --at $EPOCHREALTIME >/dev/null 2>&1 &!
+  }
+
+  _pfm_herdr_preexec() {
+    _pfm_herdr_started=$EPOCHSECONDS
+    _pfm_herdr_command=$1
+    _pfm_herdr_release
+  }
+
+  _pfm_herdr_precmd() {
+    local exit_status=$? ended=$EPOCHREALTIME threshold=${PFM_HERDR_LONG_COMMAND_SECS:-10}
+    [[ -n $_pfm_herdr_started ]] || return 0
+    local seconds=$(( EPOCHSECONDS - _pfm_herdr_started ))
+    _pfm_herdr_started=
+    [[ $threshold == <-> ]] || threshold=10
+    [[ "${PFM_HERDR_SHELL_REPORT:-1}" != 0 ]] && (( seconds >= threshold )) || return 0
+    _pfm_herdr_reported=1
+    "$HOME/.local/bin/pfm" internal herdr-shell done --pid $$ --at $ended --command "$_pfm_herdr_command" \
+      --exit $exit_status --seconds $seconds >/dev/null 2>&1 &!
+  }
+
+  add-zsh-hook preexec _pfm_herdr_preexec
+  add-zsh-hook precmd _pfm_herdr_precmd
+  add-zsh-hook zshexit _pfm_herdr_release
+  # First, so the exit status it reads is the command's.
+  precmd_functions=(_pfm_herdr_precmd "${(@)precmd_functions:#_pfm_herdr_precmd}")
+fi
 
 # Launch once at the first prompt, after the complete shell startup. Legacy
 # terminal-profile variables are consumed without reviving retired commands.

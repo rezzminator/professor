@@ -28,7 +28,7 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 		readErr, readBytes = err, len(body)
 		writer.WriteHeader(http.StatusNoContent)
 	})
-	handler := NewDaemonHandler(DaemonOptions{Chat: mounted, Harvester: mounted})
+	handler := NewDaemonHandler(DaemonOptions{Chat: mounted})
 
 	legitimate := bytes.Repeat([]byte("p"), maxDaemonBodyBytes/2)
 	handler.ServeHTTP(
@@ -42,7 +42,7 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 		)
 	}
 
-	for _, route := range []string{"/mcp/chat-professor", "/mcp/harvester-professor"} {
+	for _, route := range []string{"/mcp/chat-professor"} {
 		t.Run(route, func(t *testing.T) {
 			readErr, readBytes = nil, 0
 			oversized := bytes.Repeat([]byte("x"), maxDaemonBodyBytes+4096)
@@ -125,8 +125,8 @@ func TestDaemonHandlerNamesADeclaredOversizedBody(t *testing.T) {
 	t.Parallel()
 	reached := false
 	mounted := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
-	handler := NewDaemonHandler(DaemonOptions{Chat: mounted, Harvester: mounted})
-	for _, route := range []string{"/mcp/chat-professor", "/mcp/harvester-professor"} {
+	handler := NewDaemonHandler(DaemonOptions{Chat: mounted})
+	for _, route := range []string{"/mcp/chat-professor"} {
 		reached = false
 		recorder := httptest.NewRecorder()
 		oversized := bytes.Repeat([]byte("x"), maxDaemonBodyBytes+1)
@@ -154,7 +154,7 @@ func TestDaemonHandlerExplainsRetiredProfessorRoutes(t *testing.T) {
 		{"/mcp/professor", http.StatusGone},
 		{"/mcp/professor/", http.StatusGone},
 		{"/mcp/professor/chat", http.StatusGone},
-		{"/mcp/professor/harvester", http.StatusGone},
+		{"/mcp/professor/retired", http.StatusGone},
 		{"/mcp/professor/chat/nested", http.StatusGone},
 		{"/mcp/professor-other", http.StatusNotFound},
 	} {
@@ -168,7 +168,7 @@ func TestDaemonHandlerExplainsRetiredProfessorRoutes(t *testing.T) {
 				)
 			}
 			if row.status == http.StatusGone {
-				for _, want := range []string{"retired", "/mcp/chat-professor", "/mcp/harvester-professor", "restart", "chat"} {
+				for _, want := range []string{"retired", "/mcp/chat-professor", "restart", "chat"} {
 					if !strings.Contains(response.Body.String(), want) {
 						t.Errorf("%s cutover response = %q, want %q", row.path, response.Body.String(), want)
 					}

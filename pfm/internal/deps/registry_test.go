@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestLoginShellCommandsAreOptionalAndPlatformGated(t *testing.T) {
+	for _, tc := range []struct{ command, platform string }{
+		{"dscl", platformDarwin},
+		{"getent", platformLinux},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			for _, entry := range Registry(Options{Home: t.TempDir()}) {
+				if entry.Name != tc.command {
+					continue
+				}
+				if entry.Required || len(entry.Platforms) != 1 || entry.Platforms[0] != tc.platform ||
+					len(entry.VersionArgs) != 0 {
+					t.Fatalf("login-shell dependency must be optional and %s-only: %+v", tc.platform, entry)
+				}
+				if !entry.AppliesTo(tc.platform) || entry.AppliesTo("windows") || !Registered(tc.command) {
+					t.Fatalf("login-shell dependency has invalid availability: %+v", entry)
+				}
+				return
+			}
+			t.Fatalf("login-shell dependency %s is not registered", tc.command)
+		})
+	}
+}
+
 // resetResolveCache clears the memoized resolution table before and after a
 // test so PATH fixtures from other tests in this package (or a previous run
 // of this one) cannot leak a cached path across t.Setenv("PATH", ...) calls.
@@ -240,7 +264,7 @@ func TestAtLeastComparesNumericFieldsIncludingPreReleaseSuffixes(t *testing.T) {
 }
 
 // TestPython3RegistryEntryIsRequiredAndPlatformGated pins the python3 row: the
-// tracer's tracetree kit and its launch hook run on it, so a missing python3
+// tracer's tracetree kit runs on it, so a missing python3
 // fails the install's pre-change check and the doctor dependency preflight like
 // git or tmux, and the row's version parse reads the interpreter's own banner.
 func TestPython3RegistryEntryIsRequiredAndPlatformGated(t *testing.T) {
@@ -254,8 +278,8 @@ func TestPython3RegistryEntryIsRequiredAndPlatformGated(t *testing.T) {
 	if entry == nil {
 		t.Fatal("registry has no python3 entry")
 	}
-	if !entry.Required || entry.Harvest {
-		t.Errorf("python3 Required=%v Harvest=%v, want a required engine dependency", entry.Required, entry.Harvest)
+	if !entry.Required {
+		t.Errorf("python3 Required=%v, want a required engine dependency", entry.Required)
 	}
 	for _, platform := range []string{"linux", "darwin"} {
 		if !entry.AppliesTo(platform) {
@@ -268,7 +292,7 @@ func TestPython3RegistryEntryIsRequiredAndPlatformGated(t *testing.T) {
 	if entry.Command != "python3" {
 		t.Errorf("python3 Command = %q, want the bare name resolved on PATH", entry.Command)
 	}
-	for _, word := range []string{"python3", "tracetree", "launch hook"} {
+	for _, word := range []string{"python3", "tracetree"} {
 		if !strings.Contains(entry.InstallHint, word) {
 			t.Errorf("python3 InstallHint = %q, want it to say %q", entry.InstallHint, word)
 		}

@@ -1,0 +1,183 @@
+{
+  "0038": {
+    "name": "Cooling ramp 1 · molten: headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown",
+      "markup.heading.setext.1.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff9044"
+    }
+  },
+  "0039": {
+    "name": "Cooling ramp 2 · gold: heading 2",
+    "scope": [
+      "heading.2.markdown entity.name.section.markdown",
+      "heading.2.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.2.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#face68"
+    }
+  },
+  "0040": {
+    "name": "Cooling ramp 3 · pale straw: heading 3",
+    "scope": [
+      "heading.3.markdown entity.name.section.markdown",
+      "heading.3.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#e0dca7"
+    }
+  },
+  "0041": {
+    "name": "Cooling ramp 4 · bronze: heading 4",
+    "scope": [
+      "heading.4.markdown entity.name.section.markdown",
+      "heading.4.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#cf976b"
+    }
+  },
+  "0042": {
+    "name": "Cooling ramp 5 · temper violet: heading 5",
+    "scope": [
+      "heading.5.markdown entity.name.section.markdown",
+      "heading.5.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#bf91cd"
+    }
+  },
+  "0043": {
+    "name": "Cooling ramp 6 · temper blue: heading 6",
+    "scope": [
+      "heading.6.markdown entity.name.section.markdown",
+      "heading.6.markdown punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#79b0e8"
+    }
+  },
+  "0044": {
+    "name": "Gold · bold",
+    "scope": [
+      "markup.bold",
+      "punctuation.definition.bold.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#face68"
+    }
+  },
+  "0045": {
+    "name": "Pale amber · italic",
+    "scope": [
+      "markup.italic",
+      "punctuation.definition.italic.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ebd6b3"
+    }
+  },
+  "0046": {
+    "name": "Ash · strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#8a7869"
+    }
+  },
+  "0047": {
+    "name": "Temper blue · links",
+    "scope": [
+      "markup.underline.link",
+      "string.other.link",
+      "constant.other.reference.link",
+      "markup.underline.link.image.markdown"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#83b6e8"
+    }
+  },
+  "0049": {
+    "name": "Straw · inline code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.fenced_code",
+      "markup.raw",
+      "markup.inline.raw.string.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d3d389"
+    }
+  },
+  "0050": {
+    "name": "Bronze · fenced code language",
+    "scope": [
+      "fenced_code.block.language",
+      "fenced_code.block.language.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#d29f73"
+    }
+  },
+  "0051": {
+    "name": "Ash · quotes",
+    "scope": [
+      "markup.quote"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#8a7869"
+    }
+  },
+  "0054": {
+    "name": "Temper blue · inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#83b6e8"
+    }
+  },
+  "0055": {
+    "name": "Cherry · deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f05656"
+    }
+  },
+  "0056": {
+    "name": "Amber · changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb75e"
+    }
+  }
+}

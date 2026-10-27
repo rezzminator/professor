@@ -84,8 +84,8 @@ func printEngineSyncHookDoctor(
 // marketplace pfm install adds that is registered from another source, are one
 // warning each with its repair. An unreadable marketplace record is a failure
 // for the ids that need it; every other listed plugin is still checked. An
-// enabled callmeter -dev copy whose binary under env's callmeter home is gone
-// is a gap (installer.CallmeterBinaryGap).
+// enabled Go binary plugin -dev copy whose matching executable is gone
+// is a gap (installer.GoPluginBinaryGap).
 func printClaudePluginsDoctor(
 	stdout io.Writer,
 	store string,
@@ -173,7 +173,7 @@ func printClaudePluginsDoctor(
 			Problem: "plugin " + id + " not installed in " + store, Fix: installer.ClaudePluginRepair,
 		})
 	}
-	// Claude runs an installed -dev copy from its snapshot, which a refreshed copy does not move;
+	// Claude records each installed -dev copy's version, which a refreshed copy does not move;
 	// a target not installed is named above, its install the one repair.
 	installedTargets := slices.DeleteFunc(slices.Clone(targets), func(target installer.ClaudePluginTarget) bool {
 		return slices.Contains(missing, target.ID)
@@ -194,7 +194,7 @@ func printClaudePluginsDoctor(
 	}
 	gaps = append(gaps, marketplaceGaps...)
 	for index := range targets {
-		if gap, found := installer.CallmeterBinaryGap(env, build.Home, targets[index]); found {
+		if gap, found := installer.GoPluginBinaryGap(env, build.Home, targets[index]); found {
 			gaps = append(gaps, gap)
 		}
 	}

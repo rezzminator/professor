@@ -1,0 +1,13 @@
+{
+  "notificationCenter.border": "#3a2c55",
+  "notificationCenterHeader.background": "#181128",
+  "notificationCenterHeader.foreground": "#faebf8",
+  "notificationLink.foreground": "#3ddffd",
+  "notificationToast.border": "#4a3570",
+  "notifications.background": "#1d1530",
+  "notifications.border": "#3a2c55",
+  "notifications.foreground": "#ddd0e6",
+  "notificationsErrorIcon.foreground": "#ff5c7a",
+  "notificationsInfoIcon.foreground": "#78c7fd",
+  "notificationsWarningIcon.foreground": "#ffd866"
+}

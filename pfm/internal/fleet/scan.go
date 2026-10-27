@@ -61,6 +61,7 @@ func (env Env) Runtime() pfmconfig.Runtime {
 
 // Result is one composed snapshot of the fleet.
 type Result struct {
+	Errors   []string
 	Output   compose.Output
 	Live     gather.Snapshot
 	Counters fleetindex.Counters
@@ -119,8 +120,13 @@ func Scan(
 			return Result{}, err
 		}
 	}
+	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, live, request.ReadOnly)
+	if err != nil {
+		return Result{}, err
+	}
 	return Result{
-		Output:   ComposeFleet(env, request.View, data, live),
+		Errors:   failures,
+		Output:   output,
 		Live:     live,
 		Counters: counters,
 		Env:      env,
@@ -147,7 +153,23 @@ func ScanCached(
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Output: ComposeFleet(env, request.View, data, gather.Snapshot{}), Env: env}, nil
+	output, failures, err := composeNativeFleet(
+		ctx,
+		database,
+		env,
+		request.View,
+		data,
+		gather.Snapshot{},
+		request.ReadOnly,
+	)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{
+		Output: output,
+		Errors: failures,
+		Env:    env,
+	}, nil
 }
 
 // RowAddress is the engine, transcript, and live tmux address carried by one
@@ -188,20 +210,10 @@ func ResolveRow(
 	stderr io.Writer,
 	runtime *pfmconfig.Runtime,
 ) (RowAddress, bool, error) {
-	request := Request{View: compose.AllView, Runtime: runtime}
-	env, err := ResolveEnv(request)
+	rows, err := rowsForKill(ctx, database, stderr, runtime)
 	if err != nil {
-		return RowAddress{}, false, fmt.Errorf("resolve row %q: resolve env: %w", id, err)
+		return RowAddress{}, false, fmt.Errorf("resolve row %q: %w", id, err)
 	}
-	data, err := LoadData(ctx, database)
-	if err != nil {
-		return RowAddress{}, false, fmt.Errorf("resolve row %q: load data: %w", id, err)
-	}
-	live, err := Gather(ctx, database, env, data, false, PrintWarn(stderr), stderr)
-	if err != nil {
-		return RowAddress{}, false, fmt.Errorf("resolve row %q: gather: %w", id, err)
-	}
-	rows := ComposeFleet(env, request.View, data, live).Rows
 	for index := range rows {
 		row := rows[index]
 		if row.ID == id {
@@ -214,6 +226,29 @@ func ResolveRow(
 		}
 	}
 	return RowAddress{}, false, nil
+}
+
+// rowsForKill shares the no-index snapshot used for explicit and self targets.
+func rowsForKill(
+	ctx context.Context,
+	database *store.Store,
+	stderr io.Writer,
+	runtime *pfmconfig.Runtime,
+) ([]compose.Row, error) {
+	request := Request{View: compose.AllView, Runtime: runtime}
+	env, err := ResolveEnv(request)
+	if err != nil {
+		return nil, fmt.Errorf("resolve env: %w", err)
+	}
+	data, err := LoadData(ctx, database)
+	if err != nil {
+		return nil, fmt.Errorf("load data: %w", err)
+	}
+	live, err := Gather(ctx, database, env, data, false, PrintWarn(stderr), stderr)
+	if err != nil {
+		return nil, fmt.Errorf("gather: %w", err)
+	}
+	return ComposeFleet(env, request.View, data, live).Rows, nil
 }
 
 // ResolveEnv reads the machine state a scan composes against: the request's
@@ -275,7 +310,13 @@ func ResolveEnv(request Request) (Env, error) {
 
 // Compose classifies, merges and sorts one view's rows from the loaded data
 // and the live snapshot. It never writes.
-func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) compose.Output {
+func ComposeFleet(
+	env Env,
+	view compose.View,
+	data Data,
+	live gather.Snapshot,
+	native ...gather.HerdrSeat,
+) compose.Output {
 	data, live = followContinuations(data, live)
 	launches, launchErr := fleetdb.OpenLaunches(context.Background(), env.Paths)
 	if launches != nil {
@@ -285,6 +326,7 @@ func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) c
 		Workbenches:      env.Workbenches,
 		WorkbenchErrors:  env.WorkbenchErrors,
 		Snapshot:         live,
+		HerdrSeats:       native,
 		Transcripts:      data.Transcripts,
 		Rollouts:         data.Rollouts,
 		OpenCodeSessions: data.OpenCodeSessions,

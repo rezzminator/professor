@@ -1,6 +1,7 @@
 package mcpserv
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,20 +12,29 @@ import (
 // daemon that accepts its explicit caller identity.
 const ProxyWireVersion = 1
 
+const (
+	proxyNotInChat = "not_in_chat"
+	proxyFailed    = "failed"
+)
+
 // ProxyIdentity is the caller seat a per-chat proxy places in _meta.pfmProxy.
 // It is an identity assertion, not authorization: the daemon listens only on
 // loopback, and the accepted threat model permits another local process to
 // state the same payload. The boundary protects against a confused chat, not
 // a malicious local process.
 type ProxyIdentity struct {
-	Version    int    `json:"v"`
-	Session    string `json:"session"`
-	SocketPath string `json:"socketPath"`
-	SocketName string `json:"socketName"`
-	Pane       string `json:"pane"`
-	Engine     string `json:"engine"`
-	ID         string `json:"id"`
-	Source     string `json:"source"`
+	Version        int                 `json:"v"`
+	Session        string              `json:"session,omitempty"`
+	Backend        string              `json:"backend,omitempty"`
+	SeatID         string              `json:"seatId,omitempty"`
+	HerdrWorkspace string              `json:"herdrWorkspace,omitempty"`
+	Error          *ProxyIdentityError `json:"error,omitempty"`
+	SocketPath     string              `json:"socketPath,omitempty"`
+	SocketName     string              `json:"socketName,omitempty"`
+	Pane           string              `json:"pane,omitempty"`
+	Engine         string              `json:"engine,omitempty"`
+	ID             string              `json:"id,omitempty"`
+	Source         string              `json:"source,omitempty"`
 }
 
 // parseProxyIdentity decodes the untyped JSON object carried in
@@ -68,6 +78,9 @@ func parseProxyIdentity(raw any) (ProxyIdentity, string, error) {
 		value *string
 	}{
 		{name: "session", value: &payload.Session},
+		{name: "backend", value: &payload.Backend},
+		{name: "seatId", value: &payload.SeatID},
+		{name: "herdrWorkspace", value: &payload.HerdrWorkspace},
 		{name: "socketPath", value: &payload.SocketPath},
 		{name: "socketName", value: &payload.SocketName},
 		{name: "pane", value: &payload.Pane},
@@ -86,7 +99,27 @@ func parseProxyIdentity(raw any) (ProxyIdentity, string, error) {
 		}
 		*field.value = text
 	}
-	if strings.TrimSpace(payload.Session) == "" ||
+	if rawError, exists := object["error"]; exists {
+		errorObject, ok := rawError.(map[string]any)
+		if !ok {
+			return ProxyIdentity{}, "MCP _meta.pfmProxy error must be an object", nil
+		}
+		kind, kindOK := errorObject["kind"].(string)
+		message, messageOK := errorObject["message"].(string)
+		if !kindOK || !messageOK || strings.TrimSpace(message) == "" {
+			return ProxyIdentity{}, "MCP _meta.pfmProxy error must carry string kind and non-empty message", nil
+		}
+		switch kind {
+		case proxyNotInChat, statusNotRegistered, statusAmbiguous, proxyFailed:
+		default:
+			return ProxyIdentity{}, fmt.Sprintf("MCP _meta.pfmProxy error kind %q is unknown", kind), nil
+		}
+		payload.Error = &ProxyIdentityError{Kind: kind, Message: message}
+	}
+	if payload.Backend != "" && payload.Backend != "tmux" && payload.Backend != "herdr" {
+		return ProxyIdentity{}, fmt.Sprintf("MCP _meta.pfmProxy backend %q is unknown", payload.Backend), nil
+	}
+	if (payload.Session == "" && payload.Error == nil) ||
 		strings.TrimSpace(payload.Session) != payload.Session || containsControl(payload.Session) {
 		return ProxyIdentity{},
 			"MCP _meta.pfmProxy must carry a non-empty session without whitespace or control characters",
@@ -95,14 +128,36 @@ func parseProxyIdentity(raw any) (ProxyIdentity, string, error) {
 	return payload, "", nil
 }
 
-func (payload ProxyIdentity) callerIdentity() resolve.Identity {
-	return resolve.Identity{
-		Session:    payload.Session,
-		SocketPath: payload.SocketPath,
-		SocketName: payload.SocketName,
-		Pane:       payload.Pane,
-		Engine:     payload.Engine,
-		ID:         payload.ID,
-		Source:     "mcp-proxy",
+// ProxyIdentityError carries a failed lookup without making the caller anonymous.
+type ProxyIdentityError struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+}
+
+func proxyErrorKind(err error) string {
+	switch {
+	case errors.Is(err, resolve.ErrNotInChat):
+		return proxyNotInChat
+	case errors.Is(err, resolve.ErrNotRegistered):
+		return statusNotRegistered
+	case errors.Is(err, resolve.ErrAmbiguous):
+		return statusAmbiguous
+	default:
+		return proxyFailed
+	}
+}
+
+func (failure ProxyIdentityError) Error() string { return failure.Message }
+
+func (failure ProxyIdentityError) Unwrap() error {
+	switch failure.Kind {
+	case proxyNotInChat:
+		return resolve.ErrNotInChat
+	case statusNotRegistered:
+		return resolve.ErrNotRegistered
+	case statusAmbiguous:
+		return resolve.ErrAmbiguous
+	default:
+		return nil
 	}
 }

@@ -211,19 +211,17 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			// are exactly the stale processes this check exists to name.
 			name: "pre-professor stdio servers still running",
 			table: mcpServeProcTable{
-				pids: []int{50000361, 50000362, 50000363},
+				pids: []int{50000361, 50000362},
 				cmdlines: map[int][]string{
 					50000361: {"pfm", "mcp"},
 					50000362: {"pfm", "mcp", "chat", "serve"},
-					50000363: {"pfm", "mcp", "harvester", "serve", "--transport", "stdio"},
 				},
-				images: map[int]gather.FileID{50000361: replaced, 50000362: replaced, 50000363: replaced},
+				images: map[int]gather.FileID{50000361: replaced, 50000362: replaced},
 			},
-			wantWarnings: 3,
+			wantWarnings: 2,
 			want: []string{
 				"pid=50000361 chat=UNRESOLVED",
 				"pid=50000362 chat=UNRESOLVED",
-				"pid=50000363 chat=UNRESOLVED",
 			},
 			notWant: []string{"clean"},
 		},

@@ -30,7 +30,10 @@ var hygiene = envStripWords(hygieneNames)
 // the extension closes the socket with 1008, and OpenCode's backoff resets on
 // every open — one rejected handshake per second for the life of the chat.
 // Claude keeps the variable: the CLI reads the token and the IDE link is wanted.
-var opencodeHygieneNames = append(append([]string{}, hygieneNames...), "CLAUDE_CODE_SSE_PORT")
+var opencodeHygieneNames = append(append([]string{}, hygieneNames...),
+	"CLAUDE_CODE_SSE_PORT", "PFM_OPENCODE_MODEL", "PFM_OPENCODE_VARIANT", "PFM_OPENCODE_POLICY",
+	"PFM_OPENCODE_SYSTEM_FILE", "PFM_OPENCODE_FLEET_FILE",
+)
 
 var opencodeHygiene = envStripWords(opencodeHygieneNames)
 
@@ -51,7 +54,8 @@ func envStripWords(names []string) string {
 // home and claude carry the systemPrompt choice; the launcher re-decides it
 // every spawn (hygiene strips any inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).
 // machine supplies only its MCP servers and mcp.thirdParty, never its roster.
-// name is the chat's pfm label, carried as --name; "" carries nothing.
+// name is the chat's pfm label, carried as --name; "" carries nothing, and
+// neither does a resume in place (claudelaunch.Render).
 func LauncherRun(
 	realBinary string,
 	args []string,
@@ -288,6 +292,11 @@ func Synthesize(request Request) (Plan, error) {
 		if err != nil {
 			return Plan{}, err
 		}
+		recipe, err := spawn.SeatRun(request.Row.CWD)
+		if err != nil {
+			return Plan{}, err
+		}
+		plan.SeatRun = &recipe
 		plan.Run = run
 		plan.Warnings = spawn.warnings()
 		plan.Record = &fleetdb.Launch{
@@ -302,6 +311,20 @@ func Synthesize(request Request) (Plan, error) {
 			return Plan{}, errors.New("new Codex action requires a project directory")
 		}
 		account, _ := machine.CodexAccountByID(request.PrimaryAccount)
+		args, err := codexModelArgs(request.Persona.Model, request.Home)
+		if err != nil {
+			return Plan{}, err
+		}
+		if request.Persona.Effort != "" {
+			args = append(args, CodexEffortArg(request.Persona.Effort)...)
+		}
+		if request.Persona.Applies() {
+			args = append(args, CodexDeveloperInstructionsArg(request.Persona.Body)...)
+		}
+		if request.Prompt != "" {
+			args = append(args, request.Prompt)
+		}
+		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, args...)
 		plan.Line = "(cd -- " + Quote(request.Row.CWD) + " && CODEX_HOME=" +
 			Quote(account.Home) + " cx"
 		if request.Prompt != "" {
@@ -314,6 +337,7 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -332,6 +356,10 @@ func Synthesize(request Request) (Plan, error) {
 			command.WriteString(Quote(request.Prompt))
 		}
 		plan.Run = command.String()
+		plan.SeatRun, err = openCodeSeatRun(request, machine, false)
+		if err != nil {
+			return Plan{}, err
+		}
 		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
 	case ResumeOpenCode:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
@@ -342,6 +370,7 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -358,6 +387,10 @@ func Synthesize(request Request) (Plan, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(request.Row.CWD))
 		plan.Run = opencodeContinuityBanner(request.Row) + command.String()
+		plan.SeatRun, err = openCodeSeatRun(request, machine, true)
+		if err != nil {
+			return Plan{}, err
+		}
 		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
 	case Live:
 		if request.Row.Socket == "" {
@@ -394,10 +427,11 @@ func Synthesize(request Request) (Plan, error) {
 			request.Cache1H,
 			machine,
 			request.Persona,
-			request.Row.Name,
+			"", // a resume restores its own name (claudelaunch.Render)
 			claudeResumeFlag,
 			request.Row.ID,
 		)
+		resumeSpawn.RemoteControlName = request.Row.Name
 		resume, err := resumeSpawn.ShellCommand()
 		if err != nil {
 			return Plan{}, err
@@ -429,14 +463,20 @@ func Synthesize(request Request) (Plan, error) {
 			request.Cache1H,
 			machine,
 			request.Persona,
-			request.Row.Name,
+			"", // a resume restores its own name (claudelaunch.Render)
 			claudeResumeFlag,
 			request.Row.ID,
 		)
+		resumeSpawn.RemoteControlName = request.Row.Name
 		resume, err := resumeSpawn.ShellCommand()
 		if err != nil {
 			return Plan{}, err
 		}
+		recipe, err := resumeSpawn.SeatRun(request.Row.CWD)
+		if err != nil {
+			return Plan{}, err
+		}
+		plan.SeatRun = &recipe
 		plan.Warnings = resumeSpawn.warnings()
 		agent := agentCommand(
 			request.Cache1H,
@@ -462,9 +502,9 @@ func Synthesize(request Request) (Plan, error) {
 				"resuming Codex requires id, cwd, and fresh socket",
 			)
 		}
-		var arguments []string
-		if request.Persona.Model != "" {
-			arguments = append(arguments, "--model", request.Persona.Model)
+		arguments, err := codexModelArgs(request.Persona.Model, request.Home)
+		if err != nil {
+			return Plan{}, err
 		}
 		if request.Persona.Effort != "" {
 			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
@@ -473,6 +513,7 @@ func Synthesize(request Request) (Plan, error) {
 			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
 		}
 		arguments = append(arguments, "resume", request.Row.ID)
+		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, arguments...)
 		plan.Run = continuityBanner(request.Row) + codexCommandFor(machine, request.PrimaryAccount, arguments...)
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}
@@ -520,23 +561,8 @@ func routeForKind(kind compose.Kind) (Route, error) {
 	}
 }
 
-func claudeCommand(
-	purpose Purpose,
-	home string,
-	account int,
-	cache1H bool,
-	machine pfmconfig.Config,
-	name string,
-	args ...string,
-) (string, error) {
-	return claudeCommandWith(purpose, claudelaunch.Hygiene(), home, account, cache1H, machine, name, args...)
-}
-
-// claudeCommandWith is claudeCommand over a caller-chosen environment strip,
-// so the headless route can widen the strip without owning a second copy of
-// the account, cache and autonomy decisions. Both are now thin wrappers over
-// ClaudeSpawn — the one door — and exist only because the synthesis routes
-// read better as one expression inside Synthesize.
+// claudeCommandWith renders one Claude launch command through ClaudeSpawn —
+// the one door; the caller-chosen environment strip is accepted and ignored.
 func claudeCommandWith(
 	purpose Purpose,
 	strip []string,
@@ -549,6 +575,9 @@ func claudeCommandWith(
 ) (string, error) {
 	_ = strip
 	spawn := claudePersonaSpawn(purpose, home, account, cache1H, machine, workbench.Persona{}, name, args...)
+	if purpose == PurposeResume {
+		spawn.Name, spawn.RemoteControlName = "", name
+	}
 	return spawn.ShellCommand()
 }
 
@@ -639,6 +668,7 @@ func codexCommandWithAccount(
 	var command strings.Builder
 	policy := machine.EffectiveCodex(account)
 	command.WriteString(environmentStrip)
+	command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.Codex).LongName))
 	if selected, found := machine.CodexAccountByID(account); found {
 		command.WriteString(" CODEX_HOME=")
 		command.WriteString(Quote(selected.Home))
@@ -649,11 +679,9 @@ func codexCommandWithAccount(
 		pfmengine.MustLookup(pfmengine.Codex).Binary,
 		policy.Binary != "" && policy.Binary != pfmengine.MustLookup(pfmengine.Codex).Binary,
 	))
-	if policy.Yolo {
-		command.WriteString(" --dangerously-bypass-approvals-and-sandbox")
-	} else {
-		command.WriteString(" --sandbox workspace-write")
-	}
+	// The typed recipe and shell door share the engine's fixed autonomy prefix.
+	command.WriteByte(' ')
+	command.WriteString(strings.Join(codexAutonomyArgs(policy.Yolo), " "))
 	for _, argument := range args {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))

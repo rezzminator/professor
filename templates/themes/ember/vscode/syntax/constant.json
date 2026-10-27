@@ -1,0 +1,73 @@
+{
+  "0009": {
+    "name": "Quench · escapes and format verbs",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "string.regexp constant.character.escape",
+      "constant.other.placeholder",
+      "constant.other.placeholder.go",
+      "constant.character.format.placeholder.other.python",
+      "constant.other.rune.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8bd6de"
+    }
+  },
+  "0012": {
+    "name": "White heat · numbers",
+    "scope": [
+      "constant.numeric",
+      "keyword.other.unit",
+      "keyword.other.unit.imaginary.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fee392"
+    }
+  },
+  "0013": {
+    "name": "White heat · constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other.caps.python"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fee392"
+    }
+  },
+  "0014": {
+    "name": "Temper violet · language values",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.boolean.go",
+      "constant.language.null.go",
+      "constant.language.iota.go",
+      "constant.language.python"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#c195cf"
+    }
+  },
+  "0034": {
+    "name": "Bronze · shell flags",
+    "scope": [
+      "constant.other.option",
+      "constant.other.option.dash.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d29f73"
+    }
+  }
+}

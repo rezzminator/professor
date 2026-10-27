@@ -146,6 +146,10 @@ func summary(prices pricing.Prices, result modelcost.Result) string {
 		}
 		line += " (" + detail + ")"
 	}
+	line += fmt.Sprintf(" · billing: %s/%s", prices.Billing.Route, prices.Billing.Region)
+	if !prices.Billing.Configured {
+		line += " (default; cloud rates may differ)"
+	}
 	if prices.Override == nil {
 		return line + " · override: none"
 	}

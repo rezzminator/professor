@@ -23,6 +23,15 @@ func RegisteredMCPServers() []string {
 // SetMCPServer atomically changes one registered server in the machine file.
 // Repeating an already-effective setting is a no-op.
 func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
+	return writeMCPServer(config, name, enabled, false)
+}
+
+// SetMCPServerExplicit records an enabled flag even when its default already matches.
+func SetMCPServerExplicit(config Config, name string, enabled bool) (bool, error) {
+	return writeMCPServer(config, name, enabled, true)
+}
+
+func writeMCPServer(config Config, name string, enabled, explicit bool) (bool, error) {
 	server, registered := config.MCPServers[name]
 	if !registered {
 		return false, fmt.Errorf("unknown MCP server %q", name)
@@ -30,10 +39,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 	if config.Path == "" {
 		return false, NoConfigPathError(nil)
 	}
-	if name == MCPServerHarvester {
-		return SetHarvesterEnabled(config, enabled)
-	}
-	if server.Enabled == enabled {
+	if server.Enabled == enabled && (!explicit || config.MCPServerSource(name) == SourceFile) {
 		return false, nil
 	}
 

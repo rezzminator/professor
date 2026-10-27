@@ -1,0 +1,69 @@
+{
+  "0003": {
+    "name": "Comment (doc)",
+    "scope": [
+      "string.quoted.docstring.multi",
+      "string.quoted.docstring.multi.python punctuation.definition.string.begin",
+      "string.quoted.docstring.multi.python punctuation.definition.string.end",
+      "string.quoted.docstring.multi.python constant.character.escape"
+    ],
+    "settings": {
+      "foreground": "#cd77bd"
+    }
+  },
+  "0009": {
+    "name": "String, Symbols",
+    "scope": [
+      "string",
+      "constant.other.symbol",
+      "constant.other.key",
+      "meta.attribute-selector",
+      "string constant.character"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#7dffd0"
+    }
+  },
+  "0070": {
+    "name": "Regular Expressions",
+    "scope": [
+      "string.regexp"
+    ],
+    "settings": {
+      "foreground": "#8ff0ff"
+    }
+  },
+  "0106": {
+    "name": "Markdown - Link",
+    "scope": [
+      "string.other.link",
+      "markup.underline.link",
+      "constant.other.reference.link.markdown",
+      "string.other.link.description.title.markdown"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0123": {
+    "name": "Pink · comments",
+    "scope": [
+      "string.comment"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#bc62ab"
+    }
+  },
+  "0128": {
+    "name": "Pink · strings",
+    "scope": [
+      "string.quoted",
+      "string.template"
+    ],
+    "settings": {
+      "foreground": "#7dffd0"
+    }
+  }
+}

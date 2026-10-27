@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,6 +94,94 @@ func TestSharedOpenUpgradesSupportedSchemasAndPreservesKills(t *testing.T) {
 	}
 }
 
+func TestSharedOpenRepairsMovedTmuxSeatsWithoutSchemaBump(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	values := paths.Values{StateDB: path}
+	seed := OpenSharedState(ctx, values)
+	for _, seat := range []Seat{
+		{SeatID: "tmux-s1", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 100},
+		{SeatID: "herdr-s1", SessionID: "S1", Backend: "herdr", State: "live", HerdrSocket: "/h.sock", HerdrPane: "w1:p1", UpdatedAt: 200},
+		{SeatID: "tmux-s2", SessionID: "S2", Backend: "tmux", State: "live", UpdatedAt: 300},
+		{SeatID: "herdr-s2", SessionID: "S2", Backend: "herdr", State: "live", HerdrSocket: "/h.sock", HerdrPane: "w1:p2", UpdatedAt: 200},
+		{SeatID: "tmux-s3", SessionID: "S3", Backend: "tmux", State: "live", UpdatedAt: 100},
+		{SeatID: "herdr-s3", SessionID: "S3", Backend: "herdr", State: "lost", HerdrSocket: "/h.sock", HerdrPane: "w1:p3", UpdatedAt: 200},
+		{SeatID: "tmux-empty", Backend: "tmux", State: "live"},
+	} {
+		if _, err := seed.db.ExecContext(ctx,
+			"INSERT INTO seat ("+seatColumns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+			seatValues(seat)...,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	state := OpenSharedState(ctx, values)
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		id   string
+		want bool
+	}{{"tmux-s1", false}, {"tmux-s2", true}, {"tmux-s3", true}, {"tmux-empty", true}} {
+		if _, found, err := state.Seat(ctx, test.id); err != nil || found != test.want {
+			t.Errorf("seat %s found=%v err=%v want %v", test.id, found, err, test.want)
+		}
+	}
+	var version int
+	if err := state.db.QueryRowContext(ctx, "PRAGMA user_version").
+		Scan(&version); err != nil ||
+		version != SchemaVersion {
+		t.Fatalf("user_version=%d err=%v want %d", version, err, SchemaVersion)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	release, err := LockMigration(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, cancel := context.WithTimeout(ctx, time.Second)
+	again := OpenSharedState(waiting, values)
+	openedErr := again.Degraded()
+	closeErr := again.Close()
+	cancel()
+	releaseErr := release()
+	if err := errors.Join(openedErr, closeErr, releaseErr); err != nil {
+		t.Fatalf("second clean open took migration lock: %v", err)
+	}
+	state = OpenSharedState(ctx, values)
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.PutSeat(
+		ctx,
+		Seat{SeatID: "tmux-s1", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 300},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.db.ExecContext(ctx, "UPDATE seat SET updated_at=100 WHERE seat_id='tmux-s1'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".migrate.lock"); !os.IsNotExist(err) {
+		t.Fatalf("second open left/took migration lock: %v", err)
+	}
+
+	readonly := OpenSharedStateReadOnly(ctx, values)
+	defer func() { _ = readonly.Close() }()
+	if err := readonly.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := readonly.Seat(ctx, "tmux-s1"); err != nil || !found {
+		t.Fatalf("read-only open repaired stale tmux row: found=%v err=%v", found, err)
+	}
+}
+
 // TestSharedOpenMigratesAtOpenUnderTheMigrationLock: an open that must add
 // hidden.revision or rename reminders to schedules waits for the migration
 // lock, so two first openers never both apply it; a file that already has both
@@ -107,7 +196,7 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 		{name: "missing column waits for the lock", seed: v3Schema, waits: true},
 		{
 			name: "a current file opens without it",
-			seed: v3Schema + migrationV5 + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion) + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
+			seed: v3Schema + migrationV5 + migrationV6 + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion) + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -115,6 +204,12 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pfm.db")
 			seedSharedState(t, path, test.seed)
+			if !test.waits {
+				current := OpenSharedState(ctx, paths.Values{StateDB: path})
+				if err := errors.Join(current.Degraded(), current.Close()); err != nil {
+					t.Fatal(err)
+				}
+			}
 			release, err := LockMigration(ctx, path)
 			if err != nil {
 				t.Fatal(err)
@@ -211,6 +306,158 @@ func TestSharedMigrationFromV1PreservesRowsAndBacksUp(t *testing.T) {
 	}()
 	if err := backup.QueryRow("SELECT count(*) FROM swap_event").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("backup swap_event=%d err=%v", count, err)
+	}
+}
+
+// retiredIssuesSeed is a version-6 file still holding the retired issues ledger.
+func retiredIssuesSeed(rows int) string {
+	seed := v3Schema + migrationV5 + migrationV6 + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" +
+		scheduleOnceDDL + ";" + `
+CREATE TABLE issues(id INTEGER PRIMARY KEY, at_ns INTEGER NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL);
+CREATE INDEX issues_at ON issues(at_ns);
+INSERT INTO hidden(uuid,hidden_at) VALUES('keep',77);
+PRAGMA user_version=6;`
+	for row := range rows {
+		seed += fmt.Sprintf("INSERT INTO issues(at_ns,title,detail) VALUES(%d,'filed','kept in the backup');", row)
+	}
+	return seed
+}
+
+func countIssueObjects(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name LIKE 'issues%'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+// A writable open drops the retired issues ledger with no schema bump, copying
+// the file aside first when the table holds rows.
+func TestSharedOpenDropsTheRetiredIssuesTable(t *testing.T) {
+	t.Parallel()
+	for _, rows := range []int{2, 0} {
+		t.Run(fmt.Sprintf("rows=%d", rows), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "pfm.db")
+			seedSharedState(t, path, retiredIssuesSeed(rows))
+			state := OpenSharedState(ctx, paths.Values{StateDB: path})
+			if err := state.Degraded(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := state.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			var version, hidden int
+			if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 6 {
+				t.Fatalf("user_version=%d err=%v, want 6: the drop needs no bump", version, err)
+			}
+			if count := countIssueObjects(t, state.db); count != 0 {
+				t.Fatalf("issues objects=%d, want the table and its index dropped", count)
+			}
+			if err := state.db.QueryRow("SELECT hidden_at FROM hidden WHERE uuid='keep'").
+				Scan(&hidden); err != nil || hidden != 77 {
+				t.Fatalf("hidden row=%d err=%v, want the kill kept", hidden, err)
+			}
+			backupPath := path + ".bak-before-issues-drop"
+			if rows == 0 {
+				if _, err := os.Stat(backupPath); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("empty ledger backup stat err=%v, want none written", err)
+				}
+				return
+			}
+			backup, err := sql.Open("sqlite", backupPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := backup.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			var kept int
+			if err := backup.QueryRow("SELECT count(*) FROM issues").Scan(&kept); err != nil || kept != rows {
+				t.Fatalf("backup issues=%d err=%v, want %d", kept, err, rows)
+			}
+		})
+	}
+}
+
+// A row filed after the backup, by an older pfm still running, keeps the table:
+// the drop recounts under its write lock and drops only the backed-up count.
+func TestSharedIssuesDropRefusesARowFiledAfterItsBackup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	seedSharedState(t, path, retiredIssuesSeed(1))
+	db, err := sqlitedb.OpenReadWrite(path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	dropped, err := dropIssuesHolding(ctx, db, path, 0)
+	if err != nil || dropped {
+		t.Fatalf("drop with one unbacked row: dropped=%v err=%v, want kept", dropped, err)
+	}
+	if count := countIssueObjects(t, db); count != 2 {
+		t.Fatalf("issues objects=%d after a changed count, want the table and index kept", count)
+	}
+	if dropped, err := dropIssuesHolding(ctx, db, path, 1); err != nil || !dropped {
+		t.Fatalf("drop at the backed-up count: dropped=%v err=%v, want dropped", dropped, err)
+	}
+	if count := countIssueObjects(t, db); count != 0 {
+		t.Fatalf("issues objects=%d after the drop, want none", count)
+	}
+}
+
+// A backup that cannot be written leaves the ledger in place and fails the open.
+func TestSharedOpenKeepsTheIssuesTableWhenItsBackupFails(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	seedSharedState(t, path, retiredIssuesSeed(1))
+	if err := os.Mkdir(path+".bak-before-issues-drop", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := OpenSharedState(ctx, paths.Values{StateDB: path})
+	err := state.Degraded()
+	if closeErr := state.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "keep retired issues before their drop") {
+		t.Fatalf("open with an unwritable backup: %v, want the named backup failure", err)
+	}
+	db, openErr := sqlitedb.OpenReadOnly(path, time.Second)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer func() { _ = db.Close() }()
+	if count := countIssueObjects(t, db); count != 2 {
+		t.Fatalf("issues objects=%d after a failed backup, want the table and index kept", count)
+	}
+}
+
+// A read-only open never drops the ledger.
+func TestSharedReadOnlyOpenLeavesTheIssuesTable(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	seedSharedState(t, path, retiredIssuesSeed(1))
+	state := OpenSharedStateReadOnly(ctx, paths.Values{StateDB: path})
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.KilledAt(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if count := countIssueObjects(t, state.db); count != 2 {
+		t.Fatalf("issues objects=%d after a read-only open, want them kept", count)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -330,14 +577,20 @@ func TestLockMigrationSerializesOpenersAndRemovesItsFile(t *testing.T) {
 
 func TestSharedMigrationRenamesStoredCalls(t *testing.T) {
 	t.Parallel()
-	for _, version := range []int{3, 4} {
+	for _, version := range []int{3, 4, 5} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pfm.db")
-			seedSharedState(t, path, v3Schema+fmt.Sprintf("PRAGMA user_version=%d;", version)+`
+			seed := v3Schema + fmt.Sprintf("PRAGMA user_version=%d;", version) + `
 INSERT INTO comms(id,at_ns,kind,sender_session,sender_label,sender_uuid,target,receiver_socket,receiver_pane,group_name,members,message)
 VALUES(7,100,'inject','sender','Sender','uuid','target','socket','%1','group','members','full body');
-INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,102,'spawn','spawn body');`)
+INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,102,'spawn','spawn body');`
+			wantBackupVersion, wantOriginalKind := 5, "inject"
+			if version == 5 {
+				seed += migrationV5 + "\nPRAGMA user_version=5;"
+				wantBackupVersion, wantOriginalKind = 6, KindCall
+			}
+			seedSharedState(t, path, seed)
 			state := OpenSharedState(ctx, paths.Values{StateDB: path})
 			defer func() {
 				if err := state.Close(); err != nil {
@@ -378,15 +631,148 @@ INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,1
 				gotVersion != SchemaVersion {
 				t.Fatalf("version=%d err=%v", gotVersion, err)
 			}
-			backup, err := sqlitedb.OpenReadOnly(path+".bak-before-v"+strconv.Itoa(SchemaVersion), time.Second)
+			// The backup marks the first pending migration, not the latest schema version.
+			backup, err := sqlitedb.OpenReadOnly(path+".bak-before-v"+strconv.Itoa(wantBackupVersion), time.Second)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("open backup before migration %d: %v", wantBackupVersion, err)
 			}
 			var originalKind string
 			queryErr := backup.QueryRow("SELECT kind FROM comms WHERE id=7").Scan(&originalKind)
-			if err := errors.Join(queryErr, backup.Close()); err != nil || originalKind != "inject" {
-				t.Fatalf("original backup kind=%q err=%v", originalKind, err)
+			if err := errors.Join(queryErr, backup.Close()); err != nil || originalKind != wantOriginalKind {
+				t.Fatalf("original backup kind=%q want %q err=%v", originalKind, wantOriginalKind, err)
 			}
 		})
 	}
+}
+
+// A reader's snapshot holds the WAL briefly while another opener reads the
+// schema version; the backup waits it out instead of failing the open.
+func TestBackupBeforeMigrationWaitsOutBusyCheckpoint(t *testing.T) {
+	t.Parallel()
+	db, path, release := heldBackupSnapshot(t)
+	released := make(chan error, 1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		released <- release()
+	}()
+	backupErr := BackupBeforeMigration(context.Background(), db, path, 7, true)
+	if err := <-released; err != nil {
+		t.Fatal(err)
+	}
+	if backupErr != nil {
+		t.Fatalf("backup with a briefly held reader: %v", backupErr)
+	}
+	backup, err := sql.Open("sqlite", path+".bak-before-v7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := backup.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var count int
+	if err := backup.QueryRow("SELECT count(*) FROM t").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("backup rows=%d err=%v", count, err)
+	}
+}
+
+func TestBackupBeforeMigrationBoundsBusyCheckpoint(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		wait time.Duration
+		want string
+	}{
+		{name: "retry budget", wait: 6 * time.Second, want: "WAL checkpoint busy after"},
+		{name: "caller deadline", wait: 50 * time.Millisecond, want: "wait for busy WAL checkpoint"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			db, path, _ := heldBackupSnapshot(t)
+			// A checkpoint must not wait the store's ten seconds on every attempt.
+			if _, err := db.Exec("PRAGMA busy_timeout=10000"); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), test.wait)
+			defer cancel()
+			err := BackupBeforeMigration(ctx, db, path, 7, true)
+			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("backup error=%v, want deadline with %q", err, test.want)
+			}
+			if test.name == "retry budget" && ctx.Err() != nil {
+				t.Fatal("checkpoint exhausted the caller's deadline instead of its own retry budget")
+			}
+			var busyTimeout int
+			if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil || busyTimeout != 10000 {
+				t.Fatalf("restored busy_timeout=%d err=%v", busyTimeout, err)
+			}
+			if _, err := os.Stat(path + ".bak-before-v7"); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("failed checkpoint published a backup: %v", err)
+			}
+		})
+	}
+}
+
+// heldBackupSnapshot keeps frames newer than a second connection's snapshot in
+// the WAL. Cleanup releases the reader even when the assertion fails.
+func heldBackupSnapshot(t *testing.T) (*sql.DB, string, func() error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil || mode != "wal" {
+		t.Fatalf("journal_mode=%q,%v", mode, err)
+	}
+	if _, err := db.ExecContext(ctx, "CREATE TABLE t(v INTEGER); INSERT INTO t VALUES(1)"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := other.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	reader, err := other.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	var releaseErr error
+	release := func() error {
+		once.Do(func() {
+			_, err := reader.ExecContext(ctx, "ROLLBACK")
+			releaseErr = errors.Join(err, reader.Close())
+		})
+		return releaseErr
+	}
+	t.Cleanup(func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := reader.ExecContext(ctx, "BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := reader.QueryRowContext(ctx, "SELECT count(*) FROM t").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO t VALUES(2)"); err != nil {
+		t.Fatal(err)
+	}
+	return db, path, release
 }

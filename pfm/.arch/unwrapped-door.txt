@@ -1,7 +1,3 @@
-http:internal/harvest/doi_mirror.go 2
-http:internal/harvest/net.go 1
-http:internal/harvest/search.go 2
-http:internal/harvestpy/provision.go 1
 http:internal/usagehook/hook.go 1
 proc:internal/codexappendix/trust.go 1
 proc:internal/costsink/arm.go 1

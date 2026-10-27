@@ -55,13 +55,15 @@ func writeCacheRecord(t *testing.T, dir, id string, entries ...cacheFixtureEntry
 	writeFixture(t, filepath.Join(dir, "plugins", "installed_plugins.json"), string(raw))
 }
 
-// cacheFiles is the snapshot of writePluginFiles' tree at version, plus the
-// entries the cache compare leaves out.
+// cacheFiles is the snapshot of writePluginFiles' tree at version, plus
+// entries a snapshot holds beside it: the typings Claude Code generates for its
+// own build into .claude-plugin/types/ and the marker of an orphaned snapshot.
 func cacheFiles(name, version, hook string) map[string]string {
 	return map[string]string{
-		filepath.Join(".claude-plugin", "plugin.json"): `{"name":"` + name + `","version":"` + version + `"}`,
-		filepath.Join("hooks", "hook.ts"):              hook,
-		filepath.Join("node_modules", "dep", "x.js"):   "cached dependency\n",
+		filepath.Join(".claude-plugin", "plugin.json"):                              `{"name":"` + name + `","version":"` + version + `"}`,
+		filepath.Join(".claude-plugin", "types", "claude-code-tools", "index.d.ts"): "declare module 'claude-code' {}\n",
+		filepath.Join("hooks", "hook.ts"):                                           hook,
+		filepath.Join("node_modules", "dep", "x.js"):                                "cached dependency\n",
 		".orphaned_at": "1760000000000",
 		".DS_Store":    "finder",
 	}
@@ -159,10 +161,11 @@ func cacheRecordVersions(t *testing.T, configDir, id string) []string {
 // every entry whose version is not the checkout's — a project scope's from its
 // project dir — and reads the record back: an entry still behind is a failure
 // naming both versions. An entry at the checkout's version whose snapshot
-// differs from the checkout is a warning to bump the version, since Claude
-// re-snapshots by version only; a preview names each update and runs none.
+// differs from the checkout is no warning: Claude reads a directory
+// marketplace's plugin in place from the copy; a preview names each update and
+// runs none.
 func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
-	const name = "sub-agent-compact"
+	const name = "forward-compaction"
 	id := devID(name)
 	hook := "export const hook = '" + name + "'\n"
 	for _, test := range []struct {
@@ -176,10 +179,9 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 		wantErr   []string
 		versions  []string
 		// failScope is the scope whose update exits 1; unversioned checkouts
-		// name no version; stray adds a file to each snapshot an update takes.
+		// name no version.
 		failScope   string
 		unversioned bool
-		stray       bool
 	}{
 		{
 			name: "stale user and project entries",
@@ -234,6 +236,7 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 			versions: []string{"1.0.0"},
 		},
 		{
+			// Claude reads a directory marketplace's plugin in place, never this snapshot.
 			name: "an equal version whose snapshot differs",
 			entries: func(string) []cacheFixtureEntry {
 				return []cacheFixtureEntry{{scope: "user", version: checkoutVersion, files: cacheFiles(name, checkoutVersion, "old\n")}}
@@ -241,16 +244,10 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 			apply:     true,
 			wantCalls: func(string) []string { return []string{} },
 			wantDirs:  func(string) []string { return []string{} },
-			wantLines: []string{
-				"  warn    claude plugin " + id + " in {first}: plugin " + id + " cache {first}/plugins/cache/" +
-					name + "-dev/" + name + "/" + checkoutVersion + " differs from {checkout} at version " + checkoutVersion +
-					" — bump the version in {checkout}/.claude-plugin/plugin.json: Claude caches by version;" +
-					" then run pfm install --yes\n",
-			},
-			versions: []string{checkoutVersion},
+			versions:  []string{checkoutVersion},
 		},
 		{
-			name: "a drifted snapshot alongside a stale project entry",
+			name: "an equal-version snapshot with other content alongside a stale project entry",
 			entries: func(project string) []cacheFixtureEntry {
 				return []cacheFixtureEntry{
 					{scope: "user", version: checkoutVersion, files: cacheFiles(name, checkoutVersion, "old\n")},
@@ -260,7 +257,6 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 			apply:     true,
 			wantCalls: func(string) []string { return []string{"plugin update " + id + " --scope project -y"} },
 			wantDirs:  func(project string) []string { return []string{project} },
-			wantLines: []string{"  warn    claude plugin " + id + " in {first}: plugin " + id + " cache {first}/plugins/cache/" + name + "-dev/" + name + "/" + checkoutVersion + " differs"},
 			wantErr:   []string{"after claude plugin update"},
 			versions:  []string{checkoutVersion, "1.0.0"},
 		},
@@ -343,20 +339,6 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 			versions: []string{checkoutVersion, checkoutVersion},
 		},
 		{
-			name: "an update whose new snapshot differs",
-			entries: func(string) []cacheFixtureEntry {
-				return []cacheFixtureEntry{{scope: "user", version: "1.0.0", files: cacheFiles(name, "1.0.0", "old\n")}}
-			},
-			apply: true, simulate: true, stray: true,
-			wantCalls: func(string) []string { return []string{"plugin update " + id + " --scope user -y"} },
-			wantDirs:  func(string) []string { return []string{""} },
-			wantLines: []string{
-				"  warn    claude plugin " + id + " in {first}: plugin " + id + " cache {first}/plugins/cache/" +
-					name + "-dev/" + name + "/" + checkoutVersion + " differs from {checkout} at version " + checkoutVersion,
-			},
-			versions: []string{checkoutVersion},
-		},
-		{
 			name: "a checkout naming no version",
 			entries: func(string) []cacheFixtureEntry {
 				return []cacheFixtureEntry{{scope: "user", version: "1.0.0", files: cacheFiles(name, "1.0.0", "old\n")}}
@@ -410,17 +392,6 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 			writeCacheRecord(t, first, id, test.entries(project)...)
 			if test.simulate {
 				simulateClaudeUpdate(t, runner, home)
-			}
-			if test.stray {
-				update := runner.onRun
-				runner.onRun = func(configDir, argv string) {
-					update(configDir, argv)
-					writeFixture(
-						t,
-						filepath.Join(configDir, "plugins", "cache", name+"-dev", name, checkoutVersion, "stray.js"),
-						"x\n",
-					)
-				}
 			}
 			if test.failScope != "" {
 				runner.fail = map[string]string{

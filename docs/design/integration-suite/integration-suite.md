@@ -376,7 +376,7 @@ What only a reading can judge is the suite reviewer's at every landing — in a 
 - Read every policy-lint rule for a property asserted rather than a line's text pinned.
 - Read every `twin:` and `live-only` reason, every new `weak-oracle:` and `skip-because:` against its class or reason, every subject's input-class lines in `self-tests.txt` against the inputs it reads, and the `DUPLICATE-CANDIDATES` list.
 
-Four rules are prose by design and belong to no check: a lane joins the sequence the day it is written (the executor's), each lane's position carries a reason (an Open ruling until it does), every unmapped test is watched failing when written (the executor's), and the rehearsal's model and reasoning setting (the owner's).
+Four rules are prose by design and belong to no check: a lane joins the sequence the day it is written (the builder's), each lane's position carries a reason (an Open ruling until it does), every unmapped test is watched failing when written (the builder's), and the rehearsal's model and reasoning setting (the owner's).
 
 ## Seed evidence
 
@@ -388,9 +388,9 @@ The design document is reviewed before anything is built. The laws reach every t
 
 In a project installed from this blueprint, the flights cast builds and keeps the suite:
 
-- The build goes through `/flights:spec` and `flights-foreman`, whose `DECIDE` line and the lander's review cover the design.
-- A flight executor builds the harness, the mocks and the lanes from the task files that Build order produces, and records each row's bite.
-- `flights-lander` runs the blocking commands of the unit and hermetic tiers, sweeps the refused shapes and performs the § The threat model duties on every landing; where a live tier exists it also runs the touched lanes from their checkpoints while it fixes, the touched lane alone, and the sequence at the gate's open and at its close. The sequence at open gives a baseline, so a red at close can be attributed to the flight. A defect a test or a lane exposes is the lander's to fix.
+- The build goes to a `flights-foreman` tier, whose return names the decisions it made, and the lander's review covers the design.
+- The foreman, or a `flights-foreman-sonnet` child it briefs with the files, the change and the acceptance, builds the harness, the mocks and the lanes in the order Build order produces, and records each row's bite.
+- `flights-lander` runs the testing manual's affected tests while it fixes, then the full gate once, right before the merge, so the manual's blocking commands, refused-shape sweep and lanes run on every landing wherever the manual carries them. A defect a test or a lane exposes is the lander's to fix.
 
 Outside this blueprint, the owner assigns the review, the build and the runs. Law 7 is the run policy, Law 20 the per-change policy, and Laws 11–15 the verdict rules at every tier.
 
@@ -400,7 +400,6 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 | --- | --- | --- |
 | `/quality:llm-codebase` | the source-tree layout and its mechanical gates | the three-state protocol as it stands; this suite's `size`, `clones` and budget rows run in its own script |
 | the project's testing manual | one project's test mechanics — where a test lives, run commands, environments, cleanup, concurrency, the local traps — and the per-change duty | this command carries the design law for every tier; the manual's § Lanes and registries carries the per-change duty and § What not to test the refused shapes, in the manual's own words for its stack |
-| `qa-commons.md` | the generic rules every project's test gates share | nothing; its rules stand as they are and this command does not rely on them |
 
 ## Surfaces that stay in sync
 
@@ -409,7 +408,6 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 | The command | `templates/global/commands/quality/integration-suite.md` | Inputs, terms, names, the tier names unit / hermetic / live, laws, procedure, output, hand-off, seed evidence, checks, the threat model |
 | Its neighbour | `templates/global/commands/quality/llm-codebase.md` | § Protocol, cited as it stands |
 | The testing-manual template | `templates/project/commands/per-project/testing-manual.md` | § Tiers in the tier names unit / hermetic / live, § Lanes and registries, § What not to test |
-| The testing-manual design | [`docs/design/flights/testing-manual.md`](../flights/testing-manual.md) | § What stays out names this command |
 | Registries | `templates/refresh-map.json`, `docs/SETUP.md`, `docs/README.md` | The command's entry |
 | This directory | `docs/design/integration-suite/` | How the command works and why its laws are shaped as they are |
 

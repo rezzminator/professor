@@ -1,14 +1,18 @@
 package gather
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -200,7 +204,7 @@ func TestWindowConvergenceClipsRunesOnlyHere(t *testing.T) {
 		panes,
 		codex,
 		nil,
-		func(string) string { return longName },
+		func(string) naming.CodexName { return naming.CodexName{Name: longName, User: true} },
 		nil,
 	)
 	if len(renames) != 1 {
@@ -306,5 +310,30 @@ func TestProcExecutablePathUsesKernelPathNotArgv(t *testing.T) {
 		if (err != nil) != test.bad || path != test.want {
 			t.Errorf("kernel path=%q %v want=%q bad=%t", path, err, test.want, test.bad)
 		}
+	}
+}
+
+func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		probe error
+		gone  bool
+	}{
+		{"same uid EINVAL", nil, false},
+		{"other uid EINVAL", syscall.EPERM, false},
+		{"vanished EINVAL", syscall.ESRCH, true},
+		{"unknown probe", syscall.EIO, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := processReadError(42, syscall.EINVAL, tc.probe)
+			if errors.Is(err, fs.ErrNotExist) != tc.gone || !tc.gone && !errors.Is(err, syscall.EINVAL) {
+				t.Fatalf(
+					"process read error=%v gone=%t want gone=%t with unreadability preserved",
+					err,
+					errors.Is(err, fs.ErrNotExist),
+					tc.gone,
+				)
+			}
+		})
 	}
 }

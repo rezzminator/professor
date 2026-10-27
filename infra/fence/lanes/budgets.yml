@@ -10,17 +10,18 @@
 # changes; evidence: $HOME/.local/state/pfm/flights/professor/fast-gate/
 # measure/r4/lanes-r2/. Targets: root build ≤ 15 min (not budgeted here),
 # full sequence ≤ 5 min with the root cached.
-tolerance: 1.25
+tolerance: PFM_FENCE_LANE_TOLERANCE
 
 # The whole canonical sequence, O1 → … → O2, in one container.
-sequence: 763
+sequence: PFM_FENCE_LANE_SEQUENCE_S
 
 lanes:
-  O1: 70
-  E1: 194
-  E2: 39
-  E3: 14
-  F: 134
-  M: 156
-  A: 49
-  O2: 86
+  O1: PFM_FENCE_LANE_O1_S
+  E1: PFM_FENCE_LANE_E1_S
+  E2: PFM_FENCE_LANE_E2_S
+  E3: PFM_FENCE_LANE_E3_S
+  F: PFM_FENCE_LANE_F_S
+  M: PFM_FENCE_LANE_M_S
+  A: PFM_FENCE_LANE_A_S
+  H: PFM_FENCE_LANE_H_S
+  O2: PFM_FENCE_LANE_O2_S

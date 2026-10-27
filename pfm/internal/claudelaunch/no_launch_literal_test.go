@@ -40,6 +40,10 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	"internal/installer/vscode_profile.go": {"pins every terminal-profile env shape pfm wrote", []string{
 		"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
 	}},
+	"internal/doctor/remote_control.go": {"reads launch environment to diagnose Remote Control blockers", []string{
+		"ANTHROPIC_BASE_URL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+	}},
 	"internal/doctor/harness_prompt.go": {"fixed headless capture argv and drift diagnosis", []string{
 		"--mcp-config", "the CLI answered from the real endpoint and ignored ANTHROPIC_BASE_URL",
 	}},
@@ -59,8 +63,6 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	"internal/headless/run/run.go": {"documented headless argv owner", []string{
 		"--system-prompt-file", "--settings", "--settings=",
 	}},
-	"internal/call/engine.go":  {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
-	"internal/kill/manager.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/mockengine/claude.go": {
 		"mock argv",
 		[]string{
@@ -70,7 +72,7 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	},
 	"internal/resolve/whoami.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/statusline/render.go": {"reads engine telemetry", []string{
-		"ANTHROPIC_MODEL", "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+		"ANTHROPIC_MODEL",
 	}},
 	"internal/testjail/launch_shell.go": {"pins the launch shell", []string{"CLAUDE_CODE_SHELL"}},
 	"internal/testjail/testjail.go":     {"sets fixture identity", []string{"CLAUDE_CODE_SESSION_ID"}},
@@ -83,7 +85,7 @@ var launchEnvFamily = regexp.MustCompile(
 var launchFlags = []string{
 	"--settings", "--mcp-config", "--session-id", "--fork-session",
 	"--system-prompt-file", "--allow-dangerously-skip-permissions",
-	"--dangerously-skip-permissions", "--resume",
+	"--dangerously-skip-permissions", "--resume", "--remote-control",
 }
 
 func launchLiteral(value string) bool {

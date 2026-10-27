@@ -260,18 +260,18 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadMeta() error = %v", err)
 	}
-	if meta.ContextTokens != 23515 || meta.ContextWindow != 272000 {
+	if meta.ContextKnown || meta.ContextTokens != 0 || meta.ContextWindow != 272000 {
 		t.Fatalf("codex meta = %#v", meta)
 	}
-	if percent := meta.ContextPercent(); percent < 8.6 || percent > 8.7 {
-		t.Fatalf("context percent = %f, want ~8.64", percent)
+	if percent := meta.ContextPercent(); percent != 0 {
+		t.Fatalf("context percent = %f, want unknown, never cumulative lifetime usage", percent)
 	}
 
 	claude := writeTranscript(
 		t,
 		"claude.jsonl",
 		`{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98}}}
-{"type":"assistant","message":{"model":"<synthetic>","usage":{}}}
+{"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}
 `,
 	)
 	meta, err = ReadMeta(claude, "cc")
@@ -467,6 +467,34 @@ func TestReadMetaClaudeCountsOnlyRealHumanPromptsAcrossWholeFile(t *testing.T) {
 	}
 	if meta.HumanPrompts != 2 {
 		t.Fatalf("human prompts = %d, want 2", meta.HumanPrompts)
+	}
+}
+
+func TestMetaUsagePresenceDoesNotManufactureZero(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"total_tokens":null}`} {
+		var meta Meta
+		var state metaScanState
+		applyMeta(&meta, &state, []byte(
+			`{"payload":{"type":"token_count","info":{"last_token_usage":`+raw+`}}}`,
+		), "cx")
+		if meta.ContextKnown {
+			t.Fatalf("absent Codex total became known: %s", raw)
+		}
+		meta.ContextTokens, meta.ContextKnown = 500, true
+		applyMeta(&meta, &state, []byte(
+			`{"payload":{"type":"token_count","info":{"last_token_usage":`+raw+`}}}`,
+		), "cx")
+		if meta.ContextTokens != 500 {
+			t.Fatalf("absent total overwrote last measurement: %+v", meta)
+		}
+	}
+	if used, known := usableContext([]byte(
+		`{"input_tokens":0,"iterations":[{"type":"advisor_message","input_tokens":177}]}`,
+	)); used != 0 || known {
+		t.Fatalf("advisor-only response became executor occupancy: %d/%v", used, known)
+	}
+	if used, known := usableContext([]byte(`{"input_tokens":0}`)); used != 0 || !known {
+		t.Fatalf("explicit zero prompt lost: %d/%v", used, known)
 	}
 }
 

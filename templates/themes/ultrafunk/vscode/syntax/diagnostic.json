@@ -1,0 +1,23 @@
+{
+  "0042": {
+    "name": "Rocket Red · invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#ff4040"
+    }
+  },
+  "0043": {
+    "name": "Rocket Red · deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#ff4040"
+    }
+  }
+}

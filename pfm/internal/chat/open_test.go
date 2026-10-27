@@ -784,3 +784,39 @@ func TestOpenDetachedIDSeesAnArchivedChatGoneThenRestored(t *testing.T) {
 			result, err, len(tmux.created))
 	}
 }
+
+func TestPrepareOpenPreservesCodexCallerReadFailure(t *testing.T) {
+	root := testjail.Fleet(t)
+	t.Setenv("TMUX", "")
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	t.Setenv("HERDR_PANE_ID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CODEX_THREAD_ID", "caller-thread")
+	runtime, err := config.RuntimeOrDefault(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(root, "blocked-db")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "cache.db"))
+	fake := &fakeOpenTmux{}
+	stubOpenExecutor(t, fake)
+	executor, request, _, err := prepareOpen(
+		context.Background(),
+		compose.Row{Kind: compose.NewClaude, CWD: root},
+		1,
+		false,
+		"",
+		io.Discard,
+		runtime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = executor.Open(context.Background(), request)
+	if err == nil || !strings.Contains(err.Error(), "Codex") || len(fake.created) != 0 {
+		t.Fatalf("caller read failure birthed chat: err=%v created=%v", err, fake.created)
+	}
+}

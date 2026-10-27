@@ -1,0 +1,74 @@
+{
+  "0019": {
+    "name": "Cyan beam: built-in functions",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0022": {
+    "name": "Gold beam: built-in types",
+    "scope": [
+      "support.type.primitive",
+      "storage.type.primitive",
+      "storage.type.built-in",
+      "support.type.builtin",
+      "storage.type.numeric",
+      "storage.type.string",
+      "storage.type.boolean",
+      "storage.type.byte",
+      "storage.type.error",
+      "storage.type.rune",
+      "storage.type.uintptr"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffd86b"
+    }
+  },
+  "0031": {
+    "name": "Sky beam: CSS properties",
+    "scope": [
+      "support.type.property-name.css",
+      "meta.property-name.css",
+      "support.type.vendored.property-name",
+      "variable.css",
+      "variable.scss",
+      "support.other.variable.less"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0032": {
+    "name": "Orchid: CSS values",
+    "scope": [
+      "support.constant.property-value.css",
+      "support.constant.color",
+      "support.constant.font-name",
+      "support.constant.media"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e1afed"
+    }
+  },
+  "0075": {
+    "name": "JSON key depth 1",
+    "scope": [
+      "support.type.property-name.json",
+      "meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fa7bc6"
+    }
+  }
+}

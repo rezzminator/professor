@@ -47,13 +47,14 @@ type scheduleSource interface {
 	ScheduleProblems(context.Context, time.Time, time.Duration) ([]fleetdb.Schedule, error)
 }
 
-// printSupervisionDoctor prints the two supervision rows: the MCP daemon and
-// the schedule timer. It returns their warnings.
+// printSupervisionDoctor prints the supervision rows: the MCP daemon, the
+// schedule timer and the launch agents' launcher. It returns their warnings.
 func printSupervisionDoctor(
 	ctx context.Context, stdout io.Writer, dependencies Dependencies, runtime config.Runtime,
 ) int {
 	return printServiceManagerDoctor(ctx, stdout, dependencies.Runner, runtime) +
-		printScheduleDoctor(ctx, stdout, dependencies.Runner, runtime.Paths, dependencies.Clock.Now())
+		printScheduleDoctor(ctx, stdout, dependencies.Runner, runtime.Paths, dependencies.Clock.Now()) +
+		printLaunchAgentsDoctor(stdout, runtime.Paths.Home)
 }
 
 // printScheduleDoctor opens the shared state database read-only (never

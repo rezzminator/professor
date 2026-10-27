@@ -1,4 +1,4 @@
-// Package fleetdb is the fleet's authoritative state store — operator decisions: kills, comms, issues.
+// Package fleetdb is the fleet's authoritative state store — operator decisions: kills, comms.
 //
 // The SQLite database at ~/.local/state/pfm/pfm.db holds every operator decision: killed
 // chats, spawned teammates, and the primary account. The transcript database
@@ -85,22 +85,6 @@ CREATE TABLE IF NOT EXISTS comms(
   message         TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comms_at ON comms(at_ns);
-CREATE TABLE IF NOT EXISTS issues(
-  id              INTEGER PRIMARY KEY,
-  at_ns           INTEGER NOT NULL,
-  title           TEXT NOT NULL,
-  detail          TEXT NOT NULL,
-  severity        TEXT NOT NULL DEFAULT 'medium' CHECK(severity IN ('low','medium','high')),
-  area            TEXT NOT NULL DEFAULT '',
-  reporter_session TEXT NOT NULL DEFAULT '',
-  reporter_label   TEXT NOT NULL DEFAULT '',
-  reporter_uuid    TEXT NOT NULL DEFAULT '',
-  reporter_cwd     TEXT NOT NULL DEFAULT '',
-  reporter_engine  TEXT NOT NULL DEFAULT '',
-  status          TEXT NOT NULL DEFAULT 'open'
-);
-CREATE INDEX IF NOT EXISTS issues_at ON issues(at_ns);
-CREATE INDEX IF NOT EXISTS issues_status ON issues(status);
 INSERT OR IGNORE INTO meta(key,val,updated_at) VALUES('schema_version','1',strftime('%s','now'));
 `
 
@@ -175,9 +159,21 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate shared state database: %w", err)
 	}
+	if err := dropRetiredIssuesTable(ctx, db, path); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate shared state database: %w", err)
+	}
 	if err := addScheduleOnce(ctx, db, path); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate shared state database: %w", err)
+	}
+	if err := addSeatOwnership(ctx, db, path); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate seat ownership: %w", err)
+	}
+	if err := retireMovedTmuxSeats(ctx, db, path); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("repair moved tmux seats: %w", err)
 	}
 	return db, nil
 }

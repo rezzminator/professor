@@ -1,0 +1,99 @@
+{
+  "0030": {
+    "name": "Ai · built-in functions",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin",
+      "support.function.builtin.go",
+      "support.function.builtin.python",
+      "support.function.console",
+      "support.function.magic.python",
+      "support.function.dom"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#2a409b"
+    }
+  },
+  "0041": {
+    "name": "Kincha · components",
+    "scope": [
+      "support.class.component",
+      "entity.name.tag.component",
+      "support.class.component.tsx",
+      "support.class.component.jsx",
+      "entity.name.tag.custom"
+    ],
+    "settings": {
+      "foreground": "#785603"
+    }
+  },
+  "0045": {
+    "name": "Asagi · CSS properties",
+    "scope": [
+      "support.type.property-name.css",
+      "meta.property-name.css",
+      "support.type.property-name.scss",
+      "support.type.property-name.less",
+      "support.type.vendored.property-name.css",
+      "support.type.custom-property.name.css",
+      "variable.css",
+      "variable.argument.css"
+    ],
+    "settings": {
+      "foreground": "#075f6b"
+    }
+  },
+  "0046": {
+    "name": "Fuji · CSS values",
+    "scope": [
+      "support.constant.property-value.css",
+      "meta.property-value.css",
+      "support.constant.color",
+      "constant.other.color.rgb-value",
+      "support.constant.font-name",
+      "support.constant.property-value.scss",
+      "constant.other.color",
+      "support.constant.vendored.property-value.css"
+    ],
+    "settings": {
+      "foreground": "#853a93"
+    }
+  },
+  "0049": {
+    "name": "Ai · CSS functions",
+    "scope": [
+      "support.function.misc.css",
+      "support.function.transform.css",
+      "support.function.calc.css",
+      "support.function.url.css",
+      "support.function.gradient.css",
+      "support.function.var.css"
+    ],
+    "settings": {
+      "foreground": "#2a409b"
+    }
+  },
+  "0075": {
+    "name": "Shu · rebase commands",
+    "scope": [
+      "support.function.git-rebase",
+      "keyword.other.git-rebase"
+    ],
+    "settings": {
+      "foreground": "#b43026"
+    }
+  },
+  "0079": {
+    "name": "Kincha · Python builtin types",
+    "scope": [
+      "support.type.python",
+      "support.type.exception.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#785603"
+    }
+  }
+}

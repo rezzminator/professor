@@ -10,12 +10,12 @@ Professor's files ship straight into other people's agent pipelines, so a few ru
 
 ## Build and test
 
-Every build, test and gate runs through one script:
+Every build runs through `dev.sh`, every test through `test.sh`:
 
 ```bash
 .claude/scripts/dev.sh status            # toolchains and projects
-.claude/scripts/dev.sh iso verify templates  # leak gate + placeholder registry
-.claude/scripts/dev.sh iso test pfm      # the Go fleet engine's suite
+.claude/scripts/test.sh <path>...        # the affected tests + static checks (leak scan included) of those paths
+.claude/scripts/test.sh --full           # the full gate, once, right before the merge
 ```
 
 - `pfm/` is the Go fleet engine (version in `pfm/go.mod`); how it is tested is written down in [`.claude/commands/pfm-testing-manual.md`](.claude/commands/pfm-testing-manual.md).

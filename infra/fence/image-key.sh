@@ -35,7 +35,31 @@ _fence_image_derive() { # <compose-file> <service>; sets key and image name
   elif command -v shasum >/dev/null 2>&1; then sha_cmd=(shasum -a 256)
   else _fence_image_error "$service" 'TOOLCHAIN-MISSING — neither sha256sum nor shasum'; return 2; fi
 
-  if ! hashes="$(cd "$context" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 "${sha_cmd[@]}")"; then
+  # A .dockerignore allow-list — `*`, then one `!path` per line — is the context docker sends: only
+  # .dockerignore and the allowed paths are inputs. Any other .dockerignore form is refused, never
+  # guessed (docker's own pattern rules are not re-implemented here).
+  local -a roots=(.)
+  if [ -f "$context/.dockerignore" ]; then
+    roots=(.dockerignore)
+    local seen_star=0 entry
+    while IFS= read -r entry || [ -n "$entry" ]; do
+      case "$entry" in
+        '' | '#'*) continue ;;
+        '*') [ "$seen_star" = 0 ] || { _fence_image_error "$service" '.dockerignore repeats *'; return 2; }; seen_star=1 ;;
+        '!'*)
+          entry="${entry#!}"; entry="${entry%/}"
+          case "$entry" in
+            '' | /* | *..* | *[\*\?\[]*) _fence_image_error "$service" ".dockerignore entry is no plain path: !$entry"; return 2 ;;
+          esac
+          [ "$seen_star" = 1 ] || { _fence_image_error "$service" '.dockerignore must start with *'; return 2; }
+          [ -e "$context/$entry" ] || { _fence_image_error "$service" ".dockerignore allows a missing path: $entry"; return 2; }
+          roots+=("$entry") ;;
+        *) _fence_image_error "$service" ".dockerignore is not an allow-list (\`*\` then \`!path\` lines): $entry"; return 2 ;;
+      esac
+    done <"$context/.dockerignore"
+    [ "$seen_star" = 1 ] || { _fence_image_error "$service" '.dockerignore must start with *'; return 2; }
+  fi
+  if ! hashes="$(cd "$context" && find "${roots[@]}" -type f -print0 | LC_ALL=C sort -z | xargs -0 "${sha_cmd[@]}")"; then
     _fence_image_error "$service" 'context file hashing failed'; return 2
   fi
   entries=''; dockerfile_hash=''
@@ -57,12 +81,12 @@ _fence_image_derive() { # <compose-file> <service>; sets key and image name
     else
       entries+="${path}"$'\t'"l $path $(readlink "$context/$path")"$'\n'
     fi
-  done < <(cd "$context" && find . \( -type d -o -type l \) -print0 | LC_ALL=C sort -z)
+  done < <(cd "$context" && find "${roots[@]}" \( -type d -o -type l \) -print0 | LC_ALL=C sort -z)
   tree="$(printf '%s' "$entries" | LC_ALL=C sort -t $'\t' -k1,1 | cut -f2-)"
   platform="${DOCKER_DEFAULT_PLATFORM:-}"
   if ! key_output="$(
     { printf 'pfm.fence.inputs v1\nservice %s\n' "$service"
-      while IFS= read -r line; do case "$line" in '      context: '*) ;; *) printf '%s\n' "$line" ;; esac; done <<<"$block"
+      while IFS= read -r line; do case "$line" in ('      context: '*) ;; (*) printf '%s\n' "$line" ;; esac; done <<<"$block"
       printf 'platform %s\ndockerfile %s\n%s\n' "$platform" "$dockerfile_hash" "$tree"
     } | "${sha_cmd[@]}"
   )"; then

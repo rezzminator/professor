@@ -400,8 +400,8 @@ target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
   config="$CODEX_HOME/config.toml"
-  staged="$HOME/.professor/pfm/harness-prompts/composed/codex.md"
-  # pfm writes the composed Codex prompt into developer_instructions
+  staged="$HOME/.professor/pfm/harness-prompts/generated/codex.md"
+  # pfm writes the generated Codex prompt into developer_instructions
   # (internal/installer/codex_developer_instructions.go); the retired
   # SessionStart appendix hook must be gone from hooks.json.
   if [ ! -f "$config" ]; then
@@ -412,14 +412,14 @@ if requires E2.01-open-seat; then
   if [ -f "$CODEX_HOME/hooks.json" ] && grep -q 'internal codex-appendix' "$CODEX_HOME/hooks.json"; then
     bad="$bad $CODEX_HOME/hooks.json still carries the retired SessionStart appendix hook;"
   fi
-  [ -f "$staged" ] || bad="$bad no composed Codex prompt at $staged to compare the config against;"
+  [ -f "$staged" ] || bad="$bad no generated Codex prompt at $staged to compare the config against;"
   marker="$(head -1 "$staged" 2>/dev/null)"
   sock="$(live_field "$CHAT" 11)"
   start="$(tmux -S "$(_lane_tmux_dir)/$sock" display -p '#{pane_start_command}' 2>&1)"
   pid="$(pane_pid)"
   argv="$(tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null)"
   if [ -z "$marker" ]; then
-    bad="$bad the composed Codex prompt has no first line;"
+    bad="$bad the generated Codex prompt has no first line;"
   elif ! grep -qF 'developer_instructions=' <<<"$argv"; then
     bad="$bad the live pane's process argv carries no developer_instructions argument (start command ${#start} bytes; process argv ${#argv} bytes);"
   elif ! grep -qF -- "$marker" <<<"$argv"; then
@@ -439,19 +439,17 @@ if requires E2.01-open-seat; then
   bad=""
   toml="$CODEX_HOME/config.toml"
   bin="$HOME/.local/bin/pfm"
-  # M34: both family servers wired over stdio inside the installer-owned fence
+  # M34: chat server wired over stdio inside the installer-owned fence
   # (internal/installer/mcp.go writeMCPCodeConfigAt).
   if [ ! -f "$toml" ]; then
     bad="$bad no $toml — the installer writes the [mcp_servers] fence there;"
   else
     fence="$(sed -n '/^# BEGIN pfm mcp_servers — installer-owned$/,/^# END pfm mcp_servers — installer-owned$/p' "$toml")"
     [ -n "$fence" ] || bad="$bad $toml carries no '# BEGIN/END pfm mcp_servers — installer-owned' fence;"
-    for family in chat harvester; do
-      section="$(awk -v header="[mcp_servers.$family-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
-      grep -qF "command = \"$bin\"" <<<"$section" &&
-        grep -qF "args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"$family\"]" <<<"$section" ||
-        bad="$bad the fence lacks the $family-professor stdio command;"
-    done
+    section="$(awk -v header="[mcp_servers.chat-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
+    grep -qF "command = \"$bin\"" <<<"$section" &&
+      grep -qF 'args = ["mcp", "serve", "--stdio", "--family", "chat"]' <<<"$section" ||
+      bad="$bad the fence lacks the chat-professor stdio command;"
   fi
   # The served surface: three JSON-RPC frames on stdin to the stdio command
   # itself (initialize, notifications/initialized, tools/list) — the same
@@ -474,10 +472,10 @@ if requires E2.01-open-seat; then
     if [ -z "$tools" ]; then
       bad="$bad tools/list over stdio returned no tool names: $(one_line "$out" | cut -c1-200);"
     else
-      for want in ls status last read call whoami new kill unkill name; do
+      for want in ls status last call whoami new kill unkill name; do
         grep -qx "$want" <<<"$tools" || bad="$bad tools/list lacks $want;"
       done
-      # Compare the chat server roster, leaving the separate harvester tools
+      # Compare the chat server roster, leaving the separate plugin tools
       # out of this chat-server assertion.
       status_tools="$(curl -s -m 5 "http://127.0.0.1:$PORT/status" | jq -r '.servers.chat[]?' 2>/dev/null | sort)"
       if [ -z "$status_tools" ]; then
@@ -488,7 +486,7 @@ if requires E2.01-open-seat; then
     fi
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "config.toml fence wires both family stdio commands at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) chat tools, matching /status"
+    pass "config.toml fence wires the chat stdio command at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) chat tools, matching /status"
   fi
 fi
 
@@ -510,17 +508,19 @@ if requires E2.01-open-seat; then
   elif ! grep -qF ASK-CX-OK <<<"$ask"; then
     bad="$bad ask returned without the fresh answer: $(one_line "$ask");"
   fi
-  watch="$(timeout 240 pfm chat watch "$id" --idle-after 10 --once 2>&1)"
+  # This beat proves delivery of a named idle transition, not a ten-second
+  # threshold. Keep its idle window short so the lane spends time on work.
+  watch="$(timeout 240 pfm chat watch "$id" --idle-after 1 --once 2>&1)"
   watch_rc=$?
   if [ "$watch_rc" -eq 124 ]; then
-    bad="$bad watch --idle-after 10 --once never returned inside 240s (the idle transition was never reported);"
+    bad="$bad watch --idle-after 1 --once never returned inside 240s (the idle transition was never reported);"
   elif [ "$watch_rc" -ne 0 ]; then
     bad="$bad watch exited $watch_rc: $(one_line "$watch");"
-  elif [ -z "$watch" ]; then
-    bad="$bad watch exited 0 but printed nothing — no transition was reported;"
+  elif ! grep -qE "^IDLE $id idle_seconds=[0-9]+$" <<<"$watch"; then
+    bad="$bad watch exited 0 without this thread's IDLE transition: $(one_line "$watch");"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "call wrote the user record (CALL-CX-OK), ask blocked for the scripted reply (ASK-CX-OK), watch --idle-after 10 --once reported: $(one_line "$watch")"
+    pass "call wrote the user record (CALL-CX-OK), ask blocked for the scripted reply (ASK-CX-OK), watch --idle-after 1 --once reported: $(one_line "$watch")"
   fi
 fi
 
@@ -534,9 +534,9 @@ if requires E2.01-open-seat; then
   id="$(live_field "$CHAT" 2)"
   # Codex tool shells are served by app-server and carry no TMUX — only
   # CODEX_THREAD_ID names the caller (cmd/pfm/chat_command.go runChatKill →
-  # chat.SeatIdentity). Driven from this shell with exactly that environment.
+  # resolve.Whoami.Identify). Driven from this shell with exactly that environment.
   for alias in self me; do
-    out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id" pfm chat kill "$alias" 2>&1)"
+    out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id" pfm chat kill "$alias" --exit 2>&1)"
     rc=$?
     kill_wait=""
     if [ "$rc" -eq 0 ]; then
@@ -549,6 +549,10 @@ if requires E2.01-open-seat; then
     elif [ -n "$kill_wait" ] || [ "$(row_field "$CHAT" 10)" != true ]; then
       bad="$bad after kill $alias the row's killed column is '$(row_field "$CHAT" 10)', not true; ${kill_wait:+$kill_wait;}"
     fi
+    # Killing a live chat also schedules its exit (dfa9dccb9). --exit above
+    # confirms it landed; unkill clears only the tombstone, never that worker.
+    # Resume for the next alias and the later doctor beat, not a hidden live row.
+    if [ "$rc" -ne 0 ]; then break; fi
     unkill="$(pfm chat unkill "$id" 2>&1)"
     unkill_rc=$?
     unkill_wait=""
@@ -559,6 +563,17 @@ if requires E2.01-open-seat; then
       bad="$bad unkill $id exited $unkill_rc: $(one_line "$unkill");"
     elif [ -n "$unkill_wait" ] || [ "$(row_field "$CHAT" 10)" != false ]; then
       bad="$bad after unkill the row's killed column is '$(row_field "$CHAT" 10)', not false; ${unkill_wait:+$unkill_wait;}"
+    fi
+    # Captured stdout is the attach line; chat open creates the resumed server
+    # before returning it. Do not eval it and attach this unattended runner.
+    reopened="$(pfm chat open "$id" 2>&1)"
+    reopened_rc=$?
+    if [ "$reopened_rc" -ne 0 ]; then
+      bad="$bad resume after kill $alias exited $reopened_rc: $(one_line "$reopened");"
+      break
+    elif ! LANE_ANCHOR= wait_for 30 "[ \"\$(live_field '$CHAT' 2)\" = '$id' ]"; then
+      bad="$bad resume after kill $alias did not restore thread $id: $LANE_WAIT_WHY;"
+      break
     fi
   done
   # A thread id no live seat carries must be refused by name, never a kill.
@@ -572,7 +587,7 @@ if requires E2.01-open-seat; then
   fi
   [ "$(row_field "$CHAT" 10)" = false ] || bad="$bad the unknown-thread kill touched $CHAT (killed='$(row_field "$CHAT" 10)');"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "self and me each resolved thread $id through CODEX_THREAD_ID with no TMUX → killed=true, unkill → false; an unknown thread refused (exit $bogus_rc: $(one_line "$bogus" | cut -c1-120))"
+    pass "self and me each resolved thread $id through CODEX_THREAD_ID with no TMUX → killed=true and seat ended, unkill → false and resumed live; an unknown thread refused (exit $bogus_rc: $(one_line "$bogus" | cut -c1-120))"
   fi
 fi
 
@@ -614,7 +629,7 @@ spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
-  report="$(pfm doctor --skip-harvest 2>&1)"
+  report="$(pfm doctor 2>&1)"
   doctor_rc=$?
   bindings="$(grep -E '^doctor: codex_pane_bindings total=' <<<"$report" | tail -1)"
   panes="$(grep -E '^doctor: codex_panes live=' <<<"$report" | tail -1)"

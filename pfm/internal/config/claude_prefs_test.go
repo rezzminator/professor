@@ -245,7 +245,15 @@ var v079ClaudeKeys = map[string]bool{
 }
 
 // releaseClaudeKeys are the claude.* keys added after v0.79.0.
-var releaseClaudeKeys = []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger", "gptAgents"}
+var releaseClaudeKeys = []string{
+	"remoteControl",
+	"helperModel",
+	"pluginCheckoutRoot",
+	"plugins",
+	"costLedger",
+	"gptAgents",
+	"subagentStatuslineTrace",
+}
 
 // pfm config init writes a file a pfm of the last release still decodes: a claude.* key added
 // since stays out of the default file (machine block and account block alike) while it is unset or
@@ -263,7 +271,7 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 		defaults := Defaults(home, nil)
 		defaults.Accounts = []Account{{
 			ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"),
-			Claude: &ClaudePrefs{HelperModel: DefaultHelperModel},
+			Claude: &ClaudePrefs{HelperModel: DefaultHelperModel, RemoteControl: true},
 		}}
 		for name, build := range map[string]func() ([]byte, error){
 			"MarshalDefault":                  func() ([]byte, error) { return MarshalDefault(home, nil) },
@@ -297,19 +305,19 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 		{
 			"every key set to a non-default",
 			`{"version":2,"claude":{"helperModel":"claude-sonnet-5-5","pluginCheckoutRoot":"/opt/plugins",` +
-				`"plugins":["effort-live-control"],"costLedger":false}}`,
+				`"plugins":["auto-effort-control"],"costLedger":false}}`,
 			map[string]any{
 				"helperModel": "claude-sonnet-5-5", "pluginCheckoutRoot": "/opt/plugins",
-				"plugins": []any{"effort-live-control"}, "costLedger": false,
+				"plugins": []any{"auto-effort-control"}, "costLedger": false,
 			},
 		},
 		{
 			"keys the user set to their defaults",
 			`{"version":2,"claude":{"helperModel":"` + DefaultHelperModel + `","costLedger":true,` +
-				`"plugins":["cache-live-control","sub-agent-compact","effort-live-control","tool-visibility-controller"]}}`,
+				`"plugins":["cache-live-control","forward-compaction","auto-effort-control","tool-visibility-controller"]}}`,
 			map[string]any{
 				"helperModel": DefaultHelperModel, "costLedger": true,
-				"plugins": []any{"cache-live-control", "sub-agent-compact", "effort-live-control", "tool-visibility-controller"},
+				"plugins": []any{"cache-live-control", "forward-compaction", "auto-effort-control", "tool-visibility-controller"},
 			},
 		},
 		{"an explicitly empty list", `{"version":2,"claude":{"plugins":[]}}`, map[string]any{"plugins": []any{}}},
@@ -399,5 +407,51 @@ func TestGptAgentsMachineWideOptInAndDefaultOmission(t *testing.T) {
 	}
 	if _, err := Load(path, home, nil); err == nil || !strings.Contains(err.Error(), "machine-wide") {
 		t.Fatalf("account opt-in refusal=%v", err)
+	}
+}
+
+func TestSubagentStatuslineTraceMachineWideSwitchDefaultsOff(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, FileName)
+	defaults := Defaults(home, nil)
+	if defaults.Claude.SubagentStatuslineTrace || defaults.Source(KeyClaudeSubagentStatuslineTrace) != SourceDefault {
+		t.Fatalf("default trace = %v from %s, want false from default",
+			defaults.Claude.SubagentStatuslineTrace, defaults.Source(KeyClaudeSubagentStatuslineTrace))
+	}
+	body, err := Marshal(defaults, false)
+	if err != nil || strings.Contains(string(body), `"subagentStatuslineTrace"`) {
+		t.Fatalf("default trace key emitted: %s %v", body, err)
+	}
+	for _, enabled := range []string{"true", "false"} {
+		if err := os.WriteFile(
+			path,
+			[]byte(`{"version":2,"claude":{"subagentStatuslineTrace":`+enabled+`}}`),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, home, nil)
+		if err != nil {
+			t.Fatalf("registered switch refused: %v", err)
+		}
+		if loaded.Claude.SubagentStatuslineTrace != (enabled == "true") ||
+			loaded.Source(KeyClaudeSubagentStatuslineTrace) != SourceFile {
+			t.Fatalf("trace = %v from %s, want %s from file",
+				loaded.Claude.SubagentStatuslineTrace, loaded.Source(KeyClaudeSubagentStatuslineTrace), enabled)
+		}
+		body, err := Marshal(loaded, false)
+		if err != nil || !strings.Contains(string(body), `"subagentStatuslineTrace": `+enabled) {
+			t.Fatalf("explicit key lost: %s %v", body, err)
+		}
+	}
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"version":2,"accounts":[{"id":1,"configDir":"~/account","claude":{"subagentStatuslineTrace":true}}]}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, home, nil); err == nil || !strings.Contains(err.Error(), "machine-wide") {
+		t.Fatalf("account switch refusal=%v", err)
 	}
 }

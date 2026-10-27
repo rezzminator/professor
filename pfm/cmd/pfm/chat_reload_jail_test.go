@@ -160,10 +160,10 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 	t.Cleanup(func() { startReloadWorker = old })
 	var workerArgs []string
 	detached := false
-	startReloadWorker = func(argv []string, opts deps.StartOptions) error {
+	startReloadWorker = func(argv []string, opts deps.StartOptions) (int, error) {
 		workerArgs = append([]string(nil), argv...)
 		detached = opts.Detach && opts.Stdout != nil && opts.Stdout == opts.Stderr
-		return nil
+		return 0, nil
 	}
 	var stdout, stderr bytes.Buffer
 	if code := run(
@@ -230,6 +230,7 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	// The calling chat is identified AMBIENTLY here, exactly as a real caller
 	// inside tmux is: $TMUX names the socket, $TMUX_PANE names the pane, and
 	// no --sock is typed on the command line.
+	proveCLIFixtureCaller(t, socket, pane)
 	t.Setenv("TMUX", socket+",1,0")
 	t.Setenv("TMUX_PANE", pane)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
@@ -238,9 +239,9 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	old := startReloadWorker
 	t.Cleanup(func() { startReloadWorker = old })
 	var workerArgs []string
-	startReloadWorker = func(argv []string, _ deps.StartOptions) error {
+	startReloadWorker = func(argv []string, _ deps.StartOptions) (int, error) {
 		workerArgs = append([]string(nil), argv...)
-		return nil
+		return 0, nil
 	}
 	var stdout, stderr bytes.Buffer
 	if code := run(
@@ -312,9 +313,9 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	old := startReloadWorker
 	t.Cleanup(func() { startReloadWorker = old })
 	var workerArgs []string
-	startReloadWorker = func(argv []string, _ deps.StartOptions) error {
+	startReloadWorker = func(argv []string, _ deps.StartOptions) (int, error) {
 		workerArgs = append([]string(nil), argv...)
-		return nil
+		return 0, nil
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{

@@ -10,6 +10,10 @@ fi
 # shellcheck source=stepprof.sh
 source "$steps_profiler" || { printf 'steps.sh: cannot source %s\n' "$steps_profiler" >&2; return 1; }
 unset steps_profiler
+# Central defaults; invalid supplied configuration never falls back.
+. "$(dirname -- "${BASH_SOURCE[0]}")/shared.sh" || return 1
+fence_config_values || return 1
+
 
 steps_reset() {
   STEPS_NAMES=()
@@ -68,10 +72,16 @@ steps_seconds() { # start and end as EPOCHREALTIME values
 
 steps_jobs() {
   local jobs="${STEPS_JOBS:-}"
+  # Inside the shared fence the container's CPU quota is the machine (nproc reports every core
+  # of the VM): the default follows the cap, rounded up.
+  if [[ -z "$jobs" ]]; then
+    jobs="$(awk '$1 != "max" && $2 > 0 { q = $1 / $2; p = int(q); if (p < q) p++; print p }' "${STEPS_CPU_MAX_FILE:-/sys/fs/cgroup/cpu.max}" 2>/dev/null)" || jobs=""
+    [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=""
+  fi
   if [[ -z "$jobs" ]]; then
     jobs="$(nproc 2>/dev/null)" || jobs=""
     [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null)" || jobs=""
-    [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=4
+    [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo "steps_run: CPU concurrency detection failed; set STEPS_JOBS" >&2; return 1; }
   fi
   if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
     printf 'steps_run: STEPS_JOBS must be a positive integer: %s\n' "$jobs" >&2
@@ -81,7 +91,7 @@ steps_jobs() {
 }
 
 steps_heavy_jobs() {
-  local jobs="${STEPS_HEAVY_JOBS:-2}"
+  local jobs="${STEPS_HEAVY_JOBS-$(_fence_config_default STEPS_HEAVY_JOBS)}"
   if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
     printf 'steps_run: STEPS_HEAVY_JOBS must be a positive integer: %s\n' "$jobs" >&2
     return 1
@@ -90,7 +100,7 @@ steps_heavy_jobs() {
 }
 
 steps_bound() { # the default per-step bound in seconds
-  local bound="${STEPS_BOUND_S:-1500}"
+  local bound="${STEPS_BOUND_S:-${PFM_FENCE_STEP_DEFAULT_S-$(_fence_config_default PFM_FENCE_STEP_DEFAULT_S)}}"
   if [[ ! "$bound" =~ ^[1-9][0-9]*$ ]]; then
     printf 'steps_run: STEPS_BOUND_S must be a positive integer: %s\n' "$bound" >&2
     return 1

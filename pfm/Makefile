@@ -24,9 +24,10 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 REPO    := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..)
-# Scratch outside the tree, where dev.sh writes it: /tmp/<project>, <project>
-# the repo directory's basename with any leading dot stripped.
-TMP_BASE := /tmp/$(patsubst .%,%,$(notdir $(REPO)))
+# The fenced runs' timing base on the host (infra/fence/shared.sh): /tmp/{project}/fence/shared/<worktree>/timing,
+# {project} the main checkout's directory and <worktree> this tree's, each minus a leading dot.
+FENCE_MAIN := $(abspath $(dir $(shell git -C "$(REPO)" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)))
+FENCE_TIMING := /tmp/$(patsubst .%,%,$(notdir $(FENCE_MAIN)))/fence/shared/$(patsubst .%,%,$(notdir $(REPO)))/timing
 DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
 # The local build artifact lives in the repo's gitignored tmp/, never in the tree.
@@ -57,12 +58,20 @@ COVER_DIR ?= $(REPO)/tmp/cover
 # lint-new judges lines changed since this ref — origin/main, the last release,
 # for every caller (dev.sh, the gate, CI), so a local green is a CI green.
 LINT_BASE ?= origin/main
-# The fenced unit captures in docs/dev/testing/concurrency-sweep.md pin these flags.
-# The tagged e2e suite keeps its own -p 1 in dev.sh.
-TESTFLAGS ?= -p 6 -parallel 4
+# Package concurrency follows the fence's CPU cap: PFM_FENCE_TEST_P when the caller sets it
+# (infra/fence/shared.sh hands it in), else the container's cgroup quota (/sys/fs/cgroup/cpu.max,
+# rounded up), else the configured quota or available cores with no quota — the fenced unit captures in docs/dev/testing/concurrency-sweep.md.
+# The tagged e2e suite has independent PFM_FENCE_E2E_* knobs in dev.sh.
+# Resolve only when a test target expands TESTFLAGS, never for build/install/help.
+# Explicit make variables must reach $(shell) on older GNU make too; quote
+# their values as data, so malformed input reaches validation, not the shell.
+fence_test_env = $(if $(filter undefined,$(origin $(1))),,$(1)='$(subst ','"'"',$($(1)))')
+FENCE_TEST_CONFIG = $(shell $(call fence_test_env,PFM_FENCE_TEST_P) $(call fence_test_env,PFM_FENCE_TEST_PARALLEL) bash -c '. "$(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../infra/fence/shared.sh)" && fence_config_values || exit 1; p="$$(fence_config_test_p)" || exit 1; printf "%s %s\n" "$$p" "$$PFM_FENCE_TEST_PARALLEL"' || echo CONFIG-INVALID)
+TEST_P = $(word 1,$(FENCE_TEST_CONFIG))
+TESTFLAGS ?= $(if $(findstring CONFIG-INVALID,$(FENCE_TEST_CONFIG)),$(error invalid fence test configuration; see named error above),-p $(TEST_P) -parallel $(word 2,$(FENCE_TEST_CONFIG)))
 
-.PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags iso timing sweep gate install host-install rollback \
-        mcp-restart mcp-status stale sweep-stale clean
+.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover testflags timing sweep install host-install rollback \
+        agents-plan agents-install mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
 	@echo "pfm targets — run as: make <target>"
@@ -79,11 +88,6 @@ build: ## Compile to tmp/bin/pfm.dev (a local artifact, never the shipped path);
 	@mkdir -p $(dir $(LOCAL))
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
 	@echo "built: $(LOCAL)"
-
-# The composer runs here, so it builds for the host even when a cross build
-# exports GOOS/GOARCH (else: "exec format error").
-prompts: ## Compose the tracked harness prompts from their parts
-	GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run ./harness-prompts/compose
 
 tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
 	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh
@@ -124,7 +128,7 @@ lint: ## Every finding in the module — the burn-down view
 # `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
 # fence-wide it hijacks every `git init` the test suite runs.
 FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
-# LINT_PKGS: the packages lint-new analyzes; check-pfm.sh passes only its named files' packages.
+# LINT_PKGS: the packages lint-new analyzes; .claude/scripts/test.sh passes only its named files' packages.
 LINT_PKGS ?= ./...
 # GOMEMLIMIT: a change to a widely imported package (testjail, deps) leaves the
 # lint cache cold for its importers; golangci-lint then peaked at 1752 MiB and
@@ -161,21 +165,21 @@ arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new 
 testflags:
 	@printf '%s\n' '$(TESTFLAGS)'
 
-iso: ## Containerised test suite (delegates to dev.sh iso; same TESTFLAGS)
-	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh iso test pfm
-
 timing: ## Print the most recently written suite timing TSV
-	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(TMP_BASE)/timing"
+	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(FENCE_TIMING)"
 
 sweep: ## Measure the fenced concurrency sweep and publish its report
 	bash scripts/test-sweep.sh --preflight
 	cd "$(REPO)" && bash .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-sweep.sh --run --wait-quiet --label fence --out /pfm-timing/sweep-fence.tsv --json /pfm-timing/sweep-json'
-	bash scripts/test-sweep.sh --report "$(TMP_BASE)/timing/sweep-fence.tsv"
-
-gate: fmt-check lint-new vet arch iso ## Everything a change must pass before it merges
-	@echo "gate: all passed"
+	bash scripts/test-sweep.sh --report "$(FENCE_TIMING)/sweep-fence.tsv"
 
 # -------------------------------------------------------------- install ----
+
+agents-plan: ## Preview machine agent generation and registry links without rebuilding binaries or restarting services
+	engine-sync global --source-repo "$(REPO)" --plan
+
+agents-install: ## Generate and link machine agents without rebuilding binaries or restarting services; preview with agents-plan first
+	engine-sync global --source-repo "$(REPO)"
 
 install: ## Swap in a new build, restart the daemon, sweep obsolete processes, and keep compatible stdio proxies
 	@$(MAKE) --no-print-directory host-install

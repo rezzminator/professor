@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -27,20 +28,21 @@ const (
 
 // ClaudeSpawn prints or executes the launch returned by the registry.
 type ClaudeSpawn struct {
-	Purpose    Purpose
-	Account    int
-	Cache1H    *bool
-	SessionID  string
-	Resume     string
-	Fork       bool
-	Name       string
-	Model      string
-	Effort     string
-	PromptFile string
-	Args       []string
-	Home       string
-	Machine    pfmconfig.Config
-	Runner     deps.Runner
+	Purpose           Purpose
+	Account           int
+	Cache1H           *bool
+	SessionID         string
+	Resume            string
+	Fork              bool
+	Name              string
+	RemoteControlName string
+	Model             string
+	Effort            string
+	PromptFile        string
+	Args              []string
+	Home              string
+	Machine           pfmconfig.Config
+	Runner            deps.Runner
 
 	binary            string
 	explicitConfigDir string
@@ -50,7 +52,7 @@ func (spawn ClaudeSpawn) request() claudelaunch.Request {
 	return claudelaunch.Request{
 		Purpose: spawn.Purpose, Account: spawn.Account, Cache1H: spawn.Cache1H,
 		SessionID: spawn.SessionID, Resume: spawn.Resume, Fork: spawn.Fork,
-		Name: spawn.Name, Model: spawn.Model, Effort: spawn.Effort,
+		Name: spawn.Name, RemoteControlName: spawn.RemoteControlName, Model: spawn.Model, Effort: spawn.Effort,
 		PromptFile: spawn.PromptFile, Args: spawn.Args, Home: spawn.Home,
 		Binary: spawn.binary, ConfigDir: spawn.explicitConfigDir,
 	}
@@ -235,4 +237,19 @@ func writeAssignments(command *strings.Builder, assignments []string) {
 		command.WriteByte('=')
 		command.WriteString(Quote(value))
 	}
+}
+
+// SeatRun retains the canonical engine recipe, not the tmux launch wrapper.
+func (spawn ClaudeSpawn) SeatRun(cwd string) (fleetdb.SeatRun, error) {
+	launch, err := spawn.render()
+	if err != nil {
+		return fleetdb.SeatRun{}, err
+	}
+	return fleetdb.SeatRun{
+		Binary:     launch.Binary,
+		Args:       append([]string(nil), launch.Argv...),
+		Env:        launchEnvironment(os.Environ(), launch),
+		CWD:        cwd,
+		CostLedger: spawn.Machine.EffectiveClaude(spawn.Account).CostLedger,
+	}, nil
 }

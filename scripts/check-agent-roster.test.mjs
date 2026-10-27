@@ -75,6 +75,67 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
   });
 }
 
+// Eligibility is read from source headers, never inferred from the emitted roster.
+for (const [scope, directory] of [
+  ['root', '.claude/agents'], ['child', 'demo-child/.claude/agents'],
+  ['nested', '.claude/agents/team'],
+]) {
+  for (const [name, header, capabilities, codexExtra, openCodeExtra] of [
+    ['Codex excluded', 'engines:\n  codex: false', [], 0, 1],
+    ['OpenCode excluded', 'engines:\n  opencode: false', [], 1, 0],
+    ['both excluded', 'engines:\n  codex: false\n  opencode: false', [], 0, 0],
+    ['engine settings stay eligible', 'engines:\n  codex:\n    model: gpt-6-luna\n  opencode:\n    model: openai/gpt-6-luna', [], 1, 1],
+    ['unmet requirement', 'requires: [gpt-agents]', [], 0, 0],
+    ['all requirements needed', 'requires: [gpt-agents, another]', ['gpt-agents'], 0, 0],
+    ['requirements met and trimmed', 'requires: [" gpt-agents ", another]', [' gpt-agents ', 'another'], 1, 1],
+    ['numeric requirement met', 'requires: [123]', ['123'], 1, 1],
+    ['numeric requirement unmet', 'requires: [123]', [], 0, 0],
+    ['boolean requirement text', 'requires: [true]', ['true'], 1, 1],
+    ['no requirements', 'requires: []', [], 1, 1],
+    ['requirements met but engine excluded', 'requires: [gpt-agents]\nengines:\n  codex: false\n  opencode: false', ['gpt-agents'], 0, 0],
+  ]) {
+    test(`source eligibility ${scope}: ${name}`, (t) => {
+      const f = fixture(t, {}, { version: 1 }, { targets: { capabilities } }, {
+        [`${directory}/eligible.md`]: `---\nname: eligible\ndescription: Eligibility fixture\nmodel: smart\n${header}\n---\nRead.\n`,
+      });
+      const result = check(f);
+      assert.equal(result.status, 0, result.out);
+      assert.ok(result.out.includes(`${2 + codexExtra} Codex and ${2 + (scope === 'nested' ? 0 : openCodeExtra)} OpenCode agents match source`), result.out);
+    });
+  }
+  for (const [runtime, extension, mirror] of [
+    ['codex', '.toml', '.codex/agents'], ['opencode', '.md', '.opencode/agent'],
+  ]) {
+    if (scope === 'nested' && runtime === 'opencode') continue;
+    test(`missing eligible ${runtime} ${scope} output fails despite clean compiler`, (t) => {
+      const f = fixture(t, {}, { version: 1 }, { targets: { capabilities: ['gpt-agents'] } }, {
+        [`${directory}/eligible.md`]: '---\nname: eligible\ndescription: Eligible role\nmodel: smart\nrequires: [gpt-agents]\nengines:\n  codex: {}\n  opencode: {}\n---\nRead.\n',
+      });
+      const name = `eligible${scope === 'child' ? '-demo-child' : ''}${extension}`;
+      unlinkSync(join(f.root, mirror, name));
+      cleanVerdictStub(f);
+      const result = check(f);
+      assert.equal(result.status, 1, result.out);
+      assert.ok(result.out.includes(`${runtime}: source agent missing from generated roster: ${name}`), result.out);
+      assert.doesNotMatch(result.out, /agent-roster: clean/);
+    });
+  }
+}
+
+for (const header of ['engines:\n  codex: false\n  opencode: false', 'requires: [gpt-agents]']) {
+  test(`enumerated sources can all be intentionally ineligible: ${header.split(':')[0]}`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, {
+      '.claude/agents/alpha.md': `---\nname: alpha\nmodel: smart\n${header}\n---\nRead.\n`,
+      'demo-child/.claude/agents/beta.md': `---\nname: beta\nmodel: smart\n${header}\n---\nRead.\n`,
+    });
+    mkdirSync(join(f.root, '.codex/agents'), { recursive: true });
+    mkdirSync(join(f.root, '.opencode/agent'), { recursive: true });
+    const result = check(f);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.out, /0 Codex and 0 OpenCode agents match source/);
+  });
+}
+
 for (const [name, path, header, status, message] of [
   ["project from", ".claude/agents/local.md", "from: general-purpose", 5, /SOURCE REJECTED — python3 .*machine scope only/],
   ["project abstract", ".claude/agents/local.md", "abstract: true", 5, /SOURCE REJECTED — python3 .*machine scope only/],
@@ -229,6 +290,21 @@ function cleanVerdictStub(f) {
   f.env.ENGINE_SYNC_BIN = join(f.root, "clean-engine-sync");
 }
 
+for (const [runtime, corrupt] of [
+  ['opencode', '---\nname: gitter\npermission:\n  bash:\n    "git *": deny\n---\nThe body says "git *": allow, but the permission denies it.\n'],
+  ...['read-only', 'workspace-write', 'unknown'].map((mode) => ['codex', `name = "gitter"\nsandbox_mode = "${mode}"\n`]),
+]) {
+  test(`structured writer permission corruption fails despite clean compiler: ${runtime} ${corrupt}`, (t) => {
+    const source = '---\nname: gitter\ndescription: Writer fixture\nmodel: smart\nengines:\n  codex:\n    sandbox: inherit\n  opencode:\n    permission:\n      bash:\n        "git *": allow\n---\nWrite git.\n';
+    const f = fixture(t, {}, { version: 1 }, {}, { '.claude/agents/gitter.md': source });
+    f.put(runtime === 'codex' ? '.codex/agents/gitter.toml' : '.opencode/agent/gitter.md', corrupt);
+    cleanVerdictStub(f);
+    const result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, new RegExp(`${runtime}: gitter`));
+  });
+}
+
 test("a role with no generated Codex twin fails although engine-sync's check reports clean", (t) => {
   const f = fixture(t);
   unlinkSync(join(f.root, ".codex/agents/alpha.toml"));
@@ -263,6 +339,8 @@ test("sources that define no agent name what the comparison could not do", (t) =
   const f = fixture(t);
   rmSync(join(f.root, ".claude/agents"), { recursive: true });
   rmSync(join(f.root, "demo-child/.claude/agents"), { recursive: true });
+  mkdirSync(join(f.root, ".claude/agents"), { recursive: true });
+  mkdirSync(join(f.root, "demo-child/.claude/agents"), { recursive: true });
   rmSync(join(f.root, ".codex/agents"), { recursive: true });
   rmSync(join(f.root, ".opencode/agent"), { recursive: true });
   mkdirSync(join(f.root, ".codex/agents"), { recursive: true });
@@ -273,6 +351,34 @@ test("sources that define no agent name what the comparison could not do", (t) =
   assert.match(result.out, /codex: the sources under \.claude\/agents \(root and child projects\) define no registered agent/);
   assert.match(result.out, /opencode: the sources under \.claude\/agents \(root and child projects\) define no registered agent/);
 });
+
+for (const writer of ['gitter']) {
+  const source = `---\nname: ${writer}\ndescription: Fixture Git writer\nmodel: smart\ntools: Read, Write, Bash\nengines:\n  codex:\n    sandbox: inherit\n  opencode:\n    permission:\n      bash:\n        "git *": allow\n---\nPerform the assigned Git phase.\n`;
+  test(`${writer} emitted permissions satisfy the local roster check`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, { [`.claude/agents/${writer}.md`]: source });
+    const result = check(f);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.out, /agent-roster: clean/);
+  });
+  test(`${writer} read-only Codex artifact fails despite a clean compiler verdict`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, { [`.claude/agents/${writer}.md`]: source });
+    f.put(`.codex/agents/${writer}.toml`, 'sandbox_mode = "read-only"\n');
+    cleanVerdictStub(f);
+    const result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.ok(result.out.includes(`codex: ${writer}.toml sandbox override differs from its source protocol (expected inherit)`), result.out);
+    assert.doesNotMatch(result.out, /agent-roster: clean/);
+  });
+  test(`${writer} missing OpenCode Git permission fails despite a clean compiler verdict`, (t) => {
+    const f = fixture(t, {}, { version: 1 }, {}, { [`.claude/agents/${writer}.md`]: source });
+    f.put(`.opencode/agent/${writer}.md`, '---\npermission:\n  bash:\n    "git *": deny\n---\nRead only.\n');
+    cleanVerdictStub(f);
+    const result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.ok(result.out.includes(`opencode: ${writer}.md lacks its source per-agent git write permission`), result.out);
+    assert.doesNotMatch(result.out, /agent-roster: clean/);
+  });
+}
 
 // Only ENOENT and ENOTDIR mean a path is absent. Any other lookup error (neither is a permission error
 // root would bypass: a symlink loop and an over-long name fail for every user) is a named failure.
@@ -334,27 +440,8 @@ for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
   });
 }
 
-// The GPT twins are derived agents: their machine-scoped .md declarations name their base, engine-sync renders
-// them, and a host that opts in with --capability gpt-agents links them. The properties below are therefore
-// pinned against what engine-sync RENDERS from the shipped declaration, never against a source file.
 const CAPABILITY = 'gpt-agents';
-const twins = [
-  ['gpt-flights-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
-  ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],
-  ['gpt-flights-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
-  ['gpt-flights-speccer', 'gpt-6.1-sol', 'xhigh', 'flights-speccer'],
-  ['gpt-flights-mechanical-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
-  ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
-  ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
-  ['gpt-rr', 'gpt-6.1-sol', 'low', 'rr'],
-  ['gpt-rr-pro', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro'],
-  ['gpt-rr-pro-max', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro-max'],
-  ['sol', 'gpt-6.1-sol', 'high'],
-  ['luna', 'gpt-6-luna', 'medium'],
-  ['astra', 'gpt-6-astra', 'high'],
-];
-const otherVariants = ['foreman-pro', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
-const configDir = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}';
+const otherVariants = ['flights-foreman-sonnet', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
 const renderErrors = /SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING|FRONTMATTER-INVALID/;
 
 // `engine-sync global` over the shipped declaration, into a jail home and Codex home: the real machine
@@ -426,113 +513,104 @@ test('the shipped variants render with zero errors with and without the gpt-agen
   }
 });
 
-test('the gpt-agents capability decides whether the GPT twins are linked', () => {
-  const on = renderShipped([CAPABILITY]);
-  const off = renderShipped([]);
-  for (const [name] of twins) {
-    assert.ok(renderedText(on, name), `${name}: not rendered with --capability ${CAPABILITY}`);
-    assert.equal(renderedText(off, name), null, `${name}: linked without the capability`);
-    // The doctor row: `ok agent SKIPPED all {name} {path} (requires {capability} unmet)`.
-    assert.match(off.doctor.out, new RegExp(`agent SKIPPED all ${name} \\S+ \\(requires ${CAPABILITY} unmet\\)`),
-      `${name}: not reported SKIPPED`);
-    assert.doesNotMatch(on.doctor.out, new RegExp(`agent SKIPPED all ${name} `), `${name}: SKIPPED although the capability is declared`);
+test('only the exact gitter mirror retains Git write permissions', () => {
+  const render = renderShipped([CAPABILITY]);
+  const dir = join(render.home, '.config/opencode/agents');
+  const allowed = [];
+  for (const file of readdirSync(dir).filter(file => file.endsWith('.md'))) {
+    const fm = parseFrontmatter(file, readFileSync(join(dir, file), 'utf8'));
+    if (fm.permission?.bash?.['git *'] === 'allow') allowed.push(file.slice(0, -3));
+  }
+  assert.deepEqual(allowed.sort(), ['gitter']);
+  for (const name of ['gitter']) {
+    const codex = readFileSync(join(render.home, '.codex/agents', `${name}.toml`), 'utf8');
+    assert.doesNotMatch(codex, /^sandbox_mode\s*=/m, `${name}: sandbox inherit must emit no sandbox_mode`);
   }
 });
 
-// A fifth field names the rendered variant a twin derives from when it is not the role's own manual.
-for (const [name, model, effort, role, base] of twins) {
-  test(`${name} renders its runtime and portable role contract`, () => {
-    const render = renderShipped([CAPABILITY]);
-    const text = renderedText(render, name);
-    assert.ok(text, `${name}: the rendered agent is missing`);
-    const fm = parseFrontmatter(name, text);
-    assert.equal(fm.name, name);
-    assert.equal(fm.model, `${model}[1m]`);
-    assert.equal(fm.effort, effort);
-    assert.deepEqual(fm.engines, { codex: false, opencode: false });
-    assert.deepEqual(fm.requires, [CAPABILITY]);
-    assert.deepEqual(fm.autoCompact, { forceAt: '230k', nudgeFrom: '190k', nudgeEvery: '20k' });
-    // The cap is 15 KiB for a twin of the general-purpose worker; a twin of a role manual may grow by the
-    // renames and the return law (2 KiB) over the larger of 15 KiB and the manual it derives from.
-    const original = role ? readFileSync(join(ROOT, 'templates/global/agents', `${role}.md`), 'utf8') : '';
-    const cap = role ? Math.max(15 * 1024, Buffer.byteLength(original)) + 2 * 1024 : 15 * 1024;
-    assert.ok(Buffer.byteLength(text) <= cap, `${name}: ${Buffer.byteLength(text)} bytes exceeds the agent size cap ${cap}`);
-    assert.doesNotMatch(text, /\/(Users|home|root)\/|\/private\//, `${name}: carries a machine-absolute path`);
-    assert.ok(!text.includes(render.home), `${name}: carries the render's home directory`);
-    for (const stray of filesNamed(render.home, name).filter((path) => !path.startsWith(join(render.home, '.claude/agents'))
-      && !path.startsWith(`${join(render.home, 'source')}/`) && !path.includes('/generated/claude-agents/')))
-      assert.fail(`${name}: ${stray} is a Codex role or an OpenCode agent; a GPT twin is Claude-only`);
-    if (!role) {
-      assert.equal(fm.role, undefined, `${name}: a general-purpose worker has no role`);
-      return;
-    }
-    assert.equal(fm.role, role);
-    // engine-sync renames every standalone occurrence of a name, quoted or not.
-    const renameStandalone = (names) => original.replace(
-      new RegExp(`(^|[^A-Za-z0-9_./:-])(${names})(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`, 'g'),
-      (_, before, agent) => `${before}gpt-${agent}`);
-    const renamed = role === 'flights-foreman'
-      ? renameStandalone('flights-mechanical-executor|flights-foreman|flights-lander|flights-speccer')
-      : role === 'flights-lander'
-        ? renameStandalone('reviewer-pro|reviewer')
-        : original;
-    const manual = base ? renderedText(render, base) : renamed;
-    assert.ok(manual, `${name}: its base ${base} was not rendered`);
-    assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(manual).trimEnd()), `${name}: the rendered body is not the full ${base ?? role} manual`);
-    if (role.startsWith('flights-')) {
-      assert.ok(text.includes('your parent hears from you only by that return'), `${name}: the return law is not prepended`);
-      // Each role's return law names only the files that role owns: the speccer writes its spec, never a builder's files.
-      const [owned, foreign] = role === 'flights-speccer'
-        ? ['write spec.md and the research and calibration files your manual names in the flight directory', 'run.md, briefs, returns/*.md, gate.md, red/*']
-        : ['run.md, briefs, returns/*.md, gate.md, red/*', 'write spec.md and the research'];
-      assert.ok(text.includes(owned), `${name}: the return law lost its file list`);
-      assert.ok(!text.includes(foreign), `${name}: the return law names files another role owns`);
-    } else if (role === 'rr') {
-      // The research leads keep their diggers on Claude: no rename, and sub-rr admits each twin.
-      assert.doesNotMatch(text, /gpt-sub-rr|gpt-clone-distiller/, `${name}: its diggers must remain Claude agents`);
-      assert.equal(fm.tools, parseFrontmatter(base ?? role, renderedText(render, base ?? role)).tools, `${name}: tools differ from ${base ?? role}`);
-      const digger = parseFrontmatter('sub-rr', renderedText(render, 'sub-rr'));
-      assert.ok(digger.visibility['visible-to'].include.includes(name), `${name}: sub-rr is not visible to it`);
-    } else {
-      assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
-      assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-flights-lander']);
-    }
-    if (role === 'flights-lander') {
-      assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),
-        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent',
-         'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back', 'Skill'],
-        `${name}: tools must match the GPT engine's supported role contract (Agent: the lander's review dispatch)`);
-      for (const reviewer of ['gpt-reviewer', 'gpt-reviewer-pro'])
-        assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
-    }
-    if (role === 'flights-foreman') {
-      for (const spawned of ['gpt-flights-foreman', 'gpt-flights-mechanical-executor', 'gpt-flights-lander', 'gpt-flights-speccer'])
-        assert.ok(text.includes(`subagent_type: "${spawned}"`), `${name}: rename to ${spawned} not applied`);
-      assert.doesNotMatch(text, /subagent_type: "flights-/, `${name}: a flights-* spawn survived the renames`);
-      const commands = (event) => fm.hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));
-      assert.deepEqual(commands('PreToolUse'),
-        ['pfm internal orchestrator-wait', 'pfm internal call-cap', 'python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate']);
-      // the cut gate holds Bash as well as the edit tools: a pre-cut `sed -i` is a code edit
-      assert.deepEqual(fm.hooks.PreToolUse.map((entry) => entry.matcher), ['Bash', '*', 'Bash|Edit|Write|MultiEdit|NotebookEdit']);
-      assert.deepEqual(commands('Stop'), [`python3 -I "${configDir}/hooks/gpt-agent-stop.py" foreman`]);
-    }
-  });
+// auto-effort-control steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
+// its buttons: exactly these Claude roles hold both; every other rendered agent, pcm and releaser neither.
+const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort-control__${tool}`);
+const foremanEffort = { floor: 'medium', ceiling: 'xhigh' };
+const effortSteered = new Map([
+  ['flights-foreman', foremanEffort], ['flights-foreman-sonnet', foremanEffort],
+  ['reviewer', true], ['reviewer-pro', true], ['reviewer-nt', true], ['documenter', true],
+]);
+function assertEffortPermission(name, text) {
+  const fm = parseFrontmatter(name, text);
+  const tools = (fm.tools ?? '').split(',').map((tool) => tool.trim());
+  const inheritsAll = fm.tools === undefined || tools.includes('*');
+  const denied = new Set(fm.disallowedTools ?? []);
+  const held = effortButtons.filter((button) => (inheritsAll || tools.includes(button)) && !denied.has(button));
+  const want = effortSteered.get(name);
+  if (want === undefined) {
+    assert.equal(fm.effortControl, undefined, `${name}: steered by effortControl but not an approved role`);
+    assert.deepEqual(held, [], `${name}: holds effort buttons`);
+    return false;
+  }
+  assert.deepEqual(fm.effortControl, want, `${name}: effortControl`);
+  assert.deepEqual(held, effortButtons, `${name}: must hold every effort button`);
+  for (const button of inheritsAll ? [] : effortButtons)
+    assert.equal(tools.filter((tool) => tool === button).length, 1, `${name}: must hold ${button} once; tools ${fm.tools}`);
+  return true;
 }
 
-// sub-agent-compact registers `compact` only while forwardHandoffTool is off, and Professor runs it on:
-// a fixed tools list naming the plugin names forward_handoff and look_back, never the unregistered compact.
-test('every shipped agent naming sub-agent-compact holds forward_handoff and look_back, never compact', () => {
+test('effort permission gate rejects an unapproved role inheriting every tool', () => {
+  assert.throws(() => assertEffortPermission('unapproved', '---\nname: unapproved\n---\nRead.\n'), /holds effort buttons/);
+  assert.throws(() => assertEffortPermission('unapproved', '---\nname: unapproved\ntools: "*"\n---\nRead.\n'), /holds effort buttons/);
+  assert.equal(assertEffortPermission('unapproved', '---\nname: unapproved\ntools: Read, Bash\n---\nRead.\n'), false);
+});
+
+test('effort permission gate evaluates native exclusions without reducing inherited capabilities', () => {
+  const exclusions = `disallowedTools: ${JSON.stringify(effortButtons)}\n`;
+  for (const tools of ['', 'tools: "*"\n', `tools: Read, Bash, ${effortButtons.join(', ')}\n`]) {
+    assert.equal(assertEffortPermission('unapproved', `---\nname: unapproved\n${tools}${exclusions}---\nRead.\n`), false);
+  }
+  for (const surviving of effortButtons) {
+    const denied = effortButtons.filter((button) => button !== surviving);
+    assert.throws(() => assertEffortPermission('unapproved', `---\nname: unapproved\ndisallowedTools: ${JSON.stringify(denied)}\n---\nRead.\n`));
+  }
+  assert.throws(() => assertEffortPermission('reviewer', `---\nname: reviewer\neffortControl: true\ndisallowedTools: [${effortButtons[0]}]\n---\nReview.\n`));
+});
+
+test('effort buttons ride exactly the steered Claude roles, never another rendered agent, pcm or releaser', () => {
+  const render = renderShipped([CAPABILITY]);
+  const dir = join(render.home, '.claude/agents');
+  const agents = [
+    ...readdirSync(dir).filter((file) => file.endsWith('.md')).map((file) => [file.slice(0, -3), readFileSync(join(dir, file), 'utf8')]),
+    ...['.claude/agents/pcm.md', '.claude/agents/releaser.md', 'templates/project/agents/pcm.md']
+      .map((path) => [path, readFileSync(join(ROOT, path), 'utf8')]),
+  ];
+  const steered = [];
+  for (const [name, text] of agents) {
+    if (assertEffortPermission(name, text)) steered.push(name);
+  }
+  assert.deepEqual(steered.sort(), [...effortSteered.keys()].sort(), 'an approved steered role was not rendered');
+});
+
+// forward-compaction registers two tools: a fixed tools list naming the plugin names both.
+test('every shipped agent naming forward-compaction holds forward_compaction and look_back', () => {
   const dirs = ['templates/global/agents', 'templates/generated/agents', 'templates/project/agents', '.claude/agents'];
   let handing = 0;
   for (const dir of dirs.filter((relative) => existsSync(join(ROOT, relative)))) {
     for (const file of readdirSync(join(ROOT, dir)).filter((entry) => entry.endsWith('.md'))) {
       const tools = readFileSync(join(ROOT, dir, file), 'utf8').match(/^tools:(.*)$/m)?.[1] ?? '';
-      if (!tools.includes('mcp__sub-agent-compact__')) continue;
+      if (!tools.includes('mcp__forward-compaction__')) continue;
       handing++;
-      assert.ok(!tools.includes('mcp__sub-agent-compact__compact'), `${dir}/${file}: names the unregistered compact tool`);
-      for (const tool of ['mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'])
-        assert.ok(tools.includes(tool), `${dir}/${file}: names sub-agent-compact but not ${tool}`);
+      for (const tool of ['mcp__forward-compaction__forward_compaction', 'mcp__forward-compaction__look_back'])
+        assert.ok(tools.includes(tool), `${dir}/${file}: names forward-compaction but not ${tool}`);
     }
   }
-  assert.ok(handing > 0, 'no shipped agent names a sub-agent-compact tool: the scan read nothing');
+  assert.ok(handing > 0, 'no shipped agent names a forward-compaction tool: the scan read nothing');
+});
+
+test('canonical investigation and trace visibility stays separate from GPT helpers', () => {
+  const render = renderShipped([CAPABILITY]);
+  for (const [child, callers] of [
+    ['transcript-reader', ['agent-investigator']], ['sub-tracer', ['tracer', 'sub-tracer']],
+  ]) {
+    const text = renderedText(render, child);
+    assert.ok(text, `${child}: no rendered helper`);
+    assert.deepEqual(parseFrontmatter(child, text).visibility['visible-to'].include, callers);
+  }
 });

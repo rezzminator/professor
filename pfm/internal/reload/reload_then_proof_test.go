@@ -53,7 +53,7 @@ func driveFakeClock(t *testing.T, clk *clock.Fake, fn func()) {
 // This file pins deliverThen's paste-placeholder proof (issue #12): a --then
 // prompt must be proven delivered from the ACTIVE composer only, a stale
 // placeholder left over in scrollback must never stand in for that proof, a
-// failed baseline capture must narrow the proof back to the tail needle, and
+// an unreadable baseline must prevent typing (reload_then_test.go), and
 // an unconfirmed submit must surface as an error the caller can recover
 // from instead of a silent false "success".
 
@@ -179,7 +179,7 @@ func TestDeliverThenRefusesAStalePlaceholderLeftInScrollback(t *testing.T) {
 	}
 }
 
-// --- (c) a failed baseline capture downgrades to tail-only proof ----------
+// --- (c) a failed baseline capture refuses delivery before typing --------
 
 // baselineFailureTmux fails exactly the pre-send baseline capture (the 2nd
 // Capture call), then renders a composer that is either a bare paste
@@ -223,15 +223,14 @@ func (tmux *baselineFailureTmux) SendKey(ctx context.Context, socket, pane, key 
 	return tmux.fakeReloadTmux.SendKey(ctx, socket, pane, key)
 }
 
-func TestDeliverThenRequiresTheTailNeedleWhenTheBaselineCaptureFailed(t *testing.T) {
+func TestDeliverThenRefusesWhenTheBaselineCaptureFailed(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name         string
 		composerMode string
-		wantAccepted bool
 	}{
-		{"a bare placeholder is refused without a baseline", "placeholder", false},
-		{"the prompt's own tail text is still accepted", "tail", true},
+		{"a bare placeholder cannot bypass the failed baseline", "placeholder"},
+		{"the prompt's own tail cannot bypass the failed baseline", "tail"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -257,17 +256,13 @@ func TestDeliverThenRequiresTheTailNeedleWhenTheBaselineCaptureFailed(t *testing
 					io.Discard,
 				)
 			})
-			if testCase.wantAccepted {
-				if err != nil {
-					t.Fatalf("deliverThen() error = %v, want the tail needle accepted despite the failed baseline", err)
-				}
-				return
+			if err == nil || !strings.Contains(err.Error(), "read composer before delivery") ||
+				!strings.Contains(err.Error(), "capture-pane: pane not found (transient)") {
+				t.Fatalf("deliverThen() error = %v, want explicit pre-send baseline refusal", err)
 			}
-			if err == nil {
-				t.Fatal("deliverThen() = nil, want a bare placeholder refused when the baseline capture failed")
-			}
-			if tmux.enterCount != 0 {
-				t.Fatalf("enterCount = %d, want no submit attempt for an unproven send", tmux.enterCount)
+			if tmux.literal != "" || tmux.enterCount != 0 {
+				t.Fatalf("typed=%q enterCount=%d, want no delivery over an unreadable baseline",
+					tmux.literal, tmux.enterCount)
 			}
 		})
 	}

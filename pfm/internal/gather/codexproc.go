@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // CodexThreadResolver names the conversation behind a live codex process that
@@ -227,7 +226,7 @@ func codexThreadEnv(proc ProcFS, pid int) string {
 	if err != nil {
 		return ""
 	}
-	return environment[resolve.CodexThreadEnv]
+	return environment[pfmengine.MustLookup(pfmengine.Codex).SessionEnv]
 }
 
 func processBirth(proc ProcFS, pid int) int64 {

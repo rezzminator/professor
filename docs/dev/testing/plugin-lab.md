@@ -51,7 +51,7 @@ infra/plugin-lab/lab prune --days N       # deletes run folders older than N day
 
 - Header: run id, scenario, plugin and version, claude binary, the checkout's rev and dirty hash, start, wall time. The dirty hash is a content hash: sha256 over the path and blob of every modified or untracked file under the plugin folder (`git ls-files -m -o --exclude-standard`), leaving out the engine-written `tsconfig.json` and `.claude-plugin/types/`.
 - `## Passport`: the isolation proofs, one line each — observed env keys equal the allowlist plus `LAB_ENV` (read from outside the process), the session id is in no live store, no keychain item left behind, no undeclared hook bypass line in the debug log, rev and dirty hash equal at start and end with no hot reload of the plugin's hooks in the debug log (Claude Code reloads a `--plugin-dir` on any edit), the installed copies off, the spend metered against the cap.
-- Vitals (when `LAB_LOGGER=yes`): `vital/first-row` (at least one level or decision row since the start under `PLUGIN_LOG_DIR/{plugin}/`, the earliest named; a plugin logs on events only, so the scenario must make it write one) and `vital/no-new-errors` (no row in `errors.jsonl` since the start but those `expect_error` declared).
+- Vitals (when `LAB_LOGGER=yes`): `vital/first-row` (at least one level or decision row since the start under `PLUGIN_LOG_DIR/{plugin}/`, the earliest named; a plugin logs on events only, so the scenario must make it write one) and `vital/no-new-errors` (no row in `errors.jsonl` since the start but those `expect_error` declared), and `vital/options-ignored` (the scenario tests the options it set, never the defaults: no `options-ignored` decision row and no warning that options "are not read" in any log of the plugin or at `LAB_DECISIONS`, a `pluginConfigs` option the plugin reads nowhere; no `option-error` row naming a `LAB_ENV` variable, a value the plugin refused, unless `expect_error option-error` declares it; ERROR when it cannot look: no log, an unreadable log folder, a `LAB_DECISIONS` that is not absolute or has `{sid}` outside its file name, a settings source the plugin could not read). With `LAB_LOGGER=no` it runs only when `LAB_DECISIONS` names a decision log.
 - `## Checks`: one row per beat, `| {scenario}/{slug} | {row} | {verdict} | {evidence} |`.
 - Last line: `verdict {PASS|FAIL|ERROR|STOPPED} · ${usd} / {cap}`.
 
@@ -72,7 +72,7 @@ A beat whose `--needs` did not PASS is `ERROR blocked-by {id}` (`GAP blocked-by`
 1. Make the plugin's level and decision logs honour `PLUGIN_LOG_DIR`; a scenario whose session writes no row sets `LAB_LOGGER=no`.
 2. Nothing to ignore for the files Claude Code writes into the plugin's folder on load: `passport/identity` leaves out `tsconfig.json` and `.claude-plugin/types/`; any other file the load writes fails it as `tree-changed`.
 3. Create `infra/plugin-lab/scenarios/{plugin}/`, the directory name equal to the plugin's `name`.
-4. Write `logger-ready.sh` first, a turn that makes the plugin write its first row (copy `scenarios/effort-live-control/logger-ready.sh`); run it once live.
+4. Write `logger-ready.sh` first, a turn that makes the plugin write its first row (copy `scenarios/auto-effort-control/logger-ready.sh`); run it once live.
 5. Add a scenario per requirement row; list rows only unit tests can carry in `gaps.tsv`.
 6. Run `bash infra/plugin-lab/tests/scenarios_test.sh` before the first live run.
 
@@ -81,9 +81,9 @@ A beat whose `--needs` did not PASS is `ERROR blocked-by {id}` (`GAP blocked-by`
 A scenario is `scenarios/{plugin}/{slug}.sh`, sourced by the lab: a header of variables, then one function `lab_scenario` made of beats.
 
 ```bash
-# S2: one turn with an invalid option; the plugin's first row is its option-error warning under PLUGIN_LOG_DIR (R1).
+# S2: one turn with an invalid option; the plugin's first row is its option-error error under PLUGIN_LOG_DIR (R1).
 # shellcheck shell=bash disable=SC2034
-LAB_PLUGIN=effort-live-control
+LAB_PLUGIN=auto-effort-control
 LAB_ROWS=(R1)
 LAB_MODEL=haiku
 LAB_CAP_USD=0.25
@@ -95,7 +95,7 @@ lab_options '{"floor":"bogus"}'
 
 lab_scenario() {
   beat ready -- turn 'Reply with the word READY.' 300
-  beat option-error-row --needs ready -- level_has warnings 'select(.event == "option-error" and .where == "hooks/effort-live-control.ts#start")'
+  beat option-error-row --needs ready -- level_has errors 'select(.event == "option-error" and .where == "hooks/auto-effort-control.ts#start")'
 }
 ```
 
@@ -116,7 +116,7 @@ Header:
 | `LAB_GAP_IF_NOT_INDUCED` | the reason a fault-inducing scenario reads GAP when the fault did not happen |
 | `LAB_LOGGER` | `yes` adds the vitals; `no` skips them |
 | `LAB_DECISIONS` | the decision log the decision verbs read, when an option moves it; `{run}`, `{plugin}` and `{sid}` expand; default `{run}/logs/{plugin}/decisions/{sid}.jsonl` |
-| `lab_options` | the plugin's options JSON, written to `pluginConfigs.{plugin}@inline.options`; `{run}` expands |
+| `lab_options` | the options JSON of a plugin that declares options, written to `pluginConfigs.{plugin}@inline.options`; `{run}` expands. `forward-compaction` reads none: its options are `FORWARD_COMPACTION_*` variables in `LAB_ENV`, and `vital/options-ignored` fails a run whose settings still carry a JSON option. A `LAB_ENV` variable named in the plugin's own prefix (its name upper snake, then `_`) that no file of the plugin names stops the run before launch, `ERROR option-unknown` |
 
 Beats: `beat {slug} [--row R] [--needs slug]... -- {verb} [args]`. Slugs are unique in a scenario. The body may use only verbs plus `for`, `if`, `local`, `((` and plain assignments; `tests/scenarios_test.sh` enforces that, the header, and that the caps of all scenarios sum to at most USD 10.
 
@@ -125,14 +125,14 @@ Beats: `beat {slug} [--row R] [--needs slug]... -- {verb} [args]`. Slugs are uni
 - The first drive verb boots the session lazily; the session ends with `exit_session` after the last beat.
 - `slash {command} SessionStart` follows the new session: `LAB_SID_PREV` keeps the old id, `LAB_SID` and `LAB_TRANSCRIPT` move to the new one, so later decision verbs read the new session's log; read the old one with `jsonl_has '{run}/logs/{plugin}/decisions/'"$LAB_SID_PREV"'.jsonl' …`.
 - `LAB_AGENT_ID`, `LAB_AGENT_TRANSCRIPT` and `LAB_SID_PREV` stay empty until `wait_subagent` or `slash … SessionStart` sets them, so a beat naming them takes `--needs` on that beat.
-- `expect_error {event}` declares a level-log error row the scenario induces on purpose; `expect_bypass {plugin} {event}` declares a hook bypass line it induces.
+- `expect_error {event}` declares a level-log error row the scenario induces on purpose, and `expect_error option-error` a refused `LAB_ENV` value; `expect_bypass {plugin} {event}` declares a hook bypass line it induces.
 
 ## Verbs
 
 | Verb | Arguments | Does |
 | --- | --- | --- |
 | `need_corpus` | name tokens | writes `{run}/work/corpus/{name}.txt` of `tokens × 4` bytes, ending in a unique last word; Claude Code counts these words at about 1.5 tokens per 4 bytes (a 15000 file reads as 22.4k), so size a fill against the measured context, not the argument |
-| `need_agent` | name model tools [flow map] | a project agent in `{run}/work/.claude/agents/`; the map renders as nested `autoCompact:` lines |
+| `need_agent` | name model tools | a project agent in `{run}/work/.claude/agents/` |
 | `need_dir_mode` | path mode | pre-creates a directory with that mode |
 | `need_fixture_plugin` | fixture marketplace | installs `fixtures/{fixture}` into the run's store and enables it in the run settings |
 | `say` | text | types one line; returns at its prompt-submit mark; a line neither the transcript nor the pane holds after 5 s is typed once more |
@@ -168,7 +168,7 @@ The authoritative list is `LAB_VERBS` in `infra/plugin-lab/lib/verdict.sh`.
 
 ## Self-tests
 
-`infra/plugin-lab/tests/` mirrors the code (`lib/*_test.sh`, `hooks/mark_test.sh`, `lab_test.sh`, `lab_errors_test.sh` and `lab_violations_test.sh` over the shared `lab_setup.sh`, `scenarios_test.sh`) and runs hermetically against the fakes in `tests/fakes/` (`claude`, `meter`, `security`): no network, no tokens. The fence step `templates.plugin-lab` (`checks_templates_plugin_lab` in `infra/fence/checks.sh`) runs `shellcheck -x -S warning` over the lab's shell (`infra/plugin-lab/.shellcheckrc` turns off SC2034, since a global set in one sourced file is read in another), then every self-test side by side, each file in its own temp root, printing each suite's log and rc and a `{n} suites, {red} red` total. One file on the host goes through the fence: `.claude/scripts/test-templates.sh infra/plugin-lab/tests/lib/observe_test.sh`.
+`infra/plugin-lab/tests/` mirrors the code (`lib/*_test.sh`, `hooks/mark_test.sh`, `lab_test.sh`, `lab_errors_test.sh` and `lab_violations_test.sh` over the shared `lab_setup.sh`, `scenarios_test.sh`) and runs hermetically against the fakes in `tests/fakes/` (`claude`, `meter`, `security`): no network, no tokens. The fence step `templates.plugin-lab` (`checks_templates_plugin_lab` in `infra/fence/checks.sh`) runs `shellcheck -x -S warning` over the lab's shell (`infra/plugin-lab/.shellcheckrc` turns off SC2034, since a global set in one sourced file is read in another), then every self-test side by side, each file in its own temp root, printing each suite's log and rc and a `{n} suites, {red} red` total. One file on the host goes through the fence: `.claude/scripts/test.sh infra/plugin-lab/tests/lib/observe_test.sh`.
 
 ## Follow-up migration
 

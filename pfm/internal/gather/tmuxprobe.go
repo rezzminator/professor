@@ -18,6 +18,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -42,19 +43,39 @@ type PaneCapturer interface {
 // permission failure) under a wall of "exit status 1" after every picker close.
 var ErrServerGone = errors.New("no tmux server on socket")
 
-// serverGone reads tmux's own words for a socket with nothing behind it. The
+// ErrOptionUnset marks a read of a global option the server holds no value
+// for: tmux refuses an unset user option as "invalid option: @name" (an older
+// tmux says "unknown option"). It is tmux's definitive answer that the option
+// is unset, never a read that could not run.
+var ErrOptionUnset = errors.New("tmux option unset")
+
+// optionUnset reads tmux's refusal of an unset option named name.
+func optionUnset(err error, name string) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	for _, line := range strings.Split(string(exit.Stderr), "\n") {
+		if line = strings.TrimSpace(line); line == "invalid option: "+name || line == "unknown option: "+name {
+			return true
+		}
+	}
+	return false
+}
+
+// TmuxServerGone reads tmux's own words for a socket with nothing behind it. The
 // exit status alone cannot say it — tmux exits 1 for every failure and writes
 // the reason to stderr, which exec keeps on the ExitError rather than in the
 // error message.
-func serverGone(err error) bool {
+func TmuxServerGone(err error) bool {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) {
 		return false
 	}
 	stderr := string(exit.Stderr)
 	return strings.Contains(stderr, "no server running") ||
-		strings.Contains(stderr, "error connecting to") ||
-		strings.Contains(stderr, "No such file or directory")
+		strings.Contains(stderr, "error connecting to") &&
+			(strings.Contains(stderr, "No such file or directory") || strings.Contains(stderr, "Connection refused"))
 }
 
 // ErrServerEmpty marks a probe whose server answered but holds no session and
@@ -191,7 +212,7 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 			// Both probes agree there is nothing behind the socket: say so in a
 			// form the caller can classify, since the bare ExitError reads only
 			// "exit status 1".
-			if serverGone(err) && serverGone(legacyErr) {
+			if TmuxServerGone(err) && TmuxServerGone(legacyErr) {
 				return nil, fmt.Errorf("%w: %s", ErrServerGone, socket)
 			}
 			if serverEmpty(err) && serverEmpty(legacyErr) {
@@ -306,7 +327,7 @@ func parseLegacyPaneOutput(socket string, output []byte) ([]ProbePane, error) {
 func (tmux TmuxProbe) ServerPID(ctx context.Context, socket string) (int, error) {
 	output, err := tmux.probeCommand(ctx, socket, "display-message", "-p", "#{pid}").Output()
 	if err != nil {
-		if serverGone(err) {
+		if TmuxServerGone(err) {
 			return 0, fmt.Errorf("read tmux server pid on %s: %w", socket, ErrServerGone)
 		}
 		return 0, fmt.Errorf("read tmux server pid on %s: %w", socket, withStderr(err))
@@ -355,13 +376,24 @@ func (tmux TmuxProbe) CapturePane(
 // sets pane_title, never the window name.) The latch is WINDOW-scoped on
 // purpose — it protects the windows pfm addresses the fleet by, and leaves the
 // operator's own windows and their global setting alone.
+//
+// A writer that knows the chat's exact name (rename.ChatName) states it in the
+// SAME tmux command, set BEFORE the rename: the window-renamed hook that the
+// rename fires reads herdr.ChatNameOption, and the window name is only the
+// clipped form. A writer that does not know it sets nothing; a name no user
+// chose (rename.Automatic) is marked in herdr.ChatNameAutoOption too.
 func (tmux TmuxProbe) RenameWindow(
 	ctx context.Context,
 	rename WindowRename,
 ) error {
-	command := tmux.probeCommand(
-		ctx,
-		rename.Socket,
+	var arguments []string
+	switch {
+	case rename.ChatName != "" && rename.Automatic:
+		arguments = append(AutomaticChatNameCommand(rename.WindowID, rename.ChatName), ";")
+	case rename.ChatName != "":
+		arguments = append(ChatNameCommand(rename.WindowID, rename.ChatName), ";")
+	}
+	arguments = append(arguments,
 		"rename-window",
 		"-t",
 		rename.WindowID,
@@ -373,6 +405,7 @@ func (tmux TmuxProbe) RenameWindow(
 		"allow-rename",
 		"off",
 	)
+	command := tmux.probeCommand(ctx, rename.Socket, arguments...)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf(
 			"rename tmux window %s %s to %q: %w: %s",
@@ -385,6 +418,34 @@ func (tmux TmuxProbe) RenameWindow(
 	}
 	return nil
 }
+
+// ChatNameCommand is the tmux command that stores a chat's exact name on the
+// session target addresses — the one spelling every window-name writer
+// chains, with `;`, into its own command. tmux reads an argument ending in `;`
+// as a command separator and drops the `;`, unless a backslash precedes it,
+// which tmux removes: the name's last character is protected here.
+func ChatNameCommand(target, chatName string) []string {
+	if strings.HasSuffix(chatName, ";") {
+		chatName = chatName[:len(chatName)-1] + `\;`
+	}
+	return []string{tmuxSetOption, "-t", target, herdr.ChatNameOption, chatName}
+}
+
+// AutomaticChatNameCommand is ChatNameCommand for a name no user chose: the
+// same command, chained with `;` to the setting of herdr.ChatNameAutoOption
+// to the same name, its final `;` escaped the same way.
+func AutomaticChatNameCommand(target, chatName string) []string {
+	command := ChatNameCommand(target, chatName)
+	return append(command, ";", tmuxSetOption, "-t", target, herdr.ChatNameAutoOption, command[len(command)-1])
+}
+
+// ChatRenameCommand is ChatNameCommand followed, in the same tmux command, by
+// the rename of target's window to the chat name's clipped WindowNameFor form.
+func ChatRenameCommand(target, chatName string) []string {
+	return append(ChatNameCommand(target, chatName), ";", "rename-window", "-t", target, WindowNameFor(chatName))
+}
+
+const tmuxSetOption = "set-option"
 
 // ShowGlobalOption reads one global tmux option's raw value off a live
 // server, the same `show -gv` read tmux-title-renudge performs. tmux always
@@ -399,10 +460,13 @@ func (tmux TmuxProbe) ShowGlobalOption(
 	command := tmux.probeCommand(ctx, socket, "show", "-gv", name)
 	output, err := command.Output()
 	if err != nil {
-		if serverGone(err) {
+		if TmuxServerGone(err) {
 			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrServerGone)
 		}
-		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, err)
+		if optionUnset(err, name) {
+			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrOptionUnset)
+		}
+		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, withStderr(err))
 	}
 	return strings.TrimRight(string(output), "\n"), nil
 }

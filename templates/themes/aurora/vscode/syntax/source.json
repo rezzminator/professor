@@ -1,0 +1,17 @@
+{
+  "0000": {
+    "name": "Starlight · plain text",
+    "scope": [
+      "source",
+      "text",
+      "variable",
+      "variable.other",
+      "variable.other.readwrite",
+      "meta.definition.variable.name",
+      "entity.name.variable"
+    ],
+    "settings": {
+      "foreground": "#dce5fa"
+    }
+  }
+}

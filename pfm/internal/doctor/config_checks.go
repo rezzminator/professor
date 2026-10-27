@@ -75,12 +75,6 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) (int, int) {
 		runtime.Config.MCP.HTTP.Port,
 		runtime.Config.Source("mcp.http.port"),
 	)
-	fmt.Fprintf(
-		stdout,
-		"doctor: config harvester path=%s exists=%t\n",
-		runtime.Config.Harvester.Path,
-		runtime.Config.Harvester.Exists,
-	)
 	for _, account := range runtime.Config.CodexAccounts {
 		path := filepath.Join(account.Home, "auth.json")
 		if err := config.CodexLoginError(account.Home); err != nil {
@@ -211,60 +205,6 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 	return 0, 0
 }
 
-// RetiredHarvesterEnv maps every environment variable the harvester used to
-// read to where that setting lives now. The harvester ignores them all, so a
-// set one is a setting that silently stopped applying — doctor says so.
-var RetiredHarvesterEnv = []struct{ Name, Now string }{
-	{"SEARXNG_URL", "search.searxngURL"},
-	{"BRAVE_API_KEY", "search.braveApiKey"},
-	{"HARVESTER_DISABLE_SEARCH", "search.enabled"},
-	{"HARVESTER_CONTACT_EMAIL", "scholarly.contactEmail"},
-	{"GOOGLE_BOOKS_API_KEY", "scholarly.googleBooksApiKey"},
-	{"CORE_API_KEY", "scholarly.coreApiKey"},
-	{"SEMANTIC_SCHOLAR_API_KEY", "scholarly.semanticScholarApiKey"},
-	{"HARVESTER_BROWSER", "fetch.browser"},
-	{"HARVESTER_PDF_OCR", "convert.pdfOcr"},
-	{"HARVESTER_PDF_LAYOUT", "convert.pdfLayout"},
-	{"WEBFETCH_DIR", "cache.dir"},
-	{"HARVESTER_CACHE_DIR", "cache.dir"},
-	{"HARVESTER_CACHE_TTL", "cache.ttlSeconds"},
-	{"HARVESTER_NEG_TTL", "cache.negativeTtlSeconds"},
-	{"HARVESTER_NEG_TTL_TRANSIENT", "cache.negativeTransientTtlSeconds"},
-	{"HARVESTER_MAX_INLINE_CHARS", "output.maxInlineChars"},
-	{"HARVESTER_STATE_DIR", "external.stateDir"},
-	{"HARVESTER_AUTH_PASSPHRASE", "external.auth.passphrase"},
-	{"HARVESTER_STATIC_TOKEN", "external.auth.staticToken"},
-	{"HARVESTER_LOCAL_ROOTS", ""},
-	{"PFM_HARVEST_PYTHON", ""},
-}
-
-// printHarvesterExternalDoctor reports the external gateway whenever it is
-// configured on: the daemon's live state, or why it cannot be running. A
-// configured gateway that never opened is a warning, never an absent line.
-func printHarvesterExternalDoctor(stdout io.Writer, harvester config.HarvesterConfig, reported string) int {
-	if !harvester.External.Enabled {
-		return 0
-	}
-	state := reported
-	switch {
-	case !harvester.Enabled:
-		state = "off (external.enabled is true but harvester.enabled is false; the gateway only runs with the harvester)"
-	case state == "":
-		state = "not reported (daemon predates the external gateway; restart it)"
-	}
-	fmt.Fprintf(stdout, "doctor: mcp harvester_external=%s\n", state)
-	if strings.HasPrefix(state, "listening") {
-		return 0
-	}
-	return 1
-}
-
-// printHarvesterConfigDoctor warns when a retired harvester environment
-// variable is still set, naming the config setting that replaced it.
-func printHarvesterConfigDoctor(stdout io.Writer, runtime config.Runtime) int {
-	return printHarvesterConfigDoctorWithEnv(stdout, runtime, paths.OSEnv{})
-}
-
 // printDuplicateSeatLogins reads the user-scope Claude registries that the
 // installer already owns and names seats sharing one OAuth login. A shared
 // login shares one provider usage cap, so reloading onto the second seat does
@@ -340,32 +280,6 @@ func printDuplicateSeatLogins(stdout io.Writer, runtime config.Runtime, env path
 			"doctor: duplicate-seat-login email=%s seats=%s advisory=these seats share one OAuth usage cap; reload onto one of them does not change capacity\n",
 			email,
 			strings.Join(labels, ","),
-		)
-	}
-	return warnings
-}
-
-func printHarvesterConfigDoctorWithEnv(stdout io.Writer, runtime config.Runtime, env paths.Env) int {
-	warnings := 0
-	for _, retired := range RetiredHarvesterEnv {
-		if strings.TrimSpace(env.Get(retired.Name)) == "" {
-			continue
-		}
-		warnings++
-		if retired.Now == "" {
-			fmt.Fprintf(
-				stdout,
-				"doctor: harvester retired_env=%s is set but ignored (removed; pfm never honored it)\n",
-				retired.Name,
-			)
-			continue
-		}
-		fmt.Fprintf(
-			stdout,
-			"doctor: harvester retired_env=%s is set but ignored — move it to %s in %s\n",
-			retired.Name,
-			retired.Now,
-			runtime.Config.Harvester.Path,
 		)
 	}
 	return warnings

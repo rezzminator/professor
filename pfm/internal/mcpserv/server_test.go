@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -278,7 +279,13 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	if listed.Count != 1 {
 		t.Fatalf("ls = %+v", listed)
 	}
+	// The presence is the host's own (a dash without Herdr, else what its
+	// Herdr says); the stdio path must carry one, whatever it reads.
+	if listed.Rows[0].Herdr == "" {
+		t.Fatalf("ls row = %+v, want a herdr presence string over stdio", listed.Rows[0])
+	}
 	wantRow := ChatRow{
+		Herdr:   listed.Rows[0].Herdr,
 		Session: "fixture-session",
 		ID:      "fixture",
 		Engine:  "cc",
@@ -316,32 +323,6 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Fatalf("capture = %+v", captured)
 	}
 
-	found := callTool[FindOutput](t, session, "find", FindInput{
-		Excerpt: "secret middle",
-	})
-	if found.Count != 1 ||
-		found.Candidates[0].ID != "fixture" ||
-		!found.Candidates[0].Confirmed {
-		t.Fatalf("find = %+v", found)
-	}
-
-	read := callTool[ReadOutput](t, session, "read", ReadInput{
-		Source:   "fixture",
-		LastN:    2,
-		MaxBytes: 1000,
-	})
-	// The human's interrupt is a turn end, kept in the record the way a
-	// model-server error is (transcript.interruptedTurn).
-	wantTurns := []Turn{
-		{Role: "assistant", Text: "[turn aborted: interrupted]"},
-		{Role: "user", Text: "Final prompt"},
-	}
-	if !reflect.DeepEqual(read.Turns, wantTurns) ||
-		read.Count != 2 ||
-		!read.Truncated {
-		t.Fatalf("read = %+v, want turns %+v", read, wantTurns)
-	}
-
 	called := callTool[CallOutput](t, session, "call", CallInput{
 		Target:  "Fixture Label",
 		Message: "hello fixture",
@@ -357,6 +338,20 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	})
 	if !strings.Contains(after.Text, "USER:hello fixture") {
 		t.Fatalf("post-call capture = %+v", after)
+	}
+
+	// A broadcast reports each target on its own; one refusal never hides
+	// the delivery beside it.
+	broadcast := callTool[CallOutput](t, session, "call", CallInput{
+		Targets: []string{"Fixture Label", jail.selectorSession, "Fixture Label"},
+		Message: "hello broadcast",
+	})
+	if broadcast.Status != "partial" || broadcast.Code != 6 || len(broadcast.Results) != 2 ||
+		broadcast.Results[0].Target != "Fixture Label" || broadcast.Results[0].Status != "delivered" ||
+		!strings.Contains(broadcast.Results[0].Proof, "USER:hello broadcast") ||
+		broadcast.Results[1].Target != jail.selectorSession || broadcast.Results[1].Status != "refused" ||
+		!strings.Contains(broadcast.Message, "broadcast delivered 1/2; not delivered: "+jail.selectorSession) {
+		t.Fatalf("broadcast = %+v\nstderr:\n%s", broadcast, serverStderr.String())
 	}
 
 	selectorBefore := callTool[CaptureOutput](t, session, "capture",
@@ -840,10 +835,126 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 	path := filepath.Join(root, "mcp-enabled.json")
 	if err := os.WriteFile(
 		path,
-		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true},"harvester":{"enabled":false}}}}`+"\n"),
+		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true}}}}`+"\n"),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		literal, refused bool
+		keys             []string
+	}{
+		{name: "named", keys: []string{"Enter"}},
+		{name: "literal", literal: true, keys: []string{"Home"}},
+		{name: "unsupported second key", refused: true, keys: []string{"Enter", "Home"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := testjail.ShortRoot(t)
+			socket := filepath.Join(root, "native.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan struct{})
+			t.Cleanup(func() {
+				if err := listener.Close(); err != nil {
+					t.Error(err)
+				}
+				<-done
+			})
+			got := make(chan map[string]any, 1)
+			go func() {
+				defer close(done)
+				for {
+					conn, err := listener.Accept()
+					if err != nil {
+						return
+					}
+					func() {
+						defer func() {
+							if err := conn.Close(); err != nil {
+								t.Error(err)
+							}
+						}()
+						var request map[string]any
+						if err := json.NewDecoder(conn).Decode(&request); err != nil {
+							t.Error(err)
+							return
+						}
+						var result any
+						switch request["method"] {
+						case "pane.list":
+							result = map[string]any{
+								"type":  "pane_list",
+								"panes": []any{testjail.HerdrPaneInfo("w6:p3")["pane"]},
+							}
+						case "pane.process_info":
+							result = map[string]any{
+								"type":         "pane_process_info",
+								"process_info": map[string]any{"pane_id": "w6:p3", "shell_pid": 41},
+							}
+						default:
+							got <- request
+							result = map[string]any{"type": "ok"}
+						}
+						if err := json.NewEncoder(conn).
+							Encode(map[string]any{"id": request["id"], "result": result}); err != nil {
+							t.Error(err)
+						}
+					}()
+				}
+			}()
+			service := newFixtureService(t)
+			seedKeysHerdrOwner(t, socket)
+			service.backend.callEngine = resolveGateCaller{
+				target: pfmcall.Target{Backend: "herdr", SocketPath: socket, Pane: "w6:p3"},
+			}
+			_, output, err := service.chatKeys(
+				context.Background(),
+				nil,
+				KeysInput{Target: "NATIVE", Keys: test.keys, Literal: test.literal},
+			)
+			if test.refused {
+				if err == nil || !strings.Contains(err.Error(), "Herdr") || output.Status != statusError ||
+					output.Code != 10 ||
+					output.Count != 0 {
+					t.Fatalf("capability refusal output=%+v err=%v", output, err)
+				}
+				select {
+				case request := <-got:
+					t.Fatalf("refused sequence sent input: %v", request)
+				default:
+				}
+				return
+			}
+			if err != nil || output.Count != 1 {
+				t.Fatalf("native keys output=%+v err=%v", output, err)
+			}
+			select {
+			case request := <-got:
+				want := "pane.send_keys"
+				if test.literal {
+					want = "pane.send_text"
+				}
+				if request["method"] != want {
+					t.Fatalf("native method=%v", request)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("native keys never reached resolved socket")
+			}
+		})
+	}
+}
+
+// The chat server's routing text, byte for byte: every clause names a tool it registers.
+func TestChatInstructionsPinTheRoutingText(t *testing.T) {
+	want := "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+	if chatInstructions != want {
+		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", chatInstructions, want)
+	}
 }

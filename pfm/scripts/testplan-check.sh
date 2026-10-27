@@ -3,7 +3,7 @@
 # row citing a deleted test or a renamed file reads as coverage that is not there.
 #   scripts/testplan-check.sh [TESTPLAN.md]
 # Checked: each `Test…` identifier is a `func Test…` in some pfm/ *_test.go (a
-# trailing `*` is a name prefix, `TestChatDigest*`); each backticked token shaped
+# trailing `*` is a name prefix, `TestChatLS*`); each backticked token shaped
 # like a source path (.go .sh .py .zsh .txtar .tsv .sql), its `:line` /
 # `:line-line` / `: Name` tail dropped, is a path suffix of a file under pfm/ (the
 # plan writes a bare file name, or a path relative to the engine, internal/ or a

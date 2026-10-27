@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -18,9 +19,11 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/rowfacts"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
@@ -120,6 +123,9 @@ func Run(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
+		for _, failure := range scan.Errors {
+			fmt.Fprintf(stderr, "pfm ls: %s\n", failure)
+		}
 		if scan.Snapshot.ScheduleError != "" {
 			fmt.Fprintf(stderr, "pfm ls: %s\n", scan.Snapshot.ScheduleError)
 		}
@@ -156,6 +162,9 @@ func Run(
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
+		}
+		for _, failure := range scan.Errors {
+			fmt.Fprintf(stderr, "pfm ls: %s\n", failure)
 		}
 		if hasUpdate {
 			scan.Snapshot.Rows = append([]compose.Row{updateRow}, scan.Snapshot.Rows...)
@@ -220,6 +229,9 @@ func Run(
 		return 1
 	}
 	if *plain || *tsv {
+		if len(scan.Errors) > 0 {
+			return 1
+		}
 		return 0
 	}
 	// Every ⌃X already landed the moment it was typed, so there is nothing
@@ -257,14 +269,14 @@ func Run(
 			fmt.Fprintln(stderr, "pfm ls: deactive refused for split live window")
 			return 1
 		}
-		if err := pfmchat.KillServer(ctx, scan.Paths, outcome.Row.Socket); err != nil {
+		if err := deactivateApplier(ctx, scan.Paths)(outcome.Row); err != nil {
 			fmt.Fprintf(stderr, "pfm ls: deactive %s: %v\n", outcome.Row.Name, err)
 			return 1
 		}
 		fmt.Fprintf(stderr, "pfm ls: deactivated %s — ready to resume\n", outcome.Row.Name)
 		return 0
 	case ui.OutcomeReboot:
-		row, err := rebootRow(ctx, scan.Paths, outcome.Row, stderr)
+		row, err := rebootRow(ctx, scan.Paths, outcome.Row, stderr, runtime)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
@@ -568,6 +580,22 @@ func deactivateApplier(
 	resolved paths.Values,
 ) func(compose.Row) error {
 	return func(row compose.Row) error {
+		if row.Backend == spawn.BackendHerdr {
+			var diagnostic strings.Builder
+			runtime := pfmconfig.Runtime{Paths: resolved}
+			target := headless.Chat{
+				Backend: row.Backend,
+				SeatID:  row.SeatID,
+				ID:      row.ID,
+				Engine:  compose.EngineForKind(row.Kind),
+				Socket:  row.Socket,
+				Pane:    row.PaneID,
+			}
+			if code := pfmchat.EndResolved(ctx, target, io.Discard, &diagnostic, &runtime); code != 0 {
+				return fmt.Errorf("native deactivate: %s", strings.TrimSpace(diagnostic.String()))
+			}
+			return nil
+		}
 		if row.Socket == "" {
 			return errors.New("selected chat has no live server")
 		}
@@ -580,7 +608,17 @@ func rebootRow(
 	resolved paths.Values,
 	row compose.Row,
 	stderr io.Writer,
+	runtimes ...pfmconfig.Runtime,
 ) (compose.Row, error) {
+	if row.Backend == spawn.BackendHerdr {
+		if !row.Kind.IsLiveSeat() {
+			return row, nil
+		}
+		if err := pfmchat.RebootNative(ctx, resolved, row, row.Account, row.C1H, stderr, runtimes...); err != nil {
+			return compose.Row{}, err
+		}
+		return row, nil
+	}
 	if row.Kind == compose.LiveSplit || row.ID == "" {
 		return compose.Row{}, errors.New("a split live row cannot be rebooted as one chat")
 	}

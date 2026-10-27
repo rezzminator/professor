@@ -26,18 +26,3 @@ func unmarshalKeepingNumbers(raw []byte, target any) error {
 	}
 	return nil
 }
-
-// jsonNumberIs reports whether a decoded JSON value is the number want,
-// whichever form decoded it: json.Number from unmarshalKeepingNumbers, or
-// float64 from a plain json.Unmarshal. A literal compared against float64 alone
-// would call every kept number different and rewrite a converged file forever.
-func jsonNumberIs(value any, want float64) bool {
-	switch number := value.(type) {
-	case json.Number:
-		got, err := number.Float64()
-		return err == nil && got == want
-	case float64:
-		return number == want
-	}
-	return false
-}

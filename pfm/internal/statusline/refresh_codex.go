@@ -4,13 +4,17 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -100,4 +104,72 @@ func parseCodexRateLimits(body []byte) (map[string]any, error) {
 
 func removeRefreshLock(cachePath string) {
 	_ = os.Remove(strings.TrimSuffix(cachePath, ".json") + ".lock")
+}
+
+// takeStatuslineRefreshLock creates lockPath with O_EXCL, stamped now;
+// held=false with a nil error means a live refresher owns it. A refresher
+// ends within its App Server timeout, far inside ttl, so a lock older than ttl
+// (or dated more than ttl ahead) is one whose refresher died before its
+// deferred unlock; left in place it would suppress every refresh after it.
+// It is cleared only under an flock on lockPath+".guard" and re-read there, so
+// two renders that both see one orphan never remove the lock the other just
+// took: one takes it, the other spawns nothing.
+func takeStatuslineRefreshLock(lockPath string, now time.Time, ttl time.Duration) (bool, error) {
+	held, err := createStatuslineRefreshLock(lockPath, now)
+	if held || err != nil {
+		return held, err
+	}
+	if age := statuslineFileAge(lockPath, now); age <= ttl && age >= -ttl {
+		return false, nil
+	}
+	guard, err := os.OpenFile(lockPath+".guard", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return false, fmt.Errorf("open refresh lock guard: %w", err)
+	}
+	defer func() {
+		if closeErr := guard.Close(); closeErr != nil {
+			obs.Logger(context.Background()).
+				Warn("close statusline refresh lock guard", "path", lockPath+".guard", obs.FieldErr, closeErr.Error())
+		}
+	}()
+	if err := syscall.Flock(int(guard.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return false, nil // another render is clearing the orphan
+		}
+		return false, fmt.Errorf("lock refresh lock guard: %w", err)
+	}
+	info, err := os.Stat(lockPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return false, fmt.Errorf("inspect refresh lock: %w", err)
+	case now.Sub(info.ModTime()) <= ttl && now.Sub(info.ModTime()) >= -ttl:
+		return false, nil // taken afresh since the first look
+	default:
+		if err := os.Remove(lockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, fmt.Errorf("clear orphaned refresh lock: %w", err)
+		}
+	}
+	return createStatuslineRefreshLock(lockPath, now)
+}
+
+// createStatuslineRefreshLock is one O_EXCL create; an existing lock is
+// held=false with a nil error. The lock is stamped now, the clock its age is
+// judged by.
+func createStatuslineRefreshLock(lockPath string, now time.Time) (bool, error) {
+	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("create refresh lock: %w", err)
+	}
+	err = errors.Join(lock.Close(), os.Chtimes(lockPath, now, now))
+	if err != nil {
+		if removeErr := os.Remove(lockPath); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove refresh lock after the failed stamp: %w", removeErr))
+		}
+		return false, fmt.Errorf("stamp refresh lock: %w", err)
+	}
+	return true, nil
 }

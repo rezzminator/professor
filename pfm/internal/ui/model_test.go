@@ -197,8 +197,8 @@ func TestChatActionCarouselAndTheLaunchRowArrows(t *testing.T) {
 	if command != nil || model.Result().Kind != OutcomeNone || len(deactivated) != 1 || deactivated[0].Socket != "s" {
 		t.Fatalf("deactive carousel Enter result=%#v command=%v deactivated=%#v", model.Result(), command, deactivated)
 	}
-	if model.FilteredRowCount() != 0 {
-		t.Fatalf("deactivated live row remained visible: %#v", model.VisibleRows())
+	if row, ok := model.selectedRow(); !ok || row.ID != "live" || row.Kind.IsLiveSeat() || row.Socket != "" {
+		t.Fatalf("deactivated live row did not stay as a resumable row under the cursor: %#v", model.VisibleRows())
 	}
 }
 
@@ -908,5 +908,87 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestNativeLifecycleUsesBackendAwareAppliers(t *testing.T) {
+	for _, action := range []string{"kill", "reboot", "reboot-menu", "deactivate"} {
+		t.Run(action, func(t *testing.T) {
+			row := compose.Row{
+				Kind:    compose.LiveClaude,
+				ID:      "native",
+				Name:    "NATIVE",
+				Backend: "herdr",
+				Socket:  "/fixture/herdr.sock",
+				PaneID:  "w6:p3",
+			}
+			model := NewModel(Snapshot{Rows: []compose.Row{row}})
+			kills, stops := 0, 0
+			model.applyKill = func(change KillChange) error {
+				kills++
+				if change.Socket != row.Socket || change.PaneID != row.PaneID || change.ID != row.ID {
+					t.Fatalf("kill lost native address: %+v", change)
+				}
+				return nil
+			}
+			model.applyDeactivate = func(got compose.Row) error {
+				stops++
+				if got.PaneID != row.PaneID {
+					t.Fatalf("stop lost native pane: %+v", got)
+				}
+				return nil
+			}
+			switch action {
+			case "kill":
+				model.toggleKilled()
+			case "deactivate":
+				model.deactivate(row)
+			case "reboot":
+				model, _ = applyKey(t, model, controlKey('o'))
+			case "reboot-menu":
+				model.actionIndex = 1
+				model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			}
+			switch action {
+			case "kill":
+				if kills != 1 || len(model.killChanges) != 1 || !model.rows[0].Killed {
+					t.Fatalf("kill not applied: calls=%d status=%q", kills, model.killStatus)
+				}
+			case "deactivate":
+				if stops != 1 || len(model.rows) != 1 || model.rows[0].Kind.IsLiveSeat() || model.rows[0].PaneID != "" {
+					t.Fatalf("deactivate not applied: calls=%d status=%q", stops, model.killStatus)
+				}
+			default:
+				if model.outcome != OutcomeReboot || model.outcomeRow.PaneID != row.PaneID {
+					t.Fatalf("reboot outcome=%v row=%+v", model.outcome, model.outcomeRow)
+				}
+			}
+		})
+	}
+}
+
+func TestNativeDeactivationKeepsSiblingPaneAfterRefresh(t *testing.T) {
+	a := compose.Row{
+		Kind:    compose.LiveClaude,
+		ID:      "a",
+		Name:    "A",
+		Backend: "herdr",
+		Socket:  "/fixture/herdr.sock",
+		PaneID:  "w1:p1",
+	}
+	b := a
+	b.ID, b.Name, b.PaneID = "b", "B", "w1:p2"
+	model := NewModel(Snapshot{Rows: []compose.Row{a, b}, ApplyDeactivate: func(compose.Row) error { return nil }})
+	model.deactivate(a)
+	model.applyRefresh(Snapshot{Rows: []compose.Row{a, b}})
+	rows := model.VisibleRows()
+	var live []string
+	for _, row := range rows {
+		if row.Kind.IsLiveSeat() {
+			live = append(live, row.ID)
+		}
+	}
+	if len(rows) != 2 || len(live) != 1 || live[0] != b.ID {
+		t.Fatalf("native deactivate hid sibling or revived stopped pane: %+v", rows)
 	}
 }

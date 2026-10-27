@@ -167,6 +167,7 @@ type Input struct {
 	Workbenches      []workbench.Bench
 	WorkbenchErrors  []workbench.WalkError
 	Snapshot         gather.Snapshot
+	HerdrSeats       []gather.HerdrSeat
 	Transcripts      []store.Transcript
 	Rollouts         []store.Rollout
 	OpenCodeSessions []store.OpenCodeSession
@@ -182,25 +183,41 @@ type Input struct {
 
 // Row is one live, resumable, agent, or new-chat choice.
 type Row struct {
-	Kind      Kind
-	ID        string
-	Path      string
-	ConfigDir string
-	Socket    string
-	PaneID    string
-	// PanePIDs are the roots of this live socket's process tree. They are
-	// presentation-neutral live facts used only by the lazy Stats sampler.
+	Backend        string
+	SeatID         string
+	HerdrWorkspace string
+	// LostNote is the seat loss note from fleetdb seat.lost_note, empty unless the seat was lost.
+	LostNote     string
+	BackendError string
+	Kind         Kind
+	ID           string
+	Path         string
+	ConfigDir    string
+	Socket       string
+	PaneID       string
+	// PanePIDs are the roots of this live seat's process tree: the tmux pane
+	// process, or a Herdr seat's proven seat-host. They are presentation-neutral
+	// live facts used only by the lazy Stats sampler.
 	PanePIDs    []int
 	SessionName string
 	WindowName  string
 	Name        string
-	LastPrompt  string
-	Workbench   string
-	Engines     []pfmengine.ID
-	Project     string
-	CWD         string
-	Size        int64
-	PromptCount int64
+	// UserName is the part of Name a user chose: a Claude chat's custom title
+	// (its /rename), a Codex thread's indexed name, a native seat's name when
+	// the engine carries none; empty when Name is automatic (an AI title, a
+	// first prompt).
+	UserName string
+	// UserNameKnown says UserName was read from an indexed source (the
+	// transcript, the rollout, the seat): an empty UserName then means the
+	// chat has none, never that its source was not read yet.
+	UserNameKnown bool
+	LastPrompt    string
+	Workbench     string
+	Engines       []pfmengine.ID
+	Project       string
+	CWD           string
+	Size          int64
+	PromptCount   int64
 	// AssistantCount is set only for a ResumeOpenCode row: an OpenCode
 	// session has no file size, so its reality signal is prompts answered,
 	// not bytes on disk. A session with prompts but no assistant reply is
@@ -249,6 +266,15 @@ func RowKey(row Row) string {
 		return row.Kind.String() + "\x00" + row.Socket + "\x00" + row.PaneID
 	}
 	return row.Kind.String() + "\x00" + row.CWD + "\x00" + row.Project
+}
+
+// LiveSeatKey names one live seat: a tmux socket is one chat's server, while
+// every Herdr pane shares its server's socket, so a native seat adds its pane.
+func LiveSeatKey(row Row) string {
+	if row.Backend == herdrBackend {
+		return row.Socket + "\x00" + row.PaneID
+	}
+	return row.Socket
 }
 
 // Output contains the rows plus project metadata. Composition reads the kill

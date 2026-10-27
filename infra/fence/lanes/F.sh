@@ -173,7 +173,7 @@ hex_to_sgr() { # hex_to_sgr "#rrggbb" — the r;g;b triple a truecolor SGR carri
 # library's single re-open spends the same command after it dies.
 open_cc() {
   local rc
-  pfm chat new --name "$CC" --engine cc --account "$SEAT" --cwd "$CWD" --cache 1h --model sonnet --effort low \
+  pfm chat new --name "$CC" --engine cc --backend tmux --account "$SEAT" --cwd "$CWD" --cache 1h --model sonnet --effort low \
     --await --timeout 300 --settle 5 --progress \
     "You are $CC, the chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." \
     >/tmp/f-cc.launch.out 2>/tmp/f-cc.launch.err

@@ -42,7 +42,7 @@ func (installer *engine) wireCodexDefaults() error {
 	if err != nil {
 		return err
 	}
-	prompt, err := codexHarnessPrompt()
+	prompt, err := installer.generatedHarnessPrompt(pfmengine.Codex)
 	if err != nil {
 		return err
 	}

@@ -20,22 +20,22 @@ expect_lacks 'no token in the env' "$lines" lab-canary-7f3e
 
 # L6: settings render
 store=$T/store; mkdir -p "$store/plugins"
-printf '{"version":2,"plugins":{"sub-agent-compact@sub-agent-compact":[],"sub-agent-compact@sub-agent-compact-dev":[],"cache-live-control@cache-live-control":[]}}' > "$store/plugins/installed_plugins.json"
-mapfile -t ids < <(lab_installed_ids "$store" sub-agent-compact)
-expect_eq 'live ids of the plugin under test' "${ids[*]}" 'sub-agent-compact@sub-agent-compact sub-agent-compact@sub-agent-compact-dev'
-LAB_OPTIONS='{"forwardHandoffTool":true}'; LAB_ALLOW=(Read mcp__sub-agent-compact__look_back); LAB_DENY=(Bash Grep); LAB_LAB=$LAB_DIR
-lab_settings_render sub-agent-compact "${ids[@]}"
+printf '{"version":2,"plugins":{"forward-compaction@forward-compaction":[],"forward-compaction@forward-compaction-dev":[],"cache-live-control@cache-live-control":[]}}' > "$store/plugins/installed_plugins.json"
+mapfile -t ids < <(lab_installed_ids "$store" forward-compaction)
+expect_eq 'live ids of the plugin under test' "${ids[*]}" 'forward-compaction@forward-compaction forward-compaction@forward-compaction-dev'
+LAB_OPTIONS='{"floor":"bogus"}'; LAB_ALLOW=(Read mcp__forward-compaction__look_back); LAB_DENY=(Bash Grep); LAB_LAB=$LAB_DIR
+lab_settings_render auto-effort-control "${ids[@]}"
 s=$LAB_RUN/settings.json
-expect_eq 'enabledPlugins off' "$(jq -c .enabledPlugins "$s")" '{"sub-agent-compact@sub-agent-compact":false,"sub-agent-compact@sub-agent-compact-dev":false}'
-expect_eq 'options under name@inline' "$(jq -c '.pluginConfigs["sub-agent-compact@inline"].options.forwardHandoffTool' "$s")" true
+expect_eq 'enabledPlugins off' "$(jq -c .enabledPlugins "$s")" '{"forward-compaction@forward-compaction":false,"forward-compaction@forward-compaction-dev":false}'
+expect_eq 'options under name@inline' "$(jq -c '.pluginConfigs["auto-effort-control@inline"].options.floor' "$s")" '"bogus"'
 expect_eq 'dontAsk' "$(jq -r .permissions.defaultMode "$s")" dontAsk
-expect_eq 'allow list exactly the scenario tools' "$(jq -c .permissions.allow "$s")" '["Read","mcp__sub-agent-compact__look_back"]'
+expect_eq 'allow list exactly the scenario tools' "$(jq -c .permissions.allow "$s")" '["Read","mcp__forward-compaction__look_back"]'
 expect_eq 'deny list exactly the scenario denials' "$(jq -c .permissions.deny "$s")" '["Bash","Grep"]'
 expect_eq 'six mark hooks' "$(jq -r '.hooks | to_entries[] | "\(.key)=\(.value[0].hooks[0].command)"' "$s" | sed "s|$LAB_DIR|LAB|g; s|$LAB_RUN|RUN|g" | sort | tr '\n' ' ')" \
   "PreCompact=LAB_MARKS='RUN/marks.jsonl' 'LAB/hooks/mark.sh' PreCompact SessionEnd=LAB_MARKS='RUN/marks.jsonl' 'LAB/hooks/mark.sh' SessionEnd SessionStart=LAB_MARKS='RUN/marks.jsonl' 'LAB/hooks/mark.sh' SessionStart Stop=LAB_MARKS='RUN/marks.jsonl' 'LAB/hooks/mark.sh' Stop SubagentStop=LAB_MARKS='RUN/marks.jsonl' 'LAB/hooks/mark.sh' SubagentStop UserPromptSubmit=LAB_MARKS='RUN/marks.jsonl' 'LAB/hooks/mark.sh' UserPromptSubmit "
 # a run or lab path with a space still runs the mark hook with its marks file
 mkdir -p "$T/lab x/hooks" "$T/run y"; printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$LAB_MARKS" "$1"\n' > "$T/lab x/hooks/mark.sh"; chmod +x "$T/lab x/hooks/mark.sh"
-(LAB_RUN="$T/run y" LAB_LAB="$T/lab x"; lab_settings_render sub-agent-compact "${ids[@]}"
+(LAB_RUN="$T/run y" LAB_LAB="$T/lab x"; lab_settings_render forward-compaction "${ids[@]}"
   expect_eq 'a spaced path keeps the mark hook whole' "$(sh -c "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$LAB_RUN/settings.json")" 2>&1)" "$T/run y/marks.jsonl|SessionStart")
 lab_managed_render
 expect_eq 'managed default' "$(jq -c . "$LAB_RUN/managed/managed-settings.json")" '{"prependPlugins":[]}'
@@ -55,8 +55,8 @@ expect_has 'launcher flags' "$la" "--setting-sources project --settings $LAB_RUN
 expect_lacks 'no token in the launcher' "$la" lab-canary-7f3e
 # scenario preludes: a project agent, a directory mode, a fixture plugin installed with zero tokens
 LAB_SCENARIO=sc LAB_ROWS=(R7e) LAB_LAB=$LAB_DIR LAB_CLAUDE=$FAKES/claude; : > "$LAB_RUN/checks.tsv"; mkdir -p "$LAB_RUN/work"
-need_agent lab-echo haiku 'Read' '{nudgeFrom: 15k, forceAt: 40k}'
-expect_eq 'agent file, the autoCompact map nested (the plugin reads no flow map)' "$(cat "$LAB_RUN/work/.claude/agents/lab-echo.md")" "$(printf -- '---\nname: lab-echo\ndescription: plugin-lab agent lab-echo\nmodel: haiku\ntools: Read\nautoCompact:\n  nudgeFrom: 15k\n  forceAt: 40k\n---\n\nFollow the task you are given exactly, using only your tools. Reply briefly.')"
+need_agent lab-echo haiku 'Read'
+expect_eq 'agent file' "$(cat "$LAB_RUN/work/.claude/agents/lab-echo.md")" "$(printf -- '---\nname: lab-echo\ndescription: plugin-lab agent lab-echo\nmodel: haiku\ntools: Read\n---\n\nFollow the task you are given exactly, using only your tools. Reply briefly.')"
 need_dir_mode '{run}/logs-ro' 500
 expect_eq 'directory mode' "$(cd "$LAB_RUN/logs-ro" && find . -maxdepth 0 -perm 500 | wc -l | tr -d ' ')" 1
 LAB_ENV=()

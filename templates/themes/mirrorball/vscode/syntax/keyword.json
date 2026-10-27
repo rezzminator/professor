@@ -1,0 +1,76 @@
+{
+  "0004": {
+    "name": "Pink beam: keywords",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.other",
+      "keyword.declaration",
+      "storage.type.function",
+      "keyword.control.flow",
+      "keyword.control.import",
+      "keyword.control.export",
+      "keyword.operator.new",
+      "keyword.operator.expression",
+      "keyword.control.at-rule",
+      "punctuation.definition.keyword",
+      "keyword.other.special-method"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fa7bc6"
+    }
+  },
+  "0005": {
+    "name": "Violet beam: storage and modifiers",
+    "scope": [
+      "storage",
+      "storage.type",
+      "storage.modifier",
+      "keyword.storage",
+      "storage.type.class",
+      "storage.type.struct",
+      "storage.type.enum",
+      "storage.type.interface",
+      "storage.type.type",
+      "storage.type.namespace",
+      "keyword.type",
+      "keyword.struct.go",
+      "keyword.interface.go",
+      "keyword.const.go",
+      "keyword.var.go",
+      "keyword.map.go",
+      "keyword.channel.go"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b294f5"
+    }
+  },
+  "0006": {
+    "name": "Glint: operators",
+    "scope": [
+      "keyword.operator",
+      "keyword.operator.assignment",
+      "keyword.operator.logical",
+      "punctuation.accessor",
+      "punctuation.separator.key-value",
+      "storage.type.function.arrow",
+      "keyword.operator.type"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f7b0dc"
+    }
+  },
+  "0034": {
+    "name": "Red: !important",
+    "scope": [
+      "keyword.other.important"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#f26868"
+    }
+  }
+}

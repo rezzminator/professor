@@ -1,0 +1,65 @@
+{
+  "0039": {
+    "name": "O I 630.0 nm · invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal",
+      "invalid.illegal.bad-ampersand",
+      "invalid.broken"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#ff6b7d"
+    }
+  },
+  "0040": {
+    "name": "O I 630.0 nm · deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#ff6b7d"
+    }
+  },
+  "0062": {
+    "name": "Log · errors",
+    "scope": [
+      "token.error-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff6b7d"
+    }
+  },
+  "0063": {
+    "name": "Log · warnings",
+    "scope": [
+      "token.warn-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f7c95c"
+    }
+  },
+  "0064": {
+    "name": "Log · info",
+    "scope": [
+      "token.info-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#7cb4ff"
+    }
+  },
+  "0065": {
+    "name": "Log · debug",
+    "scope": [
+      "token.debug-token"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b49cff"
+    }
+  }
+}

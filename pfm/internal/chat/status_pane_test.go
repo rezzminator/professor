@@ -1,9 +1,13 @@
 package chat
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -333,5 +337,138 @@ func TestInspectSeatKeepsAnOpenCodexTurnWorking(t *testing.T) {
 					status.State, calls, testCase.want, testCase.wantCalls)
 			}
 		})
+	}
+}
+
+// Native states are the fallback only; a broken or unknown response is not idle.
+func TestHerdrStatusNativeFallback(t *testing.T) {
+	t.Run("quiet pending tool preserves transcript working", func(t *testing.T) {
+		socket := herdrStatusSocket(t, `{"agent":{"pane_id":"w6:p3","agent_status":"idle"}}`)
+		got, err := blockedFromPane(context.Background(),
+			headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Live: true},
+			headless.Status{State: headless.StateWorking, PendingTool: "Bash", QuietSeconds: 10}, nil, nil)
+		if err != nil || got.State != headless.StateWorking {
+			t.Fatalf("native idle overrode pending transcript tool: %+v err=%v", got, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		state, want string
+		bad         bool
+	}{
+		{"idle", headless.StateIdle, false},
+		{"done", headless.StateIdle, false},
+		{"working", headless.StateWorking, false},
+		{"blocked", headless.StateBlocked, false},
+		{"unknown", headless.StateWorking, false},
+		{"future", "", true},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			socket := herdrStatusSocket(t, fmt.Sprintf(`{"agent":{"pane_id":"w6:p3","agent_status":%q}}`, tc.state))
+			got, err := InspectSeat(
+				context.Background(),
+				nil,
+				headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Engine: pfmengine.Claude, Live: true},
+				time.Now(),
+				nil,
+			)
+			if tc.bad {
+				if err == nil {
+					t.Fatalf("unknown state returned %+v, want error", got)
+				}
+				return
+			}
+			if err != nil || got.State != tc.want {
+				t.Fatalf("status=%+v, %v; want %s", got, err, tc.want)
+			}
+		})
+	}
+	t.Run("unreachable", func(t *testing.T) {
+		_, err := InspectSeat(
+			context.Background(),
+			nil,
+			headless.Chat{Backend: "herdr", Socket: filepath.Join(t.TempDir(), "dead.sock"), Pane: "w6:p3", Live: true},
+			time.Now(),
+			nil,
+		)
+		if err == nil {
+			t.Fatal("unreachable returned no error")
+		}
+	})
+}
+
+func herdrStatusSocket(t *testing.T, result string, panes ...string) string {
+	t.Helper()
+	return herdrStatusSocketReplies(t, func() string { return result }, panes...)
+}
+
+func herdrStatusSocketReplies(t *testing.T, result func() string, panes ...string) string {
+	t.Helper()
+	t.Setenv("PFM_STATE_DB", filepath.Join(t.TempDir(), "state.db"))
+	t.Setenv("PFM_PROC_ROOT", t.TempDir())
+	pane := "w6:p3"
+	if len(panes) != 0 {
+		pane = panes[0]
+	}
+	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var request struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&request); err != nil {
+					return
+				}
+				body := result()
+				if proof, _, ok := nativeChatProof(nativeChatRequest{Method: request.Method}, pane); ok {
+					raw, err := json.Marshal(proof)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					body = string(raw)
+				}
+				response := fmt.Sprintf(`{"id":%q,"ok":true,"result":%s}`+"\n", request.ID, body)
+				_, _ = io.WriteString(conn, response)
+			}()
+		}
+	}()
+	_, db, seat := nativeChatSeat(t, socket, "live")
+	seat.HerdrPane, seat.HerdrWorkspace = pane, strings.Split(pane, ":")[0]
+	if len(panes) > 1 {
+		seat.Engine = panes[1]
+	}
+	_ = nativeChatHost(t, db, seat, true)
+	return socket
+}
+
+func TestHerdrStatusRequiresDurableOwnership(t *testing.T) {
+	testjail.Fleet(t)
+	socket := nativeChatSocket(t, func(nativeChatRequest) (any, string) {
+		return json.RawMessage(`{"agent":{"pane_id":"w6:p3","agent_status":"idle"}}`), ""
+	})
+	_, err := statusFromHerdr(
+		context.Background(),
+		headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Engine: pfmengine.Claude},
+		headless.Status{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "ownership unproved") {
+		t.Fatalf("status without owner=%v; want explicit ownership unproved", err)
 	}
 }

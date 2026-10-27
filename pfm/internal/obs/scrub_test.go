@@ -201,7 +201,7 @@ func TestScrubWalksNestedAnyValues(t *testing.T) {
 	t.Run("wrapped error", func(t *testing.T) {
 		ctx, recorder := Test(t)
 		inner := errors.New("token=PLANTEDWRAPPED")
-		wrapped := fmt.Errorf("harvester search failed: %w", inner)
+		wrapped := fmt.Errorf("document search failed: %w", inner)
 		Logger(ctx).Info("probe", "argv", wrapped)
 		if strings.Contains(recorder.Raw(), "PLANTEDWRAPPED") {
 			t.Fatalf("a secret inside a wrapped error leaked: %s", recorder.Raw())

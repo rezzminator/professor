@@ -145,3 +145,23 @@ func TestSeatTargetAddressesTheRuntimesTmuxDirectoryOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestRosterKeepsNativeReservationBeforePanePublication(t *testing.T) {
+	testjail.Fleet(t)
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	rows := []compose.Row{{
+		Backend: "herdr", SeatID: "birth-seat", ID: "provisional-session",
+		Kind: compose.LiveClaude, Name: "new-chat", Socket: filepath.Join(t.TempDir(), "herdr.sock"),
+		SessionName: "new-chat", // compose's native SessionName is a label, never a pane address.
+	}}
+	target, code, detail, err := rosterTarget(resolvedPaths(t), rows, "", "new-chat")
+	if err != nil || code != 0 || target.SeatID != "birth-seat" || target.Pane != "" {
+		t.Fatalf(
+			"native reservation before pane publication: target=%+v code=%d detail=%q err=%v",
+			target,
+			code,
+			detail,
+			err,
+		)
+	}
+}

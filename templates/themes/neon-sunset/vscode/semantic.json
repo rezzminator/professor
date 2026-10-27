@@ -1,0 +1,121 @@
+{
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "attribute": {
+    "foreground": "#72f1b8",
+    "italic": true
+  },
+  "boolean": "#e48bff",
+  "builtinAttribute": {
+    "foreground": "#72f1b8",
+    "italic": true
+  },
+  "builtinType": "#ffd866",
+  "character": "#ffe8a3",
+  "class": "#ffd866",
+  "class.declaration": {
+    "bold": true,
+    "foreground": "#ffd866"
+  },
+  "class.defaultLibrary": "#ffd866",
+  "clsParameter": {
+    "foreground": "#e48bff",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#8c7db3",
+    "italic": true
+  },
+  "decorator": {
+    "foreground": "#72f1b8",
+    "italic": true
+  },
+  "enum": "#ffd866",
+  "enumMember": "#ff7b72",
+  "escapeSequence": "#ffe8a3",
+  "event": "#72f1b8",
+  "formatSpecifier": "#ffe8a3",
+  "function": "#3ddffd",
+  "function.builtin": "#72f1b8",
+  "function.declaration": {
+    "bold": true,
+    "foreground": "#3ddffd"
+  },
+  "function.defaultLibrary": "#72f1b8",
+  "interface": {
+    "foreground": "#ffd866",
+    "italic": true
+  },
+  "interface.declaration": {
+    "bold": true,
+    "foreground": "#ffd866",
+    "italic": true
+  },
+  "keyword": "#fd67ad",
+  "keyword.controlFlow": "#fd67ad",
+  "label": {
+    "foreground": "#fd67ad",
+    "italic": true
+  },
+  "lifetime": {
+    "foreground": "#e48bff",
+    "italic": true
+  },
+  "macro": {
+    "foreground": "#72f1b8",
+    "italic": true
+  },
+  "method": "#3ddffd",
+  "method.declaration": {
+    "bold": true,
+    "foreground": "#3ddffd"
+  },
+  "method.defaultLibrary": "#72f1b8",
+  "module": "#8fa8ff",
+  "namespace": "#8fa8ff",
+  "number": "#ff7b72",
+  "operator": "#ff9bd2",
+  "parameter": {
+    "foreground": "#ffc2a1",
+    "italic": true
+  },
+  "property": "#b3ecff",
+  "property.defaultLibrary": "#72f1b8",
+  "property.readonly": "#b3ecff",
+  "regexp": "#ffcf6b",
+  "selfKeyword": {
+    "foreground": "#e48bff",
+    "italic": true
+  },
+  "selfParameter": {
+    "foreground": "#e48bff",
+    "italic": true
+  },
+  "string": "#ff9f5c",
+  "struct": "#ffd866",
+  "struct.declaration": {
+    "bold": true,
+    "foreground": "#ffd866"
+  },
+  "type": "#ffd866",
+  "type.defaultLibrary": "#ffd866",
+  "typeAlias": "#ffd866",
+  "typeParameter": {
+    "foreground": "#ffd866",
+    "italic": true
+  },
+  "unresolvedReference": {
+    "foreground": "#ff5c7a",
+    "underline": true
+  },
+  "variable": "#f4e8f7",
+  "variable.constant": "#ff7b72",
+  "variable.defaultLibrary": "#72f1b8",
+  "variable.readonly": "#ff7b72",
+  "variable.readonly.defaultLibrary": "#72f1b8",
+  "variable.readonly:javascript": "#f4e8f7",
+  "variable.readonly:javascriptreact": "#f4e8f7",
+  "variable.readonly:typescript": "#f4e8f7",
+  "variable.readonly:typescriptreact": "#f4e8f7"
+}

@@ -1,0 +1,248 @@
+{
+  "0026": {
+    "name": "Asagi · data keys",
+    "scope": [
+      "entity.name.tag.yaml",
+      "support.type.property-name.json",
+      "support.type.property-name.toml",
+      "entity.name.tag.toml",
+      "keyword.key.toml",
+      "meta.mapping.key.yaml string",
+      "support.type.property-name.json.comments",
+      "entity.name.tag.ini",
+      "keyword.other.definition.ini"
+    ],
+    "settings": {
+      "foreground": "#075f6b"
+    }
+  },
+  "0027": {
+    "name": "Shu · data tables",
+    "scope": [
+      "entity.other.attribute-name.table.toml",
+      "support.type.property-name.table.toml",
+      "entity.name.section.group-title.ini",
+      "punctuation.definition.table.toml"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b43026"
+    }
+  },
+  "0028": {
+    "name": "Kaki · data anchors & tags",
+    "scope": [
+      "entity.name.type.anchor.yaml",
+      "variable.other.alias.yaml",
+      "keyword.control.flow.alias.yaml",
+      "punctuation.definition.anchor.yaml",
+      "punctuation.definition.alias.yaml",
+      "storage.type.tag-handle.yaml",
+      "punctuation.definition.directive.begin.yaml",
+      "entity.other.document.begin.yaml"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#9f5401"
+    }
+  },
+  "0029": {
+    "name": "Ai · functions",
+    "scope": [
+      "entity.name.function",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "support.function.any-method",
+      "meta.function-call.generic",
+      "entity.name.function.member",
+      "meta.function-call.method",
+      "entity.name.method",
+      "entity.name.function.call",
+      "meta.method-call entity.name.function",
+      "meta.function-call.python",
+      "entity.name.function.go",
+      "support.function.go",
+      "meta.function-call.object",
+      "entity.name.function.shell",
+      "meta.function-call support.function"
+    ],
+    "settings": {
+      "foreground": "#2a409b"
+    }
+  },
+  "0032": {
+    "name": "Kincha · types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.name.trait",
+      "entity.name.union",
+      "entity.name.type.alias",
+      "entity.name.type.class",
+      "entity.name.type.interface",
+      "entity.name.type.enum",
+      "entity.name.type.struct",
+      "entity.name.type.go",
+      "entity.other.inherited-class",
+      "support.class",
+      "support.type",
+      "support.class.builtin",
+      "storage.type.java",
+      "storage.type.cs",
+      "storage.type.rust",
+      "meta.type.annotation entity.name.type",
+      "meta.return.type entity.name.type"
+    ],
+    "settings": {
+      "foreground": "#785603"
+    }
+  },
+  "0034": {
+    "name": "Kincha · type parameters",
+    "scope": [
+      "entity.name.type.parameter",
+      "meta.type.parameters entity.name.type",
+      "entity.name.type.type-parameter",
+      "storage.type.generic"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#785603"
+    }
+  },
+  "0035": {
+    "name": "Kincha · namespaces & modules",
+    "scope": [
+      "entity.name.namespace",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "support.other.namespace",
+      "entity.name.import.go",
+      "entity.name.package.go",
+      "entity.name.type.namespace",
+      "support.other.module",
+      "meta.import.python entity.name",
+      "entity.name.scope-resolution"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#785603"
+    }
+  },
+  "0036": {
+    "name": "Enji · decorators & annotations",
+    "scope": [
+      "entity.name.function.decorator",
+      "meta.decorator",
+      "meta.decorator entity.name.function",
+      "meta.decorator variable.other.readwrite",
+      "meta.decorator support.function",
+      "punctuation.decorator",
+      "meta.attribute",
+      "storage.type.annotation",
+      "punctuation.definition.annotation",
+      "meta.annotation",
+      "entity.name.function.decorator.python",
+      "meta.function.decorator.python",
+      "punctuation.definition.decorator.python",
+      "meta.attribute.rust",
+      "punctuation.definition.attribute.rust"
+    ],
+    "settings": {
+      "foreground": "#970639"
+    }
+  },
+  "0037": {
+    "name": "Enji · macros & preprocessor",
+    "scope": [
+      "entity.name.function.macro",
+      "support.function.macro",
+      "entity.name.function.preprocessor",
+      "meta.preprocessor",
+      "keyword.control.directive",
+      "punctuation.definition.directive",
+      "meta.macro.rust",
+      "entity.name.function.macro.rust",
+      "support.macro.rust"
+    ],
+    "settings": {
+      "foreground": "#970639"
+    }
+  },
+  "0039": {
+    "name": "Shu · tags",
+    "scope": [
+      "entity.name.tag",
+      "meta.tag.sgml",
+      "entity.name.tag.html",
+      "entity.name.tag.xml",
+      "entity.name.tag.js",
+      "entity.name.tag.tsx",
+      "entity.name.tag.vue",
+      "entity.name.tag.svelte",
+      "meta.tag.sgml.doctype"
+    ],
+    "settings": {
+      "foreground": "#b43026"
+    }
+  },
+  "0042": {
+    "name": "Asagi · attributes",
+    "scope": [
+      "entity.other.attribute-name",
+      "entity.other.attribute-name.html",
+      "entity.other.attribute-name.jsx",
+      "entity.other.attribute-name.tsx",
+      "entity.other.attribute-name.xml",
+      "entity.other.attribute-name.localname"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#075f6b"
+    }
+  },
+  "0043": {
+    "name": "Kaki · CSS selectors",
+    "scope": [
+      "entity.other.attribute-name.class.css",
+      "entity.other.attribute-name.id.css",
+      "entity.other.attribute-name.class",
+      "entity.other.attribute-name.id",
+      "entity.other.attribute-name.pseudo-class",
+      "entity.other.attribute-name.pseudo-element",
+      "entity.other.attribute-name.parent-selector",
+      "punctuation.definition.entity.css",
+      "entity.other.keyframe-offset.css"
+    ],
+    "settings": {
+      "foreground": "#9f5401"
+    }
+  },
+  "0044": {
+    "name": "Shu · CSS element selectors",
+    "scope": [
+      "entity.name.tag.css",
+      "entity.name.tag.scss",
+      "entity.name.tag.less",
+      "entity.name.tag.reference.scss"
+    ],
+    "settings": {
+      "foreground": "#b43026"
+    }
+  },
+  "0051": {
+    "name": "Ai · shell commands",
+    "scope": [
+      "entity.name.command.shell",
+      "support.function.builtin.shell",
+      "entity.name.function.call.shell"
+    ],
+    "settings": {
+      "foreground": "#2a409b"
+    }
+  }
+}

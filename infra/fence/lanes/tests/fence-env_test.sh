@@ -28,7 +28,7 @@ COMMON="$MAIN/.git"
 resolve() { # resolve <worktree> [VAR=value…]: the engine-sync exports, one per line, or the resolver's error and exit
   local root="$1"; shift
   (
-    unset ENGINE_SYNC_SRC
+    unset ENGINE_SYNC_SRC HARVESTER_SRC
     [ $# -eq 0 ] || export "$@"
     ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
     printf 'SRC=%s\nMISSING=%s\n' "$PFM_DEV_ENGINE_SYNC_SRC" "$PFM_DEV_ENGINE_SYNC_MISSING"
@@ -88,4 +88,32 @@ if [ "$rc" -eq 1 ] && [ "$out" = 'fence-env-test: ENGINE_SYNC_SRC must be an abs
   ok 'a relative ENGINE_SYNC_SRC exits 1 naming it'
 else bad 'relative ENGINE_SYNC_SRC' "rc=$rc" "got: $out"; fi
 
+harvester_resolve() {
+  local root="$1"; shift
+  (
+    unset HARVESTER_SRC
+    [ $# -eq 0 ] || export "$@"
+    ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
+    printf 'SRC=%s\nMISSING=%s\n' "$PFM_DEV_HARVESTER_SRC" "$PFM_DEV_HARVESTER_MISSING"
+  ) 2>&1
+}
+out="$(harvester_resolve "$T/linked")"; rc=$?
+if [ "$rc" -eq 0 ] && [[ "$out" == *"MISSING=$MAIN/plugins/harvester: no go.mod"* ]]; then
+  ok 'missing harvester source is named'
+else bad 'missing harvester source' "rc=$rc" "$out"; fi
+mkdir -p "$MAIN/plugins/harvester" "$T/linked/plugins/harvester"
+printf 'module example.test/harvester\n' >"$MAIN/plugins/harvester/go.mod"
+out="$(harvester_resolve "$T/linked")"
+if [ "$out" = "$(printf 'SRC=%s\nMISSING=' "$MAIN/plugins/harvester")" ]; then
+  ok 'linked worktree resolves harvester from the main checkout'
+else bad 'main harvester source' "$out"; fi
+printf 'module example.test/pinned-harvester\n' >"$T/linked/plugins/harvester/go.mod"
+out="$(harvester_resolve "$T/linked")"
+if [ "$out" = "$(printf 'SRC=%s\nMISSING=' "$T/linked/plugins/harvester")" ]; then
+  ok 'worktree harvester source wins over the main checkout'
+else bad 'pinned harvester source' "$out"; fi
+out="$(harvester_resolve "$T/linked" HARVESTER_SRC=plugins/harvester)"; rc=$?
+if [ "$rc" -eq 1 ] && [[ "$out" == *'HARVESTER_SRC must be an absolute path: plugins/harvester' ]]; then
+  ok 'relative harvester source is refused by name'
+else bad 'relative harvester source' "rc=$rc" "$out"; fi
 shtest_end

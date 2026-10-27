@@ -7,17 +7,16 @@ argument-hint: "[repo]"
 
 # Housekeeping
 
-Repository: $ARGUMENTS — with none, the main checkout of the current one. This chat only reads and deletes stale `UNLANDED.md` markers (§ 4); every git write goes to `gitter`.
+Repository: $ARGUMENTS — with none, the main checkout of the current one. This chat only reads; every git write goes to `gitter`.
 
 ## 1. Inventory
 
 One read-only shell call gathers:
 
 - `{base}`: `develop` where it exists, else the remote default branch (`git symbolic-ref --short refs/remotes/origin/HEAD`)
-- every linked worktree (`git worktree list --porcelain`): branch, tip, ahead and behind `{base}`, dirty count, last commit age and subject
+- every linked worktree (`git worktree list --porcelain`): branch, tip, ahead and behind `{base}`, dirty count, last commit age and subject; for a `locked {reason}` record, include that reason and the lock file's age (mtime of `{common-git-dir}/worktrees/{id}/locked`, resolved with `git -C {path} rev-parse --git-path locked`, not an assumed worktree basename). A missing or unreadable lock file reports an inventory error, not an unlocked worktree
 - local branches `git branch --no-merged {base}`, and the remote branch of each
 - `git stash list`, each entry with `git stash show --include-untracked --stat`
-- every `$HOME/.local/state/pfm/flights/{project}/*/UNLANDED.md`: a flight that passed its gate and never landed; its worktree is WAITING, and a successfully enumerated but gone worktree makes the file stale, deleted in § 4
 
 `{base}`, the release branch and branches sharing no history with `{base}` (`gh-pages`-like) are not work branches: list them under left alone.
 
@@ -25,8 +24,10 @@ One read-only shell call gathers:
 
 Every worktree and branch is one of:
 
-- MERGED: its tip is an ancestor of `{base}` (`git merge-base --is-ancestor`).
-- LANDED: a squash or rebase put its change on `{base}` under another hash. `git cherry` reports a squash as `+`, so a same-subject commit on `{base}` is the lead, never the proof. The proof: `git diff --stat {tip} {landing} -- {files the branch touched}` shows only what the landing refined, and every test the branch has and `{base}` lacks at that path is found on `{base}` by name (`git grep -n "{TestName}" {base}`). A test found nowhere makes it WAITING.
+- KEPT: a locked worktree, with its porcelain lock reason and lock-file age. Leave it and its branch alone unless the user rules it done; that ruling sends gitter to unlock it before the normal § 3–4 proof and removal. Age alone never overrides a lock.
+- LANDED: the gitter sweep's exact criterion — `{base}`'s reflog has a subject starting literally `merge {branch}: `, its tip is an ancestor of `{base}`, and `status --porcelain` is empty. Match the subject with an anchored literal prefix, not a branch-name regex.
+- MERGED: its tip is an ancestor of `{base}` (`git merge-base --is-ancestor`), but it lacks the full LANDED proof; manual housekeeping may inspect it, automatic gitter sweeps leave it alone.
+- TRANSPLANTED: a squash or rebase put its change on `{base}` under another hash. `git cherry` reports a squash as `+`, so a same-subject commit on `{base}` is the lead, never the proof. The proof: `git diff --stat {tip} {landing} -- {files the branch touched}` shows only what the landing refined, and every test the branch has and `{base}` lacks at that path is found on `{base}` by name (`git grep -n "{TestName}" {base}`). A test found nowhere makes it WAITING.
 - WAITING: any other work not on `{base}`.
 
 A worktree's dirty files are compared with `{base}` byte for byte (`git show {base}:{f} | cmp -s - {f}`), each one same, older (the diff shows `{base}` holding the newer lines) or new. A new hunk makes the worktree WAITING unless `{base}` covers its behaviour another way, named in one line.
@@ -40,10 +41,8 @@ A worktree holding initialised submodules is removable only when, per submodule 
 One `gitter` dispatch carries every local removal. Per item: the path, the branch, the tip to re-verify (a moved tip stops that item), the evidence line, and the command:
 
 - the removal: `.claude/scripts/worktree.sh remove {name}` only when the script exists and the physical path is exactly `{repo}/.worktrees/{name}` (one direct child; it frees ports, tears the stack down and judges submodules), with `--discard` named only for dirty files classified same or older; every other path uses `git worktree remove {path}` without port or stack teardown, with `--force` named only for those files or submodules § 3 cleared
-- `git branch -d` for MERGED; `git branch -D` for LANDED, its landing commit named
+- `git branch -d` for MERGED or LANDED; `git branch -D` for TRANSPLANTED, its landing commit named; a KEPT item enters this dispatch only after the user's done ruling, with `git worktree unlock {path}` before removal
 - `git worktree prune` last
-
-After a successful final `git worktree list` enumeration, this chat deletes markers whose worktree line names a gone worktree, including markers whose worktrees were already gone at inventory. An unreadable or malformed marker stays, with its path and cause reported. Delete only `UNLANDED.md`, retaining the flight directory and audit trail; these files lie outside the repository, so no `gitter` dispatch carries them. A failed or empty enumeration authorizes no deletion.
 
 Out of scope in that brief: pushes, remote branches, stashes, `{base}` and the main checkout's untracked files. A refusal `gitter` returns is traced to its cause; a cause the evidence clears goes back with that evidence, any other cause makes the item WAITING.
 
@@ -56,12 +55,11 @@ Both are listed for the user before anything happens: a remote branch with its t
 
 ## 6. WAITING work
 
-WAITING work stays. Report what it holds and what finishing it takes; when the user asked for the work to be done, dispatch `flights-foreman` with the branch, the worktree and what is left.
+WAITING work stays. Report what it holds and what finishing it takes; when the user asked for the work to be done, dispatch the foreman tier its difficulty calls for with the branch, the worktree and what is left.
 
 ## Report
 
 - a table: item · state · evidence (landing commit, file comparison, where moved tests live)
 - what was left alone, and why
 - recovery lines for dropped stashes
-- the `UNLANDED.md` files deleted, one line each
 - the final `git worktree list`, `git branch --list` and `git stash list`, read by this chat, never relayed from `gitter`

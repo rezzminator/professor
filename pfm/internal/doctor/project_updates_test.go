@@ -36,21 +36,20 @@ func TestDoctorProjectUpdatesFlagRunsOnlyTheProjectReport(t *testing.T) {
 
 // TestDoctorProjectUpdatesUsageRejectsMixedFlags pins the usage door: --root
 // or --json without --project-updates, --project-updates with --verbose or
-// --skip-harvest, and any positional, all exit 2.
+// and any positional, all exit 2.
 func TestDoctorProjectUpdatesUsageRejectsMixedFlags(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	for _, args := range [][]string{
 		{"--root", "."},
 		{"--json"},
 		{"--project-updates", "--verbose"},
-		{"--project-updates", "--skip-harvest"},
 		{"--project-updates", "extra"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(args, &stdout, &stderr, runtime); code != 2 {
 			t.Fatalf("doctor %v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
-		want := "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 machine checks clean, project_updates rows advisory; " +
+		want := "usage: pfm doctor [--verbose] (exit 0 machine checks clean, project_updates rows advisory; " +
 			"1 warnings, 3 failures) | " +
 			"pfm doctor --project-updates [--root DIR] [--json] (exit 0 clean, 1 review required, 3 report failure); 2 usage error\n" +
 			"       pfm doctor --stale [--purge] list the retired paths pfm once wrote; --purge moves them into one backup dir\n"
@@ -85,7 +84,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
-		"    scripts/legacy.sh:2   /wave — retired command, now /flights:spec\n",
+		"    scripts/legacy.sh:2   /wave — retired command, now the flights-foreman agent\n",
 		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__chat-professor__*\n",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -115,7 +114,6 @@ func newProjectUpdatesStore(t *testing.T) string {
 	store := t.TempDir()
 	for relative, content := range map[string]string{
 		"VERSION":                             "0.1.0\n",
-		"templates/project/CLAUDE.md":         "# fixture contract\n",
 		"templates/project/settings.json":     "{}\n",
 		"templates/project/rumdl-policy.toml": "[global]\n",
 	} {

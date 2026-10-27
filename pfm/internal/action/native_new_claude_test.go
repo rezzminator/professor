@@ -1,15 +1,28 @@
 package action
 
 import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func mustProfessorPromptPath(t *testing.T, home string) string {
@@ -192,5 +205,299 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 				}
 			})
 		}
+	}
+}
+
+// A picker inside a Herdr pane starts or resumes a chat IN that pane: the seat
+// is reserved for the caller's own pane, the line the shell runs is the
+// seat-host exec that makes the pane's process the chat, no new tab is laid
+// out, and the caller's sole tab takes the chat's label (a named launch its
+// name, a resume its row's name, an unnamed chat its project folder); a label
+// the user set on the tab stays against every name but one a user chose (a
+// launch name, a resumed chat's user name). A tab Herdr will not read keeps
+// its label, named on stderr, and the birth proceeds; a pane this process
+// does not front is left alone and the chat is born in a new tab.
+func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
+	const resumeID = "abcdef12-1234-1234-1234-123456789abc"
+	for _, test := range []struct {
+		name, launchName, label, refuse string
+		row                             compose.Row
+		// handLabel: pfm labelled the tab "PFM" before, then the user set
+		// "work" on it in Herdr; label "work" says it stays.
+		handLabel bool
+	}{
+		{"a named new claude chat", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}, false},
+		{"an unnamed new claude chat", "", "", "", compose.Row{Kind: compose.NewClaude}, false},
+		{"a new codex chat", "", "", "", compose.Row{Kind: compose.NewCodex}, false},
+		{"a new opencode chat", "", "", "", compose.Row{Kind: compose.NewOpenCode}, false},
+		{
+			"a named claude resume", "", "OLD CHAT", "",
+			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "OLD CHAT"},
+			false,
+		},
+		{"an unnamed claude resume", "", "", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID}, false},
+		{"a codex resume", "", "", "", compose.Row{Kind: compose.ResumeCodex, ID: resumeID}, false},
+		{"an opencode resume", "", "", "", compose.Row{Kind: compose.ResumeOpenCode, ID: resumeID}, false},
+		{"a tab Herdr will not read", "", "", "tab.get", compose.Row{Kind: compose.NewClaude}, false},
+		{"a pane this process does not front", "", "", "stale", compose.Row{Kind: compose.NewClaude}, false},
+		{
+			"a hand-set label against an AI title", "", "work", "",
+			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "AI TITLE"},
+			true,
+		},
+		{
+			"a hand-set label against the project folder", "", "work", "", compose.Row{Kind: compose.NewClaude}, true,
+		},
+		{"a hand-set label against a launch name", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}, true},
+		{
+			"a hand-set label against a resumed chat's user name", "", "MINE", "",
+			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "MINE", UserName: "MINE"},
+			true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := newPickerHerdr(t)
+			fake.mu.Lock()
+			fake.refuse = test.refuse
+			fake.mu.Unlock()
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", fake.socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			t.Setenv("TMUX", "/tmp/tmux-1000/dead,1,0")
+			home := values.Home
+			machine := testMachineConfig(home)
+			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
+			binary := filepath.Join(home, "engine")
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			machine.Claude.Binary, machine.Codex.Binary, machine.OpenCode.Binary = binary, binary, binary
+			var stderr strings.Builder
+			executor, err := New(Dependencies{
+				Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr,
+				Identify: func(context.Context) (resolve.Identity, error) {
+					return resolve.Identity{
+						Backend:        "herdr",
+						SocketPath:     fake.socket,
+						Pane:           "w6:p3",
+						HerdrWorkspace: "w6",
+						Fronted:        test.refuse != "stale",
+					}, resolve.ErrNotRegistered
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := test.row
+			row.CWD = home
+			label := cmp.Or(test.label, filepath.Base(home))
+			if test.handLabel {
+				var seq uint64
+				next := func() uint64 { seq++; return seq }
+				if err := herdr.LabelSoleTab(context.Background(), fake.socket, "w6:t1", "PFM", next); err != nil {
+					t.Fatal(err)
+				}
+				fake.mu.Lock()
+				fake.label, fake.renames = "work", nil
+				fake.mu.Unlock()
+			}
+			line, err := executor.Open(context.Background(), Request{
+				Row: row, LaunchName: test.launchName, Home: home, PrimaryAccount: 2,
+				FreshSocket: "unused", Config: machine,
+			})
+			if test.refuse == "stale" {
+				// A stale or inherited HERDR_PANE_ID: that pane is neither reserved
+				// nor relabelled, and the chat is born in a new tab, named on stderr.
+				db := fleetdb.OpenSharedState(context.Background(), values)
+				_, here, hereErr := db.SeatByPane(context.Background(), fake.socket, "w6:p3")
+				tabbed, found, readErr := db.SeatByPane(context.Background(), fake.socket, "w6:p9")
+				if closeErr := db.Close(); closeErr != nil {
+					t.Error(closeErr)
+				}
+				methods, renames := fake.seen()
+				if err != nil || line != "" || here || hereErr != nil || !found || readErr != nil ||
+					tabbed.Backend != "herdr" || !slices.Contains(methods, "layout.apply") || len(renames) != 0 {
+					t.Fatalf("stale pane open line=%q err=%v caller seat=%v (%v) new tab seat=%+v found=%v (%v) "+
+						"methods=%q renames=%q stderr=%q",
+						line, err, here, hereErr, tabbed, found, readErr, methods, renames, stderr.String())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("picker open: %v", err)
+			}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			seat, found, err := db.SeatByPane(context.Background(), fake.socket, "w6:p3")
+			if err != nil || !found || seat.Backend != "herdr" || seat.HerdrPane != "w6:p3" ||
+				seat.Engine != string(compose.EngineForKind(row.Kind)) || seat.SessionID == "" {
+				t.Fatalf("caller pane seat=%+v found=%v err=%v", seat, found, err)
+			}
+			if want := "exec pfm internal seat-host " + seat.SeatID; line != want {
+				t.Fatalf("line = %q, want %q", line, want)
+			}
+			if row.ID != "" {
+				run, err := db.ReadSeatRun(seat.SeatID)
+				if err != nil || seat.SessionID != row.ID || !slices.Contains(run.Args, row.ID) {
+					t.Fatalf("resumed seat=%+v run=%+v err=%v", seat, run, err)
+				}
+			}
+			methods, renames := fake.seen()
+			if slices.Contains(methods, "pane.process_info") {
+				t.Fatalf("picker repeated caller proof: %q", methods)
+			}
+			if slices.Contains(methods, "layout.apply") {
+				t.Fatalf("a picker open laid out a new Herdr tab: %q", methods)
+			}
+			if test.refuse != "" {
+				if len(renames) != 0 || !strings.Contains(stderr.String(), "Herdr tab of pane w6:p3 keeps its label") {
+					t.Fatalf("refused tab renames = %q, stderr = %q", renames, stderr.String())
+				}
+				return
+			}
+			want := []string{"w6:t1=" + label}
+			if label == "work" {
+				want = nil
+			}
+			if !slices.Equal(renames, want) {
+				t.Fatalf("tab renames = %q, want %q (methods %q)", renames, want, methods)
+			}
+		})
+	}
+}
+
+// pickerHerdr is a Herdr socket for a picker running in pane w6:p3, alone in
+// tab w6:t1 (labelled "2"); it records every method asked of it and every tab
+// rename as "{tab}={label}".
+type pickerHerdr struct {
+	socket  string
+	mu      sync.Mutex
+	methods []string
+	renames []string
+	refuse  string // the one method answered with a refusal
+	label   string // the tab's label, "2" until a rename or a test sets it
+}
+
+func (fake *pickerHerdr) seen() (methods, renames []string) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return slices.Clone(fake.methods), slices.Clone(fake.renames)
+}
+
+func herdrPickerSocket(t *testing.T) string {
+	t.Helper()
+	return newPickerHerdr(t).socket
+}
+
+func newPickerHerdr(t *testing.T) *pickerHerdr {
+	t.Helper()
+	fake := &pickerHerdr{socket: filepath.Join(testjail.ShortRoot(t), "herdr.sock")}
+	listener, err := net.Listen("unix", fake.socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+					Params struct {
+						PaneID string `json:"pane_id"`
+						TabID  string `json:"tab_id"`
+						Label  string `json:"label"`
+					} `json:"params"`
+				}
+				if json.NewDecoder(conn).Decode(&req) != nil {
+					return
+				}
+				fake.mu.Lock()
+				refused, stale := req.Method == fake.refuse, fake.refuse == "stale"
+				fake.methods = append(fake.methods, req.Method)
+				if req.Method == "tab.rename" && !refused {
+					fake.renames = append(fake.renames, req.Params.TabID+"="+req.Params.Label)
+					fake.label = req.Params.Label
+				}
+				label := cmp.Or(fake.label, "2")
+				fake.mu.Unlock()
+				if refused {
+					_, _ = fmt.Fprintf(
+						conn,
+						`{"id":%q,"ok":false,"error":{"code":"unknown_method","message":"fixture refusal"}}`+"\n",
+						req.ID,
+					)
+					return
+				}
+				var result any
+				switch req.Method {
+				case "pane.get", "pane.focus":
+					result = testjail.HerdrPaneInfo(req.Params.PaneID)
+				case "tab.get", "tab.rename":
+					result = map[string]any{
+						"type": "tab_info",
+						"tab":  map[string]any{"tab_id": req.Params.TabID, "label": label, "pane_count": 1},
+					}
+				case "pane.process_info":
+					foreground := os.Getpid()
+					if stale {
+						foreground = 1
+					}
+					result = map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+						"pane_id": req.Params.PaneID, "shell_pid": 1,
+						"foreground_processes": []any{map[string]any{"pid": foreground, "name": "pfm"}},
+					}}
+				case "ping":
+					result = map[string]any{"type": "pong", "version": "0.9.5", "protocol": 22}
+				case "layout.apply":
+					result = map[string]any{"layout": map[string]any{
+						"workspace_id": "w6", "root": map[string]any{"type": "pane", "pane_id": "w6:p9"},
+					}}
+				default:
+					result = map[string]any{"pane": map[string]any{"pane_id": "w6:p3"}}
+				}
+				body, err := json.Marshal(map[string]any{"id": req.ID, "ok": true, "result": result})
+				if err != nil {
+					t.Errorf("encode Herdr %s reply: %v", req.Method, err)
+					return
+				}
+				_, _ = fmt.Fprintf(conn, "%s\n", body)
+			}()
+		}
+	}()
+	return fake
+}
+
+func TestPickerRejectsCallerReadFailure(t *testing.T) {
+	home, failure := t.TempDir(), errors.New("caller pane read failed")
+	tmux := &fakeActionTmux{alive: map[string]bool{}, panes: map[string][]ActionPane{}}
+	executor, err := New(Dependencies{
+		Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
+		Identify: func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, failure },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		Row: compose.Row{Kind: compose.NewClaude, CWD: home}, Config: testMachineConfig(home),
+		Home: home, PrimaryAccount: 1, FreshSocket: "cc-caller-failure",
+	}
+	_, err = executor.Open(context.Background(), request)
+	if !errors.Is(err, failure) || len(tmux.created) != 0 {
+		t.Fatalf("caller failure = %v, births = %d; want caller error and no birth", err, len(tmux.created))
 	}
 }

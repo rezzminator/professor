@@ -1,0 +1,55 @@
+{
+  "0002": {
+    "name": "Ash · punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "punctuation.accessor",
+      "punctuation.other.period.go",
+      "punctuation.other.comma.go",
+      "punctuation.other.colon.go",
+      "meta.separator.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a99c91"
+    }
+  },
+  "0011": {
+    "name": "Molten · template expressions",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "punctuation.definition.interpolation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9044"
+    }
+  },
+  "0026": {
+    "name": "Ash · tag brackets",
+    "scope": [
+      "punctuation.definition.tag"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a99c91"
+    }
+  },
+  "0052": {
+    "name": "Molten · list markers",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "punctuation.definition.list.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9044"
+    }
+  }
+}

@@ -1,0 +1,267 @@
+{
+  "0033": {
+    "name": "Markdown headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown",
+      "markup.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fd67ad"
+    }
+  },
+  "0034": {
+    "name": "Markdown h1: the band",
+    "scope": [
+      "heading.1.markdown entity.name.section.markdown",
+      "heading.1.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.1.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#3ddffd"
+    }
+  },
+  "0035": {
+    "name": "Markdown h2: the band",
+    "scope": [
+      "heading.2.markdown entity.name.section.markdown",
+      "heading.2.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.2.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b494ff"
+    }
+  },
+  "0036": {
+    "name": "Markdown h3: the band",
+    "scope": [
+      "heading.3.markdown entity.name.section.markdown",
+      "heading.3.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.3.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#e48bff"
+    }
+  },
+  "0037": {
+    "name": "Markdown h4: the band",
+    "scope": [
+      "heading.4.markdown entity.name.section.markdown",
+      "heading.4.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.4.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fd67ad"
+    }
+  },
+  "0038": {
+    "name": "Markdown h5: the band",
+    "scope": [
+      "heading.5.markdown entity.name.section.markdown",
+      "heading.5.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.5.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff7b72"
+    }
+  },
+  "0039": {
+    "name": "Markdown h6: the band",
+    "scope": [
+      "heading.6.markdown entity.name.section.markdown",
+      "heading.6.markdown punctuation.definition.heading.markdown",
+      "markup.heading.setext.6.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffd866"
+    }
+  },
+  "0040": {
+    "name": "Markdown bold",
+    "scope": [
+      "markup.bold",
+      "punctuation.definition.bold.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffc7dc"
+    }
+  },
+  "0041": {
+    "name": "Markdown italic",
+    "scope": [
+      "markup.italic",
+      "punctuation.definition.italic.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f0b8ff"
+    }
+  },
+  "0042": {
+    "name": "Markdown bold italic",
+    "scope": [
+      "markup.bold markup.italic",
+      "markup.italic markup.bold"
+    ],
+    "settings": {
+      "fontStyle": "bold italic",
+      "foreground": "#ffd866"
+    }
+  },
+  "0043": {
+    "name": "Markdown strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#8c7db3"
+    }
+  },
+  "0044": {
+    "name": "Markdown links",
+    "scope": [
+      "markup.underline.link",
+      "constant.other.reference.link",
+      "markup.underline.link.image"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#3ddffd"
+    }
+  },
+  "0046": {
+    "name": "Markdown inline code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.inline.raw.string.markdown",
+      "markup.raw"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72f1b8"
+    }
+  },
+  "0047": {
+    "name": "Markdown fenced code",
+    "scope": [
+      "markup.fenced_code",
+      "markup.fenced_code.block.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f4e8f7"
+    }
+  },
+  "0048": {
+    "name": "Markdown fence language",
+    "scope": [
+      "fenced_code.block.language",
+      "fenced_code.block.language.markdown"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b494ff"
+    }
+  },
+  "0049": {
+    "name": "Markdown quotes",
+    "scope": [
+      "markup.quote"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#8c7db3"
+    }
+  },
+  "0053": {
+    "name": "Markdown tables",
+    "scope": [
+      "markup.table punctuation.separator",
+      "punctuation.separator.table.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#a998cc"
+    }
+  },
+  "0054": {
+    "name": "Diff: inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted",
+      "meta.diff.header.to-file",
+      "punctuation.definition.to-file.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72f1b8"
+    }
+  },
+  "0055": {
+    "name": "Diff: deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted",
+      "meta.diff.header.from-file",
+      "punctuation.definition.from-file.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff5c7a"
+    }
+  },
+  "0056": {
+    "name": "Diff: changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffd866"
+    }
+  },
+  "0066": {
+    "name": "Log levels: error",
+    "scope": [
+      "markup.error",
+      "log.error"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff5c7a"
+    }
+  },
+  "0067": {
+    "name": "Log levels: warning",
+    "scope": [
+      "markup.warning",
+      "log.warning"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffd866"
+    }
+  },
+  "0068": {
+    "name": "Log levels: info",
+    "scope": [
+      "markup.info",
+      "log.info"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#78c7fd"
+    }
+  }
+}

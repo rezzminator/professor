@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -101,6 +102,7 @@ func Fire(
 	if err != nil {
 		return Report{}, fmt.Errorf("list due schedules: %w", err)
 	}
+	ctx = context.WithValue(ctx, fireTimeKey{}, fireTiming{tick: now, started: obs.Clock(ctx).Now()})
 	for index := range due {
 		r := due[index]
 		err := deliverer.Deliver(ctx, r, Message(r))
@@ -109,6 +111,8 @@ func Fire(
 			err = nil
 		}
 		if err != nil {
+			obs.Logger(ctx).
+				ErrorContext(ctx, fmt.Sprintf("schedule %d stays due: %v", r.ID, err), obs.FieldChat, r.SessionID)
 			failure := err
 			if _, recordErr := store.RecordScheduleFailure(ctx, r.ID, now, err.Error()); recordErr != nil {
 				failure = errors.Join(err, fmt.Errorf("record failure of schedule %d: %w", r.ID, recordErr))
@@ -123,6 +127,15 @@ func Fire(
 			}
 			report.Failed = append(report.Failed, Failure{Schedule: r, Err: failure})
 			continue
+		}
+		if cleaner, ok := deliverer.(interface{ ForgetDelivery(fleetdb.Schedule) error }); ok {
+			if err := cleaner.ForgetDelivery(r); err != nil {
+				if warning == nil {
+					warning = &DeliveryWarning{Err: err}
+				} else {
+					warning.Err = errors.Join(warning.Err, err)
+				}
+			}
 		}
 		report.Fired = append(report.Fired, r)
 		if warning != nil {

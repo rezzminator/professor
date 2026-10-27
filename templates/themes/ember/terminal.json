@@ -1,0 +1,13 @@
+{
+  "terminal.ansiBlack": "#2b221c",
+  "terminal.ansiBrightBlack": "#86776b",
+  "terminal.ansiBrightBlue": "#a5d0f6",
+  "terminal.ansiBrightCyan": "#b0eaf1",
+  "terminal.ansiBrightGreen": "#ade799",
+  "terminal.ansiBrightMagenta": "#dab4e6",
+  "terminal.ansiBrightRed": "#ff7e77",
+  "terminal.ansiBrightWhite": "#fef4df",
+  "terminal.ansiBrightYellow": "#ffe891",
+  "terminal.ansiWhite": "#d4c8bc",
+  "terminalCursor.foreground": "#ffb75e"
+}

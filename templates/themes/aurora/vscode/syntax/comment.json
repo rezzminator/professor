@@ -1,0 +1,53 @@
+{
+  "0001": {
+    "name": "High haze · comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment",
+      "comment.line",
+      "comment.block"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#7280aa"
+    }
+  },
+  "0002": {
+    "name": "N2+ halo · doc-comment tags",
+    "scope": [
+      "comment keyword.codetag",
+      "storage.type.class.jsdoc",
+      "comment.block.documentation storage.type",
+      "comment.block.documentation keyword",
+      "comment.block.documentation punctuation.definition.block.tag",
+      "comment.block.documentation punctuation.definition.inline.tag"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#a99cf0"
+    }
+  },
+  "0003": {
+    "name": "N2+ halo · doc-comment types",
+    "scope": [
+      "comment.block.documentation entity.name.type",
+      "comment.block.documentation entity.name.type.instance"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f2d48c"
+    }
+  },
+  "0004": {
+    "name": "N2+ halo · doc-comment parameters",
+    "scope": [
+      "comment.block.documentation variable.other",
+      "comment.block.documentation variable.parameter"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#d4c6ff"
+    }
+  }
+}

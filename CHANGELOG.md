@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.83.0](releases/v0.83.0.md) — native Herdr seats, pfm theme sync across Claude Code, Herdr, VS Code and Ghostty, `pfm restart`, sub-agent-compact renamed forward-compaction, no GPT agents shipped, pruned project templates
 - [v0.82.0](releases/v0.82.0.md) — engine-sync becomes the single writer of every Codex and OpenCode mirror; /pfm:update owns the host install with alpha plugins and a verified Claude plugin cache; GPT twins for the research leads; harvester hardening (bounded reads, distrusted cached Jina snapshots)
 - [v0.81.0](releases/v0.81.0.md) — Removes the prompt-guard hook in favour of the pcm agent; adds documenter as a global agent that runs every write from a caller-written handoff; adds project-tier update verbs and a doctor warning for unclosed update rows; retires advisor-cache-gateway (superseded by gpt-gateway, advisor off); removes /rnd; agents keep the compact-only sub-agent-compact mechanism; pins sub-agent-compact v0.4.1 (compact on, handoff off by default), engine-sync v0.3.0, effort-live-control v0.2.0, cache-live-control v0.5.0 and gpt-gateway v0.3.0.
 - [v0.80.1](releases/v0.80.1.md) — gpt-gateway, the local gateway the GPT twins need, published at rezzminator/gpt-gateway (v0.1.0) and pinned as the `plugins/gpt-gateway` submodule

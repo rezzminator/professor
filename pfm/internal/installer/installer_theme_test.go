@@ -3,44 +3,20 @@ package installer
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
-	themeBody := []byte(`{"name":"Tokyo Night","fixture":true}` + "\n")
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/tokyo-night.json" {
-			http.NotFound(response, request)
-			return
-		}
-		if _, err := response.Write(themeBody); err != nil {
-			t.Errorf("write theme fixture response: %v", err)
-		}
-	}))
-	t.Cleanup(server.Close)
-	manifest := fmt.Sprintf(`{
-  "_comment": "fixture",
-  "source_fetched": {
-    "tokyo-night": {
-      "repo": %q,
-      "raw": %q,
-      "target": "~/.claude/themes/tokyo-night.json",
-      "activate": "/theme",
-      "requires": "fixture"
-    }
-  }
-}`, server.URL, server.URL+"/tokyo-night.json")
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
+	themeBody := writeThemeDir(t, filepath.Join(sourceRepo, "templates", "themes"), "sonar-gold",
+		`{"name":"Sonar Gold","base":"dark","overrides":{"claude":"#ffd60a"}}`)
 
 	run := func(mode Mode) (Report, string, error) {
 		var output bytes.Buffer
@@ -51,7 +27,7 @@ func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 		})
 		return report, output.String(), err
 	}
-	target := filepath.Join(home, ".claude", "themes", "tokyo-night.json")
+	target := filepath.Join(home, ".claude", "themes", "sonar-gold.json")
 	first, firstOutput, err := run(ModeApply)
 	if err != nil {
 		t.Fatalf("first theme install: %v\n%s", err, firstOutput)
@@ -63,7 +39,7 @@ func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second theme install: %v\n%s", err, secondOutput)
 	}
-	if second.Changed != 0 || !strings.Contains(secondOutput, "theme tokyo-night") {
+	if second.Changed != 0 || !strings.Contains(secondOutput, "theme sonar-gold") {
 		t.Fatalf("second report=%#v, want changed=0 with a named theme row\n%s", second, secondOutput)
 	}
 	if first.Changed == 0 {
@@ -78,7 +54,7 @@ func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 	if got := readFixture(t, target); got != "operator modification\n" {
 		t.Fatalf("locally modified theme was overwritten: %q", got)
 	}
-	if !strings.Contains(driftOutput, "theme tokyo-night locally modified; left in place") {
+	if !strings.Contains(driftOutput, "theme sonar-gold locally modified; left in place") {
 		t.Fatalf("local drift was silent:\n%s", driftOutput)
 	}
 
@@ -87,36 +63,34 @@ func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("theme uninstall: %v\n%s", err, uninstallOutput)
 	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("uninstall retained installer-owned theme: %v", err)
+	for _, path := range []string{target, themesync.ProfilePath(home, "sonar-gold")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("uninstall retained installer-owned theme file %s: %v", path, err)
+		}
 	}
 }
 
-func TestThemeFetchFailureIsLoudAndNonFatal(t *testing.T) {
+// TestReleaseProfileFetchFailureIsLoudAndNonFatal: with no themes in the
+// clone, a theme the release listing names but whose files it will not serve
+// is a named skip, and the rest of the host install carries on.
+func TestReleaseProfileFetchFailureIsLoudAndNonFatal(t *testing.T) {
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	recordFixtureSourceRepo(t, home, sourceRepo)
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		http.Error(response, "blocked by fixture", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(server.Close)
-	manifest := fmt.Sprintf(
-		`{"source_fetched":{"tokyo-night":{"repo":%q,"raw":%q,"target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`,
-		server.URL,
-		server.URL+"/tokyo-night.json",
-	)
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
+	client := releaseThemeClient(t, "v1.0.0", nil, `[{"name":"sonar-gold","type":"dir"}]`)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
 		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
+		ThemeReleaseURL: releaseThemeURL("v1.0.0"), ThemeHTTPClient: client,
 	})
 	if err != nil {
 		t.Fatalf("cosmetic theme fetch aborted host install: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "theme tokyo-night fetch failed") ||
-		!strings.Contains(output.String(), "503") {
+	theme := releaseThemeURL("v1.0.0") + "sonar-gold/"
+	if !strings.Contains(output.String(), "theme sonar-gold fetch failed: "+theme+": claude.json: GET "+theme+
+		"claude.json: HTTP Not Found") {
 		t.Fatalf("theme fetch failure was silent or vague:\n%s", output.String())
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".zshrc")); statErr != nil {
@@ -124,53 +98,22 @@ func TestThemeFetchFailureIsLoudAndNonFatal(t *testing.T) {
 	}
 }
 
-func TestThemeManifestResolvesRegisteredOwnerPlaceholder(t *testing.T) {
-	sourceRepo := t.TempDir()
-	writeFixture(
-		t,
-		filepath.Join(sourceRepo, ".professor", "manifest.json"),
-		`{"installed_from":{"repo":"fixture-owner/professor"}}`,
-	)
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{
-  "source_fetched": {
-    "tokyo-night": {
-      "repo": "https://github.com/{GH_USER}/claude-code-tokyo-night",
-      "raw": "https://raw.githubusercontent.com/{GH_USER}/claude-code-tokyo-night/main/tokyo-night.json",
-      "target": "~/.claude/themes/tokyo-night.json",
-      "activate": "/theme",
-      "requires": "fixture"
-    }
-  }
-}`)
-	sources, err := loadThemeSources(context.Background(), Options{SourceRepo: sourceRepo})
-	if err != nil {
-		t.Fatalf("loadThemeSources: %v", err)
-	}
-	if got := sources["tokyo-night"].Raw; got != "https://raw.githubusercontent.com/fixture-owner/claude-code-tokyo-night/main/tokyo-night.json" {
-		t.Fatalf("resolved raw URL=%q", got)
-	}
-}
+func TestThemeProfilesFallBackToReleaseWhenTheCloneHoldsNone(t *testing.T) {
+	listing := `[{"name":"README.md","type":"file"},{"name":"lagoon","type":"dir"}]`
+	client := releaseThemeClient(t, "v1.0.0", nil, listing)
 
-func TestThemeManifestFallsBackToReleaseWhenDiscoveredSourceLacksManifest(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		response.Header().Set("Content-Type", "application/json")
-		if _, err := io.WriteString(
-			response,
-			`{"source_fetched":{"tokyo-night":{"repo":"https://example.test/theme","raw":"https://example.test/theme.json","target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`,
-		); err != nil {
-			t.Errorf("write release manifest fixture: %v", err)
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	sources, err := loadThemeSources(context.Background(), Options{
-		SourceRepo:       t.TempDir(),
-		ThemeManifestURL: server.URL,
+	profiles, err := loadThemeProfiles(context.Background(), Options{
+		SourceRepo:      t.TempDir(),
+		ThemeReleaseURL: releaseThemeURL("v1.0.0"),
+		ThemeHTTPClient: client,
 	})
 	if err != nil {
-		t.Fatalf("loadThemeSources() did not fall back to release manifest: %v", err)
+		t.Fatalf("loadThemeProfiles() did not fall back to the release: %v", err)
 	}
-	if _, found := sources["tokyo-night"]; !found {
-		t.Fatalf("release manifest sources=%#v, want tokyo-night", sources)
+	if got := profileKeys(profiles); strings.Join(got, ",") != "lagoon" {
+		t.Fatalf("release profiles = %v, want lagoon alone", got)
+	}
+	if got := profiles["lagoon"].raw; got != releaseThemeURL("v1.0.0")+"lagoon/" {
+		t.Fatalf("release profile lagoon raw=%q, want it in the release's templates/themes/", got)
 	}
 }

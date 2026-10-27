@@ -2,7 +2,7 @@
 
 An opinionated multi-agent development pipeline for Claude Code — **with a full cast of characters**. It drops into **any Claude Code project, at any repo size**, regardless of language, framework, or runtime. Structure is captured at install as a **roster** of 1..N projects: a single-project repo is a roster of one (first-class — the worktree is the repo root, routing is trivial, cross-project steps drop out), and a multi-project repo lights up per-project agents and cross-project routing. The mechanics survive every stack; the characters' voices survive every domain.
 
-This is the **transplantable nervous system** — not a config dump. Built by the Professor (the grandfatherly polymath who runs the show). The pipeline gives you the **discipline + personalities**, you parameterize the domain content (your stack, your sacred-ground concerns, your regulation, your user persona).
+This is the **transplantable nervous system** — not a config dump. Built by the Professor (the grandfatherly polymath who runs the show). The pipeline gives you the **discipline + personalities**, you parameterize the domain content (your stack, your sacred-ground concerns, your regulation).
 
 ---
 
@@ -10,13 +10,12 @@ This is the **transplantable nervous system** — not a config dump. Built by th
 
 A complete `.claude/` infrastructure that turns Claude Code from "an AI that writes code when you ask" into **a self-disciplined engineering team with character**:
 
-- **The full cast** — The Professor (orchestrator), PFM, Audit, plus optional Tier B archetypes (Officer, Mentor, Marketer). The harness prompt owns the Professor voice; working prompts carry their task contracts.
+- **The full cast** — The Professor (orchestrator), PFM, Audit. The harness prompt owns the Professor voice; working prompts carry their task contracts.
 - **Worktree isolation** — every feature gets its own git worktree branch + a unique port allocation. Multiple parallel pipelines on the same repo without collisions.
 - **A pipeline that refuses cowboy coding** — `planner → architect → developer → QA → merge`. QA gates block bad code from reaching `main`. Only one agent (`gitter`) touches git.
 - **Self-improvement at the source** — the change manager (`/pcm`) edits the pipeline rules where they live instead of accumulating "lessons learned" files nobody reads.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths. Rename a directory once, every agent follows.
 - **Documentation discipline** — pipeline docs are temporary and archived; only one agent writes to permanent project docs.
-- **Memory backup (opt-in)** — a `SessionEnd` hook auto-syncs Claude's persistent project memory to a private repo on session end, so a machine wipe or new machine doesn't lose what Claude learned. Plain git, zero tokens.
 
 ---
 
@@ -50,7 +49,7 @@ templates/
 ├── project/              ← scaffolded rules, agents, commands, hooks, and engine adapters
 ├── global/               ← machine-global commands, agents, and skill source registry
 ├── prompts/              ← Claude replacement and the Codex fleet prompt
-└── themes/               ← source-fetched theme registry
+└── themes/               ← Professor themes, one {name}.json profile each
 ```
 
 Host fleet tooling has one source outside the template tree: the Go engine under `../pfm/`, with every staged host asset under `../pfm/internal/installer/assets/`. A fresh box gets the `pfm` binary, then runs `pfm install --yes`; no separate host template bundle is copied.
@@ -80,12 +79,11 @@ For the manual path, see `SETUP.md`.
 
 ---
 
-## The three tiers
+## The tiers
 
-Every command, agent, and rule in this blueprint sorts into one of three tiers:
+Every command, agent, and rule in this blueprint sorts into one of two tiers:
 
-- **Tier A — Universal archetypes** ship with FULL CHARACTER. Domain references inside (the opted-in Tier B cast, the Professor's example stack traces) parameterize per install.
-- **Tier B — Domain archetypes** ship as ARCHETYPE SKELETONS with placeholders. You fill in regulation, user persona, market, knowledge domain — the voice and structure are universal.
+- **Tier A — Universal archetypes** ship with FULL CHARACTER. Domain references inside (the Professor's example stack traces) parameterize per install.
 - **Tier C — Pure mechanics** ship as INFRASTRUCTURE. No character; just role-defined plumbing.
 
 See `SETUP.md` for the install interview and adaptation guidance.
@@ -98,19 +96,13 @@ See `SETUP.md` for the install interview and adaptation guidance.
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator and root identity — lives in CLAUDE.md, not a separate command.
 - **/pcm** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
-- **/flights:{init,spec,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics with light Professor voice.
+- **/flights:doctor, /dev** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/flights:spec`, `/flights:audit`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
+**Bundled commands (ship with the blueprint):** `/flights:doctor`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:claude-selector`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `legal` is bundled under `templates/project/skills/`.
 
 **Host tooling (opt-in):** statusline, the `pfm install --vscode` Professor VS Code extension (Professor's assistant in VS Code) with the PFM terminal made default, a Linux/macOS multi-account `/reload` (per-chat billing switch across subscriptions), and the launcher-agnostic chat fleet (`pfm` picker, `/clear` auto-kill, `pfm reap` orphan sweeper).
-
-**Tier B — opt-in domain archetypes:**
-
-- **/officer** — compliance enforcer. Pick your regulation(s).
-- **/mentor** — business advisor. Pick your market + jurisdiction.
-- **/marketer** — visibility strategist. Pick your channels + language.
 
 ---
 

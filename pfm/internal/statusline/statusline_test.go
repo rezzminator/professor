@@ -244,14 +244,6 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 					`{"primary":{"usedPercent":31.6,"windowDurationMins":300,"resetsAt":1786845600},"secondary":{"usedPercent":70.5,"windowDurationMins":10080,"resetsAt":1787443200},"planType":"plus"}`,
 					now,
 				)
-				writeGoldenCache(t, filepath.Join(cacheDir, "cc-sl-gptreq"), "7 0\n", now)
-				if err := os.WriteFile(
-					filepath.Join(procRoot, "net", "tcp"),
-					[]byte(" 00000000:494D "),
-					0o600,
-				); err != nil {
-					t.Fatal(err)
-				}
 			}
 			raw, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.fixture+".json"))
 			if err != nil {
@@ -380,8 +372,8 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	for _, want := range []string{
-		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·🏎️ high", "sample",
-		"43%", "💰$3.42/?/?/?", "⏳ 5m32s", "·2 ·1",
+		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·▰▰▰ high", "sample",
+		"43% 10.3K", "💰$3.42/?/?/?", "⏳ 5m32s", "·2 ·1",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("render lacks %q:\n%q", want, got)
@@ -417,7 +409,7 @@ func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T
 	input := []byte(`{
   "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
   "cwd":"/work/sample",
-  "context_window":{"used_percentage":77},
+  "context_window":{"context_window_size":1000000,"used_percentage":77},
   "transcript_path":` + string(encodedTranscriptPath) + `
 }`)
 	got, err := Render(context.Background(), input, Runtime{
@@ -460,7 +452,7 @@ func TestRenderMarksCompactBoundaryEstimateWithoutPostTokens(t *testing.T) {
 	got, err := Render(context.Background(), []byte(`{
   "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
   "cwd":"/work/sample",
-  "context_window":{"used_percentage":77},
+  "context_window":{"context_window_size":1000000,"used_percentage":77},
   "transcript_path":`+string(encodedPath)+`
 }`), Runtime{
 		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
@@ -494,7 +486,7 @@ func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T)
 	got, err := Render(context.Background(), []byte(`{
   "model":{"display_name":"Opus 4"},
   "cwd":"/work/sample",
-  "context_window":{"used_percentage":77,"current_usage":{"input_tokens":1000}},
+  "context_window":{"context_window_size":1000000,"used_percentage":77,"current_usage":{"input_tokens":1000}},
   "transcript_path":`+string(encodedPath)+`
 }`), Runtime{
 		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
@@ -553,7 +545,7 @@ func TestCodexSegmentDoesNotOverwriteTranscriptGauge(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Render(context.Background(), []byte(`{
-  "context_window":{"used_percentage":77,"current_usage":{"input_tokens":136000}},
+  "context_window":{"context_window_size":1000000,"used_percentage":77,"current_usage":{"input_tokens":136000}},
   "transcript_path":`+string(encodedPath)+`
 }`), Runtime{
 		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
@@ -564,43 +556,29 @@ func TestCodexSegmentDoesNotOverwriteTranscriptGauge(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "25% of 272.0K") || strings.Contains(plain, "50%") || strings.Contains(plain, "77%") {
+	if !strings.Contains(plain, "25% 68.0K of 272.0K") || strings.Contains(plain, "50%") ||
+		strings.Contains(plain, "77%") {
 		t.Fatalf("Codex overwrote transcript gauge:\n%q", plain)
 	}
 }
 
 func TestCodexEngineOwnsCodexUsageIndependentOfAccountID(t *testing.T) {
-	root := t.TempDir()
-	input := []byte(`{
-  "model":{"display_name":"Claude"},
-  "workspace":{"current_dir":"/work/sample"},
-  "context_window":{"used_percentage":10,"current_usage":{"input_tokens":136000}},
-  "cost":{"total_cost_usd":99,"total_duration_ms":1000}
-}`)
-	// Every model family the Codex proxy serves has a 272K window: 136K used is 50%.
-	for _, model := range []string{"gpt-5.6-sol[1m]", "gpt-6.1-sol[1m]", "gpt-6-luna"} {
-		got, err := Render(context.Background(), input, Runtime{
-			Now:       func() time.Time { return time.Unix(1_786_838_400, 0) },
-			Home:      root,
-			ConfigDir: filepath.Join(root, ".cc", "2"),
-			CacheDir:  filepath.Join(root, "cache"),
-			TmuxDir:   filepath.Join(root, "tmux"),
-			ProcRoot:  filepath.Join(root, "proc"),
-			Columns:   120,
-			UID:       1000,
-			Engine:    pfmengine.Codex,
-			Env:       map[string]string{"ANTHROPIC_MODEL": model},
-			Command:   quietRunner{},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(got, "🥈 ") ||
-			!strings.Contains(got, "🍀 "+strings.TrimSuffix(model, "[1m]")) ||
-			!strings.Contains(got, "50%") ||
-			strings.Contains(got, "💰$99.00") {
-			t.Fatalf("Codex-engine rendering drifted for %s:\n%q", model, got)
-		}
+	r := parityRuntime(t)
+	r.Engine = pfmengine.Codex
+	r.AccountDirs = map[string]int{r.ConfigDir: 2}
+	got, err := Render(
+		context.Background(),
+		[]byte(
+			`{"model":{"id":"gpt-6.1-sol"},"context_window":{"current_usage":{"input_tokens":165000}},"cost":{"total_cost_usd":99}}`,
+		),
+		r,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := stripANSICodes(got)
+	if !strings.Contains(plain, "33% 165.0K") || strings.Contains(plain, "💰$99.00") {
+		t.Fatalf("Codex render: %s", plain)
 	}
 }
 
@@ -706,31 +684,8 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestCodexAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
-	root := t.TempDir()
-	logDir := filepath.Join(root, ".local", "state", "claude-code-proxy")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	log := strings.Join([]string{
-		`{"msg":"request_completed","t":"2026-08-16T01:00:00Z","status":401}`,
-		`{"msg":"upstream_diagnostic","t":"2026-08-16T02:00:00Z","status":403}`,
-		`{"msg":"request_completed","t":"2026-08-16T03:00:00Z","status":401}`,
-	}, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(logDir, "proxy.log"), []byte(log), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	count, reject := codexRequestCount(Runtime{
-		Now:  func() time.Time { return time.Date(2026, 8, 16, 5, 0, 0, 0, time.UTC) },
-		Home: root, CacheDir: filepath.Join(root, "cache"),
-	}, time.Date(2026, 8, 16, 5, 0, 0, 0, time.UTC))
-	if count != 2 || reject {
-		t.Fatalf("count=%d reject=%v; non-request rows must not manufacture a three-request streak", count, reject)
-	}
-}
-
 // The scoped Fable window is resolved into data.RateLimits.Windows before
-// harvestRateLimits runs, but the snapshot writer only ever copied the two
+// recordRateLimits runs, but the snapshot writer only ever copied the two
 // flat windows out of that map. A host whose Limits tab reads nothing BUT
 // this snapshot (credentials in the OS keychain, so no usage-API path) could
 // therefore never show Fable, however faithfully it was rendered inline.

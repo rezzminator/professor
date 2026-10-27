@@ -1,0 +1,213 @@
+{
+  "0001": {
+    "name": "Fix YAML block scalar, Python Logical",
+    "scope": [
+      "keyword.control.flow.block-scalar.literal",
+      "keyword.control.flow.python"
+    ],
+    "settings": {
+      "fontStyle": ""
+    }
+  },
+  "0005": {
+    "name": "Comment Doc (doc)",
+    "scope": [
+      "keyword.operator.assignment.jsdoc",
+      "meta.other.type.phpdoc.php keyword.other.type.php",
+      "meta.other.type.phpdoc.php support.other.namespace.php",
+      "meta.other.type.phpdoc.php punctuation.separator.inheritance.php",
+      "meta.other.type.phpdoc.php support.class",
+      "keyword.other.phpdoc.php",
+      "log.date"
+    ],
+    "settings": {
+      "foreground": "#cd77bd"
+    }
+  },
+  "0013": {
+    "name": "Storage Type",
+    "scope": [
+      "storage.type"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0016": {
+    "name": "Blade, Twig, Smarty Handlebars keywords",
+    "scope": [
+      "keyword.control.smarty",
+      "keyword.control.twig",
+      "support.constant.handlebars keyword.control",
+      "keyword.operator.comparison.twig",
+      "keyword.blade",
+      "entity.name.function.blade",
+      "meta.tag.blade keyword.other.type.php"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  },
+  "0017": {
+    "name": "Spread",
+    "scope": [
+      "keyword.operator.spread",
+      "keyword.operator.rest"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0018": {
+    "name": "Operator, Misc",
+    "scope": [
+      "keyword.operator",
+      "keyword.control.as",
+      "keyword.other",
+      "keyword.operator.bitwise.shift",
+      "punctuation",
+      "expression.embbeded.vue punctuation.definition.tag",
+      "text.html.twig meta.tag.inline.any.html",
+      "meta.tag.template.value.twig meta.function.arguments.twig",
+      "meta.directive.vue punctuation.separator.key-value.html",
+      "punctuation.definition.constant.markdown",
+      "punctuation.definition.string",
+      "punctuation.support.type.property-name",
+      "text.html.vue-html meta.tag",
+      "meta.attribute.directive",
+      "punctuation.definition.keyword",
+      "punctuation.terminator.rule",
+      "punctuation.definition.entity",
+      "punctuation.separator.inheritance.php",
+      "keyword.other.template",
+      "keyword.other.substitution",
+      "entity.name.operator",
+      "meta.property-list punctuation.separator.key-value",
+      "meta.at-rule.mixin punctuation.separator.key-value",
+      "meta.at-rule.function variable.parameter.url",
+      "meta.embedded.inline.phpx punctuation.definition.tag.begin.html",
+      "meta.embedded.inline.phpx punctuation.definition.tag.end.html"
+    ],
+    "settings": {
+      "foreground": "#ff70e5"
+    }
+  },
+  "0019": {
+    "name": "Import, Export, From, Default",
+    "scope": [
+      "keyword.control.module.js",
+      "keyword.control.import",
+      "keyword.control.export",
+      "keyword.control.from",
+      "keyword.control.default",
+      "meta.import keyword.other"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0020": {
+    "name": "Keyword",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.other.important"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0021": {
+    "name": "Keyword SQL",
+    "scope": [
+      "keyword.other.DML"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0022": {
+    "name": "Keyword Operator Logical, Arrow, Ternary, Comparison",
+    "scope": [
+      "keyword.operator.logical",
+      "storage.type.function",
+      "keyword.operator.bitwise",
+      "keyword.operator.ternary",
+      "keyword.operator.comparison",
+      "keyword.operator.relational",
+      "keyword.operator.or.regexp"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0038": {
+    "name": "Constant, Tag Attribute",
+    "scope": [
+      "keyword.other.type.php",
+      "storage.type.php",
+      "constant.character",
+      "constant.escape",
+      "keyword.other.unit"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0055": {
+    "name": "SCSS Mixins, Extends, Include Keyword",
+    "scope": [
+      "keyword.control.at-rule.include punctuation.definition.keyword",
+      "keyword.control.at-rule.mixin punctuation.definition.keyword",
+      "meta.at-rule.include keyword.control.at-rule.include",
+      "keyword.control.at-rule.extend punctuation.definition.keyword",
+      "meta.at-rule.extend keyword.control.at-rule.extend",
+      "entity.other.attribute-name.placeholder.css punctuation.definition.entity.css",
+      "meta.at-rule.media keyword.control.at-rule.media",
+      "meta.at-rule.mixin keyword.control.at-rule.mixin",
+      "meta.at-rule.function keyword.control.at-rule.function",
+      "keyword.control punctuation.definition.keyword"
+    ],
+    "settings": {
+      "foreground": "#eb66ff"
+    }
+  },
+  "0074": {
+    "name": "Regular Expressions - Quantifier",
+    "scope": [
+      "keyword.operator.quantifier.regexp"
+    ],
+    "settings": {
+      "foreground": "#ff70e5"
+    }
+  },
+  "0078": {
+    "name": "CSS Units",
+    "scope": [
+      "keyword.other.unit"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0124": {
+    "name": "Pink · doc comment types",
+    "scope": [
+      "storage.type.class.jsdoc",
+      "comment.block.documentation entity.name.type"
+    ],
+    "settings": {
+      "foreground": "#dd88cd"
+    }
+  },
+  "0126": {
+    "name": "Pink · storage modifiers",
+    "scope": [
+      "storage.modifier.import"
+    ],
+    "settings": {
+      "foreground": "#eb66ff"
+    }
+  }
+}

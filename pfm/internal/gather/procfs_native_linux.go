@@ -28,7 +28,7 @@ func (proc linuxProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 	for _, line := range strings.Split(string(content), "\n") {
 		if value, found := strings.CutPrefix(line, "State:"); found {
 			fields := strings.Fields(value)
-			identity.Zombie = len(fields) > 0 && fields[0] == "Z"
+			identity.Zombie = len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X")
 		}
 		if value, found := strings.CutPrefix(line, "Name:"); found {
 			identity.Command = strings.TrimSpace(value)

@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,6 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 	home := t.TempDir()
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	for _, testCase := range []struct {
 		name  string
 		setup func(t *testing.T)
@@ -51,7 +51,6 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 
 func TestReportHooksNoClaudeAccountAndCodexResidue(t *testing.T) {
 	home := t.TempDir()
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -64,9 +63,22 @@ func TestReportHooksNoClaudeAccountAndCodexResidue(t *testing.T) {
 	}
 }
 
+// resumeUnkillKey is the native hook key of the resume-unkill handler in a
+// hooks.json body.
+func resumeUnkillKey(t *testing.T, account, body string) string {
+	t.Helper()
+	for _, line := range strings.Split(nativeListing(t, account, []byte(body)), "\n") {
+		if strings.Contains(line, " internal resume-unkill") {
+			start := strings.Index(line, `"key":"`) + len(`"key":"`)
+			return line[start : start+strings.Index(line[start:], `"`)]
+		}
+	}
+	t.Fatalf("no resume-unkill handler in %s", body)
+	return ""
+}
+
 func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	home := t.TempDir()
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -74,21 +86,20 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	}
 	codex := filepath.Join(home, ".codex")
 	// The receipt carries history; both its unknown native trust and the stale handler are visible.
-	writeFixture(
-		t,
-		filepath.Join(codex, "hooks.json"),
-		`{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"pfm internal clear-hide"}]},`+
-			`{"matcher":"resume","hooks":[{"type":"command","command":"`+resumeUnkillCommand(home)+`"}]}]}}`,
-	)
+	// The install would remove the retired clear-hide handler, so it is put in after.
+	body := strings.Replace(ownedHooksBody(t, home, ""), `"SessionStart": [`,
+		`"SessionStart": [{"matcher":"","hooks":[{"type":"command","command":"pfm internal clear-hide"}]},`, 1)
+	writeFixture(t, filepath.Join(codex, "hooks.json"), body)
 	writeFixture(
 		t,
 		filepath.Join(codex, ".professor-hook-trust.json"),
-		`{"`+codex+`/hooks.json:session_start:1:0":"sha256:abc"}`,
+		`{"`+resumeUnkillKey(t, codex, body)+`":"sha256:abc"}`,
 	)
 	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codex}}}
 	var output bytes.Buffer
 	warnings, failures := ReportHooks(&output, home, machine, false)
-	if warnings != 2 || failures != 1 ||
+	// Eight failures: the stale clear-hide handler and the seven Herdr handlers the receipt does not record.
+	if warnings != 2 || failures != 8 ||
 		!strings.Contains(output.String(), "native trust is unknown") ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json SessionStart clear-hide STALE") {
 		t.Fatalf("failures=%d output=%s", failures, output.String())
@@ -101,7 +112,6 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 func stageCodexProbeHome(t *testing.T, hooksBody string) (home string, machine pfmconfig.Config, hooksPath string) {
 	t.Helper()
 	home = t.TempDir()
-	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -123,6 +133,20 @@ func resumeUnkillHooksBody(home string) string {
 		resumeUnkillCommand(home) + `","timeout":30}]}]}}`
 }
 
+// ownedHooksBody is a hooks.json carrying every handler pfm owns (resume-unkill
+// and the Herdr reporter's), after the personal entries of extra, if any.
+func ownedHooksBody(t *testing.T, home, extra string) string {
+	t.Helper()
+	if extra == "" {
+		extra = `{"hooks":{}}`
+	}
+	body, _, _, err := updateCodexHooks([]byte(extra), home, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
 func codexProbeRows(home string, machine pfmconfig.Config) []HookProbeResult {
 	var rows []HookProbeResult
 	probed := ProbeExpectedHooks(home, machine)
@@ -136,28 +160,42 @@ func codexProbeRows(home string, machine pfmconfig.Config) []HookProbeResult {
 
 func TestProbeCodexHooksReportsTheResumeUnkillHookMissing(t *testing.T) {
 	t.Parallel()
-	for name, body := range map[string]string{
-		"no hooks.json":     "",
-		"no resume handler": `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`,
-		"wrong matcher": `{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[` +
-			`{"type":"command","command":"@CMD@"}]}]}}`,
+	for name, test := range map[string]struct {
+		body string
+		// rows is how many owned handlers the probe reports MISSING: one row for
+		// an absent file, one per owned handler a present file lacks.
+		rows int
+	}{
+		"no hooks.json":     {"", 1},
+		"no resume handler": {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`, 8},
+		"wrong matcher": {`{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[` +
+			`{"type":"command","command":"@CMD@"}]}]}}`, 8},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			home, machine, hooksPath := stageCodexProbeHome(t, "")
-			if body != "" {
-				writeFixture(t, hooksPath, strings.ReplaceAll(body, "@CMD@", resumeUnkillCommand(home)))
+			if test.body != "" {
+				writeFixture(t, hooksPath, strings.ReplaceAll(test.body, "@CMD@", resumeUnkillCommand(home)))
 			}
 			rows := codexProbeRows(home, machine)
-			if len(rows) != 1 || rows[0].State != string(HostOverlayMissing) || rows[0].Hook.Name != "resume-unkill" ||
-				rows[0].Hook.Target != "codex[1]" || rows[0].Hook.File != hooksPath ||
-				rows[0].Hook.Event != "SessionStart" || rows[0].Hook.Matcher != "resume" ||
+			if len(rows) != test.rows ||
+				rows[0].State != string(HostOverlayMissing) ||
+				rows[0].Hook.Name != "resume-unkill" ||
+				rows[0].Hook.Target != "codex[1]" ||
+				rows[0].Hook.File != hooksPath ||
+				rows[0].Hook.Event != "SessionStart" ||
+				rows[0].Hook.Matcher != "resume" ||
 				rows[0].Hook.Command != resumeUnkillCommand(home) {
-				t.Fatalf("rows=%+v, want one MISSING resume-unkill row", rows)
+				t.Fatalf("rows=%+v, want %d MISSING rows led by resume-unkill", rows, test.rows)
+			}
+			for _, row := range rows {
+				if row.State != string(HostOverlayMissing) {
+					t.Fatalf("row %+v is not MISSING", row)
+				}
 			}
 			var output bytes.Buffer
 			missing := "doctor: hook codex[1] hooks.json SessionStart resume-unkill MISSING"
-			if _, failures := ReportHooks(&output, home, machine, false); failures != 1 ||
+			if _, failures := ReportHooks(&output, home, machine, false); failures != test.rows ||
 				!strings.Contains(output.String(), missing) || !strings.Contains(output.String(), "pfm install --yes") {
 				t.Fatalf("failures=%d output=%s", failures, output.String())
 			}
@@ -165,16 +203,39 @@ func TestProbeCodexHooksReportsTheResumeUnkillHookMissing(t *testing.T) {
 	}
 }
 
+func TestProbeCodexHooksReportsEveryHerdrHandlerMissing(t *testing.T) {
+	t.Parallel()
+	home, machine, hooksPath := stageCodexProbeHome(t, "")
+	writeFixture(t, hooksPath, resumeUnkillHooksBody(home))
+	var output bytes.Buffer
+	_, failures := ReportHooks(&output, home, machine, false)
+	for _, name := range []string{
+		"SessionStart herdr-start-SessionStart", "UserPromptSubmit herdr-working-UserPromptSubmit",
+		"PostToolUse herdr-working-PostToolUse", "PermissionRequest herdr-blocked-PermissionRequest",
+		"Stop herdr-idle-Stop", "Interrupt herdr-idle-Interrupt",
+	} {
+		if !strings.Contains(output.String(), "doctor: hook codex[1] hooks.json "+name+" MISSING") {
+			t.Fatalf("no MISSING row for %s:\n%s", name, output.String())
+		}
+	}
+	if failures < 6 {
+		t.Fatalf("failures=%d, want a failure per missing Herdr handler:\n%s", failures, output.String())
+	}
+}
+
 func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 	t.Parallel()
 	home, machine, _ := stageCodexProbeHome(t, "")
 	hooksPath := filepath.Join(home, ".codex", "hooks.json")
-	writeFixture(t, hooksPath, resumeUnkillHooksBody(home))
+	writeFixture(t, hooksPath, ownedHooksBody(t, home, ""))
 
+	// Codex refuses to run an untrusted handler, so every owned one is a named failure.
 	var output bytes.Buffer
 	warnings, failures := ReportHooks(&output, home, machine, false)
-	if warnings != 2 || failures != 0 ||
+	// The one warning is the missing Claude config of this machine config.
+	if warnings != 1 || failures != 8 ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json SessionStart resume-unkill UNTRUSTED") ||
+		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json Stop herdr-idle-Stop UNTRUSTED") ||
 		!strings.Contains(output.String(), "pfm install --yes") {
 		t.Fatalf("warnings=%d failures=%d output=%s", warnings, failures, output.String())
 	}
@@ -196,14 +257,19 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 	if rows := codexProbeRows(
 		home,
 		machine,
-	); len(rows) != 1 || rows[0].State != "native-trust-unknown" ||
+	); len(rows) != 8 || rows[0].Hook.Name != "resume-unkill" || rows[0].State != "native-trust-unknown" ||
 		!strings.Contains(rows[0].Error, "native trust is unknown") {
 		t.Fatalf("historical trust must stay visibly unknown: %+v", rows)
 	}
 	output.Reset()
 	warnings, failures = ReportHooks(&output, home, machine, false)
-	if warnings != 2 || failures != 0 || !strings.Contains(output.String(), "NATIVE-TRUST-UNKNOWN") ||
-		strings.Contains(output.String(), "pfm install --yes") {
+	unknownLine := ""
+	for _, line := range strings.Split(output.String(), "\n") {
+		if strings.Contains(line, "NATIVE-TRUST-UNKNOWN") {
+			unknownLine = line
+		}
+	}
+	if warnings != 2 || failures != 7 || unknownLine == "" || strings.Contains(unknownLine, "pfm install --yes") {
 		t.Fatalf(
 			"unknown native trust must be an explicit warning, without promising readback: warnings=%d failures=%d output=%s",
 			warnings,
@@ -221,14 +287,14 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 
 func TestProbeCodexHooksReportsUnreadableTrustReceipt(t *testing.T) {
 	home, machine, hooksPath := stageCodexProbeHome(t, "")
-	writeFixture(t, hooksPath, resumeUnkillHooksBody(home))
+	writeFixture(t, hooksPath, ownedHooksBody(t, home, ""))
 	receipt := filepath.Join(filepath.Dir(hooksPath), ".professor-hook-trust.json")
 	if err := os.Symlink(receipt, receipt); err != nil {
 		t.Fatal(err)
 	}
 	rows := probeCodexHooks(home, machine, filepath.Join(home, ".local", "bin", "pfm"))
 	if len(rows) != 1 || rows[0].State != stateUnreadable || !strings.Contains(rows[0].Error, receipt) {
-		t.Fatalf("rows=%+v, want one unreadable trust receipt row", rows)
+		t.Fatalf("rows=%+v, want one unreadable trust receipt row, not one per handler", rows)
 	}
 }
 
@@ -267,5 +333,93 @@ func TestDoctorDisabledHookDoesNotPromiseInstallRepair(t *testing.T) {
 	if warnings != 1 || failures != 0 || !strings.Contains(output.String(), "DISABLED") ||
 		strings.Contains(output.String(), "pfm install") {
 		t.Fatalf("disabled advice warnings=%d failures=%d: %s", warnings, failures, output.String())
+	}
+}
+
+// withHerdrTimeout is a pfm-owned hooks.json whose Herdr handler of event
+// carries timeout instead of the one pfm writes; nil removes the key.
+func withHerdrTimeout(t *testing.T, home, event string, timeout any) string {
+	t.Helper()
+	var document map[string]any
+	if err := json.Unmarshal([]byte(ownedHooksBody(t, home, "")), &document); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ := document["hooks"].(map[string]any)
+	entries, _ := hooks[event].([]any)
+	edited := false
+	for _, entryValue := range entries {
+		entry, _ := entryValue.(map[string]any)
+		handlers, _ := entry["hooks"].([]any)
+		for _, handlerValue := range handlers {
+			handler, _ := handlerValue.(map[string]any)
+			if command, _ := handler["command"].(string); !strings.Contains(command, "herdr-state") {
+				continue
+			}
+			if timeout == nil {
+				delete(handler, "timeout")
+			} else {
+				handler["timeout"] = timeout
+			}
+			edited = true
+		}
+	}
+	if !edited {
+		t.Fatalf("no Herdr handler of %s in the owned hooks.json", event)
+	}
+	body, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// An installed Herdr handler whose timeout is not the one pfm writes is a
+// drift row naming the event, the timeout found and the one expected; a
+// healthy file has none, and a file that cannot be read stays UNREADABLE.
+func TestProbeCodexHooksReportsAHerdrHandlerTimeoutDrift(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		body func(t *testing.T, home string) string
+		want []string
+	}{
+		"healthy": {func(t *testing.T, home string) string { return ownedHooksBody(t, home, "") }, nil},
+		"an Interrupt timeout of 5": {
+			func(t *testing.T, home string) string { return withHerdrTimeout(t, home, "Interrupt", 5) },
+			[]string{"doctor: hook codex[1] hooks.json Interrupt herdr-idle-Interrupt DRIFT what=timeout want=3 got=5"},
+		},
+		"a Stop timeout of 3": {
+			func(t *testing.T, home string) string { return withHerdrTimeout(t, home, "Stop", 3) },
+			[]string{"doctor: hook codex[1] hooks.json Stop herdr-idle-Stop DRIFT what=timeout want=5 got=3"},
+		},
+		"a SessionEnd with no timeout": {
+			func(t *testing.T, home string) string { return withHerdrTimeout(t, home, "SessionEnd", nil) },
+			[]string{"doctor: hook codex[1] hooks.json SessionEnd herdr-end-SessionEnd DRIFT what=timeout want=3 got=absent"},
+		},
+		"an unreadable file": {
+			func(*testing.T, string) string { return `{"hooks":` },
+			[]string{"doctor: hook codex[1] hooks.json UNREADABLE"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			home, machine, hooksPath := stageCodexProbeHome(t, "")
+			writeFixture(t, hooksPath, test.body(t, home))
+			var output bytes.Buffer
+			ReportHooks(&output, home, machine, false)
+			var drifts []string
+			for _, line := range strings.Split(output.String(), "\n") {
+				if strings.Contains(line, "what=timeout") || strings.Contains(line, "UNREADABLE") {
+					drifts = append(drifts, line)
+				}
+			}
+			if len(drifts) != len(test.want) {
+				t.Fatalf("timeout and unreadable rows = %q, want %q:\n%s", drifts, test.want, output.String())
+			}
+			for index, want := range test.want {
+				if !strings.HasPrefix(drifts[index], want) {
+					t.Fatalf("row %q, want it to open %q", drifts[index], want)
+				}
+			}
+		})
 	}
 }

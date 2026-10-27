@@ -88,9 +88,28 @@ func TestLoadSavedReadsADocumentOrABareTable(t *testing.T) {
 	}
 	want := `{"saved":"` + bare + `","fetched_at":"2026-01-01T00:00:00Z","sources":[` +
 		`{"provider":"anthropic","url":"https://example.invalid/anthropic/pricing"},` +
-		`{"provider":"openai","url":"https://example.invalid/openai/pricing"}],"served_from":null,"refresh":null}`
+		`{"provider":"openai","url":"https://example.invalid/openai/pricing"}],"billing":null,"served_from":null,"refresh":null}`
 	if got := stringify(table.catalog(), 0); got != want {
 		t.Errorf("catalog of a bare table:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestBillingSelectionSurvivesSavedDocumentAndReport(t *testing.T) {
+	doc := fixtureDocument(t)
+	doc.Billing = &pricing.Billing{Route: "bedrock", Region: "geo", Configured: true, Multiplier: 1.1}
+	path := writeJSON(t, filepath.Join(t.TempDir(), "cloud.json"), doc)
+	book, err := loadSaved(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _, _ := testAuditor(t)
+	a.prices = book
+	if line := a.gapsLine(); !strings.Contains(line, "; Claude bedrock/geo") || strings.Contains(line, billingGap) {
+		t.Errorf("configured billing must be explicit without a default warning: %s", line)
+	}
+	catalog := stringify(book.catalog(), 0)
+	if !strings.Contains(catalog, `"billing":{"route":"bedrock","region":"geo","configured":true,"multiplier":1.1}`) {
+		t.Errorf("billing provenance missing from report JSON: %s", catalog)
 	}
 }
 
@@ -213,9 +232,8 @@ func TestLoadServedServesTheEmbeddedTableOfflineWithoutAClone(t *testing.T) {
 func TestAFailedRefreshServesTheCloneTableOnceAndLeadsTheGapsLine(t *testing.T) {
 	root := fixture(t, "claude/projects")
 	modes := map[string][]string{
-		"report":   {"--since", "99999d", "--root", root},
-		"codex":    {"--codex", "--since", "99999d", "--codex-root", fixture(t, "codex")},
-		"timeline": {"--timeline", fixture(t, "timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl")},
+		"report": {"--since", "99999d", "--root", root},
+		"codex":  {"--codex", "--since", "99999d", "--codex-root", fixture(t, "codex")},
 	}
 	for mode, args := range modes {
 		t.Run(mode, func(t *testing.T) {

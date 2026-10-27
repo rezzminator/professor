@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,29 +46,36 @@ var nodeOps = map[string]string{
 // usageRefusals are the Node exit-2 messages that stay usage errors; every
 // other Node exit 2 is a runtime failure, exit 1 in pfm (R2).
 var usageRefusals = []string{
-	"--since wants", "--timeline reads whole files", "--timeline wants a transcript path", "matched none of the",
+	"--since wants", "matched none of the",
 	"is not a directory",
 }
 
-// intended rewrites a Node golden into what pfm prints: the R3 deltas, each
-// named in the flight's run.md.
+// intended rewrites a Node golden into what pfm prints: the R3 deltas.
 var crossCheckBlock = regexp.MustCompile(`(\n== CROSS-CHECK \([^\n]*\)(?:\n {2}[^\n]*)+)`)
-
-var metricsLines = regexp.MustCompile(`(\nmetrics → [^\n]* \()(\d+)( lines\))`)
 
 func intended(text string) string {
 	text = strings.ReplaceAll(text, "token-audit: ", "pfm tokens: ")
 	text = strings.ReplaceAll(text, "TOKEN_AUDIT_PRICES ", "--prices ")
 	// R6: no cost ledger on the machine, so the report adds its one line after the cross-check block
 	text = crossCheckBlock.ReplaceAllString(text, "${1}\n"+noLedgerLine)
-	text = strings.ReplaceAll(text, "\n\ncross-check: at the published context tiers",
-		"\n\n"+noLedgerLine+"\n\ncross-check: at the published context tiers")
-	// the flight's metrics file grew by that line and the blank line after it
-	text = metricsLines.ReplaceAllStringFunc(text, func(match string) string {
-		parts := metricsLines.FindStringSubmatch(match)
-		lines, _ := strconv.Atoi(parts[2])
-		return parts[1] + strconv.Itoa(lines+2) + parts[3]
-	})
+	// The Node goldens predate #43's explicit coverage and billing assumptions.
+	// Keep their numeric/transcript expectations, extending only the new provenance surfaces.
+	if strings.HasPrefix(text, "TOKEN AUDIT ·") && !strings.HasPrefix(text, "TOKEN AUDIT · codex ·") {
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			if strings.HasPrefix(line, "data gaps: ") {
+				gaps := strings.TrimPrefix(line, "data gaps: ")
+				if gaps == "none" {
+					gaps = ""
+				} else {
+					gaps += " · "
+				}
+				lines[i] = "data gaps: " + gaps + backgroundGap + " · " + billingGap
+			}
+		}
+		text = strings.Join(lines, "\n")
+	}
+	text = strings.ReplaceAll(text, `],"served_from":`, `],"billing":null,"served_from":`)
 	return nodeError.ReplaceAllStringFunc(text, func(match string) string {
 		parts := nodeError.FindStringSubmatch(match)
 		return nodeOps[parts[2]] + " " + parts[3] + ": " + parts[1]
@@ -90,9 +96,9 @@ func intendedExit(code int, stderr string) int {
 
 func TestAuditReplaysTheNodeGoldens(t *testing.T) {
 	dirs := goldenDirs(t)
-	// 18 A1 modes and 78 suite runs: fewer means the enumerator lost some.
-	if len(dirs) != 96 {
-		t.Fatalf("found %d golden runs, want 96", len(dirs))
+	// 10 A1 modes and 40 suite runs: fewer means the enumerator lost some.
+	if len(dirs) != 50 {
+		t.Fatalf("found %d golden runs, want 50", len(dirs))
 	}
 	for _, dir := range dirs {
 		t.Run(filepath.Base(filepath.Dir(dir))+"/"+filepath.Base(dir), func(t *testing.T) {
@@ -193,7 +199,6 @@ func openScenario(t *testing.T, dir string) scenario {
 	if !ok {
 		t.Fatalf("%s names no saved price table: the replay never fetches", manifest.Test)
 	}
-	// first, so a trailing variadic flag (--timeline) never swallows it
 	args := []string{"--prices", expand(prices)}
 	for _, arg := range manifest.Args {
 		args = append(args, expand(arg))
@@ -316,6 +321,12 @@ func TestIntendedRewritesTheNodeDeltas(t *testing.T) {
 	cases := []struct{ node, pfm string }{
 		{"token-audit: --since wants", "pfm tokens: --since wants"},
 		{
+			"TOKEN AUDIT · fixture\ndata gaps: none\n",
+			"TOKEN AUDIT · fixture\ndata gaps: " + backgroundGap + " · " + billingGap + "\n",
+		},
+		{`{"sources":[],"served_from":"embedded"}`, `{"sources":[],"billing":null,"served_from":"embedded"}`},
+		{"TOKEN AUDIT · codex · fixture\ndata gaps: none", "TOKEN AUDIT · codex · fixture\ndata gaps: none"},
+		{
 			"token-audit: TOKEN_AUDIT_PRICES /t/x.json: ENOENT: no such file or directory, open '/t/x.json'",
 			"pfm tokens: --prices /t/x.json: open /t/x.json: no such file or directory",
 		},
@@ -329,11 +340,6 @@ func TestIntendedRewritesTheNodeDeltas(t *testing.T) {
 			"x\n== CROSS-CHECK (this estimate vs the harness's own cost-state line)\n  no chat qualifies\n" +
 				noLedgerLine + "\n\nfull data → /o",
 		},
-		{
-			"## flight total\n\ngaps\n\ncross-check: at the published context tiers (x)",
-			"## flight total\n\ngaps\n\n" + noLedgerLine + "\n\ncross-check: at the published context tiers (x)",
-		},
-		{"\nmetrics → /m.md (39 lines)\n", "\nmetrics → /m.md (41 lines)\n"},
 		{"a CROSS-CHECK mention\n  indented", "a CROSS-CHECK mention\n  indented"},
 	}
 	for _, c := range cases {

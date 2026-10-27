@@ -1,9 +1,0 @@
-TIMELINE main · sonnet-5 · effort medium · 1 calls · wall 0s · peak ctx 1.0K · out 0 tok · tool errors 0 · results >20KB 0 · $0.0020 · {TMP}/price-duplicate-discovery-xodf4I/-tmp-price-proj/s.jsonl
-  #1 09:00:00 after - · ctx 1.0K · out 0 · $0.0020 · (no tools)
-pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
-data gaps: 1 duplicate files skipped
-
-TIMELINE main · sonnet-5 · effort medium · 1 calls · wall 0s · peak ctx 1.0K · out 0 tok · tool errors 0 · results >20KB 0 · $0.0020 · {TMP}/price-clean-discovery-FKjooy/-tmp-price-proj/s.jsonl
-  #1 09:00:00 after - · ctx 1.0K · out 0 · $0.0020 · (no tools)
-pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
-data gaps: none

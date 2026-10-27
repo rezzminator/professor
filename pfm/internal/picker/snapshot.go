@@ -11,7 +11,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/theme"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -63,7 +67,9 @@ func buildSnapshot(
 	for _, account := range machine.AccountIDs() {
 		cacheByAccount[account] = machine.EffectiveClaude(account).Cache1H
 	}
+	palette, themeError := pickerTheme(environment.Paths.Home)
 	return ui.Snapshot{
+		ThemeError:             themeError,
 		Rows:                   rows,
 		ScheduleError:          scheduleError,
 		FactsError:             factsError,
@@ -79,6 +85,7 @@ func buildSnapshot(
 		OpenCodePrimaryAccount: machine.PrimaryOpenCodeAccount(),
 		OpenCodeAccountIDs:     machine.OpenCodeAccountIDs(),
 		Theme:                  machine.Theme,
+		ThemePalette:           palette,
 		Home:                   environment.Paths.Home,
 		ProjectDirs:            output.ProjectDirs,
 		DirExists:              isDirectory,
@@ -91,6 +98,19 @@ func buildSnapshot(
 		Cosmos:                 cosmos,
 		CosmosEvents:           cosmosEvents,
 	}
+}
+
+func pickerTheme(home string) (*theme.Palette, string) {
+	variant, err := themesync.CurrentVariant(themesync.DefaultStateDir(home))
+	if err != nil {
+		obs.Logger(context.Background()).Warn("picker theme unreadable; using configured palette", obs.FieldErr, err)
+		return nil, err.Error()
+	}
+	if variant == nil {
+		return nil, ""
+	}
+	palette := theme.FromVariant(*variant)
+	return &palette, ""
 }
 
 // enrichFacts fills each row's model, effort and working state from its
@@ -120,7 +140,10 @@ func rereadFacts(environment fleet.Env, request scanRequest, last sentRefresh) u
 		}
 	}
 	snapshot := last.snapshot
-	snapshot.Rows, snapshot.FactsError = enrichFacts(request, rows, environment.NowNS)
+	if hasLiveRow(rows) {
+		snapshot.Rows, snapshot.FactsError = enrichFacts(request, rows, environment.NowNS)
+	}
+	snapshot.ThemePalette, snapshot.ThemeError = pickerTheme(environment.Paths.Home)
 	snapshot.NowNS = environment.NowNS
 	return snapshot
 }
@@ -129,12 +152,14 @@ func rereadFacts(environment fleet.Env, request scanRequest, last sentRefresh) u
 // poll can re-read row facts over it without a new gather) and the snapshot
 // the picker received.
 type sentRefresh struct {
+	failed   bool
 	output   compose.Output
 	snapshot ui.Snapshot
 }
 
 func sendRefresh(
 	ctx context.Context,
+	database *store.Store,
 	environment fleet.Env,
 	request scanRequest,
 	data fleet.Data,
@@ -142,7 +167,23 @@ func sendRefresh(
 	refreshing bool,
 	updates chan<- ui.Snapshot,
 ) (sentRefresh, bool) {
-	output := fleet.ComposeFleet(environment, request.View, data, live)
+	native, failures, err := fleet.NativeSeats(ctx, environment.Paths, request.ReadOnly)
+	if err == nil && len(failures) > 0 {
+		err = fmt.Errorf("probe native seats: %s", strings.Join(failures, "\n"))
+	}
+	if err == nil {
+		data, err = fleet.EnrichNative(ctx, database, data, native)
+	}
+	if err != nil {
+		return sentRefresh{failed: true}, sendRefreshFailure(
+			ctx,
+			updates,
+			"native seats",
+			err,
+			time.Unix(0, environment.NowNS),
+		)
+	}
+	output := fleet.ComposeFleet(environment, request.View, data, live, native...)
 	snapshot := buildSnapshot(ctx, environment, request, output)
 	snapshot.Refreshing = refreshing
 	return sentRefresh{output: output, snapshot: snapshot}, publishSnapshot(ctx, snapshot, updates)

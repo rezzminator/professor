@@ -10,7 +10,7 @@ import (
 )
 
 // statuslineSnapshot is one provider-confirmed quota reading a running Claude
-// seat handed its statusline on stdin (statusline.harvestRateLimits writes it).
+// seat handed its statusline on stdin (statusline.recordRateLimits writes it).
 type statuslineSnapshot struct {
 	Account   int    `json:"acct"`
 	ConfigDir string `json:"config_dir"`
@@ -34,7 +34,7 @@ type statuslineSnapshot struct {
 }
 
 // ClaudeRateLimitDir is the one filesystem rule for provider-confirmed Claude
-// windows harvested from statusline input: the statusline writes there, and
+// windows recorded from statusline input: the statusline writes there, and
 // the usage door and the Limits tab read there. Production uses the host temp
 // directory; a PFM_HOME jail keeps it inside that jail.
 func ClaudeRateLimitDir(jailHome string) string {

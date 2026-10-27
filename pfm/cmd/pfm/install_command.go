@@ -24,27 +24,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
-// installHarvestProvisioner is nil in production and resolves to the real
-// pinned adapter. The command-package TestMain replaces it with a no-network
-// fake so existing CLI wiring tests never download the conversion lock.
-var (
-	installHarvestProvisionerOverride installer.HarvestProvisioner
-	installThemeHTTPClientOverride    *http.Client
-)
+var installThemeHTTPClientOverride *http.Client
 
 var runInstaller = installer.Run
-
-func installHarvestProvisioner() installer.HarvestProvisioner {
-	if installHarvestProvisionerOverride != nil {
-		return installHarvestProvisionerOverride
-	}
-	return installer.NewHarvestProvisioner()
-}
 
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--check [--plan]] [--vscode] [--offline] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
@@ -59,13 +46,25 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		false,
 		"install the Professor VS Code extension and make the PFM terminal the default",
 	)
-	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
+	offline := flags.Bool(
+		"offline",
+		false,
+		"skip the rumdl install (uv tool install); every other step, plugin and engine installs included, still runs",
+	)
+	// A v0.82 updater passes --skip-harvest to the new binary's install --yes.
+	skipHarvest := flags.Bool("skip-harvest", false, "retired no-op: harvest moved to the harvester plugin")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
-	skipThemes := flags.Bool("skip-themes", false, "skip Claude Code themes, source-fetched and bundled")
+	skipThemes := flags.Bool("skip-themes", false, "skip the Professor themes")
 	adoptAgents := flags.Bool("adopt-agents", false, "adopt an unowned file at a declared agent's path")
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
+	}
+	if *skipHarvest {
+		fmt.Fprintln(
+			stderr,
+			"pfm install: --skip-harvest is retired and ignored; harvest moved to the harvester plugin",
+		)
 	}
 	if *plan && !*check {
 		fmt.Fprintln(stderr, "pfm install: --plan needs --check: run pfm install --check --plan")
@@ -134,7 +133,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		options.VSCode = *vscode
 		options.AdoptAgents = *adoptAgents
 		options.InstallThemes = !*skipThemes
-		options.ThemeManifestURL = installer.ThemeManifestURL(version)
+		options.ThemeReleaseURL = installer.ThemeReleaseURL(version)
 		options.ThemeHTTPClient = installThemeHTTPClientOverride
 		if skipCodex {
 			options.CodexHomes = []string{}
@@ -142,8 +141,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		return options
 	}
 	// printDependencies is the required dependency preflight: it prints the
-	// table and returns its failure count. Provisioning only marks the
-	// harvester rows "provisioned by install"; every probe is read-only.
+	// table and returns its failure count; every probe is read-only.
 	printDependencies := func(w io.Writer, runtime commandRuntime) int {
 		entries := deps.Registry(deps.Options{
 			Home:         runtime.Paths.Home,
@@ -151,10 +149,8 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			CodexBinary:  runtime.Config.Codex.Binary,
 		})
 		probe := deps.ProbeOptions{
-			SkipHarvest:  *skipHarvest,
-			SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
-			Provisioning: true,
-			Runner:       obs.Runner(deps.RealRunner{}),
+			SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
+			Runner:      obs.Runner(deps.RealRunner{}),
 		}
 		_, failures, _ := doctor.PrintDependencies(context.Background(), w, runtime.Paths.Home, entries, probe)
 		return failures
@@ -193,7 +189,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	if mode != installer.ModeApply {
 		preflight = printDependencies(stdout, runtime)
 	}
-	options := withFlags(newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime))
+	options := withFlags(newInstallerOptions(mode, *configDir, *offline, stdout, stderr, runtime))
 	options.ConfigSeed = seeded
 	options.ConfigSeedContent = installConfig.SeedContent
 	code = runInstallerCommand(installCommand, options, stderr)
@@ -209,8 +205,8 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		if *vscode {
 			confirmation += " --vscode"
 		}
-		if *skipHarvest {
-			confirmation += " --skip-harvest"
+		if *offline {
+			confirmation += " --offline"
 		}
 		if skipCodex {
 			confirmation += " --skip-engine codex"
@@ -240,18 +236,17 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 func newInstallerOptions(
 	mode installer.Mode,
 	configDir string,
-	skipHarvest bool,
+	offline bool,
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
 ) installer.Options {
 	options := installer.Options{
 		Mode:                mode,
+		Offline:             offline,
 		ConfigDir:           configDir,
 		Stdout:              stdout,
-		ProvisionHarvest:    !skipHarvest,
 		SkillSourcesOffline: paths.SkillSourcesOffline(),
 		ThemesOffline:       paths.ThemesOffline(),
-		HarvestProvisioner:  installHarvestProvisioner(),
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]
@@ -260,6 +255,7 @@ func newInstallerOptions(
 		options.RequireManagedCleanup = runtime.Config.Claude.RequireManagedCleanup
 		options.Home = runtime.Paths.Home
 		options.StateDB = runtime.Paths.StateDB
+		options.ProcRoot = runtime.Paths.ProcRoot
 		options.MCPEnabled = make(map[string]bool, len(runtime.Config.MCPServers))
 		for name, server := range runtime.Config.MCPServers {
 			options.MCPEnabled[name] = server.Enabled
@@ -270,8 +266,7 @@ func newInstallerOptions(
 		options.ClaudeBinary, options.GptAgents = runtime.Config.Claude.Binary, runtime.Config.Claude.GptAgents
 		options.Version = runtime.Version
 		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
-		options.ClaudePlugins, options.ClaudeEnv = runtime.Config.Claude.Plugins, runtime.Config.Claude.Env
-		options.ClaudePluginsDefault = runtime.Config.Source(pfmconfig.KeyClaudePlugins) == pfmconfig.SourceDefault
+		installer.ConfigureExtensions(&options, runtime.Config)
 		options.CodexBinary = runtime.Config.Codex.Binary
 		if options.CodexBinary == "" {
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary
@@ -308,7 +303,7 @@ func newInstallerOptions(
 // under home, the same recorded clone `pfm update` prefers via
 // preferredUpdateSourceRepo. `pfm install --yes` run outside the source
 // checkout (a cron job, a different cwd) must still find its own clone
-// rather than falling through empty to the release manifest URL.
+// rather than falling through empty to the release themes.
 //
 // Both misses end in the same fallback, and only one of them is ordinary: no
 // marker at all is a first install and stays silent, while a marker naming a
@@ -329,7 +324,7 @@ func resolveInstallSourceRepo(home string, stderr io.Writer) string {
 		return ""
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm install: %v; falling back to the release manifest\n", err)
+		fmt.Fprintf(stderr, "pfm install: %v; falling back to the release themes\n", err)
 		return ""
 	}
 	return recorded

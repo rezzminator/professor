@@ -110,6 +110,9 @@ func Run(
 	tmux Tmux,
 	request Request,
 ) (Result, error) {
+	if err := naming.ValidateLabel(request.Name); err != nil {
+		return Result{}, err
+	}
 	if tmux == nil {
 		return Result{}, errors.New("spawn requires a tmux client")
 	}
@@ -132,11 +135,14 @@ func Run(
 		Socket:  request.Socket,
 		Session: request.Socket,
 		Window:  window,
-		CWD:     request.CWD,
-		Run:     request.Run,
-		Binary:  request.Binary,
-		Width:   request.Width,
-		Height:  request.Height,
+		// The exact name; WindowName above is its clipped, tmux-safe form.
+		ChatName:          request.Name,
+		ChatNameAutomatic: request.NameAutomatic,
+		CWD:               request.CWD,
+		Run:               request.Run,
+		Binary:            request.Binary,
+		Width:             request.Width,
+		Height:            request.Height,
 	}
 	if spec.Width <= 0 {
 		spec.Width = 220
@@ -153,6 +159,9 @@ func Run(
 		Session: spec.Session,
 		Window:  window,
 		Name:    request.Name,
+	}
+	if err := recordSpawnSeat(ctx, request); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("tmux chat exists; persist seat: %v", err))
 	}
 	target := spec.Session
 	trace.step("session %s created, running: %s", spec.Session, request.Run)
@@ -330,6 +339,11 @@ func waitForComposer(
 	for {
 		capture, err := tmux.Capture(ctx, socket, target)
 		switch {
+		case err == nil && pfmengine.ClaudeTrustDialog(capture):
+			// Trust precedes readiness: Claude's launcher may already be ready,
+			// but this dialog's Enter and Escape both select "No, exit".
+			trace.step("held at the folder-trust dialog: nothing pressed | %s", screen(capture))
+			return false
 		case err == nil && ready(capture):
 			held++
 			if held >= composerHoldReads {
@@ -342,12 +356,6 @@ func waitForComposer(
 			held = 0
 			if codexFolderUntrusted(capture) && codexFolderTrustKey(capture) == "" {
 				trace.step("untrusted folder: nothing pressed | %s", screen(capture))
-				return false
-			}
-			if pfmengine.ClaudeTrustDialog(capture) {
-				// Its default row is "No, exit": Enter or Escape ends the chat,
-				// and the key that clears it trusts a folder no human chose.
-				trace.step("held at the folder-trust dialog: nothing pressed | %s", screen(capture))
 				return false
 			}
 			trimmed := strings.TrimSpace(capture)

@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type tmuxJail struct {
@@ -259,12 +261,42 @@ func TestServerGoneReadsTmuxOwnWords(t *testing.T) {
 	if err.Error() != "exit status 1" {
 		t.Logf("note: tmux error text is %q", err.Error())
 	}
-	if !serverGone(err) {
+	if !TmuxServerGone(err) {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			t.Fatalf("tmux said %q and serverGone missed it", string(exit.Stderr))
+			t.Fatalf("tmux said %q and TmuxServerGone missed it", string(exit.Stderr))
 		}
-		t.Fatalf("serverGone missed %v", err)
+		t.Fatalf("TmuxServerGone missed %v", err)
+	}
+}
+
+// TestShowGlobalOptionReadsTmuxsUnsetAnswer runs the real tmux: an unset user
+// option on a live server is ErrOptionUnset, a set one reads back its value.
+func TestShowGlobalOptionReadsTmuxsUnsetAnswer(t *testing.T) {
+	dir := testjail.ShortRoot(t)
+	const socket = "cc-opt-unset"
+	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe")
+	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+dir)
+	if output, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("start tmux server: %v: %s", err, output)
+	}
+	t.Cleanup(func() {
+		stop := exec.Command("tmux", "-L", socket, "kill-server")
+		stop.Env = start.Env
+		_ = stop.Run()
+	})
+	client := TmuxProbe{TmuxTmpDir: dir}
+	_, err := client.ShowGlobalOption(context.Background(), socket, "@pfm-never-set")
+	if !errors.Is(err, ErrOptionUnset) {
+		t.Fatalf("ShowGlobalOption of an unset user option = %v, want ErrOptionUnset", err)
+	}
+	set := exec.Command("tmux", "-L", socket, "set-option", "-g", "@pfm-set", "#00e5ff")
+	set.Env = start.Env
+	if output, err := set.CombinedOutput(); err != nil {
+		t.Fatalf("set option: %v: %s", err, output)
+	}
+	if got, err := client.ShowGlobalOption(context.Background(), socket, "@pfm-set"); err != nil || got != "#00e5ff" {
+		t.Fatalf("ShowGlobalOption of a set option = %q, %v, want #00e5ff", got, err)
 	}
 }
 
@@ -441,7 +473,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 		ProcFS:    proc,
 		Tmux:      client,
 		Now:       func() time.Time { return now },
-		CodexName: func(string) string { return longName },
+		CodexName: func(string) naming.CodexName { return naming.CodexName{Name: longName, User: true} },
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -584,11 +616,13 @@ func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
 		secondTwinID:  "TWIN",
 	}
 	gatherer, err := New(Dependencies{
-		ProcFS:      &fakeProcFS{processes: processes},
-		Tmux:        client,
-		Now:         func() time.Time { return now },
-		CodexName:   func(path string) string { return map[string]string{rolloutPath: "FRESH_THREAD"}[path] },
-		CodexIDName: func(threadID string) string { return namesByID[threadID] },
+		ProcFS: &fakeProcFS{processes: processes},
+		Tmux:   client,
+		Now:    func() time.Time { return now },
+		CodexName: func(path string) naming.CodexName {
+			return naming.CodexName{Name: map[string]string{rolloutPath: "FRESH_THREAD"}[path], User: true}
+		},
+		CodexIDName: func(threadID string) naming.CodexName { return naming.CodexName{Name: namesByID[threadID], User: true} },
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

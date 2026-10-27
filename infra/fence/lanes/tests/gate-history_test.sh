@@ -12,6 +12,8 @@ SUT="${GATE_HISTORY_SUT:-$(dirname -- "${BASH_SOURCE[0]}")/../../gate-history.sh
 
 TAB=$'\t'
 HEADER="stamp${TAB}run${TAB}worktree${TAB}commit${TAB}target${TAB}step${TAB}verdict${TAB}wall_s${TAB}cpu_s${TAB}io_mb${TAB}psi_cpu_s${TAB}psi_io_s${TAB}psi_mem_s${TAB}attribution${TAB}host_load"
+HEADER_V2="${HEADER}${TAB}concurrent_runs" # the interim 16-column ledger
+CONC_HEADER="worktree${TAB}run${TAB}concurrent_runs"
 
 # Nothing a developer's or CI's environment sets may steer these cases.
 export HOME="$T/home"
@@ -47,6 +49,7 @@ printf 'target\tall\ncommit\tabc1234\ndirty_files\t0\nstarted\t2026-10-01T10:00:
   printf 'templates.leak\tPASS\t2.0\tNA\tNA\tNA\tNA\tNA\tnot measured\tresources.tsv missing\n'
   printf 'GATE\tPASS\t41.1\t125.0\t3.5\t0.5\t0.1\t0.0\tCODE\ttick-deficit 1%% (> -5%%)\n'
 } > "$run/profile.tsv"
+printf 'profile\tnative\ncpus\t6\nmem\t5368709120\ncpuset\t2-9\ngomaxprocs\t8\n' >> "$run/gate.meta"
 out=$(gh ingest "$T/wt1/timing" --project p 2>&1); rc=$?
 L=$LD/p/ledger.tsv
 eq 'ingest profiled run: exit 0' 0 "$rc"
@@ -56,7 +59,21 @@ want=$(printf '%s\n' "$HEADER" \
   "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}templates.leak${TAB}PASS${TAB}2.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}not measured${TAB}NA" \
   "2026-10-01T10:00:00Z${TAB}run.PROF${TAB}wt1${TAB}abc1234${TAB}all${TAB}GATE${TAB}PASS${TAB}41.1${TAB}125.0${TAB}3.5${TAB}0.5${TAB}0.1${TAB}0.0${TAB}CODE${TAB}NA")
 eq 'ingest profiled run: header, then one row per profile.tsv row (GATE included), columns per the contract' "$want" "$(cat "$L")"
+eq 'caps sidecar records effective caps without changing the measurement ledger schema' "$(printf 'worktree\trun\tprofile\tcpus\tmem\tcpuset\tgomaxprocs\nwt1\trun.PROF\tnative\t6\t5368709120\t2-9\t8')" "$(cat "$LD/p/caps.tsv")"
 cp "$L" "$T/prof.ledger"
+
+# A failed caps receipt must not mark a gate ingested and lose its effective caps forever.
+LD=$T/ld-caps-fail
+mkdir -p "$LD/p/caps.tsv"
+out=$(gh ingest "$T/wt1/timing" --project p 2>&1); rc=$?
+if [[ $rc != 0 && "$out" == *LEDGER-NOT-WRITTEN* && "$(rowcount "$LD/p/ledger.tsv")" == 1 ]]; then
+  ok 'caps write refusal is named and leaves the run retryable'
+else bad 'caps write refusal is named and leaves the run retryable' "rc=$rc $out" "$(cat "$LD/p/ledger.tsv")"; fi
+rmdir "$LD/p/caps.tsv"
+out=$(gh ingest "$T/wt1/timing" --project p 2>&1); rc=$?
+if [[ $rc == 0 && "$(rowcount "$LD/p/caps.tsv")" == 2 && "$(rowcount "$LD/p/ledger.tsv")" == 4 ]]; then
+  ok 'retry after caps write refusal records the run and its caps exactly once'
+else bad 'retry after caps write refusal' "rc=$rc $out"; fi
 
 # --- ingest: old runs ---------------------------------------------------------------
 LD=$T/ld-old
@@ -117,6 +134,53 @@ L=$LD/p/ledger.tsv
 eq 'not a real gate / fixture gate: only the real gate is ingested (stub without templates.leak, fixtures 1, a run still going: skipped)' \
   "gate-history: ingested 1 run(s) → $L" "$out"
 eq 'not a real gate / fixture gate: the ledger holds the real run alone' 'run.REAL' "$(awk -F'\t' 'NR > 1 && !s[$2]++ { print $2 }' "$L")"
+
+# --- every gate run counts, pfm-only included, with its concurrent-run count ---------------
+LD=$T/ld-pfmonly
+b=$T/wt-conc/timing
+mkdir -p "$b/run.PFM"
+printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.PFM/gate.tsv"
+printf 'target\tpfm\ncommit\tdef5678\nstarted\t2026-10-02T09:00:00Z\nfixtures\t0\nconcurrent_runs\t3\n' > "$b/run.PFM/gate.meta"
+TS 202610020900.00 "$b/run.PFM/gate.tsv" # mtimes pinned: ingest orders runs oldest first by gate.tsv mtime
+out=$(gh ingest "$b" --project p 2>&1)
+L=$LD/p/ledger.tsv C=$LD/p/concurrent.tsv
+eq 'pfm-only gate (gate.meta, no templates.leak row): ingested' "gate-history: ingested 1 run(s) → $L" "$out"
+eq 'pfm-only gate: the ledger keeps the 15-column header, its rows 15 fields' "$HEADER|" "$(head -n 1 "$L")|$(awk -F'\t' 'NF != 15' "$L")"
+eq 'pfm-only gate: the sidecar holds the run once with the concurrent runs from gate.meta' \
+  "$CONC_HEADER|wt-conc${TAB}run.PFM${TAB}3" "$(head -n 1 "$C")|$(sed -n 2p "$C")"
+mkdir -p "$b/run.BADC"
+printf 'step\tverdict\tseconds\npfm.unit\tPASS\t30.0\nSTEPS\tPASS\t30.0\n' > "$b/run.BADC/gate.tsv"
+printf 'target\tpfm\nstarted\t2026-10-02T10:00:00Z\nconcurrent_runs\tNA not in the shared fence\n' > "$b/run.BADC/gate.meta"
+TS 202610021000.00 "$b/run.BADC/gate.tsv"
+gh ingest "$b" --project p > /dev/null 2>&1
+eq 'a gate with no recorded count: concurrent_runs NA' 'NA' "$(awk -F'\t' '$2 == "run.BADC" { print $3; exit }' "$C")"
+
+# --- an interim 16-column ledger is split back: counts to the sidecar, 15 columns again ----------
+LD=$T/ld-split
+mkdir -p "$LD/p"
+{ printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'
+  printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tpfm.unit\tPASS\t8.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$LD/p/ledger.tsv"
+out=$(gh ingest "$b" --project p 2>&1); rc=$?
+L=$LD/p/ledger.tsv C=$LD/p/concurrent.tsv
+eq 'split: ingest into an interim ledger exits 0 and names the split' '0 yes' \
+  "$rc $(grep -q '^gate-history: split .* back to the 15-column header, concurrent_runs → .*concurrent.tsv$' <<< "$out" && echo yes || echo "no: $out")"
+eq 'split: the 15-column header, the old row cut to 15 fields, no row short or long' \
+  "$HEADER|2026-09-01T00:00:00Z${TAB}run.OLD${TAB}wtU${TAB}abc${TAB}all${TAB}GATE${TAB}PASS${TAB}9.0${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}NA${TAB}CODE${TAB}0.5|" \
+  "$(head -n 1 "$L")|$(sed -n 2p "$L")|$(awk -F'\t' 'NF != 15' "$L")"
+eq 'split: the sidecar holds the old run once with its count, then the new runs oldest first' \
+  "$CONC_HEADER|wtU${TAB}run.OLD${TAB}2|wt-conc${TAB}run.PFM${TAB}3|wt-conc${TAB}run.BADC${TAB}NA" "$(paste -sd'|' "$C")"
+{ printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$L"
+printf '%s\nwtU\trun.OLD\t2\n' "$CONC_HEADER" > "$C"
+mkdir -p "$T/empty-base"
+gh ingest "$T/empty-base" --project p > /dev/null 2>&1
+eq 'split cut short after the sidecar rename: the next split adds no duplicate' "$CONC_HEADER|wtU${TAB}run.OLD${TAB}2|$HEADER" "$(paste -sd'|' "$C")|$(head -n 1 "$L")"
+LD=$T/ld-v1
+mkdir -p "$LD/p"
+{ printf '%s\n' "$HEADER"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\n'; } > "$LD/p/ledger.tsv"
+cp "$LD/p/ledger.tsv" "$T/v1.before"
+gh ingest "$b" --project p > /dev/null 2>&1
+eq 'a 15-column ledger (an older gate-history.sh writes it too) is appended to, never rewritten' \
+  "$(cat "$T/v1.before")" "$(head -n 2 "$LD/p/ledger.tsv")"
 
 # --- re-ingest ----------------------------------------------------------------------------
 LD=$T/ld-prof
@@ -355,9 +419,40 @@ mkdir -p "$LD/p"
 printf '%s\n' "$HEADER" > "$LD/p/ledger.tsv"
 out=$(gh report --project p 2>&1); rc=$?
 eq 'empty ledger: header only is 0 gates recorded, exit 0' "0 gate-history: 0 gates recorded in $LD/p/ledger.tsv" "$rc $out"
+LD=$T/ld-interim
+mkdir -p "$LD/p"
+{ printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$LD/p/ledger.tsv"
+out=$(gh report --project p 2>&1); rc=$?
+eq 'report on an interim 16-column ledger not yet split: its gate read, none malformed' '0 yes no' \
+  "$rc $(grep -q '1 gate(s) recorded' <<< "$out" && echo yes || echo "no: $out") $(grep -q 'malformed' <<< "$out" && echo yes || echo no)"
 LD=$T/ld-foreign
 out=$(gh report --project p 2>&1); rc=$?
 eq 'report on a ledger with a foreign first line: BAD LEDGER, exit 1' '1 yes' "$rc $(grep -q '^gate-history: BAD LEDGER ' <<< "$out" && echo yes || echo "no: $out")"
+
+# --- concurrent ingests: one ledger writer at a time ------------------------------------------------------------
+# Six runs in six bases, each base ingested twice at once, racing the split of an interim ledger: every run lands
+# once, no row is lost to the split's renames, none is duplicated by a dedupe read before another's append.
+bad_rounds=""
+for round in 1 2 3 4 5; do
+  LD=$T/ld-race$round
+  mkdir -p "$LD/p"
+  { printf '%s\n' "$HEADER_V2"; printf '2026-09-01T00:00:00Z\trun.OLD\twtU\tabc\tall\tGATE\tPASS\t9.0\tNA\tNA\tNA\tNA\tNA\tCODE\t0.5\t2\n'; } > "$LD/p/ledger.tsv"
+  pids=()
+  for i in 1 2 3 4 5 6; do
+    old_run "$T/race$round/wt$i/timing/run.R$i" 20260927000$i.00
+  done
+  for i in 1 2 3 4 5 6 1 2 3 4 5 6; do
+    gh ingest "$T/race$round/wt$i/timing" --project p > /dev/null 2>&1 &
+    pids+=($!)
+  done
+  for pid in "${pids[@]}"; do wait "$pid"; done
+  L=$LD/p/ledger.tsv C=$LD/p/concurrent.tsv
+  got="$(head -n 1 "$L" | awk -F'\t' '{ print NF }') $(rowcount "$L") $(awk -F'\t' 'NR > 1 { print $3 FS $2 FS $6 }' "$L" | sort | uniq -d | wc -l | tr -d ' ') $(awk -F'\t' 'NF != 15' "$L" | wc -l | tr -d ' ')"
+  got="$got $(rowcount "$C") $(awk -F'\t' 'NR > 1 { print $1 FS $2 }' "$C" | sort | uniq -d | wc -l | tr -d ' ')"
+  [ "$got" = '15 20 0 0 8 0' ] || bad_rounds="$bad_rounds round $round: $got;"
+done
+eq 'concurrent ingests racing the split: 15-column header, 1+1+6x3 rows, no duplicate, no short row; sidecar 1+1+6 rows, no duplicate' '' "$bad_rounds"
+ls -d "$T"/ld-race*/p/ledger.tsv.lock 2> /dev/null | grep -q . && bad 'concurrent ingests left their ledger lock behind' || ok 'concurrent ingests release the ledger lock'
 
 # --- ingest then report ---------------------------------------------------------------------------------------
 LD=$T/ld-both

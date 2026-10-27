@@ -10,6 +10,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -57,6 +58,7 @@ func InspectSeat(
 type SeatInspector struct {
 	runtime     *pfmconfig.Runtime
 	transcripts *transcript.Reader
+	nativeIdle  map[string]nativeIdleObservation
 }
 
 // NewSeatInspector returns a watch's inspector.
@@ -70,12 +72,72 @@ func (inspector *SeatInspector) Inspect(
 	target headless.Chat,
 	now time.Time,
 ) (headless.Status, error) {
-	return inspectTarget(ctx, inspector.runtime, target, now, nil, inspector.transcripts)
+	var native nativeStatusObservation
+	status, err := inspectTarget(ctx, inspector.runtime, target, now, nil, inspector.transcripts, &native)
+	if target.Backend == spawn.BackendHerdr {
+		inspector.observeNativeIdle(target, now, native, &status, err)
+	}
+	return status, err
 }
 
 // Sweep lets go of the transcripts not inspected since the last Sweep: a
 // watch sweeps once per poll, so it holds only the seats it still watches.
-func (inspector *SeatInspector) Sweep() { inspector.transcripts.Sweep() }
+func (inspector *SeatInspector) Sweep() {
+	inspector.transcripts.Sweep()
+	for key, entry := range inspector.nativeIdle {
+		if !entry.seen {
+			delete(inspector.nativeIdle, key)
+		} else {
+			entry.seen = false
+			inspector.nativeIdle[key] = entry
+		}
+	}
+}
+
+type nativeIdleObservation struct {
+	identity string
+	seq      uint64
+	since    time.Time
+	seen     bool
+}
+
+func (inspector *SeatInspector) observeNativeIdle(
+	target headless.Chat,
+	now time.Time,
+	native nativeStatusObservation,
+	status *headless.Status,
+	readErr error,
+) {
+	if inspector.nativeIdle == nil {
+		inspector.nativeIdle = make(map[string]nativeIdleObservation)
+	}
+	key := target.SeatID + "\x00" + target.ID + "\x00" + target.Name
+	previous, found := inspector.nativeIdle[key]
+	identityParts := []string{target.Socket, target.Pane, native.Terminal}
+	if native.AgentSession != nil {
+		session := native.AgentSession
+		identityParts = append(identityParts, session.Source, session.Agent, session.Kind, session.Value)
+	}
+	identity := fmt.Sprintf("%q", identityParts)
+	entry := nativeIdleObservation{identity: identity, seq: native.StateChangeSeq, seen: true}
+	resting := readErr == nil && target.Live && (native.State == "idle" || native.State == "done")
+	if resting {
+		entry.since = now
+		if found && previous.identity == entry.identity && previous.seq == entry.seq && !previous.since.IsZero() {
+			entry.since = previous.since
+		} else if !found && status.IdleSeconds > 0 {
+			entry.since = now.Add(-time.Duration(status.IdleSeconds) * time.Second)
+		}
+		elapsed := max(int64(0), int64(now.Sub(entry.since)/time.Second))
+		if native.TranscriptRest && status.IdleSeconds < elapsed {
+			elapsed = status.IdleSeconds
+			entry.since = now.Add(-time.Duration(elapsed) * time.Second)
+		}
+		status.IdleSeconds = elapsed
+		status.RestID = fmt.Sprintf("%s:%d", identity, native.StateChangeSeq)
+	}
+	inspector.nativeIdle[key] = entry
+}
 
 func inspectTarget(
 	ctx context.Context,
@@ -84,6 +146,7 @@ func inspectTarget(
 	now time.Time,
 	capture PaneCapture,
 	transcripts *transcript.Reader,
+	observations ...*nativeStatusObservation,
 ) (headless.Status, error) {
 	status, err := headless.InspectWith(ctx, target, now, transcripts)
 	if err != nil {
@@ -94,13 +157,31 @@ func inspectTarget(
 		return headless.Status{}, err
 	}
 	switch {
+	case target.Backend == spawn.BackendHerdr && target.Live:
+		status, err = statusFromHerdr(ctx, target, status, observations...)
 	case pane:
 		status, err = statusFromPane(ctx, target, status, capture, runtime)
 	case awaitsPane(target, status):
 		status, err = blockedFromPane(ctx, target, status, capture, runtime)
 	}
 	if err != nil {
+		if target.Backend == spawn.BackendHerdr {
+			err = fmt.Errorf("read Herdr endpoint %s pane %s: %w", target.Socket, target.Pane, err)
+		}
 		return headless.Status{}, err
+	}
+	if target.Backend == spawn.BackendHerdr {
+		effective, runtimeErr := pfmconfig.RuntimeOrDefault(runtime)
+		if runtimeErr != nil {
+			return headless.Status{}, runtimeErr
+		}
+		seat, found, seatErr := nativeSeat(ctx, effective, target.ID, target.SeatID)
+		if seatErr != nil {
+			return headless.Status{}, fmt.Errorf("read status loss note: %w", seatErr)
+		}
+		if found {
+			status.LostNote = seat.LostNote
+		}
 	}
 	return status, nil
 }

@@ -1,0 +1,24 @@
+TOKEN TREE · session 5e55a0a1-7ee0-4000-8000-00000000c0de · 5 agents · writes counted under /work/repo
+landed code lines          NOT MEASURED — pass --worktree DIR --base SHA
+landed lines per M input   NOT MEASURED — pass --worktree DIR --base SHA
+silent share               85.9% of input tokens (4 of 5 read agents wrote nothing under the scope)
+input tokens               162100 (uncached 5600 · cache read 142000 · cache write 14500) · $0.0979
+written / read bytes       39 / 205
+
+== WRITTEN / READ BY AGENT TYPE
+  TYPE                         AGENTS    INPUT TOK    WRITTEN         READ      W/R
+  flights-foreman                   1        74100          0           48    0.000
+  main                              1        48500          0           29    0.000
+  flights-foreman-sonnet            2        32900         39           96    0.406
+  tracer                            1         6600          0           32    0.000
+
+== AGENTS (the most input tokens first)
+  DEPTH  AGENT                                TYPE                     MODEL                     INPUT TOK   CACHE READ  CACHE WRITE    WRITTEN         READ      W/R        USD
+      1  a0f0000000000001                     flights-foreman          claude-opus-5-5               74100        66000         5800          0           48    0.000    $0.0546
+      0  5e55a0a1-7ee0-4000-8000-00000000c0de main                     claude-sonnet-5               48500        43000         4000          0           29    0.000    $0.0225
+      2  a0f0000000000002                     flights-foreman-sonnet   claude-sonnet-5               22800        20000         2300         39           71    0.549    $0.0113
+      2  a0f0000000000003                     flights-foreman-sonnet   claude-sonnet-5               10100         8000         1500          0           25    0.000    $0.0068
+      2  a0f0000000000004                     tracer                   claude-haiku-4-5               6600         5000          900          0           32    0.000    $0.0027
+
+pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: transcript totals exclude background API calls (auto_mode, prompt_suggestion, hook_prompt, generate_session_title, agent_summary); captured telemetry is reported separately by pfm tokens (without --tree); missing telemetry and metadata-filtered background sessions cannot be quantified · Claude billing route/region not configured; default direct/global list prices may not match cloud billing — set billing in pfm.prices.json or override rates

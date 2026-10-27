@@ -5,6 +5,7 @@
 #
 #   . "$REPO_ROOT/infra/fence/engine-sync.sh"
 #   engine_sync_build <out>         # build ./cmd/engine-sync from the source onto <out>
+#   engine_sync_build_once <out>    # the same, once per <out>: concurrent callers share one build
 #   engine_sync_link_stable <bin>   # the plugin wrapper's stable link onto <bin>
 #
 # The source is $ENGINE_SYNC_FENCE_SRC, default /engine-sync: fence-env.sh
@@ -47,6 +48,22 @@ engine_sync_build() { # engine_sync_build <out>
     return 1
   fi
   mv -f "$tmp" "$out" || { rm -f "$tmp"; echo "engine-sync: cannot move the build onto $out" >&2; return 1; }
+}
+
+# engine_sync_build_once <out>: <out> is built once — the gate's mirror, generated-agent and OpenCode
+# steps run concurrently and share one binary per run instead of three links of the same package.
+# Callers serialize on flock <out>.lock: the first builds and marks <out>.ok, the others wait and
+# reuse it. A failed build marks nothing, so the next caller builds again and names its own failure.
+engine_sync_build_once() {
+  local out="$1" rc=0
+  mkdir -p "$(dirname "$out")" || { echo "engine-sync: cannot create $(dirname "$out")" >&2; return 1; }
+  (
+    flock 9 || { echo "engine-sync: cannot lock $out.lock" >&2; exit 1; }
+    if [ -f "$out.ok" ] && [ -x "$out" ]; then exit 0; fi
+    engine_sync_build "$out" || exit 1
+    : >"$out.ok" || { echo "engine-sync: cannot mark $out.ok" >&2; exit 1; }
+  ) 9>"$out.lock" || rc=$?
+  return "$rc"
 }
 
 engine_sync_link_stable() { # engine_sync_link_stable <bin>

@@ -70,7 +70,7 @@ A render manifest records the hash of every rendered artifact. An artifact whose
 | --------------- | -------------------------------------------------------------- | ---------------------------------- | --------------------- |
 | Host executable | `pfm` | built binary | runtime config only |
 | Host assets | `pfm/internal/installer/assets/` | embedded, staged, then symlinked | none |
-| Repo files | per-project testing manuals, project agents, Codex TOMLs, child CLAUDE.md | rendered from the adopter's values | roster, stack, models |
+| Repo files | per-project testing manuals, project agents, Codex TOMLs | rendered from the adopter's values | roster, stack, models |
 
 The host tiers are value-free by construction — proven by inspection: their templates contain only harness conditionals, no host variables. That is what makes committed renders possible for them. The repo tier genuinely depends on the adopter's roster, so it renders on the adopter's machine at setup and update. Which rows are shipping versus designed is the [Migration state](#migration-state) table's job — this one describes the target shape.
 
@@ -82,7 +82,7 @@ go -C ~/.professor/pfm build -o ~/.local/bin/pfm ./cmd/pfm
 pfm install --yes             # idempotent; applies the exact binary assets
 ```
 
-`pfm install` runs read-only host checks first: a BLOCK row refuses with exit 4, and `pfm doctor` prints its fix. With no blockers, the installer performs a lossless build: creates missing shared entries in `~/.claude`, creates real account directories and links every shared entry from every account to the store. Existing contents survive, and wrong links are repointed without touching their targets. Registries are written once into the store; hooks, status line and MCP ride launches. The clone owns `pfm.config.json` and composed prompts; operator state is `~/.local/state/pfm/pfm.db` and the cache is `pfm-cache.db` beside it. Legacy config and database moves are operator fixes. `~/.zshrc` sources `{clone}/pfm/internal/installer/assets/shim/pfm.zsh`.
+`pfm install` runs read-only host checks first: a BLOCK row refuses with exit 4, and `pfm doctor` prints its fix. With no blockers, the installer performs a lossless build: creates missing shared entries in `~/.claude`, creates real account directories and links every shared entry from every account to the store. Existing contents survive, and wrong links are repointed without touching their targets. Registries are written once into the store; hooks, status line and MCP ride launches. The clone owns `pfm.config.json`; `pfm install` generates the gitignored per-engine prompts under `{clone}/pfm/harness-prompts/generated/`; operator state is `~/.local/state/pfm/pfm.db` and the cache is `pfm-cache.db` beside it. Legacy config and database moves are operator fixes. `~/.zshrc` sources `{clone}/pfm/internal/installer/assets/shim/pfm.zsh`.
 
 ## Origin flow — the maintainer's repo is an adopter
 
@@ -90,7 +90,7 @@ The maintainer's own monorepo — where the pipeline runs daily and improvements
 
 - **Framework templates are authored in `templates/`; fleet assets are authored in `pfm/internal/installer/assets/`.** The binary embeds the latter; machines consume both through their owning install paths rather than a duplicate host bundle.
 - **`refresh-map.json` retires file-by-file.** Its `curated` class (template IS the source, no live file to derive from) is the terminal state for every entry; the map is a migration ledger, and an empty map ends the live→template derivation era.
-- **The release protocol shrinks** to: version, changelog, tag, push. The genericize/refresh pass exists only for files still in the derivation era.
+- **The release protocol shrinks** to: version, changelog, the `develop → main` merge (whose `publish` job tags it). The genericize/refresh pass exists only for files still in the derivation era.
 
 Until then, both flows run side by side: derived templates refresh from the live source under the hash map; curated templates are edited here directly.
 

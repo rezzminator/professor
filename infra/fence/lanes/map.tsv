@@ -1,8 +1,6 @@
 name	lane	beat
 mcp__chat-professor__capture	M	M.09-chat-tools
-mcp__chat-professor__digest	M	M.09-chat-tools
 mcp__chat-professor__exit	M	M.10-chat-tools-gap
-mcp__chat-professor__find	M	M.09-chat-tools
 mcp__chat-professor__call	M	M.09-chat-tools
 mcp__chat-professor__keys	M	M.09-chat-tools
 mcp__chat-professor__kill	M	M.10-chat-tools-gap
@@ -11,16 +9,11 @@ mcp__chat-professor__ls	M	M.09-chat-tools
 mcp__chat-professor__name	M	M.10-chat-tools-gap
 mcp__chat-professor__new	M	M.09-chat-tools
 mcp__chat-professor__open	M	M.10-chat-tools-gap
-mcp__chat-professor__read	M	M.09-chat-tools
 mcp__chat-professor__resolve	M	M.09-chat-tools
 mcp__chat-professor__save	M	M.10-chat-tools-gap
 mcp__chat-professor__status	M	M.09-chat-tools
 mcp__chat-professor__unkill	M	M.10-chat-tools-gap
 mcp__chat-professor__whoami	M	M.09-chat-tools
-mcp__harvester-professor__download_file	M	M.11-harvester-tools
-mcp__harvester-professor__read	M	M.11-harvester-tools
-mcp__harvester-professor__search_literature	M	M.11-harvester-tools
-mcp__harvester-professor__search_web	M	M.11-harvester-tools
 pfm archive	O2	O2.02-archive
 pfm chat ask	E1	E1.15-ask
 pfm chat ask	E2	E2.07-call-ask-watch
@@ -46,6 +39,7 @@ pfm chat new	F	F.02-new-label-role
 pfm chat new	F	F.03-new-account-1h-model
 pfm chat new	F	F.04-new-await-attach
 pfm chat new	F	F.19-new-workbench
+pfm chat new	O2	O2.05-internal-plumbing
 pfm chat open	F	F.06-ls-rows
 pfm chat read	E1	E1.13-last-read-stream
 pfm chat recover	E2	E2.04-recover
@@ -73,9 +67,6 @@ pfm config show	O1	O1.13-misc-ops
 pfm config validate	O1	O1.13-misc-ops
 pfm doctor	M	M.04-doctor-mcp
 pfm doctor	O1	O1.10-doctor-exit-contract
-pfm harvest	O2	O2.09-harvester
-pfm harvest ask	O2	O2.09-harvester
-pfm harvest download-file	M	M.11-harvester-tools
 pfm headless	O2	O2.04-headless
 pfm headless exec	O2	O2.04-headless
 pfm heal	O1	O1.11-heal
@@ -89,14 +80,16 @@ pfm internal chat-server	F	F.16-picker-plumbing
 pfm internal claude-launch	E1	E1.01-open-seat1
 pfm internal claude-version	O2	O2.05-internal-plumbing
 pfm internal clear-kill	O2	O2.05-internal-plumbing
+pfm internal clear-name	O2	O2.05-internal-plumbing
 pfm internal codex-launch	E2	E2.10-codex-launch
 pfm internal cost-launch	O2	O2.05-internal-plumbing
 pfm internal cost-sink	O2	O2.05-internal-plumbing
 pfm internal epic-inject	O2	O2.05-internal-plumbing
 pfm internal exit-close	E1	E1.21-exit-close
 pfm internal exit-intercept	E1	E1.19-kill-unkill
-pfm internal explore-deny	O2	O2.05-internal-plumbing
 pfm internal git-guard	O2	O2.05-internal-plumbing
+pfm internal herdr-indicators	H	H.tab-priority
+pfm internal herdr-state	O2	O2.05-internal-plumbing
 pfm internal store-guard	O2	O2.05-internal-plumbing
 pfm internal kill-exit	O2	O2.05-internal-plumbing
 pfm internal launch	E1	E1.23-launcher
@@ -105,13 +98,14 @@ pfm internal primary-get	O2	O2.05-internal-plumbing
 pfm internal primary-set	O2	O2.05-internal-plumbing
 pfm internal reload-intercept	E1	E1.09-reload-while-busy
 pfm internal reload-run	E1	E1.09-reload-while-busy
+pfm internal restart-run	O1	O1.19-restart-dry-run
 pfm internal schedule-fire	E1	E1.27-schedule
+pfm internal seat-host	O2	O2.05-internal-plumbing
 pfm internal stale	O2	O2.05-internal-plumbing
 pfm internal statusline	E1	E1.23-launcher
 pfm internal then	E1	E1.07-reload-then
 pfm internal tmux-title-renudge	O2	O2.05-internal-plumbing
 pfm internal update-check	A	A.14-release-notice
-pfm issues	O1	O1.13-misc-ops
 pfm log	O2	O2.05b-activity-log
 pfm ls	A	A.15-fleet-unchanged-by-update
 pfm ls	F	F.06-ls-rows
@@ -123,9 +117,11 @@ pfm mcp serve	M	M.07-stdio-transports
 pfm mcp serve	M	M.08-mcp-cli
 pfm name-sync	F	F.13-name-sync
 pfm model-cost	O1	O1.15-model-cost
+pfm theme	O1	O1.18-theme
 pfm tokens	O1	O1.16-tokens
 pfm transcript	O1	O1.17-transcript
 pfm reap	O2	O2.01-reap
+pfm restart	O1	O1.19-restart-dry-run
 pfm statusline	E1	E1.02-statusline-theme
 pfm statusline	E2	E2.02-statusline
 pfm statusline	E3	E3.01-open-seat
@@ -140,4 +136,19 @@ pfm update pin	A	A.05-update-verbs
 pfm usage-hook	O1	O1.13-misc-ops
 pfm version	O1	O1.13-misc-ops
 pfm whoami	O1	O1.13-misc-ops
-mcp__chat-professor__servicedesk	M	M.10-chat-tools-gap
+pfm chat new	H	H.birth
+pfm internal seat-host	H	H.seat-host
+pfm chat call	H	H.native-call
+pfm whoami	H	H.whoami
+pfm ls	H	H.discovery
+pfm chat status	H	H.status
+pfm chat keys	H	H.keys
+pfm chat capture	H	H.capture
+pfm chat call	H	H.tmux-to-tmux
+pfm chat call	H	H.tmux-to-herdr
+pfm chat call	H	H.herdr-to-tmux
+pfm chat call	H	H.herdr-to-herdr
+pfm chat watch	H	H.watch
+pfm chat name	H	H.name
+pfm chat open	H	H.open-restored
+pfm config validate	O1	O1.20-extensions

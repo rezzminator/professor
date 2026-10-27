@@ -169,6 +169,12 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	if !strings.HasPrefix(window, "Parent seat-branch|") {
 		t.Fatalf("detached branch window = %q", window)
 	}
+	// N5: the fork's exact name is stored for the Herdr reporter at birth.
+	if got := branchTmuxOutput(
+		t, branchPath, "show-options", "-v", "-t", branchSocket, "@pfm_chat_name",
+	); got != "Parent seat-branch" {
+		t.Fatalf("branch @pfm_chat_name = %q, want the fork's name", got)
+	}
 	clients := branchTmuxOutput(t, branchPath, "list-clients", "-F", "#{client_name}")
 	if strings.TrimSpace(clients) != "" {
 		t.Fatalf("branch was attached at birth: %q", clients)
@@ -185,6 +191,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	joined := strings.Join(strings.Fields(string(arguments)), " ")
 	for _, want := range []string{
 		"--resume " + parentID, "--fork-session", "--model opus[1m]", "--name Parent seat-branch",
+		"--remote-control Parent seat-branch",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("claude argv %q lacks %q", joined, want)

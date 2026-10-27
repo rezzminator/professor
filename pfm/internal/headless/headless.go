@@ -32,6 +32,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -55,18 +56,40 @@ const (
 // Chat is one resolved seat: who it is, where its record lives, and whether a
 // server is still holding it up.
 type Chat struct {
-	Name    string
-	ID      string
-	Engine  pfmengine.ID
-	Path    string
-	CWD     string
-	Socket  string
-	Session string
-	Pane    string
-	Live    bool
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	Name           string
+	ID             string
+	Engine         pfmengine.ID
+	Path           string
+	CWD            string
+	Socket         string
+	Session        string
+	Pane           string
+	Live           bool
 	// PanePID is the process at the root of the seat's pane, as the fleet
 	// last listed it; 0 when unknown.
 	PanePID int
+}
+
+// Handle preserves a resolved conversation across calls and waits. A native
+// socket hosts many seats. Its durable seat survives replacement of a planner's
+// provisional thread id; a tmux socket is dedicated to one chat.
+func (chat Chat) Handle() string {
+	if chat.Backend == "herdr" {
+		if chat.SeatID != "" {
+			return resolve.SeatPrefix + chat.SeatID
+		}
+		if chat.ID != "" {
+			return chat.ID
+		}
+		return chat.Name
+	}
+	if chat.Socket != "" {
+		return chat.Socket
+	}
+	return chat.Name
 }
 
 // Status is the machine-readable verdict. Field names are a contract — a
@@ -88,7 +111,13 @@ type Status struct {
 	Last        string       `json:"last,omitempty"`
 	// Error is the kind of the error the turn ended on (server_overloaded,
 	// server_error, ...), set only when State is error.
-	Error         string `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+	// StateSource explains a fallback when a native state cannot classify the turn.
+	StateSource string `json:"state_source,omitempty"`
+	// RestID is native rest evidence for a watch, never transcript content.
+	RestID string `json:"-"`
+	// LostNote is the seat loss note from fleetdb seat.lost_note, empty unless the seat was lost.
+	LostNote      string `json:"lost_note,omitempty"`
 	Summary       string `json:"summary,omitempty"`
 	SummaryCached bool   `json:"summary_cached,omitempty"`
 	Ask           string `json:"ask,omitempty"`
@@ -142,6 +171,12 @@ func (status Status) Line() string {
 	}
 	if status.Last != "" {
 		line += "\t" + status.Last
+	}
+	if status.LostNote != "" {
+		line += "\t" + status.LostNote
+	}
+	if status.StateSource != "" {
+		line += fmt.Sprintf("\tstate_source=%q", status.StateSource)
 	}
 	return line
 }

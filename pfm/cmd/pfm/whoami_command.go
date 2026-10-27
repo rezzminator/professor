@@ -29,7 +29,9 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		flags.Usage()
 		return 2
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, err := resolve.NewWhoami(
+		resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(firstRuntime(runtimes))},
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm whoami: %v\n", err)
 		return 1
@@ -37,12 +39,8 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	ctx := context.Background()
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
-		seat, found := pfmchat.SeatIdentity(ctx, firstRuntime(runtimes))
-		if !found {
-			fmt.Fprintf(stderr, "%v\n", err)
-			return 1
-		}
-		identity = seat
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
 	}
 	if *asJSON {
 		encoded, err := json.Marshal(identity)
@@ -54,13 +52,14 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		return 0
 	}
 	if *asLabel && identity.SocketPath != "" {
-		target := identity.Pane
-		if target == "" {
-			target = identity.Session
+		transport, transportErr := pfmcall.New(pfmcall.Dependencies{})
+		if transportErr != nil {
+			fmt.Fprintf(stderr, "pfm whoami: %v\n", transportErr)
+			return 1
 		}
-		capture, captureErr := (pfmcall.TmuxCaller{}).Capture(
-			ctx, identity.SocketPath, target, true, pfmcall.FullScrollback,
-		)
+		target := pfmcall.Target{Backend: identity.Backend, SocketPath: identity.SocketPath}
+		target.Pane = chatPaneTarget(identity.Pane, identity.Session, "")
+		capture, captureErr := transport.CaptureTarget(ctx, target, pfmcall.FullScrollback)
 		if captureErr == nil {
 			emojis := []string(nil)
 			if len(runtimes) != 0 {

@@ -34,6 +34,18 @@ func TestToolErrorsKeepHandlerOutput(t *testing.T) {
 			},
 		},
 		{
+			name: "keys unsupported backend capability", tool: "keys",
+			arguments: map[string]any{"target": "native", "keys": []string{"Enter", "Home"}},
+			backend: &backend{
+				callEngine: resolveGateCaller{
+					target: pfmcall.Target{Backend: "herdr", SocketPath: "/missing/native.sock", Pane: "w6:p3"},
+				},
+				allowAmbientIdentity: true,
+			},
+			prefix: "keys: ",
+			fields: map[string]any{"status": statusError, "code": float64(10), "count": float64(0)},
+		},
+		{
 			name: "keys unknown target", tool: "keys",
 			arguments: map[string]any{"target": "gone", "keys": []string{"Escape"}},
 			backend: &backend{

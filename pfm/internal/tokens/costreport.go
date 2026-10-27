@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"math"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/costledger"
-	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -57,29 +58,32 @@ type sourceLine struct {
 
 // sessionLedger is one chat's ledger set against its transcripts.
 type sessionLedger struct {
-	chat       ledgerChat
-	faults     int
-	total      costledger.Totals
-	side       costledger.Totals
-	cc         *float64
-	ccClosed   bool  // no line follows the last cost-state: cc is the chat's final total, not a floor
-	before     int64 // micro-dollars spent before the ledger began (costledger.BeforeLedger)
-	agents     []agentLine
-	sources    []sourceLine
-	unreliable []string // why the side-call split may be wrong, never silently dropped
+	chat         ledgerChat
+	faults       int
+	total        costledger.Totals
+	side         costledger.Totals
+	cc           *float64
+	ccClosed     bool  // no line follows the last cost-state: cc is the chat's final total, not a floor
+	before       int64 // micro-dollars spent before the ledger began (costledger.BeforeLedger)
+	agents       []agentLine
+	sources      []sourceLine
+	unreliable   []string // why the side-call split may be wrong, never silently dropped
+	observations bool     // missing request ids prevent unique-call accounting
 }
 
 // ledgerReport is what looking for the ledger of every chat found.
 type ledgerReport struct {
-	chats      int
-	unmeasured int // chats with no ledger
-	measured   []*sessionLedger
-	failed     []string // a ledger that could not be read, named
+	chats        int
+	unmeasured   int // chats with no ledger
+	measured     []*sessionLedger
+	failed       []string // a ledger that could not be read, named
+	unattributed costledger.Ledger
 }
 
 // measureLedgers reads the ledger of every chat, once per run.
 func (a *auditor) measureLedgers(chats []ledgerChat) *ledgerReport {
 	report := &ledgerReport{chats: len(chats)}
+	chats = a.includeTelemetryChats(chats, report)
 	for _, chat := range chats {
 		if a.ledgerDir == "" || !costledger.ValidSessionID(chat.sid) {
 			report.unmeasured++
@@ -101,6 +105,84 @@ func (a *auditor) measureLedgers(chats []ledgerChat) *ledgerReport {
 	return report
 }
 
+// includeTelemetryChats finds sessions with calls but no selected transcript. Filters that
+// need transcript metadata cannot attribute these sessions, so they remain outside that selection.
+func (a *auditor) includeTelemetryChats(chats []ledgerChat, report *ledgerReport) []ledgerChat {
+	if a.ledgerDir == "" {
+		return chats
+	}
+	fail := func(label string, err error) {
+		message := label + ": " + err.Error()
+		a.scan.readErrors = append(a.scan.readErrors, message)
+		report.failed = append(report.failed, message)
+	}
+	unattributed, err := costledger.Unattributed(a.ledgerDir)
+	if err != nil {
+		fail("unattributed telemetry unreadable", err)
+	} else {
+		unattributed.Rows = a.ledgerWindow(unattributed.Rows)
+		report.unattributed = unattributed
+	}
+	if a.opts.project != "" || a.opts.family != "" || (a.opts.familyRxSource != "" && a.opts.familyRxSource != ".") {
+		return chats
+	}
+	ids, err := costledger.SessionIDs(a.ledgerDir)
+	if err != nil {
+		fail("cost ledger directory unreadable", err)
+		return chats
+	}
+	seen := map[string]bool{}
+	for _, chat := range chats {
+		seen[chat.sid] = true
+	}
+	for _, sid := range ids {
+		if seen[sid] ||
+			(a.opts.session != "" && !strings.HasPrefix(sid, a.opts.session)) {
+			continue
+		}
+		ledger, err := costledger.ForSession(a.ledgerDir, sid)
+		if err != nil {
+			fail("cost ledger of "+sid, err)
+			continue
+		}
+		if len(a.ledgerWindow(ledger.Rows)) == 0 {
+			if ledger.Faults > 0 {
+				fail(
+					"cost ledger of "+sid,
+					fmt.Errorf("%d malformed records; no calls dated in the selected window", ledger.Faults),
+				)
+			}
+			continue
+		}
+		chats = append(chats, ledgerChat{sid: sid, title: "telemetry only (no selected transcript)"})
+		report.chats++
+	}
+	return chats
+}
+
+func (a *auditor) ledgerWindow(rows []costledger.Row) []costledger.Row {
+	var selected []costledger.Row
+	for index := range rows {
+		row := &rows[index]
+		at, ok := dateParse(row.TS, a.loc)
+		if !ok {
+			message := fmt.Sprintf(
+				"telemetry timestamp %q for session %q is invalid; observation excluded from the selected window",
+				row.TS,
+				row.SessionID,
+			)
+			if !slices.Contains(a.scan.readErrors, message) {
+				a.scan.readErrors = append(a.scan.readErrors, message)
+			}
+			continue
+		}
+		if at >= a.since && at <= a.now {
+			selected = append(selected, *row)
+		}
+	}
+	return selected
+}
+
 // measureSession joins one chat's ledger to its transcripts.
 func (a *auditor) measureSession(chat ledgerChat, ledger costledger.Ledger) *sessionLedger {
 	held, problems := a.heldRequests(chat.sid)
@@ -108,6 +190,18 @@ func (a *auditor) measureSession(chat ledgerChat, ledger costledger.Ledger) *ses
 	session := &sessionLedger{
 		chat: chat, faults: ledger.Faults, total: costledger.Sum(ledger.Rows), side: costledger.Sum(side),
 		unreliable: problems,
+	}
+	missingRequest := 0
+	for index := range ledger.Rows {
+		if ledger.Rows[index].RequestID == "" {
+			missingRequest++
+		}
+	}
+	if missingRequest != 0 {
+		session.observations = true
+		session.unreliable = append(session.unreliable, strconv.Itoa(missingRequest)+
+			" observations without request_id cannot be reconciled against transcripts; "+
+			"uncorrelated log/span observations and retries may overlap")
 	}
 	states, found := a.mainCostStates(chat.sid)
 	if found {
@@ -405,11 +499,17 @@ func (s *sessionLedger) difference() (int64, bool) {
 // and any difference, then the split by agent and by query_source with each
 // row's share of the session total. top bounds the top-level agent rows.
 func (s *sessionLedger) lines(top int) []string {
+	unit := func(n int) string {
+		if s.observations {
+			return countWord(n, "observation", "observations")
+		}
+		return countWord(n, "call", "calls")
+	}
 	title := firstText(s.chat.title, "(untitled)")
 	out := []string{
 		"  chat " + s.chat.sid + " · " + strings.TrimRight(cut(title, 50), " "),
 		"    session total " + microsDollars(s.sessionMicros()) + " (" + num(float64(s.total.Rows)) + " " +
-			countWord(s.total.Rows, "call", "calls") + ") — the main status line's number",
+			unit(s.total.Rows) + ") — the main status line's number",
 	}
 	if s.before >= differenceFloor {
 		out = append(out, "    before ledger "+microsDollars(s.before)+" (not attributed)")
@@ -417,12 +517,12 @@ func (s *sessionLedger) lines(top int) []string {
 	out = append(
 		out,
 		"    side calls "+microsDollars(s.side.Micros)+" ("+num(float64(s.side.Rows))+" "+
-			countWord(s.side.Rows, "call", "calls")+" no transcript holds)",
+			unit(s.side.Rows)+" no transcript holds)",
 	)
 	if n := s.total.UnknownCost; n != 0 {
 		out = append(
 			out,
-			"    "+num(float64(n))+" "+countWord(n, "call", "calls")+" with no cost in the ledger, not in the total",
+			"    "+num(float64(n))+" "+unit(n)+" with no cost in the ledger, not in the total",
 		)
 	}
 	if s.faults != 0 {
@@ -519,7 +619,7 @@ func (s *sessionLedger) json() *object {
 	}
 	return newObject().set("sid", s.chat.sid).set("micros", float64(s.total.Micros)).set("rows", s.total.Rows).
 		set("beforeLedgerMicros", float64(s.before)).set("sessionMicros", float64(s.sessionMicros())).
-		set("unknownCost", s.total.UnknownCost).set("faults", s.faults).
+		set("unknownCost", s.total.UnknownCost).set("faults", s.faults).set("countsAreObservations", s.observations).
 		set("side", newObject().set("micros", float64(s.side.Micros)).set("calls", s.side.Rows).
 			set("unknownCost", s.side.UnknownCost)).
 		set("claudeCodeMicros", cc).
@@ -539,12 +639,31 @@ func (a *auditor) ledgerJSON() ([]*object, bool) {
 	return sessions, true
 }
 
+func (a *auditor) unattributedJSON() *object {
+	if a.ledgers == nil || !a.ledgers.unattributed.Present {
+		return nil
+	}
+	ledger := a.ledgers.unattributed
+	total := costledger.Sum(ledger.Rows)
+	sources := []*object{}
+	for _, source := range sourceLines(ledger.Rows) {
+		sources = append(sources, newObject().set("source", source.source).set("observations", source.rows).
+			set("micros", float64(source.micros)).set("unknownCost", source.unknown))
+	}
+	return newObject().set("scope", "host-wide window, no session; not additive to selected chats").
+		set("observations", total.Rows).set("micros", float64(total.Micros)).
+		set("unknownCost", total.UnknownCost).set("faults", ledger.Faults).
+		set("inputTokens", float64(total.InputTokens)).set("cacheReadTokens", float64(total.CacheReadTokens)).
+		set("cacheCreationTokens", float64(total.CacheCreationTokens)).set("outputTokens", float64(total.OutputTokens)).
+		set("mayOverlap", true).set("bySource", sources)
+}
+
 // body is the report's cost-ledger lines for the chats measured:
 // one block per chat with a ledger (at most top, the dearest first), each
 // unreadable ledger named, and the one line for the chats with none. With no
 // ledger anywhere it is the line alone.
 func (r *ledgerReport) body(top int, heading string) []string {
-	if len(r.measured) == 0 && len(r.failed) == 0 {
+	if len(r.measured) == 0 && len(r.failed) == 0 && len(r.unattributed.Rows) == 0 && r.unattributed.Faults == 0 {
 		return []string{noLedgerLine}
 	}
 	stableSort(r.measured, func(left, right *sessionLedger) float64 {
@@ -560,6 +679,22 @@ func (r *ledgerReport) body(top int, heading string) []string {
 			"  … "+num(float64(len(r.measured)-top))+" more "+countWord(len(r.measured)-top, "chat", "chats")+
 				" with a ledger (--top)",
 		)
+	}
+	if len(r.unattributed.Rows) != 0 || r.unattributed.Faults != 0 {
+		total := costledger.Sum(r.unattributed.Rows)
+		out = append(out, "  unattributed telemetry (no session, host-wide window; not assigned to selected chats)",
+			"    "+strconv.Itoa(total.Rows)+" observations, "+microsDollars(total.Micros)+
+				" reported cost; "+strconv.Itoa(total.UnknownCost)+" without cost; "+
+				strconv.Itoa(r.unattributed.Faults)+" malformed rows",
+			"    tokens input="+strconv.FormatInt(total.InputTokens, 10)+
+				" cached="+strconv.FormatInt(total.CacheReadTokens, 10)+
+				" cache-write="+strconv.FormatInt(total.CacheCreationTokens, 10)+
+				" output="+strconv.FormatInt(total.OutputTokens, 10),
+			"    observations may overlap or repeat; not a unique-call count or an additive spend total")
+		for _, source := range sourceLines(r.unattributed.Rows) {
+			out = append(out, "    "+source.source+": "+strconv.Itoa(source.rows)+" observations, "+
+				microsDollars(source.micros))
+		}
 	}
 	out = append(out, r.failed...)
 	if r.unmeasured != 0 {
@@ -580,50 +715,4 @@ func (a *auditor) reportCostLedger(t *totals) {
 	for _, line := range report.body(a.opts.top, heading) {
 		a.print(line)
 	}
-}
-
-// flightLedgerLines is the flight report's cost-ledger lines: the claude
-// sessions the flight's matched agents ran under, each in a fenced block.
-func (a *auditor) flightLedgerLines(matched []flightRow) []string {
-	var chats []ledgerChat
-	seen := map[string]bool{}
-	for _, row := range matched {
-		r := row.run
-		if r.engine != pricing.EngineClaude || seen[r.sid] {
-			continue
-		}
-		seen[r.sid] = true
-		chats = append(chats, ledgerChat{sid: r.sid, title: a.mainTitle(r.sid)})
-	}
-	report := a.measureLedgers(chats)
-	if len(report.measured) == 0 && len(report.failed) == 0 {
-		return report.body(0, "")
-	}
-	out := []string{"## cost ledger", ""}
-	for _, s := range report.measured {
-		out = append(out, "```")
-		out = append(out, s.lines(math.MaxInt)...)
-		out = append(out, "```", "")
-	}
-	out = append(out, report.failed...)
-	if report.unmeasured != 0 {
-		out = append(
-			out,
-			noLedgerLine+" for "+strconv.Itoa(report.unmeasured)+" of "+strconv.Itoa(report.chats)+" sessions",
-		)
-	}
-	for len(out) != 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
-	}
-	return out
-}
-
-// mainTitle is the title of the main chat of session sid, "" when no main run holds it.
-func (a *auditor) mainTitle(sid string) string {
-	for _, r := range a.runs {
-		if r.kind == kindMain && r.sid == sid {
-			return r.title
-		}
-	}
-	return ""
 }

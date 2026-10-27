@@ -24,12 +24,6 @@ import (
 var (
 	headerStyle = lipgloss.NewStyle().
 			Bold(true)
-	groupStyleA = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#5eead4"))
-	groupStyleB = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#7dd3fc"))
 	borderStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#64748b"))
 	selectedStyle = lipgloss.NewStyle().
@@ -40,8 +34,6 @@ var (
 			Foreground(lipgloss.Color("#94a3b8"))
 	codexStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#e879f9"))
-	openCodeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#60a5fa"))
 	agentStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#fb923c"))
 	statsHeaderStyle = lipgloss.NewStyle().
@@ -79,20 +71,21 @@ var (
 
 func configureStyles(palette theme.Palette) {
 	configuredPalette = palette
+	selectedForeground := palette.SelectedForeground
+	if selectedForeground == "" {
+		selectedForeground = palette.Header
+	}
 	headerStyle = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Header)).
 		Background(lipgloss.Color(palette.HeaderBg))
-	groupStyleA = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupA))
-	groupStyleB = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupB))
 	borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Border))
 	selectedStyle = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color(palette.Header)).
+		Foreground(lipgloss.Color(selectedForeground)).
 		Background(lipgloss.Color(palette.Selected))
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
-	openCodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.OpenCode]))
 	agentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.AgentRow))
 	statsHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.StatsHeader))
 	statsClaudeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.StatsEngine[pfmengine.Claude]))
@@ -121,9 +114,25 @@ func configureStyles(palette theme.Palette) {
 		Bold(true).
 		Foreground(lipgloss.Color(palette.LimitRed))
 	professorUpdateStyle = lipgloss.NewStyle().Bold(true).Blink(true).
-		Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color(palette.LimitAmber))
+		Foreground(lipgloss.Color(paletteInk("#111827"))).Background(lipgloss.Color(palette.LimitAmber))
 	professorUpdateSelectedStyle = lipgloss.NewStyle().Bold(true).Blink(true).
-		Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color(palette.LimitAmber))
+		Foreground(lipgloss.Color(paletteInk("#111827"))).Background(lipgloss.Color(palette.LimitAmber))
+}
+
+func configureSnapshotStyles(snapshot Snapshot) {
+	if snapshot.ThemePalette != nil {
+		configureStyles(*snapshot.ThemePalette)
+		return
+	}
+	configureStyles(theme.Load(snapshot.Theme))
+}
+
+// paletteInk preserves legacy badge ink when the terminal owns the background.
+func paletteInk(legacy string) string {
+	if configuredPalette.Background != "" {
+		return configuredPalette.Background
+	}
+	return legacy
 }
 
 // View renders only the visible viewport, so frame cost is independent of the
@@ -133,6 +142,10 @@ func (model Model) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeNone
 	view.WindowTitle = "pfm"
+	if configuredPalette.Background != "" {
+		view.BackgroundColor = lipgloss.Color(configuredPalette.Background)
+		view.ForegroundColor = lipgloss.Color(configuredPalette.Foreground)
+	}
 	return view
 }
 
@@ -179,167 +192,6 @@ func (model Model) renderChatsBody(width, height int) string {
 		joined[index] = list[index] + side[index]
 	}
 	return strings.Join(joined, "\n")
-}
-
-func (model Model) renderStatsSubtabs(width int) string {
-	chats := " Chats "
-	docker := " Docker "
-	if model.statsSubtab == StatsChats {
-		chats = selectedStyle.Render(chats)
-	} else {
-		docker = selectedStyle.Render(docker)
-	}
-	prefix := " subtabs  "
-	if model.statsFocus == StatsFocusSubtab {
-		prefix = "›subtabs  "
-	}
-	return fillLine(prefix+chats+" "+docker+"   ←/→", width)
-}
-
-func (model Model) renderStatsHeader(width int) string {
-	value := func(percent float64, valid bool) string {
-		if !valid {
-			return "…"
-		}
-		return fmt.Sprintf("%.0f%%", percent)
-	}
-	header := model.stats.Header
-	line := " " + statsCPUStyle.Render("CPU "+value(header.CPUPercent, header.CPUValid)) +
-		" · " + statsTokenStyle.Render(fmt.Sprintf("PSI %.0f%%", header.PSIPercent)) +
-		" · " + statsMemoryStyle.Render(fmt.Sprintf("RAM %.0f%%", header.RAMPercent)) +
-		" · " + statsImageStyle.Render(fmt.Sprintf("SWAP %.0f%%", header.SwapPercent))
-	if model.statsError != "" {
-		line += " · " + warnStyle.Render("sample failed: "+model.statsError)
-	} else {
-		if len(model.stats.Warnings) > 0 {
-			warning := model.stats.Warnings[0]
-			if len(model.stats.Warnings) > 1 {
-				warning += fmt.Sprintf(" (+%d)", len(model.stats.Warnings)-1)
-			}
-			line += " · " + warnStyle.Render("warning: "+warning)
-		}
-		if model.statsLoading {
-			line += " · " + dimStyle.Render("sampling…")
-		}
-	}
-	return fillLine(line, width)
-}
-
-func (model Model) renderStatsPanel(width, height int) string {
-	innerWidth := maxInt(1, width-2)
-	innerHeight := maxInt(1, height-2)
-	lines := make([]string, 0, innerHeight)
-	if model.statsSubtab == StatsChats {
-		nameWidth := min(32, maxInt(8, innerWidth-72))
-		header := fmt.Sprintf(
-			"  %-*s %-7s %7s %8s %6s %9s %8s %5s %12s",
-			nameWidth, "NAME", "ENGINE", "CPU%", "RSS", "RAM%", "TOKENS", "TOK/MIN", "GEAR", "USAGE",
-		)
-		lines = append(lines, statsHeaderStyle.Render(fillLine(header, innerWidth)))
-		for index := range model.stats.Chats {
-			chat := &model.stats.Chats[index]
-			if len(lines) >= innerHeight {
-				break
-			}
-			cpu := "…"
-			if chat.CPUValid {
-				cpu = fmt.Sprintf("%.1f%%", chat.CPUPercent)
-			}
-			gear := "-"
-			if chat.GearCount > 0 {
-				gear = fmt.Sprintf("⚙%d", chat.GearCount)
-			}
-			tokens := "…"
-			if chat.TokensKnown {
-				tokens = formatUsageTokens(chat.TokenCount)
-			}
-			tokensPerMinute := "…"
-			if chat.TokenRateValid {
-				tokensPerMinute = formatTokenRate(chat.TokensPerMinute)
-			}
-			plain := fmt.Sprintf(
-				"  %-*s %-7s %7s %8s %5.1f%% %9s %8s %5s %12s",
-				nameWidth, clipRunesEllipsis(cleanField(chat.Name), nameWidth), chat.Engine, cpu,
-				formatSize(int64(chat.RSSBytes)), chat.RAMPercent,
-				tokens, tokensPerMinute, gear, usageSpark(chat.Spark),
-			)
-			plain = fillLine(plain, innerWidth)
-			if model.statsFocus == StatsFocusContent && index == model.statsCursor {
-				lines = append(lines, selectedStyle.Render("›"+ansi.Truncate(plain[1:], maxInt(0, innerWidth-1), "")))
-				continue
-			}
-			engineStyle := statsClaudeStyle
-			if id, err := pfmengine.Parse(chat.Engine); err == nil {
-				if style, ok := statsEngineStyles[id]; ok {
-					engineStyle = style
-				}
-			}
-			line := "  " + statsNameStyle.Render(fmt.Sprintf(
-				"%-*s", nameWidth, clipRunesEllipsis(cleanField(chat.Name), nameWidth),
-			)) + " " + engineStyle.Render(fmt.Sprintf("%-7s", chat.Engine)) +
-				" " + statsCPUStyle.Render(fmt.Sprintf("%7s", cpu)) +
-				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", formatSize(int64(chat.RSSBytes)))) +
-				" " + statsMemoryStyle.Render(fmt.Sprintf("%5.1f%%", chat.RAMPercent)) +
-				" " + statsTokenStyle.Render(fmt.Sprintf("%9s", tokens)) +
-				" " + statsTokenStyle.Render(fmt.Sprintf("%8s", tokensPerMinute)) +
-				" " + statsGearStyle.Render(fmt.Sprintf("%5s", gear)) +
-				" " + statsTokenStyle.Render(fmt.Sprintf("%12s", usageSpark(chat.Spark)))
-			lines = append(lines, fillLine(line, innerWidth))
-		}
-	} else {
-		available := maxInt(16, innerWidth-36)
-		nameWidth := min(24, maxInt(8, available/3))
-		imageWidth := maxInt(8, available-nameWidth)
-		header := fmt.Sprintf(
-			"  %-*s %-*s %7s %8s %8s %6s",
-			nameWidth, "NAME", imageWidth, "IMAGE", "CPU%", "MEMORY", "LIMIT", "MEM%",
-		)
-		lines = append(lines, statsHeaderStyle.Render(fillLine(header, innerWidth)))
-		for index, container := range model.stats.Docker {
-			if len(lines) >= innerHeight {
-				break
-			}
-			cpu := "…"
-			if container.CPUValid {
-				cpu = fmt.Sprintf("%.1f%%", container.CPUPercent)
-			}
-			limit := "max"
-			if container.LimitBytes > 0 {
-				limit = formatSize(int64(container.LimitBytes))
-			}
-			plain := fillLine(fmt.Sprintf(
-				"  %-*s %-*s %7s %8s %8s %5.1f%%",
-				nameWidth, clipRunesEllipsis(cleanField(container.Name), nameWidth),
-				imageWidth, clipRunesEllipsis(cleanField(container.Image), imageWidth), cpu,
-				formatSize(int64(container.MemoryBytes)), limit,
-				container.MemoryPercent,
-			), innerWidth)
-			if model.statsFocus == StatsFocusContent && index == model.statsDockerCursor {
-				lines = append(lines, selectedStyle.Render("›"+ansi.Truncate(plain[1:], maxInt(0, innerWidth-1), "")))
-				continue
-			}
-			line := "  " + statsNameStyle.Render(fmt.Sprintf(
-				"%-*s", nameWidth, clipRunesEllipsis(cleanField(container.Name), nameWidth),
-			)) + " " + statsImageStyle.Render(fmt.Sprintf(
-				"%-*s", imageWidth, clipRunesEllipsis(cleanField(container.Image), imageWidth),
-			)) + " " + statsCPUStyle.Render(fmt.Sprintf("%7s", cpu)) +
-				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", formatSize(int64(container.MemoryBytes)))) +
-				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", limit)) +
-				" " + statsMemoryStyle.Render(fmt.Sprintf("%5.1f%%", container.MemoryPercent))
-			lines = append(lines, fillLine(line, innerWidth))
-		}
-	}
-	if len(lines) == 1 && len(lines) < innerHeight {
-		message := "  waiting for first sample…"
-		if model.stats.Ready {
-			message = "  no live rows"
-		}
-		lines = append(lines, dimStyle.Render(fillLine(message, innerWidth)))
-	}
-	for len(lines) < innerHeight {
-		lines = append(lines, strings.Repeat(" ", innerWidth))
-	}
-	return framePanel(" stats ", lines, width)
 }
 
 func (model Model) renderLimitsPanel(width, height int) string {
@@ -732,14 +584,6 @@ func codexAccountMedal(account int) string {
 		return "·"
 	}
 	return pfmconfig.DefaultEmoji(account)
-}
-
-func fixedDisplayColumn(value string, width int) string {
-	value = ansi.Truncate(value, maxInt(0, width), "…")
-	if padding := width - lipgloss.Width(value); padding > 0 {
-		value += strings.Repeat(" ", padding)
-	}
-	return value
 }
 
 func clipRunesEllipsis(value string, limit int) string {

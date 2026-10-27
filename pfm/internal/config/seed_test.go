@@ -12,7 +12,7 @@ import (
 )
 
 // The seed preview must equal what a load of the seeded target returns, the
-// harvester sibling of the target included, and never create the target.
+// target included, and never create the target.
 func TestLoadSeedMatchesLoadOfSeededTarget(t *testing.T) {
 	home := t.TempDir()
 	example := filepath.Join(t.TempDir(), "example.pfm.config.json")
@@ -21,9 +21,6 @@ func TestLoadSeedMatchesLoadOfSeededTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), FileName)
-	if err := os.WriteFile(HarvesterPath(target), []byte(`{"enabled":false}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	seeded, err := LoadSeed(example, target, home, nil)
 	if err != nil {
 		t.Fatal(err)

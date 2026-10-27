@@ -159,71 +159,108 @@ func (finisher *Finisher) Run(
 	if args.ID == "" || args.SocketPath == "" || args.PaneID == "" {
 		return errors.New("kill-exit requires id, socket, and pane")
 	}
+	client, native, err := targetClient(
+		ctx,
+		finisher.database,
+		finisher.tmux,
+		finisher.paths.tmuxDir,
+		finisher.paths.sidDir,
+		Target(args),
+		finisher.log,
+	)
+	if err != nil {
+		return err
+	}
+	// A per-run copy changes only the ratchet's transport, never the shared
+	// finisher or its tmux-only teammate cleanup.
+	ratchet := *finisher
+	ratchet.tmux = client
 	if err := waitContext(ctx, finisher.delay); err != nil {
 		return err
 	}
-	frame, turn, err := finisher.turnEnded(ctx, args)
-	if err != nil {
-		return err
+	var frame string
+	turn := turnPaneGone
+	landed := false
+	if native {
+		exists, probeErr := client.PaneExists(ctx, args.SocketPath, args.PaneID)
+		landed = probeErr == nil && !exists
+	}
+	if !landed {
+		frame, turn, err = ratchet.turnEnded(ctx, args)
+		if err != nil {
+			return err
+		}
+		landed = native && turn == turnPaneGone
 	}
 
 	// Read the viewports BEFORE the chat dies: its clients vanish with its server,
 	// and they are the only evidence of which panes were watching it.
-	viewports := finisher.viewportPanes(ctx, args.SocketPath)
+	var viewports []string
+	if !native {
+		viewports = finisher.viewportPanes(ctx, args.SocketPath)
+	}
 
 	// The exit command goes only into a composer proven empty once the turn
 	// is over; every other run types nothing, and its one log line names why
 	// — the detached finisher's stderr is the chat's kill-exit log, so the
 	// reason is never absence. The fallback kill ends the pane either way.
-	landed := false
-	probeErr := finisher.exitRefusal(ctx, args, command, frame, turn)
-	if probeErr == nil {
-		_ = finisher.tmux.SendLine(ctx, args.SocketPath, args.PaneID, command)
-		landed, probeErr, err = pollPaneGone(
-			ctx, finisher.tmux, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
-			finisher.answerExitDialog(args),
-		)
-		if err != nil {
-			return err
+	var probeErr error
+	if !landed {
+		probeErr = ratchet.exitRefusal(ctx, args, command, frame, turn)
+		if probeErr == nil {
+			sendErr := client.SendLine(ctx, args.SocketPath, args.PaneID, command)
+			landed, probeErr, err = pollPaneGone(
+				ctx, client, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
+				ratchet.answerExitDialog(args),
+			)
+			probeErr = errors.Join(sendErr, probeErr)
+			if err != nil {
+				return err
+			}
+		} else {
+			fmt.Fprintf(
+				finisher.log,
+				"pfm internal kill-exit %s: no exit command typed — %v; the fallback kill-pane closes the pane\n",
+				args.ID, probeErr,
+			)
 		}
-	} else {
-		fmt.Fprintf(
-			finisher.log,
-			"pfm internal kill-exit %s: no exit command typed — %v; the fallback kill-pane closes the pane\n",
-			args.ID, probeErr,
-		)
 	}
-	// The fallback kill always runs, matching the graceful-close-then-
-	// fallback-kill choreography regardless of what the grace window saw —
-	// but its error only MATTERS when the loop itself never confirmed the
+	// On tmux the fallback kill always runs; on Herdr it is a last resort
+	// only, since engine absence can leave the supervisor pane alive.
+	// Tmux keeps its graceful-close-then-fallback-kill choreography regardless
+	// of what the grace window saw, but its error only matters when the loop
+	// itself never confirmed the
 	// pane gone: against an already-confirmed-gone pane a forced kill is
 	// expected to fail ("can't find pane") and that is not itself evidence
 	// of anything. A kill the finisher has not seen land either way is
 	// never the one it records.
 	// A failed kill of a pane already gone (it died before the turn ended)
 	// is no evidence either way, so the pane is asked once more.
-	if killErr := finisher.tmux.KillPane(ctx, args.SocketPath, args.PaneID); killErr == nil {
-		landed = true
-	} else if !landed {
-		exists, existsErr := finisher.tmux.PaneExists(ctx, args.SocketPath, args.PaneID)
-		if existsErr == nil && !exists {
+	if !native || !landed {
+		if killErr := client.KillPane(ctx, args.SocketPath, args.PaneID); killErr == nil {
 			landed = true
-		} else {
-			probeErr = errors.Join(probeErr, killErr, existsErr)
+		} else if !landed {
+			exists, existsErr := client.PaneExists(ctx, args.SocketPath, args.PaneID)
+			if existsErr == nil && !exists {
+				landed = true
+			} else {
+				probeErr = errors.Join(probeErr, killErr, existsErr)
+			}
 		}
 	}
 	finisher.closeViewports(ctx, viewports)
 
 	var cleanupErrors []error
-	for _, crumb := range []string{
-		filepath.Join(finisher.paths.sidDir, args.SocketName+"."+args.PaneID),
-		filepath.Join(finisher.paths.sidDir, args.SocketName),
-	} {
-		if err := os.Remove(crumb); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			cleanupErrors = append(cleanupErrors, err)
+	if !native {
+		for _, crumb := range []string{
+			filepath.Join(finisher.paths.sidDir, args.SocketName+"."+args.PaneID),
+			filepath.Join(finisher.paths.sidDir, args.SocketName),
+		} {
+			if err := os.Remove(crumb); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				cleanupErrors = append(cleanupErrors, err)
+			}
 		}
 	}
-
 	if err := finisher.refresher.Refresh(ctx); err != nil {
 		cleanupErrors = append(cleanupErrors, fmt.Errorf("refresh post-exit index: %w", err))
 	} else if landed {

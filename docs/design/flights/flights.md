@@ -1,132 +1,211 @@
 # Flights
 
-A flight is one request, built and landed. `/flights:spec` settles the requirements with the user when they are not settled; [`flights-foreman`](flights-foreman.md) reads, designs what no ruling decided (first through [`flights-speccer`](flights-speccer.md) when the codebase has no pattern for the work), builds, splits at ownership boundaries or at segments it cuts before reading their code, and lands the flight through one [`flights-lander`](flights-lander.md). This file holds the decisions shared by the whole family; each member's own decisions live in its file.
-
-A change lands in the design doc first, then in the template, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
+The foreman exists to raise the ratio of code written to tokens read. That ratio is the family's one measure: a rule, an agent or a step that does not raise it does not exist here.
 
 ## Contents
 
+- [The measure](#the-measure)
+- [Why the foreman builds by its own hand](#why-the-foreman-builds-by-its-own-hand)
 - [The family](#the-family)
-- [The lifecycle](#the-lifecycle)
-- [The flight directory](#the-flight-directory)
-- [Verdict tokens](#verdict-tokens)
-- [Two containers](#two-containers)
-- [Where each rule lives](#where-each-rule-lives)
-- [Names](#names)
-- [Harness settings the family needs](#harness-settings-the-family-needs)
-- [What the family replaced](#what-the-family-replaced)
+- [The life cycle](#the-life-cycle)
+- [Choosing a tier](#choosing-a-tier)
+- [What passes between agents](#what-passes-between-agents)
+- [Reading and the trace store](#reading-and-the-trace-store)
+- [Waiting](#waiting)
+- [Tests](#tests)
+- [Effort buttons](#effort-buttons)
+- [Decisions](#decisions)
+- [What the build/land lifecycle never carries](#what-the-buildland-lifecycle-never-carries)
+- [Harness settings](#harness-settings)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 - [Open items](#open-items)
 
+## The measure
+
+| Number | Definition | Reported by |
+| --- | --- | --- |
+| Landed lines per million input tokens | code lines added plus removed in what landed (tests, docs, generated and lock files excluded) ÷ input tokens (input + cache read + cache write) of every agent in the tree, × 10⁶ | `pfm tokens --tree`, first line of `/flights:doctor` |
+| Written / read | bytes an agent wrote through Edit and Write to repo files ÷ bytes of tool results it read | per agent and per agent type, same tools |
+| Silent share | share of the tree's input tokens taken by agents that wrote no code | same tools |
+
+Reading is the cost; writing is the product. The family raises the ratio three ways:
+
+- **One builder reads once.** The foreman reads what the build needs and writes the change itself; a child exists only for an area disjoint from its own.
+- **A big reading may go to a tracer once.** The answer is reused while its files are unchanged.
+- **Review and the full gate run once per worktree.** They happen at the very end, inside one lander, whose cheap children read what it spawns them for.
+
+## Why the foreman builds by its own hand
+
+One brief (`pfm restart`, base `e4e4fa09`) was built three ways on 2026-10-18 and 2026-10-19:
+
+| Build | Cost | Wall time | Requests | Notes |
+| --- | --- | --- | --- | --- |
+| native `general-purpose`, opus medium | $8.04 | 34 min | 134 | one agent |
+| `flights-foreman` tree | $19.03 | 59 min | 550 | 24 agents; 6 workers on one package, 18 of 21 test runs red from siblings' half-written files; the foreman idle about 37 of the 59 min; workers re-read 15 of the 27 files their briefs summarized from the tracer |
+| one-builder prototype | $6.87 | 39 min | 133 | one agent |
+
+Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, against 0.92 and 0.78 for the two single agents. So the foreman is the builder: it reads what the build needs, writes the whole change, and tests once it is whole. Splitting costs reading (each child re-reads what its brief summarized) and wall time (siblings break each other's runs), so it is the exception.
+
 ## The family
 
-| Member | Kind | Does | Runs at |
+| Member | Kind | Model · effort | Does |
 | --- | --- | --- | --- |
-| `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors; cuts its door list into a spine and segments; data shapes, decision, build; freezes the interface or spine and spawns one child foreman per other build unit, unrelated problem or `CHILD` segment; verifies their returns; lands through the lander | `sonnet`, effort `high` |
-| `flights-speccer` | agent | Writes `spec.md` for novel, large work the codebase has no pattern for: the simplest design that meets the request, research (an existing tool first), dependencies both ways, the quality laws, every element priced against its real use; the root foreman's spawn before its base gate on novel, large work, or any chat's own for a spec without the build | `opus`, effort `xhigh` |
-| `flights-lander` | agent | The landing's gate, one per flight: every project's gate, one review of the whole diff across every project, adversarial tests, its own fixes; the testing manuals' floors are its gate rows | `opus`, effort `high` |
-| `flights-mechanical-executor` | agent | One bulk edit a foreman fully fixed (a rename across many files), from a task file the foreman writes | `sonnet` |
-| `/flights:init` | command | Readies a project for flights, once: maps its build units inside-out, writes the project map, and gives each unit a testing manual, a test command and a static-check command | the main chat |
-| `/flights:spec` | command | The human front: maps only what asking needs, grills the user until no gap is left, writes `requirements.md`, hands it to `flights-foreman` | the main chat |
-| `/flights:orchestrate-cross-harness` | command | The main chat acts as the root foreman; child foremen run as chat seats of another engine | the main chat |
-| `/flights:audit` | command | The skeptic over a flight, running or landed: every claim against its artifact | the main chat |
+| `flights-foreman-sonnet` | agent | sonnet · high | Foreman for a clear path: the pattern is in the code; a `from:` render of `flights-foreman` |
+| `flights-foreman` | agent | opus · high | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules and the toughest work |
+| `flights-lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
+| `flights-speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
+| `flights-hunter`, `flights-spec-walker`, `flights-sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
+| `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
-Four agents, four commands. Project law reaches them through the project contract and the project's [testing manual](testing-manual.md); `gitter` is the fleet's own.
+- **The speccer is user-invoked:** the user, or the main chat on the user's request, calls it independently. No foreman, lander or command hands work to it; it returns to its caller and hands off to nobody. Its spec, research and calibration files live in its flight directory, outside the message-only build/land protocol.
+- **Landers are spawned only by the main chat.**
+- **`tracer` and `gitter`** are fleet agents the family uses; they are not its members.
 
-## The lifecycle
-
-1. Ready. `/flights:init`, once per project: the project map, and each unit's testing manual, test command and static-check command. Re-run, it builds only what is missing and aligns what is stale.
-2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request; a chat that wants only the spec of novel, large work spawns `flights-speccer` on its own.
-3. Build. One root `flights-foreman`: for novel, large work with no pattern in the codebase, first one `flights-speccer`, whose `spec.md` becomes the request; the base gate, the doors; the cut; the data shapes, the decision; the interface frozen in the innermost unit, or the spine inside one; the producer built by the foreman that read it; one child foreman per other unit or segment, in parallel against it; every return verified; the owner repairs its own reds.
-4. Land. One `flights-lander` for the whole flight, then, when the caller ordered it, the commit and, for a worktree flight, the merge through the repository's git writer, the lander's `PASS` or `FIXED` being the merge nod.
-5. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
-
-## The flight directory
+## The life cycle
 
 ```text
-$HOME/.local/state/pfm/flights/{project}/{flight}/
-  requirements.md the binding rulings and requirement rows   written by /flights:spec
-  spec.md         the spec of novel, large work              written by flights-speccer
-  run.md          the ledger of the run                      written by the root flights-foreman
-  agents.tsv      one row per spawn: unit, type, agent id, round, time, engine   appended by the root flights-foreman
-  briefs/         one brief file per spawn                   written by the spawning foreman
-  tasks/          one task file per mechanical bulk edit     written by the foreman that fixed it
-  returns/        one return file per child foreman (sub-agent or seat) and per gate round   written by each child and by flights-lander
-  metrics.md      per-agent calls, context, tokens, price    written by pfm tokens at landing
-  gate.md         the gate's attack map and findings         written by flights-lander
-  REVIEW.md       the merge-gating report, from gate.md      written by the root flights-foreman
-  audit.md        the last audit's report                    written by /flights:audit
+main chat -> gitter worktree (or develop) -> foreman tier, worktree path in its brief
+foreman -> reads, writes the whole change, runs the affected tests once -> one return message
+(a child only for an area disjoint from the foreman's own, while the foreman is busy with its part)
+every foreman on the worktree returned -> main chat -> flights-lander -> its own review, children in the background
+lander fixes all findings -> affected tests until green -> full gate once -> lander returns
+main chat -> gitter commits / merges -> same-dispatch verified teardown (or KEEP lock)
+flight abandoned without merge -> writers stopped -> main chat -> gitter close
 ```
 
-- The directory lives outside the repo, under `$HOME/.local/state/pfm/flights/{project}/` (`{project}` = the repo directory's basename, leading dot stripped), kept across reboots; the audit reads it after the landing.
-- Beside the project's flight directories sits `project-map.md`: the project's static facts — its build units in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. `/flights:init` alone writes it, a flight's scoped map living in its own flight directory; a foreman reads it at intake and reports a line it finds wrong. The code wins over it.
-- Each writer owns its own files; nobody edits another writer's file.
+1. **Settle.** The main chat settles open requirements with the user before any dispatch.
+2. **Place.** The main chat has gitter make the worktree, or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree on separate areas.
+3. **Build.** A foreman builds the request by its own hand.
+   - **Reads:** what the build needs; see [reading](#reading-and-the-trace-store).
+   - **Writes:** the whole change, then runs the affected tests once, never after each edit; a fix's regression test runs red first.
+   - **Children:** a child only when both hold: the foreman is busy with its own part, and the other area has no file in common with its own.
+   - **Returns:** one message; every item the brief names is built, or the return is `PARTIAL` naming it.
+4. **Land.** Once every foreman on a worktree has returned, the main chat spawns one `flights-lander`. The lander:
+   1. syncs the worktree to TARGET's tip;
+   2. reviews the whole change itself, spawning the children its inventory's PLAN computes;
+   3. fixes every finding;
+   4. runs the affected tests until green;
+   5. runs the full gate once;
+   6. returns.
 
-## Verdict tokens
+   One worktree gets one lander: no separate reviewer, no second round, no second lander.
+5. **Merge and tear down.** On `PASS` or `FIXED`, the main chat sends gitter to commit and merge, with the lander's report path as its REPORT_PATH. Teardown belongs to that same MERGE dispatch, verified by `git worktree list`. The return ends `worktree removed: {path} · branch {deleted|kept}` or `worktree kept (locked): {path} — {reason}`. A needed keep is `KEEP: {reason}` in the brief, never a teardown ban; gitter keeps the branch and locks the worktree with that reason. A reasonless removal ban becomes a lock with reason `kept by caller, no reason given`. The main chat that kept it carries the `kept (locked)` line in its Verdict until it orders gitter to unlock and remove it.
+6. **Close without a merge.** A lander `FAIL` not retried, an abandoned foreman `PARTIAL`, a dropped flight or an abandoned dead agent's flight still closes, after its writers stop. The main chat sends gitter to remove the clean linked worktree, keeping and naming any unmerged branch (`-d` only, never `-D`). Dirty work is locked with the reason it waits and the user is asked what to do with its changes; the Verdict names what stayed. The main checkout is never a close target.
+7. **Measure.** `/flights:doctor`, run by the user, reports the measure for the tree.
 
-| Token | Written by | Means |
+## Choosing a tier
+
+The main chat chooses at dispatch; a foreman chooses for the rare child it spawns.
+
+| Choice | Decided by | Rule |
 | --- | --- | --- |
-| `CLAIMED` | the spawning foreman, at spawn | A child or executor holds this unit or task |
-| `DONE` | child → parent, after verification; the root, after a gate `PASS` or `FIXED` | The unit's requirement rows are met and proven, with no `UNBUILT` requested element; a gate `FAIL` makes the root's `FAILED` or `PARTIAL` |
-| `SPEC` | `flights-speccer` | `spec.md` is written whole; its path follows |
-| `PARTIAL` | root foreman, `flights-speccer` | Some units `DONE`, the rest named with their cause, including each requested element marked `UNBUILT` in the spec's `## Open`; a spec cut at its cap, the rest in its `## Open` |
-| `FAILED` | any builder | The goal was not reached; the return names the cause or what was read |
-| `SPEC-DRIFT` | `flights-mechanical-executor` | Its task file contradicts the tree; nothing guessed |
-| `BLOCKED` | any foreman, `flights-speccer` | A question only the user can answer, or a ruling contradicted; both sides quoted. A speccer's `PARTIAL` or `BLOCKED` becomes the root foreman's own first-line `BLOCKED`, nothing built |
-| `COMA` | the root, cross-harness only | A seat whose turn a model-server error stopped, re-prompted |
+| Foreman tier | difficulty and ambiguity, never size | `flights-foreman-sonnet`: the path is clear, the pattern is in the code · `flights-foreman`: design choices, ambiguity, unfamiliar code, an unknown cause, several modules, the toughest work |
+| Child tier | what the area needs | `flights-foreman-sonnet`: a clear path, the pattern is in the code · `flights-foreman`: design, debugging, judgment · `documenter`: docs · `pcm`: prompt files |
+| Lander children | the lander's inventory PLAN, computed from the diff and the spec files | hunters k = min(4, ceil(production diff lines / 600)) · spec walkers per spec with 10+ numbered rows · sub-landers by inventory row ranges |
 
-A return opens with its token on the first line; the rest is evidence.
+The lander itself has no tiers: `flights-lander` lands every worktree.
 
-## Two containers
+## What passes between agents
 
-| | Nested (default) | Cross-harness (`/flights:orchestrate-cross-harness`) |
-| --- | --- | --- |
-| The root foreman | a `flights-foreman` sub-agent | the main chat, reading the foreman's body |
-| A child foreman | `Agent(subagent_type: "flights-foreman")` | a seat of the chosen engine, named `{flight}-{unit}`, born with the `flights-foreman` role through `pfm chat new --agent-role`, its brief as the first turn via `--prompt-file` |
-| Wait | end the message; each return wakes the parent | a Monitor on `returns/`; the seat's inject is a bonus |
-| The speccer and the lander | sub-agents of the root | the same: sub-agents of the chat, never seats |
+In the build/land lifecycle:
 
-## Where each rule lives
+- **Messages only.** A brief is the spawn prompt, and a return is the final message.
+- **No build/land files.** The build/land protocol creates no flight directory, run log, brief file, return file, gate file or spec file.
+- **The one path that travels** is a tracer run, when one exists, named in a brief so the receiver may reuse it.
+- **A foreman's brief carries:**
+  - the work and its acceptance;
+  - where to work;
+  - the testing manual path, if one exists;
+  - a tracer run path, when one exists;
+  - for a child, the interface it must fit.
+- **A foreman's return:**
+  - first line `DONE {name}` or `PARTIAL {name}: {what is left}`;
+  - then the decisions it made, the files it changed, and the tests it ran with their result lines;
+  - a `TRACER` line naming any tracer run it made or used, so a later agent can reuse it;
+  - an `OUTSIDE` line naming any change beyond the request, which it never makes.
+- **A child's return** has a foreman's shape. It is a claim. The parent checks it against the diff and the test lines.
+- **A lander's return:**
+  - first line `PASS`, `FIXED` or `FAIL {worktree}`;
+  - then each finding, fixed or listed;
+  - the sync outcome;
+  - each project's last full-gate verdict line;
+  - the residuals and decisions;
+  - the lander's report path.
 
-| Layer | Reader | Holds |
-| --- | --- | --- |
-| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | Cost = calls × context; the reader builds, compaction holds length, and work splits at ownership or at a segment briefed unread; the ladder (direct, `flights-foreman`, `/flights:spec` first when requirements are open, `flights-speccer` first for work with no pattern); a foreman reports once and waits for its children |
-| `CLAUDE.md` / `AGENTS.md` | every sub-agent and seat | The project contract |
-| The agent file | the agent | The protocol of one role |
-| The brief | one child or executor | Its requirement rows, the frozen interface's paths, acceptance, the testing manual's path, the worktree, the flight directory |
+## Reading and the trace store
 
-## Names
+- **The foreman reads what the build needs:** the files it changes, the code it calls at its signatures and contracts, and the closest pattern once.
+- **The tracer is optional.** A foreman may call one; it is not required to.
+- **A run may travel.** When a tracer run exists, its path may go into a child's brief.
+- **The store is per repo.** Every tracer run lives under `/tmp/{project}/tracer/`, and each answer records the sha256 of every file it cited.
+- **The tracer checks the store first.** Recall searches every earlier run of the same repo root, with no age limit.
+  - An answer whose cited files all match their recorded hashes is fresh: it is returned with no walk.
+  - An answer with changed files re-walks only the threads that cite them.
+- **No hook prepares, forces or gates a tracer.** The tracer opens its own run and recalls as its first command.
 
-- The unit of work is a flight; the family is `flights`; agent names carry no namespace (`flights-foreman`), commands carry it as `/flights:{verb}`.
+## Waiting
 
-## Harness settings the family needs
+- **Agents** are waited on by ending the turn. Their return arrives as a notification.
+- **Commands** run in the foreground with a timeout. One longer than the Bash tool's 10-minute limit runs in the background and is waited on with one blocking wait (`timeout {s} bash -c 'until [ -s "$1" ]; do sleep 20; done; cat "$1"' _ {file}`).
+- **Never end a turn while your own command runs.** An agent woken by its own finished background command can have its final notice delivered to the main chat instead of its parent.
 
-Claude Code stops the Agent tool three levels below the main chat by default and caps concurrent sub-agents. A flight is main → root foreman → child foreman → mechanical executor, or main → root foreman → lander → its review fork, or main → root foreman → speccer → its tracers and researchers. `pfm` writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line from its settings; neither ceiling is reported when hit, so the root counts its children in flight.
+## Tests
 
-## What the family replaced
+- **Who runs what:**
+  - a foreman runs the affected tests once its change is whole, never after each edit; a fix's regression test runs red first;
+  - only the lander runs the full gate, once per worktree right before its merge, after every review finding is fixed and the affected tests are green.
+- **A red full gate:** the lander fixes it, gets the failing tests green with the affected-test command, never a gate rerun, then runs that gate once more. That is the only repeat.
+- **The testing manual:** a project's testing manual, where one exists (this repo's `.claude/commands/pfm-testing-manual.md`), names the affected-test command and the full gate. Without one, agents use the project's documented test commands.
+- **Where tests run:** this repo runs every test in the fence through `.claude/scripts/test.sh`.
 
-| Retired | Replaced by |
+## Effort buttons
+
+The `auto-effort-control` plugin gives an agent whose frontmatter carries `effortControl` three tools, `effort_up`, `effort_down` and `effort_auto` (`mcp__auto-effort-control__…`), and steers its effort while it works (`plugins/auto-effort-control/README.md`). `effortControl: on` takes the plugin's default band, floor medium and ceiling xhigh.
+
+| Agent | `effortControl` |
 | --- | --- |
-| The task-file planner (task files, index, nested planners) | the foreman reads and builds; `/flights:spec` writes `requirements.md` |
-| `flights-orchestrator`, `/flights:orchestrate-nested`, `/flights:orchestrate-live` | the root foreman; nested is the default container |
-| `flights-smart-executor`, `flights-precise-executor` | the foreman builds what it read |
-| `general-orchestrator`, `general-foreman`, `general-executor` | `flights-foreman` with no spec; a batch of unrelated problems is one child per problem; bulk fixed edits go to `flights-mechanical-executor` |
-| `flight-index.mjs` | none: no task-file index exists |
-| `speccer-manual.md` | `project-map.md` |
-| Earlier: `/wave:*`, `scheduler`, `architect`, `speccer` | the flights family |
+| `flights-foreman`, `flights-foreman-sonnet` | `on` (floor medium, ceiling xhigh), both starting at high |
+| `reviewer`, `reviewer-pro`, `reviewer-nt`, `documenter` | `on` |
+
+A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. Neither `pcm` nor `releaser` carries it. `flights-lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
+
+## Decisions
+
+- **A failing gate is fixed in the code.** A foreman raises a limit only through the project's documented exception route, the reason recorded there and in its `DECISIONS`; the lander judges it.
+- **Never ask.** A foreman or lander never asks the user. It decides, and lists every decision first in its return.
+- **Critical decisions go to the main chat, without stopping.** A critical decision is one where being wrong costs data, privacy or patient data, money, security, or anything irreversible. The agent sends it to the main chat (`SendMessage(to: "main")`) with the choice it is proceeding with, then keeps working. If an answer arrives that differs, it adopts it.
+- **The place is the parent's.** A foreman's prompt names no worktree: it works where its parent points it, and the main chat owns the place, the landing and git.
+
+## What the build/land lifecycle never carries
+
+| Absent | Instead |
+| --- | --- |
+| Agent hooks (cut gate, call cap, stop hooks, wait denial) | the protocol in the agent file |
+| A call or round cap | the foreman decides when its change is whole |
+| Flight files and a run log | messages |
+| A lander or gitter spawned by a foreman | the main chat owns both |
+| Review lenses (a security seat, fixed tracers) | the lander's hunt and the children its computed PLAN spawns |
+| A second gate round | fixes inside the one lander |
+| A required specification or requirements interview step | the main chat settles requirements; the user may independently request `flights-speccer` |
+
+## Harness settings
+
+The deepest chain is main → foreman → child foreman → tracer → sub-tracer: four levels below the main chat; a foreman reaches it only when it spawns. pfm writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line (`pfm/internal/claudelaunch/knobs.go`). A spawn refused at the concurrency limit never started, and goes out again once a slot frees.
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/flights-foreman.md`, `flights-speccer.md`, `flights-lander.md`, `flights-mechanical-executor.md` | The protocols |
-| The commands | `templates/global/commands/flights/*.md` | The four commands, machine-global |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names |
-| The adopter contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The ladder |
-| The engine | `pfm` settings and launcher | The two harness settings |
-| This directory | `docs/design/flights/` | One design file per member; this file for what they share |
+| The agents | `templates/global/agents/flights-*.md` and the `from:` foreman tier, rendered into `templates/generated/agents/` | The protocols |
+| The lander's kit | `templates/global/skills/lander-inventory/` | The inventory and the computed spawn |
+| The command | `templates/global/commands/flights/doctor.md` | The meter |
+| The measurement | `pfm tokens --tree` in `pfm/internal/tokens/` | The measure's numbers |
+| Dispatch routing | `templates/global/agents/flights-foreman.md`, `templates/global/agents/flights-foreman-sonnet.md` — `description:` | Foreman suitability; main chat → foreman → main chat → flights-lander → gitter |
+| Landing | `templates/global/agents/flights-lander.md` | Main-only landing after every foreman returns: sync, review, fix, affected tests, full gate, report |
+| The tracer | `templates/global/agents/tracer.md`, `templates/global/skills/tracetree/`, `docs/design/tracing/` | The store and its reuse |
+| This directory | `docs/design/flights/` | One file per member, this file for what they share |
 
 ## Open items
 
-- The multi-project form is unmeasured: the first cross-project flights measure calls per unit, the re-read share and the lander's findings.
-- The caps (250 calls per foreman, 200 per lander) and the `autoCompact` points are first values; tune them from callmeter peaks.
+- The baseline before this design: a median of 41 landed lines per million input tokens over 166 flights in the 14 days to 2026-10-18. Agents that wrote no code took 61% of the input. The first flights on this design are measured against it with `/flights:doctor`.
+- The lander's PLAN constants (600 lines per hunter, 10 rows per walker, the caps) are first values; tune them from `/flights:doctor` reports.

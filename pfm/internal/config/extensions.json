@@ -1,0 +1,10 @@
+{
+  "ponytail": {
+    "version": "5.3.2",
+    "engines": {
+      "claude": {"uninstallArgs": ["plugin", "uninstall"], "uninstallSuffix": ["--scope", "user"],"id": "ponytail@ponytail", "source": "DietrichGebert/ponytail", "marketplace": "ponytail", "marketplaceArgs": ["plugin", "marketplace", "add"], "installArgs": ["plugin", "install"], "installSuffix": ["--scope", "user"]},
+      "codex": {"uninstallArgs": ["plugin", "remove"],"cachePath": ["plugins", "cache", "ponytail", "ponytail"], "id": "ponytail@ponytail", "source": "DietrichGebert/ponytail", "marketplace": "ponytail", "marketplaceArgs": ["plugin", "marketplace", "add"], "installArgs": ["plugin", "add"]},
+      "opencode": {"package": "@dietrichgebert/ponytail@5.3.2"}
+    }
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "0033": {
+    "name": "C-related Block Level Variables",
+    "scope": [
+      "source.cpp meta.block variable.other"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0044": {
+    "name": "CSS Class and Support",
+    "scope": [
+      "source.css support.type.property-name",
+      "source.sass support.type.property-name",
+      "source.scss support.type.property-name",
+      "source.less support.type.property-name",
+      "source.stylus support.type.property-name",
+      "source.postcss support.type.property-name",
+      "support.type.property-name.css",
+      "support.type.vendored.property-name",
+      "support.type.map.key"
+    ],
+    "settings": {
+      "foreground": "#ff70b8"
+    }
+  },
+  "0061": {
+    "name": "Keyword this with Punctuation, ES7 Bind Operator",
+    "scope": [
+      "source.js constant.other.object.key.js string.unquoted.label.js",
+      "variable.language.this punctuation.definition.variable",
+      "keyword.other.this"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0065": {
+    "name": "CSS ID's",
+    "scope": [
+      "source.sass keyword.control"
+    ],
+    "settings": {
+      "foreground": "#ff70b8"
+    }
+  },
+  "0079": {
+    "name": "JSON Key - Level 0",
+    "scope": [
+      "source.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#ff70b8"
+    }
+  },
+  "0080": {
+    "name": "JSON Key - Level 1",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  },
+  "0081": {
+    "name": "JSON Key - Level 2",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0082": {
+    "name": "JSON Key - Level 3",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0083": {
+    "name": "JSON Key - Level 4",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#ffb4a8"
+    }
+  },
+  "0084": {
+    "name": "JSON Key - Level 5",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  },
+  "0085": {
+    "name": "JSON Key - Level 6",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0086": {
+    "name": "JSON Key - Level 7",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0087": {
+    "name": "JSON Key - Level 8",
+    "scope": [
+      "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json"
+    ],
+    "settings": {
+      "foreground": "#7dffd0"
+    }
+  },
+  "0116": {
+    "name": "ENV value",
+    "scope": [
+      "source.env"
+    ],
+    "settings": {
+      "foreground": "#ff70b8"
+    }
+  },
+  "0129": {
+    "name": "Pink · regular expressions",
+    "scope": [
+      "source.regexp"
+    ],
+    "settings": {
+      "foreground": "#8ff0ff"
+    }
+  }
+}

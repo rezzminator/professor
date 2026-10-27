@@ -43,14 +43,16 @@ type SinkOptions struct {
 // Sink is the HTTP receiver: it decodes OTLP/JSON POSTs into halves, joins them and appends the
 // rows to the ledger. It never panics out of a request and never refuses a well-formed POST.
 type Sink struct {
-	dir     string
-	log     io.Writer
-	logMu   sync.Mutex
-	now     func() time.Time
-	maxBody int64
-	joiner  *Joiner
-	faults  atomic.Int64
-	last    atomic.Int64
+	dir          string
+	log          io.Writer
+	logMu        sync.Mutex
+	now          func() time.Time
+	maxBody      int64
+	joiner       *Joiner
+	faults       atomic.Int64
+	last         atomic.Int64
+	unattributed atomic.Int64
+	warned       sync.Map
 }
 
 // NewSink returns a Sink appending to the ledger under opts.Dir.
@@ -72,6 +74,21 @@ func NewSink(opts SinkOptions) *Sink {
 
 // Faults counts the POSTs and rows the sink refused or failed to write.
 func (s *Sink) Faults() int { return int(s.faults.Load()) }
+
+// Unattributed counts observations missing a session or a usable request correlation.
+// It counts observations, not unique calls: identity-less retries cannot be deduplicated.
+func (s *Sink) Unattributed() int { return int(s.unattributed.Load()) }
+
+func (s *Sink) noteIdentity(path, session, identity string) {
+	if session != "" && identity != "" {
+		return
+	}
+	s.unattributed.Add(1)
+	if _, seen := s.warned.LoadOrStore(path, true); !seen {
+		s.Logf("%s: unattributed telemetry retained; missing session or request correlation; "+
+			"identity-less observations may overlap or repeat (see cost ledger)", path)
+	}
+}
 
 // LastPost is when the sink last received a POST, zero before the first.
 func (s *Sink) LastPost() time.Time {
@@ -207,34 +224,45 @@ func tooLargeOr(err error, fallback int) int {
 
 func (s *Sink) ingestLogs(body []byte, now time.Time) error {
 	halves, err := DecodeLogs(body)
+	if err != nil {
+		return err
+	}
+	refused := 0
 	for index := range halves {
 		half := &halves[index]
-		if !costledger.ValidSessionID(half.SessionID) {
-			s.fault(
-				"api_request %s refused: session id %q is outside the ledger's character class",
-				half.RequestID,
-				half.SessionID,
-			)
+		if half.SessionID != "" && !costledger.ValidSessionID(half.SessionID) {
+			refused++
 			continue
 		}
+		row := logOnlyRow(*half, now)
+		s.noteIdentity(pathLogs, half.SessionID, row.Identity())
 		s.joiner.AddLog(*half, now)
 	}
-	return err
+	return unsafeSessions(refused)
 }
 
 func (s *Sink) ingestSpans(body []byte, now time.Time) error {
 	halves, err := DecodeSpans(body)
+	if err != nil {
+		return err
+	}
+	refused := 0
 	for index := range halves {
 		half := &halves[index]
-		if !costledger.ValidSessionID(half.SessionID) {
-			s.fault(
-				"llm_request span %s refused: session id %q is outside the ledger's character class",
-				half.RequestID,
-				half.SessionID,
-			)
+		if half.SessionID != "" && !costledger.ValidSessionID(half.SessionID) {
+			refused++
 			continue
 		}
+		row := spanOnlyRow(*half, now)
+		s.noteIdentity(pathTraces, half.SessionID, row.Identity())
 		s.joiner.AddSpan(*half, now)
 	}
-	return err
+	return unsafeSessions(refused)
+}
+
+func unsafeSessions(count int) error {
+	if count == 0 {
+		return nil
+	}
+	return &RefusedError{Count: count, Reason: fmt.Sprintf("%d records refused: unsafe session id", count)}
 }

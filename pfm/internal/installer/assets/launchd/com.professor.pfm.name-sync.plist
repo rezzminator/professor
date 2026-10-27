@@ -17,8 +17,13 @@
   run, and a name-sync racing login would gather a fleet that has not started.
   __PFM_HOME__ is substituted at install time — launchd has no %h.
 
+  ProgramArguments[0] is the one stable launcher script (agentlauncher), never
+  pfm itself: macOS Background Task Management treats a rebuilt, ad-hoc-signed
+  pfm as a new item and posts an advisory per build; the launcher execs pfm and
+  never changes.
+
   PATH is rendered at install from the one service search path every pfm unit
-  shares (installer servicePath): launchd's bare PATH cannot see Homebrew's
+  shares (paths.ServicePath): launchd's bare PATH cannot see Homebrew's
   tmux, and without it every run probed nothing and renamed nothing while
   reporting success.
 
@@ -33,7 +38,7 @@
 	<string>com.professor.pfm.name-sync</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>__PFM_HOME__/.local/bin/pfm</string>
+		<string>__PFM_AGENT_LAUNCHER__</string>
 		<string>name-sync</string>
 		<string>--apply</string>
 	</array>

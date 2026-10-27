@@ -8,15 +8,11 @@ import (
 )
 
 const (
-	MCPServerHarvester = "harvester"
-	MCPServerChat      = "chat"
+	MCPServerChat = "chat"
 )
 
 // MCPServerKey names where a registered server's enabled flag is configured.
 func MCPServerKey(name string) string {
-	if name == MCPServerHarvester {
-		return "harvester.enabled"
-	}
 	return "mcp.servers." + name + ".enabled"
 }
 
@@ -37,7 +33,7 @@ func validateThirdParty(path string, entries map[string]json.RawMessage) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if name == MCPRegistrationName(MCPServerChat) || name == MCPRegistrationName(MCPServerHarvester) {
+		if name == MCPRegistrationName(MCPServerChat) {
 			return fmt.Errorf("config %s: mcp.thirdParty.%s: the name %s is pfm's own server", path, name, name)
 		}
 		entry := bytes.TrimSpace(entries[name])
@@ -50,4 +46,14 @@ func validateThirdParty(path string, entries map[string]json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// MCPServerSource reports where a registered server's enabled flag came from.
+func (config Config) MCPServerSource(name string) Source {
+	return config.Source(MCPServerKey(name))
+}
+
+// MCPServerEnabled reports the configured enablement of one registered family.
+func MCPServerEnabled(config Config, name string) bool {
+	return config.MCPServers[name].Enabled
 }

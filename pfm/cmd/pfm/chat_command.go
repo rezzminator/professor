@@ -9,20 +9,23 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/recovery"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 func renderNoSuchChat(name string, stdout, stderr io.Writer, asJSON bool) int {
@@ -43,7 +46,11 @@ func chatResolver(
 	runtimes ...commandRuntime,
 ) func(context.Context) (headless.Chat, bool, error) {
 	return func(ctx context.Context) (headless.Chat, bool, error) {
-		return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
+		chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
+		if err == nil && found {
+			err = pfmchat.CheckAwait(ctx, chat, firstRuntime(runtimes))
+		}
+		return chat, found, err
 	}
 }
 
@@ -68,13 +75,17 @@ func runChatOpen(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (exitCode int) {
-	flags := cli.NewFlagSet("chat open", "usage: pfm chat open <target>", stderr)
+	flags := cli.NewFlagSet("chat open", "usage: pfm chat open [--restored] <target>", stderr)
+	restored := flags.Bool("restored", false, "resume a restored pane without interactive prompts")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
 		return 2
+	}
+	if *restored {
+		return pfmchat.OpenRestoredID(context.Background(), flags.Arg(0), stdout, stderr, &runtime)
 	}
 	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtime)
 	if code != 0 {
@@ -83,19 +94,17 @@ func runChatOpen(
 	return pfmchat.OpenID(context.Background(), chat.ID, stdout, stderr, &runtime)
 }
 
-func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (code int) {
-	return runChatKillContext(context.Background(), args, stdout, stderr, env, runtimes...)
+func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
+	return runChatKillContext(context.Background(), args, stdout, stderr, runtimes...)
 }
 
 func runChatKillContext(
 	ctx context.Context,
 	args []string,
 	stdout, stderr io.Writer,
-	env paths.Env,
 	runtimes ...commandRuntime,
 ) (code int) {
 	defer func() { pfmchat.RecordVerb(ctx, "kill", code) }()
-	env = defaultEnv(env)
 	flags := cli.NewFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
 	exit := flags.Bool("exit", false, "gracefully close after killing")
 	targets, code, ok := cli.ParseFlagsAnywhere(flags, args)
@@ -111,23 +120,12 @@ func runChatKillContext(
 			confirm := *exit || (chat.Live && chat.Socket != "" && chat.Pane != "")
 			return runResolvedChatKillContext(ctx, chat, confirm, stdout, stderr, runtimes...)
 		}
-		if env.Get("TMUX") == "" && env.Get(resolve.CodexThreadEnv) != "" {
-			chat, found, err := pfmchat.Resolve(ctx, targets[0], io.Discard, firstRuntime(runtimes))
-			if err != nil {
-				fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
-				return 1
-			}
-			if !found {
-				fmt.Fprintln(stderr, "pfm chat kill: this Codex chat has no live fleet seat")
-				return codeUnknownChat
-			}
-			return runResolvedChatKillContext(ctx, chat, *exit, stdout, stderr, runtimes...)
-		}
+
 		killArgs := []string{"--self"}
 		if *exit {
 			killArgs = append(killArgs, "--exit")
 		}
-		return runKill(killArgs, stdout, stderr, runtimes...)
+		return runKill(ctx, killArgs, stdout, stderr, runtimes...)
 	}
 	target := targets[0]
 	id := target
@@ -151,8 +149,9 @@ func runChatKillContext(
 	switch {
 	case found:
 		id = chat.ID
-		if chat.Live && chat.Socket != "" && chat.Pane != "" {
-			return runResolvedChatKillContext(ctx, chat, true, stdout, stderr, runtimes...)
+		addressed := chat.Live && chat.Socket != "" && chat.Pane != ""
+		if addressed || chat.Backend == pfmcall.HerdrBackend {
+			return runResolvedChatKillContext(ctx, chat, *exit || addressed, stdout, stderr, runtimes...)
 		}
 		if chat.Live {
 			// Live with no address to close: say so instead of letting the
@@ -183,7 +182,7 @@ func runChatKillContext(
 	}
 	killArgs = append(killArgs, id)
 	var killOut, killErr strings.Builder
-	code = runKill(killArgs, &killOut, &killErr, runtimes...)
+	code = runKill(ctx, killArgs, &killOut, &killErr, runtimes...)
 	_, _ = io.WriteString(stdout, killOut.String())
 	_, _ = io.WriteString(stderr, killErr.String())
 	if code != 0 && strings.Contains(killErr.String(), "not indexed") {
@@ -302,13 +301,23 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat capture: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
-	socketPath, err := chatSocketPath(chat.Socket)
+	transport, err := pfmcall.New(pfmcall.Dependencies{})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
 		return 1
 	}
-	capture, err := (pfmcall.TmuxCaller{}).Capture(
-		context.Background(), socketPath, pfmchat.PaneTarget(chat), true, pfmcall.FullScrollback,
+	socketPath := chat.Socket
+	if chat.Backend != pfmcall.HerdrBackend {
+		socketPath, err = chatSocketPath(chat.Socket)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
+			return 1
+		}
+	}
+	capture, err := transport.CaptureTarget(
+		context.Background(),
+		pfmcall.Target{Backend: chat.Backend, SocketPath: socketPath, Pane: pfmchat.PaneTarget(chat)},
+		pfmcall.FullScrollback,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
@@ -410,6 +419,10 @@ func runChatNameWithContext(
 		fmt.Fprintln(stderr, "pfm chat name: name must be one non-empty line")
 		return 2
 	}
+	if err := naming.ValidateLabel(name); err != nil {
+		fmt.Fprintf(stderr, "pfm chat name: %v\n", err)
+		return 2
+	}
 	chat, code := headlessTarget(ctx, flags.Arg(0), stdout, stderr, false, runtimes...)
 	if code != 0 {
 		return code
@@ -443,6 +456,9 @@ func applyChatName(
 		fmt.Fprintf(stderr, "pfm chat name: %s\n", resultMessage)
 		return resultCode
 	}
+	if chat.Backend == "herdr" {
+		return 0
+	}
 	target := chat.Pane
 	if target == "" {
 		target = chat.Session
@@ -464,6 +480,10 @@ func applyChatName(
 func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	defer func() { pfmchat.RecordVerb(context.Background(), "end", code) }()
 	flags := cli.NewFlagSet("chat end", "usage: pfm chat end <target>", stderr)
+	worker := len(args) > 0 && args[0] == "--native-end-worker"
+	if worker {
+		args = args[1:]
+	}
 	if parseCode, ok := cli.ParseFlags(flags, args); !ok {
 		return parseCode
 	}
@@ -471,40 +491,19 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		flags.Usage()
 		return 2
 	}
-	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtimes...)
-	if code != 0 {
-		return code
+	resolveTarget := func(ctx context.Context) (headless.Chat, int) {
+		chat, code := headlessTarget(ctx, flags.Arg(0), stdout, stderr, false, runtimes...)
+		if code == 0 && !chat.Live && chat.Backend != "herdr" {
+			fmt.Fprintf(stderr, "pfm chat end: %q is not running\n", chat.Name)
+			return chat, codeDeadChat
+		}
+		return chat, code
 	}
-	if !chat.Live {
-		fmt.Fprintf(stderr, "pfm chat end: %q is not running\n", chat.Name)
-		return codeDeadChat
-	}
-	socketPath, err := chatSocketPath(chat.Socket)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
-		return 1
-	}
-	command := pfmtmux.Exec(context.Background(), "", socketPath, "kill-server")
-	if output, err := command.CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: %v: %s\n", err, strings.TrimSpace(string(output)))
-		return 1
-	}
-	// The seat is dead, so its prompt file is litter. Cleanup is best-effort:
-	// the end itself succeeded and a prompt-file failure must remain visible
-	// without changing that result.
-	if endRuntime, err := pfmconfig.OptionalRuntime(runtimes); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not resolve paths to remove its role prompt: %v\n", err)
-	} else if err := agentrole.RemoveSeatPrompt(endRuntime.Paths.SIDDir, chat.Socket, chat.Pane); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not remove role prompt: %v\n", err)
-	}
-	fmt.Fprintf(stdout, "ended %s\n", chat.ID)
-	return 0
+	ctx := context.Background()
+	return pfmchat.EndTarget(ctx, flags.Arg(0), worker, stdout, stderr, firstRuntime(runtimes), resolveTarget)
 }
 
 func renameChatWindow(ctx context.Context, socket, target, name string) error {
-	// Every window-name writer clips through WindowNameFor, or the writers
-	// rename the window back and forth (see its doc).
-	name = gather.WindowNameFor(name)
 	socketPath, err := chatSocketPath(socket)
 	if err != nil {
 		return err
@@ -512,7 +511,10 @@ func renameChatWindow(ctx context.Context, socket, target, name string) error {
 	if target == "" {
 		target = socket
 	}
-	command := pfmtmux.Exec(ctx, "", socketPath, "rename-window", "-t", target, name)
+	// The exact name is stored and the window renamed to its clipped form in
+	// one tmux command; every window-name writer clips through WindowNameFor,
+	// or the writers rename the window back and forth (see its doc).
+	command := pfmtmux.Exec(ctx, "", socketPath, gather.ChatRenameCommand(target, name)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-window: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -547,4 +549,87 @@ func runChatSatellite(
 		fmt.Fprintf(stderr, "pfm chat: unsupported compatibility command %q\n", verb)
 		return 2
 	}
+}
+
+// runChatLS is `pfm chat ls`: chat.List's live, unkilled chats in the current
+// directory's repository, or with --all in every repository. MCP ls's
+// `all` differs: it adds killed and background rows as well.
+func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
+	clk = defaultClock(clk)
+	all := false
+	for _, arg := range args {
+		switch arg {
+		case "--all", "-a", "all":
+			all = true
+		default:
+			fmt.Fprintln(
+				stderr,
+				"usage: pfm chat ls [--all|--reap]  (--all: chats in every repo; --reap: end empty pfm tmux servers)",
+			)
+			return 2
+		}
+	}
+	request := pfmchat.ListRequest{View: compose.AllView, LiveOnly: true, ReadOnly: true}
+	if !all {
+		directory, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat ls: read the current directory: %v\n", err)
+			return 1
+		}
+		request.Repo = gitroot.RepoRoot(directory)
+	}
+	listed, err := pfmchat.List(context.Background(), firstRuntime(runtimes), request, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
+		return 1
+	}
+	for _, failure := range listed.Errors {
+		fmt.Fprintln(stderr, failure)
+	}
+	if all {
+		fmt.Fprintln(stdout, "live chats everywhere (name · session · state · herdr · dir · last activity):")
+	} else {
+		fmt.Fprintln(stdout, "live chats in this repo (name · session · state · herdr · last activity):")
+	}
+	for index := range listed.Rows {
+		row := &listed.Rows[index]
+		chat := pfmchat.FromRow(*row)
+		status, inspectErr := pfmchat.InspectSeat(context.Background(), firstRuntime(runtimes), chat, clk.Now(), nil)
+		state := doctor.StateUnknown
+		if inspectErr != nil {
+			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)
+		} else {
+			state = status.State
+		}
+		// Name is the actionable identity; retain the raw tmux session second
+		// so parsers lose no information.
+		handle := row.Socket
+		if row.SessionName != "" {
+			handle = row.SessionName
+		}
+		location := listed.PresenceOf(index) + "  "
+		if all {
+			location += strings.Replace(row.CWD, listed.Home, "~", 1) + "  "
+		}
+		fmt.Fprintf(
+			stdout, "  %-28s %-24s %-7s %s%s\n",
+			transcript.Truncate(row.Name, 28), handle, state, location, transcript.Truncate(row.LastPrompt, 64),
+		)
+		if row.LostNote != "" {
+			fmt.Fprintf(stdout, "    loss note: %s\n", row.LostNote)
+		}
+	}
+	if len(listed.Rows) == 0 {
+		fmt.Fprintln(stdout, "  (none)")
+	}
+	if listed.Elsewhere > 0 {
+		fmt.Fprintf(stdout, "  (+%d live in other dirs — pfm chat ls --all to see them)\n", listed.Elsewhere)
+	}
+	if listed.KilledCount > 0 {
+		fmt.Fprintf(stdout, "  (+%d killed — pfm ls --killed to manage)\n", listed.KilledCount)
+	}
+	if len(listed.Errors) > 0 {
+		return 1
+	}
+	return 0
 }

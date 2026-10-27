@@ -212,9 +212,9 @@ func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
 		}
 	})
 
-	t.Run("metadata-free raw pane retains ambient resolution", func(t *testing.T) {
+	t.Run("metadata-free raw pane refuses an unproved environment", func(t *testing.T) {
 		got, found, err := Resolve(context.Background(), "%3", io.Discard, nil)
-		if err != nil || !found || got.Socket != filepath.Base(daemonSocket) || got.Pane != "%3" {
+		if !errors.Is(err, resolve.ErrNotInChat) || found || got != (headless.Chat{}) {
 			t.Fatalf("Resolve(ambient %%3) = %+v found=%t err=%v", got, found, err)
 		}
 	})
@@ -251,31 +251,61 @@ func TestAmbientSplitSelfEnrichmentKeepsTheLivePane(t *testing.T) {
 	}
 }
 
-// TestSeatIdentityIsOnlyTheLastRung pins the refusals that keep an INHERITED
-// CODEX_THREAD_ID from naming anyone: no thread id, a Claude session of the
-// process's own, or a thread the fleet binds to no live socket — each is "no
-// seat identity", never a handle nobody can reply to.
-func TestSeatIdentityIsOnlyTheLastRung(t *testing.T) {
-	testjail.Fleet(t)
-	ctx := context.Background()
-	t.Setenv(resolve.ClaudeSessionEnv, "")
-	t.Setenv(resolve.CodexThreadEnv, "")
-	if identity, found := SeatIdentity(ctx, nil); found {
-		t.Fatalf("SeatIdentity() without a thread = %+v", identity)
+func TestCodexSeatsKeepNativeAddressAndRejectsUnusableRows(t *testing.T) {
+	values := paths.Values{TmuxDir: "/jail/tmux"}
+	native := compose.Row{
+		Kind: compose.LiveCodex, ID: "thread-native", Name: "Native", SessionName: "Native",
+		Backend: "herdr", SeatID: "seat-cx", HerdrWorkspace: "w7",
+		Socket: "/jail/native/herdr.sock", PaneID: "w7:pW",
 	}
-	t.Setenv(resolve.CodexThreadEnv, "019f-inherited")
-	t.Setenv(resolve.ClaudeSessionEnv, "a-claude-session")
-	if identity, found := SeatIdentity(ctx, nil); found {
-		t.Fatalf("SeatIdentity() under a Claude session = %+v", identity)
-	}
-	t.Setenv(resolve.ClaudeSessionEnv, "")
-	// SeatIdentity folds a scan error into "no seat"; prove the scan ran, so
-	// this case is "no live socket hosts the thread", not "could not look".
-	if _, err := Rows(ctx, io.Discard, nil); err != nil {
-		t.Fatalf("fleet scan failed, so the next case would pass vacuously: %v", err)
-	}
-	if identity, found := SeatIdentity(ctx, nil); found {
-		t.Fatalf("SeatIdentity() for a thread no live socket hosts = %+v", identity)
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*compose.Row)
+		duplicate bool
+		want      bool
+	}{
+		{name: "native", want: true},
+		{name: "unnamed", mutate: func(row *compose.Row) { row.SessionName = "" }, want: true},
+		{name: "relative", mutate: func(row *compose.Row) { row.Socket = "herdr.sock" }},
+		{name: "dead", mutate: func(row *compose.Row) { row.Kind = compose.ResumeCodex }},
+		{name: "killed", mutate: func(row *compose.Row) { row.Killed = true }},
+		{name: "backend failure", mutate: func(row *compose.Row) { row.BackendError = "HERDR UNREACHABLE" }},
+		{name: "wrong engine", mutate: func(row *compose.Row) { row.Kind = compose.LiveClaude }},
+		{name: "no pane", mutate: func(row *compose.Row) { row.PaneID = "" }},
+		{name: "ambiguous", duplicate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := native
+			if tc.mutate != nil {
+				tc.mutate(&row)
+			}
+			rows := []compose.Row{row}
+			if tc.duplicate {
+				rows = append(rows, row)
+			}
+			seats, err := codexSeatsFromRows(rows, values)
+			identity := resolve.Identity{}
+			if err == nil {
+				identity, err = resolve.CodexThreadSeat(native.ID, seats)
+			}
+			found := err == nil
+			if found != tc.want {
+				t.Fatalf("identity = %+v found=%t, want found=%t", identity, found, tc.want)
+			}
+			if !found {
+				return
+			}
+			session := row.SessionName
+			if session == "" {
+				session = row.SeatID
+			}
+			if identity.Backend != row.Backend || identity.SeatID != row.SeatID ||
+				identity.HerdrWorkspace != row.HerdrWorkspace || identity.SocketPath != row.Socket ||
+				identity.SocketName != "herdr.sock" || identity.Pane != row.PaneID ||
+				identity.Session != session || identity.ID != row.ID || identity.Engine != "cx" {
+				t.Fatalf("native identity = %+v, want native row %+v", identity, row)
+			}
+		})
 	}
 }
 
@@ -300,3 +330,107 @@ func TestTargetReportsAScanThatCouldNotLook(t *testing.T) {
 		t.Fatalf("Target(ghost) with an unopenable index = %v, want a *TargetError that is not ErrUnknownChat", err)
 	}
 }
+
+func TestHerdrRosterPreservesTargetOwnedAddress(t *testing.T) {
+	row := compose.Row{
+		Kind:           compose.LiveClaude,
+		Backend:        "herdr",
+		SeatID:         "seat1",
+		HerdrWorkspace: "w6",
+		Socket:         "/jail/herdr.sock",
+		PaneID:         "w6:p3",
+		ID:             "sid1",
+		Name:           "REVIEW",
+	}
+	chat := FromRow(row)
+	if chat.Backend != "herdr" || chat.SeatID != "seat1" || chat.HerdrWorkspace != "w6" {
+		t.Fatalf("native projection lost: %+v", chat)
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, code, _, err := seatTarget(values, []compose.Row{row}, "REVIEW")
+	if err != nil || code != 0 || target.Backend != "herdr" || target.SocketPath != row.Socket ||
+		target.SeatID != "seat1" ||
+		target.HerdrWorkspace != "w6" {
+		t.Fatalf("target=%+v code=%d err=%v", target, code, err)
+	}
+}
+
+// A launch identity is provisional; a resolved handle must keep following the
+// same durable seat after a reporter publishes the real thread (for either engine).
+func TestResolvedHandleSurvivesNativeSessionReplacement(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.LiveCodex, compose.LiveClaude} {
+		t.Run(string(compose.EngineForKind(kind)), func(t *testing.T) {
+			testjail.Fleet(t)
+			t.Setenv("TMUX_TMPDIR", t.TempDir())
+			ctx := context.Background()
+			row := compose.Row{
+				Backend: "herdr", SeatID: "durable-seat", ID: "provisional-session",
+				Name: "new-chat", Kind: kind, Socket: filepath.Join(t.TempDir(), "herdr.sock"), PaneID: "w1:p2",
+			}
+			rows := []compose.Row{row}
+			scan := func(context.Context) ([]compose.Row, error) { return rows, nil }
+			initial, found, err := ResolveIn(ctx, row.Name, scan, io.Discard, nil)
+			if err != nil || !found {
+				t.Fatalf("initial resolution: found=%t err=%v", found, err)
+			}
+			rows[0].ID, rows[0].Name, rows[0].Path = "reported-thread", "renamed-chat", "/fixture/reported.jsonl"
+			current, found, err := ResolveIn(ctx, initial.Handle(), scan, io.Discard, nil)
+			if err != nil || !found || current.ID != "reported-thread" || current.Path != "/fixture/reported.jsonl" {
+				t.Fatalf("follow after identity swap: chat=%+v found=%t err=%v", current, found, err)
+			}
+			target, code, detail, err := rosterTarget(resolvedPaths(t), rows, "", initial.Handle())
+			if err != nil || code != 0 || target.SeatID != row.SeatID || target.ID != "reported-thread" {
+				t.Fatalf("delivery after identity swap: target=%+v code=%d detail=%q err=%v", target, code, detail, err)
+			}
+			// Neither a reused name, nor a new thread, nor a label spoofing the handle
+			// may capture a reference to a seat which has genuinely gone.
+			rows[0].SeatID, rows[0].Name, rows[0].ID = "replacement-seat", initial.Handle(), initial.ID
+			if got, found, err := ResolveIn(ctx, initial.Handle(), scan, io.Discard, nil); err != nil || found {
+				t.Fatalf("gone seat redirected: chat=%+v found=%t err=%v", got, found, err)
+			}
+			rows = nil
+			if _, _, err := ResolveIn(ctx, initial.Handle(), func(context.Context) ([]compose.Row, error) {
+				return nil, errors.New("fleet read failed")
+			}, io.Discard, nil); err == nil || !strings.Contains(err.Error(), "fleet read failed") {
+				t.Fatalf("failed scan rendered as absence: %v", err)
+			}
+		})
+	}
+}
+
+func TestCodexIdentityScanFailureIsReported(t *testing.T) {
+	testjail.Fleet(t)
+	t.Setenv(resolve.CodexThreadEnv, "019a2b")
+	t.Setenv(resolve.ClaudeSessionEnv, "")
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
+	environment := resolve.WhoamiEnvironment{CodexThreadID: "019a2b"}
+	identifier, err := resolve.NewWhoami(
+		resolve.WhoamiDependencies{
+			Environment: &environment,
+			Processes:   emptyIdentityProcesses{},
+			TmuxDir:     t.TempDir(),
+			CodexSeats:  CodexSeats(nil),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = identifier.Identify(
+		context.Background(),
+	); err == nil || errors.Is(err, resolve.ErrNotInChat) ||
+		!strings.Contains(err.Error(), "Codex identity store") {
+		t.Fatalf("scan error became absence: %v", err)
+	}
+}
+
+type emptyIdentityProcesses struct{}
+
+func (emptyIdentityProcesses) Environ(int) (map[string]string, error) { return nil, nil }
+func (emptyIdentityProcesses) Parent(int) (int, error)                { return 1, nil }

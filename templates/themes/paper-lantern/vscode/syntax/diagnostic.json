@@ -1,0 +1,33 @@
+{
+  "0055": {
+    "name": "Enji · invalid",
+    "scope": [
+      "invalid",
+      "invalid.illegal"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#a8182c"
+    }
+  },
+  "0056": {
+    "name": "Kaki · deprecated",
+    "scope": [
+      "invalid.deprecated"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#9f5401"
+    }
+  },
+  "0077": {
+    "name": "Kaki · commit subject overflow",
+    "scope": [
+      "invalid.deprecated.line-too-long.git-commit",
+      "invalid.illegal.line-too-long.git-commit"
+    ],
+    "settings": {
+      "foreground": "#9f5401"
+    }
+  }
+}

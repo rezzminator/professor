@@ -67,9 +67,21 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 			row.Value, row.Won = shellValue()
 		case SourceMachineConfig:
 			row.Value = configValue(knob.Name, prefs, machine)
-			if machine.MCPServerSource(pfmconfig.MCPServerChat) != pfmconfig.SourceDefault ||
-				machine.MCPServerSource(pfmconfig.MCPServerHarvester) != pfmconfig.SourceDefault {
+			if machine.MCPServerSource(pfmconfig.MCPServerChat) != pfmconfig.SourceDefault {
 				row.Won = "config"
+			}
+		}
+		if knob.Name == knobTheme {
+			theme, note := themeForLaunch(prefs.Theme)
+			if theme == "" {
+				row.Value = unsetWord
+			} else {
+				row.Value = theme
+			}
+			if note == themeSyncOwnsIt {
+				row.Won = note
+			} else if note != "" {
+				row.Won += " (" + note + ")"
 			}
 		}
 		rows = append(rows, row)
@@ -122,6 +134,8 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 			return productionMode
 		}
 		return prefs.SystemPrompt
+	case knobRemoteControl:
+		return strconv.FormatBool(prefs.RemoteControl)
 	case knobNativeCursor:
 		return strconv.FormatBool(prefs.NativeCursor)
 	case knobMaxSubagentSpawnDepth:
@@ -139,6 +153,8 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 		return helperModel(prefs)
 	case knobTmuxTruecolor:
 		return strconv.FormatBool(prefs.TmuxTruecolor)
+	case knobSubagentStatuslineTrace:
+		return strconv.FormatBool(prefs.SubagentStatuslineTrace)
 	case knobCostLedger:
 		return strconv.FormatBool(prefs.CostLedger)
 	case knobTheme:
@@ -152,7 +168,7 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 		return prefs.PermissionMode
 	case knobMCP:
 		var enabled []string
-		for _, name := range []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester} {
+		for _, name := range []string{pfmconfig.MCPServerChat} {
 			if machine.MCPServers[name].Enabled {
 				enabled = append(enabled, name)
 			}

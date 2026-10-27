@@ -51,7 +51,7 @@ judge() { # judge <args…>: OUT, ERR, RC of the judge; the default thresholds f
 }
 word() { printf '%s' "${OUT%%"$TAB"*}"; }
 
-QUIET_LINE="CODE${TAB}tick-deficit +0.0% (> -5%) · cpu-psi +3.0% (< 20%) · spin ×1.0 (< ×1.5; ref 1000µs from this file) · run-delay NA (not given)"
+QUIET_LINE="CODE${TAB}tick-deficit +0.0% (> -5%) · cpu-psi +3.0% (< 20%) · cg-io-psi +0.0% (< 15%) · vm-io-psi +0.0% (< 15%) · spin ×1.0 (< ×1.5; ref 1000µs from this file) · run-delay NA (not given)"
 
 # The threshold cases judge against this fixture file, so calibrating pfm/.testcontention.yml never
 # moves them; the real file is read only by the thresholds-file checks and the default --yml case.
@@ -88,6 +88,56 @@ eq "in-VM cpu wait: CONTENTION" CONTENTION "$(word)"
 has "in-VM cpu wait: evidence names cpu-psi with its line" "cpu-psi +30.0% (≥ 20%)" "$OUT"
 has "in-VM cpu wait: tick-deficit stays under its line" "tick-deficit +0.0% (> -5%)" "$OUT"
 
+# --- I/O pressure: CPU, ticks and spin stay quiet -----------------------------
+for scope in cg vm; do
+  column=$([ "$scope" = cg ] && echo 12 || echo 17)
+  for rate in 0.14 0.15 0.18; do
+    rows 10 1000 1 4 2.0 2.0 0.03 1000 | awk -F'\t' -v OFS='\t' -v col="$column" -v rate="$rate" \
+      '{ $col = (NR - 1) * rate; print }' | res "$T/io-$scope-$rate/run.i1/resources.tsv"
+    judge window --resources "$T/io-$scope-$rate/run.i1/resources.tsv" --yml "$FIX"
+    expected='not measured'; [ "$rate" != 0.14 ] || expected=CODE
+    eq "$scope I/O pressure $rate: $expected with quiet CPU and spin" "$expected 0" "$(word) $RC"
+    if [ "$rate" != 0.14 ]; then
+      has "$scope I/O pressure $rate: ambiguity is explicit" 'I/O pressure cannot distinguish external contention from code I/O' "$OUT"
+    fi
+    line='≥'; [ "$rate" != 0.14 ] || line='<'
+    has "$scope I/O pressure $rate: evidence names its scope and threshold" "$scope-io-psi +${rate#0.}.0% ($line 15%)" "$OUT"
+  done
+  rows 10 1000 1 4 2.0 2.0 0.03 1000 | awk -F'\t' -v OFS='\t' -v col="$column" \
+    'NR == 1 { $col = 100 } { print }' | res "$T/io-$scope-backwards/run.i1/resources.tsv"
+  judge window --resources "$T/io-$scope-backwards/run.i1/resources.tsv" --yml "$FIX"
+  has "$scope I/O counter backwards: NA, never contention" "$scope-io-psi NA (the pressure counter went backwards)" "$OUT"
+  eq "$scope I/O counter backwards: quiet other signals remain CODE" CODE "$(word)"
+  rows 10 1000 1 4 2.0 2.0 0.03 1000 | awk -F'\t' -v OFS='\t' -v col="$column" \
+    '{ $col = "NA"; print }' | res "$T/io-$scope-na/run.i1/resources.tsv"
+  judge window --resources "$T/io-$scope-na/run.i1/resources.tsv" --yml "$FIX"
+  has "$scope I/O unavailable: NA with the missing column" "$scope-io-psi NA (0 samples < 4, ${scope}_psi_io_some_s NA in 10 of 10 rows)" "$OUT"
+done
+# Overlapping scopes are never summed, nor may low I/O manufacture CODE when CPU is unmeasured.
+rows 10 1000 1 4 2.0 2.0 0.03 1000 | awk -F'\t' -v OFS='\t' \
+  '{ $12 = $17 = (NR - 1) * 0.08; print }' | res "$T/io-overlap/run.o1/resources.tsv"
+judge window --resources "$T/io-overlap/run.o1/resources.tsv" --yml "$FIX"
+eq "8% in both overlapping scopes is not a 16% signal" CODE "$(word)"
+rows 10 1000 1 4 2.0 2.0 0.03 1000 | awk -F'\t' -v OFS='\t' \
+  '{ $3 = $4 = $5 = $11 = $21 = "NA"; print }' | res "$T/io-only/run.o1/resources.tsv"
+judge window --resources "$T/io-only/run.o1/resources.tsv" --yml "$FIX"
+eq "low I/O alone cannot manufacture a CODE attribution" 'not measured' "$(word)"
+rows 10 1000 1 4 2.0 2.0 0.30 1000 | awk -F'\t' -v OFS='\t' \
+  '{ $12 = $17 = (NR - 1) * 0.18; print }' | res "$T/io-cpu/run.c1/resources.tsv"
+judge window --resources "$T/io-cpu/run.c1/resources.tsv" --yml "$FIX"
+eq "I/O ambiguity does not suppress an existing CPU contention signal" CONTENTION "$(word)"
+
+# A configurable I/O line does not alter CPU PSI's independently calibrated line.
+{ cat "$FIX"; echo 'io_psi_share_min: 0.25'; } > "$T/io-high.yml"
+judge window --resources "$T/io-vm-0.18/run.i1/resources.tsv" --yml "$T/io-high.yml"
+eq "I/O threshold override: 18% under 25% remains CODE" CODE "$(word)"
+has "I/O threshold override: its line is reported" 'vm-io-psi +18.0% (< 25%)' "$OUT"
+for value in 0 -0.1 fast; do
+  { cat "$FIX"; printf 'io_psi_share_min: %s\n' "$value"; } > "$T/io-invalid.yml"
+  judge window --resources "$T/quiet/run.q1/resources.tsv" --yml "$T/io-invalid.yml"
+  eq "I/O threshold $value: rejected with its key" "2 yes" "$RC $([[ $ERR == *io_psi_share_min* ]] && echo yes || echo no)"
+done
+
 # --- slow spin ---------------------------------------------------------------
 { rows 6 1000 1 4 2.0 2.0 0.01 1000; rows 6 1006 1 4 2.0 2.0 0.01 2000; } | res "$T/spin/run.a1/resources.tsv"
 judge window --resources "$T/spin/run.a1/resources.tsv" --from 1006 --to 1011 --yml "$FIX"
@@ -100,11 +150,11 @@ has "slow spin, a sibling: reference is the sibling's minimum, named" "spin ×4.
 # One outlier row does not make a slow window: the window's median is judged, not its mean.
 { rows 4 1000 1 4 2.0 2.0 0.01 1000; rows 1 1004 1 4 2.0 2.0 0.01 9000; } | res "$T/median/run.d1/resources.tsv"
 judge window --resources "$T/median/run.d1/resources.tsv" --yml "$FIX"
-eq "spin: the median of the window, an outlier row does not cross" "CODE${TAB}tick-deficit +0.0% (> -5%) · cpu-psi +0.0% (< 20%) · spin ×1.0 (< ×1.5; ref 1000µs from this file) · run-delay NA (not given)" "$OUT"
+eq "spin: the median of the window, an outlier row does not cross" "CODE${TAB}tick-deficit +0.0% (> -5%) · cpu-psi +0.0% (< 20%) · cg-io-psi +0.0% (< 15%) · vm-io-psi +0.0% (< 15%) · spin ×1.0 (< ×1.5; ref 1000µs from this file) · run-delay NA (not given)" "$OUT"
 # A counter that went backwards (a restarted cgroup) is NA, never a negative share.
 rows 6 1000 1 4 2.0 2.0 0.01 1000 | awk -F'\t' -v OFS='\t' 'NR == 1 { $3 = "100.000000"; $11 = "50.000000" } { print }' | res "$T/backwards/run.k1/resources.tsv"
 judge window --resources "$T/backwards/run.k1/resources.tsv" --yml "$FIX"
-eq "a counter that went backwards: the cpu signals are NA, the others decide" "CODE${TAB}tick-deficit NA (a cpu counter went backwards) · cpu-psi NA (the pressure counter went backwards) · spin ×1.0 (< ×1.5; ref 1000µs from this file) · run-delay NA (not given)" "$OUT"
+eq "a counter that went backwards: the cpu signals are NA, the others decide" "CODE${TAB}tick-deficit NA (a cpu counter went backwards) · cpu-psi NA (the pressure counter went backwards) · cg-io-psi +0.0% (< 15%) · vm-io-psi +0.0% (< 15%) · spin ×1.0 (< ×1.5; ref 1000µs from this file) · run-delay NA (not given)" "$OUT"
 
 # The reference reads this file and the 20 newest siblings: the 21st-newest is not read.
 rows 6 1000 1 4 2.0 2.0 0.01 1000 | res "$T/many/run.m00/resources.tsv"
@@ -186,7 +236,7 @@ has "run delay over 0 cpu-s: NA with its reason, not a division" "run-delay NA (
 
 # --- short window ------------------------------------------------------------
 judge window --resources "$T/quiet/run.q1/resources.tsv" --from 1000 --to 1002 --yml "$FIX"
-eq "short window: three rows < min_samples 4 is not measured" "not measured${TAB}tick-deficit NA (3 samples < 4) · cpu-psi NA (3 samples < 4) · spin NA (3 samples < 4) · run-delay NA (not given)" "$OUT"
+eq "short window: three rows < min_samples 4 is not measured" "not measured${TAB}tick-deficit NA (3 samples < 4) · cpu-psi NA (3 samples < 4) · cg-io-psi NA (3 samples < 4) · vm-io-psi NA (3 samples < 4) · spin NA (3 samples < 4) · run-delay NA (not given)" "$OUT"
 judge window --resources "$T/quiet/run.q1/resources.tsv" --from 1000 --to 1003 --yml "$FIX"
 eq "short window: exactly min_samples rows is measured (bounds are inclusive)" CODE "$(word)"
 judge window --resources "$T/quiet/run.q1/resources.tsv" --from 2000 --to 3000 --yml "$FIX"

@@ -4,11 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHeadlessClaudeAssignsSessionAndLaunchRecord(t *testing.T) {
@@ -204,7 +207,7 @@ func TestHeadlessCodexTakesNeitherNameNorPrompt(t *testing.T) {
 	}
 	if !strings.HasSuffix(
 		plan.Run,
-		" codex --dangerously-bypass-approvals-and-sandbox",
+		" codex --no-daemon --dangerously-bypass-approvals-and-sandbox",
 	) {
 		t.Fatalf("unexpected codex command: %s", plan.Run)
 	}
@@ -315,5 +318,329 @@ func TestHeadlessClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.
 				}
 			})
 		}
+	}
+}
+
+func TestHeadlessClaudeRetainsStructuredSeatRecipe(t *testing.T) {
+	request := HeadlessRequest{
+		Engine:         pfmengine.Claude,
+		Name:           "REVIEW",
+		CWD:            "/work/alpha",
+		Home:           t.TempDir(),
+		PrimaryAccount: 2,
+		Prompt:         "a prompt with 'quotes' and $(nope)",
+	}
+	plan, err := headlessWithTestConfig(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SeatRun == nil || plan.SeatRun.CWD != request.CWD || plan.SeatRun.Binary == "" ||
+		len(plan.SeatRun.Args) == 0 ||
+		!slices.Contains(plan.SeatRun.Args, request.Prompt) {
+		t.Fatalf("structured recipe=%+v", plan.SeatRun)
+	}
+	parsed := parsedShell(t, plan.Run)
+	if parsed.SessionID != plan.Record.SessionID {
+		t.Fatalf("recipe and launch identity diverged: %+v", plan)
+	}
+}
+
+func TestHeadlessCodexRetainsStructuredSeatRecipe(t *testing.T) {
+	for _, yolo := range []bool{false, true} {
+		t.Run(strconv.FormatBool(yolo), func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.Codex.Binary = "/opt/codex stable"
+			machine.Codex.Yolo = yolo
+			t.Setenv("CLAUDECODE", "stale")
+			t.Setenv("CODEX_HOME", "/stale")
+			request := HeadlessRequest{
+				Engine:         pfmengine.Codex,
+				Name:           "REVIEW",
+				CWD:            "/work/alpha",
+				Home:           home,
+				PrimaryAccount: 2,
+				Model:          "next-model",
+				Effort:         "high",
+				PromptChannel:  "developer 'text'",
+				Config:         machine,
+			}
+			plan, err := PlanCodex(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix := []string{pfmengine.CodexNoDaemon, "--sandbox", "workspace-write"}
+			if yolo {
+				prefix = []string{pfmengine.CodexNoDaemon, "--dangerously-bypass-approvals-and-sandbox"}
+			}
+			prefix = append(prefix, "--model", request.Model)
+			want := prefix
+			want = append(want, CodexEffortArg("high")...)
+			want = append(want, CodexDeveloperInstructionsArg(request.PromptChannel)...)
+			account, _ := machine.CodexAccountByID(2)
+			if plan.SeatRun == nil || plan.SeatRun.Binary != machine.Codex.Binary || plan.SeatRun.CWD != request.CWD ||
+				!reflect.DeepEqual(plan.SeatRun.Args, want) {
+				t.Fatalf("typed Codex recipe=%+v want args=%q", plan.SeatRun, want)
+			}
+			if lastEnvironmentValueNative(plan.SeatRun.Env, "CODEX_HOME") != account.Home ||
+				lastEnvironmentValueNative(plan.SeatRun.Env, "CLAUDECODE") != "" {
+				t.Fatalf("Codex environment=%v", plan.SeatRun.Env)
+			}
+		})
+	}
+}
+
+// A bare roster tier is not a Codex model id: OpenAI answers `codex --model astra` with a 400. chat new and
+// the MCP new tool reach PlanCodex, which resolves the tier through the registered agent persona of
+// that name, the roster's own model; a full id passes through unchanged.
+func TestPlanCodexResolvesBareRosterTierToCodexModelID(t *testing.T) {
+	home := t.TempDir()
+	testjail.StageGlobalAgents(t, home)
+	// Professor ships no Codex-model agents, so the bare tiers resolve through personas staged here.
+	for name, model := range map[string]string{"astra": "gpt-6-astra", "sol": "gpt-6-sol", "luna": "gpt-6-luna"} {
+		persona := "---\nname: " + name + "\nmodel: " + model + "\n---\n"
+		if err := os.WriteFile(
+			filepath.Join(home, ".claude", "agents", name+".md"),
+			[]byte(persona),
+			0o644,
+		); err != nil {
+			t.Fatalf("stage %s persona: %v", name, err)
+		}
+	}
+	machine := testMachineConfig(home)
+	for tier, want := range map[string]string{"astra": "gpt-6-astra", "gpt-6-astra": "gpt-6-astra"} {
+		plan, err := PlanCodex(HeadlessRequest{
+			Engine: pfmengine.Codex, Name: "TIER", CWD: "/work/alpha", Home: home,
+			PrimaryAccount: 2, Model: tier, Config: machine,
+		})
+		if err != nil {
+			t.Fatalf("PlanCodex(--model %s): %v", tier, err)
+		}
+		at := slices.Index(plan.SeatRun.Args, "--model")
+		if at < 0 || at+1 >= len(plan.SeatRun.Args) || plan.SeatRun.Args[at+1] != want {
+			t.Fatalf("--model %s launched args %q, want --model %s", tier, plan.SeatRun.Args, want)
+		}
+		if !strings.Contains(plan.Run, Quote("--model")+" "+Quote(want)) || strings.Contains(plan.Run, Quote("astra")) {
+			t.Fatalf("--model %s launched run %q, want --model %s", tier, plan.Run, want)
+		}
+	}
+	for _, tier := range []string{"sol", "luna"} {
+		plan, err := PlanCodex(HeadlessRequest{
+			Engine: pfmengine.Codex, Name: "TIER", CWD: "/work/alpha", Home: home,
+			PrimaryAccount: 2, Model: tier, Config: machine,
+		})
+		if err != nil {
+			t.Fatalf("PlanCodex(--model %s): %v", tier, err)
+		}
+		at := slices.Index(plan.SeatRun.Args, "--model")
+		if got := plan.SeatRun.Args[at+1]; !strings.HasPrefix(got, "gpt-") || !strings.HasSuffix(got, "-"+tier) {
+			t.Fatalf("--model %s launched --model %q, want the roster's gpt-*-%s id", tier, got, tier)
+		}
+	}
+}
+
+func lastEnvironmentValueNative(env []string, key string) string {
+	value := ""
+	for _, entry := range env {
+		if v, ok := strings.CutPrefix(entry, key+"="); ok {
+			value = v
+		}
+	}
+	return value
+}
+
+func TestHeadlessCanonicalEngineAndOpenCodeRecipe(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	machine.Claude.Binary = "/opt/custom-cc"
+	machine.Codex.Binary = "/opt/custom-cx"
+	machine.OpenCode.Binary = "/opt/custom-ox"
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/ox"}}
+	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode} {
+		t.Run(string(id), func(t *testing.T) {
+			request := HeadlessRequest{
+				Engine:         id,
+				Name:           "RAW",
+				CWD:            home,
+				Home:           home,
+				PrimaryAccount: 2,
+				Config:         machine,
+				Prompt:         "a\nb",
+			}
+			var plan HeadlessPlan
+			var err error
+			switch id {
+			case pfmengine.Claude:
+				plan, err = PlanClaude(request)
+			case pfmengine.Codex:
+				plan, err = PlanCodex(request)
+			case pfmengine.OpenCode:
+				plan, err = PlanOpenCode(request)
+			}
+			if err != nil {
+				t.Fatalf("canonical %s recipe: %v", id, err)
+			}
+			if plan.Engine != id || plan.SeatRun == nil {
+				t.Fatalf("canonical identity=%q recipe=%+v want=%s", plan.Engine, plan.SeatRun, id)
+			}
+			if id == pfmengine.OpenCode {
+				if plan.Record != nil || !plan.PromptOnCommandLine ||
+					!reflect.DeepEqual(plan.SeatRun.Args, []string{home, "--prompt", request.Prompt}) ||
+					plan.SeatRun.Binary != machine.OpenCode.Binary {
+					t.Fatalf("OpenCode typed plan=%+v recipe=%+v", plan, plan.SeatRun)
+				}
+			}
+		})
+	}
+}
+
+func TestPlanCodexPreservesResumeIdentity(t *testing.T) {
+	for _, sid := range []string{"", "thread 'safe'"} {
+		t.Run(sid, func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.Codex.Binary = "/opt/custom-cx"
+			plan, err := PlanCodex(
+				HeadlessRequest{
+					Name:            "RAW",
+					CWD:             home,
+					Home:            home,
+					PrimaryAccount:  2,
+					Config:          machine,
+					ResumeSessionID: sid,
+					Model:           "next",
+					Effort:          "high",
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := append(codexAutonomyArgs(machine.EffectiveCodex(2).Yolo), "--model", "next")
+			want = append(want, CodexEffortArg("high")...)
+			if sid != "" {
+				want = append(want, "resume", sid)
+			}
+			if !reflect.DeepEqual(plan.SeatRun.Args, want) || plan.Record != nil {
+				t.Fatalf("resume recipe args=%q want=%q record=%+v", plan.SeatRun.Args, want, plan.Record)
+			}
+			if sid != "" && !strings.Contains(plan.Run, Quote("resume")+" "+Quote(sid)) {
+				t.Fatalf("resume shell=%s", plan.Run)
+			}
+		})
+	}
+}
+
+func TestHeadlessForkRetainsTypedRecipe(t *testing.T) {
+	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		t.Run(string(id), func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			plan, err := HeadlessFork(
+				HeadlessForkRequest{
+					Engine:         id,
+					SessionID:      "session 'quoted'",
+					Name:           "FORK",
+					CWD:            home,
+					Home:           home,
+					PrimaryAccount: 2,
+					Config:         machine,
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.SeatRun == nil || plan.SeatRun.CWD != home || plan.Engine != id {
+				t.Fatalf("fork typed recipe=%+v identity=%s", plan.SeatRun, plan.Engine)
+			}
+			if !slices.Contains(plan.SeatRun.Args, "session 'quoted'") {
+				t.Fatalf("fork args=%q", plan.SeatRun.Args)
+			}
+		})
+	}
+}
+
+func TestHeadlessOpenCodeCarriesReporterAndRejectsUnsupportedPolicy(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: home}}
+	request := HeadlessRequest{
+		Name:           "RAW",
+		CWD:            home,
+		Home:           home,
+		PrimaryAccount: 1,
+		Config:         machine,
+		Model:          "openai/gpt-6.1-sol",
+		Effort:         "High",
+		Prompt:         "Initial task 'quoted'\nnext line",
+		PromptChannel:  "Constitution, not the initial task.",
+	}
+	plan, err := PlanOpenCode(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(
+		lastEnvironmentValueNative(plan.SeatRun.Env, "OPENCODE_CONFIG_CONTENT"),
+		"opencode-herdr-plugin.mjs",
+	) ||
+		!slices.Contains(plan.SeatRun.Args, request.Model) {
+		t.Fatalf(
+			"OpenCode native policy args=%q reporter=%q",
+			plan.SeatRun.Args,
+			lastEnvironmentValueNative(plan.SeatRun.Env, "OPENCODE_CONFIG_CONTENT"),
+		)
+	}
+	for key, want := range map[string]string{
+		"PFM_OPENCODE_MODEL":   request.Model,
+		"PFM_OPENCODE_VARIANT": "high",
+		"PFM_OPENCODE_POLICY":  request.PromptChannel,
+	} {
+		if got := lastEnvironmentValueNative(plan.SeatRun.Env, key); got != want {
+			t.Errorf("%s=%q, want %q", key, got, want)
+		}
+	}
+	if !slices.Contains(plan.SeatRun.Args, request.Prompt) || slices.Contains(plan.SeatRun.Args, "--variant") ||
+		slices.Contains(plan.SeatRun.Args, request.PromptChannel) {
+		t.Fatalf("native prompt/policy argv=%q", plan.SeatRun.Args)
+	}
+	for _, effort := range []string{"", "turbo"} {
+		test := request
+		test.Effort = effort
+		_, err := PlanOpenCode(test)
+		if effort == "" && err != nil ||
+			effort != "" && (err == nil || !strings.Contains(err.Error(), "unknown OpenCode effort")) {
+			t.Fatalf("effort %q error=%v", effort, err)
+		}
+	}
+	test := request
+	test.PromptChannel = "policy\x00invalid"
+	if _, err := PlanOpenCode(test); err == nil || !strings.Contains(err.Error(), "prompt channel") {
+		t.Fatalf("invalid prompt channel error=%v", err)
+	}
+}
+
+func TestOpenCodeNativePolicyDoesNotDependOnReporter(t *testing.T) {
+	request := Request{
+		OpenCodePlugin:        "/fixture/seat.mjs",
+		OpenCodePromptChannel: "Policy only.",
+	}
+	request.Persona.Model, request.Persona.Effort = "openai/gpt-6.1-sol", "high"
+	assignments, err := openCodePersonaAssignments(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, word := range []string{
+		`OPENCODE_CONFIG_CONTENT={"plugin":["file:///fixture/seat.mjs"]}`,
+		"PFM_OPENCODE_MODEL=openai/gpt-6.1-sol", "PFM_OPENCODE_VARIANT=high", "PFM_OPENCODE_POLICY=Policy only.",
+	} {
+		if !slices.Contains(assignments, word) {
+			t.Errorf("native assignments lack %q: %q", word, assignments)
+		}
+	}
+	request.OpenCodePlugin = ""
+	if _, err := openCodePersonaAssignments(
+		request,
+	); err == nil ||
+		!strings.Contains(err.Error(), "require the native seat plugin") {
+		t.Fatalf("missing delivery mechanism error=%v", err)
 	}
 }

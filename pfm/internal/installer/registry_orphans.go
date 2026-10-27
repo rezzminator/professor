@@ -44,7 +44,7 @@ func (installer *engine) retireDeadRegistryLinks() error {
 			return fmt.Errorf("resolve registry plan clone: %w", err)
 		}
 		scan.Plan, err = PlanRegistryLinks(
-			installer.options.Home, installer.options.ConfigDir, clone, installer.options.ThemeManifestURL,
+			installer.options.Home, installer.options.ConfigDir, clone, installer.options.ThemeReleaseURL,
 		)
 		if errors.Is(err, errPlanSkillSources) {
 			installer.skip("registry-ownership check skipped: " + err.Error())

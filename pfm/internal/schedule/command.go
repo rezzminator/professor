@@ -102,23 +102,17 @@ func closeScheduleStore(state *fleetdb.Store, command string, stderr io.Writer, 
 	return code
 }
 
-// callerIdentity is the chat running this command: runWhoami's resolution,
-// else the Codex seat lookup. ok is false when the caller cannot be told. A
-// test replaces it to stand inside a chat.
-var callerIdentity = func(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Identity, bool) {
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+// callerIdentity resolves the chat running this command. A test replaces it.
+var callerIdentity = func(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Identity, error) {
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(runtime)})
 	identity := resolve.Identity{}
 	if err == nil {
 		identity, err = identifier.Identify(ctx)
 	}
 	if err != nil {
-		seat, found := pfmchat.SeatIdentity(ctx, runtime)
-		if !found {
-			return resolve.Identity{}, false
-		}
-		identity = seat
+		return resolve.Identity{}, err
 	}
-	return identity, identity.ID != ""
+	return identity, nil
 }
 
 // scheduleCaller is the chat running this command, keyed by scheduleChatKey,
@@ -129,8 +123,14 @@ func scheduleCaller(
 	ctx context.Context,
 	runtime *pfmconfig.Runtime,
 ) (identity resolve.Identity, label string, ok bool, keyErr error) {
-	identity, ok = callerIdentity(ctx, runtime)
-	if !ok {
+	identity, keyErr = callerIdentity(ctx, runtime)
+	if errors.Is(keyErr, resolve.ErrNotInChat) {
+		return identity, "", false, nil
+	}
+	if keyErr != nil {
+		return identity, "", true, keyErr
+	}
+	if identity.ID == "" {
 		return identity, "", false, nil
 	}
 	key, keyErr := scheduleChatKey(ctx, identity.Engine, identity.ID)
@@ -418,7 +418,12 @@ func runScheduleRm(args []string, stdout, stderr io.Writer, runtime *pfmconfig.R
 		return 2
 	}
 	ctx := context.Background()
-	state, opened := openScheduleStore(ctx, scheduleCommand+" rm", stderr, runtime)
+	effective, err := pfmconfig.RuntimeOrDefault(runtime)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s rm: read runtime: %v\n", scheduleCommand, err)
+		return 1
+	}
+	state, opened := openScheduleStore(ctx, scheduleCommand+" rm", stderr, &effective)
 	if !opened {
 		return 1
 	}
@@ -432,5 +437,9 @@ func runScheduleRm(args []string, stdout, stderr io.Writer, runtime *pfmconfig.R
 		return closeScheduleStore(state, scheduleCommand+" rm", stderr, 1)
 	}
 	fmt.Fprintf(stdout, "removed schedule %d\n", id)
+	if err := removeScheduleReceipt(scheduleReceiptPath(effective.Paths.StateDB, id)); err != nil {
+		fmt.Fprintf(stderr, "%s rm: schedule %d removed, but %v\n", scheduleCommand, id, err)
+		return closeScheduleStore(state, scheduleCommand+" rm", stderr, 1)
+	}
 	return closeScheduleStore(state, scheduleCommand+" rm", stderr, 0)
 }

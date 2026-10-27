@@ -19,7 +19,7 @@ func ValidateSeatPromptPolicy(engineID pfmengine.ID, claudePolicy string) error 
 	switch engineID {
 	case pfmengine.OpenCode:
 		return errors.New(
-			"--agent-role is not supported for opencode: pfm cannot launch an OpenCode seat, so no prompt channel exists to carry a role",
+			"--agent-role is not supported for opencode: native launch policy does not compose registered agent roles",
 		)
 	case pfmengine.Claude:
 		if claudePolicy == "" {

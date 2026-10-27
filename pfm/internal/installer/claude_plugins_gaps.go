@@ -31,7 +31,9 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 // ids (GitHub, professor, -dev), every install-only plugin enabled under any,
 // every local target whose copy is missing, not a plain directory or not the
 // checkout's content, every other plugin enabled under two or more keys, and
-// every enabled retired default agent-effort copy. A
+// every enabled retired default plugin copy, every listed bare name a successor
+// retired, and every retired or other copy's pluginConfigs entry left beside
+// its successor's. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -45,6 +47,11 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 	var gaps []ClaudePluginGap
 	for index := range targets {
 		target := &targets[index]
+		if successor := target.retiredSuccessor(); successor != "" {
+			// Its other gaps would send the reader to ensure the retired copy.
+			gaps = append(gaps, retiredListedGap(target.Name, successor))
+			continue
+		}
 		var enabledCopies []string
 		for _, id := range target.copyIDs() {
 			if pluginEnabled(document, id) {
@@ -91,16 +98,65 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			}
 		}
 	}
-	for _, id := range retiredClaudePlugins["effort-live-control"] {
-		if pluginEnabled(document, id) {
+	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
+		for _, id := range retiredClaudePlugins[successor] {
+			if pluginEnabled(document, id) {
+				gaps = append(gaps, ClaudePluginGap{
+					Problem: "plugin " + id + " retired (now " + successor + ") but still enabled in " + path,
+					Fix: "claude plugin uninstall " + shellCommandLine(id) + " --scope user" +
+						"; if claude.plugins still lists it, replace that entry with " + successor,
+				})
+			}
+		}
+	}
+	for index := range targets {
+		target := &targets[index]
+		retired := retiredClaudePlugins[target.Name]
+		if !target.Own || len(retired) == 0 {
+			continue
+		}
+		// Install carries the first entry to target.ID and drops them all
+		// (retireConfigs); the plugin warns on each one it leaves.
+		if ids := retiredConfigIDs(document, target, retired); len(ids) != 0 {
+			shown := make([]string, len(ids))
+			for position, id := range ids {
+				shown[position] = EscapeControl(id)
+			}
 			gaps = append(gaps, ClaudePluginGap{
-				Problem: "plugin " + id + " retired (now effort-live-control) but still enabled in " + path,
-				Fix: "claude plugin uninstall " + shellCommandLine(id) + " --scope user" +
-					"; if claude.plugins still lists it, replace that entry with effort-live-control",
+				Problem: "pluginConfigs of " + strings.Join(shown, " and ") + " still in " + path +
+					": retired or other copies of " + target.ID,
+				Fix: "pfm install copies the first to " + target.ID + " when it has none, then drops them",
 			})
 		}
 	}
 	return append(gaps, claudePluginDuplicateGaps(document, path, targets)...), nil
+}
+
+// retiredSuccessor is the plugin that replaced a listed bare name of ours, read
+// from retiredClaudePlugins; "" for a full id, an install-only plugin or a
+// name no successor retired.
+func (target ClaudePluginTarget) retiredSuccessor() string {
+	if !target.Own || target.InstallOnly {
+		return ""
+	}
+	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
+		for _, id := range retiredClaudePlugins[successor] {
+			if name, _, _ := strings.Cut(id, "@"); name == target.Name {
+				return successor
+			}
+		}
+	}
+	return ""
+}
+
+// retiredListedGap is the gap install fails and doctor reports for a
+// claude.plugins bare name its successor retired: ensuring it would enable the
+// copy the successor's install disables.
+func retiredListedGap(name, successor string) ClaudePluginGap {
+	return ClaudePluginGap{
+		Problem: "plugin " + name + " is retired (now " + successor + ") but " + pfmconfig.KeyClaudePlugins + " lists it",
+		Fix:     "replace " + name + " with " + successor + " in " + pfmconfig.KeyClaudePlugins + ", then " + ClaudePluginRepair,
+	}
 }
 
 // ClaudePluginsNotInstalled reads one account's plugins/installed_plugins.json

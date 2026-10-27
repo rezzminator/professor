@@ -13,7 +13,6 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -89,6 +88,9 @@ func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
 	if got := strings.TrimSpace(string(output)); got != "after" {
 		t.Fatalf("window name=%q, want after", got)
 	}
+	if got := branchTmuxOutput(t, socketPath, "show-options", "-v", "-t", session, "@pfm_chat_name"); got != "after" {
+		t.Fatalf("@pfm_chat_name=%q, want after", got)
+	}
 }
 
 // TestRenameChatWindowClipsNamesLongerThanWindowNameRunes pins a
@@ -151,6 +153,10 @@ func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
 	want := gather.WindowNameFor(name)
 	if got := strings.TrimSpace(string(output)); got != want {
 		t.Fatalf("window name=%q, want clipped %q", got, want)
+	}
+	// The chat's exact name rides in the same tmux command, unclipped (N3).
+	if got := branchTmuxOutput(t, socketPath, "show-options", "-v", "-t", session, "@pfm_chat_name"); got != name {
+		t.Fatalf("@pfm_chat_name=%q, want the exact name %q", got, name)
 	}
 }
 
@@ -224,7 +230,7 @@ func TestScopedLiveKillConfirmsClosureWithoutExitFlag(t *testing.T) {
 	}
 	ctx := pfmchat.WithResolvedSelf(context.Background(), self)
 	var stdout, stderr bytes.Buffer
-	if code := runChatKillContext(ctx, []string{"self"}, &stdout, &stderr, paths.OSEnv{}); code != 0 {
+	if code := runChatKillContext(ctx, []string{"self"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("kill self code=%d stderr=%q", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "closing pane %0 on socket cc-new-review") {

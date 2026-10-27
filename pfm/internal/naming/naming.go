@@ -1,6 +1,7 @@
 package naming
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -17,6 +18,22 @@ const (
 	// legacy label prefix, read-compat only.
 	legacyKillPrefix = "_HIDE"
 )
+
+// SeatPrefix is reserved for exact durable seat handles, never display labels.
+const SeatPrefix = "seat:"
+
+// ReservedLabel reports a label that would occupy the durable-handle namespace.
+func ReservedLabel(label string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), SeatPrefix)
+}
+
+// ValidateLabel refuses reserved labels before any naming side effect.
+func ValidateLabel(label string) error {
+	if ReservedLabel(label) {
+		return fmt.Errorf("label %q is reserved for durable seat handles", label)
+	}
+	return nil
+}
 
 // LabelKilled reports whether a display name carries KillPrefix.
 func LabelKilled(name string) bool {
@@ -41,6 +58,13 @@ type CodexThread struct {
 	FirstPrompt  string
 }
 
+// CodexName is a Codex thread's indexed name and whether a user chose it
+// (a thread or session_index name) rather than its first prompt.
+type CodexName struct {
+	Name string
+	User bool
+}
+
 // CodexNameIndex builds the two lookups a live Codex pane can be named
 // through: by the rollout file it holds, and by the thread id it was
 // identified by. A resumed or paginated session writes no rollout file and has
@@ -49,28 +73,26 @@ type CodexThread struct {
 func CodexNameIndex(
 	threads []CodexThread,
 	cxNames map[string]string,
-) (byPath, byID map[string]string) {
-	byPath = make(map[string]string, len(threads))
-	byID = make(map[string]string, len(threads)+len(cxNames))
+) (byPath, byID map[string]CodexName) {
+	byPath = make(map[string]CodexName, len(threads))
+	byID = make(map[string]CodexName, len(threads)+len(cxNames))
 	for _, thread := range threads {
-		name := CxName(
-			thread.ID,
-			thread.SessionID,
-			thread.ParentThread,
-			cxNames,
-			thread.FirstPrompt,
-		)
+		// A lineage name is the user's; the first-prompt fallback is not.
+		name := CodexName{Name: CxName(thread.ID, thread.SessionID, thread.ParentThread, cxNames, ""), User: true}
+		if name.Name == "" {
+			name = CodexName{Name: CxName("", "", "", nil, thread.FirstPrompt)}
+		}
 		byPath[filepath.Clean(thread.Path)] = name
-		if name != "" {
+		if name.Name != "" {
 			byID[thread.ID] = name
 		}
 	}
 	for id := range cxNames {
-		if byID[id] != "" {
+		if byID[id].Name != "" {
 			continue
 		}
 		if name := CxName(id, "", "", cxNames, ""); name != "" {
-			byID[id] = name
+			byID[id] = CodexName{Name: name, User: true}
 		}
 	}
 	return byPath, byID
@@ -79,13 +101,12 @@ func CodexNameIndex(
 // DisplayName applies transcript naming precedence. The caller supplies the
 // last custom title, last AI title, and first real prompt found by the indexer.
 func DisplayName(customTitle, aiTitle, firstPrompt string) string {
-	if customTitle != "" {
-		return customTitle
+	for _, label := range []string{customTitle, aiTitle, firstPrompt} {
+		if label != "" && !ReservedLabel(label) {
+			return label
+		}
 	}
-	if aiTitle != "" {
-		return aiTitle
-	}
-	return firstPrompt
+	return ""
 }
 
 // Unnamed is the name a live row gets when every naming source is empty. It
@@ -169,9 +190,12 @@ func CxName(
 		if id == "" {
 			continue
 		}
-		if name := names[id]; name != "" {
+		if name := names[id]; name != "" && !ReservedLabel(name) {
 			return ClipRunes(SquashTabsAndNewlines(name), 60)
 		}
+	}
+	if ReservedLabel(firstUserMessage) {
+		return ""
 	}
 	return ClipRunes(SquashTabsAndNewlines(firstUserMessage), 60)
 }
@@ -233,7 +257,7 @@ func LaunchName(label string) string {
 		}
 	}
 	name := strings.TrimSpace(cleaned.String())
-	if name == "" || name == Unnamed {
+	if name == "" || name == Unnamed || ReservedLabel(name) {
 		return ""
 	}
 	return strings.TrimSpace(ClipRunes(name, LaunchNameRunes))

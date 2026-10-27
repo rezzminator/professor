@@ -1,0 +1,93 @@
+{
+  "0015": {
+    "name": "Cream: variables",
+    "scope": [
+      "variable",
+      "variable.other",
+      "meta.definition.variable.name",
+      "variable.other.readwrite",
+      "entity.name.variable",
+      "variable.other.object",
+      "support.variable",
+      "meta.definition.variable",
+      "string.unquoted.argument.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffe9e9"
+    }
+  },
+  "0016": {
+    "name": "Glitter: self, this, lifetimes, magic",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.parameter.function.language.special.self.python",
+      "variable.parameter.function.language.special.cls.python",
+      "variable.language.special.self",
+      "entity.name.type.lifetime",
+      "punctuation.definition.lifetime",
+      "support.variable.magic",
+      "support.function.magic",
+      "entity.name.type.anchor.yaml",
+      "variable.other.alias.yaml"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ed98e5"
+    }
+  },
+  "0017": {
+    "name": "Peach: parameters",
+    "scope": [
+      "variable.parameter",
+      "meta.parameter",
+      "entity.name.variable.parameter",
+      "variable.parameter.function",
+      "variable.parameter.function.language.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffb898"
+    }
+  },
+  "0018": {
+    "name": "Peach: shell variables",
+    "scope": [
+      "variable.other.normal.shell",
+      "punctuation.definition.variable.shell",
+      "variable.other.special.shell",
+      "variable.other.positional.shell",
+      "variable.other.bracket.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb898"
+    }
+  },
+  "0019": {
+    "name": "Sky: properties and keys",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "entity.name.tag.yaml",
+      "support.type.property-name.json",
+      "variable.object.property",
+      "support.variable.property",
+      "variable.other.member",
+      "entity.name.field",
+      "support.type.property-name.toml",
+      "support.type.property-name.css",
+      "meta.property-name.css",
+      "support.type.vendored.property-name.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b5d3ff"
+    }
+  }
+}

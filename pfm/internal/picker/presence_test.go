@@ -6,16 +6,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -122,6 +126,26 @@ func awaitFullPass(t *testing.T, updates <-chan ui.Snapshot, within time.Duratio
 		case <-deadline:
 			t.Fatalf("no snapshot within %s while parked and %s: the picker froze at the moment it parked", within, why)
 		}
+	}
+}
+
+func TestParkedPickerPublishesThemeWithoutLiveRowsOrFacts(t *testing.T) {
+	presenceJail(t)
+	updates := parkedPresenceStream(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	variant := pickerThemeVariant(true)
+	writePickerTheme(t, home, themesync.Applied{Primary: variant}, themesync.Light, true)
+	snapshot := awaitFullPass(t, updates, 5*time.Second, "the theme changed without live rows or a facts reader")
+	if got := ui.NewModel(snapshot).
+		View().
+		BackgroundColor; !reflect.DeepEqual(
+		got,
+		lipgloss.Color(variant.Background),
+	) {
+		t.Fatalf("parked theme background = %v, want %s", got, variant.Background)
 	}
 }
 

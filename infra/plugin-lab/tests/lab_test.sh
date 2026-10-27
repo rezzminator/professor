@@ -12,7 +12,7 @@ source "$(dirname "$0")/lab_setup.sh"
 runlab hello
 expect_eq 'normal run exits 0' "$RC" 0
 expect_has 'preflight line' "$OUT" 'auth: 300 min left · budget: 10.00 left of 10.00 · cap 0.25 · run '
-for c in passport/env-allowlist passport/live-store-untouched passport/keychain-clean passport/hook-bypass passport/identity passport/installed-copy-off passport/spend vital/first-row vital/no-new-errors hello/ready; do
+for c in passport/env-allowlist passport/live-store-untouched passport/keychain-clean passport/hook-bypass passport/identity passport/installed-copy-off passport/spend vital/first-row vital/no-new-errors vital/options-ignored hello/ready; do
   expect_has "$c PASS" "$(row "$c")" PASS
 done
 expect_eq 'L4 fd 3 carried the token' "$(cat "$RUN/fake/fd3.sha" 2>&1)" "$(sha256_of lab-canary-7f3e)"

@@ -37,6 +37,20 @@ func TestConfigShowDisplaysTheTmuxTitlesAndNameSyncKeys(t *testing.T) {
 	}
 }
 
+func TestConfigShowDisplaysTheSubagentStatuslineTraceSwitch(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		home := t.TempDir()
+		machine := pfmconfig.Defaults(home, nil)
+		machine.Claude.SubagentStatuslineTrace = enabled
+		var stdout bytes.Buffer
+		printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
+		want := fmt.Sprintf("config claude.subagentStatuslineTrace=%t (default)", enabled)
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("config show missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestConfigClaude(t *testing.T) {
 	home := t.TempDir()
 	machine := pfmconfig.Defaults(
@@ -143,5 +157,74 @@ func TestConfigShowDoctorIgnoreWarnings(t *testing.T) {
 				t.Fatalf("config show lacks %q:\n%s", tc.want, stdout.String())
 			}
 		})
+	}
+}
+
+func TestConfigShowHerdrTabPrioritySources(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"default", `{"version":2}`, "config chat.herdrTabPriority=false (default)\n"},
+		{"on", `{"version":2,"chat":{"herdrTabPriority":true}}`, "config chat.herdrTabPriority=true (file)\n"},
+		{"off", `{"version":2,"chat":{"herdrTabPriority":false}}`, "config chat.herdrTabPriority=false (file)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, pfmconfig.FileName)
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			machine, err := pfmconfig.Load(path, home, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
+			if !strings.Contains(stdout.String(), tc.want) {
+				t.Fatalf("config show missing %q:\n%s", tc.want, stdout.String())
+			}
+		})
+	}
+}
+
+func TestConfigShowChatBackendSources(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"absent", `{"version":2}`, "config chat.backend=auto (default)\n"},
+		{"explicit auto", `{"version":2,"chat":{"backend":"auto"}}`, "config chat.backend=auto (file)\n"},
+		{"tmux", `{"version":2,"chat":{"backend":"tmux"}}`, "config chat.backend=tmux (file)\n"},
+		{"herdr", `{"version":2,"chat":{"backend":"herdr"}}`, "config chat.backend=herdr (file)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, pfmconfig.FileName)
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			machine, err := pfmconfig.Load(path, home, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
+			if !strings.Contains(stdout.String(), tc.want) {
+				t.Fatalf("config show missing %q:\n%s", tc.want, stdout.String())
+			}
+		})
+	}
+}
+
+func TestConfigShowExtensionsWithSource(t *testing.T) {
+	root := jailTest(t)
+	path := writeConfigFixture(
+		t,
+		root,
+		`{"version":2,"extensions":{"ponytail":{"enabled":true,"engines":["codex"],"env":{"PONYTAIL_SUBAGENT_MATCHER":"^worker$"}}}}`,
+	)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d stderr %s", code, stderr.String())
+	}
+	for _, want := range []string{"config extensions.ponytail.enabled=true (file)", "config extensions.ponytail.engines=codex (file)", "PONYTAIL_SUBAGENT_MATCHER"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("missing %q in %s", want, stdout.String())
+		}
 	}
 }

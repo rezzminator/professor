@@ -1,0 +1,22 @@
+{
+  "@host_accent": "#ff3ddc",
+  "@p_amber": "#ffd23f",
+  "@p_fg": "#ffb5e4",
+  "@p_fg1": "#ff9ed6",
+  "@p_fg2": "#c962b5",
+  "@p_g0": "#3f0535",
+  "@p_g3": "#711360",
+  "@p_red": "#ff3d6e",
+  "@pfm-c-accent": "#ff3ddc",
+  "@pfm-c-bg": "#23031e",
+  "@pfm-c-fg": "#ffb5e4",
+  "@pfm-c-muted": "#ff9ed6",
+  "@pfm-c-overlay": "#711360",
+  "@pfm-c-surface": "#3f0535",
+  "message-command-style": "bg=#711360,fg=#ff75e6",
+  "message-style": "bg=#711360,fg=#ffb5e4",
+  "mode-style": "bg=#711360,fg=#ffb5e4",
+  "pane-border-style": "fg=#711360",
+  "status-style": "bg=#3f0535,fg=#ff9ed6",
+  "window-status-style": "fg=#c962b5"
+}

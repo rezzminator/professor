@@ -31,17 +31,27 @@ func TestListSymbolKeepsTheFamiliesAndNeverSpendsTheLiveDot(t *testing.T) {
 	}
 }
 
-func TestEffortLabelWearsTheStatusLineEmoji(t *testing.T) {
+func TestEffortLabelShowsOnlyTheFilledSteps(t *testing.T) {
 	for level, want := range map[string]string{
-		"low": "🚲 low", "medium": "🏍️ medium", "high": "🏎️ high", "xhigh": "🚀 xhigh", "max": "🛰️ max",
-		"turbo": "🔆 turbo",
+		"low": "▰ low", "medium": "▰▰ medium", "high": "▰▰▰ high", "xhigh": "▰▰▰▰ xhigh", "max": "▰▰▰▰▰ max",
+		"turbo": "effort turbo (unknown)", "HIGH": "▰▰▰ high", "": "",
 	} {
 		if got := EffortLabel(level); got != want {
 			t.Errorf("EffortLabel(%q) = %q, want %q", level, got, want)
 		}
 	}
-	if EffortEmoji("") != "" || RowEffort("") != "" {
+	if RowEffort("") != "" {
 		t.Error("no level, no emoji")
+	}
+}
+
+func TestEffortBarNormalisesTheLevelAndLeavesAnUnknownOneBarless(t *testing.T) {
+	for _, testcase := range []struct{ level, name, bar string }{
+		{" Medium ", "medium", "▰▰"}, {"max", "max", "▰▰▰▰▰"}, {"turbo", "turbo", ""}, {"", "", ""},
+	} {
+		if name, bar := EffortBar(testcase.level); name != testcase.name || bar != testcase.bar {
+			t.Errorf("EffortBar(%q) = (%q, %q), want (%q, %q)", testcase.level, name, bar, testcase.name, testcase.bar)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package claudelaunch
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -14,6 +15,8 @@ type Parsed struct {
 	Hooks                                                         []Hook
 	PromptFile, MCPConfig, SessionID, Resume, Name, Model, Effort string
 	Fork, Autonomy                                                bool
+	RemoteControl                                                 bool
+	RemoteControlName                                             string
 	Rest                                                          []string
 }
 
@@ -39,6 +42,14 @@ func Parse(argv []string) (Parsed, error) {
 			return argv[index], nil
 		}
 		switch flag {
+		case flagRemoteControl:
+			parsed.RemoteControl = true
+			if inline {
+				parsed.RemoteControlName = inlineValue
+			} else if index+1 < len(argv) && !strings.HasPrefix(argv[index+1], "-") {
+				index++
+				parsed.RemoteControlName = argv[index]
+			}
 		case flagSessionID,
 			flagResume,
 			flagName,
@@ -135,7 +146,15 @@ func Parse(argv []string) (Parsed, error) {
 func splitValueFlag(word string) (string, string, bool) {
 	name, value, inline := strings.Cut(word, "=")
 	switch name {
-	case flagSessionID, flagResume, flagName, flagModel, flagEffort, flagPromptFile, flagSettings, flagMCPConfig:
+	case flagSessionID,
+		flagResume,
+		flagName,
+		flagModel,
+		flagEffort,
+		flagPromptFile,
+		flagSettings,
+		flagMCPConfig,
+		flagRemoteControl:
 		return name, value, inline
 	default:
 		return word, "", false
@@ -147,6 +166,29 @@ func splitValueFlag(word string) (string, string, bool) {
 func argsName(args []string) bool {
 	for _, arg := range args {
 		if arg == flagName || arg == flagNameShort || strings.HasPrefix(arg, flagName+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+// resumesInPlace reports whether the launch continues an existing session
+// rather than forking it — Resume, or the caller's own --resume, --resume=…,
+// -r, --continue or -c, with no --fork-session. Such a session carries its
+// name in its transcript and Claude restores it, so Render gives it no
+// --name: Claude applies a launch name only once its session registers, and
+// one landing then reverts a /rename the user typed meanwhile.
+func resumesInPlace(request Request) bool {
+	if request.Fork || slices.Contains(request.Args, flagForkSession) {
+		return false
+	}
+	if request.Resume != "" {
+		return true
+	}
+	for _, arg := range request.Args {
+		switch {
+		case arg == flagResume, arg == flagResumeShort, arg == flagContinue, arg == flagContinueShort,
+			strings.HasPrefix(arg, flagResume+"="):
 			return true
 		}
 	}
@@ -189,7 +231,13 @@ func parseHooks(raw any) ([]Hook, error) {
 				async, _ := command["async"].(bool)
 				result = append(
 					result,
-					Hook{Event: event, Matcher: matcher, Command: text, Name: parsedHookName(text), Async: async},
+					Hook{
+						Event:   event,
+						Matcher: matcher,
+						Command: text,
+						Name:    parsedHookName(event, text),
+						Async:   async,
+					},
 				)
 			}
 		}
@@ -197,21 +245,36 @@ func parseHooks(raw any) ([]Hook, error) {
 	return result, nil
 }
 
-// parsedHookName is a rendered command's registry name: its last word, read
-// before a fail-open wrapper's " || { … }" tail, where the registry spells two
-// rows apart from that word.
-func parsedHookName(command string) string {
-	head, _, _ := strings.Cut(command, " || { ")
-	words := strings.Fields(head)
+// parsedHookName is a rendered command's registry name: its last word, where
+// the registry spells a row apart from that word. A Herdr reporter row is
+// "herdr-" plus its state word, and its three working rows share one command,
+// so their event tells them apart.
+func parsedHookName(event, command string) string {
+	words := strings.Fields(command)
 	if len(words) == 0 {
 		return ""
 	}
-	switch name := words[len(words)-1]; name {
-	case "usage-hook":
-		return "usage"
-	case "intake":
-		return hookTracerIntake
-	default:
-		return name
+	name := words[len(words)-1]
+	if slices.Contains(words, "herdr-state") {
+		switch event {
+		case HookEventUserPromptSubmit:
+			return "herdr-" + name + "-prompt"
+		case "PostToolUse":
+			return "herdr-" + name + "-tool"
+		case "PostToolUseFailure":
+			return "herdr-" + name + "-tool-failure"
+		default:
+			return "herdr-" + name
+		}
 	}
+	if name == "clear-name" {
+		if event == HookEventUserPromptSubmit {
+			return "clear-name-prompt"
+		}
+		return "clear-name-start"
+	}
+	if name == "usage-hook" {
+		return "usage"
+	}
+	return name
 }

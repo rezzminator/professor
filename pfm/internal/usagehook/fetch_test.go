@@ -319,3 +319,36 @@ func TestClaudeProbesNeverWriteTheRealClaudeHome(t *testing.T) {
 		t.Errorf("the fake recorded %d runs, want 4 (--version, doctor --help, doctor, the usage --version)", runs)
 	}
 }
+
+// TestClaudeVersionProbeDropsTheHerdrPane: the version read runs no turn, so it
+// is never the chat bound to the parent's Herdr pane; the four Herdr names stay
+// out of its environment while the rest of it passes through.
+func TestClaudeVersionProbeDropsTheHerdrPane(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "w1:p1")
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
+	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
+	t.Setenv("PFM_PROBE_KEEP", "kept")
+	scratch := t.TempDir()
+	record := filepath.Join(scratch, "env.log")
+	binary := filepath.Join(scratch, "claude")
+	script := "#!/bin/sh\n/usr/bin/env > '" + record + "'\nprintf '2.1.238 (Claude Code)\\n'\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if version, err := claudeCodeVersion(context.Background(), binary); err != nil || version != "2.1.238" {
+		t.Fatalf("claudeCodeVersion = %q, %v, want 2.1.238", version, err)
+	}
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "PFM_PROBE_KEEP=kept") {
+		t.Fatalf("the probe lost an unrelated variable: %s", raw)
+	}
+	for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+		if strings.Contains("\n"+string(raw), "\n"+name+"=") {
+			t.Errorf("%s reached the version probe: %s", name, raw)
+		}
+	}
+}

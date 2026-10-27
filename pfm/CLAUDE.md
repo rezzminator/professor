@@ -15,8 +15,8 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - architecture ratchet: C1–C26 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
 - lint law: gofumpt + gci + golines at 120, plus dupl, goconst, gocritic, revive, staticcheck; coverage thresholds · `.golangci.yml`, `.testcoverage.yml`, tools pinned in `infra/fence/tools.env`
 - shim: the thin zsh wrapper that `eval`s the eval-protocol line, sourced in place from the clone · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
-- installer: stages every host asset embedded from `internal/installer/assets/`; the fleet prompts and the shim are read from the clone instead · `internal/installer/`
-- composed prompts: the tracked fleet prompt per engine, drift-gated by a test · `harness-prompts/composed/` · generated from `harness-prompts/` by `make -C pfm prompts`
+- installer: stages every host asset embedded from `internal/installer/assets/`; the shim is read from the clone instead · `internal/installer/`
+- generated prompts: the gitignored fleet prompt per engine, shared head + engine middle + tail, written before any consumer reads it · `harness-prompts/generated/{claude|codex|opencode}.md` · generated from the `harness-prompts/` parts the binary embeds by `pfm install`
 - machine config: gitignored `{clone}/pfm.config.json`, seeded from `example.pfm.config.json`; `PFM_CONFIG` overrides · design `docs/design/engines/pfm-home.md`
 - launch registry: every flag, env value and `--settings` key a Claude chat starts with · `internal/claudelaunch/` · design `docs/design/engines/claude-launch.md`
 - cost ledger: every Claude API call's price, `{session_id}.jsonl` joined from the OpenTelemetry log and span a per-chat `pfm internal cost-sink` receives on loopback; the one source of the status line's dollars, `pfm tokens` and callmeter · `internal/costledger/`, `internal/costsink/` · design `docs/design/engines/cost-ledger.md`
@@ -31,9 +31,9 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Fence
 
-- `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since the Makefile's `LINT_BASE`, origin/main: a develop base judges nothing on a push to develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone; `iso gate pfm` — the gate — runs all of these as concurrent steps in one container, the unit suite sharded by `scripts/test-shard.sh`, and prints a per-step table.
-- One package or probe: `.claude/scripts/dev.sh iso run 'go -C pfm test -count=1 ./internal/{pkg}/'`; the lint burn-down view: `iso run 'make -C pfm lint'`.
-- The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools; `make -C pfm prompts` likewise runs on the host.
+- The full gate, `.claude/scripts/test.sh --full`, runs vet, fmt-check, lint-new (lines changed since the Makefile's `LINT_BASE`, origin/main: a develop base judges nothing on a push to develop), the architecture ratchet, the gate scripts' own `scripts/*_test.sh`, and unit plus tagged e2e, each against its timing budget, with the templates rows as concurrent steps in one run, the unit suite sharded by `scripts/test-shard.sh`, and prints a per-step table.
+- A package's tests: `.claude/scripts/test.sh internal/{pkg}/{file}.go`; a probe it does not cover: `.claude/scripts/dev.sh iso run '{command}'`, the lint burn-down view `iso run 'make -C pfm lint'`.
+- The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools.
 
 ## Environment Variables
 
@@ -54,7 +54,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - Eval protocol (K1): the TUI renders on `/dev/tty`, information goes to stderr, exactly one shell line to stdout; bunker semantics need `exec tmux attach` to replace the interactive shell.
 - A ✦-new Claude row spawns natively through `action.ClaudeSpawn`; a ✦-new Codex row calls the user's own `cx`; emitted lines stay golden-testable.
 - K3: a second copy of a K3 rule is a defect; MCP reaches everything outside `internal/chat/` through argv `Dispatch`, which C10 counts and lets only shrink.
-- Architecture ratchet: `.claude/scripts/dev.sh iso verify pfm` runs it; a new entry is a FAIL to fix; a genuinely new exception is a hand edit to `.arch/` named in the commit message.
+- Architecture ratchet: `.claude/scripts/test.sh` runs it as `arch` on any `pfm/` path; a new entry is a FAIL to fix; a genuinely new exception is a hand edit to `.arch/` named in the commit message.
 - Lint law: `.golangci.yml` and `.testcoverage.yml` are gates — lint-new blocks a wave on the lines it changed, `make lint` is the burn-down view, coverage thresholds only ratchet up.
 - A kill is permanent, and the store table keeps its `hidden` name; a kill of a live chat always runs the detached exit choreography, `--exit` its explicit form.
 - The ratchet counts prompts, not bytes (K2): kill baselines are `baseline_prompts`; auto-unkill is `prompt_count > baseline`; legacy byte baselines convert once, at import.

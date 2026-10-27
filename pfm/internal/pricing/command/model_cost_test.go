@@ -196,6 +196,44 @@ func TestModelCostAllJSONRefreshesAStaleTable(t *testing.T) {
 	}
 }
 
+func TestModelCostReportsConfiguredBillingAndKeepsPublishedFileGlobal(t *testing.T) {
+	f := newFixture(t)
+	body := `{"version":2,"billing":{"route":"bedrock","region":"geo"},"rows":[]}`
+	if err := os.WriteFile(config.PricesPath(f.configPath), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := f.run(t0.Add(time.Hour), false, "--force", "--json", "claude-opus-5-5")
+	if code != 0 || stderr != "" {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+	doc, err := pricing.DecodeDocument([]byte(stdout), "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Billing == nil || doc.Billing.Route != "bedrock" || doc.Billing.Region != "geo" ||
+		!doc.Billing.Configured || len(doc.Rows) != 1 || *doc.Rows[0].In != 4.4 ||
+		doc.Rows[0].Source != pricing.SourcePublished || len(doc.Sources) != 3 {
+		t.Fatalf("document must carry billed rates and provenance: %+v", doc)
+	}
+	content, err := os.ReadFile(f.file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := pricing.DecodeTable(content, f.file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := published.Resolve("claude-opus-5-5")
+	if !ok || *row.In != 4 {
+		t.Fatalf("published global price was changed: %+v", row)
+	}
+	code, stdout, stderr = f.run(t0.Add(time.Hour), false, "--check")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "billing: bedrock/geo") ||
+		strings.Contains(stdout, "cloud rates may differ") {
+		t.Fatalf("configured summary: code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+}
+
 func TestModelCostModelTextInsideTheWindowFetchesNothing(t *testing.T) {
 	f := newFixture(t)
 	code, stdout, stderr := f.run(t0.Add(time.Hour), false, "claude-opus-4-1")
@@ -204,7 +242,7 @@ func TestModelCostModelTextInsideTheWindowFetchesNothing(t *testing.T) {
 		t.Fatalf("code %d, %d fetches, stderr %q, stdout:\n%s", code, f.calls, stderr, stdout)
 	}
 	summary := "prices: 1 rows · fetched " + t0.Format(time.RFC3339) + " · checked " + t0.Format(time.RFC3339) +
-		" · from file " + f.file + " · refresh current · override: none"
+		" · from file " + f.file + " · refresh current · billing: direct/global (default; cloud rates may differ) · override: none"
 	if lines[0] != summary {
 		t.Fatalf("summary = %q\nwant      %q", lines[0], summary)
 	}

@@ -195,6 +195,12 @@ func TestOpenRecordsClaudeBeforePaneStarts(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
+				state := fleetdb.OpenSharedState(context.Background(), values)
+				seat, found, seatErr := state.Seat(context.Background(), "cc-record")
+				closeErr := state.Close()
+				if seatErr != nil || closeErr != nil || !found || seat.SessionID != record.SessionID {
+					t.Fatalf("picker socket-key seat=%+v found=%v err=%v close=%v", seat, found, seatErr, closeErr)
+				}
 				if record.Account != 1 || record.Cache1H || string(record.Engine) != "cc" {
 					t.Fatalf("record = %#v", record)
 				}

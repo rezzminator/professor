@@ -105,7 +105,7 @@ func TestSignatureUsesTheSenderStatedByTheSpawningChat(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	t.Setenv(SenderSessionEnv, "cx-1700000000-1-1")
 	t.Setenv(SenderLabelEnv, "WAVE_ORCHESTRATOR")
@@ -145,7 +145,7 @@ func TestUnderivableIdentityRefusesToSendAtAll(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	result, err := engine.Call(context.Background(), Request{
 		Target:  "chat",
@@ -184,7 +184,7 @@ func TestAllowUnsignedStillStatesTheAbsence(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 		&fakeSpawner{},
 		func(options *Options) { options.AllowUnsigned = true },
 	)
@@ -218,7 +218,7 @@ func TestUnderivableIdentityRefusesTheAutoFilePointerToo(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	result, err := engine.Call(context.Background(), Request{
 		Target:  "chat",
@@ -252,7 +252,7 @@ func TestUnderivableIdentityRefusesEvenWhenPasteWouldHaveCarriedIt(t *testing.T)
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	// Far over ClaudeInlineMax (720): the paste transport is what this body
 	// would use if identity resolved.
@@ -332,10 +332,10 @@ func TestSignatureUsesCodexThreadSeatAfterAncestryMiss(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	t.Setenv(resolve.CodexThreadEnv, "019ffd1e-300f-7872")
-	engine.codexSeat = fakeIdentifier{identity: resolve.Identity{
+	engine.whoami = fakeIdentifier{identity: resolve.Identity{
 		Session:    "cc-1700000000-1-1",
 		SocketPath: "/tmp/tmux-jail/cc-1700000000-1-1",
 		SocketName: "cc-1700000000-1-1",
@@ -483,12 +483,12 @@ func TestSignatureLabelIsReadPerDeliveryFromTheRosterFirst(t *testing.T) {
 			SocketName: "cc-1788256324-1866070-42739",
 			Pane:       "%0",
 			Engine:     string(pfmengine.Claude),
+			ID:         "5a3bb7cb-258d-4bdf-8a4e-7b0409fd329c",
 		},
 	})
 	engine.names = names
 	var warnings strings.Builder
 	engine.warningWriter = &warnings
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "5a3bb7cb-258d-4bdf-8a4e-7b0409fd329c")
 
 	deliver := func(message string) string {
 		t.Helper()
@@ -575,7 +575,7 @@ func TestSignatureReplyHintCarriesTheLabelNotTheSessionID(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	t.Setenv(SenderSessionEnv, "cc-1787705979-3980493-30867")
 	t.Setenv(SenderLabelEnv, "P:DO")
@@ -610,7 +610,7 @@ func TestSignatureReplyHintFallsBackToTheSidNeverTheSession(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	t.Setenv(SenderSessionEnv, "cc-1787705979-3980493-30867")
 	t.Setenv(SenderIDEnv, "019ffd1e-300f-7872")
@@ -636,7 +636,7 @@ func TestSignatureReplyHintFallsBackToTheSidNeverTheSession(t *testing.T) {
 	// the footer says so instead of offering the socket.
 	t.Setenv(SenderIDEnv, "")
 	nameless := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
-	engine = newSignatureEngineWith(t, "cc-1-2-3", nameless, fakeIdentifier{err: resolve.ErrNoTmux}, &fakeSpawner{},
+	engine = newSignatureEngineWith(t, "cc-1-2-3", nameless, fakeIdentifier{err: resolve.ErrNotInChat}, &fakeSpawner{},
 		func(options *Options) { options.AllowUnsigned = true })
 	t.Setenv(SenderSessionEnv, "cc-1787705979-3980493-30867")
 	result, err = engine.Call(context.Background(), Request{Target: "chat", Message: "session only"})
@@ -660,7 +660,7 @@ func TestSignatureReplyHintQuotesALabelWithSpaces(t *testing.T) {
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	t.Setenv(SenderSessionEnv, "cc-1787705979-3980493-30867")
 	t.Setenv(SenderLabelEnv, "Delivery Trust")
@@ -696,7 +696,7 @@ func TestSignatureFooterPlantsNoBookmarkMarkerInTheRecipientsPane(t *testing.T) 
 		t,
 		"cc-1-2-3",
 		fake,
-		fakeIdentifier{err: resolve.ErrNoTmux},
+		fakeIdentifier{err: resolve.ErrNotInChat},
 	)
 	t.Setenv(SenderSessionEnv, "cc-1787705979-3980493-30867")
 	t.Setenv(SenderLabelEnv, "W5_BUILDER")
@@ -724,4 +724,74 @@ func TestSignatureFooterPlantsNoBookmarkMarkerInTheRecipientsPane(t *testing.T) 
 	if label := naming.BookmarkLabel(typed); label != "" {
 		t.Fatalf("the delivered footer resolves as a pane label: %q", label)
 	}
+}
+
+func TestSignatureUsesNativeHerdrSenderCapture(t *testing.T) {
+	socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+		if request.Method == "pane.read" {
+			return map[string]any{
+				"type": "pane_read",
+				"read": map[string]any{
+					"pane_id":   "w1:p2",
+					"text":      "🥇 │ 🔖 NativeSender │ status\n────────\n❯ \n────────",
+					"truncated": false,
+				},
+			}, ""
+		}
+		if request.Method == "agent.get" {
+			return nativeAgent("agent_info", "idle"), ""
+		}
+		return nativeAgent("agent_prompted", "working"), ""
+	})
+	engine := newSignatureEngine(
+		t,
+		"cc-1-2-3",
+		&fakeTmux{capture: "🥇 │ 🔖 WrongTmuxSender │ status\n❯ ", submitOnEnter: true},
+		fakeIdentifier{
+			identity: resolve.Identity{
+				Backend:    "herdr",
+				SocketPath: socket.path,
+				Pane:       "w1:p2",
+				Session:    "sender-native",
+				Engine:     "cc",
+			},
+		},
+	)
+	target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
+	seedNativeOwner(t, target)
+	result, err := engine.CallTarget(context.Background(), target, Request{Target: "recipient", Message: "hello"})
+	if err != nil || result.Code != 0 {
+		t.Fatalf("call=%+v err=%v", result, err)
+	}
+	calls := socket.calls()
+	text, _ := calls[len(calls)-1].Params["text"].(string)
+	if !strings.Contains(text, "call NativeSender") {
+		t.Fatalf("Herdr sender signed from wrong backend: %q", text)
+	}
+}
+
+func TestSenderRetriesAnUnprovenIdentity(t *testing.T) {
+	engine := newSignatureEngine(t, "cc-1-2-3", &fakeTmux{capture: captureIdle}, fakeIdentifier{})
+	identifier := &recoveringSenderIdentifier{}
+	engine.whoami = identifier
+	engine.sender(context.Background())
+	if got := engine.sender(context.Background()); got.Session != "cc-proven" || identifier.calls != 2 {
+		t.Fatalf("sender cached an unproven answer: %+v calls=%d", got, identifier.calls)
+	}
+}
+
+type recoveringSenderIdentifier struct{ calls int }
+
+func (i *recoveringSenderIdentifier) Identify(context.Context) (resolve.Identity, error) {
+	i.calls++
+	if i.calls == 1 {
+		return resolve.Identity{}, errors.New("caller not registered yet")
+	}
+	return resolve.Identity{
+		Session:    "cc-proven",
+		SocketPath: "/jail/cc-proven",
+		Pane:       "%1",
+		ID:         "proven-id",
+		Engine:     string(pfmengine.Claude),
+	}, nil
 }

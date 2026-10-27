@@ -23,6 +23,14 @@
 #                 tick_deficit_max. (Steal time is blind in this VM: unused.)
 #   cpu-psi       Δcg_psi_cpu_some_s ÷ Δepoch_s: runnable work waiting in the
 #                 VM. Crosses at ≥ cpu_psi_share_min.
+#   {cg,vm}-io-psi Δ{cg,vm}_psi_io_some_s ÷ Δepoch_s: work blocked on I/O,
+#                 not CPU use. Crosses at ≥ io_psi_share_min (optional, default
+#                 0.15). Keep the scopes separate, never add overlapping PSI.
+#                 Recorded themesync windows: quiet run.gOAIjJ / run.96jTZ6
+#                 VM 8.1 / 12.2%, loaded run.9XobnV / run.RtBX3t 16.6 / 24.6%.
+#                 The 15% line separates these observations, but neither scope
+#                 identifies which package waited or who caused the I/O. It is
+#                 diagnostic only: code's own I/O can cross it too.
 #   spin          window median spin_us ÷ the reference: the least floor over this
 #                 file and the 20 newest run.*/resources.tsv beside it in the same
 #                 timing base (this file alone when none). A file's floor is its
@@ -31,10 +39,12 @@
 #                 step shortened does not become the reference. Crosses at ≥
 #                 spin_ratio_min.
 #   run-delay     run_delay_s ÷ cpu_s. Crosses at ≥ run_delay_ratio_min.
-# Verdict: CONTENTION when any measured signal crosses; CODE when one is
-# measured and none crosses; `not measured` when none is. The evidence names
-# every signal with its value and its line. A missing or empty resources file is
-# `not measured`, its reason in the evidence, exit 0.
+# Verdict: CONTENTION when a CPU/scheduler signal crosses; I/O alone cannot
+# authorize a downgrade. With only I/O crossing, attribution is `not measured`
+# (external contention and code I/O cannot be distinguished). Otherwise CODE
+# when a CPU/scheduler signal is measured, `not measured` when none is. The
+# evidence names every signal with its value and its line. A missing or empty
+# resources file is `not measured`, its reason in the evidence, exit 0.
 #
 # What THIS script reports when it is itself broken: bad usage, an unreadable or
 # incomplete thresholds file, a malformed resources.tsv or windows file is exit 2
@@ -59,6 +69,7 @@ HEADER = (
     'vm_psi_io_full_s vm_psi_mem_some_s vm_psi_mem_full_s spin_us load1'
 ).split()
 KEYS = ('tick_deficit_max', 'cpu_psi_share_min', 'spin_ratio_min', 'run_delay_ratio_min', 'min_samples')
+DEFAULTS = {'io_psi_share_min': 0.15}
 SIBLINGS = 20
 NUMBER = re.compile(r'[+-]?[0-9]+(\.[0-9]+)?')
 USAGE = (
@@ -122,8 +133,11 @@ def load_thresholds(path):
             fail(f'thresholds {path}:{lineno}: key {key} given twice')
         found[key] = (value, lineno)
     limits = {}
-    for key in KEYS:
+    for key in (*KEYS, *DEFAULTS):
         if key not in found:
+            if key in DEFAULTS:
+                limits[key] = DEFAULTS[key]
+                continue
             fail(f'thresholds {path}: missing key {key}')
         value, lineno = found[key]
         if not NUMBER.fullmatch(value):
@@ -131,7 +145,7 @@ def load_thresholds(path):
         limits[key] = float(value)
     if limits['tick_deficit_max'] > 0:
         fail(f"thresholds {path}: key tick_deficit_max must not be positive (a deficit is negative): {limits['tick_deficit_max']:g}")
-    for key in KEYS[1:4]:
+    for key in (*KEYS[1:4], *DEFAULTS):
         if limits[key] <= 0:
             fail(f'thresholds {path}: key {key} must be positive: {limits[key]:g}')
     if limits['min_samples'] < 1 or limits['min_samples'] != int(limits['min_samples']):
@@ -263,21 +277,21 @@ def signal_tick_deficit(inside, limits):
     return f'tick-deficit {percent(value)} ({line})', crossed
 
 
-def signal_cpu_psi(inside, limits):
-    usable, reason = window_samples(inside, ('cg_psi_cpu_some_s',), limits['min_samples'])
+def signal_psi(inside, limits, name, column, threshold):
+    usable, reason = window_samples(inside, (column,), limits['min_samples'])
     if usable is None:
-        return 'cpu-psi NA (%s)' % reason, None
+        return f'{name} NA ({reason})', None
     first, last = usable[0], usable[-1]
     span = last['epoch_s'] - first['epoch_s']
-    stall = last['cg_psi_cpu_some_s'] - first['cg_psi_cpu_some_s']
+    stall = last[column] - first[column]
     if span <= 0:
-        return 'cpu-psi NA (window spans no time)', None
+        return f'{name} NA (window spans no time)', None
     if stall < 0:
-        return 'cpu-psi NA (the pressure counter went backwards)', None
+        return f'{name} NA (the pressure counter went backwards)', None
     value = stall / span
-    crossed = value >= limits['cpu_psi_share_min']
-    line = ('≥' if crossed else '<') + ' ' + percent_line(limits['cpu_psi_share_min'])
-    return f'cpu-psi {percent(value)} ({line})', crossed
+    crossed = value >= limits[threshold]
+    line = ('≥' if crossed else '<') + ' ' + percent_line(limits[threshold])
+    return f'{name} {percent(value)} ({line})', crossed
 
 
 def signal_spin(inside, limits, reference):
@@ -307,18 +321,26 @@ def judge(rows, limits, reference, lo, hi, delay, cpu):
     inside = [row for row in rows if lo <= row['epoch_s'] <= hi]
     results = [
         signal_tick_deficit(inside, limits),
-        signal_cpu_psi(inside, limits),
+        signal_psi(inside, limits, 'cpu-psi', 'cg_psi_cpu_some_s', 'cpu_psi_share_min'),
+        signal_psi(inside, limits, 'cg-io-psi', 'cg_psi_io_some_s', 'io_psi_share_min'),
+        signal_psi(inside, limits, 'vm-io-psi', 'vm_psi_io_some_s', 'io_psi_share_min'),
         signal_spin(inside, limits, reference),
         signal_run_delay(delay, cpu, limits),
     ]
-    measured = [crossed for _, crossed in results if crossed is not None]
+    # The I/O scopes include other packages/runs and the code's own I/O.
+    # Keep their evidence, but never let them turn a code regression green.
+    measured = [results[i][1] for i in (0, 1, 4, 5) if results[i][1] is not None]
+    evidence = ' · '.join(text for text, _ in results)
     if any(measured):
         word = 'CONTENTION'
+    elif any(results[i][1] for i in (2, 3)):
+        word = 'not measured'
+        evidence += ' · I/O pressure cannot distinguish external contention from code I/O'
     elif measured:
         word = 'CODE'
     else:
         word = 'not measured'
-    return word, ' · '.join(text for text, _ in results)
+    return word, evidence
 
 
 def read_windows(path):

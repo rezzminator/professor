@@ -1,0 +1,83 @@
+{
+  "0019": {
+    "name": "Pearl: variables",
+    "scope": [
+      "variable",
+      "variable.other",
+      "meta.definition.variable.name",
+      "variable.other.readwrite",
+      "entity.name.variable",
+      "variable.other.object",
+      "variable.other.local",
+      "variable.other.assignment.go",
+      "variable.other.declaration.go",
+      "variable.css",
+      "variable.scss",
+      "meta.template.expression variable.other.readwrite"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e1f3f2"
+    }
+  },
+  "0020": {
+    "name": "Nudibranch: self and this",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.parameter.function.language.special.self.python",
+      "variable.parameter.function.language.special.cls.python",
+      "variable.language.special.self.python",
+      "keyword.other.self.rust",
+      "variable.language.self.rust"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ccabff"
+    }
+  },
+  "0021": {
+    "name": "Polyp: parameters",
+    "scope": [
+      "variable.parameter",
+      "meta.parameter",
+      "entity.name.variable.parameter",
+      "variable.parameter.function",
+      "variable.other.normal.shell",
+      "variable.other.special.shell",
+      "variable.other.positional.shell",
+      "variable.other.bracket.shell",
+      "variable.other.makefile"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#fdd0b8"
+    }
+  },
+  "0022": {
+    "name": "Ice: properties and keys",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "entity.name.tag.yaml",
+      "support.type.property-name.json",
+      "variable.object.property",
+      "variable.other.member",
+      "entity.name.variable.field",
+      "support.variable.property",
+      "support.type.property-name.toml",
+      "support.type.custom-property",
+      "support.type.property-name.css",
+      "meta.property-name.css",
+      "variable.other.field.go"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#afdff0"
+    }
+  }
+}

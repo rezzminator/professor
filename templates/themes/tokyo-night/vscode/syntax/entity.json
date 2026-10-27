@@ -1,0 +1,213 @@
+{
+  "0023": {
+    "name": "Tag",
+    "scope": [
+      "entity.name.tag"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0024": {
+    "name": "Tag - Custom / Unrecognized",
+    "scope": [
+      "entity.name.tag support.class.component",
+      "meta.tag.custom entity.name.tag",
+      "meta.tag.other.unrecognized.html.derivative entity.name.tag",
+      "meta.tag"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0036": {
+    "name": "Function Definition",
+    "scope": [
+      "entity.name.function",
+      "variable.other.enummember",
+      "meta.function-call",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "meta.definition.method entity.name.function",
+      "meta.object-literal entity.name.function"
+    ],
+    "settings": {
+      "foreground": "#ff70b8"
+    }
+  },
+  "0040": {
+    "name": "Inherited Class",
+    "scope": [
+      "entity.other.inherited-class"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0042": {
+    "name": "Class Name",
+    "scope": [
+      "entity.name"
+    ],
+    "settings": {
+      "foreground": "#ffbde3"
+    }
+  },
+  "0046": {
+    "name": "CSS Class",
+    "scope": [
+      "entity.other.attribute-name.class",
+      "meta.at-rule.mixin.scss entity.name.function.scss"
+    ],
+    "settings": {
+      "foreground": "#7dffd0"
+    }
+  },
+  "0047": {
+    "name": "CSS ID",
+    "scope": [
+      "entity.other.attribute-name.id"
+    ],
+    "settings": {
+      "foreground": "#ff7a91"
+    }
+  },
+  "0048": {
+    "name": "CSS Tag",
+    "scope": [
+      "entity.name.tag.css"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  },
+  "0049": {
+    "name": "CSS Tag Reference, Pseudo & Class Punctuation",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class punctuation.definition.entity",
+      "entity.other.attribute-name.pseudo-element punctuation.definition.entity",
+      "entity.other.attribute-name.class punctuation.definition.entity",
+      "entity.name.tag.reference"
+    ],
+    "settings": {
+      "foreground": "#ffb4a8"
+    }
+  },
+  "0052": {
+    "name": "CSS Parent Selector Entity",
+    "scope": [
+      "entity.other.attribute-name.parent-selector-suffix punctuation.definition.entity.css"
+    ],
+    "settings": {
+      "foreground": "#ffadff"
+    }
+  },
+  "0058": {
+    "name": "Sub-methods",
+    "scope": [
+      "entity.name.module.js",
+      "variable.import.parameter.js",
+      "variable.other.class.js"
+    ],
+    "settings": {
+      "foreground": "#ffbde3"
+    }
+  },
+  "0062": {
+    "name": "HTML Attributes",
+    "scope": [
+      "entity.other.attribute-name",
+      "text.html.basic entity.other.attribute-name.html",
+      "text.html.basic entity.other.attribute-name"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0064": {
+    "name": "Vue (Vetur / deprecated) Template attributes",
+    "scope": [
+      "entity.other.attribute-name.id.html",
+      "meta.directive.vue entity.other.attribute-name.html"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0066": {
+    "name": "CSS psuedo selectors",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class",
+      "entity.other.attribute-name.pseudo-element",
+      "entity.other.attribute-name.placeholder",
+      "meta.property-list meta.property-value"
+    ],
+    "settings": {
+      "foreground": "#ff3ddc"
+    }
+  },
+  "0114": {
+    "name": "Apache Tag",
+    "scope": [
+      "entity.tag.apacheconf"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0136": {
+    "name": "Pink · YAML keys",
+    "scope": [
+      "entity.name.tag.yaml"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0138": {
+    "name": "Pink · types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.name.type.parameter"
+    ],
+    "settings": {
+      "foreground": "#dc8aff"
+    }
+  },
+  "0141": {
+    "name": "Pink · CSS classes",
+    "scope": [
+      "entity.other.attribute-name.class.css"
+    ],
+    "settings": {
+      "foreground": "#7dffd0"
+    }
+  },
+  "0142": {
+    "name": "Pink · CSS ids",
+    "scope": [
+      "entity.other.attribute-name.id.css"
+    ],
+    "settings": {
+      "foreground": "#ff7a91"
+    }
+  },
+  "0159": {
+    "name": "Pink · type role",
+    "scope": [
+      "entity.name.type.class",
+      "entity.name.type.interface",
+      "entity.name.type.enum",
+      "entity.name.type.alias",
+      "entity.name.type.struct"
+    ],
+    "settings": {
+      "foreground": "#dc8aff"
+    }
+  }
+}

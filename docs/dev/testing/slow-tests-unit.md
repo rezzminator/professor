@@ -10,7 +10,7 @@ Observed durations come from the 2026-09-27 fenced `iso test pfm` capture (`-p 4
 
 ### TestEveryEgressGoesThroughTheGateway
 
-**Source:** [pfm/internal/harvest/gateway_chokepoint_test.go](../../../pfm/internal/harvest/gateway_chokepoint_test.go) line 182 · **Observed:** 0.95s · **Class:** AST/source filesystem
+**Source:** `plugins/harvester/internal/harvest/gateway_chokepoint_test.go` line 182 · **Observed:** 0.95s · **Class:** AST/source filesystem
 
 os.ReadDir("."); parser.ParseFile for every production .go; scanGatewayEgress.
 
@@ -40,7 +40,7 @@ seedOpenCodeStress; store.Open temp DB; three goroutines call syncOpenCodeMirror
 
 U — both databases are temp/local and the concurrency seam is in-process.
 
-### TestDeliverThenRequiresTheTailNeedleWhenTheBaselineCaptureFailed
+### TestDeliverThenRefusesWhenTheBaselineCaptureFailed
 
 **Source:** [pfm/internal/reload/reload_then_proof_test.go](../../../pfm/internal/reload/reload_then_proof_test.go) line 226 · **Observed:** 0.00s · **Class:** injected fake seams
 
@@ -74,7 +74,7 @@ U — pure in-process model/render stress with no external process or network.
 
 ### TestGatewayEgressEnumeratorIgnoresLookalikeMethods
 
-**Source:** [pfm/internal/harvest/gateway_chokepoint_test.go](../../../pfm/internal/harvest/gateway_chokepoint_test.go) line 294 · **Observed:** 0.01s · **Class:** AST/type check
+**Source:** `plugins/harvester/internal/harvest/gateway_chokepoint_test.go` line 294 · **Observed:** 0.01s · **Class:** AST/type check
 
 inline fixture string; parser.ParseFile; scanGatewayEgress type-checks http.Header/url.Values methods.
 
@@ -82,7 +82,7 @@ U — local parser/type checker only; net/http names in the fixture do not issue
 
 ### TestGatewayEgressEnumeratorCatchesEveryShape
 
-**Source:** [pfm/internal/harvest/gateway_chokepoint_test.go](../../../pfm/internal/harvest/gateway_chokepoint_test.go) line 238 · **Observed:** 0.01s · **Class:** AST/type check
+**Source:** `plugins/harvester/internal/harvest/gateway_chokepoint_test.go` line 238 · **Observed:** 0.01s · **Class:** AST/type check
 
 inline HTTP-call fixture; parser.ParseFile; scanGatewayEgress type-check; compares 12 shapes.
 
@@ -130,7 +130,7 @@ U — installer runner is fake and all paths are temporary local files.
 
 ### TestWaveStatsWrittenByRealFetch
 
-**Source:** [pfm/internal/harvest/wave_parity_test.go](../../../pfm/internal/harvest/wave_parity_test.go) line 152 · **Observed:** 0.01s · **Class:** HTTP mock/filesystem
+**Source:** `plugins/harvester/internal/harvest/wave_parity_test.go` line 152 · **Observed:** 0.01s · **Class:** HTTP mock/filesystem
 
 mustNew; injected roundTripFunc returns 404; h.Fetch; stats file check.
 
@@ -154,7 +154,7 @@ U — local database migration and idempotence remain unit-level.
 
 ### TestBibliographicLandingCycleStopsAfterOneHop
 
-**Source:** [pfm/internal/harvest/content_test.go](../../../pfm/internal/harvest/content_test.go) line 11 · **Observed:** 0.01s · **Class:** HTTP mock/redirect logic
+**Source:** `plugins/harvester/internal/harvest/content_test.go` line 11 · **Observed:** 0.01s · **Class:** HTTP mock/redirect logic
 
 withPublicDNSForProviderTest only injects DNS; roundTripFunc fakes A/B HTTP cycle; legacyConverterFunc; h.Fetch.
 

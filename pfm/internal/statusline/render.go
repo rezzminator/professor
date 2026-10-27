@@ -1,11 +1,9 @@
 package statusline
 
 import (
-	"bufio"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +15,8 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/sky"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -46,9 +45,11 @@ type input struct {
 	ContextWindow struct {
 		UsedPercentage    float64 `json:"used_percentage"`
 		ContextWindowSize int64   `json:"context_window_size"`
+		PercentageKnown   bool    `json:"-"`
 		TotalInputTokens  int64   `json:"total_input_tokens"`
 		TotalOutputTokens int64   `json:"total_output_tokens"`
 		CurrentUsage      struct {
+			Known                    bool  `json:"-"`
 			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 			InputTokens              int64 `json:"input_tokens"`
@@ -88,6 +89,8 @@ type input struct {
 type rateWindow struct {
 	UsedPercentage float64 `json:"used_percentage"`
 	ResetsAt       int64   `json:"resets_at"`
+	Cached         bool    `json:"-"`
+	Failure        bool    `json:"-"`
 }
 
 type rateLimits struct {
@@ -147,31 +150,18 @@ func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) 
 			ResetsAt:       resetAt.Unix(),
 		}
 	}
-	// The harness's own `limits` array — when it sent one at all — is
-	// authoritative for the Fable window; pfm's usage cache is a fallback for
-	// a harness that omitted the array entirely (limits.Scoped is nil only
-	// when the payload's "limits" key was absent, never when json decoded a
-	// present-but-empty array), not a second opinion on a payload that DID
-	// report and simply carries no Fable entry for this account.
-	if limits.Scoped == nil && account > 0 {
-		if fable, ok := usagehook.CachedFableWindow(
-			runtime.CacheDir,
-			runtime.UID,
-			account,
-			runtime.ConfigDir,
-			now,
-		); ok {
-			if resetAt, err := time.Parse(time.RFC3339, fable.ResetsAt); err == nil {
-				windows["seven_day_fable"] = rateWindow{
-					UsedPercentage: *fable.Utilization,
-					ResetsAt:       resetAt.Unix(),
-				}
-			}
-			// A cache entry whose resets_at fails to parse degrades to
-			// absent rather than failing the render — a cache-read problem
-			// must never propagate out of Render (unlike a malformed harness
-			// payload above, which is a hard decode error).
+	// A reported window is authoritative, even at zero. Only missing
+	// windows use the shared usage cache; an explicit scoped array also owns
+	// the absence of Fable, independently of missing main windows.
+	missing := make(map[string]bool)
+	for _, descriptor := range usagehook.AllWindows() {
+		if _, present := windows[descriptor.Key]; !present &&
+			(descriptor.Key != "seven_day_fable" || limits.Scoped == nil) {
+			missing[descriptor.Key] = true
 		}
+	}
+	if account > 0 && len(missing) > 0 {
+		fillCachedRateWindows(now, runtime, account, windows, missing)
 	}
 	return windows, nil
 }
@@ -185,16 +175,26 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("decode statusline input: %w", err)
 	}
-	if data.Model.DisplayName == "" {
-		data.Model.DisplayName = pfmengine.MustLookup(pfmengine.Claude).Short
+	if err := validateInput(data); err != nil {
+		return "", fmt.Errorf("invalid statusline input: %w", err)
+	}
+	if data.Model.ID == "" {
+		data.Model.ID = runtime.getenv("ANTHROPIC_MODEL")
+	}
+	if data.Model.DisplayName == "" ||
+		(openAIModel(data.Model.ID) && data.Model.DisplayName == pfmengine.MustLookup(pfmengine.Claude).Short) {
+		data.Model.DisplayName = modelFamily(data.Model.ID)
+		if data.Model.DisplayName == "" {
+			data.Model.DisplayName = pfmengine.MustLookup(runtime.Engine).Short
+		}
 	}
 	directory := data.Workspace.CurrentDir
 	if directory == "" {
 		directory = data.CWD
 	}
 	now := runtime.now()
-	// account is resolved here, ahead of windowsAt, because the Fable
-	// window's cache fallback needs to know which account's cache file to
+	// account is resolved here, ahead of windowsAt, because the usage
+	// windows' cache fallback needs to know which account's cache file to
 	// read; accountBadge is pure and side-effect-free, so calling it before
 	// its other use below duplicates no logic, only the (cheap) lookup.
 	badge, account := accountBadge(runtime)
@@ -207,14 +207,19 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	writeBreadcrumb(runtime, data.TranscriptPath)
 	convergeWindowName(ctx, runtime, data)
 
-	harvestRateLimits(runtime, now, account, data)
+	recordRateLimits(runtime, now, account, data)
 
 	directoryName := filepath.Base(filepath.Clean(directory))
 	if directory == "" || directoryName == string(filepath.Separator) {
 		directoryName = "~"
 	}
 
-	l1 := badge + modelSegment(data)
+	gauge, l2, _ := renderContextLine(runtime, data, directory, now)
+	if data.Model.ID == "" && gauge.model != "" {
+		data.Model.ID = gauge.model
+		data.Model.DisplayName = modelFamily(gauge.model)
+	}
+	l1 := badge + modelSegment(data, sessionAutoEffort(runtime, data))
 	l1 += sep + blue + directoryName + reset
 	if data.Worktree.Name != "" {
 		l1 += sep + magenta + "🌳 " + data.Worktree.Name + reset
@@ -237,9 +242,8 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	if data.SessionName != "" {
 		l1 += sep + cLabel + "🔖 " + data.SessionName + reset
 	}
-	l1 += sep + sky.SnapshotCounts(fleetCounts(runtime))
+	l1 += sep + fleetSegment(runtime)
 
-	gauge, l2, contextTokens := renderContextLine(runtime, data, directory, now)
 	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
 	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
 	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.
@@ -247,13 +251,17 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 
 	l3 := ""
 	if runtime.Engine == pfmengine.Codex {
-		codexLine, replacement := codexSegment(runtime, now, contextTokens, l2, gauge.transcript)
-		if replacement != "" {
-			l2 = replacement
-		}
+		codexLine := codexQuotaSegment(runtime, now)
 		l3 = appendSegment(l3, codexLine)
 	}
 	l3 = appendRateSegments(l3, now, data)
+	if runtime.Engine == pfmengine.Claude {
+		weekly := codexWeeklyLine(runtime, now, l1, l2, l3)
+		if l3 != "" && weekly != "" {
+			l3 += "\n" + reset
+		}
+		l3 += weekly
+	}
 
 	if l3 != "" {
 		return reset + l1 + "\n" + reset + l2 + "\n" + reset + l3 + "\n", nil
@@ -356,6 +364,10 @@ func appendRateSegments(line string, now time.Time, data input) string {
 			line = appendSegment(line, makeBar(0, 5)+" "+dim+descriptor.Label+"-used:—"+reset)
 			continue
 		}
+		if window.Failure {
+			line = appendSegment(line, makeBar(0, 5)+" "+red+descriptor.Label+"-used:ERR"+reset)
+			continue
+		}
 		used := gaugePercent(window.UsedPercentage)
 		segment := makeBar(used, 5) + " " + percentColor(used) +
 			descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
@@ -370,72 +382,6 @@ func appendRateSegments(line string, now time.Time, data input) string {
 		line = appendSegment(line, segment)
 	}
 	return line
-}
-
-func gitSegment(ctx context.Context, runtime Runtime, directory string) string {
-	if directory == "" {
-		return ""
-	}
-	if err := os.MkdirAll(runtime.CacheDir, 0o700); err != nil {
-		return ""
-	}
-	digest := md5.Sum([]byte(directory))
-	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-"+hex.EncodeToString(digest[:]))
-	stale := true
-	if info, err := os.Stat(cachePath); err == nil {
-		stale = runtime.now().Sub(info.ModTime()) > 5*time.Second
-	}
-	if stale {
-		commandContext, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
-		branch, err := runtime.Command.Output(
-			commandContext,
-			"git",
-			"-C", directory, "--no-optional-locks", "symbolic-ref", "--short", "HEAD",
-		)
-		cancel()
-		content := ""
-		if err == nil && strings.TrimSpace(string(branch)) != "" {
-			staged := gitDiffCount(ctx, runtime, directory, true)
-			modified := gitDiffCount(ctx, runtime, directory, false)
-			content = fmt.Sprintf("%s|%d|%d", strings.TrimSpace(string(branch)), staged, modified)
-		}
-		_ = atomicfile.Write(cachePath, []byte(content), 0o600)
-	}
-	body, err := os.ReadFile(cachePath)
-	if err != nil || len(body) == 0 {
-		return ""
-	}
-	fields := strings.Split(strings.TrimSpace(string(body)), "|")
-	if len(fields) != 3 || fields[0] == "" {
-		return ""
-	}
-	staged, _ := strconv.Atoi(fields[1])
-	modified, _ := strconv.Atoi(fields[2])
-	color, suffix := green, ""
-	if staged > 0 {
-		suffix += fmt.Sprintf(" %s+%d", green, staged)
-		color = yellow
-	}
-	if modified > 0 {
-		suffix += fmt.Sprintf(" %s~%d", yellow, modified)
-		color = yellow
-	}
-	return color + "🌿 " + fields[0] + suffix + reset
-}
-
-func gitDiffCount(ctx context.Context, runtime Runtime, directory string, staged bool) int {
-	args := []string{"-C", directory, "--no-optional-locks", "diff"}
-	if staged {
-		args = append(args, "--cached")
-	}
-	args = append(args, "--numstat")
-	commandContext, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
-	defer cancel()
-	output, err := runtime.Command.Output(commandContext, "git", args...)
-	if err != nil {
-		return 0
-	}
-	return len(strings.FieldsFunc(strings.TrimSpace(string(output)), func(r rune) bool { return r == '\n' }))
 }
 
 func accountBadge(runtime Runtime) (string, int) {
@@ -482,7 +428,7 @@ func accountBadgeForID(runtime Runtime, account int) (string, int) {
 	return "", 0
 }
 
-func fleetCounts(runtime Runtime) map[pfmengine.ID]int {
+func fleetCountsWithError(runtime Runtime) (map[pfmengine.ID]int, error) {
 	allowProbe := runtime.getenv("PFM_TEST_PROBE_SOCKETS") == "1"
 	counts := make(map[pfmengine.ID]int)
 	count := func(name string) {
@@ -512,16 +458,16 @@ func fleetCounts(runtime Runtime) map[pfmengine.ID]int {
 			seen[name] = true
 			count(name)
 		}
-		return counts
+		return counts, nil
 	}
 	entries, err := os.ReadDir(runtime.TmuxDir)
 	if err != nil {
-		return counts
+		return nil, fmt.Errorf("read fleet sockets %s: %w", runtime.TmuxDir, err)
 	}
 	for _, entry := range entries {
 		count(entry.Name())
 	}
-	return counts
+	return counts, nil
 }
 
 // windowConvergeTimeout bounds the whole convergence. The statusline renders
@@ -544,9 +490,9 @@ const windowConvergeTimeout = 750 * time.Millisecond
 // and the timer remains the backstop for everything this path cannot see (a
 // chat whose statusline is not rendering, a name a second writer took back).
 //
-// Cost discipline: a converged chat forks NOTHING. The last applied label is
-// cached per session beside the cache-window anchor, and a render whose label
-// still matches the cache returns before touching tmux at all.
+// Cost discipline: a converged chat forks NOTHING. The last applied exact name
+// is cached per session beside the cache-window anchor, and a render whose
+// name still matches the cache returns before touching tmux at all.
 func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	// Claude only: a codex window follows its thread's indexed name, applied
 	// by name-sync's own half, and a subagent's statusline is not the window's
@@ -571,7 +517,11 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 		key = socket
 	}
 	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-window-"+key)
-	if cached, err := os.ReadFile(cachePath); err == nil && string(cached) == label {
+	// The cache holds the server ($TMUX: socket, server pid, session) beside
+	// the name: a resumed chat keeps its session id and name on a NEW server,
+	// which lacks the window name and @pfm_chat_name until this render sets them.
+	stamp := runtime.getenv("TMUX") + "\n" + data.SessionName
+	if cached, err := os.ReadFile(cachePath); err == nil && string(cached) == stamp {
 		return
 	}
 	commandContext, cancel := context.WithTimeout(ctx, windowConvergeTimeout)
@@ -595,29 +545,31 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	if !found || panes != "1" {
 		return
 	}
-	if current != label {
-		rename := gather.WindowRename{
-			Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
-		}
-		client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
-		if err := client.RenameWindow(commandContext, rename); err != nil {
-			return
-		}
+	// The cache keys on the EXACT name: a name that differs only past the clip
+	// is still a rename for the Herdr reporter, so the combined rename-window +
+	// chat-name command runs even when the window already carries the label.
+	rename := gather.WindowRename{
+		Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
+		ChatName: data.SessionName,
 	}
-	// Written only after the window provably carries the label, so a failed
+	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
+	if err := client.RenameWindow(commandContext, rename); err != nil {
+		return
+	}
+	// Written only after the window provably carries the name, so a failed
 	// rename is retried on the next render instead of being cached as done.
-	_ = atomicfile.Write(cachePath, []byte(label), 0o600)
+	_ = atomicfile.Write(cachePath, []byte(stamp), 0o600)
 }
 
 // pfmSocket resolves the fleet socket this render is running inside, or
 // reports that it is not in one. It applies the same probe-socket allowance
-// fleetCounts does so a jailed fixture can exercise the path.
+// fleetCountsWithError does so a jailed fixture can exercise the path.
 func pfmSocket(runtime Runtime) (string, bool) {
 	tmux := runtime.getenv("TMUX")
 	if tmux == "" {
 		return "", false
 	}
-	socketPath := strings.SplitN(tmux, ",", 2)[0]
+	socketPath := pfmtmux.SocketPath(tmux)
 	if filepath.Clean(filepath.Dir(socketPath)) != filepath.Clean(runtime.TmuxDir) {
 		return "", false
 	}
@@ -638,7 +590,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	if tmux == "" || transcriptPath == "" {
 		return
 	}
-	socket := strings.SplitN(tmux, ",", 2)[0]
+	socket := pfmtmux.SocketPath(tmux)
 	socket = filepath.Base(socket)
 	if socket == "." || socket == "" {
 		return
@@ -653,7 +605,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	}
 }
 
-func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) {
+func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
 	// Every window carrying a reset time is recorded under `windows`, 0% used
 	// included: 0% is a real reading, and a seat that has just started is
 	// exactly the one whose usage door should answer from this file instead of
@@ -661,11 +613,12 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	// into this map, so the Fable window arrives here like the flat ones — and
 	// a reader that has fallen back to this file (a signed-out or unreachable
 	// account) can render no window this writer did not carry. A payload whose
-	// windows have all reset writes nothing.
+	// windows have all reset writes nothing. Cache-derived readings must not
+	// acquire a fresh confirmation timestamp on every draw.
 	windows := make(map[string]rateWindow, len(data.RateLimits.Windows))
 	live := false
 	for key, window := range data.RateLimits.Windows {
-		if window.ResetsAt <= 0 {
+		if window.ResetsAt <= 0 || window.Cached || window.Failure {
 			continue
 		}
 		windows[key] = window
@@ -748,168 +701,116 @@ func statuslineFileAge(path string, now time.Time) time.Duration {
 }
 
 func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Duration) {
-	if runtime.Spawn == nil || statuslineFileAge(cachePath, runtime.now()) <= ttl {
+	attemptPath := cachePath + ".attempt"
+	if runtime.Spawn == nil || statuslineFileAge(cachePath, runtime.now()) <= ttl ||
+		statuslineFileAge(attemptPath, runtime.now()) <= ttl {
 		return
 	}
 	lockPath := strings.TrimSuffix(cachePath, ".json") + ".lock"
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
 		return
 	}
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	held, err := takeStatuslineRefreshLock(lockPath, runtime.now(), ttl)
 	if err != nil {
+		obs.Logger(context.Background()).
+			Warn("take statusline refresh lock", "kind", kind, "path", lockPath, obs.FieldErr, err.Error())
 		return
 	}
-	_ = lock.Close()
+	if !held {
+		return
+	}
+	// Bound failed/missing-Codex retries too; an absent cache must not spawn
+	// another app-server on every Claude statusline update after a failed fetch.
+	if err := atomicfile.Write(attemptPath, nil, 0o600); err != nil {
+		_ = os.Remove(lockPath)
+		obs.Logger(context.Background()).
+			Warn("record statusline refresh attempt", "kind", kind, "path", attemptPath, obs.FieldErr, err.Error())
+		return
+	}
+	if err := os.Chtimes(attemptPath, runtime.now(), runtime.now()); err != nil {
+		_ = os.Remove(lockPath)
+		obs.Logger(context.Background()).
+			Warn("timestamp statusline refresh attempt", "kind", kind, "path", attemptPath, obs.FieldErr, err.Error())
+		return
+	}
 	if err := runtime.Spawn(kind); err != nil {
 		_ = os.Remove(lockPath)
+		obs.Logger(context.Background()).Warn("start statusline refresh", "kind", kind, obs.FieldErr, err.Error())
 	}
 }
 
-type codexUsageCache struct {
-	Primary   *codexWindow `json:"primary"`
-	Secondary *codexWindow `json:"secondary"`
-	PlanType  string       `json:"planType"`
-}
+const codexQuotaLabel = "ChatGPT quota "
 
-type codexWindow struct {
-	UsedPercent        float64 `json:"usedPercent"`
-	WindowDurationMins int64   `json:"windowDurationMins"`
-	ResetsAt           int64   `json:"resetsAt"`
-}
-
-func codexSegment(
-	runtime Runtime,
-	now time.Time,
-	contextTokens int64,
-	currentL2 string,
-	transcriptGauge bool,
-) (string, string) {
-	model := runtime.getenv("ANTHROPIC_MODEL")
-	if model == "" {
-		model = "gpt-5.6-sol"
+func codexQuotaSegment(runtime Runtime, now time.Time) string {
+	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
+	armRefresh(runtime, RefreshKindCodex, path, 5*time.Minute)
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return cWarn + codexQuotaLabel + "missing" + reset
 	}
-	model = strings.TrimSuffix(model, "[1m]")
-	segment := green + "🍀 " + model + reset
-	procTCP, err := os.ReadFile(filepath.Join(runtime.ProcRoot, "net", "tcp"))
-	if err == nil && strings.Contains(strings.ToUpper(string(procTCP)), ":494D ") {
-		segment += sep + dim + "⇅ proxy" + reset
-	} else {
-		segment += sep + red + "⇅ proxy DOWN" + reset
-	}
-	requests, authReject := codexRequestCount(runtime, now)
-	if requests > 0 {
-		segment += sep + dim + "↻ " + strconv.Itoa(requests) + " today" + reset
-	}
-	if authReject {
-		segment += sep + red + "⚠ auth-reject streak — WS upgrade refused; CCP_CODEX_TRANSPORT=http" + reset
-	}
-	usagePath := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
-	armRefresh(runtime, RefreshKindCodex, usagePath, 5*time.Minute)
-	usageBody, usageErr := os.ReadFile(usagePath)
-	var usage codexUsageCache
-	if usageErr == nil && json.Unmarshal(usageBody, &usage) == nil {
-		for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
-			if window == nil || window.UsedPercent < 0 {
-				continue
-			}
-			percent := gaugePercent(window.UsedPercent)
-			segment += sep + makeBar(percent, 5) + " " + percentColor(percent) +
-				windowLabel(window.WindowDurationMins) + "-used:" + strconv.Itoa(percent) + "%" + reset +
-				resetCountdown(now, window.ResetsAt)
-		}
-		if usage.PlanType != "" {
-			segment += sep + dim + "ChatGPT " + usage.PlanType + reset
-		}
-	} else {
-		segment += sep + dim + "ChatGPT subscription" + reset
-	}
-
-	replacement := ""
-	window := int64(0)
-	baseModel := strings.TrimSuffix(model, "-fast")
-	if strings.HasPrefix(baseModel, "gpt-5.6-") || strings.HasPrefix(baseModel, "gpt-6") {
-		window = 272_000
-	} else {
-		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)
-	}
-	if !transcriptGauge && window > 0 && contextTokens > 0 {
-		percent := gaugePercent(float64(contextTokens) * 100 / float64(window))
-		if percent > 100 {
-			percent = 100
-		}
-		rest := ""
-		if index := strings.Index(currentL2, sep); index >= 0 {
-			rest = currentL2[index:]
-		}
-		replacement = urgencyEmoji(percent) + " " + makeBar(percent, 10) + " " +
-			percentColor(percent) + strconv.Itoa(percent) + "%" + reset + " " + dim +
-			"of " + formatContextTokens(window) + reset + rest
-	}
-	return segment, replacement
-}
-
-func codexRequestCount(runtime Runtime, now time.Time) (int, bool) {
-	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-gptreq")
-	if statuslineFileAge(cachePath, now) > 30*time.Second {
-		logPath := filepath.Join(runtime.Home, ".local", "state", "claude-code-proxy", "proxy.log")
-		file, err := os.Open(logPath)
-		if err == nil {
-			defer func() {
-				if err := file.Close(); err != nil {
-					fmt.Fprintf(os.Stderr, "statusline: close %s proxy log %s: %v\n",
-						pfmengine.MustLookup(pfmengine.Codex).Short, logPath, err)
-				}
-			}()
-			today := now.UTC().Format("2006-01-02")
-			count := 0
-			last := make([]int, 0, 3)
-			scanner := bufio.NewScanner(file)
-			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-			for scanner.Scan() {
-				var row struct {
-					Message string `json:"msg"`
-					Time    string `json:"t"`
-					Status  int    `json:"status"`
-				}
-				if json.Unmarshal(scanner.Bytes(), &row) != nil {
-					continue
-				}
-				if row.Message != "request_completed" {
-					continue
-				}
-				if strings.HasPrefix(row.Time, today) {
-					count++
-				}
-				last = append(last, row.Status)
-				if len(last) > 3 {
-					last = last[len(last)-3:]
-				}
-			}
-			reject := len(last) == 3
-			for _, status := range last {
-				reject = reject && (status == 401 || status == 403)
-			}
-			_ = atomicfile.Write(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolDigit(reject))), 0o600)
-		}
-	}
-	body, err := os.ReadFile(cachePath)
 	if err != nil {
-		return 0, false
+		fmt.Fprintf(runtime.Warn, "statusline: read Codex quota %s: %v\n", path, err)
+		return cBad + codexQuotaLabel + catalogError + reset
 	}
-	fields := strings.Fields(string(body))
-	if len(fields) != 2 {
-		return 0, false
+	var rawUsage struct {
+		Primary   json.RawMessage `json:"primary"`
+		Secondary json.RawMessage `json:"secondary"`
 	}
-	count, _ := strconv.Atoi(fields[0])
-	reject, _ := strconv.Atoi(fields[1])
-	return count, reject == 1
-}
-
-func boolDigit(value bool) int {
-	if value {
-		return 1
+	if err := json.Unmarshal(body, &rawUsage); err != nil {
+		return cBad + codexQuotaLabel + catalogError + reset
 	}
-	return 0
+	for _, raw := range []json.RawMessage{rawUsage.Primary, rawUsage.Secondary} {
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		var fields struct {
+			Percent *float64 `json:"usedPercent"`
+		}
+		if json.Unmarshal(raw, &fields) != nil || fields.Percent == nil {
+			return cBad + codexQuotaLabel + catalogError + reset
+		}
+	}
+	var usage codexUsageCache
+	if err := json.Unmarshal(body, &usage); err != nil {
+		return cBad + codexQuotaLabel + catalogError + reset
+	}
+	if usage.Primary == nil && usage.Secondary == nil {
+		return cWarn + codexQuotaLabel + "unknown" + reset
+	}
+	segment := ""
+	for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
+		if window == nil {
+			continue
+		}
+		if window.UsedPercent < 0 || window.UsedPercent > 100 || window.ResetsAt <= 0 ||
+			window.WindowDurationMins <= 0 {
+			return cBad + codexQuotaLabel + catalogError + reset
+		}
+		percent := gaugePercent(window.UsedPercent)
+		segment = appendSegment(
+			segment,
+			makeBar(
+				percent,
+				5,
+			)+" "+percentColor(
+				percent,
+			)+windowLabel(
+				window.WindowDurationMins,
+			)+"-used:"+strconv.Itoa(
+				percent,
+			)+"%"+reset+resetCountdown(
+				now,
+				window.ResetsAt,
+			),
+		)
+	}
+	if statuslineFileAge(path, now) > 5*time.Minute {
+		segment += " " + cWarn + "stale" + reset
+	}
+	if usage.PlanType != "" {
+		segment = appendSegment(segment, dim+"ChatGPT "+usage.PlanType+reset)
+	}
+	return segment
 }
 
 func windowLabel(minutes int64) string {

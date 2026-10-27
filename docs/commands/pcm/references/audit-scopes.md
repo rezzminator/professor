@@ -38,7 +38,7 @@ Files: `templates/**`, `docs/{SETUP,PLACEHOLDERS,RELEASE}.md`, `templates/refres
 This is the scope with adopters downstream of it — a FAIL here ships.
 
 - **Internal reference resolution:** every template referencing another template, agent, command, script, or reference card → the target exists under `templates/` (a pointer that only resolves in the source project is a broken install)
-- **Verdict tokens ↔ their writers:** every token a `/flights:*` command (`templates/global/commands/flights/`) cites (`CLAIMED`, `DONE`, `PARTIAL`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `COMA`) is one `flights-foreman`, `flights-mechanical-executor` or `/flights:orchestrate-cross-harness` writes
+- **Return tokens ↔ their writers:** every token a `flights-*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes (`templates/global/agents/flights-*.md`)
 - **Placeholder integrity:** every `{TOKEN}` in a template is registered in `PLACEHOLDERS.md`; every registered token is used or knowingly retired; no template carries a source-project value where a token belongs
 - **SETUP coverage:** every file under `templates/` has a write step in `SETUP.md`; every path `SETUP.md` writes has a template
 - **Cast consistency:** `README.md` agent/command/skill lists match a live `ls` of `templates/project/agents/` and `templates/project/commands/`
@@ -52,7 +52,7 @@ Files: `.claude/scripts/*.{sh,mjs}`
 
 - **Existence & permissions:** each script exists and is executable (`+x`)
 - **Referential integrity:** grep agents/commands for each script name → paths used to call it are correct
-- **Safety headers:** `set -euo pipefail` present at top of every bash `.sh` — named exceptions: the fail-open hook `format-md.sh` runs `set -uo pipefail` by design, and POSIX `#!/bin/sh` scripts (`memory-*.sh`) carry no `pipefail`
+- **Safety headers:** `set -euo pipefail` present at top of every bash `.sh` — named exception: the fail-open hook `format-md.sh` runs `set -uo pipefail` by design
 - **No hardcoded paths:** no absolute paths or project-specific paths that should be variables
 
 ## `structure` — Walk repo skeleton

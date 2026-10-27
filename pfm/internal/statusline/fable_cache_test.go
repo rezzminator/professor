@@ -38,7 +38,7 @@ func fableRuntime(root string, account int, now time.Time) Runtime {
 	}
 }
 
-// writeFableCacheRecord seeds the exact file CachedFableWindow reads, through
+// writeFableCacheRecord seeds the shared usage cache the renderer reads, through
 // the package's own writer, so the test never re-derives the "cc-usage-<uid>"
 // naming or the on-disk shape independently of the code under test.
 func writeFableCacheRecord(t *testing.T, cacheDir string, uid, account int, record usagehook.CacheRecord) {
@@ -178,193 +178,9 @@ func TestFableWindowPresentButEmptyLimitsArrayIsNotCacheFallback(t *testing.T) {
 	}
 }
 
-// TestFableWindowAbsentWithNoUsageCacheFile pins the plain missing-cache
-// path: no cache file at all degrades to absent, and Render never errors —
-// the honesty requirement that a cache-read problem must never propagate out
-// of Render.
-func TestFableWindowAbsentWithNoUsageCacheFile(t *testing.T) {
-	root := t.TempDir()
-	now := time.Now()
-	runtime := fableRuntime(root, 2, now)
-	got, err := Render(context.Background(), harnessPayloadWithFiveAndSeven(now, ""), runtime)
-	if err != nil {
-		t.Fatalf("Render returned an error for a missing usage cache: %v", err)
-	}
-	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "7d-fable-used:—") {
-		t.Fatalf("missing usage cache did not render absent:\n%q", plain)
-	}
-}
-
-// TestFableWindowMalformedOrUnreadableCacheDegradesToAbsentWithoutBreakingTheLine
-// pins the honesty requirement that a broken cache must never blank the
-// statusline: Render still succeeds, the fable window degrades to absent,
-// and the rest of the rate-limit line (five_hour/seven_day, sourced only
-// from the harness) stays intact. Both a malformed file and a structurally
-// unreadable one are covered, because the fence runs every test as root,
-// where chmod-based unreadability is a silent no-op (root ignores mode
-// bits) — a directory sitting where the cache file must be fails
-// os.ReadFile for every uid instead.
-func TestFableWindowMalformedOrUnreadableCacheDegradesToAbsentWithoutBreakingTheLine(t *testing.T) {
-	for _, testcase := range []struct {
-		name    string
-		corrupt func(t *testing.T, path string)
-	}{
-		{
-			name: "truncated JSON",
-			corrupt: func(t *testing.T, path string) {
-				t.Helper()
-				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, []byte(`{"limits":[{"kind":"weekly_sc`), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			},
-		},
-		{
-			name: "cache path is a directory, not a file",
-			corrupt: func(t *testing.T, path string) {
-				t.Helper()
-				if err := os.MkdirAll(path, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			},
-		},
-	} {
-		t.Run(testcase.name, func(t *testing.T) {
-			root := t.TempDir()
-			now := time.Now()
-			runtime := fableRuntime(root, 2, now)
-			path := usagehook.CachePath(usagehook.UsageCacheDir(runtime.CacheDir, runtime.UID), 2)
-			testcase.corrupt(t, path)
-			got, err := Render(context.Background(), harnessPayloadWithFiveAndSeven(now, ""), runtime)
-			if err != nil {
-				t.Fatalf("Render returned an error for a broken usage cache: %v", err)
-			}
-			plain := stripANSICodes(got)
-			if !strings.Contains(plain, "7d-fable-used:—") {
-				t.Fatalf("broken usage cache did not degrade to absent:\n%q", plain)
-			}
-			if !strings.Contains(plain, "5h-used:11%") || !strings.Contains(plain, "7d-used:31%") {
-				t.Fatalf("broken usage cache blanked the rest of the rate-limit line:\n%q", plain)
-			}
-		})
-	}
-}
-
-// TestFableWindowAbsentWhenUsageCacheIsBeyondTheStalenessBound pins the
-// one-hour bound CachedFableWindow's doc comment commits to (matching
-// Evaluate's own "a stale cache remains usable for about an hour"): a cache
-// older than that renders absent, never the stale percentage. A cache still
-// inside the bound is asserted alongside it, so the boundary is pinned in
-// both directions rather than just the "eventually gives up" half.
-func TestFableWindowAbsentWhenUsageCacheIsBeyondTheStalenessBound(t *testing.T) {
-	for _, testcase := range []struct {
-		name       string
-		age        time.Duration
-		wantAbsent bool
-	}{
-		{name: "just inside the one-hour bound", age: 59 * time.Minute, wantAbsent: false},
-		{name: "beyond the one-hour bound", age: 90 * time.Minute, wantAbsent: true},
-	} {
-		t.Run(testcase.name, func(t *testing.T) {
-			root := t.TempDir()
-			now := time.Now()
-			runtime := fableRuntime(root, 2, now)
-			fetchedAt := now.Add(-testcase.age)
-			writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-				Usage: usagehook.Usage{
-					Limits: []usagehook.ScopedLimit{
-						fableScopedLimit(44, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
-					},
-				},
-				ConfigDir: runtime.ConfigDir,
-				FetchedAt: &fetchedAt,
-			})
-			got, err := Render(context.Background(), harnessPayloadWithFiveAndSeven(now, ""), runtime)
-			if err != nil {
-				t.Fatal(err)
-			}
-			plain := stripANSICodes(got)
-			rendered := strings.Contains(plain, "7d-fable-used:44%")
-			absent := strings.Contains(plain, "7d-fable-used:—")
-			if testcase.wantAbsent && !absent {
-				t.Fatalf("a cache beyond the one-hour bound rendered a stale percentage:\n%q", plain)
-			}
-			if !testcase.wantAbsent && !rendered {
-				t.Fatalf("a cache still inside the one-hour bound rendered absent:\n%q", plain)
-			}
-		})
-	}
-}
-
-// TestFableWindowAbsentWhileUsageCacheBackoffIsActive pins that a live
-// Backoff — another picker's already-recorded 429 or other failure — is
-// treated as "no fresh data" even when the cache is otherwise fresh and
-// carries an entirely valid Fable entry.
-func TestFableWindowAbsentWhileUsageCacheBackoffIsActive(t *testing.T) {
-	root := t.TempDir()
-	now := time.Now()
-	runtime := fableRuntime(root, 2, now)
-	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-		Usage: usagehook.Usage{
-			Limits: []usagehook.ScopedLimit{
-				fableScopedLimit(61, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
-			},
-		},
-		ConfigDir: runtime.ConfigDir,
-		FetchedAt: &now,
-		Backoff:   &usagehook.CacheBackoff{Message: "429", RetryAfter: now.Add(15 * time.Minute), RecordedAt: now},
-	})
-	got, err := Render(context.Background(), harnessPayloadWithFiveAndSeven(now, ""), runtime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "7d-fable-used:—") {
-		t.Fatalf("an active backoff did not suppress the cached fable window:\n%q", plain)
-	}
-	if strings.Contains(plain, "61%") {
-		t.Fatalf("an active backoff still leaked the cached percentage:\n%q", plain)
-	}
-}
-
-// TestFableWindowAbsentWhenCachedEntryResetsInThePast pins that the cache
-// path cannot bypass fableWindow's own selection rules: a cached entry whose
-// resets_at has already passed is rejected by the SAME selector a live fetch
-// uses, exactly like TestScopedFableRequiresAValidFutureReset pins it for
-// the harness path in usagehook's own tests.
-func TestFableWindowAbsentWhenCachedEntryResetsInThePast(t *testing.T) {
-	root := t.TempDir()
-	now := time.Now()
-	runtime := fableRuntime(root, 2, now)
-	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-		Usage: usagehook.Usage{
-			Limits: []usagehook.ScopedLimit{fableScopedLimit(44, now.Add(-time.Hour).UTC().Format(time.RFC3339), true)},
-		},
-		ConfigDir: runtime.ConfigDir,
-		FetchedAt: &now,
-	})
-	got, err := Render(context.Background(), harnessPayloadWithFiveAndSeven(now, ""), runtime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "7d-fable-used:—") {
-		t.Fatalf("a cached entry with a past resets_at was not rejected by the selector:\n%q", plain)
-	}
-	if strings.Contains(plain, "44%") {
-		t.Fatalf("a cached entry with a past resets_at still rendered:\n%q", plain)
-	}
-}
-
-// TestFableWindowNeverSourcesFiveHourOrSevenDayFromCache pins precedence
-// rule #1 from the other direction: five_hour and seven_day always come from
-// the harness payload, never from pfm's own cache, even when the cache holds
-// different values for both AND a valid Fable entry that IS legitimately
-// consulted in the same render.
-func TestFableWindowNeverSourcesFiveHourOrSevenDayFromCache(t *testing.T) {
+// TestHarnessMainWindowsTakePrecedenceOverCache pins that reported harness
+// values win even when the cache has different values and a usable Fable entry.
+func TestHarnessMainWindowsTakePrecedenceOverCache(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	runtime := fableRuntime(root, 2, now)
@@ -401,40 +217,7 @@ func TestFableWindowNeverSourcesFiveHourOrSevenDayFromCache(t *testing.T) {
 	}
 }
 
-func TestFableWindowRejectsCacheFromAnotherSeatOrLegacyRecord(t *testing.T) {
-	for _, testcase := range []struct {
-		name      string
-		configDir string
-	}{
-		{name: "another seat", configDir: "other-seat"},
-		{name: "legacy blank identity", configDir: ""},
-	} {
-		t.Run(testcase.name, func(t *testing.T) {
-			root := t.TempDir()
-			now := time.Now()
-			runtime := fableRuntime(root, 2, now)
-			writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-				Usage: usagehook.Usage{
-					Limits: []usagehook.ScopedLimit{
-						fableScopedLimit(88, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
-					},
-				},
-				ConfigDir: testcase.configDir,
-				FetchedAt: &now,
-			})
-			got, err := Render(context.Background(), harnessPayloadWithFiveAndSeven(now, ""), runtime)
-			if err != nil {
-				t.Fatal(err)
-			}
-			plain := stripANSICodes(got)
-			if !strings.Contains(plain, "7d-fable-used:—") || strings.Contains(plain, "88%") {
-				t.Fatalf("cache identity %q leaked into seat %q:\n%s", testcase.configDir, runtime.ConfigDir, plain)
-			}
-		})
-	}
-}
-
-func TestHarvestRateLimitsPersistsAValidFableWithoutUsableFlatWindows(t *testing.T) {
+func TestRecordRateLimitsPersistsAValidFableWithoutUsableFlatWindows(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	for _, testcase := range []struct {
 		name         string

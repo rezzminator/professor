@@ -22,7 +22,7 @@ type gitGuardHookInput struct {
 }
 
 const (
-	// gitGuardExemptAgent is the one agent type that writes shared git state.
+	// gitGuardExemptAgent is the one writer; only its exact agent_type is exempt.
 	gitGuardExemptAgent = "gitter"
 	gitGuardWorktreeSh  = ".claude/scripts/worktree.sh"
 	gitGuardOnlyGitter  = `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.`

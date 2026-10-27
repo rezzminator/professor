@@ -39,12 +39,16 @@ set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
-CANONICAL="O1 E1 E2 E3 F M A O2"
+CANONICAL="O1 E1 E2 E3 F M A H O2"
 BUDGETS="$HERE/budgets.yml"
 PENDING="$HERE/pending.txt"
 ROOT_SH="${LANE_ROOT_SH:-$HERE/root.sh}"
 PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
 OUT_ROOT="${LANE_OUT_ROOT:-/tmp/$PROJECT/lanes}"
+# Central defaults; invalid supplied configuration never falls back.
+. "$HERE/../shared.sh" || exit 1
+fence_config_values || exit 1
+
 
 WANT="" ROOT_MODE=reuse SEATS="cc:1" DRY=0 CHECK_BUDGET=""
 while [ $# -gt 0 ]; do
@@ -62,7 +66,7 @@ case "$ROOT_MODE" in reuse|rebuild) ;; *) echo "run: --root takes reuse|rebuild,
 # The egress capture's start and verdict bounds, in whole seconds of wall time
 # (a self-test shortens them); each is judged from $EPOCHREALTIME, so a slow
 # docker exec cannot stretch the named bound.
-EGRESS_READY_SECS="${LANE_EGRESS_READY_SECS:-10}" EGRESS_VERDICT_SECS="${LANE_EGRESS_VERDICT_SECS:-30}"
+EGRESS_READY_SECS="${LANE_EGRESS_READY_SECS}" EGRESS_VERDICT_SECS="${LANE_EGRESS_VERDICT_SECS}"
 for bound in "$EGRESS_READY_SECS" "$EGRESS_VERDICT_SECS"; do
   [[ "$bound" =~ ^[0-9]+$ ]] || { echo "run: LANE_EGRESS_READY_SECS and LANE_EGRESS_VERDICT_SECS take whole seconds, not '$bound'" >&2; exit 2; }
 done
@@ -123,6 +127,17 @@ COUNT="$(printf '%s\n' "$ORDER" | wc -w | tr -d ' ')"
 MODE=sequence
 [ "$COUNT" -eq 1 ] && MODE=solo
 
+case "${LANE_H_SCOPE:-}" in
+  "") ;;
+  birth|discovery|delivery|delivery-tmux|delivery-outcomes|delivery-status|controls|open-live|reload|lifecycle|restoration|tab-priority) [ "$ORDER" = H ] || die "LANE_H_SCOPE requires solo H" 2 ;;
+  *) die "LANE_H_SCOPE takes birth, discovery, delivery, delivery-tmux, delivery-outcomes, delivery-status, controls, open-live, reload, lifecycle, restoration or tab-priority" 2 ;;
+esac
+if [ -n "${LANE_H_PFM:-}" ]; then
+  [ -n "${LANE_H_SCOPE:-}" ] || die "LANE_H_PFM requires focused solo H scope" 2
+  [ -f "$LANE_H_PFM" ] && [ -x "$LANE_H_PFM" ] && [ ! -L "$LANE_H_PFM" ] ||
+    die "LANE_H_PFM must be an executable regular file" 2
+fi
+
 # ─── the known-gap ledger, before anything runs ─────────────────────────────
 
 gaps_validate || die "the known-gap ledger is not valid (lines above) — fix it before a run" 2
@@ -131,15 +146,19 @@ gaps_validate || die "the known-gap ledger is not valid (lines above) — fix it
 
 [ -f "$BUDGETS" ] || die "TOOLCHAIN-MISSING — $BUDGETS not found; every lane needs a budget row" 2
 TOLERANCE="$(awk '/^tolerance:/ { print $2; exit }' "$BUDGETS")"
+TOLERANCE="$(fence_config_resolve "$TOLERANCE")" || exit 2
 [ -n "$TOLERANCE" ] || die "$BUDGETS carries no tolerance: — the ×1.25 rule cannot be applied" 2
 budget_for() { # budget_for <lane> — the value, or empty when the lane has no row
-  awk -v want="$1" '
+  local value
+  value="$(awk -v want="$1" '
     /^lanes:/ { inl = 1; next }
     /^[a-z]/ { inl = 0 }
     inl && $1 ~ /:$/ { k = $1; sub(/:$/, "", k); if (k == want) { print $2; exit } }
-  ' "$BUDGETS"
+  ' "$BUDGETS")"
+  fence_config_resolve "$value"
 }
 SEQ_BUDGET="$(awk '/^sequence:/ { print $2; exit }' "$BUDGETS")"
+SEQ_BUDGET="$(fence_config_resolve "$SEQ_BUDGET")" || exit 2
 [ -n "$SEQ_BUDGET" ] || die "$BUDGETS carries no sequence: budget row" 2
 
 # budget_verdict <name> <wall_s> <value> — prints the line, returns 1 on a red
@@ -244,10 +263,14 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || die "no image $IMAGE after the 
 # shellcheck source=container.sh
 . "$HERE/container.sh"
 FENCE_CALLER=lanes-run lane_fence_env "$ROOT"
-CNAME="pfm-lane-$STAMP"
-docker rm -f "$CNAME" >/dev/null 2>&1
-lane_run "$CNAME" "$IMAGE" none || die "the lane container would not start from $IMAGE" 1
+# This run's own name — worktree, stamp, pid and a random part — so two runs started in the same
+# second never share one; the only container a run removes is the one it started.
+wt_tag="$(basename "$ROOT" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.\n-' '-')"; wt_tag="${wt_tag#[.-]}"
+rand="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+[ "${#rand}" -eq 8 ] || die "no random part for the lane container's name from /dev/urandom" 1
+CNAME="pfm-lane-${wt_tag:-wt}-$STAMP-$$-$rand"
 trap 'docker rm -f "$CNAME" >/dev/null 2>&1' EXIT
+lane_run "$CNAME" "$IMAGE" none || die "the lane container would not start from $IMAGE" 1
 scan="$(docker exec "$CNAME" bash /worktree/infra/fence/lanes/cred-scan.sh 2>&1)" ||
   die "✗ CREDENTIAL-REFUSED — $scan" 1
 
@@ -273,13 +296,19 @@ if docker exec "$CNAME" mkdir -p "$CONT_OUT" &&
     sleep 0.2
   done
 fi
+H_PFM_OVERRIDE=""
+if [ -n "${LANE_H_PFM:-}" ]; then
+  H_PFM_OVERRIDE="$CONT_OUT/pfm"
+  docker cp "$LANE_H_PFM" "$CNAME:$H_PFM_OVERRIDE" || die "isolated H product copy failed" 1
+fi
 failed_lanes="" missing_rows=""
 for l in $ORDER; do
   prior="$(prior_of "$l")"
   say "── lane $l${prior:+ (after $prior)}"
   docker exec -w /tmp \
     -e "LANE_MODE=$MODE" -e "LANE_PRIOR=$prior" -e "LANE_SEATS=$SEATS" \
-    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e "LANE_PROFILE=${LANE_PROFILE:-}" -e IS_SANDBOX=1 -e GOPROXY=off \
+    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e "LANE_PROFILE=${LANE_PROFILE:-}" \
+    -e "LANE_H_SCOPE=${LANE_H_SCOPE:-all}" -e "H_PFM_OVERRIDE=$H_PFM_OVERRIDE" -e IS_SANDBOX=1 -e GOPROXY=off \
     "$CNAME" bash "/worktree/infra/fence/lanes/$l.sh" 2>&1 | tee "$OUT/$l.stream.log"
   rc="${PIPESTATUS[0]}"
   for f in "$l.log" "$l.timeline.tsv" "$l.row.tsv" "$l.logstate" "$l.seats" "$l.waits.tsv"; do

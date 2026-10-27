@@ -4,7 +4,7 @@ Runs a plugin checkout in a real, isolated, metered Claude Code session on the h
 
 ```bash
 infra/plugin-lab/lab list
-infra/plugin-lab/lab run sub-agent-compact/logger-ready --plugin {checkout}/plugins/sub-agent-compact --ledger {flight dir}/lab-ledger.tsv
+infra/plugin-lab/lab run forward-compaction/logger-ready --plugin {checkout}/plugins/forward-compaction --ledger {flight dir}/lab-ledger.tsv
 ```
 
 - `scenarios/{plugin}/` holds the scenarios and `gaps.tsv`; `lib/` the lab; `hooks/mark.sh` the session marks; `tests/` the hermetic self-tests (fence step `templates.plugin-lab`).

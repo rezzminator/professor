@@ -104,3 +104,11 @@ func TestFromSocketRecognizesEveryEngine(t *testing.T) {
 		t.Fatalf("FromSocket(unknown) = %q, %t; want empty, false", got, ok)
 	}
 }
+
+func TestHerdrNativePromptOnlyClaude(t *testing.T) {
+	for _, id := range All() {
+		if got, want := MustLookup(id).HerdrNativePrompt, id == Claude; got != want {
+			t.Errorf("%s HerdrNativePrompt=%v, want %v", id, got, want)
+		}
+	}
+}

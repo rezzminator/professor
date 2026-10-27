@@ -24,6 +24,7 @@ func documentFixture() Document {
 			PersistError: "read-only",
 		},
 		Override: &Override{Path: "/cfg/pfm.prices.json", Rows: 1},
+		Billing:  &Billing{Route: "vertex", Region: "regional", Configured: true, Multiplier: 1.1},
 		Rows: []Row{
 			{
 				Key:    "claude-opus-5-5",
@@ -60,6 +61,19 @@ func TestDocumentRoundTrips(t *testing.T) {
 	}
 }
 
+func TestOlderDocumentLeavesBillingUnspecified(t *testing.T) {
+	doc := documentFixture()
+	doc.Billing = nil
+	var content bytes.Buffer
+	if err := EncodeDocument(&content, doc); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeDocument(content.Bytes(), "older")
+	if err != nil || decoded.Billing != nil {
+		t.Fatalf("old document must not invent a billing route: %+v, %v", decoded.Billing, err)
+	}
+}
+
 func TestDecodeDocumentRefusesWhatPfmNeverWrites(t *testing.T) {
 	compact, err := json.Marshal(documentFixture())
 	if err != nil {
@@ -74,6 +88,9 @@ func TestDecodeDocumentRefusesWhatPfmNeverWrites(t *testing.T) {
 		{"a rate below zero", `"in":4,"out":20,"hit"`, `"in":-4,"out":20,"hit"`, "non-negative"},
 		{"no fetch time", `"fetched_at":"2026-01-01T00:00:00Z"`, `"fetched_at":""`, "fetched_at"},
 		{"an override with no path", `"path":"/cfg/pfm.prices.json"`, `"path":""`, "override needs"},
+		{"an unknown billing route", `"route":"vertex"`, `"route":"other"`, "billing route/region"},
+		{"a contradictory multiplier", `"multiplier":1.1`, `"multiplier":2`, "billing multiplier"},
+		{"a non-default unconfigured route", `"configured":true`, `"configured":false`, "configured flag"},
 		{"not JSON", `{`, `[`, "price document saved"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -45,10 +45,7 @@ func RecordSession(raw []byte, sidDir string, warn io.Writer) {
 	if err := json.Unmarshal(raw, &sample); err != nil {
 		return // Render reports malformed input itself
 	}
-	sessionID := strings.TrimSpace(sample.SessionID)
-	if sessionID == "" && sample.TranscriptPath != "" {
-		sessionID = strings.TrimSuffix(filepath.Base(sample.TranscriptPath), filepath.Ext(sample.TranscriptPath))
-	}
+	sessionID := sessionIDOf(sample.SessionID, sample.TranscriptPath)
 	if sessionID == "" {
 		return
 	}
@@ -59,6 +56,15 @@ func RecordSession(raw []byte, sidDir string, warn io.Writer) {
 	if err := writeSessionEffort(sidDir, sessionID, record); err != nil {
 		fmt.Fprintf(warn, "pfm statusline: record session effort (fail-open): %v\n", err)
 	}
+}
+
+// sessionIDOf is the payload's session: its session_id, else the transcript
+// file's base name without its extension; "" when it names neither.
+func sessionIDOf(sessionID, transcriptPath string) string {
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" || transcriptPath == "" {
+		return sessionID
+	}
+	return strings.TrimSuffix(filepath.Base(transcriptPath), filepath.Ext(transcriptPath))
 }
 
 // writeSessionEffort replaces the session's record whole, so a row reading it

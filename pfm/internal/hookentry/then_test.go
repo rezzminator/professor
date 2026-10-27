@@ -181,3 +181,29 @@ func TestThenRefusesAnUnknownEngineBeforeWaiting(t *testing.T) {
 		t.Fatalf("refusal does not name the engine: %q", log.String())
 	}
 }
+
+func TestThenCarriesAndValidatesSeatBackend(t *testing.T) {
+	for _, backend := range []string{"", "tmux", "herdr", "bogus"} {
+		t.Run("backend-"+backend, func(t *testing.T) {
+			waiter := &blockingWaiter{release: make(chan struct{}), result: pfmcall.Result{Message: "delivered"}}
+			close(waiter.release)
+			swapThenWaiter(t, waiter)
+			args := []string{"--socket", "/seat/socket", "--target", "p2", "--engine", "cc", "--steer", "resume"}
+			if backend != "" {
+				args = append(args, "--backend", backend)
+			}
+			var log bytes.Buffer
+			code := Then(args, &log)
+			if backend == "bogus" {
+				if code != 2 || !strings.Contains(log.String(), "unsupported seat backend") {
+					t.Fatalf("invalid backend code=%d log=%q", code, log.String())
+				}
+				return
+			}
+			if code != 0 || waiter.got.Backend != backend || waiter.got.SocketPath != "/seat/socket" ||
+				waiter.got.Target != "p2" {
+				t.Fatalf("backend handoff: code=%d wait=%+v log=%q", code, waiter.got, log.String())
+			}
+		})
+	}
+}

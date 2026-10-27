@@ -137,8 +137,7 @@ func renderEvent(ev *event, req *request) []string {
 	return lines
 }
 
-// header is the digest's head; shown names how many events the filters kept,
-// -1 for none (counts).
+// header is the digest's head; shown names how many events the filters kept.
 func header(p *parsed, req *request, shown int) []string {
 	meta := func(key, def string) string {
 		if value, set := p.meta[key]; set {
@@ -205,9 +204,6 @@ func header(p *parsed, req *request, shown int) []string {
 		strings.Join(tally, " · ")))
 	if metaError := p.meta["meta_error"]; metaError != "" {
 		lines = append(lines, "META UNREADABLE "+metaError)
-	}
-	if shown < 0 {
-		return lines
 	}
 	total := 0
 	for _, ev := range p.events {
@@ -316,94 +312,6 @@ func showDigest(p *parsed, req *request, home string) (string, error) {
 	lines = append(lines, skippedLine(p))
 	for index := 2; index < len(lines); index++ {
 		lines[index] = shorten(lines[index], p, home)
-	}
-	return strings.Join(lines, "\n") + "\n", nil
-}
-
-func countsDigest(p *parsed, req *request) (string, error) {
-	events, err := selectEvents(p, req)
-	if err != nil {
-		return "", err
-	}
-	type row struct{ calls, errs, total, largest, unanswered int }
-	rows := map[string]*row{}
-	var names []string
-	kinds := newTally()
-	for _, ev := range events {
-		kinds.add(ev.kind)
-		if ev.kind != kindCall {
-			continue
-		}
-		r := rows[ev.name]
-		if r == nil {
-			r = &row{}
-			rows[ev.name] = r
-			names = append(names, ev.name)
-		}
-		r.calls++
-		size := 0
-		if ev.result != nil {
-			size = utf8.RuneCountInString(*ev.result)
-		} else {
-			r.unanswered++
-		}
-		if ev.err {
-			r.errs++
-		}
-		r.total += size
-		r.largest = max(r.largest, size)
-	}
-	slices.SortStableFunc(names, func(left, right string) int { return rows[right].calls - rows[left].calls })
-	lines := append(header(p, req, -1), "TOOL | CALLS | ERR | RESULT TOTAL | RESULT MAX | NO RESULT")
-	for _, name := range names {
-		r := rows[name]
-		lines = append(lines, fmt.Sprintf("%s | %d | %d | %s | %s | %d", name, r.calls, r.errs, sizeText(r.total),
-			sizeText(r.largest), r.unanswered))
-	}
-	lines = append(lines, "EVENTS "+tallyText(kinds), skippedLine(p))
-	return strings.Join(lines, "\n") + "\n", nil
-}
-
-func typesDigest(p *parsed, req *request) (string, error) {
-	for _, flag := range []struct {
-		name  string
-		given bool
-	}{
-		{optOnly, req.only != defaultOnly},
-		{optTool, len(req.tools) != 0},
-		{optGrep, req.grep != ""},
-		{optSince, req.since != ""},
-		{optUntil, req.until != ""},
-		{optFirst, req.first != 0},
-		{optLast, req.last != 0},
-	} {
-		if flag.given {
-			return "", usageFailure("types counts records: %s does not apply (only --lines does)", flag.name)
-		}
-	}
-	low, high := 0.0, float64(1<<62)
-	if req.lines != "" {
-		var err error
-		if low, high, err = lineBounds(req.lines); err != nil {
-			return "", err
-		}
-	}
-	groups := map[string]*tally{dispRendered: newTally(), dispHeader: newTally(), dispSkipped: newTally()}
-	total := 0
-	for _, line := range p.order {
-		if low <= float64(line) && float64(line) <= high {
-			mark := p.disp[line]
-			groups[mark.state].add(mark.label)
-			total++
-		}
-	}
-	lines := []string{fmt.Sprintf("RECORDS %d in %s (%s)", total, p.path, p.engine)}
-	for _, state := range []string{dispRendered, dispHeader, dispSkipped} {
-		text := tallyText(groups[state])
-		if text == "" {
-			text = noneWord
-		}
-		lines = append(lines, fmt.Sprintf("%s %d: %s", state, groups[state].total(), text))
 	}
 	return strings.Join(lines, "\n") + "\n", nil
 }

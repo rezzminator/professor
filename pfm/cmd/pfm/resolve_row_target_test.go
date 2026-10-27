@@ -293,7 +293,7 @@ func TestChatKillReportsLookupFailureWithoutKilling(t *testing.T) {
 	t.Setenv(fleet.TestNowNSEnv, "not-a-timestamp")
 
 	var stdout, stderr bytes.Buffer
-	code := runKill([]string{id}, &stdout, &stderr, commandRuntime{Paths: jailPaths(t)})
+	code := runKill(t.Context(), []string{id}, &stdout, &stderr, commandRuntime{Paths: jailPaths(t)})
 	if code != 1 {
 		t.Fatalf("runKill() code = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -324,7 +324,7 @@ func TestChatKillOfAnUnknownIDStillUsesTheManagersRefusal(t *testing.T) {
 	jailTest(t)
 	const id = "no-such-chat"
 	var stdout, stderr bytes.Buffer
-	code := runKill([]string{id}, &stdout, &stderr, commandRuntime{Paths: jailPaths(t)})
+	code := runKill(t.Context(), []string{id}, &stdout, &stderr, commandRuntime{Paths: jailPaths(t)})
 	if code != 1 {
 		t.Fatalf("runKill() code = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}

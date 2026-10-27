@@ -1,0 +1,210 @@
+{
+  "0018": {
+    "name": "Cyan beam: function definitions",
+    "scope": [
+      "meta.definition.function entity.name.function",
+      "meta.definition.method entity.name.function",
+      "meta.function entity.name.function"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0021": {
+    "name": "Gold beam: type definitions",
+    "scope": [
+      "meta.definition.class entity.name.type.class",
+      "meta.class entity.name.type.class",
+      "meta.interface entity.name.type.interface"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffd86b"
+    }
+  },
+  "0056": {
+    "name": "Violet beam: diff headers",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.header.from-file",
+      "meta.diff.header.to-file"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b294f5"
+    }
+  },
+  "0057": {
+    "name": "Lilac: diff ranges",
+    "scope": [
+      "meta.diff.range"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c0a2f5"
+    }
+  },
+  "0058": {
+    "name": "Smoke: diff index",
+    "scope": [
+      "meta.diff.index",
+      "meta.separator.diff"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9284a8"
+    }
+  },
+  "0066": {
+    "name": "Search: paths",
+    "scope": [
+      "meta.path.basename.search"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0067": {
+    "name": "Search: line numbers",
+    "scope": [
+      "meta.resultLinePrefix.lineNumber.search"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9284a8"
+    }
+  },
+  "0068": {
+    "name": "Search: match line prefix",
+    "scope": [
+      "meta.resultLinePrefix.matchLinePrefix.search"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fa7bc6"
+    }
+  },
+  "0076": {
+    "name": "JSON key depth 2",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0077": {
+    "name": "JSON key depth 3",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fce353"
+    }
+  },
+  "0078": {
+    "name": "JSON key depth 4",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b294f5"
+    }
+  },
+  "0079": {
+    "name": "JSON key depth 5",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0080": {
+    "name": "JSON key depth 6",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8fa3"
+    }
+  },
+  "0081": {
+    "name": "JSON key depth 7",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fa7bc6"
+    }
+  },
+  "0082": {
+    "name": "JSON key depth 8",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0083": {
+    "name": "JSON key depth 9",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fce353"
+    }
+  },
+  "0084": {
+    "name": "JSON key depth 10",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b294f5"
+    }
+  },
+  "0085": {
+    "name": "JSON key depth 11",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8dccf9"
+    }
+  },
+  "0086": {
+    "name": "JSON key depth 12",
+    "scope": [
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json support.type.property-name.json",
+      "meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json meta.structure.dictionary.json punctuation.support.type.property-name"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8fa3"
+    }
+  }
+}

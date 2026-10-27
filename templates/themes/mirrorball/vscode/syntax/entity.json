@@ -1,0 +1,145 @@
+{
+  "0017": {
+    "name": "Cyan beam: functions",
+    "scope": [
+      "entity.name.function",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "support.function.any-method",
+      "meta.function-call.generic",
+      "entity.name.command",
+      "meta.require"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#72e5fd"
+    }
+  },
+  "0020": {
+    "name": "Gold beam: types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.other.inherited-class",
+      "support.type",
+      "support.class",
+      "entity.name.type.parameter",
+      "support.class.component",
+      "entity.name.type.class"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffd86b"
+    }
+  },
+  "0023": {
+    "name": "Indigo: namespaces and modules",
+    "scope": [
+      "entity.name.namespace",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "storage.modifier.import",
+      "support.other.namespace",
+      "entity.name.import"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b9b4ff"
+    }
+  },
+  "0024": {
+    "name": "Amber: decorators, attributes and macros",
+    "scope": [
+      "entity.name.function.decorator",
+      "punctuation.decorator",
+      "entity.name.function.macro",
+      "support.function.macro",
+      "meta.attribute.rust",
+      "punctuation.definition.attribute",
+      "storage.type.annotation",
+      "entity.name.function.preprocessor",
+      "keyword.control.directive",
+      "meta.preprocessor",
+      "punctuation.definition.decorator",
+      "meta.function.decorator",
+      "meta.decorator entity.name.function",
+      "meta.decorator meta.function-call entity.name.function",
+      "meta.decorator variable.other.readwrite"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f0ad67"
+    }
+  },
+  "0025": {
+    "name": "Orchid: lifetimes",
+    "scope": [
+      "entity.name.type.lifetime",
+      "punctuation.definition.lifetime"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#e1afed"
+    }
+  },
+  "0026": {
+    "name": "Rose: tags",
+    "scope": [
+      "entity.name.tag",
+      "entity.name.tag.html",
+      "meta.tag.sgml.doctype"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff8fa3"
+    }
+  },
+  "0027": {
+    "name": "Peach: attributes",
+    "scope": [
+      "entity.other.attribute-name",
+      "entity.other.attribute-name.html"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffc29e"
+    }
+  },
+  "0028": {
+    "name": "Gold beam: CSS classes",
+    "scope": [
+      "entity.other.attribute-name.class.css",
+      "entity.other.attribute-name.class"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffd86b"
+    }
+  },
+  "0029": {
+    "name": "Coral beam: CSS ids",
+    "scope": [
+      "entity.other.attribute-name.id.css",
+      "entity.other.attribute-name.id"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa07a"
+    }
+  },
+  "0030": {
+    "name": "Cyan beam: CSS pseudo-classes",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class",
+      "entity.other.attribute-name.pseudo-element"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#72e5fd"
+    }
+  }
+}

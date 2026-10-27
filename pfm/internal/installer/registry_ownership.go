@@ -71,7 +71,7 @@ var errPlanSkillSources = errors.New("plan registry source-fetched skills")
 // source-fetched skills that do not clash with a template skill, and the
 // embedded command and skill assets. A source it cannot read is an error,
 // never an empty plan.
-func PlanRegistryLinks(home, store, clone, manifestURL string) (RegistryPlan, error) {
+func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, error) {
 	plan := RegistryPlan{
 		AgentDirs: []string{
 			filepath.Join(clone, "templates", "global", "agents"),
@@ -107,8 +107,9 @@ func PlanRegistryLinks(home, store, clone, manifestURL string) (RegistryPlan, er
 			return RegistryPlan{}, fmt.Errorf("plan registry skill %s: %w", path, err)
 		}
 		plan.Links[filepath.Join(store, globalSkillsRegistry, entry.Name())] = true
+		plan.Links[filepath.Join(home, ".agents", globalSkillsRegistry, entry.Name())] = true
 	}
-	sources, _, err := loadSkillSources(clone, manifestURL)
+	sources, _, err := loadSkillSources(clone, releaseURL)
 	if err != nil {
 		return RegistryPlan{}, fmt.Errorf("%w: %w", errPlanSkillSources, err)
 	}
@@ -146,7 +147,7 @@ func ScanRegistryOwnership(home, store string, retired RetiredRegistryNames) (Re
 	if fallback := filepath.Join(home, ".professor"); clone != fallback {
 		roots = append(roots, fallback)
 	}
-	plan, err := PlanRegistryLinks(home, store, clone, ThemeManifestURL(""))
+	plan, err := PlanRegistryLinks(home, store, clone, ThemeReleaseURL(""))
 	if err != nil {
 		return RegistryOwnership{}, err
 	}

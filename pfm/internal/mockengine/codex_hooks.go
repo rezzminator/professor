@@ -39,9 +39,13 @@ func codexHookRPC(proc *process, method string, params json.RawMessage) (any, er
 		return nil, fmt.Errorf("resolve Codex home: %w", err)
 	}
 	configPath := filepath.Join(home, "config.toml")
-	config := map[string]any{}
-	if _, err := toml.DecodeFile(configPath, &config); err != nil && !errors.Is(err, os.ErrNotExist) {
+	raw, err := os.ReadFile(configPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read native hook state: %w", err)
+	}
+	config := map[string]any{}
+	if _, err := toml.Decode(string(raw), &config); err != nil {
+		return nil, fmt.Errorf("parse native hook state: %w", err)
 	}
 	hooks, err := codexNativeHooks(home, config)
 	if err != nil {
@@ -92,36 +96,106 @@ func codexHookRPC(proc *process, method string, params json.RawMessage) (any, er
 	if !found {
 		return nil, errors.New("native hook key or current hash does not match source")
 	}
-	hookConfig, _ := config["hooks"].(map[string]any)
-	if hookConfig == nil {
-		hookConfig = map[string]any{}
-		config["hooks"] = hookConfig
+	updated, err := replaceCodexHookState(string(raw), key, map[string]any{
+		"enabled": input.Value.Enabled, "trusted_hash": input.Value.TrustedHash,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("edit native hook state: %w", err)
 	}
-	state, _ := hookConfig["state"].(map[string]any)
-	if state == nil {
-		state = map[string]any{}
-		hookConfig["state"] = state
-	}
-	state[key] = map[string]any{"enabled": input.Value.Enabled, "trusted_hash": input.Value.TrustedHash}
-	var encoded bytes.Buffer
-	if err := toml.NewEncoder(&encoded).Encode(config); err != nil {
-		return nil, fmt.Errorf("encode native hook state: %w", err)
-	}
-	if err := os.WriteFile(configPath, encoded.Bytes(), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(updated), 0o600); err != nil {
 		return nil, fmt.Errorf("persist native hook state: %w", err)
 	}
 	return map[string]any{}, nil
+}
+
+// replaceCodexHookState models Codex's targeted config edit, not a whole-file
+// re-encode: comments include installer ownership fences, and losing them turns
+// the next install's own fleet prompt into an apparently foreign declaration.
+func replaceCodexHookState(raw, key string, value map[string]any) (string, error) {
+	quoted, err := json.Marshal(key)
+	if err != nil {
+		return "", fmt.Errorf("quote hook key: %w", err)
+	}
+	var encoded bytes.Buffer
+	fmt.Fprintf(&encoded, "[hooks.state.%s]\n", quoted)
+	if err := toml.NewEncoder(&encoded).Encode(value); err != nil {
+		return "", fmt.Errorf("encode hook state: %w", err)
+	}
+	start, end, offset := -1, len(raw), 0
+	for _, line := range strings.SplitAfter(raw, "\n") {
+		boundary := offset
+		offset += len(line)
+		if !strings.HasPrefix(strings.TrimSpace(line), "[") {
+			continue
+		}
+		var prefix map[string]any
+		metadata, err := toml.Decode(raw[:offset], &prefix)
+		if err != nil {
+			// A header-looking line inside a multiline string is not a table.
+			continue
+		}
+		if start >= 0 {
+			end = boundary
+			break
+		}
+		keys := metadata.Keys()
+		if len(keys) > 0 {
+			last := keys[len(keys)-1]
+			if len(last) == 3 && last[0] == "hooks" && last[1] == "state" && last[2] == key {
+				start = boundary
+			}
+		}
+	}
+	updated := raw
+	if start >= 0 {
+		// Trailing comments may open the next installer's ownership fence.
+		// They are not hook-state values, even when no table follows them.
+		for end > start {
+			before := strings.TrimSuffix(raw[:end], "\n")
+			boundary := strings.LastIndexByte(before, '\n') + 1
+			line := strings.TrimSpace(raw[boundary:end])
+			if line != "" && !strings.HasPrefix(line, "#") {
+				break
+			}
+			end = boundary
+		}
+		updated = raw[:start] + raw[end:]
+	}
+	if updated != "" && !strings.HasSuffix(updated, "\n") {
+		updated += "\n"
+	}
+	updated += encoded.String()
+	var checked map[string]any
+	if _, err := toml.Decode(updated, &checked); err != nil {
+		return "", fmt.Errorf("validate updated hook config: %w", err)
+	}
+	return updated, nil
 }
 
 func codexNativeHooks(home string, config map[string]any) ([]codexNativeHook, error) {
 	path := filepath.Join(home, "hooks.json")
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return []codexNativeHook{}, nil
-	}
-	if err != nil {
+		raw = []byte("{}")
+	} else if err != nil {
 		return nil, fmt.Errorf("read native hooks: %w", err)
 	}
+	hooks, err := codexHooksFromDocument(raw, path, "user", path, config)
+	if err != nil {
+		return nil, err
+	}
+	plugins, err := codexPluginHooks(home, config)
+	if err != nil {
+		return nil, err
+	}
+	return append(hooks, plugins...), nil
+}
+
+func codexHooksFromDocument(
+	raw []byte,
+	path, source, keyPrefix string,
+	config map[string]any,
+) ([]codexNativeHook, error) {
 	var document hookDocument
 	if err := json.Unmarshal(raw, &document); err != nil {
 		return nil, fmt.Errorf("decode native hooks: %w", err)
@@ -154,7 +228,7 @@ func codexNativeHooks(home string, config map[string]any) ([]codexNativeHook, er
 					}
 					keyEvent += strings.ToLower(string(char))
 				}
-				key := fmt.Sprintf("%s:%s:%d:%d", path, keyEvent, matcherIndex, handlerIndex)
+				key := fmt.Sprintf("%s:%s:%d:%d", keyPrefix, keyEvent, matcherIndex, handlerIndex)
 				hash := fmt.Sprintf("sha256:%x", sha256.Sum256(fingerprint))
 				hookState, _ := state[key].(map[string]any)
 				enabled := true
@@ -167,7 +241,7 @@ func codexNativeHooks(home string, config map[string]any) ([]codexNativeHook, er
 				}
 				hooks = append(hooks, codexNativeHook{
 					Key: key, HandlerType: handler.Type, Command: handler.Command,
-					Matcher: entry.Matcher, SourcePath: path, Source: "user", CurrentHash: hash,
+					Matcher: entry.Matcher, SourcePath: path, Source: source, CurrentHash: hash,
 					EventName: strings.ToLower(event[:1]) + event[1:], Enabled: enabled, TrustStatus: trust,
 				})
 			}

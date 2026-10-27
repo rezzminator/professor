@@ -1,0 +1,40 @@
+{
+  "0008": {
+    "name": "Straw · strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "punctuation.definition.string",
+      "string.quoted.raw.go",
+      "string.unquoted.plain.out.yaml",
+      "string.unquoted.block.yaml"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d3d389"
+    }
+  },
+  "0010": {
+    "name": "Copper · regular expressions",
+    "scope": [
+      "string.regexp",
+      "source.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e59b91"
+    }
+  },
+  "0048": {
+    "name": "Pale steel · link text",
+    "scope": [
+      "string.other.link.title.markdown",
+      "string.other.link.description.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b4d6ef"
+    }
+  }
+}

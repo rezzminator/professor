@@ -12,8 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
+	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -24,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -107,6 +108,12 @@ func DeliverName(
 	name string,
 	runtime *pfmconfig.Runtime,
 ) (int, string, error) {
+	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\x00\r\n") {
+		return 1, "", errors.New("chat name must be nonempty and contain no NUL or newline")
+	}
+	if err := naming.ValidateLabel(name); err != nil {
+		return 1, "", err
+	}
 	engine, err := NewCallEngine(false, runtime)
 	if err != nil {
 		return 1, "", err
@@ -122,16 +129,23 @@ func DeliverName(
 	if err != nil {
 		return 1, "", err
 	}
-	socketPath, err := values.SocketUnder(chat.Socket)
+	socketPath, err := targetSocket(values, chat.Backend, chat.Socket)
 	if err != nil {
 		return 1, "", err
 	}
 	target := pfmcall.Target{
+		Backend: chat.Backend, SeatID: chat.SeatID, HerdrWorkspace: chat.HerdrWorkspace,
 		SocketPath: socketPath, Pane: chat.Pane, Engine: string(chat.Engine),
 		Name: chat.Name, ID: chat.ID, Session: chat.Session,
 	}
 	request.Target = chat.Pane
 	result, err := engine.CallTarget(ctx, target, request)
+	if err == nil && result.Code == 0 && chat.Backend == spawn.BackendHerdr {
+		err = renameHerdr(ctx, chat, name, values)
+		if err != nil {
+			return 1, result.Message, err
+		}
+	}
 	return result.Code, result.Message, err
 }
 
@@ -171,7 +185,7 @@ func ResolveIn(
 			return self, true, nil
 		}
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(runtime)})
 	if err != nil {
 		return headless.Chat{}, false, err
 	}
@@ -186,9 +200,13 @@ func ResolveIn(
 	var requestIdentity *resolve.Identity
 	if resolve.IsRawPane(normalized) {
 		if scoped, ok := ScopedSelf(ctx); ok {
-			identity := resolve.Identity{}
+			identity := resolve.Identity{
+				Backend:        scoped.Backend,
+				SeatID:         scoped.SeatID,
+				HerdrWorkspace: scoped.HerdrWorkspace,
+			}
 			if scoped.Socket != "" {
-				identity.SocketPath, err = values.SocketUnder(scoped.Socket)
+				identity.SocketPath, err = targetSocket(values, scoped.Backend, scoped.Socket)
 				if err != nil {
 					return headless.Chat{}, false, fmt.Errorf("resolve scoped caller socket: %w", err)
 				}
@@ -219,7 +237,7 @@ func ResolveIn(
 		rosterMatch = matched
 		socketPath := ""
 		if matched.Socket != "" {
-			socketPath, matchErr = values.SocketUnder(matched.Socket)
+			socketPath, matchErr = targetSocket(values, matched.Backend, matched.Socket)
 			if matchErr != nil {
 				return resolve.Seat{}, resolve.CodeUndelivered, "", matchErr
 			}
@@ -229,13 +247,19 @@ func ResolveIn(
 			pane = matched.Session
 		}
 		return resolve.Seat{
-			SocketPath: socketPath, Pane: pane, Engine: string(matched.Engine),
-			Name: matched.Name, ID: matched.ID, Session: matched.Session,
+			Backend:        matched.Backend,
+			SeatID:         matched.SeatID,
+			HerdrWorkspace: matched.HerdrWorkspace,
+			SocketPath:     socketPath,
+			Pane:           pane,
+			Engine:         string(matched.Engine),
+			Name:           matched.Name,
+			ID:             matched.ID,
+			Session:        matched.Session,
 		}, 0, "", nil
 	})
 	seat, code, detail, err := (resolve.Ladder{
 		Roster: roster, Raw: raw, Self: identifier,
-		CodexSelf:       codexSeatIdentifier{runtime: runtime},
 		RequestIdentity: requestIdentity,
 		Env:             paths.OSEnv{}, Session: pfmcall.TmuxCaller{},
 	}).Resolve(ctx, name, resolve.LadderOptions{})
@@ -248,8 +272,9 @@ func ResolveIn(
 			return rosterMatch, true, nil
 		}
 		resolved := headless.Chat{
+			Backend: seat.Backend, SeatID: seat.SeatID, HerdrWorkspace: seat.HerdrWorkspace,
 			Name: seat.Name, ID: seat.ID, Engine: pfmengine.ID(seat.Engine),
-			Socket: filepath.Base(seat.SocketPath), Session: seat.Session,
+			Socket: seatSocket(seat.Backend, seat.SocketPath), Session: seat.Session,
 			Pane: seat.Pane, Live: true,
 		}
 		if selfTarget {
@@ -401,6 +426,7 @@ func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 	for index := range rows {
 		row := rows[index]
 		candidates = append(candidates, resolve.RosterCandidate{
+			Backend: row.Backend, SeatID: row.SeatID, HerdrWorkspace: row.HerdrWorkspace,
 			Name: row.Name, ID: row.ID, Socket: row.Socket,
 			Session: row.SessionName, Pane: row.PaneID,
 			Engine: string(compose.EngineForKind(row.Kind)),
@@ -420,7 +446,7 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	}
 	for index := range rows {
 		row := rows[index]
-		if row.ID == match.ID && row.Socket == match.Socket &&
+		if row.SeatID == match.SeatID && row.ID == match.ID && row.Socket == match.Socket &&
 			row.PaneID == match.Pane && row.Name == match.Name {
 			return FromRow(row), true, nil
 		}
@@ -431,6 +457,7 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 // FromRow is a composed row in the shape every verb operates on.
 func FromRow(row compose.Row) headless.Chat {
 	return headless.Chat{
+		Backend: row.Backend, SeatID: row.SeatID, HerdrWorkspace: row.HerdrWorkspace,
 		Name:    row.Name,
 		ID:      row.ID,
 		Engine:  compose.EngineForKind(row.Kind),
@@ -452,53 +479,81 @@ func panePID(pids []int) int {
 	return pids[0]
 }
 
-// SeatIdentity is the last identity rung for a Codex tool shell under `codex
-// app-server` instead of in its own pane. That server is reparented to init and
-// serves every seat from one process, so a tool shell it spawns has no tmux
-// anywhere in its ancestry — the walk has nothing to find, and the seat's
-// messages went out UNSIGNED though the seat itself is plainly addressable.
-//
-// The shell does carry CODEX_THREAD_ID, and the fleet already binds a thread to
-// the socket hosting it: this is that lookup, and nothing more. It runs only
-// after the tmux rungs fail, because CODEX_THREAD_ID is INHERITED — a process
-// with a pane of its own must never be renamed by an id it merely inherited.
-func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Identity, bool) {
-	env := paths.OSEnv{}
-	thread := env.Get(resolve.CodexThreadEnv)
-	if thread == "" || env.Get(resolve.ClaudeSessionEnv) != "" {
-		return resolve.Identity{}, false
-	}
-	database, err := store.Open(store.WithWarningWriter(io.Discard))
-	if err != nil {
-		return resolve.Identity{}, false
-	}
-	defer func() {
-		if err := database.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "chat identity: close fleet database: %v\n", err)
+// CodexSeats supplies the live fleet rows for Identify's final Codex-thread rung.
+func CodexSeats(runtime *pfmconfig.Runtime) func(context.Context) ([]resolve.CodexSeat, error) {
+	return func(ctx context.Context) (seats []resolve.CodexSeat, returnErr error) {
+		database, err := store.Open(store.WithWarningWriter(io.Discard))
+		if err != nil {
+			return nil, fmt.Errorf("open Codex identity store: %w", err)
 		}
-	}()
-	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: compose.AllView, ReadOnly: true, Runtime: runtime,
-	}, io.Discard)
-	if err != nil {
-		return resolve.Identity{}, false
+		defer func() {
+			if err := database.Close(); err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("close Codex identity store: %w", err))
+			}
+		}()
+		scan, err := fleet.Scan(
+			ctx,
+			database,
+			fleet.Request{View: compose.AllView, ReadOnly: true, Runtime: runtime},
+			io.Discard,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan Codex identity seats: %w", err)
+		}
+		return codexSeatsFromRows(scan.Output.Rows, scan.Env.Paths)
 	}
-	for index := range scan.Output.Rows {
-		row := scan.Output.Rows[index]
-		if row.ID != thread || row.Socket == "" {
+}
+
+func codexSeatsFromRows(rows []compose.Row, values paths.Values) ([]resolve.CodexSeat, error) {
+	seats := []resolve.CodexSeat{}
+	for index := range rows {
+		row := &rows[index]
+		if row.Kind != compose.LiveCodex || row.Killed || row.Socket == "" {
 			continue
 		}
-		// A seat with no live socket is no identity: better to say the sender
-		// is underivable than to hand back a handle nobody can reply to.
-		return resolve.Identity{
-			Session:    row.Socket,
-			SocketPath: filepath.Join(scan.Env.Paths.TmuxDir, row.Socket),
-			SocketName: row.Socket,
-			Engine:     string(pfmengine.Codex),
-			ID:         thread,
-			Source:     "codex-thread",
-			Recovered:  true,
-		}, true
+		socket, err := targetSocket(values, row.Backend, row.Socket)
+		if err != nil {
+			return nil, fmt.Errorf("resolve Codex seat %s socket: %w", row.ID, err)
+		}
+		backend := row.Backend
+		if backend == "" {
+			backend = spawn.BackendTmux
+		}
+		session := row.SessionName
+		if backend == spawn.BackendTmux && session == "" {
+			session = row.Socket
+		}
+		seats = append(
+			seats,
+			resolve.CodexSeat{
+				ThreadID:       row.ID,
+				Backend:        backend,
+				SeatID:         row.SeatID,
+				SessionName:    session,
+				SocketPath:     socket,
+				Pane:           row.PaneID,
+				HerdrWorkspace: row.HerdrWorkspace,
+				BackendError:   row.BackendError,
+			},
+		)
 	}
-	return resolve.Identity{}, false
+	return seats, nil
+}
+
+// targetSocket keeps native addresses absolute; only tmux sockets use the fleet root.
+func targetSocket(values paths.Values, backend, socket string) (string, error) {
+	if backend == spawn.BackendHerdr {
+		if !filepath.IsAbs(socket) {
+			return "", fmt.Errorf("herdr socket must be absolute: %q", socket)
+		}
+		return socket, nil
+	}
+	return values.SocketUnder(socket)
+}
+
+func seatSocket(backend, socket string) string {
+	if backend == spawn.BackendHerdr {
+		return socket
+	}
+	return filepath.Base(socket)
 }

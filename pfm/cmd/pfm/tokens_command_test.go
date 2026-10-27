@@ -16,7 +16,7 @@ func TestTokensCLIEntry(t *testing.T) {
 	jailTest(t)
 	var out, errs bytes.Buffer
 	if code := run([]string{"tokens", "--help"}, &out, &errs); code != 0 ||
-		!strings.Contains(out.String(), "--codex") || !strings.Contains(out.String(), "--timeline") {
+		!strings.Contains(out.String(), "--codex") || !strings.Contains(out.String(), "--tree") {
 		t.Fatalf("tokens --help code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
 	}
 	out.Reset()
@@ -27,6 +27,14 @@ func TestTokensCLIEntry(t *testing.T) {
 		t.Fatalf("tokens over an empty root code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
 	}
 	out.Reset()
+	errs.Reset()
+	// an id no transcript carries is a failure naming it, never an empty tree
+	if code := run([]string{"tokens", "--tree", "no-such-id", "--root", t.TempDir()}, &out, &errs); code != 1 ||
+		out.Len() != 0 || !strings.Contains(errs.String(), "--tree no-such-id: no session or agent transcript") {
+		t.Fatalf("tokens --tree over an empty root code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+	}
+	out.Reset()
+	errs.Reset()
 	// the cost ledger directory is the one the sink writes: PFM_COST_LEDGER_DIR names it
 	const session = "00000000-0000-4000-8000-0000000000c3"
 	root, ledgerDir := t.TempDir(), t.TempDir()

@@ -21,7 +21,7 @@ type fakeAskAdapter interface {
 }
 
 // These adapters stand in for the next-wave preparation layers. They carry
-// no transcript or harvester domain types: both feed only the shared ask
+// no transcript or document domain types: both feed only the shared ask
 // contract and preserve provenance in its generic fields.
 type fakeTranscriptAdapter struct{}
 
@@ -42,9 +42,9 @@ func (fakeTranscriptAdapter) Prepare() (AskInput, Evidence) {
 
 func (fakeTranscriptAdapter) WantSpanKind() string { return "turns" }
 
-type fakeHarvesterAdapter struct{}
+type fakeDocumentAdapter struct{}
 
-func (fakeHarvesterAdapter) Prepare() (AskInput, Evidence) {
+func (fakeDocumentAdapter) Prepare() (AskInput, Evidence) {
 	input := AskInput{
 		ContentFiles: []string{"prepared-source.md"},
 		SourceLabels: []string{"https://fixture.invalid/source"},
@@ -59,7 +59,7 @@ func (fakeHarvesterAdapter) Prepare() (AskInput, Evidence) {
 	return input, evidence
 }
 
-func (fakeHarvesterAdapter) WantSpanKind() string { return "lines" }
+func (fakeDocumentAdapter) WantSpanKind() string { return "lines" }
 
 func TestResolveInputUsesExplicitValuesBeforeConfig(t *testing.T) {
 	cfg := pfmconfig.Config{Ask: pfmconfig.AskConfig{
@@ -88,10 +88,10 @@ func TestResolveInputUsesExplicitValuesBeforeConfig(t *testing.T) {
 	}
 }
 
-func TestEvidenceStaysContentAgnosticForTranscriptAndHarvesterAdapters(t *testing.T) {
+func TestEvidenceStaysContentAgnosticForTranscriptAndDocumentAdapters(t *testing.T) {
 	adapters := map[string]fakeAskAdapter{
 		"transcript": fakeTranscriptAdapter{},
-		"harvester":  fakeHarvesterAdapter{},
+		"document":   fakeDocumentAdapter{},
 	}
 	for name, adapter := range adapters {
 		input, evidence := adapter.Prepare()
@@ -191,7 +191,7 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 				t.Fatalf("ResolveEngine(): %v", err)
 			}
 			input := test.input
-			input.ContentFiles = []string{"/fixture/exchange.md"}
+			input.ContentFiles = validAskInput(t, test.name).ContentFiles
 			input.SourceLabels = []string{"last exchange"}
 			input.Prompt = "summarize"
 			result, err := engine.Run(context.Background(), input)
@@ -217,6 +217,30 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 	}
 }
 
+func TestProcessEngineLeavesDocumentContentOnDisk(t *testing.T) {
+	directory := t.TempDir()
+	capture := filepath.Join(directory, "stdin")
+	writeAskStub(t, directory, "codex", `/bin/cat > "$ASK_CAPTURE"
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"answer"}}' '{"type":"turn.completed"}'`)
+	t.Setenv("PATH", directory)
+	t.Setenv("ASK_CAPTURE", capture)
+	engine, err := ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := validAskInput(t, "codex")
+	if _, err := engine.Run(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), input.ContentFiles[0]) || strings.Contains(string(raw), "prepared exchange") {
+		t.Fatalf("document ask must reference files without preloading their unbounded contents: %s", raw)
+	}
+}
+
 func TestProcessEngineUsageIsNilWhenAbsent(t *testing.T) {
 	directory := t.TempDir()
 	writeAskStub(
@@ -230,7 +254,7 @@ func TestProcessEngineUsageIsNilWhenAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := engine.Run(context.Background(), validAskInput("codex"))
+	result, err := engine.Run(context.Background(), validAskInput(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +283,7 @@ func TestProcessEngineTakesAnswerAndErrorsFromJSON(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := engine.Run(context.Background(), validAskInput(test.engine))
+			result, err := engine.Run(context.Background(), validAskInput(t, test.engine))
 			if test.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantError) {
 					t.Fatalf("error=%v, want %q", err, test.wantError)
@@ -289,7 +313,7 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.Run(context.Background(), validAskInput("codex"))
+	_, err = engine.Run(context.Background(), validAskInput(t, "codex"))
 	if err == nil || !strings.Contains(err.Error(), "exit status 7") ||
 		!strings.Contains(err.Error(), `"first error\nfatal tail"`) {
 		t.Fatalf("crash error = %v", err)
@@ -303,7 +327,7 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err = engine.Run(ctx, validAskInput("codex"))
+	_, err = engine.Run(ctx, validAskInput(t, "codex"))
 	if err == nil || !strings.Contains(err.Error(), "codex ask timed out") {
 		t.Fatalf("timeout error = %v", err)
 	}
@@ -339,13 +363,18 @@ func askMachine(t *testing.T, engineName string) pfmconfig.Config {
 	}
 }
 
-func validAskInput(engineName string) AskInput {
+func validAskInput(t *testing.T, engineName string) AskInput {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "exchange.md")
+	if err := os.WriteFile(file, []byte("prepared exchange"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	id, err := pfmengine.Parse(engineName)
 	if err != nil {
 		panic(err)
 	}
 	return AskInput{
-		ContentFiles: []string{"/fixture/exchange.md"}, SourceLabels: []string{"last exchange"},
+		ContentFiles: []string{file}, SourceLabels: []string{"last exchange"},
 		Prompt: "summarize", Engine: id,
 	}
 }

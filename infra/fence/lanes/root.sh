@@ -18,7 +18,10 @@
 # fence-env.sh, engine-sync.sh), lane build files (root.sh, container.sh,
 # provision.sh, adopt.sh, cred-scan.sh, fixtures/, scenarios/), and the
 # engine-sync source fence-env.sh resolves (the binary provision.sh builds; an
-# absent source hashes as absent). It hashes on-disk content, identically
+# absent source hashes as absent), and each plugin checkout pfm install copies
+# into the image (plugins/{name}/plugins/{name}, every directory and file the
+# copy takes with its mode bits, ignored or untracked ones included; a missing
+# checkout hashes as absent). It hashes on-disk content, identically
 # whether dirty, staged or committed; test files, testdata and the pfm e2e tree
 # are excluded. Lane scripts, lib.sh and registries load from /worktree
 # at run time, so editing them reuses the root. Seats are lane inputs, not image inputs.
@@ -36,7 +39,7 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 REBUILD=0 PRINT_HASH=0 TAG=""
-HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios"
+HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/source-clone.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios infra/plugin-lab/tests/fakes/claude"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -87,14 +90,60 @@ hash_tree() { # hash_tree <dir> <label prefix> <git ls-files pathspec…>
   done 3<<<"$hashes" <<<"$paths"
 }
 
+# Every plugin checkout an -alpha pfm install copies into the image's
+# ~/.local/share/{name}-dev, hashed as pfm's copy digest compares it: every
+# directory and file reached through symlinks, each file's content and every
+# permission bit of both, node_modules and .DS_Store left out at any depth,
+# ignored and untracked files counted. A copy baked from other content is
+# refreshed by the next in-lane install, and overlayfs refuses that directory
+# rename (EXDEV).
+hash_plugin_copies() {
+  local dir name checkout entries files hashes path blob bit
+  for dir in "$ROOT"/plugins/*/; do
+    [ -d "$dir" ] || continue
+    dir="${dir%/}" name="$(basename "$dir")"
+    checkout="$dir/plugins/$name"
+    if [ ! -f "$checkout/.claude-plugin/plugin.json" ]; then
+      printf 'plugin-copy/%s\tabsent\t0\n' "$name"
+      continue
+    fi
+    entries="$(cd "$checkout" && find -L . \( -name node_modules -o -name .DS_Store \) -prune -o \( -type d -o -type f \) -print |
+      LC_ALL=C sort)" || return 1
+    files="$(while IFS= read -r path; do [ -d "$checkout/$path" ] || printf '%s/%s\n' "$checkout" "${path#./}"; done <<<"$entries")"
+    hashes="$(printf '%s\n' "$files" | git -C "$ROOT" hash-object --no-filters --stdin-paths)" || return 1
+    while IFS= read -r path; do
+      if [ -d "$checkout/$path" ]; then
+        printf 'plugin-copy/%s/%s\tdir\n' "$name" "${path#./}"
+        continue
+      fi
+      IFS= read -r blob <&3 || return 1
+      printf 'plugin-copy/%s/%s\t%s\n' "$name" "${path#./}" "$blob"
+    done 3<<<"$hashes" <<<"$entries"
+    # The mode bits, one sorted path list per bit (find -perm is portable; stat is not).
+    for bit in 400 200 100 040 020 010 004 002 001; do
+      entries="$(cd "$checkout" && find -L . \( -name node_modules -o -name .DS_Store \) -prune -o \
+        \( -type d -o -type f \) -perm "-$bit" -print | LC_ALL=C sort)" || return 1
+      while IFS= read -r path; do
+        [ -z "$path" ] || printf 'plugin-copy/%s/%s\tmode-%s\n' "$name" "${path#./}" "$bit"
+      done <<<"$entries"
+    done
+  done
+}
+
 hash_inputs() {
   # shellcheck disable=SC2086 # HASH_PATHS is the fixed, space-delimited input roster.
   hash_tree "$ROOT" "" $HASH_PATHS \
     ':(exclude)pfm/**/*_test.go' ':(exclude)pfm/*_test.go' \
     ':(exclude)pfm/**/testdata/**' ':(exclude)pfm/testdata/**' \
-    ':(exclude)pfm/e2e/**' \
-    ':(exclude)pfm/internal/harvestpy/assets/**/*_test.py' \
-    ':(exclude)pfm/internal/harvestpy/assets/*_test.py' || return 1
+    ':(exclude)pfm/e2e/**' || return 1
+  hash_plugin_copies || return 1
+  if [ -n "${PFM_DEV_HARVESTER_MISSING:-}" ]; then
+    printf 'harvester\tabsent\t0\n'
+  else
+    hash_tree "$PFM_DEV_HARVESTER_SRC" "harvester/" . \
+      ':(exclude)**/*_test.go' ':(exclude)*_test.go' \
+      ':(exclude)**/testdata/**' ':(exclude)testdata/**' || return 1
+  fi
   if [ -n "$PFM_DEV_ENGINE_SYNC_MISSING" ]; then
     printf 'engine-sync\tabsent\t0\n'
   else
@@ -147,6 +196,31 @@ command -v docker >/dev/null || fatal "TOOLCHAIN-MISSING — docker"
 docker info >/dev/null 2>&1 || fatal "TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed)"
 
 T0="$(date +%s)"
+PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
+LANE_TMP="/tmp/$PROJECT/lanes"
+mkdir -p "$LANE_TMP" || fatal "the lane scratch directory could not be created: $LANE_TMP"
+# One root build per hash at a time on the machine: the lock covers the inspect and the whole build,
+# so two concurrent builds — from any worktree of this repo — never race on one tag or on the shared
+# cache volumes; a waiter re-inspects and reuses what the holder made. The image tag and the cache
+# volumes are machine-global, so the lock lives under the main checkout's /tmp/{project}/lanes
+# (its {project} from the git common dir), never the worktree's. mkdir_lock_try
+# (infra/fence/mkdir-lock.sh) breaks a stale lock without ever making two holders.
+# shellcheck source=../mkdir-lock.sh
+. "$HERE/../mkdir-lock.sh" || fatal "the lock helper could not be sourced: $HERE/../mkdir-lock.sh"
+MAIN_PROJECT="$(basename "$(dirname "$PFM_DEV_GIT_COMMON")")"; MAIN_PROJECT="${MAIN_PROJECT#.}"
+[ -n "$MAIN_PROJECT" ] || fatal "no project name in the git common dir $PFM_DEV_GIT_COMMON"
+LOCK_DIR="/tmp/$MAIN_PROJECT/lanes"
+mkdir -p "$LOCK_DIR" || fatal "the root build lock directory could not be created: $LOCK_DIR"
+LOCK="$LOCK_DIR/root-build-$HASH.lock" LOCKED=0
+root_unlock() { [ "$LOCKED" -eq 0 ] || rm -rf "$LOCK"; LOCKED=0; }
+told=0
+for ((i = 0; i < PFM_FENCE_LANE_ROOT_LOCK_TICKS; i++)); do
+  if mkdir_lock_try "$LOCK" "$$"; then LOCKED=1; break; fi
+  [ "$told" -eq 1 ] || { say "waiting for the root build of $HASH held by pid ${MKDIR_LOCK_HOLDER:-?} ($LOCK)"; told=1; }
+  sleep "$PFM_FENCE_LOCK_POLL_S"
+done
+[ "$LOCKED" -eq 1 ] || fatal "the root build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after $PFM_FENCE_LANE_ROOT_LOCK_TICKS polls of $PFM_FENCE_LOCK_POLL_S s"
+trap root_unlock EXIT
 if [ "$REBUILD" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
   say "reusing $IMAGE (same hash: no root build input changed) · $(( $(date +%s) - T0 ))s"
   printf '%s\n' "$IMAGE"
@@ -154,9 +228,6 @@ if [ "$REBUILD" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 
 say "building $IMAGE — no image for this hash yet$( [ "$REBUILD" -eq 1 ] && printf ' (--rebuild)')"
-PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
-LANE_TMP="/tmp/$PROJECT/lanes"
-mkdir -p "$LANE_TMP" || fatal "the lane scratch directory could not be created: $LANE_TMP"
 STEP_LOG="$LANE_TMP/root-step-$SUFFIX.log"
 : >"$STEP_LOG" || fatal "the step output file could not be written: $STEP_LOG"
 
@@ -167,17 +238,14 @@ fence_volumes_ensure
 # The build container goes first, then the pin it held — on every exit path
 # (commit, step failure, fatal, Ctrl-C), so this build's base pin never outlives
 # its build.
-cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; lane_base_release "$PIN"; rm -f "$STEP_LOG"; }
+cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; lane_base_release "$PIN"; rm -f "$STEP_LOG"; root_unlock; }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 BASE="$(lane_base_image "$ROOT" "$PIN")" || fatal "the pfm-dev fence image could not be built"
 say "base image $BASE (pinned for this build, so a concurrent dev.sh iso rebuild cannot orphan it)"
-lane_run "$BUILD" "$BASE" '' \
-  -v pfm-lane-harvest-cache:/root/.local/state/pfm/harvest-python/cache \
-  -v pfm-lane-uv-cache:/root/.cache/uv \
-  -e UV_CACHE_DIR=/root/.cache/uv -e UV_LINK_MODE=copy || fatal "the fence container would not start from $BASE"
+lane_run "$BUILD" "$BASE" '' || fatal "the fence container would not start from $BASE"
 
 root_failure_diagnostics() { # root_failure_diagnostics <step> <exit> <output-file> [attempt] [retry]
   local dir stamp file

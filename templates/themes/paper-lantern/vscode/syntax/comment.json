@@ -1,0 +1,52 @@
+{
+  "0001": {
+    "name": "Nezumi · comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment",
+      "comment.line",
+      "comment.block"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#857868"
+    }
+  },
+  "0003": {
+    "name": "Kincha · doc types",
+    "scope": [
+      "comment.block.documentation entity.name.type",
+      "comment.block.documentation entity.name.type.instance",
+      "comment.block.documentation punctuation.definition.bracket.curly"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#785603"
+    }
+  },
+  "0004": {
+    "name": "Kogecha · doc params",
+    "scope": [
+      "comment.block.documentation variable.other",
+      "comment.block.documentation variable.parameter",
+      "comment.block.documentation entity.name.variable"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#663c23"
+    }
+  },
+  "0005": {
+    "name": "Kaki · code tags",
+    "scope": [
+      "comment keyword.codetag",
+      "comment keyword.codetag.notation",
+      "keyword.codetag.notation"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#9f5401"
+    }
+  }
+}

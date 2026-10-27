@@ -3,7 +3,7 @@
 # the fleet left behind, archives and indexes a real transcript history, drives
 # headless on both engines, reads doctor's Codex-pane rows, crosses the two
 # operator-side seams (reload-while-busy, a dropped seat under a live chat),
-# proves the harvester and its sidecar for real, and ENDS THE MACHINE with
+# ENDS THE MACHINE with
 # `pfm uninstall`. Runs INSIDE a lane container (run.sh), never on a host.
 #
 #   run.sh --lanes O2            solo, from a fresh root
@@ -16,7 +16,7 @@
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
 # Cost: one Claude seat for the stimuli (reap's busy turn, the queued call and
-# reload, the harvester's `ask`), the Codex home for one headless turn, plus —
+# reload), the Codex home for one headless turn, plus —
 # solo only — the storm the prelude raises and kills to make the graveyard, one
 # Claude chat and one Codex chat standing in for E1's and E2's. Roughly 8 short
 # turns.
@@ -59,7 +59,7 @@ lane_begin O2
 # ── prelude: what this lane needs, made when missing, no-op otherwise ───────
 lane_require_seat_ops "$CONFIG"
 
-need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
+need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "bash /worktree/infra/fence/source-clone.sh /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it"
 need "the managed install root $MANAGED" "[ -d '$MANAGED' ]" "(cd '$BLUEPRINT' && pfm install --yes)" ||
   lane_abort "pfm install has never completed in this container"
@@ -380,7 +380,7 @@ else
   elif [ ! -s "$manifest" ]; then
     bad="$bad the manifest --apply named ($manifest) is missing or empty;"
   else
-    [ "$(head -1 "$manifest")" = "$(printf 'uuid\tengine\torig_path\tbytes\tarchived_path\tarchived_at')" ] ||
+    [ "$(head -1 "$manifest")" = "$(printf 'uuid\tengine\torig_path\tbytes\tarchived_path\tarchived_at\tstate\tfile_id')" ] ||
       bad="$bad the manifest header is not the documented TSV: $(one_line "$(head -1 "$manifest")");"
     last_id="$(tail -1 "$manifest" | cut -f1)"
     last_orig="$(tail -1 "$manifest" | cut -f3)"
@@ -560,6 +560,21 @@ rc=$?
 pfm internal clear-kill stray </dev/null >/dev/null 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || bad="$bad clear-kill with a positional argument exited $rc (want 2, usage);"
+# clear-name: a named /clear successor gets its own supported title on the first prompt, once.
+clear_id=22222222-2222-4222-8222-222222222222
+clear_fresh="Lane Desk #2"
+cn="$(printf '{"hook_event_name":"SessionStart","source":"clear","session_id":"%s","session_title":"Lane Desk"}' "$clear_id" | env -u HERDR_ENV pfm internal clear-name 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 0 ] && [ -z "$cn" ] && [ ! -s "$int_err" ] || bad="$bad clear-name start failed: rc=$rc out=$(one_line "$cn") err=$(one_line "$(cat "$int_err")");"
+cn="$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s"}' "$clear_id" | pfm internal clear-name 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 0 ] && [ ! -s "$int_err" ] && [ "$(printf '%s' "$cn" | jq -r '.hookSpecificOutput.sessionTitle')" = "$clear_fresh" ] || bad="$bad clear-name first prompt did not title successor: rc=$rc out=$(one_line "$cn") err=$(one_line "$(cat "$int_err")");"
+cn="$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s"}' "$clear_id" | pfm internal clear-name 2>"$int_err")"
+[ "$?" -eq 0 ] && [ -z "$cn" ] && [ ! -s "$int_err" ] || bad="$bad clear-name repeated first-prompt title: $(one_line "$cn$(cat "$int_err")");"
+printf 'not json' | pfm internal clear-name >/dev/null 2>"$int_err"
+[ "$?" -eq 0 ] && grep -q 'decode hook payload' "$int_err" || bad="$bad clear-name malformed payload was not fail-open and visibly diagnosed;"
+pfm internal clear-name stray </dev/null >/dev/null 2>"$int_err"
+[ "$?" -eq 2 ] || bad="$bad clear-name positional argument did not return usage 2;"
 # X26 epic-inject: from a plain shell there is no chat identity — fail-open, exit 0, nothing injected.
 ei="$(printf '{"transcript_path":"/tmp/none.jsonl","cwd":"%s"}' "$CWD" | pfm internal epic-inject 2>"$int_err")"
 rc=$?
@@ -587,18 +602,37 @@ sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},
 [ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
 sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
 [ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
-# X29 explore-deny: denies a non-haiku Explore by name, lets haiku and every other agent through.
-deny="$(printf '{"tool_input":{"subagent_type":"Explore","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
+# herdr-state: outside a Herdr pane valid events are silent exit-0 no-ops; malformed payloads warn without blocking.
+for hs_event in start working blocked idle end notification attach sync; do
+  hs_out="$(printf '{"session_id":"lane-no-such-session","hook_event_name":"Stop","message":"x"}' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine claude "$hs_event" 2>"$int_err")"
+  rc=$?
+  [ "$rc" -eq 0 ] || bad="$bad herdr-state $hs_event outside Herdr exited $rc (want 0): $(one_line "$(cat "$int_err")");"
+  [ -z "$hs_out" ] || bad="$bad herdr-state $hs_event outside Herdr printed '$(one_line "$hs_out")' on stdout (want nothing);"
+  [ ! -s "$int_err" ] || bad="$bad herdr-state $hs_event outside Herdr wrote to stderr (want silence): $(one_line "$(cat "$int_err")");"
+done
+hs_out="$(printf 'not json' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine codex idle 2>"$int_err")"
 rc=$?
-[ "$rc" -eq 0 ] || bad="$bad explore-deny exited $rc: $(one_line "$deny");"
-[ "$(printf '%s' "$deny" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)" = deny ] ||
-  bad="$bad explore-deny did not deny a sonnet Explore: $(one_line "$deny");"
-grep -qF 'tracer' <<<"$(printf '%s' "$deny" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null)" ||
-  bad="$bad the Explore denial does not point at the tracer agent;"
-allow="$(printf '{"tool_input":{"subagent_type":"Explore","model":"haiku"}}' | pfm internal explore-deny 2>&1)"
-[ -z "$allow" ] || bad="$bad explore-deny blocked a haiku Explore: $(one_line "$allow");"
-other="$(printf '{"tool_input":{"subagent_type":"tracer","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
-[ -z "$other" ] || bad="$bad explore-deny blocked a tracer dispatch: $(one_line "$other");"
+[ "$rc" -eq 0 ] || bad="$bad herdr-state on garbage stdin exited $rc (want 0, a hook exit 2 blocks Claude): $(one_line "$(cat "$int_err")");"
+[ -z "$hs_out" ] || bad="$bad herdr-state on garbage stdin printed success on stdout: $(one_line "$hs_out");"
+grep -qF 'decode hook payload (skipped)' "$int_err" ||
+  bad="$bad herdr-state on garbage stdin did not diagnose the malformed payload: $(one_line "$(cat "$int_err")");"
+# Native seat plumbing refuses malformed requests before touching any live pane.
+expect-log '"hook":"seat-host","decision":"error","exit":1'
+seat_out="$(pfm internal seat-host 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 1 ] && grep -qF 'expected one seat id' "$int_err" ||
+  bad="$bad seat-host missing-seat rejection rc=$rc: $(one_line "$(cat "$int_err")");"
+[ -z "$seat_out" ] || bad="$bad seat-host missing-seat printed success: $(one_line "$seat_out");"
+backend_out="$(pfm chat new --backend invalid --name LANE_BACKEND_INVALID 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 2 ] && grep -qF -- '--backend must be auto, tmux or herdr' "$int_err" ||
+  bad="$bad chat new invalid backend rc=$rc: $(one_line "$(cat "$int_err")");"
+[ -z "$backend_out" ] || bad="$bad invalid backend printed success: $(one_line "$backend_out");"
+backend_out="$(env -u TMUX HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH="$LANE_OUT_DIR/absent-herdr.sock" pfm chat new --backend herdr --name LANE_BACKEND_DEAD --engine cc --cwd "$CWD" 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 1 ] && grep -qF 'pane w1:p1 unreachable' "$int_err" ||
+  bad="$bad chat new forced dead Herdr rc=$rc: $(one_line "$(cat "$int_err")");"
+[ -z "$backend_out" ] || bad="$bad forced dead Herdr printed success: $(one_line "$backend_out");"
 # X30 kill-exit: the pane-death finisher refuses to run without its full address.
 pfm internal kill-exit >/dev/null 2>"$int_err"
 rc=$?
@@ -693,7 +727,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · clear-name first-prompt title once and visible malformed-payload failure · herdr-state outside Herdr exits 0 silent on valid events and visibly diagnoses garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────
@@ -845,19 +879,37 @@ if [ -z "$SPARE" ]; then
   blocked "seats $LANE_SEATS" "no spare seat to drop — dropping the only seat would take the lane's own chats with it (run with --seats cc:1,cc:2)"
 else
   bad=""
+  o2_t0="${EPOCHREALTIME:-}"
   new_out="$(pfm chat new --name "$SPARE_CHAT" --engine cc --account "$SPARE" --cwd "$CWD" --await --timeout 300 \
     "You are $SPARE_CHAT, a chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says." 2>&1)"
   new_rc=$?
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_new_chat "$o2_t0" "$new_rc"
   if [ "$new_rc" -ne 0 ] || ! live_chat "$SPARE_CHAT"; then
     fail "could not open a chat on the spare seat $SPARE (exit $new_rc): $(one_line "$new_out") — nothing lives on the seat to drop under"
   else
     acct_before="$(live_field "$SPARE_CHAT" 9)"
     cp "$CONFIG" "$CONFIG.lane-backup"
     jq --argjson drop "$SPARE" '.accounts |= map(select(.id != $drop))' "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+    o2_t0="${EPOCHREALTIME:-}"
     drop_out="$(install_again)"
     drop_rc=$?
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_install "$o2_t0" "$drop_rc"
     [ "$drop_rc" -eq 0 ] || bad="$bad the install after the drop exited $drop_rc: $(one_line "$(printf '%s\n' "$drop_out" | tail -3)");"
+    # Both proofs read this fixed dropped config. Join doctor before restoring it.
+    drop_doc_output="$LANE_OUT_DIR/O2.dropped-doctor.out"
+    drop_doc_receipt="$LANE_OUT_DIR/O2.dropped-doctor.rc"
+    (
+      rm -f "$drop_doc_output" "$drop_doc_receipt" || exit 125
+      o2_t0="${EPOCHREALTIME:-}"
+      pfm doctor >"$drop_doc_output" 2>&1
+      drop_doc_status=$?
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_doctor "$o2_t0" "$drop_doc_status"
+      printf '%s\n' "$drop_doc_status" >"$drop_doc_receipt" || exit 125
+      exit "$drop_doc_status"
+    ) &
+    drop_doc_pid=$!
     # The RUNTIME side: the chat on the dropped seat keeps working.
+    o2_t0="${EPOCHREALTIME:-}"
     live_chat "$SPARE_CHAT" || bad="$bad $SPARE_CHAT lost its live row when its seat was dropped;"
     st_out="$(pfm chat status "$SPARE_CHAT" 2>&1)"
     st_rc=$?
@@ -867,9 +919,26 @@ else
       bad="$bad call into $SPARE_CHAT was refused after the drop;"
     wait_prompt "$SPARE_CHAT" SPARE-ALIVE 120 || bad="$bad $SPARE_CHAT did not receive the call after its seat was dropped: ${LANE_WAIT_WHY:-no wait reason};"
     acct_dropped="$(live_field "$SPARE_CHAT" 9)"
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step dropped_runtime "$o2_t0" checked
     # The LEDGER side: doctor's roster no longer names the seat, and doctor still runs.
-    doc="$(pfm doctor 2>&1)"
-    doc_rc=$?
+    drop_doc_wait_rc=0
+    wait "$drop_doc_pid" || drop_doc_wait_rc=$?
+    if ! doc="$(cat "$drop_doc_output" 2>&1)"; then
+      bad="$bad dropped doctor output could not be read: $(one_line "$doc");"
+    fi
+    if ! doc_rc="$(cat "$drop_doc_receipt" 2>&1)"; then
+      bad="$bad dropped doctor exit receipt could not be read: $(one_line "$doc_rc");"
+      doc_rc=255
+    fi
+    case "$doc_rc" in
+      ''|*[!0-9]*) bad="$bad dropped doctor exit receipt is malformed: $(one_line "$doc_rc");"; doc_rc=255 ;;
+    esac
+    if [ "${#doc_rc}" -gt 3 ] || [ "$doc_rc" -gt 255 ]; then
+      bad="$bad dropped doctor exit receipt is out of range;"
+      doc_rc=255
+    fi
+    [ "$drop_doc_wait_rc" -eq "$doc_rc" ] ||
+      bad="$bad dropped doctor worker exit $drop_doc_wait_rc disagrees with receipt $doc_rc;"
     acct_row="$(printf '%s\n' "$doc" | grep -m1 '^doctor: config accounts=')"
     [ -n "$acct_row" ] || bad="$bad doctor printed no 'config accounts=' row;"
     grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$acct_row" && bad="$bad doctor's roster still names the dropped seat $SPARE: $acct_row;"
@@ -877,10 +946,15 @@ else
     [ "$doc_rc" -le 1 ] || bad="$bad pfm doctor exited $doc_rc with a live chat on the dropped seat; first failure row: $(one_line "$(printf '%s\n' "$doc" | grep -m1 -E 'unhealthy|broken|error=' || true)");"
     # Restore: config back, install, the seat's hooks and the row's account return.
     mv "$CONFIG.lane-backup" "$CONFIG"
+    o2_t0="${EPOCHREALTIME:-}"
     restore_out="$(install_again)"
     restore_rc=$?
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step restored_install "$o2_t0" "$restore_rc"
     [ "$restore_rc" -eq 0 ] || bad="$bad the restoring install exited $restore_rc: $(one_line "$(printf '%s\n' "$restore_out" | tail -3)");"
+    o2_t0="${EPOCHREALTIME:-}"
     restore_doc="$(pfm doctor 2>&1)"
+    restore_doc_rc=$?
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step restored_doctor "$o2_t0" "$restore_doc_rc"
     restore_row="$(printf '%s\n' "$restore_doc" | grep -m1 '^doctor: config accounts=')"
     grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$restore_row" ||
       bad="$bad doctor's roster did not relist seat $SPARE after restore: $restore_row;"
@@ -893,145 +967,6 @@ else
   fi
 fi
 
-# ─── O2.09 — the harvester and its sidecar, for real on this architecture ───
-
-beat O2.09-harvester
-spends "cc:$SEAT"
-if gap_applies O2.09-harvester; then
-  known O2.09-harvester
-else
-  bad=""
-  # Public-source probes under --network none deliberately fail DNS. Match
-  # only their resolver and fallback endpoints; other ERROR records stay red.
-  expect-log '"msg":"http.out.request","cmd":"harvest".*"comp":"http.out".*"host":"cloudflare-dns.com","path":"/dns-query","err":"dial DoH resolver:'
-  while read -r host path; do
-    expect-log "\"msg\":\"http.out.request\",\"cmd\":\"harvest\".*\"comp\":\"http.out\".*\"host\":\"$host\",\"path\":\"$path\",\"err\":\"DNS resolution failed for $host:"
-  done <<'END_HARVEST_ENDPOINTS'
-www.rfc-editor.org /rfc/rfc2324.txt
-www.w3.org /WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf
-archive.org /wayback/available
-r.jina.ai /https://www.rfc-editor.org/rfc/rfc2324.txt
-defuddle.md /https://www.rfc-editor.org/rfc/rfc2324.txt
-api.openalex.org /works/https://doi.org/10.1371/journal.pmed.0020124
-api.crossref.org /works/10.1371/journal.pmed.0020124
-api.semanticscholar.org /graph/v1/paper/DOI:10.1371/journal.pmed.0020124
-zenodo.org /api/records
-doaj.org /api/search/articles/doi:10.1371/journal.pmed.0020124
-api.core.ac.uk /v3/works/10.1371/journal.pmed.0020124
-api.openaire.eu /search/publications
-journals.plos.org /pmed/article/file
-r.jina.ai /https://journals.plos.org/pmed/article/file
-defuddle.md /https://journals.plos.org/pmed/article/file
-pmc.ncbi.nlm.nih.gov /tools/idconv/api/v1/articles/
-europepmc.org /articles/PMC1182327
-pmc.ncbi.nlm.nih.gov /articles/PMC1182327/
-www.ebi.ac.uk /europepmc/webservices/rest/PMC1182327/fullTextXML
-r.jina.ai /https://europepmc.org/articles/PMC1182327
-defuddle.md /https://europepmc.org/articles/PMC1182327
-www.ncbi.nlm.nih.gov /pmc/utils/oa/oa.fcgi
-r.jina.ai /https://pmc.ncbi.nlm.nih.gov/articles/PMC1182327/
-defuddle.md /https://pmc.ncbi.nlm.nih.gov/articles/PMC1182327/
-r.jina.ai /https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1182327/fullTextXML
-defuddle.md /https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1182327/fullTextXML
-library.oapen.org /rest/search
-openlibrary.org /isbn/9780262033848.json
-directory.doabooks.org /rest/items/find-by-metadata-field
-catalog.hathitrust.org /api/volumes/brief/isbn/9780262033848.json
-END_HARVEST_ENDPOINTS
-  hv_err=/tmp/o2-harvest.err
-  hv_config="${CONFIG%/*}/harvester.config.json"
-  if with_restored "$hv_config"; then
-    jq '.cache.dir = "/root/.local/state/pfm/o2-harvest-cache"' "$hv_config" >"$hv_config.tmp" &&
-      mv "$hv_config.tmp" "$hv_config" || bad="$bad could not set a writable lane harvester cache in $hv_config;"
-  else
-    bad="$bad could not back up $hv_config before setting a writable cache;"
-  fi
-  url_txt="https://www.rfc-editor.org/rfc/rfc2324.txt"
-  url_pdf="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-  local_doc="$CWD/o2-harvest-local.txt"
-  local_pdf=/worktree/pfm/internal/harvestpy/testdata/corpus/raw/binary/scholar-breast-cancer.pdf
-  printf '# Lane O2 local harvest source\n\nThe needle is LOCAL-HARVEST-OK.\n' >"$local_doc"
-  harvest_one() { # harvest_one <what> <source> <must-succeed 0|1> [content-needle] — one --json fetch, judged
-    local what="$1" src="$2" must="$3" needle="${4:-}" out rc err kind status
-    out="$(pfm harvest --json "$src" 2>"$hv_err")"
-    rc=$?
-    if ! printf '%s' "$out" | jq -e '.[0]' >/dev/null 2>&1; then
-      bad="$bad $what ($src): --json printed no result object (exit $rc): $(one_line "$out") $(one_line "$(cat "$hv_err")");"
-      return
-    fi
-    err="$(printf '%s' "$out" | jq -r '.[0].error // empty')"
-    kind="$(printf '%s' "$out" | jq -r '.[0].error_kind // empty')"
-    status="$(printf '%s' "$out" | jq -r '.[0] | if has("cached") then "cached=\(.cached)" else empty end')"
-    if [ -n "$err" ]; then
-      if [ "$must" -eq 1 ]; then
-        bad="$bad $what ($src) failed (exit $rc, kind '${kind:-<none>}'): $err;"
-      elif [ -z "$kind" ] || [ "$kind" = invalid ]; then
-        bad="$bad $what ($src) was not classified as its identifier kind — error_kind '${kind:-<none>}': $err;"
-      elif [ -n "$needle" ] && [ "$kind" != "$needle" ]; then
-        bad="$bad $what ($src) error_kind='$kind' (want $needle): $err;"
-      else
-        noted="$noted $what: resolver reached, named error kind '$kind';"
-      fi
-      return
-    fi
-    [ "$rc" -eq 0 ] || bad="$bad $what ($src) reported no error but pfm harvest exited $rc;"
-    [ -n "$status" ] || bad="$bad $what ($src) succeeded without a cached field;"
-    if [ "$must" -eq 1 ] && [ -z "$(printf '%s' "$out" | jq -r '.[0].content // empty')" ]; then
-      bad="$bad $what ($src) succeeded without content;"
-    elif [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$(printf '%s' "$out" | jq -r '.[0].content // ""')"; then
-      bad="$bad $what ($src) content lacks '$needle' (kind $(printf '%s' "$out" | jq -r '.[0].kind // "?"'), $(printf '%s' "$out" | jq -r '.[0].chars // 0') chars);"
-    fi
-    noted="$noted $what: ok ($(printf '%s' "$out" | jq -r '.[0].kind // "?"'), $status);"
-  }
-  noted=""
-  harvest_one "URL" "$url_txt" 0 dns
-  harvest_one "local path" "$local_doc" 1 "LOCAL-HARVEST-OK"
-  # H9: a local PDF's text exists only if the pinned Python sidecar converted it.
-  harvest_one "PDF via sidecar" "$local_pdf" 1
-  harvest_one "PDF URL" "$url_pdf" 0 dns
-  harvest_one "DOI" "10.1371/journal.pmed.0020124" 0 no_open_copy
-  harvest_one "PMID" "pmid:16060722" 0
-  harvest_one "PMCID" "PMC1182327" 0
-  harvest_one "ISBN" "9780262033848" 0
-  # --include-content=false and --refresh on the local text: the cache answers, then is bypassed.
-  size="$(pfm harvest --include-content=false "$local_doc" 2>&1)"
-  rc=$?
-  [ "$rc" -eq 0 ] || bad="$bad --include-content=false exited $rc: $(one_line "$size");"
-  grep -qE 'tokens: [0-9]+ / chars: [0-9]+ / path: .+ / cached: (true|false)' <<<"$size" ||
-    bad="$bad --include-content=false did not print the tokens/chars/path/cached line: $(one_line "$size");"
-  grep -qF 'cached: true' <<<"$size" || bad="$bad a second fetch of $local_doc was not a cache hit: $(one_line "$size");"
-  refresh="$(pfm harvest --json --refresh "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
-  [ "$refresh" = false ] || bad="$bad --refresh reported cached '${refresh:-<none>}' (want false: the cache was bypassed);"
-  pfm harvest >/dev/null 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || bad="$bad pfm harvest with no source exited $rc (want 2, usage);"
-  # H2: ask over a local document; the evidence is pfm's usage line.
-  ask_out="$(pfm harvest ask --engine claude -p "$(mock_steps '{"type":"turn","reply":"HARVEST-ASK","tokens":{"input":100,"output":20}}')" "$local_doc" 2>"$hv_err")"
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    bad="$bad pfm harvest ask exited $rc: $(one_line "$(cat "$hv_err")");"
-  else
-    [ -n "$ask_out" ] || bad="$bad pfm harvest ask exited 0 but printed no answer;"
-    grep -qxF 'pfm harvest ask: usage input=100 cached_input=0 cache_creation=0 output=20' "$hv_err" ||
-      bad="$bad pfm harvest ask printed no usage line with the scripted counts on stderr: $(one_line "$(cat "$hv_err")");"
-  fi
-  pfm harvest ask "$local_doc" >/dev/null 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || bad="$bad pfm harvest ask without -p exited $rc (want 2, usage);"
-  # H9/H12: the sidecar's provisioning as doctor reports it — landed, not skipped.
-  doc="$(pfm doctor 2>&1)"
-  hp="$(printf '%s' "$doc" | grep '^doctor: harvestpy')"
-  [ -n "$hp" ] || bad="$bad pfm doctor printed no harvestpy row — the sidecar's provisioning is unreported;"
-  grep -qF 'harvestpy skipped' <<<"$hp" && bad="$bad doctor reports the harvestpy runtime SKIPPED — setup fell back to --skip-harvest;"
-  grep -qE 'harvestpy interpreter=\(file\) .* version=' <<<"$hp" || bad="$bad doctor names no provisioned harvestpy interpreter: $(one_line "$hp");"
-  grep -qF 'live_smoke=(file) healthy' <<<"$hp" || bad="$bad doctor's harvestpy live smoke is not healthy: $(one_line "$(printf '%s' "$hp" | grep -E 'live_smoke|broken' | head -2)");"
-  grep -qE 'harvestpy .*(broken|unavailable|blocked)' <<<"$hp" && bad="$bad a broken harvestpy row: $(one_line "$(printf '%s' "$hp" | grep -E 'broken|unavailable|blocked' | head -1)");"
-  rm -f "$local_doc"
-  restore_now "$hv_config" || bad="$bad could not restore $hv_config;"
-  if [ -n "$bad" ]; then fail "$bad"; else
-    pass "$(uname -s | tr 'A-Z' 'a-z')-$(uname -m):$noted size-only hit, --refresh refresh; ask answered with a usage line; doctor: $(one_line "$(printf '%s' "$hp" | grep -E 'interpreter|live_smoke' | tr '\n' ' ')" | cut -c1-160)"
-  fi
-fi
 
 # ─── O2.10 — uninstall: the end of the machine ──────────────────────────────
 
@@ -1072,8 +1007,23 @@ done <<EOF
 $seat_dirs
 EOF
 
+# I70 precondition: the bundled theme profiles the uninstall must remove, each
+# proven on disk first, so their absence afterwards is the uninstall's doing.
+themes_staged=""
+if themes="$(bundled_themes "$BLUEPRINT/templates/themes")"; then
+  while IFS= read -r t; do
+    for f in "$HOME/.claude/themes/$t.json" "$MANAGED/themes/$t.json"; do
+      if [ -f "$f" ]; then themes_staged="$themes_staged $f"; else bad="$bad theme file $f absent before uninstall;"; fi
+    done
+  done <<<"$themes"
+else
+  bad="$bad $themes;"
+fi
+o2_t0="${EPOCHREALTIME:-}"
 un="$( (cd "$BLUEPRINT" && pfm uninstall 2>&1) )"
 un_rc=$?
+[ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step uninstall_command "$o2_t0" "$un_rc"
+o2_t0="${EPOCHREALTIME:-}"
 un_summary="$(printf '%s' "$un" | grep -E '^summary changed=' | tail -1)"
 [ "$un_rc" -eq 0 ] || bad="$bad pfm uninstall exited $un_rc: $(one_line "$(printf '%s' "$un" | grep -iE 'error|refuse|failed' | head -2)") $(one_line "$(printf '%s\n' "$un" | tail -2)");"
 grep -qF 'MODE: uninstall' <<<"$un" || bad="$bad pfm uninstall did not announce MODE: uninstall;"
@@ -1087,10 +1037,6 @@ if [ -e "$MANAGED" ]; then
   left="$(find "$MANAGED" -type f -o -type l 2>/dev/null | head -5 | tr '\n' ' ')"
   [ -z "$left" ] || bad="$bad the managed root still holds: $left;"
 fi
-# I69: the harvestpy runtime and cache.
-for d in env cache; do
-  [ ! -e "$HOME/.local/state/pfm/harvest-python/$d" ] || bad="$bad harvestpy $d still present under ~/.local/state/pfm/harvest-python;"
-done
 # I71/I72: the launcher and the host overlays.
 for o in pfm-statusline tmux-title-renudge; do
   [ ! -e "$HOME/.local/bin/$o" ] && [ ! -L "$HOME/.local/bin/$o" ] || bad="$bad host overlay ~/.local/bin/$o still present;"
@@ -1106,7 +1052,9 @@ while IFS= read -r dir; do
   [ ! -e "$dir/commands/reload.md" ] || bad="$bad $dir/commands/reload.md still present;"
   [ ! -e "$dir/skills/handoff" ] && [ ! -L "$dir/skills/handoff" ] || bad="$bad $dir/skills/handoff still present;"
   [ -z "$(find "$dir/commands/chat" -maxdepth 1 -name '*.md' 2>/dev/null | head -1)" ] || bad="$bad /chat:* command remnants still under $dir/commands/chat;"
-  [ -z "$(find "$dir" -maxdepth 2 -name 'professor-*.json' 2>/dev/null | head -1)" ] || bad="$bad a staged professor-*.json theme still under $dir;"
+  while IFS= read -r t; do
+    [ -z "$t" ] || [ ! -e "$dir/themes/$t.json" ] || bad="$bad bundled theme $t still readable at $dir/themes/$t.json;"
+  done <<<"${themes:-}"
   if [ -f "$dir/settings.json" ]; then
     n_pfm="$(hook_commands "$dir/settings.json" | grep -c 'pfm')"
     [ "$n_pfm" -eq 0 ] || bad="$bad $dir/settings.json still carries $n_pfm pfm hook(s): $(one_line "$(hook_commands "$dir/settings.json" | grep pfm | head -1)");"
@@ -1120,7 +1068,7 @@ while IFS= read -r dir; do
   elif [ ! -f "$registry" ]; then
     bad="$bad existing account registry $registry disappeared or became unreadable;"
   else
-    jq -e '(.mcpServers // {}) | (has("chat-professor") or has("harvester-professor")) | not' "$registry" >/dev/null 2>&1 ||
+    jq -e '(.mcpServers // {}) | (has("chat-professor")) | not' "$registry" >/dev/null 2>&1 ||
       bad="$bad $registry still registers a family MCP server or could not be read;"
     registry_data="$(claude_registry_without_family_entries "$registry" 2>&1)" ||
       bad="$bad could not read $registry after uninstall: $(one_line "$registry_data");"
@@ -1131,12 +1079,14 @@ $seat_dirs
 EOF
 grep -qxF "$FOREIGN_HOOK" <<<"$(hook_commands "$SEAT_DIR/settings.json")" || bad="$bad the FOREIGN hook '$FOREIGN_HOOK' was stripped from $SEAT_DIR/settings.json;"
 [ -f "$own_cmd" ] || bad="$bad the operator's own command file $own_cmd was removed;"
-# The theme target is the shared Claude home, not an individual seat.
-[ -z "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
-  bad="$bad an installer-owned professor theme remains under $HOME/.claude/themes;"
+# The theme targets are the shared Claude home and pfm's install dir, not a seat:
+# every installer-owned profile file staged above is gone.
+for f in $themes_staged; do
+  [ ! -e "$f" ] || bad="$bad installer-owned theme file $f remains after uninstall;"
+done
 # I75/I78/I79: the Codex side — command mirror, hooks.json, config.toml.
 if [ -f "$CODEX_HOME/config.toml" ]; then
-  grep -qE 'BEGIN pfm developer_instructions|mcp_servers\.chat|mcp_servers\.harvester' "$CODEX_HOME/config.toml" &&
+  grep -qE 'BEGIN pfm developer_instructions|mcp_servers\.chat' "$CODEX_HOME/config.toml" &&
     bad="$bad $CODEX_HOME/config.toml still carries pfm's prompt/MCP wiring: $(one_line "$(grep -E 'BEGIN pfm developer_instructions|mcp_servers' "$CODEX_HOME/config.toml" | head -1)");"
 fi
 if [ -f "$CODEX_HOME/hooks.json" ]; then
@@ -1154,9 +1104,10 @@ vsix="$(find "$HOME/.vscode" "$HOME/.vscode-server" "$HOME/.vscode-oss" -maxdept
 [ -z "$vsix" ] || bad="$bad VS Code extension link(s) still present: $vsix;"
 # I86: the adopter's project scaffold is not pfm's to remove.
 for p in $express_before; do [ -e "$p" ] || bad="$bad uninstall removed the project scaffold $p;"; done
+[ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec o2_step uninstall_assertions "$o2_t0" checked
 # I89 is a documented UNKNOWN (no pruning routine): the retention is REPORTED, not judged.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "exit $un_rc · $un_summary · managed root, ledger, overlays, /reload + handoff links, themes, harvestpy env+cache, MCP registrations, Codex wiring, pfm.zsh line all gone from $(printf '%s\n' "$seat_dirs" | grep -c .) seat(s); the foreign hook and $own_cmd kept; ${express_before:-no express scaffold present} untouched"
+  pass "exit $un_rc · $un_summary · managed root, ledger, overlays, /reload + handoff links, themes, MCP registrations, Codex wiring, pfm.zsh line all gone from $(printf '%s\n' "$seat_dirs" | grep -c .) seat(s); the foreign hook and $own_cmd kept; ${express_before:-no express scaffold present} untouched"
 fi
 
 lane_end

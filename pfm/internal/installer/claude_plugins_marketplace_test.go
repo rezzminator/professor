@@ -193,7 +193,7 @@ func bareList(names ...string) []pfmconfig.ClaudePlugin {
 // build with no clone are untouched; a list that cannot be read is an error
 // beside the unchanged build, never an empty list.
 func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
-	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort"}
+	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort-control", "example-plugin"}
 	clone := writeMarketplaceClone(t, names, nil)
 	manifest := func(t *testing.T, content string) string {
 		dir := t.TempDir()
@@ -214,11 +214,11 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 		}, bareList(names...), nil, ""},
 		{"an explicit list stays and the rest are unlisted", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{Version: alphaVersion, SourceRepo: clone, Plugins: []pfmconfig.ClaudePlugin{
-				{ID: "sub-agent-compact"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
+				{ID: "forward-compaction"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
 			}}
 		}, []pfmconfig.ClaudePlugin{
-			{ID: "sub-agent-compact"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
-		}, []string{"buddy", "auto-effort"}, ""},
+			{ID: "forward-compaction"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
+		}, []string{"buddy", "auto-effort-control", "example-plugin"}, ""},
 		{"a release reads nothing", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{Version: "0.80.0", SourceRepo: clone, Plugins: defaults, PluginsDefault: true}
 		}, defaults, nil, ""},
@@ -359,7 +359,7 @@ func simulateClaude(t *testing.T, runner *pluginRunner) {
 // removed) and every copy kept disabled. Unset, every plugin is enabled. An
 // existing -dev options entry is never overwritten.
 func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
-	names := []string{"sub-agent-compact", "engine-sync", "buddy", "auto-effort"}
+	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort-control"}
 	for _, test := range []struct {
 		name        string
 		list        []pfmconfig.ClaudePlugin
@@ -369,20 +369,20 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 		wantEnabled map[string]any
 	}{
 		{
-			"claude.plugins is the enabled set", bareList("sub-agent-compact", "engine-sync"), false, false,
+			"claude.plugins is the enabled set", bareList("forward-compaction", "engine-sync"), false, false,
 			func(marketplace func(string) string) []string {
 				return []string{
 					"plugin marketplace add " + marketplace("engine-sync"), "plugin install engine-sync@engine-sync-dev -y",
 					"plugin marketplace add " + marketplace("buddy"),
-					"plugin marketplace add " + marketplace("auto-effort"), "plugin install auto-effort@auto-effort-dev -y",
+					"plugin marketplace add " + marketplace("auto-effort-control"), "plugin install auto-effort-control@auto-effort-control-dev -y",
 				}
 			},
 			map[string]any{
-				"sub-agent-compact@sub-agent-compact-dev": true,
-				"engine-sync@professor":                   false,
-				"engine-sync@engine-sync-dev":             true,
-				"buddy@buddy-dev":                         false,
-				"auto-effort@auto-effort-dev":             false,
+				"forward-compaction@forward-compaction-dev":   true,
+				"engine-sync@professor":                       false,
+				"engine-sync@engine-sync-dev":                 true,
+				"buddy@buddy-dev":                             false,
+				"auto-effort-control@auto-effort-control-dev": false,
 			},
 		},
 		{
@@ -391,20 +391,20 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				return []string{
 					"plugin marketplace add " + marketplace("engine-sync"), "plugin install engine-sync@engine-sync-dev -y",
 					"plugin marketplace add " + marketplace("buddy"), "plugin install buddy@buddy-dev -y",
-					"plugin marketplace add " + marketplace("auto-effort"), "plugin install auto-effort@auto-effort-dev -y",
+					"plugin marketplace add " + marketplace("auto-effort-control"), "plugin install auto-effort-control@auto-effort-control-dev -y",
 				}
 			},
 			map[string]any{
-				"sub-agent-compact@sub-agent-compact-dev": true,
-				"engine-sync@professor":                   false,
-				"engine-sync@engine-sync-dev":             true,
-				"buddy@buddy-dev":                         true,
-				"auto-effort@auto-effort-dev":             true,
+				"forward-compaction@forward-compaction-dev":   true,
+				"engine-sync@professor":                       false,
+				"engine-sync@engine-sync-dev":                 true,
+				"buddy@buddy-dev":                             true,
+				"auto-effort-control@auto-effort-control-dev": true,
 			},
 		},
 		// The install enables an install-only plugin and the edit after it disables
 		// it: a preview, which cannot read the installed state, names both.
-		{"a preview names the disable after an install", bareList("sub-agent-compact"), false, true, nil, nil},
+		{"a preview names the disable after an install", bareList("forward-compaction"), false, true, nil, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			inst, runner, out, home, first := alphaPluginEngine(t, "")
@@ -416,10 +416,10 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			marketplace := func(name string) string { return filepath.Join(home, ".local", "share", name+"-dev") }
 			// The store's settings.json, linked from the account dir.
 			store := filepath.Join(home, ".claude", "settings.json")
-			writeFixture(t, store, `{"enabledPlugins":{"sub-agent-compact@sub-agent-compact-dev":true,`+
+			writeFixture(t, store, `{"enabledPlugins":{"forward-compaction@forward-compaction-dev":true,`+
 				`"engine-sync@professor":true,"buddy@buddy-dev":false},"pluginConfigs":{`+
-				`"sub-agent-compact@sub-agent-compact-dev":{"options":{"forwardHandoffTool":true}},`+
-				`"sub-agent-compact@professor":{"options":{"forwardHandoffTool":false}},`+
+				`"forward-compaction@forward-compaction-dev":{"options":{"ceilingNative":true}},`+
+				`"forward-compaction@professor":{"options":{"ceilingNative":false}},`+
 				`"engine-sync@professor":{"options":{"y":2}},"buddy@buddy-dev":{"options":{"x":1}}}}`)
 			if err := os.Symlink(store, filepath.Join(first, "settings.json")); err != nil {
 				t.Fatal(err)
@@ -427,13 +427,13 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			writeInstalledPlugins(
 				t,
 				first,
-				"sub-agent-compact@sub-agent-compact-dev",
+				"forward-compaction@forward-compaction-dev",
 				"engine-sync@professor",
 				"buddy@buddy-dev",
 			)
 			known, err := json.Marshal(map[string]any{
-				"sub-agent-compact-dev": map[string]any{"source": map[string]any{
-					"source": "directory", "path": marketplace("sub-agent-compact"),
+				"forward-compaction-dev": map[string]any{"source": map[string]any{
+					"source": "directory", "path": marketplace("forward-compaction"),
 				}},
 				"buddy-dev": map[string]any{"source": map[string]any{
 					"source": "directory", "path": filepath.Join(home, ".config", "buddy", "dev-marketplace"),
@@ -450,7 +450,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 			}
 			if test.preview {
-				for _, name := range []string{"engine-sync", "auto-effort"} {
+				for _, name := range []string{"engine-sync", "auto-effort-control"} {
 					want := "  change  disable " + name + "@" + name + "-dev in "
 					if !strings.Contains(out.String(), want) {
 						t.Fatalf("preview lacks %q:\n%s", want, out.String())
@@ -468,12 +468,10 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			if !reflect.DeepEqual(settings["enabledPlugins"], test.wantEnabled) {
 				t.Fatalf("enabledPlugins = %v, want %v\n%s", settings["enabledPlugins"], test.wantEnabled, out.String())
 			}
+			// forward-compaction retires sub-agent-compact, so its options settle on the -dev copy alone.
 			wantConfigs := map[string]any{
-				"sub-agent-compact@sub-agent-compact-dev": map[string]any{
-					"options": map[string]any{"forwardHandoffTool": true},
-				},
-				"sub-agent-compact@professor": map[string]any{
-					"options": map[string]any{"forwardHandoffTool": false},
+				"forward-compaction@forward-compaction-dev": map[string]any{
+					"options": map[string]any{"ceilingNative": true},
 				},
 				"engine-sync@professor":       map[string]any{"options": map[string]any{"y": float64(2)}},
 				"engine-sync@engine-sync-dev": map[string]any{"options": map[string]any{"y": float64(2)}},
@@ -496,8 +494,8 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			if !test.listDefault {
 				for _, line := range []string{
 					"  ok      claude plugin buddy@buddy-dev installed in " + first + ", kept disabled: claude.plugins does not list buddy\n",
-					"  change  disable auto-effort@auto-effort-dev in " + filepath.Join(first, "settings.json") +
-						": claude.plugins does not list auto-effort\n",
+					"  change  disable auto-effort-control@auto-effort-control-dev in " + filepath.Join(first, "settings.json") +
+						": claude.plugins does not list auto-effort-control\n",
 					"  change  disable engine-sync@professor in " + filepath.Join(first, "settings.json") +
 						": engine-sync@engine-sync-dev replaces it; copy its pluginConfigs to engine-sync@engine-sync-dev\n",
 				} {
@@ -515,7 +513,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 // copy and enabled is a FAIL naming the plugin, the account dir and each cause,
 // never a quiet skip. A dry run and a plugin left right fail nothing.
 func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
-	const name = "sub-agent-compact"
+	const name = "forward-compaction"
 	dev := devID(name)
 	for _, test := range []struct {
 		name      string
@@ -614,23 +612,23 @@ func TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled(t *testing.T) {
 			var out bytes.Buffer
 			inst := pluginEngine(home, binary, first, second, runner, &out, true)
 			inst.options.Version = alphaVersion
-			names := []string{"sub-agent-compact", "buddy"}
+			names := []string{"forward-compaction", "buddy"}
 			withCheckout := names
 			if test.noCheckout {
 				withCheckout = names[:1]
 			}
 			inst.options.SourceRepo = writeMarketplaceClone(t, names, withCheckout)
-			inst.options.ClaudePlugins = bareList("sub-agent-compact")
+			inst.options.ClaudePlugins = bareList("forward-compaction")
 			writeFixture(t, filepath.Join(first, "settings.json"),
-				`{"enabledPlugins":{"sub-agent-compact@sub-agent-compact-dev":true,"buddy@buddy-dev":true}}`)
-			writeInstalledPlugins(t, first, "sub-agent-compact@sub-agent-compact-dev", "buddy@buddy-dev")
+				`{"enabledPlugins":{"forward-compaction@forward-compaction-dev":true,"buddy@buddy-dev":true}}`)
+			writeInstalledPlugins(t, first, "forward-compaction@forward-compaction-dev", "buddy@buddy-dev")
 			buddy := filepath.Join(home, ".local", "share", "buddy-dev")
 			if test.foreign {
 				buddy = "/elsewhere/buddy-dev"
 			}
 			known, err := json.Marshal(map[string]any{
-				"sub-agent-compact-dev": map[string]any{"source": map[string]any{
-					"source": "directory", "path": filepath.Join(home, ".local", "share", "sub-agent-compact-dev"),
+				"forward-compaction-dev": map[string]any{"source": map[string]any{
+					"source": "directory", "path": filepath.Join(home, ".local", "share", "forward-compaction-dev"),
 				}},
 				"buddy-dev": map[string]any{"source": map[string]any{"source": "directory", "path": buddy}},
 			})

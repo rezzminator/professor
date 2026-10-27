@@ -8,7 +8,35 @@ source "$SUT"
 REPO_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 TMP_BASE="$T"
 FAILURES=0
+
+# A fence scratch directory disappears after the call. Every unregistered token
+# must remain in the retained output, including those outside the top ten.
+mkdir -p "$T/placeholder-fixture/templates" "$T/placeholder-fixture/docs" "$T/placeholder-tmp"
+printf '{KNOWN}\n' > "$T/placeholder-fixture/docs/PLACEHOLDERS.md"
+printf '{UNREGISTERED_%02d}\n' {1..12} > "$T/placeholder-fixture/templates/example.md"
+(
+  cd "$T/placeholder-fixture" || exit 1
+  export PFM_DEV_FENCE=1 TMPDIR="$T/placeholder-tmp"
+  head_() { :; }
+  fail_step() { printf 'FAIL %s\n' "$*"; }
+  info() { printf '%s\n' "$*"; }
+  checks_templates_placeholders
+) > "$T/placeholder-report" 2>&1
+rm -rf "$T/placeholder-tmp"
+missing=0
+for token in $(printf '{UNREGISTERED_%02d}\n' {1..12}); do
+  grep -Fq "$token" "$T/placeholder-report" || missing=$((missing + 1))
+done
+if [ "$missing" = 0 ] && grep -q '^FAIL 12 of 12' "$T/placeholder-report"; then
+  ok 'all placeholder failures survive scratch cleanup in retained output'
+else
+  bad 'complete placeholder diagnostics after scratch cleanup' "missing $missing tokens" "$(cat "$T/placeholder-report")"
+fi
+
 shtest_unset_gate_env # run nested under the gate's own stepprof wrapper, the suite starts from none of its knobs
+fence_config_values || exit 1
+# Optional scheduler knobs must remain absent so the gate owns its derived bound.
+unset STEPS_BOUND_S STEPS_JOBS
 cat > "$T/budgets.yml" <<'YAML'
 tolerance: 1.25
 fail_factor: 2
@@ -164,7 +192,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -204,7 +232,7 @@ if gate_run templates >"$T/templates.out" &&
   graph_order templates; then
   ok 'templates graph runs its tests before static checks'
 else bad 'templates graph' "$(cat "$T/registered")"; fi
-for n in check-pfm check-templates test-pfm test-templates unit-path; do
+for n in test unit-path; do
   if grep -Fxq "templates.$n-tests checks_templates_unit_script $n" "$T/registered.args"; then
     ok "$n suite is registered with its own name"
   else bad "$n suite registration" "$(grep 'checks_templates_unit_script' "$T/registered.args")"; fi
@@ -216,6 +244,68 @@ else bad 'plugin-logs gate registration' "$(cat "$T/registered.args")"; fi
 if grep -Fxq "templates.plugin-lab checks_templates_plugin_lab" "$T/registered.args"; then
   ok 'plugin-lab self-tests are a named gate step'
 else bad 'plugin-lab gate registration' "$(cat "$T/registered.args")"; fi
+
+# Drive gate_run's actual discovery through the real step registry, stopping at
+# its metadata boundary so no registered test, sampler or static command runs.
+registry_probe() (
+  local target="$1" rejected="$2" root="$3" capture="$4" i
+  source "$REPO_ROOT/infra/fence/steps.sh" || exit 2
+  eval "$(declare -f steps_add | sed '1s/steps_add/registry_real_steps_add/')"
+  eval "$(declare -f steps_set_bound | sed '1s/steps_set_bound/registry_real_steps_set_bound/')"
+  steps_add() {
+    if [ "$1" = "$rejected" ]; then
+      printf 'steps_add: fixture registration refused: %s\n' "$1" >&2
+      return 1
+    fi
+    registry_real_steps_add "$@"
+  }
+  steps_set_bound() {
+    if [ "$rejected" = fixture.bound ]; then
+      printf 'steps_set_bound: fixture registration refused: fixture.bound\n' >&2
+      return 1
+    fi
+    registry_real_steps_set_bound "$@"
+  }
+  REPO_ROOT="$root"
+  fail_step() { printf 'FAILSTEP %s\n' "$*"; }
+  gate_derive_bound() { return 1; }
+  gate_write_meta() {
+    : >"$capture"
+    for ((i = 0; i < ${#STEPS_NAMES[@]}; i++)); do
+      printf '%s %s\n' "${STEPS_NAMES[i]}" "${STEPS_COMMANDS[i]% }" >>"$capture"
+    done
+    exit 0
+  }
+  gate_run "$target"
+)
+if registry_probe templates '' "$REPO_ROOT" "$T/real-registry" >"$T/real-registry.out" 2>&1 &&
+  grep -Fxq "templates.lanes.m bash $REPO_ROOT/infra/fence/lanes/tests/M_test.sh" "$T/real-registry" &&
+  grep -Fxq "templates.lanes.o2 bash $REPO_ROOT/infra/fence/lanes/tests/O2_test.sh" "$T/real-registry" &&
+  [ "$(grep -c '^templates\.lanes\.' "$T/real-registry")" -eq "$(find "$REPO_ROOT/infra/fence/lanes/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ]; then
+  ok 'the actual gate enumerator registers M and O2 commands under valid IDs and includes every lane suite'
+else bad 'actual lane suite registration' "$(cat "$T/real-registry.out")" "$(cat "$T/real-registry" 2>/dev/null)"; fi
+for rejected in pfm.unit pfm.self.arch-check templates.lanes.root templates.demo.codex_fence_home \
+  fixture.go-fail fixture.bound pfm.arch templates.check-map templates.clone templates.test-tests templates.engine-sync-action-tests; do
+  rm -f "$T/refused-registry"
+  if ! PFM_GATE_FIXTURES=1 registry_probe all "$rejected" "$REPO_ROOT" "$T/refused-registry" >"$T/refused-registry.out" 2>&1 &&
+    grep -Fq "fixture registration refused: $rejected" "$T/refused-registry.out" && [ ! -e "$T/refused-registry" ]; then
+    ok "a rejected $rejected registration stops gate construction before execution"
+  else bad "ignored registration failure $rejected" "$(cat "$T/refused-registry.out")"; fi
+done
+for broken in collision invalid; do
+  fixture="$T/registry-$broken"
+  mkdir -p "$fixture/infra/fence/lanes/tests" "$fixture/infra/demo/tests"
+  : >"$fixture/infra/fence/lanes/tests/M_test.sh"
+  : >"$fixture/infra/demo/tests/demo_test.sh"
+  case "$broken" in
+    collision) : >"$fixture/infra/fence/lanes/tests/m_test.sh"; diagnostic='duplicate step name: templates.lanes.m' ;;
+    invalid) : >"$fixture/infra/fence/lanes/tests/bad+name_test.sh"; diagnostic='invalid step name or missing command: templates.lanes.bad+name' ;;
+  esac
+  if ! registry_probe templates '' "$fixture" "$fixture/registered" >"$fixture/out" 2>&1 &&
+    grep -Fq "$diagnostic" "$fixture/out" && [ ! -e "$fixture/registered" ]; then
+    ok "discovered suite ID $broken is named and refuses an incomplete gate"
+  else bad "discovered suite ID $broken" "$(cat "$fixture/out")"; fi
+done
 
 # The pfm that pfm.unit prebuilds is kept in <run>/bin: check-map is handed it; the mirrors build engine-sync instead.
 if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then
@@ -393,21 +483,23 @@ if [ "$GATE_RC" -ne 0 ] && [ "$(tail -1 "$RUN/gate.tsv")" = "$(printf 'BUDGET\tP
   ok 'red steps: the BUDGET row still records its own verdict'
 else bad 'red steps with a budget row' "$(cat "$RUN/gate.tsv")"; fi
 
-PFM_GATE_FIXTURES=1 fx_case meta all
+PFM_FENCE_CONCURRENT=3 PFM_GATE_FIXTURES=1 fx_case meta all
 ts='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
-if [ "$(cut -f1 "$RUN/gate.meta" | paste -sd, -)" = 'target,commit,dirty_files,started,finished,fixtures,steps_bound_s,steps_jobs,steps_heavy_jobs' ] &&
+if [ "$(cut -f1 "$RUN/gate.meta" | paste -sd, -)" = 'target,commit,dirty_files,started,finished,fixtures,steps_bound_s,steps_jobs,steps_heavy_jobs,profile,cpus,mem,cpuset,gomaxprocs,concurrent_runs' ] &&
+  [ "$(meta_get concurrent_runs "$RUN/gate.meta")" = 3 ] &&
   [ "$(meta_get target "$RUN/gate.meta")" = all ] && [ "$(meta_get commit "$RUN/gate.meta")" = abcdef012345 ] &&
   [ "$(meta_get dirty_files "$RUN/gate.meta")" = 3 ] && [ "$(meta_get fixtures "$RUN/gate.meta")" = 1 ] &&
   [ "$(meta_get steps_bound_s "$RUN/gate.meta")" = 494 ] && [ "$(meta_get steps_jobs "$RUN/gate.meta")" = 6 ] &&
   [ "$(meta_get steps_heavy_jobs "$RUN/gate.meta")" = 2 ] &&
   [[ "$(meta_get started "$RUN/gate.meta")" =~ $ts ]] && [[ "$(meta_get finished "$RUN/gate.meta")" =~ $ts ]]; then
-  ok 'gate.meta records what ran: target, commit, dirty files, UTC start and finish, fixtures, bound, job caps'
+  ok 'gate.meta records what ran: target, commit, dirty files, UTC start and finish, fixtures, bound, job caps, concurrent runs'
 else bad 'gate.meta' "$(cat "$RUN/gate.meta")"; fi
 if [ "$(meta_get finished "$T/meta.during")" = 'NA running' ] && [ "$(meta_get started "$T/meta.during")" = "$(meta_get started "$RUN/gate.meta")" ]; then
   ok 'gate.meta exists before the steps run, finished NA running'
 else bad 'gate.meta during the run' "$(cat "$T/meta.during")"; fi
 fx_case meta-plain all
 if [ "$(meta_get fixtures "$RUN/gate.meta")" = 0 ]; then ok 'fixtures is 0 without PFM_GATE_FIXTURES=1'; else bad 'fixtures 0' "$(cat "$RUN/gate.meta")"; fi
+if [ "$(meta_get concurrent_runs "$RUN/gate.meta")" = 'NA not in the shared fence' ]; then ok 'concurrent_runs is NA, named, outside the shared fence'; else bad 'concurrent_runs NA' "$(cat "$RUN/gate.meta")"; fi
 if (
     eval "orig_$(declare -f gate_budget_verdict)"
     gate_budget_verdict() { cp "$PFM_TEST_TIMING_DIR"/run.*/gate.meta "$T/meta.at-budget"; orig_gate_budget_verdict "$@"; }
@@ -584,11 +676,11 @@ if grep -q '^rows ' "$STUB_EVENTS" && grep -Eq '^  PROFILE e2e.load NOT RECORDED
   ok 'a load sampler that cannot start is one line, and the e2e rows still run'
 else bad 'e2e load failure' "$(cat "$STUB_EVENTS")" "$(cat "$T/e2e-noload.out")"; fi
 
-# checks_pfm_race: the named harvester race tests under cgo's -race, their stream kept in the run dir and
+# checks_pfm_race: the named race tests under cgo's -race, their stream kept in the run dir and
 # profiled into its own root <run>/profile/race (never pfm.unit's processes of the same packages), then a pass event demanded of every named test: a renamed, skipped or
 # unbuilt test is a red step naming it, never a green "no tests to run".
 race_pass() { printf '{"Action":"pass","Package":"github.com/rezzminator/professor/pfm/%s","Test":"%s"}\n' "$1" "$2"; }
-# The cases read the list checks.sh holds, so a test joining it changes no case here; the chaos suites
+# The cases read the list checks.sh holds, so a test joining it changes no case here; the guarded suites
 # must be on it (the wrong-package and missing cases below name them).
 race_all="$CHECKS_PFM_RACE_TESTS"
 race_n="$(wc -l <<< "$race_all" | tr -d ' ')"
@@ -602,8 +694,8 @@ race_case() { # race_case <label> <expected FAILSTEP line or empty> <stream: "pk
     while read -r pkg test; do race_pass "$pkg" "$test"; done <<< "$stream" > "$rd/race.json"
   fi
   checks_pfm_race "$T/fx/pfm" "$rd" >"$T/race.out" 2>&1
-  if grep -Fq "$rd/profile/race pfm: go test -race (harvester chaos and race regressions) -- bash -c" "$T/unit.calls" &&
-    grep -Fq 'CGO_ENABLED=1 go -C "$1" test -race -count=1 -json -timeout 10m -run "$2" "${@:4}" > "$3"' "$T/unit.calls" &&
+  if grep -Fq "$rd/profile/race pfm: go test -race (race regressions) -- bash -c" "$T/unit.calls" &&
+    grep -Fq 'CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"' "$T/unit.calls" &&
     grep -Fq "_ $T/fx/pfm $race_regex $rd/race.json $race_pkgs" "$T/unit.calls" &&
     [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$rd/race.json" "$rd/race.json" "$rd/profile/race")" ] &&
     [ "$(grep -v '^  PROFILE ' "$T/race.out")" = "$want" ] && [ -z "${PFM_TEST_ARTIFACT_DIR+x}" ] &&
@@ -613,11 +705,11 @@ race_case() { # race_case <label> <expected FAILSTEP line or empty> <stream: "pk
 }
 race_case 'every named test passed under -race with cgo on: green' '' "$race_all"
 race_case 'a named test with no pass event (skipped, renamed, never built) is red by name' \
-  "FAILSTEP pfm: race — 1 of $race_n named test(s) never passed: internal/harvestmcp TestServiceChaos" \
-  "$(grep -v TestServiceChaos <<< "$race_all")"
+  "FAILSTEP pfm: race — 1 of $race_n named test(s) never passed: internal/installer TestClaudeMCPLockProtectsSlowBackup" \
+  "$(grep -v TestClaudeMCPLockProtectsSlowBackup <<< "$race_all")"
 race_case 'a pass in the wrong package does not stand in for the named one' \
-  "FAILSTEP pfm: race — 1 of $race_n named test(s) never passed: internal/harvest TestHarvesterChaos" \
-  "$(sed 's|^internal/harvest TestHarvesterChaos$|internal/harvestmcp TestHarvesterChaos|' <<< "$race_all")"
+  "FAILSTEP pfm: race — 1 of $race_n named test(s) never passed: internal/installer TestMCPWritePreservesAnEditDuringBackup" \
+  "$(sed 's|^internal/installer TestMCPWritePreservesAnEditDuringBackup$|internal/store TestMCPWritePreservesAnEditDuringBackup|' <<< "$race_all")"
 race_case 'no stream at all: every named test is named as never passed' \
   "FAILSTEP pfm: race — $race_n of $race_n named test(s) never passed: $(paste -sd, - <<< "$race_all" | sed 's/,/, /g')" ABSENT
 # No C compiler (an image built without gcc): the step is red as a missing toolchain and runs no go test,
@@ -656,16 +748,16 @@ export MIRROR_CALLS="$T/mirror.calls"
 cm_reuse="$T/cm-reuse"; mkdir -p "$cm_reuse/bin"; cp "$T/prebuilt-pfm" "$cm_reuse/bin/pfm"
 : > "$T/unit.calls"; : > "$T/go.calls"; FAILURES=0
 STUB_GO_RC=0 checks_gate_check_map "$cm_reuse" >"$T/cm-reuse.out" 2>&1
-if [ ! -s "$T/go.calls" ] && [ "$FAILURES" -eq 0 ] &&
+if [ "$(sed 's/ |.*//' "$T/go.calls")" = "" ] && [ "$FAILURES" -eq 0 ] &&
   [ "$(cat "$T/unit.calls")" = "unset templates: lane↔command map (check-map) -- bash infra/fence/lanes/check-map.sh --pfm $cm_reuse/bin/pfm" ]; then
-  ok 'check-map reuses <run>/bin/pfm and builds nothing'
+  ok 'check-map reuses <run>/bin/pfm'
 else bad 'check-map reuse' "$(cat "$T/go.calls")" "$(cat "$T/unit.calls")" "$(cat "$T/cm-reuse.out")"; fi
 cm_build="$T/cm-build"; mkdir -p "$cm_build"
 : > "$T/unit.calls"; : > "$T/go.calls"; FAILURES=0
 STUB_GO_RC=0 checks_gate_check_map "$cm_build" >"$T/cm-build.out" 2>&1
-if [ "$(sed 's/ |.*//' "$T/go.calls")" = "go -C pfm build -o $cm_build/check-map-pfm ./cmd/pfm" ] && [ "$FAILURES" -eq 0 ] &&
+if [ "$(sed 's/ |.*//' "$T/go.calls")" = "$(printf 'go -C pfm build -o %s/check-map-pfm ./cmd/pfm' "$cm_build")" ] && [ "$FAILURES" -eq 0 ] &&
   [ "$(cat "$T/unit.calls")" = "unset templates: lane↔command map (check-map) -- bash infra/fence/lanes/check-map.sh --pfm $cm_build/check-map-pfm" ]; then
-  ok 'check-map without <run>/bin/pfm builds check-map-pfm as before'
+  ok 'check-map without <run>/bin/pfm builds the MCP binary'
 else bad 'check-map build' "$(cat "$T/go.calls")" "$(cat "$T/unit.calls")" "$(cat "$T/cm-build.out")"; fi
 : > "$T/unit.calls"; : > "$T/go.calls"; FAILURES=0
 STUB_GO_RC=1 checks_gate_check_map "$cm_build" >"$T/cm-build-fail.out" 2>&1
@@ -705,7 +797,7 @@ case "$1" in
       echo 'SECTION-DRIFT beta-max: beta.md § Budget changed since pinned (pin sha256:a, now sha256:b) — review the override, then run engine-sync variants pin beta-max'
     fi
     if [ "${STUB_ES_UNKNOWN:-0}" -ne 0 ]; then # exit 0 with the OpenCode renderer's warning for a server it cannot grant
-      for tool in mcp__sub-agent-compact__compact mcp__sub-agent-compact__compact mcp__nosuch__x; do
+      for tool in mcp__forward-compaction__forward_compaction mcp__forward-compaction__forward_compaction mcp__nosuch__x; do
         echo "skip    unknown MCP server in tool $tool in $home/agents/beta.md — no configured or project .mcp.json server serves it; it stays denied"
       done
     fi
@@ -726,7 +818,7 @@ es_bin="$TMP_BASE/engine-sync/engine-sync"
 es_case() { # es_case <function> [VAR=value…]: run it with engine_sync_build stubbed; output in $T/es.out
   local fn="$1"; shift
   : > "$MIRROR_CALLS"; : > "$T/es-build.calls"; : > "$T/es-stage.calls"; : > "$MIRROR_CALLS.policy"; FAILURES=0
-  rm -rf "$TMP_BASE/engine-sync/mirror-tree" "$TMP_BASE/engine-sync/mirror-tree.built"
+  rm -rf "$TMP_BASE/engine-sync/mirror-tree" "$TMP_BASE/engine-sync/mirror-tree.built" "$es_bin" "$es_bin.ok"
   (
     [ $# -eq 0 ] || export "$@"
     engine_sync_build() {
@@ -906,7 +998,7 @@ if grep -Fq 'SECTION-DRIFT beta-max' "$T/es.out" &&
   ok 'a SECTION-DRIFT is red and names the declaration even when engine-sync exits 0'
 else bad 'generated agents, drift' "$(cat "$T/es.out")"; fi
 es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names" STUB_ES_UNKNOWN=1
-if grep -Eq '^ *2 skip    unknown MCP server in tool mcp__sub-agent-compact__compact in ' "$T/es.out" &&
+if grep -Eq '^ *2 skip    unknown MCP server in tool mcp__forward-compaction__forward_compaction in ' "$T/es.out" &&
   grep -Fq 'FAILSTEP generated agents: engine-sync dropped MCP tools from OpenCode twins (2 distinct' "$T/es.out" &&
   ! grep -Fq 'generated agents FAILED to render' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && ga_jailed; then
   ok 'an unknown-MCP-server warning from an exit-0 render is red and names each server and its count, never a clean render'
@@ -1043,11 +1135,11 @@ out="$( ( run() { shift 2; printf 'run [%s]\n' "$*"; }; head_() { printf 'head [
 if grep -Fxq 'run [bash /repo/scripts/test-unit-path.sh]' <<<"$out"; then
   ok 'the unit-path suite runs through bash'
 else bad 'checks_templates_unit_script run' "$out"; fi
-out="$( ( run() { return 3; }; head_() { :; }; REPO_ROOT=/repo; checks_templates_unit_script check-pfm; echo "rc=$?" ) 2>&1 )"
+out="$( ( run() { return 3; }; head_() { :; }; REPO_ROOT=/repo; checks_templates_unit_script test; echo "rc=$?" ) 2>&1 )"
 if [ "$out" = 'rc=3' ]; then ok "checks_templates_unit_script returns run's status, a red suite is not swallowed"
 else bad 'checks_templates_unit_script red suite' "$out"; fi
 
-# checks_templates (CI's iso test templates) calls each of the five unit-script suites once.
+# checks_templates (CI's iso test templates) calls each of the two unit-script suites once.
 out="$( (
   for f in $(declare -F | awk '{print $3}' | grep '^checks_templates_'); do
     case "$f" in checks_templates_steps|checks_templates_step_serial) continue ;; esac
@@ -1055,7 +1147,7 @@ out="$( (
   done
   checks_templates
 ) 2>&1 )"
-for n in check-pfm check-templates test-pfm test-templates unit-path; do
+for n in test unit-path; do
   if [ "$(grep -Fxc "checks_templates_unit_script $n" <<<"$out")" -eq 1 ]; then
     ok "the serial list calls the $n suite once"
   else bad "the serial list calls the $n suite once" "$out"; fi

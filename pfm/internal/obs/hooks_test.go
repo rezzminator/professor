@@ -50,10 +50,10 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 	finish(2)
 	_, finish = Hook(ctx, "then", &bytes.Buffer{})
 	finish(1)
-	tee, finish := Hook(ctx, "explore-deny", &bytes.Buffer{})
+	tee, finish := Hook(ctx, "store-guard", &bytes.Buffer{})
 	_, _ = tee.Write(
 		[]byte(
-			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Explore is read-only"}}`,
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"denied by policy"}}`,
 		),
 	)
 	finish(0)
@@ -68,9 +68,32 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 		t.Fatalf("levels: exit 1 at %s (want ERROR), exit 2 at %s (want INFO)", records[2].Level, records[1].Level)
 	}
 	requireField(t, records[3], "decision", "deny")
-	requireField(t, records[3], "reason", "Explore is read-only")
+	requireField(t, records[3], "reason", "denied by policy")
 	if _, found := records[0].Field("reason"); found {
 		t.Fatalf("a hook that gave no reason got one: %v", records[0].Fields)
+	}
+}
+
+func TestHookNativeHangupIsInterruptedNotFailure(t *testing.T) {
+	for _, name := range []string{"seat-host", "claude-launch", "launch", "then"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, recorder := Test(t)
+			_, finish := Hook(ctx, name, &bytes.Buffer{})
+			finish(129)
+			record := recorder.Records()[0]
+			requireField(t, record, FieldExit, float64(129))
+			if name == "then" {
+				requireField(t, record, "decision", "error")
+				if record.Level != slog.LevelError.String() {
+					t.Fatalf("unrelated hook failure level=%s", record.Level)
+				}
+				return
+			}
+			requireField(t, record, "decision", "interrupted")
+			if record.Level != slog.LevelInfo.String() {
+				t.Fatalf("native terminal hangup level=%s", record.Level)
+			}
+		})
 	}
 }
 

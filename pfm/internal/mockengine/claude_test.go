@@ -14,6 +14,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
+	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
+	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless/run"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
@@ -35,6 +39,12 @@ func init() {
 }
 
 func serveVerbsStdioProfessor() int {
+	// This test subprocess is a composition root, like cmd/pfm/engines.go.
+	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
+	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
+	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
+	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
+	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
 	resolved, err := paths.Resolve()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "verbs stdio professor: resolve paths: %v\n", err)
@@ -652,14 +662,17 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 			session.waitFrame("the seed reply", func(frame string) bool { return strings.Contains(frame, "⏺ ok") })
 			fix.indexedTranscripts()
 			session.typeLine(
-				`query mock-engine: [{"type":"mcp","tool":"find","input":{"excerpt":"violet archive fixture","include_self":true}},{"type":"turn","reply":"MCP finished"}]`,
+				fmt.Sprintf(
+					`query mock-engine: [{"type":"mcp","tool":"last","input":{"target":%q}},{"type":"turn","reply":"MCP finished"}]`,
+					fixtureSession,
+				),
 			)
 			session.waitFrame(
 				"the MCP reply",
 				func(frame string) bool { return strings.Contains(frame, "⏺ MCP finished") },
 			)
-			result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-find.json"))
-			if !strings.Contains(result, fixtureSession) {
+			result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-last.json"))
+			if !strings.Contains(result, fixtureSession) || !strings.Contains(result, `"text":"ok"`) {
 				t.Fatalf("pfm's tools/call answer=%s", result)
 			}
 			var uses, results int
@@ -678,7 +691,7 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, part := range parts {
-					if part.Type == "tool_use" && part.Name == "find" {
+					if part.Type == "tool_use" && part.Name == "last" {
 						uses++
 					}
 					if part.Type == "tool_result" && strings.Contains(part.Content, fixtureSession) && !part.IsError {
@@ -701,9 +714,9 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 
 func TestClaudeMCPFailuresAreToolResultsAndKeepThePaneLive(t *testing.T) {
 	for _, row := range []struct{ name, config, tool, cause string }{
-		{"missing server", `{"mcpServers":{}}`, "find", "professor"},
-		{"broken config", `{`, "find", "decode"},
-		{"spawn", `{"mcpServers":{"chat-professor":{"command":"/tmp/mockengine-command-absent"}}}`, "find", "initialize"},
+		{"missing server", `{"mcpServers":{}}`, "last", "professor"},
+		{"broken config", `{`, "last", "decode"},
+		{"spawn", `{"mcpServers":{"chat-professor":{"command":"/tmp/mockengine-command-absent"}}}`, "last", "initialize"},
 		{"call", "", "unknown_fixture_tool", "tools/call"},
 	} {
 		t.Run(row.name, func(t *testing.T) {

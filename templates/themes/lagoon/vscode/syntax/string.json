@@ -1,0 +1,56 @@
+{
+  "0009": {
+    "name": "Sea glass: strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "punctuation.definition.string",
+      "string.unquoted.plain",
+      "string.quoted.raw.go",
+      "string.other"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9ae79f"
+    }
+  },
+  "0010": {
+    "name": "Sea glass: docstrings",
+    "scope": [
+      "string.quoted.docstring",
+      "string.quoted.docstring punctuation.definition.string"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#9ae79f"
+    }
+  },
+  "0014": {
+    "name": "Flamingo tongue: regular expressions",
+    "scope": [
+      "string.regexp",
+      "source.regexp",
+      "punctuation.definition.group.regexp",
+      "punctuation.definition.character-class.regexp",
+      "string.regexp punctuation.definition.string"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9bdb"
+    }
+  },
+  "0045": {
+    "name": "Parrotfish: link text",
+    "scope": [
+      "string.other.link",
+      "constant.other.reference.link",
+      "string.other.link.title.markdown",
+      "string.other.link.description.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#76c7ff"
+    }
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "0018": {
+    "name": "Amber · functions",
+    "scope": [
+      "entity.name.function",
+      "meta.function-call entity.name.function",
+      "variable.function",
+      "support.function.any-method",
+      "meta.function-call.generic",
+      "entity.name.function.go",
+      "entity.name.function.call",
+      "entity.name.command",
+      "meta.function-call.python"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb75e"
+    }
+  },
+  "0020": {
+    "name": "Temper blue · types",
+    "scope": [
+      "entity.name.type",
+      "entity.name.class",
+      "entity.name.struct",
+      "entity.name.interface",
+      "entity.name.enum",
+      "entity.other.inherited-class",
+      "entity.name.type.parameter",
+      "entity.name.type.go",
+      "entity.name.type.any.go",
+      "entity.name.type.comparable.go",
+      "meta.type.annotation entity.name.type"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#83b6e8"
+    }
+  },
+  "0022": {
+    "name": "Bronze · namespaces and packages",
+    "scope": [
+      "entity.name.namespace",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "storage.modifier.import",
+      "support.other.namespace",
+      "entity.name.type.package.go",
+      "entity.name.import.go",
+      "variable.other.import.go",
+      "entity.name.namespace.rust"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d29f73"
+    }
+  },
+  "0023": {
+    "name": "Temper violet · decorators and macros",
+    "scope": [
+      "entity.name.function.decorator",
+      "meta.decorator",
+      "punctuation.decorator",
+      "meta.attribute",
+      "entity.name.function.macro",
+      "support.function.macro",
+      "entity.name.function.macro.rust",
+      "meta.attribute.rust",
+      "storage.type.annotation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#c195cf"
+    }
+  },
+  "0025": {
+    "name": "Ember · tags",
+    "scope": [
+      "entity.name.tag",
+      "meta.tag.sgml",
+      "support.class.component"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f47550"
+    }
+  },
+  "0027": {
+    "name": "Bronze · attributes",
+    "scope": [
+      "entity.other.attribute-name"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#d29f73"
+    }
+  },
+  "0028": {
+    "name": "Amber · CSS classes",
+    "scope": [
+      "entity.other.attribute-name.class.css",
+      "entity.other.attribute-name.class"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffb75e"
+    }
+  },
+  "0029": {
+    "name": "Molten · CSS ids",
+    "scope": [
+      "entity.other.attribute-name.id.css",
+      "entity.other.attribute-name.id"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9044"
+    }
+  },
+  "0030": {
+    "name": "Temper violet · CSS pseudo-classes",
+    "scope": [
+      "entity.other.attribute-name.pseudo-class.css",
+      "entity.other.attribute-name.pseudo-element.css"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#c195cf"
+    }
+  }
+}

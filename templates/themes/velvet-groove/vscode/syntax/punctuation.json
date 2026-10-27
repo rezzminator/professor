@@ -1,0 +1,52 @@
+{
+  "0006": {
+    "name": "Dusty: punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "meta.brace.round",
+      "meta.brace.square",
+      "meta.brace.curly",
+      "punctuation.definition.block",
+      "punctuation.definition.parameters",
+      "punctuation.definition.arguments",
+      "punctuation.definition.array",
+      "punctuation.definition.dictionary",
+      "punctuation.definition.typeparameters",
+      "punctuation.definition.tag",
+      "punctuation.definition.markdown",
+      "meta.separator.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#c9a3a6"
+    }
+  },
+  "0008": {
+    "name": "Harvest gold, shaded: quotes",
+    "scope": [
+      "punctuation.definition.string"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#d9ae5a"
+    }
+  },
+  "0045": {
+    "name": "Liner notes: markers",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "punctuation.definition.quote.begin.markdown",
+      "punctuation.definition.block.sequence.item.yaml",
+      "markup.list.numbered punctuation.definition.list"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff75a0"
+    }
+  }
+}

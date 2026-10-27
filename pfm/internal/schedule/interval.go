@@ -120,5 +120,5 @@ func Message(r fleetdb.Schedule) string {
 	if r.Once {
 		when = "once"
 	}
-	return "⏰ pfm schedule " + strconv.FormatInt(r.ID, 10) + " (" + when + "): " + r.Prompt
+	return "⏰ pfm schedule " + strconv.FormatInt(r.ID, 10) + " (" + when + "): " + r.Prompt + "\n\n" + fireTag(r)
 }

@@ -180,9 +180,16 @@ if [ -n "$CC_STUB_TRUST" ]; then
 fi
 prompt=""
 skip=0
+remote_name=0
 for argument in "$@"; do
   if [ "$skip" = 1 ]; then skip=0; continue; fi
+  if [ "$remote_name" = 1 ]; then
+    remote_name=0
+    case "$argument" in -*) ;; *) continue ;; esac
+  fi
   case "$argument" in
+    --remote-control) remote_name=1 ;;
+    --remote-control=*) ;;
     --name|--model|--effort|--session-id|--settings|--mcp-config|--system-prompt-file) skip=1 ;;
     -*) ;;
     *) prompt="$argument"; break ;;

@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,58 +22,25 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 const (
-	themeManifestRelative = "templates/themes/sources.json"
+	// themeProfilesRelative is the Professor theme directory: every
+	// subdirectory of it is one theme (themesync.ReadProfileDir), and nothing
+	// else is.
+	themeProfilesRelative = "templates/themes"
 	themeOwnershipName    = "theme-ownership.json"
-	themeOwnerPlaceholder = "{GH_USER}"
 	maxThemeDownloadBytes = 10 << 20
 )
 
-var errThemesOfflineFetch = fmt.Errorf("fetch failed: fetch skipped: %s=1", paths.EnvThemesOffline)
-
-type themeManifest struct {
-	Comment       string                  `json:"_comment,omitempty"`
-	SourceFetched map[string]themeSource  `json:"source_fetched,omitempty"`
-	Bundled       map[string]bundledTheme `json:"bundled,omitempty"`
-}
-
-type themeSource struct {
-	Repo     string `json:"repo"`
-	Raw      string `json:"raw"`
-	Target   string `json:"target"`
-	Activate string `json:"activate"`
-	Requires string `json:"requires"`
-	// local is the absolute path of a bundled palette read from the source
-	// clone; empty for a source-fetched theme or a bundled one resolved
-	// against the release manifest, both of which download Raw.
-	local string
-	// base names the source_fetched theme a bundled overlay is merged onto;
-	// empty for a complete palette.
-	base string
-}
-
-// bundledTheme is a palette the blueprint ships itself under templates/themes/:
-// File names it beside sources.json, so it is read from the source clone
-// when the manifest is, or downloaded from beside the release manifest.
-// With Base set the file is an overlay — only `name` and the `overrides`
-// keys that differ — written merged onto the fetched base, so the base is
-// never vendored and cannot drift.
-type bundledTheme struct {
-	File     string `json:"file"`
-	Base     string `json:"base,omitempty"`
-	Target   string `json:"target"`
-	Activate string `json:"activate"`
-	Requires string `json:"requires"`
-}
-
-// themePalette is the Claude Code theme file shape both kinds share.
-type themePalette struct {
-	Name      string            `json:"name"`
-	Base      string            `json:"base,omitempty"`
-	Overrides map[string]string `json:"overrides"`
+// themeProfile is one Professor theme install ships: a {name}/ directory in
+// templates/themes/, read from the source clone or, with no clone, downloaded
+// file by file from the release.
+type themeProfile struct {
+	local string // its absolute directory in the source clone; empty when downloaded
+	raw   string // its release directory URL, ending in "/"; empty when read from the source clone
 }
 
 type themeOwnershipRecord struct {
@@ -86,9 +52,9 @@ func (installer *engine) installThemes(ctx context.Context) {
 	if !installer.options.InstallThemes {
 		return
 	}
-	sources, err := loadThemeSources(ctx, installer.options)
+	profiles, err := loadThemeProfiles(ctx, installer.options)
 	if err != nil {
-		installer.skip("themes NOT installed: load " + themeManifestRelative + ": " + err.Error())
+		installer.skip("themes NOT installed: load " + themeProfilesRelative + ": " + err.Error())
 		return
 	}
 	ownershipPath := filepath.Join(installer.managedRoot, themeOwnershipName)
@@ -97,69 +63,39 @@ func (installer *engine) installThemes(ctx context.Context) {
 		installer.skip("themes NOT installed: read ownership " + ownershipPath + ": " + err.Error())
 		return
 	}
+	ownership = installer.retireThemes(ownershipPath, profiles, ownership)
 
-	type themeLoad struct {
-		content []byte
-		err     error
-	}
-	loads := map[string]themeLoad{}
-	load := func(name string) themeLoad {
-		if cached, ok := loads[name]; ok {
-			return cached
-		}
-		content, err := loadThemeContent(
-			ctx,
-			installer.options.ThemeHTTPClient,
-			sources[name],
-			installer.options.ThemesOffline,
-		)
-		result := themeLoad{content: content, err: err}
-		loads[name] = result
-		return result
-	}
-	for _, name := range sortedThemeNames(sources) {
-		source := sources[name]
-		target, targetErr := themeTarget(installer.options.Home, source.Target)
-		if targetErr != nil {
-			installer.skip("theme " + name + " manifest target invalid: " + targetErr.Error())
-			continue
-		}
-		existing, exists, readErr := readOptionalRegularFile(target)
-		if readErr != nil {
-			installer.skip("theme " + name + " inspect failed: " + readErr.Error())
-			continue
-		}
-		record, owned := ownership[name]
-		if owned {
-			if filepath.Clean(record.Path) != filepath.Clean(target) {
-				installer.skip(
-					fmt.Sprintf("theme %s ownership target drift: ledger=%s manifest=%s", name, record.Path, target),
-				)
-				continue
-			}
-			if exists && contentSHA256(existing) != record.SHA256 {
-				installer.skip("theme " + name + " locally modified; left in place at " + target)
-				continue
-			}
-		} else if exists {
-			installer.skip("theme " + name + " already exists but is not installer-owned; left in place at " + target)
+	for _, name := range sortedThemeNames(profiles) {
+		source := profiles[name]
+		target := filepath.Join(installer.options.Home, ".claude", "themes", name+".json")
+		claude := themeFile{key: name, path: target}
+		if skip := claude.inspect(name, ownership); skip != "" {
+			installer.skip(skip)
 			continue
 		}
 
 		if !installer.apply {
-			if installer.options.ThemesOffline {
-				if source.local == "" {
-					installer.skip("theme " + name + " " + errThemesOfflineFetch.Error())
-					continue
-				}
-				if source.base != "" && sources[source.base].local == "" {
-					installer.skip("theme " + name + " base " + source.base + " " + errThemesOfflineFetch.Error())
-					continue
-				}
+			profile := themeFile{
+				key:   profileLedgerKey(name),
+				label: " profile copy",
+				path:  themesync.ProfilePath(installer.options.Home, name),
 			}
-			if owned && exists {
-				installer.ok("theme " + name + " currently installed; apply checks its source for updates")
-			} else {
+			if skip := profile.inspect(name, ownership); skip != "" {
+				installer.skip(skip)
+				continue
+			}
+			if profile.exists && !profile.owned {
+				installer.ok("theme " + name + " profile copy exists at " + profile.path +
+					" and is not installer-owned; apply adopts it only when byte-identical to the install," +
+					" else skips the theme")
+			}
+			switch {
+			case claude.owned && claude.exists:
+				installer.ok("theme " + name + " currently installed; apply checks its profile for updates")
+			case claude.exists:
+				installer.ok("theme " + name + " exists at " + target +
+					" and is not installer-owned; apply adopts it only when byte-identical to the install")
+			default:
 				verb := "fetch theme"
 				if source.local != "" {
 					verb = "read bundled theme"
@@ -171,53 +107,17 @@ func (installer *engine) installThemes(ctx context.Context) {
 			continue
 		}
 
-		loaded := load(name)
-		if loaded.err != nil {
-			installer.skip("theme " + name + " " + loaded.err.Error())
+		content, loadErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, source)
+		if loadErr != nil {
+			installer.skip("theme " + name + " " + loadErr.Error())
 			continue
 		}
-		content := loaded.content
-		if source.base != "" {
-			base := load(source.base)
-			if base.err != nil {
-				installer.skip("theme " + name + " base " + source.base + " " + base.err.Error())
-				continue
-			}
-			merged, mergeErr := mergeThemeOverlay(base.content, content)
-			if mergeErr != nil {
-				installer.skip("theme " + name + " overlay onto " + source.base + " failed: " + mergeErr.Error())
-				continue
-			}
-			content = merged
-		}
-		digest := contentSHA256(content)
-		if exists && bytes.Equal(existing, content) && owned && record.SHA256 == digest {
-			installer.ok("theme " + name + " unchanged at " + target)
+		files, filesErr := themeFiles(installer.options.Home, name, claude, content)
+		if filesErr != nil {
+			installer.skip("theme " + name + " " + filesErr.Error())
 			continue
 		}
-
-		next := cloneThemeOwnership(ownership)
-		next[name] = themeOwnershipRecord{Path: target, SHA256: digest}
-		if err := func() error {
-			if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
-				return fmt.Errorf("write %s: %w", target, writeErr)
-			}
-			if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
-				rollbackErr := rollbackTheme(target, existing, exists)
-				if rollbackErr != nil {
-					return fmt.Errorf("record ownership: %w; rollback failed: %v", ledgerErr, rollbackErr)
-				}
-				return fmt.Errorf("record ownership: %w", ledgerErr)
-			}
-			return nil
-		}(); err != nil {
-			installer.skip("theme " + name + " install failed: " + err.Error())
-			continue
-		}
-		ownership = next
-		if changeErr := installer.change("write theme "+name+" -> "+target, nil); changeErr != nil {
-			installer.skip("theme " + name + " report failed after install: " + changeErr.Error())
-		}
+		ownership = installer.installThemeFiles(name, ownershipPath, ownership, files)
 	}
 }
 
@@ -236,311 +136,84 @@ func (installer *engine) uninstallThemes() {
 		return
 	}
 
-	for _, name := range sortedThemeOwnershipNames(ownership) {
-		record := ownership[name]
-		content, exists, readErr := readOptionalRegularFile(record.Path)
-		if readErr != nil {
-			installer.skip("theme " + name + " uninstall inspect failed: " + readErr.Error())
-			continue
-		}
-		if exists && contentSHA256(content) != record.SHA256 {
-			installer.skip(
-				"theme " + name + " locally modified; left in place and retained recovery ownership at " + record.Path,
-			)
-			continue
-		}
-		if !installer.apply {
-			if changeErr := installer.change("remove theme "+name+" "+record.Path, nil); changeErr != nil {
-				installer.skip("theme " + name + " uninstall preview failed: " + changeErr.Error())
-			}
-			continue
-		}
-
-		next := cloneThemeOwnership(ownership)
-		delete(next, name)
-		if exists {
-			if removeErr := os.Remove(record.Path); removeErr != nil {
-				installer.skip("theme " + name + " uninstall failed: remove " + record.Path + ": " + removeErr.Error())
-				continue
-			}
-		}
-		if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
-			var rollbackErr error
-			if exists {
-				rollbackErr = atomicfile.Write(record.Path, content, 0o644)
-			}
-			message := "theme " + name + " uninstall failed: update ownership: " + ledgerErr.Error()
-			if rollbackErr != nil {
-				message += "; rollback failed: " + rollbackErr.Error()
-			}
-			installer.skip(message)
-			continue
-		}
-		ownership = next
-		if changeErr := installer.change("remove theme "+name+" "+record.Path, nil); changeErr != nil {
-			installer.skip("theme " + name + " uninstall report failed: " + changeErr.Error())
-		}
+	for _, key := range sortedThemeOwnershipNames(ownership) {
+		ownership = installer.removeOwnedTheme(ownershipPath, ownership, key, themeUninstall)
 	}
 	if installer.apply {
-		themesDir := filepath.Join(installer.options.Home, ".claude", "themes")
-		if removeErr := os.Remove(
-			themesDir,
-		); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) &&
-			!errors.Is(removeErr, fs.ErrExist) {
-			installer.skip("leave theme directory " + themesDir + ": " + removeErr.Error())
+		for _, directory := range []string{
+			filepath.Join(installer.options.Home, ".claude", "themes"),
+			themesync.ProfileDir(installer.options.Home),
+		} {
+			if removeErr := os.Remove(
+				directory,
+			); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) &&
+				!errors.Is(removeErr, fs.ErrExist) {
+				installer.skip("leave theme directory " + directory + ": " + removeErr.Error())
+			}
 		}
 	}
 }
 
-// loadThemeContent returns a theme's palette bytes: a bundled palette from the
-// source clone is read from disk ("read failed: ..." names the path), anything
-// else is downloaded ("fetch failed: ..."); either way non-JSON is refused.
-func loadThemeContent(ctx context.Context, client *http.Client, source themeSource, offline bool) ([]byte, error) {
-	var content []byte
+// loadThemeContent returns a theme's profile document, assembled from its
+// directory (themesync.ReadProfileDir) in the source clone ("read failed:
+// ..." names the path) or from its files downloaded from the release
+// (themesync.AssembleProfile; "fetch failed: ..."); either way every file is
+// held to the theme layout.
+func loadThemeContent(ctx context.Context, client *http.Client, source themeProfile) ([]byte, error) {
 	if source.local != "" {
-		read, err := os.ReadFile(source.local)
+		content, err := themesync.ReadProfileDir(source.local)
 		if err != nil {
 			return nil, fmt.Errorf("read failed: %w", err)
 		}
-		content = read
-	} else {
-		if offline {
-			return nil, errThemesOfflineFetch
-		}
-		fetched, err := fetchTheme(ctx, client, source.Raw)
-		if err != nil {
-			return nil, fmt.Errorf("fetch failed: %w", err)
-		}
-		content = fetched
+		return content, nil
 	}
-	if !json.Valid(content) {
-		if source.local != "" {
-			return nil, fmt.Errorf("read failed: %s is not valid JSON", source.local)
-		}
-		return nil, errors.New("fetch failed: response is not valid JSON")
+	content, err := themesync.AssembleProfile(func(file string) ([]byte, error) {
+		return fetchTheme(ctx, client, source.raw+file)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fetch failed: %s: %w", source.raw, err)
 	}
 	return content, nil
 }
 
-// mergeThemeOverlay writes the base palette with the overlay's name (when set)
-// and its overrides on top; a key the overlay does not name keeps the base value.
-func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
-	var basePalette, overlayPalette themePalette
-	if err := json.Unmarshal(base, &basePalette); err != nil {
-		return nil, fmt.Errorf("decode base palette: %w", err)
-	}
-	if err := json.Unmarshal(overlay, &overlayPalette); err != nil {
-		return nil, fmt.Errorf("decode overlay: %w", err)
-	}
-	if len(overlayPalette.Overrides) == 0 {
-		return nil, errors.New("overlay carries no overrides")
-	}
-	if len(basePalette.Overrides) == 0 {
-		return nil, errors.New("base palette carries no overrides")
-	}
-	for key, value := range overlayPalette.Overrides {
-		basePalette.Overrides[key] = value
-	}
-	if overlayPalette.Name != "" {
-		basePalette.Name = overlayPalette.Name
-	}
-	content, err := json.MarshalIndent(basePalette, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("encode merged palette: %w", err)
-	}
-	return append(content, '\n'), nil
-}
-
-// ThemeManifestURL is the release-matched theme manifest URL for
-// currentVersion ("main" for a development or empty version) — install's
-// Options.ThemeManifestURL, and the {GH_USER} fallback pfm doctor resolves a
-// source-fetched skills registry with, as install does.
-func ThemeManifestURL(currentVersion string) string {
+// ThemeReleaseURL is the release-matched URL of templates/themes/ for
+// currentVersion ("main" for a development or empty version), ending in "/":
+// install's Options.ThemeReleaseURL, where the profiles are downloaded from
+// when no source clone holds them, and the {GH_USER} fallback the skill
+// sources resolve their owner from (registeredOwner), as pfm doctor does.
+func ThemeReleaseURL(currentVersion string) string {
 	reference := strings.TrimSpace(currentVersion)
 	if reference == "" || reference == pfmconfig.DevelopmentVersion {
 		reference = "main"
 	}
-	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"
+	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/" +
+		themeProfilesRelative + "/"
 }
 
-// releaseManifestUnpublishedAlpha reports whether a release theme manifest
-// URL names an -alpha version reference. ThemeManifestURL builds
-// this URL from VERSION, and pfm never publishes an -alpha tag on GitHub, so
-// that raw.githubusercontent.com URL 404s every time; loadThemeSources turns
-// that predictable failure into a named refusal instead of a bare HTTP
-// error, and skips the doomed fetch entirely.
-func releaseManifestUnpublishedAlpha(rawURL string) bool {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	for _, segment := range strings.Split(parsed.Path, "/") {
-		if strings.HasSuffix(segment, "-alpha") {
-			return true
-		}
-	}
-	return false
-}
+// ownerPlaceholder is the registered {GH_USER} placeholder a skill source's
+// repo may carry; resolveOwnerPlaceholder fills it.
+const ownerPlaceholder = "{GH_USER}"
 
-func loadThemeSources(ctx context.Context, options Options) (map[string]themeSource, error) {
-	var content []byte
-	var origin string
-	var localThemes string // templates/themes/ in the source clone when the manifest was read there
-	var err error
-	if strings.TrimSpace(options.SourceRepo) != "" {
-		origin = filepath.Join(options.SourceRepo, filepath.FromSlash(themeManifestRelative))
-		localThemes = filepath.Dir(origin)
-		content, err = os.ReadFile(origin)
-		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				return nil, fmt.Errorf("read local manifest %s: %w", origin, err)
-			}
-			localErr := err
-			localThemes = ""
-			origin = strings.TrimSpace(options.ThemeManifestURL)
-			if origin == "" {
-				return nil, fmt.Errorf("read local manifest: %w; no release manifest URL is configured", localErr)
-			}
-			if releaseManifestUnpublishedAlpha(origin) {
-				return nil, fmt.Errorf(
-					"local theme manifest unavailable: %v; release manifest for an unpublished -alpha build; run pfm install from the source clone",
-					localErr,
-				)
-			}
-			if options.ThemesOffline {
-				return nil, fmt.Errorf(
-					"local theme manifest unavailable: %v; fetch skipped: %s=1",
-					localErr,
-					paths.EnvThemesOffline,
-				)
-			}
-			content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
-			if err != nil {
-				return nil, fmt.Errorf(
-					"local theme manifest unavailable: %v; fetch release manifest %s: %w",
-					localErr,
-					origin,
-					err,
-				)
-			}
-		}
-	} else {
-		origin = strings.TrimSpace(options.ThemeManifestURL)
-		if origin == "" {
-			return nil, errors.New("no source repository or release manifest URL is configured")
-		}
-		if releaseManifestUnpublishedAlpha(origin) {
-			return nil, errors.New(
-				"release manifest for an unpublished -alpha build; run pfm install from the source clone",
-			)
-		}
-		if options.ThemesOffline {
-			return nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
-		}
-		content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
-		if err != nil {
-			return nil, fmt.Errorf("fetch release manifest %s: %w", origin, err)
-		}
-	}
-	content, err = resolveOwnerPlaceholder(content, options.SourceRepo, options.ThemeManifestURL)
-	if err != nil {
-		return nil, err
-	}
-	var manifest themeManifest
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&manifest); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", origin, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, fmt.Errorf("decode %s: multiple JSON values", origin)
-		}
-		return nil, fmt.Errorf("decode %s trailing content: %w", origin, err)
-	}
-	if len(manifest.SourceFetched) == 0 && len(manifest.Bundled) == 0 {
-		return nil, fmt.Errorf("manifest %s has no source_fetched or bundled themes", origin)
-	}
-	sources := make(map[string]themeSource, len(manifest.SourceFetched)+len(manifest.Bundled))
-	for name, source := range manifest.SourceFetched {
-		if strings.TrimSpace(name) == "" || strings.TrimSpace(source.Raw) == "" ||
-			strings.TrimSpace(source.Target) == "" {
-			return nil, fmt.Errorf("manifest %s theme %q is missing name, raw, or target", origin, name)
-		}
-		if err := validateThemeURL(source.Raw); err != nil {
-			return nil, fmt.Errorf("manifest %s theme %q raw URL: %w", origin, name, err)
-		}
-		sources[name] = source
-	}
-	for name, bundled := range manifest.Bundled {
-		file := strings.TrimSpace(bundled.File)
-		if strings.TrimSpace(name) == "" || file == "" || strings.TrimSpace(bundled.Target) == "" {
-			return nil, fmt.Errorf("manifest %s bundled theme %q is missing name, file, or target", origin, name)
-		}
-		if file != path.Base(file) || file == "." || file == ".." {
-			return nil, fmt.Errorf(
-				"manifest %s bundled theme %q file %q must be a bare file name beside the manifest",
-				origin,
-				name,
-				file,
-			)
-		}
-		if _, clash := sources[name]; clash {
-			return nil, fmt.Errorf("manifest %s names theme %q as both source_fetched and bundled", origin, name)
-		}
-		base := strings.TrimSpace(bundled.Base)
-		if base != "" {
-			if _, known := manifest.SourceFetched[base]; !known {
-				return nil, fmt.Errorf(
-					"manifest %s bundled theme %q base %q is not a source_fetched theme",
-					origin,
-					name,
-					base,
-				)
-			}
-		}
-		source := themeSource{
-			Target:   bundled.Target,
-			Activate: bundled.Activate,
-			Requires: bundled.Requires,
-			base:     base,
-		}
-		if localThemes != "" {
-			source.local = filepath.Join(localThemes, file)
-		} else {
-			// The release manifest was fetched: the palette is published beside it.
-			source.Raw = strings.TrimSuffix(origin, path.Base(origin)) + file
-			source.Repo = source.Raw
-			if err := validateThemeURL(source.Raw); err != nil {
-				return nil, fmt.Errorf("manifest %s bundled theme %q release URL: %w", origin, name, err)
-			}
-		}
-		sources[name] = source
-	}
-	return sources, nil
-}
-
-// resolveOwnerPlaceholder replaces the registered {GH_USER} placeholder in a
-// source-fetched registry (the theme manifest, the global skill sources) with
-// the blueprint repo owner registeredOwner resolves. Content without the
-// placeholder is returned untouched; a resolution failure is an error naming
-// the placeholder, never a silently unresolved URL.
-func resolveOwnerPlaceholder(content []byte, sourceRepo, manifestURL string) ([]byte, error) {
-	if !bytes.Contains(content, []byte(themeOwnerPlaceholder)) {
+// resolveOwnerPlaceholder replaces the registered {GH_USER} placeholder in the
+// global skill sources with the blueprint repo owner registeredOwner
+// resolves. Content without the placeholder is returned untouched; a
+// resolution failure is an error naming the placeholder, never a silently
+// unresolved URL.
+func resolveOwnerPlaceholder(content []byte, sourceRepo, releaseURL string) ([]byte, error) {
+	if !bytes.Contains(content, []byte(ownerPlaceholder)) {
 		return content, nil
 	}
-	owner, err := registeredOwner(sourceRepo, manifestURL)
+	owner, err := registeredOwner(sourceRepo, releaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("resolve registered placeholder %s: %w", themeOwnerPlaceholder, err)
+		return nil, fmt.Errorf("resolve registered placeholder %s: %w", ownerPlaceholder, err)
 	}
-	return bytes.ReplaceAll(content, []byte(themeOwnerPlaceholder), []byte(owner)), nil
+	return bytes.ReplaceAll(content, []byte(ownerPlaceholder), []byte(owner)), nil
 }
 
 // registeredOwner resolves {GH_USER}: the owner in the source clone's
 // .professor/manifest.json installed_from.repo, else the owner segment of the
-// release manifest URL.
-func registeredOwner(sourceRepo, manifestURL string) (string, error) {
+// release theme URL (ThemeReleaseURL).
+func registeredOwner(sourceRepo, releaseURL string) (string, error) {
 	if strings.TrimSpace(sourceRepo) != "" {
 		manifestPath := filepath.Join(sourceRepo, ".professor", "manifest.json")
 		content, err := os.ReadFile(manifestPath)
@@ -562,13 +235,13 @@ func registeredOwner(sourceRepo, manifestURL string) (string, error) {
 			return "", fmt.Errorf("read %s: %w", manifestPath, err)
 		}
 	}
-	parsed, err := url.Parse(strings.TrimSpace(manifestURL))
+	parsed, err := url.Parse(strings.TrimSpace(releaseURL))
 	if err != nil {
-		return "", fmt.Errorf("parse release manifest URL: %w", err)
+		return "", fmt.Errorf("parse release theme URL: %w", err)
 	}
 	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(segments) < 2 || strings.TrimSpace(segments[0]) == "" {
-		return "", fmt.Errorf("release manifest URL %q does not name an owner/repository", manifestURL)
+		return "", fmt.Errorf("release theme URL %q does not name an owner/repository", releaseURL)
 	}
 	return segments[0], nil
 }
@@ -583,6 +256,198 @@ func repositoryOwner(repository string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[len(parts)-2])
+}
+
+// releaseUnpublishedAlpha reports whether a release theme URL names an
+// -alpha version reference. ThemeReleaseURL builds this URL from VERSION, and
+// pfm never publishes an -alpha tag on GitHub, so that URL 404s every time;
+// releaseThemeProfiles turns that predictable failure into a named refusal
+// instead of a bare HTTP error, and skips the doomed fetch entirely.
+func releaseUnpublishedAlpha(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if strings.HasSuffix(segment, "-alpha") {
+			return true
+		}
+	}
+	return false
+}
+
+// loadThemeProfiles finds the themes install ships, keyed by name: every
+// theme directory in the source clone's templates/themes/, or, with no source
+// clone or one without that directory, every one there at the release.
+func loadThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, error) {
+	if strings.TrimSpace(options.SourceRepo) == "" {
+		profiles, err := releaseThemeProfiles(ctx, options)
+		if err != nil {
+			return nil, fmt.Errorf("no source repository: %w", err)
+		}
+		return profiles, nil
+	}
+	directory := filepath.Join(options.SourceRepo, filepath.FromSlash(themeProfilesRelative))
+	names, err := localProfileDirs(directory)
+	if errors.Is(err, fs.ErrNotExist) {
+		profiles, releaseErr := releaseThemeProfiles(ctx, options)
+		if releaseErr != nil {
+			return nil, fmt.Errorf("local themes unavailable: %v; %w", err, releaseErr)
+		}
+		return profiles, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	profiles := make(map[string]themeProfile, len(names))
+	for _, name := range names {
+		if err := validateThemeName(name); err != nil {
+			return nil, fmt.Errorf("theme %s: %w", name, err)
+		}
+		profiles[name] = themeProfile{local: filepath.Join(directory, name)}
+	}
+	if len(profiles) == 0 {
+		return nil, fmt.Errorf("no theme in %s: a theme is a {name}/ directory there", directory)
+	}
+	return profiles, nil
+}
+
+// releaseThemeProfiles lists the profiles at Options.ThemeReleaseURL and
+// names each one's download URL: refused, before any fetch, for an
+// unpublished -alpha release or with the theme fetch switched off.
+func releaseThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, error) {
+	base := strings.TrimSpace(options.ThemeReleaseURL)
+	if base == "" {
+		return nil, errors.New("no release theme URL is configured")
+	}
+	if releaseUnpublishedAlpha(base) {
+		return nil, errors.New(
+			"release themes for an unpublished -alpha build; run pfm install from the source clone",
+		)
+	}
+	if options.ThemesOffline {
+		return nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
+	}
+	names, err := releaseProfileDirs(ctx, options.ThemeHTTPClient, base)
+	if err != nil {
+		return nil, err
+	}
+	profiles := make(map[string]themeProfile, len(names))
+	for _, name := range names {
+		if err := validateThemeName(name); err != nil {
+			return nil, fmt.Errorf("theme %s: %w", name, err)
+		}
+		raw := strings.TrimSuffix(base, "/") + "/" + name + "/"
+		if err := validateThemeURL(raw); err != nil {
+			return nil, fmt.Errorf("theme %s release URL: %w", name, err)
+		}
+		profiles[name] = themeProfile{raw: raw}
+	}
+	if len(profiles) == 0 {
+		return nil, fmt.Errorf("no theme in %s", base)
+	}
+	return profiles, nil
+}
+
+// flatProfileError refuses a {name}.json file directly in templates/themes/:
+// a theme is a directory, so a profile left in the single-file form would
+// otherwise never install, unseen.
+func flatProfileError(file, where string) error {
+	return fmt.Errorf(
+		"%s in %s is a single-file profile: a theme is a %s/ directory of themesync.ProfileFiles",
+		file, where, strings.TrimSuffix(file, ".json"),
+	)
+}
+
+// localProfileDirs are the themes in the source clone's templates/themes/,
+// sorted: every subdirectory, each a theme. A {name}.json file there is an
+// error (flatProfileError), a symlink or other non-regular entry too; any
+// other file (the README) is not a theme.
+func localProfileDirs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("list themes in %s: %w", dir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		switch {
+		case entry.IsDir():
+			names = append(names, entry.Name())
+		case !entry.Type().IsRegular():
+			return nil, fmt.Errorf(
+				"%s in %s is neither a theme directory nor a file (%s)",
+				entry.Name(),
+				dir,
+				entry.Type(),
+			)
+		case strings.HasSuffix(entry.Name(), ".json"):
+			return nil, flatProfileError(entry.Name(), dir)
+		}
+	}
+	return names, nil
+}
+
+// The contents API's types for a directory and a file entry, as against
+// "symlink" or "submodule".
+const (
+	githubContentsDir  = "dir"
+	githubContentsFile = "file"
+)
+
+// releaseProfileDirs lists the themes at a release theme URL on
+// raw.githubusercontent.com through GitHub's contents API, the one listing
+// that host has: the directories of templates/themes/ at the URL's ref. A
+// {name}.json file there is an error (flatProfileError).
+func releaseProfileDirs(ctx context.Context, client *http.Client, releaseURL string) ([]string, error) {
+	listing, err := themeListingURL(releaseURL)
+	if err != nil {
+		return nil, err
+	}
+	content, err := fetchTheme(ctx, client, listing)
+	if err != nil {
+		return nil, fmt.Errorf("list release profiles: %w", err)
+	}
+	var entries []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(content, &entries); err != nil {
+		return nil, fmt.Errorf("list release profiles: decode %s: %w", listing, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		switch {
+		case entry.Type == githubContentsDir:
+			names = append(names, entry.Name)
+		case entry.Type == githubContentsFile && strings.HasSuffix(entry.Name, ".json"):
+			return nil, flatProfileError(entry.Name, releaseURL)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// themeListingURL turns a release theme URL,
+// https://raw.githubusercontent.com/{owner}/{repo}/{ref}/templates/themes/,
+// into the contents API URL listing that directory at that ref; any other
+// shape is an error naming it.
+func themeListingURL(releaseURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(releaseURL))
+	if err != nil {
+		return "", fmt.Errorf("list release profiles: parse %s: %w", releaseURL, err)
+	}
+	suffix := strings.Split(themeProfilesRelative, "/")
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if parsed.Host != "raw.githubusercontent.com" || len(segments) < 3+len(suffix) ||
+		strings.Join(segments[len(segments)-len(suffix):], "/") != themeProfilesRelative {
+		return "", fmt.Errorf(
+			"list release profiles: %s is not https://raw.githubusercontent.com/{owner}/{repo}/{ref}/%s/",
+			releaseURL, themeProfilesRelative,
+		)
+	}
+	ref := strings.Join(segments[2:len(segments)-len(suffix)], "/")
+	return "https://api.github.com/repos/" + segments[0] + "/" + segments[1] + "/contents/" +
+		themeProfilesRelative + "?ref=" + url.QueryEscape(ref), nil
 }
 
 func validateThemeURL(raw string) error {
@@ -641,20 +506,6 @@ func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, e
 		return nil, fmt.Errorf("GET %s exceeds %d bytes", raw, maxThemeDownloadBytes)
 	}
 	return content, nil
-}
-
-func themeTarget(home, target string) (string, error) {
-	if !strings.HasPrefix(target, "~/") {
-		return "", fmt.Errorf("target %q must start with ~/", target)
-	}
-	resolved := filepath.Clean(filepath.Join(home, filepath.FromSlash(strings.TrimPrefix(target, "~/"))))
-	root := filepath.Join(filepath.Clean(home), ".claude", "themes")
-	relative, err := filepath.Rel(root, resolved)
-	if err != nil || relative == "." || relative == ".." ||
-		strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("target %q must name a file beneath ~/.claude/themes", target)
-	}
-	return resolved, nil
 }
 
 func readOptionalRegularFile(filePath string) ([]byte, bool, error) {
@@ -739,9 +590,9 @@ func cloneThemeOwnership(records map[string]themeOwnershipRecord) map[string]the
 	return cloned
 }
 
-func sortedThemeNames(sources map[string]themeSource) []string {
-	names := make([]string, 0, len(sources))
-	for name := range sources {
+func sortedThemeNames(profiles map[string]themeProfile) []string {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
 		names = append(names, name)
 	}
 	sort.Strings(names)

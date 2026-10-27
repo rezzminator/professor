@@ -1,5 +1,5 @@
 # Install from the private staged source, then initialize an entirely jailed project.
-exec jail-pfm install --yes --skip-harvest
+exec jail-pfm install --yes
 exec jail-pfm init $WORK/project
 exists $WORK/project/.professor/baseline.json
 

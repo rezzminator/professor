@@ -14,6 +14,9 @@ services:
       # an ordinary builder leaves an unkeyed image for the next fence start.
       labels:
         pfm.fence.inputs: ${PFM_DEV_INPUTS_KEY:-unkeyed}
+      # Empty by default: the npm mirror for a network that blocks registry.npmjs.org.
+      args:
+        PFM_NPM_REGISTRY: ${PFM_NPM_REGISTRY:-}
     image: professor-pfm-dev
     # A real machine has an init that reaps orphans; a bare container does
     # not, so a double-forked descendant lingers as a zombie and the
@@ -23,8 +26,8 @@ services:
     # A hard memory ceiling: RAM and swap together never exceed 3 GB, so one
     # fence cannot starve the host or the containers beside it. pfm-sim
     # inherits it through extends.
-    mem_limit: 3g
-    memswap_limit: 3g
+    mem_limit: ${PFM_FENCE_COMPOSE_MEM:?set by fence_config_init}
+    memswap_limit: ${PFM_FENCE_COMPOSE_MEM:?set by fence_config_init}
     # Fence housekeeping (infra/fence/housekeeping.sh) removes only containers
     # carrying this label: exited ones, and running ones past their age limit
     # unless `iso shell` or the demo also set pfm.fence.long-lived=1.
@@ -43,6 +46,7 @@ services:
       # resolves it; an absent source mounts the common Git directory instead
       # and PFM_DEV_ENGINE_SYNC_MISSING names the absence.
       - ${PFM_DEV_ENGINE_SYNC_SRC:?set by dev.sh iso — the engine-sync source}:/engine-sync:ro
+      - ${PFM_DEV_HARVESTER_SRC:?set by dev.sh iso — the harvester source}:/harvester:ro
       - pfm-dev-gocache:/root/.cache/go-build
       - pfm-dev-gomod:/root/go/pkg/mod
       - pfm-dev-lintcache:/root/.cache/golangci-lint
@@ -54,6 +58,7 @@ services:
       PFM_DEV_REPO_GIT_DIR: /pfm-git-common/${PFM_DEV_GIT_DIR_REL:?set by dev.sh iso — relative active gitdir}
       PFM_DEV_REPO_WORK_TREE: /worktree
       PFM_DEV_ENGINE_SYNC_MISSING: ${PFM_DEV_ENGINE_SYNC_MISSING:-}
+      PFM_DEV_HARVESTER_MISSING: ${PFM_DEV_HARVESTER_MISSING:-}
 
   # The real-simulation fence (`dev.sh iso sim`): pfm-dev's mounts and law plus
   # a real Google Chrome and the shared memory Chrome needs
@@ -68,14 +73,14 @@ services:
     build:
       target: pfm-sim
     image: professor-pfm-sim
-    shm_size: "2gb"
+    shm_size: ${PFM_FENCE_SIM_SHM:?set by fence_config_init}
     entrypoint: ["/worktree/infra/fence/sim-entry.sh"]
     environment:
       # uv's cache lives INSIDE the per-worktree harvest volume: one filesystem,
       # so uv hardlinks. Every sidecar-script edit publishes a new environment
       # (the script is in its digest); hardlinked, that costs seconds, where a
       # cross-volume copy would cost the environment's full size per edit.
-      UV_CACHE_DIR: /root/.local/state/pfm/harvest-python/.uv-cache
+      UV_CACHE_DIR: /root/.local/state/harvester/python/cache
 
 # The caches are shared by bare name with plain `docker run -v` mounters, so
 # compose never creates or prefixes them (a compose-made fence_… copy is never
@@ -85,8 +90,6 @@ services:
 #   pfm-dev-gocache    lanes/container.sh, release-rehearsal.sh
 #   pfm-dev-gomod      lanes/container.sh, release-rehearsal.sh
 #   pfm-dev-lintcache  docker-compose.yml (pfm-dev, pfm-sim by extends)
-#   pfm-lane-harvest-cache  lanes/root.sh (via lanes/container.sh)
-#   pfm-lane-uv-cache       lanes/root.sh (via lanes/container.sh)
 volumes:
   pfm-dev-gocache:
     external: true

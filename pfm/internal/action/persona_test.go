@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -64,7 +65,7 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 					fleetEnv = " PFM_OPENCODE_FLEET_FILE=" + Quote(request.OpenCodeFleetPrompt)
 				}
 				words = []string{
-					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `"]}'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
+					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}' PFM_OPENCODE_MODEL='openai/gpt-x' PFM_OPENCODE_VARIANT='xhigh'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
 						prompt,
 					) + " opencode",
 				}
@@ -148,9 +149,14 @@ func TestWorkbenchPersonaEffort(t *testing.T) {
 			wantEffort: "xhigh",
 		},
 		{
-			name:     "OpenCode effort unvalidated",
+			name:     "unknown OpenCode effort",
 			manifest: `{"prompt":"scribe.md","effort":"turbo","engines":["opencode"]}`,
-			engines:  []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New, wantEffort: "turbo",
+			engines:  []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New,
+			refused: map[pfmengine.ID]bool{pfmengine.OpenCode: true},
+		},
+		{
+			name: "OpenCode effort lowered", manifest: `{"prompt":"scribe.md","effort":"High","engines":["opencode"]}`,
+			engines: []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New, wantEffort: "high",
 		},
 		{
 			name: "ForLaunch error passes through", manifest: `{"prompt":""}`,
@@ -408,13 +414,122 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 			prompt := filepath.Join(dir, ".professor", "scribe.md")
 			want := `OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(
 				request.Home,
+			) + `","file://` + paths.OpenCodeHerdrPlugin(
+				request.Home,
 			) + `"]}'`
 			if marker == "clone recorded" {
-				want += " PFM_OPENCODE_FLEET_FILE=" + Quote(paths.ComposedHarnessPromptIn(clone, pfmengine.OpenCode))
+				want += " PFM_OPENCODE_FLEET_FILE=" + Quote(paths.GeneratedHarnessPromptIn(clone, pfmengine.OpenCode))
 			}
 			want += " PFM_OPENCODE_SYSTEM_FILE=" + Quote(prompt) + " opencode"
 			if !strings.Contains(run, want) {
 				t.Fatalf("run lacks %q: %s", want, run)
+			}
+		})
+	}
+}
+
+// TestExecutorOpenCodeHerdrPlugin: every pfm OpenCode chat loads the Herdr
+// reporter plugin staged with the absolute pfm binary, a chat without a
+// persona included; a Claude chat stages none.
+func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
+	for _, test := range []struct {
+		name, manifest string
+		kind           compose.Kind
+		want           string
+	}{
+		{"persona chat", `{"prompt":"scribe.md","engines":["opencode"]}`, compose.NewOpenCode, "persona"},
+		{"no persona, fresh, outside a workbench", `{"prompt":"scribe.md"}`, compose.NewOpenCode, "plain"},
+		{"no persona, resume", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "plain"},
+		{"claude chat", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeClaude, "none"},
+		// The reporter is optional: a staging failure launches the chat
+		// without it.
+		{"staging fails", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "unstaged"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, dir := actionWorkbenchFixture(t, test.manifest)
+			request.Row.Kind = test.kind
+			if test.want == "unstaged" {
+				if err := os.MkdirAll(paths.OpenCodeHerdrPlugin(request.Home), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.Contains(test.name, "outside a workbench") {
+				request.Row.CWD, request.Row.Workbench = filepath.Dir(filepath.Dir(dir)), ""
+			}
+			tmux := &fakeActionTmux{alive: map[string]bool{}}
+			executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := executor.Open(context.Background(), request); err != nil {
+				t.Fatal(err)
+			}
+			if len(tmux.created) != 1 {
+				t.Fatalf("created=%d", len(tmux.created))
+			}
+			run := tmux.created[0].Run
+			plugin := paths.OpenCodeHerdrPlugin(request.Home)
+			herdrURL := `"file://` + plugin + `"`
+			staged, stageErr := os.ReadFile(plugin)
+			switch test.want {
+			case "unstaged":
+				if strings.Contains(run, plugin) || strings.Contains(run, "OPENCODE_CONFIG_CONTENT") {
+					t.Fatalf("a chat whose Herdr plugin failed to stage loads it: %s", run)
+				}
+				return
+			case "none":
+				if stageErr == nil || strings.Contains(run, plugin) {
+					t.Fatalf("a Claude chat staged or loaded the OpenCode Herdr plugin: %v\n%s", stageErr, run)
+				}
+				return
+			case "plain":
+				want := `OPENCODE_CONFIG_CONTENT='{"plugin":[` + herdrURL + `]}'`
+				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE=") {
+					t.Fatalf("run lacks %q or carries a persona env: %s", want, run)
+				}
+			case "persona":
+				want := `"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(request.Home) + `",` + herdrURL + `]}'`
+				if !strings.Contains(run, want) {
+					t.Fatalf("run lacks %q: %s", want, run)
+				}
+			}
+			binary := filepath.Join(request.Home, ".local", "bin", "pfm")
+			if stageErr != nil || !strings.Contains(string(staged), `const PFM_BINARY = "`+binary+`"`) {
+				t.Fatalf("staged plugin %s does not carry the pfm binary %s: %v", plugin, binary, stageErr)
+			}
+		})
+	}
+}
+
+func TestExtensionLaunchDoors(t *testing.T) {
+	machine := testMachineConfig(t.TempDir())
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: t.TempDir()}}
+	machine.Extensions = map[string]pfmconfig.Extension{
+		"ponytail": {
+			Enabled: true,
+			Engines: []string{"codex", "opencode"},
+			Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "^worker$"},
+		},
+	}
+	for _, kind := range []compose.Kind{compose.NewCodex, compose.ResumeCodex, compose.NewOpenCode, compose.ResumeOpenCode} {
+		t.Run(kind.String(), func(t *testing.T) {
+			request := Request{
+				Config:         machine,
+				Home:           t.TempDir(),
+				PrimaryAccount: 1,
+				FreshSocket:    "fixture",
+				Row:            compose.Row{Kind: kind, ID: "session", CWD: t.TempDir()},
+			}
+			plan, err := Synthesize(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.SeatRun == nil ||
+				!strings.Contains(strings.Join(plan.SeatRun.Env, "\n"), "PONYTAIL_SUBAGENT_MATCHER=^worker$") {
+				t.Fatalf("extension env lost in typed recipe: %+v", plan.SeatRun)
+			}
+			if kind != compose.NewCodex && !strings.Contains(plan.Run, "PONYTAIL_SUBAGENT_MATCHER='^worker$'") {
+				t.Fatalf("extension env lost in shell recipe: %s", plan.Run)
 			}
 		})
 	}

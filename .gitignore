@@ -1,6 +1,9 @@
 .DS_Store
 /pfm.config.json
 /harvester.config.json
+# Pre-plugin harvester config and cache beside pfm.config.json (gateway credentials, private pages): `pfm install` moves the config and `harvester setup` the cache to the harvester's own homes.
+.harvester-cache/
+.harvester-state/
 *.swp
 *.bak
 node_modules/
@@ -45,23 +48,22 @@ templates/global/agents/*.toml
 # .codex/skills/; the goals/ tree is the goal plugin's live session state.
 .opencode/skills/
 .opencode/goals/
-# clone-distiller result files (tracer-rr/ holds those from before its rename):
-# machine-local dig evidence (verbatim third-party code, paths into /tmp clones);
-# the RR document carries the commit-pinned links.
+# RR dig evidence: each run directory's sub-rr/ reports and clone-distiller/
+# result files (the top-level clone-distiller/ and tracer-rr/ hold those from
+# before run directories) are machine-local (verbatim third-party text, paths
+# into /tmp clones); the run's synthesis document stays tracked.
+.professor/RR/*/sub-rr/
+.professor/RR/*/clone-distiller/
 .professor/RR/clone-distiller/
 .professor/RR/tracer-rr/
-# Harvester conversion cache and OpenCode's own runtime files (plugin install
-# tree, nested config): host state, never repo content. `.cache/` is the
-# harvester cache's pre-migration name, ignored until `pfm install` renames it.
-.harvester-cache/
+# OpenCode's runtime files and local caches are host state.
 .cache/
 .opencode/.opencode/
 .opencode/node_modules/
 .opencode/package.json
 .opencode/package-lock.json
 .opencode/.gitignore
-# Python bytecode caches from python runs outside pfm (pfm's harvestpy launches
-# send theirs to $TMPDIR/pfm-pycache).
+# Python bytecode caches.
 __pycache__/
 
 # The scrub table maps real private values to placeholder tokens — it MUST stay local,
@@ -71,3 +73,6 @@ scripts/placeholder-map.tsv
 # leak-check.sh private denylist — names the very things that must never be
 # published, so it is never tracked/public. See scripts/leak-check.sh header.
 scripts/leak-terms.txt
+
+# Fleet prompts are assembled from embedded source parts by pfm install.
+/pfm/harness-prompts/generated/

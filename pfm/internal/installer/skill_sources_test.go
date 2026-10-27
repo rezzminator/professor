@@ -579,8 +579,15 @@ func TestSourceFetchedSkillsNewClashLinksTheTemplateInOneInstall(t *testing.T) {
 	if !strings.Contains(output, "SKILL-SOURCE-CLASH shared: ") {
 		t.Fatalf("the clash was not reported:\n%s", output)
 	}
-	assertLink(t, filepath.Join(home, ".claude", "skills", "shared"), template)
-	requireNoPath(t, filepath.Join(home, ".agents", "skills", "shared"), "the clashing store link survived")
+	for _, registry := range []string{".claude", ".agents"} {
+		assertLink(t, filepath.Join(home, registry, "skills", "shared"), template)
+		if got := readSkillFile(
+			t,
+			filepath.Join(home, registry, "skills", "shared", "SKILL.md"),
+		); got != "# template\n" {
+			t.Fatalf("%s skill content = %q, want template", registry, got)
+		}
+	}
 }
 
 // TestSourceFetchedSkillsBusyStoreIsLeftAlone pins F13: while another install
@@ -720,7 +727,7 @@ func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 		t.Fatal("find test source")
 	}
 	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
-	sources, present, err := loadSkillSources(repo, ThemeManifestURL(""))
+	sources, present, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil || !present || len(sources) == 0 {
 		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)
 	}

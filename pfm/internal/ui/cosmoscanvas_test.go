@@ -9,6 +9,8 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // The rail the "Cosmos system focus" golden draws: with `s` pressed, the
@@ -217,6 +219,8 @@ func TestCanvasRenderIsByteIdenticalToTheFmtEncoder(t *testing.T) {
 // TestCanvasRenderAllocatesOncePerFrame pins the removed work: a frame is one
 // buffer, not a boxed argument list per colour change.
 func TestCanvasRenderAllocatesOncePerFrame(t *testing.T) {
+	// AllocsPerRun counts every goroutine, including the trace reader.
+	testjail.PauseFlightRecorder(t)
 	canvas := NewCanvas(118, 43)
 	scatterCanvas(canvas, 7)
 	if allocs := testing.AllocsPerRun(20, func() { _ = canvas.render() }); allocs > 2 {
@@ -228,6 +232,7 @@ func TestCanvasRenderAllocatesOncePerFrame(t *testing.T) {
 // canvas handed back and acquired again is a blank canvas of the new size with
 // the default quantisation, and the cycle allocates nothing.
 func TestAcquiredCanvasIsBlankAndReusesItsBuffers(t *testing.T) {
+	testjail.PauseFlightRecorder(t)
 	dirty := acquireCanvas(118, 43)
 	dirty.Quant = 16
 	scatterCanvas(dirty, 3)

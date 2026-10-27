@@ -1,6 +1,7 @@
 package action
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -15,9 +16,13 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // New constructs an action executor using only K4-overridable paths.
@@ -48,7 +53,15 @@ func New(dependencies Dependencies) (*Executor, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	if dependencies.Identify == nil {
+		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+		if err != nil {
+			return nil, fmt.Errorf("resolve picker caller: %w", err)
+		}
+		dependencies.Identify = identifier.Identify
+	}
 	return &Executor{
+		identify:  dependencies.Identify,
 		tmux:      tmux,
 		processes: processes,
 		gate:      gate,
@@ -150,6 +163,86 @@ func (executor *Executor) Open(
 	if err != nil {
 		return "", err
 	}
+	if request.Row.Kind == compose.NewClaude || request.Row.Kind == compose.NewCodex ||
+		request.Row.Kind == compose.NewOpenCode || request.Row.Kind == compose.ResumeClaude ||
+		request.Row.Kind == compose.ResumeCodex || request.Row.Kind == compose.ResumeOpenCode {
+		caller, callerErr := executor.identify(ctx)
+		choice, chooseErr := spawn.Place(ctx, "picker", request.Config.Chat.Backend, caller, callerErr)
+		if chooseErr != nil {
+			return "", chooseErr
+		}
+		if choice.Backend == spawn.BackendHerdr {
+			values, pathErr := pfmconfig.ResolvePaths()
+			if pathErr != nil {
+				return "", pathErr
+			}
+			if plan.SeatRun == nil {
+				return "", errors.New("native picker launch has no structured recipe or identity")
+			}
+			engineID := compose.EngineForKind(request.Row.Kind)
+			sessionID := request.Row.ID
+			if plan.Record != nil {
+				sessionID = plan.Record.SessionID
+			} else if sessionID == "" {
+				sessionID, err = newSessionID()
+				if err != nil {
+					return "", err
+				}
+			}
+			seat := fleetdb.Seat{
+				SessionID: sessionID,
+				Engine:    string(engineID),
+				Name:      request.LaunchName,
+			}
+			if !choice.InPlace {
+				_, spawnErr := spawn.SpawnHerdr(
+					ctx,
+					spawn.HerdrRequest{Choice: choice, Paths: values, Run: *plan.SeatRun, Seat: seat},
+				)
+				if spawnErr != nil {
+					return "", spawnErr
+				}
+				executor.recordLaunch(ctx, plan.Record)
+				launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
+				return "", nil
+			}
+			// The chat is born in the caller's own pane: the reservation names
+			// this pane and the shell execs the seat host in place, so the pane
+			// and its tab stay the user's (no new tab, nothing left to close).
+			prepared, prepareErr := spawn.PrepareHerdr(
+				ctx,
+				spawn.HerdrRequest{
+					Choice: choice,
+					Paths:  values,
+					Run:    *plan.SeatRun,
+					Seat:   seat,
+				},
+			)
+			if prepareErr != nil {
+				return "", prepareErr
+			}
+			// Only a name a user chose (launch --name, a resumed chat's own
+			// user name) replaces a label the user set on this tab; an AI
+			// title, a first prompt or the project folder is re-announced.
+			name := cmp.Or(request.LaunchName, request.Row.Name)
+			userChose := request.LaunchName != "" ||
+				request.Row.UserName != "" && request.Row.Name == request.Row.UserName
+			label := spawn.BirthTabLabel(name, plan.SeatRun.CWD)
+			if labelErr := herdr.LabelPaneTab(
+				ctx, choice.HerdrSocket, choice.HerdrPane, label, userChose,
+			); labelErr != nil &&
+				!errors.Is(labelErr, herdr.ErrTabNotSole) {
+				// The birth proceeds: the tab keeps its label until the chat's
+				// name reaches it.
+				fmt.Fprintf(
+					executor.stderr, "pfm: Herdr tab of pane %s keeps its label: %v\n", choice.HerdrPane, labelErr,
+				)
+			}
+			executor.recordLaunch(ctx, plan.Record)
+			launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
+			return prepared.Eval, nil
+		}
+	}
 	if plan.ChatServer != nil {
 		executor.recordLaunch(ctx, plan.Record)
 		if err := executor.tmux.CreateChatServer(
@@ -157,6 +250,24 @@ func (executor *Executor) Open(
 			*plan.ChatServer,
 		); err != nil {
 			return "", err
+		}
+		if plan.Record != nil {
+			values, pathErr := pfmconfig.ResolvePaths()
+			if pathErr != nil {
+				return "", pathErr
+			}
+			if persistErr := spawn.RecordTmuxSeat(
+				ctx,
+				values,
+				fleetdb.Seat{
+					SessionID:  plan.Record.SessionID,
+					Engine:     string(plan.Record.Engine),
+					Name:       request.LaunchName,
+					TmuxSocket: plan.ChatServer.Socket,
+				},
+			); persistErr != nil {
+				fmt.Fprintf(executor.stderr, "pfm: tmux picker chat exists; seat registration failed: %v\n", persistErr)
+			}
 		}
 		held, err := executor.watchLaunch(
 			ctx,
@@ -297,10 +408,7 @@ func (executor *Executor) SelfSwitch(
 	currentTMUX, targetSocket string,
 	engineCommands ...string,
 ) bool {
-	currentPath := currentTMUX
-	if comma := strings.IndexByte(currentPath, ','); comma >= 0 {
-		currentPath = currentPath[:comma]
-	}
+	currentPath := pfmtmux.SocketPath(currentTMUX)
 	if currentPath == "" || filepath.Base(currentPath) != targetSocket {
 		return false
 	}

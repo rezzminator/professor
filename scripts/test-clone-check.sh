@@ -65,6 +65,14 @@ for scenario in missing-scan wrong-scan missing-resolve wrong-resolve; do
   fi
 done
 
+# In the fence every check's tool is the image's: the remedy names the image, never a host install.
+out=$(PFM_DEV_FENCE=1 clone "$T/absent"); rc=$?
+if [[ $rc -eq 2 && "$out" == *'the fence image lacks it — infra/fence/pfm-dev.Dockerfile installs it'* && "$out" != *'run infra/fence/tools.sh'* ]]; then
+  ok 'in the fence a missing jscpd names the image, not a host install'
+else
+  bad 'in the fence a missing jscpd names the image, not a host install' "rc=$rc; $out"
+fi
+
 rm -f "$T/scanned"
 out=$(clone "$T/bin"); rc=$?
 if [[ $rc -eq 0 && "$out" == 'CLONES PASS Found 17 clones, none new' && -e "$T/scanned" ]]; then

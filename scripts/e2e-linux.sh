@@ -11,7 +11,6 @@ fi
 docker run --rm \
   -e HOME=/tmp/pfm-e2e-home \
   -e PFM_DEV_FENCE=1 \
-  -e PFM_HARVESTPY_OFFLINE=1 \
   -e PFM_E2E_SOURCE_REPO=/workspace \
   -v "${repo_root}:/workspace:ro" \
   -w /workspace \

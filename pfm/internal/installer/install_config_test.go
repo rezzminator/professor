@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -63,20 +64,20 @@ func TestInstallConfig(t *testing.T) {
 				clone = t.TempDir()
 				wantTheme, wantSeed = "seeded", example
 			}
-			before := snapshotMemoryMigrationTree(t, home)
+			before := snapshotTree(t, home)
 			got, seeded, err := InstallConfig(runtime, &paths.MapEnv{}, clone)
 			if err != nil || got.Theme != wantTheme || seeded != wantSeed {
 				t.Fatalf("config=%+v seeded=%q err=%v", got, seeded, err)
 			}
-			if !reflect.DeepEqual(before, snapshotMemoryMigrationTree(t, home)) {
+			if !reflect.DeepEqual(before, snapshotTree(t, home)) {
 				t.Fatal("read-only config changed home")
 			}
 			if wantTheme == "original" && !reflect.DeepEqual(got, runtime.Config) {
 				t.Fatal("fallback changed runtime config")
 			}
 			if wantTheme == "seeded" {
-				if got.Path != target || got.Harvester.Path != pfmconfig.HarvesterPath(target) {
-					t.Fatalf("paths=%q/%q", got.Path, got.Harvester.Path)
+				if got.Path != target {
+					t.Fatalf("path=%q", got.Path)
 				}
 				if len(got.Accounts) == 0 || got.Accounts[0].ConfigDir != pfmconfig.DefaultAccountDir(home, 1) {
 					t.Fatalf("accounts=%+v", got.Accounts)
@@ -271,8 +272,8 @@ func installSeedClaude(t *testing.T, example []byte) map[string]json.RawMessage 
 	return claude
 }
 
-// The seed a first install writes leaves out the four claude keys a pfm of the
-// last release refuses (helperModel, pluginCheckoutRoot, plugins, costLedger)
+// The seed a first install writes leaves out the new claude keys a pfm of the
+// last release refuses (remoteControl, helperModel, pluginCheckoutRoot, plugins, costLedger)
 // while they sit at their defaults, exactly as `pfm config init` does
 // (marshalClaude); the example file itself keeps them, for its parity test.
 func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
@@ -285,7 +286,7 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	claude := installSeedClaude(t, example)
-	for _, key := range []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger"} {
+	for _, key := range []string{"remoteControl", "helperModel", "pluginCheckoutRoot", "plugins", "costLedger"} {
 		if _, present := claude[key]; present {
 			t.Errorf("the seed keeps claude.%s at its default", key)
 		}
@@ -298,12 +299,56 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 // A value the example sets away from its default is kept.
 func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
 	claude := installSeedClaude(t, []byte(`{"version":2,"claude":{"helperModel":"claude-custom-1","costLedger":false,`+
-		`"plugins":["effort-live-control"],"theme":null}}`))
+		`"plugins":["auto-effort-control"],"remoteControl":false,"theme":null}}`))
 	for key, want := range map[string]string{
-		"helperModel": `"claude-custom-1"`, "costLedger": "false", "plugins": `["effort-live-control"]`,
+		"helperModel": `"claude-custom-1"`, "costLedger": "false", "plugins": `["auto-effort-control"]`,
+		"remoteControl": "false",
 	} {
 		if got := strings.Join(strings.Fields(string(claude[key])), ""); got != want {
 			t.Errorf("seed claude.%s = %q, want %q", key, got, want)
 		}
 	}
+}
+
+// snapshotTree records every path under root with its mode and content, so a read-only call can be proven to leave the tree as it was.
+func snapshotTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	snapshot := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, _ os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			snapshot[relative] = fmt.Sprintf("symlink:%o:%s", info.Mode().Perm(), target)
+		case info.IsDir():
+			snapshot[relative] = fmt.Sprintf("dir:%o", info.Mode().Perm())
+		default:
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			snapshot[relative] = fmt.Sprintf("file:%o:%x", info.Mode().Perm(), content)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }

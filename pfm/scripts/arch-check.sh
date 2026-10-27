@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pfm architecture ratchet — `make arch` (part of `make gate`). Design and the
+# pfm architecture ratchet — `make arch` (the `arch` check of .claude/scripts/test.sh and the full gate). Design and the
 # meaning of every check: docs/dev/pfm-architecture.md § Checks.
 #
 # Every check prints exactly one line: CHECK <id> PASS|FAIL|ERROR <detail>.

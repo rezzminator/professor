@@ -2,8 +2,7 @@
 
 ## How it was verified
 
-- [ ] `.claude/scripts/dev.sh iso verify templates` — the leak gate and placeholder registry
-- [ ] The affected tests, named: `.claude/scripts/dev.sh iso test pfm` or the package run in the fence
+- [ ] `.claude/scripts/test.sh <paths>` over every file the change touched — its affected tests and static checks, the leak scan and placeholder registry among them
 - [ ] A bug fix carries a regression test that failed before the fix
 
 ## Checklist

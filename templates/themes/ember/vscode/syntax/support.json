@@ -1,0 +1,71 @@
+{
+  "0019": {
+    "name": "Pale steel · built-in functions",
+    "scope": [
+      "support.function",
+      "support.function.builtin",
+      "entity.name.function.builtin",
+      "keyword.other.special-method",
+      "entity.name.function.support.builtin.go",
+      "entity.name.function.support.go",
+      "support.function.builtin.shell",
+      "support.variable",
+      "support.module.node"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b4d6ef"
+    }
+  },
+  "0021": {
+    "name": "Pale steel · built-in types",
+    "scope": [
+      "support.type",
+      "support.class",
+      "support.type.primitive",
+      "storage.type.primitive",
+      "storage.type.built-in",
+      "keyword.type",
+      "storage.type.boolean.go",
+      "storage.type.byte.go",
+      "storage.type.error.go",
+      "storage.type.numeric.go",
+      "storage.type.rune.go",
+      "storage.type.string.go",
+      "storage.type.uintptr.go",
+      "support.type.python",
+      "entity.name.type.primitive.rust",
+      "entity.name.type.numeric.rust"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b4d6ef"
+    }
+  },
+  "0031": {
+    "name": "Peach ash · CSS properties",
+    "scope": [
+      "support.type.property-name.css",
+      "meta.property-name.css",
+      "support.type.vendored.property-name.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#efbea7"
+    }
+  },
+  "0032": {
+    "name": "White heat · CSS values",
+    "scope": [
+      "support.constant.property-value.css",
+      "meta.property-value.css",
+      "support.constant.color",
+      "constant.other.color.rgb-value",
+      "keyword.other.unit.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fee392"
+    }
+  }
+}

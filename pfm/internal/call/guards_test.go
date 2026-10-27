@@ -1,6 +1,8 @@
 package call
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -239,4 +241,41 @@ func FuzzSelectorLine(f *testing.F) {
 	f.Fuzz(func(_ *testing.T, capture string) {
 		_ = SelectorLine(capture)
 	})
+}
+
+// Trust menu rows must never be stashed as drafts or accepted as empty input.
+func TestUnnumberedTrustMenuIsNotAComposer(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	body, err := os.ReadFile("../engine/testdata/claude-trust-unnumbered.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selected := range []string{"No, exit", "Yes, I trust this folder"} {
+		capture := string(body)
+		if selected != "No, exit" {
+			capture = strings.ReplaceAll(capture, "❯ No, exit", "  No, exit")
+			capture = strings.ReplaceAll(capture, "   Yes, I trust this folder", " ❯ Yes, I trust this folder")
+		}
+		if got := SelectorLine(capture); got != "❯ "+selected {
+			t.Errorf("selector=%q, want selected trust row", got)
+		}
+		if row := LastComposerLine(capture); row != "" || ComposerRowShown(capture) || hasDraft(row) {
+			t.Errorf("trust menu read as editable input: row=%q", row)
+		}
+		empty, draft, err := ComposerEmpty(capture, func() (string, error) { return capture, nil })
+		if empty || draft != "" || err != nil {
+			t.Errorf("trust menu empty=%v draft=%q err=%v", empty, draft, err)
+		}
+		if draft := "❯ " + selected; !hasDraft(draft) || ComposerDraftText(draft) != selected {
+			t.Errorf("an ordinary draft without dialog context was lost: %q", draft)
+		}
+		quotedChoice := capture + "\n────────\n❯ " + selected + "\n────────"
+		if SelectorLine(quotedChoice) != "" || ComposerDraftText(quotedChoice) != selected {
+			t.Error("quoted dialog overrode a bounded draft matching a trust choice")
+		}
+		quoted := capture + "\n────────\n❯ actual draft\n────────"
+		if SelectorLine(quoted) != "" || ComposerDraftText(quoted) != "actual draft" {
+			t.Error("quoted dialog outranked active composer")
+		}
+	}
 }

@@ -1,0 +1,144 @@
+{
+  "0005": {
+    "name": "O I 557.7 nm · keywords",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.other",
+      "keyword.control.flow",
+      "keyword.control.conditional",
+      "keyword.control.loop",
+      "keyword.control.import",
+      "keyword.control.export",
+      "keyword.control.from",
+      "keyword.control.return",
+      "keyword.control.trycatch",
+      "keyword.other.import",
+      "keyword.other.package",
+      "keyword.package",
+      "keyword.import",
+      "keyword.control.directive",
+      "punctuation.definition.directive",
+      "keyword.control.at-rule",
+      "keyword.control.at-rule punctuation.definition.keyword"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf0a8"
+    }
+  },
+  "0006": {
+    "name": "N2+ 427.8 nm · declarations",
+    "scope": [
+      "storage",
+      "storage.type",
+      "storage.modifier",
+      "keyword.storage",
+      "keyword.declaration",
+      "storage.type.function",
+      "storage.type.class",
+      "storage.type.interface",
+      "storage.type.enum",
+      "storage.type.struct",
+      "storage.type.type",
+      "storage.type.namespace",
+      "storage.type.module",
+      "keyword.function",
+      "keyword.var",
+      "keyword.const",
+      "keyword.type.go",
+      "keyword.struct.go",
+      "keyword.interface.go",
+      "keyword.map.go",
+      "keyword.channel.go",
+      "keyword.function.go",
+      "keyword.const.go",
+      "keyword.var.go",
+      "storage.type.function.python",
+      "storage.type.class.python",
+      "keyword.declaration.function",
+      "keyword.declaration.struct",
+      "keyword.declaration.enum",
+      "keyword.declaration.trait",
+      "keyword.declaration.impl",
+      "keyword.declaration.type",
+      "keyword.other.fn.rust"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b49cff"
+    }
+  },
+  "0007": {
+    "name": "N2+ 427.8 nm · modifiers",
+    "scope": [
+      "storage.modifier.async",
+      "keyword.control.async",
+      "storage.modifier.mut",
+      "keyword.other.mut",
+      "storage.modifier.static",
+      "storage.modifier.readonly",
+      "storage.modifier.public",
+      "storage.modifier.private",
+      "storage.modifier.protected",
+      "storage.modifier.export"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b49cff"
+    }
+  },
+  "0008": {
+    "name": "Airglow · operators",
+    "scope": [
+      "keyword.operator",
+      "keyword.operator.assignment",
+      "keyword.operator.arithmetic",
+      "keyword.operator.comparison",
+      "keyword.operator.logical",
+      "keyword.operator.relational",
+      "keyword.operator.bitwise",
+      "keyword.operator.ternary",
+      "keyword.operator.spread",
+      "keyword.operator.rest",
+      "keyword.operator.optional",
+      "keyword.operator.type.annotation",
+      "keyword.operator.channel",
+      "keyword.operator.address",
+      "keyword.operator.borrow",
+      "keyword.operator.dereference",
+      "keyword.operator.range",
+      "punctuation.accessor",
+      "punctuation.separator.key-value",
+      "storage.type.function.arrow",
+      "punctuation.separator.annotation"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9fe9d0"
+    }
+  },
+  "0009": {
+    "name": "Airglow · word operators",
+    "scope": [
+      "keyword.operator.new",
+      "keyword.operator.expression",
+      "keyword.operator.typeof",
+      "keyword.operator.instanceof",
+      "keyword.operator.delete",
+      "keyword.operator.void",
+      "keyword.operator.in",
+      "keyword.operator.of",
+      "keyword.operator.sizeof",
+      "keyword.operator.logical.python",
+      "keyword.operator.word",
+      "keyword.operator.as",
+      "keyword.operator.cast",
+      "keyword.control.as"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf0a8"
+    }
+  }
+}

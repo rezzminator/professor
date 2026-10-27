@@ -1,18 +1,17 @@
 package hostcheck
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 func settingsFixture(t *testing.T, env Env, path string) {
@@ -144,12 +143,9 @@ func TestPFMMCP(t *testing.T) {
 		env := fixtureEnv(t)
 		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
 		servers := map[string]any{}
-		for _, family := range []string{"chat", "harvester"} {
-			servers[family+"-professor"] = map[string]any{
-				"type":    "stdio",
-				"command": filepath.Join(env.Home, ".local", "bin", "pfm"),
-				"args":    []string{"mcp", "serve", "--stdio", "--family", family},
-			}
+		servers["chat-professor"] = map[string]any{
+			"type": "stdio", "command": filepath.Join(env.Home, ".local", "bin", "pfm"),
+			"args": []string{"mcp", "serve", "--stdio", "--family", "chat"},
 		}
 		raw, err := json.Marshal(map[string]any{"mcpServers": servers})
 		if err != nil {
@@ -313,81 +309,6 @@ func TestOwnershipLedgerUnreadable(t *testing.T) {
 	}
 }
 
-func historicalHelper(t *testing.T, newName string) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test file")
-	}
-	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	content, err := os.ReadFile(filepath.Join(root, "templates", "project", "scripts", newName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content = bytes.Replace(content, []byte("# "+newName+" —"), []byte("# cc-"+newName+" —"), 1)
-	content = bytes.Replace(
-		content,
-		[]byte("SessionStart hook (memory-wire.sh)"),
-		[]byte("SessionStart hook (cc-memory-wire.sh)"),
-		1,
-	)
-	return string(bytes.Replace(content, []byte("{MEMORY_VAULT_DIR}"), []byte("invented-vault"), 1))
-}
-
-func TestMemoryHelpers(t *testing.T) {
-	for _, name := range []string{"memory-wire.sh", "memory-consolidate.sh"} {
-		t.Run(name, func(t *testing.T) {
-			env := fixtureEnv(t)
-			path := filepath.Join(env.Accounts[0].ConfigDir, "scripts", "cc-"+name)
-			content := historicalHelper(t, name)
-			writeFile(t, path, content)
-			target := filepath.Join(env.Accounts[0].ConfigDir, "scripts", name)
-			assertRows(
-				t,
-				detect(t, "memory-helpers", env),
-				Row{
-					Block,
-					"memory-helpers",
-					path,
-					"pfm's memory helper under its retired name",
-					"mv " + path + " " + target + ", then replace " + path + " with " + target + " in every hook command of " + filepath.Join(
-						env.Accounts[0].ConfigDir,
-						"settings.json",
-					),
-				},
-			)
-		})
-		t.Run(name+"-customized", func(t *testing.T) {
-			env := fixtureEnv(t)
-			path := filepath.Join(env.Accounts[0].ConfigDir, "scripts", "cc-"+name)
-			writeFile(t, path, historicalHelper(t, name)+"# edited\n")
-			assertRows(t, detect(t, "memory-helpers", env))
-		})
-	}
-	t.Run("unreadable-continues", func(t *testing.T) {
-		env := fixtureEnv(t)
-		writeFile(t, filepath.Join(env.Store, "scripts"), "file")
-		path := filepath.Join(env.Accounts[0].ConfigDir, "scripts", "cc-memory-wire.sh")
-		writeFile(t, path, historicalHelper(t, "memory-wire.sh"))
-		rows := detect(t, "memory-helpers", env)
-		if len(rows) != 3 {
-			t.Fatalf("rows=%v", rows)
-		}
-		for i, name := range []string{"cc-memory-wire.sh", "cc-memory-consolidate.sh"} {
-			assertUnreadable(
-				t,
-				rows[i:i+1],
-				"memory-helpers",
-				filepath.Join(env.Store, "scripts", name),
-				syscall.ENOTDIR,
-			)
-		}
-		if rows[2].Path != path || rows[2].Severity != Block {
-			t.Fatalf("later=%v", rows[2])
-		}
-	})
-}
-
 func TestThirdPartyMCP(t *testing.T) {
 	env := fixtureEnv(t)
 	path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
@@ -483,5 +404,46 @@ func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
 				t.Fatalf("unaccepted or unreadable rows=%+v", rows)
 			}
 		})
+	}
+}
+
+func TestRetiredMCPPreflightAllowsOwnedCutover(t *testing.T) {
+	checked := 0
+	for _, name := range installer.LegacyMCPNames() {
+		if !strings.HasSuffix(name, "-professor") {
+			continue
+		}
+		for _, oldBinary := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/old-binary=%t", name, oldBinary), func(t *testing.T) {
+				env := fixtureEnv(t)
+				family := strings.TrimSuffix(name, "-professor")
+				binary, args := family, []string{"mcp"}
+				if oldBinary {
+					binary, args = "pfm", []string{"mcp", "serve", "--stdio", "--family", family}
+				}
+				entry := map[string]any{
+					"type": "stdio", "command": filepath.Join(env.Home, ".local", "bin", binary), "args": args,
+				}
+				raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{name: entry}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, filepath.Join(env.Accounts[0].ConfigDir, ".claude.json"), string(raw))
+				ledger, err := json.Marshal(map[string]any{"clients": installer.LegacyMCPNames()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, filepath.Join(env.ManagedRoot, "mcp-ownership.json"), string(ledger))
+				for _, row := range RunAll(env) {
+					if row.Check == checkPFMMCP && row.Severity == Block {
+						t.Fatalf("owned retired registration blocks install before cleanup: %+v", row)
+					}
+				}
+			})
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("retired registration fixtures did not exercise preflight")
 	}
 }

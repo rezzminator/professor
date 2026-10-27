@@ -2,9 +2,12 @@ package resolve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,6 +15,8 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // fakeProcTree is a jailed process chain: no test ever reads live /proc.
@@ -24,12 +29,12 @@ type fakeProcTree struct {
 // not one that never existed.
 type erroringNamer struct{ err error }
 
-func (namer erroringNamer) SessionName(context.Context, string, string) (string, error) {
-	return "", namer.err
+func (namer erroringNamer) SessionPane(context.Context, string, string) (string, int, error) {
+	return "", 0, namer.err
 }
 
 // L1-F5: a tmux exec failure on an already-resolved socket must surface as
-// its own error, never as ErrNoTmux — the caller IS inside tmux, the exec
+// its own error, never as ErrNotInChat — the caller IS inside tmux, the exec
 // just could not run.
 func TestIdentifySurfacesATmuxExecFailureOnAResolvedSocket(t *testing.T) {
 	sentinel := errors.New("tmux exec boom")
@@ -45,8 +50,8 @@ func TestIdentifySurfacesATmuxExecFailureOnAResolvedSocket(t *testing.T) {
 	if err == nil {
 		t.Fatal("Identify() with a failing tmux exec returned no error")
 	}
-	if errors.Is(err, ErrNoTmux) {
-		t.Fatalf("Identify() error = %v, want the exec failure, not ErrNoTmux", err)
+	if errors.Is(err, ErrNotInChat) {
+		t.Fatalf("Identify() error = %v, want the exec failure, not ErrNotInChat", err)
 	}
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Identify() error = %v, want it to wrap %v", err, sentinel)
@@ -81,7 +86,7 @@ func TestProcTreeParentUsesInjectedProcFS(t *testing.T) {
 func (tree fakeProcTree) Environ(pid int) (map[string]string, error) {
 	environment, found := tree.environments[pid]
 	if !found {
-		return nil, errors.New("no environ")
+		return nil, os.ErrNotExist
 	}
 	return environment, nil
 }
@@ -89,7 +94,7 @@ func (tree fakeProcTree) Environ(pid int) (map[string]string, error) {
 func (tree fakeProcTree) Parent(pid int) (int, error) {
 	parent, found := tree.parents[pid]
 	if !found {
-		return 0, errors.New("no stat")
+		return 0, os.ErrNotExist
 	}
 	return parent, nil
 }
@@ -159,7 +164,8 @@ func TestJailedWhoamiEnvironmentAndAncestryPaths(t *testing.T) {
 			TMUXPane:        pane,
 			ClaudeSessionID: "11111111-2222-4333-8444-555555555555",
 		},
-		TmuxDir: jail.tmuxDir,
+		TmuxDir:   jail.tmuxDir,
+		Processes: fakeProcTree{parents: map[int]int{9999: panePID, panePID: 1}}, SelfPID: 9999,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -184,10 +190,15 @@ func TestJailedWhoamiEnvironmentAndAncestryPaths(t *testing.T) {
 	codexSocket := "cx-1700000501-1-2"
 	codexSession := "codex-session"
 	codexRow := jail.startPlain(t, codexSocket, codexSession)
-	codexPane := strings.Split(codexRow, "\t")[0]
+	codexFields := strings.Split(codexRow, "\t")
+	codexPane := codexFields[0]
+	codexPanePID, err := strconv.Atoi(codexFields[1])
+	if err != nil {
+		t.Fatal(err)
+	}
 	codexSocketPath := filepath.Join(jail.tmuxDir, codexSocket)
 	tree := fakeProcTree{
-		parents: map[int]int{4242: 4241, 4241: 4240, 4240: 1},
+		parents: map[int]int{4242: 4241, 4241: 4240, 4240: codexPanePID, codexPanePID: 1},
 		environments: map[int]map[string]string{
 			4242: {"PATH": "/usr/bin"},
 			4241: {"PATH": "/usr/bin"},
@@ -260,8 +271,8 @@ func TestJailedWhoamiEnvironmentAndAncestryPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := identifier.Identify(ctx); !errors.Is(err, ErrNoTmux) {
-		t.Fatalf("orphan identity error = %v, want ErrNoTmux", err)
+	if _, err := identifier.Identify(ctx); !errors.Is(err, ErrNotInChat) {
+		t.Fatalf("orphan identity error = %v, want ErrNotInChat", err)
 	}
 }
 
@@ -306,8 +317,198 @@ func TestWhoamiProcTreeReadsAJailedProcRoot(t *testing.T) {
 	if err != nil || parent != 4200 {
 		t.Fatalf("Parent() = %d, %v, want 4200", parent, err)
 	}
-	if socketPath := socketFromTMUX(environment["TMUX"]); socketPath !=
+	if socketPath := pfmtmux.SocketPath(environment["TMUX"]); socketPath !=
 		"/tmp/tmux-1000/cc-1-2-3" {
-		t.Fatalf("socketFromTMUX() = %q", socketPath)
+		t.Fatalf("pfmtmux.SocketPath() = %q", socketPath)
+	}
+}
+
+type fixedPaneNamer struct{ pid int }
+
+func (namer fixedPaneNamer) SessionPane(context.Context, string, string) (string, int, error) {
+	return "cc-1", namer.pid, nil
+}
+
+func TestIdentifySelectsNearestProvenContainer(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		tmuxPID, herdrPID int
+		backend           string
+		ambiguous         bool
+	}{
+		{"tmux-inside-herdr", 4200, 5000, "tmux", false},
+		{"herdr-inside-tmux", 4000, 4200, "herdr", false},
+		{"equal-claims", 4200, 4200, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			go func() {
+				for {
+					conn, err := listener.Accept()
+					if err != nil {
+						return
+					}
+					func() {
+						defer func() { _ = conn.Close() }()
+						var req struct {
+							ID     string `json:"id"`
+							Method string `json:"method"`
+						}
+						if json.NewDecoder(conn).Decode(&req) != nil {
+							return
+						}
+						var body map[string]any
+						if req.Method == "pane.get" {
+							body = map[string]any{
+								"type": "pane_info",
+								"pane": map[string]any{"pane_id": "wC:p24", "workspace_id": "wC", "terminal_id": "t9"},
+							}
+						} else {
+							body = map[string]any{
+								"type": "pane_process_info",
+								"process_info": map[string]any{
+									"pane_id":              "wC:p24",
+									"foreground_processes": []any{map[string]any{"pid": tc.herdrPID}},
+								},
+							}
+						}
+						_ = json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "ok": true, "result": body})
+					}()
+				}
+			}()
+			identifier, err := NewWhoami(
+				WhoamiDependencies{
+					Environment: &WhoamiEnvironment{
+						TMUX:        "/tmp/tmux-1000/cc-1,1,0",
+						TMUXPane:    "%3",
+						HerdrSocket: socket,
+						HerdrPane:   "wC:p24",
+					},
+					Namer:     fixedPaneNamer{pid: tc.tmuxPID},
+					SelfPID:   4300,
+					Processes: fakeProcTree{parents: map[int]int{4300: 4200, 4200: 4100, 4100: 4000, 4000: 1}},
+					TmuxDir:   t.TempDir(),
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := identifier.Identify(context.Background())
+			if tc.ambiguous {
+				if !errors.Is(err, ErrAmbiguous) {
+					t.Fatalf("identity=%+v err=%v", got, err)
+				}
+				return
+			}
+			if got.Backend != tc.backend || tc.backend == "tmux" && err != nil ||
+				tc.backend == "herdr" && !errors.Is(err, ErrNotRegistered) {
+				t.Fatalf("identity=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
+type unreadableAncestry struct{}
+
+func (unreadableAncestry) Parent(int) (int, error)                { return 0, os.ErrPermission }
+func (unreadableAncestry) Environ(int) (map[string]string, error) { return nil, os.ErrPermission }
+
+func TestIdentifyDoesNotHideUnreadableAncestry(t *testing.T) {
+	identifier, err := NewWhoami(
+		WhoamiDependencies{
+			Environment: &WhoamiEnvironment{},
+			Processes:   unreadableAncestry{},
+			SelfPID:     4300,
+			TmuxDir:     t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = identifier.Identify(context.Background())
+	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotInChat) {
+		t.Fatalf("unreadable ancestry became absence: %v", err)
+	}
+}
+
+func TestIdentifyMissingTmuxIsFailedRead(t *testing.T) {
+	identifier, err := NewWhoami(
+		WhoamiDependencies{
+			Environment: &WhoamiEnvironment{TMUX: "/tmp/missing,1,0", TMUXPane: "%3"},
+			Namer:       CommandTmuxNamer{Binary: filepath.Join(t.TempDir(), "missing-tmux")},
+			Processes:   fakeProcTree{parents: map[int]int{4300: 1}},
+			SelfPID:     4300,
+			TmuxDir:     t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = identifier.Identify(context.Background())
+	if !pfmtmux.CouldNotRun(err) || errors.Is(err, ErrNotInChat) || errors.Is(err, ErrNotRegistered) ||
+		errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("missing binary became absence: %v", err)
+	}
+}
+
+func TestIdentifyDistinguishesMissingTmuxServerFromReadFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, stderr string
+		gone         bool
+	}{
+		{"permission denied", "error connecting to /tmp/cc-probe (Permission denied)", false},
+		{"unknown connection failure", "error connecting to /tmp/cc-probe (Resource temporarily unavailable)", false},
+		{"missing socket", "error connecting to /tmp/cc-probe (No such file or directory)", true},
+		{"refused connection", "error connecting to /tmp/cc-probe (Connection refused)", true},
+		{"no server", "no server running on /tmp/cc-probe", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failure := &exec.ExitError{Stderr: []byte(tc.stderr)}
+			identifier, err := NewWhoami(WhoamiDependencies{
+				Environment: &WhoamiEnvironment{TMUX: "/tmp/cc-probe,1,0", TMUXPane: "%3"},
+				Namer:       erroringNamer{err: failure},
+				Processes:   fakeProcTree{parents: map[int]int{4300: 1}},
+				SelfPID:     4300, TmuxDir: t.TempDir(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = identifier.Identify(context.Background())
+			if errors.Is(err, ErrNotInChat) != tc.gone || !tc.gone && !errors.Is(err, failure) {
+				t.Fatalf(
+					"Identify with %q returned %v; want gone=%t and read failures preserved",
+					tc.stderr,
+					err,
+					tc.gone,
+				)
+			}
+		})
+	}
+}
+
+type environmentDeniedTree struct{ fakeProcTree }
+
+func (environmentDeniedTree) Environ(int) (map[string]string, error) {
+	return nil, os.ErrPermission
+}
+
+func TestIdentifyPreservesAncestryEnvironmentReadFailure(t *testing.T) {
+	identifier, err := NewWhoami(WhoamiDependencies{
+		Environment: &WhoamiEnvironment{},
+		Processes:   environmentDeniedTree{fakeProcTree{parents: map[int]int{4300: 1}}},
+		SelfPID:     4300, TmuxDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = identifier.Identify(context.Background())
+	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotInChat) {
+		t.Fatalf("unreadable environment became absence: %v", err)
 	}
 }

@@ -12,17 +12,28 @@ source "$SUT"
 if declare -F stepprof_run >/dev/null; then ok 'sourcing steps.sh defines stepprof_run'; else bad 'stepprof_run not defined after sourcing'; fi
 
 # scripts/shtest.sh: the gate knobs a suite inherits from the gate's stepprof wrapper go, BASH_ENV stays.
-# The set follows .claude/scripts/dev.sh: every NAME it hands the fence as `-e NAME=` from the timing-artifact
-# comment through the end of its `for knob in` loop, plus that loop's words; the literal names are the ones
-# dev.sh never injects (a run's own profiling, sampler and history knobs).
+# The set follows .claude/scripts/dev.sh and infra/fence/shared.sh: every NAME they hand the fence as
+# `-e NAME=` from the timing-artifact comment through the end of dev.sh's `for knob in` loop (or shared.sh's
+# `# end of the gate knobs` line), plus that loop's words; the literal names are the ones neither injects
+# (a run's own profiling, sampler and history knobs, and the live-run count shared-run.sh exports).
 REPO_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 SHTEST_SH="$REPO_ROOT/scripts/shtest.sh"
 DEV_SH="$REPO_ROOT/.claude/scripts/dev.sh"
-literal_knobs='PFM_TEST_ARTIFACT_DIR PFM_TEST_PROFILE_PARENT PFM_TEST_DEADLINE_EPOCH STEPPROF_PSI_DIR SAMPLER_INTERVAL_S SAMPLER_SPIN_ITERS SAMPLER_CGROUP_DIR SAMPLER_PROC_DIR PFM_GATE_HISTORY_DIR'
-dev_knobs() { # dev_knobs <dev.sh>: the injected names in order, one per line; rc 1 when it yields none
+SHARED_SH="$REPO_ROOT/infra/fence/shared.sh"
+literal_knobs='PFM_TEST_ARTIFACT_DIR PFM_TEST_PROFILE_PARENT PFM_TEST_DEADLINE_EPOCH STEPPROF_PSI_DIR SAMPLER_INTERVAL_S SAMPLER_SPIN_ITERS SAMPLER_CGROUP_DIR SAMPLER_PROC_DIR PFM_GATE_HISTORY_DIR PFM_FENCE_CONCURRENT'
+dev_knobs() { # dev_knobs <file>...: the injected names in order, one per line; rc 1 when a file yields none
+  local names f
+  for f in "$@"; do
+    dev_knobs_of "$f" >/dev/null || return 1
+  done
+  names="$(for f in "$@"; do dev_knobs_of "$f"; done | awk '!seen[$0]++')"
+  printf '%s\n' "$names"
+}
+dev_knobs_of() { # dev_knobs_of <file>
   local names
   names="$(awk '
-    /# Only generated timing artifacts are writable/ { on = 1 }
+    /# Only generated timing artifacts are writable|# Profiling and step-scheduling knobs/ { on = 1 }
+    on && /# end of the gate knobs/ { exit }
     on {
       line = $0
       while (match(line, /-e "?[A-Z][A-Z0-9_]*=/)) {
@@ -39,18 +50,19 @@ dev_knobs() { # dev_knobs <dev.sh>: the injected names in order, one per line; r
   [ -n "$names" ] || return 1
   printf '%s\n' "$names"
 }
-if derived_knobs="$(dev_knobs "$DEV_SH")"; then
+if derived_knobs="$(dev_knobs "$DEV_SH" "$SHARED_SH")"; then
   missing=''
-  for n in PFM_TEST_TIMING_HOST PFM_TEST_RUN_NOTE TESTFLAGS STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
+  for n in PFM_TEST_TIMING_HOST PFM_TEST_RUN_NOTE PFM_FENCE_CPUS PFM_FENCE_HEARTBEAT_S PFM_FENCE_TEST_P TESTFLAGS STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
     grep -qx "$n" <<<"$derived_knobs" || missing="$missing $n"
   done
-  if [ -z "$missing" ]; then ok 'the knob set derived from dev.sh holds the timing host, run note, TESTFLAGS and the for-knob names'
+  if [ -z "$missing" ]; then ok 'the knob set derived from dev.sh and shared.sh holds the timing host, run note, fence caps, TESTFLAGS and the for-knob names'
   else bad 'the knob set derived from dev.sh' "missing:$missing"; fi
 else
   derived_knobs=''
-  bad 'derived no knob from dev.sh' "$DEV_SH"
+  bad 'derived no knob from dev.sh or shared.sh' "$DEV_SH $SHARED_SH"
 fi
-gate_knobs="$(printf '%s\n' $derived_knobs $literal_knobs | awk '!seen[$0]++' | paste -sd' ' -)"
+schema_knobs="$(fence_config_schema | cut -d'|' -f1)"
+gate_knobs="$(printf '%s\n' $derived_knobs $literal_knobs $schema_knobs | awk '!seen[$0]++' | paste -sd' ' -)"
 if out="$(
   for n in $gate_knobs; do export "$n=inherited"; done
   export BASH_ENV="$T/bash_env"
@@ -113,8 +125,8 @@ if [ -n "$twice_t" ] && [ ! -e "$twice_t" ] && [ ! -e "$X1" ] && [ ! -e "$X2" ];
   ok 'shtest_clean_also: a second call adds its paths, the first call'"'"'s are still removed'
 else bad 'shtest_clean_also twice' "first $X1: $(ls -d "$X1" 2>&1)" "second $X2: $(ls -d "$X2" 2>&1)"; rm -rf -- "$twice_t" "$X1" "$X2"; fi
 
-# the five unit-script suites source shtest.sh and call shtest_isolate_host; all six files set no EXIT trap of their own
-for f in test-check-pfm test-check-templates test-test-pfm test-test-templates test-unit-path stub-root; do
+# the two unit-script suites source shtest.sh and call shtest_isolate_host; all three files set no EXIT trap of their own
+for f in test-test test-unit-path stub-root; do
   suite="$REPO_ROOT/scripts/$f.sh"
   if [ "$f" = stub-root ]; then
     if [ "$(grep -cE "^[[:space:]]*trap +['\"]" "$suite")" = 0 ]; then ok "$f.sh sets no EXIT trap of its own"
@@ -126,7 +138,7 @@ done
 
 # a suite whose EXIT trap is empty when its probe runs FAILs the probe, never PASSes it: each suite's head through its
 # probe runs against a shtest.sh whose shtest_clean_also leaves no trap
-for f in test-check-templates test-test-templates; do
+for f in test-test; do
   d="$T/probe-$f"; mkdir -p "$d/scripts" "$d/tmp"
   ln -s "$REPO_ROOT/.claude" "$d/.claude"
   printf 'source %q\nshtest_clean_also() { trap - EXIT; }\n' "$SHTEST_SH" > "$d/scripts/shtest.sh"
@@ -317,11 +329,34 @@ steps_reset
 for n in 1 2 3 4; do steps_add_heavy "default$n" heavy_step "default$n"; done
 unset STEPS_JOBS STEPS_HEAVY_JOBS
 : > "$T/heavy.events"
-if steps_run "$T/heavy-default" >"$T/heavy-default.out" &&
+printf 'max 100000\n' > "$T/cpu.max.unlimited"
+if STEPS_CPU_MAX_FILE="$T/cpu.max.unlimited" steps_run "$T/heavy-default" >"$T/heavy-default.out" &&
   [ "$(sort -n "$T/heavy.events" | awk '{n+=($3=="start"?1:-1); if(n>max)max=n} END{print max+0}')" -eq 2 ] &&
-  [ "$(steps_jobs)" = "$(nproc)" ]; then
+  [ "$(STEPS_CPU_MAX_FILE="$T/cpu.max.unlimited" steps_jobs)" = "$(nproc)" ]; then
   ok 'default heavy cap is two and default jobs follows CPU count'
 else bad 'default heavy cap or jobs'; fi
+
+# Inside the shared fence the container's CPU quota is the machine: the default jobs follow cgroup
+# cpu.max (quota / period, rounded up); an unreadable file falls back to the CPU count.
+printf '250000 100000\n' > "$T/cpu.max.capped"
+printf '600000 100000\n' > "$T/cpu.max.six"
+got_capped="$(STEPS_CPU_MAX_FILE="$T/cpu.max.capped" steps_jobs)"
+got_six="$(STEPS_CPU_MAX_FILE="$T/cpu.max.six" steps_jobs)"
+got_none="$(STEPS_CPU_MAX_FILE="$T/no-such-cpu.max" steps_jobs)"
+got_set="$(STEPS_JOBS=5 STEPS_CPU_MAX_FILE="$T/cpu.max.capped" steps_jobs)"
+if [ "$got_capped" = 3 ] && [ "$got_six" = 6 ] && [ "$got_none" = "$(nproc)" ] && [ "$got_set" = 5 ]; then
+  ok 'default jobs follow the cgroup CPU quota, rounded up; STEPS_JOBS wins; no quota file is the CPU count'
+else bad 'jobs from cpu.max' "capped=$got_capped six=$got_six none=$got_none set=$got_set nproc=$(nproc)"; fi
+
+# pfm/Makefile: go test package concurrency follows the cap — PFM_FENCE_TEST_P, else the container's
+# cgroup quota rounded up, else 6 — never a fixed -p 6.
+MK_DIR="$REPO_ROOT/pfm"
+cap_now="$(awk '$1 != "max" && $2 > 0 { q = $1 / $2; p = int(q); if (p < q) p++; print p }' /sys/fs/cgroup/cpu.max 2>/dev/null)"
+mk_set="$(env -u TESTFLAGS PFM_FENCE_TEST_P=3 make -s -C "$MK_DIR" --no-print-directory testflags 2>&1)"
+mk_def="$(env -u TESTFLAGS -u PFM_FENCE_TEST_P make -s -C "$MK_DIR" --no-print-directory testflags 2>&1)"
+if [ "$mk_set" = '-p 3 -parallel 4' ] && [ "$mk_def" = "-p ${cap_now:-6} -parallel 4" ]; then
+  ok "pfm/Makefile TESTFLAGS: -p follows PFM_FENCE_TEST_P, else the CPU quota (${cap_now:-none}, else 6)"
+else bad 'Makefile -p' "set=$mk_set default=$mk_def cap=${cap_now:-none}"; fi
 
 steps_reset; steps_add valid true
 STEPS_HEAVY_JOBS=0
@@ -426,5 +461,18 @@ out="$(bash -c 'source "$1"' _ "$T/noprof/steps.sh" 2>&1)"; rc=$?
 if [ "$rc" -eq 1 ] && [ "$out" = "steps.sh: cannot source $T/noprof/stepprof.sh" ]; then
   ok 'steps.sh without stepprof.sh beside it names the missing file and fails'
 else bad 'missing stepprof.sh' "rc=$rc $out"; fi
+
+# Public knobs change scheduling and Go concurrency without changing the Makefile.
+out="$(env -u TESTFLAGS PFM_FENCE_TEST_P=2 PFM_FENCE_TEST_PARALLEL=7 make -s -C "$MK_DIR" --no-print-directory testflags 2>&1)"; rc=$?
+if [[ $rc == 0 && "$out" == '-p 2 -parallel 7' ]]; then ok 'Go package and in-package parallelism are independently configurable'; else bad 'Go concurrency override' "$out"; fi
+out="$(env -u TESTFLAGS PFM_FENCE_TEST_PARALLEL=0 make -s -C "$MK_DIR" --no-print-directory testflags 2>&1)"; rc=$?
+if [[ $rc != 0 && "$out" == *'PFM_FENCE_TEST_PARALLEL'* ]]; then ok 'invalid Go parallelism refuses make before any test'; else bad 'invalid Go parallelism' "$out"; fi
+
+out="$(unset PFM_FENCE_STEP_DEFAULT_S STEPS_BOUND_S; steps_bound)"; rc=$?
+if [[ $rc == 0 && "$out" == "$(_fence_config_default PFM_FENCE_STEP_DEFAULT_S)" ]]; then ok 'step bound rederives its registered default after environment cleanup'; else bad 'step bound after cleanup' "$out"; fi
+out="$(PFM_FENCE_TEST_PARALLEL=0 make -s -C "$MK_DIR" --no-print-directory help 2>&1)"; rc=$?
+if [[ $rc == 0 && "$out" == *'pfm targets'* ]]; then ok 'non-test make targets do not resolve test-only configuration'; else bad 'non-test make configuration' "$out"; fi
+out="$(env -u TESTFLAGS make -s -C "$MK_DIR" --no-print-directory testflags PFM_FENCE_TEST_P=3 PFM_FENCE_TEST_PARALLEL=7 2>&1)"; rc=$?
+if [[ $rc == 0 && "$out" == '-p 3 -parallel 7' ]]; then ok 'explicit make concurrency variables reach validation and flags'; else bad 'make variable concurrency' "$out"; fi
 
 shtest_end

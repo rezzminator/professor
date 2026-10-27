@@ -8,7 +8,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
-const doctorUsage = "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 machine checks clean, project_updates rows advisory; " +
+const doctorUsage = "usage: pfm doctor [--verbose] (exit 0 machine checks clean, project_updates rows advisory; " +
 	"1 warnings, 3 failures) | " +
 	"pfm doctor --project-updates [--root DIR] [--json] (exit 0 clean, 1 review required, 3 report failure); 2 usage error"
 

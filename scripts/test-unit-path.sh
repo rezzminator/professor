@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Exercise .claude/scripts/unit-path.sh, the one path resolver of the test-{unit}.sh and
-# check-{unit}.sh scripts, against a fake repository: every path spelling, the outside rule,
-# two-file ambiguity, deletions at HEAD, missing files, flags and the log path.
+# Exercise .claude/scripts/unit-path.sh, the one path resolver of .claude/scripts/test.sh, against
+# a fake repository: every path spelling, the outside rule, two-file ambiguity, deletions at HEAD,
+# missing files, flags, the whole-repository unit any and the log path.
 #   bash scripts/test-unit-path.sh [path to unit-path.sh]
 # BROKEN STATE: a missing resolver fails every case (its source error is printed), never 0 failed.
 set -uo pipefail
@@ -88,12 +88,42 @@ done
 resolve "$R" test pfm
 expect "no argument prints the usage, exit 2" 2 "usage: x"
 
+# The unit any: test.sh names pfm and other paths in one call.
+resolve "$R" test any pfm/internal/a/a_test.go docs/x.md
+expect "any: a pfm path and a root path resolve in one call (pfm)" 0 "PATH pfm/internal/a/a_test.go"
+expect "any: a pfm path and a root path resolve in one call (root)" 0 "PATH docs/x.md"
+resolve "$R" test any internal/a/a_test.go
+expect "any: a pfm-relative spelling resolves when nothing else exists" 0 "PATH pfm/internal/a/a_test.go"
+resolve "$R" test any docs/x.md
+expect "any: a root spelling never also resolves under pfm/ (pfm/docs/x.md exists too)" 0 "PATH docs/x.md"
+resolve "$R" test any pfm/internal/a/gone_test.go
+expect "any: a deletion-only selection is no usage error (its unit's checks still run)" 0 "RC 0"
+OUT_DROP="$(cd "$R" && ROOT="$R" bash -c 'usage() { exit 2; }; source "$0"; unit_paths test any "$@"; echo "DROPPED ${UNIT_DROPPED[*]}"' "$SUT" pfm/internal/a/gone_test.go docs/y.md 2>&1)"
+if grep -qxF 'DROPPED pfm/internal/a/gone_test.go docs/y.md' <<<"$OUT_DROP"; then ok "any: every deletion is recorded in UNIT_DROPPED, repository-relative"
+else bad "any: every deletion is recorded in UNIT_DROPPED" "$OUT_DROP"; fi
+resolve "$R" test any nope.md
+expect "any: a missing file names the repository" 2 "unit-path.sh: nope.md is no such file in the repository"
+: >"$T/outside-any.txt"
+resolve "$R" test any "$T/outside-any.txt"
+expect "any: a file outside the repository is outside it" 2 "unit-path.sh: $T/outside-any.txt is outside the repository"
+
 git -C "$R" worktree add -q "$T/wt" 2>/dev/null
-LOG_OUT="$(cd "$T/wt" && ROOT="$(pwd -P)" bash -c 'source "$0" || exit 99; unit_log check-pfm && echo "$UNIT_LOG"' "$SUT" 2>&1)"
-if [[ "$LOG_OUT" =~ ^/tmp/$PROJECT/check-pfm/[0-9]{8}T[0-9]{6}Z-[0-9]+\.log$ ]] && [ -d "/tmp/$PROJECT/check-pfm" ]; then
+LOG_OUT="$(cd "$T/wt" && ROOT="$(pwd -P)" bash -c 'source "$0" || exit 99; unit_log test && echo "$UNIT_LOG"' "$SUT" 2>&1)"
+if [[ "$LOG_OUT" =~ ^/tmp/$PROJECT/test/[0-9]{8}T[0-9]{6}Z-[0-9]+\.log$ ]] && [ -d "/tmp/$PROJECT/test" ]; then
   ok "unit_log names the main checkout's directory minus its dot, from a linked worktree"
 else
   bad "unit_log names the main checkout's directory minus its dot, from a linked worktree" "$LOG_OUT"
 fi
+
+# Existing paths leave no lexical segments: Bash 3.2 treats that empty array as unset.
+COMPAT_BASH="${PFM_TEST_BASH32:-bash}"
+for input in "$R" / "$R/pfm/internal/a/a_test.go"; do
+  OUT="$("$COMPAT_BASH" -uc 'source "$1"; unit_canon "$2"' _ "$SUT" "$input" 2>&1)"; RC=$?
+  if [ "$RC" = 0 ] && [ "$OUT" = "$input" ]; then ok "nounset empty segments: $input"
+  else bad "nounset empty segments: $input" "rc=$RC" "$OUT"; fi
+done
+OUT="$("$COMPAT_BASH" -uc 'source "$1"; unit_canon "$2"' _ "$SUT" "$R/missing/../new" 2>&1)"; RC=$?
+if [ "$RC" = 0 ] && [ "$OUT" = "$R/new" ]; then ok "nounset nonempty segments collapse"
+else bad "nounset nonempty segments collapse" "rc=$RC" "$OUT"; fi
 
 shtest_end

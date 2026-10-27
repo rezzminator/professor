@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -33,6 +35,7 @@ type Request struct {
 	ConfigDir, Binary, SessionID, Resume string
 	Fork                                 bool
 	Name                                 string
+	RemoteControlName                    string
 	Cache1H                              *bool
 	Model, Effort, PromptFile            string
 	Args                                 []string
@@ -78,6 +81,10 @@ func CheckConfigDir(account int, dir string) error {
 func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	prefs := machine.EffectiveClaude(request.Account)
 	result := Launch{Unset: Hygiene(), Binary: prefs.Binary, Cache1H: prefs.Cache1H, SessionID: request.SessionID}
+	if request.Purpose == PurposeQuery {
+		// A query child is never the chat bound to the parent's Herdr pane.
+		result.Unset = append(result.Unset, herdr.Env()...)
+	}
 	if request.Binary != "" {
 		result.Binary = request.Binary
 	}
@@ -123,7 +130,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	if request.Fork {
 		result.Argv = append(result.Argv, flagForkSession)
 	}
-	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) {
+	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
 	result.Argv = append(result.Argv, request.Args...)
@@ -164,6 +171,11 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 			result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
 		}
 	}
+	result.Argv = RefreshRemoteControl(
+		result.Argv,
+		prefs.RemoteControl && request.Purpose != PurposeQuery,
+		cmp.Or(request.RemoteControlName, request.Name),
+	)
 	return result, nil
 }
 
@@ -239,6 +251,9 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
+	if prefs.SubagentStatuslineTrace {
+		env[EnvSubagentStatuslineTrace] = "1"
+	}
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}
@@ -246,8 +261,8 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 		env[envSimplePrompt] = "1"
 	}
 	settings["env"] = env
-	if prefs.Theme != "" {
-		settings[knobTheme] = prefs.Theme
+	if theme, _ := themeForLaunch(prefs.Theme); theme != "" {
+		settings[knobTheme] = theme
 	}
 	if request.Purpose != PurposeQuery {
 		settings[knobHooks] = hookSettings(HookTemplates(request.Home))
@@ -300,20 +315,22 @@ func hookSettings(templates []Hook) map[string]any {
 }
 
 // mcpConfig combines third-party entries with the professor registration
-// when the chat or harvester family is enabled.
+// when the chat family is enabled.
 func mcpConfig(home string, machine pfmconfig.Config) map[string]any {
 	servers := make(map[string]any, len(machine.MCP.ThirdParty)+1)
 	for name, entry := range machine.MCP.ThirdParty {
 		servers[name] = entry
 	}
-	for _, family := range []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester} {
+	for _, family := range []string{pfmconfig.MCPServerChat} {
 		if !machine.MCPServers[family].Enabled {
 			continue
 		}
+		command := filepath.Join(home, ".local", "bin", "pfm")
+		args := []string{knobMCP, "serve", "--stdio", "--family", family}
 		servers[pfmconfig.MCPRegistrationName(family)] = map[string]any{
 			typeWord:    "stdio",
-			commandWord: filepath.Join(home, ".local", "bin", "pfm"),
-			"args":      []string{knobMCP, "serve", "--stdio", "--family", family},
+			commandWord: command,
+			"args":      args,
 		}
 	}
 	if len(servers) == 0 {
@@ -372,7 +389,7 @@ func PromptWarning(request Request, machine pfmconfig.Config) string {
 }
 
 func PromptFile(home string) (string, error) {
-	return paths.ComposedHarnessPrompt(home, pfmengine.Claude)
+	return paths.GeneratedHarnessPrompt(home, pfmengine.Claude)
 }
 
 func argsPersonaFlag(args []string, flag string) bool {

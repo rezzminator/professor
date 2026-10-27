@@ -76,12 +76,15 @@ const (
 
 // Target is one resolved tmux destination.
 type Target struct {
-	SocketPath string `json:"socket_path"`
-	Pane       string `json:"pane"`
-	Engine     string `json:"engine"`
-	Name       string `json:"name,omitempty"`
-	ID         string `json:"id,omitempty"`
-	Session    string `json:"session,omitempty"`
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	SocketPath     string `json:"socket_path"`
+	Pane           string `json:"pane"`
+	Engine         string `json:"engine"`
+	Name           string `json:"name,omitempty"`
+	ID             string `json:"id,omitempty"`
+	Session        string `json:"session,omitempty"`
 }
 
 // Request describes one live call.
@@ -89,7 +92,10 @@ type Request struct {
 	Target   string
 	Message  string
 	ForceNow bool
-	Origin   string
+	// RequireIdle refuses busy targets and nonempty composers without changing
+	// them. A scheduler uses it only after transcript absence permits a retry.
+	RequireIdle bool
+	Origin      string
 	// FileBacked says Message came from --file. It travels through tmux's
 	// bracketed-paste transport so a long Codex body is not mistaken for an
 	// inline composer whose visible head/tail cannot be proven.
@@ -192,6 +198,9 @@ type ThenSpawner interface {
 
 // SteerSpawn is one detached follow-up delivery.
 type SteerSpawn struct {
+	// Backend is the resolved target substrate; empty retains legacy tmux.
+	Backend    string
+	herdrTurn  *herdrTurn
 	SocketPath string
 	Target     string
 	// Engine is the target's engine as the spawning chat resolved it
@@ -210,6 +219,8 @@ type SteerSpawn struct {
 // hands Engine.DeliverThen: the pane to ride out, the steers to deliver once
 // it settles, and the engine identity the waiter cannot derive on its own.
 type ThenWait struct {
+	// Backend is carried explicitly by the detached waiter, never inferred.
+	Backend    string
 	SocketPath string
 	Target     string
 	Steers     []string
@@ -289,11 +300,9 @@ type Dependencies struct {
 	// OpenCodeBinary verifies a live OpenCode pane the same way.
 	OpenCodeBinary string
 	AccountEmojis  []string
-	// CodexSeat is the last sender-identity rung. It maps this process's
-	// CODEX_THREAD_ID to the live fleet seat after ambient tmux and ancestry
-	// recovery both fail. Nil means that lookup is unavailable.
-	CodexSeat SelfIdentifier
-	Recorder  func(context.Context, fleetdb.CommsEvent) error
+	// CodexSeats supplies Identify's last Codex-thread rung.
+	CodexSeats func(context.Context) ([]resolve.CodexSeat, error)
+	Recorder   func(context.Context, fleetdb.CommsEvent) error
 	// WarningWriter receives non-fatal recorder failures. Nil uses stderr.
 	WarningWriter io.Writer
 	Options       Options

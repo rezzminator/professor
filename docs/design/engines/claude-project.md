@@ -48,7 +48,7 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 ## The outputStyle gate
 
-`infra/check-self-hosted-manifest.sh:247-265` (run by `.claude/scripts/check-templates.sh` and `.claude/scripts/dev.sh iso test templates`) fails when:
+`infra/check-self-hosted-manifest.sh:247-265` (run by `.claude/scripts/test.sh`'s `manifest` check and `.claude/scripts/dev.sh iso test templates`) fails when:
 
 - `.claude/output-styles/` is tracked or exists on disk;
 - the manifest advertises `installed.output_styles`;
@@ -60,11 +60,10 @@ A style file would be inert under the per-launch `outputStyle: default` pin, so 
 
 What `docs/SETUP.md` tells an adopter to add by hand — everything else is `pfm init` or `pfm install`:
 
-- A `PostToolUse` `Edit|Write` hook running the project's `.claude/scripts/format-md.sh` (`docs/SETUP.md:256-278`).
-- The memory scripts in `~/.claude/scripts/` with `SessionStart` `memory-wire.sh` and `SessionEnd` `memory-sync.sh` hooks in `~/.claude/settings.json` (`docs/SETUP.md:408-437`).
+- A `PostToolUse` `Edit|Write` hook running the project's `.claude/scripts/format-md.sh` (`docs/SETUP.md:213-235`).
 
-`INSTALL.md:29` states that pfm does not install the Claude or Codex CLI and their self-doctors are optional diagnostics; `pfm install --config-dir DIR` is the only supported override of the target dir (`INSTALL.md:222`).
+`INSTALL.md:29` states that pfm does not install the Claude or Codex CLI and their self-doctors are optional diagnostics; `pfm install --config-dir DIR` is the only supported override of the target dir (`INSTALL.md:248`).
 
 ## Discrepancies
 
-- **The format hook is manual and templated at once.** `docs/SETUP.md:256-278` asks for the `format-md.sh` hook by hand, with an absolute path; the template's `PostToolUse` group already carries project hooks through `$CLAUDE_PROJECT_DIR`.
+- **The format hook is manual and templated at once.** `docs/SETUP.md:213-235` asks for the `format-md.sh` hook by hand, with an absolute path; the template's `PostToolUse` group already carries project hooks through `$CLAUDE_PROJECT_DIR`.

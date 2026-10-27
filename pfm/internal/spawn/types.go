@@ -17,8 +17,15 @@ type SessionSpec struct {
 	Socket  string
 	Session string
 	Window  string
-	CWD     string
-	Run     string
+	// ChatName is the chat's exact name when the door knows it; NewSession
+	// sets herdr.ChatNameOption to it in the same tmux command that creates
+	// the session. Empty for an unnamed chat: nothing is set.
+	ChatName string
+	// ChatNameAutomatic says no user chose ChatName (a pool name, a branch's
+	// default name): NewSession also sets herdr.ChatNameAutoOption to it.
+	ChatNameAutomatic bool
+	CWD               string
+	Run               string
 	// Binary is the executable word Run launches, stated so NewSession can
 	// prove it is reachable BEFORE a server is created around it. A pane
 	// whose command cannot resolve dies at launch and takes the fresh server
@@ -46,11 +53,14 @@ type Tmux interface {
 // which owns the launch ceremony; this package owns only the session and the
 // keystrokes.
 type Request struct {
-	Engine pfmengine.ID
-	Name   string
-	Socket string
-	CWD    string
-	Run    string
+	SessionID string
+	Engine    pfmengine.ID
+	Name      string
+	// NameAutomatic says no user chose Name: SessionSpec.ChatNameAutomatic.
+	NameAutomatic bool
+	Socket        string
+	CWD           string
+	Run           string
 	// Binary mirrors SessionSpec.Binary: the executable word Run launches,
 	// preflighted before the server exists. Empty skips the preflight.
 	Binary    string

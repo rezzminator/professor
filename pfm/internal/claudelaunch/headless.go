@@ -165,8 +165,8 @@ func RenderHeadless(settings map[string]any) (string, error) {
 				env[envTmuxTruecolor] = "1"
 			}
 		case knobTheme:
-			if value.(string) != "" {
-				result[knobTheme] = value
+			if theme, _ := themeForLaunch(value.(string)); theme != "" {
+				result[knobTheme] = theme
 			}
 		case knobCleanupPeriodDays:
 			result[knobCleanupPeriodDays] = mustInteger(value)

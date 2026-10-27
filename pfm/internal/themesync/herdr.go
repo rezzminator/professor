@@ -1,0 +1,529 @@
+package themesync
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+)
+
+const (
+	herdrBlockOpen  = "# >>> pfm theme"
+	herdrBlockClose = "# <<< pfm theme <<<"
+	herdrThemeTable = "theme"
+	herdrDeferred   = "applies when Herdr starts"
+)
+
+var (
+	herdrOpenPattern   = regexp.MustCompile(`^# >>> pfm theme · \S+ · gen (\d+) >>>$`)
+	herdrHeaderPattern = regexp.MustCompile(`^\s*\[\[?\s*([^\]\s][^\]]*?)\s*\]\]?\s*(#.*)?$`)
+	herdrRootTheme     = regexp.MustCompile(`^\s*theme\s*[.=]`)
+	// herdrNotRunning matches the texts `herdr server reload-config` prints when no server is up.
+	herdrNotRunning = []string{
+		"not running", "no server", "no running", "connection refused", "no such file", "could not connect",
+		"couldn't connect", "failed to connect",
+	}
+)
+
+// herdrToken is one `[theme.custom]` token.
+type herdrToken struct{ name, value string }
+
+// Herdr's built-in themes the custom tokens layer onto, one per side.
+const (
+	herdrDarkName  = "tokyo-night"
+	herdrLightName = "tokyo-night-day"
+)
+
+// herdrTokens maps a variant onto Herdr's 19 documented custom tokens (D11).
+func (variant Variant) herdrTokens() []herdrToken {
+	return []herdrToken{
+		{"accent", variant.Accent},
+		{"panel_bg", variant.Background},
+		{"sidebar_bg", variant.Surface},
+		{"active_row_bg", variant.SelectionBackground},
+		{"selection_bg", variant.SelectionBackground},
+		{"surface0", variant.Surface},
+		{"surface1", variant.Overlay},
+		{"surface_dim", variant.Surface},
+		{"overlay0", variant.Muted},
+		{"overlay1", variant.State.Idle},
+		{"text", variant.Foreground},
+		{"subtext0", variant.State.Idle},
+		{"mauve", variant.ANSI[5]},
+		{"green", variant.State.Idle},
+		{"yellow", variant.State.Working},
+		{"red", variant.State.Blocked},
+		{"blue", variant.State.Done},
+		{"teal", variant.State.Done},
+		{"peach", variant.Orange},
+	}
+}
+
+// herdrWriteTokens writes one custom table: the variant's tokens, each one
+// the theme's pin of that name when it has one.
+func herdrWriteTokens(out *strings.Builder, table string, variant Variant, pins map[string]string) {
+	out.WriteString("[" + table + "]\n")
+	for _, token := range variant.herdrTokens() {
+		value := token.value
+		if pin, pinned := pins[token.name]; pinned {
+			value = pin
+		}
+		fmt.Fprintf(out, "%s = %q\n", token.name, value)
+	}
+}
+
+// herdrRender is the marker-fenced block that replaces the user's [theme]
+// tables: name / auto_switch (an auto source) / dark_name / light_name and
+// every custom token, the primary variant in [theme.custom], an auto source's
+// light one in [theme.custom.light]; the theme's Herdr pins lay over the
+// tokens of both tables.
+func herdrRender(applied Applied, generation int) string {
+	var out strings.Builder
+	pins := herdrPins(applied.Pins)
+	fmt.Fprintf(&out, "%s · %s · gen %d >>>\n[%s]\n", herdrBlockOpen,
+		strings.Join(strings.Fields(applied.Value), "-"), generation, herdrThemeTable)
+	switch {
+	case applied.Auto && applied.Alternate != nil:
+		fmt.Fprintf(&out, "name = %q\nauto_switch = true\ndark_name = %q\nlight_name = %q\n\n",
+			herdrDarkName, herdrDarkName, herdrLightName)
+		herdrWriteTokens(&out, "theme.custom", applied.Primary, pins)
+		out.WriteString("\n")
+		herdrWriteTokens(&out, "theme.custom.light", *applied.Alternate, pins)
+	default:
+		name := herdrDarkName
+		if applied.Side == Light {
+			name = herdrLightName
+		}
+		fmt.Fprintf(&out, "name = %q\nauto_switch = false\n\n", name)
+		herdrWriteTokens(&out, "theme.custom", applied.Primary, pins)
+	}
+	out.WriteString(herdrBlockClose + "\n")
+	return out.String()
+}
+
+// herdrLine is one line with its byte range [start, end) in the file, newline included.
+type herdrLine struct {
+	start, end int
+	text       string
+}
+
+func herdrLines(content string) []herdrLine {
+	var lines []herdrLine
+	for start := 0; start < len(content); {
+		end := len(content)
+		if newline := strings.IndexByte(content[start:], '\n'); newline >= 0 {
+			end = start + newline + 1
+		}
+		lines = append(lines, herdrLine{start: start, end: end, text: strings.TrimRight(content[start:end], "\r\n")})
+		start = end
+	}
+	return lines
+}
+
+// herdrBlockRange finds the first pfm block's byte range, markers included.
+func herdrBlockRange(content string) (start, end int, found bool) {
+	open := -1
+	lines := herdrLines(content)
+	for index, line := range lines {
+		if open < 0 && strings.HasPrefix(line.text, herdrBlockOpen) {
+			open = index
+		} else if open >= 0 && line.text == herdrBlockClose {
+			return lines[open].start, line.end, true
+		}
+	}
+	return 0, 0, false
+}
+
+// herdrExtract returns the pfm block and the generation its header carries.
+func herdrExtract(content string) (block string, generation int, found bool) {
+	start, end, found := herdrBlockRange(content)
+	if !found {
+		return "", 0, false
+	}
+	block = content[start:end]
+	header, _, _ := strings.Cut(block, "\n")
+	if match := herdrOpenPattern.FindStringSubmatch(header); match != nil {
+		generation, _ = strconv.Atoi(match[1])
+	}
+	return block, generation, true
+}
+
+// herdrReplace swaps an existing pfm block for a new one in place.
+func herdrReplace(content, block string) (string, bool) {
+	start, end, found := herdrBlockRange(content)
+	if !found {
+		return content, false
+	}
+	return content[:start] + block + content[end:], true
+}
+
+func herdrThemeHeader(text string) bool {
+	match := herdrHeaderPattern.FindStringSubmatch(text)
+	return len(match) > 1 && (match[1] == herdrThemeTable || strings.HasPrefix(match[1], herdrThemeTable+"."))
+}
+
+// herdrInstall puts the block where the user's theme tables are (the first
+// [theme] header through the last [theme.*] section's last content line,
+// trailing blank and comment lines excluded), or appends it when there is
+// none; the snapshot is what herdrRemove needs to undo it byte for byte.
+func herdrInstall(original, block string) (string, herdrSnapshot, error) {
+	lines := herdrLines(original)
+	var headers, themeHeaders []int
+	for index, line := range lines {
+		if herdrHeaderPattern.MatchString(line.text) {
+			headers = append(headers, index)
+			if herdrThemeHeader(line.text) {
+				themeHeaders = append(themeHeaders, index)
+			}
+		} else if len(headers) == 0 && herdrRootTheme.MatchString(line.text) {
+			return "", herdrSnapshot{}, fmt.Errorf("themesync: herdr config sets theme at the root (line %d: %q); "+
+				"move it under a [theme] table", index+1, line.text)
+		}
+	}
+	if len(themeHeaders) == 0 {
+		prefix := ""
+		switch {
+		case original == "":
+		case strings.HasSuffix(original, "\n"):
+			prefix = "\n"
+		default:
+			prefix = "\n\n"
+		}
+		return original + prefix + block, herdrSnapshot{Added: prefix + block}, nil
+	}
+	first, last := themeHeaders[0], themeHeaders[len(themeHeaders)-1]
+	for _, header := range headers {
+		if header > first && header < last && !herdrThemeHeader(lines[header].text) {
+			return "", herdrSnapshot{}, fmt.Errorf(
+				"themesync: herdr config splits its theme tables around line %d (%q); "+
+					"keep [theme] and [theme.*] together",
+				header+1,
+				lines[header].text,
+			)
+		}
+	}
+	endLine := len(lines) // exclusive index of the last line the span may hold
+	for _, header := range headers {
+		if header > last {
+			endLine = header
+			break
+		}
+	}
+	for endLine-1 > last {
+		trimmed := strings.TrimSpace(lines[endLine-1].text)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		endLine--
+	}
+	start, end := lines[first].start, lines[endLine-1].end
+	return original[:start] + block + original[end:], herdrSnapshot{Span: original[start:end]}, nil
+}
+
+// herdrRemove takes the pfm block out and puts the original back: the replaced
+// span, or (when the block was appended) nothing plus the separator it added.
+func herdrRemove(content string, snapshot herdrSnapshot) (string, bool) {
+	start, end, found := herdrBlockRange(content)
+	if !found {
+		return content, false
+	}
+	if snapshot.Span == "" {
+		prefix, _, _ := strings.Cut(snapshot.Added, herdrBlockOpen)
+		if strings.HasSuffix(content[:start], prefix) {
+			start -= len(prefix)
+		}
+	}
+	return content[:start] + snapshot.Span + content[end:], true
+}
+
+func (s *session) herdrPath() (string, error) {
+	if snapshot := s.state.Herdr; snapshot != nil {
+		if snapshot.Path != "" {
+			return snapshot.Path, nil
+		}
+		// Snapshots from before config overrides always edited this path.
+		return filepath.Join(s.env.Home, ".config", "herdr", "config.toml"), nil
+	}
+	return paths.HerdrConfig(s.env.Home, paths.OSEnv{})
+}
+
+// herdrReload asks a running Herdr server to reread its config; a server that
+// is not up is the "applies when Herdr starts" case, anything else an error.
+func (s *session) herdrReload(ctx context.Context) (string, error) {
+	binary, err := s.env.Runner.LookPath("herdr")
+	if err != nil {
+		return "herdr not on PATH; " + herdrDeferred, nil //nolint:nilerr // absence of the binary is the deferred case, not a failure
+	}
+	path, err := s.herdrPath()
+	if err != nil {
+		return "", err
+	}
+	result, err := s.env.Runner.Run(
+		ctx,
+		[]string{binary, "server", "reload-config"},
+		deps.RunOptions{Env: deps.EnvironmentWith("HERDR_CONFIG_PATH", path)},
+	)
+	if err != nil {
+		return "", fmt.Errorf("themesync: herdr server reload-config: %w", err)
+	}
+	if result.ExitCode == 0 {
+		return herdrReloadAcknowledgement(result.Stdout, result.Stderr)
+	}
+	text := strings.TrimSpace(string(result.Stderr) + " " + string(result.Stdout))
+	for _, marker := range herdrNotRunning {
+		if strings.Contains(strings.ToLower(text), marker) {
+			return herdrDeferred, nil
+		}
+	}
+	return "", fmt.Errorf("themesync: herdr server reload-config exited %d: %s", result.ExitCode, text)
+}
+
+func (s *session) applyHerdr(ctx context.Context) SurfaceResult {
+	path, pathErr := s.herdrPath()
+	if pathErr != nil {
+		return s.failed(surfaceHerdr, path, pathErr)
+	}
+	original, err := os.ReadFile(path)
+	missing := errors.Is(err, os.ErrNotExist)
+	if missing {
+		if _, lookErr := s.env.Runner.LookPath("herdr"); lookErr != nil {
+			return s.absent(surfaceHerdr, path, "no config at "+path+" and herdr not on PATH")
+		}
+	} else if err != nil {
+		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: read %s: %w", path, err))
+	}
+	block := herdrRender(s.theme(), s.state.Generation)
+	updated, replaced := herdrReplace(string(original), block)
+	if !replaced {
+		var snapshot herdrSnapshot
+		if updated, snapshot, err = herdrInstall(string(original), block); err != nil {
+			return s.failed(surfaceHerdr, path, err)
+		}
+		snapshot.Created = missing
+		snapshot.Path = path
+		if !missing {
+			if snapshot.Backup, err = s.backupBeside(path, original); err != nil {
+				return s.failed(surfaceHerdr, path, err)
+			}
+		}
+		s.state.Herdr = &snapshot
+		if err := s.persist(); err != nil {
+			return s.failed(surfaceHerdr, path, err)
+		}
+	}
+	if updated, err = herdrRowsStyled(updated, s.herdrHues()); err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	changed := updated != string(original) || missing
+	if changed {
+		if err := s.replaceFile(path, []byte(updated)); err != nil {
+			return s.failed(surfaceHerdr, path, err)
+		}
+	}
+	// The reload runs before the plugin step, so a plugin failure never
+	// withholds a due reload; a failed reload stays due either way.
+	reloadNote, reloadErr := "", error(nil)
+	if s.reloadDue(surfaceHerdr, changed) {
+		reloadNote, reloadErr = s.herdrReload(ctx)
+		s.setDue(surfaceHerdr, reloadErr != nil)
+	}
+	pluginNote, pluginErr := s.applyHerdrPlugin(ctx)
+	if err := errors.Join(reloadErr, pluginErr); err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	return s.result(surfaceHerdr, VerdictApplied, path, strings.TrimSpace(reloadNote+" "+pluginNote))
+}
+
+// herdrHues are the hexes the sidebar rows' pfm tokens are styled with: the
+// applied theme's state hues on the side the appearance shows, so a light
+// auto theme gets its light-lifted hues. A missing hue is left empty, which
+// herdrRowsStyled reports only when a row names that token.
+func (s *session) herdrHues() map[string]string {
+	state := s.theme().variant(s.state.Appearance).State
+	return map[string]string{
+		herdr.IndicatorWorking: state.Working, herdr.IndicatorBlocked: state.Blocked,
+		herdr.IndicatorDone: state.Done, herdr.IndicatorUnknown: state.Unknown,
+	}
+}
+
+func (s *session) readHerdr(_ context.Context) SurfaceResult {
+	path, pathErr := s.herdrPath()
+	if pathErr != nil {
+		return s.failed(surfaceHerdr, path, pathErr)
+	}
+	content, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist) && s.state.Herdr == nil:
+		return s.absent(surfaceHerdr, path, "no config at "+path)
+	case errors.Is(err, os.ErrNotExist):
+		return s.in(surfaceHerdr, VerdictDrift, path, "config file is gone", 0)
+	case err != nil:
+		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: read %s: %w", path, err))
+	}
+	block, generation, found := herdrExtract(string(content))
+	switch {
+	case !found:
+		return s.in(surfaceHerdr, VerdictDrift, path, "pfm block missing from "+path, 0)
+	case block != herdrRender(s.theme(), generation) || generation != s.state.Generation:
+		return s.in(
+			surfaceHerdr,
+			VerdictDrift,
+			path,
+			fmt.Sprintf(
+				"block at generation %d differs from the render at generation %d",
+				generation,
+				s.state.Generation,
+			),
+			generation,
+		)
+	}
+	styled, err := herdrRowsStyled(string(content), s.herdrHues())
+	if errors.Is(err, errHerdrNoHue) {
+		return s.in(surfaceHerdr, VerdictDrift, path, err.Error(), generation)
+	}
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	if styled != string(content) {
+		return s.in(
+			surfaceHerdr,
+			VerdictDrift,
+			path,
+			"sidebar row pfm token styles differ from the theme's hues",
+			generation,
+		)
+	}
+	drift, err := s.readHerdrPlugin()
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	if drift != "" {
+		return s.in(surfaceHerdr, VerdictDrift, path, drift, generation)
+	}
+	return s.in(surfaceHerdr, VerdictInSync, path, "", generation)
+}
+
+func (s *session) restoreHerdr(ctx context.Context) SurfaceResult {
+	path, pathErr := s.herdrPath()
+	if pathErr != nil {
+		return s.failed(surfaceHerdr, path, pathErr)
+	}
+	snapshot := s.state.Herdr
+	if snapshot == nil {
+		return s.absent(surfaceHerdr, path, "nothing applied")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: read %s: %w", path, err))
+	}
+	restored, found := herdrRemove(string(content), *snapshot)
+	if !found {
+		restored = string(content)
+	}
+	bare, err := herdrRowsBare(restored)
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	detail := ""
+	switch {
+	case !found && bare == string(content):
+		detail = "pfm block already gone"
+	case found && snapshot.Created && strings.TrimSpace(bare) == "":
+		if err := s.removeFile(path); err != nil {
+			return s.failed(surfaceHerdr, path, err)
+		}
+	default:
+		if err := s.replaceFile(path, []byte(bare)); err != nil {
+			return s.failed(surfaceHerdr, path, err)
+		}
+		if !found {
+			detail = "pfm block already gone"
+		}
+	}
+	pluginNote, err := s.restoreHerdrPlugin(ctx)
+	if err != nil {
+		return s.failed(surfaceHerdr, path, err)
+	}
+	// The indicator tokens carry no ttl: with the plugin unlinked nothing
+	// would repaint them, so they are cleared on every server pfm painted.
+	if err := herdr.ClearIndicators(ctx, paths.HerdrLockDir(s.env.Home), io.Discard, call.ProveHerdrPane); err != nil {
+		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: clear the herdr indicators: %w", err))
+	}
+	detail = strings.TrimSpace(detail + " " + pluginNote)
+	if note, err := s.herdrReload(ctx); err != nil {
+		s.setDue(surfaceHerdr, true)
+		return s.failed(surfaceHerdr, path, err)
+	} else if note != "" {
+		detail = strings.TrimSpace(detail + " " + note)
+	}
+	s.state.Herdr = nil
+	s.setDue(surfaceHerdr, false)
+	return s.result(surfaceHerdr, VerdictRestored, path, detail)
+}
+
+func herdrReloadAcknowledgement(stdout, stderr []byte) (string, error) {
+	var response struct {
+		Error  json.RawMessage `json:"error"`
+		Result struct {
+			Type        string   `json:"type"`
+			Status      string   `json:"status"`
+			Diagnostics []string `json:"diagnostics"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout, &response); err != nil {
+		return "", fmt.Errorf("themesync: decode Herdr config reload: %w", err)
+	}
+	if len(response.Error) != 0 {
+		return "", fmt.Errorf("themesync: Herdr config reload refused: %s", response.Error)
+	}
+	ack := response.Result
+	if ack.Type != "config_reload" || ack.Diagnostics == nil {
+		return "", fmt.Errorf("themesync: unexpected Herdr config reload acknowledgement: %s", stdout)
+	}
+	detail := strings.TrimSpace(strings.Join(ack.Diagnostics, "; ") + " " + string(stderr))
+	if ack.Status != "applied" {
+		return "", fmt.Errorf("themesync: Herdr config reload status %q: %s", ack.Status, detail)
+	}
+	return detail, nil
+}
+
+// HerdrTabGlyphs is the tab status glyphs of the theme in force, its profile's
+// surfaces.herdr.tabGlyphs as the sync last applied them, for the Herdr tab
+// painter to read on every tick, so a theme switch shows on the next paint.
+// No sync, a sync that is off or has applied nothing, or a theme with no
+// glyphs is the zero value: the default glyphs. A state file that cannot be
+// read or parsed, or a glyph herdr refuses, is an error naming the file.
+func HerdrTabGlyphs(stateDir string) (herdr.TabGlyphs, error) {
+	store := stateStore{dir: stateDir}
+	// A FIFO or device in place of state.json would block the read, and with
+	// it every tab's status, on the painter's half-second tick.
+	if info, err := os.Stat(store.statePath()); err == nil && !info.Mode().IsRegular() {
+		return herdr.TabGlyphs{}, fmt.Errorf(
+			"themesync: %s is not a regular file (%s)", store.statePath(), info.Mode().Type(),
+		)
+	}
+	state, found, err := store.load()
+	if err != nil {
+		return herdr.TabGlyphs{}, err
+	}
+	if !found || !state.Enabled || state.Applied == nil || state.Applied.Pins == nil ||
+		state.Applied.Pins.Herdr == nil {
+		return herdr.TabGlyphs{}, nil
+	}
+	glyphs, err := herdr.ParseTabGlyphs(state.Applied.Pins.Herdr.TabGlyphs)
+	if err != nil {
+		return herdr.TabGlyphs{}, fmt.Errorf("themesync: %s: %w", store.statePath(), err)
+	}
+	return glyphs, nil
+}

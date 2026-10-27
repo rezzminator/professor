@@ -86,7 +86,18 @@ if requires E1.01-open-seat1; then
   bad=""
   theme="$(jq -r '.theme // ""' "$SEAT_DIR/settings.json" 2>&1)" ||
     bad="$bad settings.json unreadable ($(one_line "$theme"));"
-  case "$theme" in custom:professor-*) ;; *) bad="$bad theme=${theme:-<none>} (want custom:professor-*);" ;; esac
+  # The theme is a bundled profile, `custom:{name}`, and the seat reads that
+  # profile's palette through its linked themes dir.
+  if themes="$(bundled_themes "$HOME/.professor/templates/themes")"; then
+    stem="${theme#custom:}"
+    if [ "$stem" = "$theme" ] || ! grep -qxF -- "$stem" <<<"$themes"; then
+      bad="$bad theme=${theme:-<none>} (want custom:{name} of a bundled profile: $(one_line "$themes"));"
+    elif ! jq -e '.overrides | length > 0' "$SEAT_DIR/themes/$stem.json" >/dev/null 2>&1; then
+      bad="$bad theme $theme selected but $SEAT_DIR/themes/$stem.json is absent or carries no overrides;"
+    fi
+  else
+    bad="$bad $themes;"
+  fi
   tui="$(jq -r '.tui // ""' "$SEAT_DIR/settings.json" 2>/dev/null)"
   [ "$tui" = fullscreen ] || bad="$bad tui=${tui:-<none>};"
   # The socket comes from the LIVE row read at this beat, never from an earlier

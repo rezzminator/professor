@@ -13,7 +13,7 @@ FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffb
 # cgo): CGO_ENABLED stays 0 below, so every build stays static, and the gate's
 # race step (infra/fence/checks.sh checks_pfm_race) turns cgo on for itself.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 tcpdump \
+    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 tcpdump iproute2 \
     libgl1 libglib2.0-0 libxcb1 \
     gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
@@ -37,6 +37,22 @@ RUN case "${TARGETARCH}" in \
  && tar -C /tmp -xJf /tmp/shellcheck.tar.xz \
  && install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck \
  && rm -rf /tmp/shellcheck.tar.xz "/tmp/shellcheck-v${SHELLCHECK_VERSION}"
+# rumdl is the Markdown linter .claude/scripts/test.sh runs on every named .md file, pinned to
+# the release `pfm install` installs on a host (pfm/internal/installer/markdown_tool.go
+# rumdlPinnedVersion): bump both together. The static musl build, verified against the
+# release's recorded digest before extracting.
+ARG RUMDL_VERSION=0.2.73
+RUN case "${TARGETARCH}" in \
+      amd64) rd_arch=x86_64; rd_sum=dc4aa9bf98f936f667039224a34fc2e26ddf6be3589bf59d63e4d6b038be4f5c ;; \
+      arm64) rd_arch=aarch64; rd_sum=f51548adfc71c4982cb5cc239d847bcd4c884e6ac8dc67efd68efd3eea9753a4 ;; \
+      *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/rumdl.tar.gz "https://github.com/rvben/rumdl/releases/download/v${RUMDL_VERSION}/rumdl-v${RUMDL_VERSION}-${rd_arch}-unknown-linux-musl.tar.gz" \
+ && echo "${rd_sum}  /tmp/rumdl.tar.gz" | sha256sum -c - \
+ && mkdir /tmp/rumdl && tar -C /tmp/rumdl -xzf /tmp/rumdl.tar.gz \
+ && install -m 0755 "$(find /tmp/rumdl -type f -name rumdl | head -n 1)" /usr/local/bin/rumdl \
+ && rm -rf /tmp/rumdl.tar.gz /tmp/rumdl \
+ && rumdl --version | grep -F "${RUMDL_VERSION}"
 # Node pinned to the mirror compilers' minimum supported release. Verify the selected
 # architecture's tarball against the release checksum before extracting it.
 ARG NODE_VERSION=22.13.1
@@ -55,7 +71,11 @@ ENV HOME=/root \
 # installs on the host, so a lint verdict is the same on both sides of the fence.
 COPY tools.env tools.sh /opt/pfm-tools/
 COPY jscpd/ /opt/pfm-tools/jscpd/
-RUN TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
+# A network that blocks registry.npmjs.org names its mirror in PFM_NPM_REGISTRY;
+# npm rewrites the lockfile's registry.npmjs.org URLs to it, integrity unchanged.
+ARG PFM_NPM_REGISTRY=
+RUN if [ -n "$PFM_NPM_REGISTRY" ]; then export NPM_CONFIG_REGISTRY="$PFM_NPM_REGISTRY"; fi \
+ && TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
 # Every image built from this file, by any builder (compose, the rehearsals'
 # plain `docker build`, a lane root committed from a container of it), carries
@@ -82,5 +102,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* \
  && google-chrome-stable --version
 
-# pfm-dev — the default target: the base as it is.
+# pfm-dev carries the real headless Herdr used by the native-seat lane.
 FROM pfm-base AS pfm-dev
+ARG HERDR_VERSION=0.9.5
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+      amd64) herdr_arch=x86_64; herdr_sum=14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d ;; \
+      arm64) herdr_arch=aarch64; herdr_sum=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c ;; \
+      *) echo "unsupported Herdr architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/herdr "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-${herdr_arch}" \
+ && echo "${herdr_sum}  /tmp/herdr" | sha256sum -c - \
+ && install -m 0755 /tmp/herdr /usr/local/bin/herdr \
+ && rm /tmp/herdr \
+ && herdr --version

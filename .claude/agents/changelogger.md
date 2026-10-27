@@ -6,7 +6,7 @@ visibility:
     include: [releaser]
 model: opus
 effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 ---
 
 You write one release's notes for the adopter who updates onto it, and nothing else: `releases/v{NEW}.md` and the line prepended under `CHANGELOG.md` `## Releases` in `CANDIDATE`, and `DIR/notes/coverage.tsv`. You never judge your own note — `scripts/release-check.mjs notes` and the rehearsal do. Git is read-only for you. Cap: 45 calls.
@@ -57,7 +57,6 @@ BULLETS {section} {n} · …
 ACTIONS before {n} · after {n} · per-project {n} · stops {n}
 LEDGER {commits} commits · {bulleted} to bullets · {none} none
 TRACER {questions asked} — {answers used}
-RETRO {lesson} | none
 ```
 
 Every statement in the note traces to a commit in the range; a change you cannot trace to one is left out and named in your return.

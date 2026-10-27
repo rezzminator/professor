@@ -1,0 +1,250 @@
+{
+  "0002": {
+    "name": "Ai · doc tags",
+    "scope": [
+      "storage.type.class.jsdoc",
+      "storage.type.class.doxygen",
+      "keyword.other.phpdoc",
+      "comment.block.documentation storage.type",
+      "comment.block.documentation punctuation.definition.block.tag",
+      "comment.block.documentation keyword"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#58659f"
+    }
+  },
+  "0006": {
+    "name": "Shu · keywords",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.other",
+      "keyword.declaration",
+      "keyword.control.flow",
+      "keyword.control.conditional",
+      "keyword.control.loop",
+      "keyword.control.trycatch",
+      "keyword.other.using",
+      "keyword.other.package",
+      "keyword.other.import",
+      "keyword.control.import",
+      "keyword.control.export",
+      "keyword.control.from",
+      "keyword.control.as",
+      "keyword.control.default",
+      "keyword.operator.new",
+      "keyword.operator.expression",
+      "keyword.operator.logical.python",
+      "keyword.operator.wordlike",
+      "keyword.control.flow.block-scalar"
+    ],
+    "settings": {
+      "foreground": "#b43026"
+    }
+  },
+  "0007": {
+    "name": "Enji · exits",
+    "scope": [
+      "keyword.control.flow.return",
+      "keyword.control.return",
+      "keyword.control.flow.break",
+      "keyword.control.flow.continue",
+      "keyword.control.flow.throw",
+      "keyword.control.throw",
+      "keyword.control.flow.raise",
+      "keyword.control.flow.yield",
+      "keyword.control.yield",
+      "keyword.control.flow.await",
+      "keyword.control.await",
+      "keyword.control.go",
+      "keyword.control.defer",
+      "keyword.control.panic"
+    ],
+    "settings": {
+      "foreground": "#970639"
+    }
+  },
+  "0008": {
+    "name": "Shu · storage & modifiers",
+    "scope": [
+      "storage",
+      "storage.type",
+      "storage.modifier",
+      "keyword.storage",
+      "storage.type.function",
+      "storage.type.class",
+      "storage.type.interface",
+      "storage.type.enum",
+      "storage.type.struct",
+      "storage.type.type",
+      "storage.type.namespace",
+      "storage.type.trait",
+      "storage.type.impl",
+      "storage.modifier.async",
+      "storage.modifier.mut",
+      "storage.modifier.visibility",
+      "storage.type.var",
+      "storage.type.const",
+      "storage.type.let",
+      "keyword.other.fn.rust",
+      "keyword.function.go",
+      "keyword.struct.go",
+      "keyword.interface.go",
+      "keyword.map.go",
+      "keyword.channel.go",
+      "keyword.type.go",
+      "keyword.var.go",
+      "keyword.const.go",
+      "keyword.package.go",
+      "keyword.import.go",
+      "storage.type.function.python",
+      "storage.type.class.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b43026"
+    }
+  },
+  "0009": {
+    "name": "Shu · imports",
+    "scope": [
+      "storage.modifier.import",
+      "storage.modifier.package",
+      "keyword.control.import.python",
+      "keyword.control.import.from.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b43026"
+    }
+  },
+  "0010": {
+    "name": "Ai-nezumi · operators",
+    "scope": [
+      "keyword.operator",
+      "keyword.operator.assignment",
+      "keyword.operator.arithmetic",
+      "keyword.operator.comparison",
+      "keyword.operator.relational",
+      "keyword.operator.logical",
+      "keyword.operator.bitwise",
+      "keyword.operator.ternary",
+      "keyword.operator.spread",
+      "keyword.operator.rest",
+      "keyword.operator.type",
+      "keyword.operator.optional",
+      "keyword.operator.channel",
+      "keyword.operator.address",
+      "keyword.operator.pointer",
+      "keyword.operator.dereference",
+      "keyword.operator.borrow",
+      "keyword.operator.range",
+      "keyword.operator.pipe",
+      "keyword.operator.redirect",
+      "keyword.operator.heredoc",
+      "storage.type.function.arrow",
+      "punctuation.separator.key-value",
+      "punctuation.accessor",
+      "punctuation.separator.dot-access",
+      "punctuation.separator.namespace",
+      "punctuation.separator.scope"
+    ],
+    "settings": {
+      "foreground": "#4e597d"
+    }
+  },
+  "0031": {
+    "name": "Ai · constructors & special methods",
+    "scope": [
+      "keyword.other.special-method",
+      "entity.name.function.constructor",
+      "support.function.magic",
+      "entity.name.function.special"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#2a409b"
+    }
+  },
+  "0033": {
+    "name": "Kincha · primitive types",
+    "scope": [
+      "storage.type.primitive",
+      "storage.type.built-in",
+      "support.type.primitive",
+      "keyword.type",
+      "support.type.builtin",
+      "storage.type.numeric.go",
+      "storage.type.string.go",
+      "storage.type.boolean.go",
+      "storage.type.byte.go",
+      "storage.type.rune.go",
+      "storage.type.error.go",
+      "storage.type.uintptr.go",
+      "entity.name.type.numeric.rust",
+      "entity.name.type.primitive.rust",
+      "support.type.builtin.ts",
+      "support.type.primitive.ts",
+      "support.type.primitive.tsx"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#785603"
+    }
+  },
+  "0038": {
+    "name": "Kaki · lifetimes & labels",
+    "scope": [
+      "storage.modifier.lifetime.rust",
+      "entity.name.type.lifetime.rust",
+      "punctuation.definition.lifetime.rust",
+      "entity.name.label",
+      "entity.name.goto-label",
+      "constant.other.label"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#9f5401"
+    }
+  },
+  "0047": {
+    "name": "Shu · CSS at-rules",
+    "scope": [
+      "keyword.control.at-rule",
+      "keyword.control.at-rule.css",
+      "keyword.control.at-rule.media",
+      "keyword.control.at-rule.import",
+      "keyword.control.at-rule.include.scss",
+      "keyword.control.at-rule.mixin.scss",
+      "punctuation.definition.keyword.css"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b43026"
+    }
+  },
+  "0050": {
+    "name": "Fuji · units",
+    "scope": [
+      "keyword.other.unit.css",
+      "keyword.other.unit.scss",
+      "keyword.other.unit.px.css",
+      "keyword.other.unit.percentage.css"
+    ],
+    "settings": {
+      "foreground": "#853a93"
+    }
+  },
+  "0054": {
+    "name": "Shu · Dockerfile instructions",
+    "scope": [
+      "keyword.other.special-method.dockerfile",
+      "keyword.other.dockerfile"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#b43026"
+    }
+  }
+}

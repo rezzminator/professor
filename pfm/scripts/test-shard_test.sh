@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUT="${TEST_SHARD_SUT:-$ROOT/scripts/test-shard.sh}"
 SHTEST_TAG=pfm-test-shard-test
 source "$ROOT/../scripts/shtest.sh"
+shtest_unset_gate_env
 PKG=github.com/rezzminator/professor/pfm/cmd/pfm
 QUICK=github.com/rezzminator/professor/pfm/internal/quick
 
@@ -454,5 +455,13 @@ if [ "$rc" -eq 2 ] && [ ! -s "$STUB_LOG" ]; then ok out-unwritable-before-go; el
 : >"$STUB_LOG"
 rc=0; bash "$SUT" run --out /sys/test-shard-unwritable.json --history "$T/history.json" >"$T/error.log" 2>&1 || rc=$?
 if [ "$rc" -eq 2 ] && [ ! -s "$STUB_LOG" ]; then ok out-read-only-before-go; else bad "out-read-only-before-go: rc=$rc" "$(cat "$T/error.log")"; fi
+
+# Configured count and timeout reach both the Go runner and compiled shards.
+: >"$STUB_LOG"
+rc=0; PFM_FENCE_TEST_TIMEOUT=31m PFM_FENCE_TEST_COUNT=3 bash "$SUT" run --out "$T/configured.json" -- -p 4 >"$T/configured.log" 2>&1 || rc=$?
+if grep -q '^test -timeout 31m ' "$STUB_LOG" && grep -q -- '-count=3 -json ' "$STUB_LOG" && grep -q -- '-test.count=3 -test.timeout 31m ' "$STUB_LOG"; then ok configured-count-and-timeout; else bad 'configured count and timeout' "$(cat "$STUB_LOG")" "$(cat "$T/configured.log")"; fi
+: >"$STUB_LOG"
+rc=0; PFM_FENCE_SHARDS_CMD=0 bash "$SUT" run --out "$T/invalid-config.json" >"$T/invalid-config.log" 2>&1 || rc=$?
+if [[ $rc != 0 ]] && grep -q 'PFM_FENCE_SHARDS_CMD must be int' "$T/invalid-config.log" && [[ ! -s "$STUB_LOG" ]]; then ok invalid-config-before-go; else bad 'invalid config before go' "rc=$rc $(cat "$T/invalid-config.log")"; fi
 
 shtest_end

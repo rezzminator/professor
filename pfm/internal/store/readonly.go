@@ -24,10 +24,11 @@ func OpenWithoutMigrating(ctx context.Context, options ...OpenOption) (*Store, e
 		return nil, err
 	}
 	return &Store{
-		db:    db,
-		state: fleetdb.OpenSharedStateReadOnly(ctx, resolved),
-		path:  resolved.CacheDB,
-		warn:  settings.warn,
-		clock: settings.clock,
+		db:       db,
+		state:    fleetdb.OpenSharedStateReadOnly(ctx, resolved),
+		path:     resolved.CacheDB,
+		readOnly: true,
+		warn:     settings.warn,
+		clock:    settings.clock,
 	}, nil
 }

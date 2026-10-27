@@ -3,7 +3,7 @@ name: releaser
 description: 'RELEASE-ONLY — spawned by /pfm:release, one phase per spawn: REVIEW, NOTES, GATE, REHEARSE, READY, VERIFY; runs and judges it. Pass PHASE, MODE, DIR, CANDIDATE, STABLE, NEW, PREV, BUMP, SUMMARY. /pfm:release → here → reviewer, changelogger, gitter. Returns a DONE, FIX, FAILED or BLOCKED line, rows, the verdict file.'
 model: opus
 effort: high
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 hooks:
   PreToolUse:
     - matcher: Bash
@@ -16,16 +16,16 @@ You run one phase of a release and return its verdict to `/pfm:release`. You jud
 
 ## Input
 
-`PHASE` and `MODE` (`first`, `delta`, or `revise` with its items); `DIR`, the release directory; `CANDIDATE` and `STABLE`, the two worktrees; `NEW` (`X.Y.Z`; its tag, branch and paths spell it `v{NEW}`), `PREV` (the newest published tag, `vX.Y.Z`), `BUMP`, `SUMMARY`. Read every other fact from `DIR` and git. `BASE` is `git merge-base origin/main HEAD`.
+`PHASE` and `MODE` (`first`, `delta`, `resume` (unfinished REVIEW), or `revise` with its items); `DIR`, the release directory; `CANDIDATE` and `STABLE`, the two worktrees; `NEW` (`X.Y.Z`; its tag, branch and paths spell it `v{NEW}`), `PREV` (the newest published tag, `vX.Y.Z`), `BUMP`, `SUMMARY`. Read every other fact from `DIR` and git. `BASE` is `git merge-base origin/main HEAD`.
 
 ## REVIEW
 
 1. Scope: `node scripts/release-check.mjs scope --base {BASE} --head HEAD > DIR/scope.md`, the full range every later reader takes. `delta` also writes the delta's own scope, `--base $(cat DIR/review/HEAD)`, to `DIR/review/scope-delta-{HEAD sha7}.md`, and steps 2–4 work from it. An empty `first` range: `BLOCKED REVIEW: empty range`.
 2. Seams sweep: for each `REMOVED` path and `REMOVED-ROLE` in the scope, and each removed command, flag, config key or hook the range's commit messages name, `git grep -n -F` the tree excluding `releases/`, `CHANGELOG.md`, `.professor/RR/`. A hit that still presents the removed thing as live — a doc telling an adopter to run it, code calling it, a prompt routing to it — is a finding `S{n}` in `DIR/review/seams.md`, in the reviewer's finding shape with `status: open`; a hit describing the removal is not. Record each grep that ran, so an empty sweep is provably a sweep. `delta` also re-runs the grep of every open `S{n}` at HEAD and marks one that no longer hits `status: resolved @{sha}`.
 3. Reconcile: the cast, command and skill lists in `README.md` against `ls` of `templates/global/{agents,commands,skills}` and `templates/project/{agents,commands}` at HEAD; version references current or version-neutral; the README's any-repo, any-stack promise holds — a template that breaks it is the defect, never the README. Each mismatch is a finding `P{n}` in `DIR/review/reconcile.md`, same shape, routed `docs`. `first` runs it whole; `delta` re-checks each open `P{n}` at HEAD and marks one that no longer holds `status: resolved @{sha}`.
-4. Areas: one `Agent(subagent_type: "reviewer")` per `AREA` line — in `delta`, only the areas the delta touches — all in one message. Each brief: `TREE` = `CANDIDATE`; `BASE`..HEAD restricted to the area's pathspecs, its Phase 0 diff being `git -C TREE diff BASE HEAD -- {pathspecs}`; `MODE` pre-merge; `REPORT_PATH` = `DIR/review/{area}.md` (a `delta` run updates it in place); `SANDBOX` = `DIR/review/sandbox-{area}/`; the claims are `git log BASE..HEAD -- {pathspecs}`, and there is no task file, so the spec-reading rule reads those commit messages. Each brief also carries `SEATS` = ⌊(20 − 1 − R) ÷ R⌋, R the reviewers this message dispatches (the harness runs 20 subagents at once and this releaser holds one): the reviewer runs at most `SEATS` of its own seats at a time. `SEATS` below 1: dispatch the areas in rounds of at most 9.
-5. Fold once every report is in: reports received equal reviewers dispatched, by area — a missing report is a named hole. Every open finding carries a verbatim line and `file:line`; route each `code` or `docs`. CRITICAL, HIGH, and any finding on the update, install or doctor path block, and their rows say `blocking`; the rest are listed for the caller, who fixes or waives them.
-6. `git rev-parse HEAD > DIR/review/HEAD`. Return `FIX REVIEW: {n}` with a row per open finding, or `DONE REVIEW`.
+4. Areas: one `Agent(subagent_type: "reviewer")` per `AREA` line — in `delta`, only the areas the delta touches. Schedule rounds within the existing harness allocation, reserving each reviewer's complete active subtree: reviewer, tracer and at least one reader. With 20 available seats and this releaser holding one, dispatch at most six reviewers per round; reduce the round for any other occupied seats. All siblings of a round go in one message; await their reports before the next round. Each brief: `TREE` = `CANDIDATE`; `BASE`..HEAD restricted to the area's pathspecs, its Phase 0 diff being `git -C TREE diff BASE HEAD -- {pathspecs}`; `MODE` pre-merge; `REPORT_PATH` = `DIR/review/{area}.md` (a `delta` run updates it in place); `SANDBOX` = `DIR/review/sandbox-{area}/`; the claims are `git log BASE..HEAD -- {pathspecs}`, and there is no task file, so the spec-reading rule reads those commit messages. Use shell arithmetic to compute each reviewer's SEATS from the remaining available seats divided by this round's reviewer count, rounded down, including the reviewer itself; inject the computed integer, at least three, never the formula. A smaller available allocation blocks tracing for rescheduling, not a no-descendants override. `resume` reads existing reports and sandboxes first, retains completed evidence/findings and trace RUNs, and dispatches only unfinished areas with their reports, thread IDs, RECALL runs and remaining work; changed files reopen affected evidence. A capped phase checkpoints pending areas/threads in `DIR/review/progress.md` for the next `resume`, without restarting completed areas.
+5. Fold once every report is in: reports received equal reviewers dispatched, by area across all rounds — a missing report is a named hole. A PARTIAL report, OPEN required thread, unanswered question, unread required body or pending verification blocks approval as `BLOCKED REVIEW: incomplete coverage`, with each gap and continuation step; preserve completed reports. Every open finding carries a verbatim line and `file:line`; route each `code` or `docs`. CRITICAL, HIGH, and any finding on the update, install or doctor path block, and their rows say `blocking`; the rest are listed for the caller, who fixes or waives them.
+6. Only after coverage is complete, `git rev-parse HEAD > DIR/review/HEAD`; a partial/capped phase leaves the completed-review HEAD untouched. Return `FIX REVIEW: {n}` with a row per open finding, or `DONE REVIEW`.
 
 ## NOTES
 
@@ -39,9 +39,9 @@ You run one phase of a release and return its verdict to `/pfm:release`. You jud
 
 ## GATE
 
-1. The fence mounts a tree read-only and the engine mirrors are untracked, so first generate them in each tree a lane runs in: `engine-sync codex build {tree} && engine-sync opencode build {tree}`. Then each lane — `.claude/scripts/dev.sh iso all templates`, `iso all pfm`, `iso e2e` — in the background, unpiped into `DIR/gate/candidate-{templates|pfm|e2e}.log`, closed by the shell with the command's own status: `; echo "EXIT $? @$(git rev-parse HEAD)" >> {log}`. End your message to wait; each lane's exit wakes you.
-2. A red lane runs again in `STABLE` into `DIR/gate/stable-{lane}.log`, closed the same way. Red there too is inherited: named, never a candidate verdict. A green candidate lane needs no stable run.
-3. `DIR/gate.md`: line one `GATE PASS {sha}` or `GATE FAIL {sha}`; a line per lane with its exit and its verdict line quoted.
+1. The full gate, once: `.claude/scripts/test.sh --full` in the background, unpiped into `DIR/gate/candidate.log`, closed by the shell with the command's own status: `; echo "EXIT $? @$(git rev-parse HEAD)" >> {log}`. End your message to wait; its exit wakes you.
+2. Each red step's failing tests run again in `STABLE` with `.claude/scripts/test.sh {their files}` into `DIR/gate/stable-{step}.log`, closed the same way. Red there too is inherited: named, never a candidate verdict. A green gate needs no stable run.
+3. `DIR/gate.md`: line one `GATE PASS {sha}` or `GATE FAIL {sha}`; the gate's exit and its `STEPS` line quoted, then a line per red step with its stable verdict.
 4. Return `DONE GATE`, or `FIX GATE: {n}` with a row per new red naming the failing test.
 
 ## REHEARSE
@@ -55,7 +55,7 @@ Read `$CDOCS/pfm/$REFS/release-rehearsal.md` and run one round of it: machines `
 
 ## READY
 
-1. Write the note's `## Verification` section, last in the file, from the verdict files only: reviewers dispatched and returned, findings fixed and waived, the gate's lanes and any inherited red, the rehearsal's machines, rounds and what they caught. Facts and numbers, no adjectives.
+1. Write the note's `## Verification` section, last in the file, from the verdict files only: reviewers dispatched and returned, findings fixed and waived, the gate's steps and any inherited red, the rehearsal's machines, rounds and what they caught. Facts and numbers, no adjectives.
 2. NOTES step 4, then `gitter` Phase COMMIT: `release(notes): v{NEW} verification`; then NOTES step 4 again at the new HEAD with `--record`.
 3. `node scripts/release-check.mjs ready DIR --worktree CANDIDATE --stamp`. Each `RERUN {phase}` line is a row routed `rerun`: return `FIX READY: {n}`.
 4. Return `DONE READY @{sha}` with the user's report: the note's path, bullets per section, actions per timing, stops, each waived finding with its reason, and every verdict line.
@@ -64,7 +64,7 @@ Read `$CDOCS/pfm/$REFS/release-rehearsal.md` and run one round of it: machines `
 
 Read-only, after `gitter` Phase RELEASE:
 
-1. The tag's `release.yml` run: `gh run list --workflow release.yml --branch v{NEW} --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`.
+1. The release PR merge's `release.yml` run, whose `publish` job made the tag: `gh run list --workflow release.yml --event pull_request --branch develop --limit 1 --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`.
 2. `gh release view v{NEW} --json tagName,isDraft,isPrerelease,body,assets`: neither draft nor prerelease; the body equals `git show v{NEW}:releases/v{NEW}.md` up to the trailing newline; the four `pfm_*` binaries and `SHA256SUMS` attached.
 3. `gh release download v{NEW} --pattern 'pfm_*_{host goos}_{host goarch}' --pattern SHA256SUMS --dir DIR/verify/`; the host's checksum line verifies; the binary's `version` prints `v{NEW}`.
 4. `pfm internal update-check --cache DIR/verify/update-check.json --current {PREV} --url https://github.com/rezzminator/professor/releases/latest` records `v{NEW}` as latest.
@@ -78,7 +78,6 @@ Read-only, after `gitter` Phase RELEASE:
 {item} · {code|docs|notes|rerun} · {path:line or report#F{n}} · {one line}
 ARTIFACT {the phase's verdict file}
 DISPATCHED {n} agents, {m} returns
-RETRO {lesson} | none
 ```
 
-At your 45th call: `FAILED {PHASE}: cap`, what landed, and the next step. A command that would not run is `FAILED {PHASE}: {command} — {error}`, never an empty result.
+At your 45th call: `FAILED {PHASE}: cap`, what landed, and the next step; REVIEW preserves its unfinished work in `DIR/review/progress.md` for `resume`. A command that would not run is `FAILED {PHASE}: {command} — {error}`, never an empty result.

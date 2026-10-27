@@ -1,22 +1,29 @@
 {
   "name": "professor",
   "displayName": "Professor",
-  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked.",
-  "version": "0.1.0",
+  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked, paints the terminal, and every window's title, activity and status bars and borders (local and Remote-SSH), in Claude Code's theme, which `pfm theme` renders; and lists every pfm theme in VS Code's Color Theme picker as Professor · {name}, where picking one switches every surface to it.",
+  "version": "0.6.0",
   "publisher": "professor",
   "engines": { "vscode": "^1.90.0" },
-  "extensionKind": ["workspace", "ui"],
+  "extensionKind": ["workspace"],
   "main": "./extension.js",
-  "activationEvents": ["onTerminalProfile:professor.terminal", "onCommand:workbench.action.terminal.new"],
+  "activationEvents": ["onStartupFinished", "onTerminalProfile:professor.terminal", "onCommand:workbench.action.terminal.new"],
   "contributes": {
+    "themes": [],
     "terminal": {
       "profiles": [
         { "id": "professor.terminal", "title": "Professor", "icon": "mortar-board" }
       ]
     },
     "commands": [
-      { "command": "professor.newChatTerminal", "title": "Professor: New Chat Terminal", "icon": "$(mortar-board)" }
+      { "command": "professor.newChatTerminal", "title": "Professor: New Chat Terminal", "icon": "$(mortar-board)" },
+      { "command": "professor.chooseTheme", "title": "Professor: Choose Theme" }
     ],
+    "menus": {
+      "commandPalette": [
+        { "command": "professor.chooseTheme", "when": "!remoteName || professor.pfmHere" }
+      ]
+    },
     "keybindings": [
       { "command": "professor.newChatTerminal", "key": "ctrl+shift+alt+t", "mac": "cmd+shift+alt+t", "when": "terminalProcessSupported" }
     ],
@@ -35,7 +42,8 @@
           "type": "array",
           "default": ["terminal.ansiRed", "terminal.ansiGreen", "terminal.ansiYellow", "terminal.ansiBlue", "terminal.ansiMagenta", "terminal.ansiCyan"],
           "description": "Theme colours cycled beside the icons on the same counter, so a pair repeats only every least-common-multiple of the two list lengths."
-        }
+        },
+        "professor.theme.stateDir": { "type": "string", "default": "", "scope": "machine", "description": "Directory pfm theme writes its contract (current.json) to; empty means ~/.local/state/pfm/theme. The terminal follows Claude Code's theme only after pfm theme on." }
       }
     }
   }

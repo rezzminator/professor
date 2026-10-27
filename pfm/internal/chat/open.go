@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -90,9 +91,14 @@ func ExitResolved(ctx context.Context, runtime *config.Runtime, chat headless.Ch
 
 // resolvedKillRequest is the one kill a resolved chat asks for: its exact id,
 // engine, transcript, socket and pane, so a split pane stays pane-scoped.
+// Native kills bind the durable seat, not its provisional launch session.
 func resolvedKillRequest(chat headless.Chat, exit bool) kill.Request {
+	id := chat.ID
+	if chat.Backend == spawn.BackendHerdr && chat.SeatID != "" {
+		id = chat.SeatID
+	}
 	return kill.Request{
-		ID: chat.ID, Engine: chat.Engine, RolloutPath: chat.Path,
+		ID: id, Engine: chat.Engine, RolloutPath: chat.Path,
 		SocketName: chat.Socket, PaneID: chat.Pane, Exit: exit,
 	}
 }
@@ -108,6 +114,28 @@ func OpenID(
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
+	}
+	seat, found, seatErr := nativeSeat(ctx, effective, id, "")
+	if seatErr != nil {
+		fmt.Fprintf(stderr, "pfm chat open: %v\n", seatErr)
+		return 1
+	}
+	if found && ctx.Value(restoredOpenKey{}) != true {
+		primary, primaryErr := fleet.PrimaryAccount(effective.Paths, effective.Config)
+		if primaryErr != nil {
+			fmt.Fprintf(stderr, "pfm chat open: read primary account: %v\n", primaryErr)
+			return 1
+		}
+		_, code := openNativeRow(
+			ctx,
+			nativeRow(seat),
+			primary,
+			effective.Config.EffectiveClaude(primary).Cache1H,
+			stdout,
+			stderr,
+			effective,
+		)
+		return code
 	}
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
@@ -166,6 +194,13 @@ func OpenDetachedID(
 	if err != nil {
 		return action.OpenResult{}, err
 	}
+	seat, found, seatErr := nativeSeat(ctx, effective, id, "")
+	if seatErr != nil {
+		return action.OpenResult{}, seatErr
+	}
+	if found {
+		return detachedNative(ctx, seat, stderr, effective)
+	}
 	rows, err := Rows(ctx, stderr, &effective)
 	if err != nil {
 		return action.OpenResult{}, err
@@ -192,6 +227,19 @@ func OpenDetachedTarget(
 	effective, err := config.RuntimeOrDefault(runtime)
 	if err != nil {
 		return action.OpenResult{}, err
+	}
+	if target.Backend == spawn.BackendHerdr {
+		seat, found, err := nativeSeat(ctx, effective, target.ID, target.SeatID)
+		if err != nil {
+			return action.OpenResult{}, err
+		}
+		// The caller's pane may predate a move already persisted by another
+		// probe. Exact seat/session/socket checks remain; detachedNative proves
+		// and returns the current terminal-owned address under its lock.
+		if !found || seat.HerdrSocket != target.Socket {
+			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
+		}
+		return detachedNative(ctx, seat, stderr, effective)
 	}
 	if target.Engine == pfmengine.Claude && target.Live {
 		rows, rowsErr := Rows(ctx, stderr, &effective)
@@ -243,6 +291,16 @@ func openDetachedResolvedRow(
 	stderr io.Writer,
 	effective config.Runtime,
 ) (action.OpenResult, error) {
+	if row.Backend == spawn.BackendHerdr {
+		seat, found, err := nativeSeat(ctx, effective, row.ID, row.SeatID)
+		if err != nil {
+			return action.OpenResult{}, err
+		}
+		if !found {
+			return action.OpenResult{}, fmt.Errorf("native target no longer matches its durable seat")
+		}
+		return detachedNative(ctx, seat, stderr, effective)
+	}
 	fleetPrimary, err := fleet.PrimaryAccount(effective.Paths, effective.Config)
 	if err != nil {
 		return action.OpenResult{}, fmt.Errorf("read primary account: %w", err)
@@ -332,6 +390,15 @@ func OpenRow(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
+	if ctx.Value(restoredOpenKey{}) == true && row.Backend == spawn.BackendHerdr {
+		row.Backend = ""
+		row.Kind = compose.ResumeKindFor(row.Kind)
+		row.Socket = ""
+		row.PaneID = ""
+		row.SeatID = ""
+	} else if handled, code := openNativeRow(ctx, row, primary, cache1H, stdout, stderr, effective); handled {
+		return code
+	}
 	relocated := ""
 	if !row.Kind.IsLiveSeat() {
 		if info, statErr := os.Stat(row.CWD); statErr != nil || !info.IsDir() {
@@ -369,6 +436,7 @@ func OpenRow(
 	// so the unseen flag clears before it.
 	markSchedulesSeen(ctx, effective.Paths, row.ID, stderr)
 	if line != "" {
+		retireOtherHerdrViews(ctx, row, effective, stderr)
 		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
 			return 1
@@ -427,8 +495,18 @@ func prepareOpen(
 	if account, found := effective.Config.CodexAccountByID(primary); found {
 		healCodexRoot = account.Home
 	}
+	var gate action.Gate
+	if ctx.Value(restoredOpenKey{}) == true {
+		gate = restoredGate{}
+	}
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(&effective)})
+	if err != nil {
+		return nil, action.Request{}, NameReservation{}, errors.Join(err, claim.Release())
+	}
 	executor, err := newOpenExecutor(action.Dependencies{
-		Stderr: stderr,
+		Identify: identifier.Identify,
+		Gate:     gate,
+		Stderr:   stderr,
 		Heal: func(ctx context.Context, threadID string) string {
 			return heal.Thread(ctx, healCodexRoot, threadID)
 		},

@@ -14,9 +14,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/restart"
 )
 
 // ErrNameSyncRunning refuses a mutating install while the Linux name-sync
@@ -56,15 +56,6 @@ type CommandRunner interface {
 	Run(context.Context, string, ...string) error
 }
 
-// HarvestProvisioner is the narrow seam between host wiring and the pinned
-// Python runtime. The real implementation delegates to harvestpy; installer
-// tests inject a fake so they never download the conversion lock.
-type HarvestProvisioner interface {
-	Plan(harvestpy.Platform) (harvestpy.InstallPlan, error)
-	Provision(context.Context, harvestpy.ProvisionOptions) (harvestpy.ProvisionResult, error)
-	Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error)
-}
-
 // OutputRunner is the optional half of CommandRunner for probes that need to
 // READ a manager's answer rather than just its exit status. launchctl reports a
 // job's state in its output and exits zero either way, so the launch-agent gate
@@ -75,12 +66,23 @@ type OutputRunner interface {
 }
 
 type Options struct {
-	Mode                  Mode
+	Mode Mode
+	// herdrIndicatorDeps replaces the process-table, signal and start doors in tests.
+	herdrIndicatorDeps *restart.Deps
+	// LeaveVSCodeColors permits uninstall to leave known extension-owned keys;
+	// their recovery records remain on disk. Other restore failures still stop it.
+	LeaveVSCodeColors     bool
 	ManagedSettingsDir    string
 	CleanupPeriodDays     int
 	RequireManagedCleanup bool
+	// themeFollowerRefresh re-applies the theme follower's launch agent for
+	// home while the theme sync is on; nil uses themesync.Sync.
+	themeFollowerRefresh func(ctx context.Context, home string) error
 	// writeManaged is the atomic managed-drop-in writer; nil uses atomicfile.Write.
-	writeManaged     func(string, []byte) error
+	writeManaged func(string, []byte) error
+	// themeOff runs `pfm theme off` for home before an uninstall while the
+	// theme sync is on; nil uses themesync.Off over the real runner and tmux.
+	themeOff         func(ctx context.Context, home string) error
 	Home             string
 	StateDB          string
 	ConfigDir        string
@@ -137,7 +139,9 @@ type Options struct {
 	Version string
 	// ClaudePluginCheckoutRoot is claude.pluginCheckoutRoot; empty when unset.
 	ClaudePluginCheckoutRoot string
-	// GptAgents is the machine-wide gpt twin and hook asset opt-in.
+	// GptAgents is claude.gptAgents: the machine-wide switch declaring the engine-sync
+	// capability gpt-agents (engine-sync installs only agents that require it). Off by
+	// default; no agent requires it today.
 	GptAgents bool
 	// AdoptAgents is pfm install --adopt-agents: engine-sync global adopts an
 	// unowned regular file sitting at a declared agent's path.
@@ -150,7 +154,8 @@ type Options struct {
 	ClaudePluginsDefault bool
 	// ClaudeEnv is claude.env: the plugin options as environment variables
 	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
-	ClaudeEnv map[string]string
+	ClaudeEnv  map[string]string
+	Extensions map[string]pfmconfig.Extension
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches
@@ -174,16 +179,9 @@ type Options struct {
 	// never touch a real home.
 	vscodeExtensionRoots []string
 
-	// ProvisionHarvest makes install/uninstall own the pinned conversion
-	// environment. The command sets this for real user actions; existing
-	// installer unit tests leave it false and inject no network-capable worker.
-	ProvisionHarvest bool
-	// SkillSourcesOffline skips fetching the source-fetched global skills
-	// (paths.EnvSkillSourcesOffline); an existing store copy is still linked.
+	// SkillSourcesOffline skips fetching source-fetched global skills.
 	SkillSourcesOffline bool
-	HarvestProvisioner  HarvestProvisioner
-	HarvestPlatform     harvestpy.Platform
-	HarvestOffline      bool
+	Offline             bool
 
 	// ProcRoot is the process table pruneClaudeVersions reads to tell a
 	// version a live chat is executing from one it is safe to remove. Empty
@@ -192,17 +190,19 @@ type Options struct {
 	// real /proc.
 	ProcRoot string
 
-	// InstallThemes enables the optional Claude Code themes, source-fetched and bundled.
+	// InstallThemes enables the optional Professor themes, the profiles in
+	// templates/themes/.
 	// Command callers set it by default; unit callers opt in explicitly so a
 	// test can never acquire network access by accident.
 	InstallThemes bool
-	// ThemesOffline skips remote theme manifests and palettes while allowing
-	// bundled palettes from SourceRepo to install.
+	// ThemesOffline skips downloading the release profiles while allowing the
+	// profiles in SourceRepo to install.
 	ThemesOffline bool
-	// ThemeManifestURL is the release-matched fallback used when SourceRepo is
-	// unavailable (for example, the checksum-verified binary install path).
-	ThemeManifestURL string
-	ThemeHTTPClient  *http.Client
+	// ThemeReleaseURL is the release-matched templates/themes/ URL the
+	// profiles are downloaded from when SourceRepo holds none (for example,
+	// the checksum-verified binary install path).
+	ThemeReleaseURL string
+	ThemeHTTPClient *http.Client
 
 	// launchGateUnprobed records that the launch-agent gate could not ask its
 	// question. It is set by Run, never by a caller.
@@ -293,6 +293,12 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 	return result.Stdout, nil
 }
 
+// defaultProcRoot is the process table an install reads when neither
+// Options.ProcRoot nor its Env names one. The package's TestMain points it at an
+// empty jail, so a test whose fake Env omits PFM_PROC_ROOT never reads, or
+// signals, the processes of a suite running beside it.
+var defaultProcRoot = "/proc"
+
 func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.SourceRepo != "" {
 		abs, err := filepath.Abs(options.SourceRepo)
@@ -327,7 +333,7 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.ProcRoot == "" {
 		options.ProcRoot = options.Env.Get(paths.EnvProcRoot)
 		if options.ProcRoot == "" {
-			options.ProcRoot = "/proc"
+			options.ProcRoot = defaultProcRoot
 		}
 	}
 	if options.MCPPort == 0 {
@@ -345,60 +351,5 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.ProcessRunner == nil {
 		options.ProcessRunner = obs.Runner(deps.RealRunner{})
 	}
-	if options.ProvisionHarvest && options.HarvestProvisioner == nil {
-		options.HarvestProvisioner = NewHarvestProvisioner()
-	}
 	return options, nil
-}
-
-// harvestModelStager is the optional OCR-model half of a HarvestProvisioner:
-// the production adapter stages the models; test doubles need not.
-type harvestModelStager interface {
-	StageOCRModels(context.Context, harvestpy.OCRStageOptions) (harvestpy.OCRStaging, error)
-}
-
-func (pinnedHarvestProvisioner) StageOCRModels(
-	ctx context.Context,
-	options harvestpy.OCRStageOptions,
-) (harvestpy.OCRStaging, error) {
-	return harvestpy.StageOCRModels(ctx, options)
-}
-
-// stageHarvestModels stages the OCR models after the environment is healthy:
-// it names the download and its size before it starts, answers a warm cache
-// without a download, and names an offline install that could not stage.
-func (installer *engine) stageHarvestModels(
-	ctx context.Context,
-	provider HarvestProvisioner,
-	root string,
-	platform harvestpy.Platform,
-) error {
-	stager, ok := provider.(harvestModelStager)
-	if !ok {
-		return nil
-	}
-	staging, err := stager.StageOCRModels(ctx, harvestpy.OCRStageOptions{
-		Root: root, Platform: platform, Offline: installer.options.HarvestOffline,
-		Announce: func(message string) { installer.say("harvestpy OCR models: %s", message) },
-	})
-	if errors.Is(err, harvestpy.ErrOCRModelsOffline) {
-		installer.say(
-			"harvestpy OCR models: NOT staged — %v; scanned PDFs fail by name until `pfm install` runs with network",
-			err,
-		)
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("harvestpy OCR model staging: %w", err)
-	}
-	if staging.AlreadyStaged {
-		installer.ok("harvestpy OCR models already staged in " + staging.ModelRoot + " (no download)")
-		return nil
-	}
-	installer.ok(fmt.Sprintf("harvestpy OCR models staged in %s (%d bytes on disk); Hebrew: %s",
-		staging.ModelRoot, staging.Bytes, staging.Hebrew))
-	for set, reason := range staging.Skipped {
-		installer.say("harvestpy OCR models: %s not staged — %s", set, reason)
-	}
-	return nil
 }

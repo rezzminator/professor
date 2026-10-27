@@ -13,30 +13,17 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInstallDeferredTrustFailureLandsLaterSteps(t *testing.T) {
 	home := t.TempDir()
 	account, binary, _ := stageResumeUnkillAccount(t, home)
 	writeFixture(t, filepath.Join(account, "hooks.json"), `{"hooks":{}}`)
-	script, err := os.ReadFile(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
 	// The discovery answers no handler; initialization and the write reply
 	// retain the same native API exchange as the successful account fixture.
-	lines := strings.Split(string(script), "\n")
-	for index, line := range lines {
-		if strings.Contains(line, `printf '{"id":1,"result":{"data"`) {
-			lines[index] = `      printf '%s\n' '{"id":1,"result":{"data":[]}}' ;;`
-		}
-	}
-	if err := testjail.WriteExecutable(binary, []byte(strings.Join(lines, "\n")), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeFixture(t, filepath.Join(home, "hooks-listing.jsonl"), "")
 	var output bytes.Buffer
-	_, err = Run(context.Background(), Options{
+	_, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &output,
 		CodexHomes: []string{account}, CodexBinary: binary, MCPConfigPath: testConfigPath(t),
 	})
@@ -44,7 +31,7 @@ func TestInstallDeferredTrustFailureLandsLaterSteps(t *testing.T) {
 		t.Fatalf("install error=%v, want failed discovery", err)
 	}
 	for _, line := range []string{
-		"  change  trust resume-unkill hook " + account + "\n",
+		"  change  trust Codex hooks " + account + "\n",
 		"  FAIL    Codex hook trust for " + account + ": ", "log default:", "zshrc",
 	} {
 		if !strings.Contains(output.String(), line) {
@@ -104,15 +91,21 @@ func TestInstallDeferredRestartFailureUsesFAILAndLandsLaterSteps(t *testing.T) {
 
 type installEnableRunner struct {
 	*fakeRunner
-	failEnable bool
-	timerState string
+	failEnable       bool
+	timerState       string
+	keepTimerStopped bool
 }
 
 func (runner *installEnableRunner) Run(ctx context.Context, name string, args ...string) error {
 	err := runner.fakeRunner.Run(ctx, name, args...)
-	if runner.failEnable && name+" "+strings.Join(args, " ") ==
+	if name+" "+strings.Join(args, " ") ==
 		"systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer" {
-		return errors.New("exit 1")
+		if runner.failEnable {
+			return errors.New("exit 1")
+		}
+		if err == nil && !runner.keepTimerStopped {
+			runner.timerState = "active"
+		}
 	}
 	return err
 }
@@ -204,6 +197,26 @@ func TestInstallDeferredRerunRepairsInactiveTimerAndKeepsHealthyUnits(t *testing
 				t.Fatalf("healthy units enabled again:\n%s", calls)
 			}
 		})
+	}
+}
+
+func TestInstallReportsScheduleTimerThatDidNotStart(t *testing.T) {
+	if schedulerIsLaunchd {
+		return // This contract is systemd's enable --now acknowledgement.
+	}
+	runner := &installEnableRunner{
+		fakeRunner: &fakeRunner{manager: true}, timerState: "inactive", keepTimerStopped: true,
+	}
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: t.TempDir(), Runner: runner, Stdout: &output, MCPConfigPath: testConfigPath(t),
+	})
+	if err == nil || !strings.Contains(err.Error(), "pfm-schedule.timer") ||
+		!strings.Contains(err.Error(), "inactive") {
+		t.Fatalf("install silently accepted an inactive schedule timer: err=%v output=%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "  FAIL    ") || !strings.Contains(output.String(), "zshrc") {
+		t.Fatalf("timer failure or subsequent steps not reported: %s", output.String())
 	}
 }
 

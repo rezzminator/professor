@@ -1,0 +1,143 @@
+{
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "*.mutable": {
+    "underline": true
+  },
+  "*.unsafe": {
+    "bold": true,
+    "foreground": "#f26868"
+  },
+  "attribute": "#f0ad67",
+  "boolean": "#e1afed",
+  "builtinConstant": "#e1afed",
+  "builtinType": {
+    "foreground": "#ffd86b",
+    "italic": true
+  },
+  "character": "#a6e7a7",
+  "class": "#ffd86b",
+  "class.declaration": {
+    "bold": true,
+    "foreground": "#ffd86b"
+  },
+  "class.defaultLibrary": {
+    "foreground": "#ffd86b",
+    "italic": true
+  },
+  "clsParameter": {
+    "foreground": "#e1afed",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#8e7ea4",
+    "italic": true
+  },
+  "decorator": "#f0ad67",
+  "derive": "#f0ad67",
+  "enum": "#ffd86b",
+  "enum.declaration": {
+    "bold": true,
+    "foreground": "#ffd86b"
+  },
+  "enumMember": "#ffa07a",
+  "escapeSequence": "#95e2f5",
+  "event": "#f0ad67",
+  "formatSpecifier": "#95e2f5",
+  "function": "#72e5fd",
+  "function.declaration": {
+    "bold": true,
+    "foreground": "#72e5fd"
+  },
+  "function.defaultLibrary": {
+    "foreground": "#72e5fd",
+    "italic": true
+  },
+  "interface": "#ffd86b",
+  "interface.declaration": {
+    "bold": true,
+    "foreground": "#ffd86b"
+  },
+  "interface.defaultLibrary": {
+    "foreground": "#ffd86b",
+    "italic": true
+  },
+  "keyword": "#fa7bc6",
+  "keyword.controlFlow": "#fa7bc6",
+  "label": "#fa7bc6",
+  "lifetime": {
+    "foreground": "#e1afed",
+    "italic": true
+  },
+  "macro": "#f0ad67",
+  "magicFunction": {
+    "foreground": "#72e5fd",
+    "italic": true
+  },
+  "method": "#72e5fd",
+  "method.declaration": {
+    "bold": true,
+    "foreground": "#72e5fd"
+  },
+  "method.defaultLibrary": {
+    "foreground": "#72e5fd",
+    "italic": true
+  },
+  "module": "#b9b4ff",
+  "namespace": "#b9b4ff",
+  "number": "#ffa07a",
+  "operator": "#f7b0dc",
+  "parameter": {
+    "foreground": "#ffc29e",
+    "italic": true
+  },
+  "property": "#8dccf9",
+  "property.readonly": "#8dccf9",
+  "punctuation": "#aa9cbf",
+  "regexp": "#f29bf0",
+  "selfKeyword": {
+    "foreground": "#e1afed",
+    "italic": true
+  },
+  "selfParameter": {
+    "foreground": "#e1afed",
+    "italic": true
+  },
+  "selfTypeKeyword": {
+    "foreground": "#ffd86b",
+    "italic": true
+  },
+  "string": "#a6e7a7",
+  "struct": "#ffd86b",
+  "struct.declaration": {
+    "bold": true,
+    "foreground": "#ffd86b"
+  },
+  "type": "#ffd86b",
+  "type.declaration": {
+    "bold": true,
+    "foreground": "#ffd86b"
+  },
+  "type.defaultLibrary": {
+    "foreground": "#ffd86b",
+    "italic": true
+  },
+  "typeAlias": "#ffd86b",
+  "typeParameter": {
+    "foreground": "#ffd86b",
+    "italic": true
+  },
+  "unresolvedReference": {
+    "foreground": "#f26868",
+    "underline": true
+  },
+  "variable": "#f8f0fa",
+  "variable.constant": "#ffa07a",
+  "variable.defaultLibrary": {
+    "foreground": "#f8f0fa",
+    "italic": true
+  },
+  "variable.readonly": "#ffa07a",
+  "variable.readonly.defaultLibrary": "#ffa07a"
+}

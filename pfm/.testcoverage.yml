@@ -10,6 +10,5 @@ threshold:
 exclude:
   paths:
     - ^internal/installer/assets/   # staged shell/JS/Python, not Go
-    - ^internal/harvestpy/          # pinned Python sidecar
     - _test\.go$
 breakdown-file-name: tmp/cover/breakdown.json

@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -75,6 +74,18 @@ func RetiredPfmCommand(command string) (name, successor string, ok bool) {
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
 const chatlogSuccessor = "the chatlog skill"
 
+// forwardCompactionSuccessor is what the forward-compaction plugin serves in
+// place of sub-agent-compact's tools.
+const forwardCompactionSuccessor = "mcp__forward-compaction__forward_compaction / mcp__forward-compaction__look_back"
+
+// flightsSuccessor takes new work since /flights:spec retired, so the /wave
+// family, the wave-builder skill and /imagine:build-spec point there too.
+const flightsSuccessor = "the flights-foreman agent"
+
+// imagineSuccessor is what replaced /imagine:build, /imagine:build-fast,
+// /imagine:callmeter, /ultimate-spec and the ultimate visualization skill.
+const imagineSuccessor = "/imagine"
+
 // retiredNames is the one registry of retired names `pfm doctor
 // --project-updates` scans a project's files for. Every entry cites
 // the release note or commit that retired it. A retired name that is also a
@@ -93,16 +104,17 @@ var retiredNames = []retiredName{
 	{
 		name:      "mcp__professor__",
 		kind:      retiredTool,
-		successor: "mcp__chat-professor__* / mcp__harvester-professor__*",
+		successor: "mcp__chat-professor__* / mcp__plugin_harvester_harvester__*",
 		match:     matchPrefix,
 	},
 	{name: "pfm chat inject", kind: retiredCommand, successor: "pfm chat call", match: matchExact},
 	{name: "chat_inject", kind: retiredTool, successor: "mcp__chat-professor__call", match: matchExact},
 	// releases/v0.78.0.md "Global: flights replaces wave": every /wave:*
-	// command and the wave-builder skill are removed; new work starts with
-	// /flights:spec. The bare /wave pair retired earlier (releases/v0.43.0.md).
-	{name: "/wave", kind: retiredCommand, successor: "/flights:spec", match: matchFamily},
-	{name: "wave-builder", kind: retiredSkill, successor: "/flights:spec", match: matchExact},
+	// command and the wave-builder skill are removed. The bare /wave pair
+	// retired earlier (releases/v0.43.0.md). New work started with
+	// /flights:spec until it retired too (below): flights-foreman takes it now.
+	{name: "/wave", kind: retiredCommand, successor: flightsSuccessor, match: matchFamily},
+	{name: "wave-builder", kind: retiredSkill, successor: flightsSuccessor, match: matchExact},
 	// releases/v0.77.0.md "B: templates — /jc and /qa:live are gone"; commit
 	// e7c8b6a2 "retire /jc, /qa:live and /pfm:refresh". /jc:wave was its
 	// namespace (releases/v0.32.0.md).
@@ -131,11 +143,17 @@ var retiredNames = []retiredName{
 		name: ".claude/commands/pfm/references/audit-scopes.md", kind: retiredPath,
 		successor: ".claude/commands/pcm.md", match: matchExact,
 	},
-	// releases/v0.78.0.md "→ For: every adopter · per project · MCP tool
-	// names": mcp__chat__* and mcp__harvester__* become their
-	// mcp__professor__ forms.
+	// releases/v0.78.0.md retired the former chat tool namespace.
 	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__chat-professor__*", match: matchPrefix},
-	{name: "mcp__harvester__", kind: retiredTool, successor: "mcp__harvester-professor__*", match: matchPrefix},
+	// Standalone plugin registration replaces the server pfm installed.
+	{name: "harvester-professor", kind: retiredTool, successor: "harvester", match: matchExact},
+	{
+		name: "mcp__harvester-professor__", kind: retiredTool,
+		successor: "mcp__plugin_harvester_harvester__*", match: matchPrefix,
+	},
+	// The forward-compaction plugin replaces sub-agent-compact: its server and
+	// both of its tools are renamed (forward_handoff is forward_compaction).
+	{name: "mcp__sub-agent-compact__", kind: retiredTool, successor: forwardCompactionSuccessor, match: matchPrefix},
 	// releases/v0.62.0.md "Removed: the host-level /chat:* Claude
 	// slash-command family"; "drive chat through the MCP tools instead".
 	{name: "/chat:", kind: retiredCommand, successor: "mcp__chat-professor__*", match: matchPrefix},
@@ -148,6 +166,14 @@ var retiredNames = []retiredName{
 	// Commit "remove /rnd end to end": the project-scope research command and
 	// its former /rnd:hammer and /rnd:referee sub-commands have no successor.
 	{name: "/rnd", kind: retiredCommand, match: matchFamily},
+	// Commit db16bb63 "replace context-meter and context-audit commands with
+	// one user-only initial-context audit skill".
+	{name: "/context-meter", kind: retiredCommand, successor: "/context-audit", match: matchExact},
+	// Commit "prune project templates": the project-tier /mentor, /marketer and
+	// /officer command templates are gone, with no successor.
+	{name: "/mentor", kind: retiredCommand, match: matchExact},
+	{name: "/marketer", kind: retiredCommand, match: matchExact},
+	{name: "/officer", kind: retiredCommand, match: matchExact},
 	{name: "mono-architect", kind: retiredAgent, match: matchExact},
 	{name: "mono-documenter", kind: retiredAgent, match: matchExact},
 	{name: "mono-planner", kind: retiredAgent, match: matchExact},
@@ -165,9 +191,26 @@ var retiredNames = []retiredName{
 	// Commit f0c88ffb "tracer-rr is clone-distiller".
 	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
 	// Commit 3b401f24: the twin agents take their originals' full names; terra retires.
-	{name: "gpt-foreman", kind: retiredAgent, successor: "gpt-flights-foreman", match: matchExact},
-	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
-	{name: "gpt-executor", kind: retiredAgent, successor: "gpt-flights-mechanical-executor", match: matchExact},
+	// No successor: gpt-flights-lander, the name gpt-lander once took, retired with the twins.
+	{name: "gpt-lander", kind: retiredAgent, match: matchExact},
+	{name: "gpt-executor", kind: retiredAgent, match: matchExact},
+	// The flights family cut (docs/design/flights/flights.md § The family): the
+	// foreman-pro twins, the mechanical executors and the gpt speccer retire, and
+	// so do /flights:spec, /flights:init and /flights:orchestrate-cross-harness.
+	// None has a successor: the agents they once pointed at retired too.
+	// flights-speccer is no row: commit 5c7d67f1 restored it, and it ships.
+	{name: "foreman-pro", kind: retiredAgent, match: matchExact},
+	{name: "gpt-foreman-pro", kind: retiredAgent, match: matchExact},
+	{name: "flights-mechanical-executor", kind: retiredAgent, match: matchExact},
+	{name: "gpt-flights-mechanical-executor", kind: retiredAgent, match: matchExact},
+	{name: "gpt-flights-speccer", kind: retiredAgent, match: matchExact},
+	{name: "/flights:spec", kind: retiredCommand, match: matchExact},
+	{name: "/flights:init", kind: retiredCommand, match: matchExact},
+	{name: "/flights:orchestrate-cross-harness", kind: retiredCommand, match: matchExact},
+	// The one lander (docs/design/flights/flights-lander.md): its size tiers
+	// retire, flights-lander landing every worktree.
+	{name: "flights-lander-mini", kind: retiredAgent, successor: "flights-lander", match: matchExact},
+	{name: "flights-lander-pro", kind: retiredAgent, successor: "flights-lander", match: matchExact},
 	retiredAgentRow("terra", "", `subagent_type: "terra"`),
 	retiredAgentRow("terra", "", `subagent_type:"terra"`),
 	retiredAgentRow("terra", "", `subagent_type: 'terra'`),
@@ -191,6 +234,14 @@ var retiredNames = []retiredName{
 	{name: "/tokens", kind: retiredCommand, successor: chatlogSuccessor, match: matchFamily},
 	{name: "skills/transcript", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
 	{name: "transcript skill", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
+	// Commit 3fb6eda4 "retire pfm transcript counts|types and pfm tokens --timeline":
+	// the chatlog kit's prep reads Claude, Codex and OpenCode itself (TOOLS rows,
+	// timeline.txt). pfm transcript show|locate|agents and pfm tokens stay live.
+	// Known gap: the scan matches the exact phrase `pfm tokens --timeline`; the flag split from
+	// `pfm tokens` by other flags is not flagged.
+	{name: "pfm transcript counts", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
+	{name: "pfm transcript types", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
+	{name: "pfm tokens --timeline", kind: retiredCommand, successor: chatlogSuccessor, match: matchExact},
 	// Commit 8bde61ab "/close-out is /done-herewith"; the skill by its path
 	// too, the bare word "close-out" being prose.
 	{name: "/close-out", kind: retiredCommand, successor: "/done-herewith", match: matchFamily},
@@ -220,26 +271,53 @@ var retiredNames = []retiredName{
 	// moved to professor as /imagine:callmeter" its skill. /ultimate itself is
 	// live again as a standalone skill, so it is no row and no agent row below
 	// matches a reference to that skill (`/ultimate`, skills/ultimate/).
-	{name: "/ultimate-spec", kind: retiredCommand, successor: "/imagine:build", match: matchExact},
+	// Commit 471d4b63 "the imagine family collapses to /imagine, the imagination
+	// agent and the ultimate skill" retired every /imagine: subcommand, the
+	// imagine agent and the imagine-core skill (its law lives in the imaginator
+	// agent); /imagine itself is live, so it is no row. A spec without a build
+	// went to /flights:spec, which retired since: flights-foreman takes it.
+	// Commit 196ec68b "retire /imagine:evolve with its imagine-historian agent"
+	// left both with no successor.
+	{name: "/ultimate-spec", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
 	{
-		name: "/callmeter:ultimate-visualization", kind: retiredSkill, successor: "/imagine:callmeter",
+		name: "/callmeter:ultimate-visualization", kind: retiredSkill, successor: imagineSuccessor,
 		match: matchExact,
 	},
+	{name: "/imagine:build", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
+	{name: "/imagine:build-fast", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
+	{name: "/imagine:build-spec", kind: retiredCommand, successor: flightsSuccessor, match: matchExact},
+	{name: "/imagine:callmeter", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
+	{name: "imagine-core", kind: retiredSkill, successor: "the imaginator agent", match: matchExact},
+	{name: "/imagine:evolve", kind: retiredCommand, match: matchExact},
+	{name: "imagine-historian", kind: retiredAgent, match: matchExact},
 	// The agent is named by its context only — the bare word is everyday prose.
 	// One row per spelling an agent reference takes: the Agent tool's
 	// subagent_type in YAML, call, keyword and JSON form, the agent file's path,
 	// and the backticked name beside the word agent or sub-agent.
-	retiredAgentRow("ultimate", "imagine", `subagent_type: "ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type:"ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type: 'ultimate'`),
-	retiredAgentRow("ultimate", "imagine", "subagent_type: ultimate"),
-	retiredAgentRow("ultimate", "imagine", `subagent_type="ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type": "ultimate"`),
-	retiredAgentRow("ultimate", "imagine", `subagent_type":"ultimate"`),
-	retiredAgentRow("ultimate", "imagine", "agents/ultimate.md"),
-	retiredAgentRow("ultimate", "imagine", "`ultimate` agent"),
-	retiredAgentRow("ultimate", "imagine", "`ultimate` sub-agent"),
-	retiredAgentRow("ultimate", "imagine", "`ultimate` subagent"),
+	retiredAgentRow("ultimate", "imaginator", `subagent_type: "ultimate"`),
+	retiredAgentRow("ultimate", "imaginator", `subagent_type:"ultimate"`),
+	retiredAgentRow("ultimate", "imaginator", `subagent_type: 'ultimate'`),
+	retiredAgentRow("ultimate", "imaginator", "subagent_type: ultimate"),
+	retiredAgentRow("ultimate", "imaginator", `subagent_type="ultimate"`),
+	retiredAgentRow("ultimate", "imaginator", `subagent_type": "ultimate"`),
+	retiredAgentRow("ultimate", "imaginator", `subagent_type":"ultimate"`),
+	retiredAgentRow("ultimate", "imaginator", "agents/ultimate.md"),
+	retiredAgentRow("ultimate", "imaginator", "`ultimate` agent"),
+	retiredAgentRow("ultimate", "imaginator", "`ultimate` sub-agent"),
+	retiredAgentRow("ultimate", "imaginator", "`ultimate` subagent"),
+	// The imagine agent, named by its context for the same reason: imaginator,
+	// /imagine and imagine-core are other names and never reach these rows.
+	retiredAgentRow("imagine", "imaginator", `subagent_type: "imagine"`),
+	retiredAgentRow("imagine", "imaginator", `subagent_type:"imagine"`),
+	retiredAgentRow("imagine", "imaginator", `subagent_type: 'imagine'`),
+	retiredAgentRow("imagine", "imaginator", "subagent_type: imagine"),
+	retiredAgentRow("imagine", "imaginator", `subagent_type="imagine"`),
+	retiredAgentRow("imagine", "imaginator", `subagent_type": "imagine"`),
+	retiredAgentRow("imagine", "imaginator", `subagent_type":"imagine"`),
+	retiredAgentRow("imagine", "imaginator", "agents/imagine.md"),
+	retiredAgentRow("imagine", "imaginator", "`imagine` agent"),
+	retiredAgentRow("imagine", "imaginator", "`imagine` sub-agent"),
+	retiredAgentRow("imagine", "imaginator", "`imagine` subagent"),
 }
 
 // retiredAgentRow is one contextual spelling of a retired agent reference.
@@ -713,39 +791,3 @@ func isRetiredNameByte(b byte) bool {
 
 // openRetiredFile opens a file for the scan.
 func openRetiredFile(name string) (io.ReadCloser, error) { return os.Open(name) }
-
-// RetiredRegistryNames derives from retiredNames the names the registry
-// ownership scan matches against an unmarked entry: an agent by file stem, a
-// command by its path below the commands registry (`/qa:live` is
-// qa/live), a skill by directory name (`skills/transcript` is transcript). A
-// name that is not one registry entry (a phrase, an MCP tool, a path) is left out.
-func RetiredRegistryNames() installer.RetiredRegistryNames {
-	names := installer.RetiredRegistryNames{
-		Agents: map[string]bool{}, Commands: map[string]bool{}, Skills: map[string]bool{},
-	}
-	for _, retired := range retiredNames {
-		name := retired.name
-		if retired.kind == retiredAgent && retired.probe != "" {
-			name = strings.TrimSuffix(path.Base(retired.probe), ".md")
-		}
-		if strings.ContainsAny(name, " ") {
-			continue
-		}
-		switch retired.kind {
-		case retiredAgent:
-			if !strings.ContainsAny(name, "/:") {
-				names.Agents[name] = true
-			}
-		case retiredCommand:
-			if command, found := strings.CutPrefix(name, "/"); found && command != "" {
-				names.Commands[strings.ReplaceAll(strings.TrimSuffix(command, ":"), ":", "/")] = true
-			}
-		case retiredSkill:
-			skill := strings.TrimPrefix(name, "skills/")
-			if !strings.ContainsAny(skill, "/:") {
-				names.Skills[skill] = true
-			}
-		}
-	}
-	return names
-}

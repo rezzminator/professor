@@ -1,0 +1,41 @@
+{
+  "0008": {
+    "name": "Sunset: strings",
+    "scope": [
+      "string",
+      "string.quoted",
+      "string.template",
+      "string.unquoted",
+      "punctuation.definition.string",
+      "string.quoted.docstring",
+      "markup.inline.raw.string"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff9f5c"
+    }
+  },
+  "0012": {
+    "name": "Regular expressions",
+    "scope": [
+      "string.regexp",
+      "source.regexp"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffcf6b"
+    }
+  },
+  "0045": {
+    "name": "Markdown link text",
+    "scope": [
+      "string.other.link",
+      "string.other.link.title.markdown",
+      "string.other.link.description.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#fd67ad"
+    }
+  }
+}

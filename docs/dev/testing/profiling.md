@@ -89,7 +89,7 @@ The step's `steps/<name>.xtrace` (see [Per step](#per-step)). For a red shell st
 
 ## Where
 
-`$run` is `/pfm-timing/run.XXXXXX` in the fence and `/tmp/<worktree>/timing/run.XXXXXX` on the host. Besides `steps/<name>.log`, `steps/<name>.failures`, `unit.json`, `unit.tsv`, `unit.load`, `unit-shards/`, `e2e.json` and `e2e.tsv`:
+`$run` is `/pfm-timing/run.XXXXXX` in the fence and `/tmp/{project}/fence/shared/<worktree>/timing/run.XXXXXX` on the host. Besides `steps/<name>.log`, `steps/<name>.failures`, `unit.json`, `unit.tsv`, `unit.load`, `unit-shards/`, `e2e.json` and `e2e.tsv`:
 
 | Path under `$run` | Writer | Content |
 | --- | --- | --- |
@@ -111,7 +111,7 @@ The step's `steps/<name>.xtrace` (see [Per step](#per-step)). For a red shell st
 
 ## Reading a red gate
 
-1. **The step table.** Each non-PASS row carries its pointers: the step log, `steps/<name>.hang/tree.txt` for `TIMEOUT`, and `steps/<name>.xtrace` when it holds ERR records. The fence prints `/pfm-timing/…`; read the same path under `/tmp/<worktree>/timing/` on the host.
+1. **The step table.** Each non-PASS row carries its pointers: the step log, `steps/<name>.hang/tree.txt` for `TIMEOUT`, and `steps/<name>.xtrace` when it holds ERR records. The fence prints `/pfm-timing/…`; read the same path under `/tmp/{project}/fence/shared/<worktree>/timing/` on the host.
 2. **`PROFILE` lines under a red Go step's report.** `profile-report.sh failures` prints, per failing package, `PROFILE <import path>: <dir>/<reason>/DIAGNOSIS.txt` per bundle, `no bundle — <dir>/summary.json (event <e>, exit <c>)`, or `NOT RECORDED — no <label>.* under <profile-dir>`.
 3. **The `PROFILE` block after the table.** `PROFILE gate` gives the run's verdict, wall, CPU, I/O, memory peak, swap and attribution; one `PROFILE step` line per non-PASS step, then the five slowest PASS steps, each with its attribution and its `· xtrace`, `· hang` or `· profiles` pointer (`MISSING` when the artifact is not there); `PROFILE index` names `profile/INDEX.txt`.
 4. **`profile/INDEX.txt`.** Three sections: `## Go test processes` (each process directory with event, exit, wall and run delay), `## Steps` (verdict, how it ended, rc, wall, CPU, and the first ERR record), `## Resources` (the sample count, or why there is none). `profile.tsv` holds the same per-step numbers, plus a `GATE` row: `step verdict wall_s cpu_s io_mb psi_cpu_s psi_io_s psi_mem_s attribution evidence`.
@@ -130,20 +130,26 @@ Every timing verdict says whether the host or the code is to blame, as one of th
 | --- | --- | --- |
 | `tick-deficit` | (Δ`vm_busy_s` − Δ`cg_cpu_s`) ÷ (Δ`epoch_s` × `cpus`); negative means the host withheld vCPU time | ≤ `tick_deficit_max` (-0.05, -5 %) |
 | `cpu-psi` | Δ`cg_psi_cpu_some_s` ÷ Δ`epoch_s` | ≥ `cpu_psi_share_min` (0.36) |
+| `cg-io-psi` | Δ`cg_psi_io_some_s` ÷ Δ`epoch_s` | ≥ `io_psi_share_min` (0.15) |
+| `vm-io-psi` | Δ`vm_psi_io_some_s` ÷ Δ`epoch_s` | ≥ `io_psi_share_min` (0.15) |
 | `spin` | median `spin_us` ÷ the least 5th-percentile `spin_us` of this file and the 20 newest sibling `run.*/resources.tsv` | ≥ `spin_ratio_min` (×1.6) |
 | `run-delay` | `run_delay_s` ÷ `cpu_s`, only when both are given | ≥ `run_delay_ratio_min` (1.4) |
 
-A signal needs `min_samples` (4) rows with a value inside the window, else it is `NA (<reason>)`. The verdict is `CONTENTION` when any measured signal crosses, `CODE` when at least one is measured and none crosses, and `not measured` when none is measured. A missing or empty `resources.tsv` is `not measured (<reason>)`; a judge that fails renders `not measured (judge failed: …)`, never a silent `CODE`. The evidence names every signal: `tick-deficit +3.3% (> -5%) · cpu-psi +24.6% (< 36%) · spin ×1.4 (< ×1.6; ref …) · run-delay NA (not given)`.
+`tick-deficit`, `cpu-psi`, `spin` and `run-delay` are the authoritative signals: only they can mark `CONTENTION` or downgrade FAIL → WARN. `cg-io-psi` and `vm-io-psi` are separate signals, one per scope, reported in the evidence but never authoritative: the cgroup and VM scopes include other packages and runs as well as the code's own I/O, so their pressure cannot tell external contention from code I/O. Overlapping scopes are never summed. `io_psi_share_min` is optional in `pfm/.testcontention.yml` and defaults to 0.15 when the key is absent.
 
-**FAIL → WARN.** A fail-tier verdict whose own window the judge calls `CONTENTION` is downgraded to WARN and says `· downgraded from FAIL`: the gate budget (`BUDGET` row, whole run) and each package and SUITE row of `test-timing.sh --check` (the package's event window, or the whole stream). `CODE` and `not measured` change nothing. Every other verdict (a red test, a `TIMEOUT`, a malformed record) stays red whatever the attribution.
+A signal needs `min_samples` (4) rows with a value inside the window, else it is `NA (<reason>)`. The verdict is `CONTENTION` when any authoritative signal crosses and `CODE` when at least one authoritative signal is measured and none crosses (an I/O signal that stays under `io_psi_share_min` adds nothing to that). When no authoritative signal crosses and either I/O signal does, the verdict is `not measured` with `I/O pressure cannot distinguish external contention from code I/O`. When every authoritative signal is `NA`, the verdict is `not measured`: low I/O alone never produces `CODE`. A missing or empty `resources.tsv` is `not measured (<reason>)`; a judge that fails renders `not measured (judge failed: …)`, never a silent `CODE`. The evidence names every signal: `tick-deficit +3.3% (> -5%) · cpu-psi +24.6% (< 36%) · cg-io-psi +4.1% (< 15%) · vm-io-psi +8.3% (< 15%) · spin ×1.4 (< ×1.6; ref …) · run-delay NA (not given)`.
+
+**FAIL → WARN.** A fail-tier verdict whose own window the judge calls `CONTENTION` is downgraded to WARN and says `· downgraded from FAIL`: the gate budget (`BUDGET` row, whole run) and each package and SUITE row of `test-timing.sh --check` (the package's event window, or the whole stream). `CODE` and `not measured` change nothing, so a timing failure whose only elevated signal is I/O pressure stays FAIL. Every other verdict (a red test, a `TIMEOUT`, a malformed record) stays red whatever the attribution.
+
+An I/O-only busy host can therefore still turn a timing gate red, with no budget or limit raised to absorb it. Read the `not measured` evidence and the step's profile bundle (`DIAGNOSIS.txt`, `resources.tsv`) to decide whether the code's own I/O or another run's caused the slowness, then fix or isolate that cause; a blind rerun proves nothing.
 
 The spin reference is the least floor over this file and its sibling runs, a floor being a file's nearest-rank 5th-percentile `spin_us` (its least when it has 20 samples or fewer): a single sample shortened by a VM clock step no longer sets the reference, while a file whose low 5 % is short still does. When every gate turns `CONTENTION` at once, check the sibling floors.
 
 ## Ledger and report
 
-`.claude/scripts/dev.sh iso gate` runs `infra/fence/gate-history.sh ingest <timing-base> --host-load-now` on the host after the container exits; a failed ingest prints `LEDGER-NOT-WRITTEN` and leaves the gate verdict alone. The ledger is `${PFM_GATE_HISTORY_DIR:-$HOME/.local/state/pfm/gate-history}/<project>/ledger.tsv`, append-only, header `stamp run worktree commit target step verdict wall_s cpu_s io_mb psi_cpu_s psi_io_s psi_mem_s attribution host_load`. `<project>` is the basename of the parent of `git rev-parse --git-common-dir` without a leading dot; `--project` overrides.
+`.claude/scripts/dev.sh iso gate` runs `infra/fence/gate-history.sh ingest <timing-base> --host-load-now` on the host after the run ends; a failed ingest prints `LEDGER-NOT-WRITTEN` and leaves the gate verdict alone. The ledger is `${PFM_GATE_HISTORY_DIR:-$HOME/.local/state/pfm/gate-history}/<project>/ledger.tsv`, append-only, header `stamp run worktree commit target step verdict wall_s cpu_s io_mb psi_cpu_s psi_io_s psi_mem_s attribution host_load`. Each ingested run also appends one row to `concurrent.tsv` beside the ledger, header `worktree run concurrent_runs`: `gate.meta`'s count of the runs live in the shared fence container when the gate started (`NA` when unrecorded). The ledger keeps its 15 columns so an older `gate-history.sh` still appends to it; a ledger carrying the interim 16-column header (`concurrent_runs` as its last column) is split back first, its counts into `concurrent.tsv`, then the 15-column ledger through one atomic rename. `<project>` is the basename of the parent of `git rev-parse --git-common-dir` without a leading dot; `--project` overrides.
 
-- **What counts as a gate:** a run whose `gate.tsv` has a `templates.leak` row and whose `gate.meta` does not say `fixtures 1`. Others are skipped. Ingest adds one row per `profile.tsv` row, `GATE` included (a run without `profile.tsv` gives one row per `gate.tsv` step plus `GATE`, unmeasured cells `NA`). A run is keyed worktree + run, so a second ingest of the same base appends nothing.
+- **What counts as a gate:** a run with a `gate.tsv` and a `gate.meta` (an older run without `gate.meta` counts when its `gate.tsv` has a `templates.leak` row) whose `gate.meta` does not say `fixtures 1`. Others are skipped. Ingest adds one row per `profile.tsv` row, `GATE` included (a run without `profile.tsv` gives one row per `gate.tsv` step plus `GATE`, unmeasured cells `NA`). A run is keyed worktree + run, so a second ingest of the same base appends nothing.
 - **`gate-history.sh report [--last N] [--project P]`** (N defaults to 20): per step of the newest gate, the earlier runs' count, median and p90 (NOT-RUN rows left out), the newest wall and verdict, and a flag: `history <3` (fewer than three earlier measurements), `REGRESSION` (newest wall > 1.5 × the median, attribution `CODE`), `slow (<WORD>)` (the same slowdown under `CONTENTION` or `not measured`), `not run` / `no wall`, or `ok`.
 - **Flips:** one `FLIP <step>: <before> → <after> (<run>)` line per step whose verdict differs between the last two gates.
 
@@ -176,7 +182,7 @@ Hazards:
 
 ## Fixtures
 
-`PFM_GATE_FIXTURES=1 .claude/scripts/dev.sh iso gate templates` registers five deliberately red steps in phase 0, the instrument's own proof:
+`PFM_GATE_FIXTURES=1 .claude/scripts/dev.sh iso gate` registers five deliberately red steps in phase 0, the instrument's own proof:
 
 | Step | What it proves |
 | --- | --- |

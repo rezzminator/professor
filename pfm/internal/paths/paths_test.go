@@ -121,6 +121,16 @@ func TestDevRepoGitDirLogsPhysicalResolutionFailureBeforeCleanFallback(t *testin
 	}
 }
 
+// Every pfm service unit and the theme follower run on this one search path:
+// pfm and claude in ~/.local/bin, tmux in Homebrew (Apple silicon, then Intel),
+// then the system directories launchd's bare default holds.
+func TestServicePathIsTheOneServiceSearchPath(t *testing.T) {
+	want := "/h/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	if got := ServicePath("/h"); got != want {
+		t.Fatalf("ServicePath(/h) = %q, want %q", got, want)
+	}
+}
+
 // The state and cache databases have distinct names in the pfm state directory.
 func TestResolveStateAndCacheDefaults(t *testing.T) {
 	testRoot := t.TempDir()
@@ -477,5 +487,160 @@ func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testi
 	}
 	if got, want := CostSinkLog(home), "/jail/home/.local/state/pfm/log/cost-sink.log"; got != want {
 		t.Errorf("CostSinkLog = %q, want %q", got, want)
+	}
+}
+
+func TestSubagentStatuslineTraceStaysInTheHomesLogDirectory(t *testing.T) {
+	got := SubagentStatuslineTrace("/jail/home")
+	want := "/jail/home/.local/state/pfm/log/subagent-statusline.jsonl"
+	if got != want {
+		t.Fatalf("SubagentStatuslineTrace = %q, want %q", got, want)
+	}
+}
+
+// The auto-effort-control state file is the plugin's own path rule, mirrored: its
+// variable (blank is unset, `~/` the home), else its default under the home's
+// state directory, the session id made file-safe and set before the name's last
+// extension (`sessionLogPath` in the plugin's src/log.ts).
+func TestAutoEffortStateFileMirrorsThePluginsPathRule(t *testing.T) {
+	cases := []struct {
+		name, home, setting, sessionID, want, wantErr string
+		legacy                                        string
+		set                                           bool
+	}{
+		{
+			name:      "default",
+			home:      "/jail/home",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
+		},
+		{
+			name:      "blank variable is unset",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
+		},
+		{
+			name:      "whitespace variable is unset",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "  ",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
+		},
+		{
+			name:      "variable set",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/elsewhere/effort.json",
+			sessionID: "sess-1",
+			want:      "/elsewhere/effort.sess-1.json",
+		},
+		{
+			name:      "padded variable trimmed",
+			home:      "/jail/home",
+			set:       true,
+			setting:   " /elsewhere/effort.json\n",
+			sessionID: "sess-1",
+			want:      "/elsewhere/effort.sess-1.json",
+		},
+		{
+			name:      "home expanded",
+			home:      "/jail/root/",
+			set:       true,
+			setting:   "~/notes/effort.json",
+			sessionID: "sess-1",
+			want:      "/jail/root/notes/effort.sess-1.json",
+		},
+		{
+			name:      "last extension only",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/x/effort.state.json",
+			sessionID: "sess-1",
+			want:      "/x/effort.state.sess-1.json",
+		},
+		{
+			name:      "extensionless name",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/x.d/effort",
+			sessionID: "sess-1",
+			want:      "/x.d/effort.sess-1",
+		},
+		{
+			name:      "dot-first name",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/x/.effort",
+			sessionID: "sess-1",
+			want:      "/x/.effort.sess-1",
+		},
+		{
+			name:      "session id made file-safe",
+			home:      "/jail/home",
+			sessionID: "a/b c.d:é😀_-Z9",
+			want:      "/jail/home/.local/state/auto-effort-control/state.a_b_c_d_____-Z9.json",
+		},
+		{
+			name:      "legacy override",
+			home:      "/jail/home",
+			legacy:    " /old/state.json ",
+			sessionID: "sess-1",
+			want:      "/old/state.sess-1.json",
+		},
+		{
+			name:      "same old and new override",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/same/state.json",
+			legacy:    "/same/state.json",
+			sessionID: "sess-1",
+			want:      "/same/state.sess-1.json",
+		},
+		{
+			name:      "conflicting overrides",
+			home:      "/jail/home",
+			set:       true,
+			setting:   "/new/state.json",
+			legacy:    "/old/state.json",
+			sessionID: "sess-1",
+			wantErr:   "AUTO_EFFORT_STATE_FILE conflicts with AUTO_EFFORT_CONTROL_STATE_FILE",
+		},
+		{
+			name: "retired override falls back like the producer",
+			home: "/jail/home", set: true,
+			setting:   "~/.local/state/safe/../auto-effort/state.json",
+			sessionID: "sess-1",
+			want:      "/jail/home/.local/state/auto-effort-control/state.sess-1.json",
+		},
+		{name: "empty session id", home: "/jail/home", sessionID: "", wantErr: "empty session id"},
+		{
+			name:      "home needed but unknown",
+			home:      "",
+			set:       true,
+			setting:   "~/effort.json",
+			sessionID: "sess-1",
+			wantErr:   "home directory",
+		},
+		{name: "default needs the home", home: "", sessionID: "sess-1", wantErr: "home directory"},
+	}
+	for _, tc := range cases {
+		env := &MapEnv{Values: map[string]string{"AUTO_EFFORT_STATE_FILE": tc.legacy}}
+		if tc.set {
+			env.Values["AUTO_EFFORT_CONTROL_STATE_FILE"] = tc.setting
+		}
+		got, err := AutoEffortStateFile(env, tc.home, tc.sessionID)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("%s: AutoEffortStateFile = %q, %v; want an error containing %q", tc.name, got, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("%s: AutoEffortStateFile = %q, %v; want %q", tc.name, got, err, tc.want)
+		}
 	}
 }

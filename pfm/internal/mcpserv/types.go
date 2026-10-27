@@ -15,6 +15,11 @@ type LSInput struct {
 
 // ChatRow is one structured live or resumable fleet row.
 type ChatRow struct {
+	Backend        string       `json:"backend,omitempty"`
+	SeatID         string       `json:"seat_id,omitempty"`
+	HerdrWorkspace string       `json:"herdr_workspace,omitempty"`
+	BackendError   string       `json:"backend_error,omitempty"`
+	LostNote       string       `json:"lost_note,omitempty"`
 	Session        string       `json:"session"`
 	ID             string       `json:"id"`
 	Engine         pfmengine.ID `json:"engine"`
@@ -27,13 +32,19 @@ type ChatRow struct {
 	Killed         bool         `json:"killed,omitempty"`
 	Socket         string       `json:"socket,omitempty"`
 	Pane           string       `json:"pane,omitempty"`
+	// Herdr is the chat's Herdr presence, the string pfm chat ls prints: "—"
+	// on a host with no Herdr, "not in herdr", the pane id, workspace, agent
+	// status and agent name ("no-agent" for a pane Herdr lists no agent on),
+	// or "herdr error: {cause}" for a failed lookup.
+	Herdr          string `json:"herdr,omitempty"`
 	transcriptPath string
 }
 
 // LSOutput is ls's structured response.
 type LSOutput struct {
-	Rows  []ChatRow `json:"rows"`
-	Count int       `json:"count"`
+	Errors []string  `json:"errors,omitempty"`
+	Rows   []ChatRow `json:"rows"`
+	Count  int       `json:"count"`
 	// Matched is how many rows the view and the project filter selected,
 	// before Limit cut the payload down. Count < Matched is the ONLY way a
 	// caller can tell a short answer from an empty fleet, so Truncated names
@@ -69,14 +80,29 @@ type ResolveOutput struct {
 
 // CallInput requests guarded live delivery.
 type CallInput struct {
-	Target   string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
+	Target   string   `json:"target,omitempty" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane; give this or targets"`
+	Targets  []string `json:"targets,omitempty" jsonschema:"several targets for a broadcast, delivered in parallel, each reported in results; joined with target when both are given"`
 	Message  string   `json:"message" jsonschema:"message to type and submit"`
 	ForceNow bool     `json:"force_now,omitempty" jsonschema:"interrupt a busy target with Escape before delivery"`
 	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here"`
 }
 
-// CallOutput is a stable MCP representation of pfmcall.Result.
+// CallOutput is a stable MCP representation of pfmcall.Result; a broadcast
+// adds one result per target.
 type CallOutput struct {
+	CallDelivery
+	// Results holds a broadcast's per-target outcomes, in the order given.
+	Results []TargetCallOutput `json:"results,omitempty"`
+}
+
+// TargetCallOutput is one broadcast target's outcome.
+type TargetCallOutput struct {
+	Target string `json:"target"`
+	CallDelivery
+}
+
+// CallDelivery is one delivery's outcome.
+type CallDelivery struct {
 	Status        string `json:"status"`
 	Code          int    `json:"code"`
 	Message       string `json:"message"`
@@ -105,9 +131,13 @@ type KeysInput struct {
 	Capture bool     `json:"capture,omitempty" jsonschema:"return the pane after the keys land"`
 }
 
+// codeCapability marks a pre-send backend refusal, not a dead target.
+const codeCapability = 10
+
 // KeysOutput is the structured receipt for keys.
 type KeysOutput struct {
 	Status     string   `json:"status"`
+	Message    string   `json:"message,omitempty"`
 	Code       int      `json:"code"`
 	SocketPath string   `json:"socket_path,omitempty"`
 	Pane       string   `json:"pane,omitempty"`
@@ -154,89 +184,6 @@ type WhoamiOutput struct {
 	Message    string `json:"message,omitempty"`
 }
 
-// FindInput searches indexed transcript files.
-type FindInput struct {
-	Excerpt     string `json:"excerpt" jsonschema:"literal name or prompt excerpt to find; a multi-line excerpt is split into needles and candidates are ranked by how many they hit"`
-	Limit       int    `json:"limit,omitempty" jsonschema:"maximum candidates, default 10 and maximum 50"`
-	IncludeSelf bool   `json:"include_self,omitempty" jsonschema:"also match the asking session's own transcript, which is excluded by default where the server knows the asking session (self_id then names it)"`
-}
-
-// FindCandidate is one confirmed indexed transcript match.
-type FindCandidate struct {
-	ID        string `json:"id"`
-	Path      string `json:"path"`
-	Engine    string `json:"engine"`
-	Name      string `json:"name"`
-	Dir       string `json:"dir"`
-	Date      string `json:"date"`
-	Excerpt   string `json:"excerpt,omitempty"`
-	Confirmed bool   `json:"confirmed"`
-	Hits      int    `json:"hits"`
-}
-
-// FindOutput is find's structured response.
-type FindOutput struct {
-	Candidates []FindCandidate `json:"candidates"`
-	Count      int             `json:"count"`
-	Needles    []string        `json:"needles,omitempty"`
-	SelfID     string          `json:"self_id,omitempty"`
-}
-
-// ReadInput requests bounded recent transcript turns.
-type ReadInput struct {
-	Source   string `json:"source" jsonschema:"indexed Claude/Codex id or exact indexed path"`
-	LastN    int    `json:"last_n,omitempty" jsonschema:"maximum recent turns, default 20 and maximum 200"`
-	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 65536 and maximum 1048576"`
-}
-
-// DigestInput requests the one-line-per-event digest of one transcript. Every
-// optional field maps onto one `pfm transcript show` flag.
-type DigestInput struct {
-	Source     string `json:"source" jsonschema:"find id, Claude, Codex or OpenCode session or agent id (or prefix), transcript path, OpenCode locator {store}#{session id}, or a Claude chat's or OpenCode session's title"`
-	Lines      string `json:"lines,omitempty" jsonschema:"transcript line range FROM-TO, FROM- or one line number; the events those records produced"`
-	Since      string `json:"since,omitempty" jsonschema:"window start: HH:MM[:SS] UTC, an ISO time, +5m from the transcript start, -15m from its end"`
-	Until      string `json:"until,omitempty" jsonschema:"window end, same forms as since"`
-	Grep       string `json:"grep,omitempty" jsonschema:"keep events whose full text (input, result, prose) matches this regular expression"`
-	IgnoreCase bool   `json:"ignore_case,omitempty" jsonschema:"match grep case-insensitively"`
-	Only       string `json:"only,omitempty" jsonschema:"event kinds, comma-separated: prompt, reply, call, note, final; error alone keeps only failed calls"`
-	Tool       string `json:"tool,omitempty" jsonschema:"keep only calls of these tool names, comma-separated"`
-	Results    string `json:"results,omitempty" jsonschema:"call results shown: brief (default), none, full or tail:N lines"`
-	First      int    `json:"first,omitempty" jsonschema:"keep the first N events after every other filter"`
-	Last       int    `json:"last,omitempty" jsonschema:"keep the last N events after every other filter"`
-	Text       int    `json:"text,omitempty" jsonschema:"characters kept of a prompt or reply, default 500"`
-	MaxBytes   int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, cut at a line end; default 65536 and maximum 1048576"`
-}
-
-// DigestOutput is digest's bounded digest text.
-type DigestOutput struct {
-	Text       string `json:"text"`
-	Bytes      int    `json:"bytes"`
-	TotalBytes int    `json:"total_bytes"`
-	Truncated  bool   `json:"truncated"`
-}
-
-// Turn is one visible user, assistant, tool, or summary transcript record.
-// A tool call carries the tool's name in Tool and its condensed input as Text
-// — the transcript records no prose for it, and a turn with an empty Text
-// reads as a chat that said nothing rather than one that called a tool.
-type Turn struct {
-	Role      string `json:"role"`
-	Text      string `json:"text"`
-	Tool      string `json:"tool,omitempty"`
-	Timestamp string `json:"timestamp,omitempty"`
-}
-
-// ReadOutput is read's bounded extraction.
-type ReadOutput struct {
-	ID        string `json:"id"`
-	Path      string `json:"path"`
-	Engine    string `json:"engine"`
-	Turns     []Turn `json:"turns"`
-	Count     int    `json:"count"`
-	Truncated bool   `json:"truncated"`
-	Bytes     int    `json:"bytes"`
-}
-
 // LastInput selects the newest assistant answer for a chat.
 type LastInput struct {
 	Target string `json:"target" jsonschema:"chat id, name, session, or tmux target"`
@@ -259,6 +206,7 @@ type StatusInput struct {
 type StatusOutput struct {
 	Name          string       `json:"name"`
 	State         string       `json:"state"`
+	StateSource   string       `json:"state_source,omitempty"`
 	IdleSeconds   int64        `json:"idle_seconds"`
 	Engine        pfmengine.ID `json:"engine"`
 	Model         string       `json:"model,omitempty"`
@@ -268,6 +216,7 @@ type StatusOutput struct {
 	ContextPct    float64      `json:"context_pct,omitempty"`
 	Last          string       `json:"last,omitempty"`
 	Error         string       `json:"error,omitempty"`
+	LostNote      string       `json:"lost_note,omitempty"`
 	Summary       string       `json:"summary,omitempty"`
 	SummaryCached bool         `json:"summary_cached,omitempty"`
 	Ask           string       `json:"ask,omitempty"`
@@ -275,16 +224,16 @@ type StatusOutput struct {
 
 // TargetInput is shared by chat actions whose CLI form takes one target.
 type TargetInput struct {
-	Target string `json:"target" jsonschema:"chat id, name, session, or tmux target"`
+	Target string `json:"target" jsonschema:"chat id, name, session, tmux target, or exact durable native seat:<id>"`
 }
 
 type NameInput struct {
 	Target string `json:"target"`
-	Name   string `json:"name"`
+	Name   string `json:"name" jsonschema:"chat label; seat: prefix is reserved (case-insensitive)"`
 }
 
 type NewInput struct {
-	Name      string `json:"name,omitempty" jsonschema:"the chat's name in pfm ls and the target call, status and kill take; inside a workbench, empty takes its next {name}:{n}"`
+	Name      string `json:"name,omitempty" jsonschema:"chat label (seat: prefix reserved, case-insensitive); inside a workbench, empty takes its next {name}:{n}"`
 	Engine    string `json:"engine,omitempty" jsonschema:"cc/claude, cx/codex or ox/opencode; the caller's engine when empty"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"working directory, relative to the caller's; the caller's directory when empty"`
 	Account   int    `json:"account,omitempty" jsonschema:"account number to launch on; pfm picks when 0"`
@@ -322,21 +271,4 @@ type KillInput struct {
 type SaveInput struct {
 	Target     string `json:"target" jsonschema:"FILE PATH to append the snapshot to (not a chat) — must contain a directory separator, e.g. ./notes/session.md"`
 	Transcript string `json:"transcript,omitempty" jsonschema:"path of the transcript .jsonl to dump; defaults to the calling chat's own transcript"`
-}
-
-// IssueInput is one agent complaint filed against Professor itself. Reporter
-// identity is never accepted here — servicedesk captures it the same
-// way call captures a sender, so a model can complain but never say
-// who is complaining.
-type IssueInput struct {
-	Title    string `json:"title" jsonschema:"short one-line issue title"`
-	Detail   string `json:"detail" jsonschema:"full issue body: what went wrong, what was expected, and the surface it happened on"`
-	Severity string `json:"severity,omitempty" jsonschema:"low, medium, or high; defaults to medium"`
-	Area     string `json:"area,omitempty" jsonschema:"free text naming the command, agent, file, or surface this is about"`
-}
-
-// IssueOutput is servicedesk's receipt: the filed issue's stable id.
-type IssueOutput struct {
-	Status string `json:"status"`
-	ID     int64  `json:"id,omitempty"`
 }

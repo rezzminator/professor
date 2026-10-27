@@ -24,6 +24,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -498,7 +499,6 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 			return previousCleanup()
 		}
 	}
-
 	args, err := arguments(request)
 	if err != nil {
 		return result, err
@@ -508,6 +508,7 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		environment = append([]string(nil), request.Env...)
 	}
 	setEnvironment(environment, request.Engine, request.ConfigDir, request.Env != nil, &environment)
+	environment = request.Config.ExtensionEnvironment(pfmengine.MustLookup(request.Engine).LongName, environment)
 	var openCode openCodeRun
 	if request.Engine == pfmengine.OpenCode {
 		openCode, err = startOpenCode(ctx, &request, environment, cwd)
@@ -636,9 +637,11 @@ func arguments(request Request) ([]string, error) {
 		}
 	case pfmengine.Codex:
 		args = append(args, "exec")
-		if request.Model != "" {
-			args = append(args, "--model", request.Model)
+		modelArgs, err := codexExecModelArgs(request.Model)
+		if err != nil {
+			return nil, err
 		}
+		args = append(args, modelArgs...)
 		if request.Effort != "" {
 			args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(request.Effort))
 		}
@@ -710,9 +713,9 @@ func setEnvironment(
 	target *[]string,
 ) {
 	dropped := map[string]struct{}{"TMUX": {}, "TMUX_PANE": {}}
-	names := claudelaunch.Hygiene()
+	names := append(herdr.Env(), claudelaunch.Hygiene()...) // only the interactive chat reports to its pane
 	if explicit {
-		names = claudelaunch.IdentityHygiene()
+		names = append(herdr.Env(), claudelaunch.IdentityHygiene()...)
 	}
 	for _, name := range names {
 		// Preserve the non-Claude doors' existing environment contract.

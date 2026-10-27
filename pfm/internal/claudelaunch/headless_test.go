@@ -43,7 +43,7 @@ func TestRenderHeadlessPayload(t *testing.T) {
 			t.Errorf("helperModel %#v error=%v", value, err)
 		}
 	}
-	for key, value := range map[string]any{"unknown": true, "permissionMode": "bypass", "binary": "claude", "systemPrompt": "professor"} {
+	for key, value := range map[string]any{"unknown": true, "remoteControl": true, "permissionMode": "bypass", "binary": "claude", "systemPrompt": "professor"} {
 		_, err := RenderHeadless(map[string]any{key: value})
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s error=%v", key, err)

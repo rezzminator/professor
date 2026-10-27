@@ -19,7 +19,7 @@
 
 A release is long; a context only grows, and every call re-sends it (fleet prompt § Orchestration). One agent carrying the whole release would read the range, six review reports, the notes, three gate lanes and two rehearsal transcripts into one context. A fresh spawn per phase keeps each under the 45-call law and keeps the heavy reading out of the main chat, which keeps only the tokens, the fixes and the ledger. State between spawns lives in the release directory, never in a context: every phase starts by reading what it needs from disk.
 
-The phase agent never fixes code. A fix is work the main chat routes by the work ladder, often to a fenced executor; the judge that found the defect does not also write its fix.
+The phase agent never fixes code. A fix is work the main chat routes, often to a fenced foreman; the judge that found the defect does not also write its fix.
 
 ## The brief
 
@@ -92,7 +92,7 @@ One round per spawn, by `docs/commands/pfm/references/release-rehearsal.md`: two
 
 After `gitter` Phase RELEASE, read-only:
 
-1. The tag's `release.yml` run, watched to completion: `gh run watch {id} --exit-status`.
+1. The release PR merge's `release.yml` run, whose `publish` job made the tag, watched to completion: `gh run watch {id} --exit-status`.
 2. `gh release view v{NEW} --json tagName,isDraft,isPrerelease,body,assets`: not a draft, not a prerelease; the body equals `git show v{NEW}:releases/v{NEW}.md` up to the trailing newline; the four `pfm_*` binaries and `SHA256SUMS` attached.
 3. The host's binary and `SHA256SUMS` downloaded into `DIR/verify/`; its checksum line verifies; the binary's `version` prints `v{NEW}`.
 4. The banner's source: `pfm internal update-check --cache DIR/verify/update-check.json --current {PREV} --url https://github.com/rezzminator/professor/releases/latest` records `v{NEW}` as latest.
@@ -114,5 +114,4 @@ After `gitter` Phase RELEASE, read-only:
 {item} · {code|docs|notes|rerun} · {path:line or report#F{n}} · {one line}
 ARTIFACT {the phase's verdict file}
 DISPATCHED {n} agents, {m} returns
-RETRO {lesson} | none
 ```

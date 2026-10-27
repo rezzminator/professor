@@ -2,15 +2,15 @@
 name: reviewer-nt
 from: reviewer
 description: reviewer without tracers on opus high
-tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Grep, Glob, Bash, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 unset:
   - skills
 pins:
-  '(intro)': sha256:8b70b9c6cdc3f271ae1434243b733e4a2a50e9da6226f7b20c99a13305e023aa
-  Phase 0 — Read the change and cut threads (≤10 calls): sha256:c8e51ae9d7466b83fe8eec38e024a28899f0e1ead4dffa3390af12122f9a2de3
-  Phase 1 — Dispatch, then hunt: sha256:1dc7a1cef204e2c1a76e231cc0444125d9bf5db7ba81a6a790d88d1cff05b4dd
-  Phase 2 — Judge (≤25 calls): sha256:297a82b7c22dc07dfeedb4a2771d4237613a0c10005172eafe17964f00c69c85
-  Report — `SANDBOX/review.md`: sha256:be103ff040e551639ffd29837cde0a2de7e35b54d7d403bdad465d48712b755c
+  (intro): sha256:109f8673b52b23b1694f50df198779994ce772d85333d7133efea41b07cf0685
+  Phase 0 — Read the change and cut threads (≤10 calls): sha256:039864318708b49f413b9cd2b86f978eeebf1c1a746b4dbe0d297926a317b2ec
+  Phase 1 — Dispatch, then hunt: sha256:f69534b6c40f1769b7eede7d186a9b2d6e50cc687f23ca4c474e988e9222c79d
+  Phase 2 — Judge (≤25 calls): sha256:db5a68e12291deb85bc35f50c03e4eda61ec774e94774f493bd2d6acd94bc902
+  Report — `SANDBOX/review.md`: sha256:6d300f6739123ec1f7e17e57f93d79228649b78b6cec70a8721f242032fe807c
 retitle:
   Phase 1 — Dispatch, then hunt: Phase 1 — Walk, then hunt
 ---

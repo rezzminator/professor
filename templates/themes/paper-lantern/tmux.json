@@ -1,0 +1,18 @@
+{
+  "@host_accent": "#e6603f",
+  "@p_amber": "#f0c75e",
+  "@p_fg": "#efe5cf",
+  "@p_fg1": "#e2c27a",
+  "@p_fg2": "#a8977d",
+  "@p_g0": "#231b16",
+  "@p_g3": "#3a2d25",
+  "@p_red": "#f07a5e",
+  "message-command-style": "bg=#3a2d25,fg=#e2c27a,bold",
+  "message-style": "bg=#e2c27a,fg=#231b16,bold",
+  "mode-style": "bg=#f0dfae,fg=#17120e",
+  "pane-active-border-style": "fg=#{?#{==:#{@pfm-state},blocked},#936600,#{?#{==:#{@pfm-state},working},#2f4fa8,#{?#{==:#{@pfm-state},done},#427231,#695f51}}}",
+  "pane-border-style": "fg=#cbbb9d",
+  "status-style": "bg=#231b16,fg=#e2c27a",
+  "window-status-current-style": "fg=#{?#{==:#{@pfm-state},blocked},#f0c75e,#{?#{==:#{@pfm-state},working},#a9b8f2,#{?#{==:#{@pfm-state},done},#a9d07f,#efe5cf}}},bold",
+  "window-status-style": "fg=#a8977d"
+}

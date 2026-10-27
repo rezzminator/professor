@@ -136,7 +136,7 @@ func TestConfigCLIMCPListReportsConfiguredStateAndSource(t *testing.T) {
 	if code := run([]string{"--config", path, "mcp", "ls"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(mcp ls) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if got, want := stdout.String(), "chat\ttrue\tfile\nharvester\tfalse\tdefault\n"; got != want {
+	if got, want := stdout.String(), "chat\ttrue\tfile\n"; got != want {
 		t.Fatalf("run(mcp ls) stdout=%q, want %q", got, want)
 	}
 	if stderr.Len() != 0 {
@@ -148,7 +148,7 @@ func TestConfigCLIMCPStdioRefusesADisabledFamily(t *testing.T) {
 	root := jailTest(t)
 	path := writeConfigFixture(t, root, `{
   "version": 1,
-  "mcp": {"servers": {"chat": {"enabled": false}, "harvester": {"enabled": false}}}
+  "mcp": {"servers": {"chat": {"enabled": false}}}
 }`)
 
 	var stdout, stderr bytes.Buffer
@@ -170,53 +170,12 @@ func TestConfigCLIMCPStdioRefusesADisabledFamily(t *testing.T) {
 	}
 }
 
-// TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart pins that `pfm mcp
-// serve --stdio --family harvester` with only the harvester enabled configures it and reaches the
-// server start: exit 0, no usage refusal and no harvester configuration error. Stdin is closed immediately so the reachable
-// server terminates instead of blocking the test on stdio framing.
-func TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart(t *testing.T) {
-	root := jailTest(t)
-	path := writeConfigFixture(t, root, `{
-  "version": 1,
-  "mcp": {"servers": {"chat": {"enabled": false}, "harvester": {"enabled": true}}}
-}`)
-
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	previous := os.Stdin
-	os.Stdin = reader
-	defer func() {
-		os.Stdin = previous
-		_ = reader.Close()
-	}()
-
-	var stdout, stderr bytes.Buffer
-	if code := run(
-		[]string{"--config", path, "mcp", "serve", "--stdio", "--family", "harvester"},
-		&stdout,
-		&stderr,
-	); code != 0 ||
-		strings.Contains(stderr.String(), "configure harvester") {
-		t.Fatalf(
-			"run(mcp serve --stdio) code=%d stdout=%q stderr=%q, want exit 0 from the enabled harvester's server start",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-}
-
-// Every form outside ls, serve [--stdio --family chat|harvester] and <server> enable|disable prints
+// Every form outside ls, serve [--stdio --family chat] and <server> enable|disable prints
 // the usage line and exits 2 — a bare server name included.
 func TestConfigCLIMCPUnknownFormsPrintUsage(t *testing.T) {
 	root := jailTest(t)
 	path := writeConfigFixture(t, root, `{"version": 1}`)
-	const usage = "usage: pfm mcp ls | pfm mcp serve [--stdio --family chat|harvester] | pfm mcp <server> enable|disable"
+	const usage = "usage: pfm mcp ls | pfm mcp serve [--stdio --family chat] | pfm mcp <server> enable|disable"
 	for _, args := range [][]string{{"chat"}, {"serve", "--http"}} {
 		var stdout, stderr bytes.Buffer
 		argv := append([]string{"--config", path, "mcp"}, args...)
@@ -400,7 +359,7 @@ func TestConfigShowReportsClaudePlugins(t *testing.T) {
 	for _, test := range []struct{ name, content, want string }{
 		{
 			"unset", `{"version":2}`,
-			"config claude.plugins=cache-live-control,sub-agent-compact,effort-live-control,tool-visibility-controller,engine-sync (default)",
+			"config claude.plugins=cache-live-control,forward-compaction,auto-effort-control,tool-visibility-controller,engine-sync (default)",
 		},
 		{
 			"listed",
@@ -428,13 +387,14 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	path := writeConfigFixture(
 		t,
 		root,
-		`{"version":2,"claude":{"webSearchesPerSession":17,"autoCompactWindow":250000,"helperModel":"claude-sonnet-5-5","tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
+		`{"version":2,"claude":{"remoteControl":false,"webSearchesPerSession":17,"autoCompactWindow":250000,"helperModel":"claude-sonnet-5-5","tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
 	)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("config show code=%d stderr=%q", code, stderr.String())
 	}
 	for _, want := range []string{
+		"config claude.remoteControl=false (file)",
 		"config claude.webSearchesPerSession=17 (file)",
 		"config claude.autoCompactWindow=250000 (file)",
 		"config claude.helperModel=claude-sonnet-5-5 (file)",
@@ -454,6 +414,9 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	stderr.Reset()
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("default config show code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "config claude.remoteControl=true (default)") {
+		t.Fatalf("default config show lacks Remote Control: %s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "config claude.autoCompactWindow=100000 (default)") {
 		t.Fatalf("default config show lacks auto compact window: %s", stdout.String())

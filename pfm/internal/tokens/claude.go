@@ -3,7 +3,6 @@ package tokens
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"math"
 	"strconv"
@@ -99,9 +98,6 @@ var bands = [...]struct {
 	below float64
 	name  string
 }{{50, "under 50K"}, {100, "50–100K"}, {150, "100–150K"}, {200, "150–200K"}, {400, "200–400K"}, {math.Inf(1), "over 400K"}}
-
-// timelineBig is the tool-result size, in characters, --timeline counts as big.
-const timelineBig = 20 * 1024
 
 // claudeMessage decodes a message's usage. A malformed usage skips the whole
 // message, content included, and returns its error for the collect gap counter.
@@ -247,43 +243,6 @@ func blockChars(raw json.RawMessage) (float64, bool) {
 	return total, true
 }
 
-// toolTarget is what a tool call aimed at, one line, whatever the tool.
-func toolTarget(input json.RawMessage) string {
-	var fields struct {
-		FilePath, Command, Pattern, Path, SubagentType, Skill, URL, Query json.RawMessage
-	}
-	_ = json.Unmarshal(input, &struct {
-		FilePath     *json.RawMessage `json:"file_path"`
-		Command      *json.RawMessage `json:"command"`
-		Pattern      *json.RawMessage `json:"pattern"`
-		Path         *json.RawMessage `json:"path"`
-		SubagentType *json.RawMessage `json:"subagent_type"`
-		Skill        *json.RawMessage `json:"skill"`
-		URL          *json.RawMessage `json:"url"`
-		Query        *json.RawMessage `json:"query"`
-	}{
-		&fields.FilePath, &fields.Command, &fields.Pattern, &fields.Path,
-		&fields.SubagentType, &fields.Skill, &fields.URL, &fields.Query,
-	})
-	target := ""
-	if value := coalesce(fields.FilePath, fields.Command, fields.Pattern, fields.Path,
-		fields.SubagentType, fields.Skill, fields.URL, fields.Query); value != nil {
-		target = keyString(value)
-	} else if members, ok := jsvalue.Members(input); ok {
-		for _, member := range members {
-			if isString(member.Value) {
-				target = jsString(member.Value)
-				break
-			}
-		}
-	}
-	target = jsTrim(collapseSpaces(target))
-	if utf16Len(target) > 100 {
-		return utf16Slice(target, 0, 99) + "…"
-	}
-	return target
-}
-
 // inputString is String(input[field] || ""): a tool input's string field.
 func inputString(input json.RawMessage, fields ...string) string {
 	var members map[string]json.RawMessage
@@ -338,15 +297,6 @@ type toolUse struct {
 	ts    float64
 }
 
-// timelineSlot is one tool a --timeline call issued.
-type timelineSlot struct {
-	name, target string
-	chars        float64
-	hasResult    bool
-	err          bool
-	dur          float64
-}
-
 // briefStats is what a sub-agent did with its brief.
 type briefStats struct {
 	tests, testFails                      float64
@@ -357,27 +307,22 @@ type briefStats struct {
 
 // collected is a transcript read into its replay events.
 type collected struct {
-	seq         []event
-	usage       map[string]*callUsage
-	order       int // distinct calls seen
-	seenReads   map[string]bool
-	allCmd      map[string]float64
-	title       string
-	aiTitle     string
-	cwd         string
-	harnessUSD  *float64
-	anchors     costledger.Anchors // every cost-state line, each placed at its exit
-	brief       *string
-	stats       briefStats
-	issued      map[string][]*timelineSlot
-	lines, bad  int
-	recT0       float64
-	recT1       float64
-	big         float64
-	isSub       bool
-	sid         string
-	meta        transcript.SubagentMeta
-	timelineRun bool
+	seq        []event
+	usage      map[string]*callUsage
+	order      int // distinct calls seen
+	seenReads  map[string]bool
+	allCmd     map[string]float64
+	title      string
+	aiTitle    string
+	cwd        string
+	harnessUSD *float64
+	anchors    costledger.Anchors // every cost-state line, each placed at its exit
+	brief      *string
+	stats      briefStats
+	lines, bad int
+	isSub      bool
+	sid        string
+	meta       transcript.SubagentMeta
 }
 
 // costState hands anchors a cost-state line's total and clock fields. read is false when the line
@@ -406,10 +351,8 @@ func costState(anchors *costledger.Anchors, line *transcript.ClaudeRecord) (cost
 func (a *auditor) collect(file string, owners map[string]string) (*collected, error) {
 	c := &collected{
 		usage: map[string]*callUsage{}, seenReads: map[string]bool{}, allCmd: map[string]float64{},
-		issued: map[string][]*timelineSlot{}, recT0: math.Inf(1),
 		isSub: transcript.IsSubagentTranscript(file), sid: transcript.TranscriptSession(file),
-		stats:       briefStats{testCmd: newObject(), editFiles: newObject()},
-		timelineRun: a.timelineMode,
+		stats: briefStats{testCmd: newObject(), editFiles: newObject()},
 	}
 	if c.isSub {
 		meta, err := transcript.ReadSubagentMeta(transcript.SubagentMetaPath(file))
@@ -419,7 +362,6 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 		c.meta = meta
 	}
 	toolUses := map[string]toolUse{}
-	slots := map[string]*timelineSlot{}
 	err := eachLine(file, func(raw []byte) {
 		c.lines++
 		line, decoded := transcript.DecodeClaudeRecord(raw)
@@ -433,9 +375,6 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 		if truthy(line.Timestamp) {
 			ts, _ = dateParse(keyString(line.Timestamp), a.loc)
 			c.anchors.Stamp(keyString(line.Timestamp))
-		}
-		if c.timelineRun && !math.IsNaN(ts) {
-			c.recT0, c.recT1 = math.Min(c.recT0, ts), math.Max(c.recT1, ts)
 		}
 		if c.cwd == "" && truthy(line.CWD) {
 			c.cwd = keyString(line.CWD)
@@ -475,9 +414,9 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 		}
 		switch {
 		case kind == "assistant" && usage != nil:
-			a.collectCall(c, &line, message, usage, file, ts, toolUses, slots, owners)
+			a.collectCall(c, &line, message, usage, file, ts, toolUses, owners)
 		case kind == "user":
-			a.collectUser(c, &line, message, ts, toolUses, slots)
+			a.collectUser(c, &line, message, ts, toolUses)
 		case kind == "attachment" && jsString(attachmentType(line.Attachment)) != "prompt_snapshot":
 			att := firstOf(attachmentType(line.Attachment))
 			if att == "" {
@@ -491,10 +430,6 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 	})
 	if err != nil {
 		return nil, err
-	}
-	// a timeline over a file with no parseable line is a failure to read it, never an empty run
-	if c.timelineRun && c.lines != 0 && c.bad == c.lines {
-		return nil, fmt.Errorf("no line parsed as JSON (%d malformed)", c.bad)
 	}
 	return c, nil
 }
@@ -511,7 +446,7 @@ func attachmentType(attachment json.RawMessage) json.RawMessage {
 
 func (a *auditor) collectCall(
 	c *collected, line *transcript.ClaudeRecord, message *transcript.ClaudeMessage, block *pricing.UsageBlock,
-	file string, ts float64, toolUses map[string]toolUse, slots map[string]*timelineSlot, owners map[string]string,
+	file string, ts float64, toolUses map[string]toolUse, owners map[string]string,
 ) {
 	usage, split := block.Billed()
 	advisors := block.Advisors()
@@ -566,17 +501,12 @@ func (a *auditor) collectCall(
 		}
 		blockID := keyString(use.ID)
 		toolUses[blockID] = toolUse{name: keyString(use.Name), input: input, ts: ts}
-		if c.timelineRun {
-			slot := &timelineSlot{name: keyString(use.Name), target: toolTarget(input)}
-			slots[blockID] = slot
-			c.issued[id] = append(c.issued[id], slot)
-		}
 	}
 }
 
 func (a *auditor) collectUser(
 	c *collected, line *transcript.ClaudeRecord, message *transcript.ClaudeMessage, ts float64,
-	toolUses map[string]toolUse, slots map[string]*timelineSlot,
+	toolUses map[string]toolUse,
 ) {
 	var content json.RawMessage
 	if message != nil {
@@ -629,15 +559,6 @@ func (a *auditor) collectUser(
 		switch block.Kind() {
 		case "tool_result":
 			c.seq = append(c.seq, a.toolResult(c, block, ts, toolUses))
-			if c.timelineRun {
-				result := c.seq[len(c.seq)-1]
-				if result.chars > timelineBig {
-					c.big++
-				}
-				if slot := slots[keyString(block.ToolUseID)]; slot != nil {
-					slot.chars, slot.hasResult, slot.err, slot.dur = result.chars, true, result.err, result.dur
-				}
-			}
 		case blockText:
 			c.seq = append(
 				c.seq,

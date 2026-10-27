@@ -30,7 +30,6 @@ const (
 	e2ePreviousTag     = "PFM_E2E_PREVIOUS_TAG"
 	e2eCurrentTag      = "PFM_E2E_CURRENT_TAG"
 	e2eSourceRepo      = "PFM_E2E_SOURCE_REPO"
-	e2eHarvestSkipLine = "harvestpy: skipped (blocked, not attempted)"
 	e2eFixtureSkill    = ".claude/skills/e2e-fixture/SKILL.md"
 	e2eBinaryEnv       = "PFM_E2E_BINARY"
 	e2eSourceMarker    = ".local/share/pfm/install/source-repo"
@@ -165,12 +164,11 @@ func runInstallE2E(t *testing.T) {
 		h.t = t
 		harness := &h
 		freshHome = home
-		result := harness.pfm(home, "install", "--yes", "--skip-harvest")
+		result := harness.pfm(home, "install", "--yes")
 		harness.requireSuccess("install", result)
-		harness.requireHarvestGate("install", result)
 		harness.assertInstalled(home)
 		result = harness.pfm(home, "doctor")
-		harness.requireSkippedHarvestDoctor(result)
+		harness.requireInstalledDoctor(result)
 		// Claude Code reads managed settings only from its platform's system
 		// directory: the drop-in must land there, not merely where doctor looks.
 		managedDropIn := "/etc/claude-code/managed-settings.d/pfm.json"
@@ -234,7 +232,7 @@ func runInstallE2E(t *testing.T) {
 		if err := os.WriteFile(settings, []byte(original), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		result := harness.pfm(home, "install", "--yes", "--vscode", "--skip-harvest")
+		result := harness.pfm(home, "install", "--yes", "--vscode")
 		harness.requireSuccess("VS Code terminal install", result)
 		merged, err := os.ReadFile(settings)
 		if err != nil {
@@ -263,13 +261,11 @@ func runInstallE2E(t *testing.T) {
 		harness := &h
 		previous := harness.previousBinary()
 		home := harness.newHome(previous)
-		result := harness.pfm(home, "install", "--yes", "--skip-harvest")
+		result := harness.pfm(home, "install", "--yes")
 		harness.requireSuccess("previous install", result)
-		harness.requireHarvestGate("previous install", result)
 		currentTag := currentE2ETag(t)
-		result = harness.pfm(home, "update", "--skip-harvest", "--to", currentTag, "--repo", harness.repo)
+		result = harness.pfm(home, "update", "--to", currentTag, "--repo", harness.repo)
 		harness.requireSuccess("self-update from previous release", result)
-		harness.requireHarvestGate("self-update from previous release", result)
 		if !strings.Contains(result.stdout, "updated "+currentTag) {
 			t.Fatalf("self-update output=%q, want target %s", result.stdout, currentTag)
 		}
@@ -407,27 +403,26 @@ func (h *e2eHarness) environment(home string) []string {
 		filepath.Join(home, ".cc", "3", "projects"),
 	}
 	values := map[string]string{
-		"GOCACHE":               h.goCache,
-		"GOMODCACHE":            h.goModCache,
-		"HOME":                  home,
-		"PFM_HOME":              home,
-		"PFM_CONFIG":            filepath.Join(home, "pfm.config.json"),
-		"PFM_CACHE_DB":          filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db"),
-		"PFM_STATE_DB":          filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
-		"PFM_SID_DIR":           filepath.Join(home, "sid"),
-		"PFM_CLAUDE_ROOTS":      strings.Join(roots, string(os.PathListSeparator)),
-		"PFM_CODEX_ROOT":        filepath.Join(home, ".codex"),
-		"PFM_TMUX_DIR":          filepath.Join(home, "tmux"),
-		"PFM_TMUX_CONF":         filepath.Join(home, "tmux.conf"),
-		"PFM_PROC_ROOT":         filepath.Join(home, "proc"),
-		"PFM_CGROUP_ROOT":       filepath.Join(home, "cgroup"),
-		"TMUX_TMPDIR":           filepath.Join(home, "tmux"),
-		"TMPDIR":                filepath.Join(home, "tmp"),
-		"XDG_CONFIG_HOME":       filepath.Join(home, ".config"),
-		"PATH":                  path,
-		e2eSourceRepo:           h.repo,
-		e2eHomeEnv:              home,
-		"PFM_HARVESTPY_OFFLINE": "1",
+		"GOCACHE":          h.goCache,
+		"GOMODCACHE":       h.goModCache,
+		"HOME":             home,
+		"PFM_HOME":         home,
+		"PFM_CONFIG":       filepath.Join(home, "pfm.config.json"),
+		"PFM_CACHE_DB":     filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db"),
+		"PFM_STATE_DB":     filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
+		"PFM_SID_DIR":      filepath.Join(home, "sid"),
+		"PFM_CLAUDE_ROOTS": strings.Join(roots, string(os.PathListSeparator)),
+		"PFM_CODEX_ROOT":   filepath.Join(home, ".codex"),
+		"PFM_TMUX_DIR":     filepath.Join(home, "tmux"),
+		"PFM_TMUX_CONF":    filepath.Join(home, "tmux.conf"),
+		"PFM_PROC_ROOT":    filepath.Join(home, "proc"),
+		"PFM_CGROUP_ROOT":  filepath.Join(home, "cgroup"),
+		"TMUX_TMPDIR":      filepath.Join(home, "tmux"),
+		"TMPDIR":           filepath.Join(home, "tmp"),
+		"XDG_CONFIG_HOME":  filepath.Join(home, ".config"),
+		"PATH":             path,
+		e2eSourceRepo:      h.repo,
+		e2eHomeEnv:         home,
 		// Keep the whole-home refusal snapshot free of diagnostic log writes.
 		"PFM_LOG_LEVEL":             "off",
 		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1", "PFM_PRICES_OFFLINE": "1",
@@ -463,21 +458,10 @@ func (h *e2eHarness) requireSuccess(phase string, result commandResult) {
 		return
 	}
 	differences := []string{"command exit"}
-	output := result.stdout + result.stderr
-	if strings.Contains(strings.ToLower(output), "harvestpy") && !strings.Contains(output, e2eHarvestSkipLine) {
-		differences = append(differences, "harvestpy provisioning attempted; expected blocked, not attempted")
-	}
 	h.t.Fatalf(
 		"%s failed; differing paths: %s; status: %v; stdout=%q stderr=%q",
 		phase, strings.Join(differences, ", "), result.err, result.stdout, result.stderr,
 	)
-}
-
-func (h *e2eHarness) requireHarvestGate(phase string, result commandResult) {
-	h.t.Helper()
-	if !strings.Contains(result.stdout+result.stderr, e2eHarvestSkipLine) {
-		h.t.Fatalf("%s failed; differing paths: harvestpy gate output; want %q", phase, e2eHarvestSkipLine)
-	}
 }
 
 func (h *e2eHarness) assertLauncherRuntime(home string) {
@@ -589,7 +573,6 @@ func (h *e2eHarness) assertInit(project, source string) {
 	}
 	sha := strings.TrimSpace(shaResult.stdout)
 	for _, mapping := range []struct{ source, target string }{
-		{"CLAUDE.md", "CLAUDE.md"},
 		{"settings.json", ".claude/settings.json"},
 	} {
 		h.assertInitFile(
@@ -654,8 +637,7 @@ func (h *e2eHarness) assertInitFile(source, target, local, template, sha string)
 		),
 	)
 	marked := false
-	if local != "CLAUDE.md" && local != "AGENTS.md" && strings.HasSuffix(local, ".md") &&
-		bytes.HasPrefix(want, []byte("---\n")) {
+	if strings.HasSuffix(local, ".md") && bytes.HasPrefix(want, []byte("---\n")) {
 		prefix := append([]byte("---\n"), marker...)
 		if !bytes.HasPrefix(got, prefix) {
 			h.t.Fatalf("init scaffold failed; differing paths: %s; exact frontmatter marker absent", local)

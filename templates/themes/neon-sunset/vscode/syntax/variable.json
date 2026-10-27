@@ -1,0 +1,108 @@
+{
+  "0003": {
+    "name": "Doc names",
+    "scope": [
+      "variable.other.jsdoc",
+      "comment.block.documentation variable",
+      "entity.name.variable.parameter.jsdoc"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffc2a1"
+    }
+  },
+  "0017": {
+    "name": "Orchid: this, self, super",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.parameter.function.language.special.self.python",
+      "variable.parameter.function.language.special.cls.python",
+      "variable.language.special.self.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#e48bff"
+    }
+  },
+  "0018": {
+    "name": "Variables",
+    "scope": [
+      "variable",
+      "variable.other",
+      "variable.other.readwrite",
+      "meta.definition.variable.name",
+      "variable.other.object",
+      "variable.other.local",
+      "variable.other.normal.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f4e8f7"
+    }
+  },
+  "0019": {
+    "name": "Peach: parameters",
+    "scope": [
+      "variable.parameter",
+      "meta.parameter",
+      "entity.name.variable.parameter",
+      "variable.parameter.function",
+      "meta.function.parameters variable.other"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#ffc2a1"
+    }
+  },
+  "0020": {
+    "name": "Ice: properties",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "variable.object.property",
+      "variable.other.member",
+      "entity.name.tag.yaml",
+      "support.type.property-name.toml",
+      "support.type.property-name.css",
+      "support.type.vendored.property-name.css",
+      "meta.property-name.css",
+      "variable.css",
+      "variable.argument.css",
+      "entity.other.attribute-name.table.toml",
+      "support.type.property-name.json"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b3ecff"
+    }
+  },
+  "0063": {
+    "name": "Shell variables",
+    "scope": [
+      "variable.other.special.shell",
+      "variable.other.positional.shell",
+      "variable.other.bracket.shell",
+      "punctuation.definition.variable.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffc2a1"
+    }
+  },
+  "0064": {
+    "name": "Environment and dotenv keys",
+    "scope": [
+      "variable.other.env",
+      "variable.other.dotenv"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b3ecff"
+    }
+  }
+}

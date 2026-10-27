@@ -11,6 +11,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // NameResolver is the fleet roster rung of call's target resolution, shared
@@ -106,15 +107,16 @@ func seatTarget(values paths.Values, seats []compose.Row, name string) (pfmcall.
 	if !found {
 		return pfmcall.Target{}, pfmcall.CodeUnknown, "", nil
 	}
-	socketPath, err := values.SocketUnder(chat.Socket)
+	socketPath, err := targetSocket(values, chat.Backend, chat.Socket)
 	if err != nil {
 		return pfmcall.Target{}, pfmcall.CodeUndelivered, "", fmt.Errorf("roster seat %q socket: %w", chat.Name, err)
 	}
 	pane := chat.Pane
-	if pane == "" {
+	if pane == "" && chat.Backend != spawn.BackendHerdr {
 		pane = chat.Session
 	}
 	return pfmcall.Target{
+		Backend: chat.Backend, SeatID: chat.SeatID, HerdrWorkspace: chat.HerdrWorkspace,
 		SocketPath: socketPath,
 		Pane:       pane,
 		Engine:     string(chat.Engine),
@@ -140,7 +142,8 @@ func (resolver NameResolver) SenderName(
 }
 
 // liveSeats reduces the composed fleet to addressable live seats: live, not
-// killed, on a socket, with a pane or session to type into. A killed seat
+// killed, on a socket, with a pane or session (or a native reservation whose
+// pane has not been published yet). A killed seat
 // never answers to its name — the name usually lives on in its replacement,
 // and a tombstone must not turn that into an ambiguity. A requiredEngine
 // keeps only that engine's rows.
@@ -149,7 +152,7 @@ func liveSeats(rows []compose.Row, requiredEngine string) []compose.Row {
 	for index := range rows {
 		row := rows[index]
 		if !row.Kind.IsAddressable() || row.Killed || row.Socket == "" ||
-			(row.PaneID == "" && row.SessionName == "") ||
+			(row.PaneID == "" && row.SessionName == "" && (row.Backend != spawn.BackendHerdr || row.SeatID == "")) ||
 			(requiredEngine != "" && string(compose.EngineForKind(row.Kind)) != requiredEngine) {
 			continue
 		}

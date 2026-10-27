@@ -3,6 +3,8 @@ package headless
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -222,6 +224,38 @@ func TestStreamFollowEndsWhenTheChatDies(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "A done") {
 		t.Fatalf("stream lost what it had already read: %q", out.String())
+	}
+}
+
+// An initial liveness check must not hide the transcript of an exited chat.
+// Only a follow reports death, after draining; trust and probe errors still
+// refuse before any transcript is emitted.
+func TestStreamCheckPreservesExitedTranscript(t *testing.T) {
+	probeErr := errors.New("pane read failed")
+	for _, tc := range []struct {
+		name   string
+		follow bool
+		check  error
+		want   error
+		output string
+	}{
+		{name: "replay exited chat", check: ErrChatGone, output: "A done\n"},
+		{name: "follow exited chat", follow: true, check: ErrChatGone, want: ErrChatGone, output: "A done\n"},
+		{name: "trust blocked", check: ErrTrustDialog, want: ErrTrustDialog},
+		{name: "probe failed", check: probeErr, want: probeErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeChat(t, assistantLine("done"))
+			var out bytes.Buffer
+			err := Stream(context.Background(), path, "cc", StreamOptions{
+				FromStart: true,
+				Follow:    tc.follow,
+				Check:     func() error { return tc.check },
+			}, &out)
+			if !errors.Is(err, tc.want) || out.String() != tc.output {
+				t.Fatalf("Stream() output=%q error=%v, want output=%q error=%v", out.String(), err, tc.output, tc.want)
+			}
+		})
 	}
 }
 
@@ -543,5 +577,39 @@ func TestWatchAnnouncesATurnEndedOnAnErrorAsIdleWithItsKind(t *testing.T) {
 	if !regexp.MustCompile(`^IDLE seat idle_seconds=\d+ error=server_error\n$`).MatchString(out.String()) ||
 		idleHooks != 1 || status.State != StateError {
 		t.Fatalf("watch output = %q hooks = %d status = %#v", out.String(), idleHooks, status)
+	}
+}
+
+func TestStatusLostNoteRendering(t *testing.T) {
+	for _, note := range []string{"your last message was not answered — re-send it", ""} {
+		input := map[string]any{"name": "seat", "state": "lost"}
+		if note != "" {
+			input["lost_note"] = note
+		} else {
+			input["state"] = "idle"
+		}
+		data, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var status Status
+		if err := json.Unmarshal(data, &status); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.Marshal(status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output map[string]any
+		if err := json.Unmarshal(data, &output); err != nil {
+			t.Fatal(err)
+		}
+		if note != "" {
+			if output["lost_note"] != note || !strings.Contains(status.Line(), note) {
+				t.Fatalf("lost note missing: json=%s human=%q", data, status.Line())
+			}
+		} else if _, present := output["lost_note"]; present {
+			t.Fatalf("live status has lost_note: %s", data)
+		}
 	}
 }

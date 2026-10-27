@@ -3,12 +3,10 @@ package installer
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -20,150 +18,16 @@ import (
 // protects an in-flight `claude update` rollback.
 const ClaudeVersionKeepCount = 2
 
-// ClaudeVersion is one build under ~/.local/share/claude/versions.
-type ClaudeVersion struct {
-	Path      string
-	Version   semver.Version
-	VersionOK bool
-	Bytes     int64
-	ModTime   time.Time
-	ID        gather.FileID
-}
+// ClaudeVersion is the shared read-only native build observation.
+type ClaudeVersion = gather.ClaudeVersion
 
-// ClaudeVersionsReport is the native version directory's picture: every
-// build found (newest first), which build is newest, and why every
-// structurally protected build is kept. InspectClaudeVersions alone never
-// populates Live or LiveProbeErr — those are ProbeLiveClaudeVersions' job,
-// a separate, deliberately optional call (see both doc comments).
-type ClaudeVersionsReport struct {
-	Dir      string
-	Versions []ClaudeVersion
-	Newest   *ClaudeVersion
-	// Live maps a version's path to the live pids executing it. Populated
-	// only by ProbeLiveClaudeVersions.
-	Live map[string][]int
-	// LiveProbeErr is set when the process table, or any one candidate
-	// process's image, could not be read. A probe that could not run never
-	// renders as "nothing found": PlanClaudeVersionPrune refuses every
-	// version rather than risk removing one a chat is running right now.
-	// Populated only by ProbeLiveClaudeVersions.
-	LiveProbeErr error
-	// Protected maps a version's path to the reason it is never removed:
-	// "newest", "live (pids …)", "configured claude.binary", "displaced
-	// native target", or "unparsed name".
-	Protected map[string]string
-}
+// ClaudeVersionsReport is the shared structural native build report.
+type ClaudeVersionsReport = gather.ClaudeVersionsReport
 
-func claudeVersionsDir(home string) string {
-	return filepath.Join(home, ".local", "share", pfmengine.MustLookup(pfmengine.Claude).LongName, "versions")
-}
+var claudeVersionsDir = gather.ClaudeVersionsDir
 
-// InspectClaudeVersions enumerates every regular, executable file under
-// ~/.local/share/claude/versions, orders them newest first by parsed
-// semantic version (an unparsed name sorts last and is never chosen as
-// newest), and marks the structural protections: newest, unparsed name, the
-// configured `claude.binary`, and a displaced native target.
-//
-// It deliberately touches NO process table. ResolveClaudeBinary — the managed
-// launcher's hot path, run on every single `claude` launch — calls only this
-// half; probing every live pid for its executing image (a fork of `lsof` per
-// pid on macOS, see gather.ProcImage) is expensive and useless there, since
-// resolution only wants the newest build's path. The live-process half is
-// ProbeLiveClaudeVersions, a separate call only `pfm doctor` and
-// pruneClaudeVersions (the destructive path) make.
-func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport, error) {
-	dir := claudeVersionsDir(home)
-	report := ClaudeVersionsReport{Dir: dir, Protected: map[string]string{}}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return report, nil
-		}
-		return ClaudeVersionsReport{}, fmt.Errorf("read Claude versions directory %s: %w", dir, err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return ClaudeVersionsReport{}, fmt.Errorf("inspect Claude version %s: %w", entry.Name(), err)
-		}
-		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		version, ok := semver.ParseVersion("v" + entry.Name())
-		id, err := gather.FileIDOf(path)
-		if err != nil {
-			return ClaudeVersionsReport{}, fmt.Errorf("identify Claude version %s: %w", path, err)
-		}
-		report.Versions = append(report.Versions, ClaudeVersion{
-			Path: path, Version: version, VersionOK: ok, Bytes: info.Size(), ModTime: info.ModTime(), ID: id,
-		})
-	}
-
-	newer := func(a, b ClaudeVersion) bool {
-		if a.VersionOK != b.VersionOK {
-			return a.VersionOK
-		}
-		if a.VersionOK && a.Version != b.Version {
-			return b.Version.Less(a.Version)
-		}
-		return a.ModTime.After(b.ModTime)
-	}
-	sort.Slice(report.Versions, func(i, j int) bool { return newer(report.Versions[i], report.Versions[j]) })
-
-	if len(report.Versions) > 0 && report.Versions[0].VersionOK {
-		newest := report.Versions[0]
-		report.Newest = &newest
-		report.Protected[newest.Path] = "newest"
-	}
-	for _, version := range report.Versions {
-		if !version.VersionOK {
-			report.Protected[version.Path] = "unparsed name"
-		}
-	}
-	// A not-exist error is genuine absence — nothing is configured or
-	// displaced there, never a reason to refuse the prune. Any OTHER error
-	// (permission denied, a path that is not a regular file, …) means pfm
-	// could not identify what that path even IS, and removing a build it
-	// failed to identify is the unsafe direction: refuse outright rather
-	// than silently treat "could not look" as "not protected".
-	if configuredBinary != "" {
-		configuredID, err := gather.FileIDOf(configuredBinary)
-		switch {
-		case err == nil:
-			for _, version := range report.Versions {
-				if version.ID == configuredID {
-					report.Protected[version.Path] = "configured claude.binary"
-				}
-			}
-		case os.IsNotExist(err):
-			// nothing configured there
-		default:
-			return ClaudeVersionsReport{}, fmt.Errorf("identify configured Claude binary %s: %w", configuredBinary, err)
-		}
-	}
-	if displaced := strings.TrimSpace(readClaudeLauncherState(home)); displaced != "" {
-		displacedID, err := gather.FileIDOf(displaced)
-		switch {
-		case err == nil:
-			for _, version := range report.Versions {
-				if version.ID == displacedID {
-					report.Protected[version.Path] = "displaced native target"
-				}
-			}
-		case os.IsNotExist(err):
-			// the recorded displaced target no longer exists
-		default:
-			return ClaudeVersionsReport{}, fmt.Errorf("identify displaced Claude target %s: %w", displaced, err)
-		}
-	}
-
-	return report, nil
-}
+// InspectClaudeVersions is the shared structural inspector's compatibility facade.
+var InspectClaudeVersions = gather.InspectClaudeVersions
 
 // Signaler delivers a signal to pid; signal 0 only asks whether pid exists.
 // syscall.Kill is the real one; a test's fake plays the kernel — the same
@@ -278,17 +142,6 @@ func withinDir(path, versionsDir string) bool {
 		return false
 	}
 	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-}
-
-// readClaudeLauncherState reads the displaced-native-target recorded by
-// RepairClaudeLauncher, or "" when none was ever recorded — the same file
-// unwireClaudeLauncher reads to restore a pre-pfm launcher on uninstall.
-func readClaudeLauncherState(home string) string {
-	content, err := os.ReadFile(claudeLauncherStatePath(home))
-	if err != nil {
-		return ""
-	}
-	return string(content)
 }
 
 func joinPids(pids []int) string {

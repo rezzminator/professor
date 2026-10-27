@@ -1,6 +1,8 @@
 package run
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -167,6 +169,94 @@ func TestClaudeEnvironmentDropsTheLoginDefaultSentinel(t *testing.T) {
 		}
 		if value := lastEnvironmentValue(got, "CLAUDE_CONFIG_DIR"); value != "/cfg2" {
 			t.Errorf("explicit=%t: CLAUDE_CONFIG_DIR=%q, want /cfg2", explicit, value)
+		}
+	}
+}
+
+// Only the interactive chat bound to a Herdr pane reports to it: every
+// headless or nested engine door drops the Herdr variables, whatever the
+// engine and whether the caller supplied the environment.
+func TestHeadlessEnvironmentDropsTheHerdrPaneForEveryEngine(t *testing.T) {
+	inherited := []string{
+		"HERDR_ENV=1", "HERDR_PANE_ID=w1:p2", "HERDR_SOCKET_PATH=/run/herdr.sock", "HERDR_BIN_PATH=/usr/bin/herdr",
+		"PATH=/usr/bin",
+	}
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode} {
+		for _, explicit := range []bool{false, true} {
+			var got []string
+			setEnvironment(inherited, engine, "", explicit, &got)
+			for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+				if value := lastEnvironmentValue(got, name); value != "" {
+					t.Errorf("%s explicit=%t: %s leaked as %q in %q", engine, explicit, name, value, got)
+				}
+			}
+			if lastEnvironmentValue(got, "PATH") != "/usr/bin" {
+				t.Errorf("%s explicit=%t: PATH lost in %q", engine, explicit, got)
+			}
+		}
+	}
+}
+
+func TestHeadlessProcessExtensionOwnership(t *testing.T) {
+	headlessJail(t)
+	for _, mode := range []string{"on", "off", "dropped"} {
+		for _, id := range []pfmengine.ID{pfmengine.Codex, pfmengine.OpenCode} {
+			t.Run(mode+"/"+string(id), func(t *testing.T) {
+				capture := t.TempDir()
+				body := `/usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER PONYTAIL_USER_EXPORT > "$CAPTURE_DIR/extension-env" || true`
+				var machine pfmconfig.Config
+				if id == pfmengine.Codex {
+					binary := writeEngineStub(t, body+"\nprintf '%s\\n' '{}' ")
+					machine = codexMachine(binary, t.TempDir())
+				} else {
+					inner := writeOpenCodeStub(t, body+"\n"+opencodeValidEvents())
+					wrapper := writeEngineStub(
+						t,
+						`if [ "${1:-}" = serve ]; then /usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER PONYTAIL_USER_EXPORT > "$CAPTURE_DIR/server-extension-env" || true; fi`+"\nexec '"+inner+"' \"$@\"",
+					)
+					machine = opencodeMachine(wrapper, opencodeHome(t))
+				}
+				machine.Extensions = map[string]pfmconfig.Extension{
+					"ponytail": {
+						Enabled: mode != "off",
+						Engines: []string{"codex", "opencode"},
+						Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "^worker$"},
+					},
+				}
+				if mode == "dropped" {
+					ext := machine.Extensions["ponytail"]
+					ext.Engines = nil
+					machine.Extensions["ponytail"] = ext
+				}
+				want := "stale\nuser"
+				if mode == "on" {
+					want = "^worker$\nuser"
+				}
+				_, err := Run(
+					context.Background(),
+					Request{
+						Config:  machine,
+						Engine:  id,
+						Prompt:  "fixture",
+						Native:  true,
+						Env:     testEnv(capture, "PONYTAIL_SUBAGENT_MATCHER=stale", "PONYTAIL_USER_EXPORT=user"),
+						TempDir: t.TempDir(),
+					},
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, err := os.ReadFile(filepath.Join(capture, "extension-env"))
+				if err != nil || strings.TrimSpace(string(raw)) != want {
+					t.Fatalf("%s process env=%q err=%v", id, raw, err)
+				}
+				if id == pfmengine.OpenCode {
+					raw, err := os.ReadFile(filepath.Join(capture, "server-extension-env"))
+					if err != nil || strings.TrimSpace(string(raw)) != want {
+						t.Fatalf("OpenCode server env=%q err=%v", raw, err)
+					}
+				}
+			})
 		}
 	}
 }

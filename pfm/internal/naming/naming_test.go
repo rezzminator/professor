@@ -291,3 +291,20 @@ func TestCxName(t *testing.T) {
 		})
 	}
 }
+
+func TestReservedSeatLabel(t *testing.T) {
+	for _, label := range []string{"seat:child", "SeAt:child", " seat:child"} {
+		if got := DisplayName(label, label, "safe prompt"); got != "safe prompt" {
+			t.Errorf("reserved Claude title adopted: %q", got)
+		}
+		if got := DisplayName("", label, ""); got != "" {
+			t.Errorf("reserved auto-title adopted: %q", got)
+		}
+		if got := CxName("own", "", "", map[string]string{"own": label}, "safe prompt"); got != "safe prompt" {
+			t.Errorf("reserved Codex title adopted: %q", got)
+		}
+		if got := LaunchName(label); got != "" {
+			t.Errorf("reserved launch name adopted: %q", got)
+		}
+	}
+}

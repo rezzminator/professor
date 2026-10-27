@@ -61,12 +61,11 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	}
 	flags := cli.NewFlagSet(
 		updateCommand,
-		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop|accept} [options]",
+		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop|accept} [options]",
 		stderr,
 	)
 	target := flags.String("to", "", "target semantic-version tag")
 	repoFlag := flags.String("repo", "", "source clone to update")
-	skipHarvest := flags.Bool("skip-harvest", false, "leave the optional harvestpy runtime unmanaged")
 	projectRoot := flags.String("root", "", "project root used for the post-update template report")
 	jsonOutput := flags.Bool(jsonFormat, false, "write the project report as one JSON object")
 	positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
@@ -103,7 +102,6 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 		context.Background(),
 		repo,
 		*target,
-		*skipHarvest,
 		progress,
 		stderr,
 		runtime,
@@ -151,7 +149,6 @@ func refuseSourceDowngrade(ctx context.Context, repo, target, previousRef string
 func updateRepository(
 	ctx context.Context,
 	repo, requestedTag string,
-	skipHarvest bool,
 	stdout, stderr io.Writer,
 	runtime config.Runtime,
 ) (err error) {
@@ -316,7 +313,7 @@ func updateRepository(
 		return fmt.Errorf("snapshot update-owned files before install: %w", err)
 	}
 	// Read current health before replacement so candidate deltas exclude old warnings.
-	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, skipHarvest, stdout, stderr)
+	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, stdout, stderr)
 	switch {
 	case baselineErr != nil:
 		fmt.Fprintf(
@@ -356,7 +353,6 @@ func updateRepository(
 				replacements,
 				nil,
 				runtime,
-				skipHarvest,
 				stdout,
 				stderr,
 			)
@@ -368,7 +364,7 @@ func updateRepository(
 		replacements[index].replaced = true
 	}
 
-	installErr := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr)
+	installErr := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, stdout, stderr)
 	recordUpdateOwnedFilesAfter(snapshots)
 	if installErr != nil {
 		return updateFailure(
@@ -382,7 +378,6 @@ func updateRepository(
 				replacements,
 				snapshots,
 				runtime,
-				skipHarvest,
 				stdout,
 				stderr,
 			),
@@ -393,7 +388,6 @@ func updateRepository(
 		candidateA,
 		runtime,
 		runtime.Config.Path,
-		skipHarvest,
 		stdout,
 		stderr,
 	)
@@ -409,7 +403,6 @@ func updateRepository(
 				replacements,
 				snapshots,
 				runtime,
-				skipHarvest,
 				stdout,
 				stderr,
 			),
@@ -428,7 +421,6 @@ func updateRepository(
 				replacements,
 				snapshots,
 				runtime,
-				skipHarvest,
 				stdout,
 				stderr,
 			),
@@ -465,7 +457,6 @@ func updateRepository(
 				replacements,
 				snapshots,
 				runtime,
-				skipHarvest,
 				stdout,
 				stderr,
 			),
@@ -630,13 +621,8 @@ func applyUpdateInstall(
 	ctx context.Context,
 	candidate, repo, sourceRepo string,
 	runtime config.Runtime,
-	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) error {
-	args := []string{"--yes"}
-	if skipHarvest {
-		args = append(args, "--skip-harvest")
-	}
 	return runUpdateCandidateCommand(
 		ctx,
 		candidate,
@@ -646,7 +632,8 @@ func applyUpdateInstall(
 		stdout,
 		stderr,
 		installCommand,
-		args...)
+		"--yes",
+	)
 }
 
 // updateInstallConfigPath is the --config an install is given, only when it exists.
@@ -668,13 +655,8 @@ func runUpdateDoctor(
 	candidate string,
 	_ config.Runtime,
 	configPath string,
-	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) (doctorOutcome, error) {
-	var args []string
-	if skipHarvest {
-		args = []string{"--skip-harvest"}
-	}
 	// Doctor normally inspects the current repository's publication hook as
 	// well as host health. An update is validating the newly installed host
 	// binary, not whichever source checkout invoked it, so run from a fresh
@@ -698,7 +680,7 @@ func runUpdateDoctor(
 		stdout,
 		stderr,
 		doctorCommand,
-		args...)
+	)
 	var exitErr *doctorExitError
 	switch {
 	case runErr == nil:
@@ -722,14 +704,13 @@ func runUpdateDoctor(
 func runUpdateBaselineDoctor(
 	ctx context.Context,
 	runtime config.Runtime,
-	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) (doctorOutcome, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return doctorOutcome{}, fmt.Errorf("resolve current binary for baseline doctor: %w", err)
 	}
-	return runUpdateDoctor(ctx, self, runtime, runtime.Config.Path, skipHarvest, stdout, stderr)
+	return runUpdateDoctor(ctx, self, runtime, runtime.Config.Path, stdout, stderr)
 }
 
 // acquireUpdateOwnership claims an inode shared across processes before any

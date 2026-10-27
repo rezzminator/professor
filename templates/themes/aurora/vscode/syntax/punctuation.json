@@ -1,0 +1,72 @@
+{
+  "0010": {
+    "name": "Night slate · punctuation",
+    "scope": [
+      "punctuation",
+      "meta.brace",
+      "punctuation.separator",
+      "punctuation.terminator",
+      "punctuation.section",
+      "punctuation.definition.block",
+      "punctuation.definition.parameters",
+      "punctuation.definition.arguments",
+      "punctuation.definition.array",
+      "punctuation.definition.dictionary",
+      "punctuation.parenthesis",
+      "punctuation.bracket",
+      "meta.brace.round",
+      "meta.brace.square",
+      "meta.brace.curly",
+      "punctuation.separator.comma",
+      "punctuation.separator.dot",
+      "punctuation.terminator.statement"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8792b4"
+    }
+  },
+  "0014": {
+    "name": "O I 557.7 nm · template and interpolation braces",
+    "scope": [
+      "punctuation.definition.template-expression",
+      "punctuation.section.embedded",
+      "punctuation.definition.template-expression.begin",
+      "punctuation.definition.template-expression.end",
+      "punctuation.section.embedded.begin",
+      "punctuation.section.embedded.end",
+      "punctuation.definition.interpolation",
+      "meta.interpolation punctuation.section"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf0a8"
+    }
+  },
+  "0029": {
+    "name": "Night slate · tag brackets",
+    "scope": [
+      "punctuation.definition.tag",
+      "punctuation.definition.tag.begin",
+      "punctuation.definition.tag.end",
+      "meta.tag punctuation.separator"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#8792b4"
+    }
+  },
+  "0056": {
+    "name": "O I 557.7 nm · list markers",
+    "scope": [
+      "punctuation.definition.list.begin.markdown",
+      "beginning.punctuation.definition.list",
+      "punctuation.definition.list.markdown",
+      "beginning.punctuation.definition.list.markdown"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#5cf0a8"
+    }
+  }
+}

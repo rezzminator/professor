@@ -75,6 +75,54 @@ exit 2
 	}
 }
 
+// TestReadCodexRateLimitsDropsTheHerdrPane: the App Server read runs no turn,
+// so it is never the chat bound to the parent's Herdr pane — with or without an
+// explicit account home, none of the four Herdr names reaches it.
+func TestReadCodexRateLimitsDropsTheHerdrPane(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "w1:p1")
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
+	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
+	t.Setenv("PFM_PROBE_KEEP", "kept")
+	for _, codexHome := range []string{"", filepath.Join(t.TempDir(), "codex-one")} {
+		t.Run("home="+filepath.Base(codexHome), func(t *testing.T) {
+			binDir := t.TempDir()
+			record := filepath.Join(binDir, "env.log")
+			script := `#!/bin/sh
+/usr/bin/env > '` + record + `'
+count=0
+while IFS= read -r line; do
+  count=$((count + 1))
+  if [ "$count" -eq 3 ]; then
+    printf '{"jsonrpc":"2.0","id":1,"result":{"rateLimits":{"planType":"plus","primary":{"usedPercent":10}}}}\n'
+    exit 0
+  fi
+done
+exit 2
+`
+			if err := testjail.WriteExecutable(filepath.Join(binDir, "codex"), []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			if _, err := ReadCodexRateLimitsWithBinaryAtHome(context.Background(), "codex", codexHome); err != nil {
+				t.Fatalf("App Server read: %v", err)
+			}
+			raw, err := os.ReadFile(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), "PFM_PROBE_KEEP=kept") {
+				t.Fatalf("the App Server lost an unrelated variable: %s", raw)
+			}
+			for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+				if strings.Contains("\n"+string(raw), "\n"+name+"=") {
+					t.Errorf("%s reached the App Server: %s", name, raw)
+				}
+			}
+		})
+	}
+}
+
 func TestReadCodexRateLimitsRejectsMalformedOrWrongIDResponses(t *testing.T) {
 	command := exec.Command("sh", "-c", `
 while IFS= read -r line; do

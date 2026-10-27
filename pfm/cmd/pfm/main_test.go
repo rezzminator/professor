@@ -116,7 +116,7 @@ func TestSettledRootInterface(t *testing.T) {
 	help := stdout.String()
 	for _, want := range []string{
 		"operator commands:", "  chat", "  install", "  update", "  init", "wiring commands:",
-		"  statusline", "  usage-hook",
+		"  statusline", "  usage-hook", "tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree DIR)",
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("root help missing %q:\n%s", want, help)
@@ -141,7 +141,7 @@ func TestChatShimWhoamiCompatibilityRoute(t *testing.T) {
 		t.Fatalf("chat whoami code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if strings.Contains(stderr.String(), "unknown command") ||
-		!strings.Contains(stderr.String(), "not inside tmux") {
+		!strings.Contains(stderr.String(), "not inside a pfm chat") {
 		t.Fatalf("chat whoami did not reach the root identity command: %q", stderr.String())
 	}
 }
@@ -338,72 +338,6 @@ func TestKilledPruneOrphansCLI(t *testing.T) {
 	stderr.Reset()
 	if code := run([]string{"ls", "--killed", "--yes"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("killed --yes without --prune-orphans code=%d, want 2", code)
-	}
-}
-
-func TestKillSelfResolveAndInternalCLI(t *testing.T) {
-	jailTest(t)
-	const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	database, err := store.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.UpsertTranscript(
-		context.Background(),
-		store.Transcript{
-			UUID: id,
-			Path: "/jailed/" + id + ".jsonl",
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TMUX", filepath.Join(t.TempDir(), "cc-1-1-1")+",1,0")
-	t.Setenv("TMUX_PANE", "%1")
-	t.Setenv("CLAUDE_CODE_SESSION_ID", id)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"chat", "kill", "self"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("kill --self code=%d stderr=%q", code, stderr.String())
-	}
-	// A self-kill DOES carry a tmux address, so its line names the pane it is
-	// closing rather than a de-listing.
-	if stdout.String() != "killed "+id+"\tclosing pane %1 on socket cc-1-1-1\n" {
-		t.Fatalf("kill --self stdout=%q", stdout.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(
-		[]string{"chat", "resolve", "missing"},
-		&stdout,
-		&stderr,
-	); code != codeUnknownChat {
-		t.Fatalf(
-			"resolve miss code=%d stdout=%q stderr=%q",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	if stdout.String() != "missing\tnot-found\n" ||
-		!strings.Contains(stderr.String(), "no chat named") {
-		t.Fatalf("resolve miss stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	code := run([]string{
-		"internal",
-		"kill-exit",
-		"--engine", "invalid",
-		"--id", id,
-		"--path", "/jailed/transcript.jsonl",
-		"--socket", "/jailed/socket",
-		"--socket-name", "cc-1-1-1",
-		"--pane", "%1",
-	}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), `unknown engine "invalid"`) {
-		t.Fatalf("internal code=%d stderr=%q", code, stderr.String())
 	}
 }
 
@@ -819,7 +753,7 @@ func TestInstallRefusesWhileLegacyConfigWaits(t *testing.T) {
 		modes = append(modes, options.Mode)
 		return installer.Report{}, nil
 	}
-	for _, args := range [][]string{{"install", "--skip-harvest"}, {"install", "--yes", "--skip-harvest"}} {
+	for _, args := range [][]string{{"install", "--offline"}, {"install", "--yes", "--offline"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 4 {
 			t.Fatalf("run(%q) code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
@@ -943,9 +877,9 @@ func TestInstallWithMissingNamedLegacyConfig(t *testing.T) {
 		code   int
 		prefix string
 	}{
-		{[]string{"install", "--skip-harvest"}, 0, "  skip    "},
-		{[]string{"install", "--yes", "--skip-harvest"}, 1, "pfm install: "},
-		{[]string{"install", "--check", "--skip-harvest"}, 1, "pfm install: "},
+		{[]string{"install", "--offline"}, 0, "  skip    "},
+		{[]string{"install", "--yes", "--offline"}, 1, "pfm install: "},
+		{[]string{"install", "--check", "--offline"}, 1, "pfm install: "},
 	} {
 		var stdout, stderr bytes.Buffer
 		args := append([]string{"--config", legacy}, scenario.args...)

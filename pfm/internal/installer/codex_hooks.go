@@ -18,8 +18,8 @@ import (
 // copies, so the hook has a single spelling.
 const codexResumeUnkillHookName = "resume-unkill"
 
-// codexHookEvent is how Codex's hooks/list spells the SessionStart event.
-const codexHookEvent = "sessionStart"
+// codexResumeUnkillTimeoutSeconds is the resume-unkill handler's timeout.
+const codexResumeUnkillTimeoutSeconds = 30
 
 // codexClearMatcher is the matcher the retired Codex SessionStart clear-kill
 // hook used to carry. It remains only so leftover entries can be removed; no
@@ -58,10 +58,10 @@ func codexHookHandlerCount(document map[string]any, hook ExpectedHook) int {
 	return count
 }
 
-// ensureCodexHook appends the hook as its own entry when no matching handler
-// exists, creating the hooks object and the event array as needed, and reports
-// whether it wrote.
-func ensureCodexHook(document map[string]any, hook ExpectedHook) bool {
+// ensureCodexHook appends the hook as its own entry (no matcher key when the
+// hook carries none) when no matching handler exists, creating the hooks
+// object and the event array as needed, and reports whether it wrote.
+func ensureCodexHook(document map[string]any, hook ExpectedHook, timeoutSeconds int) bool {
 	if codexHookHandlerCount(document, hook) > 0 {
 		return false
 	}
@@ -71,17 +71,21 @@ func ensureCodexHook(document map[string]any, hook ExpectedHook) bool {
 		document["hooks"] = hooks
 	}
 	entries, _ := hooks[hook.Event].([]any)
-	hooks[hook.Event] = append(entries, map[string]any{
-		"matcher": hook.Matcher,
+	entry := map[string]any{
 		"hooks": []any{map[string]any{
-			"type": "command", configCommandKey: hook.Command, "timeout": 30,
+			"type": "command", configCommandKey: hook.Command, "timeout": timeoutSeconds,
 		}},
-	})
+	}
+	if hook.Matcher != "" {
+		entry["matcher"] = hook.Matcher
+	}
+	hooks[hook.Event] = append(entries, entry)
 	return true
 }
 
-// updateCodexHooks preserves personal handlers, owns exactly one Codex hook —
-// the SessionStart "resume" resume-unkill handler — and retires pfm's others:
+// updateCodexHooks preserves personal handlers, owns the Codex hooks the
+// installer writes — the SessionStart "resume" resume-unkill handler and the
+// Herdr reporter handlers of codex_hooks_herdr.go — and retires pfm's others:
 // the clear-kill hook, and the SessionStart appendix hook whose truncated,
 // compaction-dropped delivery developer_instructions replaced. An uninstall
 // strips the owned hook through the ledger.
@@ -154,7 +158,10 @@ func updateCodexHooks(
 		if removeOwnedSettingsHooks(document, stale) {
 			changed = true
 		}
-		if ensureCodexHook(document, resumeUnkill) {
+		if ensureCodexHook(document, resumeUnkill, codexResumeUnkillTimeoutSeconds) {
+			changed = true
+		}
+		if ensureCodexHerdrHooks(document, home) {
 			changed = true
 		}
 	}
@@ -269,10 +276,10 @@ func (installer *engine) wireCodexHooks() error {
 		}
 	}
 	seen := map[string]bool{}
-	// carriesHook records, per physical hooks.json, whether the file the install
-	// leaves behind holds the owned resume-unkill handler — the precondition of
-	// asking Codex to trust it.
-	carriesHook := map[string]bool{}
+	// carriesHook records, per physical hooks.json, which owned handlers the
+	// file the install leaves behind holds — the precondition of asking Codex
+	// to trust them.
+	carriesHook := map[string][]ExpectedHook{}
 	uninstalling := installer.options.Mode == ModeUninstall
 	if len(installer.codexHomes()) == 0 {
 		installer.skip("no Codex accounts configured — hooks.json wiring has nothing to wire")
@@ -328,7 +335,7 @@ func (installer *engine) wireCodexHooks() error {
 				if uninstalling {
 					return nil
 				}
-				carries, err := codexHooksCarryResumeUnkill(final, installer.options.Home)
+				carries, err := codexHooksCarried(final, installer.options.Home)
 				if err != nil {
 					return fmt.Errorf("inspect Codex hooks %s: %w", path, err)
 				}
@@ -418,24 +425,49 @@ func (installer *engine) wireCodexHooks() error {
 	return installer.wireCodexHookTrust(carriesHook)
 }
 
-// codexHooksCarryResumeUnkill reports whether a hooks.json body holds the
-// owned resume-unkill handler.
-func codexHooksCarryResumeUnkill(raw []byte, home string) (bool, error) {
-	hook, err := codexResumeUnkillHook(home)
+// codexOwnedHooks is every handler pfm owns in a Codex hooks.json: the
+// resume-unkill handler, then the Herdr reporter handlers.
+func codexOwnedHooks(home string) ([]ExpectedHook, error) {
+	unkill, err := codexResumeUnkillHook(home)
 	if err != nil {
-		return false, err
+		return nil, err
+	}
+	return append([]ExpectedHook{unkill}, codexHerdrHooks(home)...), nil
+}
+
+// codexHandler is the native-hook handler an owned hook becomes: Codex's own
+// event spelling ("SessionStart" -> "sessionStart"), the matcher and command.
+func codexHandler(hook ExpectedHook) codexappendix.Handler {
+	event := hook.Event
+	if event != "" {
+		event = strings.ToLower(event[:1]) + event[1:]
+	}
+	return codexappendix.Handler{Event: event, Matcher: hook.Matcher, Command: hook.Command}
+}
+
+// codexHooksCarried reports which owned handlers a hooks.json body holds.
+func codexHooksCarried(raw []byte, home string) ([]ExpectedHook, error) {
+	owned, err := codexOwnedHooks(home)
+	if err != nil {
+		return nil, err
 	}
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return false, err
+		return nil, err
 	}
-	return codexHookHandlerCount(document, hook) > 0, nil
+	var carried []ExpectedHook
+	for _, hook := range owned {
+		if codexHookHandlerCount(document, hook) > 0 {
+			carried = append(carried, hook)
+		}
+	}
+	return carried, nil
 }
 
-// wireCodexHookTrust records or removes Codex's trust of the resume-unkill hook
+// wireCodexHookTrust records or removes Codex's trust of every owned handler
 // per physical account, and cleans up after the retired appendix hook.
-func (installer *engine) wireCodexHookTrust(carriesHook map[string]bool) error {
-	if _, err := codexResumeUnkillHook(installer.options.Home); err != nil {
+func (installer *engine) wireCodexHookTrust(carriesHook map[string][]ExpectedHook) error {
+	if _, err := codexOwnedHooks(installer.options.Home); err != nil {
 		return err
 	}
 	seenAccounts := map[string]bool{}
@@ -455,7 +487,7 @@ func (installer *engine) wireCodexHookTrust(carriesHook map[string]bool) error {
 					return err
 				}
 			}
-			return installer.wireResumeUnkillTrust(account, carriesHook)
+			return installer.wireHandlerTrust(account, carriesHook)
 		}()
 		if err != nil {
 			//nolint:staticcheck // Codex is a product name.
@@ -470,48 +502,61 @@ func (installer *engine) wireCodexHookTrust(carriesHook map[string]bool) error {
 	return nil
 }
 
-func (installer *engine) wireResumeUnkillTrust(account string, carriesHook map[string]bool) error {
+// wireHandlerTrust trusts, quietly, every owned handler the account's
+// hooks.json carries, with one Codex discovery for the lot. A trust Codex
+// already holds for the exact handler is no change, so a repeat install stays
+// changed=0; a handler its operator disabled is left alone. Any other state,
+// an unreadable one included, records the trust again, and that call reports
+// its own error.
+func (installer *engine) wireHandlerTrust(account string, carriesHook map[string][]ExpectedHook) error {
 	if installer.options.Mode == ModeUninstall {
 		if !codexappendix.HookTrustRecorded(account) {
 			return nil
 		}
 		return installer.change(
-			"remove resume-unkill hook trust "+account,
+			"remove Codex hook trust "+account,
 			func() error { return codexappendix.UnregisterHookTrust(account) },
 		)
 	}
-	if !carriesHook[physicalSettingsPath(filepath.Join(account, "hooks.json"))] {
+	carried := carriesHook[physicalSettingsPath(filepath.Join(account, "hooks.json"))]
+	if len(carried) == 0 {
 		return nil
 	}
 	if installer.options.CodexBinary == "" {
 		installer.skip("Codex hook trust not recorded for " + account +
-			": no Codex binary configured — the resume-unkill hook stays untrusted")
+			": no Codex binary configured — the owned hooks stay untrusted")
 		return nil
 	}
-	hook, err := codexResumeUnkillHook(installer.options.Home)
-	if err != nil {
-		return err
+	handlers := make([]codexappendix.Handler, 0, len(carried))
+	for _, hook := range carried {
+		handlers = append(handlers, codexHandler(hook))
 	}
-	// A trust Codex already holds for this exact handler is no change, so a
-	// repeat install stays changed=0; a handler its operator disabled is left
-	// alone, as RegisterHookTrust leaves it. Any other state, an unreadable
-	// one included, records the trust again, and that call reports its own error.
-	trusted, stateErr := codexappendix.NativeHookTrustState(
-		context.Background(), installer.options.CodexBinary, account, hook.Command,
+	states := codexappendix.NativeHookTrustStates(
+		context.Background(),
+		installer.options.CodexBinary,
+		account,
+		handlers,
 	)
-	switch {
-	case stateErr == nil && trusted:
-		installer.ok("resume-unkill hook trusted in " + account)
-		return nil
-	case errors.Is(stateErr, codexappendix.ErrNativeHookDisabled):
-		installer.skip("resume-unkill hook trust in " + account + ": its operator disabled the handler, left alone")
+	var untrusted []codexappendix.Handler
+	for index, state := range states {
+		name := carried[index].Name
+		switch {
+		case state.Err == nil && state.Trusted:
+			installer.ok(name + " hook trusted in " + account)
+		case errors.Is(state.Err, codexappendix.ErrNativeHookDisabled):
+			installer.skip(name + " hook trust in " + account + ": its operator disabled the handler, left alone")
+		default:
+			untrusted = append(untrusted, state.Handler)
+		}
+	}
+	if len(untrusted) == 0 {
 		return nil
 	}
-	return installer.change("trust resume-unkill hook "+account, func() error {
-		if err := codexappendix.RegisterHookTrust(
-			context.Background(), installer.options.CodexBinary, account, codexHookEvent, hook.Matcher, hook.Command,
+	return installer.change("trust Codex hooks "+account, func() error {
+		if err := codexappendix.RegisterHookTrusts(
+			context.Background(), installer.options.CodexBinary, account, untrusted,
 		); err != nil {
-			return fmt.Errorf("record resume-unkill hook trust for %s: %w", account, err)
+			return fmt.Errorf("record Codex hook trust for %s: %w", account, err)
 		}
 		return nil
 	})

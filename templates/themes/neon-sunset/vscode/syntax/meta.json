@@ -1,0 +1,59 @@
+{
+  "0011": {
+    "name": "Plain regions: template interiors, CSS values",
+    "scope": [
+      "meta.template.expression",
+      "meta.embedded.line",
+      "meta.interpolation",
+      "meta.property-value.css"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f4e8f7"
+    }
+  },
+  "0052": {
+    "name": "Markdown rules",
+    "scope": [
+      "meta.separator.markdown",
+      "meta.separator"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#b494ff"
+    }
+  },
+  "0057": {
+    "name": "Diff: hunk range",
+    "scope": [
+      "meta.diff.range",
+      "meta.diff.range.unified"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b494ff"
+    }
+  },
+  "0058": {
+    "name": "Diff: header",
+    "scope": [
+      "meta.diff.header",
+      "meta.diff.index",
+      "meta.diff.header.command"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#3ddffd"
+    }
+  },
+  "0059": {
+    "name": "Git commit subject",
+    "scope": [
+      "meta.scope.message.git-commit"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#faebf8"
+    }
+  }
+}

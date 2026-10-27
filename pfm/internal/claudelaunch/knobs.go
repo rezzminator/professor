@@ -12,6 +12,8 @@ const (
 	knobCache1H                    = "cache1h"
 	knobSystemPrompt               = "systemPrompt"
 	knobNativeCursor               = "nativeCursor"
+	knobRemoteControl              = "remoteControl"
+	knobSubagentStatuslineTrace    = "subagentStatuslineTrace"
 	knobMaxSubagentSpawnDepth      = "maxSubagentSpawnDepth"
 	knobMaxConcurrentSubagents     = "maxConcurrentSubagents"
 	knobWebSearchesPerSession      = "webSearchesPerSession"
@@ -62,25 +64,32 @@ const (
 	envGatewayDiscovery            = "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
 	envCodexThreadID               = "CODEX_THREAD_ID"
 	envNativeCursor                = "CLAUDE_CODE_NATIVE_CURSOR"
-	envSpawnDepth                  = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
-	envConcurrentSubagents         = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
-	envWebSearches                 = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
-	envTmuxTruecolor               = "CLAUDE_CODE_TMUX_TRUECOLOR"
-	envAgentTeams                  = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
-	envFunctionHooks               = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
-	flagSettings                   = "--settings"
-	flagMCPConfig                  = "--mcp-config"
-	flagModel                      = "--model"
-	flagEffort                     = "--effort"
-	flagSessionID                  = "--session-id"
-	flagResume                     = "--resume"
-	flagName                       = "--name"
-	flagNameShort                  = "-n"
-	flagPromptFile                 = "--system-prompt-file"
-	flagSystemPrompt               = "--system-prompt"
-	flagForkSession                = "--fork-session"
-	flagAllowBypass                = "--allow-dangerously-skip-permissions"
-	flagBypass                     = "--dangerously-skip-permissions"
+	// EnvSubagentStatuslineTrace is the settings env variable claude.subagentStatuslineTrace sets
+	// to 1; the sub-agent status line reads it.
+	EnvSubagentStatuslineTrace = "PFM_SUBAGENT_STATUSLINE_TRACE"
+	envSpawnDepth              = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
+	envConcurrentSubagents     = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
+	envWebSearches             = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
+	envTmuxTruecolor           = "CLAUDE_CODE_TMUX_TRUECOLOR"
+	envAgentTeams              = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+	envFunctionHooks           = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
+	flagSettings               = "--settings"
+	flagMCPConfig              = "--mcp-config"
+	flagModel                  = "--model"
+	flagEffort                 = "--effort"
+	flagSessionID              = "--session-id"
+	flagResume                 = "--resume"
+	flagResumeShort            = "-r"
+	flagContinue               = "--continue"
+	flagContinueShort          = "-c"
+	flagRemoteControl          = "--remote-control"
+	flagName                   = "--name"
+	flagNameShort              = "-n"
+	flagPromptFile             = "--system-prompt-file"
+	flagSystemPrompt           = "--system-prompt"
+	flagForkSession            = "--fork-session"
+	flagAllowBypass            = "--allow-dangerously-skip-permissions"
+	flagBypass                 = "--dangerously-skip-permissions"
 )
 
 const (
@@ -222,12 +231,24 @@ var Knobs = func() []Knob {
 			"Choose the managed system prompt.",
 		},
 		Knob{
+			knobRemoteControl, WireFlag, flagRemoteControl, SourceConfig, true,
+			"Request Remote Control for every interactive session; Claude enforces eligibility.",
+		},
+		Knob{
 			knobNativeCursor,
 			WireSettings,
 			"env." + envNativeCursor,
 			SourceConfig,
 			false,
 			"Enable Claude's native cursor when configured.",
+		},
+		Knob{
+			knobSubagentStatuslineTrace,
+			WireSettings,
+			"env." + EnvSubagentStatuslineTrace,
+			SourceConfig,
+			false,
+			"Turn on the sub-agent status line's trace when configured.",
 		},
 		Knob{
 			knobMaxSubagentSpawnDepth,
@@ -309,7 +330,14 @@ var Knobs = func() []Knob {
 			defaultWord,
 			"Use the managed output style.",
 		},
-		Knob{knobTheme, WireSettings, knobTheme, SourceConfig, nil, "Carry the selected Claude theme."},
+		Knob{
+			knobTheme,
+			WireSettings,
+			knobTheme,
+			SourceConfig,
+			nil,
+			"Carry the selected Claude theme unless theme sync owns it.",
+		},
 		Knob{
 			knobCleanupPeriodDays,
 			WireSettings,
@@ -318,7 +346,7 @@ var Knobs = func() []Knob {
 			36500,
 			"Keep managed transcripts.",
 		},
-		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "13 registrations", "Attach the fleet hook set."},
+		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "23 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},
 		Knob{
 			knobSubagentStatusLine,

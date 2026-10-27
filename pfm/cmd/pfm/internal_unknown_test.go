@@ -37,9 +37,11 @@ func TestRunInternalUnknownSubcommandIsANonBlockingHookError(t *testing.T) {
 // keeps the hooks it read at start, so the stripped `internal compact-nudge`
 // still fires on every prompt until the session restarts. It must exit 0 and
 // print nothing — a UserPromptSubmit hook's stdout becomes prompt context, and
-// its stderr is a warning on every prompt that no install can clear.
+// its stderr is a warning on every prompt that no install can clear. The
+// same holds for `internal explore-deny`, the PreToolUse Agent|Task hook the
+// launch line of a chat started before the upgrade still carries.
 func TestRunInternalRetiredHookIsASilentNoOp(t *testing.T) {
-	for _, name := range []string{"compact-nudge", "clear-hide", "callmeter"} {
+	for _, name := range []string{"compact-nudge", "clear-hide", "callmeter", "explore-deny"} {
 		var stdout, stderr bytes.Buffer
 		if code := runInternal([]string{name}, &stdout, &stderr, commandRuntime{}); code != 0 ||
 			stdout.Len() != 0 || stderr.Len() != 0 {

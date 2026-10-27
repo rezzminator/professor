@@ -22,12 +22,14 @@ source "$LANES/../../../scripts/shtest.sh"
 R="$T/repo-$BASHPID"
 FAIL_DIR="/tmp/$(basename "$R")/lanes/root-failures"
 # One EXIT trap for both scratch roots: a second trap would replace shtest's.
-trap 'rm -rf -- "$T" "/tmp/$(basename "$R")"' EXIT
+trap 'rm -rf -- "$T" "/tmp/$(basename "$R")" "/tmp/$(basename "$R")-wt"' EXIT
 mkdir -p "$R/infra/fence/lanes"
 cp "$SUT" "$R/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$R/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$R/infra/fence/fence-env.sh"
 cp "$LANES/../image-key.sh" "$R/infra/fence/image-key.sh"
+cp "$LANES/../shared.sh" "${R}/infra/fence/shared.sh"
+cp "$LANES/../mkdir-lock.sh" "$R/infra/fence/mkdir-lock.sh"
 printf 'FROM scratch\n' >"$R/infra/fence/pfm-dev.Dockerfile"
 printf 'services: {}\n' >"$R/infra/fence/docker-compose.yml"
 shtest_compose_config "$R/infra/fence" >"$T/compose-config.yml"
@@ -56,6 +58,7 @@ case "$1" in
       if [ "${STUB_PROBE_FAIL:-0}" = 1 ]; then echo 'fixture image probe error' >&2; exit 6; fi
       echo 'sha256:fixture-base-id'; exit 0
     fi
+    [ -e "${STUB_ROOT_PRESENT:-/nonexistent}" ] && exit 0
     exit 1 ;; # root image inspect: no root for this hash yet
   inspect)
     if [ "${STUB_PROBE_FAIL:-0}" = 1 ]; then echo 'fixture inspect probe error' >&2; exit 6; fi
@@ -80,7 +83,7 @@ case "$1" in
           if [ "$STUB_COMMIT_MODE" = create ]; then reason='no such file or directory'; else reason='input/output error'; fi
           echo "Error response from daemon: failed to export layer: CreateDiff: mount callback failed on /var/lib/desktop-containerd/daemon/tmpmounts/containerd-mount3073836047: mount callback failed on /var/lib/desktop-containerd/daemon/tmpmounts/containerd-mount2491854757: failed to commit: rename /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/ingest/326d610ace0d011d9a568ef39c8380be31c458b4acfa5c0b1aa501863f59e1e8/data /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/blobs/sha256/9d53aef03c0266b814e656a1361946cc1737cbab752e32c7ab1e9b7f4a5b6f00: $reason" >&2 ;;
         lchown)
-          echo 'Error response from daemon: failed to apply diff: failed to Lchown "/var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/pfm/harvest-python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9" for UID 0, GID 0: lchown /var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/pfm/harvest-python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9: no such file or directory' >&2 ;;
+          echo 'Error response from daemon: failed to apply diff: failed to Lchown "/var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/harvester/python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9" for UID 0, GID 0: lchown /var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/27301/fs/root/.local/state/harvester/python/models/hf/hub/models--docling-project--docling-models/blobs/2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9: no such file or directory' >&2 ;;
         near-open) echo 'Error response from daemon: open /x: no such file or directory' >&2 ;;
       esac
       exit 1
@@ -142,9 +145,7 @@ ens_line="$(grep -nx 'fence_volumes_ensure' "$STUB_DOCKER_LOG" | head -1 | cut -
 if [ -n "$hk_line" ] && [ -n "$ens_line" ] && [ -n "$first_build" ] && [ "$hk_line" -lt "$first_build" ] && [ "$ens_line" -lt "$first_build" ]; then
   ok "housekeeping runs with the root's hash, and the caches are ensured, before the base build"
 else bad "housekeeping before build" "$(cat "$STUB_DOCKER_LOG")"; fi
-if grep -q -- '-v pfm-lane-harvest-cache:/root/.local/state/pfm/harvest-python/cache -v pfm-lane-uv-cache:/root/.cache/uv -e UV_CACHE_DIR=/root/.cache/uv -e UV_LINK_MODE=copy' "$STUB_DOCKER_LOG"; then
-  ok "root build mounts only the harvest download and uv caches"
-else bad "root build cache mounts" "$(grep '^run ' "$STUB_DOCKER_LOG")"; fi
+
 
 # Two builds of one hash own distinct names; neither removes an older container.
 first_build="$(build_name)"; first_pin="$(pin_name)"
@@ -268,11 +269,13 @@ else bad "empty fleet gate" "rc=$RC" "$OUT"; fi
 
 # 6 — the hash follows on-disk build content, never index or commit state.
 H="$T/hash-repo"
-mkdir -p "$H/infra/fence/lanes" "$H/infra/fence/jscpd" "$H/pfm/internal/alpha/testdata" "$H/pfm/testdata" "$H/pfm/e2e" "$H/pfm/internal/harvestpy/assets"
+mkdir -p "$H/infra/fence/lanes" "$H/infra/fence/jscpd" "$H/pfm/internal/alpha/testdata" "$H/pfm/testdata" "$H/pfm/e2e" "$H/pfm/internal/alpha/assets"
 cp "$SUT" "$H/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$H/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$H/infra/fence/fence-env.sh"
 cp "$LANES/../image-key.sh" "$H/infra/fence/image-key.sh"
+cp "$LANES/../shared.sh" "$H/infra/fence/shared.sh"
+cp "$LANES/../mkdir-lock.sh" "$H/infra/fence/mkdir-lock.sh"
 cp "$R/infra/fence/housekeeping.sh" "$H/infra/fence/housekeeping.sh"
 for script in provision adopt cred-scan; do cp "$R/infra/fence/lanes/$script.sh" "$H/infra/fence/lanes/$script.sh"; done
 for file in E1.sh lib.sh beats.md; do printf 'fixture\n' >"$H/infra/fence/lanes/$file"; done
@@ -282,10 +285,10 @@ printf 'test\n' >"$H/pfm/internal/alpha/x_test.go"
 printf 'fixture\n' >"$H/pfm/internal/alpha/testdata/input"
 printf 'fixture\n' >"$H/pfm/testdata/input"
 printf 'e2e\n' >"$H/pfm/e2e/example.go"
-printf 'test\n' >"$H/pfm/internal/harvestpy/assets/example_test.py"
+printf 'package alpha\n' >"$H/pfm/internal/alpha/assets/example_test.go"
 (cd "$H" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
 base="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
-for file in infra/fence/lanes/E1.sh infra/fence/lanes/lib.sh infra/fence/lanes/beats.md infra/fence/lanes/Z.sh infra/fence/lanes/provision.sh infra/fence/jscpd/package-lock.json pfm/go.mod pfm/internal/alpha/x_test.go pfm/internal/alpha/testdata/input pfm/testdata/input pfm/e2e/example.go pfm/internal/harvestpy/assets/example_test.py; do
+for file in infra/fence/lanes/E1.sh infra/fence/lanes/lib.sh infra/fence/lanes/beats.md infra/fence/lanes/Z.sh infra/fence/lanes/provision.sh infra/fence/jscpd/package-lock.json pfm/go.mod pfm/internal/alpha/x_test.go pfm/internal/alpha/testdata/input pfm/testdata/input pfm/e2e/example.go pfm/internal/alpha/assets/example_test.go; do
   printf 'edit\n' >>"$H/$file"
   changed="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
   case "$file" in
@@ -355,9 +358,50 @@ rm "$ES/cmd/engine-sync/extra.go"
 if [ "$es_untracked" != "$es_base" ] && [ "$es_base" != "$base" ]; then
   ok "an untracked engine-sync source file and the source's presence both change the hash"
 else bad "engine-sync source presence" "base=$base es_base=$es_base es_untracked=$es_untracked"; fi
+# 6c — each plugin checkout pfm install copies into the image is a hash input, as the
+# copy takes it: ignored files count, node_modules does not, a missing checkout is absent.
+PC="$H/plugins/demo/plugins/demo"
+pc_none="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+mkdir -p "$H/plugins/demo"
+pc_empty="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+mkdir -p "$PC/.claude-plugin" "$PC/node_modules/dep"
+printf '{"name":"demo"}\n' >"$PC/.claude-plugin/plugin.json"
+pc_base="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+printf 'dep\n' >"$PC/node_modules/dep/index.js"
+pc_nm="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+printf 'types/\n' >"$PC/.gitignore"
+pc_gi="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+mkdir -p "$PC/types"; printf 'generated\n' >"$PC/types/index.d.ts"
+pc_ignored="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+printf 'edit\n' >>"$PC/.claude-plugin/plugin.json"
+pc_edit="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+# pfm's copy digest counts every directory and every permission bit, so an empty
+# directory or a mode change the exec bit does not show is a difference too.
+mkdir -p "$PC/empty"
+pc_dir="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+chmod 600 "$PC/.claude-plugin/plugin.json"
+pc_mode="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+chmod 700 "$PC/empty"
+pc_dirmode="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+rm -rf "$H/plugins"
+if [ "$pc_dir" != "$pc_edit" ] && [ "$pc_mode" != "$pc_dir" ] && [ "$pc_dirmode" != "$pc_mode" ]; then
+  ok "a plugin checkout's empty directory, a file's non-exec mode bits and a directory's mode change the hash"
+else bad "plugin checkout directories and modes" "edit=$pc_edit dir=$pc_dir mode=$pc_mode dirmode=$pc_dirmode"; fi
+if [ "$pc_empty" != "$pc_none" ] && [ "$pc_base" != "$pc_empty" ] && [ "$pc_nm" = "$pc_base" ] &&
+  [ "$pc_ignored" != "$pc_gi" ] && [ "$pc_edit" != "$pc_ignored" ]; then
+  ok "a plugin checkout's copied files, ignored ones included, change the hash; node_modules does not; a missing checkout hashes as absent"
+else bad "plugin checkout hash input" "none=$pc_none empty=$pc_empty base=$pc_base nm=$pc_nm gi=$pc_gi ignored=$pc_ignored edit=$pc_edit"; fi
 HASH_BIN="$T/hash-bin"; mkdir -p "$HASH_BIN"
 cat >"$HASH_BIN/git" <<'EOF'
 #!/usr/bin/env bash
+if [ -n "${STUB_HASH_FAIL_SOURCE:-}" ]; then
+  if [ "${1:-}" = -C ] && [ "${2:-}" = "$STUB_HASH_FAIL_SOURCE" ] &&
+    [ "${3:-}" = "$STUB_HASH_FAIL_OPERATION" ]; then
+    echo "harvester $STUB_HASH_FAIL_OPERATION refused (fixture)" >&2
+    exit 128
+  fi
+  exec /usr/bin/git "$@"
+fi
 case "$*" in *ls-files*) echo 'listing refused (fixture)' >&2; exit 128 ;; esac
 exec /usr/bin/git "$@"
 EOF
@@ -365,10 +409,76 @@ chmod +x "$HASH_BIN/git"
 OUT="$(PATH="$HASH_BIN:$PATH" bash "$H/infra/fence/lanes/root.sh" --print-hash 2>&1)"; RC=$?
 if [ "$RC" -eq 2 ] && grep -q 'HASH-UNDERIVABLE.*listing refused' <<<"$OUT"; then ok "a failed git listing refuses image reuse"
 else bad "failed git listing" "rc=$RC out=$OUT"; fi
+HS="$T/harvester-src"
+mkdir -p "$HS/cmd/harvester"
+printf 'module example.test/harvester\n' >"$HS/go.mod"
+printf 'package main\n' >"$HS/cmd/harvester/main.go"
+(cd "$HS" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
+for operation in ls-files hash-object; do
+  OUT="$(PATH="$HASH_BIN:$PATH" HARVESTER_SRC="$HS" ENGINE_SYNC_SRC="$ES" \
+    STUB_HASH_FAIL_SOURCE="$HS" STUB_HASH_FAIL_OPERATION="$operation" \
+    bash "$H/infra/fence/lanes/root.sh" --print-hash 2>&1)"; RC=$?
+  if [ "$RC" -eq 2 ] && grep -q '^root: HASH-UNDERIVABLE:' <<<"$OUT"; then
+    ok "a failed harvester $operation refuses image reuse before successful engine-sync hashing"
+  else bad "failed harvester $operation" "rc=$RC out=$OUT"; fi
+done
 for flag in --accounts --no-adopt; do
   case "$flag" in --accounts) set -- "$flag" 1 ;; *) set -- "$flag" ;; esac
   OUT="$(bash "$R/infra/fence/lanes/root.sh" "$@" 2>&1)"; RC=$?
   if [ "$RC" -eq 2 ] && grep -q '^usage: root.sh' <<<"$OUT"; then ok "unsupported root input $flag reports usage"
   else bad "invalid root input $flag" "rc=$RC" "$OUT"; fi
 done
+# One root build per hash at a time: a build holds /tmp/{project}/lanes/root-build-<hash>.lock over the
+# inspect and the build, so two concurrent builds never race on one tag or the shared cache volumes. A
+# waiter that finds the image once the lock is free reuses it; a dead holder's lock is broken.
+HASH="$(bash "$R/infra/fence/lanes/root.sh" --print-hash 2>/dev/null)"
+LK="/tmp/$(basename "$R")/lanes/root-build-$HASH.lock"
+mkdir -p "$LK"
+sleep 30 &
+holder=$!
+printf '%s\n' "$holder" >"$LK/pid"
+: >"$STUB_DOCKER_LOG"
+STUB_ROOT_PRESENT="$T/root.present" bash "$R/infra/fence/lanes/root.sh" >"$T/wait.out" 2>&1 </dev/null &
+waiter=$!
+for ((i = 0; i < 150; i++)); do grep -q 'waiting for the root build' "$T/wait.out" 2>/dev/null && break; sleep 0.1; done
+waited="$(grep -c 'waiting for the root build' "$T/wait.out")"
+: >"$T/root.present"
+rm -rf "$LK"
+wait "$waiter"; wrc=$?
+ps -o args= -p "$holder" 2>/dev/null | grep -qF 'sleep 30' && kill "$holder" 2>/dev/null
+if [ "$waited" -ge 1 ] && [ "$wrc" -eq 0 ] && grep -q "^root: reusing pfm-lane-root:$HASH" "$T/wait.out" &&
+  ! grep -qE '^(run -d|commit) ' "$STUB_DOCKER_LOG" && [ ! -e "$LK" ]; then
+  ok "a root build waits for a concurrent build of its hash, then reuses the image it made and leaves no lock"
+else bad "concurrent root build" "waited=$waited rc=$wrc" "$(cat "$T/wait.out")" "$(cat "$STUB_DOCKER_LOG")"; fi
+rm -f "$T/root.present"
+mkdir -p "$LK"
+printf '999999\n' >"$LK/pid"
+run_root ok
+if [ "$RC" -eq 0 ] && grep -q '^commit ' "$STUB_DOCKER_LOG" && [ ! -e "$LK" ]; then
+  ok "a dead holder's root build lock is broken, the build runs and releases its lock"
+else bad "dead holder lock" "rc=$RC" "$OUT"; fi
+# The lock is the machine's, not the worktree's: a build from a linked worktree of the repo waits on the
+# lock under the main checkout's /tmp/{project}/lanes, so two worktrees on one hash never build one tag at once.
+WT="$R-wt"
+git -C "$R" worktree add -q "$WT" 2>/dev/null || bad "cross-worktree lock: git worktree add failed" "$WT"
+WHASH="$(bash "$WT/infra/fence/lanes/root.sh" --print-hash 2>/dev/null)"
+LK="/tmp/$(basename "$R")/lanes/root-build-$WHASH.lock"
+mkdir -p "$LK"
+sleep 30 &
+holder=$!
+printf '%s\n' "$holder" >"$LK/pid"
+: >"$STUB_DOCKER_LOG"
+STUB_ROOT_PRESENT="$T/root.present" bash "$WT/infra/fence/lanes/root.sh" >"$T/wtwait.out" 2>&1 </dev/null &
+waiter=$!
+for ((i = 0; i < 150; i++)); do grep -q 'waiting for the root build' "$T/wtwait.out" 2>/dev/null && break; sleep 0.1; done
+waited="$(grep -c "waiting for the root build of $WHASH held by pid $holder ($LK)" "$T/wtwait.out")"
+: >"$T/root.present"
+rm -rf "$LK"
+wait "$waiter"; wrc=$?
+ps -o args= -p "$holder" 2>/dev/null | grep -qF 'sleep 30' && kill "$holder" 2>/dev/null
+rm -f "$T/root.present"
+if [ -n "$WHASH" ] && [ "$waited" -ge 1 ] && [ "$wrc" -eq 0 ] && grep -q "^root: reusing pfm-lane-root:$WHASH" "$T/wtwait.out" && [ ! -e "$LK" ]; then
+  ok "a root build from a linked worktree waits on the main checkout's lock for its hash, then reuses the image"
+else bad "cross-worktree root build lock" "hash=$WHASH waited=$waited rc=$wrc" "$(cat "$T/wtwait.out")"; fi
+
 shtest_end

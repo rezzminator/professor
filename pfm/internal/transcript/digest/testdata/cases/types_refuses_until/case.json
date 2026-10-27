@@ -1,9 +1,0 @@
-{
- "args": [
-  "types",
-  "{CLAUDE}",
-  "--until",
-  "20:01"
- ],
- "dirs": []
-}

@@ -93,16 +93,10 @@ type Request struct {
 	Then         string
 	// Name is the chat's pfm label, carried to Claude as --name: on --new the
 	// custom title the reborn chat inherits (followName also types /rename and
-	// relabels the session left behind). A same-pane Claude reboot owns it
-	// instead: prepareReload sets it from Label for the session it resumes.
-	// "" carries nothing.
+	// relabels the session left behind). A same-pane Claude reboot sets none:
+	// the session it resumes restores its own name (claudelaunch.Render gives
+	// a resume no --name). "" carries nothing.
 	Name string
-	// Label is set for a same-pane Claude reboot only: it resolves a session's
-	// pfm label (store.SessionLabel), and prepareReload asks it again whenever
-	// a handoff moves the reboot onto another session, so the reborn pane
-	// never wears the label of the session the pane used to show. When set it
-	// owns Name; "" carries no --name; the resolver reports its own failure.
-	Label func(sessionID string) string
 	// Model and Effort pin the reborn seat's tier — the same pair
 	// HeadlessRequest carries for a fresh launch (internal/action/headless.go).
 	// "" means "inherit whatever the CLI/account would have chosen on its
@@ -422,7 +416,7 @@ func Run(
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
 	if promptWarning != "" {
-		announcePane(ctx, request, tmux, stderr, "pfm reload: "+promptWarning)
+		announcePane(ctx, request, tmux, stderr, "pfm chat reload: "+promptWarning)
 	}
 	carrySchedules(ctx, leftBehind, request.SessionID, stderr)
 	if err := writeHandoff(lock, handoffRecord{
@@ -490,7 +484,11 @@ func waitCallerIdle(
 				announced = true
 				fmt.Fprintln(stderr, "pfm chat reload: the chat's turn is still running — holding /exit until it ends")
 				announcePane(
-					ctx, request, tmux, stderr, "pfm reload: waiting for this turn to end, then rebooting this chat",
+					ctx,
+					request,
+					tmux,
+					stderr,
+					"pfm chat reload: waiting for this turn to end, then rebooting this chat",
 				)
 			}
 		case !showsComposer:
@@ -506,7 +504,7 @@ func waitCallerIdle(
 			stable++
 			if stable >= 2 {
 				if announced {
-					announcePane(ctx, request, tmux, stderr, "pfm reload: rebooting now")
+					announcePane(ctx, request, tmux, stderr, "pfm chat reload: rebooting now")
 				}
 				return capture, nil
 			}
@@ -575,6 +573,11 @@ func codexRun(request Request) (string, error) {
 	for _, name := range claudelaunch.Hygiene() {
 		parts = append(parts, "-u", name)
 	}
+	if extensionEnv := strings.TrimSpace(
+		action.ExtensionShellEnv(request.Machine, pfmengine.MustLookup(pfmengine.Codex).LongName),
+	); extensionEnv != "" {
+		parts = append(parts, extensionEnv)
+	}
 	if request.CodexHome != "" {
 		parts = append(parts, "CODEX_HOME="+action.Quote(request.CodexHome))
 	}
@@ -585,14 +588,19 @@ func codexRun(request Request) (string, error) {
 	if binary != pfmengine.MustLookup(pfmengine.Codex).Binary {
 		binary = action.Quote(binary)
 	}
-	parts = append(parts, binary)
+	// The respawned chat runs in-process, so its hooks reach its pane.
+	parts = append(parts, binary, pfmengine.CodexNoDaemon)
 	if request.CodexYolo {
 		parts = append(parts, "--dangerously-bypass-approvals-and-sandbox")
 	} else {
 		parts = append(parts, "--sandbox", "workspace-write")
 	}
-	if request.Model != "" {
-		parts = append(parts, "--model", action.Quote(request.Model))
+	model, err := pfmengine.CodexModel(request.Model, request.Home)
+	if err != nil {
+		return "", fmt.Errorf("resolve codex respawn model: %w", err)
+	}
+	if model != "" {
+		parts = append(parts, "--model", action.Quote(model))
 	}
 	if effort != "" {
 		flag := action.CodexEffortArg(effort)
@@ -661,18 +669,25 @@ ready:
 	if !live {
 		return fmt.Errorf("reload --then: no live %s on the pane", engineLabel(request.Engine))
 	}
+	// Prove the reborn composer empty immediately before either engine's
+	// send. A resumed draft must never become part of the wake prompt.
+	baseline, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+	if err != nil {
+		return fmt.Errorf("reload --then: read composer before delivery: %w", err)
+	}
+	if !composerDrawn(baseline) || selectorOpen(baseline) || pfmengine.ClaudeTrustDialog(baseline) ||
+		pfmcall.IsFooterBusy(request.Engine, baseline) {
+		return errors.New("reload --then: composer changed before delivery; nothing was typed")
+	}
+	empty, draft, err := reloadComposerEmpty(baseline, styledCapture(ctx, request, tmux))
+	if err != nil {
+		return fmt.Errorf("reload --then: %w", err)
+	}
+	if !empty {
+		return fmt.Errorf("reload --then: %w", composerDraftError(draft))
+	}
 	if request.Engine == pfmengine.Codex {
 		return deliverCodexThen(ctx, request, options, tmux, stderr)
-	}
-	// A composer baseline captured BEFORE the send lets us tell a freshly
-	// typed paste placeholder from one left over from an earlier turn — a
-	// pre-existing placeholder must never count as proof. haveBaseline is
-	// tracked explicitly: a failed capture must never silently masquerade
-	// as an empty-but-legitimate baseline (an error is never absence).
-	baseline, baselineErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
-	haveBaseline := baselineErr == nil
-	if baselineErr != nil {
-		fmt.Fprintf(stderr, "pfm chat reload --then: capture composer baseline before typing prompt: %v\n", baselineErr)
 	}
 	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, request.Then); err != nil {
 		return fmt.Errorf("reload --then: type prompt: %w", err)
@@ -699,22 +714,6 @@ ready:
 		composer := composerText(capture)
 		hasTail := strings.Contains(squashSpace(composer), squashSpace(needle))
 		hasPlaceholder := pfmcall.HasPastePlaceholder(composer)
-		if !haveBaseline {
-			// No baseline means we cannot rule out a placeholder that was
-			// already sitting in the composer before we ever typed (e.g. a
-			// leftover unsent paste). A refusal here costs nothing —
-			// failThen preserves the prompt on disk — so require the tail
-			// needle, which is the human's own new prompt text and cannot
-			// come from a stale paste.
-			if hasTail {
-				typed = true
-				break
-			}
-			if err := options.Clock.Sleep(ctx, 200*time.Millisecond); err != nil {
-				return err
-			}
-			continue
-		}
 		// capture != baseline is a weak, supporting signal only: both TUIs
 		// animate every frame (spinners, token counters, clocks), so the
 		// pane differs from any baseline within a beat regardless of
@@ -733,7 +732,7 @@ ready:
 	}
 	if !typed {
 		return errors.New(
-			"reload --then: typed text never rendered in the composer — looked for the prompt's tail text and, when a pre-send baseline was captured, a paste placeholder there too, but neither appeared — refusing blind Enter",
+			"reload --then: typed text never rendered in the composer — looked for the prompt's tail text or a new paste placeholder there, but neither appeared — refusing blind Enter",
 		)
 	}
 	// The submit proof reuses the SAME tail needle the typed proof just saw

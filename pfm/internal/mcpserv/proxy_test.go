@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -24,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -75,7 +75,8 @@ func proxyTestService(marker string, rows []compose.Row, calls *[][]string) *Ser
 		last:   chat.LastResult{Text: marker + " self answer\n"}, resolveScopedSelf: true,
 	}
 	return newService(marker, &backend{
-		chat: verbs, runtimeIdentity: "sha256:proxy-test",
+		paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+		chat:  verbs, runtimeIdentity: "sha256:proxy-test",
 		dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
 			*calls = append(*calls, append([]string(nil), args...))
 			_, _ = io.WriteString(stdout, marker+"\n")
@@ -119,7 +120,7 @@ func TestStdioProxyReinitializesAfterDaemonReplacement(t *testing.T) {
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
@@ -463,7 +464,7 @@ func TestStdioProxyAllowsHealthyCallsPastRetryWindow(t *testing.T) {
 
 func TestStdioProxyAllowsExistingMaximumCaptureResponse(t *testing.T) {
 	t.Parallel()
-	service := newService("test", &backend{chat: &fakeChatVerbs{
+	service := newService("test", &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
 		last: chat.LastResult{Text: strings.Repeat("x", maxCaptureBytes)},
 	}})
 	server := httptest.NewServer(proxyTestDaemon(service))
@@ -488,7 +489,7 @@ func TestStdioProxyAllowsExistingMaximumCaptureResponse(t *testing.T) {
 
 func TestStdioProxyAllowsEscapedMaximumCaptureResponse(t *testing.T) {
 	t.Parallel()
-	service := newService("test", &backend{chat: &fakeChatVerbs{
+	service := newService("test", &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
 		last: chat.LastResult{Text: strings.Repeat("<", maxCaptureBytes)},
 	}})
 	server := httptest.NewServer(proxyTestDaemon(service))
@@ -527,14 +528,6 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := filepath.Join(root, "tmux", "cc-proxy-split")
-	command := exec.Command(
-		"tmux", "-S", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "proxy-split", "sleep 120",
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start tmux: %v: %s", err, output)
-	}
-	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socket, "kill-server").Run() })
 	if err := os.WriteFile(
 		filepath.Join(root, "sid", "cc-proxy-split.%0"),
 		[]byte(transcript+"\n"),
@@ -542,37 +535,49 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TMUX", socket+",1,0")
-	t.Setenv("TMUX_PANE", "%0")
-	t.Setenv(resolve.ClaudeSessionEnv, "")
-	t.Setenv(resolve.CodexThreadEnv, "")
+	previous := proxyWhoami
+	proxyWhoami = resolve.WhoamiDependencies{
+		Environment: &resolve.WhoamiEnvironment{TMUX: socket + ",1,0", TMUXPane: "%0"},
+		Namer:       stdioTestNamer("proxy-split"),
+		SelfPID:     4100,
+		Processes:   stdioTestProcessTree{},
+	}
+	t.Cleanup(func() { proxyWhoami = previous })
 	var warnings proxyTestBuffer
 	proxy := newStdioProxy(context.Background(), "unused", &warnings)
-	if proxy.identity == nil || proxy.identity.ID != id || proxy.identity.Pane != "%0" {
-		t.Fatalf(
-			"proxy identity = %+v, want transcript %q on pane %%0; warnings: %s",
-			proxy.identity,
-			id,
-			warnings.String(),
-		)
+	var received map[string]any
+	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","id":2,"result":{}}`)),
+		}, nil
+	})}
+	var output bytes.Buffer
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
+	params, _ := received["params"].(map[string]any)
+	meta, _ := params["_meta"].(map[string]any)
+	identity, _ := meta["pfmProxy"].(map[string]any)
+	if identity["id"] != id || identity["pane"] != "%0" {
+		t.Fatalf("proxy identity=%v, want transcript %q on pane %%0; warnings: %s", identity, id, warnings.String())
 	}
 }
 
 // A daemon restarted under a different chat runtime between the original send
 // and its replay: a chat call is refused rather than replayed into the wrong
-// fleet, while a harvester call — which carries no chat runtime — replays and
-// is answered. The runtime is probed before a replay, never before the
+// fleet. The runtime is probed before a replay, never before the
 // original send.
-func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
+func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct {
-		name       string
-		call       string
-		wantReplay bool
+		name string
+		call string
 	}{
 		{name: "chat call refused", call: "new"},
-		{name: "servicedesk call refused", call: "servicedesk"},
-		{name: "harvester call replayed", call: "read", wantReplay: true},
+		{name: "kill call refused", call: killToolName},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			var routeCalls, firstSendProbes atomic.Int32
@@ -608,37 +613,25 @@ func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
 			defer server.Close()
 			proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 			proxy.expectedRuntimeIdentity = "sha256:selected"
-			if row.wantReplay {
-				proxy.family = pfmconfig.MCPServerHarvester
-			}
 			proxy.sessionID = "old-session"
 			proxy.protocol = "2025-06-18"
 			proxy.retryDelay = time.Millisecond
 			proxy.retryWindow = time.Second
 			proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
 			frame := []byte(proxyTestToolCall(8, row.call, `{"name":"wrong-fleet"}`))
-			response, err := proxy.sendWithRetry(context.Background(), frame, false)
+			_, err := proxy.sendWithRetry(context.Background(), frame, false)
 			if firstSendProbes.Load() != 0 {
 				t.Fatalf("first send probed /status %d times, want none", firstSendProbes.Load())
 			}
-			if !row.wantReplay {
-				const refused = "runtime mismatch during recovery; request was not replayed"
-				if err == nil || !strings.Contains(err.Error(), refused) {
-					t.Fatalf("mismatched replacement error = %v, want contextual no-replay error", err)
-				}
-				if routeCalls.Load() != 1 {
-					t.Fatalf(
-						"mismatched replacement received %d route posts, want only failed original",
-						routeCalls.Load(),
-					)
-				}
-				return
+			const refused = "runtime mismatch during recovery; request was not replayed"
+			if err == nil || !strings.Contains(err.Error(), refused) {
+				t.Fatalf("mismatched replacement error = %v, want contextual no-replay error", err)
 			}
-			if err != nil {
-				t.Fatalf("harvester replay error = %v, want the replayed answer", err)
-			}
-			if want := `{"jsonrpc":"2.0","id":8,"result":{"answered":"tools/call"}}`; string(response) != want {
-				t.Fatalf("harvester replay response = %s, want %s", response, want)
+			if routeCalls.Load() != 1 {
+				t.Fatalf(
+					"mismatched replacement received %d route posts, want only failed original",
+					routeCalls.Load(),
+				)
 			}
 		})
 	}
@@ -684,9 +677,11 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.sidDir = t.TempDir()
-	proxy.identity = &ProxyIdentity{
-		Version: ProxyWireVersion, Session: "cc-seat", SocketPath: "/tmp/tmux-1000/cc-seat",
-		SocketName: "cc-seat", Pane: "%7", Engine: "claude", ID: "session-id", Source: "tmux",
+	proxy.identify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{
+			Session: "cc-seat", SocketPath: "/tmp/tmux-1000/cc-seat",
+			SocketName: "cc-seat", Pane: "%7", Engine: "claude", ID: "session-id", Source: "tmux",
+		}, nil
 	}
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
@@ -711,9 +706,6 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	}
 }
 
-// A harvester call needs no current transcript: with the crumb unreadable or
-// the crumb directory not absolute it still forwards the identity resolved at
-// start, where a chat call is refused.
 func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	t.Parallel()
 	var received []map[string]any
@@ -741,9 +733,11 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	writeCrumb("conversation-a")
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.sidDir = sidDir
-	proxy.identity = &ProxyIdentity{
-		Version: ProxyWireVersion, Session: "seat", SocketName: socket,
-		Pane: "%1", Engine: "claude", ID: "conversation-a",
+	proxy.identify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{
+			Session: "seat", SocketName: socket,
+			Pane: "%1", Engine: "claude", ID: "conversation-a",
+		}, nil
 	}
 	var output bytes.Buffer
 	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
@@ -767,7 +761,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	missingParams := received[2]["params"].(map[string]any)
 	missingMeta := missingParams["_meta"].(map[string]any)
 	missingIdentity := missingMeta["pfmProxy"].(map[string]any)
-	if missingIdentity["id"] != "" {
+	if id, _ := missingIdentity["id"].(string); id != "" {
 		t.Fatalf("missing current crumb replayed cached id: %+v", missingIdentity)
 	}
 	if err := os.Mkdir(crumb, 0o700); err != nil {
@@ -782,23 +776,6 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 			output.String(),
 		)
 	}
-	assertHarvesterCallForwarded := func(id int) {
-		previous := proxy.family
-		proxy.family = pfmconfig.MCPServerHarvester
-		defer func() { proxy.family = previous }()
-		t.Helper()
-		proxy.forward(context.Background(), []byte(proxyTestToolCall(id, "read", `{}`)), &output)
-		meta := received[len(received)-1]["params"].(map[string]any)["_meta"].(map[string]any)
-		if len(received) != before+1 || meta["pfmProxy"].(map[string]any)["id"] != "conversation-a" {
-			t.Fatalf("harvester call without a usable crumb: received=%d output=%s",
-				len(received)-before, output.String())
-		}
-		received = received[:before]
-	}
-	assertHarvesterCallForwarded(51)
-	proxy.sidDir = "relative/sid"
-	assertHarvesterCallForwarded(52)
-	proxy.sidDir = sidDir
 	if err := os.Remove(crumb); err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +808,7 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
@@ -839,7 +816,7 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	harness.write(t, proxyTestToolCall(2, "whoami", `{}`))
 	whoami := proxyTestStructured(t, harness.read(t))
 	message, _ := whoami["message"].(string)
-	if whoami["status"] != "not_found" || !strings.Contains(message, "cannot derive who is calling") {
+	if whoami["status"] != "not_found" || !strings.Contains(message, "not inside a pfm chat") {
 		t.Fatalf("unresolved proxy identity = %+v, want the daemon's named refusal", whoami)
 	}
 }
@@ -950,4 +927,37 @@ func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
 		}
 		assertOwnWarn(t, recorder)
 	})
+}
+
+func TestBirthProxyResolvesEveryRequest(t *testing.T) {
+	previous := proxyWhoami
+	environment := &resolve.WhoamiEnvironment{}
+	proxyWhoami = resolve.WhoamiDependencies{
+		Environment: environment,
+		Namer:       stdioTestNamer("cc-seat"),
+		SelfPID:     4100,
+		Processes:   stdioTestProcessTree{},
+	}
+	t.Cleanup(func() { proxyWhoami = previous })
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":2,"result":{}}`)
+	}))
+	defer server.Close()
+	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	environment.TMUX = "/tmp/tmux-1000/cc-seat,1,0"
+	environment.TMUXPane = "%7"
+	environment.CodexThreadID = "thread-a"
+	var output bytes.Buffer
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
+	params := received["params"].(map[string]any)
+	meta, _ := params["_meta"].(map[string]any)
+	identity, _ := meta["pfmProxy"].(map[string]any)
+	if identity["session"] != "cc-seat" {
+		t.Fatalf("forwarded identity=%+v, want request's current seat", identity)
+	}
 }

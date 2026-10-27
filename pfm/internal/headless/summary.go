@@ -73,11 +73,12 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 		return failedSummary(err)
 	}
 	input, resolveErr := ask.ResolveInput(ask.AskInput{
-		ContentFiles: []string{prepared},
-		SourceLabels: []string{chat.Name + " last exchange"},
-		Prompt:       summaryPrompt,
-		Engine:       engineName,
-		Model:        options.Model,
+		InlineContent: true,
+		ContentFiles:  []string{prepared},
+		SourceLabels:  []string{chat.Name + " last exchange"},
+		Prompt:        summaryPrompt,
+		Engine:        engineName,
+		Model:         options.Model,
 	}, options.Config)
 	if !exchange.complete {
 		input.Prompt += " The response is PARTIAL because the seat is still working."

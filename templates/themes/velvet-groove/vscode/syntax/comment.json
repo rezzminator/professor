@@ -1,0 +1,48 @@
+{
+  "0000": {
+    "name": "Smoke: comments",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment",
+      "comment.line",
+      "comment.block",
+      "comment.block.documentation",
+      "string.quoted.docstring",
+      "string.quoted.docstring.multi.python",
+      "string.quoted.docstring.single.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b38e93"
+    }
+  },
+  "0001": {
+    "name": "Smoke: doc-comment tags",
+    "scope": [
+      "comment keyword.codetag",
+      "storage.type.class.jsdoc",
+      "comment.block.documentation entity.name.type",
+      "comment.block.documentation storage.type",
+      "comment.block.documentation keyword",
+      "comment.block.documentation variable",
+      "comment.block.documentation punctuation.definition.block.tag",
+      "keyword.other.phpdoc",
+      "storage.type.class.doxygen"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#adb3ff"
+    }
+  },
+  "0002": {
+    "name": "Smoke: doc-comment braces",
+    "scope": [
+      "comment.block.documentation punctuation.definition.bracket"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#b38e93"
+    }
+  }
+}

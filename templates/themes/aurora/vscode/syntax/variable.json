@@ -1,0 +1,85 @@
+{
+  "0018": {
+    "name": "N2 fringe · this, self, super",
+    "scope": [
+      "variable.language",
+      "variable.language.this",
+      "variable.language.self",
+      "variable.language.super",
+      "variable.language.special.self",
+      "variable.parameter.function.language.special.self",
+      "variable.parameter.function.language.special.cls",
+      "variable.language.special.cls",
+      "variable.language.arguments"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#f286d2"
+    }
+  },
+  "0019": {
+    "name": "N2+ faint top · parameters",
+    "scope": [
+      "variable.parameter",
+      "meta.parameter",
+      "entity.name.variable.parameter",
+      "variable.parameter.function",
+      "meta.function.parameters variable",
+      "variable.other.parameter"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#d4c6ff"
+    }
+  },
+  "0020": {
+    "name": "Sirius · properties and keys",
+    "scope": [
+      "variable.other.property",
+      "variable.other.object.property",
+      "support.type.property-name",
+      "meta.object-literal.key",
+      "entity.name.tag.yaml",
+      "support.type.property-name.json",
+      "variable.object.property",
+      "variable.other.member",
+      "entity.name.variable.field",
+      "variable.other.field",
+      "meta.field.declaration",
+      "support.variable.property",
+      "entity.other.attribute-name.table.toml",
+      "support.type.property-name.toml",
+      "keyword.key.toml",
+      "meta.mapping.key"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9fc2ff"
+    }
+  },
+  "0021": {
+    "name": "Sirius · object member access",
+    "scope": [
+      "variable.other.object"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#dce5fa"
+    }
+  },
+  "0038": {
+    "name": "Sirius · shell variables",
+    "scope": [
+      "variable.other.normal.shell",
+      "variable.other.special.shell",
+      "variable.other.positional.shell",
+      "variable.other.bracket.shell",
+      "punctuation.definition.variable.shell",
+      "variable.other.assignment.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#9fc2ff"
+    }
+  }
+}

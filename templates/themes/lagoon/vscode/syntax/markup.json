@@ -1,0 +1,202 @@
+{
+  "0040": {
+    "name": "Beach sand: headings",
+    "scope": [
+      "markup.heading",
+      "entity.name.section",
+      "punctuation.definition.heading.markdown"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#face68"
+    }
+  },
+  "0041": {
+    "name": "Polyp: bold",
+    "scope": [
+      "markup.bold"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#fdd0b8"
+    }
+  },
+  "0042": {
+    "name": "Polyp: italic",
+    "scope": [
+      "markup.italic"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#fdd0b8"
+    }
+  },
+  "0043": {
+    "name": "Polyp: bold italic",
+    "scope": [
+      "markup.bold markup.italic",
+      "markup.italic markup.bold"
+    ],
+    "settings": {
+      "fontStyle": "bold italic",
+      "foreground": "#fdd0b8"
+    }
+  },
+  "0044": {
+    "name": "Driftwood: strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#89a8ae"
+    }
+  },
+  "0046": {
+    "name": "Ice: link URLs",
+    "scope": [
+      "markup.underline.link"
+    ],
+    "settings": {
+      "fontStyle": "underline",
+      "foreground": "#aeced2"
+    }
+  },
+  "0047": {
+    "name": "Bubbles: inline code",
+    "scope": [
+      "markup.inline.raw",
+      "markup.fenced_code",
+      "markup.raw"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#86f8cf"
+    }
+  },
+  "0048": {
+    "name": "Driftwood: code fence language",
+    "scope": [
+      "fenced_code.block.language"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#89a8ae"
+    }
+  },
+  "0049": {
+    "name": "Driftwood: quotes",
+    "scope": [
+      "markup.quote"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#89a8ae"
+    }
+  },
+  "0052": {
+    "name": "Open water: inserted",
+    "scope": [
+      "markup.inserted",
+      "punctuation.definition.inserted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#76c7ff"
+    }
+  },
+  "0053": {
+    "name": "Fire coral: deleted",
+    "scope": [
+      "markup.deleted",
+      "punctuation.definition.deleted"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ff7d81"
+    }
+  },
+  "0054": {
+    "name": "Sand: changed",
+    "scope": [
+      "markup.changed",
+      "punctuation.definition.changed"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#f7cd6c"
+    }
+  },
+  "0062": {
+    "name": "Atoll depth 1 · beach sand: heading level 1",
+    "scope": [
+      "heading.1.markdown entity.name.section.markdown",
+      "heading.1.markdown punctuation.definition.heading.markdown",
+      "markup.heading.1"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#face68"
+    }
+  },
+  "0063": {
+    "name": "Atoll depth 2 · turquoise flat: heading level 2",
+    "scope": [
+      "heading.2.markdown entity.name.section.markdown",
+      "heading.2.markdown punctuation.definition.heading.markdown",
+      "markup.heading.2"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#3ce5c7"
+    }
+  },
+  "0064": {
+    "name": "Atoll depth 3 · coral crest: heading level 3",
+    "scope": [
+      "heading.3.markdown entity.name.section.markdown",
+      "heading.3.markdown punctuation.definition.heading.markdown",
+      "markup.heading.3"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ffa28f"
+    }
+  },
+  "0065": {
+    "name": "Atoll depth 4 · drop-off blue: heading level 4",
+    "scope": [
+      "heading.4.markdown entity.name.section.markdown",
+      "heading.4.markdown punctuation.definition.heading.markdown",
+      "markup.heading.4"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#76c7ff"
+    }
+  },
+  "0066": {
+    "name": "Atoll depth 5 · twilight: heading level 5",
+    "scope": [
+      "heading.5.markdown entity.name.section.markdown",
+      "heading.5.markdown punctuation.definition.heading.markdown",
+      "markup.heading.5"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#a7baff"
+    }
+  },
+  "0067": {
+    "name": "Atoll depth 6 · midnight violet: heading level 6",
+    "scope": [
+      "heading.6.markdown entity.name.section.markdown",
+      "heading.6.markdown punctuation.definition.heading.markdown",
+      "markup.heading.6"
+    ],
+    "settings": {
+      "fontStyle": "bold",
+      "foreground": "#ccabff"
+    }
+  }
+}

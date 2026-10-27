@@ -14,18 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/doctor"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
-
-func clearRetiredHarvesterEnv(t *testing.T) {
-	t.Helper()
-	for _, retired := range doctor.RetiredHarvesterEnv {
-		t.Setenv(retired.Name, "")
-	}
-}
 
 type synchronizedBuffer struct {
 	mu sync.Mutex
@@ -184,7 +176,7 @@ exit 3
 	}
 	for _, want := range []string{
 		"tmux=" + socket,
-		"argv=--resume fixture-id --dangerously-skip-permissions --settings {",
+		"argv=--remote-control --resume fixture-id --dangerously-skip-permissions --settings {",
 		"ttl=1h",
 		"config=" + filepath.Join(root, "caller-config"),
 		"force=unset", "sid=unset", "child=unset", "endpoint=unset",
@@ -350,7 +342,6 @@ func TestInternalLaunchTmuxStartFailureIsLoudAndNeverFallsBack(t *testing.T) {
 }
 
 func TestDoctorReportsClaudeLauncherMissingDisplacedAndOK(t *testing.T) {
-	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	root := jailTest(t)
 	home := filepath.Join(root, "home")
 	testjail.PinClaudeAsk(t, home)

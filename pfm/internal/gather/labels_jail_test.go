@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // The claude half of window naming against a REAL tmux server on a scratch
@@ -34,7 +36,7 @@ func TestClaudeWindowNameConvergesOnARealServer(t *testing.T) {
 	gatherer, err := New(Dependencies{
 		Tmux:       tmux,
 		TmuxTmpDir: jail.root,
-		CodexName:  func(string) string { return "" },
+		CodexName:  func(string) naming.CodexName { return naming.CodexName{} },
 	})
 	if err != nil {
 		t.Fatal(err)

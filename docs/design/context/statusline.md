@@ -12,6 +12,7 @@ Decisions live in this file. A change lands here first, then in the code, then i
 - [Where each field comes from](#where-each-field-comes-from)
 - [Effort](#effort)
 - [The main statusline](#the-main-statusline)
+  - [cacheKeepwarmShield](#cachekeepwarmshield)
 - [Palette and glyphs](#palette-and-glyphs)
 - [What it does not do](#what-it-does-not-do)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
@@ -47,10 +48,10 @@ The command is rendered with `~` expanded to the home directory. `~/.local/bin/p
 | Field | Shows | Rule |
 | --- | --- | --- |
 | nested | `2/5` | agents below this one working right now (Claude Code's payload lists them with a status that is not over, and their own turn is open and was written within the last 15 minutes), in green, over every agent below it at any depth, in the tools colour; absent when it spawned none, so a row without agents below it opens on the gauge. It leads the row because a parent row is read for it |
-| gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize`, rounded to the nearest percent; a window not yet full stops at 99%, so `100%` always means full |
+| gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | the payload's `tokenCount` of `contextWindowSize` (GPT models resolve capacity from the local catalog instead of trusting the harness's nominal window), taken only when the count is above zero and shows a percent above 0% (with an unknown window, any count above zero wins); otherwise the prompt size of the agent transcript's newest completed call stands in: input + cache read + cache creation tokens of its last executor request (a response that ran several requests sums them at its top level, or carries them only in `usage.iterations`), recorded only for completed calls, so a streaming call never displaces it, and cleared at a compaction boundary (`agentContextGauge`, `recordTranscriptLine`). Rounded to the nearest percent; a window not yet full stops at 99%, so `100%` always means full. With no completed call, a count the payload stated (a stated zero included) renders as it is: a stated zero reads `0/{window}`. A count the payload never stated shows `?` with no bar and no percent: `?/1.0M` when the window is known, `?/?` when it is not; a known count with no window shows the count alone. A capacity state the catalog left follows as `ctx {state}` |
 | spend | `Σ$1.24/3.1M/42K/12` | follows the gauge after a space, not a `│`, opened by a muted `Σ`: a lifetime sum, never a share of the context gauge beside it. USD, prompt tokens (uncached, cache read, cache write), output tokens, distinct `tool_use` calls, billed by this agent and every agent below it at any depth. With a cost ledger the dollars and tokens are the ledger's rows of those agents, their side calls included, and only the tool calls come from the transcripts ([cost-ledger.md](../engines/cost-ledger.md#sub-agent-row-numbers)); without one, the transcripts price them, over each whole transcript, so spend from before a compaction counts. A response counts once per `message.id`; a usage block whose counts sit only in `usage.iterations` is folded, and a cache write is priced by its TTL split, the uncovered part at the 5-minute rate. Rates come from pfm's price table (`pfm/internal/pricing/prices.json`, the newer of the clone file and the embedded copy, plus any `pfm.prices.json` override), read without a fetch; a row's long tier applies to a response whose context is above its threshold, as `pfm tokens` prices it. A floor carries a yellow `+?`: a model the table cannot price, or a transcript below it that cannot be read. `$?` when nothing could be priced, `Σ$?/?/?/?` when the agent's own transcript cannot be read |
 | identity | `scout·tracer` | the task name, then its role (`agentType`) |
-| model | `opus·🏎️ high` | the model family, then the effort (see [Effort](#effort)) |
+| model | the family, then the effort bar and level | the model family, then the effort (see [Effort](#effort)) |
 | status | `running 2m:0s` | status plus time since `startTime`, in the cache window's h:m:s shape; a finished task's clock stops at its transcript's last entry. `delegating` replaces a stopped status while any agent below still works, and its clock runs on |
 | idle | `idle 1m20s` | only while running and silent for 60 s or more; yellow, red from 5 min |
 | errors | `1 error` | tool results marked `is_error`; absent at zero |
@@ -87,42 +88,101 @@ An unreadable fact renders as a failure to look, never as zero or empty: `Σ$?/?
 
 ## Effort
 
-The effort shows as an emoji and its level, in the model block of both the main line and every row:
+The effort shows as a bar of filled `▰` blocks, one to five by level, then the lowercase level, in the model block of both the main line and every row. The bar wears its level's own colour, cool to hot, each one a constant of `palette.go` (`effortBarColors`); the level word wears the effort colour (`cEffort`). No empty `▱` steps, no `effort` word before the bar and no effort emoji appear on either surface (`modelglyph.EffortLabel`, `pfm/internal/modelglyph/modelglyph.go`):
 
-| Level | Emoji |
+| Level | Reads | Bar colour |
+| --- | --- | --- |
+| low | `▰ low` | `cWindow`, blue |
+| medium | `▰▰ medium` | `cGood`, green |
+| high | `▰▰▰ high` | `cWarn`, yellow |
+| xhigh | `▰▰▰▰ xhigh` | `cElapsed`, orange |
+| max | `▰▰▰▰▰ max` | `cBad`, red |
+| a level outside the five | `effort {level} (unknown)`, the level as given | none: no bar, the effort colour |
+
+A bar the segment's state mutes or flags wears that colour whole: a sub-agent's guessed level is muted, `ERR` is red, so the level colour never hides a bar that cannot be trusted.
+
+Thinking off or absent changes nothing: the effort reads the same as with thinking on, state file included.
+
+### The main line's effort, from auto-effort-control
+
+When the auto-effort-control plugin holds a level for the session, the main line shows that level, marked `requested`: `▰▰▰ high · requested`. The plugin rewrites each main-chat request's effort, so the level Claude Code reports for the session is not what is sent. The plugin writes the file (one JSON line, `version` 2, `mode`, `level`, `reason`, `keeper`, `updatedAt`; the plugin's `src/state.ts`) and pfm only reads it, on every render (`sessionAutoEffort`, `pfm/internal/statusline/model_segment.go`). `keeper` is the pid of the plugin's keeper process, a shell whose argv ends in `auto-effort-control-keeper` and which lives exactly while the plugin's hooks are loaded in the session, or 0 when no process vouches for the line. The file counts only while that pid is a live process carrying the mark (`keeperProbe`: a signal-0 probe, then the argv through `gather.ProcFS`):
+
+| State | Effort reads |
 | --- | --- |
-| low | 🚲 |
-| medium | 🏍️ |
-| high | 🏎️ |
-| xhigh | 🚀 |
-| max | 🛰️ |
-| a level Claude Code adds later | 🔆 |
-| thinking off (main line) | 💤 in place of the level's emoji, muted, with `(off)` |
+| `auto`, `model` or `pin` with a level: the plugin's level, the same in every mode | `▰▰▰ high · requested`, the file's level, whatever the payload says |
+| `off`, or `auto` with no level yet (a fresh session or a `/reload-plugins`, before the first request) | `▰▰▰ high`, the payload's level alone, as without the plugin |
+| `keeper` 0, no process at the pid, a zombie, another user's process (the signal-0 probe refused: the keeper runs as the status line's user), or a live process without the mark: the plugin was disabled, crashed, ended or moved its file | `▰▰▰ high`, the payload's level alone, as without the plugin; no stderr line |
+| unreadable, still unparsable after one re-read (a write may be in progress), a `version` other than 2, unknown `mode`, a level outside the five, `model` or `pin` without a level, `keeper` missing, not an integer or negative, a probe or argv read failing any other way, or the state-file variables in conflict (below) | `▰▰▰ high · ERR` in red whole, the payload's level; `effort unknown · ERR` without one; and one stderr line naming the path and the cause |
+| no file, or a payload naming no session | `▰▰▰ high`, the payload's level alone; `effort unknown` without one |
+
+The path is the plugin's rule (`pfm/internal/paths/paths.go`): `$AUTO_EFFORT_CONTROL_STATE_FILE` (blank is unset, a leading `~/` the home), else the former plugin's `$AUTO_EFFORT_STATE_FILE`, else `~/.local/state/auto-effort-control/state.json`, with the session id made file-safe (`[^A-Za-z0-9_-]` to `_`) before the name's last extension: `state.{session}.json`. Both variables set to different values is an `ERR` row whose stderr line names both: unlike the plugin, which lets the canonical variable win and reports the former one, pfm shows no path it cannot trust. Equal values are no conflict. The session is the payload's `session_id`, else the transcript's base name.
+
+Two limits: a state path set only through the plugin's own options (`/config`), not the variable, is not seen, so the line shows the payload's level, never the plugin's; a dead keeper's pid reused by another session's keeper reads live (pid wrap).
 
 A sub-agent without an effort of its own runs at its parent's live effort for its own model. The row payload then carries no effort, because `task.effort` is only the agent definition's. To fill the gap, the main statusline records the session's effort and model on every render, in `$PFM_SID_DIR/statusline-effort-{session}` (`pfm/internal/statusline/session_effort.go`). A row with no effort of its own shows that record: in full colour on the same model version, and muted on a different one, where Claude Code may resolve another level. A record that fails to read costs only the effort on that row, with the cause on stderr.
 
 ## The main statusline
 
-- The context gauge and every rate-limit `-used:` percent (Claude, Fable, Codex) round as a row's gauge does: to the nearest percent, stopping at 99% until the window is full (`gaugePercent`, `pfm/internal/statusline/context.go`).
-- After the context gauge, the spend block reads `💰$3.20/1.2M/40K/88` and holds exactly one dollar amount in every state (colour: dim, yellow from $2, red from $10). With a cost ledger the amount is the complete session total (the ledger total plus the spend before the ledger on a resumed or pre-ledger chat) and the tokens are the ledger's sums; without one it is Claude Code's own `cost.total_cost_usd` and the tokens are the transcripts' (the chat's and every sub-agent's, a response once per `message.id`, its last line). The distinct tool calls always come from those transcripts. `+?` marks a floor and `?` a transcript that could not be read. A state worth flagging ends in one amount-free marker (`sink failed`, `ledger preempted`, `ledger off`, `ledger unreadable`, `pre-ledger`, `unlogged`); the amounts behind a marker are in `pfm tokens`. Every number, its source and each marker's rule are in [cost-ledger.md](../engines/cost-ledger.md#the-status-lines). A Codex chat keeps `🧮` context tokens and `✎` prompts in its place (`pfm/internal/statusline/context.go`, `ledger_spend.go`).
-- The model block reads `◆ Opus 5.5·🚀 xhigh`: model symbol and name, a muted `·`, then the effort (`pfm/internal/statusline/model_segment.go`).
+- The context gauge and every rate-limit `-used:` percent (Claude, Fable, Codex) round as a row's gauge does: to the nearest percent, stopping at 99% until the window is full (`gaugePercent`, `pfm/internal/statusline/context.go`). The main gauge places the current context count next to the percent, for example `33% 165.0K`, distinct from cumulative spend.
+- `resolvedContextWindow` (`pfm/internal/statusline/context.go`) preserves a positive explicit `PFM_CONTEXT_WINDOW` first, then a native Codex transcript's emitted capacity. Otherwise a GPT model uses the local catalog's `context_window`, not a blind 1M or a blanket 95% reduction; non-GPT models use the harness capacity. `context_capacity.go` reads `GPT_GATEWAY_CHATGPT_MODELS_PATH`, else `~/.local/state/gpt-gateway/chatgpt-models.json`, once per render without a provider request. Model matching strips `[1m]` and `-fast`; a switched model never borrows the previous model's capacity. GPT sub-agent gauges use that same catalog rather than the harness's nominal window: a 70.3K count with a 500.0K entry reads `14% 70.3K/500.0K`. Missing, unknown, stale and unreadable capacities stay visible as `ctx missing`, `ctx unknown`, `ctx stale` or `ctx error`, rather than a guessed denominator; non-missing read errors also go to stderr. Cumulative dollars retain the separate `API-eq` rule below.
+- A Claude chat's main statusline carries a Codex weekly row directly below the Claude usage limits: `codex-7d-used:{N}% ↻{reset}`, the percent and countdown of the Codex secondary (weekly) window. It reads only the existing shared cache `cc-gpt-usage-{UID}.json`, with no separate fetcher, endpoint or gateway change; the detached `RefreshKindCodex` refresh that already fills that cache is armed for Claude chats too, on the same 5-minute freshness. Shared `armRefresh` records an `.attempt` sidecar and throttles failed refreshes and missing-Codex retries for that same five-minute TTL, even without a successful cache. The cache's account is the existing app-server's inherited `CODEX_HOME`, else Codex's default home; it is not remapped by the Claude account. The percent rounds through `gaugePercent`, and the bar `▰▱` takes the same thresholds as the other rate limits (green, yellow from 50, red from 80).
+  - `codexWeeklyLine` (`pfm/internal/statusline/codex_weekly.go`) sizes the whole row to the maximum ANSI-visible display width of its label and all rendered sibling rows (identity, context/spend and Claude quotas, passed by `render.go`). When `COLUMNS` is known, terminal width minus four bounds that target, reserving Claude's two outer footer cells on each side with `statusLine.padding=0`. The bar fills the space left after the label and separator; when no bar fits the label is ANSI-safely truncated, and no row is emitted if the content ceiling is nonpositive. With no quota row the other sibling rows still determine the width, never a fixed five-cell fallback. Other rows are not resized by this rule; remote layouts and user padding overrides are not exposed by the hook.
+  - A missing weekly cache or window reads `codex-7d: no data`; a malformed or unreadable cache, or an invalid window, reads `codex-7d: error`. Valid data older than 5 minutes keeps its percent and countdown and appends `stale {age}`.
+  - A Codex-engine chat's valid output is unchanged.
+- A spend block whose dollars include a gateway GPT model ends the amount with a muted `API-eq`: an API-equivalent price from the transcript, not subscription dollars charged. It supplements native or ledger dollars only by a positive missing gateway subtotal. `beforeGatewayOverlap` bounds possible pre-ledger overlap by gateway-call timestamps against each cost-state's `At`/`Until`: calls provably after that exit add to native history; historical calls with missing timestamps or possibly before the exit can overlap and mark the amount as a `+?` floor. The rules, the unbilled streaming opening estimate and the `-fast` price resolution are in [cost-ledger.md](../engines/cost-ledger.md#gateway-gpt-spend) (`pfm/internal/statusline/ledger_spend.go`, `subagents_spend.go`); production reads no gateway database.
+- After the context gauge, the spend block reads `💰$3.20/1.2M/40K/88` and holds exactly one dollar amount in every state (colour: dim, yellow from $2, red from $10). With a cost ledger the amount is the complete session total (the ledger total plus the spend before the ledger on a resumed or pre-ledger chat, plus any `API-eq` gateway GPT supplement) and the tokens are the ledger's sums, the supplement's tokens added likewise; without one it is Claude Code's own `cost.total_cost_usd`, or for GPT the larger transcript-priced total (the `max` in the gateway section), and the tokens are the transcripts' (the chat's and every sub-agent's, a response once per `message.id`, its last line). The distinct tool calls always come from those transcripts. `+?` marks a floor and `?` a transcript that could not be read. A state worth flagging ends in one amount-free marker (`sink failed`, `ledger preempted`, `ledger off`, `ledger unreadable`, `pre-ledger`, `unlogged`); the amounts behind a marker are in `pfm tokens`. Every number, its source and each marker's rule are in [cost-ledger.md](../engines/cost-ledger.md#the-status-lines). A Codex chat keeps `🧮` context tokens and `✎` prompts in its place (`pfm/internal/statusline/context.go`, `ledger_spend.go`).
+- The model block reads `◆ Opus 5.5·▰▰▰▰ xhigh · requested` under auto-effort-control: model symbol and name, a muted `·`, then the effort ([The main line's effort](#the-main-lines-effort-from-auto-effort-control), `pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.
 - The cache window reads `💾1h✓59m:28s 94%`: the cache window, the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry.
 - The window (`1h` or `5m`) comes first from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). When the payload carries no expiry — no cached request yet, or an older build — pfm's launch record decides, never the statusline's own environment: `fleetdb.LaunchFor(ctx, session_id)`, keyed by the `session_id` in the statusline payload, returns the `cache1h` the chat was launched with ([claude-launch.md](../engines/claude-launch.md#the-launch-record)). A session pfm never launched (`ErrNoLaunch`) falls to the transcript (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else no cache marker. A failed launch read shows `💾⚠` and writes the cause to stderr, never a silent `5m`.
 - The countdown runs to the payload's `prompt_cache.expires_at` when it carries one; otherwise from the newest request record in the transcript, a user record that is not a local command's echo, plus the window; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
+- The cache-keepwarm plugin's shield follows the hit share inside the same segment ([cacheKeepwarmShield](#cachekeepwarmshield)); the sub-agent rows carry none.
 - The line uses the same palette as the rows (`pfm/internal/statusline/palette.go`).
+
+### cacheKeepwarmShield
+
+When the cache-keepwarm plugin's state file for the session shows it doing something — keeping a wait warm, stopped or off — the main line's cache segment ends with a shield after the countdown and the hit share: `💾1h✓59m:28s 94% 🛡 waiting`. The plugin writes the file and pfm only reads it, on every render, inside `cacheWindowSegment` (`pfm/internal/statusline/cache_window.go`). The record is one JSON object, schema `v` 1:
+
+| Field | Holds |
+| --- | --- |
+| `v` | `1` |
+| `sessionId` | the session the record belongs to |
+| `pid` | the Claude process's pid |
+| `updatedAt` | epoch ms |
+| `enabled` | bool |
+| `source` | `launch` or `session` |
+| `state` | `warming`, `on`, `stopped` or `off` |
+| `reason` | the plugin's stable `ReasonCode` |
+| `pokes` | `{count, max}`, or `null` |
+| `nextAt` | epoch ms of the next keep-warm poke, or `null` |
+| `protectingTokensEq` | tokens the cache guards, or `null` |
+
+The path is the resolver's (`paths.CacheKeepwarmStateFile(env, home, sessionID)`, `pfm/internal/paths/keepwarm.go`): `$CACHE_KEEPWARM_STATE_DIR` overrides the sessions directory, else `${XDG_STATE_HOME:-$HOME/.local/state}/cache-keepwarm/sessions/{sessionID}.json`. A session id holds only `A-Za-z0-9_-`; any other is refused with an error, never sanitized into a name.
+
+| State | Shield reads |
+| --- | --- |
+| no file | no shield |
+| `warming`, amber | `🛡 waiting`: the plugin keeps a wait warm |
+| `on`: enabled, nothing to keep warm | no shield, as without the plugin |
+| `stopped`, red | `🛡 stopped` |
+| `off`, muted | `🛡 off` |
+| a valid record whose `pid` is dead, not a Claude process, a zombie, or a process started more than 2 s after `updatedAt` (a reused pid) | no shield, as without the plugin |
+| unreadable, unparsable, a `v` other than 1, an unknown `state`, a schema violation, or a probe that failed to run, red | `🛡 ERR`, and one stderr line naming the path and the cause |
+
+The payload's `session_id` selects the file; an empty session id names no file. State roots must be absolute. The shield is one word: `pokes`, `nextAt` and `protectingTokensEq` are validated but not shown. A record never expires by age: a quiet session's record stays valid, so only the pid decides whether the record counts; its `state` then decides whether a shield shows. A shield remains visible even when no cache countdown is available.
 
 ## Palette and glyphs
 
 One definition in `palette.go` serves both surfaces, so a part that means the same thing on both (model, effort, tokens, elapsed time) wears the same colour. The colours are bright 256-colour tones, chosen to stay legible over Claude Code's faint row body.
 
-Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge uses Geometric Shapes (`▰▱`). `🏍️`, `🏎️` and `🛰️` are two code points each, the base plus a variation selector. A terminal that counts them as one column shifts the text after them by one cell; they have rendered in the host's tmux panes since install, and the single-code-point fallbacks are 🛵 (medium) and 🚘 (high).
+Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge uses Geometric Shapes (`▰▱`) and the effort bar `▰` alone, single code points; the effort carries no emoji.
 
 ## What it does not do
 
 - It does not decorate the `⏺ main` row: Claude Code 2.1.281 renders no decoration there.
-- It does not show a row for a task that has neither a token count nor a window.
+- It does not omit a task's row for unknown context: every task id in the payload gets its `pfm` row, `?/?` in the gauge when neither a token count nor a window is known, and never a `0%` for an unknown count. Optional diagnostics of what the line received and emitted: [claude-launch.md](../engines/claude-launch.md#sub-agent-status-line-trace).
 - It does not render anything for Codex or OpenCode: `subagentStatusLine` is Claude Code's.
+- It does not show the cache-keepwarm shield on a sub-agent row: the shield is the main line's.
 - It does not tell a hung child from a working one while Claude Code still lists it as running: its open turn counts for 15 minutes.
 
 ## Surfaces that stay in sync
@@ -135,5 +195,7 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 | The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the status-lines row: `statusLine` and `subagentStatusLine` in every launch's `--settings` payload |
 | The launch record | `fleetdb.LaunchFor` over `pfm.db` table `launch` | the cache window per `session_id` |
 | The account-file host check | `pfm/internal/hostcheck/owned.go` | `pfm-settings` BLOCK row for old pfm status lines, with the operator’s fix |
+| The Codex weekly row | `pfm/internal/statusline/codex_weekly.go` (`codexWeeklyLine`, `readCodexWeekly`), `render.go`, `process.go`, `runtime.go` | `codex-7d-used:` row, its `RefreshKindCodex` refresh for Claude chats, `cc-gpt-usage-{UID}.json` read |
+| The cache-keepwarm shield | `pfm/internal/statusline/cache_window.go`, `cache_keepwarm.go`, `pfm/internal/paths/keepwarm.go` | the shield states and failures; `paths.CacheKeepwarmStateFile` |
 | The goldens | `pfm/internal/statusline/testdata/render-*.golden` | the main line byte for byte |
 | The lane map | `infra/fence/lanes/` | its beat and its map row |

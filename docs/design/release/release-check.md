@@ -47,7 +47,7 @@ Tier 1 is the adopter contract; its paths are the only ones a release reviews in
 | Area | Paths |
 | --- | --- |
 | `templates` | `templates/`, `pfm/harness-prompts/` |
-| `pfm-update` | `pfm/internal/{update,updatecheck,installer,enginesync,globallink,codexappendix,claudelaunch,harvestpy,doctor,config,professor,codexprompt,picker,mcpserv,harvestmcp}/`; files under `pfm/cmd/pfm/` whose name starts with `install`, `uninstall`, `update`, `init`, `doctor`, `config` or `mcp_serve` |
+| `pfm-update` | `pfm/internal/{update,updatecheck,installer,enginesync,globallink,codexappendix,claudelaunch,doctor,config,professor,codexprompt,picker,mcpserv,herdr,themesync,themetmux,agentlauncher}/`; files under `pfm/cmd/pfm/` whose name starts with `install`, `uninstall`, `update`, `init`, `doctor`, `config` or `mcp_serve` |
 | `public` | `README.md`, `INSTALL.md`, `CHANGELOG.md`, `docs/SETUP.md`, `docs/RELEASE.md`, `docs/PLACEHOLDERS.md` |
 | `gates` | `.github/`, `.githooks/`, `scripts/`, `infra/fence/release-rehearsal.sh`, `infra/check-self-hosted-manifest.sh` |
 
@@ -110,7 +110,7 @@ With `--stamp` and every rule passing, it writes `READY` as `{sha} v{NEW} {YYYY-
 - `changelogger`: `notes` with the coverage arguments, before it returns.
 - `gitter` Phase RELEASE: `ready` without `--stamp`, as its precondition.
 - `.claude/scripts/dev.sh verify templates`: `notes --all releases`.
-- `.github/workflows/release.yml`: `notes releases/{tag}.md --version {tag}` beside the authored-notes gate.
+- `.github/workflows/release.yml`: the release PR's `release` job runs `make release`, `notes releases/v{VERSION}.md --version v{VERSION}` beside the authored-notes gate; `make release-check` runs it locally.
 
 ## Tests
 

@@ -135,7 +135,11 @@ func personaGoldenRequests(t *testing.T, home string) ([]Request, string) {
 		request.Row = compose.Row{Kind: kind, CWD: "/work/acme/docs/scribe", ID: "44444444-4444-4444-8444-444444444444"}
 		request.Persona = workbench.Persona{Prompt: prompt, Body: "You are scribe.", Effort: "xhigh", Model: "gpt-x"}
 		request.OpenCodePlugin = filepath.Join(home, ".local", "state", "pfm", "opencode-workbench-plugin.mjs")
-		request.OpenCodeFleetPrompt = "/work/clone/pfm/harness-prompts/composed/opencode.md"
+		request.OpenCodeHerdrPlugin = filepath.Join(home, ".local", "state", "pfm", "opencode-herdr-plugin.mjs")
+		request.OpenCodeFleetPrompt = "/work/clone/pfm/harness-prompts/generated/opencode.md"
+		if kind == compose.NewOpenCode || kind == compose.ResumeOpenCode {
+			request.Persona.Model = "openai/gpt-x"
+		}
 		if kind == compose.NewClaude {
 			request.LaunchName = "_SCRIBE:3"
 		}

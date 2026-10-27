@@ -1,0 +1,12 @@
+{
+  "0077": {
+    "name": "Decorators",
+    "scope": [
+      "tag.decorator.js entity.name.tag.js",
+      "tag.decorator.js punctuation.definition.tag.js"
+    ],
+    "settings": {
+      "foreground": "#ff70b8"
+    }
+  }
+}

@@ -1,8 +1,3 @@
-[submodule "agent-effort"]
-	path = plugins/effort-live-control
-	url = https://github.com/rezzminator/effort-live-control.git
-	branch = develop
-	ignore = dirty
 [submodule "tool-visibility-controller"]
 	path = plugins/tool-visibility-controller
 	url = https://github.com/rezzminator/tool-visibility-controller.git
@@ -28,18 +23,28 @@
 	url = https://github.com/rezzminator/engine-sync.git
 	branch = develop
 	ignore = dirty
-[submodule "sub-agent-compact"]
-	path = plugins/sub-agent-compact
+[submodule "forward-compaction"]
+	path = plugins/forward-compaction
 	url = https://github.com/rezzminator/sub-agent-compact.git
 	branch = develop
 	ignore = dirty
-[submodule "auto-effort"]
-	path = plugins/auto-effort
+[submodule "auto-effort-control"]
+	path = plugins/auto-effort-control
 	url = https://github.com/rezzminator/auto-effort.git
 	branch = develop
 	ignore = dirty
 [submodule "gpt-gateway"]
 	path = plugins/gpt-gateway
 	url = https://github.com/rezzminator/gpt-gateway.git
+	branch = develop
+	ignore = dirty
+[submodule "cache-keepwarm"]
+	path = plugins/cache-keepwarm
+	url = https://github.com/rezzminator/cache-keepwarm.git
+	branch = develop
+	ignore = dirty
+[submodule "plugins/harvester"]
+	path = plugins/harvester
+	url = https://github.com/rezzminator/harvester.git
 	branch = develop
 	ignore = dirty

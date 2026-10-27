@@ -13,6 +13,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -46,7 +47,7 @@ const probe = (path, link = false) => {
 };
 // Agent sources as the compilers read them: README.md and SKILL.md are never an agent; Codex walks
 // nested directories and names a role by its file's basename, OpenCode reads the top level only.
-const markdownNames = (dir, nested = false, ancestors = new Set()) => {
+const markdownSources = (dir, nested = false, ancestors = new Set()) => {
   if (!probe(dir)) return [];
   let physical;
   try { physical = realpathSync(dir); }
@@ -66,15 +67,19 @@ const markdownNames = (dir, nested = false, ancestors = new Set()) => {
     failures.push(`cannot read agent source directory ${dir}: ${error.code || error.message}`);
     return [];
   }
+  const headers = new Map(sourceInventory(dir).map((row) => [row.name, row]));
   return entries
     .flatMap((entry) => {
       const path = join(dir, entry.name);
       const info = entry.isSymbolicLink() ? probe(path) : entry;
-      if (nested && info?.isDirectory()) return markdownNames(path, true, next);
-      return info?.isFile() && entry.name.endsWith(".md") && !["README.md", "SKILL.md"].includes(entry.name)
-        ? [entry.name.slice(0, -3)] : [];
+      if (nested && info?.isDirectory()) return markdownSources(path, true, next);
+      if (!info?.isFile() || !entry.name.endsWith(".md") || ["README.md", "SKILL.md"].includes(entry.name)) return [];
+      const name = entry.name.slice(0, -3);
+      const header = headers.get(name);
+      if (!header) throw new Error(`agent source inventory omitted ${path}`);
+      return [header];
     })
-    .sort();
+    .sort((a, b) => a.name.localeCompare(b.name));
 };
 const generatedNames = (dir, extension) => existsSync(dir)
   ? readdirSync(dir).filter((name) => name.endsWith(extension))
@@ -89,12 +94,11 @@ const agentSourceDirs = [
   "templates/global/agents",
   "templates/project/agents",
 ];
-let modelLinesRead = 0;
-for (const dir of agentSourceDirs) {
-  const directory = join(ROOT, dir);
-  if (!probe(directory)) continue;
+const inventoryCache = new Map();
+function sourceInventory(directory) {
+  if (inventoryCache.has(directory)) return inventoryCache.get(directory);
   const args = ["-I", join(ROOT, "scripts/agent-source-inventory.py"), directory];
-  if (dir !== "templates/global/agents") args.push("--project");
+  if (directory !== join(ROOT, "templates/global/agents")) args.push("--project");
   const scan = spawnSync("python3", args, { encoding: "utf8" });
   // The inventory's exit 3 is a toolchain gap; roster exit 3 is only absent mirrors.
   if (scan.status === 3) {
@@ -108,7 +112,15 @@ for (const dir of agentSourceDirs) {
     console.error(`agent-roster: ${rejected ? "SOURCE REJECTED" : "ERROR"} — python3 ${args.join(" ")}: ${context}`);
     process.exit(rejected ? 5 : 2);
   }
-  for (const {name, kind, model} of JSON.parse(scan.stdout)) {
+  const rows = JSON.parse(scan.stdout);
+  inventoryCache.set(directory, rows);
+  return rows;
+}
+let modelLinesRead = 0;
+for (const dir of agentSourceDirs) {
+  const directory = join(ROOT, dir);
+  if (!probe(directory)) continue;
+  for (const {name, kind, model} of sourceInventory(directory)) {
     const text = readFileSync(join(directory, `${name}.md`), "utf8");
     const front = text.startsWith("---\n") ? text.slice(4, text.indexOf("\n---", 4)) : "";
     const line = front.split("\n").find((l) => /^model:/.test(l));
@@ -208,21 +220,48 @@ const projects = [...new Set(candidates)]
   .filter((name) => !excluded(name) && !isWorkbench(join(ROOT, name)) && hasOrientation(join(ROOT, name)))
   .sort();
 
+// Capabilities are host-only: config show omits targets, and this checker supplies
+// no --capability flags. Read the same fixed global path as config.LoadTargets;
+// an unreadable/malformed policy is an error, never an empty capability set.
+const hostPolicyPath = join(homedir(), ".claude/engine-sync.json");
+const hostPolicy = probe(hostPolicyPath) ? JSON.parse(readFileSync(hostPolicyPath, "utf8")) : {};
+const configuredCapabilities = hostPolicy.targets?.capabilities ?? [];
+if (!stringList(configuredCapabilities) || configuredCapabilities.some((name) => !name.trim()))
+  throw new Error(`${hostPolicyPath}: targets.capabilities must contain nonempty capability names`);
+const capabilities = new Set(configuredCapabilities.map((name) => name.trim()));
+function eligible(source, runtime) {
+  const { engines, requires } = source;
+  if (!engines || typeof engines !== "object" || Array.isArray(engines) ||
+      !stringList(requires) || requires.some((name) => !name.trim()))
+    throw new Error(`${source.path}: invalid engines/requires eligibility metadata`);
+  const engine = engines[runtime];
+  if (engine !== undefined && engine !== false && (!engine || typeof engine !== "object" || Array.isArray(engine)))
+    throw new Error(`${source.path}: engines.${runtime} must be settings or false`);
+  return engine !== false && requires.every((name) => capabilities.has(name.trim()));
+}
+
 // A role's generated name: its file's basename, plus `-{suffix}` for a child project; neverRegister
-// names a base or a final name that neither runtime emits.
-function expectedAgents(nested) {
+// names a base or a final name that neither runtime emits. Eligibility is source evidence.
+const sourceCounts = new Map();
+function expectedAgents(runtime, nested) {
   const registered = (base, name) => !POLICY.neverRegister.includes(base) && !POLICY.neverRegister.includes(name);
-  const expected = markdownNames(join(ROOT, ".claude/agents"), nested).filter((agent) => registered(agent, agent));
+  const sources = markdownSources(join(ROOT, ".claude/agents"), nested);
+  let defined = sources.length;
+  const expected = sources.filter((source) => registered(source.name, source.name) && eligible(source, runtime))
+    .map((source) => source.name);
   for (const project of projects) {
     let suffix = project;
     if (POLICY.suffixMode === "none") suffix = "";
     if (POLICY.suffixMode === "strip-prefix")
       suffix = project.startsWith(POLICY.suffixPrefix) ? project.slice(POLICY.suffixPrefix.length) : project;
-    for (const agent of markdownNames(join(ROOT, project, ".claude/agents"), nested)) {
-      const name = suffix ? `${agent}-${suffix.replaceAll("/", "-")}` : agent;
-      if (registered(agent, name)) expected.push(name);
+    const childSources = markdownSources(join(ROOT, project, ".claude/agents"), nested);
+    defined += childSources.length;
+    for (const source of childSources) {
+      const name = suffix ? `${source.name}-${suffix.replaceAll("/", "-")}` : source.name;
+      if (registered(source.name, name) && eligible(source, runtime)) expected.push(name);
     }
   }
+  sourceCounts.set(runtime, defined);
   return [...new Set(expected)].sort();
 }
 function compare(runtime, expected, actual, extension) {
@@ -231,34 +270,42 @@ function compare(runtime, expected, actual, extension) {
   for (const name of actual.filter((n) => !expected.includes(n)))
     failures.push(`${runtime}: generated agent has no source: ${name}${extension}`);
 }
-const codexExpected = expectedAgents(true);
-const openCodeExpected = expectedAgents(false);
+const codexExpected = expectedAgents("codex", true);
+const openCodeExpected = expectedAgents("opencode", false);
 compare("codex", codexExpected, generatedNames(codexDir, ".toml"), ".toml");
 compare("opencode", openCodeExpected, generatedNames(openCodeDir, ".md"), ".md");
 
 for (const [runtime, expected] of [["codex", codexExpected], ["opencode", openCodeExpected]]) {
-  if (!expected.length)
+  if (!expected.length && sourceCounts.get(runtime) === 0)
     failures.push(`${runtime}: the sources under .claude/agents (root and child projects) define no registered agent — the comparison had nothing to compare`);
 }
 
-if (codexExpected.includes("gitter")) {
-  const path = join(ROOT, ".codex/agents/gitter.toml");
-  if (
-    existsSync(path) &&
-    /sandbox_mode\s*=\s*"read-only"/.test(readFileSync(path, "utf8"))
-  ) {
-    failures.push(
-      "codex: gitter.toml is registered read-only and cannot perform its source protocol",
-    );
-  }
+function artifactPermissions(path, runtime) {
+  const args = ["-I", join(ROOT, "scripts/agent-source-inventory.py"), path, "--artifact", runtime];
+  const parsed = spawnSync("python3", args, { encoding: "utf8" });
+  if (parsed.error || parsed.status !== 0)
+    throw new Error(`cannot read structured ${runtime} permissions in ${path}: ${parsed.error || parsed.stderr.trim() || `exit ${parsed.status}`}`);
+  return JSON.parse(parsed.stdout);
 }
+for (const writer of ["gitter"]) {
+  const source = sourceInventory(join(ROOT, ".claude/agents")).find((row) => row.name === writer);
+  if (codexExpected.includes(writer)) {
+    const path = join(ROOT, `.codex/agents/${writer}.toml`);
+    const configured = source.engines.codex?.sandbox;
+    // Both writers grant Write; without an explicit pin the compiler emits no
+    // sandbox override, as with inherit. Judge TOML data, not instruction text.
+    const expected = configured && configured !== "inherit" ? configured : null;
+    if (existsSync(path) && artifactPermissions(path, "codex").sandbox !== expected) {
+      failures.push(`codex: ${writer}.toml sandbox override differs from its source protocol (expected ${expected ?? "inherit"})`);
+    }
+  }
 
-if (openCodeExpected.includes("gitter")) {
-  const path = join(ROOT, ".opencode/agent/gitter.md");
-  if (existsSync(path) && !/"git \*": allow/.test(readFileSync(path, "utf8"))) {
-    failures.push(
-      "opencode: gitter.md lacks its per-agent git write permission",
-    );
+  if (openCodeExpected.includes(writer)) {
+    const path = join(ROOT, `.opencode/agent/${writer}.md`);
+    const expected = source.engines.opencode?.permission?.bash?.["git *"];
+    if (existsSync(path) && artifactPermissions(path, "opencode").permission?.bash?.["git *"] !== expected) {
+      failures.push(`opencode: ${writer}.md lacks its source per-agent git write permission`);
+    }
   }
 }
 

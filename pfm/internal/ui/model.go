@@ -18,7 +18,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/sky"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
-	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 const (
@@ -102,6 +101,7 @@ type Model struct {
 	suppressedCount      int
 	refreshing           bool
 	scheduleError        string
+	themeError           string
 	primary              int
 	initialPrimary       int
 	accountIDs           []int
@@ -196,7 +196,16 @@ type Model struct {
 	applyKill          func(KillChange) error
 	applyDeactivate    func(compose.Row) error
 	deactivatedSockets map[string]bool
-	killStatus         string
+	// deactivatedRows holds, per deactivated live seat, the resumable row it
+	// became: a refresh whose snapshot still lists the seat live (the stop has
+	// not reached the roster yet) shows this row in its place, so the cursor
+	// stays on the conversation just deactivated.
+	deactivatedRows map[string]compose.Row
+	// nativeEndSeats marks the deactivated seats that are native (Herdr)
+	// panes: their stop only schedules a detached end worker, so their
+	// resumable row refuses to open while the roster still lists the seat live.
+	nativeEndSeats map[string]bool
+	killStatus     string
 	// deck is the deck layer's own state: the reader's home and the arrival
 	// clock of chats that appeared while the picker was open (deckstate.go).
 	deck deckState
@@ -204,7 +213,7 @@ type Model struct {
 
 // NewModel builds the first frame entirely from cached state.
 func NewModel(snapshot Snapshot) Model {
-	configureStyles(theme.Load(snapshot.Theme))
+	configureSnapshotStyles(snapshot)
 	configuredAccountEmojis = copyEmojis(snapshot.AccountEmojis)
 	configuredCodexAccountEmojis = copyEmojis(snapshot.CodexAccountEmojis)
 	input := textinput.New()
@@ -224,6 +233,7 @@ func NewModel(snapshot Snapshot) Model {
 		suppressedCount:     snapshot.SuppressedCount,
 		refreshing:          snapshot.Refreshing,
 		scheduleError:       snapshot.ScheduleError,
+		themeError:          snapshot.ThemeError,
 		primary:             validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		initialPrimary:      validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		accountIDs:          normalizedAccountIDs(snapshot.AccountIDs),
@@ -240,6 +250,8 @@ func NewModel(snapshot Snapshot) Model {
 		applyKill:           snapshot.ApplyKill,
 		applyDeactivate:     snapshot.ApplyDeactivate,
 		deactivatedSockets:  make(map[string]bool),
+		deactivatedRows:     make(map[string]compose.Row),
+		nativeEndSeats:      make(map[string]bool),
 		statsSampler:        snapshot.StatsSampler,
 		samplingContext:     snapshot.SamplingContext,
 		cosmosSampler:       snapshot.CosmosSampler,
@@ -525,6 +537,10 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return model, nil
 			default:
+				if model.nativeEndPending(row) {
+					model.killStatus = "resume refused — " + row.Name + " is still ending; resume once its pane has closed"
+					return model, nil
+				}
 				if isNewChatActionKind(row.Kind) {
 					row.Account = model.accountForKind(row.Kind)
 				}
@@ -734,10 +750,10 @@ func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 		}
 	case "c":
 		model.statsSort = StatsSortCPU
-		model.sortStats(model.selectedStatsKey())
+		model.sortStats(model.selectedStatsKey(), model.selectedDockerKey())
 	case "m":
 		model.statsSort = StatsSortRAM
-		model.sortStats(model.selectedStatsKey())
+		model.sortStats(model.selectedStatsKey(), model.selectedDockerKey())
 	}
 	return model, nil
 }
@@ -826,7 +842,7 @@ func trackedChatSockets(rows []compose.Row) map[string]bool {
 	for index := range rows {
 		row := &rows[index]
 		if row.Socket != "" && isNameGroupRow(row.Kind) {
-			sockets[row.Socket] = true
+			sockets[compose.LiveSeatKey(*row)] = true
 		}
 	}
 	return sockets
@@ -893,45 +909,73 @@ func statsWaitCmd(generation uint64, interval time.Duration) tea.Cmd {
 }
 
 func (model *Model) applyStats(snapshot pfmstats.Snapshot) {
-	follow := model.selectedStatsKey()
+	follow, followDocker := model.selectedStatsKey(), model.selectedDockerKey()
 	model.stats = snapshot
 	model.adoptClock(snapshot.SampleTime)
-	model.sortStats(follow)
+	model.sortStats(follow, followDocker)
 	innerWidth, innerHeight := model.limitViewportDimensions()
 	model.limitsOffset = min(model.limitsOffset, maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight))
 }
 
-func (model *Model) sortStats(follow string) {
-	sort.SliceStable(model.stats.Chats, func(left, right int) bool {
+// sortStats orders both subtabs by the chosen key, busiest first, and keeps
+// each cursor on the row it was on, wherever that row moved or the list shrank.
+func (model *Model) sortStats(follow, followDocker string) {
+	chats := model.stats.Chats
+	sort.SliceStable(chats, func(left, right int) bool {
 		if model.statsSort == StatsSortRAM {
-			if model.stats.Chats[left].RSSBytes != model.stats.Chats[right].RSSBytes {
-				return model.stats.Chats[left].RSSBytes > model.stats.Chats[right].RSSBytes
+			if chats[left].RSSBytes != chats[right].RSSBytes {
+				return chats[left].RSSBytes > chats[right].RSSBytes
 			}
-		} else if model.stats.Chats[left].CPUPercent != model.stats.Chats[right].CPUPercent {
-			return model.stats.Chats[left].CPUPercent > model.stats.Chats[right].CPUPercent
+		} else if chats[left].CPUPercent != chats[right].CPUPercent {
+			return chats[left].CPUPercent > chats[right].CPUPercent
 		}
-		return model.stats.Chats[left].Socket < model.stats.Chats[right].Socket
+		return chats[left].Seat < chats[right].Seat
 	})
-	if len(model.stats.Chats) == 0 {
-		model.statsCursor = 0
-		return
-	}
-	if follow != "" {
-		for index := range model.stats.Chats {
-			if model.stats.Chats[index].Socket == follow {
-				model.statsCursor = index
-				return
+	docker := model.stats.Docker
+	sort.SliceStable(docker, func(left, right int) bool {
+		if model.statsSort == StatsSortRAM {
+			if docker[left].MemoryBytes != docker[right].MemoryBytes {
+				return docker[left].MemoryBytes > docker[right].MemoryBytes
 			}
+		} else if docker[left].CPUPercent != docker[right].CPUPercent {
+			return docker[left].CPUPercent > docker[right].CPUPercent
+		}
+		if docker[left].Name != docker[right].Name {
+			return docker[left].Name < docker[right].Name
+		}
+		return docker[left].ID < docker[right].ID
+	})
+	model.statsCursor = followCursor(model.statsCursor, len(chats), func(index int) bool {
+		return follow != "" && chats[index].Seat == follow
+	})
+	model.statsDockerCursor = followCursor(model.statsDockerCursor, len(docker), func(index int) bool {
+		return followDocker != "" && docker[index].ID == followDocker
+	})
+}
+
+// followCursor returns the index matching the followed row, else the old
+// cursor clamped into a list of length rows.
+func followCursor(cursor, rows int, followed func(int) bool) int {
+	for index := range rows {
+		if followed(index) {
+			return index
 		}
 	}
-	model.statsCursor = min(model.statsCursor, len(model.stats.Chats)-1)
+	return max(0, min(cursor, rows-1))
 }
 
 func (model Model) selectedStatsKey() string {
 	if model.statsCursor < 0 || model.statsCursor >= len(model.stats.Chats) {
 		return ""
 	}
-	return model.stats.Chats[model.statsCursor].Socket
+	return model.stats.Chats[model.statsCursor].Seat
+}
+
+func (model Model) selectedDockerKey() string {
+	if model.statsDockerCursor < 0 || model.statsDockerCursor >= len(model.stats.Docker) {
+		return ""
+	}
+	return model.stats.Docker[model.statsDockerCursor].ID
 }
 
 func (model *Model) updateQuery(value string) {
@@ -965,6 +1009,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		model.refreshing = false
 		return
 	}
+	configureSnapshotStyles(snapshot)
 	follow := model.selectedKey()
 	fallback := model.cursor
 	if snapshot.ProjectDirs != nil {
@@ -980,25 +1025,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 			rows = append([]compose.Row{model.rows[previous]}, rows...)
 		}
 	}
-	rowsAdjusted := false
-	if len(model.deactivatedSockets) != 0 {
-		live := trackedChatSockets(rows)
-		for socket := range model.deactivatedSockets {
-			if !live[socket] {
-				delete(model.deactivatedSockets, socket)
-			}
-		}
-		filtered := make([]compose.Row, 0, len(rows))
-		for index := range rows {
-			row := &rows[index]
-			if row.Kind.IsLiveSeat() && model.deactivatedSockets[row.Socket] {
-				rowsAdjusted = true
-				continue
-			}
-			filtered = append(filtered, *row)
-		}
-		rows = filtered
-	}
+	rows, rowsAdjusted := model.settleDeactivated(rows)
 	if model.skyEnabled {
 		before := trackedChatSockets(model.rows)
 		after := trackedChatSockets(rows)
@@ -1032,6 +1059,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.refreshing = snapshot.Refreshing
 	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError)
 	model.scheduleError = snapshot.ScheduleError
+	model.themeError = snapshot.ThemeError
 	for index := range model.rows {
 		id := model.rows[index].ID
 		if id != "" {
@@ -1069,31 +1097,6 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.rebuildCosmosPast()
 	model.mergeCosmosSeats()
 	model.rebuild(follow, fallback)
-}
-
-func (model *Model) deactivate(row compose.Row) {
-	if model.applyDeactivate == nil {
-		model.killStatus = "deactive refused — this picker cannot stop chats"
-		return
-	}
-	if err := model.applyDeactivate(row); err != nil {
-		model.killStatus = fmt.Sprintf("deactive failed — %s: %v", row.Name, err)
-		return
-	}
-	model.deactivatedSockets[row.Socket] = true
-	model.killStatus = "deactivated — " + row.Name + " — ready to resume"
-	key := compose.RowKey(row)
-	fallback := model.cursor
-	kept := model.rows[:0]
-	for index := range model.rows {
-		candidate := &model.rows[index]
-		if compose.RowKey(*candidate) != key {
-			kept = append(kept, *candidate)
-		}
-	}
-	model.rows = kept
-	model.actionIndex = 0
-	model.rebuild("", fallback)
 }
 
 func (model *Model) toggleKilled() {

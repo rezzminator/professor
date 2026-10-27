@@ -1,101 +1,141 @@
 # flights-lander
 
-`flights-lander` is a flight's gate, the step before its landing: one fresh agent for the whole flight, whatever projects it touched, which runs each project's checks, reviews the flight's whole diff across every project, attacks the change with tests written to break it, and fixes what it finds itself. It is the flight's one review and its only independent tester; the foremen write their own covering tests and run no review.
-
-Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-lander.md`](../../../templates/global/agents/flights-lander.md).
+The lander takes one worktree's whole change after every foreman on it has returned. It reviews the change itself with cheap children it spawns, fixes every finding, proves the fixes with the affected tests and runs the full gate once, right before the merge. One worktree gets one lander: there is no separate reviewer, no second round and no second lander.
 
 ## Contents
 
-- [Why it exists](#why-it-exists)
+- [The cast](#the-cast)
+- [The flow](#the-flow)
 - [Input](#input)
-- [The run](#the-run)
-- [It fixes what it finds](#it-fixes-what-it-finds)
-- [What it does not do](#what-it-does-not-do)
-- [Bounds](#bounds)
-- [The ledger and the return](#the-ledger-and-the-return)
-- [Context budget](#context-budget)
-- [The accepted risk](#the-accepted-risk)
-- [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
-- [Evidence](#evidence)
+- [Sync to the target](#sync-to-the-target)
+- [The inventory and the computed spawn](#the-inventory-and-the-computed-spawn)
+- [The children](#the-children)
+- [The lander's own hunt](#the-landers-own-hunt)
+- [Judge and report](#judge-and-report)
+- [Fix, test, gate](#fix-test-gate)
+- [The return](#the-return)
+- [The bench](#the-bench)
+- [Declaration](#declaration)
 
-## Why it exists
+## The cast
 
-A builder that tests its own code is biased toward making it pass. The lander has a clean context and one mission: break the change. Measured on seven bug ledgers of a live adopter (63 findings, 25 fix diffs read): 43% of what the independent QA found were defects in production code, and 53% could be found only by running something — races, real queue and database wiring, the shape of data at runtime — which no reading review reaches. The review is kept beside it because it is 11 to 65 times cheaper per finding and the two barely overlap (6 shared findings of 104).
+| Agent | Model · effort | Visible to | Job |
+| --- | --- | --- | --- |
+| `flights-lander` | opus · medium | the main chat | reviews, judges, fixes, tests, gates |
+| `flights-hunter` | opus | both landers | hunts defects inside one cluster of the production diff |
+| `flights-spec-walker` | sonnet | both landers | holds a range of the request's numbered rows against the code |
+| `flights-sub-lander` | haiku | both landers | follows inventory rows or threads past the diff and flags each |
+
+Only the main chat spawns a lander. The children are read-only (`Read, Grep, Glob, Bash`, Bash for `grep`, `sed -n` and read-only `git`), write nothing and judge nothing: each returns candidates or flags for the lander to verify.
+
+## The flow
+
+```text
+lander -> sync to TARGET's tip -> inventory (call 1) -> one spawn message (call 2)
+-> hunters / spec walkers / sub-landers in the background
+-> lander hunts the seams -> every candidate verified on disk -> report
+-> fix every finding -> affected tests until green -> full gate once -> return
+```
+
+The lander never waits on a child: it keeps hunting, verifying and writing the report while they work, and ends its turn only when its own work is done; each child's return re-invokes it.
 
 ## Input
 
-From the root foreman's brief, and nothing more:
+- WORKTREE, BASE (the sha the change is measured against), TARGET (the branch or sha it lands on, `develop` when absent).
+- MANUALS: each touched project with its testing manual path.
+- INTENT: the request and the foremen's returns, their decisions included, read as claims to test.
+- STOP_AT `review` (optional): write the report and return after the review; no fix, test or gate.
+- REPORT_PATH (optional): default `/tmp/{project}/review/{worktree name}.md`. A path the harness refuses for a sub-agent's `.md` write (`REPORT*`, `SUMMARY*`, `FINDINGS*`, `ANALYSIS*`) returns `BLOCKED`.
 
-- the flight directory: `run.md` for the baseline sha, and the statement of intent the attack reads against, the same rule for the lander, its reviewer and `/flights:audit`: a [`flights-speccer`](flights-speccer.md) `spec.md` when the flight has one (it carries every `requirements.md` row verbatim plus its `## Decisions`, binding as rulings), else `requirements.md`, else the root's `GOAL` line;
-- the baseline sha from `run.md`'s header, whose `DONE` lines name the done units: the diff is `git diff {baseline}` over the worktree, plus the uncommitted tree;
-- every project the flight touched, each with the path of its [testing manual](testing-manual.md);
-- the standing rules and the worktree or worktrees.
+## Sync to the target
 
-The agent is pinned `model: opus`, `effort: high`.
+When TARGET's tip is not an ancestor of the worktree's HEAD, the lander has `gitter` stash, rebase the branch onto the tip and pop, in the foreground. On a conflict gitter stops with the markers in place; the lander resolves each path, keeping the change's intent on top of the tip, and tells gitter to finish. BASE becomes the tip, and the sync outcome goes into the report's COVERAGE and the return's `SYNC` line.
 
-## The run
+## The inventory and the computed spawn
 
-1. Read every testing manual, the statement of intent, and the diff.
-2. Open each project's gate: its testing manual's static-check command over the flight's files in it, and the full suite with the manual's floors, once each, watched; the projects' gates may run in parallel as background commands. What they report is fixed, rerunning only the failing test until it is green.
-3. One review over the flight's whole diff, every project in it, so both sides of every contract change are read together: BASE the baseline, HEAD `WORKTREE` (the uncommitted tree, its owned untracked files listed), PATHSPECS the owned paths, the statement of intent as its claims, one per worktree. The lander picks the tier from the sinks the change adds, counted with `reviewer-pro`'s own trust-tracer grep: one hit or more takes `reviewer-pro`, none takes `reviewer`, and `gate.md` records the tier, the count and the size. `reviewer-pro` is `reviewer` plus a trust tracer that walks every sink a hostile shape can reach; on the [reviewer benchmark](../review/reviewer.md#benchmark) it found 16.0 of 27 known defects per four-rung set against `reviewer`'s 11.75, at about a third more per review, while `reviewer` holds the R1 floor (4.5 of 5 against 3.75). Size is recorded, never the switch: the rungs' sizes and sink counts (R1 1,577 production lines and 14 sink hits, R3 843 and 13) do not predict which tier wins, while a change with no sink leaves the pro's added seat nothing to walk. The review runs in the background: the lander ends its turn and takes the findings from its `review.md` at the review's return; a lander that looped over transcript mtimes to guess the review's end waited on a heuristic any busy sibling agent defeats. Every finding inside the flight's files is fixed, an UNCHECKED one or an OPEN thread read to its cause first; one outside them is recorded untouched.
-4. The attack map, closed-world: every changed hunk gets one line — an attack hypothesis (the real product traffic or state that could break this hunk and the wrong behaviour that results), an explicit no-attack justification, or `RETIRE: {tests}`. A hunk absent from the map is uncovered. Attacks drive states the product can reach, never inputs it cannot send.
-5. The validity sweep: every test file the diff adds or touches, read against the placement, tier, economy and validity laws of its own project's manual. Each violation is a finding in its class. Its economy half folds the duplicate tests it finds (a decision tested in two units keeps the test of the unit that makes it, every case the fold removes kept as a case of that test) and deletes the assertions it finds catching nothing (a test id that only exists, an echo of a mock call, copy asserted in every variant or locale, a snapshot of the fixture); finding none, it removes nothing.
-6. Adversarial tests, written into the module that owns the contract, as cases or assertions of its existing test where one fits — there is no lander-owned directory. A test is accepted only after it was watched failing against the code it attacks.
-7. Fixes (next section), then the affected tests.
-8. Close each project's gate. After the last fix in a project, its static-check command once more over the files changed there; a red fixed and the same command run again. A project whose last full run passed is closed by it, its floors (coverage minimums and the like) checked on that run; a floor is the lander's, never a requirement row. Later fixes are proven by their own tests. A project whose last full run failed runs the full suite once more after each of its fixes is green alone, until a full run passes.
+Call 1 runs `lander-inventory.py`, shipped as the machine-global kit skill `templates/global/skills/lander-inventory/` and invoked as `python3 -I $HOME/.claude/skills/lander-inventory/lander-inventory.py {WORKTREE} {BASE} --spec {FILES}`. It diffs BASE against the working tree, so a foreman's uncommitted and untracked work counts with its commits. Its output file sits beside REPORT_PATH (`.md` → `.inventory.txt`):
 
-## It fixes what it finds
+- `LEFT`: a name the diff removed everywhere it touched, still in the tree outside history files.
+- `LITERAL`: a name a code or data file dropped from inside a string or key on a replaced line, so a matcher or a stored format there knows only the new spelling.
+- `GONE`: a file the diff deleted or renamed away, still named in the tree.
+- `PLAN`: the spawn, computed from the diff and the spec files.
 
-The lander owns defect resolution: every defect its attacks, the review or the checks expose is fixed by the lander — implementation and tests, surgical, root cause. A round trip back through the foremen for each finding costs more than the finding. Two things go back instead of being fixed:
-
-- a defect whose fix needs a design decision or crosses out of the flight's files: `FAIL` with the residual, which the root foreman carries in its return;
-- a defect in code the standing rules forbid touching: recorded with status `outside the flight` and named in the return, never a residual and never a `FAIL`.
-
-## What it does not do
-
-- No nested copy of itself and no `Agent` tool. The adopter's QA handed its fixes to a fresh QA seat; here the closing full-suite run and the watched-failing proof of every new test are the judges of the lander's own fixes.
-- No row-by-row conformance audit: each foreman verified its children's returns against their rows; the statement of intent is read as the attack's.
-- No commit and no merge. `gitter` commits after the lander returns, and lands a committed worktree flight whose every unit is `DONE` on the lander's `PASS` or `FIXED`.
-
-## Bounds
-
-- One lander per flight, spawned once after the last verdict, covering every project the flight touched.
-- One full-suite run per project; another only after a failed one.
-- 200 calls, one model request each, raised from 150 with the executors' batching, counted by the `pfm internal call-cap` hook (§ Cap and compaction in [flights-foreman](flights-foreman.md)); past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
-- Every verdict names its executed artifact: the run log, the report file or the pinning test. A suite not watched running is not a pass.
-
-## The ledger and the return
-
-`{flight directory}/gate.md`: the attack map, then one row per finding — project · source (checks, review, attack, sweep) · area · failing test · reproduction · expected · status (fixed, residual, outside the flight).
-
-The return's first line is `PASS {flight}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {flight}: {n} defects fixed` or `FAIL {flight}: {n} residuals`, `{flight}` being the flight directory's name; then each project's last full-run verdict line as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([the foreman's return](flights-foreman.md#return)).
-
-The return is also a file. The lander's last act before returning writes it, verbatim, to `{flight directory}/returns/gate-r{round}.md`, `{round}` read from its brief file's name: the directory created, the text written under a dot-prefixed temporary name in it and moved onto that name, so the file appears whole and a directory watcher's glob never sees the temporary. The file is the flight's audit anchor; the root foreman is woken by the lander's completion notice and waits with no watcher ([flights-foreman](flights-foreman.md#waiting)). The background gate runs stay allowed.
-
-## Context budget
-
-- `tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down` — `Agent` is carried for the step 3 review spawn, `reviewer` or `reviewer-pro`; the effort tools are the lander's own; the rest is the executor's list.
-- It reads the diff and the hunks' surroundings by range.
-- `autoCompact`, iteration 0: forced at 350k, nudged from 150k and every 60k after; at a nudge the lander finishes the step in hand and calls `mcp__sub-agent-compact__forward_handoff` carrying `gate.md` as its ledger, each project's gate runs done and left with their log paths, and in `next` the next step.
-- One lander per flight holds every project's manual and suite in one context: the price of one review that sees both sides of every contract change together. It is on the watch list ([Open items](flights.md#open-items)).
-
-## The accepted risk
-
-A lander certifies its own fixes. The research collected for this design condemns that shape (self-assessment accuracy of 49 to 54%, a self-improving verifier reading 3% error against a true 32%), and none of 17 surveyed frameworks re-spawns a tester over its own fixes — the one shipping a real adversarial tester forbids it to fix at all. The adopter's ledgers also show later rounds finding 30% of all findings, including a crash on an auth gate. The ruling is cost over independence: no nesting, the mechanical judges above, and the residual road for anything structural. The A/B that would settle it — a gate with and without a fresh verifying round, scored by mutating only the changed lines — has not been run.
-
-## Surfaces that stay in sync
-
-| Surface | File | Holds |
+| PLAN row | Rule | Cap |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-lander.md` | The executable wording |
-| The builder | [`flights-foreman`](flights-foreman.md) | The landing: the lander and the wait on its return file, then `gitter`'s commit and merge; the reaction to `FAIL` |
-| The testing manual | [`testing-manual`](testing-manual.md) | The project law the sweep and the gate run against |
-| The audit | [`flights-audit`](flights-audit.md) | `gate.md` and `returns/gate-r{round}.md` as anchors; the review read from the lander's transcript |
-| The family | [`flights.md`](flights.md) | The lander among the four agents and the directory's writers |
+| `PLAN HUNTER` | k = min(4, ceil(production diff lines / 600)) clusters in path order, each with the tests beside its files; none at 400 production lines or fewer | 4 |
+| `PLAN WALKER` | a spec file with 10 or more numbered rows gets 2 ranges, 3 past 60 rows; the largest spec first | 4 in all |
+| `PLAN SUB-LANDER` | inventory rows by line number: `LEFT`+`GONE` in batches of about 12, `LITERAL` of about 25 | 6 |
 
-## Evidence
+Production lines exclude tests, docs, generated, lock and history files. Exit 2 prints `FAILED` with its cause; the lander then names it in COVERAGE, spawns hunters by module by hand and cuts the removed threads in its own hunt.
 
-- Adopter QA ledgers: 63 findings, about 27 production defects; a QA run averages 168 calls and 30.8M input tokens; 59M to 155M tokens per production defect; one wave with none.
-- Review against QA over three waves: 47 findings against 57, 6 in common; the review caught a critical crash the QA missed; one change passed both and still needed a production fix.
-- 5 of 8 nested chains ended in a round that found nothing.
-- Tests audit of goals-tab, topics-tab and workbench: of 24 in-flight defects the landers found, executor tests caught none, and 3 executor tests pinned a defect in place.
+Call 2 is one message spawning exactly the PLAN rows in the background: no row added, dropped, merged or re-cut. The spawn is computed because a written spawn rule was disobeyed in 2 of 2 bench runs, while the computed PLAN was obeyed in 4 of 4; two runs on one change spawn alike.
+
+## The children
+
+- `flights-hunter`: one cluster's diff and the spec rows naming its files; reads every changed function whole and asks SPEC, LINES, PATHS, MANY, GUARDS, STATE, COMMENTS and TESTS at each. Budget 30 tool calls. Returns `C{n} · severity · path:line`, the line copied from its own `grep -n` output and the failure, then `GAPS`, `READ` and `NOT READ`.
+- `flights-spec-walker`: one row range of a spec; finds the line keeping each row's promise in every state the row names. Budget 30 tool calls. Returns candidates tied to a row, then `HELD`, `NOT FOUND` and `NOT READ`; a row it cannot find is `NOT FOUND`, never held.
+- `flights-sub-lander`: a range of inventory rows, or up to 3 threads the lander cut (CONTRACT, ABSENCE, HAND-OFF, CONCURRENT), each followed to its far side, 3 hops at most. Budget 25 tool calls, back within about four minutes. Returns three-line flags `UNSAFE | UNSURE` with `LOOK` and `WHY`, and one `SAFE` line naming the ranges it read; a line only grepped is `UNSURE`, never `SAFE`.
+
+## The lander's own hunt
+
+With the children out, the lander owns what no cluster owns: the seams between clusters, each INTENT claim, every changed file no hunter row lists (docs, prompts, configs, deleted files) and the untracked files, read whole. It reads every changed function with the helpers it relies on and checks LINES, PATHS, GUARDS, REMOVED, CONCURRENCY and HOT PATH, INPUTS, TESTS and CLAIMS. Two or more threads leaving the diff go to one more background sub-lander.
+
+## Judge and report
+
+- Every child candidate and every `UNSAFE` or `UNSURE` flag is verified on disk: its line ±15 lines, the quoted line at that number and the failure following from it; otherwise `RULED OUT`. A `SAFE` whose `WHY` names no read lines counts as `UNSURE`.
+- Spawned children are reconciled against returns received; a missing flag leaves its thread `OPEN`.
+- Severity: a boundary failing open, data loss or a wrong value shown as right > a crash > a cost paid on every call > what a person sees > a log line.
+- The report at REPORT_PATH: VERDICT, ranked FINDINGS (`F{n} · severity · path:line · … · status: open`, the line copied from `grep -n`), THREADS, RULED OUT, TESTS, COVERAGE (files read, children spawned against returns, `LOOK read {n} of {m}`, HEAD first and last, the sync outcome). It is the file gitter's MERGE gate reads.
+
+## Fix, test, gate
+
+- Every finding inside the change is fixed, an unchecked one or an open thread read to its cause first, and marked `status: resolved in {file:line}`; a finding outside the change stays `status: open` and goes to the residuals. Fixes are not reviewed again.
+- The affected tests of the change and the fixes run with the testing manual's command until green.
+- The full gate runs once, right before the merge; a red gate is fixed, its failing tests run green, and that gate runs once more — the only repeat.
+- No test, build or gate runs while a sub-lander is out or a finding inside the change is open. A command longer than 10 minutes runs in the background with one blocking wait.
+- A critical decision goes to `SendMessage(to: "main")` with the choice it proceeds with; the lander never asks the user.
+
+## The return
+
+```text
+PASS {worktree} | FIXED {worktree} | FAIL {worktree}
+SYNC {up to date | synced {old base} → {TIP}, resolved {paths} | none}
+FINDINGS F{n} {fixed — file:line | outside the change — why}, … | none
+GATE {project} · {last full-gate verdict line as printed}, …
+RESIDUALS … | none
+DECISIONS … | none
+REPORT {the report path}
+```
+
+The verdict is the message's first word. Any finding left unfixed, or a gate not green, makes it `FAIL`, whatever the prose around it says.
+
+`STOP_AT review` returns one line instead: `REVIEWED {WORKTREE} · {n} findings · REPORT {REPORT_PATH}`.
+
+## The bench
+
+Per replayed landing, the lander it replaced (one reviewer over the change, then fixes and the gate):
+
+| Flight | Full landing cost | Wall time |
+| --- | --- | --- |
+| pull-sync | $10.80 | 1,413 s |
+| herdr-claude-sync | $12.56 | 1,976 s |
+| fence-shared | $12.32 | 3,205 s |
+
+Its review phase alone on pull-sync took about $6.37 and 1,001 s.
+
+This lander's review phase (`STOP_AT review`), two runs per flight, scored against the old lander's findings:
+
+| Flight | Old findings matched | Cost | Wall time |
+| --- | --- | --- | --- |
+| fence-shared | 6.5 and 5.5 of 10 | $4.57, $4.31 | 372 s, 320 s |
+| herdr-claude-sync | 3 and 4 of 5 | $6.36, $5.89 | 365 s, 382 s |
+
+- 0 of its 69 findings were invalid, and it found real defects the old lander missed.
+- Bias: the answer keys are the old lander's own findings, so a defect only the new lander finds earns it nothing, and a miss is scored against the old lander's view of the change.
+- Unbenched: a full landing (fix, tests, gate) on this version, and pull-sync on this version.
+
+## Declaration
+
+- `templates/global/agents/flights-lander.md`: opus at effort medium, no `effortControl` and no effort buttons; its `tools:` line holds `Agent` (the children and gitter) and `SendMessage` (gitter's conflict hand-back, a critical decision to main).
+- `templates/global/agents/flights-{hunter,spec-walker,sub-lander}.md`: Claude originals, each `visible-to` `flights-lander`.
+- `templates/global/skills/lander-inventory/`: the inventory kit, its `SKILL.md` visible to both landers.

@@ -45,7 +45,7 @@ func TestInstallPreflightRefusesRequiredDependencyBeforeInstallerRuns(t *testing
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 1 {
+	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 1 {
 		t.Fatalf("install code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if called || !strings.Contains(stdout.String(), "doctor: dep tmux path=(none) MISSING required") ||
@@ -90,7 +90,7 @@ func TestInstallPreflightDoesNotRefuseBrokenOptionalEngine(t *testing.T) {
 		Paths: paths.Values{Home: home},
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf(
 			"install code=%d stdout=%s stderr=%s, want optional Codex failure to remain non-blocking",
 			code,
@@ -141,7 +141,7 @@ func TestInstallPreflightFailureStillPreviewsInDryRun(t *testing.T) {
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest"}, &stdout, &stderr, runtime); code != 1 {
+	if code := runInstall([]string{"--offline"}, &stdout, &stderr, runtime); code != 1 {
 		t.Fatalf("install code=%d, want 1\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
 	}
 	if !called {

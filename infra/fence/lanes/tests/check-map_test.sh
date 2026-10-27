@@ -176,44 +176,32 @@ STUB
 esac
 STUB
   chmod +x "$BIN/pfm"
+
 }
 
 # ---- 10: the derive against a stub pfm ----------------------------------
 # The stub serves five top-level commands, five chat subcommands, each family
-# roster (with shared read) over `pfm mcp serve --stdio --family …`, a hidden `chat secret` and `internal hook-x` its dispatcher
+# roster over `pfm mcp serve --stdio --family …`, a hidden `chat secret` and `internal hook-x` its dispatcher
 # knows, and answers `unknown command` for everything else — the real pfm's
 # answer for a verb it does not have.
 
 write_derive_stub "$(cat <<'ARM'
-  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}' ;;
-  "mcp serve --stdio --family harvester") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}' ;;
+  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}' ;;
 ARM
 )"
-FULL='pfm alpha\tE1\tE1.01-fixture\npfm beta\tE1\tE1.01-fixture\npfm internal hook-x\tE1\tE1.01-fixture\npfm mcp\tE1\tE1.01-fixture\npfm chat new\tO1\tO1.01-fixture\npfm chat ls\tO1\tO1.01-fixture\npfm chat call\tO1\tO1.01-fixture\npfm chat status\tO1\tO1.01-fixture\npfm chat kill\tO1\tO1.01-fixture\npfm chat unkill\tO1\tO1.01-fixture\npfm chat secret\tO1\tO1.01-fixture\nmcp__chat-professor__ls\tE1\tE1.01-fixture\nmcp__chat-professor__read\tE1\tE1.01-fixture\nmcp__harvester-professor__read\tE1\tE1.01-fixture\nmcp__harvester-professor__download_file\tE1\tE1.01-fixture\n'
+FULL='pfm alpha\tE1\tE1.01-fixture\npfm beta\tE1\tE1.01-fixture\npfm internal hook-x\tE1\tE1.01-fixture\npfm mcp\tE1\tE1.01-fixture\npfm chat new\tO1\tO1.01-fixture\npfm chat ls\tO1\tO1.01-fixture\npfm chat call\tO1\tO1.01-fixture\npfm chat status\tO1\tO1.01-fixture\npfm chat kill\tO1\tO1.01-fixture\npfm chat unkill\tO1\tO1.01-fixture\npfm chat secret\tO1\tO1.01-fixture\nmcp__chat-professor__ls\tE1\tE1.01-fixture\nmcp__chat-professor__last\tE1\tE1.01-fixture\n'
 
 map "$FULL"
 run_sut
 if [ "$RC" -eq 0 ] &&
   grep -q 'derived commands: 5 top-level + 6 chat subcommands · 0 unmapped' <<<"$OUT" &&
   grep -q 'derived tools over pfm mcp serve --stdio --family chat: 2 · 0 unmapped' <<<"$OUT" &&
-  grep -q 'derived tools over pfm mcp serve --stdio --family harvester: 2 · 0 unmapped' <<<"$OUT" &&
   grep -q '0 stale · 2 judged by pfm.s dispatcher' <<<"$OUT" &&
   grep -q '^check-map: clean — .*no stale row' <<<"$OUT"; then
   ok "derive clean: every command and tool mapped, and the hidden verbs pass on the dispatcher's word"
 else
   bad "derive clean" "rc=$RC" "$OUT"
 fi
-
-# Each family's read has a coverage door even when both expose the same verb.
-map "$(printf '%b' "$FULL" | grep -v '^mcp__harvester-professor__read')
-"
-run_sut
-if [ "$RC" -eq 1 ] && grep -q 'UNMAPPED-TOOL: mcp__harvester-professor__read' <<<"$OUT"; then
-  ok "shared read has independent family coverage"
-else
-  bad "shared read family coverage" "rc=$RC" "$OUT"
-fi
-map "$FULL"
 
 # ---- 10b: mapped must keep an early match under pipefail -----------------
 
@@ -235,15 +223,15 @@ else
   names="$(printf '%b' "$FULL" | cut -f1 | LC_ALL=C sort -u)"
   names+="$(for ((i=0; i<7000; i++)); do printf '\nzz_fill_%06d' "$i"; done)"
   framed_names=$'\n'"$names"$'\n'
-  if [ "${#names}" -gt 65536 ] && mapped mcp__harvester-professor__download_file; then
-    ok "mapped wide list: download_file early in the list is found in one call"
+  if [ "${#names}" -gt 65536 ] && mapped mcp__chat-professor__last; then
+    ok "mapped wide list: last early in the list is found in one call"
   else
-    bad "mapped wide list" "bytes=${#names}; download_file was not found"
+    bad "mapped wide list" "bytes=${#names}; last was not found"
   fi
 
-  names=$'exact\nparent child\nmcp__harvester-professor__download_file\nliteralXX\nliteral.+'
+  names=$'exact\nparent child\nmcp__chat-professor__last\nliteralXX\nliteral.+'
   framed_names=$'\n'"$names"$'\n'
-  if mapped exact && mapped parent && ! mapped mcp__harvester-professor__download_fil &&
+  if mapped exact && mapped parent && ! mapped mcp__chat-professor__las &&
     mapped 'literal.+' && ! mapped 'literal.*'; then
     ok "mapped names: exact, subcommand and literal metacharacters match; a prefix does not"
   else
@@ -264,7 +252,7 @@ else
     done
     false=0
     for ((i=0; i<LANE_CONTENTION_PROBE; i++)); do
-      mapped mcp__harvester-professor__download_file || false=$((false + 1))
+      mapped mcp__chat-professor__last || false=$((false + 1))
     done
     kill "${burners[@]}" 2>/dev/null || :
     wait "${burners[@]}" 2>/dev/null || :
@@ -287,7 +275,7 @@ write_derive_stub "$(cat <<'ARM'
     rc=$?
     [ "$rc" -gt 128 ] || exit 0
     if [ "$5" = chat ]; then
-      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}'
+      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}'
     else
       echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}'
     fi
@@ -299,7 +287,6 @@ started="$(date +%s)"
 run_sut
 wall=$(( $(date +%s) - started ))
 if [ "$RC" -eq 0 ] && [ "$wall" -lt 5 ] &&
-  grep -q 'derived tools over pfm mcp serve --stdio --family harvester: 2 · 0 unmapped' <<<"$OUT" &&
   grep -q '^check-map: clean —' <<<"$OUT"; then
   ok "delayed id-2 reply is read while stdin stays open (wall ${wall}s)"
 else
@@ -316,10 +303,10 @@ else
   bad "unmapped command" "rc=$RC" "$OUT"
 fi
 
-map "$(printf '%b' "$FULL" | grep -v '^mcp__harvester-professor__download_file')
+map "$(printf '%b' "$FULL" | grep -v '^mcp__chat-professor__last')
 "
 run_sut
-if [ "$RC" -eq 1 ] && grep -q 'UNMAPPED-TOOL: mcp__harvester-professor__download_file — no row in map.tsv names it' <<<"$OUT"; then
+if [ "$RC" -eq 1 ] && grep -q 'UNMAPPED-TOOL: mcp__chat-professor__last — no row in map.tsv names it' <<<"$OUT"; then
   ok "UNMAPPED-TOOL: a served MCP tool with no row is named"
 else
   bad "unmapped tool" "rc=$RC" "$OUT"
@@ -341,8 +328,7 @@ fi
 # ---- 11: hidden probes overlap, while their findings stay in map order ---
 
 write_derive_stub "$(cat <<'ARM'
-  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}' ;;
-  "mcp serve --stdio --family harvester") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}' ;;
+  "mcp serve --stdio --family chat") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}' ;;
   "chat a-wait --help")
     for ((i=0; i<100; i++)); do
       if [ -f "${PFM_CONFIG%/*}/peer-ready" ]; then echo 'usage: pfm chat a-wait'; exit 2; fi
@@ -378,7 +364,7 @@ write_derive_stub "$(cat <<'ARM'
         error) echo '{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"fixture family unavailable"}}' ;;
       esac
     elif [ "$5" = chat ]; then
-      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"read"}]}}'
+      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ls"},{"name":"last"}]}}'
     else
       echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"},{"name":"download_file"}]}}'
     fi
@@ -386,11 +372,12 @@ write_derive_stub "$(cat <<'ARM'
 ARM
 )"
 map "$FULL"
-for sample in 'chat empty' 'harvester empty' 'harvester error'; do
+for sample in 'chat empty' 'chat error'; do
   read -r STUB_FAILED_FAMILY STUB_FAMILY_RESULT <<<"$sample"
   export STUB_FAILED_FAMILY STUB_FAMILY_RESULT
   run_sut
-  if [ "$RC" -eq 2 ] && grep -q "DERIVE-FAILED: pfm mcp serve --stdio --family $STUB_FAILED_FAMILY listed no tool" <<<"$OUT"; then
+  failed_command="pfm mcp serve --stdio --family chat"
+  if [ "$RC" -eq 2 ] && grep -q "DERIVE-FAILED: $failed_command listed no tool" <<<"$OUT"; then
     ok "failed family named: $sample"
   else
     bad "failed family named: $sample" "rc=$RC" "$OUT"

@@ -33,6 +33,7 @@ FX="$T/.$FXNAME"
 SECOND="$T/hkwt-$$"
 mkdir -p "$FX/infra/fence/lanes"
 cp "$SUT" "$FX/infra/fence/housekeeping.sh"
+cp "$FENCE/shared.sh" "$FENCE/mkdir-lock.sh" "$FX/infra/fence/"
 cat >"$FX/infra/fence/lanes/root.sh" <<'EOF'
 h="${0%/*}/hash"
 [ -s "$h" ] || { echo "root: HASH-UNDERIVABLE: fixture" >&2; exit 2; }
@@ -52,8 +53,8 @@ hashes aaa eee
 # roots "ID REF HASH", pins, volumes); a name/ref listed in $STUB_DIR/inuse is
 # refused by rm/rmi/volume rm the way the daemon refuses an object in use.
 # STUB_DOWN=1: every call fails · STUB_PRUNE=ok|busy|fail · STUB_DF=ok|fail ·
-# STUB_MB: the gocache size df reports ("" = none), STUB_GOMOD_MB / STUB_UV_MB the
-# gomod / uv sizes (default 10) · STUB_VOLUME=0: no such volume · STUB_BUILDER=ok|busy|fail ·
+# STUB_MB: the gocache size df reports ("" = none), STUB_GOMOD_MB the
+# gomod size (default 10) · STUB_VOLUME=0: no such volume · STUB_BUILDER=ok|busy|fail ·
 # $STUB_DIR/fenceimg: the local fence image `docker run` removes root-owned scratch with.
 BIN="$T/bin"
 mkdir -p "$BIN"
@@ -121,7 +122,7 @@ case "$1" in
   system)
     [ "${STUB_DF:-ok}" = ok ] || { echo "Error response from daemon: df boom" >&2; return 1; }
     [ -z "${STUB_MB:-}" ] || printf 'acme_pgdata\t9.5GB\npfm-dev-gocache\t%sMB\n' "$STUB_MB"
-    printf 'pfm-dev-gomod\t%sMB\npfm-dev-lintcache\t10MB\npfm-lane-uv-cache\t%sMB\npfm-lane-harvest-cache\t0B\n' "${STUB_GOMOD_MB:-10}" "${STUB_UV_MB:-10}" ;;
+    printf 'pfm-dev-gomod\t%sMB\npfm-dev-lintcache\t10MB\n' "${STUB_GOMOD_MB:-10}" ;;
   builder)
     case "${STUB_BUILDER:-ok}" in
       ok) echo "Total reclaimed space: 1.5GB" ;;
@@ -188,10 +189,9 @@ else bad "containers" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 #     is never age-reaped, however old
 fresh; touch "$STAMP"; printf 'c1\nc2\n' >"$STUB_DIR/running"
 printf '/mid %s\n/demo %s 1\n' "$(iso_ago $((5 * 3600)))" "$(iso_ago $((30 * 3600)))" >"$STUB_DIR/created"
-PFM_FENCE_CONTAINER_MAX_HOURS=6h hk
-if warned containers && grep -q "PFM_FENCE_CONTAINER_MAX_HOURS" "$T/err" && ! grep -q '^rm -f' "$STUB_DOCKER_LOG" &&
-  grep -q 'pfm.fence.long-lived' <(grep '^inspect ' "$STUB_DOCKER_LOG"); then
-  ok "containers: PFM_FENCE_CONTAINER_MAX_HOURS=6h warns and the default 6 applies; a long-lived container past it is kept"
+PFM_FENCE_CONTAINER_MAX_HOURS=6h hk; invalid_rc=$?
+if [[ $invalid_rc != 0 ]] && grep -q "PFM_FENCE_CONTAINER_MAX_HOURS" "$T/err" && [[ ! -s "$STUB_DOCKER_LOG" ]]; then
+  ok "containers: PFM_FENCE_CONTAINER_MAX_HOURS=6h is refused before cleanup"
 else bad "containers max hours" "$(cat "$T/err")" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 3 — images: dangling images labelled pfm.fence=1 only, never -a; a concurrent
@@ -258,17 +258,28 @@ if grep -qxF 'WARN fence housekeeping: lane-images failed: listing lane roots: f
   ok "lane images: a failed root listing warns and stops the sweep"
 else bad "lane-image listing failure" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
-# 5 — legacy volumes: ^(fence|infra)_pfm-dev- only; the host's other stacks untouched
+# 5 — legacy volumes: compose-prefixed caches and the two retired lane caches;
+#     similar names and the host's other stacks stay untouched.
 fresh; touch "$STAMP"
 printf '%s\n' fence_pfm-dev-gocache infra_pfm-dev-lintcache fence_pfm-dev-gomod pfm-dev-gocache pfm-dev-gomod \
+  pfm-lane-harvest-cache pfm-lane-uv-cache pfm-lane-harvest-cache-copy xpfm-lane-uv-cache pfm-lane-uv-cache-other \
   acme_pgdata shop_db tracing_clickhouse notes_data 3f2a9c0e1b7d4a5f8e6c2d1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f \
   myfence_pfm-dev-gocache fence_pfm-devx fence_other >"$STUB_DIR/volumes"
-printf 'fence_pfm-dev-gomod\n' >"$STUB_DIR/inuse"
+printf '%s\n' fence_pfm-dev-gomod pfm-lane-uv-cache >"$STUB_DIR/inuse"
 hk
-if [ "$(grep '^volume rm ' "$STUB_DOCKER_LOG" | sort | tr '\n' ' ')" = "volume rm fence_pfm-dev-gocache volume rm fence_pfm-dev-gomod volume rm infra_pfm-dev-lintcache " ] &&
-  grep -q 'removed legacy volume fence_pfm-dev-gocache' "$T/err" && grep -q 'fence_pfm-dev-gomod' "$T/err" && nowarn; then
-  ok "legacy volumes: the three fence_/infra_pfm-dev- volumes only (an in-use one kept); every other volume untouched"
+if [ "$(grep '^volume rm ' "$STUB_DOCKER_LOG" | sort)" = "$(printf 'volume rm %s\n' fence_pfm-dev-gocache fence_pfm-dev-gomod infra_pfm-dev-lintcache pfm-lane-harvest-cache pfm-lane-uv-cache | sort)" ] &&
+  grep -q 'removed legacy volume fence_pfm-dev-gocache' "$T/err" &&
+  grep -q 'removed legacy volume pfm-lane-harvest-cache' "$T/err" &&
+  grep -q 'kept legacy volume pfm-lane-uv-cache — a container still uses it' "$T/err" && nowarn; then
+  ok "legacy volumes: compose-prefixed and exact retired lane caches swept, mounted cache kept, similar names untouched"
 else bad "legacy volumes" "$(grep '^volume' "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+: >"$STUB_DOCKER_LOG"; : >"$STUB_DIR/inuse"
+printf '%s\n' pfm-lane-uv-cache >"$STUB_DIR/volumes"
+hk
+if logged 'volume rm pfm-lane-uv-cache' &&
+  grep -q 'removed legacy volume pfm-lane-uv-cache' "$T/err" && nowarn; then
+  ok "legacy volumes: retired cache is retried and removed after its container releases it"
+else bad "retired legacy volume retry" "$(grep '^volume' "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 6 — budget: over → the volume is removed (no file walk, no alpine), day stamped
 fresh; STUB_MB=250 hk
@@ -297,9 +308,9 @@ else bad "budget stamp" "$(cat "$STUB_DOCKER_LOG")"; fi
 fresh; touch -d @$(( $(date +%s) - 3 * 3600 )) "$STAMP"; STUB_MB=250 hk; r1=0; logged 'volume rm pfm-dev-gocache' && r1=1
 fresh; touch -d @$(( $(date +%s) - 3600 )) "$STAMP"; STUB_MB=250 hk; r2=0; logged 'volume rm pfm-dev-gocache' || r2=1
 fresh; touch -d @$(( $(date +%s) - 3600 )) "$STAMP"; PFM_FENCE_BUDGET_MINUTES=30 STUB_MB=250 hk; r3=0; logged 'volume rm pfm-dev-gocache' && r3=1
-fresh; touch -d @$(( $(date +%s) - 3 * 3600 )) "$STAMP"; PFM_FENCE_BUDGET_MINUTES=2h STUB_MB=250 hk
-r4=0; warned cache-budget && grep -q 'PFM_FENCE_BUDGET_MINUTES' "$T/err" && logged 'volume rm pfm-dev-gocache' && r4=1
-if [ "$r1$r2$r3$r4" = 1111 ]; then ok "budget: a 3 h old stamp re-sizes, a 1 h old one skips, PFM_FENCE_BUDGET_MINUTES overrides, an invalid one warns and 120 applies"
+fresh; touch -d @$(( $(date +%s) - 3 * 3600 )) "$STAMP"; PFM_FENCE_BUDGET_MINUTES=2h STUB_MB=250 hk; invalid_rc=$?
+r4=0; [[ $invalid_rc != 0 ]] && grep -q 'PFM_FENCE_BUDGET_MINUTES' "$T/err" && [[ ! -s "$STUB_DOCKER_LOG" ]] && r4=1
+if [ "$r1$r2$r3$r4" = 1111 ]; then ok "budget: a 3 h old stamp re-sizes, a 1 h old one skips, PFM_FENCE_BUDGET_MINUTES overrides, an invalid one refuses all cleanup"
 else bad "budget cadence" "3h=$r1 1h-skip=$r2 override=$r3 invalid=$r4" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 10 — budget: an unmeasurable size (df fails, or reports nothing) warns, never passes, no stamp
@@ -314,9 +325,9 @@ if ! grep -q '^system df\|^volume rm pfm-dev-gocache' "$STUB_DOCKER_LOG" && nowa
 else bad "budget absent" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 12 — budget: an invalid PFM_FENCE_GOCACHE_MB warns and the 15000 default applies
-fresh; PFM_FENCE_GOCACHE_MB=15G STUB_MB=250 hk
-if warned cache-budget && grep -q 'PFM_FENCE_GOCACHE_MB' "$T/err" && ! logged 'volume rm pfm-dev-gocache' && [ -f "$STAMP" ]; then
-  ok "budget: PFM_FENCE_GOCACHE_MB=15G warns and the default applies"
+fresh; PFM_FENCE_GOCACHE_MB=15G STUB_MB=250 hk; invalid_rc=$?
+if [[ $invalid_rc != 0 ]] && grep -q 'PFM_FENCE_GOCACHE_MB' "$T/err" && [[ ! -s "$STUB_DOCKER_LOG" ]]; then
+  ok "budget: PFM_FENCE_GOCACHE_MB=15G is refused without sizing or removal"
 else bad "budget invalid" "$(cat "$T/err")" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 13 — F1: under the caller's set -euo pipefail, a failing size probe, a dead
@@ -350,12 +361,12 @@ hashes aaa eee
 if [ "$r1$r2" = 11 ]; then ok "stamp: /tmp/{project}/fence/ from the checkout and from a linked worktree"
 else bad "stamp home" "checkout=$r1 worktree=$r2" "$(cat "$T/err")"; fi
 
-# 15 — fence_volumes_ensure: one inspect when all five exist, a create each when
+# 15 — fence_volumes_ensure: one inspect when all three exist, a create each when
 #      not, and a dead daemon never fails a set -euo pipefail caller
 fresh; fence_volumes_ensure 2>"$T/err"
-r1=0; logged 'volume inspect pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache pfm-lane-harvest-cache pfm-lane-uv-cache' && ! grep -q '^volume create' "$STUB_DOCKER_LOG" && r1=1
+r1=0; logged 'volume inspect pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache' && ! grep -q '^volume create' "$STUB_DOCKER_LOG" && r1=1
 fresh; STUB_VOLUME=0 fence_volumes_ensure 2>"$T/err"
-r2=0; logged 'volume create pfm-dev-gocache' && logged 'volume create pfm-dev-gomod' && logged 'volume create pfm-dev-lintcache' && logged 'volume create pfm-lane-harvest-cache' && logged 'volume create pfm-lane-uv-cache' && r2=1
+r2=0; logged 'volume create pfm-dev-gocache' && logged 'volume create pfm-dev-gomod' && logged 'volume create pfm-dev-lintcache' && r2=1
 fresh; STUB_DOWN=1 bash -c 'set -euo pipefail; . "$1"; fence_volumes_ensure; echo SURVIVED' _ "$HK" >"$T/out" 2>"$T/err"
 r3=0; [ "$(cat "$T/out")" = SURVIVED ] && warned volumes && r3=1
 if [ "$r1$r2$r3" = 111 ]; then ok "volumes: ensured with one inspect, created when absent, a dead daemon warns"
@@ -518,16 +529,16 @@ r1=0; logged 'builder prune -f --filter until=168h' && [ -f "$BSTAMP" ] && grep 
 hk; r2=0; [ "$(grep -c '^builder prune' "$STUB_DOCKER_LOG")" = 1 ] && r2=1
 fresh; touch "$STAMP"; STUB_BUILDER=fail hk; r3=0; warned build-cache && [ ! -f "$BSTAMP" ] && r3=1
 fresh; touch "$STAMP"; STUB_BUILDER=busy hk; r4=0; nowarn && r4=1
-fresh; touch "$STAMP"; PFM_FENCE_BUILDCACHE_HOURS=1w hk; r5=0; warned build-cache && logged 'builder prune -f --filter until=168h' && r5=1
-if [ "$r1$r2$r3$r4$r5" = 11111 ]; then ok "build cache: daily prune of cache unused for 168h; busy silent, failure warns unstamped, invalid hours default"
+fresh; touch "$STAMP"; PFM_FENCE_BUILDCACHE_HOURS=1w hk; invalid_rc=$?; r5=0; [[ $invalid_rc != 0 ]] && grep -q PFM_FENCE_BUILDCACHE_HOURS "$T/err" && [[ ! -s "$STUB_DOCKER_LOG" ]] && r5=1
+if [ "$r1$r2$r3$r4$r5" = 11111 ]; then ok "build cache: daily prune of cache unused for 168h; busy silent, failure warns unstamped, invalid hours refuse cleanup"
 else bad "build cache" "prune=$r1 daily=$r2 fail=$r3 busy=$r4 invalid=$r5" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 21 — cache budget: every shared volume has one; gomod over its 4000 MB goes,
-#      uv under its 8000 MB stays, from one df call
-fresh; STUB_MB=40 STUB_GOMOD_MB=4500 STUB_UV_MB=7000 hk
-if logged 'volume rm pfm-dev-gomod' && ! grep -q '^volume rm pfm-lane-uv-cache\|^volume rm pfm-dev-gocache' "$STUB_DOCKER_LOG" &&
+#      gocache under its 15000 MB stays, from one df call
+fresh; STUB_MB=40 STUB_GOMOD_MB=4500 hk
+if logged 'volume rm pfm-dev-gomod' && ! grep -q '^volume rm pfm-dev-gocache' "$STUB_DOCKER_LOG" &&
   [ "$(grep -c '^system df' "$STUB_DOCKER_LOG")" = 1 ] && grep -q 'removed pfm-dev-gomod, 4500 MB > 4000 MB budget, freed 4500 MB' "$T/err" && [ -f "$STAMP" ] && nowarn; then
-  ok "cache budget: gomod over 4000 MB removed, uv under 8000 MB kept, one sizing call"
+  ok "cache budget: gomod over 4000 MB removed, gocache under 15000 MB kept, one sizing call"
 else bad "cache budget all volumes" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 shtest_end

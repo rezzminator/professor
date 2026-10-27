@@ -1,8 +1,10 @@
 package picker
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,9 +13,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -225,5 +231,111 @@ func TestOpenAndRememberRecordsBeforeTheOpenThatMayNotReturn(t *testing.T) {
 				t.Fatalf("memory after the open = %+v, %v; want %+v", after, err, test.after)
 			}
 		})
+	}
+}
+
+func TestPickerNativeDiscoveryFailures(t *testing.T) {
+	for _, stateName := range []string{"live", "lost"} {
+		for _, mode := range []string{"--plain", "--tsv", "refresh", "refreshing"} {
+			t.Run(stateName+"/"+mode, func(t *testing.T) {
+				testjail.Fleet(t)
+				ctx := context.Background()
+				values, err := pfmconfig.ResolvePaths()
+				if err != nil {
+					t.Fatal(err)
+				}
+				runtime := pfmconfig.Runtime{
+					Config: pfmconfig.Defaults(values.Home, values.Roots[pfmengine.Claude]),
+					Paths:  values,
+				}
+				state := fleetdb.OpenSharedState(ctx, values)
+				t.Cleanup(func() {
+					if err := state.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				if err := state.PutSeat(ctx, fleetdb.Seat{
+					SeatID:      "native-failure",
+					SessionID:   "native-sid",
+					Engine:      "cc",
+					Backend:     "herdr",
+					State:       stateName,
+					Name:        "NATIVE",
+					HerdrPane:   "w1:p1",
+					HerdrSocket: filepath.Join(values.Home, "dead.sock"),
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if strings.HasPrefix(mode, "--") {
+					database, err := store.Open()
+					if err != nil {
+						t.Fatal(err)
+					}
+					transcript := filepath.Join(values.Roots[pfmengine.Claude][0], "healthy.jsonl")
+					body := []byte(
+						"{\"type\":\"custom-title\",\"customTitle\":\"HEALTHY\"}\n{\"type\":\"user\",\"message\":{\"content\":\"keep healthy\"}}\n",
+					)
+					if err := os.WriteFile(transcript, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if err := database.UpsertTranscript(
+						ctx,
+						store.Transcript{
+							UUID:        "healthy",
+							Path:        transcript,
+							Size:        int64(len(body)),
+							PromptCount: 1,
+							CustomTitle: "HEALTHY",
+						},
+					); err != nil {
+						t.Fatal(err)
+					}
+					if err := database.Close(); err != nil {
+						t.Fatal(err)
+					}
+					var stdout, stderr bytes.Buffer
+					rc := Run([]string{mode}, &stdout, &stderr, runtime)
+					want := 0
+					if stateName == "live" {
+						want = 1
+					}
+					if rc != want || (want == 1 && !strings.Contains(stderr.String(), "dead.sock")) {
+						t.Errorf("native discovery rc=%d want=%d stderr=%q", rc, want, stderr.String())
+					}
+					if !strings.Contains(stdout.String(), "HEALTHY") {
+						t.Errorf("healthy partial rows lost: %s", stdout.String())
+					}
+					return
+				}
+				updates := make(chan ui.Snapshot, 1)
+				last, ok := sendRefresh(
+					ctx,
+					nil,
+					fleet.Env{Paths: values, Config: runtime.Config},
+					scanRequest{},
+					fleet.Data{},
+					gather.Snapshot{},
+					mode == "refreshing",
+					updates,
+				)
+				if !ok {
+					t.Fatal("refresh not published")
+				}
+				snapshot := <-updates
+				if stateName == "live" {
+					if !last.failed || snapshot.RefreshFailure == nil ||
+						snapshot.RefreshFailure.Stage != "native seats" ||
+						!strings.Contains(snapshot.RefreshFailure.Err, "dead.sock") {
+						t.Fatalf(
+							"native discovery accepted as current: last.failed=%t snapshot=%+v",
+							last.failed,
+							snapshot,
+						)
+					}
+				} else if last.failed || snapshot.RefreshFailure != nil || len(snapshot.Rows) == 0 {
+					t.Fatalf("lost diagnostic seat must remain a normal row: %+v", snapshot)
+				}
+			})
+		}
 	}
 }

@@ -3,7 +3,7 @@
 # settings.json with the installed copy off and the lab hooks, managed settings,
 # the .claude.json seed and the launcher that hands fd 3 to claude under env -i.
 
-lab_options() { LAB_OPTIONS=$1; } # scenario header: the plugin's options JSON
+lab_options() { LAB_OPTIONS=$1; } # scenario header: the options JSON of a plugin that declares options; forward-compaction reads none (its FORWARD_COMPACTION_* variables go in LAB_ENV) and vital/options-ignored fails a run that sets any
 
 lab_env_lines() { # the D5 allowlist, the four auth keys and the scenario's LAB_ENV, one KEY=value per line
   local r=$LAB_RUN e
@@ -80,16 +80,10 @@ lab_launch_render() { # {run}/launch.sh: opens fd 3 from the FIFO, removes it, e
   } > "$f" && chmod 700 "$f"
 }
 
-need_agent() { # <name> <model> <tools> [autoCompact map '{key: value, ...}']: a project agent in {run}/work/.claude/agents/
-  # the map is written as nested lines: the plugin's frontmatter reader takes no flow map
-  local d=$LAB_RUN/work/.claude/agents pair pairs=()
-  if [[ -n ${4:-} ]]; then
-    IFS=',' read -r -a pairs <<< "${4//[\{\}]/}"
-  fi
+need_agent() { # <name> <model> <tools>: a project agent in {run}/work/.claude/agents/
+  local d=$LAB_RUN/work/.claude/agents
   mkdir -p "$d" && {
     printf -- '---\nname: %s\ndescription: plugin-lab agent %s\nmodel: %s\ntools: %s\n' "$1" "$1" "$2" "$3"
-    (( ${#pairs[@]} )) && printf 'autoCompact:\n'
-    for pair in "${pairs[@]}"; do printf '  %s\n' "$(sed 's/^ *//; s/ *$//' <<< "$pair")"; done
     printf -- '---\n\nFollow the task you are given exactly, using only your tools. Reply briefly.\n'
   } > "$d/$1.md" || lab_need_fail "need_agent $1: cannot write $d/$1.md"
 }

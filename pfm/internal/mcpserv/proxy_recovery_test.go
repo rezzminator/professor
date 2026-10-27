@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const proxyRecoveryUninitialized = `{"jsonrpc":"2.0","id":2,"error":{"code":0,"message":"method \"tools/call\" is invalid during session initialization"}}`
@@ -46,7 +48,7 @@ func proxyTestSessionLost() *http.Response {
 
 func (daemon *proxyRecoveryDaemon) proxy() *stdioProxy {
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.endpoint = "http://proxy.test/mcp/chat"
 	proxy.retryDelay = time.Millisecond
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
@@ -116,7 +118,7 @@ func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
 	}))
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.retryWindow = 150 * time.Millisecond
 	proxy.retryDelay = 5 * time.Millisecond
 	harness := startProxyTestHarness(t, proxy)
@@ -302,7 +304,7 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 		return http.DefaultTransport.RoundTrip(request)
 	})}
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.retryWindow = 500 * time.Millisecond
 	proxy.retryDelay = 10 * time.Millisecond
 	harness := startProxyTestHarness(t, proxy)

@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -23,14 +26,22 @@ const (
 	AncestryDepth = 12
 )
 
-// ErrNoTmux is the whoami failure chat.sh reports on stderr (chat.sh:94).
-var ErrNoTmux = errors.New(
-	"ERROR: this chat is not inside tmux ($TMUX unset, and no ancestor carries it)",
+// Identity failures distinguish absence, a proven unregistered pane and conflicting owners.
+var (
+	ErrNotInChat = errors.New(
+		"ERROR: this process is not inside a pfm chat: no live tmux pane or Herdr pane holds it",
+	)
+	ErrNotRegistered = errors.New("resolve: caller not registered")
+	ErrAmbiguous     = errors.New("resolve: caller ambiguous")
 )
 
 // Identity is who the CALLING process is: the tmux handle another chat calls
 // to, plus whatever engine identity the environment carries.
 type Identity struct {
+	Backend        string `json:"backend,omitempty"`
+	SeatID         string `json:"seat_id,omitempty"`
+	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
+	Fronted        bool   `json:"fronted,omitempty"`
 	// Session is chat.sh whoami's stdout — this chat's own tmux session name.
 	Session    string `json:"session"`
 	SocketPath string `json:"socket_path,omitempty"`
@@ -46,6 +57,8 @@ type Identity struct {
 // WhoamiEnvironment is the caller environment whoami reads. It is a value so a
 // jail can state it outright instead of mutating the process environment.
 type WhoamiEnvironment struct {
+	HerdrSocket     string
+	HerdrPane       string
 	TMUX            string
 	TMUXPane        string
 	ClaudeSessionID string
@@ -54,7 +67,7 @@ type WhoamiEnvironment struct {
 
 // SessionNamer answers "what is the tmux session name here" for one socket.
 type SessionNamer interface {
-	SessionName(ctx context.Context, socketPath, target string) (string, error)
+	SessionPane(ctx context.Context, socketPath, target string) (session string, panePID int, err error)
 }
 
 // PaneOwner is one live pane and the pid tmux runs in it.
@@ -86,6 +99,7 @@ type WhoamiDependencies struct {
 	SelfPID     int
 	TmuxDir     string
 	ProcRoot    string
+	CodexSeats  func(context.Context) ([]CodexSeat, error)
 }
 
 // Whoami resolves the calling chat's own identity.
@@ -96,6 +110,7 @@ type Whoami struct {
 	processes   ProcessTree
 	selfPID     int
 	tmuxDir     string
+	codexSeats  func(context.Context) ([]CodexSeat, error)
 }
 
 // NewWhoami builds a resolver over the standard jail-aware paths.
@@ -125,6 +140,7 @@ func NewWhoami(dependencies WhoamiDependencies) (*Whoami, error) {
 		processes:   dependencies.Processes,
 		selfPID:     dependencies.SelfPID,
 		tmuxDir:     tmuxDir,
+		codexSeats:  dependencies.CodexSeats,
 	}
 	if identifier.namer == nil {
 		identifier.namer = CommandTmuxNamer{}
@@ -150,161 +166,238 @@ func CallerEnvironment() WhoamiEnvironment {
 func CallerEnvironmentFrom(env paths.Env) WhoamiEnvironment {
 	return WhoamiEnvironment{
 		TMUX:            env.Get("TMUX"),
+		HerdrSocket:     env.Get("HERDR_SOCKET_PATH"),
+		HerdrPane:       env.Get("HERDR_PANE_ID"),
 		TMUXPane:        env.Get("TMUX_PANE"),
 		ClaudeSessionID: env.Get(ClaudeSessionEnv),
 		CodexThreadID:   env.Get(CodexThreadEnv),
 	}
 }
 
-// Identify answers chat.sh's `whoami`: this chat's own tmux session name, plus
-// the engine identity behind it. The exported session id is authoritative for
-// WHICH conversation this is; the tmux handle comes from $TMUX, or — when the
-// engine spawned our shell without passing tmux context through, which is the
-// codex path — from ANCESTRY RECOVERY over the process chain
-// (chat.sh:65-96). A recovered value is never exported globally: an empty
-// $TMUX is sometimes deliberate, and re-exporting it would point every probe
-// at the sender's own session.
+// Identify reads engine/transcript identity first, then proves the environment's
+// tmux and Herdr claims against live servers and process ancestry. The tmux
+// display supplies session and pane pid; Herdr supplies canonical pane identity
+// and foreground pids. The nearest ancestor wins; equal claims are ambiguous.
+// A tmux winner needs no row. A Herdr winner resolves its durable seat and
+// supervisor only after location proof. Without a proven claim, ancestry
+// recovery precedes the Codex-thread rung. Stale claims become not-in-chat only
+// after those rungs fail; failed reads never become absence.
 func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 	identity := Identity{Source: tmuxName}
 	if identifier.environment.ClaudeSessionID != "" {
-		identity.Engine = string(pfmengine.Claude)
-		identity.ID = identifier.environment.ClaudeSessionID
-		identity.Source = "env-claude"
+		identity.Engine, identity.ID, identity.Source = string(
+			pfmengine.Claude,
+		), identifier.environment.ClaudeSessionID, "env-claude"
 	} else if identifier.environment.CodexThreadID != "" {
-		thread, err := CodexThreadID(
-			identifier.environment.CodexThreadID,
-			"",
-			"",
-			0,
-			nil,
-		)
-		if err == nil {
-			identity.ID = thread.ID
-		}
-		identity.Engine = string(pfmengine.Codex)
-		identity.Source = "env-codex"
+		identity.Engine, identity.ID, identity.Source = string(
+			pfmengine.Codex,
+		), identifier.environment.CodexThreadID, "env-codex"
 	}
-
-	socketPath := socketFromTMUX(identifier.environment.TMUX)
-	pane := ""
-	if pane == "" {
-		pane = identifier.environment.TMUXPane
-	}
-	if socketPath == "" {
-		recoveredSocket, recoveredPane, ok := identifier.recoverFromAncestry(ctx)
-		if !ok {
-			return identity, ErrNoTmux
-		}
-		socketPath = recoveredSocket
-		pane = recoveredPane
-		identity.Recovered = true
-		if identity.Source == tmuxName {
-			identity.Source = "ancestry"
-		}
-	}
-	identity.SocketPath = socketPath
-	identity.SocketName = filepath.Base(socketPath)
-	identity.Pane = pane
-	if identity.Engine == "" {
-		identity.Engine = engineForSocket(identity.SocketName)
-	}
-	session, err := identifier.namer.SessionName(ctx, socketPath, pane)
+	chain, ancestryErr := identifier.ancestors()
+	tmuxIdentity, tmuxIndex, tmuxStale, err := identifier.proveTmux(
+		ctx,
+		identity,
+		pfmtmux.SocketPath(identifier.environment.TMUX),
+		identifier.environment.TMUXPane,
+		chain,
+	)
 	if err != nil {
-		// The socket already resolved — this is a tmux exec that could not
-		// run, not "no tmux here". Reporting it as ErrNoTmux would make
-		// self/me target resolution read a transient tmux failure as the
-		// caller never being inside tmux at all.
-		return identity, fmt.Errorf("read the tmux session name on %s: %w", socketPath, err)
+		return identity, err
 	}
-	if session == "" {
-		return identity, ErrNoTmux
+	native, herdrIndex, herdrStale, err := identifier.proveHerdr(ctx, chain)
+	if err != nil {
+		return identity, err
 	}
-	identity.Session = session
-	return identity, nil
+	if tmuxIndex >= 0 && herdrIndex >= 0 && tmuxIndex == herdrIndex {
+		return identity, fmt.Errorf("%w: tmux and Herdr own ancestor %d", ErrAmbiguous, chain[tmuxIndex])
+	}
+	if herdrIndex >= 0 && (tmuxIndex < 0 || herdrIndex < tmuxIndex) {
+		native.Engine, native.ID = identity.Engine, identity.ID
+		return identifier.identifyHerdr(ctx, native)
+	}
+	if tmuxIndex >= 0 {
+		return tmuxIdentity, nil
+	}
+	if ancestryErr != nil {
+		return identity, fmt.Errorf("look up the caller: process ancestry: %w", ancestryErr)
+	}
+	recovered, found, recoveryErr := identifier.recoverFromAncestry(ctx, identity, chain)
+	if found {
+		return recovered, nil
+	}
+	if identifier.codexSeats != nil && identifier.environment.CodexThreadID != "" &&
+		identifier.environment.ClaudeSessionID == "" {
+		seats, err := identifier.codexSeats(ctx)
+		if err != nil {
+			return identity, fmt.Errorf("look up the caller: list Codex seats: %w", err)
+		}
+		codex, err := CodexThreadSeat(identifier.environment.CodexThreadID, seats)
+		if errors.Is(err, ErrNotInChat) && recoveryErr != nil {
+			return identity, recoveryErr
+		}
+		return codex, err
+	}
+	if recoveryErr != nil {
+		return identity, recoveryErr
+	}
+	stale := make([]string, 0, 2)
+	if tmuxStale != "" {
+		stale = append(stale, tmuxStale)
+	}
+	if herdrStale != "" {
+		stale = append(stale, herdrStale)
+	}
+	if len(stale) > 0 {
+		return identity, fmt.Errorf("%w (stale: %s)", ErrNotInChat, strings.Join(stale, "; "))
+	}
+	return identity, ErrNotInChat
 }
 
-// recoverFromAncestry walks this process's parents for a tmux context: first
-// their environments (the exact answer when the kernel will give it), then the
-// tmux servers' own pane-pid tables, which stay truthful even when a pane's
-// command re-execs.
+func (identifier *Whoami) proveTmux(
+	ctx context.Context,
+	identity Identity,
+	socket, pane string,
+	chain []int,
+) (Identity, int, string, error) {
+	if socket == "" {
+		return identity, -1, "", nil
+	}
+	session, pid, err := identifier.namer.SessionPane(ctx, socket, pane)
+	if err != nil {
+		var exit *exec.ExitError
+		if gather.TmuxServerGone(err) ||
+			errors.As(err, &exit) && strings.Contains(string(exit.Stderr), "can't find pane") {
+			return identity, -1, fmt.Sprintf("tmux %s %s: %v", socket, pane, err), nil
+		}
+		return identity, -1, "", fmt.Errorf("look up the caller: tmux pane %s on %s: %w", pane, socket, err)
+	}
+	if session == "" || pid <= 0 {
+		return identity, -1, "", fmt.Errorf(
+			"look up the caller: tmux pane %s on %s returned malformed identity",
+			pane,
+			socket,
+		)
+	}
+	for index, ancestor := range chain {
+		if pid != ancestor {
+			continue
+		}
+		identity.Backend, identity.Session = "tmux", session
+		identity.SocketPath, identity.SocketName, identity.Pane = socket, filepath.Base(socket), pane
+		if identity.Engine == "" {
+			identity.Engine = engineForSocket(identity.SocketName)
+		}
+		return identity, index, "", nil
+	}
+	return identity, -1, fmt.Sprintf("tmux %s %s: pane pid %d is not an ancestor", socket, pane, pid), nil
+}
+
+// recoverFromAncestry proves inherited claims before trying live pane owners.
 func (identifier *Whoami) recoverFromAncestry(
 	ctx context.Context,
-) (string, string, bool) {
-	chain := identifier.ancestors()
+	identity Identity,
+	chain []int,
+) (Identity, bool, error) {
+	var readErr error
 	for _, pid := range chain {
 		environment, err := identifier.processes.Environ(pid)
 		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ESRCH) && readErr == nil {
+				readErr = fmt.Errorf("look up the caller: read environment of pid %d: %w", pid, err)
+			}
 			continue
 		}
-		socketPath := socketFromTMUX(environment["TMUX"])
-		pane := ""
-		if socketPath == "" {
-			continue
+		found, index, _, err := identifier.proveTmux(
+			ctx,
+			identity,
+			pfmtmux.SocketPath(environment["TMUX"]),
+			environment["TMUX_PANE"],
+			chain,
+		)
+		if err != nil {
+			return identity, false, err
 		}
-		if pane == "" {
-			pane = environment["TMUX_PANE"]
+		if index >= 0 {
+			found.Recovered = true
+			if found.Source == tmuxName {
+				found.Source = "ancestry"
+			}
+			return found, true, nil
 		}
-		return socketPath, pane, true
 	}
-	owners := identifier.paneOwners(ctx)
+	owners, err := identifier.paneOwners(ctx)
+	if err != nil {
+		return identity, false, err
+	}
 	for _, pid := range chain {
 		for _, owner := range owners {
-			if owner.PanePID == pid {
-				return owner.SocketPath, owner.PaneID, true
+			if owner.PanePID != pid {
+				continue
+			}
+			found, index, _, err := identifier.proveTmux(ctx, identity, owner.SocketPath, owner.PaneID, chain)
+			if err != nil {
+				return identity, false, err
+			}
+			if index >= 0 {
+				found.Recovered = true
+				if found.Source == tmuxName {
+					found.Source = "ancestry"
+				}
+				return found, true, nil
 			}
 		}
 	}
-	return "", "", false
+	return identity, false, readErr
 }
 
-func (identifier *Whoami) ancestors() []int {
+func (identifier *Whoami) ancestors() ([]int, error) {
 	chain := make([]int, 0, AncestryDepth)
 	pid := identifier.selfPID
 	for depth := 0; depth < AncestryDepth && pid > 1; depth++ {
 		chain = append(chain, pid)
 		parent, err := identifier.processes.Parent(pid)
-		if err != nil || parent <= 1 || parent == pid {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+				break
+			}
+			return chain, fmt.Errorf("read parent of pid %d: %w", pid, err)
+		}
+		if parent <= 1 || parent == pid {
 			break
 		}
 		pid = parent
 	}
-	return chain
+	return chain, nil
 }
 
-func (identifier *Whoami) paneOwners(ctx context.Context) []PaneOwner {
+func (identifier *Whoami) paneOwners(ctx context.Context) ([]PaneOwner, error) {
 	entries, err := os.ReadDir(identifier.tmuxDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("look up the caller: list tmux sockets: %w", err)
 	}
 	owners := make([]PaneOwner, 0)
 	for _, entry := range entries {
 		info, err := entry.Info()
-		if err != nil || info.Mode()&os.ModeSocket == 0 {
+		if err != nil {
+			return nil, fmt.Errorf("look up the caller: stat tmux socket %s: %w", entry.Name(), err)
+		}
+		if info.Mode()&os.ModeSocket == 0 {
 			continue
 		}
 		socketPath := filepath.Join(identifier.tmuxDir, entry.Name())
 		rows, err := identifier.owners.PaneOwners(ctx, socketPath)
-		if err != nil {
+		if gather.TmuxServerGone(err) {
 			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("look up the caller: read tmux panes on %s: %w", socketPath, err)
 		}
 		owners = append(owners, rows...)
 	}
-	return owners
-}
-
-// socketFromTMUX splits a $TMUX value into its socket path. Only the socket
-// component is ever read back; the session and pane fields of that string name
-// a server-local index, not a stable identity.
-func socketFromTMUX(value string) string {
-	if value == "" {
-		return ""
-	}
-	fields := strings.Split(value, ",")
-	socketPath := fields[0]
-	if socketPath == "" {
-		return ""
-	}
-	return socketPath
+	return owners, nil
 }
 
 func engineForSocket(socketName string) string {
@@ -320,27 +413,36 @@ type CommandTmuxNamer struct {
 	Binary string
 }
 
-// SessionName targets an explicit pane when one is known, so a socket hosting
-// several sessions still answers with the caller's own.
-func (namer CommandTmuxNamer) SessionName(
-	ctx context.Context,
-	socketPath, target string,
-) (string, error) {
+// SessionPane reads the target's session and pane pid in one display request.
+func (namer CommandTmuxNamer) SessionPane(ctx context.Context, socketPath, target string) (string, int, error) {
 	arguments := []string{"display-message", "-p"}
 	if target != "" {
 		arguments = append(arguments, "-t", target)
 	}
-	arguments = append(arguments, "#{session_name}")
-	// Dir stays empty: socketPath is already the full pathname, and
-	// filepath.Join("", full) returns full unchanged (Socket's own doc
-	// comment, "kill's shape").
+	arguments = append(arguments, "#{session_name} #{pane_pid}")
 	output, err := pfmtmux.Socket{Binary: namer.Binary}.Command(ctx, socketPath, arguments...).Output()
-	if err != nil && target != "" {
-		// A stale pane id must not kill a live session: retry untargeted, the
-		// way chat.sh's bare `tmux display-message -p` does.
-		return namer.SessionName(ctx, socketPath, "")
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			return "", 0, fmt.Errorf(
+				"read tmux session and pane pid (%s): %w",
+				strings.TrimSpace(string(exit.Stderr)),
+				err,
+			)
+		}
+		return "", 0, fmt.Errorf("read tmux session and pane pid: %w", err)
 	}
-	return strings.TrimSpace(string(output)), err
+	value := strings.TrimSpace(string(output))
+	separator := strings.LastIndexByte(value, ' ')
+	if separator < 1 {
+		return "", 0, fmt.Errorf("tmux returned malformed session and pane pid %q", value)
+	}
+	session, rawPID := value[:separator], value[separator+1:]
+	pid, parseErr := strconv.Atoi(rawPID)
+	if parseErr != nil || pid <= 0 {
+		return "", 0, fmt.Errorf("tmux returned malformed session and pane pid %q", value)
+	}
+	return session, pid, nil
 }
 
 // CommandPaneOwners lists pane pids on one tmux socket.

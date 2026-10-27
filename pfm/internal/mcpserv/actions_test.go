@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,22 +23,18 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every
 // typed call and answers from its fields.
 type fakeChatVerbs struct {
+	listMu            sync.Mutex
 	lasts             []chat.LastRequest
 	statuses          []chat.StatusRequest
 	lists             []chat.ListRequest
-	finds             []chat.FindRequest
-	reads             []string
 	last              chat.LastResult
 	status            headless.Status
 	listed            chat.ListResult
-	found             []chat.TranscriptMatch
-	read              []transcript.Entry
 	err               error
 	resolveScopedSelf bool
 	resolvedSelfIDs   []string
@@ -75,31 +71,15 @@ func (fake *fakeChatVerbs) Status(ctx context.Context, request chat.StatusReques
 }
 
 func (fake *fakeChatVerbs) List(_ context.Context, request chat.ListRequest) (chat.ListResult, error) {
+	fake.listMu.Lock()
+	defer fake.listMu.Unlock()
 	fake.lists = append(fake.lists, request)
 	return fake.listed, fake.err
-}
-
-func (fake *fakeChatVerbs) Find(_ context.Context, request chat.FindRequest) ([]chat.TranscriptMatch, error) {
-	fake.finds = append(fake.finds, request)
-	return fake.found, fake.err
 }
 
 func (fake *fakeChatVerbs) Exit(_ context.Context, self headless.Chat) (string, error) {
 	fake.exits = append(fake.exits, self)
 	return fake.exitMessage, fake.exitErr
-}
-
-func (fake *fakeChatVerbs) Read(
-	_ context.Context,
-	target string,
-	tail int,
-) (headless.Chat, []transcript.Entry, bool, error) {
-	fake.reads = append(fake.reads, fmt.Sprintf("%s/%d", target, tail))
-	return headless.Chat{
-		ID:     target,
-		Engine: pfmengine.Claude,
-		Path:   "/transcripts/" + target + ".jsonl",
-	}, fake.read, false, fake.err
 }
 
 // TestChatLastAndStatusReachTheTypedVerbs pins the seam: last and
@@ -199,7 +179,8 @@ func TestCallerScopedSelfReachesMutationDispatchWithoutRedirectingExplicitTarget
 	var calls [][]string
 	var scopedIDs []string
 	service := newService("test", &backend{
-		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+		paths: paths.Values{TmuxDir: "/tmp/tmux"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
 		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			if scoped, ok := chat.ScopedSelf(ctx); ok {
@@ -611,20 +592,61 @@ func TestResolvedSelfPathFallbacksAndIndexedPrecedence(t *testing.T) {
 // along, and the verb's summary comes back in the structured output.
 func TestChatStatusSummaryReachesTheVerbAndReturnsField(t *testing.T) {
 	t.Parallel()
-	verbs := &fakeChatVerbs{status: headless.Status{
-		Name: "seat", State: headless.StateIdle, IdleSeconds: 2, Engine: pfmengine.Claude,
-		Summary: "done", SummaryCached: true,
-	}}
-	protocol := connectInMemory(t, newService("test", &backend{chat: verbs}).Server())
-	output := callTool[StatusOutput](t, protocol.clientSession, "status", StatusInput{
-		Target: "seat", Summary: true, Engine: "codex", Model: "test-model",
-	})
-	want := []chat.StatusRequest{{Target: "seat", Summary: true, Engine: pfmengine.Codex, Model: "test-model"}}
-	if !reflect.DeepEqual(verbs.statuses, want) {
-		t.Fatalf("Status calls = %+v, want %+v", verbs.statuses, want)
-	}
-	if output.Summary != "done" || !output.SummaryCached || output.Engine != pfmengine.Claude {
-		t.Fatalf("status output=%+v", output)
+	for _, source := range []string{"transcript (Herdr unknown)", ""} {
+		t.Run(source, func(t *testing.T) {
+			verbs := &fakeChatVerbs{status: headless.Status{
+				Name: "seat", State: headless.StateIdle, IdleSeconds: 2, Engine: pfmengine.Claude,
+				Summary: "done", SummaryCached: true, StateSource: source, RestID: "private-rest",
+			}}
+			protocol := connectInMemory(t, newService("test", &backend{chat: verbs}).Server())
+			output := callTool[map[string]any](t, protocol.clientSession, "status", StatusInput{
+				Target: "seat", Summary: true, Engine: "codex", Model: "test-model",
+			})
+			want := []chat.StatusRequest{{Target: "seat", Summary: true, Engine: pfmengine.Codex, Model: "test-model"}}
+			if !reflect.DeepEqual(verbs.statuses, want) {
+				t.Fatalf("Status calls = %+v, want %+v", verbs.statuses, want)
+			}
+			if output["summary"] != "done" || output["summary_cached"] != true ||
+				output["engine"] != string(pfmengine.Claude) {
+				t.Fatalf("status output=%+v", output)
+			}
+			got, present := output["state_source"]
+			if (source != "" && got != source) || (source == "" && present) {
+				t.Errorf("state_source=%v present=%v, want %q", got, present, source)
+			}
+			if _, present := output["rest_id"]; present {
+				t.Errorf("private rest evidence leaked: %+v", output)
+			}
+			listed, err := protocol.clientSession.ListTools(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tool := range listed.Tools {
+				if tool.Name != "status" {
+					continue
+				}
+				encoded, err := json.Marshal(tool.OutputSchema)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var schema struct {
+					Properties map[string]struct {
+						Type string `json:"type"`
+					} `json:"properties"`
+				}
+				if err := json.Unmarshal(encoded, &schema); err != nil {
+					t.Fatal(err)
+				}
+				if schema.Properties["state_source"].Type != "string" {
+					t.Errorf("state_source schema=%s", encoded)
+				}
+				if _, present := schema.Properties["rest_id"]; present {
+					t.Errorf("private rest schema leaked: %s", encoded)
+				}
+				return
+			}
+			t.Fatal("status tool missing")
+		})
 	}
 }
 
@@ -788,7 +810,8 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
 	}}
 	seat := headless.Chat{
-		Name: "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: "/work/exit",
+		Backend: "tmux",
+		Name:    "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: "/work/exit",
 		Socket: "cc-seat", Session: "cc-seat", Pane: "%7", Live: true,
 	}
 	tests := []struct {
@@ -837,7 +860,8 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 			}
 			var dispatched [][]string
 			service := newService("test", &backend{
-				chat: verbs,
+				paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+				chat:  verbs,
 				dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
 					dispatched = append(dispatched, append([]string(nil), args...))
 					_, _ = io.WriteString(stdout, "killed\n")
@@ -910,5 +934,21 @@ func TestOpenMessageCarriesEveryWarning(t *testing.T) {
 		action.OpenResult{Name: "scribe", Socket: "cc-1-2-3", State: "live"},
 	); got != "live scribe on socket cc-1-2-3" {
 		t.Fatalf("openMessage without warnings = %q", got)
+	}
+}
+
+func TestReservedSeatLabel(t *testing.T) {
+	service := newService("test", &backend{
+		chat:     &fakeChatVerbs{},
+		dispatch: func(context.Context, []string, io.Writer, io.Writer) int { return 0 },
+	})
+	for _, label := range []string{"seat:child", "SeAt:child"} {
+		_, _, newErr := service.chatNew(context.Background(), nil, NewInput{Name: label})
+		_, _, nameErr := service.chatName(context.Background(), nil, NameInput{Target: "fixture", Name: label})
+		for _, err := range []error{newErr, nameErr} {
+			if err == nil || !strings.Contains(err.Error(), "reserved for durable seat handles") {
+				t.Errorf("label %q: error=%v", label, err)
+			}
+		}
 	}
 }

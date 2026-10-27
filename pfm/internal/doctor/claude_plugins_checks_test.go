@@ -19,16 +19,16 @@ import (
 
 var doctorPluginIDs = []string{
 	"cache-live-control@cache-live-control",
-	"sub-agent-compact@sub-agent-compact",
-	"effort-live-control@effort-live-control",
+	"forward-compaction@forward-compaction",
+	"auto-effort-control@auto-effort-control",
 	"tool-visibility-controller@tool-visibility-controller",
 	"engine-sync@engine-sync",
 }
 
 var doctorDevIDs = []string{
 	"cache-live-control@cache-live-control-dev",
-	"sub-agent-compact@sub-agent-compact-dev",
-	"effort-live-control@effort-live-control-dev",
+	"forward-compaction@forward-compaction-dev",
+	"auto-effort-control@auto-effort-control-dev",
 	"tool-visibility-controller@tool-visibility-controller-dev",
 	"engine-sync@engine-sync-dev",
 }
@@ -45,7 +45,7 @@ func bareNameFix(name string) string {
 
 // writeDoctorCache records id at version in dir's plugins/installed_plugins.json,
 // which writeDoctorInstalledPlugins wrote, its installPath holding files: the
-// snapshot Claude runs it from.
+// snapshot Claude records for it.
 func writeDoctorCache(t *testing.T, dir, id, version string, files map[string]string) {
 	t.Helper()
 	path := filepath.Join(dir, "plugins", "installed_plugins.json")
@@ -143,13 +143,13 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 		}, 2, 0},
 		{
 			"an unreadable marketplace record",
-			pfmconfig.ClaudePlugin{ID: "effort-live-control"},
+			pfmconfig.ClaudePlugin{ID: "auto-effort-control"},
 			false, `{`,
 			func(path, store string) string {
 				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
 					filepath.Join(store, "plugins", "known_marketplaces.json") + ": unexpected end of JSON input\n" +
-					"doctor: claude_plugins plugin effort-live-control@effort-live-control not enabled in " + path + " — " + bareNameFix("effort-live-control") + "\n" +
-					"doctor: claude_plugins plugin effort-live-control@effort-live-control not installed in " + store + " — " + bareNameFix("effort-live-control") + "\n" +
+					"doctor: claude_plugins plugin auto-effort-control@auto-effort-control not enabled in " + path + " — " + bareNameFix("auto-effort-control") + "\n" +
+					"doctor: claude_plugins plugin auto-effort-control@auto-effort-control not installed in " + store + " — " + bareNameFix("auto-effort-control") + "\n" +
 					"doctor: claude_plugins plugin typesafe@typesafe-ai cannot be checked: marketplace typesafe-ai cannot be looked up" +
 					" while the plugin records are unreadable, and its claude.plugins entry has no source — " +
 					"repair the unreadable file named above, then run pfm doctor again\n"
@@ -260,7 +260,7 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 					"cache-live-control": map[string]any{
 						"source": map[string]any{"source": "github", "repo": "someone-else/cache-live-control"},
 					},
-					"sub-agent-compact": map[string]any{
+					"forward-compaction": map[string]any{
 						"source": map[string]any{"source": "github", "repo": "rezzminator/sub-agent-compact"},
 					},
 					"buddy": map[string]any{"source": map[string]any{"source": "github", "repo": "someone-else/buddy"}},
@@ -279,11 +279,11 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			case "disabled":
 				warnings = 1
 				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not enabled in " + path + " — " +
-					bareNameFix("sub-agent-compact") + "\n"
+					bareNameFix("forward-compaction") + "\n"
 			case "uninstalled":
 				warnings = 1
 				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not installed in " + store + " — " +
-					bareNameFix("sub-agent-compact") + "\n"
+					bareNameFix("forward-compaction") + "\n"
 			case "absent":
 				_, err := installer.ClaudePluginGaps(path, releaseTargets)
 				want = fmt.Sprintf("doctor: claude_plugins skipped: %v (store never set up)\n", err)
@@ -492,8 +492,8 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	names := []string{
 		"cache-live-control",
-		"sub-agent-compact",
-		"effort-live-control",
+		"forward-compaction",
+		"auto-effort-control",
 		"tool-visibility-controller",
 		"engine-sync",
 	}
@@ -660,7 +660,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			checkout := filepath.Join(root, names[0], "plugins", names[0])
 			switch state {
 			case "alpha cache behind", "alpha cache behind with its snapshot gone":
-				// The checkout moved to 2.0.0; Claude still runs its 1.0.0 snapshot.
+				// The checkout moved to 2.0.0; Claude still records its 1.0.0 snapshot.
 				for _, dir := range []string{checkout, mirror(names[0])} {
 					if err := os.WriteFile(
 						filepath.Join(dir, manifest),
@@ -678,10 +678,14 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					}
 				}
 			case "alpha cache unreadable":
-				if err := os.Symlink(filepath.Join(home, "nowhere"), filepath.Join(cache, "gone")); err != nil {
-					t.Fatal(err)
+				// The checkout's version cannot be read, so the record is never compared.
+				for _, dir := range []string{checkout, mirror(names[0])} {
+					if err := os.WriteFile(filepath.Join(dir, manifest), []byte("{"), 0o600); err != nil {
+						t.Fatal(err)
+					}
 				}
 			case "alpha cache differs":
+				// Claude reads a -dev copy in place, never this snapshot: no gap.
 				writeDoctorCache(t, store, doctorDevIDs[0], "1.0.0", map[string]string{
 					manifest: "{\"old\":1}", filepath.Join("node_modules", "dep.js"): "x", ".orphaned_at": "1",
 				})
@@ -716,11 +720,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					checkout+" is 2.0.0 — run pfm install --yes\n", 1
 			case "alpha cache unreadable":
 				want, failures = "doctor: claude_plugins could not read the plugin cache: plugin "+doctorDevIDs[0]+
-					" cache: read cache "+cache+": stat "+filepath.Join(cache, "gone")+": no such file or directory\n", 1
-			case "alpha cache differs":
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" cache "+cache+" differs from "+
-					checkout+" at version 1.0.0 — bump the version in "+filepath.Join(checkout, manifest)+
-					": Claude caches by version; then run pfm install --yes\n", 1
+					" cache: parse "+filepath.Join(checkout, manifest)+": unexpected end of JSON input\n", 1
 			case "alpha cache unversioned":
 				record := filepath.Join(store, "plugins", "installed_plugins.json")
 				plugin := filepath.Join(checkout, manifest)
@@ -863,7 +863,7 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 			switch state {
 			case "missing":
 				want, failures = "doctor: claude_plugins FAIL plugin callmeter@callmeter-dev binary "+binary+
-					" missing: its hooks would download a release binary, which an unreleased version fails"+
+					" missing: its wrapper would download a release binary, which an unreleased version fails"+
 					" — run pfm install --yes\n", 1
 			case "not executable":
 				want, failures = "doctor: claude_plugins FAIL plugin callmeter@callmeter-dev binary "+binary+
@@ -890,7 +890,7 @@ func TestEngineSyncHookDoctor(t *testing.T) {
 		warnings int
 	}{
 		{"unset list is the default and silent", pfmconfig.DefaultClaudePlugins(), true, "", 0},
-		{"set list without engine-sync warns", []pfmconfig.ClaudePlugin{{ID: "sub-agent-compact"}}, false, omitted, 1},
+		{"set list without engine-sync warns", []pfmconfig.ClaudePlugin{{ID: "forward-compaction"}}, false, omitted, 1},
 		{"set empty list warns", nil, false, omitted, 1},
 		{"set list with a lookalike name warns", []pfmconfig.ClaudePlugin{{ID: "engine-sync-extra"}}, false, omitted, 1},
 		{"set list with bare engine-sync is silent", []pfmconfig.ClaudePlugin{{ID: "engine-sync"}}, false, "", 0},

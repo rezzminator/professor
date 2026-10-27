@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Serve pfm's chat-professor and harvester-professor MCP servers over loopback HTTP (pfm mcp serve).
+  Serve pfm's chat-professor MCP server over loopback HTTP (pfm mcp serve).
+
+  ProgramArguments[0] is the one stable launcher script (agentlauncher), never
+  pfm itself: macOS Background Task Management treats a rebuilt, ad-hoc-signed
+  pfm as a new item and posts an advisory per build; the launcher execs pfm and
+  never changes.
 
   PATH is rendered at install from the one service
-  search path every pfm unit shares (installer servicePath): launchd starts
+  search path every pfm unit shares (paths.ServicePath): launchd starts
   agents on /usr/bin:/bin:/usr/sbin:/sbin, which cannot see ~/.local/bin (pfm,
   claude) or Homebrew — where tmux lives — and without it every chat tool a
   Codex chat calls over the daemon answers as if no chat were live.
@@ -24,7 +29,7 @@
 	<string>com.professor.pfm.mcp</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>__PFM_HOME__/.local/bin/pfm</string>
+		<string>__PFM_AGENT_LAUNCHER__</string>
 		<string>mcp</string>
 		<string>serve</string>
 	</array>

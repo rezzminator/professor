@@ -1,9 +1,0 @@
-{
- "args": [
-  "counts",
-  "{CLAUDE}",
-  "--tool",
-  "Bash"
- ],
- "dirs": []
-}

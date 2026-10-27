@@ -145,7 +145,7 @@ The § 2 launch sequence fitted to the repo: the steps the audit shows done, the
 
 ## 4. Hand-off
 
-Committing is gitter's (Phase COMMIT, exact paths). A push, a `gh repo edit`, a post or a PR to another repo runs only on the user's explicit ask in this turn. Target = this repo → `/dev verify templates` (the leak gate) before handing over.
+Committing is gitter's (Phase COMMIT, exact paths). A push, a `gh repo edit`, a post or a PR to another repo runs only on the user's explicit ask in this turn. Target = this repo → `.claude/scripts/test.sh {the changed files}` (the leak scan among its checks) before handing over.
 
 ## Never
 

@@ -18,7 +18,7 @@ const (
 	globalAgentsRegistry   = "agents"
 )
 
-// unwireGlobalRegistries removes pfm links from the store registries.
+// unwireGlobalRegistries removes pfm links from the store registries and ~/.agents/skills.
 // Source-fetched links are removed first because their targets belong to managed storage.
 func (installer *engine) unwireGlobalRegistries() error {
 	// The source-fetched skills' links resolve into the pfm-owned store, not
@@ -35,8 +35,13 @@ func (installer *engine) unwireGlobalRegistries() error {
 	// --repo nor a marker still has to find the links a normal install made.
 	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
 	config := installer.options.ConfigDir
-	for _, registry := range []string{globalCommandsRegistry, globalSkillsRegistry, globalAgentsRegistry} {
+	for _, registry := range []string{globalCommandsRegistry, globalAgentsRegistry} {
 		if err := installer.unwireGlobalRegistry(filepath.Join(config, registry), registry, repos); err != nil {
+			return err
+		}
+	}
+	for _, registry := range installer.skillSourceLinkDirs() {
+		if err := installer.unwireGlobalRegistry(registry, globalSkillsRegistry, repos); err != nil {
 			return err
 		}
 	}

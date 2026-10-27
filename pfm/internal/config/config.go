@@ -19,7 +19,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const Version = 2
+const (
+	Version        = 2
+	FileName       = "pfm.config.json"
+	LegacyFileName = "config.json"
+	DefaultMCPPort = 18377
+)
 
 const (
 	jsonKeyEnabled  = "enabled"
@@ -91,6 +96,9 @@ type ClaudePrefs struct {
 	// Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
 	Cache1H      bool
 	NativeCursor bool
+	// RemoteControl starts interactive Claude sessions with Remote Control requested.
+	// Claude still enforces its login and endpoint eligibility. Defaults true.
+	RemoteControl bool
 	// MaxSubagentSpawnDepth and MaxConcurrentSubagents lift Claude Code's
 	// sub-agent ceilings on every managed launch — see subagents.go. Zero is
 	// the unset sentinel on both.
@@ -102,8 +110,13 @@ type ClaudePrefs struct {
 	PluginCheckoutRoot string
 	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
 	CostLedger bool
-	// GptAgents opts into gpt twins and their managed hook assets machine-wide.
+	// GptAgents is claude.gptAgents: the machine-wide switch declaring the engine-sync
+	// capability gpt-agents (engine-sync installs only agents that require it). Off by
+	// default; no agent requires it today.
 	GptAgents bool
+	// SubagentStatuslineTrace is claude.subagentStatuslineTrace: the machine-wide switch that
+	// launches Claude with the sub-agent status line's trace on. Off by default.
+	SubagentStatuslineTrace bool
 	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
 	// Machine-wide: an account may not set it.
 	Plugins []ClaudePlugin
@@ -184,9 +197,10 @@ type MCPHTTP struct {
 }
 
 type MCPConfig struct {
-	Servers    map[string]MCPServer
-	HTTP       MCPHTTP
-	ThirdParty map[string]json.RawMessage
+	Servers      map[string]MCPServer
+	OtherServers map[string]json.RawMessage
+	HTTP         MCPHTTP
+	ThirdParty   map[string]json.RawMessage
 }
 
 type EnginePrefs struct {
@@ -206,6 +220,8 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // Config is the fully materialized configuration. Sources records whether
 // each effective value came from the machine file or from a default.
 type Config struct {
+	Extensions map[string]Extension
+	Chat       ChatConfig
 	// SeedContent carries the validated seed bytes into installation.
 	SeedContent      []byte `json:"-"`
 	Version          int
@@ -226,9 +242,6 @@ type Config struct {
 	MCPServers       map[string]MCPServer
 	MCP              MCPConfig
 	Ask              AskConfig
-	// Harvester is harvester.config.json, loaded beside Path. Its Enabled is
-	// mirrored into MCPServers["harvester"] for server-generic consumers.
-	Harvester HarvesterConfig
 
 	Path    string
 	Exists  bool
@@ -237,8 +250,7 @@ type Config struct {
 
 func productionMCPServers() map[string]MCPServer {
 	return map[string]MCPServer{
-		"chat":             {Enabled: false},
-		MCPServerHarvester: {Enabled: false},
+		"chat": {Enabled: false},
 	}
 }
 
@@ -253,19 +265,21 @@ type rawState struct {
 }
 
 type rawConfig struct {
-	Version  *int          `json:"version"`
-	Theme    *string       `json:"theme,omitempty"`
-	State    *rawState     `json:"state,omitempty"`
-	Accounts *[]rawAccount `json:"accounts,omitempty"`
-	Claude   *rawClaude    `json:"claude,omitempty"`
-	Codex    *rawCodex     `json:"codex,omitempty"`
-	OpenCode *rawOpenCode  `json:"opencode,omitempty"`
-	Tmux     *rawTmux      `json:"tmux,omitempty"`
-	NameSync *rawNameSync  `json:"nameSync,omitempty"`
-	Doctor   *rawDoctor    `json:"doctor,omitempty"`
-	MCP      *rawMCP       `json:"mcp,omitempty"`
-	Log      *rawLog       `json:"log,omitempty"`
-	Ask      *rawAsk       `json:"ask,omitempty"`
+	Extensions json.RawMessage `json:"extensions,omitempty"`
+	Chat       *rawChat        `json:"chat,omitempty"`
+	Version    *int            `json:"version"`
+	Theme      *string         `json:"theme,omitempty"`
+	State      *rawState       `json:"state,omitempty"`
+	Accounts   *[]rawAccount   `json:"accounts,omitempty"`
+	Claude     *rawClaude      `json:"claude,omitempty"`
+	Codex      *rawCodex       `json:"codex,omitempty"`
+	OpenCode   *rawOpenCode    `json:"opencode,omitempty"`
+	Tmux       *rawTmux        `json:"tmux,omitempty"`
+	NameSync   *rawNameSync    `json:"nameSync,omitempty"`
+	Doctor     *rawDoctor      `json:"doctor,omitempty"`
+	MCP        *rawMCP         `json:"mcp,omitempty"`
+	Log        *rawLog         `json:"log,omitempty"`
+	Ask        *rawAsk         `json:"ask,omitempty"`
 }
 
 type rawTmux struct {
@@ -300,15 +314,17 @@ type rawClaude struct {
 	Theme                 *string `json:"theme,omitempty"`
 	Cache1H               *bool   `json:"cache1h,omitempty"`
 	NativeCursor          *bool   `json:"nativeCursor,omitempty"`
+	RemoteControl         *bool   `json:"remoteControl,omitempty"`
 	SystemPrompt          *string `json:"systemPrompt,omitempty"`
 	// RetiredCompactNudge accepts old config files; it is never read or written.
 	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
-	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
-	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
-	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
-	CostLedger             *bool   `json:"costLedger,omitempty"`
-	GptAgents              *bool   `json:"gptAgents,omitempty"`
+	MaxSubagentSpawnDepth   *int    `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents  *int    `json:"maxConcurrentSubagents,omitempty"`
+	PluginCheckoutRoot      *string `json:"pluginCheckoutRoot,omitempty"`
+	CostLedger              *bool   `json:"costLedger,omitempty"`
+	GptAgents               *bool   `json:"gptAgents,omitempty"`
+	SubagentStatuslineTrace *bool   `json:"subagentStatuslineTrace,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
 	// Env is claude.env; decodeClaudeEnv validates each name and value.
@@ -339,7 +355,7 @@ type rawCodexPrefs struct {
 
 type rawMCP struct {
 	ThirdParty map[string]json.RawMessage `json:"thirdParty,omitempty"`
-	Servers    map[string]rawMCPServer    `json:"servers,omitempty"`
+	Servers    map[string]json.RawMessage `json:"servers,omitempty"`
 	HTTP       *rawMCPHTTP                `json:"http,omitempty"`
 	AuthToken  *string                    `json:"authToken,omitempty"`
 }
@@ -460,6 +476,7 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, keyTheme):          SourceDefault,
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
+		engineConfigKey(pfmengine.Claude, "remoteControl"):   SourceDefault,
 		"claude.webSearchesPerSession":                       SourceDefault,
 		"claude.autoCompactWindow":                           SourceDefault,
 		"claude.helperModel":                                 SourceDefault,
@@ -470,6 +487,7 @@ func defaultsWithMCPServers(
 		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
 		KeyClaudeGptAgents:                                   SourceDefault,
+		KeyClaudeSubagentStatuslineTrace:                     SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
@@ -478,6 +496,9 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.OpenCode, engineKeyBinary): SourceDefault,
 		"mcp.http.port":                                      SourceDefault,
 		"ask.engine":                                         SourceDefault,
+		"chat.backend":                                       SourceDefault,
+		"chat.herdrTabStatus":                                SourceDefault,
+		"chat.herdrTabPriority":                              SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,
@@ -491,18 +512,10 @@ func defaultsWithMCPServers(
 	servers := make(map[string]MCPServer, len(registered))
 	for name, server := range registered {
 		servers[name] = server
-		if name != MCPServerHarvester {
-			sources["mcp.servers."+name+".enabled"] = SourceDefault
-		}
-	}
-	harvester := DefaultHarvester()
-	if server, found := registered[MCPServerHarvester]; found {
-		harvester.Enabled = server.Enabled
-	}
-	for _, key := range harvesterSourceKeys {
-		sources[key] = SourceDefault
+		sources["mcp.servers."+name+".enabled"] = SourceDefault
 	}
 	return Config{
+		Chat:             ChatConfig{Backend: DefaultChatBackend, HerdrTabStatus: DefaultHerdrTabStatus},
 		Version:          Version,
 		InputVersion:     Version,
 		Theme:            "default",
@@ -521,6 +534,7 @@ func defaultsWithMCPServers(
 			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
 			Cache1H:               true,
+			RemoteControl:         true,
 			CostLedger:            true,
 			Plugins:               DefaultClaudePlugins(),
 
@@ -533,7 +547,6 @@ func defaultsWithMCPServers(
 		Log:        DefaultLog(),
 		MCPServers: servers,
 		MCP:        MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: DefaultMCPPort}},
-		Harvester:  harvester,
 		Ask: AskConfig{
 			Engine: defaultAskEngine,
 			Prefs: map[pfmengine.ID]EnginePrefs{
@@ -681,9 +694,6 @@ func loadWithMCPServers(
 			if configOverridden(paths.OSEnv{}) {
 				return Config{}, err
 			}
-			if err := finishHarvester(&result, home, registered, nil); err != nil {
-				return Config{}, err
-			}
 			return result, configMarkerError(err)
 		}
 	} else if !filepath.IsAbs(path) {
@@ -697,9 +707,6 @@ func loadWithMCPServers(
 
 	content, err := os.ReadFile(result.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		if err := finishHarvester(&result, home, registered, nil); err != nil {
-			return Config{}, err
-		}
 		return result, nil
 	}
 	if err != nil {
@@ -710,6 +717,13 @@ func loadWithMCPServers(
 	raw, err := decodeVersioned(result.Path, content)
 	if err != nil {
 		return Config{}, err
+	}
+	if raw.Extensions != nil {
+		result.Sources["extensions"] = SourceFile
+	}
+	result.Extensions, err = decodeExtensions(raw.Extensions)
+	if err != nil {
+		return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 	}
 	result.Sources[keyVersion] = SourceFile
 	result.InputVersion = *raw.Version
@@ -756,6 +770,7 @@ func loadWithMCPServers(
 			return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 		}
 		applyNativeCursor(&result.Claude, raw.Claude.NativeCursor, false, result.Sources, -1)
+		applyRemoteControl(&result.Claude, raw.Claude.RemoteControl, true, result.Sources, -1)
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
@@ -807,6 +822,13 @@ func loadWithMCPServers(
 					return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 				}
 				applyNativeCursor(&prefs, value.Claude.NativeCursor, result.Claude.NativeCursor, result.Sources, index)
+				applyRemoteControl(
+					&prefs,
+					value.Claude.RemoteControl,
+					result.Claude.RemoteControl,
+					result.Sources,
+					index,
+				)
 				if err := applySubagentCaps(
 					&prefs, *value.Claude, result.Claude, result.Path, "accounts", index, result.Sources,
 				); err != nil {
@@ -875,7 +897,6 @@ func loadWithMCPServers(
 		return Config{}, err
 	}
 
-	var legacyHarvesterEnabled *bool
 	if raw.MCP != nil {
 		if err := validateThirdParty(result.Path, raw.MCP.ThirdParty); err != nil {
 			return Config{}, err
@@ -884,9 +905,15 @@ func loadWithMCPServers(
 		if raw.MCP.ThirdParty != nil {
 			result.Sources["mcp.thirdParty"] = SourceFile
 		}
-		for name, server := range raw.MCP.Servers {
+		result.MCP.OtherServers = make(map[string]json.RawMessage)
+		for name, rawServer := range raw.MCP.Servers {
 			if _, known := registered[name]; !known {
-				return Config{}, fmt.Errorf("config %s: unknown key %q", result.Path, "mcp.servers."+name)
+				result.MCP.OtherServers[name] = rawServer
+				continue
+			}
+			var server rawMCPServer
+			if err := decodeStrict(rawServer, &server); err != nil {
+				return Config{}, fmt.Errorf("config %s: mcp.servers.%s: %w", result.Path, name, err)
 			}
 			if server.Enabled == nil {
 				return Config{}, fmt.Errorf(
@@ -894,13 +921,6 @@ func loadWithMCPServers(
 					result.Path,
 					"mcp.servers."+name+".enabled",
 				)
-			}
-			if name == MCPServerHarvester {
-				// Pre-split layout: the flag now lives in harvester.config.json.
-				// Honored until the operator moves it (host check pre-split-config).
-				enabled := *server.Enabled
-				legacyHarvesterEnabled = &enabled
-				continue
 			}
 			result.MCPServers[name] = MCPServer{Enabled: *server.Enabled}
 			result.MCP.Servers[name] = MCPServer{Enabled: *server.Enabled}
@@ -917,27 +937,8 @@ func loadWithMCPServers(
 		// so install can remove it, but it has no effective runtime value: the
 		// local MCP daemon is loopback-only and deliberately unauthenticated.
 	}
-	if raw.Ask != nil {
-		if raw.Ask.Engine != nil {
-			id, err := pfmengine.Parse(*raw.Ask.Engine)
-			if err != nil {
-				return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
-			}
-			result.Ask.Engine = id
-			result.Sources["ask.engine"] = SourceFile
-		}
-		for id, rawPrefs := range raw.Ask.Prefs {
-			prefs := result.Ask.Prefs[id]
-			applyEnginePrefs(&prefs, rawPrefs)
-			result.Ask.Prefs[id] = prefs
-			name := pfmengine.MustLookup(id).LongName
-			if rawPrefs.Model != nil {
-				result.Sources["ask."+name+".model"] = SourceFile
-			}
-			if rawPrefs.Effort != nil {
-				result.Sources["ask."+name+".effort"] = SourceFile
-			}
-		}
+	if err := applyChatAndAsk(&result, raw); err != nil {
+		return Config{}, err
 	}
 	// An explicit engine with an empty roster is refused. An absent key
 	// resolves through DefaultEngine, which falls back to an engine with accounts.
@@ -946,33 +947,7 @@ func loadWithMCPServers(
 			return Config{}, err
 		}
 	}
-	if err := finishHarvester(&result, home, registered, legacyHarvesterEnabled); err != nil {
-		return Config{}, err
-	}
 	return result, nil
-}
-
-// finishHarvester loads harvester.config.json, mirrors its enabled flag into
-// the server-generic MCP maps, and checks the one cross-file invariant.
-func finishHarvester(result *Config, home string, registered map[string]MCPServer, legacyEnabled *bool) error {
-	if result.Path != "" {
-		if err := loadHarvester(result, home, legacyEnabled); err != nil {
-			return err
-		}
-	}
-	if _, found := registered[MCPServerHarvester]; found {
-		result.MCP.Servers[MCPServerHarvester] = MCPServer{Enabled: result.Harvester.Enabled}
-	}
-	result.MCPServers = cloneMCPServers(result.MCP.Servers)
-	if result.Harvester.External.Enabled && result.Harvester.External.Port == result.MCP.HTTP.Port {
-		return fmt.Errorf(
-			"harvester config %s: external.port %d collides with mcp.http.port in %s; the two gateways need distinct ports",
-			result.Harvester.Path,
-			result.Harvester.External.Port,
-			result.Path,
-		)
-	}
-	return nil
 }
 
 // parseNameSyncInterval refuses invalid nameSync.interval values rather than
@@ -1200,6 +1175,7 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
 		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
+		result.RemoteControl = account.Claude.RemoteControl
 		copyClaudeLaunchPrefs(&result, *account.Claude)
 		// Zero is unset on both caps, so Load's inheritance already put the
 		// resolved top-level value here — same unconditional copy as Cache1H.
@@ -1376,30 +1352,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			"emoji":     account.Emoji,
 		}
 		if account.Claude != nil {
-			claude := map[string]any{
-				"webSearchesPerSession": account.Claude.WebSearchesPerSession,
-				"autoCompactWindow":     account.Claude.AutoCompactWindow,
-				"tmuxTruecolor":         account.Claude.TmuxTruecolor,
-				"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
-				"requireManagedCleanup": account.Claude.RequireManagedCleanup,
-				keyTheme:                themeMarshalValue(account.Claude.Theme),
-				"cache1h":               account.Claude.Cache1H,
-				"nativeCursor":          account.Claude.NativeCursor,
-			}
-			// These empty sentinels mean inherit. Writing them as explicit empty
-			// values makes our strict loader reject its own output.
-			if account.Claude.PermissionMode != "" {
-				claude["permissionMode"] = account.Claude.PermissionMode
-			}
-			if account.Claude.Binary != "" {
-				claude[engineKeyBinary] = account.Claude.Binary
-			}
-			// Preserve explicit account preferences, even when currently equal to the
-			// machine value: a later machine edit must not turn them into inheritance.
-			if account.Claude.HelperModel != config.Claude.HelperModel ||
-				config.Source(fmt.Sprintf("accounts[%d].claude.helperModel", index)) == SourceFile {
-				claude["helperModel"] = account.Claude.HelperModel
-			}
+			claude := marshalClaudeAccount(config, account, index)
 			value[claudeName] = claude
 		}
 		if account.Codex != nil {
@@ -1420,12 +1373,16 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		}
 		codexHomes = append(codexHomes, value)
 	}
-	servers := make(map[string]any, len(config.MCP.Servers))
+	servers := make(map[string]json.RawMessage, len(config.MCP.Servers)+len(config.MCP.OtherServers))
+	for name, raw := range config.MCP.OtherServers {
+		servers[name] = raw
+	}
 	for name, server := range config.MCP.Servers {
-		if name == MCPServerHarvester {
-			continue // lives in harvester.config.json (MarshalHarvester)
+		encoded, err := json.Marshal(map[string]any{jsonKeyEnabled: server.Enabled})
+		if err != nil {
+			return nil, fmt.Errorf("encode MCP server %s: %w", name, err)
 		}
-		servers[name] = map[string]any{jsonKeyEnabled: server.Enabled}
+		servers[name] = encoded
 	}
 	codexValue := map[string]any{
 		engineKeyYolo:   config.Codex.Yolo,
@@ -1465,8 +1422,14 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		"ask": askValue,
 		"log": MarshalLog(config.Log),
 	}
+	if config.Extensions != nil {
+		value["extensions"] = config.Extensions
+	}
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
+	}
+	if chat := marshalChat(config); len(chat) != 0 {
+		value["chat"] = chat
 	}
 	if doctor := marshalDoctor(config); len(doctor) != 0 {
 		value["doctor"] = doctor

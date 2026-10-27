@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -47,17 +48,8 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 	target, keys := rest[0], rest[1:]
 
 	if !*literal {
-		for _, key := range keys {
-			if pfmchat.KeyValid(key) {
-				continue
-			}
-			fmt.Fprintf(
-				stderr,
-				"pfm chat keys: %q is not a tmux key — tmux would type it as "+
-					"text; pass --literal to mean that, or use one of: %s\n",
-				key,
-				pfmchat.KeyNames(),
-			)
+		if err := pfmchat.ValidateKeyNames(keys); err != nil {
+			fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
 			return 2
 		}
 	}
@@ -71,14 +63,26 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 		fmt.Fprintf(stderr, "pfm chat keys: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
-	socketPath, err := chatSocketPath(chat.Socket)
+	transport, err := pfmcall.New(pfmcall.Dependencies{})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
 		return 1
 	}
-	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
-
-	tmux := pfmcall.TmuxCaller{}
+	socketPath := chat.Socket
+	if chat.Backend != pfmcall.HerdrBackend {
+		socketPath, err = chatSocketPath(chat.Socket)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
+			return 1
+		}
+	}
+	seat := pfmcall.Target{Backend: chat.Backend, SocketPath: socketPath, Pane: pfmchat.PaneTarget(chat)}
+	if !*literal {
+		if err := pfmcall.ValidateKeyCapabilities(seat, keys); err != nil {
+			fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
+			return 2
+		}
+	}
 	for index, key := range keys {
 		if index > 0 && *delay > 0 {
 			if err := clk.Sleep(ctx, *delay); err != nil {
@@ -88,9 +92,9 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 		}
 		var err error
 		if *literal {
-			err = tmux.SendLiteral(ctx, socketPath, pane, key)
+			err = transport.SendLiteral(ctx, seat, key)
 		} else {
-			err = tmux.SendKey(ctx, socketPath, pane, key)
+			err = transport.SendKey(ctx, seat, key)
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat keys: %s: %v\n", key, err)
@@ -106,7 +110,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 		fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
 		return 1
 	}
-	captureText, err := tmux.Capture(ctx, socketPath, pane, false, 0)
+	captureText, err := transport.CaptureTarget(ctx, seat, 0)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat keys: capture: %v\n", err)
 		return codeDeadChat
@@ -120,11 +124,5 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 
 // chatPaneTarget picks the most specific tmux address a resolved chat carries.
 func chatPaneTarget(pane, session, socket string) string {
-	if pane != "" {
-		return pane
-	}
-	if session != "" {
-		return session
-	}
-	return socket
+	return cmp.Or(pane, session, socket)
 }

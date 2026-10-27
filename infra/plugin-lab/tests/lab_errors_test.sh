@@ -23,6 +23,15 @@ expect_eq 'input-not-accepted keeps the pane' "$([[ -s $RUN/pane/ready.txt ]] &&
 FAKE_MODE=slow FAKE_TURN_S=2 case_error turn-timeout 'ERROR turn-timeout' hello
 FAKE_MODE=no-logger case_error LOG-ABSENT "ERROR LOG-ABSENT $LAB_ROOT/" hello
 expect_has 'LOG-ABSENT names the folder' "$OUT" '/logs/fake-plugin'
+expect_has 'no plugin log: the options vital could not look' "$(row vital/options-ignored)" $'ERROR\tcould-not-look: no plugin log'
+FAKE_OPTION=FAKE_PLUGIN_BOGUS=1 case_error option-unknown 'ERROR option-unknown FAKE_PLUGIN_BOGUS: named nowhere in ' hello
+# the vital's own blind spots are ERRORs, never a PASS: a settings source the plugin could not read, a LAB_DECISIONS it cannot glob
+FAKE_MODE=settings-blind runlab hello
+expect_eq 'settings-blind exit 2' "$RC" 2
+expect_has 'settings-blind is could-not-look' "$(row vital/options-ignored)" $'ERROR\tcould-not-look: the plugin could not read a settings source'
+FAKE_DECISIONS='{run}/{sid}/decisions.jsonl' runlab hello
+expect_eq 'sid-in-directory LAB_DECISIONS exit 2' "$RC" 2
+expect_has 'sid-in-directory LAB_DECISIONS is could-not-look' "$(row vital/options-ignored)" $'ERROR\tcould-not-look: LAB_DECISIONS'
 FAKE_MODE=bad-transcript case_error transcript-unreadable 'ERROR transcript-unreadable' compact
 FAKE_METER_FAIL=1 case_error meter 'ERROR meter' hello
 FAKE_METER_UNPRICED=2 case_error meter-unpriced 'ERROR meter unpriced calls 2' hello

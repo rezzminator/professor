@@ -1,0 +1,98 @@
+{
+  "0005": {
+    "name": "Staghorn coral: keywords",
+    "scope": [
+      "keyword",
+      "keyword.control",
+      "keyword.other",
+      "keyword.declaration",
+      "storage.type.function",
+      "keyword.function",
+      "keyword.operator.new",
+      "keyword.operator.expression",
+      "keyword.operator.word",
+      "keyword.operator.logical.python",
+      "keyword.operator.sizeof",
+      "keyword.operator.delete",
+      "keyword.operator.instanceof",
+      "keyword.operator.typeof",
+      "keyword.operator.void",
+      "keyword.operator.in",
+      "keyword.operator.of",
+      "keyword.control.at-rule",
+      "keyword.other.special-method.dockerfile",
+      "keyword.other.DML.sql",
+      "keyword.other.DDL.sql"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffa28f"
+    }
+  },
+  "0006": {
+    "name": "Anemone: storage and modifiers",
+    "scope": [
+      "storage",
+      "storage.type",
+      "storage.modifier",
+      "keyword.storage",
+      "storage.type.class",
+      "storage.type.interface",
+      "storage.type.type",
+      "storage.type.enum",
+      "storage.type.struct",
+      "storage.modifier.async",
+      "storage.modifier.mut.rust",
+      "storage.type.string.python",
+      "keyword.struct.go",
+      "keyword.interface.go",
+      "keyword.map.go",
+      "keyword.channel.go",
+      "keyword.var.go",
+      "keyword.const.go",
+      "keyword.type.go"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#fb9cc0"
+    }
+  },
+  "0007": {
+    "name": "Coral blush: operators",
+    "scope": [
+      "keyword.operator",
+      "keyword.operator.assignment",
+      "storage.type.function.arrow",
+      "punctuation.separator.key-value",
+      "keyword.operator.borrow.rust",
+      "keyword.operator.sigil.rust",
+      "keyword.operator.spread",
+      "keyword.operator.rest",
+      "keyword.operator.optional",
+      "keyword.operator.ternary",
+      "punctuation.separator.pointer-access",
+      "keyword.operator.address.go",
+      "punctuation.definition.variable.shell",
+      "keyword.operator.redirect.shell",
+      "keyword.operator.pipe.shell",
+      "keyword.operator.logical.shell"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#e8b7ac"
+    }
+  },
+  "0015": {
+    "name": "Flamingo tongue: regex quantifiers and anchors",
+    "scope": [
+      "keyword.operator.quantifier.regexp",
+      "keyword.control.anchor.regexp",
+      "keyword.operator.or.regexp",
+      "string.regexp keyword.other"
+    ],
+    "settings": {
+      "fontStyle": "",
+      "foreground": "#ffab68"
+    }
+  }
+}

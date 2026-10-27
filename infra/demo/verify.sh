@@ -25,6 +25,8 @@ export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp || exit 1
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=../fence/lanes/hook-command.sh
+. "$HERE/../fence/lanes/hook-command.sh"
 CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 read -r -a LIVE <<<"$(cat "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r '[.accounts[].id] | join(" ")' "$CONFIG")"
 SEAT_A="${LIVE[0]:-}"; SEAT_B="${LIVE[1]:-$SEAT_A}"
@@ -68,14 +70,15 @@ retire() {
   done
 }
 
-check_seats() { # every answering seat: /reload linked, professor theme, fullscreen, no theme override
+check_seats() { # every answering seat: /reload linked, a custom theme profile it can read, fullscreen, no theme override
   local id dir theme theme_rc reason tui bad=""
   [ -n "$SEAT_A" ] || { fail seats "no Claude seat recorded (demo-seats-live) or configured"; return; }
   for id in "${LIVE[@]}"; do
     dir="$(seat_dir "$id")"
     [ -e "$dir/commands/reload.md" ] || bad+=" seat $id: commands/reload.md missing (pfm install did not wire it);"
     if theme="$(jq -r '.theme // ""' "$dir/settings.json" 2>&1)"; then
-      [[ "$theme" == custom:professor-* ]] || bad+=" seat $id: theme=${theme:-<none>};"
+      if [[ "$theme" != custom:* ]]; then bad+=" seat $id: theme=${theme:-<none>} (want custom:{profile});"
+      elif [ ! -f "$dir/themes/${theme#custom:}.json" ]; then bad+=" seat $id: theme $theme has no $dir/themes/${theme#custom:}.json;"; fi
     else
       theme_rc=$?; reason="$(printf '%s' "$theme" | tr '\n' ' ')"
       bad+=" seat $id: theme=UNREADABLE(${reason:-jq exit $theme_rc with no error text});"
@@ -83,7 +86,7 @@ check_seats() { # every answering seat: /reload linked, professor theme, fullscr
     tui="$(jq -r '.tui // ""' "$dir/settings.json" 2>/dev/null)"; [ "$tui" = fullscreen ] || bad+=" seat $id: tui=${tui:-<none>};"
     [ "$(jq -r 'has("theme")' "$dir/.claude.json" 2>/dev/null)" = false ] || bad+=" seat $id: .claude.json carries a theme key (overrides settings.json);"
   done
-  [ -z "$bad" ] && pass seats "seat(s) ${LIVE[*]}: /reload linked, professor theme, fullscreen TUI" || fail seats "$bad"
+  [ -z "$bad" ] && pass seats "seat(s) ${LIVE[*]}: /reload linked, theme profile readable, fullscreen TUI" || fail seats "$bad"
 }
 check_daemon() { # the professor MCP daemon every stdio forwarder targets
   local out
@@ -157,6 +160,7 @@ check_express() { # five independently counted install-fidelity beats on the ado
     : >"$out"
     while IFS=$'\t' read -r event command; do
       hook_count=$((hook_count + 1))
+      command="$(hook_command_plain "$command")" # its plain form (hook-command.sh)
       if [[ ! "$command" =~ ^\$CLAUDE_PROJECT_DIR/([A-Za-z0-9._/-]+)([[:space:]].*)?$ ]]; then
         hook_bad+=" $event: malformed/unrooted command '$command';"
         continue

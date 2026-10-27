@@ -41,6 +41,16 @@ func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
 	}
 }
 
+// The install reads the resolved process table, the jail's under a test.
+func TestInstallerOptionsCarryTheResolvedProcessTable(t *testing.T) {
+	procRoot := t.TempDir()
+	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir(), ProcRoot: procRoot}}
+	options := newInstallerOptions(installer.ModeApply, "", true, io.Discard, io.Discard, runtime)
+	if options.ProcRoot != procRoot {
+		t.Fatalf("installer ProcRoot = %q, want the resolved %q", options.ProcRoot, procRoot)
+	}
+}
+
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 	home := t.TempDir()
 	runtime := commandRuntime{
@@ -73,10 +83,10 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 }
 
 // TestInstallOptionsSourceRepoFallsBackToTheRecordedClone is a REGRESSION
-// test for the 2026-09-14 retro finding: `pfm install --yes` run outside the
-// source checkout (cwd discovery finds nothing) must still resolve
+// test: `pfm install --yes` run outside the source checkout (cwd discovery
+// finds nothing) must still resolve
 // options.SourceRepo from the recorded source-repo marker rather than
-// leaving it empty and falling through to the release manifest URL. FAILS on
+// leaving it empty and falling through to the release themes. FAILS on
 // unfixed code because newInstallerOptions sets SourceRepo from
 // discoverSourceRepo() alone, which returns "" outside a clone.
 func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
@@ -203,6 +213,11 @@ func assertManagerConsulted(t *testing.T, logPath string, wantDarwinConsulted bo
 }
 
 func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
+	t.Setenv(paths.EnvProcRoot, t.TempDir())
+	// Apply now generates prompts in the source clone. Never discover the
+	// read-only test checkout; each subtest owns its default clone under HOME.
+	t.Chdir(t.TempDir())
+	t.Setenv("PFM_SOURCE_REPO", "")
 	// The launchctl fake's "print" reply models launchAgentRunning's state
 	// line (launchd.go:177-196); its exit code always succeeds like the
 	// existing systemctl fakes below, so a subtest's only lever is the
@@ -244,7 +259,8 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		script := "case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0\n"
+		script := "case \"$*\" in *ActiveState*pfm-schedule.timer) echo active;; " +
+			"*ActiveState*) echo inactive;; esac\nexit 0\n"
 		binDir, logPath := writeManagerFakes(t, script, launchctlIdle)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)
@@ -307,7 +323,7 @@ func TestInstallUnknownFlagPrintsTheUsage(t *testing.T) {
 		if code := runInstall(args, &stdout, &stderr); code != wantCode {
 			t.Fatalf("args=%q code=%d stderr=%q", args, code, stderr.String())
 		}
-		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]\n"
+		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--offline] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]\n"
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr=%q want=%q", stderr.String(), want)
 		}
@@ -326,7 +342,7 @@ func TestInstallConfirmationPreservesConfigDir(t *testing.T) {
 	dir := filepath.Join(home, "claude's config")
 	runtime := commandRuntime{Paths: paths.Values{Home: home}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--config-dir", dir, "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--config-dir", dir, "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	_, confirmation, found := strings.Cut(stdout.String(), "if you agree, run again: ")
@@ -362,23 +378,23 @@ func TestInstallCarriesExplicitVSCodeTerminalOptIn(t *testing.T) {
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--vscode", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--vscode", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("pfm install --vscode code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !captured.VSCode {
 		t.Fatal("pfm install --vscode did not reach installer.Options")
 	}
-	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --vscode --skip-harvest\n") {
+	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --vscode --offline\n") {
 		t.Fatalf("VS Code preview dropped its apply flag: %q", stdout.String())
 	}
 }
 
-func TestInstallSkipHarvestDisablesProvisioningButDefaultFailureStaysLoud(t *testing.T) {
+func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })
 	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		if options.ProvisionHarvest {
-			return installer.Report{}, errors.New("harvest fixture failed")
+		if !options.Offline {
+			return installer.Report{}, errors.New("plugin fixture failed")
 		}
 		return installer.Report{}, nil
 	}
@@ -388,32 +404,65 @@ func TestInstallSkipHarvestDisablesProvisioningButDefaultFailureStaysLoud(t *tes
 	if code := runInstall([]string{"--yes"}, &stdout, &stderr, runtime); code != 1 {
 		t.Fatalf("default apply code=%d stdout=%q stderr=%q, want loud failure", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "harvest fixture failed") {
+	if !strings.Contains(stderr.String(), "plugin fixture failed") {
 		t.Fatalf("default apply stderr=%q, want provisioning failure", stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip apply code=%d stdout=%q stderr=%q, want success", code, stdout.String(), stderr.String())
 	}
 }
 
-func TestInstallSkipHarvestPreviewPreservesTheConfirmationFlag(t *testing.T) {
+// TestInstallAcceptsTheRetiredSkipHarvestFlag: a v0.82 updater passes
+// --skip-harvest to the new binary's install --yes; it is a named no-op, so
+// the install exits as it does without the flag instead of rolling back.
+func TestInstallAcceptsTheRetiredSkipHarvestFlag(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
+		return installer.Report{}, nil
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
+	for _, args := range [][]string{{"--yes"}, {}} {
+		var plainOut, plainErr, stdout, stderr bytes.Buffer
+		plain := runInstall(args, &plainOut, &plainErr, runtime)
+		code := runInstall(append([]string{"--skip-harvest"}, args...), &stdout, &stderr, runtime)
+		if code != plain || code != 0 {
+			t.Fatalf(
+				"args=%q code=%d without the flag=%d stdout=%q stderr=%q",
+				args,
+				code,
+				plain,
+				stdout.String(),
+				stderr.String(),
+			)
+		}
+		if want := "pfm install: --skip-harvest is retired and ignored; harvest moved to the harvester plugin\n"; stderr.String() != want {
+			t.Fatalf("args=%q stderr=%q, want %q", args, stderr.String(), want)
+		}
+		if stdout.String() != plainOut.String() {
+			t.Fatalf("args=%q stdout=%q, want the flagless %q", args, stdout.String(), plainOut.String())
+		}
+	}
+}
+
+func TestInstallOfflinePreviewPreservesTheConfirmationFlag(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })
 	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		if options.ProvisionHarvest {
-			t.Fatal("skip preview enabled harvest provisioning")
+		if !options.Offline {
+			t.Fatal("offline preview did not enable offline installation")
 		}
 		return installer.Report{}, nil
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --skip-harvest\n") {
+	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --offline\n") {
 		t.Fatalf("skip preview output=%q, want preserved skip confirmation", stdout.String())
 	}
 }
@@ -447,7 +496,7 @@ func TestInstallSkipEngineCodexReachesProbeInstallerAndConfirmation(t *testing.T
 		Config: pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}},
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest", "--skip-engine", "codex"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--offline", "--skip-engine", "codex"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip-engine preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if captured.CodexHomes == nil || len(captured.CodexHomes) != 0 {
@@ -456,7 +505,7 @@ func TestInstallSkipEngineCodexReachesProbeInstallerAndConfirmation(t *testing.T
 	if !strings.Contains(stdout.String(), "skipped (--skip-engine codex)") ||
 		!strings.HasSuffix(
 			stdout.String(),
-			"if you agree, run again: pfm install --yes --skip-harvest --skip-engine codex\n",
+			"if you agree, run again: pfm install --yes --offline --skip-engine codex\n",
 		) {
 		t.Fatalf("skip-engine output=%q", stdout.String())
 	}
@@ -482,7 +531,7 @@ func TestInstallAdoptAgentsReachesTheInstallerAndConfirmation(t *testing.T) {
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	for _, adopt := range []bool{false, true} {
-		args := []string{"--skip-harvest"}
+		args := []string{"--offline"}
 		if adopt {
 			args = append(args, "--adopt-agents")
 		}
@@ -493,7 +542,7 @@ func TestInstallAdoptAgentsReachesTheInstallerAndConfirmation(t *testing.T) {
 		if captured.AdoptAgents != adopt {
 			t.Fatalf("adopt=%t: Options.AdoptAgents = %t", adopt, captured.AdoptAgents)
 		}
-		if got := strings.Contains(stdout.String(), "pfm install --yes --skip-harvest --adopt-agents\n"); got != adopt {
+		if got := strings.Contains(stdout.String(), "pfm install --yes --offline --adopt-agents\n"); got != adopt {
 			t.Fatalf("adopt=%t: confirmation = %q", adopt, stdout.String())
 		}
 	}
@@ -509,7 +558,7 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest", "--skip-themes"}, &stdout, &stderr, runtime); code != 0 {
+	if code := runInstall([]string{"--offline", "--skip-themes"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip-themes preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if captured.InstallThemes {
@@ -517,7 +566,7 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 	}
 	if !strings.HasSuffix(
 		stdout.String(),
-		"if you agree, run again: pfm install --yes --skip-harvest --skip-themes\n",
+		"if you agree, run again: pfm install --yes --offline --skip-themes\n",
 	) {
 		t.Fatalf("skip-themes confirmation=%q", stdout.String())
 	}
@@ -548,7 +597,7 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 	}
 
 	var applyStdout, applyStderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &applyStdout, &applyStderr, explicitRuntime); code != 1 {
+	if code := runInstall([]string{"--yes", "--offline"}, &applyStdout, &applyStderr, explicitRuntime); code != 1 {
 		t.Fatalf(
 			"runInstall(apply, missing --config) code=%d stdout=%q stderr=%q, want refusal",
 			code,
@@ -564,7 +613,7 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 	}
 
 	var previewStdout, previewStderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest"}, &previewStdout, &previewStderr, explicitRuntime); code != 0 {
+	if code := runInstall([]string{"--offline"}, &previewStdout, &previewStderr, explicitRuntime); code != 0 {
 		t.Fatalf(
 			"runInstall(preview, missing --config) code=%d stdout=%q stderr=%q, want 0",
 			code,
@@ -606,7 +655,7 @@ func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := run(
-		[]string{"--config", defaultPath, "install", "--yes", "--skip-harvest"},
+		[]string{"--config", defaultPath, "install", "--yes", "--offline"},
 		&stdout,
 		&stderr,
 	); code != 0 {
@@ -670,7 +719,7 @@ func TestInstallSeedDatabasePathsAgreeWithMigrationAndProcessPin(t *testing.T) {
 				return installer.Report{}, nil
 			}
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{"install", "--yes", "--skip-harvest"}, &stdout, &stderr); code != 0 || !called {
+			if code := run([]string{"install", "--yes", "--offline"}, &stdout, &stderr); code != 0 || !called {
 				t.Fatalf(
 					"install code=%d called=%v stdout=%q stderr=%q",
 					code,

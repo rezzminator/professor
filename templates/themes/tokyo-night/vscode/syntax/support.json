@@ -1,0 +1,81 @@
+{
+  "0034": {
+    "name": "Other Variable",
+    "scope": [
+      "support.other.variable"
+    ],
+    "settings": {
+      "foreground": "#ff5c8a"
+    }
+  },
+  "0041": {
+    "name": "Class, Support, DOM, etc",
+    "scope": [
+      "support.class",
+      "support.type",
+      "variable.other.readwrite.alias",
+      "support.orther.namespace.use.php",
+      "meta.use.php",
+      "support.other.namespace.php",
+      "support.type.sys-types",
+      "support.variable.dom",
+      "support.constant.math",
+      "support.type.object.module",
+      "support.constant.json",
+      "entity.name.namespace",
+      "meta.import.qualifier",
+      "variable.other.constant.object"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  },
+  "0043": {
+    "name": "Support Function",
+    "scope": [
+      "support.function"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  },
+  "0045": {
+    "name": "CSS Font",
+    "scope": [
+      "support.constant.font-name",
+      "meta.definition.variable"
+    ],
+    "settings": {
+      "foreground": "#7dffd0"
+    }
+  },
+  "0057": {
+    "name": "CSS value",
+    "scope": [
+      "support.constant.property-value"
+    ],
+    "settings": {
+      "foreground": "#ffd23f"
+    }
+  },
+  "0135": {
+    "name": "Pink · support types and properties",
+    "scope": [
+      "support.type.property-name",
+      "support.type.property-name.json",
+      "support.type.primitive",
+      "support.class.component",
+      "support.function.any-method",
+      "support.function.builtin",
+      "support.function.macro",
+      "entity.name.function.builtin",
+      "entity.name.module",
+      "entity.name.package",
+      "entity.name.type.module",
+      "support.other.namespace"
+    ],
+    "settings": {
+      "foreground": "#cb9eff"
+    }
+  }
+}

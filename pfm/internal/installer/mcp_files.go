@@ -247,7 +247,7 @@ func acquireClaudeMCPLock(name string) error {
 // enabledMCPNames lists one registration per enabled family.
 func enabledMCPNames(servers map[string]bool) []string {
 	var names []string
-	for _, family := range []string{chatName, mcpServerHarvester} {
+	for _, family := range []string{chatName} {
 		if servers[family] {
 			names = append(names, pfmconfig.MCPRegistrationName(family))
 		}
@@ -260,5 +260,28 @@ func mcpFamilyStdioArgs(name string) []string {
 }
 
 func isFamilyRegistration(name string) bool {
-	return name == pfmconfig.MCPRegistrationName(chatName) || name == pfmconfig.MCPRegistrationName(mcpServerHarvester)
+	return name == pfmconfig.MCPRegistrationName(chatName)
+}
+
+func mcpFamilyBinary(home string) string {
+	return filepath.Join(home, ".local", "bin", "pfm")
+}
+
+// codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
+// table — `command = "<bin>"` and `args = ["mcp", "serve", "--stdio"]` as the
+// TOML encoder renders them — so the writer and the strip agree byte for byte.
+func codexStdioBody(bin string, names ...string) ([]string, error) {
+	args := mcpStdioArgs
+	if len(names) > 0 {
+		args = mcpFamilyStdioArgs(names[0])
+	}
+	body := make([]string, 0, 2)
+	for _, value := range []map[string]any{{configCommandKey: bin}, {configArgsKey: args}} {
+		encoded, err := encodeCodexValues(value)
+		if err != nil {
+			return nil, err
+		}
+		body = append(body, strings.TrimSuffix(encoded, "\n"))
+	}
+	return body, nil
 }

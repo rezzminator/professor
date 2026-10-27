@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
@@ -47,6 +45,8 @@ type subagentTask struct {
 	Cwd               string          `json:"cwd"`
 	ContextWindowSize int64           `json:"contextWindowSize"`
 	TokenCount        int64           `json:"tokenCount"`
+	tokenKnown        bool
+	capacityState     string
 }
 
 // subagentRow is one line Claude Code accepts back: the task id and the body
@@ -82,6 +82,7 @@ type agentActivity struct {
 	turn agentTurn
 
 	noCacheWindow bool
+	context       int64 // newest completed call's last executor request: input + cache read + cache creation; 0 until one lands, and after a compaction
 }
 
 const (
@@ -122,47 +123,6 @@ const (
 	dropEffort
 )
 
-// rowPart is one segment of a full row; short is what it becomes once its
-// drop rank is reached ("" removes it).
-type rowPart struct {
-	text, short string
-	drop        int
-}
-
-func appendRowSegment(line, segment string) string {
-	switch {
-	case segment == "":
-		return line
-	case line == "":
-		return segment
-	}
-	return line + rowSep + segment
-}
-
-// fitRow joins the parts and, while the row is wider than columns leaves for
-// it, gives parts up rank by rank. columns 0 (no width in the payload) keeps
-// the full row.
-func fitRow(parts []rowPart, columns int) string {
-	join := func() string {
-		line := ""
-		for _, part := range parts {
-			line = appendRowSegment(line, part.text)
-		}
-		return line
-	}
-	line := join()
-	budget := columns - rowPrefixWidth
-	for rank := dropCwd; columns > 0 && rank <= dropEffort && ansi.StringWidth(line) > budget; rank++ {
-		for index := range parts {
-			if parts[index].drop == rank {
-				parts[index].text = parts[index].short
-			}
-		}
-		line = join()
-	}
-	return line
-}
-
 // userAgentsDir is the user's agent definitions directory, where Claude Code
 // reads them: $CLAUDE_CONFIG_DIR/agents when that is set, else ~/.claude/agents.
 func userAgentsDir(home string) string {
@@ -193,18 +153,28 @@ func ServeSubagents(
 	env paths.Env,
 	pfmConfigPath string,
 ) int {
+	trace := startSubagentTrace(machine.Home, env, stderr)
+	if trace != nil {
+		stdout = subagentTraceOutput{next: stdout, trace: trace}
+		defer trace.finish()
+	}
 	raw, err := readSubagentInput(stdin)
+	trace.input(raw)
 	if err != nil {
 		return failSubagents("input", raw, err, stdout, stderr)
 	}
+	trace.step("render")
 	prices := LoadServedPrices(machine.Home, pfmConfigPath, stderr, "pfm statusline --subagents")
 	userAgents := userAgentsDir(machine.Home)
 	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, machine.Home, env, userAgents, stderr)
 	if err != nil {
 		return failSubagents("render", raw, err, stdout, stderr)
 	}
+	trace.step("output")
 	if _, err := io.WriteString(stdout, rows); err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: write output (fail-open): %v\n", err)
+	} else {
+		trace.step("done")
 	}
 	return 0
 }
@@ -233,8 +203,8 @@ func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) 
 }
 
 // RenderSubagents turns one subagentStatusLine payload into the JSON lines
-// Claude Code reads back, one per task that reports a model or a token count;
-// a task it omits keeps Claude Code's own row body. A sub-agent transcript
+// Claude Code reads back, one per task with an id, even before its model or
+// token counters arrive. Unknown context stays visible as "?". A sub-agent transcript
 // that cannot be read renders "?" in its row and its cause goes to warn. A nil
 // prices leaves every row's dollars unpriced. A session with a cost ledger prices each row from it:
 // the ledger rows of that agent and every agent below it (ledger_spend.go); an agent it holds no
@@ -261,12 +231,16 @@ func RenderSubagents(
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
+	catalog := newContextCatalog(home, env.Get, now, warn)
 	var tree *agentTree // scanned once per render, on the first agent row
 	roles := newRoleLookup(data.Cwd, home, userAgents, warn)
 	ledger := loadLedgerView(data.SessionID, home, env, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
-		if task.ID == "" || (task.TokenCount <= 0 && task.ContextWindowSize <= 0) {
+		if task.TokenCount < 0 || task.ContextWindowSize < 0 {
+			return "", fmt.Errorf("row %s: negative context counters", task.ID)
+		}
+		if task.ID == "" {
 			continue
 		}
 		var activity *agentActivity
@@ -276,7 +250,8 @@ func RenderSubagents(
 				tree.judgeLiveness(now, liveTasks(data.Tasks))
 			}
 			read := *tree.read(task.ID)
-			read.noCacheWindow = openAIModel(task.Model) || openAIModel(read.model)
+			task.Model = currentModel(task.Model, read.model)
+			read.noCacheWindow = openAIModel(task.Model)
 			if read.roleErr == nil {
 				read.role = roles.name(read.role, warn)
 			}
@@ -296,6 +271,9 @@ func RenderSubagents(
 				}
 			}
 			activity = &read
+		}
+		if openAIModel(task.Model) {
+			task.ContextWindowSize, task.capacityState = catalog.capacity(task.Model)
 		}
 		row := subagentRow{
 			ID:      task.ID,
@@ -385,13 +363,7 @@ func activeContent(
 	inherited sessionEffortRecord,
 	now time.Time,
 ) []rowPart {
-	gauge := cTokens + formatContextTokens(task.TokenCount) + reset
-	if task.ContextWindowSize > 0 {
-		percent := gaugePercent(float64(task.TokenCount) * 100 / float64(task.ContextWindowSize))
-		gauge = makeBar(percent, subagentBarWidth) + " " +
-			percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " +
-			gauge + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
-	}
+	gauge := agentContextGauge(task, activity)
 	var parts []rowPart
 	if activity != nil {
 		parts = append(parts, rowPart{text: nestingSegment(activity.nest)})
@@ -444,7 +416,7 @@ func subagentIdentity(name string, activity *agentActivity) string {
 }
 
 // subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·🏎️ high. The level its transcript recorded for its latest request
+// opus·▰▰▰ high. The level its transcript recorded for its latest request
 // (recorded) wins: it is the effort that request went out at, after any
 // plugin pinned it, so it renders plainly on any model. Without one, the
 // payload's effort shows; one that is not a JSON string is left out. A row
@@ -454,7 +426,7 @@ func subagentIdentity(name string, activity *agentActivity) string {
 func subagentModel(model, recorded string, effort json.RawMessage, inherited sessionEffortRecord) string {
 	family := modelFamily(model)
 	level := strings.TrimSpace(recorded)
-	color := cEffort
+	color, painted := cEffort, true
 	if level == "" &&
 		(len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "") {
 		level = ""
@@ -462,14 +434,20 @@ func subagentModel(model, recorded string, effort json.RawMessage, inherited ses
 			level = inherited.Level
 		}
 		if modelVersion(model) != modelVersion(inherited.Model) {
-			color = cMuted
+			color, painted = cMuted, false
 		}
 	}
 	if level != "" {
-		if family == "" {
-			return color + modelglyph.EffortLabel(level) + reset
+		// A muted level may be another than the one shown, so its bar stays muted
+		// too; otherwise the bar wears the level's own colour.
+		label := color + modelglyph.EffortLabel(level)
+		if painted {
+			label = paintedEffort(level, color)
 		}
-		return cModel + family + reset + cMuted + "·" + reset + color + modelglyph.EffortLabel(level) + reset
+		if family == "" {
+			return label + reset
+		}
+		return cModel + family + reset + cMuted + "·" + reset + label + reset
 	}
 	if family == "" {
 		return ""
@@ -750,6 +728,7 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	}
 	if entry.Type == "system" && entry.Subtype == "compact_boundary" {
 		activity.compactions++
+		activity.context = 0 // a call from before the boundary no longer describes the context
 		return
 	}
 	if entry.Type != entryAssistant && entry.Type != entryUser {
@@ -781,7 +760,13 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, nil)
 		return
 	}
-	spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, &usage.UsageBlock)
+	spend.record(
+		entry.Message.ID,
+		entry.RequestID,
+		entry.Message.Model,
+		usage,
+		entry.Timestamp.Format(time.RFC3339Nano),
+	)
 	// A line that reports no cache counters is a call still streaming (the
 	// gateway's message_start carries its whole-prompt estimate in
 	// input_tokens and nothing else): reading it as a call would drop the
@@ -789,6 +774,18 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if usage.reportsCache {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
 			activity.cacheHit = hit
+		}
+	}
+	// The context is the prompt of the response's last executor request, as the
+	// main session's gauge reads it: a response that ran several requests
+	// carries their sum at the top level, or only zeros there and its counts in
+	// usage.iterations. Iterations mean the call completed even without cache
+	// counters at the top level.
+	if usage.reportsCache || len(usage.Iterations) > 0 {
+		if requests := usage.Requests(); len(requests) > 0 {
+			if size := requests[len(requests)-1].Context(); size > 0 {
+				activity.context = size
+			}
 		}
 	}
 }

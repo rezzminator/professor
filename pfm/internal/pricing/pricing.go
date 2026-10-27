@@ -343,29 +343,43 @@ func DecodeTable(content []byte, name string) (Table, error) {
 // decodeOverride reads and validates a pfm.prices.json: version 2 and rows of
 // the prices.json shape, each keyed as resolution keys a model id, so no
 // override row sits in the table matching nothing.
-func decodeOverride(content []byte, name string) ([]Row, error) {
+func decodeOverride(content []byte, name string) ([]Row, Billing, error) {
 	var doc struct {
-		Version *int   `json:"version"`
-		Rows    *[]Row `json:"rows"`
+		Version *int            `json:"version"`
+		Rows    *[]Row          `json:"rows"`
+		Billing json.RawMessage `json:"billing"`
 	}
+	billing := defaultBilling()
 	if err := strictUnmarshal(content, &doc); err != nil {
-		return nil, fmt.Errorf("prices %s: %w", name, err)
+		return nil, Billing{}, fmt.Errorf("prices %s: %w", name, err)
 	}
 	if err := checkVersion(doc.Version); err != nil {
-		return nil, fmt.Errorf("prices %s: %w", name, err)
+		return nil, Billing{}, fmt.Errorf("prices %s: %w", name, err)
+	}
+	if len(doc.Billing) > 0 {
+		var err error
+		billing, err = decodeBilling(doc.Billing)
+		if err != nil {
+			return nil, Billing{}, fmt.Errorf("prices %s: %w", name, err)
+		}
 	}
 	if doc.Rows == nil {
-		return nil, fmt.Errorf("prices %s: rows must be an array, got missing", name)
+		return nil, Billing{}, fmt.Errorf("prices %s: rows must be an array, got missing", name)
 	}
 	if err := validateRows(*doc.Rows); err != nil {
-		return nil, fmt.Errorf("prices %s: %w", name, err)
+		return nil, Billing{}, fmt.Errorf("prices %s: %w", name, err)
 	}
 	for _, row := range *doc.Rows {
 		if id, ok := NormalizeID(row.Key); !ok || id != row.Key {
-			return nil, fmt.Errorf("prices %s: %s: no model id resolves to this key; write it as %q", name, row.Key, id)
+			return nil, Billing{}, fmt.Errorf(
+				"prices %s: %s: no model id resolves to this key; write it as %q",
+				name,
+				row.Key,
+				id,
+			)
 		}
 	}
-	return *doc.Rows, nil
+	return *doc.Rows, billing, nil
 }
 
 func validate(table Table) error {
@@ -556,8 +570,8 @@ func NormalizeID(modelID string) (string, bool) {
 }
 
 // Resolve returns the row that prices modelID: the row keyed by its normalized
-// id, else by that id without a trailing snapshot date. ok is false for an
-// unpriced model.
+// id, else by the gateway gpt- fast alias, then without a trailing snapshot
+// date. ok is false for an unpriced model.
 func (t Table) Resolve(modelID string) (Row, bool) {
 	id, ok := NormalizeID(modelID)
 	if !ok {
@@ -565,6 +579,13 @@ func (t Table) Resolve(modelID string) (Row, bool) {
 	}
 	if row, found := t.row(id); found {
 		return row, true
+	}
+	// The gateway fast suffix is a routing alias, not a separate published rate.
+	if strings.HasPrefix(id, "gpt-") {
+		id = strings.TrimSuffix(id, "-fast")
+		if row, found := t.row(id); found {
+			return row, true
+		}
 	}
 	if undated := snapshotDate.ReplaceAllString(id, ""); undated != id {
 		return t.row(undated)

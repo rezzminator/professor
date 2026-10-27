@@ -2,6 +2,8 @@ package picker
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -25,6 +27,15 @@ import (
 // time: failures land at 0 (the opening pass), then 10, 30, 70 and 110 s with
 // the interval at 10 s and the cap at 40 s.
 func TestPickerRefreshStreamBacksOffConsecutiveFailedPasses(t *testing.T) {
+	testRefreshFailureBackoff(t, false)
+}
+
+func TestPickerRefreshStreamBacksOffFailedNativePublications(t *testing.T) {
+	testRefreshFailureBackoff(t, true)
+}
+
+func testRefreshFailureBackoff(t *testing.T, native bool) {
+	t.Helper()
 	previousInterval, previousThreshold := fleetRefreshInterval, fleetRefreshParkThreshold
 	previousPoll, previousStale := fleetRefreshParkPollInterval, fleetRefreshStaleAfter
 	fleetRefreshInterval, fleetRefreshParkThreshold = 10*time.Second, 40*time.Second
@@ -43,11 +54,19 @@ func TestPickerRefreshStreamBacksOffConsecutiveFailedPasses(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	})
+	if native {
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, []byte("file"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PFM_STATE_DB", filepath.Join(blocker, "state.db"))
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	updates := make(chan ui.Snapshot, 64)
 	var (
 		mutex    sync.Mutex
 		failedAt []int64
+		stages   []string
 		drained  = make(chan struct{})
 	)
 	go func() {
@@ -56,6 +75,7 @@ func TestPickerRefreshStreamBacksOffConsecutiveFailedPasses(t *testing.T) {
 			if snapshot.RefreshFailure != nil {
 				mutex.Lock()
 				failedAt = append(failedAt, snapshot.RefreshFailure.AtNS)
+				stages = append(stages, snapshot.RefreshFailure.Stage)
 				mutex.Unlock()
 			}
 		}
@@ -66,7 +86,7 @@ func TestPickerRefreshStreamBacksOffConsecutiveFailedPasses(t *testing.T) {
 		reads: make(chan time.Time), selecting: make(chan chan struct{}),
 	}}
 	runner := &toggledFailingIndexRunner{}
-	runner.failing.Store(true)
+	runner.failing.Store(!native)
 	var warnings bufferedWarnings
 	go streamFleetRefreshesWith(ctx, database, scanRequest{}, warnings.add, &warnings, updates,
 		refreshDependencies{
@@ -93,6 +113,17 @@ func TestPickerRefreshStreamBacksOffConsecutiveFailedPasses(t *testing.T) {
 
 	mutex.Lock()
 	defer mutex.Unlock()
+	if native {
+		for _, stage := range stages {
+			if stage != "native seats" {
+				t.Fatalf("fixture failed at %q instead of native publication", stage)
+			}
+		}
+		if len(failedAt) != 5 {
+			t.Fatalf("native failed passes = %d, want 5 under doubling backoff (stages %v)", len(failedAt), stages)
+		}
+		return
+	}
 	var got []int
 	for _, at := range failedAt {
 		got = append(got, int(time.Unix(0, at).Sub(start)/time.Second))

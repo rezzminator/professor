@@ -1,0 +1,89 @@
+{
+  "*.deprecated": {
+    "strikethrough": true
+  },
+  "attribute": "#f286d2",
+  "boolean": "#f286d2",
+  "builtinType": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "class": "#f2d48c",
+  "class.defaultLibrary": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "comment": {
+    "foreground": "#7280aa",
+    "italic": true
+  },
+  "decorator": "#f286d2",
+  "enum": "#f2d48c",
+  "enum.defaultLibrary": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "enumMember": "#ff9e8f",
+  "escapeSequence": "#86ecff",
+  "event": "#b49cff",
+  "formatSpecifier": "#86ecff",
+  "function": "#6fd8ff",
+  "function.defaultLibrary": "#a2e6f7",
+  "interface": "#f2d48c",
+  "interface.defaultLibrary": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "keyword": "#5cf0a8",
+  "label": "#ff9e8f",
+  "lifetime": {
+    "foreground": "#f286d2",
+    "italic": true
+  },
+  "macro": "#f286d2",
+  "method": "#6fd8ff",
+  "method.defaultLibrary": "#a2e6f7",
+  "modifier": {
+    "foreground": "#b49cff",
+    "italic": true
+  },
+  "namespace": "#74e2d2",
+  "number": "#ff9e8f",
+  "operator": "#9fe9d0",
+  "parameter": {
+    "foreground": "#d4c6ff",
+    "italic": true
+  },
+  "property": "#9fc2ff",
+  "property.readonly": "#9fc2ff",
+  "regexp": "#f8b2de",
+  "selfKeyword": {
+    "foreground": "#f286d2",
+    "italic": true
+  },
+  "selfTypeKeyword": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "string": "#c8f08f",
+  "struct": "#f2d48c",
+  "struct.defaultLibrary": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "type": "#f2d48c",
+  "type.defaultLibrary": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "typeAlias": "#f2d48c",
+  "typeParameter": {
+    "foreground": "#f2d48c",
+    "italic": true
+  },
+  "union": "#f2d48c",
+  "variable": "#dce5fa",
+  "variable.defaultLibrary": "#a2e6f7",
+  "variable.readonly": "#dce5fa",
+  "variable.readonly.defaultLibrary": "#a2e6f7"
+}

@@ -176,7 +176,12 @@ func applyLog(result *Config, raw *rawLog) error {
 // default without another display-path audit.
 func RedactSecrets(content []byte) []byte {
 	var value any
-	if err := json.Unmarshal(content, &value); err != nil {
+	if !json.Valid(content) {
+		return content
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
 		return content
 	}
 	redactJSON(value)
@@ -194,7 +199,7 @@ func redactJSON(value any) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
-			lower := strings.ToLower(key)
+			lower := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
 			if strings.Contains(lower, "token") || strings.Contains(lower, "secret") ||
 				strings.Contains(lower, "credential") ||
 				strings.Contains(lower, "password") ||

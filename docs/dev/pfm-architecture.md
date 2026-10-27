@@ -1,6 +1,6 @@
 # pfm: architecture for agent maintainers
 
-**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`). Nothing here is built yet. Code moves through `/flights:spec` and the fenced executor, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
+**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`). Nothing here is built yet. Code moves through a `flights-foreman` tier in the fence, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
 
 ## Contents
 
@@ -22,7 +22,7 @@ pfm has 98.5K source lines and 101.4K test lines across 64 packages. The package
 
 1. **`cmd/pfm` is where the logic lives.** It is 18,203 lines of `package main` in 58 files and imports 47 of the 63 internal packages. It is touched by **67% of all pfm commits** (146 of 219 non-release commits since 2026-06-01), and only 19 of those commits touched it alone. The MCP server reaches every stateful chat verb by building an argv slice, calling `runChatWithRuntime` in `package main`, and parsing the printed stdout (`internal/mcpserv/actions.go:32,84,295`; `cmd/pfm/mcp_shared.go:29`). The chat family's behavior is therefore unreachable except through a CLI string.
 2. **Mechanisms are re-implemented per package.** There are 9 concrete tmux runners (`CommandTmux` in 7 packages, plus `agentopen.RealTmux` and `cmd/pfm/reload_command.go:30`), about 2,100 lines of which roughly 1,500 are the same socket-scoped `command()` shape. There are also 6 named atomic-write helpers plus about 25 inline temp-and-rename sites, 7 `sql.Open` call sites with two near-identical pragma sets, 4 JSONL line-reading idioms with 3 different line caps, and a second procfs reader in `resolve` forced by an import cycle (`gather` imports `resolve`).
-3. **The reader's first hop gives wrong directions, and the lists are hand-kept.** `pfm/CLAUDE.md` cites two deleted packages (`check/`, `legacy/`), two missing docs (`PLAN.md`, `CUTOVER.md`) and an env var nothing reads (`PFM_DB_SCRIPT`). It says "no build tags, no per-OS packages" in § Stack, while 21 `_linux`/`_darwin` files exist and its own § Code Standards mandates them. Its package table covers 22 of 61 internal packages, its "Subcommands today" line misses 7 of 23 commands (`harvest config uninstall update init issues codex`), and its Platforms table misses the darwin-required `security` entry (`internal/deps/registry.go:65`). The `pfm internal` usage string names 8 of its 19 dispatched entries, and `docs/dev/pfm-surface.md:44` names 7. The MCP server's routing prose (`internal/mcpserv/server.go:103`) names 6 verbs as excluded, while 8 have no tool (`ask` and `branch` go unnamed). Two different databases are both named `fleet.db`.
+3. **The reader's first hop gives wrong directions, and the lists are hand-kept.** `pfm/CLAUDE.md` cites two deleted packages (`check/`, `legacy/`), two missing docs (`PLAN.md`, `CUTOVER.md`) and an env var nothing reads (`PFM_DB_SCRIPT`). It says "no build tags, no per-OS packages" in § Stack, while 21 `_linux`/`_darwin` files exist and its own § Code Standards mandates them. Its package table covers 22 of 61 internal packages, its "Subcommands today" line misses commands including `config`, `uninstall`, `update`, `init`, `issues` and `codex`, and its Platforms table misses the darwin-required `security` entry (`internal/deps/registry.go:65`). The `pfm internal` usage string names 8 of its 19 dispatched entries, and `docs/dev/pfm-surface.md:44` names 7. The MCP server's routing prose (`internal/mcpserv/server.go:103`) names 6 verbs as excluded, while 8 have no tool (`ask` and `branch` go unnamed). Two different databases are both named `fleet.db`.
 
 The design fixes all three incrementally. No rebuild is needed: under a fifth of the tree moves.
 
@@ -45,7 +45,7 @@ Co-change evidence is the number of commits since 2026-06-01, releases excluded,
 | Statusline and usage hook | render; the fail-open prompt hook | `internal/statusline/`, `internal/usagehook/` | statusline+ui 15 |
 | Installer | host wiring (links, units, settings, Codex agents, overlays, MCP clients) | `internal/installer/` split by surface | `installer.go` 2,484 lines, 32 commits |
 | Installer migrations | one-time retire/migrate steps with a sunset | `internal/installer/migrations/` **new** | 1,624 lines in 49 retire/migrate/legacy funcs (name heuristic) |
-| Harvester | transport, MCP surface, Python sidecar | `internal/harvest/`, `harvestmcp/`, `harvestpy/` | cohesive today; unchanged |
+| Harvester | standalone plugin; no active PFM integration | `plugins/harvester/` (separate module) | the plugin owns native engine registration, fetch, MCP and conversion packages |
 | Headless | one-shot engine processes; two-way await | `internal/headless/`, `headless/run/`, `ask/` | unchanged |
 | Hygiene | dry-run-first reap, archive, heal | `internal/{reap,archive,heal}/` | unchanged |
 | Engine registry | which engines exist; per-engine adapters | `internal/engine/**` | `matchutil` folds into `engine` |
@@ -78,11 +78,11 @@ pfm/
     hooks/                          # NEW. Harness hook bodies with no other domain home.
       README.md
       table.go                      # THE entry table {Entry, Event, Matcher, Engines, Summary}; installer reads it
-      explore_deny.go epic_inject.go reload_intercept.go exit_intercept.go exit_close.go …
+      epic_inject.go reload_intercept.go exit_intercept.go exit_close.go …
       <entry>_test.go
     doctor/                         # NEW. From cmd/pfm/doctor.go + *_doctor.go.
       README.md doctor.go           # probe runner; three distinct verdicts: healthy / broken / could-not-look
-      deps.go hooks.go harness_prompt.go spawn_audit.go tmux_titles.go prepush.go harvest.go mcp.go codex_panes.go
+      deps.go hooks.go harness_prompt.go spawn_audit.go tmux_titles.go prepush.go mcp.go codex_panes.go
       <probe>_test.go
     fleet/                          # NEW. Scan(ctx, db, Request) → Result: index → gather → reconcile → compose (from pipeline.go, codexpanes.go)
     picker/                         # NEW. The ls loop, cadence, cosmos sampler; row actions call chat verbs (from commands.go, pipeline.go)
@@ -101,7 +101,7 @@ pfm/
     installer/                      # installer.go split by surface; migrations/ below
       migrations/                   # NEW. v<version>_<slug>.go per step + steps.go ordered slice
     unchanged: action agentopen agentrole archive ask codexappendix codexmeta codexprompt compose config deps
-               gather harvest harvestmcp harvestpy headless headless/run heal index call kill
+               gather headless headless/run heal index call kill
                mcpserv naming nudge paths recovery reap reload resolve sky spawn stats statusline
                testjail theme transcript ui updatecheck usagehook
 ```
@@ -113,7 +113,7 @@ One term per concept, spelled the same in the directory, the identifier, the wir
 | Concept | Canonical term | Directory / identifier | Wire key | Today's divergence |
 | --- | --- | --- | --- | --- |
 | Rebuildable transcript index | index DB | `internal/store` · `paths.Values.IndexDB` | file `~/.local/state/pfm/index.db` · env `PFM_INDEX_DB` | file is `fleet.db`, field `DB`, env `PFM_DB` |
-| Operator decisions (kills, children, comms, issues, branch seats) | fleet DB | `internal/fleetdb` · `paths.Values.FleetDB` | file `~/.cc/fleet.db` · env `PFM_FLEET_DB` | package `shared`, field `SharedDB`, env `PFM_SHARED_DB`; `installer.go:2266` re-spells the path |
+| Operator decisions (kills, children, comms, branch seats) | fleet DB | `internal/fleetdb` · `paths.Values.FleetDB` | file `~/.cc/fleet.db` · env `PFM_FLEET_DB` | package `shared`, field `SharedDB`, env `PFM_SHARED_DB`; `installer.go:2266` re-spells the path |
 | One operation on one chat | verb | `internal/chat/<verb>.go` · `chat.Verbs` | CLI `pfm chat <verb>` · MCP `chat_<verb>` (`-` → `_`) | verbs live in `cmd/pfm/*_command.go`; dispatch sits in `headless_command.go:85`; `pfm headless <verb>` is a second entry to every verb, with the aliases `run`→`new` and `transcript`→`read` (`headless_command.go:54-61`) |
 | Resolved paths + config for one process | Runtime | `internal/config` · `config.Runtime` (`LoadRuntime`, `RuntimeOrDefault`) | — | `mcpserv.Runtime` (a second shape; `commandRuntime` is now an alias) |
 | A `pfm internal` entrypoint (hooks are the subset with a harness event) | entry | `internal/hooks/table.go` · `hooks.Table` | argv `pfm internal <entry>` (unchanged — installed wiring depends on it) | if-chain at `main.go:381`; usage lists 8 of 19 |
@@ -317,7 +317,7 @@ Hops are reported as the pair source-only · orientation.
 - step 6's scan half, as `internal/fleet`. Codex pane reconciliation moved with it, because `fleet.Scan` runs it. `config.Runtime` became the one runtime shape (`commandRuntime` is an alias), and the account projections became `config` methods;
 - step 4(a)'s first verbs: target resolution, `last`, `status` and `read` in `internal/chat`. MCP `last` and `status` call `chat.Verbs` typed (C10 10 → 8).
 - step 4(a)'s rest and 4(d)'s `mcpSharedOperations`: `chat.List`, `chat.Find` and `chat.NameResolver`. MCP `ls`, `find` and `read` call `ChatVerbs`, and call's roster rung is one resolver for the CLI and MCP. `capture`, `whoami` and `resolve` already called `call` and `resolve` through typed adapters, so they needed no move. An index pass refuses an engine with no index source instead of skipping it.
-- step 2's `internal/atomicfile`: every hand-rolled byte writer calls `atomicfile.Write`. C6 counts inline `os.CreateTemp` + `os.Rename` too, and its baseline is the 12 files the name grep missed: the streaming writers, plus the harvester's writer (`config.writeAtomic`, kept verbatim in `config/harvester_write.go`) and `harvest/cache.go`, which are held out of this wave.
+- step 2's `internal/atomicfile`: every hand-rolled byte writer calls `atomicfile.Write`. C6 counts inline `os.CreateTemp` + `os.Rename` too, and its baseline is the 12 files the name grep missed: the streaming writers and the other config/cache writers, which are held out of this wave.
 - step 2's `internal/sqlitedb` and `internal/tmux`: every SQLite open goes through `OpenStore`, `OpenReadOnly` or `OpenReadWrite` (C7 7 → 0), and the tmux builders in kill, call, resolve, reap, spawn, action, agentopen, reload, launch and the chat commands call `tmux.Command`. C5 keeps `gather/tmuxprobe.go` (its own socket addressing). The ratchet runs in the C locale and inside the fence (`dev.sh verify pfm`).
 
 The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
@@ -336,7 +336,7 @@ The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 6. **Fleet scan and picker.** The scan half of `pipeline.go` becomes `internal/fleet` (`fleet.Scan`), and `pfm chat ls`, MCP `ls` and the picker all read it. The loop half, plus `commands.go:30-620`, becomes `internal/picker`, whose row actions call `chat.Open`, `chat.Kill`, `chat.Reload` and `chat.End`. Primary-account I/O (`pipeline.go:1600-1654`) moves to `internal/config`, which owns accounts. Codex pane reconciliation (`pipeline.go:1117-1470`, `codexpanes.go`) stays with the refresh loop in `internal/picker` until name convergence gets its own ruling. *Moves:* the cmd/pfm+ui, cmd/pfm+compose and cmd/pfm+gather pairs, and C3 by about 2,400 lines.
 7. **Update and baselines.** `update_command.go` becomes `internal/update/`, and the logic of `update_project.go` and `init_command.go` goes to `internal/professor/`. *Moves:* C3 and C4 (5 exec sites in `update_command.go`).
 8. **Renames, one mechanical commit each.** `shared` → `fleetdb` (plus the field and env); the index DB file `fleet.db` → `index.db` (an installer step that moves the file and never deletes it: an older binary still finds its hides in the fleet DB and re-indexes the rest); `matchutil` → `engine.MatchCommand`; `stats/limits.go` + `usage_source.go` → `internal/limits`, which **must land before pfmd Phase 2** so the daemon's poller and its clients import one package; and `store` → `indexdb` if ruled. *Moves:* C8, C11, glossary divergence.
-9. **Installer.** Split `installer.go` by surface (Codex agents, global links, units, harvest install, overlays), and move every `retire*` and `migrate*` step into `internal/installer/migrations/` with a `Since` version and a sunset. *Moves:* C1 (the largest file), plus a standing trim of one-time code.
+9. **Installer.** Split `installer.go` by surface (Codex agents, global links, units, overlays), and move every `retire*` and `migrate*` step into `internal/installer/migrations/` with a `Since` version and a sunset. *Moves:* C1 (the largest file), plus a standing trim of one-time code.
 
 **What dies:** `mcpserv.Dispatch` and its argv adapters; `runChatSatellite`; the `run()` switch, `printUsage` and `diagnosticCommand` as three hand lists; the `runInternal` if-chain and its usage string; `reloadCommandTmux` and 7 more tmux runners; resolve's procfs; 5 atomic-write helpers; 2 pragma sets; `engine/matchutil`; the package name `shared`; the duplicate `fleet.db`; the package table and subcommand list in `pfm/CLAUDE.md`; and migration steps past their sunset.
 
@@ -355,8 +355,6 @@ Commands:        .claude/scripts/dev.sh iso test pfm
                  pfm/scripts/arch-check.sh            (expected: PASS, baseline <name> shrinks by <k>)
 Acceptance:      <observable behavior> · C3 budget lowered to <N>
 ```
-
-Work-tree anatomy for each flight: `$HOME/.local/state/pfm/flights/{project}/<flight>/{index.md,<level>-<letter>.md,run.md,audit.md}`, at most three levels deep. Evidence a later task needs is quoted into its task file.
 
 ## 10. Open rulings
 

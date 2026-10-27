@@ -8,16 +8,13 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/binwatch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
@@ -29,11 +26,10 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 		return 2
 	}
 	chatEnabled := runtime.Config.MCPServers[config.MCPServerChat].Enabled
-	harvesterEnabled := runtime.Config.MCPServers[config.MCPServerHarvester].Enabled
-	if !chatEnabled && !harvesterEnabled {
+	if !chatEnabled {
 		fmt.Fprintf(
 			stderr,
-			"pfm mcp serve: every registered server is disabled by config %s; enable at least one with: pfm mcp <server> enable\n",
+			"pfm mcp serve: chat is disabled by config %s; enable it with: pfm mcp chat enable\n",
 			runtime.Config.Path,
 		)
 		return 1
@@ -85,54 +81,18 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 		families.Chat = chat
 		options.ChatRuntimeIdentity = chat.RuntimeIdentity()
 	}
-	if harvesterEnabled {
-		harvester, err := harvestmcp.NewConfiguredHarvester(version, harvestRuntime(runtime))
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm mcp serve: configure harvester: %v\n", err)
-			return 1
-		}
-		defer func() {
-			cli.CloseResource(harvester, "pfm mcp serve: close harvester service", stderr, &exitCode)
-		}()
-		families.Harvester = harvester
-		options.HarvesterTools = harvester.ToolNames()
-	}
 	professor, err := mcpserv.NewFamilyServers(families)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp serve: %v\n", err)
 		return 1
 	}
 	options.Chat = professor.FamilyHandler(config.MCPServerChat)
-	options.Harvester = professor.FamilyHandler(config.MCPServerHarvester)
-	external := &atomic.Pointer[string]{}
-	setExternal := func(state string) { external.Store(&state) }
-	switch {
-	case !runtime.Config.Harvester.External.Enabled:
-		setExternal("disabled")
-	case !harvesterEnabled:
-		setExternal("off: external.enabled is true but harvester.enabled is false")
-		fmt.Fprintln(
-			stderr,
-			"pfm mcp serve: harvester external gateway NOT serving: external.enabled is true but harvester.enabled is false",
-		)
-	default:
-		stopExternal, err := startHarvesterExternal(runtime, stderr, setExternal)
-		if err != nil {
-			// The loopback port keeps serving chat + harvester; the failure is
-			// reported on /status (doctor) and here, never swallowed.
-			setExternal("failed: " + err.Error())
-			fmt.Fprintf(stderr, "pfm mcp serve: harvester external gateway NOT serving: %v\n", err)
-		} else {
-			defer stopExternal()
-		}
-	}
-	options.External = external
 	options.Clock = clk
 	options.StartedAt = clk.Now().UTC()
 	server := newLoopbackMCPServer(mcpserv.NewDaemonHandler(options))
 	fmt.Fprintf(
-		stdout, "pfm mcp serve\thttp://%s\tchat=%s\tharvester=%s\tharvester_external=%s\n",
-		address, enabledState(chatEnabled), enabledState(harvesterEnabled), *external.Load(),
+		stdout, "pfm mcp serve\thttp://%s\tchat=%s\n",
+		address, enabledState(chatEnabled),
 	)
 	listenerOwned = false // http.Server.Serve closes its listener before returning.
 	return binwatch.Serve(server, listener, stderr)
@@ -143,56 +103,6 @@ func newLoopbackMCPServer(handler http.Handler) *http.Server {
 		Handler: handler, ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute,
 	}
-}
-
-// startHarvesterExternal opens the authenticated external harvester gateway on
-// its own port, inside the daemon process. It serves the harvester ONLY —
-// never the chat MCP, which drives live terminals — and harvestmcp.NewRemote
-// refuses to build it without a credential. The returned stop closes the
-// listener and the gateway's converter.
-func startHarvesterExternal(runtime commandRuntime, stderr io.Writer, setState func(string)) (func(), error) {
-	settings := runtime.Config.Harvester.External
-	statePath := ""
-	if settings.StateDir != "" {
-		statePath = filepath.Join(settings.StateDir, "auth.json")
-	}
-	remote, err := harvestmcp.NewRemote(harvestmcp.RemoteOptions{
-		Runtime: harvestRuntime(runtime), Version: version, PublicURL: settings.PublicURL,
-		Passphrase: settings.Passphrase, StaticToken: settings.StaticToken, StatePath: statePath,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("configure: %w", err)
-	}
-	address := net.JoinHostPort(settings.Host, strconv.Itoa(settings.Port))
-	listener, err := net.Listen("tcp", address)
-	if err != nil {
-		if closeErr := remote.Close(); closeErr != nil {
-			fmt.Fprintf(stderr, "pfm mcp serve: close external harvester after failed listen: %v\n", closeErr)
-		}
-		return nil, fmt.Errorf("listen %s: %w", address, err)
-	}
-	server := &http.Server{
-		Handler:           remote.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      5 * time.Minute,
-		IdleTimeout:       2 * time.Minute,
-	}
-	setState(fmt.Sprintf("listening on %s as %s", address, settings.PublicURL))
-	go func() {
-		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			setState("failed: " + err.Error())
-			fmt.Fprintf(stderr, "pfm mcp serve: harvester external gateway stopped: %v\n", err)
-		}
-	}()
-	return func() {
-		if err := server.Close(); err != nil {
-			fmt.Fprintf(stderr, "pfm mcp serve: close external gateway: %v\n", err)
-		}
-		if err := remote.Close(); err != nil {
-			fmt.Fprintf(stderr, "pfm mcp serve: close external harvester: %v\n", err)
-		}
-	}, nil
 }
 
 // enabledState renders a config gate for the startup log line so the
@@ -208,8 +118,8 @@ func enabledState(enabled bool) string {
 // runMCPStdio serves the selected family through its daemon route,
 // with an in-process family server when the daemon is unavailable.
 func runMCPStdio(_, stderr io.Writer, runtime commandRuntime, family string) (exitCode int) {
-	if family != config.MCPServerChat && family != config.MCPServerHarvester {
-		fmt.Fprintln(stderr, "pfm mcp serve --stdio: --family must be chat or harvester")
+	if family != config.MCPServerChat {
+		fmt.Fprintln(stderr, "pfm mcp serve --stdio: --family must be chat")
 		return 2
 	}
 	if !runtime.Config.MCPServers[family].Enabled {
@@ -275,19 +185,7 @@ func newStdioFamilies(
 			families.Chat = chat
 		}
 	}
-	if runtime.Config.MCPServers[config.MCPServerHarvester].Enabled {
-		harvesterRuntime := harvestRuntime(runtime)
-		harvester, err := harvestmcp.NewConfiguredHarvester(version, harvesterRuntime)
-		if err != nil {
-			fail(config.MCPServerHarvester, harvestmcp.RegisteredToolNames(harvesterRuntime), err)
-		} else {
-			closers = append(closers, func(exitCode *int) {
-				cli.CloseResource(harvester, "pfm mcp serve --stdio: close harvester service", stderr, exitCode)
-			})
-			families.Harvester = harvester
-		}
-	}
-	if families.Chat == nil && families.Harvester == nil && len(families.Failed) == 0 {
+	if families.Chat == nil && len(families.Failed) == 0 {
 		return nil, closeFamilies, errors.New("no family is enabled by config")
 	}
 	professor, err = mcpserv.NewFamilyServers(families)

@@ -1,0 +1,117 @@
+{
+  "0015": {
+    "name": "Kaki · escapes & placeholders",
+    "scope": [
+      "constant.character.escape",
+      "constant.character",
+      "constant.other.placeholder",
+      "constant.character.format.placeholder",
+      "constant.character.string.escape",
+      "constant.character.escape.go",
+      "constant.other.placeholder.go",
+      "constant.character.entity",
+      "punctuation.definition.entity",
+      "constant.character.escape.backslash",
+      "constant.character.set.regexp",
+      "storage.type.format.python",
+      "storage.type.string.python",
+      "string.interpolated.dollar.shell punctuation.definition",
+      "punctuation.definition.variable.shell"
+    ],
+    "settings": {
+      "foreground": "#9f5401"
+    }
+  },
+  "0019": {
+    "name": "Fuji · numbers",
+    "scope": [
+      "constant.numeric",
+      "constant.numeric.integer",
+      "constant.numeric.float",
+      "constant.numeric.hex",
+      "constant.numeric.decimal",
+      "constant.numeric.binary",
+      "constant.numeric.octal",
+      "constant.numeric.complex",
+      "keyword.other.unit",
+      "constant.numeric.yaml"
+    ],
+    "settings": {
+      "foreground": "#853a93"
+    }
+  },
+  "0020": {
+    "name": "Fuji · constants",
+    "scope": [
+      "constant",
+      "variable.other.constant",
+      "variable.other.enummember",
+      "entity.name.constant",
+      "support.constant",
+      "constant.other",
+      "constant.other.caps",
+      "constant.other.symbol",
+      "constant.other.key",
+      "constant.language.go",
+      "support.constant.math",
+      "support.constant.dom",
+      "constant.other.rune.go"
+    ],
+    "settings": {
+      "foreground": "#853a93"
+    }
+  },
+  "0021": {
+    "name": "Fuji · language literals",
+    "scope": [
+      "constant.language",
+      "constant.language.boolean",
+      "constant.language.null",
+      "constant.language.undefined",
+      "constant.language.nil",
+      "constant.language.none",
+      "constant.language.nan",
+      "constant.language.infinity",
+      "constant.language.boolean.true",
+      "constant.language.boolean.false",
+      "constant.language.json",
+      "constant.language.yaml",
+      "constant.language.toml"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#853a93"
+    }
+  },
+  "0052": {
+    "name": "Kaki · shell options",
+    "scope": [
+      "constant.other.option",
+      "constant.other.option.dash",
+      "string.unquoted.argument.shell constant.other.option"
+    ],
+    "settings": {
+      "foreground": "#9f5401"
+    }
+  },
+  "0076": {
+    "name": "Kincha · rebase hashes",
+    "scope": [
+      "constant.sha.git-rebase"
+    ],
+    "settings": {
+      "foreground": "#785603"
+    }
+  },
+  "0080": {
+    "name": "Fuji · Python special constants",
+    "scope": [
+      "constant.language.python",
+      "support.variable.magic.python"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#853a93"
+    }
+  }
+}

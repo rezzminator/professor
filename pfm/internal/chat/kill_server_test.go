@@ -1,13 +1,21 @@
 package chat
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestKillServerRecordsAChatStateTransition: KillServer walks the state door
@@ -62,4 +70,470 @@ func TestKillServerRecordsAChatStateTransition(t *testing.T) {
 	if !found {
 		t.Fatalf("KillServer() wrote no chat->ended transition: %s", recorder.Raw())
 	}
+}
+
+func TestKillServerRefusesNativeSocket(t *testing.T) {
+	root := t.TempDir()
+	socket := filepath.Join(root, "herdr.sock")
+	if err := os.WriteFile(socket, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := KillServer(
+		context.Background(),
+		paths.Values{TmuxDir: root, StateDB: filepath.Join(root, "state.db")},
+		socket,
+	)
+	body, readErr := os.ReadFile(socket)
+	if err == nil || !strings.Contains(err.Error(), "use EndResolved for a native Herdr seat") || readErr != nil ||
+		string(body) != "preserve" {
+		t.Fatalf("native end err=%v body=%q read=%v", err, body, readErr)
+	}
+}
+
+func TestEndHerdrClosesOnlyItsSeat(t *testing.T) {
+	for _, scenario := range []struct {
+		name, state, refusal string
+		want                 int
+	}{
+		{name: "live", state: "live"},
+		{name: "early startup without session", state: "failed"},
+		{name: "lost missing pane", state: "lost", refusal: "pane_not_found", want: 1},
+		{name: "failed missing pane", state: "failed", refusal: "pane_not_found", want: 1},
+		{name: "close error", state: "live", refusal: "permission_denied", want: 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			calls := make(chan nativeChatRequest, 8)
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
+				calls <- req
+				return map[string]any{"type": "ok"}, scenario.refusal
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, scenario.state)
+			seat = nativeChatHost(t, db, seat, true)
+			if scenario.name == "early startup without session" {
+				seat.SessionID = ""
+				if err := db.PutSeat(context.Background(), seat); err != nil {
+					t.Fatal(err)
+				}
+			}
+			other := seat
+			other.SeatID = "other-seat"
+			other.SessionID = "other-session"
+			other.HerdrPane = "w6:p4"
+			if err := db.PutSeat(context.Background(), other); err != nil {
+				t.Fatal(err)
+			}
+			// The ended seat's reload schedule files go with it; another
+			// seat's, a sibling name and an unrelated file stay.
+			ended := []string{
+				paths.SIDReloadHerdrPrefix + seat.SeatID + ".pid",
+				paths.SIDReloadHerdrPrefix + seat.SeatID + ".log",
+			}
+			kept := []string{
+				paths.SIDReloadHerdrPrefix + other.SeatID + ".pid",
+				paths.SIDReloadHerdrPrefix + other.SeatID + ".log",
+				paths.SIDReloadHerdrPrefix + seat.SeatID + "-2.log",
+				"kill-exit-unrelated.log",
+			}
+			for _, name := range append(append([]string{}, ended...), kept...) {
+				if err := os.WriteFile(filepath.Join(runtime.Paths.SIDDir, name), []byte("1 2\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code := 0
+			if err := endHerdr(
+				context.Background(),
+				headless.Chat{
+					Backend: "herdr",
+					SeatID:  seat.SeatID,
+					ID:      seat.SessionID,
+					Socket:  socket,
+					Pane:    seat.HerdrPane,
+				},
+				runtime.Paths,
+			); err != nil {
+				code = 1
+			}
+			if code != scenario.want {
+				t.Fatalf("native worker code=%d want=%d", code, scenario.want)
+			}
+
+			_, found, err := db.Seat(context.Background(), seat.SeatID)
+			if err != nil || found != (scenario.want != 0) {
+				t.Fatalf("ended seat found=%v err=%v", found, err)
+			}
+			if _, found, err := db.Seat(context.Background(), other.SeatID); err != nil || !found {
+				t.Fatalf("other seat found=%v err=%v", found, err)
+			}
+			if scenario.want == 0 {
+				if _, err := db.ReadSeatRun(seat.SeatID); err == nil {
+					t.Fatal("ended seat recipe still present")
+				}
+			}
+			for _, name := range ended {
+				_, err := os.Stat(filepath.Join(runtime.Paths.SIDDir, name))
+				if gone := os.IsNotExist(err); gone != (scenario.want == 0) {
+					t.Fatalf("%s gone=%v (stat err=%v), want gone=%v", name, gone, err, scenario.want == 0)
+				}
+			}
+			for _, name := range kept {
+				if _, err := os.Stat(filepath.Join(runtime.Paths.SIDDir, name)); err != nil {
+					t.Fatalf("%s must stay: %v", name, err)
+				}
+			}
+			select {
+			case req := <-calls:
+				if req.Method != "pane.close" || string(req.Params["pane_id"]) != `"w6:p3"` {
+					t.Fatalf("close request=%+v", req)
+				}
+			default:
+				t.Fatal("pane.close was not sent")
+			}
+		})
+	}
+}
+
+func TestNativeEndRefusesRecycledOwnerAndKeepsRecoverableIntent(t *testing.T) {
+	for _, mode := range []string{"recycled", "unknown-close", "moved"} {
+		t.Run(mode, func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if req.Method == "pane.list" && mode == "recycled" {
+					return map[string]any{
+						"type":  "pane_list",
+						"panes": []any{testjail.HerdrPaneInfo("w6:p9")["pane"]},
+					}, ""
+				}
+				pane := "w6:p3"
+				if mode == "moved" {
+					pane = "w9:p2"
+				}
+				if value, code, ok := nativeChatProof(req, pane); ok {
+					return value, code
+				}
+				if req.Method == "pane.close" {
+					if mode == "unknown-close" {
+						return nil, "permission_denied"
+					}
+					if string(req.Params["pane_id"]) != `"w9:p2"` {
+						t.Errorf("end used stale target: %s", req.Params["pane_id"])
+					}
+					return map[string]any{"type": "ok"}, ""
+				}
+				return nil, "unexpected_method"
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, db, seat, true)
+			seat.EndPending = mode != "recycled"
+			if err := db.PutSeat(context.Background(), seat); err != nil {
+				t.Fatal(err)
+			}
+			err := endHerdr(
+				context.Background(),
+				headless.Chat{
+					Backend: "herdr",
+					SeatID:  seat.SeatID,
+					ID:      seat.SessionID,
+					Socket:  socket,
+					Pane:    seat.HerdrPane,
+				},
+				runtime.Paths,
+			)
+			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
+			if mode == "moved" {
+				if err != nil || found || readErr != nil {
+					t.Fatalf("canonical end err=%v found=%v read=%v", err, found, readErr)
+				}
+			} else if err == nil || !found || readErr != nil || current.EndPending != seat.EndPending {
+				t.Fatalf("unsafe end err=%v found=%v read=%v seat=%+v", err, found, readErr, current)
+			}
+		})
+	}
+}
+
+func TestNativePendingEndReconcilesOnlyConfirmedDisappearance(t *testing.T) {
+	for _, reply := range []string{"absent", "present", "malformed", "transport"} {
+		t.Run(reply, func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if req.Method != "pane.list" {
+					return nil, "unexpected_mutation"
+				}
+				switch reply {
+				case "absent":
+					return map[string]any{"type": "pane_list", "panes": []any{}}, ""
+				case "present":
+					return map[string]any{
+						"type":  "pane_list",
+						"panes": []any{testjail.HerdrPaneInfo("w6:p3")["pane"]},
+					}, ""
+				case "malformed":
+					return map[string]any{"type": "ok"}, ""
+				default:
+					return nil, "permission_denied"
+				}
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, db, seat, false)
+			seat.EndPending = true
+			if err := db.PutSeat(context.Background(), seat); err != nil {
+				t.Fatal(err)
+			}
+			err := endHerdr(
+				context.Background(),
+				headless.Chat{Backend: "herdr", SeatID: seat.SeatID, ID: seat.SessionID},
+				runtime.Paths,
+			)
+			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
+			if reply == "absent" {
+				if err != nil || found || readErr != nil {
+					t.Fatalf("pending disappearance not retired err=%v found=%v read=%v", err, found, readErr)
+				}
+			} else if err == nil || !found || !current.EndPending || readErr != nil {
+				t.Fatalf(
+					"unknown discarded pending owner err=%v found=%v seat=%+v read=%v",
+					err,
+					found,
+					current,
+					readErr,
+				)
+			}
+		})
+	}
+}
+
+func TestNativePendingEndReprovesDowngradedBinding(t *testing.T) {
+	for _, entry := range []string{"lookup", "schedule"} {
+		t.Run(entry, func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if req.Method == "pane.list" {
+					return map[string]any{
+						"type":  "pane_list",
+						"panes": []any{testjail.HerdrPaneInfo("w9:p8")["pane"]},
+					}, ""
+				}
+				return nil, "unexpected_method"
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, db, seat, true)
+			seat.EndPending = true
+			if err := db.PutSeat(context.Background(), seat); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if entry == "lookup" {
+				_, _, err = PendingNativeEnd(context.Background(), seat.SeatID, runtime.Paths)
+			} else {
+				err = ScheduleHerdrEnd(
+					context.Background(),
+					headless.Chat{ID: seat.SessionID, SeatID: seat.SeatID},
+					runtime,
+				)
+			}
+			if err == nil {
+				t.Fatalf("stale end_pending binding authorized %s", entry)
+			}
+			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
+			if readErr != nil || !found || current != seat {
+				t.Fatalf("stale owner not retained: %+v %v", current, readErr)
+			}
+		})
+	}
+}
+
+// The native end worker's log (end-{seat}.log) is the only trace of a detached
+// end: every step it takes lands in the steps writer, and a refusal lands as an
+// error line, so an empty log never means "nothing happened".
+func TestEndHerdrStepsLogEachStepAndTheFailure(t *testing.T) {
+	for _, scenario := range []struct {
+		name, refusal string
+		want          []string
+	}{
+		{
+			name: "success",
+			want: []string{
+				"seat read",
+				"owner proved",
+				"pane.close sending",
+				"pane.close acknowledged",
+				"seat retired",
+			},
+		},
+		{
+			name:    "refused close",
+			refusal: "permission_denied",
+			want: []string{
+				"seat read",
+				"owner proved",
+				"pane.close sending",
+				"pane.close failed",
+			},
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
+				return map[string]any{"type": "ok"}, scenario.refusal
+			})
+			runtime, db, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, db, seat, true)
+			var steps bytes.Buffer
+			err := endHerdrSteps(
+				context.Background(),
+				headless.Chat{
+					Backend: "herdr",
+					SeatID:  seat.SeatID,
+					ID:      seat.SessionID,
+					Socket:  socket,
+					Pane:    seat.HerdrPane,
+				},
+				runtime.Paths,
+				&steps,
+				false,
+			)
+			if (err != nil) != (scenario.refusal != "") {
+				t.Fatalf("endHerdrSteps err=%v refusal=%q", err, scenario.refusal)
+			}
+			log := steps.String()
+			last := -1
+			for _, want := range scenario.want {
+				index := strings.Index(log, want)
+				if index < 0 || index < last {
+					t.Fatalf("step %q missing or out of order in log:\n%s", want, log)
+				}
+				last = index
+			}
+			if scenario.refusal != "" && !strings.Contains(log, "permission_denied") {
+				t.Fatalf("failure line lacks the refusal:\n%s", log)
+			}
+			if scenario.refusal != "" && strings.Contains(log, "seat retired") {
+				t.Fatalf("a refused close logged retirement:\n%s", log)
+			}
+			if scenario.refusal != "" {
+				// The retained intent makes the end worker's door retry the
+				// close; its log names the failure once.
+				var workerLog bytes.Buffer
+				code := EndTarget(context.Background(), seat.SeatID, true, &bytes.Buffer{}, &workerLog, &runtime, nil)
+				if code != 1 || strings.Count(workerLog.String(), "(intent retained)") != 1 {
+					t.Fatalf("end worker code=%d, want 1 and one failure line:\n%s", code, &workerLog)
+				}
+			}
+		})
+	}
+}
+
+// TestEndNowEndsATmuxChatAndConfirmsItsSocketGone: pfm restart's worker ends a
+// tmux chat in-process, and the call returns nil only once the socket no
+// longer answers.
+func TestEndNowEndsATmuxChatAndConfirmsItsSocketGone(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Fatalf("tmux is required in the fence: %v", err)
+	}
+	root := testjail.ShortRoot(t)
+	values := paths.Values{
+		TmuxDir: filepath.Join(root, "t"),
+		SIDDir:  filepath.Join(root, "s"),
+		StateDB: filepath.Join(root, "pfm.db"),
+	}
+	for _, dir := range []string{values.TmuxDir, values.SIDDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	socket := "cc-endnow-1-1"
+	socketPath := filepath.Join(values.TmuxDir, socket)
+	start := exec.Command("tmux", "-S", socketPath, "-f", "/dev/null", "new-session", "-d", "-s", "bg", "sleep", "120")
+	if output, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("start probe server: %v: %s", err, output)
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socketPath, "kill-server").Run() })
+	chat := headless.Chat{ID: "sid-endnow", Socket: socket, Pane: "%0"}
+	if err := EndNow(context.Background(), chat, values); err != nil {
+		t.Fatalf("EndNow: %v", err)
+	}
+	if exec.Command("tmux", "-S", socketPath, "list-panes", "-a").Run() == nil {
+		t.Fatal("the tmux server still answers after EndNow returned nil")
+	}
+}
+
+// TestEndNowRefusesAChatWithNoAddress: a row with neither a Herdr seat nor a
+// socket is an error, never a silent "ended".
+func TestEndNowRefusesAChatWithNoAddress(t *testing.T) {
+	err := EndNow(context.Background(), headless.Chat{ID: "sid-x"}, paths.Values{})
+	if err == nil || !strings.Contains(err.Error(), "neither a Herdr seat nor a tmux socket") {
+		t.Fatalf("EndNow on an addressless chat = %v", err)
+	}
+}
+
+func TestResolvedNativeKillSurvivesSessionReplacement(t *testing.T) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		t.Run(string(engine), func(t *testing.T) {
+			testjail.Fleet(t)
+			t.Setenv("TMUX_TMPDIR", t.TempDir())
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
+				t.Errorf("unexpected native mutation: %s", req.Method)
+				return nil, "unexpected_method"
+			})
+			runtime, seats, seat := nativeChatSeat(t, socket, "live")
+			seat.Engine = string(engine)
+			seat = nativeChatHost(t, seats, seat, true)
+			// Resolve happened before the reporter replaced this provisional identity.
+			initial := headless.Chat{
+				Backend: "herdr", SeatID: seat.SeatID, ID: "provisional-session",
+				Engine: engine, Socket: socket, Pane: seat.HerdrPane, Live: true,
+			}
+			database, err := store.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			finisher := &birthKillSpawner{}
+			manager, err := kill.New(database, kill.Dependencies{Paths: runtime.Paths, Spawner: finisher})
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := manager.Kill(context.Background(), resolvedKillRequest(initial, true))
+			if err != nil || target.ID != seat.SessionID || len(finisher.calls) != 1 {
+				t.Fatalf("kill after session swap: target=%+v finishers=%+v err=%v", target, finisher.calls, err)
+			}
+			if _, found, err := database.Killed(context.Background(), seat.SessionID); err != nil || !found {
+				t.Fatalf("current conversation kill missing: found=%t err=%v", found, err)
+			}
+			// Reuse of the exact pane by a different seat must not redirect this kill.
+			if err := seats.DeleteSeat(context.Background(), seat.SeatID); err != nil {
+				t.Fatal(err)
+			}
+			seat.SeatID, seat.SessionID = "replacement-seat", "replacement-session"
+			nativeChatHost(t, seats, seat, true)
+			if _, err := manager.Kill(
+				context.Background(),
+				resolvedKillRequest(initial, true),
+			); err == nil ||
+				len(finisher.calls) != 1 {
+				t.Fatalf("gone durable seat redirected: finishers=%+v err=%v", finisher.calls, err)
+			}
+		})
+	}
+}
+
+type birthKillSpawner struct{ calls []kill.ExitArgs }
+
+func (*birthKillSpawner) Prepare(kill.ExitArgs) error { return nil }
+func (s *birthKillSpawner) Spawn(_ context.Context, args kill.ExitArgs) error {
+	s.calls = append(s.calls, args)
+	return nil
 }

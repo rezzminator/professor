@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -53,24 +52,4 @@ func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 		t.Fatalf("updateCodexHooks changed=%v err=%v; want a rewrite", changed, err)
 	}
 	requireKeepsBeyondFloat64(t, "updateCodexHooks", updated)
-}
-
-func TestJSONNumberIsMatchesEitherDecodedForm(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		value any
-		want  bool
-	}{
-		{json.Number("10"), true},
-		{json.Number("10.0"), true},
-		{float64(10), true},
-		{json.Number("11"), false},
-		{float64(9), false},
-		{"10", false},
-		{nil, false},
-	} {
-		if got := jsonNumberIs(tc.value, 10); got != tc.want {
-			t.Errorf("jsonNumberIs(%#v, 10) = %v, want %v", tc.value, got, tc.want)
-		}
-	}
 }

@@ -5,7 +5,7 @@
     {
       "name": "lab-agents",
       "source": "./plugins/lab-agents",
-      "description": "plugin-lab fixture: one namespaced agent for the tool-scoped-nudge scenario"
+      "description": "plugin-lab fixture: one namespaced agent, the plugin need_fixture_plugin installs in its self-test"
     }
   ]
 }

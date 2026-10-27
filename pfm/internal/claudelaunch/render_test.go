@@ -15,6 +15,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -82,7 +83,7 @@ func TestRenderExplicitDefaultPrompt(t *testing.T) {
 	machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
 	clone := filepath.Join(home, "blueprint")
 	for path, body := range map[string]string{
-		filepath.Join(clone, "pfm", "harness-prompts", "composed", "claude.md"): "Professor.",
+		filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md"): "Professor.",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -144,9 +145,6 @@ func TestRenderFreshInteractive(t *testing.T) {
 	}) {
 		t.Errorf("env=%q", launch.Env)
 	}
-	if len(launch.Argv) < 2 || launch.Argv[0] != "--session-id" || launch.Argv[1] != "S" {
-		t.Errorf("argv start=%q", launch.Argv)
-	}
 	if parsed.SessionID != "S" || !parsed.Autonomy {
 		t.Errorf("verbs=%#v", parsed)
 	}
@@ -164,7 +162,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 13 {
+	if len(parsed.Hooks) != 23 {
 		t.Errorf("hooks=%d", len(parsed.Hooks))
 	}
 	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
@@ -174,7 +172,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 	if err := json.Unmarshal([]byte(mcpPayload(t, parsed.MCPConfig)), &mcp); err != nil {
 		t.Fatal(err)
 	}
-	assertFamilyMCP(t, home, parsed.MCPConfig)
+	assertChatMCP(t, home, parsed.MCPConfig)
 	if !strings.HasSuffix(
 		strings.Join(launch.Argv, " "),
 		"--allow-dangerously-skip-permissions --dangerously-skip-permissions",
@@ -342,6 +340,30 @@ func TestRenderCacheLifetimeMainChatOnly(t *testing.T) {
 	}
 }
 
+func TestRenderSubagentStatuslineTraceFollowsTheConfigSwitch(t *testing.T) {
+	home, machine := renderMachine(t)
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeQuery} {
+		for _, on := range []bool{false, true} {
+			machine.Claude.SubagentStatuslineTrace = on
+			_, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Args: []string{"hello"}}, machine)
+			got, set := parsed.SettingsEnv[EnvSubagentStatuslineTrace]
+			if set != on || (on && got != "1") {
+				t.Errorf("purpose %v trace=%t: settings env %s = %q (set %t), want %t", purpose, on,
+					EnvSubagentStatuslineTrace, got, set, on)
+			}
+		}
+	}
+	if EnvSubagentStatuslineTrace != "PFM_SUBAGENT_STATUSLINE_TRACE" {
+		t.Errorf("EnvSubagentStatuslineTrace = %q", EnvSubagentStatuslineTrace)
+	}
+	machine.Claude.SubagentStatuslineTrace = true
+	for _, row := range Resolve(machine, 0) {
+		if row.Knob.Name == knobSubagentStatuslineTrace && row.Value != "true" {
+			t.Errorf("Resolve value = %q, want true", row.Value)
+		}
+	}
+}
+
 func TestRenderSystemPromptModes(t *testing.T) {
 	home, machine := renderMachine(t)
 	prompt := filepath.Join(t.TempDir(), "seat.md")
@@ -398,6 +420,23 @@ func TestRenderLauncher(t *testing.T) {
 	}
 }
 
+// A query child is never the chat bound to the parent's Herdr pane; every
+// interactive purpose keeps the variables its pane reports through.
+func TestRenderUnsetsTheHerdrPaneOnlyForAQuery(t *testing.T) {
+	home, machine := renderMachine(t)
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
+		launch, err := Render(Request{Purpose: purpose, Home: home}, machine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range herdr.Env() {
+			if got := slices.Contains(launch.Unset, name); got != (purpose == PurposeQuery) {
+				t.Errorf("purpose %d: Unset holds %s = %t", purpose, name, got)
+			}
+		}
+	}
+}
+
 func TestRenderQuery(t *testing.T) {
 	home, machine := renderMachine(t)
 	launch, parsed := renderParsed(
@@ -405,7 +444,7 @@ func TestRenderQuery(t *testing.T) {
 		Request{Purpose: PurposeQuery, Home: home, Args: []string{"agents", "--json"}},
 		machine,
 	)
-	if len(launch.Unset) != 23 || parsed.Settings["outputStyle"] != "default" ||
+	if len(launch.Unset) != 23+len(herdr.Env()) || parsed.Settings["outputStyle"] != "default" ||
 		parsed.Settings["cleanupPeriodDays"] == nil ||
 		parsed.Settings["env"] == nil {
 		t.Errorf("query settings=%#v", parsed.Settings)
@@ -426,56 +465,26 @@ func TestRenderQuery(t *testing.T) {
 // assertProfessorMCP holds the --mcp-config file's payload to develop's one professor
 // registration: exactly {type: stdio, command: <home>/.local/bin/pfm,
 // args: [mcp serve --stdio]} under mcpServers.chat-professor, and nothing else.
-func assertFamilyMCP(t *testing.T, home, word string, enabled ...bool) {
+func assertChatMCP(t *testing.T, home, word string) {
 	t.Helper()
 	payload := mcpPayload(t, word)
 	var mcp map[string]map[string]any
 	if err := json.Unmarshal([]byte(payload), &mcp); err != nil {
 		t.Fatalf("mcp=%q: %v", payload, err)
 	}
-	chat, harvester := true, false
-	if len(enabled) == 2 {
-		chat, harvester = enabled[0], enabled[1]
-	}
-	want := map[string]any{}
-	for family, on := range map[string]bool{"chat": chat, "harvester": harvester} {
-		if on {
-			want[family+"-professor"] = map[string]any{
-				"type":    "stdio",
-				"command": filepath.Join(home, ".local", "bin", "pfm"),
-				"args":    []any{"mcp", "serve", "--stdio", "--family", family},
-			}
-		}
-	}
+	want := map[string]any{"chat-professor": map[string]any{
+		"type": "stdio", "command": filepath.Join(home, ".local", "bin", "pfm"),
+		"args": []any{"mcp", "serve", "--stdio", "--family", "chat"},
+	}}
 	if len(mcp) != 1 || !reflect.DeepEqual(mcp["mcpServers"], want) {
 		t.Errorf("mcp=%s, want family registrations %#v", payload, want)
 	}
 }
 
-func TestRenderMCPFamilyRegistrations(t *testing.T) {
-	for _, entry := range []struct {
-		name            string
-		chat, harvester bool
-	}{
-		{"chat only", true, false},
-		{"harvester only", false, true},
-		{"both", true, true},
-		{"neither", false, false},
-	} {
-		t.Run(entry.name, func(t *testing.T) {
-			home, machine := renderMachine(t)
-			machine.MCPServers["chat"] = pfmconfig.MCPServer{Enabled: entry.chat}
-			machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: entry.harvester}
-			_, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Account: 1}, machine)
-			if !entry.chat && !entry.harvester {
-				if parsed.MCPConfig != "" {
-					t.Errorf("mcp=%q with every family off", parsed.MCPConfig)
-				}
-				return
-			}
-			assertFamilyMCP(t, home, parsed.MCPConfig, entry.chat, entry.harvester)
-		})
-	}
+func TestRenderMCPRegistration(t *testing.T) {
+	home, machine := renderMachine(t)
+	_, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Account: 1}, machine)
+	assertChatMCP(t, home, parsed.MCPConfig)
 }
 
 func TestRenderAccountOneConfigDir(t *testing.T) {
@@ -506,22 +515,20 @@ func TestRenderAccountOneConfigDir(t *testing.T) {
 
 func TestRenderThirdPartyMCP(t *testing.T) {
 	for _, tc := range []struct {
-		name                        string
-		purpose                     Purpose
-		chat, harvester, thirdParty bool
+		name             string
+		purpose          Purpose
+		chat, thirdParty bool
 	}{
-		{"third party only", PurposeInteractive, false, false, true},
-		{"beside professor", PurposeInteractive, true, false, true},
-		{"beside harvester", PurposeInteractive, false, true, true},
-		{"resume", PurposeResume, false, false, true},
-		{"launcher", PurposeLauncher, false, false, true},
-		{"none", PurposeInteractive, false, false, false},
-		{"query", PurposeQuery, true, true, true},
+		{"third party only", PurposeInteractive, false, true},
+		{"beside professor", PurposeInteractive, true, true},
+		{"resume", PurposeResume, false, true},
+		{"launcher", PurposeLauncher, false, true},
+		{"none", PurposeInteractive, false, false},
+		{"query", PurposeQuery, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home, machine := renderMachine(t)
 			machine.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: tc.chat}
-			machine.MCPServers[pfmconfig.MCPServerHarvester] = pfmconfig.MCPServer{Enabled: tc.harvester}
 			browser := json.RawMessage(
 				`{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}}`,
 			)
@@ -532,23 +539,23 @@ func TestRenderThirdPartyMCP(t *testing.T) {
 				machine.MCP.ThirdParty = map[string]json.RawMessage{"browser": browser, "remote": remote}
 			}
 			_, parsed := renderParsed(t, Request{Purpose: tc.purpose, Home: home, Account: 1}, machine)
-			if tc.purpose == PurposeQuery || (!tc.chat && !tc.harvester && !tc.thirdParty) {
+			if tc.purpose == PurposeQuery || (!tc.chat && !tc.thirdParty) {
 				if parsed.MCPConfig != "" {
 					t.Fatalf("mcp-config = %q, want none", parsed.MCPConfig)
 				}
 				return
 			}
 			want := map[string]json.RawMessage{"browser": browser, "remote": remote}
-			for family, enabled := range map[string]bool{pfmconfig.MCPServerChat: tc.chat, pfmconfig.MCPServerHarvester: tc.harvester} {
-				if enabled {
-					want[pfmconfig.MCPRegistrationName(family)] = json.RawMessage(
-						fmt.Sprintf(
-							`{"args":["mcp","serve","--stdio","--family",%q],"command":%q,"type":"stdio"}`,
-							family,
-							filepath.Join(home, ".local", "bin", "pfm"),
-						),
-					)
+			if tc.chat {
+				raw, err := json.Marshal(map[string]any{
+					"args":    []string{"mcp", "serve", "--stdio", "--family", "chat"},
+					"command": filepath.Join(home, ".local", "bin", "pfm"),
+					"type":    "stdio",
+				})
+				if err != nil {
+					t.Fatal(err)
 				}
+				want[pfmconfig.MCPRegistrationName(pfmconfig.MCPServerChat)] = raw
 			}
 			encoded, err := json.Marshal(map[string]any{"mcpServers": want})
 			if err != nil {
@@ -715,6 +722,20 @@ func TestRenderNameFlag(t *testing.T) {
 			Request{Name: "other", Args: []string{"--name=keep"}},
 			nil,
 		},
+		// A resumed session carries its own name in its transcript: a launch name
+		// lands after a /rename typed while Claude registers, and reverts it.
+		{"a resumed session carries no flag", Request{Name: "keep", Resume: "s1"}, nil},
+		{"an Args --resume carries no flag", Request{Name: "keep", Args: []string{"--resume", "s1"}}, nil},
+		{"an Args --resume= carries no flag", Request{Name: "keep", Args: []string{"--resume=s1"}}, nil},
+		{"an Args -r carries no flag", Request{Name: "keep", Args: []string{"-r", "s1"}}, nil},
+		{"an Args --continue carries no flag", Request{Name: "keep", Args: []string{"--continue"}}, nil},
+		{"an Args -c carries no flag", Request{Name: "keep", Args: []string{"-c"}}, nil},
+		{"a forked resume is a new session, named", Request{Name: "keep", Resume: "s1", Fork: true}, []string{"keep"}},
+		{
+			"an Args fork of a resume is named",
+			Request{Name: "keep", Args: []string{"--resume", "s1", "--fork-session"}},
+			[]string{"keep"},
+		},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			request := scenario.request
@@ -742,7 +763,7 @@ func stageComposedPrompt(t *testing.T, home string, write bool) string {
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
-	path := paths.ComposedHarnessPromptIn(clone, pfmengine.Claude)
+	path := paths.GeneratedHarnessPromptIn(clone, pfmengine.Claude)
 	if !write {
 		return path
 	}

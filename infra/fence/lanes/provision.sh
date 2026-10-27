@@ -26,8 +26,7 @@ case "${1:-}" in
     cat >"$PFM_CONFIG" <<'JSON'
 {"version":2,"accounts":[{"id":1,"configDir":"~/.cc/1","emoji":"🥇"},{"id":2,"configDir":"~/.cc/2","emoji":"🥈"}],"codex":{"homes":[{"id":1,"home":"~/.codex","emoji":"🥇"}]},"claude":{"systemPrompt":"professor"},"mcp":{"servers":{"chat":{"enabled":true}}}}
 JSON
-    printf '{"enabled":true}\n' >"$(dirname "$PFM_CONFIG")/harvester.config.json"
-    trust="$(printf '%s\n' atlas lumen orbit harvester express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s from_entries)"
+    trust="$(printf '%s\n' atlas lumen orbit express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s from_entries)"
     for id in 1 2; do
       dir="$HOME/.cc/$id"; mkdir -p "$dir"
       jq -n --argjson trust "$trust" --arg email "seat$id@lane.invalid" \
@@ -38,20 +37,22 @@ JSON
     cp "$HERE/fixtures/opencode-auth.json" "$HOME/.local/share/opencode/auth.json"
     ;;
   install)
-    [ -e "$HOME/.professor" ] || ln -s /worktree "$HOME/.professor"
+    # The mounted worktree stays read-only; install owns generated prompt files
+    # inside this container-local clone.
+    bash /worktree/infra/fence/source-clone.sh /worktree "$HOME/.professor"
     mkdir -p "$HOME/.config/opencode"
     printf '{"model":"openai/lane-fixture"}\n' >"$HOME/.config/opencode/opencode.jsonc"
-    (cd /worktree && pfm install --yes)
+    (cd "$HOME/.professor" && pfm install --yes)
     [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
       { echo "provision: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
     settings_tmp="$(mktemp)"
-    jq --arg t "custom:professor-gold" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
+    jq --arg t "custom:tokyo-night" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
     cat "$settings_tmp" >"$HOME/.claude/settings.json"
     rm -f "$settings_tmp"
     git config --global user.name demo
     git config --global user.email demo@example.invalid
     git config --global init.defaultBranch main
-    for project in atlas lumen orbit harvester; do
+    for project in atlas lumen orbit; do
       mkdir -p "/work/$project"
       if [ ! -d "/work/$project/.git" ]; then
         (cd "/work/$project" && git init -q && git commit -q --allow-empty -m init && git checkout -q -b develop)

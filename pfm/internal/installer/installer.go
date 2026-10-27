@@ -230,6 +230,7 @@ func (installer *engine) install(ctx context.Context) error {
 		installer.skip("managed command and skill wiring deferred: embedded assets failed staging")
 	}
 	installer.deferFailure(installer.wireGlobalCommands())
+	installer.deferFailure(installer.wireGlobalRules())
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
 	installer.deferFailure(installer.retireStaleLinkStages())

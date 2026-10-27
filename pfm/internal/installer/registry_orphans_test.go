@@ -368,3 +368,34 @@ func TestRetireStaleLinkStages(t *testing.T) {
 		})
 	}
 }
+
+// TestRetireDeadRulesLink: a rules link into the clone whose rule is gone is
+// retired as a dead pfm link; a live rule the plan writes stays.
+func TestRetireDeadRulesLink(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	store, repo := ClaudeStore(home), filepath.Join(home, ".professor")
+	live := filepath.Join(repo, "templates", "global", "rules", "live.md")
+	gone := filepath.Join(repo, "templates", "global", "rules", "gone.md")
+	writeFixture(t, live, "live")
+	symlinkFixture(t, live, filepath.Join(store, "rules", "live.md"))
+	dead := filepath.Join(store, "rules", "gone.md")
+	symlinkFixture(t, gone, dead)
+	var output bytes.Buffer
+	installer := &engine{
+		options:     Options{Home: home, ConfigDir: store, Stdout: &output},
+		managedRoot: managedRootForHome(home),
+		apply:       true,
+	}
+	if err := installer.retireDeadRegistryLinks(); err != nil {
+		t.Fatal(err)
+	}
+	want := "  change  retire " + dead + " (dead pfm link -> " + gone + ")\n"
+	if output.String() != want {
+		t.Fatalf("transcript=%q, want %q", output.String(), want)
+	}
+	if _, err := os.Lstat(dead); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("dead rules link survived: %v", err)
+	}
+	assertLink(t, filepath.Join(store, "rules", "live.md"), live)
+}

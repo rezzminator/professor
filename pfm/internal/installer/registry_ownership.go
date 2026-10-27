@@ -87,6 +87,13 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 	for _, entry := range entries {
 		plan.Links[filepath.Join(store, globalCommandsRegistry, entry.Name())] = true
 	}
+	rules, _, err := globalRuleNames(globalRulesSource(clone))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return RegistryPlan{}, fmt.Errorf("plan registry rules: %w", err)
+	}
+	for _, name := range rules {
+		plan.Links[filepath.Join(store, globalRulesRegistry, name)] = true
+	}
 	skills := filepath.Join(clone, "templates", "global", "skills")
 	entries, err = os.ReadDir(skills)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -156,8 +163,8 @@ func ScanRegistryOwnership(home, store string, retired RetiredRegistryNames) (Re
 	})
 }
 
-// InspectRegistryOwnership classes every Professor-owned link in the four
-// registries ({store}/agents, {store}/commands, {store}/skills,
+// InspectRegistryOwnership classes every Professor-owned link in the five
+// registries ({store}/agents, {store}/commands, {store}/rules, {store}/skills,
 // ~/.agents/skills) and lists the unmarked entries named for a retired name.
 // A link outside the owned roots and any other unmarked entry is never listed.
 // WalkDir never follows a symlink into an operator's directory. A walk, read
@@ -167,6 +174,7 @@ func InspectRegistryOwnership(scan RegistryScan) (RegistryOwnership, error) {
 	for _, registry := range []struct{ path, kind string }{
 		{filepath.Join(scan.Store, globalAgentsRegistry), globalAgentsRegistry},
 		{filepath.Join(scan.Store, globalCommandsRegistry), globalCommandsRegistry},
+		{filepath.Join(scan.Store, globalRulesRegistry), globalRulesRegistry},
 		{filepath.Join(scan.Store, globalSkillsRegistry), globalSkillsRegistry},
 		{filepath.Join(scan.Home, ".agents", globalSkillsRegistry), globalSkillsRegistry},
 	} {

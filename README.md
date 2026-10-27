@@ -171,7 +171,7 @@ Jumping several versions on one host? [UPGRADING.md](UPGRADING.md) prints the ho
 
 ## The discipline layer (`templates/`)
 
-Clone it into a repo and you get the complete agent, command, hook, script, and `CLAUDE.md` template set. `docs/SETUP.md` walks an interview that substitutes your project's names into every placeholder; `docs/PLACEHOLDERS.md` is the substitution law. Every template is the live source file verbatim — never a skeleton.
+Clone it into a repo and you get the complete agent, command, hook and script template set; `CLAUDE.md` is yours to write, and `pfm init` points you at `/quality:claude-md write CLAUDE.md` for it. `docs/SETUP.md` walks an interview that substitutes your project's names into every placeholder; `docs/PLACEHOLDERS.md` is the substitution law. Every template is the live source file verbatim — never a skeleton.
 
 The single idea underneath it is the **honest-looking absence** — an instrument that answers "nothing found" both when nothing is there and when the instrument itself is broken. The rules say it out loud:
 

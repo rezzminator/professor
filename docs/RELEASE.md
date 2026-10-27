@@ -95,7 +95,7 @@ The procedure is `.claude/commands/pfm/release.md`; the design and the reasons a
 
 ## What the release pull request triggers
 
-The workflow is `.github/workflows/release.yml`; it runs only on a pull request into `main` (and a manual `workflow_dispatch`, which builds test artifacts and publishes nothing). `make release-check` runs every pull-request check locally first, after `git fetch origin main`.
+The workflow is `.github/workflows/release.yml`; it runs only on a pull request into `main` (and a manual `workflow_dispatch`, which builds test artifacts and publishes nothing). `make release-check` runs every pull-request check locally first, after `git fetch origin main`, except the `check` job's Scan step: the HOL AI Plugin Scanner is a GitHub Action with no local install, and the target says so.
 
 While the `develop → main` pull request is open, its jobs gate the merge — the `main is release-only` ruleset requires `check` and `release`:
 

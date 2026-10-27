@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -250,17 +252,13 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	l2 += sep + cElapsed + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
 
 	l3 := ""
-	if runtime.Engine == pfmengine.Codex {
-		codexLine := codexQuotaSegment(runtime, now)
-		l3 = appendSegment(l3, codexLine)
-	}
-	l3 = appendRateSegments(l3, now, data)
-	if runtime.Engine == pfmengine.Claude {
-		weekly := codexWeeklyLine(runtime, now, l1, l2, l3)
-		if l3 != "" && weekly != "" {
-			l3 += "\n" + reset
-		}
-		l3 += weekly
+	switch runtime.Engine {
+	case pfmengine.Claude:
+		l3 = claudeQuotaRows(runtime, now, data, l1, l2)
+	case pfmengine.Codex:
+		l3 = appendRateSegments(appendSegment(l3, codexQuotaSegment(runtime, now)), now, data)
+	default:
+		l3 = appendRateSegments(l3, now, data)
 	}
 
 	if l3 != "" {
@@ -340,48 +338,90 @@ func appendSegment(line, segment string) string {
 	return line + sep + segment
 }
 
-func appendRateSegments(line string, now time.Time, data input) string {
-	// A response carrying none of the known windows is an engine that does not
-	// report these quotas (Codex renders its own from a different source; a
-	// gateway reports only its spend_limit) — not a missing reading, so it
-	// renders nothing.
-	reportsKnown := false
+// reportsKnownWindow is false for an engine that does not report these quotas
+// (Codex renders its own from a different source; a gateway reports only its
+// spend_limit) — not a missing reading, so it renders nothing.
+func reportsKnownWindow(data input) bool {
 	for _, descriptor := range usagehook.AllWindows() {
-		_, present := data.RateLimits.Windows[descriptor.Key]
-		reportsKnown = reportsKnown || present
+		if _, present := data.RateLimits.Windows[descriptor.Key]; present {
+			return true
+		}
 	}
-	if !reportsKnown {
+	return false
+}
+
+// rateWindowRow reads one known window. Every known window renders, always:
+// skipping a window at 0% made an unused quota and a quota whose data never
+// arrived look identical — both simply absent — so the one state worth seeing
+// (a limit the response stopped reporting) arrived as silence. A window missing
+// from a block that DID report renders with an explicit unknown marker.
+func rateWindowRow(now time.Time, descriptor usagehook.WindowDescriptor, data input) quotaRow {
+	window, present := data.RateLimits.Windows[descriptor.Key]
+	if !present {
+		return quotaRow{label: dim + descriptor.Label + "-used:—" + reset}
+	}
+	if window.Failure {
+		return quotaRow{label: red + descriptor.Label + "-used:ERR" + reset}
+	}
+	used := gaugePercent(window.UsedPercentage)
+	label := percentColor(used) + descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
+	remaining := window.ResetsAt - now.Unix()
+	if remaining > 0 {
+		if descriptor.Key == "five_hour" {
+			label += fmt.Sprintf(" %s↻%dh%dm%s", dim, remaining/3600, remaining%3600/60, reset)
+		} else {
+			label += fmt.Sprintf(" %s↻%dd%dh%s", dim, remaining/86400, remaining%86400/3600, reset)
+		}
+	}
+	return quotaRow{percent: used, hasData: true, label: label}
+}
+
+// appendRateSegments renders the known windows as one compact line (the
+// non-Claude engines).
+func appendRateSegments(line string, now time.Time, data input) string {
+	if !reportsKnownWindow(data) {
 		return line
 	}
-	// Otherwise every known window renders, always. Skipping a window at 0%
-	// made an unused quota and a quota whose data never arrived look
-	// identical — both simply absent — so the one state worth seeing (a limit
-	// the response stopped reporting) arrived as silence. A window missing
-	// from a block that DID report renders with an explicit unknown marker.
 	for _, descriptor := range usagehook.AllWindows() {
-		window, present := data.RateLimits.Windows[descriptor.Key]
-		if !present {
-			line = appendSegment(line, makeBar(0, 5)+" "+dim+descriptor.Label+"-used:—"+reset)
-			continue
-		}
-		if window.Failure {
-			line = appendSegment(line, makeBar(0, 5)+" "+red+descriptor.Label+"-used:ERR"+reset)
-			continue
-		}
-		used := gaugePercent(window.UsedPercentage)
-		segment := makeBar(used, 5) + " " + percentColor(used) +
-			descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
-		remaining := window.ResetsAt - now.Unix()
-		if remaining > 0 {
-			if descriptor.Key == "five_hour" {
-				segment += fmt.Sprintf(" %s↻%dh%dm%s", dim, remaining/3600, remaining%3600/60, reset)
-			} else {
-				segment += fmt.Sprintf(" %s↻%dd%dh%s", dim, remaining/86400, remaining%86400/3600, reset)
-			}
-		}
-		line = appendSegment(line, segment)
+		line = appendSegment(line, compactRow(rateWindowRow(now, descriptor, data)))
 	}
 	return line
+}
+
+// claudeQuotaRows is the Claude quota block, every row the same width: 5h and
+// 7d-fable share the top row at half width each, the 7d under it and the Codex
+// weekly last at full width. That width is the widest sibling row (the compact
+// forms count as siblings), bounded by the terminal; a terminal with no content
+// column drops the Codex row and leaves the quotas at their compact width.
+func claudeQuotaRows(runtime Runtime, now time.Time, data input, l1, l2 string) string {
+	codex := codexWeeklyRow(runtime, now)
+	widths := []int{ansi.StringWidth(codex.label)}
+	var five, week, fable quotaRow
+	known := reportsKnownWindow(data)
+	if known {
+		reading := map[string]quotaRow{}
+		for _, descriptor := range usagehook.AllWindows() {
+			reading[descriptor.Key] = rateWindowRow(now, descriptor, data)
+		}
+		five, week, fable = reading[fiveHourCacheKey], reading[sevenDayCacheKey], reading[fableCacheKey]
+		widths = append(
+			widths,
+			ansi.StringWidth(compactRow(five)+sep+compactRow(fable)),
+			ansi.StringWidth(compactRow(week)),
+		)
+	}
+	columns, ok := rowColumns(runtime, widths, l1, l2)
+	var rows []string
+	switch {
+	case known && ok:
+		rows = append(rows, halfRows(five, fable, columns), barRow(week, columns))
+	case known:
+		rows = append(rows, compactRow(five)+sep+compactRow(fable), compactRow(week))
+	}
+	if ok {
+		rows = append(rows, barRow(codex, columns))
+	}
+	return strings.Join(rows, "\n"+reset)
 }
 
 func accountBadge(runtime Runtime) (string, int) {

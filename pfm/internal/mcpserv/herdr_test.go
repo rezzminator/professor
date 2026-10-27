@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func TestHerdrProxyRequesterCarriesItsOwnBackend(t *testing.T) {
@@ -69,6 +70,30 @@ func TestHerdrProxyRequesterCarriesItsOwnBackend(t *testing.T) {
 		self.SeatID != "seat1" ||
 		self.HerdrWorkspace != "w6" {
 		t.Fatalf("self=%+v err=%v", self, err)
+	}
+}
+
+// An unnamed native seat states its durable seat handle while ls lists it by
+// its transcript id: the caller must still find its own row, or exit and
+// whoami refuse a live chat as "matched no live chat".
+func TestHerdrProxyFindsAnUnnamedSeatBySeatID(t *testing.T) {
+	row := compose.Row{
+		Kind: compose.LiveClaude, ID: "sid1", Backend: "herdr", SeatID: "seat1", HerdrWorkspace: "w6",
+		Socket: "/jail/native/herdr.sock", PaneID: "w6:p3", CWD: "/jail/work",
+	}
+	current := &backend{
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		paths: paths.Values{TmuxDir: "/jail/tmux"},
+	}
+	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
+		"pfmProxy": map[string]any{
+			"v": ProxyWireVersion, "session": resolve.SeatPrefix + "seat1", "backend": "herdr",
+			"seatId": "seat1", "herdrWorkspace": "w6", "socketPath": row.Socket, "socketName": "herdr.sock",
+			"pane": row.PaneID, "engine": "claude", "id": "sid1",
+		},
+	})
+	if err != nil || !caller.valid || caller.row.ID != "sid1" || caller.identity.SeatID != "seat1" {
+		t.Fatalf("caller=%+v err=%v", caller, err)
 	}
 }
 

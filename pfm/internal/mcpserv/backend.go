@@ -376,7 +376,11 @@ func (current *backend) proxySessionMatches(
 	if rowBackend == "" {
 		rowBackend = spawn.BackendTmux
 	}
-	if row.Session == proxy.Session && (proxy.Backend != "" || proxy.SocketPath != "" || proxy.Pane != "") {
+	// An unnamed native seat states its seat handle while ls lists it by its
+	// transcript id; the durable seat id is what both sides share.
+	sameSeat := proxy.SeatID != "" && row.SeatID == proxy.SeatID
+	if (row.Session == proxy.Session || sameSeat) &&
+		(proxy.Backend != "" || proxy.SocketPath != "" || proxy.Pane != "") {
 		path, err := current.rowSocketPath(row)
 		if err != nil {
 			return false, fmt.Sprintf("MCP caller live location: %v", err)
@@ -402,7 +406,7 @@ func (current *backend) proxySessionMatches(
 		}
 		return false, ""
 	}
-	sessionSelected := row.Session != "" && row.Session == proxy.Session
+	sessionSelected := (row.Session != "" && row.Session == proxy.Session) || sameSeat
 	targeted := sessionSelected
 	if row.Kind == compose.LiveSplit.String() && (proxy.SocketName != "" || proxy.SocketPath != "") {
 		targeted = seatSelected || seatDetail != ""

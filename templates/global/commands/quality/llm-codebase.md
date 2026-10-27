@@ -112,7 +112,7 @@ P=<project root>; BASE=$P/<baseline dir>; MODE=${1:-check}; rc=0
 case $MODE in check|--measure) ;; *) echo "usage: $0 [--measure]" >&2; exit 2;; esac
 say() { printf 'CHECK %-22s %-7s %s\n' "$1" "$2" "$3"; case $2 in FAIL) [ $rc -ge 1 ] || rc=1;; ERROR) rc=2;; esac; return 0; }
 cd "$P" || { say setup ERROR "cannot cd $P"; exit 2; }
-T=/tmp/<project name>/checks; rm -rf /tmp/<project name>/checks && mkdir -p /tmp/<project name>/checks || { say setup ERROR "cannot reset scratch /tmp/<project name>/checks"; exit 2; }; trap 'rm -rf /tmp/<project name>/checks' EXIT; mkdir -p "$BASE"
+T=$(mktemp -d) || { say setup ERROR "mktemp failed"; exit 2; }; trap 'rm -rf "$T"' EXIT; mkdir -p "$BASE"
 all() { git ls-files -co --exclude-standard | while read -r f; do [ -f "$f" ] && echo "$f"; done; }   # tracked + new, minus deleted
 src() { all | grep -E '<source pattern>' | grep -vE '<test pattern>'; }
 [ "$(src | wc -l)" -gt 0 ] || { say setup ERROR "no sources listed under $P"; exit 2; }
@@ -155,7 +155,7 @@ if find <work root> -type f \( -name 'run.*' -o -name '*.sh' \) -not -path '*/sc
 exit $rc
 ```
 
-Adapt the globs, patterns and parsers to the tree; `<project name>` is written out at every spelling, since an `rm -rf` takes a literal path, never a variable; a check that cannot be expressed as a script is listed under § Open rulings, never asserted in prose. A tree with spaces in its paths swaps `$(src)` for a NUL-separated list.
+Adapt the globs, patterns and parsers to the tree; a check that cannot be expressed as a script is listed under § Open rulings, never asserted in prose. A tree with spaces in its paths swaps `$(src)` for a NUL-separated list.
 
 ## Hand-off
 

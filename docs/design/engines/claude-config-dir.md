@@ -48,7 +48,7 @@ Claude's state file is `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`. With the vari
 | `agents` | directory | user agents and pfm registry items |
 | `commands` | directory | user commands and pfm registry items |
 | `skills` | directory | user skills and pfm registry items |
-| `rules` | directory | user rules |
+| `rules` | directory | user rules and pfm registry items |
 | `plugins` | directory | the shared plugin installation |
 | `themes` | directory | custom palettes |
 | `projects` | directory | transcripts: `{cwd slug}/{session id}.jsonl` |
@@ -166,7 +166,7 @@ On a host with an account roster the step's dir passes `claudelaunch.CheckConfig
 
 ## Registries
 
-Each item is written once under the store. Every account sees the same agents, commands and skills through its shared-entry links.
+Each item is written once under the store. Every account sees the same agents, commands, skills and rules through its shared-entry links.
 
 | Path under `{store}` | Target or content |
 | --- | --- |
@@ -176,11 +176,14 @@ Each item is written once under the store. Every account sees the same agents, c
 | `skills/*` | `{clone}/templates/global/skills/` dirs with a `SKILL.md` |
 | `skills/{name}` | `~/.local/share/pfm/install/skills/{name}/` source clone |
 | `agents/*.md` | clone sources, or rendered declarations under the clone's tracked `templates/generated/agents/` |
+| `rules/*.md` | `{clone}/templates/global/rules/` regular `.md` files, one link each (`wireGlobalRules`) |
 | `themes/*` | one `{name}.json` per `templates/themes/{name}/` profile directory; `theme-ownership.json` records ownership |
 
-Source-fetched skills also link under `~/.agents/skills/{name}`. `templates/global/skills/sources.json` registers their repos; `templates/global/agents/` supplies agents; `templates/themes/` supplies themes.
+Source-fetched skills also link under `~/.agents/skills/{name}`. `templates/global/skills/sources.json` registers their repos; `templates/global/agents/` supplies agents; `templates/global/rules/` supplies rules; `templates/themes/` supplies themes.
 
-A regular file in the way is backed up before replacement; an existing link can be replaced. Global registry inspection reports foreign targets as conflicts. The registry-ownership scan (`InspectRegistryOwnership`) walks store `agents`, `commands`, `skills` and `~/.agents/skills` without following directory links and classes each link by its target against the install plan (`PlanRegistryLinks`), never by name: `STORE` a link into a retired generated store, `ORPHAN` a live link into a recorded clone or the managed install root that the plan no longer writes, `DEAD` such a link whose target is gone, `RETIRED` an unmarked entry named for a retired agent, command or skill. Foreign links and any other unmarked entry are never listed. Unreadable paths return errors. Install retires `STORE`, `ORPHAN` and `DEAD`, uninstall every owned link; `RETIRED` stays in place. Doctor prints each as a `doctor: registry {CLASS} …` row, else `doctor: registry-ownership ok`. A retired path already absent prints nothing.
+`{store}/rules` has three consumers. Claude reads each rule natively. `engine-sync global`, run by `pfm install`, compiles the rules without `paths:` into an owned block in each Codex home's `AGENTS.md`, and into `~/.local/share/engine-sync/rules/global-always-on.md`, which it registers in OpenCode's global `instructions` array. A rule with `paths:` reaches neither engine yet. Doctor prints `doctor: rules` rows for the links (`ReportGlobalRules`) and `global-rules` rows for the compiled copies (`docs/design/rules/rules.md` § Global always-on rules).
+
+A regular file in the way is backed up before replacement; an existing link can be replaced. Global registry inspection reports foreign targets as conflicts. The registry-ownership scan (`InspectRegistryOwnership`) walks store `agents`, `commands`, `rules`, `skills` and `~/.agents/skills` without following directory links and classes each link by its target against the install plan (`PlanRegistryLinks`), never by name: `STORE` a link into a retired generated store, `ORPHAN` a live link into a recorded clone or the managed install root that the plan no longer writes, `DEAD` such a link whose target is gone, `RETIRED` an unmarked entry named for a retired agent, command or skill. Foreign links and any other unmarked entry are never listed. Unreadable paths return errors. Install retires `STORE`, `ORPHAN` and `DEAD`, uninstall every owned link; `RETIRED` stays in place. Doctor prints each as a `doctor: registry {CLASS} …` row, else `doctor: registry-ownership ok`. A retired path already absent prints nothing.
 
 ## Runtime writes
 

@@ -365,7 +365,8 @@ OWN_IDS='SLOT: repository names|issue-tracker hosts|internal domains'
 DOC="$S/design.md"; K=scripts/suite-checks; rc=0; TAB=$(printf '\t')
 say() { printf 'CHECK %s %s %s\n' "$1" "$2" "$3"; case $2 in FAIL) [ "$rc" -ge 1 ] || rc=1;; ERROR) rc=2;; esac; }
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" || { say setup ERROR "not inside a repository"; exit 2; }
-T=$(mktemp -d) || { say setup ERROR "mktemp failed"; exit 2; }; trap 'rm -rf "$T"' EXIT
+# SLOT scratch: on the next line, replace every SLOT-project with this tree's project name, written out: an rm -rf takes a literal path, never a variable
+T=/tmp/SLOT-project/suite-checks; rm -rf /tmp/SLOT-project/suite-checks && mkdir -p /tmp/SLOT-project/suite-checks || { say setup ERROR "cannot reset scratch /tmp/SLOT-project/suite-checks"; exit 2; }; trap 'rm -rf /tmp/SLOT-project/suite-checks' EXIT
 MB=$(git merge-base HEAD "$MAIN" 2>/dev/null) || { say setup ERROR "merge base unreadable"; exit 2; }
 
 # at <path>: the merge-base copy; a path the merge base lacks is being installed, so the working tree
@@ -433,7 +434,7 @@ run map-ids map-beats map-names map-dup landscape-scope names oracle copy refuse
 exit "$rc"
 ```
 
-- Set every `SLOT` line. A slot left as written keeps its rows at `ERROR`, and the unadapted skeleton exits 2.
+- Set every `SLOT` line. A slot left as written keeps its rows at `ERROR`, and the unadapted skeleton exits 2; the scratch slot owns no rows, so left as written it still runs, at `/tmp/SLOT-project/suite-checks`.
 - Write one `chk_<row>` function per row of the table, dashes as underscores; `run` reports a row with no function as `ERROR`, so the script never reads clean with a row missing.
 - A set check follows `chk_map_ids`: derive both sets, report `ERROR` when either is empty, then compare. A ratchet check follows `chk_bare_doors`: read its spellings with `oblige`, count the files it scans, extract one signature per match, and call `ratchet`, which reports `ERROR` on zero items scanned and on a baseline with no ceiling in force.
 - Read every ruling-bearing input through `excuse`, `oblige`, `ceiling` or `value`, as Where enforcement ends classes it.

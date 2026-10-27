@@ -1,4 +1,4 @@
-# plugins — the Claude Code plugins professor's marketplace lists, each a git submodule
+# plugins — the Claude Code plugins professor tracks, each a git submodule, all but gpt-gateway listed in its marketplace
 
 Professor tracks only each plugin's commit: an edit under `{name}/` belongs to that plugin's public repository, and a professor gitlink to a commit the plugin's remote lacks breaks every other clone.
 
@@ -8,10 +8,12 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - tool-visibility-controller: a `visibility` field in agent, skill and command frontmatter, plus a scope file, decides per loop which agents, skills, MCP tools and built-in tools it sees and may invoke · `tool-visibility-controller/`
 - buddy: an ASCII companion above the prompt that reacts to the work and answers `/buddy` · `buddy/`
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`
+- cache-keepwarm: keeps the prompt cache of the main chat and waiting sub-agents warm through background waits with visible pokes, capped per wait and each admitted by a budget against the rewrite it saves · `cache-keepwarm/`
 - callmeter: records every tool call, request, agent and turn into SQLite through a Go binary behind every hook · `callmeter/`
-- forward-compaction: compaction where the model writes its own handoff — the main chat and every sub-agent through one tool — and everything after the call stays verbatim · `forward-compaction/`
+- forward-compaction: compaction where the model writes its own frontier — the main chat and every sub-agent through one tool — installed with the person's standing orders and the newest messages after the call that fit, verbatim · `forward-compaction/`
 - engine-sync: the Codex and OpenCode mirror writer pfm execs · `engine-sync/`
-- harvester: shared engine MCP daemon and one-shot web/document CLI pfm registers as `harvester-professor` · `harvester/`
+- harvester: shared engine MCP daemon and one-shot web/document CLI; its own plugin registers the MCP server `harvester` (`mcp__plugin_harvester_harvester__*` in Claude Code), pfm none · `harvester/`
+- gpt-gateway: a local passthrough between Claude Code and the Anthropic API, with a middleware hook API and an opt-in ChatGPT route; a tracked submodule the marketplace does not list · `gpt-gateway/`
 - installable plugin: the directory Claude Code installs, inside each checkout · `{name}/plugins/{name}/`
 - gitlink: professor's pin of one plugin commit, registered with `branch = develop` and `ignore = dirty` · `../.gitmodules`
 
@@ -43,8 +45,26 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 ## Standalone
 
-- Every plugin works fully on a machine without Professor: its code and every file it writes carry no Professor path, agent, policy or wording; credit in its README and manifest is the one exception.
+- Dependency runs one way: pfm may depend on a plugin; a plugin depends on neither pfm nor Professor, and installs and works fully on a machine without them.
+- A plugin's code and every file it writes carry no Professor path, agent, policy or wording; credit in its README and manifest is the one exception.
 - Professor-specific behavior enters through the plugin's own integration surface — a config file, flag, environment variable or extension hook — with a neutral default; Professor's install and project files supply Professor's values; a new option adds its `{PLUGIN}_{OPTION}` variable, read in a function-hooks plugin by a string-literal `$.env.get('NAME')`.
+
+## Identity
+
+- Every plugin belongs to professor: listed in the marketplace and installed as `{name}@professor`.
+
+## Native first
+
+- A plugin uses the native APIs and utilities of Claude Code's plugin system and reimplements none of them: a context's token count is read from Claude Code's own report; the plugin counts and estimates none.
+
+## Logging
+
+- All plugin logging goes through one shared plugin-log library, shipped inside each plugin as an identical vendored copy of one canonical source, so the plugin still installs and runs without Professor or pfm; a library change lands in the canonical source and every copy in the same pass.
+- Directory: every plugin MUST write its logs under `$PLUGIN_LOG_DIR/{plugin}` when `PLUGIN_LOG_DIR` is set, and no plugin-specific log variable or path overrides it; else `~/.local/state/{plugin}/logs`; with no directory resolvable, logging is off.
+- Level files `errors.jsonl`, `warnings.jsonl`, `info.jsonl`, directory 0700, files 0600.
+- Row: one JSON line, keys in order `ts`, `plugin`, `level`, `event`, `msg`, `where`, `session` when known, `detail`; at most 4096 bytes with its newline, shortened to fit.
+- A level file past 20971520 bytes (20 MiB) moves to `.1`, and a `log-capped` row goes to `warnings.jsonl`.
+- The screen shows only errors and one line per failing streak saying the log is off or failing, re-armed by the next success; warning, info and debug rows go to their files, or nowhere when the log cannot be written.
 
 ## Git
 

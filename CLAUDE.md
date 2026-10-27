@@ -30,7 +30,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
-- plugins: the plugins the marketplace lists, each a git submodule of its own repo on `develop`; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every one as its `-dev` copy from them (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
+- plugins: the plugins professor tracks, each a git submodule of its own repo on `develop`, all but gpt-gateway listed in the marketplace; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every listed one as its `-dev` copy from them (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
 - CI: GitHub Actions gating the `develop → main` release pull request and publishing its merge; `make release-check` runs the same checks locally · `.github/workflows/release.yml`, `Makefile`
 
 ## Path vars

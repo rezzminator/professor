@@ -116,7 +116,7 @@
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/harvester.git",
         "path": "plugins/harvester",
-        "ref": "develop"
+        "ref": "main"
       },
       "description": "Fetches, converts, caches and searches documents through the harvester CLI and MCP tools.",
       "homepage": "https://github.com/rezzminator/harvester",

@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // DeliverThen rides out the turn its predecessor typed before delivering the
@@ -41,13 +42,7 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 	if wait.Backend == backendHerdr {
 		return engine.deliverHerdrThen(ctx, wait)
 	}
-	if socketPath != "" {
-		// The socket rides the environment so a pane-id target resolves on the
-		// server that actually holds it (chat.sh:1082).
-		if err := os.Setenv("CHAT_CALL_SOCKET", socketPath); err != nil {
-			return Result{}, err
-		}
-	}
+
 	armed := armedPathFor(engine.steerLogPath(Target{SocketPath: socketPath, Pane: target}))
 	if claimErr := engine.claimArmed(armed, steers[0]); claimErr != nil {
 		// The record could not be READ. Claiming it anyway would overwrite an
@@ -137,12 +132,20 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 			),
 		}, nil
 	}
-	result, err = engine.deliver(ctx, Request{
+	request := Request{
 		Target:  target,
 		Message: steers[0],
 		Then:    steers[1:],
 		Chain:   true,
-	})
+	}
+	if checked, ok := engine.checkSteerChain(request); !ok {
+		return checked, nil
+	}
+	destination := targetFromSeat(resolve.SeatFromParts(socketPath, target, engine.env))
+	if wait.Engine != "" {
+		destination.Engine = wait.Engine
+	}
+	result, err = engine.callResolved(ctx, request, destination, "")
 	if err == nil && !observed {
 		// Delivered, but without ever seeing the primary's turn begin and
 		// end. Stranding the chain would be worse, so the steer still goes —

@@ -1,14 +1,14 @@
 ---
 name: legal
 repo: 'https://github.com/lawve-ai/awesome-legal-skills'
-description: Index of curated legal/compliance playbooks — DPA (Art. 28), DPIA (Art. 35), breach response (Art. 33/34), privacy notices (Art. 13/14), vendor due diligence, red-team QC, NDA/risk triage, statute reading, pre-delivery self-check, skill-optimizer. Load for legal drafting, any DPA/DPIA/privacy/breach/consent doc, vendor vetting or legal QC. Formal compliance assessment → /officer.
+description: Index of curated legal/compliance playbooks — DPA (Art. 28), DPIA (Art. 35), breach response (Art. 33/34), privacy notices (Art. 13/14), vendor due diligence, red-team QC, NDA/risk triage, statute reading, pre-delivery self-check, skill-optimizer. Load for legal drafting, any DPA/DPIA/privacy/breach/consent doc, vendor vetting or legal QC.
 ---
 
 # Legal Reference Index
 
 Curated legal/compliance playbooks. This file is the index — load the one reference the task needs, not all of them. Each reference distils a public skill; per-file attribution and license sit at its top (Anthropic skills Apache-2.0 and adapted; the rest AGPL-3.0 and distilled — legal rules in our own words, not copied prose).
 
-For a formal compliance assessment, route to `/officer` — this skill is the shared reference shelf both the Professor and `/officer` read from. None of it is legal advice.
+None of it is legal advice.
 
 ## When to consult what
 

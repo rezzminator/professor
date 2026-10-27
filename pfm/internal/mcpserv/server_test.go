@@ -340,6 +340,20 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Fatalf("post-call capture = %+v", after)
 	}
 
+	// A broadcast reports each target on its own; one refusal never hides
+	// the delivery beside it.
+	broadcast := callTool[CallOutput](t, session, "call", CallInput{
+		Targets: []string{"Fixture Label", jail.selectorSession, "Fixture Label"},
+		Message: "hello broadcast",
+	})
+	if broadcast.Status != "partial" || broadcast.Code != 6 || len(broadcast.Results) != 2 ||
+		broadcast.Results[0].Target != "Fixture Label" || broadcast.Results[0].Status != "delivered" ||
+		!strings.Contains(broadcast.Results[0].Proof, "USER:hello broadcast") ||
+		broadcast.Results[1].Target != jail.selectorSession || broadcast.Results[1].Status != "refused" ||
+		!strings.Contains(broadcast.Message, "broadcast delivered 1/2; not delivered: "+jail.selectorSession) {
+		t.Fatalf("broadcast = %+v\nstderr:\n%s", broadcast, serverStderr.String())
+	}
+
 	selectorBefore := callTool[CaptureOutput](t, session, "capture",
 		CaptureInput{Target: jail.selectorSession})
 	selector := callTool[CallOutput](t, session, "call", CallInput{
@@ -821,7 +835,7 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 	path := filepath.Join(root, "mcp-enabled.json")
 	if err := os.WriteFile(
 		path,
-		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true},"harvester":{"enabled":false}}}}`+"\n"),
+		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true}}}}`+"\n"),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -934,5 +948,13 @@ func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
 				t.Fatal("native keys never reached resolved socket")
 			}
 		})
+	}
+}
+
+// The chat server's routing text, byte for byte: every clause names a tool it registers.
+func TestChatInstructionsPinTheRoutingText(t *testing.T) {
+	want := "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+	if chatInstructions != want {
+		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", chatInstructions, want)
 	}
 }

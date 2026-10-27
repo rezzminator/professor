@@ -21,7 +21,7 @@ type fakeAskAdapter interface {
 }
 
 // These adapters stand in for the next-wave preparation layers. They carry
-// no transcript or harvester domain types: both feed only the shared ask
+// no transcript or document domain types: both feed only the shared ask
 // contract and preserve provenance in its generic fields.
 type fakeTranscriptAdapter struct{}
 
@@ -42,9 +42,9 @@ func (fakeTranscriptAdapter) Prepare() (AskInput, Evidence) {
 
 func (fakeTranscriptAdapter) WantSpanKind() string { return "turns" }
 
-type fakeHarvesterAdapter struct{}
+type fakeDocumentAdapter struct{}
 
-func (fakeHarvesterAdapter) Prepare() (AskInput, Evidence) {
+func (fakeDocumentAdapter) Prepare() (AskInput, Evidence) {
 	input := AskInput{
 		ContentFiles: []string{"prepared-source.md"},
 		SourceLabels: []string{"https://fixture.invalid/source"},
@@ -59,7 +59,7 @@ func (fakeHarvesterAdapter) Prepare() (AskInput, Evidence) {
 	return input, evidence
 }
 
-func (fakeHarvesterAdapter) WantSpanKind() string { return "lines" }
+func (fakeDocumentAdapter) WantSpanKind() string { return "lines" }
 
 func TestResolveInputUsesExplicitValuesBeforeConfig(t *testing.T) {
 	cfg := pfmconfig.Config{Ask: pfmconfig.AskConfig{
@@ -88,10 +88,10 @@ func TestResolveInputUsesExplicitValuesBeforeConfig(t *testing.T) {
 	}
 }
 
-func TestEvidenceStaysContentAgnosticForTranscriptAndHarvesterAdapters(t *testing.T) {
+func TestEvidenceStaysContentAgnosticForTranscriptAndDocumentAdapters(t *testing.T) {
 	adapters := map[string]fakeAskAdapter{
 		"transcript": fakeTranscriptAdapter{},
-		"harvester":  fakeHarvesterAdapter{},
+		"document":   fakeDocumentAdapter{},
 	}
 	for name, adapter := range adapters {
 		input, evidence := adapter.Prepare()

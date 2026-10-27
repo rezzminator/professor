@@ -336,26 +336,18 @@ func waitForProbePhaseMarker(t *testing.T, marker string) {
 	t.Fatalf("probe phase marker %q was not created within %s", marker, budget)
 }
 
-func TestProbePlatformAndHarvestFiltering(t *testing.T) {
-	entries := []Entry{
-		{Name: "ps", Command: "ps", Required: true, Platforms: []string{"darwin"}},
-		{Name: "uv", Command: "/managed/uv", Required: true, Harvest: true},
+func TestProbePlatformFiltering(t *testing.T) {
+	entries := []Entry{{Name: "ps", Command: "ps", Required: true, Platforms: []string{"darwin"}}}
+	linux := Probe(context.Background(), entries, ProbeOptions{GOOS: "linux"})
+	if linux[0].State != StateSkipped || linux[0].Error != "not this platform" {
+		t.Fatalf("linux filter=%#v", linux)
 	}
-	linux := Probe(context.Background(), entries, ProbeOptions{GOOS: "linux", SkipHarvest: true})
-	if linux[0].State != StateSkipped || linux[0].Error != "not this platform" || linux[1].State != StateSkipped ||
-		linux[1].Error != "--skip-harvest" {
-		t.Fatalf("linux filters=%#v", linux)
-	}
-	darwin := Probe(context.Background(), entries[:1], ProbeOptions{
+	darwin := Probe(context.Background(), entries, ProbeOptions{
 		GOOS:     "darwin",
 		LookPath: func(string) (string, error) { return "/usr/bin/ps", nil },
 	})
 	if darwin[0].State != StateOK || darwin[0].Path != "/usr/bin/ps" {
 		t.Fatalf("darwin ps=%#v", darwin[0])
-	}
-	provision := Probe(context.Background(), entries[1:], ProbeOptions{GOOS: "linux", Provisioning: true})
-	if provision[0].State != StateSkipped || provision[0].Error != "provisioned by install" {
-		t.Fatalf("install harvest filter=%#v", provision[0])
 	}
 }
 

@@ -145,7 +145,7 @@ func TestEnsureCallmeterBinary(t *testing.T) {
 				Home: home, ProcessRunner: &runner, Stdout: &out,
 				Env: &paths.MapEnv{Values: map[string]string{"XDG_STATE_HOME": state}},
 			}, apply: test.apply}
-			err := inst.ensureCallmeterBinary(
+			err := inst.ensureGoPluginBinary(
 				context.Background(),
 				&ClaudePluginTarget{Name: "callmeter", Checkout: checkout},
 			)
@@ -395,7 +395,7 @@ func TestCallmeterBuildUsesClaudeEnvHome(t *testing.T) {
 		},
 		apply: true,
 	}
-	if err := inst.ensureCallmeterBinary(
+	if err := inst.ensureGoPluginBinary(
 		context.Background(),
 		&ClaudePluginTarget{Name: "callmeter", Checkout: checkout},
 	); err != nil {

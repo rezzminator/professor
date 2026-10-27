@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -364,7 +366,7 @@ func TestChatNewBackendFlag(t *testing.T) {
 		code                int
 	}{
 		{name: "invalid", backend: "other", want: "--backend must be auto, tmux or herdr", code: 2},
-		{name: "forced unreachable", backend: "herdr", want: "pane w6:p3 unreachable", code: 1},
+		{name: "forced unreachable", backend: "herdr", want: "herdr backend needs a caller in a Herdr pane", code: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			jail := newRunJail(t)
@@ -470,11 +472,25 @@ func TestChatNewNativeBackendBirth(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", socket)
 	t.Setenv("HERDR_PANE_ID", "w6:p3")
 	var stdout, stderr bytes.Buffer
-	code := run(
-		[]string{"chat", "new", "--name", "NATIVE", "--engine", "cc", "--cwd", jail.root, "--backend", "herdr"},
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := pfmchat.WithCaller(
+		context.Background(),
+		"cli.new",
+		resolve.Identity{Backend: "herdr", SocketPath: socket, Pane: "w6:p3", HerdrWorkspace: "w6"},
+		nil,
+	)
+	code := runChatWithRuntime(
+		[]string{"new", "--name", "NATIVE", "--engine", "cc", "--cwd", jail.root, "--backend", "herdr"},
+		nil,
 		&stdout,
 		&stderr,
+		runtime,
+		ctx,
 	)
+
 	if code != 0 || !strings.Contains(stdout.String(), "herdr") || strings.Contains(stdout.String(), "tmux -L") {
 		t.Fatalf("native birth code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -510,7 +526,7 @@ func TestChatNameNativeDeliveryConvergesWithoutTmuxWindow(t *testing.T) {
 }
 
 func TestChatNewNativeRawEngineBirth(t *testing.T) {
-	for _, engine := range []string{"codex", "opencode"} {
+	for _, engine := range []string{"codex", "opencode", "opencode-workbench"} {
 		t.Run(engine, func(t *testing.T) {
 			jail := newRunJail(t)
 			defer jail.killSockets(t)
@@ -570,17 +586,36 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", jail.root+string(os.PathListSeparator)+os.Getenv("PATH"))
-			ctx := pfmchat.WithResolvedSelf(
+			ctx := pfmchat.WithCaller(
 				context.Background(),
-				headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", HerdrWorkspace: "w6"},
+				"cli.new",
+				resolve.Identity{Backend: "herdr", SocketPath: socket, Pane: "w6:p3", HerdrWorkspace: "w6"},
+				nil,
 			)
 			var stdout, stderr bytes.Buffer
 			runtime, err := pfmconfig.LoadRuntime("")
 			if err != nil {
 				t.Fatal(err)
 			}
+			directory, selected := jail.root, engine
+			if engine == "opencode-workbench" {
+				directory, _ = newWorkbenchRunFixture(t, jail)
+				if err := atomicfile.Write(paths.WorkbenchManifest(directory), []byte(
+					`{"prompt":"scribe.md","engines":["opencode"],"model":"openai/other","effort":"medium"}`,
+				), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
+				selected = "ox"
+			}
+			args := []string{"new", "--engine", selected, "--name", "RAW", "--cwd", directory}
+			prompt := "First task 'quoted'\nsecond line"
+			if engine != "codex" {
+				args = append(args, "--model", "openai/gpt-6.1-sol", "--effort", "high", prompt)
+				runtime.Config.OpenCode.Binary = binary
+			}
 			code := runChatWithRuntime(
-				[]string{"new", "--engine", engine, "--name", "RAW", "--cwd", jail.root},
+				args,
 				nil,
 				&stdout,
 				&stderr,
@@ -606,6 +641,27 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 					recipeErr,
 				)
 			}
+			if engine != "codex" {
+				recipe, err := state.ReadSeatRun(seats[0].SeatID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, word := range []string{"--model", "openai/gpt-6.1-sol", "--prompt", prompt} {
+					if !slices.Contains(recipe.Args, word) {
+						t.Errorf("native recipe lacks %q: %+v", word, recipe)
+					}
+				}
+				if recipe.Binary != binary || slices.Contains(recipe.Args, "--variant") ||
+					!slices.Contains(recipe.Env, "PFM_OPENCODE_MODEL=openai/gpt-6.1-sol") ||
+					!slices.Contains(recipe.Env, "PFM_OPENCODE_VARIANT=high") {
+					t.Errorf("native model/effort/binary recipe=%+v", recipe)
+				}
+				if engine == "opencode-workbench" &&
+					(!slices.Contains(recipe.Env, "PFM_OPENCODE_SYSTEM_FILE="+filepath.Join(directory, ".professor", "scribe.md")) ||
+						strings.Contains(strings.Join(recipe.Env, "\n"), "PFM_OPENCODE_POLICY=You are scribe.")) {
+					t.Errorf("canonical persona missing or duplicated: %+v", recipe)
+				}
+			}
 		})
 	}
 }
@@ -622,5 +678,50 @@ func TestReservedSeatLabel(t *testing.T) {
 				t.Errorf("%v: code=%d stderr=%s", args, code, &stderr)
 			}
 		}
+	}
+}
+
+func TestChatNewRejectsCallerReadFailure(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	t.Setenv("TMUX", "")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	socket := filepath.Join(testjail.ShortRoot(t), "bad.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			var req struct {
+				ID string `json:"id"`
+			}
+			if json.NewDecoder(conn).Decode(&req) == nil {
+				_, _ = fmt.Fprintf(conn, "{\"id\":%q,\"result\":{}}\n", req.ID)
+			}
+			_ = conn.Close()
+		}
+	}()
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"chat", "new", "--backend", "auto", "--name", "CALLER-FAILURE", "--engine", "cc", "--cwd", jail.root},
+		&stdout,
+		&stderr,
+	)
+	if code != 1 || !strings.Contains(stderr.String(), "pfm chat new: place chat: caller unresolved:") ||
+		stdout.Len() != 0 {
+		t.Fatalf(
+			"code=%d stdout=%q stderr=%q; want caller failure without birth",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }

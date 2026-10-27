@@ -33,4 +33,4 @@ Mandatory — active litigation, government investigation, criminal/securities e
 
 ## {PROJECT_NAME} application
 
-Use NDA triage on every inbound NDA from a {ORG_UNIT}, pilot partner, or investor before signing. Use the severity × likelihood method to tier any compliance finding consistently — it maps onto the officer's audit ratings (CRITICAL/HIGH/MEDIUM/LOW) and the breach/DPIA risk registers, so the whole compliance posture speaks one risk language. Keep liability and commercial terms out of any NDA, consistent with the DPA scope rule.
+Use NDA triage on every inbound NDA from a {ORG_UNIT}, pilot partner, or investor before signing. Use the severity × likelihood method to tier any compliance finding consistently — it maps onto the CRITICAL/HIGH/MEDIUM/LOW audit ratings and the breach/DPIA risk registers, so the whole compliance posture speaks one risk language. Keep liability and commercial terms out of any NDA, consistent with the DPA scope rule.

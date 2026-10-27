@@ -30,7 +30,7 @@ var claudePluginIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(@[A-
 func DefaultClaudePlugins() []ClaudePlugin {
 	return []ClaudePlugin{
 		{ID: "cache-live-control"},
-		{ID: "sub-agent-compact"},
+		{ID: "forward-compaction"},
 		{ID: "auto-effort-control"},
 		{ID: "tool-visibility-controller"},
 		{ID: "engine-sync"},

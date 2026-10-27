@@ -176,11 +176,26 @@ func codexNativeHooks(home string, config map[string]any) ([]codexNativeHook, er
 	path := filepath.Join(home, "hooks.json")
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return []codexNativeHook{}, nil
-	}
-	if err != nil {
+		raw = []byte("{}")
+	} else if err != nil {
 		return nil, fmt.Errorf("read native hooks: %w", err)
 	}
+	hooks, err := codexHooksFromDocument(raw, path, "user", path, config)
+	if err != nil {
+		return nil, err
+	}
+	plugins, err := codexPluginHooks(home, config)
+	if err != nil {
+		return nil, err
+	}
+	return append(hooks, plugins...), nil
+}
+
+func codexHooksFromDocument(
+	raw []byte,
+	path, source, keyPrefix string,
+	config map[string]any,
+) ([]codexNativeHook, error) {
 	var document hookDocument
 	if err := json.Unmarshal(raw, &document); err != nil {
 		return nil, fmt.Errorf("decode native hooks: %w", err)
@@ -213,7 +228,7 @@ func codexNativeHooks(home string, config map[string]any) ([]codexNativeHook, er
 					}
 					keyEvent += strings.ToLower(string(char))
 				}
-				key := fmt.Sprintf("%s:%s:%d:%d", path, keyEvent, matcherIndex, handlerIndex)
+				key := fmt.Sprintf("%s:%s:%d:%d", keyPrefix, keyEvent, matcherIndex, handlerIndex)
 				hash := fmt.Sprintf("sha256:%x", sha256.Sum256(fingerprint))
 				hookState, _ := state[key].(map[string]any)
 				enabled := true
@@ -226,7 +241,7 @@ func codexNativeHooks(home string, config map[string]any) ([]codexNativeHook, er
 				}
 				hooks = append(hooks, codexNativeHook{
 					Key: key, HandlerType: handler.Type, Command: handler.Command,
-					Matcher: entry.Matcher, SourcePath: path, Source: "user", CurrentHash: hash,
+					Matcher: entry.Matcher, SourcePath: path, Source: source, CurrentHash: hash,
 					EventName: strings.ToLower(event[:1]) + event[1:], Enabled: enabled, TrustStatus: trust,
 				})
 			}

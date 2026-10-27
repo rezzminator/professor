@@ -1,5 +1,15 @@
 # Submitting Professor to hesreallyhim/awesome-claude-code
 
+## Contents
+
+- [1. Submission mechanics — the exact form](#1-submission-mechanics--the-exact-form)
+- [2. What happens after submitting](#2-what-happens-after-submitting)
+- [3. What others did — 8 recent submissions read in full](#3-what-others-did--8-recent-submissions-read-in-full)
+- [4. Fitting category for Professor](#4-fitting-category-for-professor)
+- [5. Ready-to-paste form values for Professor](#5-ready-to-paste-form-values-for-professor)
+- [6. Risks specific to Professor](#6-risks-specific-to-professor)
+- [Gaps](#gaps)
+
 Research-only. Nothing was opened, forked, starred, or commented. All facts below were read via `gh api` / `gh issue list` / `gh issue view` on 2026-09-14 against `hesreallyhim/awesome-claude-code` (53,988 stars, not archived, pushed same day).
 
 ## 1. Submission mechanics — the exact form

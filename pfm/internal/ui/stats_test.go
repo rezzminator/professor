@@ -98,7 +98,7 @@ func statsMessage(t *testing.T, messages <-chan tea.Msg) statsSampleMsg {
 }
 
 func TestRapidLimitsToStatsDropsInFlightLimitsResult(t *testing.T) {
-	oldResources := pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{{Socket: "old-resource"}}}
+	oldResources := pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{{Seat: "old-resource"}}}
 	sampler := &switchingStatsSampler{
 		fullStarted:     make(chan struct{}, 1),
 		fullRelease:     make(chan struct{}),
@@ -106,7 +106,7 @@ func TestRapidLimitsToStatsDropsInFlightLimitsResult(t *testing.T) {
 		resourceRelease: make(chan struct{}),
 		fullSnapshot:    pfmstats.Snapshot{Ready: true, Limits: []pfmstats.AccountLimits{{Account: 99}}},
 		resourceSnapshot: pfmstats.Snapshot{
-			Ready: true, Chats: []pfmstats.Chat{{Socket: "new-resource"}},
+			Ready: true, Chats: []pfmstats.Chat{{Seat: "new-resource"}},
 		},
 	}
 	snapshot := fixtureSnapshot(120)
@@ -126,7 +126,7 @@ func TestRapidLimitsToStatsDropsInFlightLimitsResult(t *testing.T) {
 	stale := statsMessage(t, limitsResult)
 	updated, _ := model.Update(stale)
 	model = updated.(Model)
-	if len(model.stats.Limits) != 0 || len(model.stats.Chats) != 1 || model.stats.Chats[0].Socket != "old-resource" {
+	if len(model.stats.Limits) != 0 || len(model.stats.Chats) != 1 || model.stats.Chats[0].Seat != "old-resource" {
 		t.Fatalf("stale Limits result overwrote Stats resources: %#v", model.stats)
 	}
 	resourceResult := runStatsCommand(t, statsCommand)
@@ -134,7 +134,7 @@ func TestRapidLimitsToStatsDropsInFlightLimitsResult(t *testing.T) {
 	resourceMessage := statsMessage(t, resourceResult)
 	updated, _ = model.Update(resourceMessage)
 	model = updated.(Model)
-	if len(model.stats.Chats) != 1 || model.stats.Chats[0].Socket != "new-resource" {
+	if len(model.stats.Chats) != 1 || model.stats.Chats[0].Seat != "new-resource" {
 		t.Fatalf("fresh Stats resource result = %#v", model.stats)
 	}
 }
@@ -148,7 +148,7 @@ func TestRapidStatsToLimitsDropsInFlightResourceResult(t *testing.T) {
 		resourceRelease: make(chan struct{}),
 		fullSnapshot:    pfmstats.Snapshot{Ready: true, Limits: []pfmstats.AccountLimits{{Account: 8}}},
 		resourceSnapshot: pfmstats.Snapshot{
-			Ready: true, Chats: []pfmstats.Chat{{Socket: "stale-resource"}},
+			Ready: true, Chats: []pfmstats.Chat{{Seat: "stale-resource"}},
 		},
 	}
 	snapshot := fixtureSnapshot(120)
@@ -710,20 +710,20 @@ func TestUsageSparkScalesToTheBusiestSample(t *testing.T) {
 	}
 }
 
-func TestStatsCursorFollowsSocketAcrossCPUSort(t *testing.T) {
+func TestStatsCursorFollowsSeatAcrossCPUSort(t *testing.T) {
 	model := NewModel(fixtureSnapshot(120))
 	model.tab = TabStats
 	model.statsSort = StatsSortCPU
 	model.applyStats(pfmstats.Snapshot{Chats: []pfmstats.Chat{
-		{Socket: "socket-a", Name: "A", CPUPercent: 10, CPUValid: true},
-		{Socket: "socket-b", Name: "B", CPUPercent: 20, CPUValid: true},
+		{Seat: "socket-a", Name: "A", CPUPercent: 10, CPUValid: true},
+		{Seat: "socket-b", Name: "B", CPUPercent: 20, CPUValid: true},
 	}})
 	if model.selectedStatsKey() != "socket-b" {
 		t.Fatalf("initial selected stats key = %q", model.selectedStatsKey())
 	}
 	model.applyStats(pfmstats.Snapshot{Chats: []pfmstats.Chat{
-		{Socket: "socket-a", Name: "A", CPUPercent: 30, CPUValid: true},
-		{Socket: "socket-b", Name: "B", CPUPercent: 5, CPUValid: true},
+		{Seat: "socket-a", Name: "A", CPUPercent: 30, CPUValid: true},
+		{Seat: "socket-b", Name: "B", CPUPercent: 5, CPUValid: true},
 	}})
 	if model.selectedStatsKey() != "socket-b" || model.statsCursor != 1 {
 		t.Fatalf("selected=%q cursor=%d after resort", model.selectedStatsKey(), model.statsCursor)
@@ -733,7 +733,7 @@ func TestStatsCursorFollowsSocketAcrossCPUSort(t *testing.T) {
 func TestStatsHeaderRendersSwapSeparate(t *testing.T) {
 	model := NewModel(fixtureSnapshot(120))
 	model.tab = TabStats
-	model.stats = pfmstats.Snapshot{Header: pfmstats.Header{
+	model.stats = pfmstats.Snapshot{Ready: true, Header: pfmstats.Header{
 		CPUPercent: 12, CPUValid: true, PSIPercent: 34,
 		RAMPercent: 56, SwapPercent: 78,
 	}}

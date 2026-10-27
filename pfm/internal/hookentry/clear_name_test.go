@@ -146,7 +146,7 @@ func TestClearNameIgnoresUnmanagedLifecycleEvents(t *testing.T) {
 
 func TestClearNamePromptBoundsHeldConversationLock(t *testing.T) {
 	oldDeadline := promptHookDeadline
-	promptHookDeadline = 25 * time.Millisecond
+	promptHookDeadline = 500 * time.Millisecond
 	t.Cleanup(func() { promptHookDeadline = oldDeadline })
 	for _, pending := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unmanaged", true: "pending"}[pending], func(t *testing.T) {

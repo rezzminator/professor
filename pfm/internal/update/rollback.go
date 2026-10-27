@@ -56,7 +56,6 @@ func rollbackUpdateState(
 	replacements []updateReplacement,
 	snapshots []updateFileSnapshot,
 	runtime config.Runtime,
-	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) error {
 	rollbackErr := rollbackUpdateReplacements(replacements, stderr)
@@ -83,7 +82,6 @@ func rollbackUpdateState(
 		repo,
 		installSourceRepo,
 		runtime,
-		skipHarvest,
 		stdout,
 		stderr,
 	); err != nil {
@@ -94,7 +92,6 @@ func rollbackUpdateState(
 		previousBinary,
 		runtime,
 		runtime.Config.Path,
-		skipHarvest,
 		stdout,
 		stderr,
 	)

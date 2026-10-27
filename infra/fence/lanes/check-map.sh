@@ -6,7 +6,7 @@
 #
 # map.tsv is `name · lane · beat`: a command (`pfm config show`,
 # `pfm chat new`, `pfm internal git-guard`) or an MCP tool (`mcp__chat-professor__call`,
-# `mcp__harvester-professor__read`), the lane script that tests it and the beat inside it. A beat that
+# `mcp__chat-professor__read`), the lane script that tests it and the beat inside it. A beat that
 # tests no command (an install behaviour, a fleet capability) needs no row.
 #
 # Two checks, each naming its own broken state:
@@ -25,7 +25,7 @@
 #      answers `unknown command` / `unknown subcommand`.
 #
 # The derive runs the REAL binary in a jail ($PFM_HOME and friends point at a
-# scratch dir, the config is a temp file with both families enabled), so it never
+# scratch dir, the config is a temp file with chat enabled), so it never
 # reads or writes the host's fleet. The tool names come from a `tools/list`
 # JSON-RPC call over each `pfm mcp serve --stdio --family …` — the served surface, not a
 # list copied into this script.
@@ -121,8 +121,6 @@ else
     cat >"$JAIL/pfm.config.json" <<'JSON'
 {"version": 2, "mcp": {"servers": {"chat": {"enabled": true}}}}
 JSON
-    # A search backend configured, so the harvester serves search_web too.
-    printf '%s\n' '{"enabled": true, "search": {"searxngURL": "http://127.0.0.1:9"}}' >"$JAIL/harvester.config.json"
     # Jailed: the derive must never touch the host's fleet, socket dir or tmux.
     pfm_jailed() {
       env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" PFM_CONFIG="$JAIL/pfm.config.json" \
@@ -161,7 +159,7 @@ JSON
       say "derived commands: $n_cmds top-level + $n_subs chat subcommands · $bad_cmds unmapped"
     fi
 
-    # Read both family registrations independently. A partial or empty family
+    # Read the chat registration. A partial or empty server
     # fails the derive; each family tool retains a distinct qualified coverage key.
     # Keep stdin open until each id-2 reply; closing it loses an in-flight reply.
     tools_ok=1 all_tools=""
@@ -169,17 +167,19 @@ JSON
         '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check-map","version":"0"}}}' \
         '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
         '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')"
-    for family in chat harvester; do
-      mcp_stdio_exchange 2 60 "$tools_frames" with_timeout 60 env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" \
+    for family in chat; do
+      stdio_command=("$PFM" --config "$JAIL/pfm.config.json" mcp serve --stdio --family chat)
+      stdio_name="pfm mcp serve --stdio --family chat"
+      mcp_stdio_exchange 2 60 "$tools_frames" with_timeout 60 env HOME="$JAIL/home" PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" \
         PFM_CONFIG="$JAIL/pfm.config.json" PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
-        "$PFM" --config "$JAIL/pfm.config.json" mcp serve --stdio --family "$family" 2>"$JAIL/stdio.$family.err" >"$JAIL/stdio.$family.frames"
+        "${stdio_command[@]}" 2>"$JAIL/stdio.$family.err" >"$JAIL/stdio.$family.frames"
       stdio_rc=$?
       tools_out="$(cat "$JAIL/stdio.$family.frames")"
       tools="$(printf '%s\n' "$tools_out" | jq -r 'select(.id == 2) | .result.tools[]?.name' 2>/dev/null)"
       n_tools="$(printf '%s\n' "$tools" | grep -c .)"
       if [ "$stdio_rc" -ne 0 ] || [ "$n_tools" -eq 0 ]; then
         tools_ok=0
-        derive_fail "pfm mcp serve --stdio --family $family listed no tool — ${MCP_STDIO_WHY:-reply carried no tools}; stderr: $(tr '\n' ' ' <"$JAIL/stdio.$family.err" 2>/dev/null | cut -c1-200); frames it did answer: $(tr '\n' ' ' <"$JAIL/stdio.$family.frames" 2>/dev/null | cut -c1-200)"
+        derive_fail "$stdio_name listed no tool — ${MCP_STDIO_WHY:-reply carried no tools}; stderr: $(tr '\n' ' ' <"$JAIL/stdio.$family.err" 2>/dev/null | cut -c1-200); frames it did answer: $(tr '\n' ' ' <"$JAIL/stdio.$family.frames" 2>/dev/null | cut -c1-200)"
       else
         bad_tools=0
         for t in $tools; do
@@ -189,7 +189,7 @@ JSON
           red "UNMAPPED-TOOL: $tool_name — no row in $(basename "$MAP") names it"
           bad_tools=$((bad_tools + 1))
         done
-        say "derived tools over pfm mcp serve --stdio --family $family: $n_tools · $bad_tools unmapped"
+        say "derived tools over $stdio_name: $n_tools · $bad_tools unmapped"
       fi
     done
     all_tools="$(printf '%s\n' "$all_tools" | sort -u)"

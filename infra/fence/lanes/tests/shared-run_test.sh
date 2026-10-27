@@ -13,6 +13,7 @@
 # BROKEN STATE: no unshare or no capability is a named FAILED line and a non-zero exit, never a skip;
 # a missing shared-run.sh exits 2 naming it.
 set -uo pipefail
+unset HARVESTER_FENCE_SRC
 FENCE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 SUT="${SHARED_RUN_SUT:-$FENCE/shared-run.sh}"
 [ -f "$SUT" ] || { echo "shared-run_test: no shared-run.sh at $SUT" >&2; exit 2; }

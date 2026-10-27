@@ -7,7 +7,46 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
+
+func TestVariantMappingUsesOnlyDerivedColoursAndFillsEveryRole(t *testing.T) {
+	v := themesync.Variant{
+		Background: "#101020", Foreground: "#eeeef0", SelectionForeground: "#eeeeff", SelectionBackground: "#404050",
+		Surface: "#202030", Overlay: "#303040", Accent: "#b080e0", Orange: "#e09060", Muted: "#9090a0",
+		State: themesync.StateColors{Working: "#80b0e0", Done: "#80c090", Blocked: "#d0b070"},
+	}
+	colours := map[string]bool{}
+	for _, value := range []string{
+		v.Background, v.Foreground, v.SelectionForeground, v.SelectionBackground,
+		v.Surface, v.Overlay, v.Accent, v.Orange, v.Muted, v.State.Working, v.State.Done, v.State.Blocked,
+	} {
+		colours[value] = true
+	}
+	for i := range v.ANSI {
+		v.ANSI[i] = fmt.Sprintf("#%02x1020", i)
+		colours[v.ANSI[i]] = true
+	}
+	palette := FromVariant(v)
+	value := reflect.ValueOf(palette)
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Field(i)
+		if field.Kind() == reflect.String && !colours[field.String()] {
+			t.Errorf("%s = %q, want a carried Variant colour", value.Type().Field(i).Name, field.String())
+		}
+	}
+	for _, row := range []map[pfmengine.ID]string{palette.EngineRow, palette.StatsEngine} {
+		for _, id := range pfmengine.All() {
+			if !colours[row[id]] {
+				t.Errorf("engine %s = %q, want a carried Variant colour", id, row[id])
+			}
+		}
+	}
+	if palette.EngineRow[pfmengine.Claude] != v.Orange || palette.EngineRow[pfmengine.Codex] != v.State.Working ||
+		palette.EngineRow[pfmengine.OpenCode] != v.State.Done || palette.SelectedForeground != v.SelectionForeground {
+		t.Fatal("engine identity or selected text lost its semantic colour")
+	}
+}
 
 func TestLoadEmbeddedPalettes(t *testing.T) {
 	defaultPalette := Load("default")

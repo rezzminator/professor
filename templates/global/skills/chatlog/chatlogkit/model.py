@@ -55,6 +55,8 @@ class Parsed:
         self.meta, self.nulls, self.title = {}, set(), ""
         self.t0 = self.t1 = None
         self.pending, self.calls, self.wrappers = {}, {}, []
+        # an exec script whose command outlived it: unified-exec session id -> (script event, output line)
+        self.late_wrappers = {}
         self.na, self.unparsed = {}, []
 
     def mark(self, line, state, label):

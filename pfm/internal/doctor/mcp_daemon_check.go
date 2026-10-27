@@ -13,15 +13,14 @@ import (
 )
 
 // DaemonReachabilityOverride replaces mcpserv.DaemonReachability under test,
-// the way HarvestOverride replaces the harvest doctor: nil in production, set
+// nil in production, set
 // once by a jailed TestMain so no unit test probes a live daemon on the
 // host's loopback port. A test that means to exercise the real probe against
 // its own listener sets this back to nil and restores it in t.Cleanup.
 var DaemonReachabilityOverride func(config.Runtime) (mcpserv.DaemonStatus, error)
 
 // configuredDaemonReachability returns the override when one is set and
-// mcpserv.DaemonReachability otherwise — the same shape as
-// configuredHarvestDoctor for HarvestOverride.
+// mcpserv.DaemonReachability otherwise.
 func configuredDaemonReachability(runtime config.Runtime) (mcpserv.DaemonStatus, error) {
 	if DaemonReachabilityOverride != nil {
 		return DaemonReachabilityOverride(runtime)
@@ -56,7 +55,6 @@ func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings in
 			status.Endpoint,
 		)
 		warnings += printMCPDaemonFamiliesDoctor(stdout, runtime, status)
-		warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
 		if status.PFMVersion != runtime.Version {
 			warnings++
 			fmt.Fprintf(
@@ -89,7 +87,7 @@ func printMCPDaemonFamiliesDoctor(stdout io.Writer, runtime config.Runtime, stat
 	mounted := slices.Sorted(maps.Keys(status.Servers))
 	var enabled []string
 	for _, family := range config.RegisteredMCPServers() {
-		if runtime.Config.MCPServers[family].Enabled {
+		if family == config.MCPServerChat && config.MCPServerEnabled(runtime.Config, family) {
 			enabled = append(enabled, family)
 		}
 	}

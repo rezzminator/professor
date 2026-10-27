@@ -48,10 +48,6 @@ suites:
       github.com/rezzminator/professor/pfm/internal/gather: 4
       github.com/rezzminator/professor/pfm/internal/gitroot: 2
       github.com/rezzminator/professor/pfm/internal/globallink: 2
-      github.com/rezzminator/professor/pfm/internal/harvest: 20
-      github.com/rezzminator/professor/pfm/internal/harvestcli: 2
-      github.com/rezzminator/professor/pfm/internal/harvestmcp: 4
-      github.com/rezzminator/professor/pfm/internal/harvestpy: 8
       github.com/rezzminator/professor/pfm/internal/headless: 4
       github.com/rezzminator/professor/pfm/internal/headless/run: 8
       github.com/rezzminator/professor/pfm/internal/heal: 12

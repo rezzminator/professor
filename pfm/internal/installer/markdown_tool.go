@@ -16,7 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -44,8 +43,7 @@ cache = false
 // installMarkdownTool provisions rumdl, the markdown linter/formatter the
 // framework's prompts and docs are checked against, then its user config. It
 // is a soft dependency: no path through this step may fail `pfm install`
-// (mirrors installHarvest's dry-run gate and ok/skip/say reporting idiom, but
-// every terminal state here returns nil).
+// every terminal state here returns nil.
 func (installer *engine) installMarkdownTool(ctx context.Context) error {
 	installer.provisionRumdl(ctx)
 	installer.ensureRumdlUserConfig()
@@ -56,8 +54,6 @@ func (installer *engine) installMarkdownTool(ctx context.Context) error {
 // present; every outcome is reported as ok, skip or say.
 func (installer *engine) provisionRumdl(ctx context.Context) {
 	processRunner := installer.processRunner()
-	platform := installer.harvestPlatform()
-	provisionedUV := filepath.Join(harvestpy.RuntimeRoot(harvestPythonRoot(installer.options.Home), platform), "uv")
 
 	if path, err := processRunner.LookPath("rumdl"); err == nil {
 		if version, versionErr := rumdlVersionWithRunner(
@@ -75,27 +71,20 @@ func (installer *engine) provisionRumdl(ctx context.Context) {
 		installer.say(
 			"rumdl dry-run: would install rumdl==%s via uv tool install (uv=%s)",
 			rumdlPinnedVersion,
-			provisionedUV,
+			"PATH",
 		)
 		return
 	}
 
-	if installer.options.HarvestOffline {
+	if installer.options.Offline {
 		installer.skip(fmt.Sprintf("rumdl: offline, will not attempt uv tool install rumdl==%s", rumdlPinnedVersion))
 		return
 	}
 
-	// Prefer the harvestpy-provisioned uv; fall back to a bare "uv" so
-	// exec searches $PATH for a system-installed one when the provisioned
-	// binary is absent.
-	uvPath := provisionedUV
-	if info, statErr := os.Stat(uvPath); statErr != nil || info.IsDir() {
-		if path, lookupErr := processRunner.LookPath("uv"); lookupErr == nil {
-			uvPath = path
-		} else {
-			installer.skip("rumdl: no uv available (checked provisioned harvestpy uv and PATH)")
-			return
-		}
+	uvPath, lookupErr := processRunner.LookPath("uv")
+	if lookupErr != nil {
+		installer.skip("rumdl: no uv available on PATH")
+		return
 	}
 
 	binDir := filepath.Join(installer.options.Home, ".local", "bin")
@@ -106,7 +95,7 @@ func (installer *engine) provisionRumdl(ctx context.Context) {
 	if runErr != nil || result.ExitCode != 0 {
 		var lookupErr *exec.Error
 		if errors.Is(runErr, os.ErrNotExist) || errors.As(runErr, &lookupErr) {
-			installer.skip("rumdl: no uv available (checked provisioned harvestpy uv and PATH)")
+			installer.skip("rumdl: no uv available on PATH")
 			return
 		}
 		installer.skip(fmt.Sprintf(

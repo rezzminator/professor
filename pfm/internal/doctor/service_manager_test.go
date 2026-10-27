@@ -13,7 +13,9 @@ import (
 // mcpEnabledRuntime is a runtime whose config serves one MCP server, so the
 // service-manager row probes instead of reporting disabled-in-config.
 func mcpEnabledRuntime() config.Runtime {
-	return config.Runtime{Config: config.Config{MCPServers: map[string]config.MCPServer{"professor": {Enabled: true}}}}
+	return config.Runtime{
+		Config: config.Config{MCPServers: map[string]config.MCPServer{config.MCPServerChat: {Enabled: true}}},
+	}
 }
 
 // TestPrintServiceManagerDoctorReportsThreeStates watches the three states
@@ -177,7 +179,7 @@ func TestPrintServiceManagerDoctorDisabledInConfigNeverProbes(t *testing.T) {
 	defer func() { ServiceManagerProbeOverride = nil }()
 
 	runtime := config.Runtime{
-		Config: config.Config{MCPServers: map[string]config.MCPServer{"professor": {Enabled: false}}},
+		Config: config.Config{MCPServers: map[string]config.MCPServer{config.MCPServerChat: {Enabled: false}}},
 	}
 	var output strings.Builder
 	if warnings := printServiceManagerDoctor(context.Background(), &output, nil, runtime); warnings != 0 {

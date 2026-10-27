@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -222,20 +221,21 @@ func TestRestartWorkerEnvDropsThePaneAndKeepsTheHerdrBinary(t *testing.T) {
 }
 
 func TestLaunchingChatIsTheTmuxSocketOrTheHerdrPane(t *testing.T) {
-	t.Setenv(herdr.EnvMarker, "1")
-	t.Setenv(herdr.EnvSocket, "/run/herdr.sock")
-	t.Setenv(herdr.EnvPane, "w1:p2")
-	t.Setenv("TMUX", "/tmp/tmux-0/pfm-cc-a,123,0")
-	if got := launchingChat(); got != (chatAddress{Socket: "pfm-cc-a"}) {
-		t.Fatalf("a tmux chat in a Herdr pane = %+v, want its tmux socket", got)
-	}
-	t.Setenv("TMUX", "")
-	if got := launchingChat(); got != (chatAddress{Socket: "/run/herdr.sock", Pane: "w1:p2"}) {
-		t.Fatalf("a chat directly in a Herdr pane = %+v, want its Herdr socket and pane", got)
-	}
-	t.Setenv(herdr.EnvMarker, "")
-	if got := launchingChat(); got != (chatAddress{}) {
-		t.Fatalf("outside every chat = %+v", got)
+	original := restartIdentify
+	t.Cleanup(func() { restartIdentify = original })
+	for _, tc := range []struct {
+		identity resolve.Identity
+		err      error
+		want     chatAddress
+	}{
+		{identity: resolve.Identity{Backend: "tmux", SocketPath: "/tmp/tmux-0/pfm-cc-a"}, want: chatAddress{Socket: "pfm-cc-a"}},
+		{identity: resolve.Identity{Backend: "herdr", SocketPath: "/run/herdr.sock", Pane: "w1:p2"}, want: chatAddress{Socket: "/run/herdr.sock", Pane: "w1:p2"}},
+		{err: resolve.ErrNotInChat},
+	} {
+		restartIdentify = func(context.Context) (resolve.Identity, error) { return tc.identity, tc.err }
+		if got, err := launchingChat(); err != nil || got != tc.want {
+			t.Fatalf("launcher=%+v, want %+v", got, tc.want)
+		}
 	}
 }
 
@@ -307,35 +307,19 @@ func TestSessionLeaderReadsThisProcess(t *testing.T) {
 	}
 }
 
-func TestLiveDepsReadsTheSearchBackendAndDaemonFromConfig(t *testing.T) {
+func TestLiveDepsReadsTheDaemonFromConfig(t *testing.T) {
 	runtime := config.Runtime{Paths: paths.Values{StateDB: "/jail/state/fleet.db", Home: "/jail"}}
 	plain := LiveDeps(runtime, &bytes.Buffer{}, []int{9}, chatAddress{Socket: "pfm-cc-a"})
-	if plain.SearchURL != "" || plain.DaemonProbe != nil || plain.LaunchedFrom.Socket != "pfm-cc-a" ||
+	if plain.DaemonProbe != nil || plain.LaunchedFrom.Socket != "pfm-cc-a" ||
 		!slices.Equal(plain.Spare, []int{9}) {
 		t.Fatalf("plain deps = %+v", plain)
 	}
 	if plain.LogDir != "/jail/state/restart" {
 		t.Fatalf("log dir = %q, want beside the state database", plain.LogDir)
 	}
-	runtime.Config.Harvester.Enabled = true
-	runtime.Config.Harvester.Search.Enabled = true
-	runtime.Config.Harvester.Search.SearXNGURL = "http://127.0.0.1:8888"
 	runtime.Config.MCPServers = map[string]config.MCPServer{"chat": {Enabled: true}}
 	configured := LiveDeps(runtime, &bytes.Buffer{}, nil, chatAddress{})
-	if configured.SearchURL != "http://127.0.0.1:8888" || configured.DaemonProbe == nil {
-		t.Fatalf("configured deps: search %q, daemon probe set %v", configured.SearchURL, configured.DaemonProbe != nil)
-	}
-}
-
-func TestProbeURLAnswersOnAnyHTTPAnswer(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	if err := probeURL(context.Background(), server.URL); err != nil {
-		t.Fatalf("probe of a live server = %v", err)
-	}
-	server.Close()
-	if err := probeURL(context.Background(), server.URL); err == nil {
-		t.Fatal("probe of a closed server answered")
+	if configured.DaemonProbe == nil {
+		t.Fatalf("configured deps: daemon probe set %v", configured.DaemonProbe != nil)
 	}
 }

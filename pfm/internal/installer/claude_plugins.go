@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -166,10 +167,14 @@ func ownClaudePluginTarget(
 	return localClaudePluginTarget(target, build)
 }
 
-// claudePluginRepository keeps the renamed identity on its existing public repository.
+// claudePluginRepository keeps a renamed identity on its existing public
+// repository: migration exceptions until an authorized repository rename.
 func claudePluginRepository(name string) string {
-	if name == "auto-effort-control" {
-		return claudePluginOwner + "/auto-effort" // Migration exception until an authorized repository rename.
+	switch name {
+	case "auto-effort-control":
+		return claudePluginOwner + "/auto-effort"
+	case "forward-compaction":
+		return claudePluginOwner + "/sub-agent-compact"
 	}
 	return claudePluginOwner + "/" + name
 }
@@ -362,6 +367,13 @@ func (installer *engine) ensureClaudePluginTarget(
 	target *ClaudePluginTarget,
 ) {
 	fail := func(err error) { run.failures = append(run.failures, installer.pluginFailure(run.dir, target.ID, err)) }
+	if successor := target.retiredSuccessor(); successor != "" {
+		// Nothing is installed, enabled or disabled for it: the successor's own
+		// pass disables its enabled copies.
+		gap := retiredListedGap(target.Name, successor)
+		fail(fmt.Errorf("%s — %s", gap.Problem, gap.Fix))
+		return
+	}
 	if target.Undecided != "" {
 		// No copy is installed, enabled or disabled on an error.
 		run.failures = append(run.failures, installer.pluginFailure(
@@ -381,9 +393,9 @@ func (installer *engine) ensureClaudePluginTarget(
 		return
 	}
 	if target.Local {
-		if target.Name == callmeterPlugin && !target.InstallOnly {
+		if _, binaryPlugin := goBinaryPlugins[target.Name]; binaryPlugin && !target.InstallOnly {
 			// The copy's hooks run the binary of its version: it goes first.
-			if err := installer.ensureCallmeterBinary(ctx, target); err != nil {
+			if err := installer.ensureGoPluginBinary(ctx, target); err != nil {
 				fail(err)
 				return
 			}
@@ -436,8 +448,8 @@ func (installer *engine) ensureClaudePluginTarget(
 		}
 	}
 	if target.Local && installed {
-		// Claude runs an installed copy from its snapshot, which moves only here
-		// and at the install above.
+		// Claude records an installed copy's version, which moves only here and
+		// at the install above.
 		if err := installer.ensureClaudePluginCache(ctx, run, target); err != nil {
 			fail(err)
 		}
@@ -570,6 +582,14 @@ func (installer *engine) installClaudePlugin(
 	target *ClaudePluginTarget,
 ) error {
 	install := []string{binary, claudePluginCommand, "install", target.ID, "-y"}
+	for name, definition := range pfmconfig.ExtensionRegistry() {
+		if installer.options.Extensions[name].Active(pfmengine.MustLookup(pfmengine.Claude).LongName) &&
+			definition.Engines[pfmengine.MustLookup(pfmengine.Claude).LongName].ID == target.ID {
+			install = append(
+				install,
+				definition.Engines[pfmengine.MustLookup(pfmengine.Claude).LongName].InstallSuffix...)
+		}
+	}
 	var add []string
 	message := fmt.Sprintf("run %s=%s %s", claudeConfigDirEnv, dir, shellCommandLine(install...))
 	if target.Source != "" {

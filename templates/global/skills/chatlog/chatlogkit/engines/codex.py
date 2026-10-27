@@ -16,6 +16,7 @@ TYPES = ("session_meta", "response_item", "event_msg", "turn_context", "world_st
 EXEC_FOLDED = "response_item/custom_tool_call exec script (shown as its actions)"
 EXIT_CODE = re.compile(r"(?:Process exited with code|Exit code:?)[\s\x85\xa0\x1c-\x1f]*(-?[0-9]+)")
 SHELL_TOOLS = ("exec_command", "shell", "local_shell")
+EXEC_SESSION = re.compile(r'"session_id"\s*:\s*([0-9]+)')
 SPAWN_TOOLS = ("spawn_agent",)
 NA = {"NOTICE": "Codex has no task-notification record",
       "HOOK": "the kit renders no Codex hook record",
@@ -53,11 +54,47 @@ def record(p, n, obj):
     ts = _stamp_of(obj.get("timestamp")) if truthy(obj.get("timestamp")) else _stamp_of(payload.get("timestamp"))
     p.stamp(ts)
     label = kind + "/" + pk if pk else kind
+    _inherit_edge(p, n, kind, pk, payload)
+    before = len(p.events)
+    _record(p, n, ts, kind, pk, label, payload)
+    if getattr(p, "inherit", None) and p.inherit[1] is None:
+        for ev in p.events[before:]:
+            if ev.kind == PROMPT:
+                ev.mech.add("INHERITED")
+
+
+def _inherit_edge(p, n, kind, pk, payload):
+    """A forked child (session_meta forked_from_id) carries its parent's history first: the parent's
+    session_meta opens it, the child's own task (its first inter-agent message, else the second
+    task_started) closes it; p.inherit is [first line, last line or None while open]."""
+    if kind == "session_meta":
+        parent = payload.get("forked_from_id")
+        if truthy(parent) and "forked_from" not in p.meta:
+            p.meta["forked_from"] = pystr(parent)
+        elif p.meta.get("forked_from") and pystr(payload.get("id")) == p.meta["forked_from"]:
+            p.inherit, p.inherit_starts = [n, None], 0
+        return
+    if not getattr(p, "inherit", None) or p.inherit[1] is not None:
+        return
+    if kind == "inter_agent_communication_metadata" or (kind == "response_item" and pk == "agent_message"):
+        p.inherit[1] = n - 1
+    elif kind == "event_msg" and pk == "task_started":
+        p.inherit_starts += 1
+        if p.inherit_starts == 2:
+            p.inherit[1] = n - 1
+
+
+def _record(p, n, ts, kind, pk, label, payload):
     if kind == "session_meta":
         _set_or(p, "session", payload.get("id"), get(payload, "session_id"))
         p.set_meta_value("cwd", get(payload, "cwd"))
         p.set_meta_value("cli", get(payload, "cli_version"))
         p.mark(n, HEADER, kind)
+        # Keep the digest header compact, but let entry L{n} recover the launch
+        # instructions and settings just as it recovers folded tool wrappers.
+        ev = Event(n, ts, NOTE, text=dumps(payload), sub="SESSION_META")
+        ev.hidden = True
+        p.events.append(ev)
     elif kind == "turn_context":
         settings = get(get(payload, "collaboration_mode"), "settings")
         settings = settings if isinstance(settings, dict) else {}
@@ -75,6 +112,8 @@ def record(p, n, obj):
         p.add(ev, label)
     elif kind == "response_item" and pk == "message":
         _message(p, n, ts, label, payload)
+    elif kind == "response_item" and pk == "agent_message":
+        _agent_message(p, n, ts, label, payload)
     elif kind == "response_item" and pk in ("function_call", "custom_tool_call"):
         name = pystr(payload["name"]) if "name" in payload else "?"
         inp = payload.get("arguments" if pk == "function_call" else "input")
@@ -130,6 +169,23 @@ def _message(p, n, ts, label, payload):
         p.mark(n, SKIPPED, label + ":" + role)
 
 
+def _agent_message(p, n, ts, label, payload):
+    """A message between Codex agents (a sub-agent's return, a send_message to a sibling): its sender,
+    recipient and plain text are kept; an encrypted payload is named, never decoded."""
+    author = pystr(payload["author"]) if truthy(payload.get("author")) else "?"
+    recipient = pystr(payload["recipient"]) if truthy(payload.get("recipient")) else "?"
+    content = payload.get("content") if isinstance(payload.get("content"), list) else []
+    plain = " ".join(pystr(c["text"]) for c in content
+                     if isinstance(c, dict) and c.get("type") in ("input_text", "output_text", "text")
+                     and truthy(c.get("text")))
+    plain = re.sub(r"\s+", " ", plain).strip()
+    encrypted = any(isinstance(c, dict) and c.get("type") == "encrypted_content" for c in content)
+    text = f"AGENT MESSAGE {author} → {recipient}" + (f" · {plain}" if plain else "")
+    if encrypted:
+        text += " · [payload encrypted]"
+    p.add(Event(n, ts, NOTE, text=text, sub="AGENT-MESSAGE"), label)
+
+
 def tool_output(output):
     """A Codex tool output as (text, failed): a JSON-object string by its "output" member, a nonzero
     exit code (metadata.exit_code, else "Process exited with code N" / "Exit code: N" in the first 400
@@ -178,6 +234,10 @@ def _output(p, n, ts, label, payload):
                 p.mark(ev.line, SKIPPED, EXEC_FOLDED)
                 p.mark(n, SKIPPED, EXEC_FOLDED.replace("custom_tool_call", "custom_tool_call_output", 1))
                 return
+            # a command yielded past its script's end completes later as its own item: remember the
+            # unified-exec session it runs in, so that item folds this script instead of doubling it
+            for sid in EXEC_SESSION.findall(text):
+                p.late_wrappers[sid] = (ev, n)
             break
     p.mark(n, "rendered", label)
 
@@ -190,7 +250,20 @@ def _item_completed(p, n, ts, label, payload):
         note = " (duplicate of its response_item)" if kind in DUPLICATE else ""
         p.mark(n, SKIPPED, label + ":" + kind + note)
         return
+    # a command run in another directory than the session's says so: a worktree run that execs in
+    # the root checkout is otherwise indistinguishable from one that stays in its lane
+    item_cwd = pystr(item["cwd"]).replace("file://", "").rstrip("/") if truthy(item.get("cwd")) else ""
+    session_cwd = pystr(p.meta.get("cwd", "")).replace("file://", "").rstrip("/")
+    pid = pystr(item["process_id"]) if truthy(item.get("process_id")) else ""
+    late = p.late_wrappers.pop(pid, None) if pid else None
+    if late is not None and actions:
+        wrapper, out_line = late
+        wrapper.hidden = True
+        p.mark(wrapper.line, SKIPPED, EXEC_FOLDED)
+        p.mark(out_line, SKIPPED, EXEC_FOLDED.replace("custom_tool_call", "custom_tool_call_output", 1))
     for a in actions:
+        if item_cwd and item_cwd != session_cwd and getattr(a, "name", None) == "exec":
+            a.text = f"[cwd {item_cwd}] " + a.text
         p.add(a, label + ":" + kind)
     if p.wrappers:
         p.wrappers[-1].children += len(actions)
@@ -237,7 +310,12 @@ def _item(n, ts, item):
                     diff = pystr(value[k])
                     break
             plus = minus = 0
+            # an add carries the raw file text, unprefixed: every line is added
+            added = not truthy(value.get("unified_diff")) and truthy(value.get("content"))
             for line in diff.splitlines():
+                if added:
+                    plus += 1
+                    continue
                 if line.startswith("+") and not line.startswith("+++"):
                     plus += 1
                 elif line.startswith("-") and not line.startswith("---"):

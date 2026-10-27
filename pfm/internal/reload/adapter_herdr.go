@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -52,16 +53,31 @@ func NativeTarget(
 	if env == nil {
 		env = paths.OSEnv{}
 	}
-	ambient := socket == "" && env.Get("TMUX") == "" && env.Get("HERDR_ENV") == "1"
+	ambient := socket == ""
 	if ambient {
-		socket = env.Get("HERDR_SOCKET_PATH")
-		if pane == "" {
-			pane = env.Get("HERDR_PANE_ID")
+		environment := resolve.CallerEnvironmentFrom(env)
+		identifier, err := resolve.NewWhoami(
+			resolve.WhoamiDependencies{Environment: &environment, ProcRoot: values.ProcRoot, TmuxDir: values.TmuxDir},
+		)
+		if err != nil {
+			return nil, true, fmt.Errorf("identify reload caller: %w", err)
 		}
-		if socket == "" || pane == "" {
-			return nil, true, errors.New("native socket and pane are required")
+		caller, err := identifier.Identify(ctx)
+		if errors.Is(err, resolve.ErrNotInChat) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, true, fmt.Errorf("identify reload caller: %w", err)
+		}
+		if caller.Backend != spawn.BackendHerdr {
+			return nil, false, nil
+		}
+		socket = caller.SocketPath
+		if pane == "" {
+			pane = caller.Pane
 		}
 	}
+
 	if socket == "" {
 		return nil, false, nil
 	}

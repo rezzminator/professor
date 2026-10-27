@@ -502,10 +502,10 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 						wantEnabled[other(p)] = false
 					}
 				}
+				// forward-compaction retires sub-agent-compact, so its options settle on the kept copy alone.
 				wantConfigs := map[string]any{
 					carried(zero):   map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
 					test.kept(zero): map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-					carried(one):    map[string]any{"options": map[string]any{"a": float64(1)}},
 					test.kept(one):  map[string]any{"options": map[string]any{"b": float64(2)}},
 				}
 				if !reflect.DeepEqual(got["enabledPlugins"], wantEnabled) ||

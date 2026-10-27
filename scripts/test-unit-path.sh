@@ -115,4 +115,15 @@ else
   bad "unit_log names the main checkout's directory minus its dot, from a linked worktree" "$LOG_OUT"
 fi
 
+# Existing paths leave no lexical segments: Bash 3.2 treats that empty array as unset.
+COMPAT_BASH="${PFM_TEST_BASH32:-bash}"
+for input in "$R" / "$R/pfm/internal/a/a_test.go"; do
+  OUT="$("$COMPAT_BASH" -uc 'source "$1"; unit_canon "$2"' _ "$SUT" "$input" 2>&1)"; RC=$?
+  if [ "$RC" = 0 ] && [ "$OUT" = "$input" ]; then ok "nounset empty segments: $input"
+  else bad "nounset empty segments: $input" "rc=$RC" "$OUT"; fi
+done
+OUT="$("$COMPAT_BASH" -uc 'source "$1"; unit_canon "$2"' _ "$SUT" "$R/missing/../new" 2>&1)"; RC=$?
+if [ "$RC" = 0 ] && [ "$OUT" = "$R/new" ]; then ok "nounset nonempty segments collapse"
+else bad "nounset nonempty segments collapse" "rc=$RC" "$OUT"; fi
+
 shtest_end

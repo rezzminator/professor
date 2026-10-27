@@ -257,11 +257,11 @@ bypass_seated() { # <builtin plugin id>: the plugin carrying the induced bypass 
 }
 
 witness_compactions() { # [--agent TYPE]: plugin compaction rows matched to transcript boundaries (D17)
-  local rc t=${LAB_TRANSCRIPT:-} compacted='((.event == "session.compact" and .decision != "skip") or .event == "compact-unseen")' filter b rows out
-  filter="select($compacted and .agentId == null)"
+  local rc t=${LAB_TRANSCRIPT:-} compacted='((.event == "compact" and .decision != "skip" and .decision != "foreign") or .event == "unseen-compaction")' filter b rows out
+  filter="select($compacted and .party == \"main\")"
   if [[ ${1:-} == --agent ]]; then
     t=${LAB_AGENT_TRANSCRIPT:-}
-    filter="select($compacted and .agentId == \"${LAB_AGENT_ID:-none}\")"
+    filter="select($compacted and .party == \"agent:${LAB_AGENT_ID:-none}\")"
   fi
   b=$(transcript_boundaries "$t") || { LAB_EV=${b#ERROR }; return 2; }
   rows=$(decision_rows "$filter") || { LAB_EV=${rows#ERROR }; return 2; }

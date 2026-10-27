@@ -47,7 +47,6 @@ func RetiredPathDetectors() []Detector {
 		{checkLegacyCacheDB, func(env Env) ([]Row, error) {
 			return staleLegacyDB(env, checkLegacyCacheDB, paths.LegacyCacheDB(env.Home), env.CacheDB)
 		}},
-		{checkLegacyHarvesterCache, staleHarvesterCache},
 		{checkStagedPrompts, func(env Env) ([]Row, error) {
 			return stalePresent(
 				checkStagedPrompts,
@@ -105,8 +104,8 @@ func stalePresent(check, problem string, candidates ...string) []Row {
 	return rows
 }
 
-// staleLegacyConfigDir: pfm config init wrote pfm.config.json, config.json
-// and harvester.config.json here until the config moved into the clone.
+// staleLegacyConfigDir: pfm config init wrote pfm.config.json and config.json
+// here until the config moved into the clone.
 func staleLegacyConfigDir(env Env) ([]Row, error) {
 	var rows []Row
 	dir := env.LegacyConfigDir
@@ -120,16 +119,6 @@ func staleLegacyConfigDir(env Env) ([]Row, error) {
 	}
 	if waiting != "" {
 		return append(rows, heldRow(checkLegacyConfigDir, dir, env.ConfigPath, "mv "+waiting+" "+env.ConfigPath)), nil
-	}
-	harvester := filepath.Join(dir, config.HarvesterFileName)
-	target := filepath.Join(filepath.Dir(env.ConfigPath), config.HarvesterFileName)
-	before := len(rows)
-	if inspectPath(&rows, checkLegacyConfigDir, harvester) != nil &&
-		inspectPath(&rows, checkLegacyConfigDir, target) == nil && len(rows) == before {
-		return append(rows, heldRow(checkLegacyConfigDir, dir, target, "mv "+harvester+" "+target)), nil
-	}
-	if len(rows) != before {
-		return rows, nil
 	}
 	return append(rows, staleRow(checkLegacyConfigDir, dir, "pre-clone pfm config dir")), nil
 }
@@ -166,25 +155,6 @@ func staleLegacyDB(_ Env, check, legacy, target string) ([]Row, error) {
 		}
 	}
 	return rows, nil
-}
-
-func staleHarvesterCache(env Env) ([]Row, error) {
-	var rows []Row
-	const check = checkLegacyHarvesterCache
-	path, target := paths.LegacyHarvesterCacheDir(env.Home), paths.HarvesterCacheDir(env.Home)
-	if env.HarvesterCacheDir != "" && paths.PhysicalPath(env.HarvesterCacheDir) == paths.PhysicalPath(path) {
-		return rows, nil
-	}
-	if inspectPath(&rows, check, path) == nil {
-		return rows, nil
-	}
-	if env.HarvesterCacheDir == "" && inspectPath(&rows, check, target) == nil {
-		if len(rows) != 0 {
-			return rows, nil
-		}
-		return append(rows, heldRow(check, path, target, "mv "+path+" "+target)), nil
-	}
-	return append(rows, staleRow(check, path, "pre-rename harvester cache dir")), nil
 }
 
 // staleEngineSyncOldConfig: engine-sync read {config}/engine-sync/config.json

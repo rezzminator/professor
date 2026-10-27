@@ -111,7 +111,7 @@ func compatibleProxyCommand(argv []string) bool {
 		strings.TrimSpace(strings.TrimPrefix(args[0], "--config=")) != "" {
 		args = args[1:]
 	}
-	return (len(args) == 5 && slices.Equal(args[:4], []string{"mcp", "serve", "--stdio", "--family"}) && (args[4] == "chat" || args[4] == "harvester"))
+	return (len(args) == 5 && slices.Equal(args[:4], []string{"mcp", "serve", "--stdio", "--family"}) && args[4] == "chat")
 }
 
 func compatibleProxyMarker(home string) string {

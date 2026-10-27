@@ -2416,11 +2416,13 @@ def recall_runs(rc, root, exclude, before=None, recalls=()):
 def walked_hashes(rc, theirs, hopset, entries):
     """{path: changed} of every working-tree file a node's hops walked, from its sidecar: changed when the file's
     sha256 at ROOT now differs from the one recorded at its write, or the file is gone; a hop pinned to a revision is
-    left out. None when the node has no sidecar or a hop's entry records no sha256."""
+    left out. None when the node has no sidecar, an unverified hop, or an entry records no sha256."""
     if entries is None:
         return None
     got = {}
     for h, e in zip(hopset, entries):
+        if e.get("status") not in ("verified", "moved"):
+            return None
         path, sha = e.get("path"), e.get("sha256")
         if REV_PIN.match(h[1]) or (isinstance(path, str) and REV_PIN.match(path)):
             continue
@@ -2463,9 +2465,8 @@ def cite_paths(text, theirs):
 
 def recall_line(rc, run, theirs, base, text, hopset, idents, walked=None):
     """One prior answer line checked against ROOT now: (kind FRESH | DELTA | STALE | GAP, text with re-addressed
-    cites, notes, failed, scope). FRESH first by hash, a closed-world claim excepted: every file its node walked
-    (walked, from `walked_hashes`) and every file it cites hash as at the write — no git asked, the cites unchanged;
-    else, by git and placement:
+    cites, notes, failed, scope). Place cites and hops before hash reuse: unchanged verified files can bypass git
+    witnessing, except for a closed-world claim. Otherwise witness against BASE:
     STALE: a cite, or any hop its node walked, no longer holds; failed when git could not
     say. DELTA: a cited span moved, or a name it carries changed its occurrence set since BASE; notes the head, then the
     `-`/`+` rows: a moved span at its old and new line, each changed line once however many names it carries; scope
@@ -2476,12 +2477,12 @@ def recall_line(rc, run, theirs, base, text, hopset, idents, walked=None):
     found = list(CITE.finditer(text))
     if not found:
         return "STALE", text, ["no [path:N] cite to re-check"], False, []
-    # a closed-world claim rests on files its node never walked (a new caller elsewhere), so only git witnesses it
-    if not CLOSED_WORLD.search(BACKTICK.sub(" ", CITE.sub(" ", text))) and hash_fresh(walked, text, theirs):
-        return "FRESH", text, [], False, []
     out, last, stale, failed, moves = [], 0, [], False, []
     for m in found:
         path, a, b = rel(m.group(1)), int(m.group(2)), int(m.group(3) or m.group(2))
+        if not 1 <= a <= b:
+            stale.append(f"{path}:{a}: invalid cite range {a}-{b}")
+            continue
         hop = None
         for h in hopset:
             hp = rel(h[1])
@@ -2509,6 +2510,10 @@ def recall_line(rc, run, theirs, base, text, hopset, idents, walked=None):
             failed |= kind == "FAILED"
             continue
         shift = new_line - hop[1]
+        current = rc.files.lines(new_path)
+        if current is None or not 1 <= a + shift <= b + shift <= len(current):
+            stale.append(f"{path}:{a}: cite outside the placed file {new_path}")
+            continue
         span = f"{new_path}:{a + shift}" + (f"-{b + shift}" if m.group(3) else "")
         if kind == "MOVED":
             at = a - hop[1]
@@ -2531,6 +2536,9 @@ def recall_line(rc, run, theirs, base, text, hopset, idents, walked=None):
             if then != "STALE":
                 return "STALE", text, [f"its node's hop {reason}"], then == "FAILED", []
     text = "".join(out) + text[last:]
+    # Hashes skip occurrence witnessing, not cite/hop validation; closed-world claims still need git.
+    if not moves and not CLOSED_WORLD.search(BACKTICK.sub(" ", CITE.sub(" ", text))) and hash_fresh(walked, text, theirs):
+        return "FRESH", text, [], False, []
     named, cited = line_witnesses(text)
     named |= {i for i in idents if holds(text, i, True)}
     if CLOSED_WORLD.search(BACKTICK.sub(" ", CITE.sub(" ", text))) and not named:

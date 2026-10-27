@@ -5,6 +5,7 @@ package stats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -22,20 +24,31 @@ import (
 )
 
 type Header struct {
-	CPUPercent  float64
-	CPUValid    bool
-	PSIPercent  float64
-	RAMPercent  float64
-	SwapPercent float64
-	MemoryBytes uint64
+	CPUPercent float64
+	CPUValid   bool
+	PSIPercent float64
+	// PSIUnavailable marks a host with no CPU pressure reading: macOS, or a
+	// Linux kernel built or booted without PSI.
+	PSIUnavailable bool
+	RAMPercent     float64
+	SwapPercent    float64
+	MemoryBytes    uint64
 }
 
 type Chat struct {
-	Socket          string
-	Name            string
-	Engine          string
-	CPUPercent      float64
-	CPUValid        bool
+	// Seat is compose.LiveSeatKey: one row per live seat, never per server
+	// socket, since every Herdr pane shares its server's socket.
+	Seat       string
+	Name       string
+	Engine     string
+	CPUPercent float64
+	CPUValid   bool
+	// NoProcess marks a live seat none of whose process roots is in the
+	// process table: its CPU and memory are unknown, never zero.
+	NoProcess bool
+	// ProbeFailed marks a process-less seat whose backend probe failed (a
+	// Herdr seat that could not be proven): its usage is unread, not absent.
+	ProbeFailed     bool
 	RSSBytes        uint64
 	RAMPercent      float64
 	GearCount       int
@@ -49,13 +62,15 @@ type Chat struct {
 }
 
 type Container struct {
-	ID            string
-	Name          string
-	Image         string
-	CPUPercent    float64
-	CPUValid      bool
-	MemoryBytes   uint64
-	LimitBytes    uint64
+	ID          string
+	Name        string
+	Image       string
+	CPUPercent  float64
+	CPUValid    bool
+	MemoryBytes uint64
+	LimitBytes  uint64
+	// MemoryPercent is of LimitBytes, or of host RAM for an unlimited
+	// container, as docker stats reports it.
 	MemoryPercent float64
 }
 
@@ -91,13 +106,16 @@ type AccountLimits struct {
 }
 
 type Snapshot struct {
-	Header     Header
-	Chats      []Chat
-	Docker     []Container
-	Limits     []AccountLimits
-	Ready      bool
-	Warnings   []string
-	SampleTime int64
+	Header Header
+	Chats  []Chat
+	Docker []Container
+	Limits []AccountLimits
+	// DockerUnsupported marks a host with no cgroup filesystem to read
+	// containers from (macOS), so an empty Docker list never reads as none.
+	DockerUnsupported bool
+	Ready             bool
+	Warnings          []string
+	SampleTime        int64
 }
 
 type processSample struct {
@@ -198,9 +216,14 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 	}
 	total, idle := resources.total, resources.idle
 	header, processes, warnings := resources.header, resources.processes, resources.warnings
-	docker, dockerRaw, dockerWarnings, err := readDockerResources(sampler.CgroupRoot)
+	docker, dockerRaw, dockerSupported, dockerWarnings, err := readDockerResources(sampler.CgroupRoot)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	for index := range docker {
+		if docker[index].LimitBytes == 0 {
+			docker[index].MemoryPercent = percent(docker[index].MemoryBytes, header.MemoryBytes)
+		}
 	}
 	dockerWarnings = append(dockerWarnings, sampler.resolveDockerIdentities(docker)...)
 	sort.Slice(docker, func(i, j int) bool {
@@ -259,7 +282,7 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 		}
 	}
 	return Snapshot{
-		Header: header, Chats: chats, Docker: docker,
+		Header: header, Chats: chats, Docker: docker, DockerUnsupported: !dockerSupported,
 		Ready: previous != nil, Warnings: warnings, Limits: limits, SampleTime: now,
 	}, nil
 }
@@ -344,6 +367,12 @@ func readLinuxHeader(root string) (Header, error) {
 	}
 	pressure, err := os.ReadFile(filepath.Join(root, "pressure", "cpu"))
 	if err != nil {
+		// No PSI (CONFIG_PSI off, or psi=0: absent or EOPNOTSUPP) is one
+		// unavailable column, never a failed sample of the whole tab.
+		if os.IsNotExist(err) || errors.Is(err, syscall.EOPNOTSUPP) {
+			header.PSIUnavailable = true
+			return header, nil
+		}
 		return Header{}, fmt.Errorf("read CPU pressure: %w", err)
 	}
 	for _, field := range strings.Fields(string(pressure)) {
@@ -428,8 +457,9 @@ func parseProcessStat(pid int, content []byte) (processSample, error) {
 }
 
 type chatTree struct {
-	chat  Chat
-	roots []int
+	chat        Chat
+	roots       []int
+	probeFailed bool
 }
 
 func chatTrees(
@@ -440,25 +470,29 @@ func chatTrees(
 	cpuCount int,
 	memoryTotal uint64,
 ) []Chat {
-	bySocket := make(map[string]*chatTree)
+	bySeat := make(map[string]*chatTree)
 	for index := range rows {
 		row := &rows[index]
 		if row.Socket == "" || !liveKind(row.Kind) {
 			continue
 		}
-		tree := bySocket[row.Socket]
+		seat := compose.LiveSeatKey(*row)
+		tree := bySeat[seat]
 		if tree == nil {
-			tree = &chatTree{chat: Chat{Socket: row.Socket, Name: row.Name, Engine: statsEngineName(row.Kind)}}
-			bySocket[row.Socket] = tree
+			tree = &chatTree{chat: Chat{Seat: seat, Name: row.Name, Engine: statsEngineName(row.Kind)}}
+			bySeat[seat] = tree
 		}
 		tree.roots = append(tree.roots, row.PanePIDs...)
+		if row.BackendError != "" {
+			tree.probeFailed = true
+		}
 	}
 	children := make(map[int][]int)
 	for pid, process := range current {
 		children[process.parent] = append(children[process.parent], pid)
 	}
-	chats := make([]Chat, 0, len(bySocket))
-	for _, tree := range bySocket {
+	chats := make([]Chat, 0, len(bySeat))
+	for _, tree := range bySeat {
 		// tmux is the direct parent of each pane root and belongs to the socket
 		// tree too. Include it once per socket so the Stats row represents the
 		// server, the engine pane, and every descendant—not merely the pane's
@@ -482,6 +516,7 @@ func chatTrees(
 			rootSet[root] = true
 		}
 		var currentTicks, priorTicks uint64
+		found := false
 		for len(stack) > 0 {
 			pid := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
@@ -489,10 +524,11 @@ func chatTrees(
 				continue
 			}
 			visited[pid] = true
-			process, found := current[pid]
-			if !found {
+			process, present := current[pid]
+			if !present {
 				continue
 			}
+			found = true
 			currentTicks += process.jiffies
 			tree.chat.RSSBytes += process.rss
 			if previous != nil {
@@ -504,6 +540,12 @@ func chatTrees(
 				tree.chat.GearCount++
 			}
 			stack = append(stack, children[pid]...)
+		}
+		if !found {
+			tree.chat.NoProcess = true
+			tree.chat.ProbeFailed = tree.probeFailed
+			chats = append(chats, tree.chat)
+			continue
 		}
 		if memoryTotal > 0 {
 			tree.chat.RAMPercent = percent(tree.chat.RSSBytes, memoryTotal)
@@ -519,7 +561,7 @@ func chatTrees(
 		}
 		chats = append(chats, tree.chat)
 	}
-	sort.Slice(chats, func(i, j int) bool { return chats[i].Socket < chats[j].Socket })
+	sort.Slice(chats, func(i, j int) bool { return chats[i].Seat < chats[j].Seat })
 	return chats
 }
 

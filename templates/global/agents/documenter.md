@@ -4,7 +4,7 @@ description: MANDATORY — Updates permanent docs per handoff — docs hub, proj
 model: sonnet
 effort: high
 effortControl: on
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 ---
 
 # Documenter — Documentation Source of Truth
@@ -58,7 +58,7 @@ Where present:
 - You are, with the main loop, the ONLY writer of the surfaces § Doc layout finds
 - You MAY write to `docs/epics/*/` only per § Epic consolidation contract — never `## Vision & Scope`, `status:`, or epic creation/deletion (the Professor owns the lifecycle)
 - NEVER write to: source code; orientation files and `.claude/` files (the `pcm` agent's, where installed); the repo's gitter manual; temporary/pipeline files (`docs/dev/builds/`); research files (`.professor/RR/`)
-- Reserved: a path the orientation file or an installed command's or agent's definition gives another owner — in a Professor install `docs/facts/` (user-ruled facts, main-loop-written on explicit ruling only), `docs/epics/legal/` (`/officer`), `docs/business/` (`/mentor`, `/marketer`). A path whose named owner is not installed stays read-only to you; name it in your return.
+- Reserved: a path the orientation file or an installed command's or agent's definition gives another owner — in a Professor install `docs/facts/` (user-ruled facts, main-loop-written on explicit ruling only). A path whose named owner is not installed stays read-only to you; name it in your return.
 
 ## Doc clusters
 

@@ -89,7 +89,9 @@ cmd_up() {
   . "$REPO_ROOT/infra/fence/housekeeping.sh"
   fence_housekeeping
   exists && die "container $NAME already exists — 'down' it or 'revert' to the snapshot"
-  docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >/dev/null \
+  local -a build_args=()
+  if [[ -n "${PFM_NPM_REGISTRY:-}" ]]; then build_args=(--build-arg "PFM_NPM_REGISTRY=$PFM_NPM_REGISTRY"); fi
+  docker build -q -t "$IMAGE" ${build_args[@]+"${build_args[@]}"} -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >/dev/null \
     || die "build image $IMAGE failed"
   start_from
 }

@@ -39,72 +39,77 @@ var callmeterEnvDropped = []string{"GOFLAGS", "GOEXPERIMENT", "GOOS", "GOARCH", 
 // checkout.
 var callmeterEnvPinned = []string{"CGO_ENABLED=0", "GOWORK=off", "GOFLAGS=-mod=readonly"}
 
-// ensureCallmeterBinary builds ./cmd/callmeter from the module holding
-// target's checkout, stamped with the checkout's plugin.json version, and puts
-// it where the wrapper runs it (callmeterBinaryPath). A binary with the same
-// bytes is left alone; otherwise the one in place is kept as callmeter.prev,
-// the rollback, and the build renamed over it, so a hook never sees a partial
-// file. Nothing else under the callmeter home is touched, its database never.
-// A dry run builds nothing and says what would be built.
-func (installer *engine) ensureCallmeterBinary(ctx context.Context, target *ClaudePluginTarget) error {
+// goBinaryPlugins are plugins whose local copies need a matching Go binary.
+var goBinaryPlugins = map[string]struct {
+	binaryPath      func(paths.Env, string, string) (string, error)
+	hookEnvironment bool
+}{
+	callmeterPlugin: {
+		binaryPath:      callmeterBinaryPath,
+		hookEnvironment: true,
+	},
+}
+
+func (installer *engine) ensureGoPluginBinary(ctx context.Context, target *ClaudePluginTarget) error {
+	plugin := goBinaryPlugins[target.Name]
 	version, err := callmeterCheckoutVersion(target.Checkout)
 	if err != nil {
 		return err
 	}
-	binary, err := callmeterBinaryPath(
-		ClaudePluginEnvironment(installer.env(), installer.options.ClaudeEnv),
-		installer.options.Home,
-		version,
-	)
+	env := installer.env()
+	if plugin.hookEnvironment {
+		env = ClaudePluginEnvironment(env, installer.options.ClaudeEnv)
+	}
+	binary, err := plugin.binaryPath(env, installer.options.Home, version)
 	if err != nil {
 		return err
 	}
 	module := filepath.Dir(filepath.Dir(target.Checkout))
 	if !installer.apply {
 		return installer.change(
-			"build callmeter "+version+" from "+module+" and place it at "+binary+" when it differs", nil,
+			"build "+target.Name+" "+version+" from "+module+" and place it at "+binary+" when it differs", nil,
 		)
 	}
 	goBinary, err := installer.processRunner().LookPath("go")
 	if err != nil {
-		return fmt.Errorf("build callmeter %s from %s: go not found: %w", version, module, err)
+		return fmt.Errorf("build "+target.Name+" %s from %s: go not found: %w", version, module, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(binary), err)
 	}
 	// The build lands in a scratch dir beside the binary, so placing it is a rename.
-	staging, err := os.MkdirTemp(filepath.Dir(binary), ".callmeter.build-")
+	staging, err := os.MkdirTemp(filepath.Dir(binary), "."+target.Name+".build-")
 	if err != nil {
-		return fmt.Errorf("stage the callmeter build: %w", err)
+		return fmt.Errorf("stage the "+target.Name+" build: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(staging) }()
-	built := filepath.Join(staging, "callmeter")
+	built := filepath.Join(staging, target.Name)
 	argv := []string{
 		goBinary, "build", "-trimpath", "-buildvcs=false",
 		"-ldflags", "-s -w -buildid= -X main.version=" + version,
-		"-o", built, "./cmd/callmeter",
+		"-o", built, "./cmd/" + target.Name,
 	}
 	options := deps.RunOptions{Dir: module, Env: callmeterBuildEnvironment()}
 	if err := runPluginCommandWithin(ctx, installer.processRunner(), argv, options, callmeterBuildTimeout); err != nil {
-		return fmt.Errorf("build callmeter %s in %s: %w", version, module, err)
+		return fmt.Errorf("build "+target.Name+" %s in %s: %w", version, module, err)
 	}
 	fresh, err := os.ReadFile(built)
 	if err != nil {
-		return fmt.Errorf("read the callmeter build %s: %w", built, err)
+		return fmt.Errorf("read the "+target.Name+" build %s: %w", built, err)
 	}
 	if len(fresh) == 0 {
-		return fmt.Errorf("build callmeter %s in %s: the build wrote no binary at %s", version, module, built)
+		return fmt.Errorf("build "+target.Name+" %s in %s: the build wrote no binary at %s", version, module, built)
 	}
 	current, err := os.ReadFile(binary)
 	switch {
 	case err == nil && bytes.Equal(current, fresh) && callmeterExecutable(binary):
-		installer.ok("callmeter binary " + binary + " matches the build of " + module)
+		installer.ok(target.Name + " binary " + binary + " matches the build of " + module)
 		return nil
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("read %s: %w", binary, err)
 	}
 	existed := err == nil
-	message := "place callmeter " + version + " built from " + module + " at " + binary
+	message := "place " + target.Name + " " + version + " built from " + module + " at " + binary
 	if existed {
 		message += ", the binary there kept as " + binary + ".prev"
 	}
@@ -134,7 +139,7 @@ func placeCallmeterBinary(built, binary string, keepPrev bool) (err error) {
 		return fmt.Errorf("make %s executable: %w", built, err)
 	}
 	if keepPrev {
-		staged := filepath.Join(filepath.Dir(built), "callmeter.prev")
+		staged := filepath.Join(filepath.Dir(built), filepath.Base(binary)+".prev")
 		if err := os.Link(binary, staged); err != nil {
 			return fmt.Errorf("keep %s as the rollback: %w", binary, err)
 		}
@@ -204,14 +209,10 @@ func ClaudePluginCheckoutVersion(checkout string) (string, error) {
 	return manifest.Version, nil
 }
 
-// CallmeterBinaryGap is the gap of target when it is the enabled callmeter
-// -dev copy and the binary its wrapper runs (callmeterBinaryPath for the
-// checkout's plugin.json version) is not an executable file: the wrapper then
-// downloads a release binary, which the checksum list of an unreleased version
-// refuses, and every hook drops its event. ok is false for every other target
-// and for a binary in place.
-func CallmeterBinaryGap(env paths.Env, home string, target ClaudePluginTarget) (gap ClaudePluginGap, ok bool) {
-	if target.Name != callmeterPlugin || !target.Local || target.InstallOnly {
+// GoPluginBinaryGap reports an enabled local Go plugin whose matching binary cannot run.
+func GoPluginBinaryGap(env paths.Env, home string, target ClaudePluginTarget) (gap ClaudePluginGap, ok bool) {
+	plugin, supported := goBinaryPlugins[target.Name]
+	if !supported || !target.Local || target.InstallOnly {
 		return ClaudePluginGap{}, false
 	}
 	problem := "plugin " + target.ID + " binary "
@@ -219,14 +220,14 @@ func CallmeterBinaryGap(env paths.Env, home string, target ClaudePluginTarget) (
 	if err != nil {
 		return ClaudePluginGap{Problem: problem + "cannot be checked: " + err.Error(), Fix: ClaudePluginRepair}, true
 	}
-	binary, err := callmeterBinaryPath(env, home, version)
+	binary, err := plugin.binaryPath(env, home, version)
 	if err != nil {
 		return ClaudePluginGap{Problem: problem + "cannot be checked: " + err.Error(), Fix: ClaudePluginRepair}, true
 	}
 	_, err = os.Stat(binary)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		problem += binary + " missing: its hooks would download a release binary, which an unreleased version fails"
+		problem += binary + " missing: its wrapper would download a release binary, which an unreleased version fails"
 	case err != nil:
 		problem += binary + " cannot be read: " + err.Error()
 	case !callmeterExecutable(binary):

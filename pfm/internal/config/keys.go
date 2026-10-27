@@ -38,7 +38,7 @@ const KeyClaudeEnv = "claude.env"
 // false launches Claude without the OTel knobs and starts no cost sink.
 const KeyClaudeCostLedger = "claude.costLedger"
 
-// KeyClaudeGptAgents is the machine-wide opt-in for the gpt agent family.
+// KeyClaudeGptAgents is the machine-wide switch declaring the engine-sync capability gpt-agents.
 const KeyClaudeGptAgents = "claude.gptAgents"
 
 // KeyClaudeSubagentStatuslineTrace is the machine-wide switch of the sub-agent status line's

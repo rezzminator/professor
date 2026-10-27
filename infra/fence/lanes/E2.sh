@@ -439,19 +439,17 @@ if requires E2.01-open-seat; then
   bad=""
   toml="$CODEX_HOME/config.toml"
   bin="$HOME/.local/bin/pfm"
-  # M34: both family servers wired over stdio inside the installer-owned fence
+  # M34: chat server wired over stdio inside the installer-owned fence
   # (internal/installer/mcp.go writeMCPCodeConfigAt).
   if [ ! -f "$toml" ]; then
     bad="$bad no $toml — the installer writes the [mcp_servers] fence there;"
   else
     fence="$(sed -n '/^# BEGIN pfm mcp_servers — installer-owned$/,/^# END pfm mcp_servers — installer-owned$/p' "$toml")"
     [ -n "$fence" ] || bad="$bad $toml carries no '# BEGIN/END pfm mcp_servers — installer-owned' fence;"
-    for family in chat harvester; do
-      section="$(awk -v header="[mcp_servers.$family-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
-      grep -qF "command = \"$bin\"" <<<"$section" &&
-        grep -qF "args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"$family\"]" <<<"$section" ||
-        bad="$bad the fence lacks the $family-professor stdio command;"
-    done
+    section="$(awk -v header="[mcp_servers.chat-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
+    grep -qF "command = \"$bin\"" <<<"$section" &&
+      grep -qF 'args = ["mcp", "serve", "--stdio", "--family", "chat"]' <<<"$section" ||
+      bad="$bad the fence lacks the chat-professor stdio command;"
   fi
   # The served surface: three JSON-RPC frames on stdin to the stdio command
   # itself (initialize, notifications/initialized, tools/list) — the same
@@ -477,7 +475,7 @@ if requires E2.01-open-seat; then
       for want in ls status last call whoami new kill unkill name; do
         grep -qx "$want" <<<"$tools" || bad="$bad tools/list lacks $want;"
       done
-      # Compare the chat server roster, leaving the separate harvester tools
+      # Compare the chat server roster, leaving the separate plugin tools
       # out of this chat-server assertion.
       status_tools="$(curl -s -m 5 "http://127.0.0.1:$PORT/status" | jq -r '.servers.chat[]?' 2>/dev/null | sort)"
       if [ -z "$status_tools" ]; then
@@ -488,7 +486,7 @@ if requires E2.01-open-seat; then
     fi
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "config.toml fence wires both family stdio commands at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) chat tools, matching /status"
+    pass "config.toml fence wires the chat stdio command at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) chat tools, matching /status"
   fi
 fi
 
@@ -536,7 +534,7 @@ if requires E2.01-open-seat; then
   id="$(live_field "$CHAT" 2)"
   # Codex tool shells are served by app-server and carry no TMUX — only
   # CODEX_THREAD_ID names the caller (cmd/pfm/chat_command.go runChatKill →
-  # chat.SeatIdentity). Driven from this shell with exactly that environment.
+  # resolve.Whoami.Identify). Driven from this shell with exactly that environment.
   for alias in self me; do
     out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id" pfm chat kill "$alias" --exit 2>&1)"
     rc=$?
@@ -631,7 +629,7 @@ spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
-  report="$(pfm doctor --skip-harvest 2>&1)"
+  report="$(pfm doctor 2>&1)"
   doctor_rc=$?
   bindings="$(grep -E '^doctor: codex_pane_bindings total=' <<<"$report" | tail -1)"
   panes="$(grep -E '^doctor: codex_panes live=' <<<"$report" | tail -1)"

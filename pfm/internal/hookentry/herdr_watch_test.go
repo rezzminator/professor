@@ -413,6 +413,10 @@ func TestHerdrWatchIsFailOpen(t *testing.T) {
 	}
 	t.Run("a Codex block starts no watch", func(t *testing.T) {
 		rig := newWatchRig(t)
+		if err := os.WriteFile(rig.transcript,
+			[]byte(`{"type":"session_meta","payload":{"id":"s1","source":"cli"}}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		// Codex TUI pid 50 is the chat pane's process, registered by its SessionStart.
 		rig.jail.procs = map[int]fakeProc{100: {50, "pfm"}, 50: {1, "codex"}}
 		rig.jail.argv = map[int][]string{50: {"codex"}}

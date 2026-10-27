@@ -14,10 +14,6 @@ mcp__chat-professor__save	M	M.10-chat-tools-gap
 mcp__chat-professor__status	M	M.09-chat-tools
 mcp__chat-professor__unkill	M	M.10-chat-tools-gap
 mcp__chat-professor__whoami	M	M.09-chat-tools
-mcp__harvester-professor__download_file	M	M.11-harvester-tools
-mcp__harvester-professor__read	M	M.11-harvester-tools
-mcp__harvester-professor__search_literature	M	M.11-harvester-tools
-mcp__harvester-professor__search_web	M	M.11-harvester-tools
 pfm archive	O2	O2.02-archive
 pfm chat ask	E1	E1.15-ask
 pfm chat ask	E2	E2.07-call-ask-watch
@@ -71,9 +67,6 @@ pfm config show	O1	O1.13-misc-ops
 pfm config validate	O1	O1.13-misc-ops
 pfm doctor	M	M.04-doctor-mcp
 pfm doctor	O1	O1.10-doctor-exit-contract
-pfm harvest	O2	O2.09-harvester
-pfm harvest ask	O2	O2.09-harvester
-pfm harvest download-file	M	M.11-harvester-tools
 pfm headless	O2	O2.04-headless
 pfm headless exec	O2	O2.04-headless
 pfm heal	O1	O1.11-heal
@@ -113,7 +106,6 @@ pfm internal statusline	E1	E1.23-launcher
 pfm internal then	E1	E1.07-reload-then
 pfm internal tmux-title-renudge	O2	O2.05-internal-plumbing
 pfm internal update-check	A	A.14-release-notice
-pfm issues	O1	O1.13-misc-ops
 pfm log	O2	O2.05b-activity-log
 pfm ls	A	A.15-fleet-unchanged-by-update
 pfm ls	F	F.06-ls-rows
@@ -144,7 +136,6 @@ pfm update pin	A	A.05-update-verbs
 pfm usage-hook	O1	O1.13-misc-ops
 pfm version	O1	O1.13-misc-ops
 pfm whoami	O1	O1.13-misc-ops
-mcp__chat-professor__servicedesk	M	M.10-chat-tools-gap
 pfm chat new	H	H.birth
 pfm internal seat-host	H	H.seat-host
 pfm chat call	H	H.native-call
@@ -160,3 +151,4 @@ pfm chat call	H	H.herdr-to-herdr
 pfm chat watch	H	H.watch
 pfm chat name	H	H.name
 pfm chat open	H	H.open-restored
+pfm config validate	O1	O1.20-extensions

@@ -21,7 +21,7 @@ A workbench owns its own CLAUDE.md: engine-sync codex build {dir} compiles it in
 | `effort` | string | none | each launch validates it against its engine's efforts and carries it lower-cased; an unknown value refuses the launch |
 | `model` | string | none | carried verbatim |
 
-Unknown or mistyped fields invalidate the manifest. Engine words are `claude`, `codex`, `opencode`; `cc` and `cx` are CLI aliases, not manifest values. OpenCode carries the prompt only.
+Unknown or mistyped fields invalidate the manifest. Engine words are `claude`, `codex`, `opencode`; `cc` and `cx` are CLI aliases, not manifest values. OpenCode requires `model` as `provider/model` and applies model/effort through its native seat plugin.
 
 ## new
 
@@ -54,7 +54,7 @@ For `/pfm:workbench new docs/scribe` in `/work/acme`:
 
 1. Read the manifest and edit the named field: `engines` sets availability and carousel order; `effort` and `model` set defaults; `prompt` names the file under `.professor/`; `title` labels the picker group; `name` sets the numbered-name prefix. Preserve every other field and the prompt unless requested.
 2. When adding `codex` to `engines`, write `{dir}/CLAUDE.md` first if absent, then enable it and run `engine-sync codex build {dir}`. When enabling `opencode`, run `engine-sync opencode build {dir}`. Rebuild the enabled mirrors after changing their Claude sources; launches also rebuild their own mirror before spawning.
-3. Run `check`. Explicit launch flags win over the persona: Claude `--system-prompt-file` / `--harness-prompt`, Codex `-c developer_instructions=…`, and each engine's explicit effort/model flags. `--agent-role` composes the role on the explicit harness, else the workbench prompt, else the fleet prompt.
+3. Run `check`. Explicit launch flags win over the persona: Claude `--system-prompt-file` / `--harness-prompt`, Codex `-c developer_instructions=…`, and each engine's explicit effort/model flags. On Claude/Codex, `--agent-role` composes the role on the explicit harness, else the workbench prompt, else the fleet prompt.
 
 ## check
 
@@ -88,4 +88,4 @@ Write `docs/scribe/CLAUDE.md`, then rerun `engine-sync codex build /work/acme/do
 - Discovery walks 1–6 directories below each managed root, including nested git repositories, `.professor/` and `.workbenches/`; it skips other dot-directories (including `.worktrees`), `node_modules`, `vendor`, `venv`, and symlinks. A chat in a linked worktree groups under the main checkout's bench at the same relative path, and launches on the worktree's own copy of that bench: its prompt, manifest and mirror come from the worktree's branch.
 - Codex and OpenCode also load ancestor `AGENTS.md` files: a parent repo's rules reach a workbench seat on those engines. The persona takes the fleet prompt's place and nothing else: `CLAUDE.md`, `AGENTS.md`, Codex's base instructions, OpenCode's provider prompt, environment and your other `instructions` entries stay; it does not isolate the bench from ancestor rules.
 - The ✦ carousel lists enabled engines with accounts. With none, it shows a workbench error notice. An omitted engine in `chat new` / `mcp__chat-professor__new` uses the current choice when enabled and usable, else the first enabled engine with an account.
-- OpenCode `chat new`, reload and branch remain refused; use its picker ✦ row and resume door. `pfm headless exec`, `PurposeQuery` probes and `internal/ask` one-shot runs are outside the workbench persona rule.
+- OpenCode `chat new` / `mcp__chat-professor__new` supports native Herdr seats only, with the initial prompt separate from policy; `--agent-role`, reload and branch are refused. `pfm headless exec`, `PurposeQuery` probes and `internal/ask` one-shot runs are outside the workbench persona rule.

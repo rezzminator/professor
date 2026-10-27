@@ -34,8 +34,8 @@ func TestUpdateStopsBeforeSelfUpdate(t *testing.T) {
 		config           bool
 	}{
 		{"dirty source", "dirty worktree", []string{"--repo", repo}, false},
-		{"missing marker", "pfm update: ", []string{"--skip-harvest"}, false},
-		{"bare config", "pfm update: config: ", []string{"--skip-harvest"}, true},
+		{"missing marker", "pfm update: ", []string{}, false},
+		{"bare config", "pfm update: config: ", []string{}, true},
 		{"project config", "pfm update: config: ", []string{"pin", "CLAUDE.md"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,7 +70,7 @@ func TestUpdateIgnoresRetiredEnginesBuildTree(t *testing.T) {
 	runtime := updateTestRuntime(t)
 	stubUpdatePipeline(t, runtime)
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo, "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf(
 			"Run() code=%d with retired engine build tree, stdout=%q stderr=%q",
 			code,
@@ -124,10 +124,10 @@ func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
@@ -155,7 +155,7 @@ func TestUpdateRefusesADowngradeItCannotRuleOut(t *testing.T) {
 	stubUpdatePipeline(t, runtime)
 
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--skip-harvest", "--to", "v0.9.0", "--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+	if code := Run([]string{"--to", "v0.9.0", "--repo", repo}, &stdout, &stderr, runtime); code == 0 {
 		t.Fatalf("Run() code = 0, want a refusal; stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "cannot rule out a downgrade to v0.9.0") ||
@@ -173,7 +173,7 @@ func TestUpdateToTheSourceCommitProceedsWhenTheNearestTagDoesNotParse(t *testing
 	stubUpdatePipeline(t, runtime)
 
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--skip-harvest", "--to", "v0.9.0", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"--to", "v0.9.0", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("Run() code = %d, want success; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -189,7 +189,7 @@ func TestUpdateProceedsWhenTheDowngradeIsRuledOut(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := Run(
-		[]string{"--skip-harvest", "--to", "v0.10.0", "--repo", repo},
+		[]string{"--to", "v0.10.0", "--repo", repo},
 		&stdout,
 		&stderr,
 		runtime,
@@ -211,7 +211,7 @@ func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
 	stubUpdatePipeline(t, runtime)
 
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("Run() on a detached source code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if strings.Contains(stderr.String(), "detached") {
@@ -282,13 +282,10 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	installCalls, doctorCalls := 0, 0
-	updateApplyInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ pfmconfig.Runtime, skipHarvest bool, _, _ io.Writer) error {
+	updateApplyInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ pfmconfig.Runtime, _, _ io.Writer) error {
 		installCalls++
 		if !strings.HasSuffix(candidate, "pfm-a") {
 			t.Fatalf("install candidate=%q, want first reproducible build", candidate)
-		}
-		if !skipHarvest {
-			t.Fatal("update did not propagate --skip-harvest to install")
 		}
 		if workingDir != repo {
 			t.Fatalf("candidate installer working directory=%q, want source repo %q", workingDir, repo)
@@ -301,20 +298,17 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		}
 		return nil
 	}
-	updateRunDoctor = func(_ context.Context, candidate string, _ pfmconfig.Runtime, _ string, skipHarvest bool, _, _ io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(_ context.Context, candidate string, _ pfmconfig.Runtime, _ string, _, _ io.Writer) (doctorOutcome, error) {
 		doctorCalls++
 		if !strings.HasSuffix(candidate, "pfm-a") {
 			t.Fatalf("doctor candidate=%q, want first reproducible build", candidate)
-		}
-		if !skipHarvest {
-			t.Fatal("update did not propagate --skip-harvest to doctor")
 		}
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("Run() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if builds != 2 {
@@ -342,7 +336,7 @@ func TestUpdateBareRunReportsNotManagedOutsideAnyProject(t *testing.T) {
 	outside := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	if code := Run(
-		[]string{"--skip-harvest", "--repo", repo, "--root", outside},
+		[]string{"--repo", repo, "--root", outside},
 		&stdout,
 		&stderr,
 		runtime,
@@ -389,7 +383,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	managedMutation := filepath.Join(runtime.Paths.Home, ".local", "share", "pfm", "install", "new-asset")
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		if err := os.MkdirAll(filepath.Dir(managedMutation), 0o700); err != nil {
 			return err
 		}
@@ -398,11 +392,11 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		}
 		return errors.New("injected install failure")
 	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		t.Fatal("doctor ran after install failure")
 		return doctorOutcome{}, nil
 	}
-	updateRollbackInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+	updateRollbackInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ pfmconfig.Runtime, _, _ io.Writer) error {
 		if !strings.Contains(candidate, "previous-") {
 			t.Fatalf("rollback installer candidate=%q, want preserved previous binary", candidate)
 		}
@@ -417,7 +411,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		}
 		return os.RemoveAll(filepath.Dir(managedMutation))
 	}
-	updateRollbackDoctor = func(_ context.Context, candidate string, _ pfmconfig.Runtime, _ string, _ bool, _, _ io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(_ context.Context, candidate string, _ pfmconfig.Runtime, _ string, _, _ io.Writer) (doctorOutcome, error) {
 		if !strings.Contains(candidate, "previous-") {
 			t.Fatalf("rollback doctor candidate=%q, want preserved previous binary", candidate)
 		}
@@ -460,7 +454,7 @@ func stubUpdateBaselineDoctor(t *testing.T, outcome doctorOutcome) {
 	t.Helper()
 	saved := updateBaselineDoctor
 	t.Cleanup(func() { updateBaselineDoctor = saved })
-	updateBaselineDoctor = func(context.Context, pfmconfig.Runtime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateBaselineDoctor = func(context.Context, pfmconfig.Runtime, io.Writer, io.Writer) (doctorOutcome, error) {
 		return outcome, nil
 	}
 }
@@ -506,20 +500,20 @@ func TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings(t *testing.
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
 	}
 	standingWarnings := doctorOutcome{Exit: 1, Warnings: 5, Output: "doctor: warnings=5\n"}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		return standingWarnings, nil
 	}
 	stubUpdateBaselineDoctor(t, standingWarnings)
 	rollbackInstallCalled, rollbackDoctorCalled := false, false
-	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		rollbackInstallCalled = true
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		rollbackDoctorCalled = true
 		return doctorOutcome{}, nil
 	}
@@ -559,17 +553,17 @@ func TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure(t *testing.T) {
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 
@@ -599,10 +593,10 @@ func TestUpdateNamesNewWarningRowsIntroducedByTheCandidate(t *testing.T) {
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{
 			Exit: 1, Warnings: 3,
 			Output: "doctor: row=A\ndoctor: row=B\ndoctor: row=C new-warning\ndoctor: warnings=3\n",
@@ -646,18 +640,18 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
 	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		t.Fatal("candidate doctor ran after install failure")
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		// doctor.go's printCombinedDoctor only ever prints "doctor: failures="
 		// when failures > 0 (doctor.go:304-306) — a tier-aware binary with
 		// warnings alone prints ONLY "doctor: warnings=N", never a
@@ -700,18 +694,18 @@ func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *test
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
 	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		t.Fatal("candidate doctor ran after install failure")
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, io.Writer, io.Writer) (doctorOutcome, error) {
 		// A genuinely pre-M2 binary's doctor output carries NONE of the
 		// three tier markers (issue #24 F3): not "doctor: failures=", not
 		// "doctor: warnings=" (only ever emitted when warnings > 0, and only
@@ -744,7 +738,7 @@ func updateWithReleaseNotesFakes(t *testing.T, repo string) string {
 	runtime := updateTestRuntime(t)
 	stubUpdatePipeline(t, runtime)
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("Run() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	return stdout.String()

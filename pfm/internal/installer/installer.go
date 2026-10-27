@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	goRuntime "runtime"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
-	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
@@ -53,31 +51,6 @@ type engine struct {
 	vscodeThemes []themesync.VSCodeThemeFile
 }
 
-type pinnedHarvestProvisioner struct{}
-
-func (pinnedHarvestProvisioner) Plan(platform harvestpy.Platform) (harvestpy.InstallPlan, error) {
-	return harvestpy.PlanConversionEnvironment(platform)
-}
-
-func (pinnedHarvestProvisioner) Provision(
-	ctx context.Context,
-	options harvestpy.ProvisionOptions,
-) (harvestpy.ProvisionResult, error) {
-	return harvestpy.Provision(ctx, options)
-}
-
-func (pinnedHarvestProvisioner) Check(
-	ctx context.Context,
-	root string,
-	platform harvestpy.Platform,
-) (harvestpy.CheckReport, error) {
-	return harvestpy.CheckConversionEnvironment(ctx, root, platform)
-}
-
-// NewHarvestProvisioner returns the production pinned-runtime adapter. Tests
-// should inject their own HarvestProvisioner through Options instead.
-func NewHarvestProvisioner() HarvestProvisioner { return pinnedHarvestProvisioner{} }
-
 func Run(ctx context.Context, options Options) (report Report, err error) {
 	endRun := runSpan(ctx, options.Mode)
 	defer func() { endRun(err) }()
@@ -106,6 +79,13 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		apply:       options.Mode != ModeDryRun,
 		stamp:       options.Now().Format("20060102-150405"),
 		managedRoot: managedRootForHome(options.Home),
+	}
+	if installer.apply {
+		unlock, lockErr := lockInstaller(installer.managedRoot)
+		if lockErr != nil {
+			return Report{}, lockErr
+		}
+		defer func() { err = errors.Join(err, unlock()) }()
 	}
 	installer.say("pfm install: home=%s config=%s", options.Home, options.ConfigDir)
 	switch options.Mode {
@@ -217,7 +197,6 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.generateHarnessPrompts(); err != nil {
 		return fmt.Errorf("generate harness prompts: %w", err)
 	}
-	installer.deferFailure(installer.installHarvest(ctx))
 	installer.deferFailure(installer.installMarkdownTool(ctx))
 	installer.installThemes(ctx)
 	vscodeThemes, err := installer.writeVSCodeThemes(installer.renderVSCodeThemes())
@@ -304,7 +283,9 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
+	installer.deferFailure(installer.ensureExtensions(ctx, false))
 	installer.deferFailure(installer.ensureClaudePlugins(ctx))
+	installer.deferFailure(installer.recordClaudeExtensionMarketplaces())
 	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
 	installer.deferFailure(installer.wireCodexHooks())
@@ -321,7 +302,9 @@ func (installer *engine) install(ctx context.Context) error {
 	// daemon after its complete config/client transaction has landed.
 	// A restart that does not come back fails the run after every later step
 	// has landed, like a failed plugin install.
-	if !schedulerIsLaunchd && installer.apply && installer.mcpAnyEnabled() && installer.userManagerAvailable(ctx) {
+	if !schedulerIsLaunchd && installer.apply &&
+		installer.options.MCPEnabled[chatName] &&
+		installer.userManagerAvailable(ctx) {
 		installer.deferFailure(installer.restartMCPUnit(ctx))
 	}
 	installer.deferFailure(mcpErr)
@@ -329,6 +312,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireLogDefault())
 	installer.deferFailure(installer.wireShell(false))
 	installer.deferFailure(installer.wireHerdrShell(false))
+	installer.deferFailure(installer.convergeHerdrIndicators(ctx))
 	installer.deferFailure(installer.wireVSCode())
 	installer.deferFailure(installer.writeUpdateMetadata())
 	// Like a failed plugin install, a refused login default is reported at
@@ -599,9 +583,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.wireOpenCodeInstructions(); err != nil {
 		return err
 	}
-	if err := installer.uninstallHarvest(); err != nil {
-		return err
-	}
 	if err := installer.themeSyncOff(ctx); err != nil {
 		return err
 	}
@@ -617,6 +598,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
 	if err := installer.unwireClaudeLauncher(); err != nil {
+		return err
+	}
+	if err := installer.ensureExtensions(ctx, true); err != nil {
 		return err
 	}
 	if err := installer.ensureClaudeEnv(true); err != nil {
@@ -730,162 +714,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	return nil
 }
 
-func harvestPythonRoot(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "harvest-python")
-}
-
-func (installer *engine) harvestPlatform() harvestpy.Platform {
-	platform := installer.options.HarvestPlatform
-	if platform.GOOS == "" {
-		platform.GOOS, platform.GOARCH = goRuntime.GOOS, goRuntime.GOARCH
-	}
-	return platform
-}
-
-func (installer *engine) installHarvest(ctx context.Context) error {
-	if !installer.options.ProvisionHarvest {
-		if installer.apply {
-			installer.say("harvestpy: skipped (blocked, not attempted)")
-		} else {
-			installer.say("harvestpy: would skip (blocked, not attempted)")
-		}
-		return nil
-	}
-	provider := installer.options.HarvestProvisioner
-	if provider == nil {
-		return errors.New("harvestpy provisioning is enabled but no provisioner is configured")
-	}
-	platform := installer.harvestPlatform()
-	plan, err := provider.Plan(platform)
-	if err != nil {
-		return fmt.Errorf("harvestpy install plan for %s: %w", platform, err)
-	}
-	installer.say(
-		"harvestpy plan: platform=%s Python %s uv=%s uv_download_bytes=%d python_download_bytes=%d package_download_bytes=%d environment_bytes=%d package_status=%s offline=%t",
-		plan.Platform,
-		plan.PythonVersion,
-		plan.UVVersion,
-		plan.UVDownloadBytes,
-		plan.PythonDownloadBytes,
-		plan.PackageDownloadBytes,
-		plan.EnvironmentBytes,
-		plan.PackageDownloadStatus,
-		installer.options.HarvestOffline,
-	)
-	if len(plan.PackageBlockers) != 0 || plan.PackageDownloadStatus == "blocked-exact-lock" {
-		installer.say("harvestpy plan: BLOCKED exact lock for %s", platform)
-		for _, blocker := range plan.PackageBlockers {
-			installer.say("  blocker %s", blocker)
-		}
-		return fmt.Errorf("harvestpy target %s is blocked-exact-lock", platform)
-	}
-	if !installer.apply {
-		installer.say(
-			"harvestpy dry-run: Plan only; writes=0 network=0 offline=%t (apply requires valid cached pins or network)",
-			installer.options.HarvestOffline,
-		)
-		return nil
-	}
-	root := harvestPythonRoot(installer.options.Home)
-	check, checkErr := provider.Check(ctx, root, platform)
-	if checkErr == nil && check.Healthy {
-		installer.ok("harvestpy environment already healthy (Check fast-path; no download)")
-		installer.reportHarvestPrune(harvestpy.PruneEnvironments(ctx, root, platform, installer.options.ProcRoot))
-		return installer.stageHarvestModels(ctx, provider, root, platform)
-	}
-	if checkErr != nil {
-		installer.say("harvestpy Check did not establish a healthy environment; provisioning: %v", checkErr)
-	} else {
-		installer.say("harvestpy Check reported an unhealthy environment; provisioning")
-	}
-	result, provisionErr := provider.Provision(ctx, harvestpy.ProvisionOptions{
-		Root:     root,
-		Cache:    filepath.Join(root, "cache"),
-		Platform: platform,
-		Offline:  installer.options.HarvestOffline,
-		ProcRoot: installer.options.ProcRoot,
-	})
-	if provisionErr != nil {
-		if errors.Is(provisionErr, harvestpy.ErrOfflineUnavailable) {
-			installer.say(
-				"harvestpy offline: required pinned input is not in the verified cached inputs; prewarm the cache or rerun with network",
-			)
-			return fmt.Errorf(
-				"harvestpy provisioning offline; verified cached inputs are unavailable: %w",
-				provisionErr,
-			)
-		}
-		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
-	}
-	installer.ok("harvestpy environment provisioned digest=" + result.Digest)
-	installer.reportHarvestPrune(result.Pruned)
-	return installer.stageHarvestModels(ctx, provider, root, platform)
-}
-
-// reportHarvestPrune prints a prune of superseded harvestpy environments:
-// each removal with the bytes it freed, each kept env with its reason, each
-// failure one warn line that never fails the install.
-func (installer *engine) reportHarvestPrune(report harvestpy.PruneReport) {
-	for _, env := range report.Removed {
-		_ = installer.change(
-			fmt.Sprintf("remove superseded harvestpy environment %s (freed %d bytes)", env.Path, env.Bytes), nil,
-		)
-	}
-	for _, kept := range report.Kept {
-		installer.skip("keep superseded harvestpy environment " + kept.Path + ": " + kept.Reason)
-	}
-	for _, failure := range report.Failed {
-		installer.warnStateExpiry(failure.Path, failure.Err)
-	}
-}
-
-func (installer *engine) uninstallHarvest() error {
-	if !installer.options.ProvisionHarvest {
-		return nil
-	}
-	root := harvestPythonRoot(installer.options.Home)
-	info, err := os.Lstat(root)
-	if errors.Is(err, fs.ErrNotExist) {
-		installer.ok("managed harvestpy runtime and cache absent")
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect managed harvestpy root: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("refuse to remove managed harvestpy root that is not a directory: %s", root)
-	}
-	hasManaged := false
-	for _, name := range []string{harvestEnvDirName, harvestCacheDirName} {
-		if _, statErr := os.Lstat(filepath.Join(root, name)); statErr == nil {
-			hasManaged = true
-		} else if !errors.Is(statErr, fs.ErrNotExist) {
-			return fmt.Errorf("inspect managed harvestpy %s: %w", name, statErr)
-		}
-	}
-	if !hasManaged {
-		installer.ok("managed harvestpy runtime and cache absent")
-		return nil
-	}
-	return installer.change("remove managed harvestpy runtime and cache", func() error {
-		for _, name := range []string{harvestEnvDirName, harvestCacheDirName} {
-			if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
-				return fmt.Errorf("remove managed harvestpy %s: %w", name, err)
-			}
-		}
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			return fmt.Errorf("inspect managed harvestpy root after removal: %w", err)
-		}
-		if len(entries) == 0 {
-			if err := os.Remove(root); err != nil {
-				return fmt.Errorf("remove empty managed harvestpy root: %w", err)
-			}
-		}
-		return nil
-	})
-}
-
 func (installer *engine) say(format string, arguments ...any) {
 	if installer.outputErr != nil {
 		return
@@ -934,7 +762,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 	installer.say("embedded assets -> %s", installer.managedRoot)
 	systemdChanged := false
 	for _, asset := range assets {
-		if mcpSchedulerAsset(asset.path) && !installer.mcpAnyEnabled() {
+		if mcpSchedulerAsset(asset.path) && !installer.options.MCPEnabled[chatName] {
 			continue
 		}
 		content, err := readAsset(asset.path)
@@ -968,12 +796,12 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			return false, err
 		}
 	}
-	if !installer.mcpAnyEnabled() {
+	if !installer.options.MCPEnabled[chatName] {
 		for _, relative := range []string{"systemd/pfm-mcp.service", "launchd/com.professor.pfm.mcp.plist"} {
 			mcpAsset := filepath.Join(installer.managedRoot, filepath.FromSlash(relative))
 			if _, err := os.Lstat(mcpAsset); err == nil {
 				message := fmt.Sprintf(
-					"remove %s (no MCP server is enabled in %s)",
+					"remove %s (chat MCP server is disabled in %s)",
 					mcpAsset,
 					installer.options.MCPConfigPath,
 				)
@@ -1395,8 +1223,6 @@ var unitNames = []string{
 
 const (
 	mcpUnitName         = "pfm-mcp.service"
-	harvestEnvDirName   = "env"
-	harvestCacheDirName = "cache"
 	systemdDefaultWants = "default.target.wants"
 )
 
@@ -1468,7 +1294,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 	}
 	changed = changed || retiredChanged
 	managedNames := append([]string(nil), unitNames...)
-	if installer.mcpAnyEnabled() {
+	if installer.options.MCPEnabled[chatName] {
 		managedNames = append(managedNames, mcpUnitName)
 	} else {
 		mcpTarget := filepath.Join(directory, mcpUnitName)
@@ -1496,7 +1322,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 	for _, enablement := range unitEnablements {
 		source := filepath.Join(directory, enablement.unit)
 		target := filepath.Join(directory, enablement.wants, enablement.unit)
-		if enablement.unit == mcpUnitName && !installer.mcpAnyEnabled() {
+		if enablement.unit == mcpUnitName && !installer.options.MCPEnabled[chatName] {
 			info, err := os.Lstat(target)
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
@@ -1560,7 +1386,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
 	enablements := [][]string{{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit}}
-	if installer.mcpAnyEnabled() {
+	if installer.options.MCPEnabled[chatName] {
 		enablements = append(enablements, []string{mcpUnitName})
 	}
 	for _, units := range enablements {

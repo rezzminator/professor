@@ -6,6 +6,7 @@ import pathlib
 import re
 import sys
 import stat
+import tomllib
 
 try:
     import yaml
@@ -39,11 +40,23 @@ def frontmatter(path):
                 pass
             lines[i] = match[1] + ": " + json.dumps(match[2].strip())
         try:
-            value = yaml.safe_load("\n".join(lines))
+            front = "\n".join(lines)
+            value = yaml.safe_load(front)
         except yaml.YAMLError as error:
             raise ValueError(f"{path}: FRONTMATTER-INVALID — {error}") from error
     if not isinstance(value, dict):
         raise ValueError(f"{path}: frontmatter is not a mapping")
+    # engine-sync reads yaml.Node.Value, not a host-language numeric/bool
+    # conversion. Preserve the lexical text of accepted capability scalars.
+    node = yaml.compose(front)
+    for key, requires in node.value:
+        if key.value != "requires":
+            continue
+        if not isinstance(requires, yaml.SequenceNode) or any(
+                not isinstance(item, yaml.ScalarNode) or not item.value.strip()
+                for item in requires.value):
+            raise ValueError(f"{path}: requires must be a list of capability names")
+        value["requires"] = [item.value.strip() for item in requires.value]
     return value, text[end + 5:]
 
 
@@ -94,12 +107,22 @@ def inventory(directory, project=False, codex=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=pathlib.Path)
+    parser.add_argument("--artifact", choices=["codex", "opencode"], help="read structured permissions from one generated artifact")
     parser.add_argument("--project", action="store_true")
     parser.add_argument("--codex", action="store_true", help="filter already rendered Claude agents for Codex")
     parser.add_argument("--names", action="store_true", help="print agent names, one per line")
     parser.add_argument("--declarations", action="store_true", help="print declaration names, one per line")
     args = parser.parse_args()
     try:
+        if args.artifact:
+            if args.artifact == "codex":
+                value = tomllib.loads(args.directory.read_text())
+                result = {"sandbox": value.get("sandbox_mode")}
+            else:
+                value, _ = frontmatter(args.directory)
+                result = {"permission": value.get("permission")}
+            print(json.dumps(result))
+            return 0
         rows = inventory(args.directory, args.project, args.codex)
         if args.declarations or args.names:
             print("\n".join(row["name"] for row in rows if

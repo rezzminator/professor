@@ -1,12 +1,28 @@
 # Getting Harvester into punkpeye/awesome-mcp-servers
 
+## Contents
+
+- [1. Mechanics](#1-mechanics)
+- [2. Monorepo servers — accepted, with precedent](#2-monorepo-servers--accepted-with-precedent)
+- [3. Section and exact insertion point](#3-section-and-exact-insertion-point)
+- [4. What others did — 10 recent add-server PRs sampled](#4-what-others-did--10-recent-add-server-prs-sampled)
+- [5. Final entry, branch, commit, PR text](#5-final-entry-branch-commit-pr-text)
+  - [Entry (verbatim, to insert at the point in §3)](#entry-verbatim-to-insert-at-the-point-in-3)
+  - [Branch name (per CONTRIBUTING.md's `add-new-server`/`fix-typo` convention)](#branch-name-per-contributingmds-add-new-serverfix-typo-convention)
+  - [Commit message (per CONTRIBUTING.md's "Add new XYZ server" example)](#commit-message-per-contributingmds-add-new-xyz-server-example)
+  - [PR title (per the sampled convention "Add owner/repo to Category", optionally 🤖🤖🤖-tagged for the agent fast-track)](#pr-title-per-the-sampled-convention-add-ownerrepo-to-category-optionally--tagged-for-the-agent-fast-track)
+  - [PR body (no `.github/PULL_REQUEST_TEMPLATE.md` exists in this repo — none to fill; body format follows the sampled merged PRs, e.g. #14154's "Summary" style)](#pr-body-no-githubpull_request_templatemd-exists-in-this-repo--none-to-fill-body-format-follows-the-sampled-merged-prs-eg-14154s-summary-style)
+  - [Does the chat-fleet MCP server fit a category?](#does-the-chat-fleet-mcp-server-fit-a-category)
+- [6. Risks](#6-risks)
+- [Gaps](#gaps)
+
 Research only — no PR, issue, fork, star, or comment was opened. All links verified read-only via `gh` against `punkpeye/awesome-mcp-servers` (94,921 stars) on 2026-09-14.
 
 ## 1. Mechanics
 
 - **File to edit:** `README.md` at repo root (4,388 lines). One PR = one entry, one line, added under the correct `###` category.
 - **Contributing guide:** [`CONTRIBUTING.md`](https://github.com/punkpeye/awesome-mcp-servers/blob/main/CONTRIBUTING.md) — fork, branch (e.g. `add-new-server`), edit README, commit, push, open PR. "One server per line", "alphabetical order within each category", "keep it consistent" with existing formatting.
-- **Scope gate (CONTRIBUTING.md § Scope):** "This list is for servers with a public GitHub repository — something you install and run yourself. If your server is remote-only (just a hosted URL, no installable package), it belongs in [awesome-remote-mcp-servers] instead." Harvester runs locally with an installable package (Go, monorepo path) — in scope.
+- **Scope gate (CONTRIBUTING.md § Scope):** "This list is for servers with a public GitHub repository — something you install and run yourself. If your server is remote-only (just a hosted URL, no installable package), it belongs in [awesome-remote-mcp-servers] instead." Harvester runs locally with an installable Go plugin — in scope once its public repository is available.
 - **Entry format:** `- [owner/repo](https://github.com/owner/repo) [![owner/repo MCP server](https://glama.ai/mcp/servers/owner/repo/badges/score.svg)](https://glama.ai/mcp/servers/owner/repo) <emoji legend> - <description>.`
   - Link text **must** be `owner/repo`, not just the repo name — enforced by CI (see below).
 - **Emoji legend** (`README.md` "## Legend", lines 51–76; CI enforces the same list in `.github/workflows/check-glama.yml`):
@@ -33,7 +49,7 @@ Servers that live inside a monorepo, linked via a subdirectory path (`/tree/main
 - `- [Agnuxo1/benchclaw-integrations](https://github.com/Agnuxo1/benchclaw-integrations/tree/main/mcp-server) ...` — Research section, line 3263.
 - `- [Embassy-of-the-Free-Mind/sourcelibrary-v2](https://github.com/Embassy-of-the-Free-Mind/sourcelibrary-v2/tree/main/mcp-server) ...` — Research section, line 3272.
 
-Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/main/<subdir>` URL — exactly the pattern Harvester would need (`rezzminator/professor` linking into `pfm/internal/harvestmcp`). No PR was found that was rejected specifically for being a monorepo/subdirectory server; the only "multiple servers" rejections (PR #14270, #8248) were for **one PR proposing two separate, unrelated servers**, not for a single server living in a larger repo. Monorepo placement is not itself a rejection reason on this list.
+Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/main/<subdir>` URL — exactly the pattern Harvester would need (`rezzminator/professor` linking into `plugins/harvester/internal/harvestmcp`). No PR was found that was rejected specifically for being a monorepo/subdirectory server; the only "multiple servers" rejections (PR #14270, #8248) were for **one PR proposing two separate, unrelated servers**, not for a single server living in a larger repo. The public repository URL is pending; do not submit a listing until the standalone repository has a public remote.
 
 ## 3. Section and exact insertion point
 
@@ -77,7 +93,7 @@ Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/mai
 ### Entry (verbatim, to insert at the point in §3)
 
 ```
-- [rezzminator/professor](https://github.com/rezzminator/professor/tree/main/pfm/internal/harvestmcp) 🏎️ 🏠 - Public-document retrieval: fetch a URL, DOI, ISBN, PMID, PMCID, or local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR). Open-access resolvers for papers, plus (when configured) web search. Tools: `read`, `search_literature`, `download_file`, and conditionally `search_web`. Runs locally; MIT; lives at `pfm/internal/harvest(mcp)` inside the Professor monorepo.
+- **Pending public repository:** Harvester has moved to a standalone Go plugin repository; replace the old Professor monorepo link after the plugin remote is created. Public-document retrieval: fetch a URL, DOI, ISBN, PMID, PMCID, or local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR). Open-access resolvers for papers, plus (when configured) web search. Tools: `read`, `search_literature`, `download_file`, and conditionally `search_web`. Runs locally; MIT; lives at `internal/harvest` and `internal/harvestmcp` in the standalone Harvester plugin repository.
 ```
 
 - No Glama badge included — Harvester has no Glama listing today (see §6, Risks). CI will flag `missing-glama` and the maintainer will likely nag for one before merge, per §4 patterns.
@@ -114,7 +130,7 @@ Add rezzminator/professor (Harvester) to Research 🤖🤖🤖
 This PR adds [rezzminator/professor](https://github.com/rezzminator/professor) (Harvester) to the **Research** category.
 
 - **Repository:** https://github.com/rezzminator/professor
-- **Server location:** `pfm/internal/harvest` + `pfm/internal/harvestmcp` (one of two MCP servers in this monorepo)
+- **Server location:** standalone Harvester plugin repository (`internal/harvest` + `internal/harvestmcp`)
 - **Language / Runtime:** Go, MIT license
 - **Capabilities:** Public-document retrieval — fetch a URL/DOI/ISBN/PMID/PMCID/local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR), open-access paper resolvers, and (when configured) web search. Tools: `read`, `search_literature`, `download_file`, and conditionally `search_web`.
 - **Scope:** Local service, installed and run yourself.
@@ -129,7 +145,7 @@ Not established with confidence in this research pass (out of the boundary set f
 ## 6. Risks
 
 - **No Glama listing found for Harvester.** In this sample, every merged PR ended up with a Glama score badge, and the maintainer directly blocked 3 of 5 merges pending one. Harvester would need to be submitted, claimed, and scored at <https://glama.ai/mcp/servers> before or during review to avoid a stalled PR — this is real setup work, not just a form field, and Glama needs the server to actually start and respond to MCP introspection.
-- **Monorepo, not a dedicated repo.** Not a rejection reason found in precedent (§2 shows two accepted monorepo entries), but it does mean the `owner/repo` name shown in the list (`rezzminator/professor`) doesn't describe what "Harvester" is — a reviewer unfamiliar with the repo may ask for clarification on scope/what's actually being installed, and the entry necessarily under-names the specific tool.
+- **Public repository pending.** The standalone Harvester repository has no public remote yet, so do not submit the entry or claim a public install path until one exists.
 - **~4 stars, created 2026-04-25 (very new, low traction).** No PR in the sample was rejected purely for low star count or age, but "maintenance signal" was explicitly cited as a merge-quality factor by one contributor (#12340: cut a release + added CI/tests "so the maintenance signal should look healthier"). A near-zero-star, ~4.5-month-old monorepo entry may draw the same kind of nudge.
 - **Two MCP servers in one repo.** The "one server per PR" rule (enforced twice in-sample) applies to one PR proposing multiple *different* servers — it should not block Harvester alone, but the repo's second (chat-fleet) server would need its own, separate PR/entry if ever proposed, not bundled into this one.
 - **CI's owner/repo link-text rule** and its expectation of a `/tree/main/<subpath>` for a monorepo entry (matching the two precedent lines in §2) must be followed exactly, or the automated name-check will flag and comment on the PR.

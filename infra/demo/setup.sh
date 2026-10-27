@@ -73,13 +73,7 @@ EOF
   #    ~/.professor is where pfm expects the blueprint clone (pfm doctor --project-updates,
   #    the global fan-out); on a real host it IS the checkout; here a writable copy holds install-generated prompts.
   bash "$SRC/infra/fence/source-clone.sh" "$SRC" "$HOME/.professor"
-  #    The harvester's Python sidecar can refuse a platform (a pinned CUDA wheel on
-  #    linux-arm64 did); the demo then installs without it and SAYS so — the deck's
-  #    harvester section is an animation, the fleet does not depend on the sidecar.
-  if ! (cd "$HOME/.professor" && pfm install --yes); then
-    echo "setup: WARNING — pfm install with the harvester failed (see above); retrying with --skip-harvest: the professor MCP's harvester tools are NOT available in this container" >&2
-    (cd "$HOME/.professor" && pfm install --yes --skip-harvest)
-  fi
+  (cd "$HOME/.professor" && pfm install --yes)
   [ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
     { echo "setup: engine-sync not on PATH after pfm install (got: $(command -v engine-sync || echo none))" >&2; exit 1; }
   # Shared settings use one theme profile for every seat and the presenter's defaults.

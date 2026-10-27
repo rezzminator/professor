@@ -107,6 +107,7 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 			return RegistryPlan{}, fmt.Errorf("plan registry skill %s: %w", path, err)
 		}
 		plan.Links[filepath.Join(store, globalSkillsRegistry, entry.Name())] = true
+		plan.Links[filepath.Join(home, ".agents", globalSkillsRegistry, entry.Name())] = true
 	}
 	sources, _, err := loadSkillSources(clone, releaseURL)
 	if err != nil {

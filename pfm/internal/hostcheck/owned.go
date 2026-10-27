@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -84,7 +85,7 @@ func pfmMCP(env Env) ([]Row, error) {
 		}
 
 		current := map[string]bool{}
-		for _, family := range []string{config.MCPServerChat, config.MCPServerHarvester} {
+		for _, family := range []string{config.MCPServerChat} {
 			name := config.MCPRegistrationName(family)
 			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, name) {
 				if report.State == installer.MCPClientPFM {
@@ -105,10 +106,6 @@ func pfmMCP(env Env) ([]Row, error) {
 		rows = appendMCPRow(rows, path, legacy)
 		canCutOver := true
 		for _, name := range legacy {
-			if name != "mcpServers.professor" && name != "mcpServers.chat" && name != "mcpServers.harvester" {
-				canCutOver = false
-				continue
-			}
 			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, strings.TrimPrefix(name, "mcpServers.")) {
 				if report.State != installer.MCPClientLegacyPFM {
 					canCutOver = false
@@ -123,7 +120,7 @@ func pfmMCP(env Env) ([]Row, error) {
 	if len(clients) > 0 {
 		severity := Warn
 		for _, client := range clients {
-			if client != "professor" && client != "chat" && client != "harvester" {
+			if !slices.Contains(installer.LegacyMCPNames(), client) {
 				severity = Block
 			}
 		}
@@ -161,36 +158,6 @@ func appendMCPRow(rows []Row, path string, names []string) []Row {
 			"remove mcpServers." + text + " from " + path + "; pfm's server rides " + claudelaunch.MCPConfigFlag + " at launch",
 		},
 	)
-}
-
-func memoryHelpers(env Env) ([]Row, error) {
-	var rows []Row
-	for _, dir := range claudeDirs(env) {
-		for _, name := range []string{"cc-memory-wire.sh", "cc-memory-consolidate.sh"} {
-			path := filepath.Join(dir, "scripts", name)
-			info := inspectPath(&rows, "memory-helpers", path)
-			if info == nil || !info.Mode().IsRegular() {
-				continue
-			}
-			newName, matched, err := installer.RetiredMemoryHelper(path)
-			if err != nil {
-				rows = append(rows, unreadable("memory-helpers", path, err))
-				continue
-			}
-			if matched {
-				target := filepath.Join(dir, "scripts", newName)
-				fix := "mv " + path + " " + target + ", then replace " + path + " with " + target + " in every hook command of " + filepath.Join(
-					dir,
-					"settings.json",
-				)
-				rows = append(
-					rows,
-					Row{Block, "memory-helpers", path, "pfm's memory helper under its retired name", fix},
-				)
-			}
-		}
-	}
-	return rows, nil
 }
 
 func thirdPartyMCP(env Env) ([]Row, error) {

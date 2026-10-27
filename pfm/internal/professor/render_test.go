@@ -10,17 +10,17 @@ import (
 )
 
 // newRenderFixtureStore lays down a self-hosted blueprint clone whose
-// CLAUDE.md template carries one install-time token supplied by the fixture
-// manifests ({PROJECT_NAME}), one left unsupplied ({PROJECT_TAGLINE}), one
+// settings.json template carries one install-time token supplied by the fixture
+// manifests ({PROJECT_NAME}), one left unsupplied ({PROJECT_MOTTO}), one
 // runtime metavariable ({SHA}), and one lowercase pattern metavariable
 // ({project}) — enough to exercise every render/leftover/metavariable rule
 // in one template. docs/PLACEHOLDERS.md carries both registry sections.
 func newRenderFixtureStore(t *testing.T) string {
 	t.Helper()
 	root := newScaffoldFixtureStore(t)
-	claudeMD := filepath.Join(root, "templates", "project", "CLAUDE.md")
-	if err := os.WriteFile(claudeMD, []byte(
-		"# {PROJECT_NAME} contract\ntagline: {PROJECT_TAGLINE}\nsha: {SHA}\ngeneric: {project}\n",
+	template := filepath.Join(root, "templates", "project", "settings.json")
+	if err := os.WriteFile(template, []byte(
+		"# {PROJECT_NAME} contract\ntagline: {PROJECT_MOTTO}\nsha: {SHA}\ngeneric: {project}\n",
 	), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func newRenderFixtureStore(t *testing.T) string {
 	}
 	if err := os.WriteFile(placeholders, []byte(
 		"# Placeholders\n\n"+
-			"Install-time tokens: {PROJECT_NAME}, {PROJECT_TAGLINE}.\n\n"+
+			"Install-time tokens: {PROJECT_NAME}, {PROJECT_MOTTO}.\n\n"+
 			"## Runtime metavariables\n\n"+
 			"Filled at runtime: {SHA}.\n",
 	), 0o600); err != nil {
@@ -61,14 +61,17 @@ func writeRenderManifest(t *testing.T, target, tokensJSON string) {
 	}
 }
 
-func claudeMDPath(target string) string {
-	return filepath.Join(target, ClaudeInstructionsFile)
+// renderFixtureLocal is where the fixture's token-carrying template deploys.
+const renderFixtureLocal = ".claude/settings.json"
+
+func renderedPath(target string) string {
+	return filepath.Join(target, filepath.FromSlash(renderFixtureLocal))
 }
 
 // TestRenderScaffoldRendersOnceAndReportsLeftovers pins the "render",
 // "once", "leftovers" and "metavariables" Done-when rows together: a fresh
 // scaffold renders PROJECT_NAME once and reports the unsupplied
-// PROJECT_TAGLINE as LEFT, the runtime {SHA} and lowercase {project} are
+// PROJECT_MOTTO as LEFT, the runtime {SHA} and lowercase {project} are
 // never touched or reported, and a second --render over the same answers
 // skips the now-changed file byte-identically.
 func TestRenderScaffoldRendersOnceAndReportsLeftovers(t *testing.T) {
@@ -84,19 +87,19 @@ func TestRenderScaffoldRendersOnceAndReportsLeftovers(t *testing.T) {
 	if rendered != 1 || left != 1 {
 		t.Fatalf("RenderScaffold() = (%d, %d), want (1, 1): stdout=%q", rendered, left, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "RENDERED CLAUDE.md (1 substitutions)") {
+	if !strings.Contains(stdout.String(), "RENDERED .claude/settings.json (1 substitutions)") {
 		t.Fatalf("stdout missing RENDERED line: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "LEFT CLAUDE.md: {PROJECT_TAGLINE}") {
+	if !strings.Contains(stdout.String(), "LEFT .claude/settings.json: {PROJECT_MOTTO}") {
 		t.Fatalf("stdout missing LEFT line: %q", stdout.String())
 	}
-	rendered1, err := os.ReadFile(claudeMDPath(target))
+	rendered1, err := os.ReadFile(renderedPath(target))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# Acme contract\ntagline: {PROJECT_TAGLINE}\nsha: {SHA}\ngeneric: {project}\n"
+	want := "# Acme contract\ntagline: {PROJECT_MOTTO}\nsha: {SHA}\ngeneric: {project}\n"
 	if string(rendered1) != want {
-		t.Fatalf("rendered CLAUDE.md = %q, want %q", rendered1, want)
+		t.Fatalf("rendered .claude/settings.json = %q, want %q", rendered1, want)
 	}
 	if strings.Contains(stdout.String(), "{SHA}") && strings.Contains(stdout.String(), "LEFT") {
 		t.Fatalf("runtime metavariable {SHA} reported as LEFT: %q", stdout.String())
@@ -118,10 +121,10 @@ func TestRenderScaffoldRendersOnceAndReportsLeftovers(t *testing.T) {
 	if strings.Contains(stdout.String(), "RENDERED") {
 		t.Fatalf("second run printed a RENDERED line: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "SKIP CLAUDE.md: changed since scaffold") {
+	if !strings.Contains(stdout.String(), "SKIP .claude/settings.json: changed since scaffold") {
 		t.Fatalf("second run missing SKIP changed-since-scaffold: %q", stdout.String())
 	}
-	rendered2Bytes, err := os.ReadFile(claudeMDPath(target))
+	rendered2Bytes, err := os.ReadFile(renderedPath(target))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +141,7 @@ func TestRenderScaffoldSkipsAHandEditedFile(t *testing.T) {
 	writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
 
 	edited := []byte("# hand-edited\n")
-	if err := os.WriteFile(claudeMDPath(target), edited, 0o600); err != nil {
+	if err := os.WriteFile(renderedPath(target), edited, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -150,10 +153,10 @@ func TestRenderScaffoldSkipsAHandEditedFile(t *testing.T) {
 	if rendered != 0 {
 		t.Fatalf("RenderScaffold() rendered=%d, want 0: stdout=%q", rendered, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "SKIP CLAUDE.md: changed since scaffold") {
+	if !strings.Contains(stdout.String(), "SKIP .claude/settings.json: changed since scaffold") {
 		t.Fatalf("stdout = %q, want SKIP changed since scaffold", stdout.String())
 	}
-	got, err := os.ReadFile(claudeMDPath(target))
+	got, err := os.ReadFile(renderedPath(target))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +172,7 @@ func TestRenderScaffoldSkipsATemplateMovedSincePin(t *testing.T) {
 	target := scaffoldedRenderTarget(t, source)
 	writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
 
-	templatePath := filepath.Join(source, "templates", "project", "CLAUDE.md")
+	templatePath := filepath.Join(source, "templates", "project", "settings.json")
 	if err := os.WriteFile(templatePath, []byte("# moved upstream\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +185,7 @@ func TestRenderScaffoldSkipsATemplateMovedSincePin(t *testing.T) {
 	if rendered != 0 {
 		t.Fatalf("RenderScaffold() rendered=%d, want 0: stdout=%q", rendered, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "SKIP CLAUDE.md: template changed since pin") {
+	if !strings.Contains(stdout.String(), "SKIP .claude/settings.json: template changed since pin") {
 		t.Fatalf("stdout = %q, want SKIP template changed since pin", stdout.String())
 	}
 }
@@ -193,14 +196,14 @@ func TestRenderScaffoldSkipsAMissingLocal(t *testing.T) {
 	target := scaffoldedRenderTarget(t, source)
 	writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
 
-	if err := os.Remove(claudeMDPath(target)); err != nil {
+	if err := os.Remove(renderedPath(target)); err != nil {
 		t.Fatal(err)
 	}
 	baseline, err := Load(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseline.Files["docs/guide.md"] = baseline.Files[ClaudeInstructionsFile]
+	baseline.Files["docs/guide.md"] = baseline.Files[renderFixtureLocal]
 	if err := Save(target, baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +216,7 @@ func TestRenderScaffoldSkipsAMissingLocal(t *testing.T) {
 	if rendered != 0 || left != 0 {
 		t.Fatalf("RenderScaffold() = (%d, %d), want (0, 0): stdout=%q", rendered, left, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "SKIP CLAUDE.md: missing") {
+	if !strings.Contains(stdout.String(), "SKIP .claude/settings.json: missing") {
 		t.Fatalf("stdout = %q, want SKIP missing", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "SKIP docs/guide.md: missing") {
@@ -222,7 +225,7 @@ func TestRenderScaffoldSkipsAMissingLocal(t *testing.T) {
 }
 
 func TestRenderScaffoldRefusesLinkedLocals(t *testing.T) {
-	for _, local := range []string{ClaudeInstructionsFile, "docs/guide.md"} {
+	for _, local := range []string{renderFixtureLocal, "docs/guide.md"} {
 		t.Run(local, func(t *testing.T) {
 			source := newRenderFixtureStore(t)
 			target := scaffoldedRenderTarget(t, source)
@@ -231,7 +234,7 @@ func TestRenderScaffoldRefusesLinkedLocals(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pin := baseline.Files[ClaudeInstructionsFile]
+			pin := baseline.Files[renderFixtureLocal]
 			templateRaw, err := os.ReadFile(filepath.Join(source, "templates", filepath.FromSlash(pin.Template)))
 			if err != nil {
 				t.Fatal(err)
@@ -242,10 +245,10 @@ func TestRenderScaffoldRefusesLinkedLocals(t *testing.T) {
 			if err := os.WriteFile(external, original, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			link := claudeMDPath(target)
+			link := renderedPath(target)
 			linkTarget := external
-			wantError := "render CLAUDE.md: a symlink, refused — pfm init --render writes only regular files"
-			if local == ClaudeInstructionsFile {
+			wantError := "render .claude/settings.json: a symlink, refused — pfm init --render writes only regular files"
+			if local == renderFixtureLocal {
 				if err := os.Remove(link); err != nil {
 					t.Fatal(err)
 				}
@@ -272,7 +275,7 @@ func TestRenderScaffoldRefusesLinkedLocals(t *testing.T) {
 			if after, readErr := os.ReadFile(external); readErr != nil || !bytes.Equal(after, original) {
 				t.Errorf("external file changed: bytes=%q error=%v", after, readErr)
 			}
-			if local != ClaudeInstructionsFile {
+			if local != renderFixtureLocal {
 				assertUnchanged(t, target)
 			}
 		})
@@ -340,7 +343,7 @@ func TestRenderScaffoldRejectsBadValues(t *testing.T) {
 		{"whitespace", `{"PROJECT_NAME":"   "}`, "INVALID PROJECT_NAME: empty value"},
 		{
 			"carries a token",
-			`{"PROJECT_NAME":"prefix {PROJECT_TAGLINE} suffix"}`,
+			`{"PROJECT_NAME":"prefix {PROJECT_MOTTO} suffix"}`,
 			"INVALID PROJECT_NAME: value carries a registered token",
 		},
 	}
@@ -487,17 +490,17 @@ func TestRenderScaffoldRejectsABrokenRegistry(t *testing.T) {
 	})
 }
 
-// assertUnchanged verifies an error path wrote nothing: CLAUDE.md is still
+// assertUnchanged verifies an error path wrote nothing: .claude/settings.json is still
 // exactly the scaffolded template bytes.
 func assertUnchanged(t *testing.T, target string) {
 	t.Helper()
-	got, err := os.ReadFile(claudeMDPath(target))
+	got, err := os.ReadFile(renderedPath(target))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# {PROJECT_NAME} contract\ntagline: {PROJECT_TAGLINE}\nsha: {SHA}\ngeneric: {project}\n"
+	want := "# {PROJECT_NAME} contract\ntagline: {PROJECT_MOTTO}\nsha: {SHA}\ngeneric: {project}\n"
 	if string(got) != want {
-		t.Fatalf("CLAUDE.md changed on an error path: got %q, want %q", got, want)
+		t.Fatalf(".claude/settings.json changed on an error path: got %q, want %q", got, want)
 	}
 }
 
@@ -520,7 +523,7 @@ func TestRenderScaffoldSkipsATemplateGoneUpstream(t *testing.T) {
 		t.Fatalf("RenderScaffold() err = %v, stdout=%q", err, stdout.String())
 	}
 	if rendered != 1 || !strings.Contains(stdout.String(), "SKIP .rumdl.toml: template changed since pin\n") ||
-		!strings.Contains(stdout.String(), "RENDERED CLAUDE.md (1 substitutions)") {
+		!strings.Contains(stdout.String(), "RENDERED .claude/settings.json (1 substitutions)") {
 		t.Fatalf("RenderScaffold() rendered=%d stdout=%q", rendered, stdout.String())
 	}
 }
@@ -528,9 +531,9 @@ func TestRenderScaffoldSkipsATemplateGoneUpstream(t *testing.T) {
 // TestRenderScaffoldWritesNothingWhenALaterLocalCannotBeInspected: a local
 // whose path cannot be inspected (a parent that is a file: ENOTDIR) is a
 // failure to look, never "missing", and it fails the run before any file is
-// written — CLAUDE.md, which sorts before it and would render, stays as
+// written — .claude/settings.json, which sorts before it and would render, stays as
 // scaffolded. Watched failing against the stat-error-is-missing branch:
-// SKIP docs/guide.md: missing, exit 0, CLAUDE.md rendered.
+// SKIP docs/guide.md: missing, exit 0, .claude/settings.json rendered.
 func TestRenderScaffoldWritesNothingWhenALaterLocalCannotBeInspected(t *testing.T) {
 	source := newRenderFixtureStore(t)
 	target := scaffoldedRenderTarget(t, source)
@@ -539,7 +542,7 @@ func TestRenderScaffoldWritesNothingWhenALaterLocalCannotBeInspected(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseline.Files["docs/guide.md"] = baseline.Files[ClaudeInstructionsFile]
+	baseline.Files["docs/guide.md"] = baseline.Files[renderFixtureLocal]
 	if err := Save(target, baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -550,7 +553,7 @@ func TestRenderScaffoldWritesNothingWhenALaterLocalCannotBeInspected(t *testing.
 	); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(claudeMDPath(target))
+	before, err := os.ReadFile(renderedPath(target))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,8 +563,8 @@ func TestRenderScaffoldWritesNothingWhenALaterLocalCannotBeInspected(t *testing.
 	if err == nil || !strings.Contains(err.Error(), "docs/guide.md") {
 		t.Fatalf("RenderScaffold() err = %v, want a failure naming docs/guide.md: stdout=%q", err, stdout.String())
 	}
-	if after, _ := os.ReadFile(claudeMDPath(target)); !bytes.Equal(after, before) {
-		t.Fatalf("CLAUDE.md was written before the failing local: %q", after)
+	if after, _ := os.ReadFile(renderedPath(target)); !bytes.Equal(after, before) {
+		t.Fatalf(".claude/settings.json was written before the failing local: %q", after)
 	}
 }
 

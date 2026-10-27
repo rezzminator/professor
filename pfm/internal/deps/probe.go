@@ -67,13 +67,11 @@ type Result struct {
 
 // ProbeOptions supplies the only variability required by tests and callers.
 type ProbeOptions struct {
-	GOOS         string
-	SkipHarvest  bool
-	SkipEngines  map[pfmengine.ID]bool
-	Provisioning bool
-	VerboseDir   string
-	LookPath     func(string) (string, error)
-	Timeout      time.Duration
+	GOOS        string
+	SkipEngines map[pfmengine.ID]bool
+	VerboseDir  string
+	LookPath    func(string) (string, error)
+	Timeout     time.Duration
 	// SelfDoctorTimeout bounds only the self-doctor calls. Unset falls back
 	// to Timeout (so existing callers that only ever set Timeout keep
 	// driving the self-doctor bound), and Timeout unset too falls back to
@@ -121,12 +119,6 @@ func Probe(ctx context.Context, entries []Entry, options ProbeOptions) []Result 
 		case entry.Engine != "" && options.SkipEngines[entry.Engine]:
 			result.State = StateSkipped
 			result.Error = "--skip-engine " + pfmengine.MustLookup(entry.Engine).LongName
-		case entry.Harvest && options.SkipHarvest:
-			result.State = StateSkipped
-			result.Error = "--skip-harvest"
-		case entry.Harvest && options.Provisioning:
-			result.State = StateSkipped
-			result.Error = "provisioned by install"
 		default:
 			result = probeOne(ctx, entry, options)
 		}

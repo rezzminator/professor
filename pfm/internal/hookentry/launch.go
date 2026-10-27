@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -30,6 +31,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -53,17 +55,16 @@ var nonInteractiveClaudeSubcommands = map[string]bool{
 	"doctor": true, "setup-token": true, "plugin": true, "config": true,
 }
 
-func launchPassThrough(arguments []string, tmux string, forced bool) bool {
-	return forced || launchInsidePfmSocket(tmux) || launchRunsNonInteractive(arguments)
+func launchPassThrough(arguments []string, caller resolve.Identity, forced bool) bool {
+	return forced || launchInsidePfmSocket(caller) || launchRunsNonInteractive(arguments)
 }
 
 // launchInsidePfmSocket reports a launch from inside a pfm-managed tmux socket.
-func launchInsidePfmSocket(tmux string) bool {
-	socketPath, _, _ := strings.Cut(tmux, ",")
-	if socketPath == "" {
+func launchInsidePfmSocket(caller resolve.Identity) bool {
+	if caller.Backend != spawn.BackendTmux {
 		return false
 	}
-	_, ok := pfmengine.FromSocket(filepath.Base(socketPath))
+	_, ok := pfmengine.FromSocket(filepath.Base(caller.SocketPath))
 	return ok
 }
 
@@ -149,9 +150,24 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		return 127
 	}
 	forcedPassThrough := env.Get("PFM_LAUNCH_PASSTHROUGH") == "1"
-	if launchPassThrough(arguments, env.Get("TMUX"), forcedPassThrough) {
+	ctx := context.Background()
+	var caller resolve.Identity
+	var callerErr error
+	if !forcedPassThrough {
+		environment := resolve.CallerEnvironmentFrom(env)
+		identifier, err := resolve.NewWhoami(
+			resolve.WhoamiDependencies{Environment: &environment, CodexSeats: chat.CodexSeats(&runtime)},
+		)
+		if err != nil {
+			callerErr = err
+		} else {
+			caller, callerErr = identifier.Identify(ctx)
+		}
+		ctx = chat.WithCaller(ctx, "hook.launch", caller, callerErr)
+	}
+	if launchPassThrough(arguments, caller, forcedPassThrough) {
 		environment := os.Environ()
-		if !forcedPassThrough && !launchInsidePfmSocket(env.Get("TMUX")) {
+		if !forcedPassThrough && !launchInsidePfmSocket(caller) {
 			// A print, help or subcommand run is never the chat bound to the parent's Herdr pane.
 			environment = herdr.StripPane(environment)
 		}
@@ -234,13 +250,10 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintln(stderr, "pfm internal launch: --cwd must be an absolute path")
 		return 2
 	}
-	choice, err := launchBackend(context.Background(), *backend, env)
+	choice, err := launchBackend(ctx, *backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
-	}
-	if choice.Warning != "" {
-		fmt.Fprintln(stderr, choice.Warning)
 	}
 	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
 	if primaryErr != nil {
@@ -363,7 +376,6 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	}
 	titles := runtime.Config.Tmux.Titles
 	client := spawn.TmuxSpawner{Binary: tmuxBinary, TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}
-	ctx := context.Background()
 	if identity != "" {
 		cache := runtime.Config.EffectiveClaude(accountID).Cache1H
 		if recordErr := fleetdb.RecordLaunch(ctx, runtime.Paths, fleetdb.Launch{

@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -26,10 +24,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -57,7 +55,12 @@ func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	}
 	ctx := context.Background()
 	if *dryRun {
-		dependencies := LiveDeps(runtime, stderr, nil, launchingChat())
+		launched, err := launchingChat()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm restart: identify launcher: %v\n", err)
+			return 1
+		}
+		dependencies := LiveDeps(runtime, stderr, nil, launched)
 		dependencies.DryRun = true
 		plan := BuildPlan(ctx, dependencies)
 		plan.Print(stdout)
@@ -127,16 +130,26 @@ func (address chatAddress) holds(chat headless.Chat) bool {
 // the same caller identity `pfm kill --self` resolves: a chat directly in a
 // Herdr pane by its Herdr socket and pane, a tmux chat by its socket; zero
 // outside every chat.
-func launchingChat() chatAddress {
-	self := kill.Environment(paths.OSEnv{})
-	if self.Native() {
-		return chatAddress{Socket: self.HerdrSocket, Pane: self.HerdrPane}
+var restartIdentify = func(ctx context.Context) (resolve.Identity, error) {
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(nil)})
+	if err != nil {
+		return resolve.Identity{}, err
 	}
-	if self.TMUX == "" {
-		return chatAddress{}
+	return identifier.Identify(ctx)
+}
+
+func launchingChat() (chatAddress, error) {
+	identity, err := restartIdentify(context.Background())
+	if errors.Is(err, resolve.ErrNotInChat) {
+		return chatAddress{}, nil
 	}
-	socket, _, _ := strings.Cut(self.TMUX, ",")
-	return chatAddress{Socket: filepath.Base(socket)}
+	if err != nil {
+		return chatAddress{}, fmt.Errorf("resolve launching chat: %w", err)
+	}
+	if identity.Backend == spawn.BackendHerdr {
+		return chatAddress{Socket: identity.SocketPath, Pane: identity.Pane}, nil
+	}
+	return chatAddress{Socket: filepath.Base(identity.SocketPath)}, nil
 }
 
 // restartWorkerEnv is the worker's environment: this one, minus every
@@ -165,7 +178,12 @@ func launchFront(ctx context.Context, stdout, stderr io.Writer, runtime config.R
 		argv = append(argv, "--config", runtime.Config.Path)
 	}
 	argv = append(argv, "internal", WorkerCommand, "--front", strconv.Itoa(os.Getpid()))
-	if launched := launchingChat(); launched.Socket != "" {
+	launched, err := launchingChat()
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm restart: identify launcher: %v\n", err)
+		return 1
+	}
+	if launched.Socket != "" {
 		argv = append(argv, "--launched-from", launched.Socket)
 		if launched.Pane != "" {
 			argv = append(argv, "--launched-pane", launched.Pane)
@@ -332,7 +350,6 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 		Clock:        clock.Real,
 		Fleet:        liveFleet{runtime: runtime, warn: warn},
 		Services:     nativeServiceManager(goruntime.GOOS, runner, clock.Real, runtime.Paths.Home, os.Getuid()),
-		HTTPProbe:    probeURL,
 		Self:         os.Getpid(),
 		EffectiveUID: uint32(os.Geteuid()),
 		Spare:        spare,
@@ -343,31 +360,12 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 		LogDir:       restartLogDir(runtime.Paths),
 		Env:          restartWorkerEnv(os.Environ()),
 	}
-	if runtime.Config.Harvester.Enabled && runtime.Config.Harvester.Search.Enabled {
-		dependencies.SearchURL = runtime.Config.Harvester.Search.SearXNGURL
-	}
-	for _, server := range runtime.Config.MCPServers {
-		if server.Enabled {
-			address := "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port)
-			dependencies.DaemonProbe = func(context.Context) error {
-				_, err := mcpserv.ProbeDaemon(address)
-				return err
-			}
-			break
+	if config.MCPServerEnabled(runtime.Config, config.MCPServerChat) {
+		address := "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port)
+		dependencies.DaemonProbe = func(context.Context) error {
+			_, err := mcpserv.ProbeDaemon(address)
+			return err
 		}
 	}
 	return dependencies
-}
-
-// probeURL answers nil when target gives any HTTP answer within 3 s.
-func probeURL(ctx context.Context, target string) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
-	if err != nil {
-		return fmt.Errorf("build probe of %s: %w", target, err)
-	}
-	response, err := obs.WrapClient(&http.Client{Timeout: 3 * time.Second}).Do(request)
-	if err != nil {
-		return fmt.Errorf("GET %s: %w", target, err)
-	}
-	return response.Body.Close()
 }

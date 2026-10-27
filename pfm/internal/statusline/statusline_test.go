@@ -685,7 +685,7 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 }
 
 // The scoped Fable window is resolved into data.RateLimits.Windows before
-// harvestRateLimits runs, but the snapshot writer only ever copied the two
+// recordRateLimits runs, but the snapshot writer only ever copied the two
 // flat windows out of that map. A host whose Limits tab reads nothing BUT
 // this snapshot (credentials in the OS keychain, so no usage-API path) could
 // therefore never show Fable, however faithfully it was rendered inline.

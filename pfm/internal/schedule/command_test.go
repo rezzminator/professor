@@ -109,8 +109,8 @@ func standInsideCodexThread(t *testing.T, thread string, rollouts ...store.Rollo
 		t.Fatal(err)
 	}
 	previous := callerIdentity
-	callerIdentity = func(context.Context, *pfmconfig.Runtime) (resolve.Identity, bool) {
-		return resolve.Identity{Engine: string(pfmengine.Codex), ID: thread, Source: "env-codex"}, true
+	callerIdentity = func(context.Context, *pfmconfig.Runtime) (resolve.Identity, error) {
+		return resolve.Identity{Engine: string(pfmengine.Codex), ID: thread, Source: "env-codex"}, nil
 	}
 	t.Cleanup(func() { callerIdentity = previous })
 }

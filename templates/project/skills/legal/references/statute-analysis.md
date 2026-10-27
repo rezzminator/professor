@@ -48,4 +48,4 @@ Misreading "and" as "or", or "shall" as "may", changes the obligation entirely.
 
 ## {PROJECT_NAME} application
 
-{PROJECT_NAME} touches multiple regimes (GDPR, EU AI Act, {JURISDICTION} civil law, and — where {ORG_UNIT}s operate abroad — laws like the NZ Privacy Act). When a new provision lands, run this before changing any document or control: confirm it is in force and current, parse its operator words, and categorise what it actually demands of us. Feed the result into the officer's `regulatory-knowledge.md`.
+{PROJECT_NAME} touches multiple regimes (GDPR, EU AI Act, {JURISDICTION} civil law, and — where {ORG_UNIT}s operate abroad — laws like the NZ Privacy Act). When a new provision lands, run this before changing any document or control: confirm it is in force and current, parse its operator words, and categorise what it actually demands of us.

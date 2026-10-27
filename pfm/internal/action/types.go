@@ -7,6 +7,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -40,6 +41,8 @@ type Request struct {
 	// OpenCodeFleetPrompt is the composed fleet prompt an OpenCode persona launch
 	// removes, empty when no clone is recorded.
 	OpenCodeFleetPrompt string
+	// OpenCodePromptChannel is launch policy text, never the initial user prompt.
+	OpenCodePromptChannel string
 	// Prompt is optional initial work for a fresh engine picker row. Resume and
 	// live routes reject/ignore no hidden input: cmd/pfm uses it only for the
 	// explicit Professor-update banner.
@@ -158,6 +161,7 @@ type CommandRunner interface {
 
 // Dependencies replace every effect boundary in jailed tests.
 type Dependencies struct {
+	Identify  func(context.Context) (resolve.Identity, error)
 	Tmux      TmuxClient
 	Processes ProcessTable
 	Gate      Gate
@@ -177,6 +181,7 @@ type HealFunc func(ctx context.Context, threadID string) string
 // Executor performs preparations and returns the only line the caller may
 // write to stdout.
 type Executor struct {
+	identify  func(context.Context) (resolve.Identity, error)
 	tmux      TmuxClient
 	processes ProcessTable
 	gate      Gate

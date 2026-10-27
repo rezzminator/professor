@@ -1,6 +1,7 @@
 """Writes: the files a run wrote. Tool writes come from the engine (Event.writes); a shell command's
 come from shell_writes() reading its redirections, tee, sed/perl -i and cp/mv/install targets. The
 `writes` verb prints each file's state on disk now."""
+import json
 import os
 import re
 import subprocess
@@ -20,6 +21,8 @@ def shell_writes(cmd):
             break
         end = re.search(r"(?:^|\s)" + re.escape(h.group(1)) + r"(?=\s|$)", s[h.end():])
         s = s[:h.start()] + " " + (s[h.end() + end.end():] if end else "")
+    # a command substitution is a path no parse knows: kept as $CMDSUB, so it resolves UNRESOLVED
+    s = re.sub(r"\$\([^()]*\)", "$CMDSUB", s)
     s = re.sub(r"'[^']*'", " '' ", s)
     s = re.sub(r'"([^"]*)"', lambda m: m.group(1) if PATHLIKE.match(m.group(1)) else " '' ", s)
     out, base, env = [], "", {}
@@ -64,11 +67,23 @@ def shell_writes(cmd):
     return list(dict.fromkeys(out))
 
 
+JS_CMD = re.compile(r"""tools\.exec_command\(\s*\{\s*["']?cmd["']?\s*:\s*("(?:[^"\\]|\\.)*")""")
+
+
 def event_writes(ev):
     """The paths a call wrote: the engine's own list, else a shell command's parse; [] for none."""
     if ev.writes is not None:
         return list(ev.writes)
-    return shell_writes(ev.text) if ev.cmd else []
+    if ev.cmd:
+        return shell_writes(ev.text)
+    # a Codex code-mode `exec` call runs its shell commands as JS string literals
+    out = []
+    for m in JS_CMD.finditer(ev.text or "") if ev.name == "exec" else ():
+        try:
+            out += shell_writes(json.loads(m.group(1)))
+        except ValueError:
+            continue
+    return list(dict.fromkeys(out))
 
 
 def file_state(ap):

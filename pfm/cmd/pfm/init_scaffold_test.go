@@ -30,7 +30,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load deployed baseline: %v", err)
 	}
-	if got, want := len(baseline.Files), 11; got != want {
+	if got, want := len(baseline.Files), 10; got != want {
 		t.Fatalf("pin count=%d, want %d: %#v", got, want, baseline.Files)
 	}
 	if _, ok := baseline.Files[".claude/commands/per-project/testing-manual.md"]; ok {
@@ -40,12 +40,11 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		t.Fatalf("AGENTS.md must remain generated, stat error=%v", err)
 	}
 	for _, relative := range []string{
-		"CLAUDE.md",
 		".claude/settings.json",
 		".rumdl.toml",
 		".claude/commands/dev.md",
 		".claude/agents/gitter.md",
-		".claude/scripts/dev.sh",
+		".claude/scripts/worktree.sh",
 		".claude/skills/legal/SKILL.md",
 		"docs/epics/TEMPLATE.md",
 		".codex/config.toml",
@@ -79,12 +78,12 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		!strings.Contains(string(commandRaw), "{TOKEN}") {
 		t.Fatalf("frontmatter marker/token placement=%q", commandRaw)
 	}
-	scriptPath := filepath.Join(target, ".claude", "scripts", "dev.sh")
+	scriptPath := filepath.Join(target, ".claude", "scripts", "worktree.sh")
 	scriptRaw, err := os.ReadFile(scriptPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(scriptRaw), "#!/usr/bin/env bash\n# pfm-scaffold: project/scripts/dev.sh@") {
+	if !strings.HasPrefix(string(scriptRaw), "#!/usr/bin/env bash\n# pfm-scaffold: project/scripts/worktree.sh@") {
 		t.Fatalf("script marker placement=%q", scriptRaw)
 	}
 	if info, err := os.Stat(scriptPath); err != nil || info.Mode().Perm()&0o111 == 0 {
@@ -96,7 +95,9 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		"SETUP.md",
 	) + " § Install interview — it records your answers in .professor/manifest.json, " +
 		"runs pfm init --render and deploys the per-project files"
-	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) {
+	next := "\nnext: write CLAUDE.md with /quality:claude-md write CLAUDE.md\n"
+	if !strings.Contains(stdout.String(), "deployed 10 project files") || !strings.Contains(stdout.String(), handoff) ||
+		!strings.HasSuffix(stdout.String(), next) {
 		t.Fatalf("init output=%q", stdout.String())
 	}
 }
@@ -237,7 +238,7 @@ func TestInitRenderFillsTokensFromManifestAnswers(t *testing.T) {
 	if code := runInit([]string{"--render", target}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("runInit(--render) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "rendered 3 files; no install-time token left") {
+	if !strings.Contains(stdout.String(), "rendered 2 files; no install-time token left") {
 		t.Fatalf("render output=%q", stdout.String())
 	}
 	commandRaw, err := os.ReadFile(filepath.Join(target, ".claude", "commands", "dev.md"))
@@ -296,7 +297,6 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		mode    os.FileMode
 	}{
 		"VERSION":                         {content: "0.65.0\n", mode: 0o600},
-		"templates/project/CLAUDE.md":     {content: "# {TOKEN} contract\n", mode: 0o600},
 		"templates/project/settings.json": {content: "{}\n", mode: 0o600},
 		"templates/project/rumdl-policy.toml": {
 			content: "# fixture rumdl policy\n[global]\n",
@@ -314,7 +314,7 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "---\nname: testing-manual\n---\nbody\n",
 			mode:    0o600,
 		},
-		"templates/project/scripts/dev.sh": {
+		"templates/project/scripts/worktree.sh": {
 			content: "#!/usr/bin/env bash\nset -euo pipefail\n",
 			mode:    0o755,
 		},

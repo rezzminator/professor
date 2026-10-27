@@ -334,10 +334,9 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 	}
 }
 
-// TestThemeReleaseUnpublishedAlphaReturnsNamedRefusal is a REGRESSION test
-// for the 2026-09-14 retro finding: `pfm install --yes` run outside the
-// source checkout falls back to a release theme URL built from an -alpha
-// VERSION, which pfm never publishes and which therefore 404s.
+// TestThemeReleaseUnpublishedAlphaReturnsNamedRefusal is a REGRESSION test:
+// `pfm install --yes` run outside the source checkout falls back to a release
+// theme URL built from an -alpha VERSION, which pfm never publishes and which therefore 404s.
 // loadThemeProfiles must recognise the -alpha reference in the URL and return
 // a named refusal instead of surfacing a bare HTTP error — and must never even
 // attempt the doomed fetch. FAILS on unfixed code because the URL is fetched
@@ -392,9 +391,8 @@ func (fn themeRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, e
 	return fn(request)
 }
 
-// TestThemePreviewLabelsBundledPaletteAsReadNotFetch is a REGRESSION test for
-// the 2026-09-14 retro finding: the preview change line for a bundled
-// palette read from the source clone said "fetch theme X -> target", the
+// TestThemePreviewLabelsBundledPaletteAsReadNotFetch is a REGRESSION test:
+// the preview change line for a bundled palette read from the source clone said "fetch theme X -> target", the
 // same verb used for a profile downloaded from the release. A bundled
 // palette is read from disk (loadThemeContent, source.local != ""), so its
 // preview line must say "read bundled theme X -> target". FAILS on unfixed

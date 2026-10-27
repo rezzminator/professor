@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 type proxyAdmissionClock struct {
@@ -337,7 +338,7 @@ func TestStdioProxyLateCancellationPrecedesReusedRequestID(t *testing.T) {
 	}))
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	released := false
 	t.Cleanup(func() {

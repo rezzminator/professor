@@ -53,7 +53,6 @@ type Env struct {
 	CloneConfigPath                                                         string
 	Home, Store, ConfigPath, LegacyConfigDir, StateDB, CacheDB, ManagedRoot string
 	ConfigExplicit                                                          bool
-	HarvesterCacheDir                                                       string
 	MCPPort                                                                 int
 	Accounts                                                                []config.Account
 	AcceptedMCP                                                             []config.AcceptedMCP
@@ -80,8 +79,7 @@ func EnvFor(runtime config.Runtime, now time.Time) Env {
 		LegacyConfigDir: config.LegacyConfigDir(paths.OSEnv{}, home),
 		StateDB:         runtime.Paths.StateDB, CacheDB: runtime.Paths.CacheDB,
 		ManagedRoot: installer.ManagedRoot(home), ConfigExplicit: runtime.ConfigExplicit,
-		HarvesterCacheDir: runtime.Config.Harvester.Cache.Dir,
-		MCPPort:           runtime.Config.MCP.HTTP.Port, Accounts: runtime.Config.Accounts, Now: now,
+		MCPPort: runtime.Config.MCP.HTTP.Port, Accounts: runtime.Config.Accounts, Now: now,
 		Environ: os.Environ(), TmuxDir: runtime.Paths.TmuxDir,
 		AcceptedMCP: runtime.Config.Doctor.AcceptedMCP,
 	}
@@ -95,17 +93,15 @@ type Detector struct {
 func Detectors() []Detector {
 	return []Detector{
 		{legacyConfigCheck, legacyConfig},
-		{"legacy-harvester-config", legacyHarvesterConfig},
 		{"pre-split-config", preSplitConfig},
 		{"legacy-state-db", detectLegacyStateDB},
 		{"legacy-cache-db", detectLegacyCacheDB},
-		{"legacy-harvester-cache", legacyHarvesterCache},
 		{"pfm-settings", pfmSettings},
 		{checkPFMMCP, pfmMCP},
-		{"memory-helpers", memoryHelpers},
 		{"staged-shim", stagedShim},
 		{"staged-prompts", stagedPrompts},
 		{"shared-db", sharedDB},
+		{checkRetiredHarvesterConfig, retiredHarvesterConfig},
 		{"stray-dir", strayDir},
 		{"account-is-store", accountIsStore},
 		{"store-identity", storeIdentity},

@@ -40,7 +40,6 @@ func TestDoctorMCPClientPreservesUnrelatedRegistrations(t *testing.T) {
 		warnings                        int
 	}{
 		{"claude", "chat", ".claude.json", `{"mcpServers":{"chat":{"command":"other-server"}}}`, 0},
-		{"claude", "harvester", ".claude.json", `{"mcpServers":{"harvester":{"command":"other-server"}}}`, 0},
 		{"claude", "professor", ".claude.json", `{"mcpServers":{"professor":{"command":"other-server"}}}`, 0},
 		{"codex", "professor", ".codex/config.toml", "[mcp_servers.professor]\ncommand = \"other-server\"\n", 0},
 		{"opencode", "professor", ".config/opencode/opencode.jsonc", `{"mcp":{"professor":{"type":"local","command":["other-server"]}}}`, 0},
@@ -114,10 +113,10 @@ func TestDoctorMCPClientReportsOpenCodeStates(t *testing.T) {
 	}
 	write(`{"mcp":{` + professor +
 		`,"chat":{"type":"local","command":["` + bin + `","mcp","chat","serve"],"enabled":true}` +
-		`,"harvester":{"type":"remote","url":"http://127.0.0.1:18377/mcp/harvester","enabled":true}}}`)
+		`}}`)
 	stdout.Reset()
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 ||
-		!strings.Contains(stdout.String(), row+"pfm legacy=chat,harvester remediation=run pfm install --yes\n") {
+		!strings.Contains(stdout.String(), row+"pfm legacy=chat remediation=run pfm install --yes\n") {
 		t.Fatalf(
 			"legacy OpenCode doctor code=%d stdout=%q, want the legacy keys and the reinstall",
 			code,
@@ -151,7 +150,7 @@ func TestDoctorMCPClientReportsOpenCodeStates(t *testing.T) {
 
 func TestDoctorMCPClientReportsFamilyOwnership(t *testing.T) {
 	for _, client := range []string{"claude", "opencode"} {
-		for _, family := range []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester} {
+		for _, family := range []string{pfmconfig.MCPServerChat} {
 			for _, tc := range []struct {
 				name, ledger, remediation string
 				enabled                   bool
@@ -354,9 +353,8 @@ func TestDoctorMCPClientReportsCodexProfessorStates(t *testing.T) {
 			"legacy chat", fenced + "\n[mcp_servers.chat]\nurl = \"http://127.0.0.1:18377/mcp/chat\"\n", true,
 			row + "pfm legacy=chat" + reinstall + "\n", 1,
 		},
-		// The same unparseable file also fails the harvester row, which
-		// names that key; both rows report the error, never absence.
-		{"unreadable", "[mcp_servers.chat-professor\n", true, row + "unreadable error=", 3},
+		// An unparseable file must report an error, never absence.
+		{"unreadable", "[mcp_servers.chat-professor\n", true, row + "unreadable error=", 1},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			if err := os.WriteFile(path, []byte(fixture.config), 0o600); err != nil {
@@ -401,7 +399,7 @@ func TestDoctorMCPClientReportsCodexProfessorStates(t *testing.T) {
 				t.Fatalf("warnings=%d output:\n%s\nwant %d warnings and the row %q", warnings, out, fixture.warnings,
 					fixture.wantRow)
 			}
-			if strings.Count(out, "client=codex config=") != 2 {
+			if strings.Count(out, "client=codex config=") != 1 {
 				t.Fatalf("want exactly one Codex professor row:\n%s", out)
 			}
 			if complete := strings.Contains(out, "client-cutover=complete"); complete != (fixture.warnings == 0) {

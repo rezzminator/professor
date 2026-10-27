@@ -185,8 +185,7 @@ exit 2
 	); err != nil {
 		h.t.Fatal(err)
 	}
-	// A fresh fixture uses the split config; the clone example still contains
-	// mcp.servers.harvester, which the host gate now refuses.
+	// Isolate the fresh install from MCP services outside this fixture.
 	roots := make([]string, 0, len(managedSettings))
 	for _, relative := range managedSettings {
 		roots = append(roots, filepath.Join(home, filepath.Dir(relative), "projects"))
@@ -203,7 +202,6 @@ exit 2
 	if err := os.WriteFile(filepath.Join(home, "pfm.config.json"), content, 0o600); err != nil {
 		h.t.Fatal(err)
 	}
-	h.writeJSON(filepath.Join(home, "harvester.config.json"), map[string]any{"enabled": false})
 	stageSchedulerFixtures(h.t, home)
 	return home
 }

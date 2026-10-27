@@ -20,7 +20,7 @@ func TestMCPEnableRefusesUnresolvedConfigPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, server := range []string{"chat", "harvester"} {
+	for _, server := range []string{"chat"} {
 		if _, err := SetMCPServer(
 			loaded,
 			server,
@@ -33,10 +33,7 @@ func TestMCPEnableRefusesUnresolvedConfigPath(t *testing.T) {
 }
 
 func TestSetMCPServerIsIndependentAtomicAndIdempotent(t *testing.T) {
-	registered := map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
-	}
+	registered := map[string]MCPServer{"chat": {Enabled: false}}
 	home := filepath.Join(t.TempDir(), "home")
 	path := filepath.Join(t.TempDir(), "deep", "machine.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -45,7 +42,7 @@ func TestSetMCPServerIsIndependentAtomicAndIdempotent(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{
   "version": 1,
   "claude": {"binary": "claude-custom"},
-  "mcp": {"servers": {"chat": {"enabled": false}, "harvester": {"enabled": false}}}
+		"mcp": {"servers": {"chat": {"enabled": false}, "external": {"enabled": true, "extra": "kept"}}}
 }`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +59,13 @@ func TestSetMCPServerIsIndependentAtomicAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(after chat) error = %v", err)
 	}
-	if !afterChat.MCPServers["chat"].Enabled || afterChat.MCPServers["harvester"].Enabled {
-		t.Fatalf("after chat toggle MCPServers = %#v, want chat true and harvester false", afterChat.MCPServers)
+	if !afterChat.MCPServers["chat"].Enabled {
+		t.Fatalf("after chat toggle MCPServers = %#v, want chat true", afterChat.MCPServers)
+	}
+	var external map[string]any
+	if err := json.Unmarshal(afterChat.MCP.OtherServers["external"], &external); err != nil ||
+		external["enabled"] != true || external["extra"] != "kept" {
+		t.Fatalf("chat toggle dropped unrelated server data: %s", afterChat.MCP.OtherServers["external"])
 	}
 	if afterChat.Claude.Binary != "claude-custom" {
 		t.Fatal("SetMCPServer discarded unrelated configuration")
@@ -82,18 +84,6 @@ func TestSetMCPServerIsIndependentAtomicAndIdempotent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(afterNoop, beforeNoop) {
 		t.Fatal("idempotent SetMCPServer rewrote the config")
-	}
-
-	changed, err = SetMCPServer(afterChat, "harvester", true)
-	if err != nil || !changed {
-		t.Fatalf("enable harvester = changed:%v err:%v, want changed true", changed, err)
-	}
-	afterHarvester, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("Load(after harvester) error = %v", err)
-	}
-	if !afterHarvester.MCPServers["chat"].Enabled || !afterHarvester.MCPServers["harvester"].Enabled {
-		t.Fatalf("after harvester toggle MCPServers = %#v, want both enabled", afterHarvester.MCPServers)
 	}
 
 	entries, err := os.ReadDir(filepath.Dir(path))
@@ -131,7 +121,7 @@ func TestSetMCPServerRejectsUnknownServerWithoutWriting(t *testing.T) {
 
 func TestRegisteredMCPServersIsSorted(t *testing.T) {
 	got := RegisteredMCPServers()
-	if !sort.StringsAreSorted(got) || !reflect.DeepEqual(got, []string{"chat", "harvester"}) {
+	if !sort.StringsAreSorted(got) || !reflect.DeepEqual(got, []string{"chat"}) {
 		t.Fatalf("RegisteredMCPServers() = %#v, want sorted production registry", got)
 	}
 }
@@ -166,7 +156,7 @@ func TestRemoveLegacyMCPAuthTokenPreservesUnrelatedConfig(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"version":2,"theme":"midnight","mcp":{"authToken":"retired-secret","http":{"port":8456},"servers":{"harvester":{"enabled":true}}}}`
+	legacy := `{"version":2,"theme":"midnight","mcp":{"authToken":"retired-secret","http":{"port":8456},"servers":{"external":{"enabled":true,"extra":"kept"}}}}`
 	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +175,7 @@ func TestRemoveLegacyMCPAuthTokenPreservesUnrelatedConfig(t *testing.T) {
 	if strings.Contains(string(body), "authToken") || strings.Contains(string(body), "retired-secret") {
 		t.Fatalf("legacy auth survived cleanup: %s", body)
 	}
-	for _, retained := range []string{`"theme": "midnight"`, `"port": 8456`, `"harvester"`} {
+	for _, retained := range []string{`"theme": "midnight"`, `"port": 8456`, `"external"`, `"extra": "kept"`} {
 		if !strings.Contains(string(body), retained) {
 			t.Fatalf("cleanup dropped unrelated config %q: %s", retained, body)
 		}

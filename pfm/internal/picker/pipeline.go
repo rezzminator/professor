@@ -292,6 +292,13 @@ func streamFleetRefreshesWith(
 		failStreak int
 		retryAt    time.Time
 	)
+	// Native publication already emits its failure snapshot; it still shares
+	// the same retry accounting as errors that fail publishes below.
+	retryFailedPass := func(at time.Time) {
+		pendingRefresh = true
+		failStreak++
+		retryAt = at.Add(failureBackoff(failStreak))
+	}
 	// fail is every pass error's one door: stderr for the log, and a failure
 	// snapshot for the picker, whose alt-screen hides stderr. A stream that
 	// only wrote stderr left the TUI showing the last good rows as current. It
@@ -301,8 +308,7 @@ func streamFleetRefreshesWith(
 			// A failed pass (not a published pass the presence probe then could
 			// not watch) schedules its retry: the loop below holds every timer
 			// fire until retryAt, whatever the park poll says.
-			failStreak++
-			retryAt = at.Add(failureBackoff(failStreak))
+			retryFailedPass(at)
 		}
 		if !writeRefreshError(ctx, stderr, stage, err) {
 			return false
@@ -364,7 +370,7 @@ func streamFleetRefreshesWith(
 		if sent, ok := sendRefresh(ctx, database, environment, request, data, live, true, updates); !ok {
 			return false
 		} else if sent.failed {
-			pendingRefresh = true
+			retryFailedPass(lastAttempt)
 			return true
 		}
 		movedBinding := false
@@ -410,7 +416,7 @@ func streamFleetRefreshesWith(
 			return false
 		}
 		if sent.failed {
-			pendingRefresh = true
+			retryFailedPass(lastAttempt)
 			return true
 		}
 		lastSent = sent
@@ -495,14 +501,15 @@ func streamFleetRefreshesWith(
 	// the defaults) re-reads the rows' working state over the LAST pass's
 	// composed output — a stat per transcript, no tmux and no process scan — so
 	// a chat that goes busy or idle while the picker is parked shows it within
-	// fleetRefreshInterval rounded up to the park poll.
+	// fleetRefreshInterval rounded up to the park poll. The same poll reads the
+	// cached theme, even when no chat is live or no facts reader is installed.
 	polls := 0
 	refreshParkedFacts := func() bool {
 		polls++
 		every := int((fleetRefreshInterval + fleetRefreshParkPollInterval - 1) / fleetRefreshParkPollInterval)
 		// A blind presence probe (no baseline) leaves its stale marker up: a
 		// facts snapshot would clear it while nothing watches the chat set.
-		if request.Facts == nil || !presence.have || polls%max(every, 1) != 0 || !hasLiveRow(lastSent.output.Rows) {
+		if !presence.have || polls%max(every, 1) != 0 {
 			return true
 		}
 		reread := environment
@@ -622,6 +629,7 @@ func streamFleetRefreshesWith(
 		if sent, ok := sendRefresh(ctx, database, environment, request, data, live, true, updates); !ok {
 			return
 		} else if sent.failed {
+			retryFailedPass(passStart)
 			continue
 		}
 		if indexer == nil {
@@ -675,6 +683,7 @@ func streamFleetRefreshesWith(
 			return
 		}
 		if sent.failed {
+			retryFailedPass(passStart)
 			continue
 		}
 		lastSent = sent

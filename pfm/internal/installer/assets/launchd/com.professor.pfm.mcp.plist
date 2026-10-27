@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Serve pfm's chat-professor and harvester-professor MCP servers over loopback HTTP (pfm mcp serve).
+  Serve pfm's chat-professor MCP server over loopback HTTP (pfm mcp serve).
 
   ProgramArguments[0] is the one stable launcher script (agentlauncher), never
   pfm itself: macOS Background Task Management treats a rebuilt, ad-hoc-signed

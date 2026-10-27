@@ -49,24 +49,15 @@ func TestHerdrShellDoctor(t *testing.T) {
 			if config == "unmarked" {
 				config = fmt.Sprintf("[terminal]\ndefault_shell = %q\n", paths.HerdrShellWrapper(home))
 			}
+			if tc.wrapper {
+				testjail.StageHerdrShell(t, home)
+			}
 			path := filepath.Join(home, ".config", "herdr", "config.toml")
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
 				t.Fatal(err)
-			}
-			if tc.wrapper {
-				if err := os.MkdirAll(filepath.Dir(paths.HerdrShellWrapper(home)), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := testjail.WriteExecutable(
-					paths.HerdrShellWrapper(home),
-					[]byte("#!/bin/sh\nexit 0\n"),
-					0o755,
-				); err != nil {
-					t.Fatal(err)
-				}
 			}
 			if tc.nonExecutable {
 				if err := os.Chmod(paths.HerdrShellWrapper(home), 0o600); err != nil {

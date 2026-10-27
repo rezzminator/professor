@@ -35,6 +35,7 @@ type ProcFS interface {
 
 // ProcessIdentity is process metadata available without reading argv.
 type ProcessIdentity struct {
+	// Zombie marks a terminal zombie or dead process (Linux Z/X); it cannot do work.
 	Zombie       bool
 	EffectiveUID uint32
 	Command      string

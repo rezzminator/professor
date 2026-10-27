@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -41,7 +42,8 @@ type HerdrShellStatus struct {
 }
 
 // InspectHerdrShell reads the setting and proves both marker ownership and an
-// executable wrapper. Parse/read failures remain errors, not missing wiring.
+// executable wrapper matching the canonical asset and its captured shell.
+// Parse/read failures remain errors, not missing wiring.
 func InspectHerdrShell(home string, env paths.Env) (HerdrShellStatus, error) {
 	path, err := paths.HerdrConfig(home, env)
 	status := HerdrShellStatus{Path: path}
@@ -83,8 +85,42 @@ func InspectHerdrShell(home string, env paths.Env) (HerdrShellStatus, error) {
 	if err != nil {
 		return status, fmt.Errorf("inspect Herdr shell wrapper: %w", err)
 	}
-	status.Wired = info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return status, nil
+	}
+	content, err := os.ReadFile(paths.HerdrShellWrapper(home))
+	if err != nil {
+		return status, fmt.Errorf("read Herdr shell wrapper: %w", err)
+	}
+	for line := range strings.SplitSeq(string(content), "\n") {
+		const prefix = "pfm_real_shell='"
+		if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, "'") {
+			continue
+		}
+		shell := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(line, prefix), "'"), `'\''`, "'")
+		if !filepath.IsAbs(shell) || strings.ContainsAny(shell, "\x00\r\n") || shell == paths.HerdrShellWrapper(home) {
+			return status, nil
+		}
+		expected, err := renderHerdrShell(paths.HerdrShellWrapper(home), shell)
+		if err != nil {
+			return status, err
+		}
+		status.Wired = bytes.Equal(content, expected)
+		return status, nil
+	}
 	return status, nil
+}
+
+func renderHerdrShell(wrapper, realShell string) ([]byte, error) {
+	content, err := readAsset(herdrShellAsset)
+	if err != nil {
+		return nil, fmt.Errorf("read Herdr shell wrapper asset: %w", err)
+	}
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'" }
+	return []byte(
+		strings.NewReplacer("__PFM_REAL_SHELL__", quote(realShell), "__PFM_WRAPPER__", quote(wrapper)).
+			Replace(string(content)),
+	), nil
 }
 
 func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
@@ -122,16 +158,10 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 	if uninstall {
 		return installer.unwireHerdrShell(status, wrapper)
 	}
-	content, err := readAsset(herdrShellAsset)
+	content, err := renderHerdrShell(wrapper, installer.herdrRealShell(wrapper))
 	if err != nil {
-		return fmt.Errorf("read Herdr shell wrapper asset: %w", err)
+		return err
 	}
-	realShell := installer.herdrRealShell(wrapper)
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'" }
-	content = []byte(
-		strings.NewReplacer("__PFM_REAL_SHELL__", quote(realShell), "__PFM_WRAPPER__", quote(wrapper)).
-			Replace(string(content)),
-	)
 	if sameFile(wrapper, content, 0o755) {
 		installer.ok(wrapper)
 	} else if err := installer.change("write "+wrapper, func() error { return atomicfile.Write(wrapper, content, 0o755) }); err != nil {

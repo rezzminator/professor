@@ -9,7 +9,7 @@
 # Every beat that mutates the install RESTORES what it changed and asserts the
 # restore: a dropped seat is always a spare (never the seat E1 will spend), a
 # moved credential is moved back, a removed overlay is re-installed. The
-# destructive tail — reap, archive, headless, harvester, uninstall — is lane O2,
+# destructive tail — reap, archive, headless, uninstall — is lane O2,
 # which runs last because it tears the machine down.
 #
 # BROKEN STATE: the prelude aborts by name when this container carries no pfm
@@ -90,7 +90,6 @@ if themes="$(bundled_themes "$clone/templates/themes")"; then
 else
   missing="$missing I15 ($themes);"
 fi
-check_path I16 "harvestpy runtime" "$HOME/.local/state/pfm/harvest-python/env"
 check_path I14 "VS Code extension asset" "$MANAGED/vscode/professor/package.json"
 for registry in agents commands skills; do
   [ -d "$SEAT_DIR/$registry" ] || missing="$missing I17/I18/I19 ($SEAT_DIR/$registry absent);"
@@ -408,7 +407,6 @@ else
 fi
 mcp_list="$(pfm mcp ls 2>&1)"
 grep -q $'^chat\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report chat enabled;"
-grep -q $'^harvester\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report harvester enabled;"
 [ -n "$(find "$SEAT_DIR/skills" -maxdepth 2 -type l -o -maxdepth 2 -type d -name '*git*' 2>/dev/null | head -1)" ] ||
   _lane_log_only "   O1.12: no git-bridge skill directory under $SEAT_DIR/skills (I94 reads the global fan-out instead)"
 if [ -n "$bad" ]; then fail "$bad"; else
@@ -431,7 +429,6 @@ run_ok() { # run_ok <what> <cmd…>
 run_ok "pfm version" pfm version
 run_ok "pfm config show" pfm config show
 run_ok "pfm config validate" pfm config validate
-run_ok "pfm issues" pfm issues
 # whoami OUTSIDE a chat must refuse by name, never invent a session.
 who="$(pfm whoami 2>&1)"
 who_rc=$?
@@ -448,7 +445,7 @@ usage_out="$(printf '{"session_id":"lane-no-such-session","prompt":"hello"}' | p
 usage_rc=$?
 [ "$usage_rc" -eq 0 ] || bad="$bad pfm usage-hook is not fail-open: exit $usage_rc ($(one_line "$usage_out"));"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "version/config show/config validate/issues answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
+  pass "version/config show/config validate answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
 fi
 
 # ─── O1.15 — model-cost offline surface ────────────────────────────────────
@@ -615,6 +612,41 @@ if [ "$worker_rc" -ne 2 ] || ! grep -qF 'usage: pfm internal restart-run --front
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "the dry run opens with the plan header, finds all seven families (exit $plan_rc), names its last process and starts no worker; an argument exits 2 with the usage, and so does the internal worker without --front"
+fi
+
+# ─── O1.20 — cross-engine extension switch ────────────────────────────────
+beat O1.20-extensions
+spends none
+bad=""
+extension_backup="$(mktemp)"
+cp "$CONFIG" "$extension_backup"
+for enabled in true false; do
+  python3 - "$CONFIG" "$enabled" <<'PYEXT'
+import json,sys
+p=sys.argv[1]
+with open(p) as f: config=json.load(f)
+config["extensions"]={"ponytail":{"enabled":sys.argv[2]=="true","engines":["claude","codex","opencode"],"env":{"PONYTAIL_SUBAGENT_MATCHER":"^fixture$"},"options":{"ledger":False}}}
+with open(p,"w") as f: json.dump(config,f)
+PYEXT
+  extension_out="$(install_again)"; extension_rc=$?
+  [ "$extension_rc" -eq 0 ] || bad="$bad extension $enabled install exited $extension_rc: $(one_line "$extension_out");"
+  extension_doctor="$(pfm doctor 2>&1)"
+  for engine in claude codex opencode; do
+    for aspect in installed enabled options env; do
+      grep -qF "doctor: extension ponytail/$engine $aspect" <<<"$extension_doctor" || bad="$bad extension $enabled $engine lacks $aspect doctor row;"
+    done
+  done
+  grep -qF 'doctor: extension ponytail/codex hook trust' <<<"$extension_doctor" || bad="$bad extension $enabled lacks hook trust row;"
+  if grep -E '^doctor: extension(s| )' <<<"$extension_doctor" | grep -q 'FAIL'; then
+    bad="$bad extension $enabled doctor drift: $(one_line "$(grep -E '^doctor: extension(s| )' <<<"$extension_doctor")");"
+  fi
+done
+cp "$extension_backup" "$CONFIG"
+rm -f "$extension_backup"
+restore_out="$(install_again)"; restore_rc=$?
+[ "$restore_rc" -eq 0 ] || bad="$bad restoring extension config failed ($restore_rc): $(one_line "$restore_out");"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "extension ON/OFF converges all engines and every doctor aspect, original config restored"
 fi
 
 lane_end

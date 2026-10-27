@@ -13,7 +13,6 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -231,7 +230,7 @@ func TestScopedLiveKillConfirmsClosureWithoutExitFlag(t *testing.T) {
 	}
 	ctx := pfmchat.WithResolvedSelf(context.Background(), self)
 	var stdout, stderr bytes.Buffer
-	if code := runChatKillContext(ctx, []string{"self"}, &stdout, &stderr, paths.OSEnv{}); code != 0 {
+	if code := runChatKillContext(ctx, []string{"self"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("kill self code=%d stderr=%q", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "closing pane %0 on socket cc-new-review") {

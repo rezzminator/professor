@@ -117,11 +117,10 @@ This settles former open question 2 (where the router lives).
 
 ### GPT agents live on the launch line
 
-A GPT agent exists only in a session started through the router. pfm's launch line sets `ANTHROPIC_BASE_URL` and passes `--agents` with the GPT definitions (W10). Each definition is compiled at launch from the Claude file it twins: the prompt body comes from the file and only `model` is swapped, so no hand-kept copy can drift.
+A GPT agent exists only in a session started through the router. pfm's launch line sets `ANTHROPIC_BASE_URL` and passes `--agents` with the GPT definitions (W10). Each definition is compiled at launch from the Claude file it mirrors: the prompt body comes from the file and only `model` is swapped, so no hand-kept copy can drift.
 
 - **General workers:** `sol`, `luna`, `astra`, pinned to the catalog's current Sol, Luna and Astra IDs.
-- **Fleet roles:** a GPT twin (for example `gpt-foreman`) replaces the file definition, in that session only.
-- **Not an ungated file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails. The shipped twins are therefore machine-source `{name}.md` declarations with `from:` that require the `gpt-agents` capability, installed only on a host that sets `claude.gptAgents` ([GPT twins](../design/gpt-twins/gpt-twins.md)).
+- **Not an ungated file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails. Professor ships no GPT-pinned agent file; the engine-sync capability `gpt-agents`, declared by the switch `claude.gptAgents` (default `false`), is what would admit one.
 - **Not an alias remap:** see W2 and W8.
 
 ### Spawning a GPT agent
@@ -366,8 +365,8 @@ Ruled on 2026-10-09:
 
 ## Open questions
 
-1. **Harness fit.** This is the gating measurement: run one flight task file with the Sonnet executor and with its GPT twin, then compare the diff, the tests, the calls and the tokens.
-2. **Launch-line composition.** Which fleet roles get GPT twins, and how pfm names a GPT-enabled seat.
+1. **Harness fit.** This is the gating measurement: run one flight task file with the Sonnet executor and with a GPT agent, then compare the diff, the tests, the calls and the tokens.
+2. **Launch-line composition.** Which fleet roles get GPT agents, and how pfm names a GPT-enabled seat.
 3. **Fleet-prompt exception.** The wording for "a GPT-pinned agent is spawned with no `model`".
 4. **Anthropic's terms** for subscription traffic through a local passthrough gateway. Not checked.
 5. **`CLAUDE_CODE_SUBAGENT_MODEL` vs a definition's `model`.** Which wins is unprobed.
@@ -389,7 +388,7 @@ Ruled on 2026-10-09:
 4. **Router fork in `gateway.py`**, with the sub-agent-only guard and per-upstream connections.
 5. **Live acceptance.** One `sol` sub-agent in a router session runs a tool-using task. On every turn from the third, the lane's `cached_tokens / input_tokens` is ≥ 0.8 and every reasoning item round-trips. Claude Code shows no error.
 6. **Answer open question 1.**
-7. **Productize.** Use `flights-foreman` with this doc as the spec (pfm launch line, GPT twins, fleet-prompt exception), or drop.
+7. **Productize.** Use `flights-foreman` with this doc as the spec (pfm launch line, GPT agents, fleet-prompt exception), or drop.
 
 ## Reproducing the probes
 

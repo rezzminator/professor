@@ -26,7 +26,6 @@ A foreman turns one request into landed-ready code for the fewest tokens read. I
 | --- | --- | --- |
 | `flights-foreman` | opus · high | design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules, the toughest work |
 | `flights-foreman-sonnet` | sonnet · high | a clear path: the pattern is in the code |
-| `gpt-foreman` | gpt-6.1-sol · high | the `flights-foreman` protocol on GPT, no effort buttons |
 
 Difficulty and ambiguity choose the tier, never size: a 3,000-line rename with a pattern is `flights-foreman-sonnet` work, and a 40-line race is `flights-foreman` work.
 
@@ -71,7 +70,6 @@ A child goes out only when both hold: the foreman is busy with its own part, and
 | Prompt files | `pcm` |
 
 - **Disjoint files.** No two children, and no child and the foreman, share a file: the foreman lists both file sets before the spawn, and a file on both lists keeps the area its own.
-- **Own provider.** A Claude foreman spawns Claude agents; a GPT twin spawns a role's GPT twin wherever one exists.
 - **No caps.** No call or round cap exists; the foreman decides when its change is whole.
 
 ## Children's briefs
@@ -143,5 +141,4 @@ One message:
 
 - **Base:** `templates/global/agents/flights-foreman.md`, opus at effort high, `effortControl` floor medium and ceiling xhigh.
 - **Sonnet tier:** `flights-foreman-sonnet.md` is a `from: flights-foreman` declaration on sonnet, rendered into `templates/generated/agents/`. The base carries no `tools:` line, so every tool, the effort buttons included, is available as for `general-purpose`; the sonnet render inherits that and the `effortControl` band ([flights.md](flights.md#effort-buttons)).
-- **GPT twin:** `gpt-foreman` is a `from: flights-foreman` declaration over the same body at effort high. It unsets `effortControl`. Its rename map renames `flights-foreman` and `flights-foreman-sonnet` to `gpt-foreman`, so every foreman child it spawns is `gpt-foreman`.
-- **Tools:** every tool, no `tools:` line. The GPT twin keeps its own pinned `tools:` line, without the buttons.
+- **Tools:** every tool, no `tools:` line.

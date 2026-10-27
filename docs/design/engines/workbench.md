@@ -22,8 +22,8 @@ A workbench is a nested sub-project marked by `{dir}/.professor/workbench.json`,
 | `engines` | `["claude"]` | Non-empty ordered array of distinct `claude`, `codex`, `opencode` words. |
 | `title` | `filepath.Base(dir)` | Non-empty string when present. |
 | `name` | `naming.WorkbenchPrefix(title)` | Non-empty string without whitespace or `:`. |
-| `effort` | none | String; every launch door validates it through its engine's effort roster (`action.PersonaEffort` over `ClaudeEffort`, `CodexEffort`) and carries it lower-cased; an unknown value refuses the launch naming the bench. |
-| `model` | none | String passed verbatim. |
+| `effort` | none | String; `action.WorkbenchPersona` validates through `ClaudeEffort`, `CodexEffort` or `OpenCodeEffort` and lower-cases it; unknown values refuse the launch naming the bench. |
+| `model` | none | String passed verbatim; OpenCode requires non-empty `provider/model` parts. |
 
 `LoadBench` uses `DisallowUnknownFields`; field type errors and unknown fields invalidate the bench. Errors retain its identity and use `{manifest path}: {fault}`. `WorkbenchPrefix` uppercases the title, retains Unicode letters/digits and falls back to `WORKBENCH`; `NextNumbered` chooses the first free positive `{prefix}:{n}`. `chat.WorkbenchName` reads live and killed roster names and refuses on a roster read error. Sources: `pfm/internal/naming/workbench.go`, `pfm/internal/chat/workbench_name.go`.
 
@@ -45,7 +45,9 @@ The shared example is `/work/acme/docs/scribe` beneath `/work/acme`, with `{"pro
 | effort | `--effort` or `-c model_reasoning_effort=…` | Manifest `effort`. | No bench default. |
 | model | `--model` or `-m` | Manifest `model`. | No bench default. |
 
-Claude carries `--system-prompt-file {abs}`. Codex carries the body through `action.CodexDeveloperInstructionsArg`. OpenCode carries only the prompt: `OPENCODE_CONFIG_CONTENT` adds the manifest prompt to `instructions`, which OpenCode unions across config layers, and names the staged plugin; `PFM_OPENCODE_SYSTEM_FILE` names the manifest prompt and `PFM_OPENCODE_FLEET_FILE` the composed fleet prompt `pfm install` lists in OpenCode's machine `instructions`. `WorkbenchSeat` removes that fleet block from `output.system` in `experimental.chat.system.transform`; the provider prompt, environment, `AGENTS.md` instructions and the operator's other entries stay. It throws when the workbench prompt is unreadable or blank, and when a request carries the workbench prompt while OpenCode lists a fleet prompt whose text it cannot find. Sources: `pfm/internal/action/persona.go`, `pfm/internal/action/headless.go`, `pfm/internal/hookentry/codex_launch.go`, `pfm/internal/workbench/opencode_seat.go`, `pfm/internal/installer/opencode_instructions.go`.
+Claude carries `--system-prompt-file {abs}`. Codex carries the body through `action.CodexDeveloperInstructionsArg`. OpenCode's `OPENCODE_CONFIG_CONTENT` adds the manifest prompt to `instructions`, which OpenCode unions across config layers, and names the staged plugin; `PFM_OPENCODE_SYSTEM_FILE` names the manifest prompt and `PFM_OPENCODE_FLEET_FILE` the composed fleet prompt `pfm install` lists in OpenCode's machine `instructions`. `WorkbenchSeat` removes that fleet block from `output.system` in `experimental.chat.system.transform`; the provider prompt, environment, `AGENTS.md` instructions and the operator's other entries stay. It throws when the workbench prompt is unreadable or blank, and when a request carries the workbench prompt while OpenCode lists a fleet prompt whose text it cannot find. Sources: `pfm/internal/action/persona.go`, `pfm/internal/action/headless.go`, `pfm/internal/hookentry/codex_launch.go`, `pfm/internal/workbench/opencode_seat.go`, `pfm/internal/installer/opencode_instructions.go`.
+
+OpenCode carries model and effort through `PFM_OPENCODE_MODEL` and `PFM_OPENCODE_VARIANT`. `WorkbenchSeat` pins the selected default agent's model and variant without replacing its policy, permissions or tools. `chat.message` overrides a remembered variant for that agent; `chat.params` refuses a resolved-model mismatch, unsupported variant or message-variant mismatch, and rethrows configuration failures at the model-call boundary. Effort without an explicit or configured model refuses the launch. Composed launch policy travels separately as `PFM_OPENCODE_POLICY` and is appended to `output.system`, not to the initial user prompt (`--prompt`); `PlanOpenCode` avoids duplicating the workbench body already carried by `instructions`. Sources: `pfm/internal/action/headless.go`, `pfm/internal/action/persona.go`, `pfm/internal/workbench/opencode_seat.go`.
 
 `--agent-role` composes onto the explicit harness, else workbench prompt, else fleet prompt. `BasePrompt`, `ResolveSeatPrompt` and `RefreshSeatPrompt` share this base across new seats and reloads. An inherited Claude branch model is kept; absent one, the bench model applies. Sources: `pfm/internal/agentrole/base_prompt.go`, `pfm/internal/agentrole/agentrole.go`, `pfm/internal/action/headless.go`.
 
@@ -61,12 +63,12 @@ An omitted engine in `chat new` / MCP `new` keeps the current engine when enable
 | Picker ✦ new Codex, bare `cx` | `New` or `Resume` for resume/continue/fork | `pfm/internal/action/persona.go` checks the picker request; `pfm/internal/hookentry/codex_launch.go`: `CodexLaunch` builds the mirror and inserts persona flags. |
 | Bare `claude`, `internal launch`, `internal claude-launch` | `New` or `Resume` for resume/continue/fork | `pfm/internal/hookentry/launch.go`, `pfm/internal/hookentry/claude_launch.go`, `pfm/internal/action/synth.go`, `pfm/internal/claudelaunch/render.go`: `Launch` → `LauncherRunAs`. |
 | agent-open | `Resume` | `pfm/internal/agentopen/real.go`: `ExecCommands.Resume`. |
-| `pfm chat new`, MCP `new` | `New` | `pfm/internal/mcpserv/actions.go`, `pfm/cmd/pfm/chat_new_command.go`: `PlanClaude` / `PlanCodex`. |
+| `pfm chat new`, MCP `new` | `New` | `pfm/internal/mcpserv/actions.go`, `pfm/cmd/pfm/chat_new_command.go`: `PlanClaude` / `PlanCodex` / `PlanOpenCode` (OpenCode: Herdr only). |
 | `pfm chat reload` prompt | `Resume` | `pfm/internal/agentrole/agentrole.go`: `RefreshSeatPrompt`. |
 | `pfm chat reload` effort, model, mirror | `Resume` | `pfm/internal/reload/reload.go`, `pfm/internal/reload/workbench.go`: `Run` → `applyReloadWorkbench`, before pane locking. |
 | `pfm chat branch` | `Resume` | `pfm/cmd/pfm/chat_satellite_command.go`, `pfm/internal/action/headless.go`: `HeadlessFork`. |
 
-Attaching to an already live seat does not relaunch it. Bare non-session administrative commands pass through. `pfm headless exec`, `PurposeQuery` probes (`reap/busy.go`, agent-open queries, `chat_call_resume.go`) and `internal/ask` one-shot runs are outside this rule. OpenCode `chat new`, reload and branch remain refused.
+Attaching to an already live seat does not relaunch it. Bare non-session administrative commands pass through. `pfm headless exec`, `PurposeQuery` probes (`reap/busy.go`, agent-open queries, `chat_call_resume.go`) and `internal/ask` one-shot runs are outside this rule. OpenCode `chat new` and registered MCP `new` support native Herdr seats only; `--agent-role`, reload and branch remain refused.
 
 ## Mirrors
 

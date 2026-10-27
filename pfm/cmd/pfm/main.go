@@ -16,7 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
-	"github.com/rezzminator/professor/pfm/internal/harvestcli"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/installer"
@@ -25,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
 	modelcostcmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/restart"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
@@ -62,11 +62,11 @@ var version = config.DevelopmentVersion
 
 // topLevelSubcommands lists every argv[0] case for reachability and installer parity.
 var topLevelSubcommands = []string{
-	versionCommand, "ls", chatCommand, "harvest", headlessCommand, indexCommand, doctorCommand,
+	versionCommand, "ls", chatCommand, headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
-	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
+	mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
 	"model-cost", "tokens", transcriptCommand, "theme", restartCommand,
 }
 
@@ -148,8 +148,6 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return picker.Run(args[1:], stdout, stderr, runtime)
 	case "chat":
 		return runChatWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, context.Background())
-	case "harvest":
-		return harvestcli.Harvest(args[1:], stdout, stderr, runtime)
 	case "headless":
 		return runHeadless(args[1:], stdout, stderr, runtime)
 	case "index":
@@ -198,8 +196,6 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runInit(args[1:], stdout, stderr, runtime)
 	case "whoami":
 		return runWhoami(args[1:], stdout, stderr, runtime)
-	case "issues":
-		return runIssues(args[1:], stdout, stderr, runtime)
 	case "mcp":
 		return runMCP(args[1:], stdout, stderr, runtime)
 	case pfmengine.MustLookup(pfmengine.Codex).LongName, pfmengine.MustLookup(pfmengine.OpenCode).LongName:
@@ -222,10 +218,8 @@ func printUsage(w io.Writer) {
 		"  ls        list or pick fleet chats",
 		"  chat      operate on one chat: new, open, call, ask, read, stream, name, kill, end",
 		"  headless  run Claude or OpenCode through one isolated process interface",
-		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path; download files",
 		"  index     refresh the transcript index",
 		"  whoami    print this chat's own tmux session name",
-		"  issues    list servicedesk complaints filed through the servicedesk MCP tool",
 		"  reap      classify the socket graveyard; --apply reclaims it",
 		"  archive   move killed chats and old subagent transcripts out of sight, reversibly",
 		"  heal      report or repair wedged Codex history projections",
@@ -238,7 +232,7 @@ func printUsage(w io.Writer) {
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
 		"  model-cost the model price table, refreshed daily: MODEL_ID --all --check --json --force",
-		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --flight DIR)",
+		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree DIR)",
 		"  theme     Claude Code's theme rendered into tmux, Herdr and VS Code: status, sync, on, off",
 		"  transcript digest one Claude, Codex or OpenCode transcript: show, locate, agents",
 		"  version   print the pfm version", "", "wiring commands:",
@@ -287,7 +281,7 @@ func runMCP(
 	if len(args) != 2 || (args[1] != "enable" && args[1] != "disable") {
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm mcp ls | pfm mcp serve [--stdio --family chat|harvester] | pfm mcp <server> enable|disable",
+			"usage: pfm mcp ls | pfm mcp serve [--stdio --family chat] | pfm mcp <server> enable|disable",
 		)
 		return 2
 	}
@@ -349,6 +343,11 @@ func runKill(ctx context.Context, args []string, stdout, stderr io.Writer, runti
 		return code
 	}
 	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
+	identifier, identityErr := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(&runtime)})
+	if identityErr != nil {
+		fmt.Fprintf(stderr, "pfm chat kill: %v\n", identityErr)
+		return 1
+	}
 	id := ""
 	var engine pfmengine.ID
 	rolloutPath := ""
@@ -373,6 +372,7 @@ func runKill(ctx context.Context, args []string, stdout, stderr io.Writer, runti
 		paneID = address.PaneID
 	}
 	target, err := manager.Kill(ctx, kill.Request{
+		Identifier:  identifier,
 		ID:          id,
 		Engine:      engine,
 		RolloutPath: rolloutPath,
@@ -380,7 +380,6 @@ func runKill(ctx context.Context, args []string, stdout, stderr io.Writer, runti
 		PaneID:      paneID,
 		Self:        *self,
 		Exit:        *exit,
-		Environment: kill.Environment(paths.OSEnv{}),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)

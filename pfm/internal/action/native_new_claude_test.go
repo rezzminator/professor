@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -265,7 +268,7 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 			t.Setenv("HERDR_ENV", "1")
 			t.Setenv("HERDR_SOCKET_PATH", fake.socket)
 			t.Setenv("HERDR_PANE_ID", "w6:p3")
-			t.Setenv("TMUX", "")
+			t.Setenv("TMUX", "/tmp/tmux-1000/dead,1,0")
 			home := values.Home
 			machine := testMachineConfig(home)
 			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
@@ -275,7 +278,18 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 			}
 			machine.Claude.Binary, machine.Codex.Binary, machine.OpenCode.Binary = binary, binary, binary
 			var stderr strings.Builder
-			executor, err := New(Dependencies{Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr})
+			executor, err := New(Dependencies{
+				Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr,
+				Identify: func(context.Context) (resolve.Identity, error) {
+					return resolve.Identity{
+						Backend:        "herdr",
+						SocketPath:     fake.socket,
+						Pane:           "w6:p3",
+						HerdrWorkspace: "w6",
+						Fronted:        test.refuse != "stale",
+					}, resolve.ErrNotRegistered
+				},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,8 +321,7 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 				}
 				methods, renames := fake.seen()
 				if err != nil || line != "" || here || hereErr != nil || !found || readErr != nil ||
-					tabbed.Backend != "herdr" || !slices.Contains(methods, "layout.apply") || len(renames) != 0 ||
-					!strings.Contains(stderr.String(), "does not front Herdr pane w6:p3") {
+					tabbed.Backend != "herdr" || !slices.Contains(methods, "layout.apply") || len(renames) != 0 {
 					t.Fatalf("stale pane open line=%q err=%v caller seat=%v (%v) new tab seat=%+v found=%v (%v) "+
 						"methods=%q renames=%q stderr=%q",
 						line, err, here, hereErr, tabbed, found, readErr, methods, renames, stderr.String())
@@ -339,6 +352,9 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 				}
 			}
 			methods, renames := fake.seen()
+			if slices.Contains(methods, "pane.process_info") {
+				t.Fatalf("picker repeated caller proof: %q", methods)
+			}
 			if slices.Contains(methods, "layout.apply") {
 				t.Fatalf("a picker open laid out a new Herdr tab: %q", methods)
 			}
@@ -464,4 +480,24 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 		}
 	}()
 	return fake
+}
+
+func TestPickerRejectsCallerReadFailure(t *testing.T) {
+	home, failure := t.TempDir(), errors.New("caller pane read failed")
+	tmux := &fakeActionTmux{alive: map[string]bool{}, panes: map[string][]ActionPane{}}
+	executor, err := New(Dependencies{
+		Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
+		Identify: func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, failure },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		Row: compose.Row{Kind: compose.NewClaude, CWD: home}, Config: testMachineConfig(home),
+		Home: home, PrimaryAccount: 1, FreshSocket: "cc-caller-failure",
+	}
+	_, err = executor.Open(context.Background(), request)
+	if !errors.Is(err, failure) || len(tmux.created) != 0 {
+		t.Fatalf("caller failure = %v, births = %d; want caller error and no birth", err, len(tmux.created))
+	}
 }

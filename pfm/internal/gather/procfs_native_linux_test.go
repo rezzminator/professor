@@ -10,7 +10,7 @@ import (
 )
 
 func TestLinuxProcFSProcessIdentity(t *testing.T) {
-	for _, state := range []string{"", "Z (zombie)", "S (sleeping)", "? (unknown)"} {
+	for _, state := range []string{"", "Z (zombie)", "X (dead)", "S (sleeping)", "? (unknown)"} {
 		t.Run(state, func(t *testing.T) {
 			root := t.TempDir()
 			statusPath := filepath.Join(root, "42", "status")
@@ -29,7 +29,7 @@ func TestLinuxProcFSProcessIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			if identity.Command != "pfm" || identity.EffectiveUID != 1200 ||
-				identity.Zombie != strings.HasPrefix(state, "Z ") {
+				identity.Zombie != (strings.HasPrefix(state, "Z ") || strings.HasPrefix(state, "X ")) {
 				t.Fatalf("ProcessIdentity(42)=%#v for state %q", identity, state)
 			}
 		})

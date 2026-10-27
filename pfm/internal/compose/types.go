@@ -195,8 +195,9 @@ type Row struct {
 	ConfigDir    string
 	Socket       string
 	PaneID       string
-	// PanePIDs are the roots of this live socket's process tree. They are
-	// presentation-neutral live facts used only by the lazy Stats sampler.
+	// PanePIDs are the roots of this live seat's process tree: the tmux pane
+	// process, or a Herdr seat's proven seat-host. They are presentation-neutral
+	// live facts used only by the lazy Stats sampler.
 	PanePIDs    []int
 	SessionName string
 	WindowName  string
@@ -265,6 +266,15 @@ func RowKey(row Row) string {
 		return row.Kind.String() + "\x00" + row.Socket + "\x00" + row.PaneID
 	}
 	return row.Kind.String() + "\x00" + row.CWD + "\x00" + row.Project
+}
+
+// LiveSeatKey names one live seat: a tmux socket is one chat's server, while
+// every Herdr pane shares its server's socket, so a native seat adds its pane.
+func LiveSeatKey(row Row) string {
+	if row.Backend == herdrBackend {
+		return row.Socket + "\x00" + row.PaneID
+	}
+	return row.Socket
 }
 
 // Output contains the rows plus project metadata. Composition reads the kill

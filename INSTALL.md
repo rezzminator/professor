@@ -2,7 +2,7 @@
 
 Two independent things live in this repo. Install what you need.
 
-- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `chat-professor` and `harvester-professor` MCP servers, multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
+- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `chat-professor` MCP server and multi-account tooling. Binary or source, touches only your `$HOME`, no project files. Harvester is an independent plugin; see its [native install guide](plugins/harvester/README.md).
 - **Professor, the discipline layer** — `CLAUDE.md`, agents, commands, the pipeline. Installed into YOUR project through a Claude-guided interview.
 
 Shortest path first.
@@ -80,20 +80,19 @@ The checksum only catches a corrupted/incomplete download — releases don't pub
 
 For a filtered network that cannot reach a Go module host or proxy, use this binary path: it only needs access to the release assets and the Git tag lookup above, not the module downloads needed by a source build.
 
-### Preview, optional components, and harvest footprint
+### Preview, plugin setup, and optional components
 
-Bare `pfm install` is a read-only preview. Review its planned writes and the harvest line before applying the identical flag set with `--yes`:
+Bare `pfm install` is a read-only preview. Review its planned writes before applying the identical flag set with `--yes`:
 
 ```bash
-pfm install --skip-harvest --skip-engine codex --skip-themes
-pfm install --yes --skip-harvest --skip-engine codex --skip-themes
+pfm install --skip-engine codex --skip-themes
+pfm install --yes --skip-engine codex --skip-themes
 ```
 
-- `--skip-harvest` leaves the pinned harvestpy runtime unmanaged; it avoids the harvest download and its disk footprint. It does not hide a failed provision.
 - `--skip-engine codex` suppresses the Codex dependency probe and Codex mirror/hooks. It does not alter Claude or OpenCode surfaces.
 - `--skip-themes` suppresses theme installation. Themes are the Professor profiles in `templates/themes/`: every `{name}/` directory there, found by scanning, installs as `~/.claude/themes/{name}.json`. Each also becomes a `Professor · {name}` VS Code colour theme in the Professor extension, rendered from the installed files on every install, `--skip-themes` included, so the extension keeps listing what is already installed.
 
-The current embedded harvest plan is measured, not a promise for every host. On Linux `amd64`, the cold package closure is about **3.1 GB** (3,106,174,573 bytes) to download and about **5.8 GB** (5,786,939,761 bytes) installed. The uv and CPython bootstrap archives add roughly 57 MB, and temporary files or caches can require more free space. Other platforms and future lock revisions vary; the preview is the authoritative plan for the host.
+Harvester installs and provisions its own binary and conversion environment through its native plugin launcher. See the [plugin guide](plugins/harvester/README.md) for the engine commands, prerequisites and offline behavior.
 
 Theme fetch failures are visible nonfatal skips, so the rest of the install can continue. A locally modified theme is preserved and reported as drift rather than overwritten. On uninstall, only theme files recorded as installer-owned in the ownership ledger are removed.
 
@@ -123,8 +122,6 @@ pfm install --yes --vscode
 Run `pfm` for the interactive picker. Its colors are enabled independently of inherited `NO_COLOR` or `CLICOLOR=0`; `pfm ls --plain` and `pfm ls --tsv` remain uncolored. The managed terminal profile uses `PFM_AUTO_OPEN=pfm` to open the picker once at the first prompt.
 
 Use `pfm`, `pfm chat open <target>` and the picker’s account selector. Reload your shell after installing the clone-sourced shim. Credentials and per-account state stay in each account directory; transcripts and the other shared entries live in `~/.claude`.
-
-Optional memory helpers use `memory-wire.sh` and `memory-consolidate.sh`. The `memory-helpers` host check refuses recognized copies under their old names and prints the moves and hook edits; run those fixes before installation. Helpers are never executed by the check.
 
 **Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` covers host checks (a BLOCK row exits 4), existence of an explicit `--config` (missing exits 1), required dependencies (failure exits 1), and both name-sync and schedule-fire jobs. A running name-sync job exits 4 at once. A running schedule fire is waited out: the check pauses for up to 90 s and prints nothing meanwhile, then exits 4 if the fire is still running. A scheduler it cannot probe prints a `skip` line and the check still passes if the other checks pass. It stops before the config seed and the installer's own plan pass, so exit 0 is no promise that `pfm install --yes` will not refuse.
 
@@ -195,7 +192,7 @@ GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -l
 
 Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
 
-The source build has the same harvest cost and opt-outs as the [preview/apply block above](#preview-optional-components-and-harvest-footprint). Then run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
+After the source build, run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
 ```bash
 cd "$HOME/.professor"
@@ -221,13 +218,13 @@ pfm init .
 claude
 ```
 
-Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install interview** section. Claude interviews you — structure, stack, optional roles, persona, and host extras — shows the full write plan, waits for you to type **"go"**, then applies it: records your answers in `.professor/manifest.json`, fills the install-time tokens once through `pfm init --render`, adapts the scaffolded local files to your roster and structure, and deploys and pins per-project agents. Ten to fifteen minutes, commits nothing.
+Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install interview** section. Claude interviews you — structure, stack, compliance frame, persona, and host extras — shows the full write plan, waits for you to type **"go"**, then applies it: records your answers in `.professor/manifest.json`, fills the install-time tokens once through `pfm init --render`, adapts the scaffolded local files to your roster and structure, and deploys and pins per-project agents. Ten to fifteen minutes, commits nothing.
 
 **Guarantees, stated by the installer up front:**
 
 - Never commits, pushes, or runs `git add` — files only; you review and commit.
 - Never overwrites an existing project file by default — `pfm init` reports `CONFLICT` and leaves that path unpinned; `--force` is the explicit overwrite choice.
-- Never installs an opt-in piece — Tier B roles, Codex, statusline, hooks, host fleet, memory backup — without an explicit yes.
+- Never installs an opt-in piece — Codex, statusline, hooks, host fleet — without an explicit yes.
 - Never touches a path outside the plan.
 
 **Full protocol:** [`docs/SETUP.md`](./docs/SETUP.md) — the interview questions, pre-flight checks, existing-doc re-homing rules, generation steps, and verification. [`docs/PLACEHOLDERS.md`](./docs/PLACEHOLDERS.md) is the substitution law. Read both before writing any file.
@@ -243,10 +240,10 @@ One writer per surface — the law that keeps the two installers from fighting o
 | State and cache databases | The operator, using `pfm doctor` fixes | `~/.local/state/pfm/pfm.db` and `pfm-cache.db` beside it; close chats and stop services before moving an old database and its WAL/SHM siblings. |
 | Claude shared store and account links | `pfm install` | Missing store entries are created in `~/.claude`; each account links every shared entry there. Existing contents are kept. |
 | Claude plugins | `pfm install` through `claude plugin install` | Installed once through the selected primary account; `settings.json` and `plugins/installed_plugins.json` resolve to the shared store. A failed plugin command keeps its writes and reports the failure. |
-| Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
+| Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation and writes every `CLAUDE.md` with `/quality:claude-md write` | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, the Professor profiles (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/{profile}.json` for every profile directory in `templates/themes/`, their whole copies under `~/.local/share/pfm/install/themes/`, and one VS Code colour theme each in the Professor extension's `themes/`; exact ownership is recorded in the install ledger |
-| MCP client registrations (`chat-professor`, `harvester-professor`) | `pfm install` | Claude receives enabled pfm servers and `mcp.thirdParty` through `--mcp-config` on managed non-query launches; query launches omit them. Install also inspects existing account `.claude.json` files found through configured accounts, the account roster, ambient config and default paths; it replaces exact pfm-owned legacy registrations with enabled family entries only in registries containing a pfm-owned registration. Foreign entries are preserved and reported; registries with no pfm-owned entry stay unchanged, and absent files stay uncreated. Doctor reuses the inspector and reports account state, foreign entries and unreadable files. Codex receives owned `mcp_servers` entries in `config.toml`; OpenCode receives entries in `opencode.jsonc`. pfm emits a server registration only while its family is enabled. |
+| MCP client registrations (`chat-professor`) | `pfm install` | Claude receives the enabled PFM server and `mcp.thirdParty` through `--mcp-config` on managed non-query launches; query launches omit them. Install removes exact retired `harvester-professor` entries that earlier Professor installers wrote, while preserving other registrations. Codex receives the owned chat `mcp_servers` entry in `config.toml`; OpenCode receives its chat entry in `opencode.jsonc`. The native Harvester plugins manage their own registrations. |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 

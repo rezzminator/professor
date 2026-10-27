@@ -1,3 +1,3 @@
-// Package kill implements permanent kills, self-identification, and the
+// Package kill implements permanent kills and the
 // detached graceful-exit finisher for Claude and Codex chats.
 package kill

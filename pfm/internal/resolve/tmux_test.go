@@ -70,14 +70,14 @@ func TestTmuxResolverRecordsEveryInvocation(t *testing.T) {
 func fakeWhoamiTmuxBinary(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
-	script := "#!/bin/sh\ncase \"$*\" in\n*list-panes*) printf '1234 %%0\\n' ;;\n*) printf 'mysession\\n' ;;\nesac\nexit 0\n"
+	script := "#!/bin/sh\ncase \"$*\" in\n*list-panes*) printf '1234 %%0\\n' ;;\n*) printf 'mysession 1234\\n' ;;\nesac\nexit 0\n"
 	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
 }
 
-// TestWhoamiTmuxRecordsEveryInvocation proves CommandTmuxNamer.SessionName and
+// TestWhoamiTmuxRecordsEveryInvocation proves CommandTmuxNamer.SessionPane and
 // CommandPaneOwners.PaneOwners cross the observed tmux door (pfmtmux.Exec, not
 // the bare pfmtmux.Command) — beside TestTmuxResolverRecordsEveryInvocation's
 // sibling façade above.
@@ -85,9 +85,9 @@ func TestWhoamiTmuxRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	binary := fakeWhoamiTmuxBinary(t)
 	namer := CommandTmuxNamer{Binary: binary}
-	name, err := namer.SessionName(ctx, "/sockets/cc-1", "%3")
-	if err != nil || name != "mysession" {
-		t.Fatalf("SessionName = %q, %v", name, err)
+	name, pid, err := namer.SessionPane(ctx, "/sockets/cc-1", "%3")
+	if err != nil || name != "mysession" || pid != 1234 {
+		t.Fatalf("SessionPane = %q %d, %v", name, pid, err)
 	}
 	owners := CommandPaneOwners{Binary: binary}
 	if _, err := owners.PaneOwners(ctx, "/sockets/cc-1"); err != nil {

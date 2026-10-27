@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -332,6 +334,14 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 		strings.Contains(stdout.String(), "called LIVE into") {
 		t.Fatalf("target-followed receipt lost file-backed provenance: %q", stdout.String())
 	}
+	// A broadcast loop passes --file with a blank message argument: that
+	// blank is no body, never a usage refusal (42 calls failed on it).
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"chat", "call", "--file", compatPath, fileSession, ""}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "FILE-BACKED") {
+		t.Fatalf("--file with a blank message exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
 	compatCapture := exec.Command("tmux", "-L", fileSocket, "capture-pane", "-t", fileSession, "-p", "-J", "-S", "-")
 	compatCapture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root, "HOME="+home)
 	compatOutput, err := compatCapture.Output()
@@ -350,6 +360,29 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 	))
 	if err != nil || len(compatCanonical) != 0 {
 		t.Fatalf("a proven paste delivery spilled a canonical body file: %q err=%v", compatCanonical, err)
+	}
+
+	// A broadcast reaches every live target and names the one it could not.
+	broadcast := fmt.Sprintf("broadcast probe %d", time.Now().UnixNano())
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"chat", "call", "--to", session + "," + fileSession, "--to", "probe-no-such-chat", broadcast,
+	}, &stdout, &stderr)
+	if code != codeUndelivered ||
+		!strings.Contains(stdout.String(), "=== "+session+": delivered") ||
+		!strings.Contains(stdout.String(), "=== "+fileSession+": delivered") ||
+		!strings.Contains(stderr.String(), "=== probe-no-such-chat: FAILED") ||
+		!strings.Contains(stderr.String(), "broadcast delivered 2/3; not delivered: probe-no-such-chat") {
+		t.Fatalf("broadcast exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for socketName, sessionName := range map[string]string{socket: session, fileSocket: fileSession} {
+		capture := exec.Command("tmux", "-L", socketName, "capture-pane", "-t", sessionName, "-p", "-J", "-S", "-")
+		capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root, "HOME="+home)
+		output, err := capture.Output()
+		if err != nil || !strings.Contains(string(output), "USER:"+broadcast) {
+			t.Fatalf("broadcast missing from %s: err=%v capture=%q", sessionName, err, output)
+		}
 	}
 }
 
@@ -633,5 +666,75 @@ func TestChatCallResumeRefusesLiveSocketCrumbSession(t *testing.T) {
 	}
 	if string(raw) != line {
 		t.Fatalf("crumb guard mutated transcript: %q", raw)
+	}
+}
+
+// A refused call says which argument is wrong, never only the usage text.
+func TestChatCallRefusalsNameTheirReason(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "message.txt")
+	if err := os.WriteFile(path, []byte("body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--file", path, "target", "inline body"}, "--file and a message argument both given"},
+		{[]string{"target", "--file", path, "inline body"}, "--file and a message argument both given"},
+		{[]string{"--file", path, "target", "--file", path}, "--file given twice"},
+		{[]string{"target"}, "no message given"},
+		{[]string{}, "no target chat given"},
+		{[]string{"--to", " , ", "body"}, "no target chat given"},
+		{[]string{"--to", "a,b"}, "no message given"},
+		{[]string{"--to", "a", "--file", path, "inline body"}, "--file and a message argument both given"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(append([]string{"chat", "call"}, tc.args...), &stdout, &stderr)
+		if code != 2 || !strings.Contains(stderr.String(), tc.want) {
+			t.Fatalf("%q: exit=%d stderr=%q, want 2 naming %q", tc.args, code, stderr.String(), tc.want)
+		}
+	}
+}
+
+// A broadcast starts every delivery before any finishes, reports in the order
+// given, and exits 0 only when every target took the message.
+func TestBroadcastHeadlessCallRunsInParallelAndReportsInOrder(t *testing.T) {
+	targets := []string{"a", "b", "c"}
+	var started sync.WaitGroup
+	started.Add(len(targets))
+	deliver := func(target string, stdout, stderr io.Writer) int {
+		started.Done()
+		started.Wait() // deadlocks unless every delivery runs at once
+		if target == "b" {
+			fmt.Fprintln(stderr, "no such chat b")
+			return codeUnknownChat
+		}
+		fmt.Fprintln(stdout, "called LIVE "+target)
+		return 0
+	}
+	var stdout, stderr bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- broadcastHeadlessCall(targets, deliver, &stdout, &stderr) }()
+	select {
+	case code := <-done:
+		if code != codeUndelivered {
+			t.Fatalf("exit=%d, want %d", code, codeUndelivered)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("broadcast ran its deliveries one at a time")
+	}
+	if want := "=== a: delivered\ncalled LIVE a\n=== c: delivered\ncalled LIVE c\n"; stdout.String() != want {
+		t.Fatalf("stdout=%q, want %q", stdout.String(), want)
+	}
+	if want := "=== b: FAILED (exit 4)\nno such chat b\n" +
+		"pfm chat call: broadcast delivered 2/3; not delivered: b\n"; stderr.String() != want {
+		t.Fatalf("stderr=%q, want %q", stderr.String(), want)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	all := func(target string, stdout, _ io.Writer) int { fmt.Fprintln(stdout, target); return 0 }
+	if code := broadcastHeadlessCall([]string{"a", "b"}, all, &stdout, &stderr); code != 0 ||
+		!strings.HasSuffix(stdout.String(), "broadcast delivered 2/2\n") || stderr.Len() != 0 {
+		t.Fatalf("all delivered exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

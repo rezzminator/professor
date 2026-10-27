@@ -14,8 +14,10 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -113,7 +115,10 @@ func TestCallEngineForRequestResolvesProxyIdentity(t *testing.T) {
 		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
-	current := &backend{chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}}}
+	current := &backend{
+		paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+	}
 	meta := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat",
 		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
@@ -127,7 +132,7 @@ func TestCallEngineForRequestResolvesProxyIdentity(t *testing.T) {
 	}
 	if caller.identity.Session != "cc-seat" || caller.identity.SocketPath != "/tmp/tmux-1000/cc-seat" ||
 		caller.identity.SocketName != "cc-seat" || caller.identity.Pane != "%7" ||
-		caller.identity.Engine != "claude" || caller.identity.ID != "session-id" ||
+		caller.identity.Engine != string(pfmengine.Claude) || caller.identity.ID != "session-id" ||
 		caller.identity.Source != "mcp-proxy" {
 		t.Fatalf("identity = %+v, want the proxy-supplied seat with mcp-proxy source", caller.identity)
 	}
@@ -145,12 +150,11 @@ func TestCallEngineForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
 		value      string
 		wantDetail string
 	}{
-		{name: "id", field: "id", value: "other-id", wantDetail: "id"},
-		{name: "pane", field: "pane", value: "%9", wantDetail: "pane"},
+		{name: "pane", field: "pane", value: "%9", wantDetail: "location disagrees"},
 		{name: "socket name", field: "socketName", value: "cc-other", wantDetail: "socketName"},
 		{
 			name: "socket path basename", field: "socketPath", value: "/tmp/tmux-1000/cc-other",
-			wantDetail: "socketPath",
+			wantDetail: "location disagrees",
 		},
 		{name: "engine", field: "engine", value: "codex", wantDetail: "engine"},
 		{name: "malformed engine", field: "engine", value: "not-an-engine", wantDetail: "engine"},
@@ -162,7 +166,7 @@ func TestCallEngineForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
 				"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id",
 			}
 			proxy[test.field] = test.value
-			current := &backend{chat: &fakeChatVerbs{
+			current := &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
 				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
 			}}
 			caller, err := current.callerForRequest(context.Background(), mcp.Meta{"pfmProxy": proxy})
@@ -195,7 +199,7 @@ func TestCallEngineForRequestRejectsConflictingProxySocketPair(t *testing.T) {
 	}{
 		{
 			name: "name matches but path differs", socketName: "cc-seat",
-			socketPath: "/tmp/tmux-1000/cc-other", wantDetail: "socketPath",
+			socketPath: "/tmp/tmux-1000/cc-other", wantDetail: "location disagrees",
 		},
 		{
 			name: "path matches but name differs", socketName: "cc-other",
@@ -204,7 +208,7 @@ func TestCallEngineForRequestRejectsConflictingProxySocketPair(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			current := &backend{chat: &fakeChatVerbs{
+			current := &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
 				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
 			}}
 			caller, err := current.callerForRequest(context.Background(), mcp.Meta{
@@ -247,7 +251,7 @@ func TestReviewProxySocketPathRejectsForeignNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !caller.present || caller.valid || !strings.Contains(caller.detail, "socketPath") {
+	if !caller.present || caller.valid || !strings.Contains(caller.detail, "location disagrees") {
 		t.Fatalf("foreign namespace caller = %+v, want present invalid socketPath refusal", caller)
 	}
 }
@@ -378,7 +382,10 @@ func TestCallEngineForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
 			ID: "second", CWD: "/work/second", Kind: compose.LiveOpenCode,
 		},
 	}
-	current := &backend{chat: &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}}}
+	current := &backend{
+		paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+	}
 	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
 		"pfmProxy": map[string]any{
 			"v": ProxyWireVersion, "session": "shared-session", "socketName": "ox-seat",
@@ -425,7 +432,7 @@ func TestCallEngineForRequestRejectsSplitProxyConflicts(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			current := &backend{chat: &fakeChatVerbs{
+			current := &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
 				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
 			}}
 			caller, err := current.callerForRequest(context.Background(), mcp.Meta{"pfmProxy": test.proxy})
@@ -693,7 +700,7 @@ func TestSplitCallerRequiresReadableExactPaneBinding(t *testing.T) {
 	}
 }
 
-func TestCallEngineForRequestUsesProxyPaneToDisambiguateSession(t *testing.T) {
+func TestCallEngineForRequestRefusesStaleProxySession(t *testing.T) {
 	t.Parallel()
 	rows := []compose.Row{
 		{
@@ -705,16 +712,18 @@ func TestCallEngineForRequestUsesProxyPaneToDisambiguateSession(t *testing.T) {
 			ID: "second", CWD: "/work/second", Kind: compose.LiveOpenCode,
 		},
 	}
-	current := &backend{chat: &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}}}
+	current := &backend{
+		paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+	}
 	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
 		"pfmProxy": map[string]any{
 			"v": ProxyWireVersion, "session": "renamed-session", "socketName": "oc-seat",
 			"socketPath": "/tmp/tmux-1000/oc-seat", "pane": "%2", "engine": "opencode",
 		},
 	})
-	if err != nil || !caller.valid || caller.row.ID != "second" || caller.row.Dir != "/work/second" ||
-		caller.identity.ID != "second" {
-		t.Fatalf("disambiguated proxy caller = %+v err=%v, want the uniquely addressed second pane", caller, err)
+	if err != nil || caller.valid || !errors.Is(caller.err, resolve.ErrNotInChat) {
+		t.Fatalf("stale proxy caller=%+v err=%v, want unmatched live session", caller, err)
 	}
 }
 
@@ -827,7 +836,10 @@ func TestCallEngineForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			current := &backend{chat: &fakeChatVerbs{listed: chat.ListResult{Rows: test.rows, Matched: len(test.rows)}}}
+			current := &backend{
+				paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+				chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: test.rows, Matched: len(test.rows)}},
+			}
 			caller, err := current.callerForRequest(context.Background(), mcp.Meta{
 				"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "missing-seat"},
 			})
@@ -921,7 +933,8 @@ func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
 	}
 	var calls [][]string
 	current := &backend{
-		chat: verbs,
+		paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
+		chat:  verbs,
 		dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			_, _ = io.WriteString(stdout, "launched\n")
@@ -950,12 +963,5 @@ func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
 	wantCalls := [][]string{{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", "/work/proxy"}}
 	if created.Status != "ok" || !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("proxied new = %+v, dispatch calls = %q", created, calls)
-	}
-
-	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: meta}}
-	reporter := service.issueReporter(context.Background(), request)
-	if reporter.Session != "cc-seat" || reporter.Label != "Proxy Claude" || reporter.UUID != "session-id" ||
-		reporter.CWD != "/work/proxy" || reporter.Engine != "claude" {
-		t.Fatalf("proxied issue reporter = %+v", reporter)
 	}
 }

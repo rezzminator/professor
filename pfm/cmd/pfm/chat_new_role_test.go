@@ -192,7 +192,7 @@ func TestChatNewAgentRoleRefusalsHappenBeforeResolutionOrSpawn(t *testing.T) {
 	}{
 		{
 			name: "opencode", engine: "opencode",
-			want: "pfm chat new: --agent-role is not supported for opencode: pfm cannot launch an OpenCode seat, so no prompt channel exists to carry a role",
+			want: "pfm chat new: --agent-role is not supported for opencode: native launch policy does not compose registered agent roles",
 		},
 		{
 			name: "Claude wrong policy", engine: "claude",

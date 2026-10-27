@@ -46,4 +46,4 @@ The document states its applicable jurisdiction, the version/date of the regimes
 
 ## Output of the check
 
-If all seven gates clear, the document is deliverable. If any gate fails, fix it before shipping — or, where a fact genuinely cannot be verified, mark the draft `DRAFT` and gather the open items in one block at the top (never inline in the body), per the officer's authoring rules.
+If all seven gates clear, the document is deliverable. If any gate fails, fix it before shipping — or, where a fact genuinely cannot be verified, mark the draft `DRAFT` and gather the open items in one block at the top (never inline in the body).

@@ -157,7 +157,7 @@ func TestSamplerCountsClaudeAndCodexLifetimeTokensIncrementally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chats := chatsBySocket(first.Chats)
+	chats := chatsBySeat(first.Chats)
 	if got := chats["claude-socket"]; !got.TokensKnown || got.TokenCount != 1000 ||
 		got.TokenRateValid {
 		t.Fatalf("Claude token accounting = %#v, want 1000 total and unknown first rate", got)
@@ -182,7 +182,7 @@ func TestSamplerCountsClaudeAndCodexLifetimeTokensIncrementally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chats = chatsBySocket(second.Chats)
+	chats = chatsBySeat(second.Chats)
 	if got := chats["claude-socket"]; got.TokenCount != 1100 || !got.TokenRateValid || got.TokensPerMinute != 200 {
 		t.Fatalf("incremental Claude token accounting = %#v, want 1100 total and 200/min", got)
 	}
@@ -224,7 +224,7 @@ func TestSamplerUsageSparkTracksBurnDeltasResetsAndCap(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return chatsBySocket(snapshot.Chats)["spark-socket"]
+		return chatsBySeat(snapshot.Chats)["spark-socket"]
 	}
 
 	first := sample()
@@ -545,11 +545,11 @@ func TestDockerIdentityIsResolvedOncePerCgroupID(t *testing.T) {
 	}
 }
 
-func chatsBySocket(chats []Chat) map[string]Chat {
+func chatsBySeat(chats []Chat) map[string]Chat {
 	result := make(map[string]Chat, len(chats))
 	for index := range chats {
 		chat := &chats[index]
-		result[chat.Socket] = *chat
+		result[chat.Seat] = *chat
 	}
 	return result
 }
@@ -694,7 +694,7 @@ func TestSamplerCountsAMultiRecordAssistantMessageOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// msg_A once (1000) + msg_B (100) + req_C once (5) + two id-less records (1 + 1).
-	if got := chatsBySocket(snapshot.Chats)["split-socket"]; !got.TokensKnown || got.TokenCount != 1107 {
+	if got := chatsBySeat(snapshot.Chats)["split-socket"]; !got.TokensKnown || got.TokenCount != 1107 {
 		t.Fatalf("split-message token accounting = %#v, want 1107 (each message counted once)", got)
 	}
 }

@@ -21,7 +21,15 @@ func StageHerdrShell(t *testing.T, home string) string {
 	if err := os.MkdirAll(filepath.Dir(wrapper), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteExecutable(wrapper, []byte("#!/bin/sh\nexec /bin/sh \"$@\"\n"), 0o755); err != nil {
+	asset := filepath.Join(checkoutRoot(), "pfm", "internal", "installer", "assets", "shim", "pfm-herdr-shell.sh")
+	raw, err := os.ReadFile(asset)
+	if err != nil {
+		t.Fatalf("read installed Herdr shell fixture asset: %v", err)
+	}
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'" }
+	contentWrapper := strings.NewReplacer("__PFM_REAL_SHELL__", quote("/bin/sh"), "__PFM_WRAPPER__", quote(wrapper)).
+		Replace(string(raw))
+	if err := WriteExecutable(wrapper, []byte(contentWrapper), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	content := fmt.Sprintf(

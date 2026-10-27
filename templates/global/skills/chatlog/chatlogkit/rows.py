@@ -153,7 +153,7 @@ def note(args):
         m = re.fullmatch(r"D(\d+)", line)
         if not m or not 1 <= int(m.group(1)) <= len(dig):
             why = f"line {line} is not a digest line D1..D{len(dig)}"
-        elif label not in READER and not re.fullmatch(r"O[1-9][0-9]?", label):
+        elif label not in READER and not re.fullmatch(r"O[0-9][0-9]?", label):
             why = f"label {label} is not CORRECTION, CLAIM, BEARS, WRITE or O{{n}}"
         elif ref != "-" and not (re.fullmatch(r"D(\d+)", ref) and 1 <= int(ref[1:]) <= len(dig)):
             why = f"ref {ref} is not a digest line"

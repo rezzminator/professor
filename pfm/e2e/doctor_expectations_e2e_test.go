@@ -26,7 +26,7 @@ import (
 // renders those states apart, and only two of them are warnings.
 //
 // The row is a property of the HOST, not of the install, so the warning tally
-// in requireSkippedHarvestDoctor adds it instead of hard-coding a number that
+// in requireInstalledDoctor adds it instead of hard-coding a number that
 // would be right on one e2e platform and wrong on the other. Every OTHER
 // warning still has to be zero: the count remains the check that a new
 // unexpected doctor warning cannot slip through the fresh-install e2e.
@@ -62,30 +62,27 @@ func claudePluginRowWarnings(output string) int {
 	return count
 }
 
-func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
+func (h *e2eHarness) requireInstalledDoctor(result commandResult) {
 	h.t.Helper()
 	output := result.stdout + result.stderr
 	if result.err == nil {
-		h.t.Fatalf("doctor after --skip-harvest succeeded, want named unprovisioned dependencies; output=%q", output)
+		h.t.Fatalf("doctor after install succeeded, want service-manager warning; output=%q", output)
 	}
 	for _, want := range []string{
-		"doctor: dep uv path= broken",
-		"doctor: dep harvestpy path= broken",
-		"doctor: harvestpy skipped",
 		"doctor: pre-push gate=armed core.hooksPath=.githooks",
 		"doctor: harness-prompt: matches baseline",
 		"doctor: service-manager=",
 	} {
 		if !strings.Contains(output, want) {
 			h.t.Fatalf(
-				"doctor after --skip-harvest omitted %q; stdout=%q stderr=%q",
+				"doctor after install omitted %q; stdout=%q stderr=%q",
 				want,
 				result.stdout,
 				result.stderr,
 			)
 		}
 	}
-	wantWarnings := fmt.Sprintf("doctor: warnings=%d", 2+schedulerRowWarnings(output)+h.hostCheckRowWarnings(output))
+	wantWarnings := fmt.Sprintf("doctor: warnings=%d", schedulerRowWarnings(output)+h.hostCheckRowWarnings(output))
 	if !strings.Contains("\n"+output, "\n"+wantWarnings+"\n") {
 		h.t.Fatalf("doctor omitted exact tally %q: %s", wantWarnings, output)
 	}
@@ -99,13 +96,9 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 	if gaps := claudePluginRowWarnings(output); gaps != 0 {
 		h.t.Fatalf("doctor found %d Claude plugin gaps after install: %s", gaps, output)
 	}
-	// M2 (issue #24 finding 1): the unprovisioned harvestpy sidecar deps
-	// (uv, harvestpy) above are warnings, not failures — the fleet engine
-	// runs without them, and `--skip-harvest` is pfm's own decision not to
-	// provision them. `doctor: failures=` must never appear here.
 	if strings.Contains(output, "doctor: failures=") {
 		h.t.Fatalf(
-			"doctor after --skip-harvest printed a failures= line for warnings-only rows; stdout=%q stderr=%q",
+			"doctor after install printed a failures= line for warnings-only rows; stdout=%q stderr=%q",
 			result.stdout,
 			result.stderr,
 		)
@@ -248,7 +241,7 @@ func (h *e2eHarness) assertOldShapeInstallConverges(fresh surfaceSnapshot) {
 	home := h.oldShapeHome(h.headBinary)
 	before := h.refusalSnapshot(home)
 	if !h.t.Run("refusal", func(t *testing.T) {
-		result := h.pfm(home, "install", "--yes", "--skip-harvest")
+		result := h.pfm(home, "install", "--yes")
 		var exit *exec.ExitError
 		if !errors.As(result.err, &exit) || exit.ExitCode() != 4 {
 			t.Fatalf("old-shape install status=%v, want 4; output=%s%s", result.err, result.stdout, result.stderr)
@@ -309,9 +302,8 @@ func (h *e2eHarness) assertOldShapeInstallConverges(fresh surfaceSnapshot) {
 		fixed := *h
 		fixed.t = t
 		fixed.applyOldShapeFixes(home)
-		result := fixed.pfm(home, "install", "--yes", "--skip-harvest")
+		result := fixed.pfm(home, "install", "--yes")
 		fixed.requireSuccess("install after doctor fixes", result)
-		fixed.requireHarvestGate("install after doctor fixes", result)
 		fixed.assertInstalled(home)
 		converged, err := fixed.snapshot(home)
 		if err != nil {

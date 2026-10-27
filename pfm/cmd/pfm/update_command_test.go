@@ -14,7 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
-func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *testing.T) {
+func TestUpdateBuildsSelectedTagIntoOwnedBinary(t *testing.T) {
 	jailTest(t)
 	repo := newTaggedBuildFixture(t)
 	runtime, err := pfmconfig.LoadRuntime("")
@@ -34,7 +34,7 @@ func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *te
 
 	var stdout, stderr bytes.Buffer
 	if code := update.Run(
-		[]string{"--skip-harvest", "--to", "v0.10.0", "--repo", repo},
+		[]string{"--to", "v0.10.0", "--repo", repo},
 		&stdout,
 		&stderr,
 		runtime,
@@ -48,8 +48,8 @@ func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *te
 	if err != nil {
 		t.Fatalf("read candidate action marker: %v", err)
 	}
-	if !strings.Contains(string(raw), "install") || !strings.Contains(string(raw), "--skip-harvest") {
-		t.Fatalf("candidate argv=%q, want install with --skip-harvest", raw)
+	if !strings.Contains(string(raw), "install") {
+		t.Fatalf("candidate argv=%q, want install", raw)
 	}
 	version := exec.Command(canonical, "version")
 	output, err := version.CombinedOutput()
@@ -87,7 +87,7 @@ func TestUpdateRunsPostBuildActionsThroughTheSelectedCandidate(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := update.Run(
-		[]string{"--skip-harvest", "--to", "v0.10.0", "--repo", repo},
+		[]string{"--to", "v0.10.0", "--repo", repo},
 		&stdout,
 		&stderr,
 		runtime,

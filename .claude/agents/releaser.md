@@ -3,7 +3,7 @@ name: releaser
 description: 'RELEASE-ONLY — spawned by /pfm:release, one phase per spawn: REVIEW, NOTES, GATE, REHEARSE, READY, VERIFY; runs and judges it. Pass PHASE, MODE, DIR, CANDIDATE, STABLE, NEW, PREV, BUMP, SUMMARY. /pfm:release → here → reviewer, changelogger, gitter. Returns a DONE, FIX, FAILED or BLOCKED line, rows, the verdict file.'
 model: opus
 effort: high
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 hooks:
   PreToolUse:
     - matcher: Bash
@@ -64,7 +64,7 @@ Read `$CDOCS/pfm/$REFS/release-rehearsal.md` and run one round of it: machines `
 
 Read-only, after `gitter` Phase RELEASE:
 
-1. The tag's `release.yml` run: `gh run list --workflow release.yml --branch v{NEW} --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`.
+1. The release PR merge's `release.yml` run, whose `publish` job made the tag: `gh run list --workflow release.yml --event pull_request --branch develop --limit 1 --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`.
 2. `gh release view v{NEW} --json tagName,isDraft,isPrerelease,body,assets`: neither draft nor prerelease; the body equals `git show v{NEW}:releases/v{NEW}.md` up to the trailing newline; the four `pfm_*` binaries and `SHA256SUMS` attached.
 3. `gh release download v{NEW} --pattern 'pfm_*_{host goos}_{host goarch}' --pattern SHA256SUMS --dir DIR/verify/`; the host's checksum line verifies; the binary's `version` prints `v{NEW}`.
 4. `pfm internal update-check --cache DIR/verify/update-check.json --current {PREV} --url https://github.com/rezzminator/professor/releases/latest` records `v{NEW}` as latest.
@@ -78,7 +78,6 @@ Read-only, after `gitter` Phase RELEASE:
 {item} · {code|docs|notes|rerun} · {path:line or report#F{n}} · {one line}
 ARTIFACT {the phase's verdict file}
 DISPATCHED {n} agents, {m} returns
-RETRO {lesson} | none
 ```
 
 At your 45th call: `FAILED {PHASE}: cap`, what landed, and the next step; REVIEW preserves its unfinished work in `DIR/review/progress.md` for `resume`. A command that would not run is `FAILED {PHASE}: {command} — {error}`, never an empty result.

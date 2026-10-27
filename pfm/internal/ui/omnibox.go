@@ -242,7 +242,7 @@ func (model Model) renderPlaceRail(width int) string {
 		}
 		if entry.root == current.root {
 			active = len(chips)
-			paint = tone{fg: mastheadInk, bg: palette.Accent, bold: true}
+			paint = tone{fg: paletteInk(mastheadInk), bg: palette.Accent, bold: true}
 			if model.goPreviewOK {
 				paint.bg = palette.Warn
 			}

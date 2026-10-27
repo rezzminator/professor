@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -809,87 +810,32 @@ func TestHerdrUnboundRetirementNamesItsState(t *testing.T) {
 	}
 }
 
-// A native Herdr chat has no TMUX: `e` ends it through `kill --self --exit`,
-// which names its seat by the HERDR_* variables its process inherited. Those
-// are a hint; the seat's saved supervisor and the pane proof stay the owner.
-func TestHerdrKillSelfResolvesNativeSeat(t *testing.T) {
-	for _, selector := range []string{"pane", "moved-pane", "no-session-hint", "unknown-pane", "tmux-in-herdr", "marker-missing"} {
-		t.Run(selector, func(t *testing.T) {
-			jail := newKillJail(t)
-			database := jail.open(t)
-			server := newKillHerdr(t)
-			seat := seedKillHerdr(t, database, server)
-			spawner := &captureSpawner{}
-			manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
-			if err != nil {
-				t.Fatal(err)
-			}
-			env := &paths.MapEnv{Values: map[string]string{
-				"HERDR_ENV":              "1",
-				"HERDR_SOCKET_PATH":      seat.HerdrSocket,
-				"HERDR_PANE_ID":          seat.HerdrPane,
-				"CLAUDE_CODE_SESSION_ID": seat.SessionID,
-			}}
-			switch selector {
-			case "moved-pane":
-				// The engine's environment keeps the pane it started in.
-				server.pane = "w9:p2"
-				next := seat
-				next.HerdrPane, next.HerdrWorkspace = server.pane, "w9"
-				if err := database.Shared().UpdateSeat(context.Background(), seat, next); err != nil {
-					t.Fatal(err)
-				}
-			case "no-session-hint":
-				delete(env.Values, "CLAUDE_CODE_SESSION_ID")
-			case "unknown-pane":
-				env.Values["HERDR_PANE_ID"] = "w1:p2"
-				delete(env.Values, "CLAUDE_CODE_SESSION_ID")
-			case "tmux-in-herdr":
-				env.Values["TMUX"] = filepath.Join(jail.tmuxDir, "cc-100-1-1") + ",1,0"
-				env.Values["TMUX_PANE"] = "%3"
-			case "marker-missing":
-				delete(env.Values, "HERDR_ENV")
-			}
-			target, err := manager.Kill(context.Background(), Request{
-				Self: true, Exit: true, Environment: Environment(env),
-			})
-			if selector == "unknown-pane" || selector == "tmux-in-herdr" || selector == "marker-missing" {
-				if err == nil || len(spawner.args) != 0 {
-					t.Fatalf(
-						"self kill accepted a seat it cannot name: target=%+v err=%v spawns=%v",
-						target,
-						err,
-						spawner.args,
-					)
-				}
-				if selector == "unknown-pane" && !strings.Contains(err.Error(), "native") {
-					t.Fatalf("unknown native pane error = %v; want it to name the native seat", err)
-				}
-				if selector != "unknown-pane" && strings.Contains(err.Error(), "native") {
-					t.Fatalf("non-native environment routed to the native seat: %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("native self kill: %v", err)
-			}
-			if target.ID != seat.SessionID || target.SocketPath != seat.HerdrSocket ||
-				target.PaneID != server.pane || len(spawner.args) != 1 {
-				t.Fatalf("native self target/spawn = %+v / %+v", target, spawner.args)
-			}
-			if row, found, err := database.Killed(
-				context.Background(),
-				seat.SessionID,
-			); err != nil || !found ||
-				row.ID != seat.SessionID {
-				t.Fatalf("kill record=%+v found=%t err=%v", row, found, err)
-			}
-		})
+func TestHerdrKillSelfUsesTheSharedIdentity(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	server := newKillHerdr(t)
+	seat := seedKillHerdr(t, database, server)
+	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: &captureSpawner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.identifier = killTestIdentity{
+		identity: resolve.Identity{
+			Backend:    "herdr",
+			ID:         seat.SessionID,
+			SeatID:     seat.SeatID,
+			SocketPath: seat.HerdrSocket,
+			Pane:       seat.HerdrPane,
+			Engine:     seat.Engine,
+			Source:     "herdr-ancestry",
+		},
+	}
+	target, err := manager.Kill(context.Background(), Request{Self: true, Exit: true})
+	if err != nil || target.ID != seat.SessionID || target.SocketPath != seat.HerdrSocket {
+		t.Fatalf("self kill = %+v, %v", target, err)
 	}
 }
 
-// The forced close retires a Herdr seat, so it retires the seat's reload
-// schedule record and log too; another seat's files stay.
 func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
 	for _, test := range []struct {
 		name string

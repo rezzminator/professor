@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -186,7 +185,7 @@ func ResolveIn(
 			return self, true, nil
 		}
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(runtime)})
 	if err != nil {
 		return headless.Chat{}, false, err
 	}
@@ -261,7 +260,6 @@ func ResolveIn(
 	})
 	seat, code, detail, err := (resolve.Ladder{
 		Roster: roster, Raw: raw, Self: identifier,
-		CodexSelf:       codexSeatIdentifier{runtime: runtime},
 		RequestIdentity: requestIdentity,
 		Env:             paths.OSEnv{}, Session: pfmcall.TmuxCaller{},
 	}).Resolve(ctx, name, resolve.LadderOptions{})
@@ -481,84 +479,65 @@ func panePID(pids []int) int {
 	return pids[0]
 }
 
-// SeatIdentity is the last identity rung for a Codex tool shell under `codex
-// app-server` instead of in its own pane. That server is reparented to init and
-// serves every seat from one process, so a tool shell it spawns has no tmux
-// anywhere in its ancestry — the walk has nothing to find, and the seat's
-// messages went out UNSIGNED though the seat itself is plainly addressable.
-//
-// The shell does carry CODEX_THREAD_ID, and the fleet already binds a thread to
-// the socket hosting it: this is that lookup, and nothing more. It runs only
-// after the tmux rungs fail, because CODEX_THREAD_ID is INHERITED — a process
-// with a pane of its own must never be renamed by an id it merely inherited.
-func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Identity, bool) {
-	env := paths.OSEnv{}
-	thread := env.Get(resolve.CodexThreadEnv)
-	if thread == "" || env.Get(resolve.ClaudeSessionEnv) != "" {
-		return resolve.Identity{}, false
-	}
-	database, err := store.Open(store.WithWarningWriter(io.Discard))
-	if err != nil {
-		return resolve.Identity{}, false
-	}
-	defer func() {
-		if err := database.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "chat identity: close fleet database: %v\n", err)
+// CodexSeats supplies the live fleet rows for Identify's final Codex-thread rung.
+func CodexSeats(runtime *pfmconfig.Runtime) func(context.Context) ([]resolve.CodexSeat, error) {
+	return func(ctx context.Context) (seats []resolve.CodexSeat, returnErr error) {
+		database, err := store.Open(store.WithWarningWriter(io.Discard))
+		if err != nil {
+			return nil, fmt.Errorf("open Codex identity store: %w", err)
 		}
-	}()
-	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: compose.AllView, ReadOnly: true, Runtime: runtime,
-	}, io.Discard)
-	if err != nil {
-		return resolve.Identity{}, false
+		defer func() {
+			if err := database.Close(); err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("close Codex identity store: %w", err))
+			}
+		}()
+		scan, err := fleet.Scan(
+			ctx,
+			database,
+			fleet.Request{View: compose.AllView, ReadOnly: true, Runtime: runtime},
+			io.Discard,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan Codex identity seats: %w", err)
+		}
+		return codexSeatsFromRows(scan.Output.Rows, scan.Env.Paths)
 	}
-	return codexSeatIdentity(scan.Output.Rows, scan.Env.Paths, thread)
 }
 
-func codexSeatIdentity(rows []compose.Row, values paths.Values, thread string) (resolve.Identity, bool) {
-	var match compose.Row
-	count := 0
+func codexSeatsFromRows(rows []compose.Row, values paths.Values) ([]resolve.CodexSeat, error) {
+	seats := []resolve.CodexSeat{}
 	for index := range rows {
-		row := rows[index]
-		if row.ID != thread || row.Kind != compose.LiveCodex || row.Killed || row.Socket == "" {
+		row := &rows[index]
+		if row.Kind != compose.LiveCodex || row.Killed || row.Socket == "" {
 			continue
 		}
-		match = row
-		count++
-	}
-	if count != 1 || match.BackendError != "" {
-		return resolve.Identity{}, false
-	}
-	socketPath, err := targetSocket(values, match.Backend, match.Socket)
-	if err != nil {
-		return resolve.Identity{}, false
-	}
-	session := match.Socket
-	if match.Backend == spawn.BackendHerdr {
-		if match.PaneID == "" {
-			return resolve.Identity{}, false
+		socket, err := targetSocket(values, row.Backend, row.Socket)
+		if err != nil {
+			return nil, fmt.Errorf("resolve Codex seat %s socket: %w", row.ID, err)
 		}
-		session = match.SessionName
-		if session == "" {
-			session = match.SeatID
+		backend := row.Backend
+		if backend == "" {
+			backend = spawn.BackendTmux
 		}
-		if session == "" {
-			return resolve.Identity{}, false
+		session := row.SessionName
+		if backend == spawn.BackendTmux && session == "" {
+			session = row.Socket
 		}
+		seats = append(
+			seats,
+			resolve.CodexSeat{
+				ThreadID:       row.ID,
+				Backend:        backend,
+				SeatID:         row.SeatID,
+				SessionName:    session,
+				SocketPath:     socket,
+				Pane:           row.PaneID,
+				HerdrWorkspace: row.HerdrWorkspace,
+				BackendError:   row.BackendError,
+			},
+		)
 	}
-	return resolve.Identity{
-		Backend:        match.Backend,
-		SeatID:         match.SeatID,
-		HerdrWorkspace: match.HerdrWorkspace,
-		Session:        session,
-		SocketPath:     socketPath,
-		SocketName:     filepath.Base(socketPath),
-		Pane:           match.PaneID,
-		Engine:         string(pfmengine.Codex),
-		ID:             thread,
-		Source:         "codex-thread",
-		Recovered:      true,
-	}, true
+	return seats, nil
 }
 
 // targetSocket keeps native addresses absolute; only tmux sockets use the fleet root.

@@ -422,6 +422,9 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 		writePluginLogsFile(t, filepath.Join(dir, "settings.json"), `{"env":{"OTHER":"keep"}}`)
 	}
 	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	// The ambient table holds another suite's painter, as the fence's /proc does
+	// under a parallel gate; the install reads only the empty table it is given.
+	t.Setenv(paths.EnvProcRoot, ambientHerdrIndicatorTable(t))
 	if _, err := installer.Run(
 		context.Background(),
 		installer.Options{
@@ -431,6 +434,7 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 			SourceRepo:       fixture.clone,
 			Version:          "0.82.0-alpha",
 			Mode:             installer.ModeApply,
+			ProcRoot:         t.TempDir(),
 			Stdout:           io.Discard,
 		},
 	); err != nil {
@@ -450,4 +454,24 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 		!strings.Contains(out.String(), "plugin_logs ok: PLUGIN_LOG_DIR=") {
 		t.Fatalf("installer leaves doctor unhealthy: %s", out.String())
 	}
+}
+
+// ambientHerdrIndicatorTable stages a process table holding one running
+// `pfm internal herdr-indicators`, the painter a parallel package starts.
+func ambientHerdrIndicatorTable(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	process := filepath.Join(root, "4242")
+	if err := os.MkdirAll(process, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"cmdline": "pfm\x00internal\x00herdr-indicators\x00",
+		"stat":    "4242 (pfm) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 100\n",
+	} {
+		if err := os.WriteFile(filepath.Join(process, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
 }

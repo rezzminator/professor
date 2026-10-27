@@ -186,6 +186,84 @@ func TestGlobalWiringDryRunPlansTheStore(t *testing.T) {
 	}
 }
 
+func TestTemplateSkillsUseBothRegistries(t *testing.T) {
+	t.Parallel()
+	for _, existing := range []string{"absent", "hand link", "copy", "user directory"} {
+		t.Run(existing, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			var output bytes.Buffer
+			installer, store, _ := globalFanoutEngine(t, home, true, &output)
+			source := filepath.Join(installer.options.SourceRepo, "templates", "global", "skills", "beta")
+			writeFixture(t, filepath.Join(filepath.Dir(source), "nomd", "notes.md"), "not a skill\n")
+			writeFixture(t, filepath.Join(filepath.Dir(source), "sources.json"), `{"source_fetched":{}}`)
+			registries := []string{filepath.Join(store, "skills"), filepath.Join(home, ".agents", "skills")}
+			for _, registry := range registries {
+				target := filepath.Join(registry, "beta")
+				switch existing {
+				case "hand link":
+					name := "elsewhere"
+					if registry != registries[0] {
+						name = "beta"
+					}
+					symlinkFixture(t, filepath.Join(store, "skills", name), target)
+				case "copy":
+					writeFixture(
+						t,
+						filepath.Join(target, "SKILL.md"),
+						readFixture(t, filepath.Join(source, "SKILL.md")),
+					)
+				case "user directory":
+					writeFixture(t, filepath.Join(target, "SKILL.md"), "my own skill\n")
+				}
+			}
+			// The hand-made Codex link points through the store, not directly into the clone.
+			if existing == "hand link" {
+				for _, registry := range registries {
+					symlinkFixture(t, source, filepath.Join(registry, "elsewhere"))
+				}
+			}
+			if err := installer.wireTemplateSkills(installer.options.SourceRepo); err != nil {
+				t.Fatal(err)
+			}
+			for _, registry := range registries {
+				target := filepath.Join(registry, "beta")
+				switch existing {
+				case "hand link":
+					name := "elsewhere"
+					if registry != registries[0] {
+						name = "beta"
+					}
+					assertFanoutLink(t, target, filepath.Join(store, "skills", name))
+					if got := readFixture(
+						t,
+						filepath.Join(target, "SKILL.md"),
+					); got != readFixture(
+						t,
+						filepath.Join(source, "SKILL.md"),
+					) {
+						t.Fatalf("hand link content = %q", got)
+					}
+				case "user directory":
+					if got := readFixture(t, filepath.Join(target, "SKILL.md")); got != "my own skill\n" {
+						t.Fatalf("user skill changed: %q", got)
+					}
+				default:
+					assertFanoutLink(t, target, source)
+				}
+				if existing == "hand link" || existing == "user directory" {
+					if !strings.Contains(output.String(), "CONFLICT "+target) {
+						t.Fatalf("conflict not reported for %s:\n%s", target, output.String())
+					}
+				}
+				for _, name := range []string{"nomd", "sources.json"} {
+					requireNoPath(t, filepath.Join(registry, name), "non-skill linked")
+				}
+			}
+		})
+	}
+}
+
 func assertFanoutLink(t *testing.T, target, source string) {
 	t.Helper()
 	resolved, linked := resolvedLink(target)

@@ -23,6 +23,12 @@ func TestRenderSubagentsGaugeFallsBackToTheTranscript(t *testing.T) {
 	}
 	streaming := `{"type":"assistant","timestamp":"2026-09-24T10:00:06Z","message":{"id":"m9","model":"claude-opus-5-5",` +
 		`"usage":{"input_tokens":900000,"output_tokens":1}}}`
+	// the counts only in usage.iterations, zeros and no cache counters at the top level
+	iterated := `{"type":"assistant","timestamp":"2026-09-24T10:00:05Z","message":{"id":"m3","model":"claude-opus-5-5",` +
+		`"usage":{"input_tokens":0,"output_tokens":0,"iterations":[` +
+		`{"input_tokens":5,"cache_read_input_tokens":90000,"output_tokens":40},` +
+		`{"input_tokens":10,"cache_read_input_tokens":290000,"cache_creation_input_tokens":9990,"output_tokens":9}]}}}`
+	compacted := `{"type":"system","subtype":"compact_boundary","timestamp":"2026-09-24T10:00:07Z"}`
 	const window = `,"contextWindowSize":1000000`
 	cases := []struct {
 		name  string
@@ -59,6 +65,18 @@ func TestRenderSubagentsGaugeFallsBackToTheTranscript(t *testing.T) {
 			task:  task("claude-opus-5-5", window),
 			lines: []string{completed("m1", 100000, 0), completed("m2", 290000, 9990)},
 			want:  "▰▰▱▱▱▱▱▱ 30% 300.0K/1.0M",
+		},
+		{
+			name:  "no payload count: a response's counts only in its iterations read its last request",
+			task:  task("claude-opus-5-5", window),
+			lines: []string{completed("m1", 100000, 0), iterated},
+			want:  "▰▰▱▱▱▱▱▱ 30% 300.0K/1.0M",
+		},
+		{
+			name:  "no payload count: a call from before a compaction no longer stands",
+			task:  task("claude-opus-5-5", window),
+			lines: []string{completed("m1", 290000, 9990), compacted},
+			want:  "?/1.0M",
 		},
 		{
 			name:  "no payload count: a call still streaming does not displace the completed one",

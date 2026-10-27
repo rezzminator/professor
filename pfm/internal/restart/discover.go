@@ -36,8 +36,6 @@ type Deps struct {
 	Clock    clock.Clock
 	Fleet    Fleet
 	Services ServiceManager
-	// HTTPProbe answers nil when the URL gives any HTTP answer.
-	HTTPProbe func(ctx context.Context, target string) error
 	// DaemonProbe answers nil when the loopback MCP daemon serves its status
 	// document; nil when no MCP server is enabled in config.
 	DaemonProbe func(ctx context.Context) error
@@ -52,7 +50,6 @@ type Deps struct {
 	Executable  string
 	ConfigPath  string
 	HerdrBinary string
-	SearchURL   string
 	// LaunchedFrom is the address of the chat that typed the restart; it ends
 	// last of the chats.
 	LaunchedFrom chatAddress
@@ -99,7 +96,6 @@ func BuildPlan(ctx context.Context, dependencies Deps) Plan {
 	} else {
 		finder.findMCPDaemon(table, supervised, servicesErr)
 	}
-	finder.findSearch(ctx)
 	if tableErr != nil {
 		finder.failed(FamilyPFM, tableErr)
 	} else {

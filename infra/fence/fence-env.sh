@@ -40,3 +40,16 @@ else
   export PFM_DEV_ENGINE_SYNC_SRC="$git_common" \
     PFM_DEV_ENGINE_SYNC_MISSING="$engine_sync_src: no go.mod (check out plugins/engine-sync, or set ENGINE_SYNC_SRC)"
 fi
+
+harvester_src="${HARVESTER_SRC:-}"
+if [[ -z "$harvester_src" ]]; then
+  if [[ -f "$ROOT/plugins/harvester/go.mod" ]]; then harvester_src="$ROOT/plugins/harvester"
+  else harvester_src="$(dirname "$git_common")/plugins/harvester"; fi
+fi
+[[ "$harvester_src" == /* ]] || { echo "$FENCE_CALLER: HARVESTER_SRC must be an absolute path: $harvester_src" >&2; exit 1; }
+if [[ -f "$harvester_src/go.mod" ]]; then
+  export PFM_DEV_HARVESTER_SRC="$harvester_src" PFM_DEV_HARVESTER_MISSING=""
+else
+  export PFM_DEV_HARVESTER_SRC="$git_common" \
+    PFM_DEV_HARVESTER_MISSING="$harvester_src: no go.mod (check out plugins/harvester, or set HARVESTER_SRC)"
+fi

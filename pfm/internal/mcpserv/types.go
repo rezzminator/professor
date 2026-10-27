@@ -80,14 +80,29 @@ type ResolveOutput struct {
 
 // CallInput requests guarded live delivery.
 type CallInput struct {
-	Target   string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
+	Target   string   `json:"target,omitempty" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane; give this or targets"`
+	Targets  []string `json:"targets,omitempty" jsonschema:"several targets for a broadcast, delivered in parallel, each reported in results; joined with target when both are given"`
 	Message  string   `json:"message" jsonschema:"message to type and submit"`
 	ForceNow bool     `json:"force_now,omitempty" jsonschema:"interrupt a busy target with Escape before delivery"`
 	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here"`
 }
 
-// CallOutput is a stable MCP representation of pfmcall.Result.
+// CallOutput is a stable MCP representation of pfmcall.Result; a broadcast
+// adds one result per target.
 type CallOutput struct {
+	CallDelivery
+	// Results holds a broadcast's per-target outcomes, in the order given.
+	Results []TargetCallOutput `json:"results,omitempty"`
+}
+
+// TargetCallOutput is one broadcast target's outcome.
+type TargetCallOutput struct {
+	Target string `json:"target"`
+	CallDelivery
+}
+
+// CallDelivery is one delivery's outcome.
+type CallDelivery struct {
 	Status        string `json:"status"`
 	Code          int    `json:"code"`
 	Message       string `json:"message"`
@@ -122,6 +137,7 @@ const codeCapability = 10
 // KeysOutput is the structured receipt for keys.
 type KeysOutput struct {
 	Status     string   `json:"status"`
+	Message    string   `json:"message,omitempty"`
 	Code       int      `json:"code"`
 	SocketPath string   `json:"socket_path,omitempty"`
 	Pane       string   `json:"pane,omitempty"`
@@ -255,21 +271,4 @@ type KillInput struct {
 type SaveInput struct {
 	Target     string `json:"target" jsonschema:"FILE PATH to append the snapshot to (not a chat) — must contain a directory separator, e.g. ./notes/session.md"`
 	Transcript string `json:"transcript,omitempty" jsonschema:"path of the transcript .jsonl to dump; defaults to the calling chat's own transcript"`
-}
-
-// IssueInput is one agent complaint filed against Professor itself. Reporter
-// identity is never accepted here — servicedesk captures it the same
-// way call captures a sender, so a model can complain but never say
-// who is complaining.
-type IssueInput struct {
-	Title    string `json:"title" jsonschema:"short one-line issue title"`
-	Detail   string `json:"detail" jsonschema:"full issue body: what went wrong, what was expected, and the surface it happened on"`
-	Severity string `json:"severity,omitempty" jsonschema:"low, medium, or high; defaults to medium"`
-	Area     string `json:"area,omitempty" jsonschema:"free text naming the command, agent, file, or surface this is about"`
-}
-
-// IssueOutput is servicedesk's receipt: the filed issue's stable id.
-type IssueOutput struct {
-	Status string `json:"status"`
-	ID     int64  `json:"id,omitempty"`
 }

@@ -492,30 +492,31 @@ func TestMCPMetadataIdentityRefusesMissingUnknownAndMalformedValues(t *testing.T
 	service := metadataIdentityService(t)
 	client := connectInMemory(t, service.Server())
 	tests := []struct {
-		name string
-		meta mcp.Meta
+		name   string
+		meta   mcp.Meta
+		status string
 	}{
-		{name: "missing", meta: nil},
-		{name: "unknown", meta: mcp.Meta{"threadId": "not-a-live-thread"}},
-		{name: "non-string", meta: mcp.Meta{"threadId": 7}},
-		{name: "empty", meta: mcp.Meta{"threadId": ""}},
-		{name: "outer whitespace", meta: mcp.Meta{"threadId": " thread-a "}},
-		{name: "control character", meta: mcp.Meta{"threadId": "thread-a\n"}},
-		{name: "wrong key spelling", meta: mcp.Meta{"thread_id": "thread-a"}},
+		{name: "missing", meta: nil, status: statusNotFound},
+		{name: "unknown", meta: mcp.Meta{"threadId": "not-a-live-thread"}, status: statusNotFound},
+		{name: "non-string", meta: mcp.Meta{"threadId": 7}, status: statusError},
+		{name: "empty", meta: mcp.Meta{"threadId": ""}, status: statusError},
+		{name: "outer whitespace", meta: mcp.Meta{"threadId": " thread-a "}, status: statusError},
+		{name: "control character", meta: mcp.Meta{"threadId": "thread-a\n"}, status: statusError},
+		{name: "wrong key spelling", meta: mcp.Meta{"thread_id": "thread-a"}, status: statusNotFound},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			whoami := callToolWithMeta[WhoamiOutput](
 				t, client.clientSession, "whoami", test.meta, WhoamiInput{},
 			)
-			if whoami.Status != "not_found" || whoami.Session != "" {
-				t.Fatalf("whoami = %+v, want honest not-found", whoami)
+			if whoami.Status != test.status || whoami.Session != "" {
+				t.Fatalf("whoami = %+v, want %s", whoami, test.status)
 			}
 			captured := callToolWithMeta[CaptureOutput](
 				t, client.clientSession, "capture", test.meta, CaptureInput{Target: "self"},
 			)
-			if captured.Status != "not_found" || captured.Code == 0 || captured.Text != "" {
-				t.Fatalf("capture = %+v, want honest not-found", captured)
+			if captured.Status != test.status || captured.Code == 0 || captured.Text != "" {
+				t.Fatalf("capture = %+v, want %s", captured, test.status)
 			}
 			called := callToolWithMeta[CallOutput](
 				t, client.clientSession, "call", test.meta, CallInput{
@@ -546,7 +547,7 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 		context.Background(), mcp.Meta{"threadId": "thread-a"},
 	)
 	if err != nil || caller.valid || !caller.present ||
-		!strings.Contains(caller.detail, "matched 2 live Codex seats") {
+		!strings.Contains(caller.detail, "multiple live Codex seats hold thread thread-a") {
 		t.Fatalf("duplicate caller resolution = %+v err=%v", caller, err)
 	}
 
@@ -590,5 +591,116 @@ func TestMCPMetadataSignsExplicitTargetWithoutRedirectingIt(t *testing.T) {
 		!strings.Contains(output.Proof, "sid thread-a") ||
 		!strings.Contains(output.Proof, `to reply: call "Codex A" <message>`) {
 		t.Fatalf("explicit target call lost target or caller provenance: %+v", output)
+	}
+}
+
+func TestBirthMixedProxyIdentityRefused(t *testing.T) {
+	current := &backend{
+		chat: &fakeChatVerbs{
+			listed: chat.ListResult{
+				Rows: []compose.Row{
+					{
+						Backend:        "herdr",
+						SeatID:         "87caf6bf",
+						SessionName:    "87caf6bf",
+						ID:             "thread-a",
+						Kind:           compose.LiveCodex,
+						Socket:         "/h/herdr.sock",
+						PaneID:         "wC:p24",
+						HerdrWorkspace: "wC",
+					},
+				},
+			},
+		},
+	}
+	caller, err := current.callerForRequest(
+		context.Background(),
+		map[string]any{
+			"pfmProxy": map[string]any{
+				"v":          1,
+				"session":    "87caf6bf",
+				"backend":    "tmux",
+				"socketPath": "/tmp/tmux-1000/cc-1",
+				"pane":       "%3",
+			},
+		},
+	)
+	want := "MCP caller location disagrees with its live chat: payload tmux /tmp/tmux-1000/cc-1 %3, row herdr /h/herdr.sock wC:p24"
+	if err != nil || caller.valid || caller.detail != want {
+		t.Fatalf("caller=%+v err=%v, want %q", caller, err, want)
+	}
+}
+
+func TestBirthProxyIdentityComesWhollyFromRow(t *testing.T) {
+	row := compose.Row{
+		Backend:        "herdr",
+		SeatID:         "87caf6bf",
+		SessionName:    "87caf6bf",
+		ID:             "old-transcript",
+		Kind:           compose.LiveClaude,
+		Socket:         "/h/herdr.sock",
+		PaneID:         "wC:p24",
+		HerdrWorkspace: "wC",
+	}
+	current := &backend{chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}}}}
+	caller, err := current.callerForRequest(
+		context.Background(),
+		map[string]any{
+			"pfmProxy": map[string]any{
+				"v":          1,
+				"session":    "87caf6bf",
+				"id":         "new-transcript",
+				"socketPath": "/h/herdr.sock",
+				"pane":       "wC:p24",
+			},
+		},
+	)
+	if err != nil || !caller.valid {
+		t.Fatalf("caller=%+v err=%v", caller, err)
+	}
+	want, err := current.identityFromRow(caller.row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.ID = "new-transcript"
+	want.Source = "mcp-proxy"
+	if !reflect.DeepEqual(caller.identity, want) {
+		t.Fatalf("identity=%+v, row identity=%+v", caller.identity, want)
+	}
+}
+
+func TestBirthProxyBackendDisagreementRefused(t *testing.T) {
+	current := &backend{
+		chat: &fakeChatVerbs{
+			listed: chat.ListResult{
+				Rows: []compose.Row{
+					{
+						Backend:        "herdr",
+						SeatID:         "87caf6bf",
+						SessionName:    "87caf6bf",
+						ID:             "thread-a",
+						Kind:           compose.LiveCodex,
+						Socket:         "/h/herdr.sock",
+						PaneID:         "wC:p24",
+						HerdrWorkspace: "wC",
+					},
+				},
+			},
+		},
+	}
+	caller, err := current.callerForRequest(
+		context.Background(),
+		map[string]any{
+			"pfmProxy": map[string]any{
+				"v":          1,
+				"session":    "87caf6bf",
+				"backend":    "tmux",
+				"socketPath": "/h/herdr.sock",
+				"pane":       "wC:p24",
+			},
+		},
+	)
+	if err != nil || caller.valid {
+		t.Fatalf("backend disagreement caller=%+v err=%v, want refused", caller, err)
 	}
 }

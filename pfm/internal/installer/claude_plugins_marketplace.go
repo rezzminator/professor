@@ -163,10 +163,16 @@ func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, erro
 		return build, err
 	}
 	if build.PluginsDefault {
-		build.Plugins = make([]pfmconfig.ClaudePlugin, 0, len(names))
+		// Extension switches compose full third-party ids with the default list.
+		// Replace only its bare defaults, never the composed extension entries.
+		extra := slices.DeleteFunc(slices.Clone(build.Plugins), func(plugin pfmconfig.ClaudePlugin) bool {
+			return !strings.Contains(plugin.ID, "@")
+		})
+		build.Plugins = make([]pfmconfig.ClaudePlugin, 0, len(names)+len(extra))
 		for _, name := range names {
 			build.Plugins = append(build.Plugins, pfmconfig.ClaudePlugin{ID: name})
 		}
+		build.Plugins = append(build.Plugins, extra...)
 	}
 	listed := map[string]bool{}
 	for _, plugin := range build.Plugins {

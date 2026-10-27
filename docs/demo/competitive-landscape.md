@@ -1,5 +1,17 @@
 # Professor vs. its open-source peers — competitive landscape
 
+## Contents
+
+- [Method and its limits](#method-and-its-limits)
+- [The field (12 in scope)](#the-field-12-in-scope)
+- [Capability matrix](#capability-matrix)
+- [1. Where peers are clearly better than Professor](#1-where-peers-are-clearly-better-than-professor)
+- [2. Where Professor is clearly ahead](#2-where-professor-is-clearly-ahead)
+- [3. Where they are comparable](#3-where-they-are-comparable)
+- [4. Professor's real weaknesses, as a user would feel them](#4-professors-real-weaknesses-as-a-user-would-feel-them)
+- [5. Honest positioning](#5-honest-positioning)
+- [Gaps](#gaps)
+
 Snapshot taken 2026-09-14. Every number below was read with read-only `gh api` calls and depth-1 clones into a scratch directory, not taken from memory. Capability cells come from each project's own README. None of the peer tools was installed or run. Where a README says nothing about a capability, the cell says **unverified**. It never says "no" unless the README rules the capability out itself.
 
 ## Method and its limits

@@ -122,7 +122,7 @@ func TestMCPUnsignedRefusalNamesTheFailedCallerBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) ||
-		!strings.Contains(output.Message, `did not bind: MCP _meta.threadId "thread-gone" has no live Codex seat`) {
+		!strings.Contains(output.Message, `no live Codex seat holds thread thread-gone`) {
 		t.Fatalf("call message hides the failed caller binding: %q", output.Message)
 	}
 }

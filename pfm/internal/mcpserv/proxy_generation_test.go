@@ -26,7 +26,7 @@ func TestStdioProxyForwardsCallsThroughDaemon(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.identity = nil
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)

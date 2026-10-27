@@ -8,13 +8,16 @@ Invoked only by a `Phase: PUSH` dispatch carrying a direct user request that exp
 
 ## 1. Survey changes
 
+Set `PUSH_REMOTE` and `PUSH_REF` to the parent's authorized remote and branch from the brief and configured upstream; survey that comparison. A missing upstream needs an explicit target, not an assumed branch.
+
 ```bash
 git status --short
-git log origin/main..HEAD --oneline 2>/dev/null || true
-git -C .professor log origin/professor..professor --oneline 2>/dev/null || true  # sub-repo commits not yet on the remote
+git log '@{upstream}..HEAD' --oneline  # when an upstream exists
 ```
 
-If clean and no unpushed commits in either repo: "Nothing to push — working tree is clean and in sync with origin." Stop.
+An optional `.professor` repository is applicable only when `.professor/.git` exists and its reported top-level is `.professor` itself, not the parent. Inspect its current branch/upstream; report failed probes as errors. Set `PROFESSOR_REMOTE` and `PROFESSOR_REF` only for that repository's target authorized by the push brief, with the ref verified against its actual branch. Detached HEAD or a missing target stops its publication. An ordinary `.professor` directory is not another repository.
+
+If clean and no unpushed commits for the applicable authorized targets: "Nothing to push — working tree is clean and in sync with its push targets." Stop.
 
 ## 2. Review for dangerous files
 
@@ -40,12 +43,14 @@ git diff --cached --quiet || { git commit -m "$MESSAGE"; git show --stat HEAD; }
 
 ## 4. Push
 
-If it fails, release the lock, stop immediately, and report.
+If the parent tracks `.professor` as a gitlink, its referenced commit must be available on that repository's authorized remote before publishing the parent pointer. If this requires an unauthorized secondary push, stop and report the missing authority. Push an applicable, authorized secondary target first; otherwise leave it untouched. On any push failure, release the lock, stop immediately, and report.
 
 ```bash
 bash .claude/scripts/git-lock.sh acquire "push"
-git -C .professor push origin professor  # always first: the parent's .professor pointer never lands on the remote before its target
-git push
+if [ -e .professor/.git ] && [ -n "${PROFESSOR_REMOTE:-}" ]; then
+  git -C .professor push "$PROFESSOR_REMOTE" "$PROFESSOR_REF"
+fi
+git push "$PUSH_REMOTE" "$PUSH_REF"
 bash .claude/scripts/git-lock.sh release
 ```
 

@@ -24,7 +24,6 @@ type DaemonStatus struct {
 	PID                 int                 `json:"pid"`
 	StartTime           string              `json:"startTime"`
 	Endpoint            string              `json:"endpoint"`
-	HarvesterExternal   string              `json:"harvesterExternal,omitempty"`
 	ChatRuntimeIdentity string              `json:"chatRuntimeIdentity,omitempty"`
 }
 

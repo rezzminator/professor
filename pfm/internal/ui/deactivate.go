@@ -19,7 +19,7 @@ func (model *Model) deactivate(row compose.Row) {
 		model.killStatus = fmt.Sprintf("deactive failed — %s: %v", row.Name, err)
 		return
 	}
-	model.deactivatedSockets[liveSeatKey(row)] = true
+	model.deactivatedSockets[compose.LiveSeatKey(row)] = true
 	model.killStatus = "deactivated — " + row.Name + " — ready to resume"
 	key := compose.RowKey(row)
 	fallback := model.cursor
@@ -27,9 +27,9 @@ func (model *Model) deactivate(row compose.Row) {
 	resumable := row.ID != "" && row.Kind != compose.LiveSplit
 	demoted := deactivatedRow(row)
 	if resumable {
-		model.deactivatedRows[liveSeatKey(row)] = demoted
+		model.deactivatedRows[compose.LiveSeatKey(row)] = demoted
 		if row.Backend == spawn.BackendHerdr {
-			model.nativeEndSeats[liveSeatKey(row)] = true
+			model.nativeEndSeats[compose.LiveSeatKey(row)] = true
 		}
 	}
 	kept := model.rows[:0]
@@ -109,9 +109,9 @@ func (model *Model) settleDeactivated(rows []compose.Row) ([]compose.Row, bool) 
 	settled := make([]compose.Row, 0, len(rows))
 	for index := range rows {
 		row := &rows[index]
-		if row.Kind.IsLiveSeat() && model.deactivatedSockets[liveSeatKey(*row)] {
+		if row.Kind.IsLiveSeat() && model.deactivatedSockets[compose.LiveSeatKey(*row)] {
 			adjusted = true
-			demoted, kept := model.deactivatedRows[liveSeatKey(*row)]
+			demoted, kept := model.deactivatedRows[compose.LiveSeatKey(*row)]
 			if kept && !present[compose.RowKey(demoted)] {
 				present[compose.RowKey(demoted)] = true
 				settled = append(settled, demoted)

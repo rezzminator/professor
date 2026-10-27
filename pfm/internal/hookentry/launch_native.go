@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -43,13 +43,8 @@ func launcherSeatAccount(runtime config.Runtime, primary int, env paths.Env) (st
 	return configDir, accountID
 }
 
-func launchBackend(ctx context.Context, requested string, env paths.Env) (spawn.BackendChoice, error) {
-	// Read the supplied environment seam, not the host's inherited Herdr keys.
-	environment := []string{"TMUX=" + env.Get("TMUX")}
-	for _, key := range herdr.Env() {
-		environment = append(environment, key+"="+env.Get(key))
-	}
-	return spawn.ChooseBackend(ctx, requested, environment, nil)
+func launchBackend(ctx context.Context, requested string) (spawn.BackendChoice, error) {
+	return chat.BirthBackend(ctx, "hook.launch", requested)
 }
 
 func launchNative(
@@ -88,6 +83,39 @@ func launchNative(
 	// The supervisor, not a birth-door process, applies the saved ledger policy.
 	environment = append(environment, paths.EnvStateDB+"="+runtime.Paths.StateDB)
 	ctx := context.Background()
+	provisional := identity
+	if provisional == "" {
+		provisional = id
+	}
+	if identity != "" {
+		if err := fleetdb.RecordLaunch(
+			ctx,
+			runtime.Paths,
+			fleetdb.Launch{SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: launch.Cache1H},
+			clock.Real.Now().Unix(),
+		); err != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, err)
+		}
+	}
+	if !choice.InPlace {
+		_, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
+			Choice: choice,
+			Paths:  runtime.Paths,
+			Run: fleetdb.SeatRun{
+				Binary:     launch.Binary,
+				Args:       launch.Argv,
+				Env:        environment,
+				CWD:        cwd,
+				CostLedger: prefs.CostLedger,
+			},
+			Seat: fleetdb.Seat{SessionID: provisional, Engine: string(pfmengine.Claude), Name: request.Name},
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: birth native chat: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	if owner, found, err := db.SeatByPane(ctx, choice.HerdrSocket, choice.HerdrPane); err != nil || found {
 		fmt.Fprintf(
@@ -138,16 +166,7 @@ func launchNative(
 		fmt.Fprintf(stderr, "pfm internal launch: close native seat state: %v\n", err)
 		return 1
 	}
-	if identity != "" {
-		if err := fleetdb.RecordLaunch(
-			ctx,
-			runtime.Paths,
-			fleetdb.Launch{SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: launch.Cache1H},
-			clock.Real.Now().Unix(),
-		); err != nil {
-			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, err)
-		}
-	}
+
 	executable, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: resolve running executable: %v\n", err)

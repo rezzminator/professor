@@ -71,7 +71,6 @@ type Ladder struct {
 	Roster          RosterResolver
 	Raw             RawResolver
 	Self            SelfIdentifier
-	CodexSelf       SelfIdentifier
 	RequestIdentity *Identity
 	Env             Environment
 	Session         SessionReader
@@ -105,11 +104,15 @@ func (ladder Ladder) Resolve(
 			if socket == "" {
 				return Seat{}, CodeUnknown, "raw pane target request identity has no socket", nil
 			}
-		} else if ladder.Env != nil {
-			socket = ladder.Env.Get("CHAT_CALL_SOCKET")
-			if socket == "" {
-				socket = socketFromEnvironment(ladder.Env.Get("TMUX"))
+		} else if ladder.Self != nil {
+			identity, err := ladder.Self.Identify(ctx)
+			if err != nil {
+				return Seat{}, CodeUndelivered, "", err
 			}
+			if identity.Backend == nativeHerdrBackend {
+				return Seat{}, CodeUnknown, "raw tmux pane targets are unavailable to a Herdr caller; use a chat name or self", nil
+			}
+			socket = identity.SocketPath
 		}
 		if socket == "" {
 			return Seat{}, CodeUnknown, "raw pane target requires TMUX", nil
@@ -186,11 +189,7 @@ func (ladder Ladder) resolveSelf(ctx context.Context) (Seat, int, string, error)
 	if ladder.Self != nil {
 		identity, err = ladder.Self.Identify(ctx)
 	}
-	if (err != nil || identity.Session == "") && ladder.CodexSelf != nil &&
-		ladder.Env != nil && ladder.Env.Get(CodexThreadEnv) != "" {
-		identity, err = ladder.CodexSelf.Identify(ctx)
-	}
-	if err != nil && !errors.Is(err, ErrNoTmux) {
+	if err != nil && !errors.Is(err, ErrNotInChat) {
 		return Seat{}, CodeUndelivered, "", err
 	}
 	if err != nil || identity.Session == "" || identity.SocketPath == "" {
@@ -233,13 +232,6 @@ func NormalizeTarget(name string) string {
 		return strings.TrimSpace(trimmed[1 : len(trimmed)-1])
 	}
 	return trimmed
-}
-
-func socketFromEnvironment(value string) string {
-	if comma := strings.IndexByte(value, ','); comma >= 0 {
-		return value[:comma]
-	}
-	return value
 }
 
 // IsRawPane reports whether value is an exact tmux pane id: % followed by

@@ -27,4 +27,4 @@ Use after a legal-drafting or compliance session to capture what was learned and
 
 ## {PROJECT_NAME} application
 
-After a meaty `/officer` or `legal`-skill session where the user corrected an output, run this to turn the correction into a candidate rule for the right reference file — then hand it to the `pcm` agent to land. This is how the legal references stay sharp without drifting into bloat. Per repo prompt-quality rules, prefer sharpening an existing rule over adding a new one, and apply the cut test to every proposed line.
+After a meaty `legal`-skill session where the user corrected an output, run this to turn the correction into a candidate rule for the right reference file — then hand it to the `pcm` agent to land. This is how the legal references stay sharp without drifting into bloat. Per repo prompt-quality rules, prefer sharpening an existing rule over adding a new one, and apply the cut test to every proposed line.

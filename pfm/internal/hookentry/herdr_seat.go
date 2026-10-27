@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -16,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // nativeSeat routes a proved durable native seat. Unproved native launchers
@@ -260,7 +260,7 @@ func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload he
 		(reporter.options.event != herdr.EventStart && reporter.options.event != herdr.EventEnd) {
 		return nil
 	}
-	socket, _, _ := strings.Cut(reporter.deps.getenv("TMUX"), ",")
+	socket := tmux.SocketPath(reporter.deps.getenv("TMUX"))
 	db := fleetdb.OpenSharedState(ctx, *reporter.deps.seatPaths)
 	defer func() {
 		if err := db.Close(); err != nil {

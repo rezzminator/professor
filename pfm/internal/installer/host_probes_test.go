@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,31 +119,6 @@ func assertProbePath(t *testing.T, err error, path string) {
 	}
 }
 
-func TestRetiredMemoryHelperProbe(t *testing.T) {
-	for _, test := range []struct{ old, new string }{{"cc-memory-wire.sh", "memory-wire.sh"}, {"cc-memory-consolidate.sh", "memory-consolidate.sh"}} {
-		t.Run(test.old, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), test.old)
-			content := oldMemoryHelperFixture(t, test.new, "invented-vault")
-			writeFixture(t, path, string(content))
-			newName, matched, err := RetiredMemoryHelper(path)
-			if err != nil || !matched || newName != test.new {
-				t.Fatalf("new=%s matched=%v err=%v", newName, matched, err)
-			}
-			writeFixture(t, path, string(append(content, []byte("# edited\n")...)))
-			if _, matched, err = RetiredMemoryHelper(path); err != nil || matched {
-				t.Fatalf("edited matched=%v err=%v", matched, err)
-			}
-			writeFixture(t, path, string(bytes.Replace(content, []byte("invented-vault"), []byte("$HOME"), 1)))
-			if _, matched, err = RetiredMemoryHelper(path); err != nil || matched {
-				t.Fatalf("unsafe matched=%v err=%v", matched, err)
-			}
-		})
-	}
-	if _, matched, err := RetiredMemoryHelper(filepath.Join(t.TempDir(), "unknown.sh")); matched || err != nil {
-		t.Fatalf("unknown=%v %v", matched, err)
-	}
-}
-
 func TestIsStagedShimLine(t *testing.T) {
 	for _, test := range []struct {
 		line string
@@ -243,13 +217,12 @@ func TestHostProbesAbsenceAndUnreadable(t *testing.T) {
 		func() error { _, err := PFMSettingsLeftovers(home, path); return err },
 		func() error { _, err := PFMMCPLeftovers(home, config.DefaultMCPPort, path); return err },
 		func() error { _, _, err := PFMHomeMCPLeftovers(home, config.DefaultMCPPort); return err },
-		func() error { _, _, err := RetiredMemoryHelper(filepath.Join(home, "cc-memory-wire.sh")); return err },
 	} {
 		if err := probe(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"settings.json", "registry.json", ".mcp.json", "cc-memory-wire.sh"} {
+	for _, name := range []string{"settings.json", "registry.json", ".mcp.json"} {
 		if err := os.Mkdir(filepath.Join(home, name), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -260,6 +233,4 @@ func TestHostProbesAbsenceAndUnreadable(t *testing.T) {
 	assertProbePath(t, err, filepath.Join(home, "registry.json"))
 	_, _, err = PFMHomeMCPLeftovers(home, config.DefaultMCPPort)
 	assertProbePath(t, err, filepath.Join(home, ".mcp.json"))
-	_, _, err = RetiredMemoryHelper(filepath.Join(home, "cc-memory-wire.sh"))
-	assertProbePath(t, err, filepath.Join(home, "cc-memory-wire.sh"))
 }

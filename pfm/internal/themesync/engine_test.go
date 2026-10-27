@@ -498,7 +498,8 @@ func TestLastFlipRecordsEverySurfaceOffsetFromTheSourceMtime(t *testing.T) {
 	}}
 	h.sync(false)
 	flip := h.state().LastFlip
-	if flip == nil || flip.Tmux != 0.41 || flip.Herdr != 0.63 || flip.VSCode != 0.64 ||
+	if flip == nil || flip.Tmux == nil || *flip.Tmux != 0.41 ||
+		flip.Herdr == nil || *flip.Herdr != 0.63 || flip.VSCode == nil || *flip.VSCode != 0.64 ||
 		flip.Source != h.path(settingsRel) || flip.At != origin.Format(time.RFC3339Nano) {
 		t.Fatalf(
 			"lastFlip = %+v, want tmux 0.41 herdr 0.63 vscode 0.64 from %s at %s",

@@ -163,6 +163,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 			env = append(env, entry)
 		}
 	}
+	env = runtime.Config.ExtensionEnvironment(pfmengine.MustLookup(pfmengine.Codex).LongName, env)
 	if !codexRunsAsInteractiveChat(args) {
 		// A subcommand or a non-interactive turn is never the chat bound to the pane: its hooks must
 		// not find the parent's Herdr pane, by Herdr name or by tmux pane.

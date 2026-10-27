@@ -93,6 +93,29 @@ func TestRenderRemoteControlAccountOverride(t *testing.T) {
 	}
 }
 
+func TestRefreshRemoteControlPreservesOptionValues(t *testing.T) {
+	for _, flag := range []string{"--append-system-prompt", "--output-format", "--allowedTools", "--disallowedTools", "--add-dir", "--agent", "--agents", "--fallback-model", "--permission-mode", "--permission-prompt-tool", "--input-format", "--json-schema", "--max-turns", "--max-budget-usd", "--plugin-dir", "--settings-sources", "--tools", "--betas", "--append-system-prompt-file"} {
+		for _, value := range []string{"--remote-control", "--print", "-p"} {
+			t.Run(flag+"/"+value, func(t *testing.T) {
+				args := []string{flag, value, "--settings", "{}", "prompt"}
+				for _, enabled := range []bool{false, true} {
+					want := append([]string(nil), args...)
+					if enabled {
+						want = append([]string{"--remote-control", "desk"}, want...)
+					}
+					got := RefreshRemoteControl(args, enabled, "desk")
+					if !slices.Equal(got, want) {
+						t.Fatalf("enabled=%t argv=%q want %q", enabled, got, want)
+					}
+					if again := RefreshRemoteControl(got, enabled, "desk"); !slices.Equal(again, want) {
+						t.Fatalf("replayed argv=%q want %q", again, want)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestRefreshRemoteControlStoredRecipes(t *testing.T) {
 	for _, test := range []struct {
 		name     string

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -773,6 +774,106 @@ func TestHerdrSupervisorAbsenceDistinguishesDarwinUnreadability(t *testing.T) {
 			)
 			if absent != tc.absent || (err == nil) != tc.absent {
 				t.Fatalf("absence=%t err=%v want absence=%t", absent, err, tc.absent)
+			}
+		})
+	}
+}
+
+// unreadableHostProc models a saved supervisor whose kernel birth cannot be
+// read: unknown evidence, never positive death.
+type unreadableHostProc struct {
+	ProcFS
+	pid int
+}
+
+func (proc unreadableHostProc) Stat(pid int) (ProcStat, error) {
+	if pid == proc.pid {
+		return ProcStat{}, fs.ErrPermission
+	}
+	return proc.ProcFS.Stat(pid)
+}
+
+func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read-only=%t", readOnly), func(t *testing.T) {
+			ctx := context.Background()
+			dbPath := filepath.Join(t.TempDir(), "pfm.db")
+			db := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: dbPath})
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			// The dead seat's old pane id now hosts a recycled occupant.
+			socket, _ := herdrOwnershipSocket(
+				t,
+				`{"result":{"type":"pane_list","panes":[`+
+					`{"pane_id":"w1:p1","workspace_id":"w1","terminal_id":"healthy","cwd":"/jail/healthy"},`+
+					`{"pane_id":"w1:p2","workspace_id":"w1","terminal_id":"recycled","cwd":"/jail/recycled"},`+
+					`{"pane_id":"w1:p3","workspace_id":"w1","terminal_id":"unknown","cwd":"/jail/unknown"}]}}`,
+				"w1:p1",
+			)
+			seat := func(id, pane, terminal string, pid int) fleetdb.Seat {
+				return fleetdb.Seat{
+					SeatID: id, SessionID: id, Engine: "cc", Backend: "herdr", State: "live",
+					HerdrSocket: socket, HerdrPane: pane, HerdrWorkspace: "w1", HerdrTerminalID: terminal,
+					SeatHostPID: pid, SeatHostStart: 9,
+				}
+			}
+			seats := []fleetdb.Seat{
+				seat("healthy", "w1:p1", "healthy", 20),
+				seat("dead", "w1:p2", "dead-terminal", 30),
+				seat("unknown", "w1:p3", "unknown", 40),
+			}
+			for _, item := range seats {
+				if err := db.PutSeat(ctx, item); err != nil {
+					t.Fatal(err)
+				}
+			}
+			proc := unreadableHostProc{pid: 40, ProcFS: &fakeProcFS{
+				processes: map[int]fakeProcess{
+					10: {stat: ProcStat{ParentPID: 1, StartTime: 3}},
+					20: {
+						cmdline: []string{"pfm", "internal", "seat-host", "healthy"},
+						stat:    ProcStat{ParentPID: 10, StartTime: 9},
+					},
+				},
+			}}
+			proofDB := db
+			if readOnly {
+				proofDB = fleetdb.OpenSharedStateReadOnly(ctx, paths.Values{StateDB: dbPath})
+				defer func() {
+					if err := proofDB.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+			}
+			rows := proveHerdrSeats(ctx, proofDB, proc, probeHerdrSeatRows(ctx, seats), readOnly)
+			if len(rows) != 3 {
+				t.Fatalf("listing dropped a seat: %+v", rows)
+			}
+			healthy, dead, unknown := rows[0], rows[1], rows[2]
+			if healthy.Err != nil || healthy.Seat.State != "live" || healthy.CWD != "/jail/healthy" {
+				t.Fatalf("healthy seat lost beside a dead one: %+v", healthy)
+			}
+			if dead.Err == nil || !strings.Contains(dead.Err.Error(), "HERDR DEAD dead") {
+				t.Fatalf("dead seat diagnostic lost: %+v", dead)
+			}
+			if dead.Seat.State == "live" {
+				t.Fatalf("positively dead seat still presents as live: %+v", dead.Seat)
+			}
+			if dead.CWD != "" || dead.Seat.HerdrTerminalID != "dead-terminal" || dead.Seat.HerdrPane != "w1:p2" {
+				t.Fatalf("dead seat imported recycled pane metadata: %+v", dead)
+			}
+			if unknown.Err == nil || !strings.Contains(unknown.Err.Error(), "HERDR ERROR") ||
+				unknown.Seat.State != "live" || unknown.CWD != "" {
+				t.Fatalf("unknown ownership classified as dead or healthy: %+v", unknown)
+			}
+			for _, want := range seats {
+				stored, found, err := db.Seat(ctx, want.SeatID)
+				if err != nil || !found || stored.State != "live" || stored.LostNote != "" {
+					t.Fatalf("listing mutated durable seat %s: %+v found=%t err=%v", want.SeatID, stored, found, err)
+				}
 			}
 		})
 	}

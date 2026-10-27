@@ -27,9 +27,12 @@ func newGitScaffoldStore(t *testing.T) string {
 	return store
 }
 
+// pinnedFixtureLocal is the scaffolded file whose template the fixtures move.
+const pinnedFixtureLocal = ".claude/settings.json"
+
 // newUpdatedGitStoreProject scaffolds a project from store, points its
-// manifest at store, then moves the store's CLAUDE.md template forward in the
-// working tree: the project's CLAUDE.md pin reads UPDATED with a one-line
+// manifest at store, then moves the store's .claude/settings.json template forward in the
+// working tree: the project's .claude/settings.json pin reads UPDATED with a one-line
 // upstream change (+upstream line).
 func newUpdatedGitStoreProject(t *testing.T, store string) (project, home string) {
 	t.Helper()
@@ -44,7 +47,7 @@ func newUpdatedGitStoreProject(t *testing.T, store string) (project, home string
 	if err := os.WriteFile(filepath.Join(project, ".professor", "manifest.json"), manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	template := filepath.Join(store, "templates", "project", "CLAUDE.md")
+	template := filepath.Join(store, "templates", "project", "settings.json")
 	if err := os.WriteFile(template, []byte("# fixture contract\nupstream line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -222,9 +225,9 @@ func TestProjectUpdatesDiffUnreadableIsAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin := baseline.Files[ClaudeInstructionsFile]
+	pin := baseline.Files[pinnedFixtureLocal]
 	pin.PinnedSHA = "0000000"
-	baseline.Files[ClaudeInstructionsFile] = pin
+	baseline.Files[pinnedFixtureLocal] = pin
 	if err := Save(project, baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -282,9 +285,9 @@ func TestProjectUpdatesRefusesAPinnedSHAThatIsNotAnObjectName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin := baseline.Files[ClaudeInstructionsFile]
+	pin := baseline.Files[pinnedFixtureLocal]
 	pin.PinnedSHA = "--output=" + planted
-	baseline.Files[ClaudeInstructionsFile] = pin
+	baseline.Files[pinnedFixtureLocal] = pin
 	if err := Save(project, baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -312,9 +315,9 @@ func TestProjectUpdatesSelfHostedPinIsAReviewNotAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin := baseline.Files[ClaudeInstructionsFile]
+	pin := baseline.Files[pinnedFixtureLocal]
 	pin.PinnedSHA = UnknownSelfHostedSHA
-	baseline.Files[ClaudeInstructionsFile] = pin
+	baseline.Files[pinnedFixtureLocal] = pin
 	if err := Save(project, baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +376,7 @@ func TestProjectUpdatesDistinguishesDirtyPinHistory(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			store := newGitScaffoldStore(t)
 			project, home := newUpdatedGitStoreProject(t, store)
-			local, template := "CLAUDE.md", "project/CLAUDE.md"
+			local, template := ".claude/settings.json", "project/settings.json"
 			if kind == "untracked pin" {
 				local, template = "extra.md", "project/extra.md"
 				if err := os.WriteFile(filepath.Join(project, local), []byte("local"), 0o600); err != nil {
@@ -457,8 +460,8 @@ func TestProjectUpdatesReportsRetiredNamesAsReviewAndAScanFailureAsFailed(t *tes
 	if code := RunProjectUpdates(project, home, false, &stdout, hits); code != 1 {
 		t.Fatalf("RunProjectUpdates() code=%d, want 1 (review):\n%s", code, stdout.String())
 	}
-	if gotRoot != project || !gotPinned[ClaudeInstructionsFile] {
-		t.Fatalf("scan root=%q pinned=%v, want %q with %s pinned", gotRoot, gotPinned, project, ClaudeInstructionsFile)
+	if gotRoot != project || !gotPinned[pinnedFixtureLocal] {
+		t.Fatalf("scan root=%q pinned=%v, want %q with %s pinned", gotRoot, gotPinned, project, pinnedFixtureLocal)
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
@@ -521,15 +524,13 @@ func TestProjectUpdatesScanSkipsOnlyThePinsTheItemDiffCovers(t *testing.T) {
 
 	var stdout bytes.Buffer
 	if code := RunProjectUpdates(project, home, false, &stdout, scan); code != 1 {
-		t.Fatalf("RunProjectUpdates() code=%d, want 1 (CLAUDE.md UPDATED):\n%s", code, stdout.String())
+		t.Fatalf("RunProjectUpdates() code=%d, want 1 (.claude/settings.json UPDATED):\n%s", code, stdout.String())
 	}
-	if !gotPinned[ClaudeInstructionsFile] {
-		t.Errorf("scan not told to skip the UPDATED pinned file %s: %v", ClaudeInstructionsFile, gotPinned)
+	if !gotPinned[pinnedFixtureLocal] {
+		t.Errorf("scan not told to skip the UPDATED pinned file %s: %v", pinnedFixtureLocal, gotPinned)
 	}
-	for _, local := range []string{".claude/settings.json", ".rumdl.toml"} {
-		if gotPinned[local] {
-			t.Errorf("scan told to skip the CURRENT pinned file %s: %v", local, gotPinned)
-		}
+	if gotPinned[".rumdl.toml"] {
+		t.Errorf("scan told to skip the CURRENT pinned file .rumdl.toml: %v", gotPinned)
 	}
 }
 

@@ -80,28 +80,6 @@ func probePathError(path string, err error) error {
 	return fmt.Errorf("probe %s: %w", path, err)
 }
 
-// RetiredMemoryHelper recognises only the pinned historical helper bytes.
-func RetiredMemoryHelper(path string) (newName string, matched bool, err error) {
-	for _, helper := range retiredMemoryHelpers {
-		if filepath.Base(path) != helper.oldName {
-			continue
-		}
-		content, err := os.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", false, nil
-		}
-		if err != nil {
-			return "", false, fmt.Errorf("read retired helper %s: %w", path, err)
-		}
-		fingerprint, err := normalizedMemoryHelperFingerprint(content)
-		if err != nil {
-			return "", false, nil
-		}
-		return helper.newName, fingerprint == helper.normalizedSHA256, nil
-	}
-	return "", false, nil
-}
-
 // IsStagedShimLine matches fleet sources outside the clone's canonical shim.
 func IsStagedShimLine(line string) bool {
 	if !isFleetSourceLine(line) {

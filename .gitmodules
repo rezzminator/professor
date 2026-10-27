@@ -23,8 +23,8 @@
 	url = https://github.com/rezzminator/engine-sync.git
 	branch = develop
 	ignore = dirty
-[submodule "sub-agent-compact"]
-	path = plugins/sub-agent-compact
+[submodule "forward-compaction"]
+	path = plugins/forward-compaction
 	url = https://github.com/rezzminator/sub-agent-compact.git
 	branch = develop
 	ignore = dirty
@@ -41,5 +41,10 @@
 [submodule "cache-keepwarm"]
 	path = plugins/cache-keepwarm
 	url = https://github.com/rezzminator/cache-keepwarm.git
+	branch = develop
+	ignore = dirty
+[submodule "plugins/harvester"]
+	path = plugins/harvester
+	url = https://github.com/rezzminator/harvester.git
 	branch = develop
 	ignore = dirty

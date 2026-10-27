@@ -234,10 +234,10 @@ func TestRunnerStartedProcessStdinStdoutPipesPassThroughUntouched(t *testing.T) 
 	fake := &deps.FakeRunner{}
 	stdin := &fakePipeWriter{}
 	stdout := io.NopCloser(strings.NewReader("inner stdout"))
-	fake.ScriptInteractive([]string{"harvestpy"}, deps.InteractiveScript{Pid: 55, Stdin: stdin, Stdout: stdout})
+	fake.ScriptInteractive([]string{"worker"}, deps.InteractiveScript{Pid: 55, Stdin: stdin, Stdout: stdout})
 	runner := Runner(fake)
 	process, err := runner.Start(
-		ctx, []string{"harvestpy", "serve"}, deps.StartOptions{StdinPipe: true, StdoutPipe: true},
+		ctx, []string{"worker", "serve"}, deps.StartOptions{StdinPipe: true, StdoutPipe: true},
 	)
 	if err != nil {
 		t.Fatal(err)

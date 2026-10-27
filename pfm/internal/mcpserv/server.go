@@ -2,6 +2,7 @@ package mcpserv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -31,6 +32,7 @@ const (
 	maxCaptureBytes     = 4 << 20
 	statusNotFound      = "not_found"
 	statusAmbiguous     = "ambiguous"
+	statusNotRegistered = "not_registered"
 	// statusDead is the answer for a target that RESOLVED and then could not
 	// be driven or read — pfmcall.CodeDead. It is deliberately not
 	// statusNotFound: a chat that exists and whose pane vanished mid-call is
@@ -48,11 +50,11 @@ var chatToolNames = []string{
 	"call", "capture", "exit",
 	"keys", killToolName, lastToolName, "ls", "name",
 	newToolName, "open", "resolve",
-	saveToolName, "servicedesk", "status", "unkill", "whoami",
+	saveToolName, "status", "unkill", "whoami",
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+const chatInstructions = "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; old transcripts → /chatlog; save my transcript → save. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -163,7 +165,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("resolve", service.chatResolve))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "call",
-		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / call into chat X\" ask. Call call{target:\"my-chat\", message:\"…\"}; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke.",
+		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / call into chat X\" ask. Call call{target:\"my-chat\", message:\"…\"}; a broadcast passes targets:[\"a\",\"b\"], delivered in parallel; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke. A broadcast returns results, one per target, and status delivered only when all took it, else partial or undelivered; a target whose delivery itself broke reports status error in results, never a tool error.",
 		Annotations: mutating,
 	}, obs.Tool("call", service.chatCall))
 	mcp.AddTool(server, &mcp.Tool{
@@ -232,11 +234,6 @@ func (service *Service) registerTools(server *mcp.Server) {
 		Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.",
 		Annotations: mutating,
 	}, obs.Tool(saveToolName, service.chatSave))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "servicedesk",
-		Description: "Files a durable complaint about Professor itself for a human to triage — a command, agent, hook, or tool that misbehaved. Call servicedesk{title:\"one line\", detail:\"what went wrong, what was expected, where\", area:\"/pfm\"}. Reporter identity is captured, never supplied. Returns status ok with the issue id; a tool error = title or detail missing, unknown severity, or the write failed — nothing was filed. Not for a bug in the user's own project.",
-		Annotations: mutating,
-	}, obs.Tool("servicedesk", service.issueServicedesk))
 }
 
 type requestScopedCallEngine interface {
@@ -285,17 +282,17 @@ const noAmbientCallerRemedy = "MCP request has no _meta.threadId, and this " +
 	"that process IS the chat. A Codex chat should resolve automatically; " +
 	"if it does not, its MCP client is not attaching _meta.threadId to this call."
 
-func (service *Service) selfCallerRefusal(caller callerIdentity) (bool, string) {
+func (service *Service) selfCallerRefusal(caller callerIdentity) (string, string) {
 	if caller.valid {
-		return false, ""
+		return "", ""
 	}
 	if caller.present {
-		return true, caller.detail
+		return identityFailureStatus(caller.err), caller.detail
 	}
 	if !service.backend.allowAmbientIdentity {
-		return true, noAmbientCallerRemedy
+		return statusNotFound, noAmbientCallerRemedy
 	}
-	return false, ""
+	return "", ""
 }
 
 // callerForRequest binds a valid Codex _meta.threadId to a fresh call
@@ -352,11 +349,12 @@ func (service *Service) chatKeys(
 	if err != nil {
 		return nil, KeysOutput{}, err
 	}
-	if refused, _ := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
+	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
 		return nil, KeysOutput{
-			Status: statusNotFound,
-			Code:   pfmcall.CodeUnknown,
-			Keys:   append([]string(nil), input.Keys...),
+			Status:  refusal,
+			Message: detail,
+			Code:    pfmcall.CodeUnknown,
+			Keys:    append([]string(nil), input.Keys...),
 		}, nil
 	}
 	target, code, detail, err := callEngine.Resolve(ctx, input.Target)
@@ -461,8 +459,8 @@ func (service *Service) chatResolve(
 	if err != nil {
 		return nil, ResolveOutput{}, err
 	}
-	if refused, detail := service.selfCallerRefusal(caller); relative && refused {
-		return nil, ResolveOutput{Status: statusNotFound, Code: 1, Candidates: detail}, nil
+	if refusal, detail := service.selfCallerRefusal(caller); relative && refusal != "" {
+		return nil, ResolveOutput{Status: refusal, Code: 1, Candidates: detail}, nil
 	}
 	type kindResolver interface {
 		ResolveKind(context.Context, string, resolve.Kind, string) (pfmcall.Target, int, string, error)
@@ -498,75 +496,6 @@ func (service *Service) chatResolve(
 	}, nil
 }
 
-func (service *Service) chatCall(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input CallInput,
-) (*mcp.CallToolResult, CallOutput, error) {
-	callEngine, caller, err := service.callEngineForRequest(ctx, request)
-	if err != nil {
-		return nil, CallOutput{}, err
-	}
-	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
-		return nil, CallOutput{
-			Status: statusNotFound, Code: pfmcall.CodeUnknown, Message: detail,
-		}, nil
-	}
-	result, err := callEngine.Call(ctx, pfmcall.Request{
-		Target:   input.Target,
-		Message:  input.Message,
-		ForceNow: input.ForceNow,
-		Then:     input.Then,
-	})
-	output := outputFromCall(result)
-	if caller.present && !caller.valid && caller.detail != "" &&
-		strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) {
-		// The request did carry an identity that failed to bind: name why, so
-		// a binding failure never reads as "no identity was sent".
-		output.Message += " The request's own caller identity did not bind: " + caller.detail
-	}
-	return nil, output, err
-}
-
-// mcpUnsignedMessage restates pfmcall.ErrUnsigned's refusal for an MCP
-// caller. The engine's own wording (call/body.go) is CLI-oriented — it
-// tells the reader to set an environment variable or pass --allow-unsigned,
-// both unreachable from an MCP tool call, and it blames a detached process
-// chain that is not what happened here. The daemon-level cause is real (this
-// process still derived no identity of its own), so only the remedy half is
-// replaced with one an MCP caller can act on.
-func mcpUnsignedMessage() string {
-	return pfmcall.ErrUnsigned.Error() +
-		": this process derived no identity of its own, so the recipient " +
-		"would be asked to act on an instruction from nobody. " +
-		noAmbientCallerRemedy
-}
-
-func outputFromCall(result pfmcall.Result) CallOutput {
-	message := result.Message
-	if strings.Contains(message, pfmcall.ErrUnsigned.Error()) {
-		message = mcpUnsignedMessage()
-	}
-	return CallOutput{
-		Status:        result.Status,
-		Code:          result.Code,
-		Message:       message,
-		SocketPath:    result.SocketPath,
-		Pane:          result.Pane,
-		Proof:         result.Proof,
-		Busy:          result.Busy,
-		Interrupted:   result.Interrupted,
-		DraftStashed:  result.DraftStashed,
-		Typed:         result.Typed,
-		SubmitRetries: result.SubmitRetries,
-		Steers:        result.Steers,
-		SteerLog:      result.SteerLog,
-		Unsigned:      result.Unsigned,
-		AutoFilePath:  result.AutoFilePath,
-		LiteralChunks: result.LiteralChunks,
-	}
-}
-
 // chatWhoami answers with the requesting chat's identity. Codex sends its
 // thread id in reserved protocol metadata. Only the per-chat stdio transport
 // may use environment/ancestry; a shared daemon has no ambient caller identity.
@@ -577,11 +506,11 @@ func (service *Service) chatWhoami(
 ) (*mcp.CallToolResult, WhoamiOutput, error) {
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
-		return nil, WhoamiOutput{}, err
+		return nil, whoamiFailure(resolve.Identity{}, err, err.Error()), nil
 	}
 	if caller.present {
 		if !caller.valid {
-			return nil, WhoamiOutput{Status: statusNotFound, Message: caller.detail}, nil
+			return nil, whoamiFailure(caller.identity, caller.err, caller.detail), nil
 		}
 		identity := caller.identity
 		return nil, WhoamiOutput{
@@ -602,19 +531,13 @@ func (service *Service) chatWhoami(
 			Message: noAmbientCallerRemedy,
 		}, nil
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: service.backend.codexSeats})
 	if err != nil {
-		return nil, WhoamiOutput{}, err
+		return nil, whoamiFailure(resolve.Identity{}, err, err.Error()), nil
 	}
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
-		return nil, WhoamiOutput{
-			Status:  statusNotFound,
-			Engine:  identity.Engine,
-			ID:      identity.ID,
-			Source:  identity.Source,
-			Message: err.Error(),
-		}, nil
+		return nil, whoamiFailure(identity, err, err.Error()), nil
 	}
 	return nil, WhoamiOutput{
 		Status:     "ok",
@@ -657,8 +580,8 @@ func (service *Service) chatCapture(
 	if err != nil {
 		return nil, CaptureOutput{}, err
 	}
-	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
-		return nil, CaptureOutput{Status: statusNotFound, Code: pfmcall.CodeUnknown, Message: detail}, nil
+	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
+		return nil, CaptureOutput{Status: refusal, Code: pfmcall.CodeUnknown, Message: detail}, nil
 	}
 	target, text, code, detail, err := callEngine.Capture(
 		ctx,
@@ -721,4 +644,43 @@ func tailBytes(text string, budget int) string {
 		cut++
 	}
 	return text[cut:]
+}
+
+func identityFailureStatus(err error) string {
+	switch {
+	case errors.Is(err, resolve.ErrNotRegistered):
+		return statusNotRegistered
+	case errors.Is(err, resolve.ErrAmbiguous):
+		return statusAmbiguous
+	case err == nil || errors.Is(err, resolve.ErrNotInChat):
+		return statusNotFound
+	default:
+		return statusError
+	}
+}
+
+func whoamiFailure(identity resolve.Identity, err error, message string) WhoamiOutput {
+	return WhoamiOutput{
+		Status:     identityFailureStatus(err),
+		SocketPath: identity.SocketPath,
+		SocketName: identity.SocketName,
+		Pane:       identity.Pane,
+		Engine:     identity.Engine,
+		ID:         identity.ID,
+		Source:     identity.Source,
+		Message:    message,
+	}
+}
+
+type callerRefusal struct{ status, message string }
+
+func (refusal callerRefusal) Error() string { return refusal.message }
+
+func callerActionFailure(err error) ActionOutput {
+	status := statusError
+	var refusal callerRefusal
+	if errors.As(err, &refusal) {
+		status = refusal.status
+	}
+	return ActionOutput{Status: status, Code: 1, Message: err.Error()}
 }

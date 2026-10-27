@@ -40,15 +40,13 @@ func runGitGuard(t *testing.T, payload string) (int, string, string) {
 }
 
 func TestGitGuardAllowsGitterEverything(t *testing.T) {
-	for _, agentType := range []string{"gitter", "gpt-gitter"} {
-		for _, command := range []string{"git commit -m x", "git worktree add ../x"} {
-			t.Run(agentType+"/"+command, func(t *testing.T) {
-				code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, "/tmp", agentType))
-				if code != 0 || stdout != "" || stderr != "" {
-					t.Fatalf("code=%d stdout=%q stderr=%q, want allowed silently", code, stdout, stderr)
-				}
-			})
-		}
+	for _, command := range []string{"git commit -m x", "git worktree add ../x"} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, "/tmp", "gitter"))
+			if code != 0 || stdout != "" || stderr != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want allowed silently", code, stdout, stderr)
+			}
+		})
 	}
 }
 
@@ -58,19 +56,19 @@ func TestGitGuardAllowsOnlyExactNativeWriterIdentities(t *testing.T) {
 		allow          bool
 	}{
 		{name: "gitter", metadata: `,"agent_type":"gitter"`, allow: true},
-		{name: "gpt-gitter", metadata: `,"agent_type":"gpt-gitter"`, allow: true},
+		{name: "gpt-gitter is an ordinary agent", metadata: `,"agent_type":"gpt-gitter"`},
 		{name: "omitted"},
 		{name: "empty", metadata: `,"agent_type":""`},
 		{name: "ordinary", metadata: `,"agent_type":"flights-foreman"`},
 		{name: "gitter lookalike", metadata: `,"agent_type":"gitter-api"`},
-		{name: "gpt-gitter lookalike", metadata: `,"agent_type":"gpt-gitter-extra"`},
+		{name: "prefix lookalike", metadata: `,"agent_type":"xgitter"`},
 		{name: "canonical path", metadata: `,"agent_type":"agents/gitter"`},
-		{name: "native path", metadata: `,"agent_type":"agents/gpt-gitter"`},
-		{name: "native relative path", metadata: `,"agent_type":"./gpt-gitter"`},
-		{name: "native absolute path", metadata: `,"agent_type":"/agents/gpt-gitter"`},
-		{name: "native backslash path", metadata: `,"agent_type":"agents\\gpt-gitter"`},
-		{name: "whitespace", metadata: `,"agent_type":"gpt-gitter "`},
-		{name: "case", metadata: `,"agent_type":"Gpt-gitter"`},
+		{name: "suffix lookalike path", metadata: `,"agent_type":"agents/gitter-x"`},
+		{name: "native relative path", metadata: `,"agent_type":"./gitter"`},
+		{name: "native absolute path", metadata: `,"agent_type":"/agents/gitter-x"`},
+		{name: "native backslash path", metadata: `,"agent_type":"agents\\gitter-x"`},
+		{name: "whitespace", metadata: `,"agent_type":"gitter "`},
+		{name: "case", metadata: `,"agent_type":"Gitter"`},
 		{name: "role spoof", metadata: `,"agent_type":"flights-foreman","role":"gitter"`},
 		{name: "model spoof", metadata: `,"agent_type":"flights-foreman","model":"gpt-gitter"`},
 	} {

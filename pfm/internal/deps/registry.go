@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -33,7 +32,6 @@ type Entry struct {
 	MinVersion     string
 	Parse          func(string) (string, error)
 	InstallHint    string
-	Harvest        bool
 	SelfDoctorArgs []string
 	// ProbeHome runs the version and self-doctor probes in a throwaway engine
 	// home (NewEngineProbeHome), never the ambient account.
@@ -214,7 +212,7 @@ var fixedCommands = []Entry{
 }
 
 // Registry is the one complete dependency table. Configured engine names and
-// provisioned harvestpy paths are materialized here rather than copied into
+// configured engine paths are materialized here rather than copied into
 // doctor or install.
 func Registry(options ...Options) []Entry {
 	var resolved Options
@@ -254,33 +252,6 @@ func Registry(options ...Options) []Entry {
 			ProbeHome: true, AccountChecks: accountChecks,
 		})
 	}
-	harvestRoot := filepath.Join(resolved.Home, ".local", "state", "pfm", "harvest-python")
-	current := filepath.Join(harvestRoot, "env", resolved.GOOS+"-"+resolved.GOARCH, "current")
-	entries = append(
-		entries,
-		Entry{
-			Name:        "uv",
-			Command:     filepath.Join(current, "uv"),
-			Purpose:     "provisioned harvestpy package verifier",
-			Required:    true,
-			Platforms:   []string{platformLinux, platformDarwin},
-			VersionArgs: []string{versionFlag},
-			Parse:       firstVersion,
-			InstallHint: "run pfm install to provision harvestpy",
-			Harvest:     true,
-		},
-		Entry{
-			Name:        "harvestpy",
-			Command:     filepath.Join(current, "project", ".venv", "bin", "python"),
-			Purpose:     "provisioned harvestpy interpreter",
-			Required:    true,
-			Platforms:   []string{platformLinux, platformDarwin},
-			VersionArgs: []string{versionFlag},
-			Parse:       firstVersion,
-			InstallHint: "run pfm install to provision harvestpy",
-			Harvest:     true,
-		},
-	)
 	for index := range entries {
 		if entries[index].Command == "" {
 			entries[index].Command = entries[index].Name

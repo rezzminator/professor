@@ -34,6 +34,8 @@ func TestLaunchPassthroughRemoteControl(t *testing.T) {
 			case "managed tmux":
 				t.Setenv("PFM_LAUNCH_PASSTHROUGH", "")
 				t.Setenv("TMUX", "/fixture/cc-1,123,0")
+				t.Setenv("TMUX_PANE", "%0")
+				proveLauncherTmux(t)
 			case "named":
 				args = append(args, "--name", "desk")
 				name = "desk"

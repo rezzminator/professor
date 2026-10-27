@@ -29,7 +29,7 @@
     "pluginCheckoutRoot": null,
     "plugins": [
       "cache-live-control",
-      "sub-agent-compact",
+      "forward-compaction",
       "auto-effort-control",
       "tool-visibility-controller",
       "engine-sync"

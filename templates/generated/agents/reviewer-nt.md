@@ -3,7 +3,7 @@
 name: reviewer-nt
 role: reviewer
 description: reviewer without tracers on opus high
-tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
+tools: Read, Write, Grep, Glob, Bash, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
 model: opus
 effort: high
 effortControl: on

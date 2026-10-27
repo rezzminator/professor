@@ -280,13 +280,13 @@ func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 		code                              int
 		want, resolution                  string
 	}{
-		{name: "default auto outside", backend: pfmconfig.DefaultChatBackend, source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: not inside a Herdr pane"},
-		{name: "explicit auto outside", backend: "auto", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: not inside a Herdr pane"},
-		{name: "default auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceDefault, code: 3, want: "doctor: herdr backend UNREACHABLE —", resolution: "chat.backend=auto (default) resolved to Herdr from the pane environment"},
-		{name: "explicit auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, code: 3, want: "doctor: herdr backend UNREACHABLE —", resolution: "chat.backend=auto (file) resolved to Herdr from the pane environment"},
-		{name: "auto nested tmux", backend: "auto", marker: "1", pane: "w1:p1", tmux: "jailed-tmux", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: inside tmux (TMUX is set)"},
-		{name: "auto missing pane", backend: "auto", marker: "1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: not inside a Herdr pane"},
-		{name: "auto missing marker", backend: "auto", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: not inside a Herdr pane"},
+		{name: "default auto outside", backend: pfmconfig.DefaultChatBackend, source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
+		{name: "explicit auto outside", backend: "auto", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no proven Herdr caller"},
+		{name: "default auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
+		{name: "explicit auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no proven Herdr caller"},
+		{name: "auto cannot read tmux", backend: "auto", marker: "1", pane: "w1:p1", tmux: "/tmp/tmux-1/dead,1,0", source: pfmconfig.SourceDefault, code: 3, want: "doctor: herdr backend UNRESOLVED — place chat: caller unresolved:"},
+		{name: "auto missing pane", backend: "auto", marker: "1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
+		{name: "auto missing marker", backend: "auto", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
 		{name: "explicit tmux inside", backend: "tmux", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=tmux (file) selects tmux"},
 		{name: "configured unreachable", backend: "herdr", source: pfmconfig.SourceFile, code: 3, want: "doctor: herdr backend UNREACHABLE —"},
 	} {
@@ -313,7 +313,8 @@ func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 					stderr.String(),
 				)
 			}
-			if scenario.code == 3 && !strings.Contains(stdout.String(), "doctor: herdr backend repair —") {
+			if scenario.code == 3 && scenario.backend == "herdr" &&
+				!strings.Contains(stdout.String(), "doctor: herdr backend repair —") {
 				t.Errorf("unreachable backend has no repair line: %s", stdout.String())
 			}
 			if scenario.resolution != "" && !strings.Contains(stdout.String(), scenario.resolution) {

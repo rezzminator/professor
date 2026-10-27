@@ -74,6 +74,10 @@ func RetiredPfmCommand(command string) (name, successor string, ok bool) {
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
 const chatlogSuccessor = "the chatlog skill"
 
+// forwardCompactionSuccessor is what the forward-compaction plugin serves in
+// place of sub-agent-compact's tools.
+const forwardCompactionSuccessor = "mcp__forward-compaction__forward_compaction / mcp__forward-compaction__look_back"
+
 // flightsSuccessor takes new work since /flights:spec retired, so the /wave
 // family, the wave-builder skill and /imagine:build-spec point there too.
 const flightsSuccessor = "the flights-foreman agent"
@@ -100,7 +104,7 @@ var retiredNames = []retiredName{
 	{
 		name:      "mcp__professor__",
 		kind:      retiredTool,
-		successor: "mcp__chat-professor__* / mcp__harvester-professor__*",
+		successor: "mcp__chat-professor__* / mcp__plugin_harvester_harvester__*",
 		match:     matchPrefix,
 	},
 	{name: "pfm chat inject", kind: retiredCommand, successor: "pfm chat call", match: matchExact},
@@ -139,11 +143,17 @@ var retiredNames = []retiredName{
 		name: ".claude/commands/pfm/references/audit-scopes.md", kind: retiredPath,
 		successor: ".claude/commands/pcm.md", match: matchExact,
 	},
-	// releases/v0.78.0.md "→ For: every adopter · per project · MCP tool
-	// names": mcp__chat__* and mcp__harvester__* become their
-	// mcp__professor__ forms.
+	// releases/v0.78.0.md retired the former chat tool namespace.
 	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__chat-professor__*", match: matchPrefix},
-	{name: "mcp__harvester__", kind: retiredTool, successor: "mcp__harvester-professor__*", match: matchPrefix},
+	// Standalone plugin registration replaces the server pfm installed.
+	{name: "harvester-professor", kind: retiredTool, successor: "harvester", match: matchExact},
+	{
+		name: "mcp__harvester-professor__", kind: retiredTool,
+		successor: "mcp__plugin_harvester_harvester__*", match: matchPrefix,
+	},
+	// The forward-compaction plugin replaces sub-agent-compact: its server and
+	// both of its tools are renamed (forward_handoff is forward_compaction).
+	{name: "mcp__sub-agent-compact__", kind: retiredTool, successor: forwardCompactionSuccessor, match: matchPrefix},
 	// releases/v0.62.0.md "Removed: the host-level /chat:* Claude
 	// slash-command family"; "drive chat through the MCP tools instead".
 	{name: "/chat:", kind: retiredCommand, successor: "mcp__chat-professor__*", match: matchPrefix},
@@ -156,6 +166,14 @@ var retiredNames = []retiredName{
 	// Commit "remove /rnd end to end": the project-scope research command and
 	// its former /rnd:hammer and /rnd:referee sub-commands have no successor.
 	{name: "/rnd", kind: retiredCommand, match: matchFamily},
+	// Commit db16bb63 "replace context-meter and context-audit commands with
+	// one user-only initial-context audit skill".
+	{name: "/context-meter", kind: retiredCommand, successor: "/context-audit", match: matchExact},
+	// Commit "prune project templates": the project-tier /mentor, /marketer and
+	// /officer command templates are gone, with no successor.
+	{name: "/mentor", kind: retiredCommand, match: matchExact},
+	{name: "/marketer", kind: retiredCommand, match: matchExact},
+	{name: "/officer", kind: retiredCommand, match: matchExact},
 	{name: "mono-architect", kind: retiredAgent, match: matchExact},
 	{name: "mono-documenter", kind: retiredAgent, match: matchExact},
 	{name: "mono-planner", kind: retiredAgent, match: matchExact},
@@ -173,17 +191,18 @@ var retiredNames = []retiredName{
 	// Commit f0c88ffb "tracer-rr is clone-distiller".
 	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
 	// Commit 3b401f24: the twin agents take their originals' full names; terra retires.
-	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
+	// No successor: gpt-flights-lander, the name gpt-lander once took, retired with the twins.
+	{name: "gpt-lander", kind: retiredAgent, match: matchExact},
 	{name: "gpt-executor", kind: retiredAgent, match: matchExact},
 	// The flights family cut (docs/design/flights/flights.md § The family): the
-	// foreman-pro twins, the mechanical executors and the speccer retire, and
+	// foreman-pro twins, the mechanical executors and the gpt speccer retire, and
 	// so do /flights:spec, /flights:init and /flights:orchestrate-cross-harness.
 	// None has a successor: the agents they once pointed at retired too.
+	// flights-speccer is no row: commit 5c7d67f1 restored it, and it ships.
 	{name: "foreman-pro", kind: retiredAgent, match: matchExact},
 	{name: "gpt-foreman-pro", kind: retiredAgent, match: matchExact},
 	{name: "flights-mechanical-executor", kind: retiredAgent, match: matchExact},
 	{name: "gpt-flights-mechanical-executor", kind: retiredAgent, match: matchExact},
-	{name: "flights-speccer", kind: retiredAgent, match: matchExact},
 	{name: "gpt-flights-speccer", kind: retiredAgent, match: matchExact},
 	{name: "/flights:spec", kind: retiredCommand, match: matchExact},
 	{name: "/flights:init", kind: retiredCommand, match: matchExact},

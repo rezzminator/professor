@@ -137,6 +137,9 @@ func personaGoldenRequests(t *testing.T, home string) ([]Request, string) {
 		request.OpenCodePlugin = filepath.Join(home, ".local", "state", "pfm", "opencode-workbench-plugin.mjs")
 		request.OpenCodeHerdrPlugin = filepath.Join(home, ".local", "state", "pfm", "opencode-herdr-plugin.mjs")
 		request.OpenCodeFleetPrompt = "/work/clone/pfm/harness-prompts/generated/opencode.md"
+		if kind == compose.NewOpenCode || kind == compose.ResumeOpenCode {
+			request.Persona.Model = "openai/gpt-x"
+		}
 		if kind == compose.NewClaude {
 			request.LaunchName = "_SCRIBE:3"
 		}

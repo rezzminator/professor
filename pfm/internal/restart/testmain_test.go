@@ -261,7 +261,6 @@ func testDeps(t *testing.T, runner *hostRunner, kernel *fakeKernel, fleet *fakeF
 		Signal:     kernel.signal,
 		Clock:      newTickClock(),
 		Fleet:      fleet,
-		HTTPProbe:  func(context.Context, string) error { return nil },
 		Self:       1,
 		Executable: "/opt/pfm/bin/pfm",
 		LogDir:     t.TempDir(),

@@ -2,7 +2,6 @@ package installer
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -15,27 +14,27 @@ func TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace(t *testing.T) {
 		path,
 		`{"mcp":{"chat":{"type":"local","command":["`+filepath.Join(home, ".local", "bin", "pfm")+
 			`","mcp","chat","serve"],"enabled":true},`+
-			`"harvester":{"type":"local","command":["uv","--directory","/srv/harvester","run","harvester"]}}}`,
+			`"external":{"type":"local","command":["uv","--directory","/srv/external","run","external"]}}}`,
 	)
 	writeFixture(t, filepath.Join(managedRootForHome(home), mcpOwnershipName),
 		`{"opencodeRegistrations":{"`+path+`":{"chat":{"type":"local","command":["`+
 			filepath.Join(home, ".local", "bin", "pfm")+`","mcp","chat","serve"],"enabled":true}}}}`)
 
-	unowned, err := OpenCodeUnownedEntries(home, path, chatName, mcpServerHarvester)
+	unowned, err := OpenCodeUnownedEntries(home, path, chatName, "external")
 	if err != nil {
 		t.Fatalf("OpenCodeUnownedEntries() error = %v", err)
 	}
-	if len(unowned) != 1 || unowned[0] != mcpServerHarvester {
-		t.Fatalf("unowned=%q, want only the user-written harvester entry", unowned)
+	if len(unowned) != 1 || unowned[0] != "external" {
+		t.Fatalf("unowned=%q, want only the user-written external entry", unowned)
 	}
 
 	// No ledger at all: every present entry is one install did not write.
 	bare := t.TempDir()
 	barePath := OpenCodeConfigPath(bare)
-	writeFixture(t, barePath, `{"mcp":{"harvester":{"type":"remote","url":"https://operator.invalid"}}}`)
-	unowned, err = OpenCodeUnownedEntries(bare, barePath, chatName, mcpServerHarvester)
-	if err != nil || len(unowned) != 1 || unowned[0] != mcpServerHarvester {
-		t.Fatalf("unowned=%q, err=%v; want the harvester entry named with no ledger present", unowned, err)
+	writeFixture(t, barePath, `{"mcp":{"external":{"type":"remote","url":"https://operator.invalid"}}}`)
+	unowned, err = OpenCodeUnownedEntries(bare, barePath, chatName, "external")
+	if err != nil || len(unowned) != 1 || unowned[0] != "external" {
+		t.Fatalf("unowned=%q, err=%v; want the external entry named with no ledger present", unowned, err)
 	}
 
 	// An absent config names nothing and is not an error.
@@ -53,7 +52,7 @@ func TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace(t *testing.T) {
 
 // TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries pins the
 // OpenCode classifier: `professor` is pfm only in the exact local stdio shape
-// install writes, pfm's own legacy `chat` / `harvester` shapes are legacy-pfm,
+// install writes, pfm's own legacy `chat` / `external` shapes are legacy-pfm,
 // anything else is foreign, and a malformed config is unreadable, never absent.
 func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
 	t.Parallel()
@@ -65,12 +64,11 @@ func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing
 		path,
 		`{"mcp":{"professor":{"type":"local","command":["`+bin+`","mcp","serve","--stdio"],"enabled":true},`+
 			`"chat":{"type":"local","command":["`+bin+`","mcp","chat","serve"],"enabled":true},`+
-			`"harvester":{"type":"remote","url":"http://127.0.0.1:8456/mcp/harvester","enabled":true}}}`,
+			`"external":{"type":"remote","url":"http://127.0.0.1:8456/mcp/external","enabled":true}}}`,
 	)
-	reports := InspectOpenCodeServers(path, home, 8456, professorName, chatName, mcpServerHarvester)
-	if len(reports) != 3 || reports[0].State != MCPClientLegacyPFM || reports[1].State != MCPClientLegacyPFM ||
-		reports[2].State != MCPClientLegacyPFM {
-		t.Fatalf("reports=%#v, want professor pfm, chat and harvester legacy-pfm", reports)
+	reports := InspectOpenCodeServers(path, home, 8456, professorName, chatName)
+	if len(reports) != 2 || reports[0].State != MCPClientLegacyPFM || reports[1].State != MCPClientLegacyPFM {
+		t.Fatalf("reports=%#v, want professor pfm, chat and external legacy-pfm", reports)
 	}
 	writeFixture(t, path, `{"mcp":{"chat":{"type":"remote","url":"http://127.0.0.1:8456/mcp/chat","enabled":true}}}`)
 	reports = InspectOpenCodeServers(path, home, 8456, professorName, chatName)
@@ -109,14 +107,11 @@ func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing
 // Claude/Codex classifier: `professor` is pfm only in the exact stdio shape
 // install writes (`{"type":"stdio","command":"<bin>","args":["mcp","serve",
 // "--stdio"]}`, nothing more, nothing less), never over HTTP; pfm's legacy
-// `chat` / `harvester` shapes (the loopback URL, the retired 64-hex bearer,
-// the stdio chat) are legacy-pfm; a `uv`/`harvest…` harvester stays
-// legacy-standalone.
+// Legacy chat shapes are legacy-pfm.
 func TestInspectProjectServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".mcp.json")
 	bin := filepath.Join(home, ".local", "bin", "pfm")
-	bearer := "Bearer " + strings.Repeat("ab", 32)
 	for _, testCase := range []struct {
 		name, key, registration, want string
 	}{
@@ -131,12 +126,6 @@ func TestInspectProjectServersClassifiesProfessorAndPFMLegacyEntries(t *testing.
 		{"professor upper-case type", professorName, `{"type":"STDIO","command":"` + bin + `","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},
 		{"chat stdio legacy", chatName, `{"type":"stdio","command":"` + bin + `","args":["mcp","chat","serve"]}`, MCPClientLegacyPFM},
 		{"chat http legacy", chatName, `{"type":"http","url":"http://127.0.0.1:8456/mcp/chat"}`, MCPClientLegacyPFM},
-		{"harvester http legacy", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:8456/mcp/harvester"}`, MCPClientLegacyPFM},
-		{"harvester bearer legacy", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:8456/mcp/harvester","headers":{"Authorization":"` + bearer + `"}}`, MCPClientLegacyPFM},
-		{"harvester foreign bearer", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:8456/mcp/harvester","headers":{"Authorization":"Bearer retired"}}`, MCPClientForeignRegistration},
-		{"harvester wrong port", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:9999/mcp/harvester"}`, MCPClientForeignRegistration},
-		{"harvester standalone", mcpServerHarvester, `{"type":"stdio","command":"uv","args":["run","harvester"]}`, MCPClientLegacyStandalone},
-		{"harvester foreign", mcpServerHarvester, `{"type":"http","url":"https://foreign.invalid/mcp"}`, MCPClientForeignRegistration},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			writeFixture(t, path, `{"mcpServers":{"`+testCase.key+`":`+testCase.registration+`}}`)
@@ -148,33 +137,6 @@ func TestInspectProjectServersClassifiesProfessorAndPFMLegacyEntries(t *testing.
 	}
 }
 
-// TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex pins the
-// Codex half: the single-line loopback url table is pfm's legacy entry (the
-// one install removes), while the same url with a headers table is not a
-// shape install removes and so stays foreign.
-func TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	codex := filepath.Join(home, ".codex")
-	config := filepath.Join(codex, "config.toml")
-	writeFixture(t, config, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8456/mcp/harvester\"\n")
-	reports := InspectHarvesterClientCutover(home, 8456, []string{codex})
-	if len(reports) != 2 || reports[0].State != MCPClientLegacyPFM {
-		t.Fatalf("reports=%#v, want the Codex url table legacy-pfm", reports)
-	}
-	writeFixture(t, config, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8456/mcp/harvester\"\n"+
-		"[mcp_servers.harvester.headers]\nAuthorization = \"Bearer "+strings.Repeat("ab", 32)+"\"\n")
-	reports = InspectHarvesterClientCutover(home, 8456, []string{codex})
-	if reports[0].State != MCPClientForeignRegistration {
-		t.Fatalf("reports=%#v, want the headed Codex table foreign-registration", reports)
-	}
-}
-
-// TestOpenCodeUnownedEntriesClaimsAnInterruptedInstallsPendingEntry pins the
-// interrupted install: the ledger's opencodePending already holds pfm's
-// professor for the path (writeMCPOpenCodeJSON records it before the write),
-// so the entry is install's own — the one it adopts on the next run — and
-// doctor must not call it user-owned.
 func TestOpenCodeUnownedEntriesClaimsAnInterruptedInstallsPendingEntry(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()

@@ -21,8 +21,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestLaunchPassThroughPredicate(t *testing.T) {
@@ -55,7 +57,11 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if got := launchPassThrough(test.arguments, test.tmux, test.forced); got != test.want {
+			if got := launchPassThrough(
+				test.arguments,
+				resolve.Identity{Backend: "tmux", SocketPath: pfmtmux.SocketPath(test.tmux)},
+				test.forced,
+			); got != test.want {
 				t.Fatalf(
 					"launchPassThrough(%q, %q, %t) = %t, want %t",
 					test.arguments,
@@ -286,9 +292,11 @@ func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			var stderr, stdout bytes.Buffer
+			var stdout bytes.Buffer
+			var stderr lockedBuffer
 			enter := strings.NewReader("\n")
 			var input io.Reader = enter
+			var finishRead func()
 			if test.cancel {
 				t.Setenv(spawn.TestFreshSocketEnv, "cc-cancel")
 				// The test process outlives the interrupt whatever the launcher does.
@@ -296,10 +304,14 @@ func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 				signal.Notify(guard, os.Interrupt)
 				t.Cleanup(func() { signal.Stop(guard) })
 				released := make(chan struct{})
-				t.Cleanup(func() { close(released) })
-				input = interruptingReader{released: released}
+				finished := make(chan struct{})
+				finishRead = func() { close(released); <-finished }
+				input = interruptingReader{released: released, finished: finished}
 			}
 			t.Cleanup(launchnotice.Replace(input, test.terminal))
+			if finishRead != nil {
+				t.Cleanup(finishRead)
+			}
 			code := Launch(
 				[]string{"--real", binary, "--cwd", dir, "--"}, &stdout, &stderr, runtime, &paths.MapEnv{},
 			)
@@ -327,9 +339,13 @@ func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 // interruptingReader is a starter pressing Ctrl-C at the Enter prompt: its read
 // interrupts the process, then waits for a line that never comes, giving up
 // after a bound so an interrupt nobody handles fails the test, not hangs it.
-type interruptingReader struct{ released chan struct{} }
+type interruptingReader struct {
+	released chan struct{}
+	finished chan struct{}
+}
 
 func (reader interruptingReader) Read([]byte) (int, error) {
+	defer close(reader.finished)
 	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
 		return 0, err
 	}
@@ -383,6 +399,9 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", test.ambient)
 			t.Setenv("TMUX", test.tmux)
+			if test.tmux != "" {
+				proveLauncherTmux(t)
+			}
 			t.Setenv("PFM_LAUNCH_PASSTHROUGH", test.forced)
 			inherited := os.Environ()
 			var got []string
@@ -672,6 +691,9 @@ func TestLaunchPassthroughDropsTheHerdrPaneOfAHeadlessRunOnly(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 			t.Setenv("TMUX", test.tmux)
+			if test.tmux != "" {
+				proveLauncherTmux(t)
+			}
 			t.Setenv("TMUX_PANE", "%1")
 			t.Setenv("PFM_LAUNCH_PASSTHROUGH", test.forced)
 			for _, entry := range herdrEnv {
@@ -704,4 +726,14 @@ func TestLaunchPassthroughDropsTheHerdrPaneOfAHeadlessRunOnly(t *testing.T) {
 			}
 		})
 	}
+}
+
+func proveLauncherTmux(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\nprintf 'cc-fixture " + strconv.Itoa(os.Getpid()) + "\\n'\n"
+	if err := testjail.WriteExecutable(filepath.Join(dir, "tmux"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

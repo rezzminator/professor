@@ -22,8 +22,8 @@
 #
 # summary: reads <run-dir>/gate.tsv, steps/*.prof.tsv, resources.tsv,
 # resources.err, profile/*/summary.json, profile/fixture-*/*/summary.json and
-# profile/race/*/summary.json (each Go fixture step profiles into its own
-# profile/fixture-<kind>/ root and the race step into profile/race/; INDEX.txt lists
+# profile/{race}/*/summary.json (each Go fixture step profiles into its own
+# profile/fixture-<kind>/ root and the race steps into their own profile roots; INDEX.txt lists
 # such a root's process directories in its place); asks pfm/scripts/test-contention.sh
 # (windows) once for every step window plus the whole file; writes
 # <run-dir>/profile.tsv (one row per gate.tsv step, then GATE) and

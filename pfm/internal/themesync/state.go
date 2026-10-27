@@ -68,6 +68,24 @@ func (store stateStore) load() (themeState, bool, error) {
 	return state, true, nil
 }
 
+// CurrentVariant reads the persisted theme for a read-only surface. A missing
+// or disabled state is off; an unreadable or incomplete enabled state is not.
+func CurrentVariant(stateDir string) (*Variant, error) {
+	store := stateStore{dir: stateDir}
+	state, found, err := store.load()
+	if err != nil {
+		return nil, err
+	}
+	if !found || !state.Enabled {
+		return nil, nil
+	}
+	if state.Applied == nil {
+		return nil, fmt.Errorf("themesync: %s: enabled state has no applied theme", store.statePath())
+	}
+	variant := state.Applied.variant(state.Appearance)
+	return &variant, nil
+}
+
 // save replaces state.json atomically; a state already on disk byte for byte
 // is not written again.
 func (store stateStore) save(state themeState) error {

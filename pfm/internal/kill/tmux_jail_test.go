@@ -15,6 +15,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -206,15 +207,17 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.Kill(ctx, Request{
-		Self: true,
-		Exit: true,
-		Environment: SelfEnvironment{
-			TMUX:            socketPath + ",1,0",
-			TMUXPane:        paneID,
-			ClaudeSessionID: id,
+	manager.identifier = killTestIdentity{
+		identity: resolve.Identity{
+			Backend:    "tmux",
+			ID:         id,
+			Engine:     string(pfmengine.Claude),
+			SocketPath: socketPath,
+			SocketName: filepath.Base(socketPath),
+			Pane:       paneID,
 		},
-	}); err != nil {
+	}
+	if _, err := manager.Kill(ctx, Request{Self: true, Exit: true}); err != nil {
 		t.Fatal(err)
 	}
 	if len(spawner.args) != 1 {

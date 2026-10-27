@@ -82,7 +82,7 @@ type agentActivity struct {
 	turn agentTurn
 
 	noCacheWindow bool
-	context       int64 // newest completed call's input + cache read + cache creation; 0 until one lands
+	context       int64 // newest completed call's last executor request: input + cache read + cache creation; 0 until one lands, and after a compaction
 }
 
 const (
@@ -728,6 +728,7 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	}
 	if entry.Type == "system" && entry.Subtype == "compact_boundary" {
 		activity.compactions++
+		activity.context = 0 // a call from before the boundary no longer describes the context
 		return
 	}
 	if entry.Type != entryAssistant && entry.Type != entryUser {
@@ -774,8 +775,17 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
 			activity.cacheHit = hit
 		}
-		if size := usage.Input + usage.CacheRead + usage.CacheCreation; size > 0 {
-			activity.context = size
+	}
+	// The context is the prompt of the response's last executor request, as the
+	// main session's gauge reads it: a response that ran several requests
+	// carries their sum at the top level, or only zeros there and its counts in
+	// usage.iterations. Iterations mean the call completed even without cache
+	// counters at the top level.
+	if usage.reportsCache || len(usage.Iterations) > 0 {
+		if requests := usage.Requests(); len(requests) > 0 {
+			if size := requests[len(requests)-1].Context(); size > 0 {
+				activity.context = size
+			}
 		}
 	}
 }

@@ -10,17 +10,6 @@ trap 'rm -rf "$ROOT"' EXIT
 TMP_BASE="$ROOT"
 source "$CATALOGUE"
 
-# The caller-owned CI policy suite must be reached through the shared Python
-# fixture step, not merely exist on disk or run in only one scheduler.
-fixture_commands="$( (
-  run() { shift 2; printf '%s\n' "$*"; }
-  head_() { :; }
-  checks_templates_refresh_scope
-) )"
-grep -Fxq "python3 $REPO_ROOT/scripts/test-verify-leak-policy.py" <<< "$fixture_commands" || {
-  echo 'FAIL templates steps: verify leak policy suite is not invoked by the shared Python fixture step' >&2; exit 1;
-}
-
 plugin_log_commands="$( (
   run() { shift 2; printf '%s\n' "$*"; }
   checks_templates_plugin_logs

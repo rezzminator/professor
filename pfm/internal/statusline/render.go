@@ -16,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -206,7 +207,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	writeBreadcrumb(runtime, data.TranscriptPath)
 	convergeWindowName(ctx, runtime, data)
 
-	harvestRateLimits(runtime, now, account, data)
+	recordRateLimits(runtime, now, account, data)
 
 	directoryName := filepath.Base(filepath.Clean(directory))
 	if directory == "" || directoryName == string(filepath.Separator) {
@@ -568,7 +569,7 @@ func pfmSocket(runtime Runtime) (string, bool) {
 	if tmux == "" {
 		return "", false
 	}
-	socketPath := strings.SplitN(tmux, ",", 2)[0]
+	socketPath := pfmtmux.SocketPath(tmux)
 	if filepath.Clean(filepath.Dir(socketPath)) != filepath.Clean(runtime.TmuxDir) {
 		return "", false
 	}
@@ -589,7 +590,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	if tmux == "" || transcriptPath == "" {
 		return
 	}
-	socket := strings.SplitN(tmux, ",", 2)[0]
+	socket := pfmtmux.SocketPath(tmux)
 	socket = filepath.Base(socket)
 	if socket == "." || socket == "" {
 		return
@@ -604,7 +605,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	}
 }
 
-func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) {
+func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
 	// Every window carrying a reset time is recorded under `windows`, 0% used
 	// included: 0% is a real reading, and a seat that has just started is
 	// exactly the one whose usage door should answer from this file instead of
@@ -709,11 +710,15 @@ func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Du
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
 		return
 	}
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	held, err := takeStatuslineRefreshLock(lockPath, runtime.now(), ttl)
 	if err != nil {
+		obs.Logger(context.Background()).
+			Warn("take statusline refresh lock", "kind", kind, "path", lockPath, obs.FieldErr, err.Error())
 		return
 	}
-	_ = lock.Close()
+	if !held {
+		return
+	}
 	// Bound failed/missing-Codex retries too; an absent cache must not spawn
 	// another app-server on every Claude statusline update after a failed fetch.
 	if err := atomicfile.Write(attemptPath, nil, 0o600); err != nil {

@@ -13,23 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 )
-
-func newTestHarvester(t *testing.T, runtime harvestmcp.Runtime) *harvestmcp.Service {
-	t.Helper()
-	runtime.Home, runtime.CacheDir = t.TempDir(), t.TempDir()
-	service, err := harvestmcp.NewConfiguredHarvester("test", runtime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close harvester: %v", err)
-		}
-	})
-	return service
-}
 
 func newTestChat(t *testing.T) *Service {
 	t.Helper()
@@ -100,16 +84,12 @@ func sortedRoster(rosters ...[]string) []string {
 	return names
 }
 
-var harvesterRosterNoSearch = []string{"read", "download_file", "search_literature"}
-
 func TestProfessorFamilyViewsServeOneFamily(t *testing.T) {
-	harvester := newTestHarvester(t, harvestmcp.Runtime{})
-	professor := newTestProfessor(t, FamilyServerOptions{Chat: newTestChat(t), Harvester: harvester})
+	professor := newTestProfessor(t, FamilyServerOptions{Chat: newTestChat(t)})
 	for _, test := range []struct {
 		family, instructions string
 		roster               []string
 	}{
-		{pfmconfig.MCPServerHarvester, harvester.Instructions(), harvesterRosterNoSearch},
 		{pfmconfig.MCPServerChat, chatInstructions, chatToolNames},
 	} {
 		t.Run(test.family, func(t *testing.T) {
@@ -128,39 +108,17 @@ func TestProfessorFamilyViewsServeOneFamily(t *testing.T) {
 }
 
 func TestProfessorLeavesADisabledFamilyOut(t *testing.T) {
-	t.Run("chat disabled", func(t *testing.T) {
-		harvester := newTestHarvester(t, harvestmcp.Runtime{})
-		professor := newTestProfessor(t, FamilyServerOptions{Harvester: harvester})
-		session := professorSession(t, professor.FamilyHandler(pfmconfig.MCPServerHarvester))
-		if got, want := sessionToolNames(t, session), sortedRoster(harvesterRosterNoSearch); !slices.Equal(got, want) {
-			t.Fatalf("tools/list = %v, want %v", got, want)
-		}
-		if got := session.InitializeResult().Instructions; got != harvester.Instructions() {
-			t.Fatalf("instructions = %q, want the harvester part alone", got)
-		}
-		if professor.FamilyHandler(pfmconfig.MCPServerChat) != nil {
-			t.Fatal("the disabled chat family has a view")
-		}
-		if servers := professor.Servers(); len(servers) != 1 || servers[pfmconfig.MCPServerHarvester] == nil {
-			t.Fatalf("Servers() = %v, want the harvester family alone", servers)
-		}
-	})
-	t.Run("harvester disabled", func(t *testing.T) {
-		professor := newTestProfessor(t, FamilyServerOptions{Chat: newTestChat(t)})
-		session := professorSession(t, professor.FamilyHandler(pfmconfig.MCPServerChat))
-		if got, want := sessionToolNames(t, session), sortedRoster(chatToolNames); !slices.Equal(got, want) {
-			t.Fatalf("tools/list = %v, want %v", got, want)
-		}
-		if got := session.InitializeResult().Instructions; got != chatInstructions {
-			t.Fatalf("instructions = %q, want the chat part alone", got)
-		}
-		if professor.FamilyHandler(pfmconfig.MCPServerHarvester) != nil {
-			t.Fatal("the disabled harvester family has a view")
-		}
-		if servers := professor.Servers(); len(servers) != 1 || servers[pfmconfig.MCPServerChat] == nil {
-			t.Fatalf("Servers() = %v, want the chat family alone", servers)
-		}
-	})
+	professor := newTestProfessor(t, FamilyServerOptions{Chat: newTestChat(t)})
+	session := professorSession(t, professor.FamilyHandler(pfmconfig.MCPServerChat))
+	if got, want := sessionToolNames(t, session), sortedRoster(chatToolNames); !slices.Equal(got, want) {
+		t.Fatalf("tools/list = %v, want %v", got, want)
+	}
+	if got := session.InitializeResult().Instructions; got != chatInstructions {
+		t.Fatalf("instructions = %q", got)
+	}
+	if servers := professor.Servers(); len(servers) != 1 || servers[pfmconfig.MCPServerChat] == nil {
+		t.Fatalf("Servers() = %v, want chat alone", servers)
+	}
 }
 
 func TestProfessorRefusesWhenEveryFamilyIsDisabled(t *testing.T) {
@@ -206,22 +164,10 @@ func TestProfessorServesAFailedFamilyAlone(t *testing.T) {
 }
 
 func TestFamilyInstructionsStayWithinTheBound(t *testing.T) {
-	chat := newTestChat(t)
-	for _, remote := range []bool{false, true} {
-		for _, search := range []bool{false, true} {
-			runtime := harvestmcp.Runtime{Remote: remote}
-			if search {
-				runtime.SearXNGURL = "http://searxng.example.test"
-			}
-			harvester := newTestHarvester(t, runtime)
-			families := newTestProfessor(t, FamilyServerOptions{Chat: chat, Harvester: harvester})
-			for family, want := range map[string]string{pfmconfig.MCPServerChat: chatInstructions, pfmconfig.MCPServerHarvester: harvester.Instructions()} {
-				text := inMemorySession(t, families.Server(family)).InitializeResult().Instructions
-				if text != want || utf8.RuneCountInString(text) > 900 {
-					t.Fatalf("family %s instructions = %q", family, text)
-				}
-			}
-		}
+	families := newTestProfessor(t, FamilyServerOptions{Chat: newTestChat(t)})
+	text := inMemorySession(t, families.Server(pfmconfig.MCPServerChat)).InitializeResult().Instructions
+	if text != chatInstructions || utf8.RuneCountInString(text) > 900 {
+		t.Fatalf("chat instructions = %q", text)
 	}
 }
 
@@ -253,40 +199,16 @@ func inMemorySession(t *testing.T, server *mcp.Server) *mcp.ClientSession {
 // TestProfessorStatusReportsRostersByFamily wires a Professor into the daemon
 // the way `pfm mcp serve` does and reads /status.
 func TestProfessorStatusReportsRostersByFamily(t *testing.T) {
-	status := func(t *testing.T, options FamilyServerOptions, harvester *harvestmcp.Service) DaemonStatus {
-		t.Helper()
-		professor := newTestProfessor(t, options)
-		daemon := DaemonOptions{
-			Chat:      professor.FamilyHandler(pfmconfig.MCPServerChat),
-			Harvester: professor.FamilyHandler(pfmconfig.MCPServerHarvester),
-		}
-		if harvester != nil {
-			daemon.HarvesterTools = harvester.ToolNames()
-		}
-		response := httptest.NewRecorder()
-		NewDaemonHandler(daemon).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
-		var decoded DaemonStatus
-		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
-			t.Fatalf("decode /status %q: %v", response.Body.String(), err)
-		}
-		return decoded
+	professor := newTestProfessor(t, FamilyServerOptions{Chat: newTestChat(t)})
+	response := httptest.NewRecorder()
+	NewDaemonHandler(
+		DaemonOptions{Chat: professor.FamilyHandler(pfmconfig.MCPServerChat)},
+	).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
+	var status DaemonStatus
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
 	}
-	chat := newTestChat(t)
-	t.Run("both families, search on", func(t *testing.T) {
-		harvester := newTestHarvester(t, harvestmcp.Runtime{SearXNGURL: "http://searxng.example.test"})
-		servers := status(t, FamilyServerOptions{Chat: chat, Harvester: harvester}, harvester).Servers
-		if !slices.Equal(servers[pfmconfig.MCPServerChat], ToolNames()) {
-			t.Fatalf("servers.chat = %v, want %v", servers[pfmconfig.MCPServerChat], ToolNames())
-		}
-		roster := servers[pfmconfig.MCPServerHarvester]
-		if len(roster) == 0 || roster[len(roster)-1] != "search_web" {
-			t.Fatalf("servers.harvester = %v, want it to end with search_web", roster)
-		}
-	})
-	t.Run("chat only", func(t *testing.T) {
-		servers := status(t, FamilyServerOptions{Chat: chat}, nil).Servers
-		if _, ok := servers[pfmconfig.MCPServerChat]; !ok || len(servers) != 1 {
-			t.Fatalf("servers = %v, want the chat key alone", servers)
-		}
-	})
+	if len(status.Servers) != 1 || !slices.Equal(status.Servers[pfmconfig.MCPServerChat], ToolNames()) {
+		t.Fatalf("servers = %v, want chat tools alone", status.Servers)
+	}
 }

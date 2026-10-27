@@ -86,6 +86,20 @@ var declaredKeys = map[string]bool{
 	"pane":     true,
 	"window":   true,
 	"session":  true,
+	// Placement inputs and result contain locations and resolver diagnostics.
+	"door":             true,
+	"requested":        true,
+	"caller_backend":   true,
+	"caller_socket":    true,
+	"caller_pane":      true,
+	"caller_workspace": true,
+	"caller_fronted":   true,
+	"caller_source":    true,
+	"caller_err":       true,
+	"chosen":           true,
+	"in_place":         true,
+	"place_err":        true,
+
 	// The argument and result SHAPE fields the middleware doors report
 	// (spec § Middleware): a count, a name, a code — never the value itself.
 	"argc":    true,
@@ -93,6 +107,7 @@ var declaredKeys = map[string]bool{
 	"status":  true,
 	"rows":    true,
 	"table":   true,
+	"line":    true, // A failed cost sink write names the rejected line.
 	"kind":    true,
 	"op":      true,
 	"route":   true,
@@ -102,11 +117,6 @@ var declaredKeys = map[string]bool{
 	"cause":   true,
 	"subcmd":  true,
 	"retries": true,
-	"line":    true, // Lane B: one harvestpy stderr line (Process.Stderr), added only when comp=harvestpy logs at DEBUG
-	"class":   true, // harvestpy.stderr's default-level stand-in for line: its bounded leading word
-	"wait_ms": true, // harvestpy.request: how long the conversion queued for a worker
-	"queue":   true, // harvestpy.request: the queue length the conversion found
-	"workers": true, // harvestpy.request: the converter pool's live workers
 }
 
 // Declared reports whether key is on the activity log's allow-list.

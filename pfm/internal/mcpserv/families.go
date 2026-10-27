@@ -9,14 +9,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 )
 
 // FamilyServerOptions names the family services the daemon carries.
 type FamilyServerOptions struct {
-	Version   string
-	Chat      *Service            // nil: the chat family is disabled
-	Harvester *harvestmcp.Service // nil: the harvester family is disabled
+	Version string
+	Chat    *Service // nil: the chat family is disabled
 	// Failed holds each enabled family that failed to configure. Its tools
 	// stay listed under their normal names and every call answers an MCP
 	// error result naming the family, the error and the fix.
@@ -25,7 +23,7 @@ type FamilyServerOptions struct {
 
 // FailedFamily is one enabled family whose configuration failed.
 type FailedFamily struct {
-	Family     string   // pfmconfig.MCPServerChat or pfmconfig.MCPServerHarvester
+	Family     string   // pfmconfig.MCPServerChat
 	Tools      []string // the names the family registers when healthy
 	Err        error    // the configuration error, rendered verbatim
 	ConfigPath string   // the pfm config file holding the key to correct
@@ -47,7 +45,7 @@ type FamilyServers struct {
 // professor whose every enabled family failed still builds: its tools answer
 // the configuration errors.
 func NewFamilyServers(options FamilyServerOptions) (*FamilyServers, error) {
-	if options.Chat == nil && options.Harvester == nil && len(options.Failed) == 0 {
+	if options.Chat == nil && len(options.Failed) == 0 {
 		return nil, errors.New("pfm mcp: every family is disabled")
 	}
 	professor := &FamilyServers{
@@ -62,10 +60,6 @@ func NewFamilyServers(options FamilyServerOptions) (*FamilyServers, error) {
 		professor.families[family] = newMCPHTTPHandler(view, pfmconfig.MCPRegistrationName(family))
 		professor.servers[family] = roster
 		professor.views[family] = view
-	}
-	if options.Harvester != nil {
-		add(pfmconfig.MCPServerHarvester, options.Harvester.Instructions(),
-			options.Harvester.RegisterTools, options.Harvester.ToolNames())
 	}
 	if options.Chat != nil {
 		add(pfmconfig.MCPServerChat, chatInstructions, options.Chat.registerTools, ToolNames())

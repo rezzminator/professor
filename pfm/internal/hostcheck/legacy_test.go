@@ -102,75 +102,31 @@ func TestLegacyConfig(t *testing.T) {
 	}
 }
 
-func TestLegacyHarvesterConfig(t *testing.T) {
-	for _, present := range []bool{false, true} {
-		t.Run(fmt.Sprint(present), func(t *testing.T) {
-			env := fixtureEnv(t)
-			path := filepath.Join(env.LegacyConfigDir, "harvester.config.json")
-			target := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
-			writeFile(t, path, "{}")
-			fix := "mv " + path + " " + target
-			if present {
-				writeFile(t, target, "{}")
-				fix = "diff " + path + " " + target + " && rm " + path
-			}
-			assertRows(
-				t,
-				detect(t, "legacy-harvester-config", env),
-				Row{Block, "legacy-harvester-config", path, "legacy harvester config outside the clone", fix},
-			)
-		})
-	}
-	env := fixtureEnv(t)
-	path := filepath.Join(env.LegacyConfigDir, "harvester.config.json")
-	makeDir(t, path)
-	assertUnreadable(t, detect(t, "legacy-harvester-config", env), "legacy-harvester-config", path, syscall.EISDIR)
-	// The legacy location may already be the clone's location.
-	env.ConfigPath = filepath.Join(env.LegacyConfigDir, config.FileName)
-	assertRows(t, detect(t, "legacy-harvester-config", env))
-}
-
 func TestPreSplitConfig(t *testing.T) {
-	for _, enabled := range []string{"true", "false", "null"} {
-		t.Run(enabled, func(t *testing.T) {
-			env := fixtureEnv(t)
-			writeFile(
-				t,
+	t.Run("old shape", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, env.ConfigPath, `{"mcp":{"http":{"port":8377}}}`)
+		sibling := filepath.Join(filepath.Dir(env.ConfigPath), "config.json")
+		writeFile(t, sibling, "{}")
+		assertRows(
+			t,
+			detect(t, "pre-split-config", env),
+			Row{
+				Block,
+				"pre-split-config",
+				sibling,
+				"a pre-split config.json beside the config",
+				"rm " + sibling + " once its content is in " + env.ConfigPath,
+			},
+			Row{
+				Block,
+				"pre-split-config",
 				env.ConfigPath,
-				`{"mcp":{"servers":{"harvester":{"enabled":`+enabled+`}},"http":{"port":8377}}}`,
-			)
-			sibling := filepath.Join(filepath.Dir(env.ConfigPath), "config.json")
-			writeFile(t, sibling, "{}")
-			assertRows(
-				t,
-				detect(t, "pre-split-config", env),
-				Row{
-					Block,
-					"pre-split-config",
-					sibling,
-					"a pre-split config.json beside the config",
-					"rm " + sibling + " once its content is in " + env.ConfigPath,
-				},
-				Row{
-					Block,
-					"pre-split-config",
-					env.ConfigPath,
-					"mcp.servers.harvester belongs in harvester.config.json",
-					"move mcp.servers.harvester.enabled (" + enabled + ") to \"enabled\" in " + filepath.Join(
-						filepath.Dir(env.ConfigPath),
-						"harvester.config.json",
-					) + ", then delete mcp.servers.harvester from " + env.ConfigPath,
-				},
-				Row{
-					Block,
-					"pre-split-config",
-					env.ConfigPath,
-					"mcp.http.port is the pre-split default 8377",
-					"set mcp.http.port to 18377 in " + env.ConfigPath + "; pfm install re-wires every client",
-				},
-			)
-		})
-	}
+				"mcp.http.port is the pre-split default 8377",
+				"set mcp.http.port to 18377 in " + env.ConfigPath + "; pfm install re-wires every client",
+			},
+		)
+	})
 	t.Run("old-name", func(t *testing.T) {
 		env := fixtureEnv(t)
 		env.ConfigPath = filepath.Join(filepath.Dir(env.ConfigPath), "config.json")
@@ -272,32 +228,6 @@ func TestLegacyDatabases(t *testing.T) {
 	}
 }
 
-func TestLegacyHarvesterCache(t *testing.T) {
-	for _, present := range []bool{false, true} {
-		t.Run(fmt.Sprint(present), func(t *testing.T) {
-			env := fixtureEnv(t)
-			path, target := paths.LegacyHarvesterCacheDir(env.Home), paths.HarvesterCacheDir(env.Home)
-			makeDir(t, path)
-			fix := "mv " + path + " " + target
-			if present {
-				makeDir(t, target)
-				fix = "rm -r " + path
-			}
-			assertRows(
-				t,
-				detect(t, "legacy-harvester-cache", env),
-				Row{Warn, "legacy-harvester-cache", path, "pre-rename harvester cache dir", fix},
-			)
-			env.HarvesterCacheDir = path
-			assertRows(t, detect(t, "legacy-harvester-cache", env))
-		})
-	}
-	env := fixtureEnv(t)
-	path := paths.LegacyHarvesterCacheDir(env.Home)
-	writeFile(t, path, "file")
-	assertUnreadable(t, detect(t, "legacy-harvester-cache", env), "legacy-harvester-cache", path, syscall.ENOTDIR)
-}
-
 func TestStagedShimAndPrompts(t *testing.T) {
 	t.Run("shim", func(t *testing.T) {
 		env := fixtureEnv(t)
@@ -391,5 +321,37 @@ func TestStrayDir(t *testing.T) {
 		for i, name := range []string{".git", ".codex", ".agents"} {
 			assertUnreadable(t, rows[i:i+1], "stray-dir", filepath.Join(root, name), syscall.ENOTDIR)
 		}
+	})
+}
+
+func TestRetiredHarvesterConfig(t *testing.T) {
+	const check = "retired-harvester-config"
+	t.Run("clean", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, env.ConfigPath, `{"mcp":{"servers":{"chat":{"enabled":true}}}}`)
+		assertRows(t, detect(t, check, env))
+	})
+	t.Run("file", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
+		writeFile(t, path, `{"enabled":true}`)
+		assertRows(t, detect(t, check, env), Row{
+			Warn, check, path, "retired harvester.config.json; pfm no longer reads it",
+			"run harvester setup to import it into the harvester plugin's config, then rm " + path,
+		})
+	})
+	t.Run("server-entry", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, env.ConfigPath, `{"mcp":{"servers":{"harvester":{"enabled":true}}}}`)
+		assertRows(t, detect(t, check, env), Row{
+			Warn, check, env.ConfigPath, "retired mcp.servers.harvester entry; pfm no longer reads it",
+			"delete mcp.servers.harvester from " + env.ConfigPath + "; the harvester plugin keeps its own config",
+		})
+	})
+	t.Run("file-unreadable", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
+		makeDir(t, path)
+		assertUnreadable(t, detect(t, check, env), check, path, syscall.EISDIR)
 	})
 }

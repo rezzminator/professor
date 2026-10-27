@@ -22,7 +22,7 @@ func TestStagedManagedSurfacesRetirement(t *testing.T) {
 			shim := filepath.Join(managed, "shim", "pfm.zsh")
 			prompts := paths.LegacyHarnessPromptsDir(home)
 			account := filepath.Join(home, "acct1")
-			proc := filepath.Join(home, "proc")
+			proc := emptyProcRoot(t, home)
 			mode := ModeApply
 			var wants []string
 			keep := false
@@ -156,7 +156,7 @@ func TestStagedRetirementChecksEachAccount(t *testing.T) {
 			home := t.TempDir()
 			prompts := paths.LegacyHarnessPromptsDir(home)
 			writeFixture(t, filepath.Join(prompts, "claude.md"), "old prompt\n")
-			proc := filepath.Join(home, "proc")
+			proc := emptyProcRoot(t, home)
 			accounts := []string{filepath.Join(home, "acct1"), filepath.Join(home, "acct2")}
 			if fallback {
 				accounts = accounts[:1]

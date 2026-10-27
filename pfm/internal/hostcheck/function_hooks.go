@@ -128,13 +128,29 @@ func modulePlugins(rows *[]Row, dir string) ([]string, bool) {
 			"which function-hook plugins are installed is unknown"))
 		return nil, false
 	}
+	markets, ok := directoryMarketplaces(rows, dir)
+	if !ok {
+		return nil, false
+	}
 	var names []string
 	for id, entries := range installed.Plugins {
-		for _, entry := range entries {
-			if entry.InstallPath == "" {
+		var folders []string
+		name, market, _ := strings.Cut(id, "@")
+		if root, directory := markets[market]; directory {
+			folder, ok := directoryPluginFolder(rows, root, name, id)
+			if !ok {
 				continue
 			}
-			hooksPath := filepath.Join(entry.InstallPath, "hooks", "hooks.json")
+			folders = []string{folder}
+		} else {
+			for _, entry := range entries {
+				if entry.InstallPath != "" {
+					folders = append(folders, entry.InstallPath)
+				}
+			}
+		}
+		for _, folder := range folders {
+			hooksPath := filepath.Join(folder, "hooks", "hooks.json")
 			hooks, found := readFile(rows, checkFunctionHookModules, hooksPath)
 			if !found {
 				continue
@@ -155,6 +171,74 @@ func modulePlugins(rows *[]Row, dir string) ([]string, bool) {
 	}
 	sort.Strings(names)
 	return names, len(*rows) == before
+}
+
+// directoryMarketplaces maps each directory-source marketplace in dir's
+// plugins/known_marketplaces.json to its path: Claude Code runs such a
+// marketplace's plugins from that folder, not from their recorded installPath.
+// ok is false when the read failed; its row is already appended.
+func directoryMarketplaces(rows *[]Row, dir string) (map[string]string, bool) {
+	record := filepath.Join(dir, "plugins", "known_marketplaces.json")
+	before := len(*rows)
+	raw, found := readFile(rows, checkFunctionHookModules, record)
+	if !found {
+		return nil, len(*rows) == before
+	}
+	var known map[string]struct {
+		Source struct {
+			Kind string `json:"source"`
+			Path string `json:"path"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &known); err != nil {
+		*rows = append(*rows, unparsable(checkFunctionHookModules, record, err,
+			"which marketplaces run their plugins from a folder is unknown"))
+		return nil, false
+	}
+	markets := map[string]string{}
+	for name, market := range known {
+		if market.Source.Kind == "directory" {
+			markets[name] = market.Source.Path
+		}
+	}
+	return markets, true
+}
+
+// directoryPluginFolder is the folder inside root that plugin id's entry in
+// root/.claude-plugin/marketplace.json names. ok is false when it cannot be
+// resolved; its row is already appended.
+func directoryPluginFolder(rows *[]Row, root, name, id string) (string, bool) {
+	manifest := filepath.Join(root, ".claude-plugin", "marketplace.json")
+	unknown := "which folder Claude Code loads plugin " + id + " from, and so its hook modules, is unknown"
+	before := len(*rows)
+	raw, found := readFile(rows, checkFunctionHookModules, manifest)
+	if !found {
+		if len(*rows) == before {
+			fix := "rerun pfm install so the marketplace folder " + root + " is rebuilt"
+			problem := manifest + " does not exist — " + unknown
+			*rows = append(*rows, Row{Warn, checkFunctionHookModules, manifest, problem, fix})
+		}
+		return "", false
+	}
+	var listed struct {
+		Plugins []struct {
+			Name   string `json:"name"`
+			Source any    `json:"source"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		*rows = append(*rows, unparsable(checkFunctionHookModules, manifest, err, unknown))
+		return "", false
+	}
+	for _, entry := range listed.Plugins {
+		if source, isPath := entry.Source.(string); entry.Name == name && isPath {
+			return filepath.Join(root, source), true
+		}
+	}
+	problem := fmt.Sprintf("%s lists no folder source for plugin %s — %s", manifest, name, unknown)
+	fix := "rerun pfm install so the marketplace lists " + name
+	*rows = append(*rows, Row{Warn, checkFunctionHookModules, manifest, problem, fix})
+	return "", false
 }
 
 // unparsable is the row for a file that was read but could not be parsed:

@@ -2524,6 +2524,56 @@ class StoreTest(unittest.TestCase):
         self.assertRegex(out, r"(?m)^FRESH " + os.path.basename(earlier) + r" node 1: .*\[a\.py:2\]$")
         self.assertNotIn("REWALK", out)
 
+    def assert_stale_rewalk(self, earlier, out):
+        rid = os.path.basename(earlier)
+        self.assertNotRegex(out, rf"(?m)^FRESH {rid} node 1:")
+        self.assertRegex(out, r"(?m)^STALE Q1 ·")
+        self.assertRegex(out, rf"(?m)^REWALK Q1 · {rid} node 1 ·")
+        self.assertNotRegex(out, r"(?m)^TRACE Q1 · none$")
+
+    def test_hash_recall_preserves_a_rejected_hop_stored_by_the_second_write(self):
+        for in_git in (False, True):
+            with self.subTest(in_git=in_git):
+                if in_git:
+                    git(self.root, "init", "-q")
+                    git(self.root, "add", "-A")
+                    git(self.root, "commit", "-q", "-m", "one")
+                earlier, _ = self.new(ASK_ALPHA)
+                got = tt(["start", earlier, "1", "a.py:1", "Q1"])
+                self.assertEqual(got.returncode, 0, got.stderr)
+                text = hops("1", ["- `load_alpha` falls back [a.py:2]"],
+                            ["@ a.py:2", "> return nonexistent_fallback", "= the fallback"],
+                            ["END returned @ a.py:2"])
+                refused = tt(["write", earlier, "1"], input=text)
+                self.assertEqual(refused.returncode, 2, refused.stderr)
+                self.assertIn("TRACETREE REFUSED", refused.stderr)
+                stored = tt(["write", earlier, "1"], input=text)
+                self.assertEqual(stored.returncode, 0, stored.stderr)
+                with open(os.path.join(earlier, "1.write.json")) as f:
+                    entry, = json.load(f)
+                self.assertEqual(entry["status"], "rejected")
+                self.assertTrue(entry["sha256"])
+                _, out = self.new(ASK_ALPHA)
+                self.assert_stale_rewalk(earlier, out)
+
+    def test_hash_recall_rejects_invalid_or_unbacked_answer_cites_with_valid_hops(self):
+        self.edit("a.py", ALPHA + ["# unrelated"] * 12)
+        for address in ("999999", "0", "2-1", "16-19", "12"):
+            with self.subTest(address=address):
+                earlier, _ = self.new(ASK_ALPHA)
+                got = tt(["start", earlier, "1", "a.py:1", "Q1"])
+                self.assertEqual(got.returncode, 0, got.stderr)
+                text = hops("1", [f"- `load_alpha` falls back [a.py:{address}]"],
+                            ["@ a.py:2", "> " + ALPHA[1], "= the fallback"], ["END returned @ a.py:2"])
+                stored = tt(["write", earlier, "1"], input=text)
+                self.assertEqual(stored.returncode, 0, stored.stderr)
+                with open(os.path.join(earlier, "1.write.json")) as f:
+                    entry, = json.load(f)
+                self.assertEqual(entry["status"], "verified")
+                self.assertTrue(entry["sha256"])
+                _, out = self.new(ASK_ALPHA)
+                self.assert_stale_rewalk(earlier, out)
+
     def test_only_the_thread_whose_file_changed_is_walked_again(self):
         earlier, _ = self.new(ASK_BOTH)
         self.walk(earlier, "1", 1, "a.py", "load_alpha")

@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -21,7 +20,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // New constructs an action executor using only K4-overridable paths.
@@ -52,7 +53,15 @@ func New(dependencies Dependencies) (*Executor, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	if dependencies.Identify == nil {
+		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+		if err != nil {
+			return nil, fmt.Errorf("resolve picker caller: %w", err)
+		}
+		dependencies.Identify = identifier.Identify
+	}
 	return &Executor{
+		identify:  dependencies.Identify,
 		tmux:      tmux,
 		processes: processes,
 		gate:      gate,
@@ -157,15 +166,13 @@ func (executor *Executor) Open(
 	if request.Row.Kind == compose.NewClaude || request.Row.Kind == compose.NewCodex ||
 		request.Row.Kind == compose.NewOpenCode || request.Row.Kind == compose.ResumeClaude ||
 		request.Row.Kind == compose.ResumeCodex || request.Row.Kind == compose.ResumeOpenCode {
-		choice, chooseErr := spawn.ChooseBackend(ctx, request.Config.Chat.Backend, os.Environ(), nil)
+		caller, callerErr := executor.identify(ctx)
+		choice, chooseErr := spawn.Place(ctx, "picker", request.Config.Chat.Backend, caller, callerErr)
 		if chooseErr != nil {
 			return "", chooseErr
 		}
-		if choice.Warning != "" {
-			fmt.Fprintln(executor.stderr, choice.Warning)
-		}
 		if choice.Backend == spawn.BackendHerdr {
-			values, pathErr := paths.Resolve()
+			values, pathErr := pfmconfig.ResolvePaths()
 			if pathErr != nil {
 				return "", pathErr
 			}
@@ -187,26 +194,17 @@ func (executor *Executor) Open(
 				Engine:    string(engineID),
 				Name:      request.LaunchName,
 			}
-			// Born in place only in a pane this process provably fronts: a stale
-			// or inherited HERDR_PANE_ID (a shell inside tmux, an agent's tool
-			// call) names a pane pfm neither reserves nor relabels, so the chat
-			// is born in a new tab of the workspace instead.
-			proveErr := pfmcall.ProveHerdrOwnPane(ctx, choice.HerdrSocket, choice.HerdrPane)
-			if errors.Is(proveErr, pfmcall.ErrHerdrPaneNotOwn) {
-				spawned, spawnErr := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
-					Choice: choice, Paths: values, Run: *plan.SeatRun, Seat: seat,
-				})
+			if !choice.InPlace {
+				_, spawnErr := spawn.SpawnHerdr(
+					ctx,
+					spawn.HerdrRequest{Choice: choice, Paths: values, Run: *plan.SeatRun, Seat: seat},
+				)
 				if spawnErr != nil {
 					return "", spawnErr
 				}
-				fmt.Fprintf(executor.stderr, "pfm: this process does not front Herdr pane %s (%v); "+
-					"the chat opened in a new tab, pane %s\n", choice.HerdrPane, proveErr, spawned.Seat.HerdrPane)
 				executor.recordLaunch(ctx, plan.Record)
 				launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
 				return "", nil
-			}
-			if proveErr != nil {
-				return "", fmt.Errorf("open in this Herdr pane: %w", proveErr)
 			}
 			// The chat is born in the caller's own pane: the reservation names
 			// this pane and the shell execs the seat host in place, so the pane
@@ -254,7 +252,7 @@ func (executor *Executor) Open(
 			return "", err
 		}
 		if plan.Record != nil {
-			values, pathErr := paths.Resolve()
+			values, pathErr := pfmconfig.ResolvePaths()
 			if pathErr != nil {
 				return "", pathErr
 			}
@@ -262,7 +260,6 @@ func (executor *Executor) Open(
 				ctx,
 				values,
 				fleetdb.Seat{
-					SeatID:     plan.Record.SessionID,
 					SessionID:  plan.Record.SessionID,
 					Engine:     string(plan.Record.Engine),
 					Name:       request.LaunchName,
@@ -411,10 +408,7 @@ func (executor *Executor) SelfSwitch(
 	currentTMUX, targetSocket string,
 	engineCommands ...string,
 ) bool {
-	currentPath := currentTMUX
-	if comma := strings.IndexByte(currentPath, ','); comma >= 0 {
-		currentPath = currentPath[:comma]
-	}
+	currentPath := pfmtmux.SocketPath(currentTMUX)
 	if currentPath == "" || filepath.Base(currentPath) != targetSocket {
 		return false
 	}

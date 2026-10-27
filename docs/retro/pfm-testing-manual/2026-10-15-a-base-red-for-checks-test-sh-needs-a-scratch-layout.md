@@ -1,5 +1,0 @@
-# 2026-10-15 — a base-vs-new red for the fence's `checks_test.sh` needs a scratch layout
-
-Observed: engine-sync-tidy phase 1 had to watch `infra/fence/lanes/tests/checks_test.sh` fail against the base `infra/fence/checks.sh`. `checks.sh` resolves its siblings and `scripts/` from its own path, so a bare copy of the base `checks.sh` passed as `CHECKS_SUT` failed on a missing `scripts/agent-source-inventory.py`, which is no assertion red. The working form was a scratch layout `{scratch}/infra/fence/` holding symlinks to the siblings plus the base `checks.sh`, with `{scratch}/scripts` linked to the tree's `scripts/`, passed as `CHECKS_SUT` through `dev.sh iso run`.
-
-Amend: .claude/commands/pfm-testing-manual.md#Tricks and traps — a red of `checks_test.sh` against a base `checks.sh` runs `CHECKS_SUT={scratch}/infra/fence/checks.sh` in a scratch layout that mirrors `infra/fence/` (siblings linked, base `checks.sh` copied) and links `{scratch}/scripts`; a failure on a missing sibling or script is a broken layout, never the red.

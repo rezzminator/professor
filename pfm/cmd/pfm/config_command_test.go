@@ -210,3 +210,21 @@ func TestConfigShowChatBackendSources(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigShowExtensionsWithSource(t *testing.T) {
+	root := jailTest(t)
+	path := writeConfigFixture(
+		t,
+		root,
+		`{"version":2,"extensions":{"ponytail":{"enabled":true,"engines":["codex"],"env":{"PONYTAIL_SUBAGENT_MATCHER":"^worker$"}}}}`,
+	)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d stderr %s", code, stderr.String())
+	}
+	for _, want := range []string{"config extensions.ponytail.enabled=true (file)", "config extensions.ponytail.engines=codex (file)", "PONYTAIL_SUBAGENT_MATCHER"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("missing %q in %s", want, stdout.String())
+		}
+	}
+}

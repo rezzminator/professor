@@ -18,7 +18,7 @@ import (
 
 func TestPrintHostChecks(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
-	for _, scenario := range []string{"clean", "BLOCK", "WARN", "unreadable", "pre-split config"} {
+	for _, scenario := range []string{"clean", "BLOCK", "WARN", "unreadable"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
@@ -56,16 +56,11 @@ func TestPrintHostChecks(t *testing.T) {
 					want += "host-check: BLOCK pre-split-config " + unreadable + " — UNREADABLE " + unreadable + ": " + syscall.ENOTDIR.Error() + "\n" +
 						"host-check:   fix: make " + unreadable + " readable to you, then rerun\n"
 				}
-				wantFailures = 2
-			case "pre-split config":
-				path = runtime.Config.Path
-				body = `{"mcp":{"servers":{"harvester":{"enabled":true}}}}`
-				want = "host-check: BLOCK pre-split-config " + path + " — mcp.servers.harvester belongs in harvester.config.json\n" +
-					"host-check:   fix: move mcp.servers.harvester.enabled (true) to \"enabled\" in " + filepath.Join(
-					filepath.Dir(path),
-					config.HarvesterFileName,
-				) + ", then delete mcp.servers.harvester from " + path + "\n"
-				wantFailures = 1
+				unreadable := filepath.Join(path, "harvester.config.json")
+				want += "host-check: BLOCK retired-harvester-config " + unreadable + " — UNREADABLE " + unreadable + ": " + syscall.ENOTDIR.Error() + "\n" +
+					"host-check:   fix: make " + unreadable + " readable to you, then rerun\n"
+				wantFailures = 3
+
 			}
 			if path != "" {
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -107,7 +102,6 @@ func TestHostChecksDoctorTallies(t *testing.T) {
 		{"clean", 0, "doctor: clean\n"},
 		{"BLOCK", 3, "doctor: failures=1\n"},
 		{"WARN", 1, "doctor: warnings=1\n"},
-		{"pre-split config", 3, "doctor: failures=1\n"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
@@ -121,9 +115,7 @@ func TestHostChecksDoctorTallies(t *testing.T) {
 				body = `{}`
 			case "WARN":
 				path = filepath.Join(runtime.Paths.Home, ".claude.json.tmp.fixture")
-			case "pre-split config":
-				path = runtime.Config.Path
-				body = `{"version":2,"mcp":{"servers":{"harvester":{"enabled":true}}}}`
+
 			}
 			if path != "" {
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

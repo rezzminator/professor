@@ -24,7 +24,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/recovery"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -95,19 +94,17 @@ func runChatOpen(
 	return pfmchat.OpenID(context.Background(), chat.ID, stdout, stderr, &runtime)
 }
 
-func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (code int) {
-	return runChatKillContext(context.Background(), args, stdout, stderr, env, runtimes...)
+func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
+	return runChatKillContext(context.Background(), args, stdout, stderr, runtimes...)
 }
 
 func runChatKillContext(
 	ctx context.Context,
 	args []string,
 	stdout, stderr io.Writer,
-	env paths.Env,
 	runtimes ...commandRuntime,
 ) (code int) {
 	defer func() { pfmchat.RecordVerb(ctx, "kill", code) }()
-	env = defaultEnv(env)
 	flags := cli.NewFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
 	exit := flags.Bool("exit", false, "gracefully close after killing")
 	targets, code, ok := cli.ParseFlagsAnywhere(flags, args)
@@ -123,18 +120,7 @@ func runChatKillContext(
 			confirm := *exit || (chat.Live && chat.Socket != "" && chat.Pane != "")
 			return runResolvedChatKillContext(ctx, chat, confirm, stdout, stderr, runtimes...)
 		}
-		if env.Get("TMUX") == "" && env.Get(resolve.CodexThreadEnv) != "" {
-			chat, found, err := pfmchat.Resolve(ctx, targets[0], io.Discard, firstRuntime(runtimes))
-			if err != nil {
-				fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
-				return 1
-			}
-			if !found {
-				fmt.Fprintln(stderr, "pfm chat kill: this Codex chat has no live fleet seat")
-				return codeUnknownChat
-			}
-			return runResolvedChatKillContext(ctx, chat, *exit, stdout, stderr, runtimes...)
-		}
+
 		killArgs := []string{"--self"}
 		if *exit {
 			killArgs = append(killArgs, "--exit")

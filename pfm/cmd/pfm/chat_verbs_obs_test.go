@@ -71,7 +71,7 @@ func TestChatKillAndUnkillRecordChatStateTransitions(t *testing.T) {
 	}
 	_, recorder := obs.Test(t)
 	var killOut, killErr strings.Builder
-	if code := runChatKill([]string{agentID}, &killOut, &killErr, paths.OSEnv{}, runtime); code != 0 {
+	if code := runChatKill([]string{agentID}, &killOut, &killErr, runtime); code != 0 {
 		t.Fatalf("chat kill code=%d stdout=%q stderr=%q", code, killOut.String(), killErr.String())
 	}
 	var unkillOut, unkillErr strings.Builder
@@ -109,7 +109,7 @@ func TestChatKillOfAnUnknownTargetRecordsAFailedChatStateTransition(t *testing.T
 	}
 	_, recorder := obs.Test(t)
 	var stdout, stderr strings.Builder
-	code := runChatKill([]string{"no-such-chat-at-all"}, &stdout, &stderr, paths.OSEnv{}, runtime)
+	code := runChatKill([]string{"no-such-chat-at-all"}, &stdout, &stderr, runtime)
 	if code != codeUnknownChat {
 		t.Fatalf("chat kill of an unknown target code=%d, want codeUnknownChat: stdout=%q stderr=%q",
 			code, stdout.String(), stderr.String())

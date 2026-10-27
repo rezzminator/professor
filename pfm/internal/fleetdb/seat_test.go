@@ -98,6 +98,66 @@ func TestSeatCRUD(t *testing.T) {
 	}
 }
 
+func TestPutSeatRetiresTmuxRowsForMovedSessionOnlyAfterInsert(t *testing.T) {
+	state, _ := openTestStore(t)
+	ctx := context.Background()
+	for _, seat := range []Seat{
+		{SeatID: "cc-old", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 100},
+		{SeatID: "cc-other", SessionID: "S2", Backend: "tmux", State: "live"},
+		{SeatID: "herdr-owner", SessionID: "S3", Backend: "herdr", State: "live", HerdrSocket: "/h.sock", HerdrPane: "w1:p1"},
+		{SeatID: "cc-refused", SessionID: "S4", Backend: "tmux", State: "live", UpdatedAt: 100},
+	} {
+		if err := state.PutSeat(ctx, seat); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moved := Seat{
+		SeatID:      "new-herdr",
+		SessionID:   "S1",
+		Backend:     "herdr",
+		State:       "live",
+		HerdrSocket: "/h.sock",
+		HerdrPane:   "w1:p2",
+		UpdatedAt:   200,
+	}
+	if err := state.PutSeat(ctx, moved); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := state.Seat(ctx, "cc-old"); err != nil || found {
+		t.Fatalf("old tmux row found=%v err=%v", found, err)
+	}
+	for _, id := range []string{"cc-other", "herdr-owner", "new-herdr"} {
+		if _, found, err := state.Seat(ctx, id); err != nil || !found {
+			t.Fatalf("seat %s found=%v err=%v", id, found, err)
+		}
+	}
+
+	if err := state.PutSeat(
+		ctx,
+		Seat{
+			SeatID:      "refused-herdr",
+			SessionID:   "S4",
+			Backend:     "herdr",
+			State:       "live",
+			HerdrSocket: "/h.sock",
+			HerdrPane:   "w1:p1",
+		},
+	); err == nil {
+		t.Fatal("duplicate live Herdr pane was accepted")
+	}
+	if _, found, err := state.Seat(ctx, "cc-refused"); err != nil || !found {
+		t.Fatalf("refused insert retired prior row: found=%v err=%v", found, err)
+	}
+	if err := state.PutSeat(ctx, Seat{
+		SeatID: "cc-replacement", SessionID: "S4", Backend: "tmux", State: "live", UpdatedAt: 101,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := state.Seat(ctx, "cc-refused"); err != nil || found {
+		t.Fatalf("replacement left prior tmux row: found=%v err=%v", found, err)
+	}
+}
+
 func TestSeatByPaneIgnoresFailedOwner(t *testing.T) {
 	state, _ := openTestStore(t)
 	ctx := context.Background()

@@ -86,7 +86,7 @@ func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 	home := t.TempDir()
 	account := filepath.Join(home, "secondary-codex")
 	path := filepath.Join(account, "config.toml")
-	original := "model = \"personal\"\n[mcp_servers.harvester]\ncommand = \"manual-harvester\"\n"
+	original := "model = \"personal\"\n[mcp_servers.chat]\ncommand = \"manual-chat\"\n"
 	writeFixture(t, path, original)
 	e := engine{
 		options: Options{Home: home, CodexHomes: []string{account}, MCPPort: 8377, Stdout: io.Discard},
@@ -101,7 +101,7 @@ func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 		t.Fatalf("install corrupted manual secondary Codex config: %v", err)
 	}
 	if got := readFixture(t, path); !strings.HasPrefix(got, original) {
-		t.Fatalf("manual harvester table was not kept byte-identical:\n%s", got)
+		t.Fatalf("manual chat table was not kept byte-identical:\n%s", got)
 	}
 }
 
@@ -111,10 +111,7 @@ func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 const codexHostShape = `[mcp_servers.chat]
 url = "http://127.0.0.1:18377/mcp/chat"
 
-[mcp_servers.harvester]
-url = "http://127.0.0.1:18377/mcp/harvester"
-
-[mcp_servers.harvester-remote]
+[mcp_servers.external-remote]
 url = "https://gateway.example.invalid/mcp"
 
 [desktop]
@@ -129,7 +126,7 @@ default_exec_yield_time_ms = 3600000
 # END pfm mcp_servers — installer-owned
 `
 
-const codexHostShapeKept = `[mcp_servers.harvester-remote]
+const codexHostShapeKept = `[mcp_servers.external-remote]
 url = "https://gateway.example.invalid/mcp"
 
 [desktop]
@@ -219,30 +216,30 @@ func TestMCPReclaimsAnOrphanedCodexProfessorBody(t *testing.T) {
 	}
 }
 
-// TestMCPKeepsALegacyCodexTableWithAnExtraKey pins that a [mcp_servers.harvester]
+// TestMCPKeepsALegacyCodexTableWithAnExtraKey pins that a [mcp_servers.chat]
 // table differing from pfm's legacy shape by one key is not pfm's and stays.
 func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	account := filepath.Join(home, ".codex")
 	path := filepath.Join(account, "config.toml")
-	original := "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\nstartup_timeout_sec = 30\n"
+	original := "[mcp_servers.chat]\nurl = \"http://127.0.0.1:18377/mcp/chat\"\nstartup_timeout_sec = 30\n"
 	writeFixture(t, path, original)
 	e := codexMCPEngine(home, account)
 	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, path); got != original+codexChatFence(home) {
-		t.Fatalf("Codex config:\n%s\nwant the extended harvester table kept and the professor fence appended", got)
+		t.Fatalf("Codex config:\n%s\nwant the extended chat table kept and the professor fence appended", got)
 	}
-	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
-		t.Fatalf("doctor classifies the extended harvester table as %s, want %s: install keeps it",
+	if report := InspectCodexServers(path, home, 18377, chatName)[0]; report.State != MCPClientForeignRegistration {
+		t.Fatalf("doctor classifies the extended chat table as %s, want %s: install keeps it",
 			report.State, MCPClientForeignRegistration)
 	}
 }
 
-// TestMCPKeepsALegacyCodexTableWithASubTable pins that a [mcp_servers.harvester]
-// table whose url line is followed by its own [mcp_servers.harvester.*]
+// TestMCPKeepsALegacyCodexTableWithASubTable pins that a [mcp_servers.chat]
+// table whose url line is followed by its own [mcp_servers.chat.*]
 // sub-table (the headers Codex sends to a streamable-HTTP server) is not pfm's
 // single-line shape: install keeps it whole rather than stripping the parent
 // and orphaning the sub-table, as doctor classifies a headed table foreign.
@@ -251,19 +248,19 @@ func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
 	home := t.TempDir()
 	account := filepath.Join(home, ".codex")
 	path := filepath.Join(account, "config.toml")
-	original := "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n\n" +
-		"[mcp_servers.harvester.http_headers]\nX-Team = \"research\"\n"
+	original := "[mcp_servers.chat]\nurl = \"http://127.0.0.1:18377/mcp/chat\"\n\n" +
+		"[mcp_servers.chat.http_headers]\nX-Team = \"research\"\n"
 	writeFixture(t, path, original)
 	e := codexMCPEngine(home, account)
 	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, path); got != original+codexChatFence(home) {
-		t.Fatalf("Codex config:\n%s\nwant the headed harvester table kept and the professor fence appended", got)
+		t.Fatalf("Codex config:\n%s\nwant the headed chat table kept and the professor fence appended", got)
 	}
-	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
+	if report := InspectCodexServers(path, home, 18377, chatName)[0]; report.State != MCPClientForeignRegistration {
 		t.Fatalf(
-			"doctor classifies the headed harvester table as %s, want %s",
+			"doctor classifies the headed chat table as %s, want %s",
 			report.State,
 			MCPClientForeignRegistration,
 		)
@@ -301,7 +298,7 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 				t.Fatal(err)
 			}
 			codexPath := filepath.Join(home, ".codex", "config.toml")
-			remote := "[mcp_servers.harvester-remote]\nurl = \"https://gateway.example.invalid/mcp\"\n"
+			remote := "[mcp_servers.external-remote]\nurl = \"https://gateway.example.invalid/mcp\"\n"
 			writeFixture(t, codexPath, readFixture(t, codexPath)+"\n[mcp_servers.chat]\n"+
 				"url = \"http://127.0.0.1:18377/mcp/chat\"\n\n"+remote+mcpFenceEnd+"\n")
 			professor, _ := json.Marshal(
@@ -315,7 +312,7 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 				`,"chat":{"type":"remote","url":"http://127.0.0.1:18377/mcp/chat","enabled":true}}}`)
 
 			options.Mode = mode
-			options.MCPEnabled = map[string]bool{"chat": false, "harvester": false}
+			options.MCPEnabled = map[string]bool{"chat": false}
 			if _, err := Run(context.Background(), options); err != nil {
 				t.Fatal(err)
 			}

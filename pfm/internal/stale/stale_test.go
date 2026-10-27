@@ -313,9 +313,9 @@ func TestClassifyCompatibleProxyCommandForms(t *testing.T) {
 	}{
 		{name: "chat family", argv: []string{"pfm", "mcp", "serve", "--stdio", "--family", "chat"}, compatible: true},
 		{
-			name:       "harvester family",
-			argv:       []string{"pfm", "mcp", "serve", "--stdio", "--family", "harvester"},
-			compatible: true,
+			name:       "unknown family",
+			argv:       []string{"pfm", "mcp", "serve", "--stdio", "--family", "other"},
+			compatible: false,
 		},
 		{name: "unknown family", argv: []string{"pfm", "mcp", "serve", "--stdio", "--family", "unknown"}},
 		{

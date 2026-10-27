@@ -9,9 +9,10 @@ func readHostResources(root string, _ int64, _ int) (hostResources, error) {
 	return readLinuxHostResources(root)
 }
 
-func readDockerResources(root string) ([]Container, map[string]dockerSample, []string, error) {
+func readDockerResources(root string) ([]Container, map[string]dockerSample, bool, []string, error) {
 	if root == "" {
 		root = "/sys/fs/cgroup"
 	}
-	return readDocker(root)
+	containers, raw, warnings, err := readDocker(root)
+	return containers, raw, true, warnings, err
 }

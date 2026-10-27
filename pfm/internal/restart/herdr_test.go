@@ -168,6 +168,25 @@ func TestHerdrStopProvesEveryProcessItRanGone(t *testing.T) {
 	}
 }
 
+func TestHerdrStopOutliverUsesNonRootOwner(t *testing.T) {
+	finder, _, kernel := herdrHost(t, &herdrModel{running: true},
+		process{PID: 31, Parent: herdrServerPID, Argv: []string{"-zsh"}, Start: 5},
+	)
+	finder.deps.EffectiveUID = foreignUID
+	kernel.foreign[herdrServerPID] = true
+	kernel.foreign[31] = true
+	table, err := finder.readTable()
+	finder.findHerdr(context.Background(), table, err)
+	if len(finder.plan.Units) != 1 {
+		t.Fatalf("units=%v", unitNames(finder.plan.Units))
+	}
+	detail, err := finder.plan.Units[0].Stop(context.Background())
+	if err != nil || !strings.Contains(detail, "each stopped") ||
+		!slices.Equal(kernel.sent(), []string{"31 terminated"}) {
+		t.Fatalf("stop=%q error=%v signals=%v", detail, err, kernel.sent())
+	}
+}
+
 func TestHerdrStopNamesAProcessItRanThatWillNotDie(t *testing.T) {
 	plan, _, kernel := herdrPlan(t, &herdrModel{running: true},
 		process{PID: 31, Parent: herdrServerPID, Argv: []string{"-zsh"}})

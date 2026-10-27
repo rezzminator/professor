@@ -300,11 +300,9 @@ type Dependencies struct {
 	// OpenCodeBinary verifies a live OpenCode pane the same way.
 	OpenCodeBinary string
 	AccountEmojis  []string
-	// CodexSeat is the last sender-identity rung. It maps this process's
-	// CODEX_THREAD_ID to the live fleet seat after ambient tmux and ancestry
-	// recovery both fail. Nil means that lookup is unavailable.
-	CodexSeat SelfIdentifier
-	Recorder  func(context.Context, fleetdb.CommsEvent) error
+	// CodexSeats supplies Identify's last Codex-thread rung.
+	CodexSeats func(context.Context) ([]resolve.CodexSeat, error)
+	Recorder   func(context.Context, fleetdb.CommsEvent) error
 	// WarningWriter receives non-fatal recorder failures. Nil uses stderr.
 	WarningWriter io.Writer
 	Options       Options

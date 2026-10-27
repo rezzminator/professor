@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func TestRunExitCloseGuards(t *testing.T) {
 	jailExitClosePaths(t)
-	original, originalEnv := exitCloseTerminals, exitCloseEnv
-	t.Cleanup(func() { exitCloseTerminals, exitCloseEnv = original, originalEnv })
+	original, originalEnv := exitCloseTerminals, exitCloseIdentify
+	t.Cleanup(func() { exitCloseTerminals, exitCloseIdentify = original, originalEnv })
 	for _, test := range []struct {
 		name, payload, tmux, wantSocket string
 		wantCalled                      bool
@@ -34,14 +35,12 @@ func TestRunExitCloseGuards(t *testing.T) {
 				called, gotSocket = true, socketPath
 				return nil, nil, nil
 			}
-			exitCloseEnv = func(key string) string {
-				if key == "TMUX" {
-					return test.tmux
+			exitCloseIdentify = func(context.Context) (resolve.Identity, error) {
+				if test.tmux == "" {
+					return resolve.Identity{}, resolve.ErrNotInChat
 				}
-				if key == "TMUX_PANE" && test.tmux != "" {
-					return "%0"
-				}
-				return ""
+				socket, _, _ := strings.Cut(test.tmux, ",")
+				return resolve.Identity{Backend: "tmux", SocketPath: socket, Pane: "%0"}, nil
 			}
 			var stderr bytes.Buffer
 			if code := ExitClose(strings.NewReader(test.payload), &stderr); code != 0 {
@@ -56,12 +55,12 @@ func TestRunExitCloseGuards(t *testing.T) {
 
 func TestRunExitCloseFailsOpenOnCloserError(t *testing.T) {
 	jailExitClosePaths(t)
-	original, originalEnv := exitCloseTerminals, exitCloseEnv
-	t.Cleanup(func() { exitCloseTerminals, exitCloseEnv = original, originalEnv })
+	original, originalEnv := exitCloseTerminals, exitCloseIdentify
+	t.Cleanup(func() { exitCloseTerminals, exitCloseIdentify = original, originalEnv })
 	exitCloseTerminals = func(context.Context, string, kill.ViewportDeps) ([]int, []string, error) {
 		return nil, nil, errors.New("boom")
 	}
-	exitCloseEnv = fleetExitCloseEnv
+	exitCloseIdentify = fleetExitCloseIdentity
 	var stderr bytes.Buffer
 	code := ExitClose(strings.NewReader(`{"hook_event_name":"SessionEnd","reason":"prompt_input_exit"}`), &stderr)
 	if code != 0 || !strings.Contains(stderr.String(), "close terminals (fail-open): boom") {
@@ -71,12 +70,12 @@ func TestRunExitCloseFailsOpenOnCloserError(t *testing.T) {
 
 func TestRunExitCloseReportsSkippedAndClosed(t *testing.T) {
 	jailExitClosePaths(t)
-	original, originalEnv := exitCloseTerminals, exitCloseEnv
-	t.Cleanup(func() { exitCloseTerminals, exitCloseEnv = original, originalEnv })
+	original, originalEnv := exitCloseTerminals, exitCloseIdentify
+	t.Cleanup(func() { exitCloseTerminals, exitCloseIdentify = original, originalEnv })
 	exitCloseTerminals = func(context.Context, string, kill.ViewportDeps) ([]int, []string, error) {
 		return []int{4242}, []string{"client 9: parent 10 is \"Code Helper\", not a terminal shell"}, nil
 	}
-	exitCloseEnv = fleetExitCloseEnv
+	exitCloseIdentify = fleetExitCloseIdentity
 	var stderr bytes.Buffer
 	code := ExitClose(strings.NewReader(`{"hook_event_name":"SessionEnd","reason":"prompt_input_exit"}`), &stderr)
 	if code != 0 ||
@@ -86,14 +85,8 @@ func TestRunExitCloseReportsSkippedAndClosed(t *testing.T) {
 	}
 }
 
-func fleetExitCloseEnv(key string) string {
-	if key == "TMUX" {
-		return "/tmp/tmux-501/cc-500-1-1,9999,0"
-	}
-	if key == "TMUX_PANE" {
-		return "%0"
-	}
-	return ""
+func fleetExitCloseIdentity(context.Context) (resolve.Identity, error) {
+	return resolve.Identity{Backend: "tmux", SocketPath: "/tmp/tmux-501/cc-500-1-1", Pane: "%0"}, nil
 }
 
 func jailExitClosePaths(t *testing.T) {
@@ -101,4 +94,43 @@ func jailExitClosePaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("PFM_HOME", home)
 	t.Setenv("PFM_SID_DIR", filepath.Join(home, "sid"))
+}
+
+func TestExitCloseDoesNotTrustAnUnprovedTmuxEnvironment(t *testing.T) {
+	jailExitClosePaths(t)
+	original, originalEnv := exitCloseTerminals, exitCloseIdentify
+	t.Cleanup(func() { exitCloseTerminals, exitCloseIdentify = original, originalEnv })
+	exitCloseIdentify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{}, errors.New("read tmux caller failed")
+	}
+	exitCloseTerminals = func(context.Context, string, kill.ViewportDeps) ([]int, []string, error) {
+		t.Error("closed a viewport without proving caller identity")
+		return nil, nil, nil
+	}
+	var stderr bytes.Buffer
+	if code := ExitClose(
+		strings.NewReader(`{"hook_event_name":"SessionEnd","reason":"prompt_input_exit"}`),
+		&stderr,
+	); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(stderr.String(), "left open —") {
+		t.Fatalf("missing identity refusal: %s", stderr.String())
+	}
+}
+
+func TestExitCloseLeavesHerdrViewportOpen(t *testing.T) {
+	original := exitCloseIdentify
+	t.Cleanup(func() { exitCloseIdentify = original })
+	exitCloseIdentify = func(context.Context) (resolve.Identity, error) {
+		return resolve.Identity{Backend: "herdr", SocketPath: "/h/herdr.sock", Pane: "w1:p1"}, nil
+	}
+	var stderr bytes.Buffer
+	if code := ExitClose(
+		strings.NewReader(`{"hook_event_name":"SessionEnd","reason":"prompt_input_exit"}`),
+		&stderr,
+	); code != 0 ||
+		stderr.Len() != 0 {
+		t.Fatalf("code=%d stderr=%s", code, &stderr)
+	}
 }

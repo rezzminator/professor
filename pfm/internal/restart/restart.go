@@ -21,7 +21,6 @@ const (
 	FamilyHerdr     = "herdr"
 	FamilyServices  = "services"
 	FamilyMCPDaemon = "mcp-daemon"
-	FamilySearch    = "search-backend"
 	FamilyPFM       = "pfm"
 )
 

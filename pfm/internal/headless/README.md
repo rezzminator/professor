@@ -110,6 +110,6 @@ pfm headless exec --engine codex --sealed \
 
 ## Internal entry point
 
-Every isolated harness process owned by PFM passes through `Run` in `pfm/internal/headless/run`. Engine adapters translate options and output; callers own domain preparation. `internal/ask` prepares harvested content and chat excerpts, then calls this runner. Harness-prompt capture, credential refresh, and Walker equivalence use the same entry point. External callers can adopt the CLI without maintaining a harness subprocess implementation.
+Every isolated harness process owned by PFM passes through `Run` in `pfm/internal/headless/run`. Engine adapters translate options and output; callers own domain preparation. PFM's `internal/ask` prepares its ask input and calls this runner. Harness-prompt capture, credential refresh, and Walker equivalence use the PFM entry point. External callers can adopt the CLI without maintaining a harness subprocess implementation.
 
 Exit codes: `0` success, `2` invalid CLI input, `3` timeout, `4` execution or I/O failure, `5` structured-output validation failure. A failed call never becomes an empty successful answer.

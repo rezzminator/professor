@@ -10,7 +10,7 @@ from .writes import event_writes
 
 MECH = ("BRIEF PROMPT FINAL SAY-CLAIM NOTE NOTICE COMPACTION COMPACT-SUMMARY COMPACT-CALL HANDOFF "
         "HOOK SPAWN ERROR ERROR-OUTPUT DENIAL AFTER-ERROR NO-RESULT UNFINISHED WAIT WRITE REPEAT "
-        "TOTALS MODEL-WAIT COSTLIEST PROMPT-SNAPSHOT").split()
+        "TOTALS MODEL-WAIT COSTLIEST PROMPT-SNAPSHOT INHERITED").split()
 DENY = re.compile(r"denied|rejected|doesn't want to proceed|not allowed|\bblocked\b(?!\s*:)|refused|permission", re.I)
 SPAWN_TOOLS = ("Agent", "Task", "spawn_agent", "task")
 WAIT_SECONDS = 60
@@ -48,6 +48,8 @@ def mechanical(dig, spans):
         d = f"D{first}"
         if ev.kind != NOTE and "COMPACT-SUMMARY" in ev.mech:
             rows.append((d, "COMPACT-SUMMARY", "-"))
+        elif ev.kind == PROMPT and "INHERITED" in ev.mech:
+            rows.append((d, "INHERITED", "-"))  # the parent's prompt a forked child carries, not its brief
         elif ev.kind == PROMPT:
             rows.append((d, "PROMPT" if briefed else "BRIEF", "-"))
             briefed = True
@@ -75,7 +77,8 @@ def mechanical(dig, spans):
                 rows.append((d, "HANDOFF", "-"))
             if ev.name in SPAWN_TOOLS or "SPAWN" in ev.mech:
                 rows.append((d, "SPAWN", "-"))
-            paths = event_writes(ev)
+            # an engine-known write (Edit, Write) whose call failed wrote nothing
+            paths = [] if ev.writes is not None and ev.err else event_writes(ev)
             if paths:
                 rows.append((d, "WRITE", "-"))
                 writes.append({"D": first, "L": ev.line, "tool": ev.name, "paths": paths})

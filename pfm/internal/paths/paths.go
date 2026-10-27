@@ -474,20 +474,6 @@ func LegacyStateDB(home string) string {
 	return filepath.Join(home, ".cc", legacyDBName)
 }
 
-// HarvesterCacheDir is the harvester's one default cache directory (used when
-// harvester.config.json sets no cache.dir): <home>/.professor/.harvester-cache.
-// It holds persistent read handles, so it lives under the home, never
-// a temp directory.
-func HarvesterCacheDir(home string) string {
-	return filepath.Join(home, ".professor", ".harvester-cache")
-}
-
-// LegacyHarvesterCacheDir names the pre-rename default cache directory;
-// pfm doctor gives the fix for moving it to HarvesterCacheDir.
-func LegacyHarvesterCacheDir(home string) string {
-	return filepath.Join(home, ".professor", ".cache")
-}
-
 // LegacyCacheDB names the old cache database; pfm doctor gives the fix for
 // moving it to DefaultCacheDB.
 func LegacyCacheDB(home string) string {

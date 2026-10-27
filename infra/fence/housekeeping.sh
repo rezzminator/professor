@@ -14,8 +14,9 @@
 # Only fence-owned objects are ever removed: containers and dangling images
 # labelled pfm.fence=1 (pfm-dev.Dockerfile, docker-compose.yml and every fence
 # `docker run` set it), lane images (label professor.lane-root, tag
-# pfm-lane-base:*), the five shared cache volumes, volumes named
-# ^(fence|infra)_pfm-dev- and this clone's recorded pfm-sim-harvest- volumes,
+# pfm-lane-base:*), the three shared cache volumes, volumes named
+# ^(fence|infra)_pfm-dev-, the retired pfm-lane-{harvest,uv}-cache volumes,
+# and this clone's recorded pfm-sim-harvest- volumes,
 # build cache no build used for a week, and scratch under the roots this repo's
 # scripts derive. No other
 # container, image or volume on the host is ever named to docker.
@@ -45,7 +46,9 @@
 #                   failing listing, an underivable checkout or an empty keep-set
 #                   removes no lane image and WARNs the cause.
 #   legacy-volumes  the compose-prefixed caches from before the volumes were
-#                   named (fence_pfm-dev-*), removed once no container uses them.
+#                   named (fence_pfm-dev-*), plus the retired exact names
+#                   pfm-lane-harvest-cache and pfm-lane-uv-cache; removed once
+#                   no container uses them.
 #   checkouts       a checkout's own fence state lives as long as the checkout:
 #                   its `iso sim` volume pfm-sim-harvest-<key> (fence_sim_volume)
 #                   and its scratch root /tmp/<checkout name minus a leading dot>
@@ -73,9 +76,7 @@
 #                   `docker system df -v` (bounded to 120 s where the host has
 #                   `timeout`) against its budget in MB — pfm-dev-gocache
 #                   PFM_FENCE_GOCACHE_MB (15000), pfm-dev-gomod PFM_FENCE_GOMOD_MB
-#                   (4000), pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000),
-#                   pfm-lane-uv-cache PFM_FENCE_UVCACHE_MB (8000),
-#                   pfm-lane-harvest-cache PFM_FENCE_HARVESTCACHE_MB (8000); over
+#                   (4000), pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000); over
 #                   budget the volume is removed — `docker volume rm`, which the
 #                   daemon refuses atomically while any container mounts it — and
 #                   the next fence run recreates it empty: one cold build.
@@ -106,13 +107,11 @@ FENCE_HK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)
 . "$FENCE_HK_DIR/shared.sh" || return 1
 fence_config_values || return 1
 
-FENCE_CACHE_VOLUMES="pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache pfm-lane-harvest-cache pfm-lane-uv-cache"
+FENCE_CACHE_VOLUMES="pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache"
 # volume · budget variable · default MB, one row per shared cache volume
 FENCE_CACHE_BUDGETS="pfm-dev-gocache PFM_FENCE_GOCACHE_MB $PFM_FENCE_GOCACHE_MB
 pfm-dev-gomod PFM_FENCE_GOMOD_MB $PFM_FENCE_GOMOD_MB
-pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB $PFM_FENCE_LINTCACHE_MB
-pfm-lane-uv-cache PFM_FENCE_UVCACHE_MB $PFM_FENCE_UVCACHE_MB
-pfm-lane-harvest-cache PFM_FENCE_HARVESTCACHE_MB $PFM_FENCE_HARVESTCACHE_MB"
+pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB $PFM_FENCE_LINTCACHE_MB"
 
 _fence_hk_warn() { printf 'WARN fence housekeeping: %s failed: %s\n' "$1" "$2" >&2; }
 _fence_hk_say() { printf 'fence housekeeping: %s\n' "$1" >&2; }
@@ -260,7 +259,7 @@ _fence_hk_legacy_volumes() {
       case "$out" in *"in use"*) _fence_hk_say "kept legacy volume $v — a container still uses it" ;;
         *) _fence_hk_warn legacy-volumes "docker volume rm $v: $(_fence_hk_line "$out")" ;; esac
     fi
-  done < <(grep -E '^(fence|infra)_pfm-dev-' <<<"$names")
+  done < <(grep -E '^(fence|infra)_pfm-dev-|^pfm-lane-(harvest|uv)-cache$' <<<"$names")
 }
 
 _fence_hk_project_dir() { # /tmp/{project} — {project} from the main checkout, so every worktree shares it

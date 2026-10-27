@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
@@ -62,24 +63,35 @@ const (
 )
 
 // PutSeat reserves or updates a seat. A failed database is never an absent seat.
-func (s *Store) PutSeat(ctx context.Context, seat Seat) error {
+func (s *Store) PutSeat(ctx context.Context, seat Seat) (returnErr error) {
 	if seat.SeatID == "" {
 		return fmt.Errorf("write seat: empty seat id")
 	}
 	if s.db == nil {
 		return fmt.Errorf("write seat %q: %w", seat.SeatID, s.degraded)
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin write seat %q: %w", seat.SeatID, err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("roll back write seat %q: %w", seat.SeatID, err))
+		}
+	}()
 	args := append(seatValues(seat), seat.Backend, seat.State, seat.HerdrSocket, seat.HerdrPane,
 		seat.HerdrSocket, seat.HerdrPane, seat.SeatID)
-	result, err := s.exec(ctx, `INSERT INTO seat (`+seatColumns+`) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+	insertSQL := `INSERT INTO seat (` + seatColumns + `) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
  WHERE ?!='herdr' OR ?!='live' OR ?='' OR ?='' OR NOT EXISTS (
  SELECT 1 FROM seat WHERE backend='herdr' AND state='live' AND herdr_socket=? AND herdr_pane=? AND seat_id<>?)
  ON CONFLICT(seat_id) DO UPDATE SET session_id=excluded.session_id,engine=excluded.engine,backend=excluded.backend,
  tmux_socket=excluded.tmux_socket,tmux_pane=excluded.tmux_pane,herdr_socket=excluded.herdr_socket,
  herdr_pane=excluded.herdr_pane,herdr_workspace=excluded.herdr_workspace,name=excluded.name,state=excluded.state,
  reload_pending=excluded.reload_pending,lost_note=excluded.lost_note,updated_at=excluded.updated_at,herdr_terminal_id=excluded.herdr_terminal_id,
- seat_host_pid=excluded.seat_host_pid,seat_host_start=excluded.seat_host_start,seat_host_birth=excluded.seat_host_birth,end_pending=excluded.end_pending`,
-		args...)
+	seat_host_pid=excluded.seat_host_pid,seat_host_start=excluded.seat_host_start,seat_host_birth=excluded.seat_host_birth,end_pending=excluded.end_pending`
+	op := obs.SQL(ctx, kind, insertSQL)
+	result, err := tx.ExecContext(ctx, insertSQL, args...)
+	op.End(rowsAffected(result, err), err)
 	if err != nil {
 		return fmt.Errorf("write seat %q: %w", seat.SeatID, err)
 	}
@@ -89,6 +101,18 @@ func (s *Store) PutSeat(ctx context.Context, seat Seat) error {
 	}
 	if count != 1 {
 		return fmt.Errorf("write seat %q: Herdr pane is already owned", seat.SeatID)
+	}
+	if seat.State == "live" && seat.SessionID != "" {
+		const retireSQL = `DELETE FROM seat WHERE backend='tmux' AND session_id=? AND seat_id<>?`
+		op := obs.SQL(ctx, kind, retireSQL)
+		result, err := tx.ExecContext(ctx, retireSQL, seat.SessionID, seat.SeatID)
+		op.End(rowsAffected(result, err), err)
+		if err != nil {
+			return fmt.Errorf("retire moved tmux seats for %q: %w", seat.SessionID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit write seat %q: %w", seat.SeatID, err)
 	}
 	return nil
 }

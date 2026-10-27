@@ -30,7 +30,10 @@ var hygiene = envStripWords(hygieneNames)
 // the extension closes the socket with 1008, and OpenCode's backoff resets on
 // every open — one rejected handshake per second for the life of the chat.
 // Claude keeps the variable: the CLI reads the token and the IDE link is wanted.
-var opencodeHygieneNames = append(append([]string{}, hygieneNames...), "CLAUDE_CODE_SSE_PORT")
+var opencodeHygieneNames = append(append([]string{}, hygieneNames...),
+	"CLAUDE_CODE_SSE_PORT", "PFM_OPENCODE_MODEL", "PFM_OPENCODE_VARIANT", "PFM_OPENCODE_POLICY",
+	"PFM_OPENCODE_SYSTEM_FILE", "PFM_OPENCODE_FLEET_FILE",
+)
 
 var opencodeHygiene = envStripWords(opencodeHygieneNames)
 
@@ -334,6 +337,7 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -366,6 +370,7 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -663,6 +668,7 @@ func codexCommandWithAccount(
 	var command strings.Builder
 	policy := machine.EffectiveCodex(account)
 	command.WriteString(environmentStrip)
+	command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.Codex).LongName))
 	if selected, found := machine.CodexAccountByID(account); found {
 		command.WriteString(" CODEX_HOME=")
 		command.WriteString(Quote(selected.Home))

@@ -3,7 +3,7 @@ name: flights-sub-lander
 description: FLIGHTS-LANDER-ONLY Traces changes past their diff — a range of inventory rows (names the diff removed that the tree still holds, matchers that dropped an old spelling) or a batch of threads (contracts, absence, hand-offs, concurrency). Spawned by flights-lander. Returns three-line flags.
 visibility:
   visible-to:
-    include: [flights-lander, gpt-flights-lander]
+    include: [flights-lander]
 tools: Read, Grep, Glob, Bash
 model: haiku
 ---

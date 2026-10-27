@@ -92,13 +92,14 @@ type SourceInfo struct {
 
 // Flip is the measured latency of the last source change: seconds from the
 // source file's mtime (At) to each surface's apply, and to the VS Code
-// extension's ack when it has acknowledged the generation.
+// extension's ack when it has acknowledged the generation. A nil offset is
+// unmeasured; a pointer to zero is a measured apply within the clock's precision.
 type Flip struct {
 	At     string   `json:"at"`
 	Source string   `json:"source"`
-	Tmux   float64  `json:"tmux,omitempty"`
-	Herdr  float64  `json:"herdr,omitempty"`
-	VSCode float64  `json:"vscode,omitempty"`
+	Tmux   *float64 `json:"tmux,omitempty"`
+	Herdr  *float64 `json:"herdr,omitempty"`
+	VSCode *float64 `json:"vscode,omitempty"`
 	Ack    *float64 `json:"ack,omitempty"`
 }
 

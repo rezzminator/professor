@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -151,5 +152,43 @@ func TestCodexThreadIDReportsAMissInsteadOfGuessing(t *testing.T) {
 	}
 	if _, err := CodexThreadID("", "", "/work/project", 0, codexCandidates()); err == nil {
 		t.Fatal("CodexThreadID(no birth time) = nil error, want a clean refusal")
+	}
+}
+
+func TestCodexThreadSeat(t *testing.T) {
+	seat := CodexSeat{
+		ThreadID:       "019a2b",
+		Backend:        "herdr",
+		SeatID:         "s1",
+		SocketPath:     "/h/herdr.sock",
+		Pane:           "wA:p2",
+		HerdrWorkspace: "wA",
+	}
+	got, err := CodexThreadSeat("019a2b", []CodexSeat{seat})
+	if err != nil || got.Session != "s1" || got.SeatID != "s1" || got.Backend != "herdr" ||
+		got.SocketName != "herdr.sock" ||
+		got.Engine != "cx" ||
+		got.ID != "019a2b" ||
+		got.Source != "codex-thread" ||
+		!got.Recovered {
+		t.Fatalf("identity=%+v err=%v", got, err)
+	}
+	if _, err := CodexThreadSeat("019a2b", []CodexSeat{seat, seat}); !errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("duplicates: %v", err)
+	}
+	if _, err := CodexThreadSeat(
+		"019a2b",
+		nil,
+	); !errors.Is(err, ErrNotInChat) ||
+		!strings.Contains(err.Error(), "no live Codex seat holds thread 019a2b") {
+		t.Fatalf("absent: %v", err)
+	}
+	seat.BackendError = "herdr unreachable"
+	if _, err := CodexThreadSeat(
+		"019a2b",
+		[]CodexSeat{seat},
+	); err == nil || !strings.Contains(err.Error(), seat.BackendError) ||
+		errors.Is(err, ErrNotInChat) {
+		t.Fatalf("failed read: %v", err)
 	}
 }

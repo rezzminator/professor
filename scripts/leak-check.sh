@@ -17,7 +17,7 @@
 #
 # Structural patterns stay inline because they name nobody. Their discriminator: a home
 # path is a leak only when it names a CONCRETE directory, so the blueprint's own
-# documented defaults (`~/work/<project>`, `$HOME/work/{MEMORY_VAULT_DIR}`) pass while a
+# documented default (`~/work/<project>`) passes while a
 # real directory under the same root does not. A personal mailbox (a gmail address) is
 # PII whoever owns it; a fixture carries an invented address instead. Written with a
 # bracket class, these four patterns also cannot match their own source text — which is why this file passes the

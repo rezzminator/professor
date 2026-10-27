@@ -116,7 +116,7 @@ func TestInstallHostGateWarningsProceed(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	if code := runInstall(
-		[]string{"--yes", "--skip-harvest"},
+		[]string{"--yes", "--offline"},
 		&out,
 		&errOut,
 		loaded,
@@ -164,7 +164,7 @@ func TestInstallFirstConfigSeed(t *testing.T) {
 				return installer.Report{}, nil
 			}
 			before := installCheckTree(t, home)
-			args := []string{"--skip-harvest"}
+			args := []string{"--offline"}
 			if apply {
 				args = append(args, "--yes")
 			}
@@ -199,7 +199,7 @@ func TestInstallSeedErrorNamesContext(t *testing.T) {
 			}
 			want := "pfm install: seed config: read install example "
 
-			args := []string{"--skip-harvest"}
+			args := []string{"--offline"}
 			if scenario != "preview read" {
 				args = append(args, "--yes")
 			}
@@ -237,7 +237,7 @@ func TestInstallRosterConfigDirsWithConfigDirFlag(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	if code := runInstall(
-		[]string{"--yes", "--skip-harvest", "--config-dir", account},
+		[]string{"--yes", "--offline", "--config-dir", account},
 		&out,
 		&errOut,
 		loaded,

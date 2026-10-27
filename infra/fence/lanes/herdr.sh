@@ -57,3 +57,28 @@ h_server_start() {
     return 1
   fi
 }
+
+# Run fixture commands beneath the real shell of a plain Herdr caller pane.
+h_run_in_pane() {
+  local pane="$1" run_dir command status
+  shift
+  run_dir="$(mktemp -d "$H_FIXTURE/shell.XXXXXX")" || return 1
+  printf -v command '%q ' "$@"
+  printf -v command 'PATH=%q %s >%q 2>&1; printf "%%s\\n" "$?" >%q' "$PATH" "$command" "$run_dir/out" "$run_dir/status"
+  if ! python3 "$HERE/herdr.py" request "$HERDR_SOCKET_PATH" pane.send_text \
+       "$(jq -nc --arg p "$pane" --arg text "$command" '{pane_id:$p,text:$text}')" >"$run_dir/transport.log" 2>&1 ||
+     ! python3 "$HERE/herdr.py" request "$HERDR_SOCKET_PATH" pane.send_keys \
+       "$(jq -nc --arg p "$pane" '{pane_id:$p,keys:["enter"]}')" >>"$run_dir/transport.log" 2>&1; then
+    printf 'H SHELL-INPUT-FAILED pane=%s artifacts=%s\n' "$pane" "$run_dir" >&2
+    cat "$run_dir/transport.log" >&2
+    return 1
+  fi
+  if ! wait_for 10 "test -s '$run_dir/status'"; then
+    printf 'H SHELL-TIMEOUT pane=%s artifacts=%s: %s\n' "$pane" "$run_dir" "$LANE_WAIT_WHY" >&2
+    return 124
+  fi
+  status="$(cat "$run_dir/status")" || return 1
+  cat "$run_dir/out" || return 1
+  rm -rf -- "$run_dir" || return 1
+  return "$status"
+}

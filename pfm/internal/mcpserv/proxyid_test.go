@@ -1,9 +1,20 @@
 package mcpserv
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
@@ -113,5 +124,90 @@ func TestParseProxyIdentityRejectsUnsupportedWireVersions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBirthProxyErrorPayload(t *testing.T) {
+	for _, kind := range []string{"not_in_chat", "not_registered", "ambiguous", "failed"} {
+		_, detail, err := parseProxyIdentity(
+			map[string]any{"v": 1, "error": map[string]any{"kind": kind, "message": "lookup failed"}},
+		)
+		if err != nil || detail != "" {
+			t.Errorf("kind %s: detail=%q err=%v", kind, detail, err)
+		}
+	}
+	_, detail, err := parseProxyIdentity(map[string]any{"v": 1, "error": map[string]any{"kind": "x", "message": "bad"}})
+	if err != nil || detail != `MCP _meta.pfmProxy error kind "x" is unknown` {
+		t.Fatalf("unknown kind: detail=%q err=%v", detail, err)
+	}
+}
+
+func TestBirthProxyForwardsCurrentHerdrSeatAndErrors(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":2,"result":{}}`)
+	}))
+	defer server.Close()
+	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxy.sidDir = t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(proxy.sidDir, "herdr.sock.wC:p24"),
+		[]byte("/transcripts/conversation-a.jsonl\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	identity := resolve.Identity{
+		Backend:        "herdr",
+		SeatID:         "87caf6bf",
+		Session:        "87caf6bf",
+		HerdrWorkspace: "wC",
+		SocketPath:     "/h/herdr.sock",
+		SocketName:     "herdr.sock",
+		Pane:           "wC:p24",
+		Engine:         "claude",
+		ID:             "conversation-a",
+		Source:         "herdr-ancestry",
+	}
+	currentErr := resolve.ErrNotRegistered
+	proxy.identify = func(context.Context) (resolve.Identity, error) { return identity, currentErr }
+	var output bytes.Buffer
+	for _, kind := range []string{"not_registered", "ok", "ambiguous", "failed", "not_in_chat"} {
+		switch kind {
+		case "ok":
+			currentErr = nil
+		case "ambiguous":
+			currentErr = resolve.ErrAmbiguous
+		case "failed":
+			currentErr = fmt.Errorf("herdr timeout")
+		case "not_in_chat":
+			currentErr = resolve.ErrNotInChat
+		}
+		proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
+		params := received["params"].(map[string]any)
+		meta := params["_meta"].(map[string]any)
+		got := meta["pfmProxy"].(map[string]any)
+		if kind == "ok" {
+			if got["session"] != "87caf6bf" || got["backend"] != "herdr" || got["seatId"] != "87caf6bf" ||
+				got["herdrWorkspace"] != "wC" ||
+				got["source"] != "herdr-ancestry" {
+				t.Fatalf("current Herdr identity=%v", got)
+			}
+		} else {
+			failure, _ := got["error"].(map[string]any)
+			if failure["kind"] != kind {
+				t.Errorf("kind %s: forwarded=%v", kind, got)
+			}
+			if kind == "not_registered" && (got["backend"] != "herdr" || got["pane"] != "wC:p24") {
+				t.Errorf("unregistered lost location: %v", got)
+			}
+			if kind != "not_registered" && len(got) != 2 {
+				t.Errorf("unresolved kind %s retained identity: %v", kind, got)
+			}
+		}
 	}
 }

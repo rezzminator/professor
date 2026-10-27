@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -152,7 +156,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 			selfErr.String(),
 		)
 	}
-	if got, want := selfOut.String(), "killed "+codexSelfID+"\tde-listed only, no live pane closed\n"; got != want {
+	if got, want := selfOut.String(), "killed "+codexSelfID+"\tclosing pane %2 on socket "+socket+"\n"; got != want {
 		t.Fatalf("Codex app-server kill self stdout=%q, want %q", got, want)
 	}
 
@@ -261,4 +265,120 @@ func newKillCLIJail(t *testing.T) *killCLIJail {
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
 	t.Setenv("PFM_TEST_KILL_CONFIRM_EVERY_MS", "10")
 	return &killCLIJail{root: root, home: home, procRoot: procRoot}
+}
+
+func TestKillSelfResolveAndInternalCLI(t *testing.T) {
+	jailTest(t)
+	const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpsertTranscript(
+		context.Background(),
+		store.Transcript{
+			UUID: id,
+			Path: "/jailed/" + id + ".jsonl",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(t.TempDir(), "cc-1-1-1")
+	command := exec.Command("tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "cc-1-1-1", "sleep 120")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("start caller fixture: %v: %s", err, output)
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socket, "kill-server").Run() })
+	proveCLIFixtureCaller(t, socket, "%0")
+	t.Setenv("TMUX", socket+",1,0")
+	t.Setenv("TMUX_PANE", "%0")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", id)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"chat", "kill", "self"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("kill --self code=%d stderr=%q", code, stderr.String())
+	}
+	// A self-kill DOES carry a tmux address, so its line names the pane it is
+	// closing rather than a de-listing.
+	if stdout.String() != "killed "+id+"\tclosing pane %0 on socket cc-1-1-1\n" {
+		t.Fatalf("kill --self stdout=%q", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(
+		[]string{"chat", "resolve", "missing"},
+		&stdout,
+		&stderr,
+	); code != codeUnknownChat {
+		t.Fatalf(
+			"resolve miss code=%d stdout=%q stderr=%q",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+	if stdout.String() != "missing\tnot-found\n" ||
+		!strings.Contains(stderr.String(), "no chat named") {
+		t.Fatalf("resolve miss stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code := run([]string{
+		"internal",
+		"kill-exit",
+		"--engine", "invalid",
+		"--id", id,
+		"--path", "/jailed/transcript.jsonl",
+		"--socket", "/jailed/socket",
+		"--socket-name", "cc-1-1-1",
+		"--pane", "%1",
+	}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), `unknown engine "invalid"`) {
+		t.Fatalf("internal code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+// The caller's jailed process table models its shell inside the fixture pane.
+func proveCLIFixtureCaller(t *testing.T, socket, pane string) {
+	t.Helper()
+	output, err := exec.Command("tmux", "-S", socket, "display-message", "-p", "-t", pane, "#{pane_pid}").Output()
+	if err != nil {
+		t.Fatalf("read fixture caller pid: %v", err)
+	}
+	parent, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		t.Fatalf("parse fixture caller pid: %v", err)
+	}
+	setCLICallerParent(t, parent)
+	dir := filepath.Join((paths.OSEnv{}).Get(paths.EnvProcRoot), strconv.Itoa(parent))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "stat"),
+		[]byte(fmt.Sprintf("%d (shell) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 0 20 0 1\n", parent)),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setCLICallerParent(t *testing.T, parent int) {
+	t.Helper()
+	dir := filepath.Join((paths.OSEnv{}).Get(paths.EnvProcRoot), strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "stat"),
+		[]byte(fmt.Sprintf("%d (tool) S %d 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 0 20 0 1\n", os.Getpid(), parent)),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "environ"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

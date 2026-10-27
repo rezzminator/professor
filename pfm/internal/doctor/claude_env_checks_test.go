@@ -20,7 +20,7 @@ import (
 // the claude.env value is ok with no write recorded; an unreadable ledger or
 // settings file is a FAIL, never ok; a key no plugin's prefix names is a warning.
 func TestClaudeEnvDoctor(t *testing.T) {
-	const key = "SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL"
+	const key = "FORWARD_COMPACTION_CEILING_NATIVE"
 	for _, test := range []struct {
 		name               string
 		env                map[string]string

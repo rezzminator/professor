@@ -9,6 +9,44 @@ import (
 	"testing"
 )
 
+func TestCurrentVariantUsesPersistedAppearanceAndDistinguishesOffFromFailure(t *testing.T) {
+	primary, alternate := Variant{Background: "#101020"}, Variant{Background: "#faf8f0"}
+	for _, tc := range []struct {
+		name  string
+		state themeState
+		want  string
+		fail  bool
+	}{
+		{"off", themeState{}, "", false},
+		{"dark", themeState{Enabled: true, Applied: &Applied{Primary: primary}}, primary.Background, false},
+		{"light", themeState{Enabled: true, Appearance: Light, Applied: &Applied{Primary: alternate}}, alternate.Background, false},
+		{"auto-light", themeState{Enabled: true, Appearance: Light, Applied: &Applied{Auto: true, Primary: primary, Alternate: &alternate}}, alternate.Background, false},
+		{"auto-dark", themeState{Enabled: true, Appearance: Dark, Applied: &Applied{Auto: true, Primary: primary, Alternate: &alternate}}, primary.Background, false},
+		{"enabled-without-applied", themeState{Enabled: true}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := stateStore{dir: t.TempDir()}
+			if got, err := CurrentVariant(store.dir); got != nil || err != nil {
+				t.Fatalf("missing state = %v, %v", got, err)
+			}
+			if err := store.save(tc.state); err != nil {
+				t.Fatal(err)
+			}
+			got, err := CurrentVariant(store.dir)
+			if tc.fail {
+				if err == nil || !strings.Contains(err.Error(), store.statePath()) {
+					t.Fatalf("incomplete enabled state = %v, %v", got, err)
+				}
+				return
+			}
+			if err != nil || (tc.want == "" && got != nil) ||
+				(tc.want != "" && (got == nil || got.Background != tc.want)) {
+				t.Fatalf("CurrentVariant = %+v, %v; want background %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestStateStoreRoundTripAndMissing(t *testing.T) {
 	store := stateStore{dir: filepath.Join(t.TempDir(), "theme")}
 	if _, found, err := store.load(); found || err != nil {

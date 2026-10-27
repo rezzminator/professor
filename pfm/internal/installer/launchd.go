@@ -132,7 +132,7 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 
 func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 	path := installer.mcpLaunchAgentPath()
-	if !installer.mcpAnyEnabled() {
+	if !installer.options.MCPEnabled[chatName] {
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			return nil
 		} else if err != nil {

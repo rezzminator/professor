@@ -5,9 +5,58 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestErrorLogRefusesFIFOsWithoutBlocking(t *testing.T) {
+	for _, read := range []bool{false, true} {
+		t.Run(map[bool]string{false: "append", true: "read"}[read], func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "fifo.log")
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				if read {
+					_, err := RecentErrors(dir, time.Time{})
+					done <- err
+				} else {
+					done <- AppendError(dir, "fifo", time.Now(), "message")
+				}
+			}()
+			select {
+			case err := <-done:
+				if err == nil || !strings.Contains(err.Error(), "herdr error log") {
+					t.Fatalf("FIFO must be a contextual error, got %v", err)
+				}
+			case <-time.After(time.Second):
+				// Release an unfixed blocking open so the red regression leaves no
+				// worker behind. Opening both ends never blocks, even without peers.
+				rescue, err := os.OpenFile(path, os.O_RDWR|syscall.O_NONBLOCK, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if read {
+					if _, err := rescue.WriteString("malformed\n"); err != nil {
+						t.Error(err)
+					}
+				}
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Error("blocked FIFO worker did not release")
+				}
+				if err := rescue.Close(); err != nil {
+					t.Error(err)
+				}
+				t.Fatal("reporter log blocked on a FIFO instead of refusing it")
+			}
+		})
+	}
+}
 
 func TestErrorLogRoundTripsRecentErrorsNewestFirst(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "herdr")

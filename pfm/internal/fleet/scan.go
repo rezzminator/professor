@@ -210,20 +210,10 @@ func ResolveRow(
 	stderr io.Writer,
 	runtime *pfmconfig.Runtime,
 ) (RowAddress, bool, error) {
-	request := Request{View: compose.AllView, Runtime: runtime}
-	env, err := ResolveEnv(request)
+	rows, err := rowsForKill(ctx, database, stderr, runtime)
 	if err != nil {
-		return RowAddress{}, false, fmt.Errorf("resolve row %q: resolve env: %w", id, err)
+		return RowAddress{}, false, fmt.Errorf("resolve row %q: %w", id, err)
 	}
-	data, err := LoadData(ctx, database)
-	if err != nil {
-		return RowAddress{}, false, fmt.Errorf("resolve row %q: load data: %w", id, err)
-	}
-	live, err := Gather(ctx, database, env, data, false, PrintWarn(stderr), stderr)
-	if err != nil {
-		return RowAddress{}, false, fmt.Errorf("resolve row %q: gather: %w", id, err)
-	}
-	rows := ComposeFleet(env, request.View, data, live).Rows
 	for index := range rows {
 		row := rows[index]
 		if row.ID == id {
@@ -236,6 +226,29 @@ func ResolveRow(
 		}
 	}
 	return RowAddress{}, false, nil
+}
+
+// rowsForKill shares the no-index snapshot used for explicit and self targets.
+func rowsForKill(
+	ctx context.Context,
+	database *store.Store,
+	stderr io.Writer,
+	runtime *pfmconfig.Runtime,
+) ([]compose.Row, error) {
+	request := Request{View: compose.AllView, Runtime: runtime}
+	env, err := ResolveEnv(request)
+	if err != nil {
+		return nil, fmt.Errorf("resolve env: %w", err)
+	}
+	data, err := LoadData(ctx, database)
+	if err != nil {
+		return nil, fmt.Errorf("load data: %w", err)
+	}
+	live, err := Gather(ctx, database, env, data, false, PrintWarn(stderr), stderr)
+	if err != nil {
+		return nil, fmt.Errorf("gather: %w", err)
+	}
+	return ComposeFleet(env, request.View, data, live).Rows, nil
 }
 
 // ResolveEnv reads the machine state a scan composes against: the request's

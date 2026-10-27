@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -64,7 +65,7 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 					fleetEnv = " PFM_OPENCODE_FLEET_FILE=" + Quote(request.OpenCodeFleetPrompt)
 				}
 				words = []string{
-					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
+					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}' PFM_OPENCODE_MODEL='openai/gpt-x' PFM_OPENCODE_VARIANT='xhigh'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
 						prompt,
 					) + " opencode",
 				}
@@ -148,9 +149,14 @@ func TestWorkbenchPersonaEffort(t *testing.T) {
 			wantEffort: "xhigh",
 		},
 		{
-			name:     "OpenCode effort unvalidated",
+			name:     "unknown OpenCode effort",
 			manifest: `{"prompt":"scribe.md","effort":"turbo","engines":["opencode"]}`,
-			engines:  []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New, wantEffort: "turbo",
+			engines:  []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New,
+			refused: map[pfmengine.ID]bool{pfmengine.OpenCode: true},
+		},
+		{
+			name: "OpenCode effort lowered", manifest: `{"prompt":"scribe.md","effort":"High","engines":["opencode"]}`,
+			engines: []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New, wantEffort: "high",
 		},
 		{
 			name: "ForLaunch error passes through", manifest: `{"prompt":""}`,
@@ -478,7 +484,7 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 				return
 			case "plain":
 				want := `OPENCODE_CONFIG_CONTENT='{"plugin":[` + herdrURL + `]}'`
-				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE") {
+				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE=") {
 					t.Fatalf("run lacks %q or carries a persona env: %s", want, run)
 				}
 			case "persona":
@@ -490,6 +496,40 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 			binary := filepath.Join(request.Home, ".local", "bin", "pfm")
 			if stageErr != nil || !strings.Contains(string(staged), `const PFM_BINARY = "`+binary+`"`) {
 				t.Fatalf("staged plugin %s does not carry the pfm binary %s: %v", plugin, binary, stageErr)
+			}
+		})
+	}
+}
+
+func TestExtensionLaunchDoors(t *testing.T) {
+	machine := testMachineConfig(t.TempDir())
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: t.TempDir()}}
+	machine.Extensions = map[string]pfmconfig.Extension{
+		"ponytail": {
+			Enabled: true,
+			Engines: []string{"codex", "opencode"},
+			Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "^worker$"},
+		},
+	}
+	for _, kind := range []compose.Kind{compose.NewCodex, compose.ResumeCodex, compose.NewOpenCode, compose.ResumeOpenCode} {
+		t.Run(kind.String(), func(t *testing.T) {
+			request := Request{
+				Config:         machine,
+				Home:           t.TempDir(),
+				PrimaryAccount: 1,
+				FreshSocket:    "fixture",
+				Row:            compose.Row{Kind: kind, ID: "session", CWD: t.TempDir()},
+			}
+			plan, err := Synthesize(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.SeatRun == nil ||
+				!strings.Contains(strings.Join(plan.SeatRun.Env, "\n"), "PONYTAIL_SUBAGENT_MATCHER=^worker$") {
+				t.Fatalf("extension env lost in typed recipe: %+v", plan.SeatRun)
+			}
+			if kind != compose.NewCodex && !strings.Contains(plan.Run, "PONYTAIL_SUBAGENT_MATCHER='^worker$'") {
+				t.Fatalf("extension env lost in shell recipe: %s", plan.Run)
 			}
 		})
 	}

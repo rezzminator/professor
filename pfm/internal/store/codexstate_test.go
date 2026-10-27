@@ -3,12 +3,16 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 type codexStateThread struct {
@@ -467,4 +471,50 @@ func TestKillStoreOnlyCodexLineageIsPermanent(t *testing.T) {
 		t.Fatalf("UpsertRollout(grown) error = %v", err)
 	}
 	assertStoreOnlyKilled("after a new prompt")
+}
+
+func TestReadCodexThreadIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, schema, values, id, source, agent, parent string
+		found, bad                                      bool
+	}{
+		{"root", "id TEXT, thread_source TEXT, agent_path TEXT", "'root','user',NULL", "root", "user", "", "", true, false},
+		{"child", "id TEXT, thread_source TEXT, agent_path TEXT", "'child','subagent','/root/worker'", "child", "subagent", "/root/worker", "", true, false},
+		{"parent", "id TEXT, parent_thread_id TEXT", "'child','root'", "child", "", "", "root", true, false},
+		{"old schema", "id TEXT", "'root'", "root", "", "", "", true, false},
+		{"absent", "id TEXT", "'other'", "root", "", "", "", false, false},
+		{"no id", "thread_source TEXT", "'subagent'", "child", "", "", "", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "state_5.sqlite")
+			db, err := sqlitedb.OpenReadWrite(file, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = db.Exec("CREATE TABLE threads (" + tc.schema + "); INSERT INTO threads VALUES (" + tc.values + ")")
+			if err = errors.Join(err, db.Close()); err != nil {
+				t.Fatal(err)
+			}
+			identity, found, err := ReadCodexThreadIdentity(context.Background(), file, tc.id)
+			if (err != nil) != tc.bad || found != tc.found || identity.ThreadSource != tc.source ||
+				identity.AgentPath != tc.agent || identity.ParentThreadID != tc.parent || found && identity.ID != tc.id {
+				t.Fatalf("identity=%+v found=%v err=%v", identity, found, err)
+			}
+		})
+	}
+}
+
+func TestReadCodexThreadIdentityReadFailureIsNotAbsence(t *testing.T) {
+	for _, raw := range []string{"not sqlite", ""} {
+		file := filepath.Join(t.TempDir(), "state_5.sqlite")
+		if raw != "" {
+			if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, found, err := ReadCodexThreadIdentity(context.Background(), file, "root")
+		if err == nil || found || !strings.Contains(err.Error(), file) {
+			t.Fatalf("failed read rendered as absence: found=%v err=%v", found, err)
+		}
+	}
 }

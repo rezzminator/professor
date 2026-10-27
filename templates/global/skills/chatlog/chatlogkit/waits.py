@@ -19,8 +19,8 @@ from .rows import die, opt
 
 USAGE = ("usage: chatlog.py waits --calls TARGET | [--type-re RE] [--child-re RE] [--since 14d] [--root DIR]... [--host NAME] "
          "[--gap S] [--out F]")
-DEFAULT_TYPES = r"^(reviewer|reviewer-pro|gpt-reviewer.*)$"
-DEFAULT_CHILD = r"^(gpt-)?(sub-)?tracer.*$"
+DEFAULT_TYPES = r"^(reviewer|reviewer-pro)$"
+DEFAULT_CHILD = r"^(sub-)?tracer.*$"
 COLS = ("transcript_path host parent_type reviewer_wall_s tracer_runs tracer_wall_s reviewer_longest_idle_s "
         "reviewer_idle_total_s parent_idle_s cache_rewrites_after_wait rewrite_tokens rewrite_usd usd_reviewer "
         "usd_tracer_tree usd_parent_during_wait findings_count parent_idle_total_s parent_rewrites "

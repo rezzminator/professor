@@ -17,7 +17,6 @@ import (
 	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
 	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
@@ -79,27 +78,6 @@ func jailTest(t *testing.T) string {
 	return root
 }
 
-type noNetworkHarvestDoctor struct{}
-
-func (noNetworkHarvestDoctor) Inspect(string, harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
-	return noNetworkHarvestDigest(), nil
-}
-
-func (noNetworkHarvestDoctor) Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error) {
-	digest := noNetworkHarvestDigest()
-	return harvestpy.CheckReport{Healthy: true, Digest: digest, Checks: map[string]harvestpy.CheckStatus{
-		"interpreter": {OK: true}, "lock_completeness": {OK: true},
-		"live_smoke": {OK: true}, "live_smoke_conversion": {OK: true},
-	}}, nil
-}
-
-func noNetworkHarvestDigest() harvestpy.EnvironmentDigest {
-	return harvestpy.EnvironmentDigest{
-		Schema: 1, Python: "3.11.15+20260610", LockSHA256: "test-lock-digest",
-		InventorySHA256: "test-inventory-digest", InventoryCount: 1,
-	}
-}
-
 func registerTestEngines() {
 	index.RegisterSource(engine.Claude, claudeengine.Source{})
 	index.RegisterSource(engine.Codex, codexengine.Source{})
@@ -119,7 +97,6 @@ func registerTestEngines() {
 
 func TestMain(m *testing.M) {
 	registerTestEngines()
-	HarvestOverride = noNetworkHarvestDoctor{}
 	DaemonReachabilityOverride = func(config.Runtime) (mcpserv.DaemonStatus, error) {
 		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
 	}

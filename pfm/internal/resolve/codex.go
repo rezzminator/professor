@@ -3,6 +3,8 @@ package resolve
 import (
 	"fmt"
 	"path/filepath"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 const (
@@ -108,4 +110,56 @@ func newerCodexThread(challenger, incumbent CodexThread) bool {
 		return challenger.CreatedAt > incumbent.CreatedAt
 	}
 	return challenger.ID < incumbent.ID
+}
+
+// CodexSeat is the live-seat projection shared by CLI and MCP identity.
+type CodexSeat struct {
+	ThreadID, Backend, SeatID, SessionName, SocketPath, Pane, HerdrWorkspace, BackendError string
+}
+
+// CodexThreadSeat resolves exactly one live seat holding thread.
+func CodexThreadSeat(thread string, seats []CodexSeat) (Identity, error) {
+	var match CodexSeat
+	count := 0
+	for i := range seats {
+		seat := &seats[i]
+		if seat.ThreadID == thread && thread != "" {
+			match = *seat
+			count++
+		}
+	}
+	if count == 0 {
+		return Identity{}, fmt.Errorf("%w: no live Codex seat holds thread %s", ErrNotInChat, thread)
+	}
+	if count != 1 {
+		return Identity{}, fmt.Errorf("%w: multiple live Codex seats hold thread %s", ErrAmbiguous, thread)
+	}
+	if match.BackendError != "" {
+		return Identity{}, fmt.Errorf("look up the caller: Codex seat %s: %s", match.SeatID, match.BackendError)
+	}
+	session := match.SessionName
+	if session == "" {
+		if match.Backend == nativeHerdrBackend {
+			session = match.SeatID
+		} else {
+			session = filepath.Base(match.SocketPath)
+		}
+	}
+	if match.SocketPath == "" || session == "" ||
+		match.Backend == nativeHerdrBackend && (match.Pane == "" || match.HerdrWorkspace == "") {
+		return Identity{}, fmt.Errorf("look up the caller: Codex seat %s has malformed identity", match.SeatID)
+	}
+	return Identity{
+		Backend:        match.Backend,
+		SeatID:         match.SeatID,
+		Session:        session,
+		SocketPath:     match.SocketPath,
+		SocketName:     filepath.Base(match.SocketPath),
+		Pane:           match.Pane,
+		HerdrWorkspace: match.HerdrWorkspace,
+		Engine:         string(pfmengine.Codex),
+		ID:             thread,
+		Source:         "codex-thread",
+		Recovered:      true,
+	}, nil
 }

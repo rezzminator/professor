@@ -63,8 +63,6 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	"internal/headless/run/run.go": {"documented headless argv owner", []string{
 		"--system-prompt-file", "--settings", "--settings=",
 	}},
-	"internal/call/engine.go":  {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
-	"internal/kill/manager.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/mockengine/claude.go": {
 		"mock argv",
 		[]string{

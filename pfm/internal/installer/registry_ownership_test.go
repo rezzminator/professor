@@ -56,6 +56,30 @@ func (h ownershipHome) classes(result RegistryOwnership) []string {
 	return rows
 }
 
+func TestPlanTemplateSkillsIncludesBothRegistries(t *testing.T) {
+	t.Parallel()
+	for _, config := range []string{".claude", "custom-store"} {
+		t.Run(config, func(t *testing.T) {
+			t.Parallel()
+			h := newOwnershipHome(t)
+			h.store = filepath.Join(h.home, config)
+			skills := filepath.Join(h.clone, "templates", "global", "skills")
+			writeFixture(t, filepath.Join(skills, "tpl", "SKILL.md"), "template")
+			writeFixture(t, filepath.Join(skills, "nomd", "notes.md"), "not a skill")
+			writeFixture(t, filepath.Join(skills, "sources.json"), `{"source_fetched":{}}`)
+			plan := h.input(t).Plan
+			for _, registry := range []string{filepath.Join(h.store, "skills"), filepath.Join(h.home, ".agents", "skills")} {
+				for name, want := range map[string]bool{"tpl": true, "nomd": false, "sources.json": false} {
+					path := filepath.Join(registry, name)
+					if got := plan.Links[path]; got != want {
+						t.Errorf("plan.Links[%s] = %t, want %t", path, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestInspectRegistryOwnershipClasses(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -150,6 +174,7 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				writeFixture(t, filepath.Join(managed, "skills", "stale", "SKILL.md"), "no longer registered")
 				writeFixture(t, filepath.Join(managed, "handoff.skill.md"), "embedded")
 				symlinkFixture(t, filepath.Join(skills, "tpl"), filepath.Join(h.store, "skills", "tpl"))
+				symlinkFixture(t, filepath.Join(skills, "tpl"), filepath.Join(h.home, ".agents", "skills", "tpl"))
 				symlinkFixture(t, filepath.Join(skills, "nomd"), filepath.Join(h.store, "skills", "nomd"))
 				symlinkFixture(t, filepath.Join(managed, "skills", "fetched"), filepath.Join(h.store, "skills", "fetched"))
 				symlinkFixture(

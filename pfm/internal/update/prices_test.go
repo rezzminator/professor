@@ -107,7 +107,7 @@ func TestUpdateRestoresWhatTheBaselineDoctorRefreshedBeforeTheFastForward(t *tes
 	gitTemp(t, repo, "checkout", "-qB", "installed", "v0.11.0")
 	runtime := updateTestRuntime(t)
 	stubUpdatePipeline(t, runtime)
-	updateBaselineDoctor = func(context.Context, pfmconfig.Runtime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateBaselineDoctor = func(context.Context, pfmconfig.Runtime, io.Writer, io.Writer) (doctorOutcome, error) {
 		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 			return doctorOutcome{}, err
 		}
@@ -115,7 +115,7 @@ func TestUpdateRestoresWhatTheBaselineDoctorRefreshedBeforeTheFastForward(t *tes
 	}
 
 	var stdout, stderr bytes.Buffer
-	args := []string{"--skip-harvest", "--to", "v0.12.0", "--repo", repo}
+	args := []string{"--to", "v0.12.0", "--repo", repo}
 	if code := Run(args, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("Run() code = %d, want success; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}

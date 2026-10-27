@@ -18,7 +18,7 @@ const FieldComp = "comp"
 // spelling. A level set for a name outside it is refused, so a typo in
 // pfm.config.json can never be a silent no-op.
 var Components = []string{
-	"cli", "mcp", "http.in", "http.out", "runner", "tmux", "hooks", "db", "harvestpy", "installer", "state",
+	"cli", "mcp", "http.in", "http.out", "runner", "tmux", "hooks", "db", "installer", "state",
 }
 
 // Where a level in force came from, as `pfm doctor` reports it.

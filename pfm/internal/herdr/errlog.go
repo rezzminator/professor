@@ -78,12 +78,19 @@ func appendReporterLog(dir, session string, at time.Time, level, message string)
 		}
 	}
 	path := filepath.Join(dir, session+ErrorLogSuffix)
-	if info, err := os.Stat(path); err == nil && info.Size() >= ErrorLogBytes {
-		if err := os.Rename(path, path+".1"); err != nil {
-			return fmt.Errorf("herdr error log: rotate %s: %w", path, err)
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("herdr error log: %s is not a regular file", path)
 		}
+		if info.Size() >= ErrorLogBytes {
+			if err := os.Rename(path, path+".1"); err != nil {
+				return fmt.Errorf("herdr error log: rotate %s: %w", path, err)
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("herdr error log: inspect %s: %w", path, err)
 	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	file, err := OpenStateFile(dir, session+ErrorLogSuffix, os.O_APPEND|os.O_CREATE|os.O_WRONLY, "herdr error log")
 	if err != nil {
 		return fmt.Errorf("herdr error log: open %s: %w", path, err)
 	}
@@ -124,7 +131,7 @@ func RecentErrors(dir string, since time.Time) ([]ErrorRecord, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		file, err := os.Open(path)
+		file, err := OpenStateFile(dir, entry.Name(), os.O_RDONLY, "herdr error log")
 		if err != nil {
 			return nil, fmt.Errorf("herdr error log: open %s: %w", path, err)
 		}

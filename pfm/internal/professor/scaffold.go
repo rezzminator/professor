@@ -17,7 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// ClaudeInstructionsFile is the project instructions file scaffolded from the blueprint.
+// ClaudeInstructionsFile is the orientation file at a repository root.
 const ClaudeInstructionsFile = "CLAUDE.md"
 
 var initTemplatePaths = []struct {
@@ -25,7 +25,6 @@ var initTemplatePaths = []struct {
 	target string
 	skip   string
 }{
-	{source: "project/CLAUDE.md", target: ClaudeInstructionsFile},
 	{source: "project/settings.json", target: ".claude/settings.json"},
 	{source: "project/rumdl-policy.toml", target: ".rumdl.toml"},
 	{source: "project/commands", target: ".claude/commands", skip: "per-project"},
@@ -255,8 +254,7 @@ func addScaffoldMarker(local, template, sha string, raw []byte) []byte {
 		template,
 		sha,
 	)
-	if local != ClaudeInstructionsFile && local != "AGENTS.md" && strings.HasSuffix(local, ".md") &&
-		strings.HasPrefix(string(raw), "---\n") {
+	if strings.HasSuffix(local, ".md") && strings.HasPrefix(string(raw), "---\n") {
 		return append(append([]byte("---\n"), []byte(marker)...), raw[len("---\n"):]...)
 	}
 	if strings.HasSuffix(local, ".sh") {

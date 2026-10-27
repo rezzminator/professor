@@ -13,7 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -117,9 +117,11 @@ func TestDetachedLegacyRecipeRemoteControl(t *testing.T) {
 			for _, key := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX"} {
 				t.Setenv(key, "")
 			}
-			ctx := WithResolvedSelf(
+			ctx := WithCaller(
 				context.Background(),
-				headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p8", HerdrWorkspace: "w6"},
+				"open.herdr",
+				resolve.Identity{Backend: "herdr", SocketPath: socket, Pane: "w6:p8", HerdrWorkspace: "w6"},
+				nil,
 			)
 			var warning bytes.Buffer
 			result, err := detachedNative(ctx, seat, &warning, runtime)

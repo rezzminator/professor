@@ -72,6 +72,7 @@ lane_run() { # lane_run <name> <image> [network] [docker-run args…]
     -v "$PFM_DEV_WORKTREE:/worktree:ro" \
     -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" \
     -v "$PFM_DEV_ENGINE_SYNC_SRC:/engine-sync:ro" \
+    -v "$PFM_DEV_HARVESTER_SRC:/harvester:ro" \
     -v pfm-dev-gocache:/root/.cache/go-build \
     -v pfm-dev-gomod:/root/go/pkg/mod \
     -w /worktree \
@@ -81,6 +82,7 @@ lane_run() { # lane_run <name> <image> [network] [docker-run args…]
     -e PFM_PRICES_OFFLINE=1 \
     -e ENGINE_SYNC_BIN=/usr/local/libexec/pfm-lanes/engine-sync \
     -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" \
+    -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}" \
     -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" \
     -e PFM_DEV_REPO_WORK_TREE=/worktree \
     "$image" sleep infinity >/dev/null

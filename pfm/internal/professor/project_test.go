@@ -164,9 +164,9 @@ func TestSelfHostedReviewLinePrintsARunnableDiffCommand(t *testing.T) {
 		t.Fatalf("Scaffold() err = %v, stdout=%q", err, scaffoldOut.String())
 	}
 
-	// Upstream (still self-hosted, still no .git) moves CLAUDE.md forward —
+	// Upstream (still self-hosted, still no .git) moves .claude/settings.json forward —
 	// the project's pin goes stale, classifying projectUpdated.
-	template := filepath.Join(source, "templates", "project", "CLAUDE.md")
+	template := filepath.Join(source, "templates", "project", "settings.json")
 	if err := os.WriteFile(template, []byte("# fixture contract v2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -190,8 +190,8 @@ func TestSelfHostedReviewLinePrintsARunnableDiffCommand(t *testing.T) {
 	if strings.Contains(text, unrunnable) {
 		t.Fatalf("review line still prints the unrunnable self-hosted@unknown..self-hosted@unknown diff:\n%s", text)
 	}
-	wantLocal := filepath.Join(project, "CLAUDE.md")
-	wantTemplate := filepath.Join(source, "templates", "project", "CLAUDE.md")
+	wantLocal := filepath.Join(project, ".claude", "settings.json")
+	wantTemplate := filepath.Join(source, "templates", "project", "settings.json")
 	wantRunnable := "diff " + wantLocal + " " + wantTemplate
 	if !strings.Contains(text, wantRunnable) {
 		t.Fatalf("review line missing the runnable plain diff %q:\n%s", wantRunnable, text)
@@ -212,9 +212,9 @@ func TestSelfHostedPinReviewLineAgainstAGitStorePrintsTheLocalFileDiff(t *testin
 		Counts: map[projectStatus]int{projectUpdated: 1},
 		Items: []projectReportItem{{
 			Status:   projectUpdated,
-			Local:    "CLAUDE.md",
-			Template: "CLAUDE.md",
-			Pin:      FilePin{Template: "CLAUDE.md", PinnedSHA: UnknownSelfHostedSHA},
+			Local:    ".claude/settings.json",
+			Template: "settings.json",
+			Pin:      FilePin{Template: "settings.json", PinnedSHA: UnknownSelfHostedSHA},
 		}},
 	}
 	var output bytes.Buffer
@@ -223,7 +223,7 @@ func TestSelfHostedPinReviewLineAgainstAGitStorePrintsTheLocalFileDiff(t *testin
 	if strings.Contains(text, "diff "+UnknownSelfHostedSHA+"..") {
 		t.Fatalf("review line prints an unresolvable self-hosted@unknown range:\n%s", text)
 	}
-	want := "review: diff /work/project/CLAUDE.md /work/blueprint/templates/project/CLAUDE.md"
+	want := "review: diff /work/project/.claude/settings.json /work/blueprint/templates/project/settings.json"
 	if !strings.Contains(text, want) {
 		t.Fatalf("review line missing the runnable local-file diff %q:\n%s", want, text)
 	}
@@ -239,9 +239,9 @@ func TestUpdatedRowPrintsUpstreamDiffHeadingIndentedLinesAndGuidance(t *testing.
 		Counts: map[projectStatus]int{projectUpdated: 1},
 		Items: []projectReportItem{{
 			Status:   projectUpdated,
-			Local:    "CLAUDE.md",
-			Template: "CLAUDE.md",
-			Pin:      FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"},
+			Local:    ".claude/settings.json",
+			Template: "settings.json",
+			Pin:      FilePin{Template: "settings.json", PinnedSHA: "abc1234"},
 			Diff:     "-old line\n+new line\n",
 		}},
 	}
@@ -249,10 +249,10 @@ func TestUpdatedRowPrintsUpstreamDiffHeadingIndentedLinesAndGuidance(t *testing.
 	writeProjectHuman(&output, report)
 	text := output.String()
 	for _, want := range []string{
-		"upstream change: git -C /work/blueprint diff abc1234 -- templates/CLAUDE.md",
+		"upstream change: git -C /work/blueprint diff abc1234 -- templates/settings.json",
 		"      -old line",
 		"      +new line",
-		"port what applies into CLAUDE.md, keep the project's own edits, then: pfm update pin CLAUDE.md",
+		"port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("UPDATED row missing %q:\n%s", want, text)
@@ -277,9 +277,9 @@ func TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants(t *testing.T) {
 	var unreadable bytes.Buffer
 	writeProjectHuman(&unreadable, base(projectReportItem{
 		Status:    projectUpdated,
-		Local:     "CLAUDE.md",
-		Template:  "CLAUDE.md",
-		Pin:       FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"},
+		Local:     ".claude/settings.json",
+		Template:  "settings.json",
+		Pin:       FilePin{Template: "settings.json", PinnedSHA: "abc1234"},
 		DiffError: "git diff: git exited with status 128: fatal: bad revision 'abc1234'",
 	}))
 	unreadableText := unreadable.String()
@@ -291,13 +291,13 @@ func TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants(t *testing.T) {
 	}
 	if !strings.Contains(
 		unreadableText,
-		"port what applies into CLAUDE.md, keep the project's own edits, then: pfm update pin CLAUDE.md",
+		"port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json",
 	) {
 		t.Fatalf("UNREADABLE row missing the guidance line:\n%s", unreadableText)
 	}
 	withNew := base(projectReportItem{
-		Status: projectUpdated, Local: "CLAUDE.md", Template: "CLAUDE.md",
-		Pin: FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"}, DiffError: "bad revision",
+		Status: projectUpdated, Local: ".claude/settings.json", Template: "settings.json",
+		Pin: FilePin{Template: "settings.json", PinnedSHA: "abc1234"}, DiffError: "bad revision",
 	})
 	withNew.Counts[projectNew] = 1
 	withNew.Items = append(withNew.Items, projectReportItem{Status: projectNew, Template: "project/NEW.md"})
@@ -311,21 +311,21 @@ func TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants(t *testing.T) {
 	var empty bytes.Buffer
 	writeProjectHuman(&empty, base(projectReportItem{
 		Status:   projectUpdated,
-		Local:    "CLAUDE.md",
-		Template: "CLAUDE.md",
-		Pin:      FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"},
+		Local:    ".claude/settings.json",
+		Template: "settings.json",
+		Pin:      FilePin{Template: "settings.json", PinnedSHA: "abc1234"},
 		Diff:     "",
 	}))
 	emptyText := empty.String()
 	want := "upstream change EMPTY — the pin was taken from an uncommitted or untracked store file, " +
 		"so git cannot show the change; compare by hand: diff " +
-		"/work/project/CLAUDE.md /work/blueprint/templates/project/CLAUDE.md"
+		"/work/project/.claude/settings.json /work/blueprint/templates/project/settings.json"
 	if !strings.Contains(emptyText, want) {
 		t.Fatalf("UPDATED row missing the EMPTY line %q:\n%s", want, emptyText)
 	}
 	if !strings.Contains(
 		emptyText,
-		"port what applies into CLAUDE.md, keep the project's own edits, then: pfm update pin CLAUDE.md",
+		"port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json",
 	) {
 		t.Fatalf("EMPTY row missing the guidance line:\n%s", emptyText)
 	}

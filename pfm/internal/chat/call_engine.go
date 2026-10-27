@@ -10,23 +10,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
-
-type codexSeatIdentifier struct{ runtime *config.Runtime }
-
-func (identifier codexSeatIdentifier) Identify(ctx context.Context) (resolve.Identity, error) {
-	identity, found := SeatIdentity(ctx, identifier.runtime)
-	if !found {
-		return resolve.Identity{}, resolve.ErrNoTmux
-	}
-	return identity, nil
-}
 
 // NewCallEngine constructs the shared caller and optionally allows an
 // unsigned sender when the explicit CLI flag authorizes it.
 func NewCallEngine(allowUnsigned bool, runtime *config.Runtime) (*pfmcall.Engine, error) {
-	identifier := codexSeatIdentifier{runtime: runtime}
 	dependencies := pfmcall.Dependencies{}
 	dependencies.Options.AllowUnsigned = allowUnsigned
 	if runtime != nil {
@@ -43,7 +31,7 @@ func NewCallEngine(allowUnsigned bool, runtime *config.Runtime) (*pfmcall.Engine
 		}
 	}
 	dependencies.Names = NameResolver{Runtime: runtime}
-	dependencies.CodexSeat = identifier
+	dependencies.CodexSeats = CodexSeats(runtime)
 	return pfmcall.New(dependencies)
 }
 

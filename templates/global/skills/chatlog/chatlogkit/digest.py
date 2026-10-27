@@ -142,6 +142,11 @@ def header_rows(p, req, shown):
     else:
         source = f"FILE {p.path} · {p.bytes} bytes · {p.records} records · cwd {meta('cwd', '?')} (shown as ./)"
     rows = [first, source]
+    if p.meta.get("forked_from"):
+        span_in = getattr(p, "inherit", None)
+        where = (f" · L{span_in[0]}-L{span_in[1] if span_in[1] is not None else '?'} carry the parent's history "
+                 "(labelled INHERITED, never the child's brief)") if span_in else ""
+        rows.append(f"FORKED from {p.meta['forked_from']}{where}")
     if p.title:
         rows.append("NAME " + p.title)
     if p.t0 is None:
@@ -245,7 +250,8 @@ def clean(line):
     m = EVENT_LINE.match(line)
     if not m:
         return line
-    if "<task-notification>" in line:
+    # only a message that IS a notification collapses; one quoting it (a wake's facts) keeps its text
+    if line[m.end():].lstrip().startswith("<task-notification>"):
         tail = line[line.index("<task-notification>"):]
         s, u = NOTIF_STATUS.search(tail), NOTIF_SUMMARY.search(tail)
         st = s.group(1).strip() if s else "?"

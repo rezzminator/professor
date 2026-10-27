@@ -76,7 +76,12 @@ func RefreshRemoteControl(args []string, enabled bool, name string) []string {
 func remoteControlValueFlag(flag string) bool {
 	switch flag {
 	case flagSettings, flagMCPConfig, flagModel, flagEffort, flagSessionID, flagResume,
-		flagResumeShort, flagName, flagNameShort, flagPromptFile, flagSystemPrompt:
+		flagResumeShort, flagName, flagNameShort, flagPromptFile, flagSystemPrompt,
+		"--append-system-prompt", "--append-system-prompt-file", "--output-format", "--input-format",
+		"--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools",
+		"--add-dir", "--agent", "--agents", "--fallback-model", "--permission-mode", "--permission-prompt-tool",
+		"--json-schema", "--max-turns", "--max-budget-usd", "--plugin-dir", "--settings-sources",
+		"--tools", "--betas":
 		return true
 	default:
 		return false

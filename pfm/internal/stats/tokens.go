@@ -60,7 +60,7 @@ type tokenRateState struct {
 	samples  []tokenRateSample
 }
 
-// tokenHistoryState keeps the per-socket usage chart baseline: the transcript
+// tokenHistoryState keeps the per-seat usage chart baseline: the transcript
 // identity it tracks, the last cumulative total seen, and the capped delta ring.
 type tokenHistoryState struct {
 	identity    string
@@ -84,23 +84,24 @@ type tokenRecord struct {
 }
 
 func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now int64) []string {
-	pathsBySocket := make(map[string]map[string]bool)
-	sessionsBySocket := make(map[string]map[string]bool)
+	pathsBySeat := make(map[string]map[string]bool)
+	sessionsBySeat := make(map[string]map[string]bool)
 	for index := range rows {
 		row := &rows[index]
 		if row.Socket == "" || row.Path == "" || !liveKind(row.Kind) {
 			continue
 		}
-		paths := pathsBySocket[row.Socket]
+		seat := compose.LiveSeatKey(*row)
+		paths := pathsBySeat[seat]
 		if paths == nil {
 			paths = make(map[string]bool)
-			pathsBySocket[row.Socket] = paths
+			pathsBySeat[seat] = paths
 		}
 		paths[row.Path] = true
-		sessions := sessionsBySocket[row.Socket]
+		sessions := sessionsBySeat[seat]
 		if sessions == nil {
 			sessions = make(map[string]bool)
-			sessionsBySocket[row.Socket] = sessions
+			sessionsBySeat[seat] = sessions
 		}
 		sessions[fmt.Sprintf("%d:%s", row.Kind, row.ID)] = true
 	}
@@ -111,9 +112,9 @@ func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now i
 		sampler.tokenCache = make(map[string]*tokenCacheEntry)
 	}
 	usedPaths := make(map[string]bool)
-	usageBySocket := make(map[string]tokenMeasure)
+	usageBySeat := make(map[string]tokenMeasure)
 	var warnings []string
-	for socket, paths := range pathsBySocket {
+	for seat, paths := range pathsBySeat {
 		combined := tokenMeasure{}
 		identities := make([]string, 0, len(paths))
 		for path := range paths {
@@ -126,12 +127,12 @@ func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now i
 				combined.known = true
 			}
 		}
-		for session := range sessionsBySocket[socket] {
+		for session := range sessionsBySeat[seat] {
 			identities = append(identities, "session:"+session)
 		}
 		sort.Strings(identities)
 		combined.identity = strings.Join(identities, "\x1e")
-		usageBySocket[socket] = combined
+		usageBySeat[seat] = combined
 	}
 	for path := range sampler.tokenCache {
 		if !usedPaths[path] {
@@ -144,28 +145,28 @@ func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now i
 	if sampler.tokenHistory == nil {
 		sampler.tokenHistory = make(map[string]*tokenHistoryState)
 	}
-	usedSockets := make(map[string]bool)
+	usedSeats := make(map[string]bool)
 	for index := range chats {
-		socket := chats[index].Socket
-		measure := usageBySocket[socket]
+		seat := chats[index].Seat
+		measure := usageBySeat[seat]
 		chats[index].TokenCount = measure.total
 		chats[index].TokensKnown = measure.known
 		if !measure.known || measure.identity == "" {
-			delete(sampler.tokenRates, socket)
+			delete(sampler.tokenRates, seat)
 			continue
 		}
-		usedSockets[socket] = true
+		usedSeats[seat] = true
 		sampler.attachTokenRateLocked(&chats[index], measure, now)
 		sampler.attachUsageSparkLocked(&chats[index], measure)
 	}
-	for socket := range sampler.tokenRates {
-		if !usedSockets[socket] {
-			delete(sampler.tokenRates, socket)
+	for seat := range sampler.tokenRates {
+		if !usedSeats[seat] {
+			delete(sampler.tokenRates, seat)
 		}
 	}
-	for socket := range sampler.tokenHistory {
-		if !usedSockets[socket] {
-			delete(sampler.tokenHistory, socket)
+	for seat := range sampler.tokenHistory {
+		if !usedSeats[seat] {
+			delete(sampler.tokenHistory, seat)
 		}
 	}
 	return warnings
@@ -176,12 +177,12 @@ func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now i
 // sample only sets the baseline — a chart needs two points to draw a step.
 func (sampler *Sampler) attachUsageSparkLocked(chat *Chat, measure tokenMeasure) {
 	if !measure.known || measure.identity == "" {
-		delete(sampler.tokenHistory, chat.Socket)
+		delete(sampler.tokenHistory, chat.Seat)
 		return
 	}
-	state := sampler.tokenHistory[chat.Socket]
+	state := sampler.tokenHistory[chat.Seat]
 	if state == nil || state.identity != measure.identity || measure.total < state.last {
-		sampler.tokenHistory[chat.Socket] = &tokenHistoryState{
+		sampler.tokenHistory[chat.Seat] = &tokenHistoryState{
 			identity:    measure.identity,
 			last:        measure.total,
 			hasBaseline: true,
@@ -197,9 +198,9 @@ func (sampler *Sampler) attachUsageSparkLocked(chat *Chat, measure tokenMeasure)
 }
 
 func (sampler *Sampler) attachTokenRateLocked(chat *Chat, measure tokenMeasure, now int64) {
-	state := sampler.tokenRates[chat.Socket]
+	state := sampler.tokenRates[chat.Seat]
 	reset := func() {
-		sampler.tokenRates[chat.Socket] = &tokenRateState{
+		sampler.tokenRates[chat.Seat] = &tokenRateState{
 			identity: measure.identity,
 			samples:  []tokenRateSample{{timeNS: now, total: measure.total}},
 		}

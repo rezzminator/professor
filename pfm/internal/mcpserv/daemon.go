@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -19,36 +18,24 @@ import (
 const mcpProtocolVersion = "2025-06-18"
 
 // daemonRoute labels the daemon's own door in the activity log, beside the
-// route each mounted handler logs under (chat-professor or harvester-professor).
+// route each mounted handler logs under (chat-professor).
 const daemonRoute = "mcp-daemon"
 
 // maxDaemonBodyBytes bounds every request body the daemon accepts, on the
 // MCP routes and /status alike. The MCP streamable transport under these
 // routes reads the whole body into memory before it parses anything, so an
-// unbounded POST from any local process is one request away from taking down
-// the process that serves every chat on the machine. 1 MiB is the bound the
-// harvester's external gateway already applies to its own POST bodies
-// (internal/harvestmcp/remote.go), and it is two orders of magnitude above
-// the largest legitimate tool input: call's own size ladder calls an 8 KiB
-// message oversized enough to spill to a file pointer (internal/call
-// body.go), and no chat tool takes anything larger.
+// unbounded POST can exhaust the daemon; 1 MiB exceeds every chat input.
 const maxDaemonBodyBytes = 1 << 20
 
 // DaemonOptions is everything `pfm mcp serve` hands the loopback daemon's
-// front door. Chat and Harvester are separate servers at config.MCPFamilyPath. A nil view
+// front door. Chat is served at config.MCPFamilyPath. A nil view
 // means that family is disabled by config and was never constructed.
 type DaemonOptions struct {
 	Version             string
 	StartedAt           time.Time
 	Endpoint            string
 	Chat                http.Handler
-	Harvester           http.Handler
 	ChatRuntimeIdentity string
-	// HarvesterTools is the runtime-dependent registered surface from
-	// harvestmcp.RegisteredToolNames — the search gate rules out a package var.
-	HarvesterTools []string
-	// External reports the external gateway state at request time.
-	External *atomic.Pointer[string]
 	// Clock defaults StartedAt when it is left zero; nil reads the wall
 	// clock exactly as an unset StartedAt always has.
 	Clock clock.Clock
@@ -88,9 +75,6 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 	} else {
 		options.ChatRuntimeIdentity = ""
 	}
-	if options.Harvester != nil {
-		servers[pfmconfig.MCPServerHarvester] = append([]string(nil), options.HarvesterTools...)
-	}
 	status := DaemonStatus{
 		PFMVersion:          options.Version,
 		ProtocolVersion:     mcpProtocolVersion,
@@ -105,8 +89,7 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 	// gives itself, which no mounted server ever sees — each leave their own
 	// http.in record under this route. A request that does reach a mounted
 	// server is recorded twice on purpose: once here, for what the daemon's
-	// door answered, and once by that server's own handler (route chat-mcp or
-	// harvester-mcp), for what the server inside it did.
+	// door answered, and once by the chat handler, for what its server did.
 	return obs.Handler(daemonRoute, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.ContentLength > maxDaemonBodyBytes {
 			http.Error(
@@ -131,22 +114,14 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 				return
 			}
 			current := status
-			if options.External != nil {
-				if state := options.External.Load(); state != nil {
-					current.HarvesterExternal = *state
-				}
-			}
 			writeDaemonJSON(writer, options.Warnings, current)
 		case pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat):
 			serveDaemonRoute(writer, request, options.Chat, pfmconfig.MCPServerChat)
-		case pfmconfig.MCPFamilyPath(pfmconfig.MCPServerHarvester):
-			serveDaemonRoute(writer, request, options.Harvester, pfmconfig.MCPServerHarvester)
 		default:
 			if request.URL.Path == "/mcp/professor" || strings.HasPrefix(request.URL.Path, "/mcp/professor/") {
 				http.Error(writer, fmt.Sprintf(
-					"pfm mcp: /mcp/professor is retired; MCP families moved to %s and %s; restart the chat to reconnect with the current MCP registrations",
+					"pfm mcp: /mcp/professor is retired; chat MCP moved to %s; restart the chat to reconnect with the current MCP registrations",
 					pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat),
-					pfmconfig.MCPFamilyPath(pfmconfig.MCPServerHarvester),
 				), http.StatusGone)
 				return
 			}

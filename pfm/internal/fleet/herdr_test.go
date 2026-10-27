@@ -3,7 +3,9 @@ package fleet
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -350,4 +352,158 @@ func TestReadOnlyNativeScanDoesNotCreateState(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A positively dead seat beside a healthy one must not fail the listing, nor
+// present as live; the healthy seat keeps its live address.
+func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		for _, cached := range []bool{false, true} {
+			t.Run(fmt.Sprintf("read-only=%t/cached=%t", readOnly, cached), func(t *testing.T) {
+				testjail.Fleet(t)
+				proc := t.TempDir()
+				t.Setenv(paths.EnvProcRoot, proc)
+				ticks := " " + strings.Repeat("0 ", 17)
+				for name, body := range map[string]string{
+					"stat":       "btime 1000000000\n",
+					"10/stat":    "10 (sh) S 1" + ticks + "3 0\n",
+					"20/stat":    "20 (pfm) S 10" + ticks + "9 0\n",
+					"20/cmdline": "pfm\x00internal\x00seat-host\x00healthy\x00",
+				} {
+					path := filepath.Join(proc, name)
+					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				socket := nativePaneServer(t, map[string]string{"w6:p3": "healthy", "w6:p4": "recycled"})
+				values, err := config.ResolvePaths()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx := context.Background()
+				state := fleetdb.OpenSharedState(ctx, values)
+				t.Cleanup(func() {
+					if err := state.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				for _, item := range []struct {
+					id, pane string
+					pid      int
+				}{{"healthy", "w6:p3", 20}, {"dead", "w6:p4", 30}} {
+					if err := state.PutSeat(ctx, fleetdb.Seat{
+						SeatID: item.id, SessionID: item.id, Engine: "cc", Backend: "herdr", State: "live",
+						Name: strings.ToUpper(item.id), HerdrSocket: socket, HerdrPane: item.pane,
+						HerdrWorkspace: "w6", HerdrTerminalID: item.id, SeatHostPID: item.pid, SeatHostStart: 9,
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				db, err := store.Open()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := db.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				request := Request{View: compose.DefaultView, ReadOnly: readOnly}
+				var result Result
+				if cached {
+					result, err = ScanCached(ctx, db, request)
+				} else {
+					result, err = Scan(ctx, db, request, &bytes.Buffer{})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(result.Errors) != 0 {
+					t.Fatalf("dead seat failed the listing: %v", result.Errors)
+				}
+				got := map[string]compose.Row{}
+				for _, row := range result.Output.Rows {
+					if row.Backend == "herdr" {
+						got[row.SeatID] = row
+					}
+				}
+				healthy, dead := got["healthy"], got["dead"]
+				if len(got) != 2 || healthy.Kind != compose.LiveClaude || healthy.BackendError != "" ||
+					healthy.CWD != "/jail/healthy" {
+					t.Fatalf("healthy seat lost beside a dead one: %+v", got)
+				}
+				if dead.Kind != compose.ResumeClaude || !strings.Contains(dead.BackendError, "HERDR DEAD dead") ||
+					dead.CWD != "" {
+					t.Fatalf("dead seat presented as live or lost its diagnostic: %+v", dead)
+				}
+				stored, found, err := state.Seat(ctx, "dead")
+				if err != nil || !found || stored.State != "live" || stored.HerdrPane != "w6:p4" {
+					t.Fatalf("listing mutated the dead seat: %+v found=%t err=%v", stored, found, err)
+				}
+			})
+		}
+	}
+}
+
+// nativePaneServer answers pane.list with each pane (terminal and cwd named by
+// its value) and pane.process_info with the shell pid 10 for any pane.
+func nativePaneServer(t *testing.T, panes map[string]string) string {
+	t.Helper()
+	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string `json:"id"`
+					Method string `json:"method"`
+					Params struct {
+						Pane string `json:"pane_id"`
+					} `json:"params"`
+				}
+				if err := json.NewDecoder(conn).Decode(&req); err != nil {
+					t.Errorf("decode herdr request: %v", err)
+					return
+				}
+				result := map[string]any{
+					"type":         "pane_process_info",
+					"process_info": map[string]any{"pane_id": req.Params.Pane, "shell_pid": 10},
+				}
+				if req.Method == "pane.list" {
+					list := []any{}
+					for pane, name := range panes {
+						workspace, _, _ := strings.Cut(pane, ":")
+						list = append(list, map[string]any{
+							"pane_id": pane, "workspace_id": workspace, "terminal_id": name, "cwd": "/jail/" + name,
+						})
+					}
+					result = map[string]any{"type": "pane_list", "panes": list}
+				}
+				if err := json.NewEncoder(conn).
+					Encode(map[string]any{"id": req.ID, "ok": true, "result": result}); err != nil {
+					t.Errorf("reply herdr request: %v", err)
+				}
+			}()
+		}
+	}()
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Error(err)
+		}
+		<-done
+	})
+	return socket
 }

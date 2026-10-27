@@ -343,13 +343,13 @@ RRACE=$T/racerun/run.RACE
 mkres "$RRACE/resources.tsv" 30 15
 mkgate "$RRACE" FAIL PASS pfm.race FAIL 3.0
 mkprof "$RRACE" pfm.race exit 1 "$(ep 2)" "$(ep 5)" 3.000000 2.000 0 0.000000 0.000000 0.000000
-proc "$RRACE/profile/race" internal_harvest.79 exit 1 "" exit
+proc "$RRACE/profile/race" internal_chat.79 exit 1 "" exit
 run_sut summary "$RRACE"
 eq "race root: summary exit 0" 0 "$RC"
 has "step line: a red pfm.race points at the profiles" " · profiles $RRACE/profile/INDEX.txt" "$(line_with "$OUT" "PROFILE step pfm.race ")"
 eq "INDEX: a process inside the race step's root is listed with its full path and bundle" \
-  "$RRACE/profile/race/internal_harvest.79 · event exit · exit 1 · wall 2.5s · run delay 0.123s → $RRACE/profile/race/internal_harvest.79/exit/DIAGNOSIS.txt" \
-  "$(line_with "$(< "$RRACE/profile/INDEX.txt")" "/internal_harvest.79 ")"
+  "$RRACE/profile/race/internal_chat.79 · event exit · exit 1 · wall 2.5s · run delay 0.123s → $RRACE/profile/race/internal_chat.79/exit/DIAGNOSIS.txt" \
+  "$(line_with "$(< "$RRACE/profile/INDEX.txt")" "/internal_chat.79 ")"
 
 # The one case that reads the real thresholds file: the script at its own location, the judge its PFM names,
 # whatever values pfm/.testcontention.yml holds. It runs on a copy of the run, so $R's own profile.tsv stays;

@@ -9,20 +9,18 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // professorHandlers is every handler newMCPHTTPHandler builds for a Professor
-// carrying both families, keyed by the obs route each one logs under.
+// carrying chat, keyed by the obs route each one logs under.
 func professorHandlers(t *testing.T) map[string]http.Handler {
 	t.Helper()
 	professor := newTestProfessor(t, FamilyServerOptions{
-		Chat: newTestChat(t), Harvester: newTestHarvester(t, harvestmcp.Runtime{}),
+		Chat: newTestChat(t),
 	})
 	return map[string]http.Handler{
-		"chat-professor":      professor.FamilyHandler(pfmconfig.MCPServerChat),
-		"harvester-professor": professor.FamilyHandler(pfmconfig.MCPServerHarvester),
+		"chat-professor": professor.FamilyHandler(pfmconfig.MCPServerChat),
 	}
 }
 

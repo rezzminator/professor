@@ -52,6 +52,7 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 		"lean prompt armed in the --settings payload and registry hooks",
 		"no --system-prompt-file prompt material", "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
 		"lean prompt missing from the --settings payload", "missing --settings outputStyle default",
+		"missing --settings permissions.disableAutoMode disable",
 	}},
 	"internal/engine/builtin.go": {"descriptor reads session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/gather/agents.go": {

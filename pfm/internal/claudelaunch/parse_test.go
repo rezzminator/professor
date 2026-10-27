@@ -143,6 +143,11 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.Settings["outputStyle"] != "default" {
 					t.Error("output style missing")
 				}
+			case "disableAutoMode":
+				permissions, _ := parsed.Settings["permissions"].(map[string]any)
+				if permissions["disableAutoMode"] != "disable" {
+					t.Error("auto mode not disabled")
+				}
 			case "theme":
 				if parsed.Settings["theme"] != "dark" {
 					t.Error("theme missing")

@@ -24,17 +24,17 @@ func TestRenderHeadlessPayload(t *testing.T) {
 	}
 	empty, err := RenderHeadless(nil)
 	if err != nil ||
-		empty != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}` {
+		empty != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default","permissions":{"disableAutoMode":"disable"}}` {
 		t.Errorf("empty=%q err=%v", empty, err)
 	}
 	window, err := RenderHeadless(map[string]any{"autoCompactWindow": 250000})
 	if err != nil ||
-		window != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}` {
+		window != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default","permissions":{"disableAutoMode":"disable"}}` {
 		t.Errorf("window=%q err=%v", window, err)
 	}
 	helper, err := RenderHeadless(map[string]any{"helperModel": "claude-sonnet-5-5"})
 	if err != nil ||
-		helper != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}` {
+		helper != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default","permissions":{"disableAutoMode":"disable"}}` {
 		t.Errorf("helper=%q err=%v", helper, err)
 	}
 	for _, value := range []any{"", "  ", "claude haiku", 5, true} {

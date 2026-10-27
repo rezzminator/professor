@@ -28,6 +28,8 @@ const (
 	knobStatusLine                 = "statusLine"
 	knobSubagentStatusLine         = "subagentStatusLine"
 	knobOutputStyle                = "outputStyle"
+	knobPermissions                = "permissions"
+	knobDisableAutoMode            = "disableAutoMode"
 	knobConfigDir                  = "configDir"
 	knobModel                      = "model"
 	knobEffort                     = "effort"
@@ -36,6 +38,7 @@ const (
 	knobFork                       = "fork"
 	knobName                       = "name"
 	defaultWord                    = "default"
+	disableWord                    = "disable"
 	accountWord                    = "account"
 	productionMode                 = "production"
 	unsetWord                      = "unset"
@@ -329,6 +332,14 @@ var Knobs = func() []Knob {
 			SourceConstant,
 			defaultWord,
 			"Use the managed output style.",
+		},
+		Knob{
+			knobDisableAutoMode,
+			WireSettings,
+			knobPermissions + "." + knobDisableAutoMode,
+			SourceConstant,
+			disableWord,
+			"Keep auto mode and its permission classifier off.",
 		},
 		Knob{
 			knobTheme,

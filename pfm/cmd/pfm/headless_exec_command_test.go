@@ -213,7 +213,7 @@ printf '%s\n' '{"result":"ok"}'`)
 		t.Fatal(err)
 	}
 	want := `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
-		`"outputStyle":"default","theme":"t"}`
+		`"outputStyle":"default","permissions":{"disableAutoMode":"disable"},"theme":"t"}`
 	if !strings.Contains(string(argv), want) {
 		t.Fatalf("argv = %s", argv)
 	}
@@ -245,7 +245,7 @@ printf '%s\n' '{"result":"ok"}'`)
 	}
 	if !strings.HasSuffix(
 		string(got),
-		"--settings\n{\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\"},\"outputStyle\":\"default\"}\n",
+		"--settings\n{\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\"},\"outputStyle\":\"default\",\"permissions\":{\"disableAutoMode\":\"disable\"}}\n",
 	) {
 		t.Fatalf("configured launch values reached child: %q", got)
 	}

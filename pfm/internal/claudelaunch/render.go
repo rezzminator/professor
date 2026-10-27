@@ -229,7 +229,11 @@ func helperModel(prefs pfmconfig.ClaudePrefs) string {
 }
 
 func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) map[string]any {
-	settings := map[string]any{knobOutputStyle: defaultWord, knobCleanupPeriodDays: prefs.CleanupPeriodDays}
+	settings := map[string]any{
+		knobOutputStyle:       defaultWord,
+		knobPermissions:       autoModeOff(),
+		knobCleanupPeriodDays: prefs.CleanupPeriodDays,
+	}
 	env := map[string]string{
 		envWebSearches:             strconv.FormatInt(prefs.WebSearchesPerSession, 10),
 		envAutoCompactWindow:       strconv.FormatInt(prefs.AutoCompactWindow, 10),
@@ -409,4 +413,17 @@ func NewSessionID() (string, error) {
 	bytes[6] = (bytes[6] & 0x0f) | 0x40
 	bytes[8] = (bytes[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", bytes[:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:]), nil
+}
+
+// autoModeOff is the permissions block every launch carries: Claude Code's
+// disableAutoMode setting removes auto mode, so its permission classifier
+// never runs in a pfm-launched chat whatever the account's settings say.
+func autoModeOff() map[string]any { return map[string]any{knobDisableAutoMode: disableWord} }
+
+// AutoModeDisabled reports whether a decoded --settings payload carries the
+// permissions block autoModeOff renders, so an audit of a live launch reads
+// the key from the registry rather than spelling it again.
+func AutoModeDisabled(settings map[string]any) bool {
+	permissions, _ := settings[knobPermissions].(map[string]any)
+	return permissions[knobDisableAutoMode] == disableWord
 }

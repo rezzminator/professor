@@ -323,3 +323,35 @@ func TestStrayDir(t *testing.T) {
 		}
 	})
 }
+
+func TestRetiredHarvesterConfig(t *testing.T) {
+	const check = "retired-harvester-config"
+	t.Run("clean", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, env.ConfigPath, `{"mcp":{"servers":{"chat":{"enabled":true}}}}`)
+		assertRows(t, detect(t, check, env))
+	})
+	t.Run("file", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
+		writeFile(t, path, `{"enabled":true}`)
+		assertRows(t, detect(t, check, env), Row{
+			Warn, check, path, "retired harvester.config.json; pfm no longer reads it",
+			"run harvester setup to import it into the harvester plugin's config, then rm " + path,
+		})
+	})
+	t.Run("server-entry", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, env.ConfigPath, `{"mcp":{"servers":{"harvester":{"enabled":true}}}}`)
+		assertRows(t, detect(t, check, env), Row{
+			Warn, check, env.ConfigPath, "retired mcp.servers.harvester entry; pfm no longer reads it",
+			"delete mcp.servers.harvester from " + env.ConfigPath + "; the harvester plugin keeps its own config",
+		})
+	})
+	t.Run("file-unreadable", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
+		makeDir(t, path)
+		assertUnreadable(t, detect(t, check, env), check, path, syscall.EISDIR)
+	})
+}

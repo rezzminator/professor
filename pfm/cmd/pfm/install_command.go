@@ -46,13 +46,25 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		false,
 		"install the Professor VS Code extension and make the PFM terminal the default",
 	)
-	offline := flags.Bool("offline", false, "install using cached plugin artifacts")
+	offline := flags.Bool(
+		"offline",
+		false,
+		"skip the rumdl install (uv tool install); every other step, plugin and engine installs included, still runs",
+	)
+	// A v0.82 updater passes --skip-harvest to the new binary's install --yes.
+	skipHarvest := flags.Bool("skip-harvest", false, "retired no-op: harvest moved to the harvester plugin")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip the Professor themes")
 	adoptAgents := flags.Bool("adopt-agents", false, "adopt an unowned file at a declared agent's path")
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
+	}
+	if *skipHarvest {
+		fmt.Fprintln(
+			stderr,
+			"pfm install: --skip-harvest is retired and ignored; harvest moved to the harvester plugin",
+		)
 	}
 	if *plan && !*check {
 		fmt.Fprintln(stderr, "pfm install: --plan needs --check: run pfm install --check --plan")

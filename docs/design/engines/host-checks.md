@@ -51,6 +51,7 @@ The table gives one row per detector; exact problems and fixes follow under each
 | `staged-shim` | BLOCK | shell source lines | retired staged shim | delete old source line |
 | `staged-prompts` | WARN | managed prompt dir | retired prompt staging | remove when unused |
 | `shared-db` | WARN | old shared database | retired file | remove |
+| `retired-harvester-config` | WARN | `harvester.config.json` beside the config, its `mcp.servers.harvester` | retired harvester settings | import with `harvester setup`, remove |
 | `stray-dir` | WARN | non-account `.cc` dirs | stray directory | inspect/remove |
 | `account-is-store` | BLOCK | physical account path | identity dir is store | unlink or configure |
 | `store-identity` | BLOCK | account entries in store | identity inside store | move, or move aside |
@@ -155,6 +156,16 @@ Looks at `{home}/.local/state/pfm/shared.db`.
 Problem: empty: `retired empty shared.db`; else `retired shared.db holds {n} bytes`.
 
 Fix: `rm {path}`.
+
+### retired-harvester-config
+
+**Severity:** WARN
+
+Looks at `harvester.config.json` beside the config, and the config's `mcp.servers.harvester`.
+
+Problem: file: `retired harvester.config.json; pfm no longer reads it`; entry: `retired mcp.servers.harvester entry; pfm no longer reads it`.
+
+Fix: file: `run harvester setup to import it into the harvester plugin's config, then rm {path}`; entry: `delete mcp.servers.harvester from {config}; the harvester plugin keeps its own config`.
 
 ### stray-dir
 

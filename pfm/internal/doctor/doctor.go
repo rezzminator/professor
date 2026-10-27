@@ -124,10 +124,15 @@ func Run(
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
+	// A v0.82 updater passes --skip-harvest to the new binary's doctor.
+	skipHarvest := flags.Bool("skip-harvest", false, "retired no-op: harvest moved to the harvester plugin")
 	projectUpdates := bindProjectUpdatesFlags(flags)
 	stale := bindStaleFlags(flags)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
+	}
+	if *skipHarvest {
+		fmt.Fprintln(stderr, "pfm doctor: --skip-harvest is retired and ignored; harvest moved to the harvester plugin")
 	}
 	if flags.NArg() != 0 {
 		flags.Usage()

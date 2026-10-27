@@ -3,6 +3,7 @@ package hostcheck
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -255,6 +256,44 @@ func sharedDB(env Env) ([]Row, error) {
 			problem = fmt.Sprintf("retired shared.db holds %d bytes", len(raw))
 		}
 		rows = append(rows, Row{Warn, checkSharedDB, path, problem, "rm " + path})
+	}
+	return rows, nil
+}
+
+const checkRetiredHarvesterConfig = "retired-harvester-config"
+
+// retiredHarvesterConfig names what pfm's harvester settings left behind
+// once harvest moved to the harvester plugin: harvester.config.json beside the
+// config, and an mcp.servers.harvester entry the config loader now passes
+// through unread. An unreadable or unparseable config is pre-split-config's
+// row, never a second one here.
+func retiredHarvesterConfig(env Env) ([]Row, error) {
+	var rows []Row
+	path := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
+	if _, ok := readFile(&rows, checkRetiredHarvesterConfig, path); ok {
+		rows = append(rows, Row{
+			Warn, checkRetiredHarvesterConfig, path, "retired harvester.config.json; pfm no longer reads it",
+			"run harvester setup to import it into the harvester plugin's config, then rm " + path,
+		})
+	}
+	raw, err := os.ReadFile(env.ConfigPath)
+	if err != nil {
+		return rows, nil //nolint:nilerr // pre-split-config reports an unreadable config
+	}
+	var document struct {
+		MCP struct {
+			Servers map[string]json.RawMessage `json:"servers"`
+		} `json:"mcp"`
+	}
+	if json.Unmarshal(raw, &document) != nil {
+		return rows, nil
+	}
+	if _, found := document.MCP.Servers["harvester"]; found {
+		rows = append(rows, Row{
+			Warn, checkRetiredHarvesterConfig, env.ConfigPath,
+			"retired mcp.servers.harvester entry; pfm no longer reads it",
+			"delete mcp.servers.harvester from " + env.ConfigPath + "; the harvester plugin keeps its own config",
+		})
 	}
 	return rows, nil
 }

@@ -195,14 +195,14 @@ var retiredNames = []retiredName{
 	{name: "gpt-lander", kind: retiredAgent, match: matchExact},
 	{name: "gpt-executor", kind: retiredAgent, match: matchExact},
 	// The flights family cut (docs/design/flights/flights.md § The family): the
-	// foreman-pro twins, the mechanical executors and the speccer retire, and
+	// foreman-pro twins, the mechanical executors and the gpt speccer retire, and
 	// so do /flights:spec, /flights:init and /flights:orchestrate-cross-harness.
 	// None has a successor: the agents they once pointed at retired too.
+	// flights-speccer is no row: commit 5c7d67f1 restored it, and it ships.
 	{name: "foreman-pro", kind: retiredAgent, match: matchExact},
 	{name: "gpt-foreman-pro", kind: retiredAgent, match: matchExact},
 	{name: "flights-mechanical-executor", kind: retiredAgent, match: matchExact},
 	{name: "gpt-flights-mechanical-executor", kind: retiredAgent, match: matchExact},
-	{name: "flights-speccer", kind: retiredAgent, match: matchExact},
 	{name: "gpt-flights-speccer", kind: retiredAgent, match: matchExact},
 	{name: "/flights:spec", kind: retiredCommand, match: matchExact},
 	{name: "/flights:init", kind: retiredCommand, match: matchExact},

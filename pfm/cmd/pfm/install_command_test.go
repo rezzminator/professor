@@ -415,6 +415,39 @@ func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) 
 	}
 }
 
+// TestInstallAcceptsTheRetiredSkipHarvestFlag: a v0.82 updater passes
+// --skip-harvest to the new binary's install --yes; it is a named no-op, so
+// the install exits as it does without the flag instead of rolling back.
+func TestInstallAcceptsTheRetiredSkipHarvestFlag(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
+		return installer.Report{}, nil
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
+	for _, args := range [][]string{{"--yes"}, {}} {
+		var plainOut, plainErr, stdout, stderr bytes.Buffer
+		plain := runInstall(args, &plainOut, &plainErr, runtime)
+		code := runInstall(append([]string{"--skip-harvest"}, args...), &stdout, &stderr, runtime)
+		if code != plain || code != 0 {
+			t.Fatalf(
+				"args=%q code=%d without the flag=%d stdout=%q stderr=%q",
+				args,
+				code,
+				plain,
+				stdout.String(),
+				stderr.String(),
+			)
+		}
+		if want := "pfm install: --skip-harvest is retired and ignored; harvest moved to the harvester plugin\n"; stderr.String() != want {
+			t.Fatalf("args=%q stderr=%q, want %q", args, stderr.String(), want)
+		}
+		if stdout.String() != plainOut.String() {
+			t.Fatalf("args=%q stdout=%q, want the flagless %q", args, stdout.String(), plainOut.String())
+		}
+	}
+}
+
 func TestInstallOfflinePreviewPreservesTheConfirmationFlag(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })

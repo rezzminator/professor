@@ -51,7 +51,7 @@ var phaseClasses = map[phase]string{
 	phaseStore:    "account-is-store store-identity account-entry-real home-state-file",
 	phaseWiring: "pfm-settings pfm-mcp staged-shim third-party-mcp " +
 		"function-hook-modules shell-claude-env",
-	phaseCleanup: "staged-prompts shared-db stray-dir unclassified " +
+	phaseCleanup: "staged-prompts shared-db retired-harvester-config stray-dir unclassified " +
 		"stale-state-tmp beside-backup",
 	phaseInstall: "retired-store-entry",
 }

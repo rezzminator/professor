@@ -63,6 +63,30 @@ func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	return runtime
 }
 
+// TestDoctorAcceptsTheRetiredSkipHarvestFlag: a v0.82 updater passes
+// --skip-harvest to the new binary's doctor; it is a named no-op, so doctor
+// exits as it does without the flag instead of failing the update on usage.
+func TestDoctorAcceptsTheRetiredSkipHarvestFlag(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	var plainOut, plainErr, stdout, stderr bytes.Buffer
+	plain := runDoctor(nil, &plainOut, &plainErr, runtime)
+	if code := runDoctor([]string{"--skip-harvest"}, &stdout, &stderr, runtime); code != plain {
+		t.Fatalf(
+			"doctor --skip-harvest code=%d, without it %d; stdout=%q stderr=%q",
+			code,
+			plain,
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+	if want := "pfm doctor: --skip-harvest is retired and ignored; harvest moved to the harvester plugin\n"; !strings.HasPrefix(
+		stderr.String(),
+		want,
+	) {
+		t.Fatalf("doctor --skip-harvest stderr=%q, want it to open with %q", stderr.String(), want)
+	}
+}
+
 func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	var stdout, stderr bytes.Buffer

@@ -30,6 +30,10 @@ const retiredGptHookReceiptName = "gpt-hook-ownership.json"
 // retiredStateDirs are pfm-owned directories under ~/.local/state/pfm whose
 // writers are gone: the call-cap hook's per-transcript tallies and the
 // tracetree cut gate's stamp records. Install removes each whole.
+// harvest-python is deliberately absent: the harvester plugin's setup
+// (plugins/harvester/internal/setup/setup.go) migrates its cache and models
+// out of ~/.local/state/pfm/harvest-python and then removes it, so pfm must
+// not delete it first.
 var retiredStateDirs = []struct{ name, what string }{
 	{"call-cap", "retired call-cap tally directory"},
 	{"cutgate", "retired tracetree cut-gate stamp directory"},

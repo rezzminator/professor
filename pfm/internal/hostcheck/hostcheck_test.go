@@ -122,7 +122,7 @@ func TestHostcheckAPI(t *testing.T) {
 		t.Fatal("severity count")
 	}
 	want := strings.Fields(
-		"legacy-config pre-split-config legacy-state-db legacy-cache-db pfm-settings pfm-mcp staged-shim staged-prompts shared-db stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup function-hook-modules shell-claude-env tmux-servers",
+		"legacy-config pre-split-config legacy-state-db legacy-cache-db pfm-settings pfm-mcp staged-shim staged-prompts shared-db retired-harvester-config stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup function-hook-modules shell-claude-env tmux-servers",
 	)
 	var got []string
 	for _, detector := range Detectors() {

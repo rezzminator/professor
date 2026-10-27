@@ -56,7 +56,10 @@ func TestPrintHostChecks(t *testing.T) {
 					want += "host-check: BLOCK pre-split-config " + unreadable + " — UNREADABLE " + unreadable + ": " + syscall.ENOTDIR.Error() + "\n" +
 						"host-check:   fix: make " + unreadable + " readable to you, then rerun\n"
 				}
-				wantFailures = 2
+				unreadable := filepath.Join(path, "harvester.config.json")
+				want += "host-check: BLOCK retired-harvester-config " + unreadable + " — UNREADABLE " + unreadable + ": " + syscall.ENOTDIR.Error() + "\n" +
+					"host-check:   fix: make " + unreadable + " readable to you, then rerun\n"
+				wantFailures = 3
 
 			}
 			if path != "" {

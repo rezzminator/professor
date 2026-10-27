@@ -101,6 +101,7 @@ func Detectors() []Detector {
 		{"staged-shim", stagedShim},
 		{"staged-prompts", stagedPrompts},
 		{"shared-db", sharedDB},
+		{checkRetiredHarvesterConfig, retiredHarvesterConfig},
 		{"stray-dir", strayDir},
 		{"account-is-store", accountIsStore},
 		{"store-identity", storeIdentity},

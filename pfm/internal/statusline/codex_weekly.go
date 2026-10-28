@@ -21,16 +21,8 @@ type codexWindow struct {
 	ResetsAt           int64   `json:"resetsAt"`
 }
 
-// codexWeeklyLine shares the Codex renderer's cache and detached refresher.
-// Match the widest rendered sibling row, keeping the label intact when space allows.
-// Hook COLUMNS bounds that width: the managed local Claude footer has two outer
-// cells per side and statusLine.padding=0. Remote layouts and user padding
-// overrides are not exposed by the hook.
-func codexWeeklyLine(runtime Runtime, now time.Time, siblingLines ...string) string {
-	return fullWidthRow(runtime, codexWeeklyRow(runtime, now), siblingLines...)
-}
-
-// codexWeeklyRow reads the shared Codex cache into a drawable reading.
+// codexWeeklyRow reads the shared Codex cache into a drawable reading, arming
+// the Codex renderer's detached refresher; claudeQuotaRows sizes and draws it.
 func codexWeeklyRow(runtime Runtime, now time.Time) quotaRow {
 	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
 	armRefresh(runtime, RefreshKindCodex, path, 5*time.Minute)

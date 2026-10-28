@@ -55,7 +55,7 @@ function fitPrefix(text: string, fits: (prefix: string) => boolean): string {
  * event and plugin shorten in that order; it never throws on size.
  */
 export function levelRow(fields: PluginLogFields, nowMs: number): string {
-  if (!(fields.level in LEVEL_FILES)) throw new Error(`plugin log invalid level: ${String(fields.level)}`);
+  if (!Object.prototype.hasOwnProperty.call(LEVEL_FILES, fields.level)) throw new Error(`plugin log invalid level: ${String(fields.level)}`);
   const own = fields.ts === undefined ? Number.NaN : Date.parse(fields.ts);
   const row: Record<string, unknown> = { ts: new Date(Number.isFinite(own) ? own : nowMs).toISOString(), plugin: fields.plugin, level: fields.level, event: fields.event, msg: fields.msg, where: fields.where, ...(fields.session ? { session: fields.session } : {}), ...(fields.detail !== undefined ? { detail: fields.detail } : {}) };
   const serialize = () => `${JSON.stringify(row)}\n`;

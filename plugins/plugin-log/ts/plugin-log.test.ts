@@ -102,6 +102,49 @@ describe('the append script', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it('carries the session into a cap row only when the row has one, never a decoy from msg or detail', async () => {
+    const session = 's"\\\n\u9686';
+    for (const known of [true, false]) {
+      const dir = scratch('cap-session');
+      try {
+        fill(join(dir, 'info.jsonl'));
+        const text = log.levelRow({ ...fields, level: 'info', msg: 'literal ,"session":"decoy", "detail":{}', detail: { session: 'nested decoy' }, session: known ? session : undefined }, now);
+        assert.equal(await shell(dir, ['info.jsonl', text]), 0);
+        assert.deepEqual(rows(dir, 'warnings.jsonl'), [{ ts: JSON.parse(text).ts, plugin: 'demo', ...spec.capped, where: 'src/plugin-log.ts#APPEND_SCRIPT', ...(known ? { session } : {}), detail: { file: 'info.jsonl' } }]);
+        assert.deepEqual(rows(dir, 'info.jsonl'), [JSON.parse(text)]);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
+  });
+
+  it('bounds a cap row past the row limit: its detail becomes its size, then its msg shortens', async () => {
+    const dir = scratch('cap-bound');
+    const session = 's'.repeat(3890);
+    try {
+      fill(join(dir, 'errors.jsonl'));
+      const text = log.levelRow({ ...fields, event: '', msg: '', where: '', session }, now);
+      const expected = { ts: JSON.parse(text).ts, plugin: 'demo', ...spec.capped, where: 'src/plugin-log.ts#APPEND_SCRIPT', session, detail: { file: 'errors.jsonl' } };
+      const detail = { truncated: true, bytes: Buffer.byteLength(JSON.stringify(expected) + '\n') };
+      const available = spec.rowMaxBytes - Buffer.byteLength(JSON.stringify({ ...expected, msg: '', detail }) + '\n');
+      assert.ok(available > 0 && available < expected.msg.length);
+      assert.equal(await shell(dir, ['errors.jsonl', text]), 0);
+      assert.deepEqual(rows(dir, 'warnings.jsonl'), [{ ...expected, msg: expected.msg.slice(0, available), detail }]);
+      assert.ok(Buffer.byteLength(readFileSync(join(dir, 'warnings.jsonl'))) <= spec.rowMaxBytes);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('fails, naming the warnings file, when a cap row cannot fit even with no msg, and appends no oversized row', async () => {
+    const dir = scratch('cap-large');
+    try {
+      fill(join(dir, 'errors.jsonl'));
+      const text = log.levelRow({ ...fields, event: '', msg: '', where: '', session: 's'.repeat(3950) }, now);
+      assert.ok(Buffer.byteLength(text) <= spec.rowMaxBytes);
+      const failed = await exec('/bin/sh', ['-c', log.APPEND_SCRIPT, 'plugin-log', dir, 'demo', 'errors.jsonl', text]).then(() => undefined, (error) => error);
+      assert.equal(failed?.code, 1);
+      assert.match(failed.stderr, new RegExp(`${dir}/warnings\\.jsonl: cap warning metadata exceeds ${spec.rowMaxBytes} bytes`));
+      assert.equal(existsSync(join(dir, 'warnings.jsonl')), false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('clears a stage and a broken lock whose writer is dead, keeping a live writer\'s stage', async () => {
     const dir = scratch('stale');
     const dead = 999_999;

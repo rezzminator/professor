@@ -57,15 +57,6 @@ func barRow(row quotaRow, columns int) string {
 	return bar + " " + row.label
 }
 
-// fullWidthRow draws row at the shared full-row width; "" when no content column exists.
-func fullWidthRow(runtime Runtime, row quotaRow, siblingLines ...string) string {
-	columns, ok := rowColumns(runtime, []int{ansi.StringWidth(row.label)}, siblingLines...)
-	if !ok {
-		return ""
-	}
-	return barRow(row, columns)
-}
-
 // compactRow is the label with a fixed 5-cell bar.
 func compactRow(row quotaRow) string {
 	return barRow(row, ansi.StringWidth(row.label)+1+5)

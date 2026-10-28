@@ -11,7 +11,6 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestClaudeEnvDoctor: each claude.env key missing from, or different in, the
@@ -199,7 +198,7 @@ func TestClaudeEnvPluginLogMissingHasOneRepair(t *testing.T) {
 			var out bytes.Buffer
 			tally := &doctorTally{}
 			printClaudeEnvDoctor(&out, managed, settings, env, build, tally)
-			printPluginLogsDoctor(&out, []string{fixture.store}, build, &paths.MapEnv{},
+			printPluginLogsDoctor(&out, []string{fixture.store}, build,
 				func(string, uint32) error { return nil }, tally)
 			if tally.failures+tally.warnings != 1 ||
 				strings.Count(out.String(), " — set ")+strings.Count(out.String(), " — run pfm install") != 1 {

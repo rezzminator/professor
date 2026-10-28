@@ -390,9 +390,10 @@ func appendRateSegments(line string, now time.Time, data input) string {
 
 // claudeQuotaRows is the Claude quota block, every row the same width: 5h and
 // 7d-fable share the top row at half width each, the 7d under it and the Codex
-// weekly last at full width. That width is the widest sibling row (the compact
-// forms count as siblings), bounded by the terminal; a terminal with no content
-// column drops the Codex row and leaves the quotas at their compact width.
+// weekly last at full width. That width is 115% of the widest sibling row
+// (rowColumns; the compact forms count as siblings), capped by the terminal; a
+// terminal with no content column drops the Codex row and leaves the quotas at
+// their compact width.
 func claudeQuotaRows(runtime Runtime, now time.Time, data input, l1, l2 string) string {
 	codex := codexWeeklyRow(runtime, now)
 	widths := []int{ansi.StringWidth(codex.label)}

@@ -23,6 +23,7 @@ type indicatorKernel struct {
 	imageReads int
 	reexec     bool
 	recycle    bool
+	goneAfter  int
 }
 
 func (k *indicatorKernel) Image(pid int) (gather.FileID, error) {
@@ -30,6 +31,9 @@ func (k *indicatorKernel) Image(pid int) (gather.FileID, error) {
 	image := k.images[pid]
 	if k.reexec && k.imageReads > 1 {
 		image.Inode++
+	}
+	if k.goneAfter > 0 && k.imageReads > k.goneAfter {
+		return gather.FileID{}, fs.ErrNotExist
 	}
 	return image, k.imageErr
 }
@@ -48,6 +52,7 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 		"stale", "current", "foreign", "absent", "duplicate socket", "two sockets",
 		"list error", "unreadable", "image error", "environment error", "missing socket", "zero start",
 		"reexec", "recycled pid", "start error", "stop error", "extra args", "gone image", "missing binary",
+		"exits before signal",
 	} {
 		t.Run(name, func(t *testing.T) {
 			binary := filepath.Join(t.TempDir(), "pfm")
@@ -130,6 +135,9 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 			case "missing binary":
 				binary += ".absent"
 				wantErr = "installed binary"
+			case "exits before signal":
+				k.goneAfter = 1
+				wantStops = 0
 			}
 			runner := &deps.FakeRunner{}
 			var startErr error

@@ -11,13 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // pluginLogFolderAccess is what a plugin needs of its log folder: list it,
@@ -27,7 +27,7 @@ const pluginLogFolderAccess = unix.R_OK | unix.W_OK | unix.X_OK
 // printManagedPluginLogsDoctor includes the exact files claude_env delegates,
 // not merely their parent directories: a symlink target need not be settings.json.
 func printManagedPluginLogsDoctor(stdout io.Writer, dirs []string, build installer.ClaudePluginBuild,
-	env paths.Env, managedRoot, settingsPath string, tally *doctorTally,
+	managedRoot, settingsPath string, tally *doctorTally,
 ) {
 	var files []string
 	if obs.AlphaBuild(build.Version) {
@@ -42,7 +42,7 @@ func printManagedPluginLogsDoctor(stdout io.Writer, dirs []string, build install
 			)
 		}
 	}
-	printPluginLogsDoctor(stdout, dirs, build, env, unix.Access, tally, files...)
+	printPluginLogsDoctor(stdout, dirs, build, unix.Access, tally, files...)
 }
 
 // printPluginLogsDoctor checks the plugin-logs system on an -alpha build, the
@@ -53,15 +53,13 @@ func printManagedPluginLogsDoctor(stdout io.Writer, dirs []string, build install
 // absolute path — missing, differing, relative and unreadable are a line each.
 // Each set folder must be a directory access grants read, write and search
 // on (pluginLogFolderGap). While a value is set, no marketplace plugin may
-// hold a row in its fallback (installer.PluginLogFallbackDir, resolved with
-// env). A read that fails is a failure naming it, never a clean answer. Every
+// hold a row in its fallback (installer.PluginLogFallbackDir). A read that fails is a failure naming it, never a clean answer. Every
 // line prints its text control-escaped (installer.EscapeControl): a value read
 // from a file cannot forge a line.
 func printPluginLogsDoctor(
 	stdout io.Writer,
 	dirs []string,
 	build installer.ClaudePluginBuild,
-	env paths.Env,
 	access func(string, uint32) error,
 	tally *doctorTally,
 	extraSettings ...string,
@@ -106,7 +104,7 @@ func printPluginLogsDoctor(
 		return setting.Value != ""
 	})
 	if set {
-		checkPluginLogFallbacks(build, env, warn, fail)
+		checkPluginLogFallbacks(build, warn, fail)
 	}
 	if clean {
 		note("ok: %s=%s in every config dir", installer.PluginLogDirEnv, strings.Join(folders, ","))
@@ -208,7 +206,7 @@ func pluginLogFolderGap(folder string, access func(string, uint32) error) (strin
 
 // checkPluginLogFallbacks counts the rows each marketplace plugin left in its
 // fallback (installer.PluginLogFallbackDir) while a log folder is set.
-func checkPluginLogFallbacks(build installer.ClaudePluginBuild, env paths.Env, warn, fail func(string, ...any)) {
+func checkPluginLogFallbacks(build installer.ClaudePluginBuild, warn, fail func(string, ...any)) {
 	switch {
 	case build.SourceRepoErr != nil:
 		fail("fallback logs not checked: source clone unresolved: %v", build.SourceRepoErr)
@@ -223,11 +221,7 @@ func checkPluginLogFallbacks(build installer.ClaudePluginBuild, env paths.Env, w
 		return
 	}
 	for _, name := range names {
-		dir, err := installer.PluginLogFallbackDir(env, build.Home, name)
-		if err != nil {
-			fail("plugin %s: fallback logs not checked: %v", name, err)
-			continue
-		}
+		dir := installer.PluginLogFallbackDir(build.Home, name)
 		rows, err := fallbackLogRows(dir)
 		switch {
 		case err != nil:
@@ -240,9 +234,9 @@ func checkPluginLogFallbacks(build installer.ClaudePluginBuild, env paths.Env, w
 }
 
 // fallbackLogRows is the non-blank lines over dir's *.jsonl files and their
-// *.jsonl.1 rotations (a writer moves a full file aside to .1); none when dir
-// does not exist. A matching name that is not a regular file is an error: a
-// FIFO or a device would block or never end.
+// rotated generations *.jsonl.{n} (the plugin-log library keeps .1 to .5);
+// none when dir does not exist. A matching name that is not a regular file is
+// an error: a FIFO or a device would block or never end.
 func fallbackLogRows(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -254,7 +248,7 @@ func fallbackLogRows(dir string) (int, error) {
 	rows := 0
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, ".jsonl.1") {
+		if !pluginLogFile(name) {
 			continue
 		}
 		path := filepath.Join(dir, name)
@@ -283,4 +277,15 @@ func fallbackLogRows(dir string) (int, error) {
 		}
 	}
 	return rows, nil
+}
+
+// pluginLogFile reports a level file name, *.jsonl, or one of its rotated
+// generations, *.jsonl.{n} with n a positive integer.
+func pluginLogFile(name string) bool {
+	_, generation, rotated := strings.Cut(name, ".jsonl.")
+	if !rotated {
+		return strings.HasSuffix(name, ".jsonl")
+	}
+	n, err := strconv.Atoi(generation)
+	return err == nil && n > 0
 }

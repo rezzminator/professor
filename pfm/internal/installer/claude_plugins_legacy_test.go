@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -321,6 +322,72 @@ func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
 				t.Fatalf("a second run ran %q or changed something:\n%s", pluginArgvs(runner), out.String())
 			}
 		})
+	}
+}
+
+// TestEnsureClaudePluginsInstallsForTheUserBeforeMovingAUserLegacyID: a
+// plugin of ours recorded only in a project, yet enabled in the user's
+// settings, is no user-scope install, so its user-scope legacy id is
+// uninstalled only after {name}@professor is installed at user scope: the
+// user never loses the plugin outside that project.
+func TestEnsureClaudePluginsInstallsForTheUserBeforeMovingAUserLegacyID(t *testing.T) {
+	names := []string{"cache-live-control", "auto-effort-control"}
+	inst, runner, out, home, first := alphaPluginEngine(t, "")
+	inst.options.SourceRepo = writeMarketplaceClone(t, names, names)
+	inst.options.ClaudePlugins = bareList(names...)
+	simulateClaudeLegacy(t, runner)
+	project := writeLegacyHost(t, home, first)
+	edit := func(path string, change func(document map[string]any)) {
+		document := map[string]any{}
+		if err := json.Unmarshal([]byte(readFixture(t, path)), &document); err != nil {
+			t.Fatal(err)
+		}
+		change(document)
+		raw, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, path, string(raw))
+	}
+	installPath := filepath.Join(first, "plugins", "cache", "clc-professor")
+	if err := os.MkdirAll(installPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	edit(filepath.Join(first, "plugins", "installed_plugins.json"), func(document map[string]any) {
+		document["plugins"].(map[string]any)["cache-live-control@professor"] = []any{map[string]any{
+			"scope": "project", "projectPath": project, "installPath": installPath, "version": checkoutVersion,
+		}}
+	})
+	edit(filepath.Join(first, "settings.json"), func(document map[string]any) {
+		document["enabledPlugins"].(map[string]any)["cache-live-control@professor"] = true
+	})
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	calls := pluginArgvs(runner)
+	userInstall := slices.Index(calls, "plugin install cache-live-control@professor --scope user -y")
+	userUninstall := slices.Index(
+		calls,
+		"plugin uninstall cache-live-control@cache-live-control-dev --scope user --keep-data",
+	)
+	if userInstall < 0 || userUninstall < userInstall {
+		t.Fatalf(
+			"calls %q: want the user-scope install before the user-scope legacy uninstall\n%s",
+			calls,
+			out.String(),
+		)
+	}
+	records, err := readClaudePluginInstalls(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(records["cache-live-control@professor"], func(have claudePluginInstall) bool {
+		return have.Scope == "user"
+	}) {
+		t.Fatalf(
+			"cache-live-control@professor records = %v, want a user-scope one",
+			records["cache-live-control@professor"],
+		)
 	}
 }
 

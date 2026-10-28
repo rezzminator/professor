@@ -293,7 +293,6 @@ func Run(
 	}
 	printManagedPluginLogsDoctor(
 		stdout, append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...), pluginBuild,
-		installer.ClaudePluginEnvironment(dependencies.Env, claudeEnv),
 		installer.ManagedRoot(resolved.Home), filepath.Join(claudeEnvDir, "settings.json"), tally,
 	)
 	printClaudeEnvDoctor(

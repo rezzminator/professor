@@ -33,7 +33,7 @@ while [ "$#" -gt 0 ]; do
     --adopt) adopt=1 ;;
     --plugins-dir) [ "$#" -ge 2 ] || usage 'missing value for --plugins-dir'; plugins_dir=$2; shift ;;
     -*) usage "unknown option $1" ;;
-    *) printf '%s\n' "$ROSTER" | grep -q "^$1 " || usage "unknown plugin $1"; only+=("$1") ;;
+    *) printf '%s\n' "$ROSTER" | cut -d' ' -f1 | grep -qxF -- "$1" || usage "unknown plugin $1"; only+=("$1") ;;
   esac
   shift
 done
@@ -43,7 +43,7 @@ done
 
 checked=0; drift=0; absent=0
 while read -r plugin source copy; do
-  if [ "${#only[@]}" -gt 0 ] && ! printf '%s\n' "${only[@]}" | grep -qx -- "$plugin"; then continue; fi
+  if [ "${#only[@]}" -gt 0 ] && ! printf '%s\n' "${only[@]}" | grep -qxF -- "$plugin"; then continue; fi
   canon="$CANON/$source"
   [ -f "$canon" ] || { echo "plugin-log-sync: canonical file missing: $canon" >&2; exit 2; }
   checkout="$plugins_dir/$plugin"

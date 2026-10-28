@@ -298,7 +298,7 @@ func TestClaudeCodexWeeklyNarrowWidths(t *testing.T) {
 				var warnings bytes.Buffer
 				runtime.Warn = &warnings
 				weeklyCache(t, runtime, body, 2*time.Hour)
-				last := codexWeeklyLine(runtime, runtime.now(), "Claude quota fallback")
+				last := weeklyRowAt(runtime, "Claude quota fallback")
 				contentColumns := max(0, columns-4)
 				if got := ansi.StringWidth(last); got > contentColumns || got == 0 && contentColumns > 0 {
 					t.Fatalf("weekly row width %d must fit %d content columns: %q", got, contentColumns, last)
@@ -335,7 +335,7 @@ func TestClaudeCodexWeeklyUnknownWidth(t *testing.T) {
 			weeklyCache(t, runtime,
 				`{"primary":{"usedPercent":52,"windowDurationMins":10080,"resetsAt":1787122800}}`,
 				time.Minute)
-			line := codexWeeklyLine(runtime, runtime.now(), claudeLine)
+			line := weeklyRowAt(runtime, claudeLine)
 			if !strings.HasSuffix(ansi.Strip(line), "codex-7d-used:52% ↻3d7h") {
 				t.Fatalf("unknown width lost reset: %q", line)
 			}
@@ -368,7 +368,7 @@ func TestClaudeCodexWeeklyLabelFitsShortSiblings(t *testing.T) {
 				if test.body != "" {
 					weeklyCache(t, runtime, test.body, test.age)
 				}
-				line := codexWeeklyLine(runtime, runtime.now(), green+"界"+reset, "tiny")
+				line := weeklyRowAt(runtime, green+"界"+reset, "tiny")
 				if got := ansi.Strip(line); !strings.HasSuffix(got, test.want) {
 					t.Fatalf("short siblings must not clip weekly text when it fits: got %q, want %q", got, test.want)
 				}
@@ -396,4 +396,15 @@ func TestClaudeCodexWeeklyFailedRefreshIsThrottled(t *testing.T) {
 	if refreshes != 2 {
 		t.Fatalf("failed refresh never retried after TTL: %d", refreshes)
 	}
+}
+
+// weeklyRowAt draws the Codex weekly row alone at the quota width its siblings
+// set, as claudeQuotaRows does; "" when no content column exists.
+func weeklyRowAt(runtime Runtime, siblingLines ...string) string {
+	row := codexWeeklyRow(runtime, runtime.now())
+	columns, ok := rowColumns(runtime, []int{ansi.StringWidth(row.label)}, siblingLines...)
+	if !ok {
+		return ""
+	}
+	return barRow(row, columns)
 }

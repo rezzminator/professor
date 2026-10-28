@@ -125,9 +125,17 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 			}
 			done[key] = true
 			reason := "legacy id of " + target.ID
-			if entry.Scope != "user" && !slices.ContainsFunc(records[target.ID], func(have claudePluginInstall) bool {
-				return have.Scope == entry.Scope && have.ProjectPath == entry.ProjectPath
-			}) && command(id+" is installed in this project; "+target.ID+" replaces it", dir,
+			// A target recorded only in a project is no user-scope install: the user-scope
+			// legacy id goes only once the target is installed there too. A target this
+			// pass installed (run.missing) is at user scope already, or previewed so.
+			userScope, where := entry.Scope == "user", "in this project"
+			if userScope {
+				where = "for this user"
+			}
+			if (!userScope || !slices.Contains(run.missing, target.ID)) &&
+				!slices.ContainsFunc(records[target.ID], func(have claudePluginInstall) bool {
+					return have.Scope == entry.Scope && have.ProjectPath == entry.ProjectPath
+				}) && command(id+" is installed "+where+"; "+target.ID+" replaces it", dir,
 				"install", target.ID, "--scope", entry.Scope, "-y") != nil {
 				gone[id] = false
 				continue

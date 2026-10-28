@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ExtensionCheck is one independently named extension drift check.
@@ -18,7 +19,11 @@ type ExtensionCheck struct{ Extension, Engine, Target, Aspect, Problem string }
 func ConfigureExtensions(options *Options, machine pfmconfig.Config) {
 	options.Extensions = machine.Extensions
 	options.ClaudePlugins = machine.ExtensionClaudePlugins()
-	options.ClaudeEnv = machine.ExtensionClaudeEnv()
+	env := options.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	options.ClaudeEnv = machine.ExtensionClaudeEnv(env, options.Home)
 	options.ClaudePluginsDefault = machine.Source(pfmconfig.KeyClaudePlugins) == pfmconfig.SourceDefault
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func printExtensionsDoctor(
@@ -14,9 +15,11 @@ func printExtensionsDoctor(
 	stdout io.Writer,
 	home, claudeDir string,
 	machine config.Config,
+	env paths.Env,
 	tally *doctorTally,
 ) {
 	options := installer.Options{
+		Env:                env,
 		Home:               home,
 		PrimaryConfigDir:   claudeDir,
 		CodexBinary:        machine.Codex.Binary,

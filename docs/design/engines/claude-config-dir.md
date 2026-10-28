@@ -64,7 +64,6 @@ Claude's state file is `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`. With the vari
 | `settings.json` | file | shared user settings; seed `{}\n` |
 | `CLAUDE.md` | file | user memory; empty seed |
 | `history.jsonl` | file | prompt history; empty seed |
-| `stats-cache.json` | file | statistics cache; empty seed |
 | `.last-cleanup` | file | cleanup marker; empty seed |
 | `gh-pr-status-cache.json` | file | pull-request status cache; empty seed |
 | `tool-visibility-controller.json` | file | the tool-visibility-controller plugin's user scope file; seed `{}\n` (a missing file is no rule, an empty one is invalid JSON) |
@@ -93,8 +92,9 @@ Every missing entry is created empty (apart from the `settings.json` and `tool-v
 | `telemetry` | queued account telemetry |
 | `feedback` | queued account feedback |
 | `.last-update-result.json` | the native updater's last result |
+| `stats-cache.json` | the `/stats` statistics cache |
 
-`.last-update-result.json` was a store entry until Claude's native updater was seen writing it by temp file and rename at the account path, which replaces a link with a real file. It is the first of `RetiredStoreEntries` (`pfm/internal/installer/retired_store_entries.go`): an entry once linked from every account and now per-account. A real file in an account dir is the healthy shape; a leftover link into the store and the store copy are `retired-store-entry` warnings, which `pfm install` migrates ([Install build](#install-build)). A future retirement is one more row in that list and its name in `AccountEntries`.
+`.last-update-result.json` and `stats-cache.json` were store entries until Claude was seen writing each by temp file and rename at the account path (the native updater and `/stats`), which replaces a link with a real file. They are the `RetiredStoreEntries` (`pfm/internal/installer/retired_store_entries.go`): entries once linked from every account and now per-account. A real file in an account dir is the healthy shape; a leftover link into the store and the store copy are `retired-store-entry` warnings, which `pfm install` migrates ([Install build](#install-build)). A future retirement is one more row in that list and its name in `AccountEntries`.
 
 `sessions/{pid}.json` describes a live process, rather than the conversation transcript. On reload, the new process registers in the selected account's directory. For `state` inside the store, `store-identity` checks only `state/mcp-discover-verdicts.json`, and it skips `cache` there (a rebuildable cache that other tools' hooks also write under the store). While account 1's dir resolves to the store, each identity path in the store is the same file as its account path, so `store-identity` prints no delete: the entry moves into the real dir that `account-is-store`'s fix makes ([host-checks.md](host-checks.md#store-identity)). Unknown names in either the store or an account report `UNCLASSIFIED` and remain untouched, except a regular `*.md` file at the store's top level.
 

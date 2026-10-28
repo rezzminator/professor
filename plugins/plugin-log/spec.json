@@ -1,0 +1,246 @@
+{
+  "about": "The plugin-log contract every language implementation is tested against: plugins/CLAUDE.md § Logging. A row's expected text is what the TypeScript implementation writes; Go and Python must write the same bytes.",
+  "capBytes": 20971520,
+  "keep": 5,
+  "rowMaxBytes": 4096,
+  "holdRows": 2000,
+  "dirMode": 448,
+  "fileMode": 384,
+  "files": {
+    "error": "errors.jsonl",
+    "warning": "warnings.jsonl",
+    "info": "info.jsonl",
+    "debug": "debug.jsonl"
+  },
+  "onScreen": {
+    "error": true,
+    "warning": false,
+    "info": false,
+    "debug": false
+  },
+  "keys": [
+    "ts",
+    "plugin",
+    "level",
+    "event",
+    "msg",
+    "where",
+    "session",
+    "detail"
+  ],
+  "dirs": [
+    {
+      "override": "/x/logs",
+      "home": "/h/u",
+      "plugin": "demo",
+      "dir": "/x/logs/demo"
+    },
+    {
+      "override": "/x/logs/",
+      "home": null,
+      "plugin": "demo",
+      "dir": "/x/logs/demo"
+    },
+    {
+      "override": null,
+      "home": "/h/u",
+      "plugin": "demo",
+      "dir": "/h/u/.local/state/demo/logs"
+    },
+    {
+      "override": "",
+      "home": "/h/u/",
+      "plugin": "demo",
+      "dir": "/h/u/.local/state/demo/logs"
+    },
+    {
+      "override": "-logs",
+      "home": null,
+      "plugin": "demo",
+      "dir": "-logs/demo"
+    },
+    {
+      "override": null,
+      "home": "",
+      "plugin": "demo",
+      "dir": null
+    },
+    {
+      "override": null,
+      "home": null,
+      "plugin": "demo",
+      "dir": null
+    }
+  ],
+  "capped": {
+    "level": "warning",
+    "event": "log-capped",
+    "msg": "level file exceeded 20971520 bytes; moved aside"
+  },
+  "dropped": {
+    "level": "error",
+    "event": "plugin-log-rows-dropped",
+    "msg": "{rows} unwritten rows were dropped past the 2000-row hold"
+  },
+  "screen": {
+    "off": "{plugin}: plugin log off: no PLUGIN_LOG_DIR and no HOME",
+    "failing": "{plugin}: plugin log {dir} failed: {cause}; {held} rows are kept for the next write"
+  },
+  "rows": [
+    {
+      "name": "every key",
+      "nowMs": 1791991231123,
+      "fields": {
+        "plugin": "demo",
+        "level": "error",
+        "event": "write-failed",
+        "msg": "the write failed",
+        "where": "src/demo.ts#write",
+        "session": "s1",
+        "detail": {
+          "count": 2,
+          "error": "refused"
+        }
+      },
+      "row": "{\"ts\":\"2026-10-14T15:20:31.123Z\",\"plugin\":\"demo\",\"level\":\"error\",\"event\":\"write-failed\",\"msg\":\"the write failed\",\"where\":\"src/demo.ts#write\",\"session\":\"s1\",\"detail\":{\"count\":2,\"error\":\"refused\"}}\n"
+    },
+    {
+      "name": "no session, no detail",
+      "nowMs": 1791991231123,
+      "fields": {
+        "plugin": "demo",
+        "level": "info",
+        "event": "started",
+        "msg": "started",
+        "where": "src/demo.ts#start"
+      },
+      "row": "{\"ts\":\"2026-10-14T15:20:31.123Z\",\"plugin\":\"demo\",\"level\":\"info\",\"event\":\"started\",\"msg\":\"started\",\"where\":\"src/demo.ts#start\"}\n"
+    },
+    {
+      "name": "debug level",
+      "nowMs": 0,
+      "fields": {
+        "plugin": "demo",
+        "level": "debug",
+        "event": "step",
+        "msg": "one step",
+        "where": "src/demo.ts#step",
+        "session": "s2"
+      },
+      "row": "{\"ts\":\"1970-01-01T00:00:00.000Z\",\"plugin\":\"demo\",\"level\":\"debug\",\"event\":\"step\",\"msg\":\"one step\",\"where\":\"src/demo.ts#step\",\"session\":\"s2\"}\n"
+    },
+    {
+      "name": "own ts",
+      "nowMs": 1791991231123,
+      "fields": {
+        "ts": "2026-01-02T03:04:05.006Z",
+        "plugin": "demo",
+        "level": "warning",
+        "event": "skips",
+        "msg": "folded",
+        "where": "src/demo.ts#fold"
+      },
+      "row": "{\"ts\":\"2026-01-02T03:04:05.006Z\",\"plugin\":\"demo\",\"level\":\"warning\",\"event\":\"skips\",\"msg\":\"folded\",\"where\":\"src/demo.ts#fold\"}\n"
+    },
+    {
+      "name": "escapes",
+      "nowMs": 1791991231123,
+      "fields": {
+        "plugin": "demo",
+        "level": "warning",
+        "event": "odd-text",
+        "msg": "line\n\"quoted\" \\ tab\t <&> é 🙂 \u0001",
+        "where": "src/demo.ts#odd",
+        "detail": {
+          "a": "<b>",
+          "z": [
+            "x",
+            1,
+            true,
+            null
+          ]
+        }
+      },
+      "row": "{\"ts\":\"2026-10-14T15:20:31.123Z\",\"plugin\":\"demo\",\"level\":\"warning\",\"event\":\"odd-text\",\"msg\":\"line\\n\\\"quoted\\\" \\\\ tab\\t <&> é 🙂 \\u0001\",\"where\":\"src/demo.ts#odd\",\"detail\":{\"a\":\"<b>\",\"z\":[\"x\",1,true,null]}}\n"
+    },
+    {
+      "name": "oversized msg",
+      "nowMs": 1791991231123,
+      "fields": {
+        "plugin": "demo",
+        "level": "error",
+        "event": "big",
+        "where": "src/demo.ts#big",
+        "session": "s3"
+      },
+      "repeat": {
+        "msg": [
+          "🙂",
+          1500
+        ]
+      },
+      "repeatDetail": {
+        "error": [
+          "x",
+          600
+        ]
+      },
+      "row": "{\"ts\":\"2026-10-14T15:20:31.123Z\",\"plugin\":\"demo\",\"level\":\"error\",\"event\":\"big\",\"msg\":\"🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂\",\"where\":\"src/demo.ts#big\",\"session\":\"s3\",\"detail\":{\"truncated\":true,\"bytes\":6752}}\n"
+    },
+    {
+      "name": "oversized escapes",
+      "nowMs": 1791991231123,
+      "fields": {
+        "plugin": "demo",
+        "level": "error",
+        "event": "big",
+        "where": "src/demo.ts#big"
+      },
+      "repeat": {
+        "msg": [
+          "\n\"\\",
+          2000
+        ]
+      },
+      "row": "{\"ts\":\"2026-10-14T15:20:31.123Z\",\"plugin\":\"demo\",\"level\":\"error\",\"event\":\"big\",\"msg\":\"\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\\\"\\\\\\n\",\"where\":\"src/demo.ts#big\",\"detail\":{\"truncated\":true,\"bytes\":12115}}\n"
+    },
+    {
+      "name": "oversized session",
+      "nowMs": 1791991231123,
+      "fields": {
+        "plugin": "demo",
+        "level": "info",
+        "event": "big",
+        "msg": "m",
+        "where": "src/demo.ts#big",
+        "detail": {
+          "a": 1
+        }
+      },
+      "repeat": {
+        "session": [
+          "S",
+          5000
+        ]
+      },
+      "row": "{\"ts\":\"2026-10-14T15:20:31.123Z\",\"plugin\":\"demo\",\"level\":\"info\",\"event\":\"big\",\"msg\":\"\",\"where\":\"src/demo.ts#big\",\"session\":\"SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS\",\"detail\":{\"truncated\":true,\"bytes\":5145}}\n"
+    },
+    {
+      "name": "exactly at the bound",
+      "nowMs": 1791991231123,
+      "fields": {
+        "plugin": "demo",
+        "level": "info",
+        "event": "fit",
+        "where": "src/demo.ts#fit"
+      },
+      "repeat": {
+        "msg": [
+          "m",
+          3990
+        ]
+      },
+      "row": "{\"ts\":\"2026-10-14T15:20:31.123Z\",\"plugin\":\"demo\",\"level\":\"info\",\"event\":\"fit\",\"msg\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"where\":\"src/demo.ts#fit\",\"detail\":{\"truncated\":true,\"bytes\":4104}}\n"
+    }
+  ]
+}

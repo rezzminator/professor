@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestExtensionsDoctorUnreadableStateIsFailureWithRepair(t *testing.T) {
@@ -25,7 +26,7 @@ func TestExtensionsDoctorUnreadableStateIsFailureWithRepair(t *testing.T) {
 	}
 	var out bytes.Buffer
 	tally := &doctorTally{}
-	printExtensionsDoctor(context.Background(), &out, home, dir, machine, tally)
+	printExtensionsDoctor(context.Background(), &out, home, dir, machine, &paths.MapEnv{}, tally)
 	for _, aspect := range []string{"installed", "enabled", "options", "env"} {
 		if !strings.Contains(out.String(), "ponytail/claude "+aspect+" FAIL state unreadable:") {
 			t.Fatalf("unreadable %s rendered absent/clean: %s", aspect, out.String())

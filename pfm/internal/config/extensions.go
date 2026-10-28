@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Extension is one machine-wide switch. No registry entry is enabled by default.
@@ -187,12 +189,28 @@ func (config Config) ExtensionClaudePlugins() []ClaudePlugin {
 	return result
 }
 
-func (config Config) ExtensionClaudeEnv() map[string]string {
+// CallmeterCostLedgerDirEnv is callmeter's own option naming the cost ledger
+// it reads; callmeter reads none while it is unset.
+const CallmeterCostLedgerDirEnv = "CALLMETER_COST_LEDGER_DIR"
+
+// ExtensionClaudeEnv is claude.env with the extensions' env. While callmeter
+// is installed it also hands callmeter pfm's cost ledger (paths.CostLedgerDir
+// under home) through CallmeterCostLedgerDirEnv, unless claude.env names one.
+func (config Config) ExtensionClaudeEnv(env paths.Env, home string) map[string]string {
 	result := maps.Clone(config.Claude.Env)
 	if result == nil {
 		result = map[string]string{}
 	}
 	maps.Copy(result, config.ExtensionEnv(pfmengine.MustLookup(pfmengine.Claude).LongName))
+	callmeter := slices.ContainsFunc(config.ExtensionClaudePlugins(), func(plugin ClaudePlugin) bool {
+		return plugin.Name() == "callmeter"
+	})
+	if _, named := result[CallmeterCostLedgerDirEnv]; callmeter && !named {
+		// An unresolved home would hand callmeter a path relative to its cwd.
+		if dir := paths.CostLedgerDir(env, home); filepath.IsAbs(dir) {
+			result[CallmeterCostLedgerDirEnv] = dir
+		}
+	}
 	return result
 }
 

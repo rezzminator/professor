@@ -553,7 +553,7 @@ func ClaudeMCPConfigDir(home string) string {
 
 // CostLedgerDir is the directory of the per-call cost ledger: EnvCostLedgerDir
 // when set, else cost-ledger under the pfm state directory. The cost sink
-// creates it 0700; callmeter reads the same path as optional data.
+// creates it 0700; pfm install hands it to callmeter as CALLMETER_COST_LEDGER_DIR.
 func CostLedgerDir(env Env, home string) string {
 	return EnvOrFrom(env, EnvCostLedgerDir, filepath.Join(home, ".local", "state", "pfm", "cost-ledger"))
 }

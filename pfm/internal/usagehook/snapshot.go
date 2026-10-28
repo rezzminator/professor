@@ -41,11 +41,32 @@ func ClaudeRateLimitDir(jailHome string) string {
 	return filepath.Join(tempBase(jailHome), "cc-rate-limits")
 }
 
-// ReadStatuslineSnapshot returns the newest snapshot for account whose
-// config_dir is configDir and whose confirmation is at most maxAge old, as
-// Usage. Account number alone is not identity, so a snapshot written before
-// config_dir was recorded, or belonging to a different config directory, is
-// ignored. found=false with a nil error means nothing qualifying is on disk; an
+// sameWindowSlack absorbs the sub-second gap between a reset the harness
+// reports in Unix seconds and the same reset the usage endpoint reports in
+// RFC 3339.
+const sameWindowSlack = int64(time.Minute / time.Second)
+
+// NewerReading reports whether the reading (used, resetsAt) is newer than
+// (thanUsed, thanResetsAt). A seat's payload stops at its last API reply, so
+// one seat's later confirmation can hold an older reading than another's: a
+// confirmation time cannot order two readings; the window can: a later reset is a later window, and inside one window usage
+// only grows. A reading with no reset (zero) is undated and loses to a dated one.
+func NewerReading(used float64, resetsAt int64, thanUsed float64, thanResetsAt int64) bool {
+	switch {
+	case resetsAt > thanResetsAt+sameWindowSlack:
+		return true
+	case resetsAt < thanResetsAt-sameWindowSlack:
+		return false
+	}
+	return used > thanUsed
+}
+
+// ReadStatuslineSnapshot returns, per window, the newest reading (NewerReading)
+// among account's snapshots whose config_dir is configDir and whose
+// confirmation is at most maxAge old, as Usage, confirmed at the oldest
+// confirmation among the readings it answers with. Account number alone is not
+// identity, so a snapshot written before config_dir was recorded, or belonging
+// to a different config directory, is ignored. found=false with a nil error means nothing qualifying is on disk; an
 // error means a snapshot could not be read or is malformed.
 func ReadStatuslineSnapshot(
 	directory string,
@@ -62,8 +83,11 @@ func ReadStatuslineSnapshot(
 		return Usage{}, time.Time{}, false, fmt.Errorf("read statusline quota directory: %w", err)
 	}
 	prefix := fmt.Sprintf("acct-%d.", account)
-	var latest statuslineSnapshot
-	var latestAt time.Time
+	type pick struct {
+		reading     snapshotWindow
+		confirmedAt time.Time
+	}
+	merged := map[string]pick{}
 	found := false
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), prefix) || !strings.HasSuffix(entry.Name(), ".json") {
@@ -101,21 +125,45 @@ func ReadStatuslineSnapshot(
 		if now.Sub(confirmedAt) > maxAge {
 			continue
 		}
-		if !found || confirmedAt.After(latestAt) {
-			latest, latestAt, found = snapshot, confirmedAt, true
+		found = true
+		for key, reading := range snapshot.readings() {
+			best, seen := merged[key]
+			if reading.ResetsAt > now.Unix() && (!seen || NewerReading(
+				reading.UsedPercentage, reading.ResetsAt, best.reading.UsedPercentage, best.reading.ResetsAt,
+			)) {
+				merged[key] = pick{reading: reading, confirmedAt: confirmedAt}
+			}
 		}
 	}
 	if !found {
 		return Usage{}, time.Time{}, false, nil
 	}
-	usage, err := latest.usage(now)
+	windows := make(map[string]snapshotWindow, len(merged))
+	var answeredAt time.Time
+	for key, chosen := range merged {
+		windows[key] = chosen.reading
+		if usageReadsWindow(key) && (answeredAt.IsZero() || chosen.confirmedAt.Before(answeredAt)) {
+			answeredAt = chosen.confirmedAt
+		}
+	}
+	usage, err := statuslineSnapshot{Windows: windows}.usage(now)
 	if err != nil {
 		return Usage{}, time.Time{}, false, err
 	}
 	if len(usage.NamedWindowsAt(now)) == 0 {
 		return Usage{}, time.Time{}, false, nil
 	}
-	return usage, latestAt, true, nil
+	return usage, answeredAt, true, nil
+}
+
+// usageReadsWindow names the snapshot windows statuslineSnapshot.usage carries
+// into Usage; any other (spend_limit) answers nothing, so it confirms nothing.
+func usageReadsWindow(key string) bool {
+	switch key {
+	case fiveHourKey, sevenDayKey, sevenDayOpusKey, sevenDayFableKey:
+		return true
+	}
+	return false
 }
 
 // snapshotWindow is one window as the harness reported it on stdin.
@@ -124,27 +172,31 @@ type snapshotWindow struct {
 	ResetsAt       int64   `json:"resets_at"`
 }
 
-// usage keeps only windows whose reset is still ahead, read from the windows
-// map when the snapshot carries one and from the flat fields an older build
-// wrote otherwise. A window Usage has no field for (spend_limit) is not read.
-func (snapshot statuslineSnapshot) usage(now time.Time) (Usage, error) {
-	readings := snapshot.Windows
-	if len(readings) == 0 {
-		readings = map[string]snapshotWindow{
-			fiveHourKey:      {UsedPercentage: float64(snapshot.FiveHourUsed), ResetsAt: snapshot.FiveHourResetsAt},
-			sevenDayKey:      {UsedPercentage: float64(snapshot.SevenDayUsed), ResetsAt: snapshot.SevenDayResetsAt},
-			sevenDayFableKey: {UsedPercentage: float64(snapshot.FableUsed), ResetsAt: snapshot.FableResetsAt},
-		}
+// readings is the windows map when the snapshot carries one, and the flat
+// fields an older build wrote otherwise.
+func (snapshot statuslineSnapshot) readings() map[string]snapshotWindow {
+	if len(snapshot.Windows) > 0 {
+		return snapshot.Windows
 	}
+	return map[string]snapshotWindow{
+		fiveHourKey:      {UsedPercentage: float64(snapshot.FiveHourUsed), ResetsAt: snapshot.FiveHourResetsAt},
+		sevenDayKey:      {UsedPercentage: float64(snapshot.SevenDayUsed), ResetsAt: snapshot.SevenDayResetsAt},
+		sevenDayFableKey: {UsedPercentage: float64(snapshot.FableUsed), ResetsAt: snapshot.FableResetsAt},
+	}
+}
+
+// usage keeps only windows whose reset is still ahead. A window Usage has no
+// field for (spend_limit) is not read.
+func (snapshot statuslineSnapshot) usage(now time.Time) (Usage, error) {
 	usage := Usage{}
-	for key, reading := range readings {
+	for key, reading := range snapshot.readings() {
 		var target *Window
 		switch key {
 		case fiveHourKey:
 			target = &usage.FiveHour
 		case sevenDayKey:
 			target = &usage.SevenDay
-		case "seven_day_opus":
+		case sevenDayOpusKey:
 			target = &usage.SevenOpus
 		case sevenDayFableKey:
 		default:

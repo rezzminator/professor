@@ -17,8 +17,47 @@ const (
 	fableCacheKey    = "seven_day_fable"
 )
 
+// adoptSiblingReadings lets another seat of this account correct a reported
+// window: an idle chat's payload stops at its last API reply while the account
+// keeps spending. Only reported windows compete here; a missing one stays the
+// usage cache's. Cached provenance keeps a borrowed reading out of this seat's
+// own snapshot.
+func adoptSiblingReadings(now time.Time, runtime Runtime, account int, windows map[string]rateWindow) {
+	if runtime.Engine != pfmengine.Claude {
+		return
+	}
+	usage, _, found, err := usagehook.ReadStatuslineSnapshot(
+		runtime.RateLimitDir, account, runtime.ConfigDir, now, usagehook.StaleHorizon,
+	)
+	if err != nil {
+		fmt.Fprintf(runtime.Warn, "statusline: sibling quota snapshots %s: %v\n", runtime.RateLimitDir, err)
+		return
+	}
+	if !found {
+		return
+	}
+	for _, named := range usage.NamedWindowsAt(now) {
+		current, present := windows[named.Key]
+		if !present || current.Failure || named.Window.Utilization == nil {
+			continue
+		}
+		resetAt, err := time.Parse(time.RFC3339, named.Window.ResetsAt)
+		if err != nil {
+			fmt.Fprintf(runtime.Warn, "statusline: sibling quota snapshots: decode %s reset: %v\n", named.Key, err)
+			continue
+		}
+		used := *named.Window.Utilization
+		if usagehook.NewerReading(used, resetAt.Unix(), current.UsedPercentage, current.ResetsAt) {
+			windows[named.Key] = rateWindow{UsedPercentage: used, ResetsAt: resetAt.Unix(), Cached: true}
+		}
+	}
+}
+
 // fillCachedRateWindows reads only the existing cache: rendering never requests
-// provider data. Cached provenance keeps these values out of fresh snapshots.
+// provider data. It fills a missing window and replaces a reported one the
+// cache holds a newer reading of (usagehook.NewerReading); a cache failure
+// marks only the missing ones. Cached provenance keeps these values out of
+// fresh snapshots.
 func fillCachedRateWindows(
 	now time.Time,
 	runtime Runtime,
@@ -69,7 +108,8 @@ func fillCachedRateWindows(
 	}
 	for _, descriptor := range usagehook.AllWindows() {
 		key := descriptor.Key
-		if !missing[key] {
+		current, present := windows[key]
+		if !missing[key] && (!present || current.Failure) {
 			continue
 		}
 		var window usagehook.Window
@@ -84,7 +124,9 @@ func fillCachedRateWindows(
 		}
 		if windowErr != nil {
 			fmt.Fprintf(runtime.Warn, "statusline: usage cache %s: %v\n", path, windowErr)
-			windows[key] = rateWindow{Failure: true}
+			if missing[key] {
+				windows[key] = rateWindow{Failure: true}
+			}
 			continue
 		}
 		if window.Utilization == nil {
@@ -95,7 +137,9 @@ func fillCachedRateWindows(
 			resetAt, parseErr := time.Parse(time.RFC3339, stamp)
 			if parseErr != nil {
 				fmt.Fprintf(runtime.Warn, "statusline: usage cache %s: decode %s reset: %v\n", path, key, parseErr)
-				windows[key] = rateWindow{Failure: true}
+				if missing[key] {
+					windows[key] = rateWindow{Failure: true}
+				}
 				continue
 			}
 			if !resetAt.After(now) {
@@ -103,6 +147,9 @@ func fillCachedRateWindows(
 			}
 			cached.ResetsAt = resetAt.Unix()
 		}
-		windows[key] = cached
+		if missing[key] ||
+			usagehook.NewerReading(cached.UsedPercentage, cached.ResetsAt, current.UsedPercentage, current.ResetsAt) {
+			windows[key] = cached
+		}
 	}
 }

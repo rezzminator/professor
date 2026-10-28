@@ -18,19 +18,11 @@ import (
 )
 
 var doctorPluginIDs = []string{
-	"cache-live-control@cache-live-control",
-	"forward-compaction@forward-compaction",
-	"auto-effort-control@auto-effort-control",
-	"tool-visibility-controller@tool-visibility-controller",
-	"engine-sync@engine-sync",
-}
-
-var doctorDevIDs = []string{
-	"cache-live-control@cache-live-control-dev",
-	"forward-compaction@forward-compaction-dev",
-	"auto-effort-control@auto-effort-control-dev",
-	"tool-visibility-controller@tool-visibility-controller-dev",
-	"engine-sync@engine-sync-dev",
+	"cache-live-control@professor",
+	"forward-compaction@professor",
+	"auto-effort-control@professor",
+	"tool-visibility-controller@professor",
+	"engine-sync@professor",
 }
 
 var releaseTargets = installer.ClaudePluginTargets(
@@ -148,8 +140,8 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 			func(path, store string) string {
 				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
 					filepath.Join(store, "plugins", "known_marketplaces.json") + ": unexpected end of JSON input\n" +
-					"doctor: claude_plugins plugin auto-effort-control@auto-effort-control not enabled in " + path + " — " + bareNameFix("auto-effort-control") + "\n" +
-					"doctor: claude_plugins plugin auto-effort-control@auto-effort-control not installed in " + store + " — " + bareNameFix("auto-effort-control") + "\n" +
+					"doctor: claude_plugins plugin auto-effort-control@professor not enabled in " + path + " — " + bareNameFix("auto-effort-control") + "\n" +
+					"doctor: claude_plugins plugin auto-effort-control@professor not installed in " + store + " — " + bareNameFix("auto-effort-control") + "\n" +
 					"doctor: claude_plugins plugin typesafe@typesafe-ai cannot be checked: marketplace typesafe-ai cannot be looked up" +
 					" while the plugin records are unreadable, and its claude.plugins entry has no source — " +
 					"repair the unreadable file named above, then run pfm doctor again\n"
@@ -218,9 +210,9 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 				enabled[doctorPluginIDs[1]] = false
 			}
 			if state == "unmanaged duplicate" {
-				enabled["buddy@buddy"] = true
-				enabled["buddy@buddy-dev"] = true
-				enabled["callmeter@callmeter-dev"] = true
+				enabled["buddy@professor"] = true
+				enabled["buddy@elsewhere"] = true
+				enabled["callmeter@professor"] = true
 				enabled["solo@one"] = true
 				enabled["solo@two"] = false
 			}
@@ -257,11 +249,8 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 				}
 			case "foreign marketplace":
 				raw, _ := json.Marshal(map[string]any{
-					"cache-live-control": map[string]any{
-						"source": map[string]any{"source": "github", "repo": "someone-else/cache-live-control"},
-					},
-					"forward-compaction": map[string]any{
-						"source": map[string]any{"source": "github", "repo": "rezzminator/sub-agent-compact"},
+					"professor": map[string]any{
+						"source": map[string]any{"source": "github", "repo": "someone-else/professor"},
 					},
 					"buddy": map[string]any{"source": map[string]any{"source": "github", "repo": "someone-else/buddy"}},
 				})
@@ -301,17 +290,19 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 				)
 			case "unmanaged duplicate":
 				warnings = 1
-				want = "doctor: claude_plugins plugin buddy enabled twice (buddy@buddy and buddy@buddy-dev) in " + path +
+				want = "doctor: claude_plugins plugin buddy enabled twice (buddy@elsewhere and buddy@professor) in " + path +
 					" — keep one copy: claude plugin disable each other key\n"
 			case "managed plus a stranger":
 				warnings = 1
-				want = "doctor: claude_plugins plugin cache-live-control enabled twice (" + doctorPluginIDs[0] +
-					" and cache-live-control@elsewhere) in " + path + " — keep one copy: claude plugin disable each other key\n"
+				want = "doctor: claude_plugins plugin cache-live-control enabled twice (cache-live-control@elsewhere and " +
+					doctorPluginIDs[0] + ") in " + path + " — keep one copy: claude plugin disable each other key\n"
 			case "foreign marketplace":
-				warnings = 1
-				want = "doctor: claude_plugins plugin " + doctorPluginIDs[0] + " marketplace cache-live-control in " +
-					marketplaces + " points at someone-else/cache-live-control, want rezzminator/cache-live-control" +
-					" — claude plugin marketplace remove cache-live-control, then run pfm install --yes\n"
+				// One marketplace serves every plugin of ours, so each is named; pfm install re-points it.
+				warnings, want = len(doctorPluginIDs), ""
+				for _, id := range doctorPluginIDs {
+					want += "doctor: claude_plugins plugin " + id + " marketplace professor in " + marketplaces +
+						" points at someone-else/professor, want rezzminator/professor — run pfm install --yes\n"
+				}
 			case "marketplaces unreadable":
 				failures = 1
 				_, err := installer.ClaudePluginMarketplaceGaps(store, releaseTargets)
@@ -343,15 +334,16 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 // TestClaudePluginsDoctorBareNameNamesItsSource: a bare claude.plugins name that is not enabled or
 // not installed is told where pfm install gets it from and that a failing install means the entry
 // is wrong, not only "run pfm install --yes" (a typo installs from no repository, so that repair
-// can never close the gap). An -alpha build that falls back to the GitHub copy says the same.
+// can never close the gap). An -alpha build with no checkout of it says the same, then why it
+// installs nothing.
 func TestClaudePluginsDoctorBareNameNamesItsSource(t *testing.T) {
-	// On -alpha a listed plugin off its -dev copy fails: each line is marked FAIL.
+	// On -alpha a listed plugin off its checkout copy fails: each line is marked FAIL.
 	for _, test := range []struct {
 		name, version, mark, note string
 	}{
 		{"release", "", "", ""},
-		{"alpha falls back to GitHub", "0.80.0-alpha", "FAIL ", "doctor: claude_plugins FAIL plugin agent-efort falls back to the GitHub copy" +
-			" agent-efort@agent-efort on this alpha build: claude.pluginCheckoutRoot unset and no source clone — " +
+		{"alpha without a checkout", "0.80.0-alpha", "FAIL ", "doctor: claude_plugins FAIL plugin agent-efort is not installed" +
+			" on this alpha build: claude.pluginCheckoutRoot unset and no source clone — " +
 			"check the plugin out where named, or set claude.pluginCheckoutRoot, then run pfm install --yes\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -369,11 +361,11 @@ func TestClaudePluginsDoctorBareNameNamesItsSource(t *testing.T) {
 			printClaudePluginsDoctor(&out, store, &paths.MapEnv{}, installer.ClaudePluginBuild{
 				Version: test.version, Home: t.TempDir(), Plugins: []pfmconfig.ClaudePlugin{{ID: "agent-efort"}},
 			}, tally)
-			want := "doctor: claude_plugins " + test.mark + "plugin agent-efort@agent-efort not enabled in " + path + " — " +
+			want := "doctor: claude_plugins " + test.mark + "plugin agent-efort@professor not enabled in " + path + " — " +
 				bareNameFix(
 					"agent-efort",
 				) + "\n" +
-				"doctor: claude_plugins " + test.mark + "plugin agent-efort@agent-efort not installed in " + store + " — " +
+				"doctor: claude_plugins " + test.mark + "plugin agent-efort@professor not installed in " + store + " — " +
 				bareNameFix(
 					"agent-efort",
 				) + "\n" + test.note
@@ -485,10 +477,11 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 }
 
 // TestClaudePluginsDoctorChecksTheBuildsCopies: an alpha build with its
-// checkouts checks the -dev ids and their copies — each gap of a listed plugin
-// a FAIL — a fallback names its reason and fails, two copies enabled at once is
-// a duplicate, and a marketplace plugin claude.plugins does not list is
-// checked installed with no copy enabled, a warning when enabled.
+// checkouts checks the {name}@professor ids and their copies — each gap of a
+// listed plugin a FAIL — a plugin with no checkout names its reason and fails,
+// a legacy id left beside its {name}@professor id is named with its -dev
+// directory, and a marketplace plugin claude.plugins does not list is checked
+// installed with no copy enabled, a warning when enabled.
 func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	names := []string{
 		"cache-live-control",
@@ -498,7 +491,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 		"engine-sync",
 	}
 	for _, state := range []string{
-		"alpha clean", "alpha duplicate", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release duplicate",
+		"alpha clean", "alpha legacy copy", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release legacy copy",
 		"alpha from the default source clone", "alpha source clone moved away", "alpha copy differs",
 		"alpha unlisted plugin disabled", "alpha unlisted plugin enabled", "alpha cache behind", "alpha cache differs",
 		"alpha cache unreadable", "alpha cache unversioned", "alpha cache behind with its snapshot gone",
@@ -525,7 +518,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				)
 			}
 			if state == "alpha source clone moved away" {
-				// The -dev copies a prior install enabled stay; the clone it recorded is gone.
+				// The copies a prior install enabled stay; the clone it recorded is gone.
 				clone := filepath.Join(home, "moved")
 				if err := os.MkdirAll(clone, 0o700); err != nil {
 					t.Fatal(err)
@@ -543,7 +536,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					t.Fatalf("build = %+v, want the moved clone's resolve error", build)
 				}
 			}
-			if state == "release duplicate" {
+			if state == "release legacy copy" {
 				build.Version = "0.80.0"
 			}
 			unlisted := strings.HasPrefix(state, "alpha unlisted")
@@ -579,7 +572,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				}
 			}
 			mirror := func(name string) string {
-				return filepath.Join(home, ".local", "share", name+"-dev", "plugins", name)
+				return filepath.Join(home, ".local", "share", "professor-dev", "plugins", name)
 			}
 			// Each copy holds its checkout's content.
 			for _, name := range append(slices.Clone(names), "buddy") {
@@ -622,23 +615,33 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				}
 			}
 			enabled := map[string]bool{}
-			ensured := doctorDevIDs
-			if state == "alpha fallback" || state == "release duplicate" {
-				ensured = doctorPluginIDs
+			ensured := doctorPluginIDs
+			for _, id := range ensured {
+				enabled[id] = true
 			}
-			for index := range names {
-				enabled[doctorPluginIDs[index]] = false
-				enabled[ensured[index]] = true
-			}
-			if state == "alpha duplicate" {
-				enabled[doctorPluginIDs[0]] = true
-			}
-			if state == "release duplicate" {
-				enabled[doctorDevIDs[0]] = true
+			// legacy is cache-live-control's -dev id on alpha and its GitHub id on a release.
+			legacy := pfmconfig.LegacyClaudePluginIDs(names[0])[0]
+			legacyDir := filepath.Join(home, ".local", "share", names[0]+"-dev")
+			switch state {
+			case "alpha legacy copy":
+				legacy = pfmconfig.LegacyClaudePluginIDs(names[0])[1]
+				enabled[legacy] = true
+				// The -dev marketplace directory an install before {name}@professor wrote.
+				if err := os.MkdirAll(filepath.Join(legacyDir, ".claude-plugin"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(
+					filepath.Join(legacyDir, ".claude-plugin", "marketplace.json"),
+					[]byte(`{"name":"`+names[0]+`-dev"}`), 0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			case "release legacy copy":
+				enabled[legacy] = true
 			}
 			if unlisted {
-				enabled["buddy@buddy-dev"] = state == "alpha unlisted plugin enabled"
-				ensured = append(slices.Clone(ensured), "buddy@buddy-dev")
+				enabled["buddy@professor"] = state == "alpha unlisted plugin enabled"
+				ensured = append(slices.Clone(ensured), "buddy@professor")
 			}
 			if err := os.MkdirAll(filepath.Join(store, "plugins"), 0o700); err != nil {
 				t.Fatal(err)
@@ -651,12 +654,10 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			writeDoctorInstalledPlugins(t, store, ensured...)
 			manifest := filepath.Join(".claude-plugin", "plugin.json")
 			for _, id := range ensured {
-				// Claude's snapshot of each -dev copy holds its checkout's content.
-				if name, marketplace, _ := strings.Cut(id, "@"); marketplace == name+"-dev" {
-					writeDoctorCache(t, store, id, "1.0.0", map[string]string{manifest: `{"version":"1.0.0"}`})
-				}
+				// Claude's snapshot of each copy holds its checkout's content; only a local copy's is checked.
+				writeDoctorCache(t, store, id, "1.0.0", map[string]string{manifest: `{"version":"1.0.0"}`})
 			}
-			cache := filepath.Join(store, "plugins", "cache", doctorDevIDs[0])
+			cache := filepath.Join(store, "plugins", "cache", doctorPluginIDs[0])
 			checkout := filepath.Join(root, names[0], "plugins", names[0])
 			switch state {
 			case "alpha cache behind", "alpha cache behind with its snapshot gone":
@@ -670,7 +671,13 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				writeDoctorCache(t, store, doctorDevIDs[0], "1.0.0", map[string]string{manifest: `{"version":"2.0.0"}`})
+				writeDoctorCache(
+					t,
+					store,
+					doctorPluginIDs[0],
+					"1.0.0",
+					map[string]string{manifest: `{"version":"2.0.0"}`},
+				)
 				if state == "alpha cache behind with its snapshot gone" {
 					// Not installed is the one gap: its install is the repair.
 					if err := os.RemoveAll(cache); err != nil {
@@ -685,33 +692,36 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					}
 				}
 			case "alpha cache differs":
-				// Claude reads a -dev copy in place, never this snapshot: no gap.
-				writeDoctorCache(t, store, doctorDevIDs[0], "1.0.0", map[string]string{
+				// Claude reads a checkout copy in place, never this snapshot: no gap.
+				writeDoctorCache(t, store, doctorPluginIDs[0], "1.0.0", map[string]string{
 					manifest: "{\"old\":1}", filepath.Join("node_modules", "dep.js"): "x", ".orphaned_at": "1",
 				})
 			}
 			want, warnings, failures := "doctor: claude_plugins ok\n", 0, 0
-			twice := "plugin cache-live-control enabled twice (" + doctorPluginIDs[0] + " and " + doctorDevIDs[0] + ") in " + path
+			legacyLine := "plugin " + names[0] + " still has legacy copies of " + doctorPluginIDs[0] + ": " + legacy +
+				" in enabledPlugins of " + path
 			switch state {
 			case "alpha marketplace empty":
 				want, failures = "doctor: claude_plugins the marketplace plugin list "+
 					filepath.Join(build.SourceRepo, ".claude-plugin", "marketplace.json")+
 					" lists no plugins — repair it, then run pfm install --yes\n", 1
-			case "alpha duplicate":
-				want, failures = "doctor: claude_plugins FAIL "+twice+" — run pfm install --yes\n", 1
-			case "release duplicate":
-				want, warnings = "doctor: claude_plugins "+twice+" — run pfm install --yes\n", 1
+			case "alpha legacy copy":
+				want, failures = "doctor: claude_plugins FAIL "+legacyLine+"; "+legacyDir+
+					" — run pfm install --yes (it moves them to "+doctorPluginIDs[0]+" once that is installed)\n", 1
+			case "release legacy copy":
+				want, warnings = "doctor: claude_plugins "+legacyLine+
+					" — run pfm install --yes (it moves them to "+doctorPluginIDs[0]+" once that is installed)\n", 1
 			case "alpha copy symlinked":
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" copy "+mirror(names[0])+
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" copy "+mirror(names[0])+
 					" is a symlink: Claude refuses plugin files outside its marketplace — run pfm install --yes\n", 1
 			case "alpha copy missing":
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" copy "+mirror(names[0])+
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" copy "+mirror(names[0])+
 					" missing — run pfm install --yes\n", 1
 			case "alpha copy differs":
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" copy "+mirror(names[0])+
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" copy "+mirror(names[0])+
 					" differs from "+filepath.Join(root, names[0], "plugins", names[0])+" — run pfm install --yes\n", 1
 			case "alpha cache behind":
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" cache in "+
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" cache in "+
 					filepath.Join(
 						store,
 						"plugins",
@@ -719,37 +729,39 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					)+" records version 1.0.0 (scope user), checkout "+
 					checkout+" is 2.0.0 — run pfm install --yes\n", 1
 			case "alpha cache unreadable":
-				want, failures = "doctor: claude_plugins could not read the plugin cache: plugin "+doctorDevIDs[0]+
+				want, failures = "doctor: claude_plugins could not read the plugin cache: plugin "+doctorPluginIDs[0]+
 					" cache: parse "+filepath.Join(checkout, manifest)+": unexpected end of JSON input\n", 1
 			case "alpha cache unversioned":
 				record := filepath.Join(store, "plugins", "installed_plugins.json")
 				plugin := filepath.Join(checkout, manifest)
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" cache in "+record+
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" cache in "+record+
 					" cannot be checked: "+plugin+" names no version, and Claude caches by version — add a version to "+
 					plugin+", then run pfm install --yes\n", 1
 			case "alpha cache behind with its snapshot gone":
-				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" not installed in "+store+
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" not installed in "+store+
 					" — run pfm install --yes\n", 1
 			case "alpha unlisted plugin enabled":
-				want, warnings = "doctor: claude_plugins plugin buddy enabled (buddy@buddy-dev) in "+path+
+				want, warnings = "doctor: claude_plugins plugin buddy enabled (buddy@professor) in "+path+
 					", but claude.plugins does not list it — run pfm install --yes\n", 1
 			case "alpha fallback":
 				want, failures = "", len(names)
-				for index, name := range names {
+				for _, name := range names {
 					checkout := filepath.Join(home, ".professor", "plugins", name, "plugins", name)
-					want += "doctor: claude_plugins FAIL plugin " + name + " falls back to the GitHub copy " +
-						doctorPluginIDs[index] + " on this alpha build: no checkout at " +
-						filepath.Join(checkout, ".claude-plugin", "plugin.json") +
+					want += "doctor: claude_plugins FAIL plugin " + name + " is not installed on this alpha build: no checkout at " +
+						filepath.Join(
+							checkout,
+							".claude-plugin",
+							"plugin.json",
+						) +
 						" (the source clone's plugins/; claude.pluginCheckoutRoot unset) — " +
 						"check the plugin out where named, or set claude.pluginCheckoutRoot, then run pfm install --yes\n"
 				}
 			case "alpha source clone moved away":
 				want, failures = "doctor: claude_plugins marketplace plugin list unread: source clone unresolved: "+
 					build.SourceRepoErr.Error()+" — repair it, then run pfm install --yes\n", len(names)+1
-				for index, name := range names {
-					want += "doctor: claude_plugins FAIL plugin " + name + " cannot be checked: its copy is undecided (" +
-						doctorPluginIDs[index] + " or " + doctorDevIDs[index] +
-						"): source clone unresolved (claude.pluginCheckoutRoot unset): " + build.SourceRepoErr.Error() +
+				for _, name := range names {
+					want += "doctor: claude_plugins FAIL plugin " + name + " cannot be checked: its checkout is undecided: " +
+						"source clone unresolved (claude.pluginCheckoutRoot unset): " + build.SourceRepoErr.Error() +
 						" — repair the path named, or run pfm install --yes from inside your Professor clone to record it again\n"
 				}
 			}
@@ -803,7 +815,7 @@ func TestDoctorClaudePluginBuild(t *testing.T) {
 	}
 }
 
-// TestClaudePluginsDoctorChecksTheCallmeterBinary: an enabled callmeter -dev
+// TestClaudePluginsDoctorChecksTheCallmeterBinary: an enabled callmeter checkout
 // copy runs the binary its wrapper finds at {CALLMETER_HOME}/bin/{plugin.json
 // version}/callmeter; on an -alpha build doctor fails when the binary install
 // placed there is gone, naming the path and the repair.
@@ -817,7 +829,7 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 			env := &paths.MapEnv{Values: map[string]string{"CALLMETER_HOME": callmeterHome}}
 			for _, dir := range []string{
 				filepath.Join(root, "callmeter", "plugins", "callmeter"),
-				filepath.Join(home, ".local", "share", "callmeter-dev", "plugins", "callmeter"),
+				filepath.Join(home, ".local", "share", "professor-dev", "plugins", "callmeter"),
 			} {
 				if err := os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o700); err != nil {
 					t.Fatal(err)
@@ -847,12 +859,12 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(store, "plugins"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			raw, _ := json.Marshal(map[string]any{"enabledPlugins": map[string]bool{"callmeter@callmeter-dev": true}})
+			raw, _ := json.Marshal(map[string]any{"enabledPlugins": map[string]bool{"callmeter@professor": true}})
 			if err := os.WriteFile(filepath.Join(store, "settings.json"), raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			writeDoctorInstalledPlugins(t, store, "callmeter@callmeter-dev")
-			writeDoctorCache(t, store, "callmeter@callmeter-dev", "0.3.0", map[string]string{
+			writeDoctorInstalledPlugins(t, store, "callmeter@professor")
+			writeDoctorCache(t, store, "callmeter@professor", "0.3.0", map[string]string{
 				filepath.Join(".claude-plugin", "plugin.json"): `{"version":"0.3.0"}`,
 			})
 			build := installer.ClaudePluginBuild{
@@ -862,11 +874,11 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 			want, failures := "doctor: claude_plugins ok\n", 0
 			switch state {
 			case "missing":
-				want, failures = "doctor: claude_plugins FAIL plugin callmeter@callmeter-dev binary "+binary+
+				want, failures = "doctor: claude_plugins FAIL plugin callmeter@professor binary "+binary+
 					" missing: its wrapper would download a release binary, which an unreleased version fails"+
 					" — run pfm install --yes\n", 1
 			case "not executable":
-				want, failures = "doctor: claude_plugins FAIL plugin callmeter@callmeter-dev binary "+binary+
+				want, failures = "doctor: claude_plugins FAIL plugin callmeter@professor binary "+binary+
 					" is not an executable file — run pfm install --yes\n", 1
 			}
 			var out bytes.Buffer

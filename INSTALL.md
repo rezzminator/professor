@@ -38,11 +38,11 @@ When required but unavailable, the binary produces `engine-sync binary unavailab
 
 `pfm install` never installs engine-sync. Produce the binary before the first `pfm install --yes` or `pfm update` on a clone host:
 
-1. Install the plugin: `claude plugin marketplace add rezzminator/engine-sync`, then `claude plugin install engine-sync@engine-sync`.
+1. Install the plugin: `claude plugin marketplace add rezzminator/professor`, then `claude plugin install engine-sync@professor`.
 2. Start a new Claude session. The plugin's `SessionStart` hook runs its wrapper, which downloads the release binary for the plugin's version, checks it against the plugin's `SHA256SUMS` and links it at the stable path above. A failed download backs off for a minute and is retried by a later session start.
 3. Confirm: `test -x ~/.local/share/engine-sync/bin/engine-sync && echo ok` (use the resolved path above if you configured another engine-sync home).
 
-An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@engine-sync`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link; rebuilding pfm does not produce engine-sync.
+An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@professor`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link; rebuilding pfm does not produce engine-sync.
 
 Once the stable binary exists, `pfm install --yes` also links it onto PATH: `~/.local/bin/engine-sync` -> `~/.local/share/engine-sync/bin/engine-sync`. It writes that link only when the path is absent or already that link; any other entry there stays as it is and `pfm doctor` warns. `pfm uninstall` removes the link only when it is pfm's.
 

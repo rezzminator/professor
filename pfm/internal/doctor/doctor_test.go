@@ -171,11 +171,11 @@ func TestDoctorCallmeterUsesClaudeEnvHome(t *testing.T) {
 		t,
 		filepath.Join(home, ".claude", "settings.json"),
 		fmt.Sprintf(
-			`{"enabledPlugins":{"callmeter@callmeter-dev":true},"env":{"PLUGIN_LOG_DIR":%q}}`,
+			`{"enabledPlugins":{"callmeter@professor":true},"env":{"PLUGIN_LOG_DIR":%q}}`,
 			filepath.Join(home, "shared-logs"),
 		),
 	)
-	writeDoctorInstalledPlugins(t, filepath.Join(home, ".claude"), "callmeter@callmeter-dev")
+	writeDoctorInstalledPlugins(t, filepath.Join(home, ".claude"), "callmeter@professor")
 	t.Setenv("CALLMETER_HOME", filepath.Join(home, "ambient"))
 	writePluginLogsFile(t, filepath.Join(home, "configured", "logs", "events.jsonl"), "{}\n")
 	writePluginLogsFile(t, filepath.Join(home, "ambient", "logs", "events.jsonl"), "{}\n{}\n")

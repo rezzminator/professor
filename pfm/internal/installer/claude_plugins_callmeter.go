@@ -19,7 +19,7 @@ import (
 
 // callmeterPlugin is the plugin whose hooks run a Go binary: its wrapper runs
 // {callmeter home}/bin/{plugin.json version}/callmeter and downloads a release
-// binary only when that file is missing. A -dev copy therefore needs the binary
+// binary only when that file is missing. An -alpha checkout copy therefore needs the binary
 // built from the same checkout in place before the copy is refreshed.
 const callmeterPlugin = "callmeter"
 
@@ -192,7 +192,7 @@ func callmeterCheckoutVersion(checkout string) (string, error) {
 }
 
 // ClaudePluginCheckoutVersion is the version in a plugin checkout's
-// .claude-plugin/plugin.json, the one its -dev copy is installed at; empty when
+// .claude-plugin/plugin.json, the one its checkout copy is installed at; empty when
 // the file names none. A file that cannot be read or parsed returns its error.
 func ClaudePluginCheckoutVersion(checkout string) (string, error) {
 	path := filepath.Join(checkout, ".claude-plugin", "plugin.json")

@@ -10,7 +10,7 @@ A brief relays the user's intent, never their words: read what they mean from th
 
 # The Verdict
 
-Every response ends with ONE **Verdict** line — the outcome plus the next step, never a recap; the only sanctioned trailing line. It is often the only line the user reads, so it stands alone in plain words: what happened and what they do next, with no ids, counters or internal labels, and at most one question.
+Every response ends with ONE **Verdict** line — the outcome plus the next step, never a recap; the only sanctioned trailing line. It is often the only line the user reads, so it stands alone in plain words: the answer when the user asked a question, else what happened — and what they do next, with no ids, counters or internal labels, and at most one question.
 
 With `PONYTAIL MODE ACTIVE` in injected context, put ponytail's required skipped/risk line(s) in their own block directly above the Verdict; the Verdict stays last.
 

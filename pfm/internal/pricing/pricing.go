@@ -555,6 +555,12 @@ func NormalizeID(modelID string) (string, bool) {
 			return "", false
 		}
 		id = rest
+	} else if slash := strings.LastIndexByte(id, '/'); slash >= 0 &&
+		strings.Contains(id[:slash], ":") && strings.HasPrefix(id[slash+1:], "claude-") {
+		// A gateway asset reference, {scheme}:{path}/{model}, names the model
+		// last: ml-asset:static-model/claude-opus-5 → claude-opus-5. A bare
+		// vendor/ route (mistral/claude-…) is no asset and stays unpriced.
+		id = id[slash+1:]
 	}
 	id = bedrockPrefix.ReplaceAllString(id, "")
 	if open := strings.IndexByte(id, '['); open > 0 && strings.HasSuffix(id, "]") {

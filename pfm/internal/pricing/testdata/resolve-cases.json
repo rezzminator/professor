@@ -5,6 +5,8 @@
     {"id": "Claude-OPUS-5-5", "key": "claude-opus-5-5"},
     {"id": "  claude-opus-5-5  ", "key": "claude-opus-5-5"},
     {"id": "anthropic/claude-opus-5-5", "key": "claude-opus-5-5"},
+    {"id": "ml-asset:static-model/claude-opus-5-5", "key": "claude-opus-5-5"},
+    {"id": "ml-asset:static-model/claude-sonnet-5[1m]", "key": "claude-sonnet-5"},
     {"id": "claude-opus-5-5[1m]", "key": "claude-opus-5-5"},
     {"id": "claude-opus-4.1", "key": "claude-opus-4-1"},
     {"id": "Claude-Opus-4.1[1m]", "key": "claude-opus-4-1"},

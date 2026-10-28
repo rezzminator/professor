@@ -116,4 +116,36 @@ out="$(harvester_resolve "$T/linked" HARVESTER_SRC=plugins/harvester)"; rc=$?
 if [ "$rc" -eq 1 ] && [[ "$out" == *'HARVESTER_SRC must be an absolute path: plugins/harvester' ]]; then
   ok 'relative harvester source is refused by name'
 else bad 'relative harvester source' "rc=$rc" "$out"; fi
+# 5 — the main checkout's gitignored infra/fence/.env (local-env.sh) reaches a
+# linked worktree; a set variable wins; a broken line or an unknown key is refused by name.
+local_env() { # local_env <worktree> [VAR=value…]: the two overrides, or the resolver's error and exit
+  local root="$1"; shift
+  (
+    unset PFM_GOPROXY PFM_NPM_REGISTRY ENGINE_SYNC_SRC HARVESTER_SRC
+    [ $# -eq 0 ] || export "$@"
+    ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
+    printf 'GOPROXY=%s\nNPM=%s\n' "${PFM_GOPROXY-unset}" "${PFM_NPM_REGISTRY-unset}"
+  ) 2>&1
+}
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=unset\nNPM=unset')" ]; then ok 'no infra/fence/.env exports nothing'
+else bad 'absent local env' "rc=$rc" "$out"; fi
+mkdir -p "$MAIN/infra/fence"
+printf '# this machine\n\nPFM_GOPROXY=https://go.example.invalid/api/go,direct\nPFM_NPM_REGISTRY=https://npm.example.invalid/\n' >"$MAIN/infra/fence/.env"
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=https://go.example.invalid/api/go,direct\nNPM=https://npm.example.invalid/')" ]; then
+  ok "a linked worktree loads the main checkout's infra/fence/.env"
+else bad 'local env from a linked worktree' "rc=$rc" "$out"; fi
+out="$(local_env "$T/linked" PFM_GOPROXY=)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=\nNPM=https://npm.example.invalid/')" ]; then ok 'a set variable wins over infra/fence/.env'
+else bad 'environment wins' "rc=$rc" "$out"; fi
+printf 'PFM_GOPROX=https://go.example.invalid\n' >"$MAIN/infra/fence/.env"
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 1 ] && [[ "$out" == *'infra/fence/.env line 1: unknown key PFM_GOPROX'* ]]; then ok 'an unknown infra/fence/.env key is refused by name'
+else bad 'unknown local env key' "rc=$rc" "$out"; fi
+printf 'export PFM_GOPROXY\n' >"$MAIN/infra/fence/.env"
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 1 ] && [[ "$out" == *'infra/fence/.env line 1 is not KEY=value'* ]]; then ok 'a malformed infra/fence/.env line is refused by name'
+else bad 'malformed local env line' "rc=$rc" "$out"; fi
+rm -f "$MAIN/infra/fence/.env"
 shtest_end

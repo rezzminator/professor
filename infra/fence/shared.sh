@@ -621,7 +621,10 @@ fence_shared_exec() {
     _fence_sh_leave_old_key
     envs=(-e "PFM_FENCE_RUN_ID=$id" -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" -e PFM_DEV_REPO_WORK_TREE=/worktree
       -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" -e PFM_TEST_TIMING_DIR=/pfm-timing
-      -e "HARVESTER_FENCE_SRC=$hs" -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}")
+      -e "HARVESTER_FENCE_SRC=$hs" -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}"
+      -e "GOPROXY=${PFM_GOPROXY:-}")
+    # GOPROXY rides each run, not the long-lived container's start: a container started under
+    # another infra/fence/.env (local-env.sh) still hands this run the caller's proxy; empty is Go's default.
     # Gate knobs: a suite the gate nests starts from none of them (scripts/shtest.sh
     # shtest_unset_gate_env; infra/fence/lanes/tests/steps_test.sh derives this block's names).
     # Only generated timing artifacts are writable: /pfm-timing is the worktree's timing base.

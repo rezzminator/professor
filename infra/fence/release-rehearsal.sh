@@ -90,7 +90,12 @@ cmd_up() {
   fence_housekeeping
   exists && die "container $NAME already exists — 'down' it or 'revert' to the snapshot"
   local -a build_args=()
-  if [[ -n "${PFM_NPM_REGISTRY:-}" ]]; then build_args=(--build-arg "PFM_NPM_REGISTRY=$PFM_NPM_REGISTRY"); fi
+  # shellcheck source=local-env.sh
+  . "$REPO_ROOT/infra/fence/local-env.sh"
+  local common
+  common="$(git_common)" || die "the git common dir of $REPO_ROOT could not be resolved"
+  fence_local_env "$(dirname "$common")" release-rehearsal || die "infra/fence/.env could not be loaded"
+  if [[ -n "${PFM_NPM_REGISTRY:-}" ]]; then build_args+=(--build-arg "PFM_NPM_REGISTRY=$PFM_NPM_REGISTRY"); fi
   docker build -q -t "$IMAGE" ${build_args[@]+"${build_args[@]}"} -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >/dev/null \
     || die "build image $IMAGE failed"
   start_from

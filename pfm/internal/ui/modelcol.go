@@ -5,6 +5,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // deckModelW is the model column: the family's symbol and the effort's emoji,
@@ -29,8 +30,11 @@ func modelCell(row compose.Row, bg string) []span {
 	return append(spans, blank(deckModelW-1))
 }
 
-// shortModel is a model id without its vendor prefix, for a pane that has room
-// for the name but not for "claude-".
+// shortModel is a model id without its vendor prefix or gateway asset path,
+// for a pane that has room for the name but not for "claude-".
 func shortModel(id string) string {
+	if normalized, ok := pricing.NormalizeID(id); ok {
+		id = normalized
+	}
 	return strings.TrimPrefix(id, "claude-")
 }

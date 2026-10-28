@@ -32,7 +32,7 @@ shtest_clean_also "/tmp/$FXNAME"
 mkdir -p "$R/.claude/scripts" "$R/pfm/scripts" "$R/infra/fence/lanes"
 cp "$SUT" "$R/.claude/scripts/dev.sh"
 cp "$REPO/pfm/scripts/repo-git.sh" "$R/pfm/scripts/"
-cp "$REPO/infra/fence/housekeeping.sh" "$REPO/infra/fence/fence-env.sh" "$REPO/infra/fence/image-key.sh" "$REPO/infra/fence/docker-compose.yml" \
+cp "$REPO/infra/fence/housekeeping.sh" "$REPO/infra/fence/fence-env.sh" "$REPO/infra/fence/local-env.sh" "$REPO/infra/fence/image-key.sh" "$REPO/infra/fence/docker-compose.yml" \
   "$REPO/infra/fence/steps.sh" "$REPO/infra/fence/stepprof.sh" "$REPO/infra/fence/checks.sh" "$REPO/infra/fence/gate-history.sh" \
   "$REPO/infra/fence/shared.sh" "$REPO/infra/fence/shared-run.sh" "$REPO/infra/fence/mkdir-lock.sh" "$REPO/infra/fence/.dockerignore" \
   "$REPO/infra/fence/engine-sync.sh" "$REPO/infra/fence/tools.env" "$REPO/infra/fence/tools.sh" "$R/infra/fence/"
@@ -157,6 +157,14 @@ if [ "$RC" -eq 0 ] && grep -q -- '-e STEPS_HEAVY_JOBS=3 ' "$STUB_DOCKER_LOG" && 
 else bad "iso knobs" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 PFM_FENCE_TEST_P=3 iso run true
 if grep -q -- '-e PFM_FENCE_TEST_P=3 ' "$STUB_DOCKER_LOG"; then ok "PFM_FENCE_TEST_P reaches the run"; else bad "PFM_FENCE_TEST_P" "$(cat "$STUB_DOCKER_LOG")"; fi
+# PFM_GOPROXY is runtime only and per run: a container already running when infra/fence/.env
+# changes still hands each run the caller's current proxy.
+printf 'PFM_GOPROXY=https://go.example.invalid/api/go,direct\n' >"$R/infra/fence/.env"
+(unset PFM_GOPROXY; iso run true; printf '%s\n' "$RC" >"$T/goproxy.rc")
+rm -f "$R/infra/fence/.env"
+if [ "$(cat "$T/goproxy.rc")" = 0 ] && grep -q -- '^exec -i .*-e GOPROXY=https://go\.example\.invalid/api/go,direct ' "$STUB_DOCKER_LOG"; then
+  ok "infra/fence/.env's PFM_GOPROXY reaches a running container's run as GOPROXY"
+else bad "PFM_GOPROXY per run" "$(cat "$T/goproxy.rc")" "$(cat "$STUB_DOCKER_LOG")"; fi
 PFM_FENCE_CPUS=two iso run true
 if [ "$RC" -ne 0 ] && grep -qF 'iso: PFM_FENCE_CPUS must be cpu' <<<"$OUT" && ! grep -q '^exec' "$STUB_DOCKER_LOG"; then
   ok "a bad PFM_FENCE_CPUS is refused before any exec"

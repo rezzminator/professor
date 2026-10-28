@@ -21,6 +21,7 @@ source "$FENCE/../../scripts/shtest.sh"
 R="$T/repo"
 mkdir -p "$R/infra/fence"
 cp "$SUT" "$R/infra/fence/release-rehearsal.sh"
+cp "$FENCE/local-env.sh" "$R/infra/fence/local-env.sh"
 cat >"$R/infra/fence/housekeeping.sh" <<'EOF'
 fence_housekeeping() { echo "fence_housekeeping $*" >>"$STUB_DOCKER_LOG"; rm -f "$STUB_EXITED"; }
 fence_volumes_ensure() { :; }
@@ -44,7 +45,7 @@ STUB
 chmod +x "$BIN/docker"
 export PATH="$BIN:$PATH" STUB_DOCKER_LOG="$T/docker.log" STUB_RUNNING="$T/running" STUB_EXITED="$T/exited"
 
-unset PFM_NPM_REGISTRY
+unset PFM_NPM_REGISTRY PFM_GOPROXY
 : >"$STUB_DOCKER_LOG"
 OUT="$(bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
 hk_line="$(grep -n '^fence_housekeeping' "$STUB_DOCKER_LOG" | head -1 | cut -d: -f1)"
@@ -71,6 +72,13 @@ for registry in '' 'https://npm.example.invalid/path?key=a&value=b'; do
     ok "up: optional registry '$registry' is forwarded exactly once when nonempty"
   else bad "up: registry '$registry'" "rc=$RC" "$build_argv" "$OUT"; fi
 done
+rm -f "$STUB_RUNNING" "$STUB_EXITED"; : >"$STUB_DOCKER_LOG"
+printf 'PFM_NPM_REGISTRY=https://npm.example.invalid/from-file\n' >"$R/infra/fence/.env"
+OUT="$(bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
+build_argv="$(grep '^build ' "$STUB_DOCKER_LOG")"; rm -f "$R/infra/fence/.env"
+if [ "$RC" = 0 ] && [[ "$build_argv" == *"--build-arg PFM_NPM_REGISTRY=https://npm.example.invalid/from-file "* ]]; then
+  ok "up: the main checkout's infra/fence/.env reaches the image build"
+else bad "up: npm mirror from infra/fence/.env" "rc=$RC" "$build_argv" "$OUT"; fi
 rm -f "$STUB_RUNNING" "$STUB_EXITED"
 OUT="$(STUB_BUILD_FAIL=1 PFM_NPM_REGISTRY=https://npm.example.invalid bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
 if [ "$RC" = 1 ] && grep -qF 'build image professor-pfm-dev failed' <<<"$OUT"; then ok "up: mirror build failure keeps its named error"

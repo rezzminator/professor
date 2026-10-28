@@ -804,3 +804,21 @@ func TestRenderSubagentsGaugeRoundsToNearest(t *testing.T) {
 		}
 	}
 }
+
+func TestModelFamilyReadsGatewayAssetPaths(t *testing.T) {
+	for id, want := range map[string]string{
+		"claude-opus-5-5[1m]":                        "opus",
+		"ml-asset:static-model/claude-opus-5":        "opus",
+		"ml-asset:static-model/claude-sonnet-5-5":    "sonnet",
+		"ml-asset:static-model/claude-haiku-4-5":     "haiku",
+		"us.anthropic.claude-opus-4-1-20250805-v1:0": "opus",
+		"gpt-6-sol-fast":                             "sol-6",
+	} {
+		if got := modelFamily(id); got != want {
+			t.Errorf("modelFamily(%q) = %q, want %q", id, got, want)
+		}
+	}
+	if modelVersion("ml-asset:static-model/claude-opus-5") != modelVersion("claude-opus-5") {
+		t.Errorf("a gateway id and its bare id are one model version")
+	}
+}

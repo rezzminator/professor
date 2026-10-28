@@ -11,8 +11,9 @@
 # /pfm-git-common) in its place, so the fence still starts and touches nothing
 # on the host, and PFM_DEV_ENGINE_SYNC_MISSING names the absence for the build.
 # BROKEN STATE: an unset ROOT prints `fence-env: ROOT unset` and exits 2; a Git
-# directory outside the common directory, or a relative ENGINE_SYNC_SRC, prints
-# the caller-prefixed error and exits 1.
+# directory outside the common directory, a relative ENGINE_SYNC_SRC or a
+# broken infra/fence/.env (local-env.sh) prints the caller-prefixed error and
+# exits 1.
 [[ -n "${ROOT:-}" ]] || { echo "fence-env: ROOT unset" >&2; exit 2; }
 
 git_common="$(git -C "$ROOT" rev-parse --git-common-dir)"
@@ -25,6 +26,11 @@ case "$git_dir" in
   *) echo "$FENCE_CALLER: git dir $git_dir is outside common dir $git_common" >&2; exit 1 ;;
 esac
 export PFM_DEV_WORKTREE="$ROOT" PFM_DEV_GIT_COMMON="$git_common" PFM_DEV_GIT_DIR_REL="$git_dir_rel"
+# This machine's network overrides (PFM_GOPROXY, PFM_NPM_REGISTRY), from the
+# main checkout's gitignored infra/fence/.env, before any image key is derived.
+# shellcheck source=local-env.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/local-env.sh"
+fence_local_env "$(dirname "$git_common")" "$FENCE_CALLER" || exit 1
 engine_sync_src="${ENGINE_SYNC_SRC:-}"
 if [[ -z "$engine_sync_src" ]]; then
   if [[ -f "$ROOT/plugins/engine-sync/go.mod" ]]; then

@@ -455,9 +455,14 @@ func subagentModel(model, recorded string, effort json.RawMessage, inherited ses
 	return cModel + family + reset
 }
 
-// modelVersion strips the vendor prefix and the context-window tag:
-// claude-opus-5-5[1m] → opus-5-5.
+// modelVersion is the model's id as the price table keys it (a gateway asset
+// path, Bedrock prefix and context-window tag dropped), without the vendor
+// prefix: claude-opus-5-5[1m] → opus-5-5,
+// ml-asset:static-model/claude-opus-5 → opus-5.
 func modelVersion(model string) string {
+	if id, ok := pricing.NormalizeID(model); ok {
+		model = id
+	}
 	model = strings.TrimPrefix(strings.TrimSpace(model), "claude-")
 	if cut := strings.IndexByte(model, '['); cut >= 0 {
 		model = model[:cut]

@@ -132,9 +132,7 @@ type indicatorPainter struct {
 	unproved map[string]unprovedPane
 	// classified caches successful ownership only for no-op paints. Every write
 	// still obtains fresh proof; the cache never authorizes a mutation.
-	classified    map[string]unprovedPane
-	priority      func() (bool, error)
-	priorityState *priorityMemo
+	classified map[string]unprovedPane
 	// serverStart reads the Herdr server's start identity (its socket file's
 	// mtime), the key of the unproved-pane memo; nil reads the socket file.
 	serverStart func() (int64, error)
@@ -373,7 +371,6 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		}
 		wrote = wrote || accepted
 	}
-	painter.prioritize(ctx)
 	if painter.tabs != nil {
 		observations, err := painter.tabs(ctx, painter.socket)
 		if err != nil {

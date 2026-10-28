@@ -3,8 +3,7 @@
   "theme": "default",
   "chat": {
     "backend": "auto",
-    "herdrTabStatus": "emoji",
-    "herdrTabPriority": false
+    "herdrTabStatus": "emoji"
   },
   "state": {
     "db": "~/.local/state/pfm/pfm.db",

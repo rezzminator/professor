@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -14,27 +15,26 @@ const DefaultHerdrTabStatus = "emoji"
 
 // ChatConfig selects the default birth backend.
 type ChatConfig struct {
-	Backend          string
-	HerdrTabStatus   string
-	HerdrTabPriority bool
+	Backend        string
+	HerdrTabStatus string
 }
 
 type rawChat struct {
-	Backend          *string `json:"backend,omitempty"`
-	HerdrTabStatus   *string `json:"herdrTabStatus,omitempty"`
-	HerdrTabPriority *bool   `json:"herdrTabPriority,omitempty"`
+	Backend        *string `json:"backend,omitempty"`
+	HerdrTabStatus *string `json:"herdrTabStatus,omitempty"`
+	// RetiredHerdrTabPriority accepts old config files (the example shipped the
+	// key) under the strict decoder; it is never read or written.
+	RetiredHerdrTabPriority json.RawMessage `json:"herdrTabPriority,omitempty"`
 }
 
 // ChatSummary renders the resolved chat settings and their configuration sources.
 func (config Config) ChatSummary() string {
 	return fmt.Sprintf(
-		"config chat.backend=%s (%s)\nconfig chat.herdrTabStatus=%s (%s)\nconfig chat.herdrTabPriority=%t (%s)\n",
+		"config chat.backend=%s (%s)\nconfig chat.herdrTabStatus=%s (%s)\n",
 		config.Chat.Backend,
 		config.Source("chat.backend"),
 		config.Chat.HerdrTabStatus,
 		config.Source("chat.herdrTabStatus"),
-		config.Chat.HerdrTabPriority,
-		config.Source("chat.herdrTabPriority"),
 	)
 }
 
@@ -47,9 +47,6 @@ func marshalChat(config Config) map[string]any {
 	}
 	if config.Chat.HerdrTabStatus != DefaultHerdrTabStatus || config.Source("chat.herdrTabStatus") == SourceFile {
 		value["herdrTabStatus"] = config.Chat.HerdrTabStatus
-	}
-	if config.Chat.HerdrTabPriority || config.Source("chat.herdrTabPriority") == SourceFile {
-		value["herdrTabPriority"] = config.Chat.HerdrTabPriority
 	}
 	return value
 }
@@ -73,10 +70,6 @@ func applyChatAndAsk(result *Config, raw rawConfig) error {
 		default:
 			return fmt.Errorf("config %s: chat.herdrTabStatus must be emoji, text or off", result.Path)
 		}
-	}
-	if raw.Chat != nil && raw.Chat.HerdrTabPriority != nil {
-		result.Chat.HerdrTabPriority = *raw.Chat.HerdrTabPriority
-		result.Sources["chat.herdrTabPriority"] = SourceFile
 	}
 	if raw.Ask != nil {
 		if raw.Ask.Engine != nil {

@@ -250,14 +250,7 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		}
 		return addresses.views(ctx, target, socket, panes)
 	}
-	priority := func() (bool, error) {
-		latest, err := pfmconfig.LoadRuntime(runtime.Config.Path)
-		if err != nil {
-			return false, fmt.Errorf("load Herdr tab priority configuration: %w", err)
-		}
-		return latest.Config.Chat.HerdrTabPriority, nil
-	}
-	return herdr.PaintIndicatorsWithTabs(ctx, socket, lockDir, persisted, provider.tabs, call.ProveHerdrPane, priority)
+	return herdr.PaintIndicatorsWithTabs(ctx, socket, lockDir, persisted, provider.tabs, call.ProveHerdrPane)
 }
 
 // tickWarnings names each per-chat tab diagnostic once while it recurs on

@@ -36,6 +36,7 @@ const (
 	roleAssistant   = "assistant"
 	roleDeveloper   = "developer"
 	sourceStartup   = "startup"
+	sourceClear     = "clear"
 	sourceResume    = "resume"
 	flagModel       = "--model"
 	blockText       = "text"

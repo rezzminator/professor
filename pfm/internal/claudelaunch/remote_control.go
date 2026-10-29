@@ -79,7 +79,7 @@ func remoteControlValueFlag(flag string) bool {
 		flagResumeShort, flagName, flagNameShort, flagPromptFile, flagSystemPrompt,
 		"--append-system-prompt", "--append-system-prompt-file", "--output-format", "--input-format",
 		"--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools",
-		"--add-dir", "--agent", "--agents", "--fallback-model", "--permission-mode", "--permission-prompt-tool",
+		"--add-dir", "--agent", "--agents", "--fallback-model", flagPermissionMode, "--permission-prompt-tool",
 		"--json-schema", "--max-turns", "--max-budget-usd", "--plugin-dir", "--settings-sources",
 		"--tools", "--betas":
 		return true

@@ -14,6 +14,7 @@ type Parsed struct {
 	SettingsEnv                                                   map[string]string
 	Hooks                                                         []Hook
 	PromptFile, MCPConfig, SessionID, Resume, Name, Model, Effort string
+	PermissionMode                                                string
 	Fork, Autonomy                                                bool
 	RemoteControl                                                 bool
 	RemoteControlName                                             string
@@ -57,7 +58,8 @@ func Parse(argv []string) (Parsed, error) {
 			flagEffort,
 			flagPromptFile,
 			flagSettings,
-			flagMCPConfig:
+			flagMCPConfig,
+			flagPermissionMode:
 			word, err := value()
 			if err != nil {
 				return Parsed{}, err
@@ -79,6 +81,8 @@ func Parse(argv []string) (Parsed, error) {
 				parsed.Effort = word
 			case flagPromptFile:
 				parsed.PromptFile = word
+			case flagPermissionMode:
+				parsed.PermissionMode = word
 			case flagSettings:
 				if !strings.HasPrefix(strings.TrimSpace(word), "{") {
 					parsed.SettingsFile = word
@@ -154,6 +158,7 @@ func splitValueFlag(word string) (string, string, bool) {
 		flagPromptFile,
 		flagSettings,
 		flagMCPConfig,
+		flagPermissionMode,
 		flagRemoteControl:
 		return name, value, inline
 	default:

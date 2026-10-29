@@ -91,7 +91,6 @@ type Knob struct {
 | agent teams | settings `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` | constant | — |
 | function hooks | settings `env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` | constant | — |
 | output style | settings `outputStyle: "default"` | constant | — |
-| auto mode off | settings `permissions.disableAutoMode: "disable"` — Claude Code removes auto mode, so its permission classifier never runs in a pfm chat, whatever an account's or project's settings enable. Every door carries it: `Render` and a headless run's `--settings`; the [spawn audit](#pfm-doctor-spawn-audit) flags a live chat without it | constant | — |
 | `theme` | settings `theme` only with theme sync off; omitted while sync owns it ([theme sync](theme-sync.md#themeforlaunch)) | config; account settings while synced | unset |
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
@@ -101,7 +100,7 @@ type Knob struct {
 | cost marker | wrapper env `PFM_COST_LEDGER=on\|off\|preempted\|failed`, the decision the status lines read | constant | — |
 | cost pid | wrapper env `PFM_COST_LEDGER_PID={pid}`, the process the armed sink serves: a second pass of that same process (the wrapper exec'd pfm's `claude` shim) keeps its sink | constant | — |
 | MCP | flag `--mcp-config {file}` — a per-launch 0600 file holding enabled `chat-professor` and third-party entries | config | — |
-| `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass` | config | `bypass` |
+| `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass`; `--allow-dangerously-skip-permissions --permission-mode auto` on `auto` (auto mode first, bypass one shift+tab away); none on `prompted` or for the launcher | config | `bypass` |
 | model | flag `--model` | launch | unset |
 | effort | flag `--effort` (`low\|medium\|high\|xhigh\|max`) | launch | unset |
 | session id | flag `--session-id {uuid}` on a fresh chat — pfm assigns the id so the launch record exists before Claude starts | door | — |
@@ -151,7 +150,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | Key | Default | Knob |
 | --- | --- | --- |
 | `binary` | `claude` | the real binary behind the launcher |
-| `permissionMode` | `bypass` | autonomy flags (`prompted` omits them) |
+| `permissionMode` | `bypass` | autonomy flags: `bypass`, `auto` (starts in auto mode, bypass reachable by shift+tab) or `prompted` (omits them) |
 | `systemPrompt` | `production` | `production` / `lean` / `professor` |
 | `cache1h` | `true` | the cache-live-control handoff (`CACHE_LIVE_CONTROL_MAIN_TTL`) in the process environment |
 | `theme` | unset | `theme` |
@@ -174,9 +173,9 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 ```text
 env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} [PFM_COST_LEDGER=off|failed] \
   [~/.local/bin/pfm internal cost-launch --] {binary} {door verbs} \
-  --settings '{"outputStyle":"default","permissions":{"disableAutoMode":"disable"},"cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
+  --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
   [--mcp-config ~/.local/state/pfm/mcp-config/claude-mcp-{random}.json] \
-  [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions] \
+  [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions | --allow-dangerously-skip-permissions --permission-mode auto] \
   [--remote-control [name]]
 ```
 
@@ -316,7 +315,7 @@ Reads each live `cc-` chat's Claude argv from `/proc`, decodes it with `claudela
 
 | Verdict | Meaning |
 | --- | --- |
-| `INJECTED` | argv carries `--settings` with `outputStyle:"default"`, `permissions.disableAutoMode:"disable"` and the registry's hook set, plus the prompt material the account's `systemPrompt` names (`--system-prompt-file`, or `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT` inside the `--settings` payload) |
+| `INJECTED` | argv carries `--settings` with `outputStyle:"default"` and the registry's hook set, plus the prompt material the account's `systemPrompt` names (`--system-prompt-file`, or `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT` inside the `--settings` payload) |
 | `VIOLATION` | a fresh launch without the registry payload, or professor prompt material missing because the generated prompt is unavailable; that reason names the resolve error and blames no spawn site |
 | `PREDATES-LAYER` | the process started before the current spawn door, with its age named, or its hook set differs from the registry at any age; reload to carry it |
 | `ROLE-OK` / `ROLE-MISMATCH` / `ROLE-CHECK-FAILED` | a seat prompt file against its role |

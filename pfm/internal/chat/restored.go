@@ -337,6 +337,7 @@ func resumeNativeRun(
 			}
 		}
 	}
+	arity[claudelaunch.PermissionModeFlag] = true
 	if resume == "" {
 		return run, errors.New("launch registry has no resume flag")
 	}

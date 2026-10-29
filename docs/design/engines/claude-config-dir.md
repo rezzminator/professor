@@ -108,7 +108,7 @@ Claude's effective layers, highest first:
 4. The project's `.claude/settings.json`.
 5. The account's `settings.json` link to `~/.claude/settings.json`.
 
-A settings `env` value overrides the shell's value; a flag overrides its settings key. Hooks merge across layers. pfm's payload carries `permissions.disableAutoMode: "disable"` on every launch it renders, above the project and account layers, so no settings file brings auto mode back ([claude-launch.md](claude-launch.md#knobs)). `/config` writes shared user settings through the account link, so every account sees the change. An account-specific launch value belongs in that account's `claude` block in `pfm.config.json`. With `$HOME` as the working directory, the store's `settings.json` is also read as that project's `.claude/settings.json`.
+A settings `env` value overrides the shell's value; a flag overrides its settings key. Hooks merge across layers. `/config` writes shared user settings through the account link, so every account sees the change. An account-specific launch value belongs in that account's `claude` block in `pfm.config.json`. With `$HOME` as the working directory, the store's `settings.json` is also read as that project's `.claude/settings.json`.
 
 ## MCP servers
 

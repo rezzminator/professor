@@ -143,11 +143,6 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.Settings["outputStyle"] != "default" {
 					t.Error("output style missing")
 				}
-			case "disableAutoMode":
-				permissions, _ := parsed.Settings["permissions"].(map[string]any)
-				if permissions["disableAutoMode"] != "disable" {
-					t.Error("auto mode not disabled")
-				}
 			case "theme":
 				if parsed.Settings["theme"] != "dark" {
 					t.Error("theme missing")
@@ -265,6 +260,17 @@ func TestParseValueFlags(t *testing.T) {
 			argv: []string{"claude", "--session-id=sid", "--name=seat", "--model=sonnet", "--effort=high", "--mcp-config=/srv/mcp.json"},
 			want: Parsed{SessionID: "sid", Name: "seat", Model: "sonnet", Effort: "high", MCPConfig: "/srv/mcp.json"},
 		},
+		{
+			name: "auto permission mode",
+			argv: []string{"claude", "--allow-dangerously-skip-permissions", "--permission-mode", "auto"},
+			want: Parsed{PermissionMode: "auto"},
+		},
+		{
+			name: "permission mode equals",
+			argv: []string{"claude", "--permission-mode=auto"},
+			want: Parsed{PermissionMode: "auto"},
+		},
+		{name: "permission mode last", argv: []string{"claude", "--permission-mode"}, err: "--permission-mode requires a value"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := Parse(test.argv)

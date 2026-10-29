@@ -70,6 +70,10 @@ func TestMain(m *testing.M) {
 	// scenario a rollback/residue test stages would never be recognized.
 	installer.SetImplementedSubcommands(topLevelSubcommands, internalSubcommands)
 	installThemeHTTPClientOverride = &http.Client{Transport: noNetworkThemeTransport{}}
+	// os.Executable is this test binary, no pfm: a front's paced worker spawn
+	// would run the whole suite again, detached. A test that counts spawns
+	// replaces this stub.
+	statuslinePacedSpawn = func(string) error { return nil }
 	doctor.DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
 		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
 	}

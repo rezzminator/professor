@@ -47,9 +47,10 @@ const (
 	// scanCheckpointMaxBytes caps the checkpoints together (the cache dir is
 	// often tmpfs, so they cost memory); past it the oldest go first.
 	scanCheckpointMaxBytes = 256 << 20
-	// scanPruneEvery spaces the prunes: the stamp file's mtime is the last.
-	scanPruneEvery = time.Hour
-	scanPruneStamp = ".pruned"
+	// pruneEvery spaces the prunes of a directory (pruneStaleFiles): its stamp
+	// file's mtime is the last.
+	pruneEvery = time.Hour
+	pruneStamp = ".pruned"
 )
 
 // transcriptScans resumes the render's whole-transcript folds from their
@@ -82,34 +83,34 @@ func newTranscriptScans(cacheDir string, warn io.Writer) transcriptScans {
 		return scans
 	}
 	scans.dir = dir
-	pruneScanCheckpoints(dir, now, scanCheckpointMaxAge, scanCheckpointMaxBytes, warn)
+	pruneStaleFiles(dir, now, scanCheckpointMaxAge, scanCheckpointMaxBytes, warn)
 	return scans
 }
 
-// pruneScanCheckpoints removes, at most once per scanPruneEvery, every file in
-// dir not written for maxAge, then the oldest of the rest until they fit in
-// maxBytes. A failure is told on warn and leaves the file for the next prune.
-func pruneScanCheckpoints(dir string, now time.Time, maxAge time.Duration, maxBytes int64, warn io.Writer) {
-	stamp := filepath.Join(dir, scanPruneStamp)
+// pruneStaleFiles removes, at most once per pruneEvery, every file in dir not
+// written for maxAge, then the oldest of the rest until they fit in maxBytes.
+// A failure is told on warn and leaves the file for the next prune.
+func pruneStaleFiles(dir string, now time.Time, maxAge time.Duration, maxBytes int64, warn io.Writer) {
+	stamp := filepath.Join(dir, pruneStamp)
 	info, err := os.Stat(stamp)
 	switch {
-	case err == nil && now.Sub(info.ModTime()) < scanPruneEvery:
+	case err == nil && now.Sub(info.ModTime()) < pruneEvery:
 		return
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		fmt.Fprintf(warn, "statusline: stat scan checkpoint prune stamp %s: %v\n", stamp, err)
+		fmt.Fprintf(warn, "statusline: stat prune stamp %s: %v\n", stamp, err)
 		return
 	}
 	if err := os.WriteFile(stamp, nil, 0o600); err != nil {
-		fmt.Fprintf(warn, "statusline: write scan checkpoint prune stamp %s: %v\n", stamp, err)
+		fmt.Fprintf(warn, "statusline: write prune stamp %s: %v\n", stamp, err)
 		return
 	}
 	if err := os.Chtimes(stamp, now, now); err != nil {
-		fmt.Fprintf(warn, "statusline: stamp scan checkpoint prune %s: %v\n", stamp, err)
+		fmt.Fprintf(warn, "statusline: stamp prune %s: %v\n", stamp, err)
 		return
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fmt.Fprintf(warn, "statusline: list scan checkpoints %s: %v\n", dir, err)
+		fmt.Fprintf(warn, "statusline: list %s for pruning: %v\n", dir, err)
 		return
 	}
 	type held struct {
@@ -121,20 +122,20 @@ func pruneScanCheckpoints(dir string, now time.Time, maxAge time.Duration, maxBy
 	total := int64(0)
 	remove := func(path string) bool {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(warn, "statusline: prune scan checkpoint %s: %v\n", path, err)
+			fmt.Fprintf(warn, "statusline: prune %s: %v\n", path, err)
 			return false
 		}
 		return true
 	}
 	for _, entry := range entries {
-		if entry.Name() == scanPruneStamp {
+		if entry.Name() == pruneStamp {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
-				fmt.Fprintf(warn, "statusline: stat scan checkpoint %s: %v\n", path, err)
+				fmt.Fprintf(warn, "statusline: stat %s for pruning: %v\n", path, err)
 			}
 			continue
 		}

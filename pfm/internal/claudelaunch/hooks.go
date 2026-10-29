@@ -11,9 +11,11 @@ const (
 	HookEventUserPromptSubmit = "UserPromptSubmit"
 	HookRRDirMatcher          = "rr|rr-pro|rr-pro-max"
 	// HookHerdrNotificationMatcher selects the Notification types the Herdr
-	// reporter maps (blocked on a permission or elicitation dialog, idle on
-	// idle_prompt); every other notification spawns nothing.
-	HookHerdrNotificationMatcher = "permission_prompt|elicitation_dialog|idle_prompt"
+	// reporter maps (blocked on a permission or elicitation dialog or a
+	// plugin_notification, a plugin's $.ui.notify such as a picker answering
+	// AskUserQuestion itself; idle on idle_prompt); every other notification
+	// spawns nothing.
+	HookHerdrNotificationMatcher = "permission_prompt|elicitation_dialog|idle_prompt|plugin_notification"
 	// HookResumeMatcher selects the SessionStart source Claude reports for
 	// --resume, --continue and the in-app /resume.
 	HookResumeMatcher   = "resume"

@@ -41,31 +41,27 @@ func TestHerdrStateReportsTheExactRequestLines(t *testing.T) {
 	payload := `{"session_id":"` + session + `","hook_event_name":"x","cwd":"/work"}`
 	resume := `"agent_session_id":"` + session + `","resume_argv":["pfm","chat","open","` + session + `"]`
 	for _, test := range []struct {
-		name   string
-		args   []string
-		stdin  string
-		reason string
-		want   []string
+		name  string
+		args  []string
+		stdin string
+		want  []string
 	}{
 		{
 			"start is idle with session and resume",
 			[]string{"--engine", "opencode", "start"},
 			payload,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"idle",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"working",
 			[]string{"--engine", "opencode", "working"},
 			payload,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"working",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"idle",
 			[]string{"--engine", "opencode", "idle"},
 			payload,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"idle",` + resume + `,"seq":1001000}}`},
 		},
 		{
@@ -74,42 +70,42 @@ func TestHerdrStateReportsTheExactRequestLines(t *testing.T) {
 			"a prompt no intercept blocks reports working",
 			[]string{"--engine", "opencode", "working"},
 			`{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/reloaded e"}`,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"working",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"blocked carries its message",
 			[]string{"--engine", "opencode", "blocked"},
 			`{"session_id":"` + session + `","message":"needs approval"}`,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"blocked","message":"needs approval",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"permission_prompt notification is blocked",
 			[]string{"--engine", "opencode", "notification"},
 			`{"session_id":"` + session + `","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"blocked","message":"Claude needs your permission to use Bash",` + resume + `,"seq":1001000}}`},
+		},
+		{
+			"plugin_notification notification is blocked",
+			[]string{"--engine", "opencode", "notification"},
+			`{"session_id":"` + session + `","notification_type":"plugin_notification","message":"Claude is waiting for your answer"}`,
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"blocked","message":"Claude is waiting for your answer",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"elicitation_dialog notification is blocked",
 			[]string{"--engine", "opencode", "notification"},
 			`{"session_id":"` + session + `","notification_type":"elicitation_dialog","message":"pick one"}`,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"blocked","message":"pick one",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"idle_prompt notification is idle",
 			[]string{"--engine", "opencode", "notification"},
 			`{"session_id":"` + session + `","notification_type":"idle_prompt","message":"waiting"}`,
-			"",
 			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"idle",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"end releases the pane and clears its title",
 			[]string{"--engine", "opencode", "end"},
 			`{"session_id":"` + session + `","reason":"prompt_input_exit"}`,
-			"",
 			[]string{
 				`{"id":"pfm-1001000","method":"pane.release_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","seq":1001000}}`,
 				`{"id":"pfm-1001001","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm","clear_title":true}}`,

@@ -60,6 +60,7 @@ func TestHerdrStateMarksTheServersAgentStateWhileTheThemeIsOn(t *testing.T) {
 		{"a permission request is blocked", "blocked", `{"session_id":"s1","message":"needs you"}`, "blocked"},
 		{"a permission notification is blocked", "notification", `{"session_id":"s1","notification_type":"permission_prompt"}`, "blocked"},
 		{"an elicitation notification is blocked", "notification", `{"session_id":"s1","notification_type":"elicitation_dialog"}`, "blocked"},
+		{"a plugin notification is blocked", "notification", `{"session_id":"s1","notification_type":"plugin_notification"}`, "blocked"},
 		{"a finished turn is done", "idle", `{"session_id":"s1"}`, "done"},
 		{"the idle prompt fades done to idle", "notification", `{"session_id":"s1","notification_type":"idle_prompt"}`, "idle"},
 		{"a compaction restart changes nothing", "start", `{"session_id":"s1","source":"compact"}`, ""},

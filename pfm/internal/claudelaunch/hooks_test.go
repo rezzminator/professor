@@ -52,7 +52,7 @@ func TestHerdrReporterRowsCoverTheClaudeLifecycle(t *testing.T) {
 		{Event: "PostToolUseFailure", Command: binary + "working", Name: "herdr-working-tool-failure", Async: true},
 		{Event: "PermissionRequest", Command: binary + "blocked", Name: "herdr-blocked", Async: true},
 		{
-			Event: "Notification", Matcher: "permission_prompt|elicitation_dialog|idle_prompt",
+			Event: "Notification", Matcher: "permission_prompt|elicitation_dialog|idle_prompt|plugin_notification",
 			Command: binary + "notification", Name: "herdr-notification", Async: true,
 		},
 		{Event: "Stop", Command: binary + "idle", Name: "herdr-idle"},

@@ -1,6 +1,8 @@
 package costledger
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
@@ -68,6 +70,34 @@ func (a *Anchors) State(usd, startMillis, durationMillis float64) {
 	}
 	a.states = append(a.states, state)
 	a.stamped = false
+}
+
+// anchorsJSON is Anchors as a reader keeps it between processes.
+type anchorsJSON struct {
+	States  []CostState `json:"states"`
+	Stamp   string      `json:"stamp"`
+	Stamped bool        `json:"stamped"`
+	Open    int         `json:"open"`
+}
+
+// MarshalJSON keeps the collector's whole state, so a reader that checkpoints
+// its walk resumes it at the next line with nothing lost.
+func (a Anchors) MarshalJSON() ([]byte, error) {
+	return json.Marshal(anchorsJSON{States: a.states, Stamp: a.stamp, Stamped: a.stamped, Open: a.open})
+}
+
+// UnmarshalJSON restores what MarshalJSON kept, refusing an open index outside
+// the states it names.
+func (a *Anchors) UnmarshalJSON(raw []byte) error {
+	var kept anchorsJSON
+	if err := json.Unmarshal(raw, &kept); err != nil {
+		return fmt.Errorf("decode cost-state anchors: %w", err)
+	}
+	if kept.Open < 0 || kept.Open > len(kept.States) {
+		return fmt.Errorf("decode cost-state anchors: open index %d outside %d states", kept.Open, len(kept.States))
+	}
+	*a = Anchors{states: kept.States, stamp: kept.Stamp, stamped: kept.Stamped, open: kept.Open}
+	return nil
 }
 
 // States is every cost-state met, in file order.

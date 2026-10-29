@@ -108,26 +108,16 @@ type metaScanState struct {
 }
 
 // ReadMeta streams a transcript for the run's own facts.
-func ReadMeta(path, engine string) (Meta, error) {
-	return ReadMetaObserving(path, engine, nil)
-}
-
-// ReadMetaObserving is ReadMeta that also hands every line it scans to observe
-// (nil for none), so a caller needing a second fact of the same file takes it
-// in this one read. A scan error leaves observe having seen only a prefix.
-func ReadMetaObserving(path, engine string, observe func(line []byte)) (meta Meta, returnErr error) {
+func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return Meta{}, err
-	}
-	meta = Meta{
-		SizeBytes:      info.Size(),
-		ModifiedUnixNS: info.ModTime().UnixNano(),
+		return Meta{}, fmt.Errorf("stat transcript %s: %w", path, err)
 	}
 	noteWholeRead(path)
 	file, err := os.Open(path)
 	if err != nil {
-		return meta, err
+		return Meta{SizeBytes: info.Size(), ModifiedUnixNS: info.ModTime().UnixNano()},
+			fmt.Errorf("open transcript %s: %w", path, err)
 	}
 	defer func() {
 		if err := file.Close(); err != nil {
@@ -137,17 +127,33 @@ func ReadMetaObserving(path, engine string, observe func(line []byte)) (meta Met
 
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64<<10), metaMaxLine)
-	state := metaScanState{}
+	var fold MetaFold
 	for scanner.Scan() {
-		applyMeta(&meta, &state, scanner.Bytes(), engine)
-		if observe != nil {
-			observe(scanner.Bytes())
-		}
+		fold.Line(scanner.Bytes(), engine)
 	}
+	meta = fold.Meta
+	meta.SizeBytes, meta.ModifiedUnixNS = info.Size(), info.ModTime().UnixNano()
 	if err := scanner.Err(); err != nil {
 		return meta, fmt.Errorf("scan transcript %s: %w", path, err)
 	}
 	return meta, nil
+}
+
+// MetaFold is ReadMeta's fold, one line at a time, with every piece of its
+// state exported, so a caller can keep it between processes and resume it at
+// the next line (ResumeLines). Its Meta leaves SizeBytes and ModifiedUnixNS
+// to the caller, which knows the file it read.
+type MetaFold struct {
+	Meta            Meta
+	ClaudeUsageSeen bool
+}
+
+// Line folds one line into the run's facts; a trailing newline or carriage
+// return is JSON whitespace and changes nothing.
+func (fold *MetaFold) Line(line []byte, engine string) {
+	state := metaScanState{claudeUsageSeen: fold.ClaudeUsageSeen}
+	applyMeta(&fold.Meta, &state, line, engine)
+	fold.ClaudeUsageSeen = state.claudeUsageSeen
 }
 
 func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {

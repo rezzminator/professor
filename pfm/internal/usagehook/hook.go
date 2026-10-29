@@ -683,11 +683,11 @@ func EnsurePrivateDir(path string) error {
 		return err
 	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("usage cache is not a real directory")
+		return fmt.Errorf("%s is not a real directory", path)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || int(stat.Uid) != os.Getuid() {
-		return fmt.Errorf("usage cache is not owned by this uid")
+		return fmt.Errorf("%s is not owned by uid %d", path, os.Getuid())
 	}
 	return os.Chmod(path, 0o700)
 }

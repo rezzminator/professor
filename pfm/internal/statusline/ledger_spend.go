@@ -190,6 +190,7 @@ func (spend agentSpend) withLedger(ledger agentSpend) agentSpend {
 	ledger.gateway.out = max(ledger.gateway.out, spend.gateway.out)
 	ledger.gateway.partial = ledger.gateway.partial || spend.gateway.partial
 	ledger.tools = spend.tools
+	ledger.behind = spend.behind // the tool calls, and the cost-states before the ledger, are a floor
 	ledger.advisorUSD = spend.advisorUSD
 	ledger.advisorUnpriced = spend.advisorUnpriced
 	return ledger

@@ -233,6 +233,8 @@ func RenderSubagents(
 	encoder.SetEscapeHTML(false)
 	catalog := newContextCatalog(home, env.Get, now, warn)
 	var tree *agentTree // scanned once per render, on the first agent row
+	// The main line's cache dir (DefaultRuntime), so both commands keep one set of checkpoints.
+	scans := newTranscriptScans(filepath.Dir(CodexStatuslineCachePath(env.Get(paths.EnvHome), os.Getuid())), warn)
 	roles := newRoleLookup(data.Cwd, home, userAgents, warn)
 	ledger := loadLedgerView(data.SessionID, home, env, warn)
 	for index := range data.Tasks {
@@ -246,7 +248,7 @@ func RenderSubagents(
 		var activity *agentActivity
 		if task.Type == localAgentTask {
 			if tree == nil {
-				tree = scanAgentTree(data.TranscriptPath, prices)
+				tree = scanAgentTree(data.TranscriptPath, prices, scans)
 				tree.judgeLiveness(now, liveTasks(data.Tasks))
 			}
 			read := *tree.read(task.ID)
@@ -570,8 +572,10 @@ func plural(count int, noun string) string {
 // counts distinct tool_use blocks, errored tool results and compact
 // boundaries, takes the cache hit and the effort from the newest assistant
 // entry that carries each, the newest entry timestamp, and what its responses
-// billed. A torn final line — the agent is mid-write — is skipped, not an error.
-func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) agentActivity {
+// billed, folding the transcript from its "activity" checkpoint (an unfinished
+// fold leaves floors and an unread turn). A torn final line — the agent is
+// mid-write — is never kept in the checkpoint.
+func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices, scans transcriptScans) agentActivity {
 	activity := agentActivity{cacheHit: -1}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		activity.err = errors.New("payload names no session transcript")
@@ -581,31 +585,34 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) age
 	path := transcript.SubagentTranscript(transcript.SubagentsDir(sessionTranscript), id)
 	activity.role, activity.roleErr = readAgentRole(transcript.SubagentMetaPath(path))
 	activity.transcript = path
-	seen := map[string]struct{}{}
-	spend := newSpendScan(prices)
-	var stamped time.Time
-	if _, _, err := transcript.ReadLines(path, 0, func(line []byte, _ bool) {
-		recordTranscriptLine(line, seen, &activity, spend)
-		if open, delegating, at, ok := messageTurnOpen(line); ok {
-			delegating = open && (delegating || activity.turn.open && activity.turn.delegating)
-			activity.turn = agentTurn{open: open, delegating: delegating, last: at, seen: true}
-			stamped = at
-		}
-	}); err != nil {
+	fold := newActivityFold(prices)
+	done, err := scans.fold(path, "activity", fold)
+	if err != nil {
 		var opened bool
 		if opened, activity.err = transcriptError(path, err); !opened {
 			return activity
 		}
 	}
+	activity.errors, activity.compactions = fold.Errors, fold.Compactions
+	activity.effort, activity.model = fold.Effort, fold.Model
+	activity.tools = len(fold.Seen)
+	activity.spend = fold.Spend.total()
+	activity.spend.tools = activity.tools
+	if err == nil && !done { // counts and spend are floors; the newest entry, turn, context and hit unknown
+		activity.spend.partial, activity.spend.behind = true, true
+		activity.turn.err = fmt.Errorf("sub-agent transcript %s not read to its end within the budget", path)
+		return activity
+	}
+	activity.last, activity.cacheHit, activity.context = fold.Last, fold.CacheHit, fold.Context
+	activity.turn = agentTurn{
+		open: fold.Turn.Open, delegating: fold.Turn.Delegating, last: fold.Turn.Last, seen: fold.Turn.Seen,
+	}
 	if !activity.turn.seen {
 		activity.turn.open = true // no reply yet: the first turn is under way
 	}
-	if stamped.IsZero() {
+	if fold.Turn.Last.IsZero() {
 		activity.stampTurn(path)
 	}
-	activity.tools = len(seen)
-	activity.spend = spend.total()
-	activity.spend.tools = activity.tools
 	return activity
 }
 
@@ -706,7 +713,7 @@ func readAgentRole(path string) (string, error) {
 	return agentType, nil
 }
 
-func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agentActivity, spend *spendScan) {
+func recordTranscriptLine(line []byte, fold *activityFold) {
 	var entry struct {
 		Type      string    `json:"type"`
 		Subtype   string    `json:"subtype"`
@@ -723,12 +730,12 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if json.Unmarshal(line, &entry) != nil {
 		return
 	}
-	if entry.Timestamp.After(activity.last) {
-		activity.last = entry.Timestamp
+	if entry.Timestamp.After(fold.Last) {
+		fold.Last = entry.Timestamp
 	}
 	if entry.Type == "system" && entry.Subtype == "compact_boundary" {
-		activity.compactions++
-		activity.context = 0 // a call from before the boundary no longer describes the context
+		fold.Compactions++
+		fold.Context = 0 // a call from before the boundary no longer describes the context
 		return
 	}
 	if entry.Type != entryAssistant && entry.Type != entryUser {
@@ -740,9 +747,9 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		id, _ := pyvalue.String(block.ID)
 		switch {
 		case entry.Type == entryAssistant && block.Kind() == blockToolUse && id != "":
-			seen[id] = struct{}{}
+			fold.Seen[id] = struct{}{}
 		case entry.Type == entryUser && block.Kind() == "tool_result" && string(block.IsError) == "true":
-			activity.errors++
+			fold.Errors++
 		}
 	}
 	if entry.Type != entryAssistant {
@@ -750,17 +757,16 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	}
 	// The level the request went out at; a model that takes none leaves it out.
 	if level, ok := entry.Effort.(string); ok && strings.TrimSpace(level) != "" {
-		activity.effort = strings.TrimSpace(level)
+		fold.Effort = strings.TrimSpace(level)
 	}
 	if model := entry.Message.Model; model != "" && model != "<synthetic>" {
-		activity.model = model
+		fold.Model = model
 	}
 	usage := entry.Message.Usage
 	if usage == nil {
-		spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, nil)
 		return
 	}
-	spend.record(
+	fold.Spend.record(
 		entry.Message.ID,
 		entry.RequestID,
 		entry.Message.Model,
@@ -773,7 +779,7 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	// newest completed call's share to 0%.
 	if usage.reportsCache {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
-			activity.cacheHit = hit
+			fold.CacheHit = hit
 		}
 	}
 	// The context is the prompt of the response's last executor request, as the
@@ -784,7 +790,7 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if usage.reportsCache || len(usage.Iterations) > 0 {
 		if requests := usage.Requests(); len(requests) > 0 {
 			if size := requests[len(requests)-1].Context(); size > 0 {
-				activity.context = size
+				fold.Context = size
 			}
 		}
 	}

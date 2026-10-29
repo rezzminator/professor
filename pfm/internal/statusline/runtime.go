@@ -105,6 +105,10 @@ type Runtime struct {
 
 	// Warn takes the render's diagnostic lines; nil is os.Stderr.
 	Warn io.Writer
+
+	// scans resumes the render's whole-transcript folds under CacheDir; set
+	// once by normalized, so its budget starts with the render.
+	scans transcriptScans
 }
 
 func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
@@ -232,6 +236,9 @@ func (runtime Runtime) normalized() Runtime {
 	}
 	if runtime.Warn == nil {
 		runtime.Warn = os.Stderr
+	}
+	if runtime.scans.warn == nil { // once: a second normalize must not restart the budget
+		runtime.scans = newTranscriptScans(runtime.CacheDir, runtime.Warn)
 	}
 	if runtime.contextCatalog == nil {
 		runtime.contextCatalog = newContextCatalog(runtime.Home, runtime.getenv, runtime.now(), runtime.Warn)

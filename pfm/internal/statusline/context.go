@@ -34,8 +34,8 @@ type contextGauge struct {
 	marker        string
 	transcript    bool
 	// scanned is what the gauge's pass over the transcript billed, nil when
-	// that pass did not complete: the spend segment reuses it instead of
-	// reading the same file again.
+	// that pass failed, a floor (behind) when the render's budget stopped it:
+	// the spend segment reuses it instead of reading the same file again.
 	scanned *agentSpend
 }
 
@@ -75,7 +75,8 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	}
 	contextTokens := gauge.tokens
 	if runtime.Engine != pfmengine.Codex {
-		l2 += sep + sessionSpendSegment(data, runtime.Prices, readLedgerBooks(runtime, data.SessionID), gauge.scanned)
+		books := readLedgerBooks(runtime, data.SessionID)
+		l2 += sep + sessionSpendSegment(data, runtime.Prices, books, gauge.scanned, runtime.scans)
 	}
 	// Never width-gated: a recorded launch reports its cache window and
 	// transcript readability. Codex reports no cache split.
@@ -114,13 +115,19 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 // call whose cost never arrived, a model the table cannot price); a transcript that cannot be
 // read is "?" in its place. A state worth flagging ends in one marker with no amount in it
 // (spendMarker); the amounts behind a marker are `pfm tokens`'.
-func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, scanned *agentSpend) string {
+func sessionSpendSegment(
+	data input,
+	prices *pricing.Prices,
+	books ledgerBooks,
+	scanned *agentSpend,
+	scans transcriptScans,
+) string {
 	total := data.Cost.TotalCostUSD
 	var spend agentSpend
 	readable := strings.TrimSpace(data.TranscriptPath) != ""
 	if readable {
 		var err error
-		if spend, err = sessionSpend(data.TranscriptPath, prices, scanned); err != nil {
+		if spend, err = sessionSpend(data.TranscriptPath, prices, scanned, scans); err != nil {
 			readable = false
 		}
 	}
@@ -139,7 +146,7 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, 
 		}
 		one := completeSpend(booked.usd, before, total)
 		line := spendDollars(one, true) + spendTail(booked.in, booked.out, tools)
-		if booked.partial {
+		if booked.partial || booked.behind {
 			line += cWarn + "+?" + reset
 		}
 		return line + markerText(spendMarker(books, one, 0, false, before)) + booked.gateway.note()
@@ -157,7 +164,7 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, 
 		line = spendDollars(total, true)
 	}
 	line += spendTail(spend.in, spend.out, tools)
-	if spend.partial && logged {
+	if spend.partial && (logged || spend.behind) {
 		line += cWarn + "+?" + reset
 	}
 	return line + markerText(spendMarker(books, total, spend.usd, logged, 0)) + spend.gateway.note()
@@ -192,7 +199,8 @@ func spendDollars(usd float64, known bool) string {
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.
-// The harness percentage is retained only for absent or unreadable transcripts.
+// The harness percentage is retained only for absent or unreadable transcripts,
+// and for one whose fold the render's budget left short of its end.
 func transcriptGauge(runtime Runtime, data input, project string, scan *spendScan) contextGauge {
 	usage := data.ContextWindow.CurrentUsage
 	fallback := contextGauge{
@@ -211,33 +219,25 @@ func transcriptGauge(runtime Runtime, data input, project string, scan *spendSca
 	if data.TranscriptPath == "" {
 		return fallback
 	}
-	activity := agentActivity{cacheHit: -1}
-	meta, err := transcript.ReadMetaObserving(data.TranscriptPath, string(runtime.Engine), func(line []byte) {
-		if scan != nil {
-			scan.line(line)
-		}
-		// Reuse the completed-call cache rule without another transcript read.
-		var record struct {
-			Type      string `json:"type"`
-			Sidechain bool   `json:"isSidechain"`
-			Message   struct {
-				Usage *transcriptUsage `json:"usage"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(line, &record) == nil && record.Type == entryAssistant && !record.Sidechain &&
-			record.Message.Usage != nil &&
-			record.Message.Usage.reportsCache {
-			u := record.Message.Usage
-			if hit := cacheHitPercent(u.CacheRead, u.CacheCreation, u.Input); hit >= 0 {
-				activity.cacheHit = hit
-			}
-		}
-	})
+	fold := newGaugeFold(string(runtime.Engine), scan)
+	done, err := runtime.scans.fold(data.TranscriptPath, "gauge-"+fold.engine, fold)
 	if err != nil {
 		fallback.transcriptErr = true
 		return fallback
 	}
-	fallback.cacheHit = activity.cacheHit
+	if !done {
+		// The budget ran out before the fold reached the end: the transcript's
+		// facts are an older prefix's, so the gauge keeps the harness's and the
+		// spend is a floor, +?, until a later render catches up.
+		if scan != nil {
+			scanned := scan.total()
+			scanned.partial, scanned.behind = true, true
+			fallback.scanned = &scanned
+		}
+		return fallback
+	}
+	meta := fold.Meta.Meta
+	fallback.cacheHit = fold.CacheHit
 	fallback.model = currentModel(data.Model.ID, meta.Model)
 	if data.Model.ID == "" {
 		fallback.window, fallback.capacityState = resolvedContextWindow(runtime, data, meta)
@@ -283,6 +283,65 @@ func transcriptGauge(runtime Runtime, data input, project string, scan *spendSca
 		}
 	}
 	return gauge
+}
+
+// gaugeFold is everything transcriptGauge takes from the main transcript in
+// its one pass: ReadMeta's fold, the newest completed call's cache hit, and on
+// Claude the spend scan. Its exported fields are the whole fold, which a scan
+// checkpoint keeps; a Codex rollout folds the same way without the spend.
+type gaugeFold struct {
+	Meta     transcript.MetaFold `json:"meta"`
+	CacheHit int                 `json:"cacheHit"`
+	Spend    *spendScan          `json:"spend,omitempty"`
+	engine   string
+	// ownSpend is the scan Spend must be: a checkpoint decodes into it, and one
+	// that dropped or added it is refused (loaded), never folded on without it.
+	ownSpend *spendScan
+}
+
+// newGaugeFold folds engine's transcript, into spend too when it is not nil.
+func newGaugeFold(engine string, spend *spendScan) *gaugeFold {
+	return &gaugeFold{engine: engine, CacheHit: -1, Spend: spend, ownSpend: spend}
+}
+
+func (fold *gaugeFold) reset() {
+	if fold.ownSpend != nil {
+		fold.ownSpend.reset()
+	}
+	*fold = gaugeFold{CacheHit: -1, Spend: fold.ownSpend, engine: fold.engine, ownSpend: fold.ownSpend}
+}
+
+func (fold *gaugeFold) loaded() error {
+	if fold.Spend != fold.ownSpend {
+		return errors.New("gauge fold whose spend scan is missing or not this engine's")
+	}
+	if fold.Spend != nil {
+		return fold.Spend.loaded()
+	}
+	return nil
+}
+
+func (fold *gaugeFold) line(line []byte) {
+	fold.Meta.Line(line, fold.engine)
+	if fold.Spend != nil {
+		fold.Spend.line(line)
+	}
+	// Reuse the completed-call cache rule without another transcript read.
+	var record struct {
+		Type      string `json:"type"`
+		Sidechain bool   `json:"isSidechain"`
+		Message   struct {
+			Usage *transcriptUsage `json:"usage"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &record) == nil && record.Type == entryAssistant && !record.Sidechain &&
+		record.Message.Usage != nil &&
+		record.Message.Usage.reportsCache {
+		u := record.Message.Usage
+		if hit := cacheHitPercent(u.CacheRead, u.CacheCreation, u.Input); hit >= 0 {
+			fold.CacheHit = hit
+		}
+	}
 }
 
 func resolvedContextWindow(runtime Runtime, data input, meta transcript.Meta) (int64, string) {

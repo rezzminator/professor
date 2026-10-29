@@ -32,10 +32,9 @@ func followerEscape(text string) string {
 
 // followerWatchPaths are the files whose change runs the follower: each
 // account's settings.json by real path, each distinct real themes dir once
-// and, on macOS, the global preferences. An unlistable account set watches
-// the preferences alone (nothing outside macOS); the one-minute backstop
-// still runs.
-func followerWatchPaths(home string, darwin bool) []string {
+// and, on macOS, the global preferences. Discovery failures must not replace
+// the last valid watches with a reduced set. No accounts is a valid empty set.
+func followerWatchPaths(home string, darwin bool) ([]string, error) {
 	var watch []string
 	seen := map[string]bool{}
 	add := func(path string) {
@@ -45,16 +44,17 @@ func followerWatchPaths(home string, darwin bool) []string {
 		}
 	}
 	settings, err := accountSettings(home)
-	if err == nil {
-		for _, path := range settings {
-			add(path)
-			add(themesDir(filepath.Dir(path)))
-		}
+	if err != nil && !errors.Is(err, ErrNoAccounts) {
+		return nil, fmt.Errorf("themesync: discover follower watches: %w", err)
+	}
+	for _, path := range settings {
+		add(path)
+		add(themesDir(filepath.Dir(path)))
 	}
 	if darwin {
 		add(globalPreferences(home))
 	}
-	return watch
+	return watch, nil
 }
 
 // followerPlist is the launch agent that runs `pfm theme sync`, through the
@@ -63,7 +63,11 @@ func followerWatchPaths(home string, darwin bool) []string {
 // Claude account's settings.json or themes dir changes or macOS rewrites its
 // global preferences, with a one-minute backstop and at load, on the one
 // service PATH (launchd's bare default holds neither tmux nor herdr).
-func followerPlist(program, home, stateDir string) string {
+func followerPlist(program, home, stateDir string) (string, error) {
+	watch, err := followerWatchPaths(home, true)
+	if err != nil {
+		return "", err
+	}
 	stringItems := func(values ...string) string {
 		var out strings.Builder
 		for _, value := range values {
@@ -83,7 +87,7 @@ func followerPlist(program, home, stateDir string) string {
 ` + stringItems(program, "theme", "sync") + `	</array>
 	<key>WatchPaths</key>
 	<array>
-` + stringItems(followerWatchPaths(home, true)...) + `	</array>
+` + stringItems(watch...) + `	</array>
 	<key>ThrottleInterval</key>
 	<integer>` + fmt.Sprint(followerThrottle) + `</integer>
 	<key>StartInterval</key>
@@ -101,7 +105,7 @@ func followerPlist(program, home, stateDir string) string {
 	<string>` + followerEscape(logPath) + `</string>
 </dict>
 </plist>
-`
+`, nil
 }
 
 func (s *session) followerPath() string {
@@ -187,7 +191,10 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 	if _, err := agentlauncher.Ensure(s.env.Home); err != nil {
 		return s.failed(surfaceFollower, path, err)
 	}
-	want := followerPlist(agentlauncher.Program(s.env.Home), s.env.Home, s.store.dir)
+	want, err := followerPlist(agentlauncher.Program(s.env.Home), s.env.Home, s.store.dir)
+	if err != nil {
+		return s.failed(surfaceFollower, path, err)
+	}
 	current, readErr := os.ReadFile(path)
 	changed := readErr != nil || string(current) != want
 	if changed {
@@ -226,13 +233,17 @@ func (s *session) readFollower(ctx context.Context) SurfaceResult {
 		return s.readSystemdFollower(ctx)
 	}
 	path := s.followerPath()
+	want, err := followerPlist(agentlauncher.Program(s.env.Home), s.env.Home, s.store.dir)
+	if err != nil {
+		return s.failed(surfaceFollower, path, err)
+	}
 	current, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):
 		return s.in(surfaceFollower, VerdictDrift, path, "launch agent plist is missing", 0)
 	case err != nil:
 		return s.failed(surfaceFollower, path, fmt.Errorf("themesync: read %s: %w", path, err))
-	case string(current) != followerPlist(agentlauncher.Program(s.env.Home), s.env.Home, s.store.dir):
+	case string(current) != want:
 		return s.in(surfaceFollower, VerdictDrift, path, "launch agent plist differs from the render", 0)
 	}
 	launcher, err := agentlauncher.UpToDate(s.env.Home)

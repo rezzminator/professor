@@ -213,13 +213,8 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 	}
 	inspector := NewSeatInspector(&runtime)
 	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings}
-	provider.mode = func() (string, error) {
-		latest, err := pfmconfig.LoadRuntime(runtime.Config.Path)
-		if err != nil {
-			return "", err
-		}
-		return latest.Config.Chat.HerdrTabStatus, nil
-	}
+	settings := herdrIndicatorConfig{path: runtime.Config.Path}
+	provider.mode = settings.mode
 	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)
 	provider.glyphs = func() (herdr.TabGlyphs, error) { return themesync.HerdrTabGlyphs(stateDir) }
 	var panes []herdr.TabPane

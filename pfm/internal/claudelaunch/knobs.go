@@ -28,8 +28,6 @@ const (
 	knobStatusLine                 = "statusLine"
 	knobSubagentStatusLine         = "subagentStatusLine"
 	knobOutputStyle                = "outputStyle"
-	knobPermissions                = "permissions"
-	knobDisableAutoMode            = "disableAutoMode"
 	knobConfigDir                  = "configDir"
 	knobModel                      = "model"
 	knobEffort                     = "effort"
@@ -38,7 +36,6 @@ const (
 	knobFork                       = "fork"
 	knobName                       = "name"
 	defaultWord                    = "default"
-	disableWord                    = "disable"
 	accountWord                    = "account"
 	productionMode                 = "production"
 	unsetWord                      = "unset"
@@ -93,11 +90,14 @@ const (
 	flagForkSession            = "--fork-session"
 	flagAllowBypass            = "--allow-dangerously-skip-permissions"
 	flagBypass                 = "--dangerously-skip-permissions"
+	flagPermissionMode         = "--permission-mode"
+	permissionModeAuto         = "auto"
 )
 
 const (
-	SettingsFlag  = flagSettings
-	MCPConfigFlag = flagMCPConfig
+	SettingsFlag       = flagSettings
+	MCPConfigFlag      = flagMCPConfig
+	PermissionModeFlag = flagPermissionMode
 )
 
 type Wire int
@@ -334,14 +334,6 @@ var Knobs = func() []Knob {
 			"Use the managed output style.",
 		},
 		Knob{
-			knobDisableAutoMode,
-			WireSettings,
-			knobPermissions + "." + knobDisableAutoMode,
-			SourceConstant,
-			disableWord,
-			"Keep auto mode and its permission classifier off.",
-		},
-		Knob{
 			knobTheme,
 			WireSettings,
 			knobTheme,
@@ -371,7 +363,7 @@ var Knobs = func() []Knob {
 		Knob{
 			knobPermissionMode,
 			WireFlag,
-			flagAllowBypass + "|" + flagBypass,
+			flagAllowBypass + "|" + flagBypass + "|" + flagPermissionMode,
 			SourceConfig,
 			"bypass",
 			"Apply the configured autonomy mode.",

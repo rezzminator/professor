@@ -94,49 +94,6 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 	}
 }
 
-// A live chat whose payload lost the auto-mode switch bypassed the door as
-// surely as one that lost outputStyle: the audit names it, never passes it.
-func TestSpawnAuditAutoModeLeftOn(t *testing.T) {
-	home := t.TempDir()
-	machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}}
-	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, machine)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parsed := mustParseSpawn(t, append([]string{launch.Binary}, launch.Argv...))
-	for name, permissions := range map[string]any{
-		"absent":     nil,
-		"other key":  map[string]any{"defaultMode": "default"},
-		"wrong word": map[string]any{"disableAutoMode": "enable"},
-		"not object": "disable",
-	} {
-		t.Run(name, func(t *testing.T) {
-			changed := parsed
-			changed.Settings = make(map[string]any, len(parsed.Settings))
-			for key, value := range parsed.Settings {
-				changed.Settings[key] = value
-			}
-			if permissions == nil {
-				delete(changed.Settings, "permissions")
-			} else {
-				changed.Settings["permissions"] = permissions
-			}
-			verdict, reason := classifySpawn(
-				changed,
-				spawnObservation{StartedUnix: 200},
-				machine.EffectiveClaude(1),
-				home,
-				100,
-				nil,
-			)
-			want := "missing --settings permissions.disableAutoMode disable — some spawn site bypassed the door"
-			if verdict != spawnViolation || reason != want {
-				t.Fatalf("%s: %s; want %s: %s", verdict, reason, spawnViolation, want)
-			}
-		})
-	}
-}
-
 func TestSpawnAuditBypassAndUndecodable(t *testing.T) {
 	home := t.TempDir()
 	prefs := config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}

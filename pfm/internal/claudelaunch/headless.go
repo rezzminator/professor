@@ -115,7 +115,7 @@ func integer(value any) (int64, bool) {
 
 // RenderHeadless turns supported per-run Claude preferences into --settings JSON.
 func RenderHeadless(settings map[string]any) (string, error) {
-	result := map[string]any{knobOutputStyle: defaultWord, knobPermissions: autoModeOff()}
+	result := map[string]any{knobOutputStyle: defaultWord}
 	env := map[string]string{envFunctionHooks: "1"}
 	for _, knob := range Knobs {
 		switch knob.Name {

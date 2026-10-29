@@ -110,9 +110,6 @@ func classifySpawn(
 	if missing == "" && (parsed.Settings == nil || parsed.Settings["outputStyle"] != "default") {
 		missing = "missing --settings outputStyle default"
 	}
-	if missing == "" && !claudelaunch.AutoModeDisabled(parsed.Settings) {
-		missing = "missing --settings permissions.disableAutoMode disable"
-	}
 	if missing == "" && !sameSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
 		missing = "hook set differs from the registry"
 	}

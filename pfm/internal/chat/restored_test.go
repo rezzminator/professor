@@ -449,6 +449,36 @@ func TestRestoredRecipeNeverResendsPromptAfterBooleanFlags(t *testing.T) {
 	}
 }
 
+// A restored auto-mode chat keeps --permission-mode and its value.
+func TestRestoredRecipeKeepsAutoPermissionMode(t *testing.T) {
+	run, err := resumeNativeRun(
+		fleetdb.SeatRun{
+			Binary: "fixture",
+			Args: []string{
+				"--allow-dangerously-skip-permissions",
+				claudelaunch.PermissionModeFlag,
+				"auto",
+				"PRIVATE PROMPT",
+				"--settings",
+				"{}",
+			},
+		},
+		fleetdb.Seat{Engine: string(pfmengine.Claude), SessionID: "same-session"}, config.Config{}, io.Discard,
+	)
+	want := []string{
+		"--allow-dangerously-skip-permissions",
+		claudelaunch.PermissionModeFlag,
+		"auto",
+		"--settings",
+		"{}",
+		"--resume",
+		"same-session",
+	}
+	if err != nil || !slices.Equal(run.Args, want) {
+		t.Fatalf("restored argv=%q err=%v want=%q", run.Args, err, want)
+	}
+}
+
 func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 	root := testjail.Fleet(t)
 	const id = "1b67f24e-bbe9-491f-8390-86f50b45a598"

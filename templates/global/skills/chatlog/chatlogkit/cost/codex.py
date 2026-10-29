@@ -22,14 +22,22 @@ BIG = 20 * 1024
 USAGE = ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens", "reasoning_output_tokens")
 
 
-def _usage(v):
-    """(input, cached, output, total, reasoning) usage; reasoning is included in output."""
+def _usage(v, field):
+    """Optional usage tuple; present malformed blocks/counters raise ValueError."""
+    if v is None:
+        return None
     if not isinstance(v, dict):
-        return None
-    try:
-        return tuple(count(v.get(k)) for k in USAGE)
-    except ValueError:
-        return None
+        raise ValueError(f"{field} is not an object")
+    values = []
+    for key in USAGE:
+        try:
+            value = count(v.get(key))
+            if value < 0:
+                raise ValueError("negative token count")
+        except ValueError as e:
+            raise ValueError(f"{field}.{key}: {e}") from e
+        values.append(value)
+    return tuple(values)
 
 
 def _stamp(r, payload):
@@ -107,15 +115,20 @@ def run(path, p, book):
             if not math.isnan(last_tool_after):
                 stamps.append(last_tool_after)
         elif pk == "token_count":
-            info = pl.get("info") if isinstance(pl.get("info"), dict) else None
-            total = _usage(info.get("total_token_usage")) if info else None
+            info = pl.get("info")
+            try:
+                if info is not None and not isinstance(info, dict):
+                    raise ValueError("info is not an object")
+                total = _usage(info.get("total_token_usage"), "total_token_usage") if info else None
+                last = _usage(info.get("last_token_usage"), "last_token_usage") if info else None
+            except ValueError as e:
+                raise C.Unreadable(f"malformed token_count usage at line {n}: {e}") from e
             if total is None:
                 continue
             if seen and total[3] == prev_total:
                 continue
             reset = seen and total[3] < prev_total
             resets += reset
-            last = _usage(info.get("last_token_usage"))
             if last is None or not any(last):
                 no_last += 1
                 base = (0,) * len(USAGE) if reset or not seen else prev_usage

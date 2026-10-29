@@ -3,12 +3,69 @@ package themesync
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestVscodeAckPublicationFailureOverridesSameGenerationSuccess(t *testing.T) {
+	h := newHarness(t)
+	report := h.on()
+	h.ackVscode(report.Generation)
+	session := newSession(h.env, stateStore{dir: h.stateDir}, h.state())
+	session.state.LastFlip = &Flip{At: time.Now().Format(time.RFC3339Nano)}
+	if flip := session.flipWithAck(); flip == nil || flip.Ack == nil {
+		t.Fatal("fixture lacks successful ACK latency")
+	}
+	dir := filepath.Join(h.stateDir, "vscode-ack-failures")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(
+		`{"generation":%d,"target":"global","error":"ACK mutex held by another window"}`,
+		report.Generation,
+	)
+	failure := filepath.Join(dir, "owner.json")
+	if err := os.WriteFile(failure, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictError, "ACK mutex")
+	if flip := session.flipWithAck(); flip == nil || flip.Ack != nil {
+		t.Error("failed ACK publication claimed successful flip latency")
+	}
+	// A later generation is not held hostage by an old window's diagnostic.
+	stale := fmt.Sprintf(`{"generation":%d,"error":"old ACK mutex failure"}`, report.Generation-1)
+	if err := os.WriteFile(failure, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictInSync, "")
+	// Unknown-generation publication failures (malformed contracts) are visible too.
+	if err := os.WriteFile(
+		failure,
+		[]byte(`{"generation":null,"error":"unreadable contract ACK"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictError, "unreadable contract ACK")
+	if err := os.Remove(failure); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictInSync, "")
+	if flip := session.flipWithAck(); flip == nil || flip.Ack == nil {
+		t.Error("recovered ACK latency stayed suppressed")
+	}
+	if err := os.WriteFile(failure, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(h.stateDir, vscodeAckFile)); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictError, "ACK mutex")
+}
 
 func TestVscodeContractKeysAndValues(t *testing.T) {
 	applied := tokyoNightApplied(t)

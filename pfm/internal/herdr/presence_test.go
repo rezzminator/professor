@@ -157,6 +157,60 @@ func probeFor(tmux *fakeTmux, withHerdr bool, warn *strings.Builder) Probe {
 	return probe
 }
 
+func TestPresenceRequiresExplicitEnumerationArrays(t *testing.T) {
+	for _, list := range []struct{ method, kind, field string }{
+		{"pane.list", "pane_list", "panes"},
+		{"agent.list", "agent_list", "agents"},
+		{"workspace.list", "workspace_list", "workspaces"},
+	} {
+		for _, shape := range []string{"missing", "null", "wrong shape", "empty"} {
+			t.Run(list.method+"/"+shape, func(t *testing.T) {
+				table := map[string]string{
+					"pane.list":      `{"type":"pane_list","panes":[]}`,
+					"agent.list":     `{"type":"agent_list","agents":[]}`,
+					"workspace.list": `{"type":"workspace_list","workspaces":[]}`,
+				}
+				result := `{"type":"` + list.kind + `"`
+				switch shape {
+				case "null":
+					result += `,"` + list.field + `":null`
+				case "wrong shape":
+					result += `,"` + list.field + `":{}`
+				case "empty":
+					result += `,"` + list.field + `":[]`
+				}
+				table[list.method] = result + "}"
+				fake := serveHerdr(t, table)
+				// The registered client has detached: malformed evidence must not
+				// take the stale-client branch to a factual NotInHerdr result.
+				tmux := &fakeTmux{stored: map[string]string{
+					"/t/cc-1|s1": storedWith(map[string]Client{
+						"1": {Pane: "w1:p1", Terminal: "term_a", Socket: fake.path},
+					}),
+				}}
+				var warn strings.Builder
+				got := probeFor(tmux, true, &warn).Presence(context.Background(), []Seat{{SocketPath: "/t/cc-1", Session: "s1"}})[0]
+				if shape == "empty" {
+					if got != PresenceNotInHerdr || warn.Len() != 0 {
+						t.Fatalf("explicit empty arrays = %q, warning %q", got, warn.String())
+					}
+				} else if !strings.HasPrefix(got, presenceUnreachableLead) ||
+					!strings.Contains(got, list.method) || !strings.Contains(warn.String(), list.method) {
+					t.Fatalf(
+						"invalid %s enumeration became %q, warning %q; want contextual lookup failure",
+						list.method,
+						got,
+						warn.String(),
+					)
+				}
+				if fake.total() != 3 {
+					t.Fatalf("enumerator ran %d requests, want 3", fake.total())
+				}
+			})
+		}
+	}
+}
+
 func TestPresenceOutsideHerdrIsADashWithNoTmuxOrSocketCall(t *testing.T) {
 	fake := healthyHerdr(t)
 	tmux := &fakeTmux{stored: map[string]string{

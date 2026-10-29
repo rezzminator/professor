@@ -116,6 +116,7 @@ func TestTmuxRestoreEveryPrefixIsRetrySafe(t *testing.T) {
 	restoreVectors := 2*(len(tmuxStyleNames)+len(tmuxChipNames)) + 15
 	for prefix := 0; prefix < restoreVectors; prefix++ {
 		t.Run(fmt.Sprint(prefix), func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			binary := filepath.Join(dir, "tmux-fixture")
 			script := "#!/bin/sh\nshift 2\n[ \"$1\" = set-option ] || exit 73\n" +

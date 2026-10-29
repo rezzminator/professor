@@ -3,21 +3,28 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// Issue #37: Claude copies a title into /clear's empty successor. Hiding the
-// original then leaves only the empty chat under that name. The hook must keep
-// the real conversation resumable, including a /rename not yet in the index.
-func TestClearKillKeepsNamedConversationResumable(t *testing.T) {
+// The CLAUDE_RULES report: a named chat cleared twice, then exited, stayed in
+// the picker, because clear-kill skipped every named session (#37's first
+// fix). The /clear successor now carries its own `{base} #N` name, so the
+// named conversation is hidden like any other: its kill keeps a prompt
+// baseline, and the hook never rewrites an engine-owned transcript.
+func TestClearKillHidesANamedConversation(t *testing.T) {
 	for _, title := range []struct {
 		name   string
 		record string
@@ -84,17 +91,15 @@ func TestClearKillKeepsNamedConversationResumable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rows := compose.Compose(compose.Input{Transcripts: transcripts, Killed: killed}).Rows
-			for _, row := range rows {
-				if row.ID == original && row.Name == "Research Desk" && row.Kind == compose.ResumeClaude {
-					return
+			if len(killed) != 1 || killed[0].ID != original ||
+				killed[0].BaselinePrompts == nil || *killed[0].BaselinePrompts != 1 {
+				t.Fatalf("named conversation after /clear: killed=%#v, want %s hidden at baseline 1", killed, original)
+			}
+			for _, row := range compose.Compose(compose.Input{Transcripts: transcripts, Killed: killed}).Rows {
+				if row.ID == original && !row.Killed {
+					t.Fatalf("named conversation still listed after /clear: row=%#v", row)
 				}
 			}
-			t.Fatalf(
-				"named conversation missing from default resume rows after /clear: rows=%#v killed=%#v",
-				rows,
-				killed,
-			)
 		})
 	}
 }
@@ -125,6 +130,13 @@ func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 			payload:  `{"hook_event_name":"SessionEnd","reason":"clear","session_id":"11111111-1111-4111-8111-111111111111"}`,
 			fleet:    true,
 			records:  `{"type":"custom-title","customTitle":""}` + "\n" + `{"type":"agent-name","agentName":""}` + "\n",
+			wantKill: true,
+		},
+		{
+			name:     "a named chat's clear hides it",
+			payload:  `{"hook_event_name":"SessionEnd","reason":"clear","session_id":"11111111-1111-4111-8111-111111111111"}`,
+			fleet:    true,
+			records:  `{"type":"custom-title","customTitle":"CLAUDE_RULES"}` + "\n",
 			wantKill: true,
 		},
 		{
@@ -386,4 +398,87 @@ func runInternalHookPayload(t *testing.T, entry, payload string) (int, string, s
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"internal", entry}, &stdout, &stderr)
 	return code, stdout.String(), strings.TrimSpace(stderr.String())
+}
+
+// The CLAUDE_RULES report end to end: a named mock Claude seat on a real tmux
+// server takes a prompt and plays /clear, with pfm's own clear-kill and
+// clear-name hooks installed in its settings and fired by the mock engine at
+// SessionEnd(clear) and SessionStart(clear). The fleet scan then hides the
+// pre-clear conversation and lists the successor as `{name} #2`.
+func TestClearHidesTheNamedConversationAndListsItsNumberedSuccessor(t *testing.T) {
+	const name = "CLAUDE_RULES"
+	ladder := newWatchLadder(t)
+	entry := func(command string) []any {
+		return []any{map[string]any{
+			"matcher": "", "hooks": []any{map[string]any{"type": "command", "command": command}},
+		}}
+	}
+	settings, err := json.Marshal(map[string]any{"hooks": map[string]any{
+		"SessionEnd":   entry(testPFMBinary + " internal clear-kill"),
+		"SessionStart": entry(testPFMBinary + " internal clear-name"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ladder.configDir, "settings.json"), settings, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	seat := ladder.start(name)
+	seat.turn()
+	original, project := seat.sid, filepath.Dir(seat.transcript)
+	seat.typeLine("/clear")
+	successor := waitForNewTranscript(t, project, filepath.Base(seat.transcript))
+	// The mock plays its input in order: this turn runs only after /clear and
+	// both of its hooks have finished.
+	seat.transcript = successor
+	seat.turn()
+
+	var rows []compose.Row
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var err error
+		if rows, err = pfmchat.Rows(context.Background(), io.Discard, nil); err != nil {
+			t.Fatalf("scan the fleet after /clear: %v", err)
+		}
+		listed, named := false, false
+		for _, row := range rows {
+			listed = listed || (row.ID == original && !row.Killed)
+			named = named || (row.ID == strings.TrimSuffix(filepath.Base(successor), ".jsonl") &&
+				row.Name == name+" #2" && !row.Killed)
+		}
+		if !listed && named {
+			return
+		}
+		if time.Now().After(deadline) {
+			var seen []string
+			for _, row := range rows {
+				seen = append(seen, fmt.Sprintf("%s name=%q killed=%v", row.ID, row.Name, row.Killed))
+			}
+			t.Fatalf("after /clear want %s hidden and the successor listed as %q; rows: %q", original, name+" #2", seen)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// waitForNewTranscript waits for the one transcript in project that is not
+// known: the successor session a /clear opens.
+func waitForNewTranscript(t *testing.T, project, known string) string {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		files, err := filepath.Glob(filepath.Join(project, "*.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range files {
+			if filepath.Base(file) != known {
+				return file
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no successor transcript beside %s in %s", known, project)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }

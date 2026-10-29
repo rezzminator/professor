@@ -656,7 +656,7 @@ func TestAccountEntryReal(t *testing.T) {
 			"! diff -rq {path} {store}/{entry} 2>&1 | grep -v '^Only in {store}/{entry}' && " +
 			"rm -r {path}  # union into the store; stops while a file differs"
 	}
-	for _, name := range strings.Fields("stats-cache.json .last-cleanup gh-pr-status-cache.json") {
+	for _, name := range strings.Fields(".last-cleanup gh-pr-status-cache.json") {
 		fixes[name] = "rm {path}  # a cache"
 	}
 	fixes["history.jsonl"] = "jq -c -s 'sort_by(.timestamp)[]' {store}/history.jsonl {path} > " +

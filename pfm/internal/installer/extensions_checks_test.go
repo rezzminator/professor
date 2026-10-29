@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestExtensionChecksNameEveryDriftAndUnreadable(t *testing.T) {
@@ -41,6 +42,32 @@ func TestExtensionChecksNameEveryDriftAndUnreadable(t *testing.T) {
 	for _, check := range checks {
 		if check.Engine == "claude" && !strings.Contains(check.Problem, "unreadable") {
 			t.Errorf("unreadable engine reports clean aspect: %+v", check)
+		}
+	}
+}
+
+// TestConfigureExtensionsHandsCallmeterTheCostLedger: callmeter reads pfm's
+// cost ledger only through its own CALLMETER_COST_LEDGER_DIR, so the install
+// supplies pfm's ledger directory while callmeter is installed; a value
+// claude.env names wins.
+func TestConfigureExtensionsHandsCallmeterTheCostLedger(t *testing.T) {
+	callmeter := []pfmconfig.ClaudePlugin{{ID: "callmeter"}}
+	for _, tc := range []struct {
+		name    string
+		plugins []pfmconfig.ClaudePlugin
+		env     map[string]string // claude.env
+		process map[string]string
+		want    string
+	}{
+		{"default ledger", callmeter, nil, nil, "/jail/home/.local/state/pfm/cost-ledger"},
+		{"ledger override", callmeter, nil, map[string]string{paths.EnvCostLedgerDir: "/ledger"}, "/ledger"},
+		{"claude.env wins", callmeter, map[string]string{"CALLMETER_COST_LEDGER_DIR": "/mine"}, nil, "/mine"},
+		{"no callmeter", []pfmconfig.ClaudePlugin{{ID: "buddy"}}, nil, nil, ""},
+	} {
+		options := Options{Home: "/jail/home", Env: &paths.MapEnv{Values: tc.process}}
+		ConfigureExtensions(&options, pfmconfig.Config{Claude: pfmconfig.Claude{Plugins: tc.plugins, Env: tc.env}})
+		if got := options.ClaudeEnv["CALLMETER_COST_LEDGER_DIR"]; got != tc.want {
+			t.Errorf("%s: CALLMETER_COST_LEDGER_DIR = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }

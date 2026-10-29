@@ -13,10 +13,11 @@ import (
 )
 
 // RetiredStoreEntries names every file once linked from every account and now
-// per-account, each also in AccountEntries. Claude's native updater writes
-// .last-update-result.json by temp file and rename at the account path, which
-// replaces a link with a real file. A future retirement is one more row here.
-var RetiredStoreEntries = []string{".last-update-result.json"}
+// per-account, each also in AccountEntries. Claude writes each by temp file and
+// rename at the account path, which replaces a link with a real file: the native
+// updater .last-update-result.json, /stats its stats-cache.json. A future
+// retirement is one more row here.
+var RetiredStoreEntries = []string{".last-update-result.json", "stats-cache.json"}
 
 var retiredStoreReadlink = os.Readlink
 

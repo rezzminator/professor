@@ -162,7 +162,9 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				seatState = "lost"
 			}
 			if tc.name == "unnamed" {
-				name, session = "", "seat1"
+				// An unnamed seat answers to its durable handle, the address
+				// call and status resolve; a bare seat id resolves nowhere.
+				name, session = "", SeatPrefix+"seat1"
 			}
 			if tc.store {
 				terminal := "own-terminal"

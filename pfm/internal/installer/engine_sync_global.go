@@ -24,7 +24,8 @@ const engineSyncGlobalTimeout = 5 * time.Minute
 // engine-sync binary and has Codex homes or a Professor clone to wire: the
 // plugin's wrapper downloads the release binary at the next Claude session
 // start and links it at the stable path (README.md § engine-sync).
-const engineSyncMissingRepair = "install the engine-sync plugin: run `claude plugin install engine-sync@engine-sync`, " +
+const engineSyncMissingRepair = "install the engine-sync plugin: run `claude plugin marketplace add rezzminator/professor`, " +
+	"then `claude plugin install engine-sync@professor`, " +
 	"start a new Claude session so the plugin wrapper downloads and links the binary, " +
 	"then rerun pfm update (or pfm install --yes)"
 

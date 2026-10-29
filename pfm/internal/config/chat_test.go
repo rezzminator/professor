@@ -107,54 +107,21 @@ func TestChatBackendConfiguration(t *testing.T) {
 	}
 }
 
-func TestHerdrTabPriorityConfiguration(t *testing.T) {
-	for _, tc := range []struct {
-		name, content string
-		source        Source
-		want, invalid bool
-	}{
-		{name: "default", content: `{"version":2}`, source: SourceDefault},
-		{name: "on", content: `{"version":2,"chat":{"herdrTabPriority":true}}`, source: SourceFile, want: true},
-		{name: "off", content: `{"version":2,"chat":{"herdrTabPriority":false}}`, source: SourceFile},
-		{name: "string", content: `{"version":2,"chat":{"herdrTabPriority":"true"}}`, invalid: true},
-		{name: "number", content: `{"version":2,"chat":{"herdrTabPriority":1}}`, invalid: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), FileName)
-			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			got, err := Load(path, t.TempDir(), nil)
-			if tc.invalid {
-				if err == nil || !strings.Contains(err.Error(), "herdrTabPriority") {
-					t.Fatalf("invalid priority error=%v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got.Chat.HerdrTabPriority != tc.want || got.Source("chat.herdrTabPriority") != tc.source {
-				t.Fatalf(
-					"priority=%t source=%s, want %t %s",
-					got.Chat.HerdrTabPriority,
-					got.Source("chat.herdrTabPriority"),
-					tc.want,
-					tc.source,
-				)
-			}
-			body, err := Marshal(got, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, body, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			again, err := Load(path, t.TempDir(), nil)
-			if err != nil || again.Chat.HerdrTabPriority != tc.want {
-				t.Fatalf("roundtrip priority=%t error=%v", again.Chat.HerdrTabPriority, err)
-			}
-		})
+func TestRetiredHerdrTabPriorityLoadsAndDrops(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	if err := os.WriteFile(path, []byte(`{"version":2,"chat":{"herdrTabPriority":true}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("a config carrying the retired chat.herdrTabPriority must still load: %v", err)
+	}
+	body, err := Marshal(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "herdrTabPriority") {
+		t.Fatalf("retired key written back:\n%s", body)
 	}
 }
 

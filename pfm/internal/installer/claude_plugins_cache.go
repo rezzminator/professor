@@ -14,8 +14,8 @@ import (
 // {config}/plugins/cache/{marketplace}/{name}/{version} and record that
 // installPath and version per scope in plugins/installed_plugins.json, a new
 // snapshot only when the version changes. A session never runs that snapshot:
-// a plugin whose entry source is a path in a directory marketplace, every -dev
-// copy's, is read in place from the copy, CLAUDE_PLUGIN_ROOT included (Claude
+// a plugin whose entry source is a path in a directory marketplace, every
+// local copy's, is read in place from the copy, CLAUDE_PLUGIN_ROOT included (Claude
 // Code 2.1.300-2.1.310, probed), so a refreshed copy reaches every new chat and
 // /reload-plugins at its version. Only the recorded version is kept current.
 
@@ -124,10 +124,17 @@ func ClaudePluginCacheGaps(configDir string, targets []ClaudePluginTarget) ([]Cl
 }
 
 // updateDir is the working directory `claude plugin update --scope` moves
-// entry from: none for the user scope, its project for a project or local
-// one. An entry pfm cannot move — a project that is not an absolute directory,
-// a scope update does not take — returns the repair the user runs instead.
+// entry from (claudePluginScopeDir).
 func (cache claudePluginCache) updateDir(entry claudePluginInstall) (dir, repair string) {
+	return claudePluginScopeDir(cache.target.ID, "update", entry)
+}
+
+// claudePluginScopeDir is the working directory a `claude plugin {verb}
+// --scope` of id's entry runs in: none for the user scope, its project for a
+// project or local one. An entry pfm cannot reach — a project that is not an
+// absolute directory, a scope the command does not take — returns the repair
+// the user runs instead.
+func claudePluginScopeDir(id, verb string, entry claudePluginInstall) (dir, repair string) {
 	switch entry.Scope {
 	case "user":
 		return "", ""
@@ -142,10 +149,10 @@ func (cache claudePluginCache) updateDir(entry claudePluginInstall) (dir, repair
 		}
 		return "", fmt.Sprintf("its project %s is not an absolute directory: recreate it and run pfm install --yes,"+
 			" or remove the entry with claude plugin uninstall %s --scope %s from that project",
-			shown, cache.target.ID, entry.Scope)
+			shown, id, entry.Scope)
 	default:
-		return "", fmt.Sprintf("claude plugin update takes no scope %s: update it the way it was installed",
-			EscapeControl(entry.Scope))
+		return "", fmt.Sprintf("claude plugin %s takes no scope %s: %s it the way it was installed",
+			verb, EscapeControl(entry.Scope), verb)
 	}
 }
 

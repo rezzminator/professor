@@ -355,12 +355,12 @@ func writePluginVersion(t *testing.T, dir, name, version string) {
 // TestClaudeDirectoryMarketplaceCacheContract plays an -alpha install of a
 // directory marketplace the way pfm runs it and reads the result with pfm's
 // own readers: the record Claude Code keeps is what the installer reads back.
-// The account starts fresh, or knowing the -dev marketplace from another
-// source, which pfm's re-point answers with the same `marketplace add`.
+// The account starts fresh, or knowing the professor marketplace from GitHub,
+// which pfm's re-point answers with the same `marketplace add`.
 func TestClaudeDirectoryMarketplaceCacheContract(t *testing.T) {
 	for _, known := range []string{
 		"",
-		`{"example-dev":{"source":{"source":"github","repo":"example/example"},"installLocation":"/elsewhere"}}`,
+		`{"professor":{"source":{"source":"github","repo":"rezzminator/professor"},"installLocation":"/elsewhere"}}`,
 	} {
 		t.Run(fmt.Sprint(known != ""), func(t *testing.T) { claudeDirectoryMarketplaceCase(t, known) })
 	}
@@ -377,20 +377,20 @@ func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
 			t.Fatal(err)
 		}
 	}
-	marketplace := filepath.Join(fix.home, ".local", "share", "example-dev")
+	marketplace := filepath.Join(fix.home, ".local", "share", "professor-dev")
 	manifest := filepath.Join(marketplace, ".claude-plugin", "marketplace.json")
 	if err := os.MkdirAll(filepath.Dir(manifest), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(manifest, []byte(
-		`{"name":"example-dev","plugins":[{"name":"example","source":"./plugins/example"}]}`,
+		`{"name":"professor","plugins":[{"name":"example","source":"./plugins/example"}]}`,
 	), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	checkout := filepath.Join(marketplace, "plugins", "example")
 	writePluginVersion(t, checkout, "example", "1.2.3")
 	targets := []installer.ClaudePluginTarget{{
-		Name: "example", ID: "example@example-dev", Source: marketplace, Local: true,
+		Name: "example", ID: "example@professor", Source: marketplace, Local: true,
 		Marketplace: marketplace, Checkout: checkout,
 	}}
 	gaps := func(step string) []installer.ClaudePluginGap {
@@ -419,7 +419,7 @@ func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
 	}
 	for _, args := range [][]string{
 		{"plugin", "marketplace", "add", marketplace},
-		{"plugin", "install", "example@example-dev", "-y"},
+		{"plugin", "install", "example@professor", "-y"},
 	} {
 		if code, msg := pluginCLI(t, fix, fix.configDir, args...); code != 0 {
 			t.Fatalf("%v exit=%d %s", args, code, msg)
@@ -433,7 +433,7 @@ func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
 		t.Fatalf("after bump gaps=%v, want the 1.2.3 user entry behind", got)
 	}
 	if code, msg := pluginCLI(t, fix, fix.configDir,
-		"plugin", "update", "example@example-dev", "--scope", "user", "-y"); code != 0 {
+		"plugin", "update", "example@professor", "--scope", "user", "-y"); code != 0 {
 		t.Fatalf("update exit=%d %s", code, msg)
 	}
 	if got := gaps("update"); len(got) != 0 {

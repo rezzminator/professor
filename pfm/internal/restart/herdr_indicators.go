@@ -134,6 +134,9 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, bo
 	for _, painter := range stale {
 		stopper.verify = func(proc process) (bool, error) {
 			image, err := dependencies.Procs.(gather.ProcImage).Image(proc.PID)
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+				return false, nil // exited (or a zombie) since the scan: already stopped
+			}
 			if err != nil {
 				return false, fmt.Errorf("herdr indicator pid %d executable before signal: %w", proc.PID, err)
 			}

@@ -43,6 +43,7 @@ node_modules/
 .opencode/LICENSE
 .opencode/SECURITY.md
 .opencode/opencode.jsonc
+pfm/.opencode/opencode.jsonc
 templates/global/agents/*.toml
 # OpenCode mirror (`engine-sync opencode build`): skill symlinks stay untracked like
 # .codex/skills/; the goals/ tree is the goal plugin's live session state.

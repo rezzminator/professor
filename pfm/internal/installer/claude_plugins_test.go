@@ -22,24 +22,16 @@ import (
 )
 
 // testPlugin is a row of the default list the install tests ensure: its Name,
-// the GitHub marketplace Source and the ID of its GitHub copy.
+// the marketplace Source a release build adds and its ID.
 type testPlugin struct{ Name, Source, ID string }
 
 // testPlugins is claude.plugins' default as these tests spell it out.
 var testPlugins = []testPlugin{
-	{Name: "cache-live-control", Source: "rezzminator/cache-live-control", ID: "cache-live-control@cache-live-control"},
-	{Name: "forward-compaction", Source: "rezzminator/sub-agent-compact", ID: "forward-compaction@forward-compaction"},
-	{
-		Name:   "auto-effort-control",
-		Source: "rezzminator/auto-effort",
-		ID:     "auto-effort-control@auto-effort-control",
-	},
-	{
-		Name:   "tool-visibility-controller",
-		Source: "rezzminator/tool-visibility-controller",
-		ID:     "tool-visibility-controller@tool-visibility-controller",
-	},
-	{Name: "engine-sync", Source: "rezzminator/engine-sync", ID: "engine-sync@engine-sync"},
+	{Name: "cache-live-control", Source: "rezzminator/professor", ID: "cache-live-control@professor"},
+	{Name: "forward-compaction", Source: "rezzminator/professor", ID: "forward-compaction@professor"},
+	{Name: "auto-effort-control", Source: "rezzminator/professor", ID: "auto-effort-control@professor"},
+	{Name: "tool-visibility-controller", Source: "rezzminator/professor", ID: "tool-visibility-controller@professor"},
+	{Name: "engine-sync", Source: "rezzminator/professor", ID: "engine-sync@professor"},
 }
 
 // pluginCall is one argv the fake runner saw, with the account it ran for.
@@ -243,9 +235,9 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 
 func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
-	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"forward-compaction@forward-compaction":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
-		`"engine-sync@engine-sync":true}}`
+	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
+		`"forward-compaction@professor":true,"auto-effort-control@professor":true,"tool-visibility-controller@professor":true,` +
+		`"engine-sync@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeInstalledPlugins(
 		t,
@@ -269,7 +261,7 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 			t.Fatalf("already-enabled account ran %v\n%s", call, out.String())
 		}
 	}
-	wantOK := "ok      claude plugin forward-compaction@forward-compaction installed and enabled in " + first
+	wantOK := "ok      claude plugin forward-compaction@professor installed and enabled in " + first
 	if !strings.Contains(out.String(), wantOK) {
 		t.Fatalf("no ok line for the enabled account:\n%s", out.String())
 	}
@@ -286,8 +278,8 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 
 // writeInstalledPlugins writes dir's plugins/installed_plugins.json the way
 // claude records an install: one user entry per id at checkoutVersion whose
-// installPath exists; a -dev id's holds the files of its checkout, as the
-// snapshot Claude took of it.
+// installPath exists; a professor id's holds the files of its checkout, as
+// the snapshot Claude took of an -alpha copy.
 func writeInstalledPlugins(t *testing.T, dir string, ids ...string) {
 	t.Helper()
 	plugins := map[string]any{}
@@ -296,7 +288,7 @@ func writeInstalledPlugins(t *testing.T, dir string, ids ...string) {
 		if err := os.MkdirAll(installPath, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if name, marketplace, _ := strings.Cut(id, "@"); marketplace == devMarketplaceName(name) {
+		if name, marketplace, _ := strings.Cut(id, "@"); marketplace == pfmconfig.ProfessorMarketplace {
 			writePluginFiles(t, installPath, name)
 		}
 		plugins[id] = []any{map[string]any{"scope": "user", "installPath": installPath, "version": checkoutVersion}}
@@ -351,8 +343,8 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 	}
 	want := []string{
-		"plugin marketplace add rezzminator/auto-effort",
-		"plugin install auto-effort-control@auto-effort-control -y",
+		"plugin marketplace add rezzminator/professor",
+		"plugin install auto-effort-control@professor -y",
 		"plugin marketplace add typesafe-ai/skills",
 		"plugin install typesafe@typesafe-ai -y",
 		"plugin install clangd-lsp@claude-plugins-official -y",
@@ -375,7 +367,8 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 
 // TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins: an unreadable
 // plugins/known_marketplaces.json fails each listed id that needs it, naming the record, and the
-// plugins that do not need it still install.
+// plugins that do not need it still install; a plugin of ours then fails its legacy check, which
+// reads the record for a legacy marketplace, naming it too.
 func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	known := filepath.Join(first, "plugins", "known_marketplaces.json")
@@ -386,13 +379,15 @@ func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *te
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort-control"}}
 	err := inst.ensureClaudePlugins(context.Background())
 	want := "claude plugin typesafe@typesafe-ai in " + first + ": marketplace record unreadable, state unknown: parse " +
-		known + ": unexpected end of JSON input"
+		known + ": unexpected end of JSON input\n" +
+		"claude plugin auto-effort-control@professor in " + first +
+		": legacy ids of auto-effort-control@professor unchecked: parse " + known + ": unexpected end of JSON input"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
 	wantCommands := []string{
-		"plugin marketplace add rezzminator/auto-effort",
-		"plugin install auto-effort-control@auto-effort-control -y",
+		"plugin marketplace add rezzminator/professor",
+		"plugin install auto-effort-control@professor -y",
 	}
 	if got := pluginArgvs(runner); !reflect.DeepEqual(got, wantCommands) {
 		t.Fatalf("commands\n got %q\nwant %q\n%s", got, wantCommands, out.String())
@@ -421,8 +416,8 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
 	wantCommands := []string{
-		"plugin marketplace add rezzminator/auto-effort",
-		"plugin install auto-effort-control@auto-effort-control -y",
+		"plugin marketplace add rezzminator/professor",
+		"plugin install auto-effort-control@professor -y",
 	}
 	if got := pluginArgvs(runner); !reflect.DeepEqual(got, wantCommands) {
 		t.Fatalf("commands\n got %q\nwant %q\n%s", got, wantCommands, out.String())
@@ -433,11 +428,11 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 }
 
 // TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched: only the listed plugins are installed,
-// enabled or retired; every other enabledPlugins entry (another copy of a plugin pfm used to
-// install included) and its pluginConfigs keep their value.
+// enabled or moved off their legacy ids; every other enabledPlugins entry (the legacy ids of a
+// plugin pfm used to install included) and its pluginConfigs keep their value.
 func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	root := t.TempDir()
-	inst, runner, out, _, first := alphaPluginEngine(t, root)
+	inst, runner, out, home, first := alphaPluginEngine(t, root)
 	for _, p := range testPlugins {
 		writePluginCheckout(t, root, p.Name)
 	}
@@ -458,12 +453,11 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantEnabled := map[string]any{
-		"cache-live-control@cache-live-control":       true,
-		"cache-live-control@cache-live-control-dev":   true,
-		"swift-lsp@claude-plugins-official":           true,
-		"buddy@buddy":                                 false,
-		"auto-effort-control@auto-effort-control":     false,
-		"auto-effort-control@auto-effort-control-dev": true,
+		"cache-live-control@cache-live-control":     true,
+		"cache-live-control@cache-live-control-dev": true,
+		"swift-lsp@claude-plugins-official":         true,
+		"buddy@buddy":                               false,
+		"auto-effort-control@professor":             true,
 	}
 	wantConfigs := map[string]any{
 		"cache-live-control@cache-live-control": map[string]any{"options": map[string]any{"keep": float64(1)}},
@@ -478,7 +472,8 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		)
 	}
 	for _, argv := range pluginArgvs(runner) {
-		if !strings.Contains(argv, "auto-effort-control") {
+		if !strings.Contains(argv, "auto-effort-control") &&
+			argv != "plugin marketplace add "+professorDevMarketplace(home) {
 			t.Fatalf("a command touched an unlisted plugin: %q", argv)
 		}
 	}
@@ -486,9 +481,9 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 
 func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
-	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"forward-compaction@forward-compaction":true,"auto-effort-control@auto-effort-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
-		`"engine-sync@engine-sync":true}}`
+	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
+		`"forward-compaction@professor":true,"auto-effort-control@professor":true,"tool-visibility-controller@professor":true,` +
+		`"engine-sync@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
 	writeInstalledPlugins(
@@ -570,15 +565,15 @@ func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
 func TestEnsureClaudePluginsFailureNamesThePluginAndOthersContinue(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	runner := &pluginRunner{fail: map[string]string{
-		first + " plugin marketplace add rezzminator/sub-agent-compact":    "marketplace unreachable",
-		first + " plugin install forward-compaction@forward-compaction -y": "plugin not found",
+		first + " plugin marketplace add rezzminator/professor":   "marketplace unreachable",
+		first + " plugin install forward-compaction@professor -y": "plugin not found",
 	}}
 	var out bytes.Buffer
 	err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(context.Background())
 	if err == nil || !strings.Contains(err.Error(), first) {
 		t.Fatalf("err=%v, want a failure naming %s\n%s", err, first, out.String())
 	}
-	wantLine := "FAIL    claude plugin forward-compaction@forward-compaction in " + first
+	wantLine := "FAIL    claude plugin forward-compaction@professor in " + first
 	if !strings.Contains(out.String(), wantLine) || !strings.Contains(out.String(), "plugin not found") {
 		t.Fatalf("output missing %q with stderr:\n%s", wantLine, out.String())
 	}
@@ -586,8 +581,8 @@ func TestEnsureClaudePluginsFailureNamesThePluginAndOthersContinue(t *testing.T)
 	// tried and the repair, in the install's own FAIL line.
 	for _, want := range []string{
 		`claude.plugins entry "forward-compaction"`,
-		"github.com/rezzminator/sub-agent-compact",
-		"fix or remove the entry in claude.plugins if that repository does not exist",
+		"github.com/rezzminator/professor",
+		"fix or remove the entry in claude.plugins if that marketplace does not list it",
 		BareClaudePluginRepair("forward-compaction"),
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -605,7 +600,7 @@ func TestEnsureClaudePluginsFailureNamesThePluginAndOthersContinue(t *testing.T)
 func TestEnsureClaudePluginsMarketplaceAlreadyAddedIsNotAFailure(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	runner := &pluginRunner{fail: map[string]string{
-		first + " plugin marketplace add rezzminator/cache-live-control": "already installed",
+		first + " plugin marketplace add rezzminator/professor": "already installed",
 	}}
 	var out bytes.Buffer
 	if err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(
@@ -629,8 +624,8 @@ func TestEnsureClaudePluginsDryRunSaysWhatWouldRun(t *testing.T) {
 		t.Fatalf("dry run executed %v", runner.calls)
 	}
 	want := "change  run CLAUDE_CONFIG_DIR=" + first + " " + binary +
-		" plugin marketplace add rezzminator/sub-agent-compact && " + binary +
-		" plugin install forward-compaction@forward-compaction -y"
+		" plugin marketplace add rezzminator/professor && " + binary +
+		" plugin install forward-compaction@professor -y"
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("output missing %q:\n%s", want, out.String())
 	}
@@ -649,7 +644,7 @@ func TestEnsureClaudePluginsUnresolvedBinaryIsAVisibleSkip(t *testing.T) {
 	if len(runner.calls) != 0 {
 		t.Fatalf("unresolved binary still ran %v", runner.calls)
 	}
-	want := "skip    claude plugin cache-live-control@cache-live-control in " + first +
+	want := "skip    claude plugin cache-live-control@professor in " + first +
 		": real claude binary not resolved:"
 	if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), "no-such-claude") {
 		t.Fatalf("output missing %q naming the binary:\n%s", want, out.String())
@@ -873,12 +868,12 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 		{"effort-live-control@effort-live-control-dev", true, true, "auto-effort-control"},
 		{"effort-live-control@professor", true, true, "auto-effort-control"},
 		{"effort-live-control@rezzminator", true, true, "auto-effort-control"},
-		{"auto-effort-control@auto-effort-control", true, false, "auto-effort-control"},
+		{"auto-effort-control@professor", true, false, "auto-effort-control"},
 		{"sub-agent-compact@sub-agent-compact", true, true, "forward-compaction"},
 		{"sub-agent-compact@sub-agent-compact-dev", true, true, "forward-compaction"},
 		{"sub-agent-compact@sub-agent-compact-dev", false, false, "forward-compaction"},
 		{"sub-agent-compact@professor", true, true, "forward-compaction"},
-		{"forward-compaction@forward-compaction", true, false, "forward-compaction"},
+		{"forward-compaction@professor", true, false, "forward-compaction"},
 	} {
 		t.Run(fmt.Sprintf("%s enabled=%v", row.id, row.enabled), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")

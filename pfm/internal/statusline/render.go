@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -131,7 +134,14 @@ func (limits *rateLimits) UnmarshalJSON(content []byte) error {
 	return nil
 }
 
-func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) (map[string]rateWindow, error) {
+// windowsAt returns the windows to render and, apart, the ones this seat's
+// payload reported (the scoped Fable folded in): the snapshot records only the
+// latter, so a reading borrowed from a sibling or the cache is never its own.
+func (limits rateLimits) windowsAt(
+	now time.Time,
+	runtime Runtime,
+	account int,
+) (map[string]rateWindow, map[string]rateWindow, error) {
 	windows := make(map[string]rateWindow, len(limits.Windows)+1)
 	for key, window := range limits.Windows {
 		windows[key] = window
@@ -143,16 +153,18 @@ func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) 
 		}
 		resetAt, err := time.Parse(time.RFC3339, named.Window.ResetsAt)
 		if err != nil {
-			return nil, fmt.Errorf("decode %s reset: %w", named.Key, err)
+			return nil, nil, fmt.Errorf("decode %s reset: %w", named.Key, err)
 		}
 		windows[named.Key] = rateWindow{
 			UsedPercentage: *named.Window.Utilization,
 			ResetsAt:       resetAt.Unix(),
 		}
 	}
-	// A reported window is authoritative, even at zero. Only missing
-	// windows use the shared usage cache; an explicit scoped array also owns
-	// the absence of Fable, independently of missing main windows.
+	reported := maps.Clone(windows)
+	// A reported window stands, even at zero, unless another seat or the usage
+	// cache holds a newer reading of it. A missing window takes the cache's;
+	// an explicit scoped array also owns the absence of Fable, independently
+	// of missing main windows.
 	missing := make(map[string]bool)
 	for _, descriptor := range usagehook.AllWindows() {
 		if _, present := windows[descriptor.Key]; !present &&
@@ -160,10 +172,11 @@ func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) 
 			missing[descriptor.Key] = true
 		}
 	}
-	if account > 0 && len(missing) > 0 {
+	if account > 0 {
+		adoptSiblingReadings(now, runtime, account, windows)
 		fillCachedRateWindows(now, runtime, account, windows, missing)
 	}
-	return windows, nil
+	return windows, reported, nil
 }
 
 // Render is the native high-frequency path. It performs no network work and
@@ -198,7 +211,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	// read; accountBadge is pure and side-effect-free, so calling it before
 	// its other use below duplicates no logic, only the (cheap) lookup.
 	badge, account := accountBadge(runtime)
-	resolvedLimits, err := data.RateLimits.windowsAt(now, runtime, account)
+	resolvedLimits, reported, err := data.RateLimits.windowsAt(now, runtime, account)
 	if err != nil {
 		return "", fmt.Errorf("decode statusline rate limits: %w", err)
 	}
@@ -207,7 +220,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	writeBreadcrumb(runtime, data.TranscriptPath)
 	convergeWindowName(ctx, runtime, data)
 
-	recordRateLimits(runtime, now, account, data)
+	recordRateLimits(runtime, now, account, data.SessionID, reported)
 
 	directoryName := filepath.Base(filepath.Clean(directory))
 	if directory == "" || directoryName == string(filepath.Separator) {
@@ -250,17 +263,13 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	l2 += sep + cElapsed + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
 
 	l3 := ""
-	if runtime.Engine == pfmengine.Codex {
-		codexLine := codexQuotaSegment(runtime, now)
-		l3 = appendSegment(l3, codexLine)
-	}
-	l3 = appendRateSegments(l3, now, data)
-	if runtime.Engine == pfmengine.Claude {
-		weekly := codexWeeklyLine(runtime, now, l1, l2, l3)
-		if l3 != "" && weekly != "" {
-			l3 += "\n" + reset
-		}
-		l3 += weekly
+	switch runtime.Engine {
+	case pfmengine.Claude:
+		l3 = claudeQuotaRows(runtime, now, data, l1, l2)
+	case pfmengine.Codex:
+		l3 = appendRateSegments(appendSegment(l3, codexQuotaSegment(runtime, now)), now, data)
+	default:
+		l3 = appendRateSegments(l3, now, data)
 	}
 
 	if l3 != "" {
@@ -340,48 +349,91 @@ func appendSegment(line, segment string) string {
 	return line + sep + segment
 }
 
-func appendRateSegments(line string, now time.Time, data input) string {
-	// A response carrying none of the known windows is an engine that does not
-	// report these quotas (Codex renders its own from a different source; a
-	// gateway reports only its spend_limit) — not a missing reading, so it
-	// renders nothing.
-	reportsKnown := false
+// reportsKnownWindow is false for an engine that does not report these quotas
+// (Codex renders its own from a different source; a gateway reports only its
+// spend_limit) — not a missing reading, so it renders nothing.
+func reportsKnownWindow(data input) bool {
 	for _, descriptor := range usagehook.AllWindows() {
-		_, present := data.RateLimits.Windows[descriptor.Key]
-		reportsKnown = reportsKnown || present
+		if _, present := data.RateLimits.Windows[descriptor.Key]; present {
+			return true
+		}
 	}
-	if !reportsKnown {
+	return false
+}
+
+// rateWindowRow reads one known window. Every known window renders, always:
+// skipping a window at 0% made an unused quota and a quota whose data never
+// arrived look identical — both simply absent — so the one state worth seeing
+// (a limit the response stopped reporting) arrived as silence. A window missing
+// from a block that DID report renders with an explicit unknown marker.
+func rateWindowRow(now time.Time, descriptor usagehook.WindowDescriptor, data input) quotaRow {
+	window, present := data.RateLimits.Windows[descriptor.Key]
+	if !present {
+		return quotaRow{label: dim + descriptor.Label + "-used:—" + reset}
+	}
+	if window.Failure {
+		return quotaRow{label: red + descriptor.Label + "-used:ERR" + reset}
+	}
+	used := gaugePercent(window.UsedPercentage)
+	label := percentColor(used) + descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
+	remaining := window.ResetsAt - now.Unix()
+	if remaining > 0 {
+		if descriptor.Key == "five_hour" {
+			label += fmt.Sprintf(" %s↻%dh%dm%s", dim, remaining/3600, remaining%3600/60, reset)
+		} else {
+			label += fmt.Sprintf(" %s↻%dd%dh%s", dim, remaining/86400, remaining%86400/3600, reset)
+		}
+	}
+	return quotaRow{percent: used, hasData: true, label: label}
+}
+
+// appendRateSegments renders the known windows as one compact line (the
+// non-Claude engines).
+func appendRateSegments(line string, now time.Time, data input) string {
+	if !reportsKnownWindow(data) {
 		return line
 	}
-	// Otherwise every known window renders, always. Skipping a window at 0%
-	// made an unused quota and a quota whose data never arrived look
-	// identical — both simply absent — so the one state worth seeing (a limit
-	// the response stopped reporting) arrived as silence. A window missing
-	// from a block that DID report renders with an explicit unknown marker.
 	for _, descriptor := range usagehook.AllWindows() {
-		window, present := data.RateLimits.Windows[descriptor.Key]
-		if !present {
-			line = appendSegment(line, makeBar(0, 5)+" "+dim+descriptor.Label+"-used:—"+reset)
-			continue
-		}
-		if window.Failure {
-			line = appendSegment(line, makeBar(0, 5)+" "+red+descriptor.Label+"-used:ERR"+reset)
-			continue
-		}
-		used := gaugePercent(window.UsedPercentage)
-		segment := makeBar(used, 5) + " " + percentColor(used) +
-			descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
-		remaining := window.ResetsAt - now.Unix()
-		if remaining > 0 {
-			if descriptor.Key == "five_hour" {
-				segment += fmt.Sprintf(" %s↻%dh%dm%s", dim, remaining/3600, remaining%3600/60, reset)
-			} else {
-				segment += fmt.Sprintf(" %s↻%dd%dh%s", dim, remaining/86400, remaining%86400/3600, reset)
-			}
-		}
-		line = appendSegment(line, segment)
+		line = appendSegment(line, compactRow(rateWindowRow(now, descriptor, data)))
 	}
 	return line
+}
+
+// claudeQuotaRows is the Claude quota block, every row the same width: 5h and
+// 7d-fable share the top row at half width each, the 7d under it and the Codex
+// weekly last at full width. That width is 115% of the widest sibling row
+// (rowColumns; the compact forms count as siblings), capped by the terminal; a
+// terminal with no content column drops the Codex row and leaves the quotas at
+// their compact width.
+func claudeQuotaRows(runtime Runtime, now time.Time, data input, l1, l2 string) string {
+	codex := codexWeeklyRow(runtime, now)
+	widths := []int{ansi.StringWidth(codex.label)}
+	var five, week, fable quotaRow
+	known := reportsKnownWindow(data)
+	if known {
+		reading := map[string]quotaRow{}
+		for _, descriptor := range usagehook.AllWindows() {
+			reading[descriptor.Key] = rateWindowRow(now, descriptor, data)
+		}
+		five, week, fable = reading[fiveHourCacheKey], reading[sevenDayCacheKey], reading[fableCacheKey]
+		widths = append(
+			widths,
+			ansi.StringWidth(compactRow(five)+sep+compactRow(fable)),
+			ansi.StringWidth(compactRow(week)),
+		)
+	}
+	columns, ok := rowColumns(runtime, widths, l1, l2)
+	var rows []string
+	switch {
+	case known && ok:
+		rows = append(rows, halfRows(five, fable, columns), barRow(week, columns))
+	case known:
+		rows = append(rows, compactRow(five)+sep+compactRow(fable), compactRow(week))
+	}
+	if ok {
+		rows = append(rows, barRow(codex, columns))
+	}
+	return strings.Join(rows, "\n"+reset)
 }
 
 func accountBadge(runtime Runtime) (string, int) {
@@ -605,7 +657,13 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	}
 }
 
-func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
+func recordRateLimits(
+	runtime Runtime,
+	now time.Time,
+	account int,
+	sessionID string,
+	reported map[string]rateWindow,
+) {
 	// Every window carrying a reset time is recorded under `windows`, 0% used
 	// included: 0% is a real reading, and a seat that has just started is
 	// exactly the one whose usage door should answer from this file instead of
@@ -613,11 +671,13 @@ func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
 	// into this map, so the Fable window arrives here like the flat ones — and
 	// a reader that has fallen back to this file (a signed-out or unreachable
 	// account) can render no window this writer did not carry. A payload whose
-	// windows have all reset writes nothing. Cache-derived readings must not
-	// acquire a fresh confirmation timestamp on every draw.
-	windows := make(map[string]rateWindow, len(data.RateLimits.Windows))
+	// windows have all reset writes nothing. Only this seat's own payload is
+	// recorded, and a redraw is no confirmation: an idle chat redraws with the
+	// payload of its last API reply, so an unchanged reading keeps the time it
+	// was first recorded (unchangedSince) and ages out of every reader's horizon.
+	windows := make(map[string]rateWindow, len(reported))
 	live := false
-	for key, window := range data.RateLimits.Windows {
+	for key, window := range reported {
 		if window.ResetsAt <= 0 || window.Cached || window.Failure {
 			continue
 		}
@@ -633,19 +693,20 @@ func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
 	if err := os.MkdirAll(runtime.RateLimitDir, 0o700); err != nil {
 		return
 	}
-	sessionID := data.SessionID
 	if sessionID == "" {
 		sessionID = "anon"
 	}
+	path := filepath.Join(runtime.RateLimitDir, fmt.Sprintf("acct-%d.%s.json", account, sessionID))
+	configDir := filepath.Clean(runtime.ConfigDir)
 	payload := map[string]any{
 		"acct":                int64(account),
-		"config_dir":          filepath.Clean(runtime.ConfigDir),
+		"config_dir":          configDir,
 		"windows":             windows,
 		"five_hour_used":      int64(fiveWindow.UsedPercentage),
 		"seven_day_used":      int64(sevenWindow.UsedPercentage),
 		"five_hour_resets_at": fiveWindow.ResetsAt,
 		"seven_day_resets_at": sevenWindow.ResetsAt,
-		"ts":                  now.Unix(),
+		"ts":                  unchangedSince(path, account, configDir, windows, now),
 	}
 	// The flat keys stay beside the map for the reader an older pfm build
 	// runs: a snapshot lives up to an hour, and that reader knows no map.
@@ -656,11 +717,7 @@ func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
 	body, err := json.Marshal(payload)
 	if err == nil {
 		body = append(body, '\n')
-		_ = atomicfile.Write(
-			filepath.Join(runtime.RateLimitDir, fmt.Sprintf("acct-%d.%s.json", account, sessionID)),
-			body,
-			0o600,
-		)
+		_ = atomicfile.Write(path, body, 0o600)
 	}
 	entries, _ := os.ReadDir(runtime.RateLimitDir)
 	for _, entry := range entries {
@@ -673,6 +730,35 @@ func recordRateLimits(runtime Runtime, now time.Time, account int, data input) {
 			_ = os.Remove(filepath.Join(runtime.RateLimitDir, entry.Name()))
 		}
 	}
+}
+
+// unchangedSince is the confirmation a snapshot of windows carries: the ts of
+// this seat's previous snapshot when it recorded the same readings for the same
+// identity, now otherwise. The file is still rewritten each draw, so the hourly
+// sweep keeps a live seat's file; a reader skips it by ts once it is too old.
+func unchangedSince(
+	path string,
+	account int,
+	configDir string,
+	windows map[string]rateWindow,
+	now time.Time,
+) int64 {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return now.Unix()
+	}
+	var previous struct {
+		Account   int                   `json:"acct"`
+		ConfigDir string                `json:"config_dir"`
+		Windows   map[string]rateWindow `json:"windows"`
+		TS        int64                 `json:"ts"`
+	}
+	if json.Unmarshal(body, &previous) != nil || previous.Account != account ||
+		previous.ConfigDir != configDir || previous.TS <= 0 || previous.TS > now.Unix() ||
+		!maps.Equal(previous.Windows, windows) {
+		return now.Unix()
+	}
+	return previous.TS
 }
 
 func formatCacheTime(duration time.Duration, expired bool) string {

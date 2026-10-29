@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -19,18 +20,22 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-// An -alpha build installs each bare plugin name from a local marketplace pfm
-// owns, ~/.local/share/{plugin}-dev: its .claude-plugin/marketplace.json names
-// the one plugin at ./plugins/{plugin}, a copy of the checkout's
-// plugins/{plugin} (under claude.pluginCheckoutRoot, else the source clone's
-// plugins/) refreshed on every install. A copy, never a symlink: Claude
-// Code refuses a plugin file that resolves outside its marketplace dir.
+// An -alpha build installs each bare plugin name as {plugin}@professor from a
+// local marketplace pfm owns, ~/.local/share/professor-dev: its
+// .claude-plugin/marketplace.json, named professor, lists each plugin at
+// ./plugins/{plugin}, a copy of the checkout's plugins/{plugin} (under
+// claude.pluginCheckoutRoot, else the source clone's plugins/) refreshed on
+// every install. A copy, never a symlink: Claude Code refuses a plugin file
+// that resolves outside its marketplace dir.
 
-// claudePluginOwner is the GitHub owner every bare plugin name's marketplace names.
+// claudePluginOwner is the GitHub owner of the professor marketplace.
 const claudePluginOwner = "rezzminator"
 
-// devMarketplaceName is the local marketplace a plugin installs from on -alpha.
-func devMarketplaceName(plugin string) string { return plugin + "-dev" }
+// professorDevMarketplace is the local professor marketplace an -alpha build
+// installs every plugin with a checkout from.
+func professorDevMarketplace(home string) string {
+	return filepath.Join(home, ".local", "share", pfmconfig.ProfessorMarketplace+"-dev")
+}
 
 // pluginCopySkipped names the checkout entries the copy leaves out.
 func pluginCopySkipped(name string) bool { return name == "node_modules" || name == ".DS_Store" }
@@ -40,8 +45,11 @@ func pluginCopySkipped(name string) bool { return name == "node_modules" || name
 // root is build.CheckoutRoot when claude.pluginCheckoutRoot is set, else the
 // source clone's plugins/; a fallback names which root it tried. A source
 // clone that cannot be resolved, or a checkout that cannot be read, leaves the
-// target Undecided rather than falling back.
+// target Undecided rather than falling back. Only a local target has a
+// source: one professor marketplace has one source, and an add from GitHub
+// would re-point it off every local copy.
 func localClaudePluginTarget(target ClaudePluginTarget, build ClaudePluginBuild) ClaudePluginTarget {
+	target.Source = ""
 	root, rootName := build.CheckoutRoot, pfmconfig.KeyClaudePluginCheckoutRoot
 	if root == "" {
 		unset := pfmconfig.KeyClaudePluginCheckoutRoot + " unset"
@@ -67,8 +75,8 @@ func localClaudePluginTarget(target ClaudePluginTarget, build ClaudePluginBuild)
 		target.Undecided = fmt.Sprintf("checkout unreadable (%s): %v", rootName, err)
 		return target
 	}
-	marketplace := filepath.Join(build.Home, ".local", "share", devMarketplaceName(target.Name))
-	target.ID, target.Source, target.Local = target.DevID, marketplace, true
+	marketplace := professorDevMarketplace(build.Home)
+	target.Source, target.Local = marketplace, true
 	target.Marketplace, target.Checkout = marketplace, checkout
 	return target
 }
@@ -126,25 +134,28 @@ func claudePluginCopyGap(target *ClaudePluginTarget) (string, error) {
 	return mirror + " differs from " + target.Checkout, nil
 }
 
-// ensureClaudePluginCopy writes the local marketplace's manifest when it does
-// not name the plugin, and refreshes the copy when it differs from the checkout.
+// ensureClaudePluginCopy adds the plugin to the local marketplace's manifest
+// when it does not list it, and refreshes the copy when it differs from the
+// checkout.
 func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) error {
 	manifestPath := filepath.Join(target.Marketplace, ".claude-plugin", "marketplace.json")
-	current, err := devMarketplaceCurrent(manifestPath, target.Name)
+	manifest, current, err := devMarketplaceCurrent(manifestPath, target.Name)
 	if err != nil {
 		return err
 	}
 	if !current {
-		manifest, err := json.MarshalIndent(devMarketplaceManifest{
-			Name:    devMarketplaceName(target.Name),
-			Owner:   &devMarketplaceOwner{Name: claudePluginOwner, URL: "https://github.com/" + claudePluginOwner},
-			Plugins: []devMarketplaceEntry{{Name: target.Name, Source: "./plugins/" + target.Name}},
-		}, "", "  ")
+		// Every other plugin's entry stays: each target adds its own.
+		manifest.Name = pfmconfig.ProfessorMarketplace
+		manifest.Owner = &devMarketplaceOwner{Name: claudePluginOwner, URL: "https://github.com/" + claudePluginOwner}
+		manifest.Plugins = append(slices.DeleteFunc(manifest.Plugins, func(entry devMarketplaceEntry) bool {
+			return entry.Name == target.Name
+		}), devMarketplaceEntry{Name: target.Name, Source: "./plugins/" + target.Name})
+		raw, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
 			return err
 		}
-		if err := installer.change("write "+manifestPath, func() error {
-			return atomicfile.Write(manifestPath, append(manifest, '\n'), 0o644)
+		if err := installer.change("add "+target.Name+" to "+manifestPath, func() error {
+			return atomicfile.Write(manifestPath, append(raw, '\n'), 0o644)
 		}); err != nil {
 			return err
 		}
@@ -161,36 +172,38 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 	return installer.change(message, func() error { return mirrorPluginTree(target.Checkout, mirror) })
 }
 
-// devMarketplaceCurrent reports whether the manifest at path is the local
-// marketplace of plugin: its name and an entry for the plugin at
-// ./plugins/{plugin}. A current manifest is left as it is, other keys (a
-// description) included; an absent, unparsable or other manifest is not
-// current and is rewritten whole.
-func devMarketplaceCurrent(path, plugin string) (bool, error) {
+// devMarketplaceCurrent reads the local professor marketplace's manifest at
+// path and reports whether it lists plugin: its name professor and an entry
+// for the plugin at ./plugins/{plugin}. A current manifest is left as it is,
+// other keys (a description) included; a manifest of another name or one that
+// does not parse is not current and comes back empty, rewritten whole; one
+// missing the plugin comes back with the entries it has.
+func devMarketplaceCurrent(path, plugin string) (devMarketplaceManifest, bool, error) {
+	var manifest devMarketplaceManifest
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
+		return manifest, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("read %s: %w", path, err)
+		return manifest, false, fmt.Errorf("read %s: %w", path, err)
 	}
-	var manifest devMarketplaceManifest
-	if json.Unmarshal(raw, &manifest) != nil || manifest.Name != devMarketplaceName(plugin) {
-		return false, nil
+	if json.Unmarshal(raw, &manifest) != nil || manifest.Name != pfmconfig.ProfessorMarketplace {
+		return devMarketplaceManifest{}, false, nil
 	}
 	for _, entry := range manifest.Plugins {
 		if entry.Name == plugin && entry.Source == "./plugins/"+plugin {
-			return true, nil
+			return manifest, true, nil
 		}
 	}
-	return false, nil
+	return manifest, false, nil
 }
 
-// devMarketplaceManifest is a -dev marketplace's .claude-plugin/marketplace.json.
+// devMarketplaceManifest is a directory marketplace's .claude-plugin/marketplace.json.
 type devMarketplaceManifest struct {
-	Name    string                `json:"name"`
-	Owner   *devMarketplaceOwner  `json:"owner,omitempty"`
-	Plugins []devMarketplaceEntry `json:"plugins"`
+	Name        string                `json:"name"`
+	Description string                `json:"description,omitempty"`
+	Owner       *devMarketplaceOwner  `json:"owner,omitempty"`
+	Plugins     []devMarketplaceEntry `json:"plugins"`
 }
 
 type devMarketplaceOwner struct {
@@ -364,43 +377,19 @@ func mirrorPluginTree(source, target string) error {
 	return os.RemoveAll(aside)
 }
 
-// copyIDs are the ids of a plugin of ours: its GitHub, professor and -dev
-// copies, each one the target has.
-func (target ClaudePluginTarget) copyIDs() []string {
-	var ids []string
-	for _, id := range []string{target.GitHubID, target.ProfessorID, target.DevID} {
-		if id != "" {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-// OtherIDs are the ids of ours this build does not ensure: every copy but ID.
-func (target ClaudePluginTarget) OtherIDs() []string {
-	var others []string
-	for _, id := range target.copyIDs() {
-		if id != target.ID {
-			others = append(others, id)
-		}
-	}
-	return others
-}
-
-// planOtherCopyRetirement plans the settings.json edit that leaves only the
-// build's copy loading: every other id (OtherIDs) set false in enabledPlugins
-// when it is enabled (never uninstalled), and the pluginConfigs entry of the
-// first other id that has one copied to the build's id when that id has none,
-// never overwriting. An install-only target's own id is set false too:
-// claude.plugins does not list it. It returns "" when there is nothing to do.
-// The edit writes through a settings.json symlink and keeps every number
-// exactly.
-func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, func() error, error) {
+// planLegacyCopyRetirement plans the settings.json edit that runs before the
+// legacy ids' uninstall, which deletes their pluginConfigs: the pluginConfigs
+// entry of a legacy id (LegacyIDs), the first enabled one that has one, else
+// the first, copied to the build's id when that id has none, never
+// overwriting, and every enabled legacy id set false. An install-only target's own id is set false too: claude.plugins does
+// not list it. It returns "" when there is nothing to do. The edit writes
+// through a settings.json symlink and keeps every number exactly.
+func planLegacyCopyRetirement(path string, target *ClaudePluginTarget) (string, func() error, error) {
 	raw, document, err := readSettingsForEdit(path)
 	if err != nil || document == nil {
 		return "", nil, err
 	}
-	disabled, carried := retireOtherCopies(document, target)
+	disabled, carried := retireLegacyCopies(document, target)
 	if len(disabled) == 0 && carried == "" {
 		return "", nil, nil
 	}
@@ -420,37 +409,39 @@ func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, f
 		}
 	}
 	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
-		retireOtherCopies(fresh, target)
+		retireLegacyCopies(fresh, target)
 		return nil
 	}), nil
 }
 
-// retireOtherCopies applies planOtherCopyRetirement's edit to document and
+// retireLegacyCopies applies planLegacyCopyRetirement's edit to document and
 // names what it changed: the ids it set false and the id whose pluginConfigs
 // entry it carried to the build's id.
-func retireOtherCopies(document map[string]any, target *ClaudePluginTarget) (disabled []string, carried string) {
-	others := target.OtherIDs()
+func retireLegacyCopies(document map[string]any, target *ClaudePluginTarget) (disabled []string, carried string) {
+	legacy := target.LegacyIDs()
 	enabled, _ := document["enabledPlugins"].(map[string]any)
 	if target.InstallOnly && enabled[target.ID] == true {
 		disabled = append(disabled, target.ID)
 	}
-	for _, other := range others {
-		if enabled[other] == true {
-			disabled = append(disabled, other)
+	for _, id := range legacy {
+		if enabled[id] == true {
+			disabled = append(disabled, id)
+		}
+	}
+	configs, _ := document["pluginConfigs"].(map[string]any)
+	if _, kept := configs[target.ID]; !kept {
+		// An enabled legacy id's options are the ones in use: they win.
+		for _, id := range legacy {
+			if _, ok := configs[id]; ok && (carried == "" || enabled[id] == true && enabled[carried] != true) {
+				carried = id
+			}
+		}
+		if carried != "" {
+			configs[target.ID] = configs[carried]
 		}
 	}
 	for _, id := range disabled {
 		enabled[id] = false
-	}
-	configs, _ := document["pluginConfigs"].(map[string]any)
-	if _, kept := configs[target.ID]; !kept {
-		for _, other := range others {
-			if _, ok := configs[other]; ok {
-				carried = other
-				configs[target.ID] = configs[other]
-				break
-			}
-		}
 	}
 	return disabled, carried
 }
@@ -710,15 +701,15 @@ func disableRetiredPlugins(document map[string]any, retired []string) []string {
 	return disabled
 }
 
-// retiredConfigIDs are the ids holding a pluginConfigs entry that target's
-// retirement leaves to target.ID alone, in carry order: its other copies, then
-// the retired ids. Claude Code reads one options entry per plugin name and the
-// plugin warns on every further one ("consolidate duplicate entries"), so none
-// of them may remain beside target.ID's.
+// retiredConfigIDs are the ids of retired holding a pluginConfigs entry,
+// which target's retirement leaves to target.ID alone, in carry order. Claude
+// Code reads one options entry per plugin name and the plugin warns on every
+// further one ("consolidate duplicate entries"), so none of them may remain
+// beside target.ID's.
 func retiredConfigIDs(document map[string]any, target *ClaudePluginTarget, retired []string) []string {
 	configs, _ := document["pluginConfigs"].(map[string]any)
 	var ids []string
-	for _, id := range append(target.OtherIDs(), retired...) {
+	for _, id := range retired {
 		if _, ok := configs[id]; ok && id != target.ID {
 			ids = append(ids, id)
 		}

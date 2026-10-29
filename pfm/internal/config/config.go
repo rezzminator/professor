@@ -498,7 +498,6 @@ func defaultsWithMCPServers(
 		"ask.engine":                                         SourceDefault,
 		"chat.backend":                                       SourceDefault,
 		"chat.herdrTabStatus":                                SourceDefault,
-		"chat.herdrTabPriority":                              SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,

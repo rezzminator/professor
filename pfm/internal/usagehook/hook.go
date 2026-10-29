@@ -27,6 +27,7 @@ const (
 	defaultEndpoint  = "https://api.anthropic.com/api/oauth/usage"
 	fiveHourKey      = "five_hour"
 	sevenDayKey      = "seven_day"
+	sevenDayOpusKey  = "seven_day_opus"
 	sevenDayFableKey = "seven_day_fable"
 )
 
@@ -701,7 +702,7 @@ func logUnknownUsageKeys(body []byte, logger io.Writer) {
 		return
 	}
 	known := map[string]bool{
-		fiveHourKey: true, sevenDayKey: true, "seven_day_opus": true, "limits": true,
+		fiveHourKey: true, sevenDayKey: true, sevenDayOpusKey: true, "limits": true,
 	}
 	unknown := make([]string, 0, len(fields))
 	for key := range fields {

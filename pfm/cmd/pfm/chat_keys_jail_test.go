@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -177,36 +176,7 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 	}
 	values.ProcRoot = t.TempDir()
 	t.Setenv(paths.EnvProcRoot, values.ProcRoot)
-	if err := os.WriteFile(filepath.Join(values.ProcRoot, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range []struct {
-		pid, parent int
-		argv        string
-	}{
-		{900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00native-adapter\x00"},
-		{os.Getpid(), 900001, "pfm-test\x00"},
-	} {
-		dir := filepath.Join(values.ProcRoot, strconv.Itoa(entry.pid))
-		if err := os.Mkdir(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		fields := make([]string, 24)
-		for i := range fields {
-			fields[i] = "0"
-		}
-		fields[0], fields[1], fields[19] = "S", strconv.Itoa(entry.parent), "100"
-		if err := os.WriteFile(
-			filepath.Join(dir, "stat"),
-			[]byte(fmt.Sprintf("%d (pfm) %s", entry.pid, strings.Join(fields, " "))),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(entry.argv), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	stageNativeCallerProc(t, values.ProcRoot, seat.SeatID)
 	if err := gather.StampHerdrHost(gather.NewProcFS(values.ProcRoot), &seat, 900001); err != nil {
 		t.Fatal(err)
 	}

@@ -256,7 +256,8 @@ func (session *claudeSession) begin(source string) error {
 		return err
 	}
 	session.seat = seat
-	if session.title != "" && (source == sourceStartup || session.call.fork) {
+	// Claude carries a chat's title into its /clear successor's transcript.
+	if session.title != "" && (source == sourceStartup || source == sourceClear || session.call.fork) {
 		if err := session.write(
 			claudeRecord{Type: claudeCustomTitle, CustomTitle: session.title, SessionID: session.sessionID},
 		); err != nil {
@@ -492,7 +493,7 @@ func (session *claudeSession) clear() error {
 		claudeProjectSlug(session.proc.cwd),
 		session.sessionID+".jsonl",
 	)
-	return session.begin("clear")
+	return session.begin(sourceClear)
 }
 
 func (session *claudeSession) finish(reason string) error {

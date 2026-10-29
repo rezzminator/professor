@@ -27,13 +27,12 @@ type ClaudePluginGap struct {
 var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 
 // ClaudePluginGaps reads the store's settings.json and names every target id
-// not enabled, every plugin of ours enabled under two or more of its copies'
-// ids (GitHub, professor, -dev), every install-only plugin enabled under any,
-// every local target whose copy is missing, not a plain directory or not the
-// checkout's content, every other plugin enabled under two or more keys, and
-// every enabled retired default plugin copy, every listed bare name a successor
-// retired, and every retired or other copy's pluginConfigs entry left beside
-// its successor's. A
+// not enabled, every install-only plugin enabled, every local target whose
+// copy is missing, not a plain directory or not the checkout's content, every
+// other plugin enabled under two or more keys, every enabled retired default
+// plugin copy, every listed bare name a successor retired, and every retired
+// copy's pluginConfigs entry left beside its successor's. A plugin of ours
+// still under a legacy id is ClaudePluginLegacyGaps'. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -52,40 +51,18 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			gaps = append(gaps, retiredListedGap(target.Name, successor))
 			continue
 		}
-		var enabledCopies []string
-		for _, id := range target.copyIDs() {
-			if pluginEnabled(document, id) {
-				enabledCopies = append(enabledCopies, id)
-			}
-		}
-		if target.InstallOnly {
-			if len(enabledCopies) != 0 {
-				// Every -alpha install disables each copy claude.plugins does not list.
-				gaps = append(gaps, ClaudePluginGap{
-					fmt.Sprintf(
-						"plugin %s enabled (%s) in %s, but %s does not list it",
-						target.Name, strings.Join(enabledCopies, " and "), path, pfmconfig.KeyClaudePlugins,
-					),
-					ClaudePluginRepair,
-				})
-			}
-		} else {
-			if !pluginEnabled(document, target.ID) {
-				gaps = append(
-					gaps,
-					ClaudePluginGap{"plugin " + target.ID + " not enabled in " + path, ClaudePluginRepair},
-				)
-			}
-			if len(enabledCopies) > 1 {
-				// Every build's install disables the copies it does not ensure.
-				gaps = append(gaps, ClaudePluginGap{
-					fmt.Sprintf(
-						"plugin %s enabled %s (%s) in %s",
-						target.Name, timesWord(len(enabledCopies)), strings.Join(enabledCopies, " and "), path,
-					),
-					ClaudePluginRepair,
-				})
-			}
+		switch {
+		case target.InstallOnly && pluginEnabled(document, target.ID):
+			// Every -alpha install disables each plugin claude.plugins does not list.
+			gaps = append(gaps, ClaudePluginGap{
+				fmt.Sprintf(
+					"plugin %s enabled (%s) in %s, but %s does not list it",
+					target.Name, target.ID, path, pfmconfig.KeyClaudePlugins,
+				),
+				ClaudePluginRepair,
+			})
+		case !target.InstallOnly && !pluginEnabled(document, target.ID):
+			gaps = append(gaps, ClaudePluginGap{"plugin " + target.ID + " not enabled in " + path, ClaudePluginRepair})
 		}
 		if target.Local {
 			gap, err := claudePluginCopyGap(target)
@@ -94,7 +71,7 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 				gap = target.Mirror() + " cannot be compared with " + target.Checkout + ": " + err.Error()
 			}
 			if gap != "" {
-				gaps = append(gaps, ClaudePluginGap{"plugin " + target.DevID + " copy " + gap, ClaudePluginRepair})
+				gaps = append(gaps, ClaudePluginGap{"plugin " + target.ID + " copy " + gap, ClaudePluginRepair})
 			}
 		}
 	}
@@ -124,7 +101,7 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			}
 			gaps = append(gaps, ClaudePluginGap{
 				Problem: "pluginConfigs of " + strings.Join(shown, " and ") + " still in " + path +
-					": retired or other copies of " + target.ID,
+					": retired copies of " + target.ID,
 				Fix: "pfm install copies the first to " + target.ID + " when it has none, then drops them",
 			})
 		}
@@ -313,8 +290,8 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 // name@marketplace keys in document, managed by pfm or not, sorted by name. A
 // plugin whose every enabled key claude.plugins lists is left alone: pfm
 // install enables each listed key again. A plugin of ours enabled only under
-// its own copies' ids (GitHub, professor, -dev) is left to ClaudePluginGaps'
-// own gaps, whose repair pfm install owns. A key from the file prints with its control
+// its own id and its legacy ids is left to ClaudePluginLegacyGaps, whose
+// repair pfm install owns. A key from the file prints with its control
 // characters escaped.
 func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
@@ -331,7 +308,7 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 	for index := range targets {
 		listed[targets[index].ID] = true
 		if targets[index].Own {
-			managed[targets[index].Name] = targets[index].copyIDs()
+			managed[targets[index].Name] = append([]string{targets[index].ID}, targets[index].LegacyIDs()...)
 		}
 	}
 	var gaps []ClaudePluginGap

@@ -146,8 +146,8 @@ func runInstallE2E(t *testing.T) {
 			output string
 			want   int
 		}{
-			{"doctor: claude_plugins plugin cache-live-control@cache-live-control not enabled in /fixture/.claude/settings.json — run pfm install --yes\n", 1},
-			{"doctor: claude_plugins plugin cache-live-control@cache-live-control not installed in /fixture/.claude — run pfm install --yes\n", 1},
+			{"doctor: claude_plugins plugin cache-live-control@professor not enabled in /fixture/.claude/settings.json — run pfm install --yes\n", 1},
+			{"doctor: claude_plugins plugin cache-live-control@professor not installed in /fixture/.claude — run pfm install --yes\n", 1},
 			{"doctor: claude_plugins ok\n", 0},
 		} {
 			if got := claudePluginRowWarnings(row.output); got != row.want {

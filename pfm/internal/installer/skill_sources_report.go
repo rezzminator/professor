@@ -249,6 +249,9 @@ func ReportGlobalRegistries(
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures
+	ruleWarnings, ruleFailures := ReportGlobalRules(w, home)
+	warnings += ruleWarnings
+	failures += ruleFailures
 	hostWarnings, hostFailures := ReportEngineSyncHost(w, home, env)
 	warnings += hostWarnings
 	failures += hostFailures

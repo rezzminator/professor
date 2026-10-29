@@ -69,7 +69,7 @@ func tabMarkers(state, mode string, glyphs TabGlyphs) []string {
 		key, text = TabGlyphWorking, "[W]"
 	case TabGlyphIdle:
 		key, text = TabGlyphIdle, "[I]"
-	case priorityDone:
+	case TabGlyphDone:
 		key, text = TabGlyphDone, "[C]"
 	case string(StateBlocked):
 		key, text = TabGlyphBlocked, "[B]"
@@ -323,11 +323,10 @@ func reconcileTab(
 		}
 		// Herdr owns completion/seen state: Stop reports idle, exposed as done
 		// until focus marks its output seen (`herdr --skill`, idle vs done).
-		// This is the same focus observation used by priority return; a sole
-		// pane is the whole tab. Keep transcript errors/death authoritative.
-		if d.State == TabGlyphIdle && pane.State == priorityDone && !*pane.Focused {
-			d.State = priorityDone
-		} else if d.State == priorityDone && *pane.Focused {
+		// A sole pane is the whole tab. Keep transcript errors/death authoritative.
+		if d.State == TabGlyphIdle && pane.State == TabGlyphDone && !*pane.Focused {
+			d.State = TabGlyphDone
+		} else if d.State == TabGlyphDone && *pane.Focused {
 			d.State = TabGlyphIdle
 		}
 		record.Identity, record.State, record.Mode = d.Identity, d.State, d.Mode
@@ -370,7 +369,6 @@ func PaintIndicatorsWithTabs(
 	stderr io.Writer,
 	tabs TabProvider,
 	proof PaneProof,
-	priority func() (bool, error),
 ) error {
 	if stderr == nil {
 		stderr = io.Discard
@@ -382,7 +380,7 @@ func PaintIndicatorsWithTabs(
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs, provePane: proof, priority: priority,
+		tabs:     tabs, provePane: proof,
 	}
 	return painter.run(ctx)
 }

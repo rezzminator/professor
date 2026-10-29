@@ -47,13 +47,13 @@ func TestFunctionHookModulesCachedFalseWarnsWithCauseAndFix(t *testing.T) {
 	env := fixtureEnv(t)
 	path := accountStateFile(env)
 	writeFile(t, path, `{"cachedGrowthBookFeatures":{"`+hookModulesFlag+`":false}}`)
-	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@buddy", true)
+	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@professor", true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn || row.Check != "function-hook-modules" || row.Path != path {
 		t.Fatalf("row=%+v, want WARN function-hook-modules at %s", row, path)
 	}
 	assertContains(t, "problem", row.Problem,
-		"cachedGrowthBookFeatures."+hookModulesFlag+" is false", "buddy@buddy",
+		"cachedGrowthBookFeatures."+hookModulesFlag+" is false", "buddy@professor",
 		"gateway", "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override")
 	assertContains(t, "fix", row.Fix, "no Claude chat running", hookModulesFlag+" to true in "+path, "new chat")
 }
@@ -61,7 +61,7 @@ func TestFunctionHookModulesCachedFalseWarnsWithCauseAndFix(t *testing.T) {
 func TestFunctionHookModulesCachedTrueIsClean(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{"cachedGrowthBookFeatures":{"`+hookModulesFlag+`":true}}`)
-	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@buddy", true)
+	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@professor", true)
 	assertRows(t, detect(t, "function-hook-modules", env))
 }
 
@@ -71,22 +71,22 @@ func TestFunctionHookModulesUnsetFlagWarnsOnlyWithModulePlugins(t *testing.T) {
 	writeFile(t, accountStateFile(env), `{"cachedGrowthBookFeatures":{"other":true}}`)
 	installModulePlugin(t, dir, "plain@plain", false)
 	assertRows(t, detect(t, "function-hook-modules", env))
-	installModulePlugin(t, dir, "auto-effort-control@auto-effort-control", true)
+	installModulePlugin(t, dir, "auto-effort-control@professor", true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn {
 		t.Fatalf("row=%+v, want WARN", row)
 	}
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "auto-effort-control@auto-effort-control")
+	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "auto-effort-control@professor")
 }
 
 func TestFunctionHookModulesMissingStateFileWarnsWithModulePlugins(t *testing.T) {
 	env := fixtureEnv(t)
-	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@buddy", true)
+	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@professor", true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn || row.Path != accountStateFile(env) {
 		t.Fatalf("row=%+v, want WARN at %s", row, accountStateFile(env))
 	}
-	assertContains(t, "problem", row.Problem, "does not exist", hookModulesFlag+" is unset", "buddy@buddy")
+	assertContains(t, "problem", row.Problem, "does not exist", hookModulesFlag+" is unset", "buddy@professor")
 }
 
 func TestFunctionHookModulesUnreadableStateFileIsReportedNotClean(t *testing.T) {
@@ -146,17 +146,17 @@ func installDirectoryPlugin(t *testing.T, dir, plugin, market string, folderModu
 func TestFunctionHookModulesDirectoryMarketplaceReadsItsFolderNotTheSnapshot(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
-	installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "buddy-dev", true, true)
+	installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@buddy-dev")
+	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@professor")
 }
 
 func TestFunctionHookModulesDirectoryMarketplaceFolderWithoutModulesIsClean(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
 	dir := env.Accounts[0].ConfigDir
-	installDirectoryPlugin(t, dir, "buddy", "buddy-dev", false, true)
-	snapshot := filepath.Join(dir, "plugins", "cache", "buddy-dev", "buddy", "hooks", "hooks.json")
+	installDirectoryPlugin(t, dir, "buddy", "professor", false, true)
+	snapshot := filepath.Join(dir, "plugins", "cache", "professor", "buddy", "hooks", "hooks.json")
 	writeFile(t, snapshot, `{"modules":["./old.ts"]}`)
 	assertRows(t, detect(t, "function-hook-modules", env))
 }
@@ -165,29 +165,29 @@ func TestFunctionHookModulesGithubMarketplaceStillReadsInstallPath(t *testing.T)
 	env := fixtureEnv(t)
 	dir := env.Accounts[0].ConfigDir
 	writeFile(t, accountStateFile(env), `{}`)
-	installModulePlugin(t, dir, "buddy@buddy", true)
+	installModulePlugin(t, dir, "buddy@professor", true)
 	writeFile(t, filepath.Join(dir, "plugins", "known_marketplaces.json"),
-		`{"buddy":{"source":{"source":"github","repo":"owner/buddy"}}}`)
+		`{"professor":{"source":{"source":"github","repo":"owner/professor"}}}`)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@buddy")
+	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@professor")
 }
 
 func TestFunctionHookModulesUnresolvableDirectoryFolderIsReportedNotClean(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
-	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "buddy-dev", true, false)
+	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, false)
 	manifest := filepath.Join(root, ".claude-plugin", "marketplace.json")
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn || row.Path != manifest {
 		t.Fatalf("row=%+v, want WARN at %s", row, manifest)
 	}
-	assertContains(t, "problem", row.Problem, "buddy@buddy-dev", "unknown")
+	assertContains(t, "problem", row.Problem, "buddy@professor", "unknown")
 }
 
 func TestFunctionHookModulesUnlistedDirectoryPluginIsReportedNotClean(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
-	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "buddy-dev", true, false)
+	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, false)
 	writeFile(
 		t,
 		filepath.Join(root, ".claude-plugin", "marketplace.json"),
@@ -204,7 +204,7 @@ func TestFunctionHookModulesUnparsableKnownMarketplacesIsReportedNotClean(t *tes
 	env := fixtureEnv(t)
 	dir := env.Accounts[0].ConfigDir
 	writeFile(t, accountStateFile(env), `{}`)
-	installModulePlugin(t, dir, "buddy@buddy", true)
+	installModulePlugin(t, dir, "buddy@professor", true)
 	known := filepath.Join(dir, "plugins", "known_marketplaces.json")
 	writeFile(t, known, `{nope`)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))

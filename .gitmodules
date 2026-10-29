@@ -25,7 +25,7 @@
 	ignore = dirty
 [submodule "forward-compaction"]
 	path = plugins/forward-compaction
-	url = https://github.com/rezzminator/sub-agent-compact.git
+	url = https://github.com/rezzminator/forward-compaction.git
 	branch = develop
 	ignore = dirty
 [submodule "auto-effort-control"]

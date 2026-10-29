@@ -59,7 +59,7 @@ func (installer *engine) retireDeadRegistryLinks() error {
 		return err
 	}
 	registries := map[string]bool{}
-	for _, name := range []string{"agents", "commands", "skills"} {
+	for _, name := range []string{"agents", "commands", "skills", globalRulesRegistry} {
 		registries[filepath.Join(installer.options.ConfigDir, name)] = true
 	}
 	registries[filepath.Join(installer.options.Home, ".agents", "skills")] = true
@@ -139,6 +139,7 @@ func (installer *engine) retireStaleLinkStagesWithWalk(walk func(string, fs.Walk
 	registries := []string{
 		filepath.Join(installer.options.ConfigDir, "agents"),
 		filepath.Join(installer.options.ConfigDir, "commands"),
+		filepath.Join(installer.options.ConfigDir, globalRulesRegistry),
 		filepath.Join(installer.options.ConfigDir, "skills"),
 		filepath.Join(installer.options.Home, ".agents", "skills"),
 	}

@@ -197,7 +197,8 @@ func (identifier *Whoami) identifyHerdr(ctx context.Context, claim herdrClaim) (
 	}
 	identity.SeatID, identity.Session = proved.SeatID, proved.Name
 	if identity.Session == "" {
-		identity.Session = proved.SeatID
+		// The durable handle call and status resolve; a bare seat id is no address.
+		identity.Session = SeatPrefix + proved.SeatID
 	}
 	identity.Engine, identity.ID = proved.Engine, proved.SessionID
 	return identity, nil

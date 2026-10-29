@@ -51,7 +51,6 @@ A gate that fails is fixed in the code. A limit the code cannot fit rises only t
 
 - Stay inside the request: a change it needs beyond its scope is named under `OUTSIDE` in your return, never made.
 - A deletion leaves nothing behind: callers, references, config keys, docs, tests, fixtures, registry rows and installed links go in the same pass, proven by a search for the name that finds only history.
-- At a compaction nudge, finish the step in hand, then call `mcp__forward-compaction__forward_compaction` with a handoff carrying the request, the decisions, the files done and in flight, any child and its area, and `## Next`.
 
 ## Return
 

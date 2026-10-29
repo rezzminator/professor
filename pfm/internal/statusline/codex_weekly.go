@@ -6,10 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 type codexUsageCache struct {
@@ -24,48 +21,26 @@ type codexWindow struct {
 	ResetsAt           int64   `json:"resetsAt"`
 }
 
-// codexWeeklyLine shares the Codex renderer's cache and detached refresher.
-// Match the widest rendered sibling row, keeping the label intact when space allows.
-// Hook COLUMNS bounds that width: the managed local Claude footer has two outer
-// cells per side and statusLine.padding=0. Remote layouts and user padding
-// overrides are not exposed by the hook.
-func codexWeeklyLine(runtime Runtime, now time.Time, siblingLines ...string) string {
+// codexWeeklyRow reads the shared Codex cache into a drawable reading, arming
+// the Codex renderer's detached refresher; claudeQuotaRows sizes and draws it.
+func codexWeeklyRow(runtime Runtime, now time.Time) quotaRow {
 	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
 	armRefresh(runtime, RefreshKindCodex, path, 5*time.Minute)
 	window, age, err := readCodexWeekly(path, now)
-	label := dim + "codex-7d: no data" + reset
-	percent := 0
+	row := quotaRow{label: dim + "codex-7d: no data" + reset}
 	if err != nil {
 		fmt.Fprintf(runtime.Warn, "statusline: Codex weekly cache %s: %v\n", path, err)
-		label = red + "codex-7d: error" + reset
+		row.label = red + "codex-7d: error" + reset
 	} else if window != nil {
-		percent = gaugePercent(window.UsedPercent)
-		label = percentColor(percent) + "codex-7d-used:" + strconv.Itoa(percent) + "%" + reset +
+		row.hasData = true
+		row.percent = gaugePercent(window.UsedPercent)
+		row.label = percentColor(row.percent) + "codex-7d-used:" + strconv.Itoa(row.percent) + "%" + reset +
 			resetCountdown(now, window.ResetsAt)
 		if age > 5*time.Minute {
-			label += " " + yellow + "stale " + formatDuration(age.Milliseconds()) + reset
+			row.label += " " + yellow + "stale " + formatDuration(age.Milliseconds()) + reset
 		}
 	}
-	columns := ansi.StringWidth(label)
-	for _, line := range siblingLines {
-		columns = max(columns, ansi.StringWidth(line))
-	}
-	if runtime.Columns > 0 {
-		contentColumns := runtime.Columns - 2*2 // Claude's outer footer padding, left and right.
-		if contentColumns <= 0 {
-			return ""
-		}
-		columns = min(columns, contentColumns)
-	}
-	width := columns - ansi.StringWidth(label) - 1
-	if width <= 0 {
-		return ansi.Truncate(label, columns, "")
-	}
-	bar := makeBar(percent, width)
-	if window == nil || err != nil {
-		bar = dim + strings.Repeat("▱", width) + reset
-	}
-	return bar + " " + label
+	return row
 }
 
 // Missing and unreadable are different visible states. File age follows the

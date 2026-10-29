@@ -92,7 +92,7 @@ func TestClaudePluginsKey(t *testing.T) {
 		},
 		{
 			name: "a source on a bare name", content: `{"version":2,"claude":{"plugins":[{"id":"callmeter","source":"o/r"}]}}`,
-			err: `claude.plugins[0] source needs a name@marketplace id: a bare name resolves to its own GitHub repository or checkout`,
+			err: `claude.plugins[0] source needs a name@marketplace id: a bare name resolves to the professor marketplace or its checkout`,
 		},
 		{
 			name: "an empty source", content: `{"version":2,"claude":{"plugins":[{"id":"a@b","source":""}]}}`,
@@ -130,12 +130,16 @@ func TestClaudePluginsKey(t *testing.T) {
 			source: SourceFile,
 		},
 		{
-			name: "a full id of a listed bare name's -dev copy", content: `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@auto-effort-control-dev"]}}`,
-			err: `claude.plugins[1] auto-effort-control@auto-effort-control-dev is a copy of claude.plugins[0] auto-effort-control, which ensures one copy and disables the other: list the plugin once`,
+			name: "a full id of a listed bare name's legacy -dev id", content: `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@auto-effort-control-dev"]}}`,
+			err: `claude.plugins[1] auto-effort-control@auto-effort-control-dev is an id of claude.plugins[0] auto-effort-control, which ensures auto-effort-control@professor and moves its legacy ids to it: list the plugin once`,
 		},
 		{
-			name: "a full id of a listed bare name's GitHub copy", content: `{"version":2,"claude":{"plugins":["auto-effort-control@auto-effort-control","c","auto-effort-control"]}}`,
-			err: `claude.plugins[2] auto-effort-control is a bare name of claude.plugins[0] auto-effort-control@auto-effort-control, which it ensures or disables: list the plugin once`,
+			name: "a full id of a listed bare name's professor id", content: `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@professor"]}}`,
+			err: `claude.plugins[1] auto-effort-control@professor is an id of claude.plugins[0] auto-effort-control, which ensures auto-effort-control@professor and moves its legacy ids to it: list the plugin once`,
+		},
+		{
+			name: "a full id of a listed bare name's legacy GitHub id", content: `{"version":2,"claude":{"plugins":["auto-effort-control@auto-effort-control","c","auto-effort-control"]}}`,
+			err: `claude.plugins[2] auto-effort-control is a bare name of claude.plugins[0] auto-effort-control@auto-effort-control, which it ensures or moves: list the plugin once`,
 		},
 		{
 			name:        "a bare name beside the same plugin of another marketplace",

@@ -495,3 +495,70 @@ func TestRetireRegistryOwnership(t *testing.T) {
 		})
 	}
 }
+
+func rulesRows(output string) []string {
+	var rows []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "doctor: rules") {
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
+// TestRulesDoctorRows: doctor names a rule whose store link is missing, a
+// conflict, and prints the healthy summary row once every rule is linked.
+func TestRulesDoctorRows(t *testing.T) {
+	t.Parallel()
+	report := func(h ownershipHome) (rows []string, warnings, failures int) {
+		var output bytes.Buffer
+		warnings, failures = ReportGlobalRegistries(
+			&output, h.home, true,
+			&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
+			nil, nil, ownershipRetired,
+		)
+		return rulesRows(output.String()), warnings, failures
+	}
+	h := newOwnershipHome(t)
+	source := filepath.Join(h.clone, "templates", "global", "rules")
+	writeFixture(t, filepath.Join(source, "a.md"), "a")
+	writeFixture(t, filepath.Join(source, "b.md"), "b")
+	symlinkFixture(t, filepath.Join(source, "a.md"), filepath.Join(h.store, "rules", "a.md"))
+
+	rows, warnings, failures := report(h)
+	missing := filepath.Join(h.store, "rules", "b.md")
+	if len(rows) != 1 || warnings != 1 || failures != 0 ||
+		!strings.HasPrefix(rows[0], "doctor: rules "+missing+" state=missing") ||
+		!strings.HasSuffix(rows[0], "run pfm install --yes") {
+		t.Fatalf("rows=%q warnings=%d failures=%d, want one missing row for %s", rows, warnings, failures, missing)
+	}
+
+	symlinkFixture(t, filepath.Join(source, "b.md"), missing)
+	rows, warnings, failures = report(h)
+	if !reflect.DeepEqual(rows, []string{"doctor: rules ok (2 linked)"}) || warnings != 0 || failures != 0 {
+		t.Fatalf("rows=%q warnings=%d failures=%d, want the healthy row", rows, warnings, failures)
+	}
+
+	// An operator's own file under a shipped name: a warning whose fix is not a
+	// bare rerun, since install preserves it.
+	writeFixture(t, filepath.Join(source, "c.md"), "c")
+	conflict := filepath.Join(h.store, "rules", "c.md")
+	writeFixture(t, conflict, "my own rule")
+	rows, warnings, failures = report(h)
+	if len(rows) != 1 || warnings != 1 || failures != 0 ||
+		!strings.HasPrefix(rows[0], "doctor: rules "+conflict+" state=conflict") ||
+		!strings.HasSuffix(rows[0], "pfm install preserves it; move it aside, then run pfm install --yes") {
+		t.Fatalf("rows=%q warnings=%d failures=%d, want one conflict row for %s", rows, warnings, failures, conflict)
+	}
+
+	// A file where the rules directory belongs: a read failure that is not "absent"
+	// (the registry plan fails on it too, so failures counts both rows).
+	if err := os.RemoveAll(source); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, source, "not a directory")
+	rows, _, failures = report(h)
+	if failures == 0 || len(rows) != 1 || !strings.HasPrefix(rows[0], "doctor: rules state=CHECK-FAILED") {
+		t.Fatalf("an unreadable source must be a failing row: rows=%q failures=%d", rows, failures)
+	}
+}

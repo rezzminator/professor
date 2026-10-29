@@ -17,9 +17,11 @@ import (
 // templates/generated/agents render, the links engine-sync global writes. Like
 // the jail's fake engine-sync these are fixtures, not a second compiler:
 // engine-sync's gate proves the rendered manuals and settings. Shared files
-// below a subdirectory are never agents: the inventory never lists them.
+// below a subdirectory are never agents: the inventory never lists them. It
+// also links the checkout's global rules, the other registry a healthy home holds.
 func StageGlobalAgents(t *testing.T, home string) {
 	t.Helper()
+	stageGlobalRules(t, home)
 	rows, err := globalAgentFixtures()
 	if err != nil {
 		t.Fatalf("inventory global agent fixtures: %v", err)
@@ -47,6 +49,31 @@ func StageGlobalAgents(t *testing.T, home string) {
 		}
 		if err := os.Symlink(target, link); err != nil {
 			t.Fatalf("link agent fixture %s -> %s: %v", link, target, err)
+		}
+	}
+}
+
+// stageGlobalRules links every *.md of the checkout's templates/global/rules
+// into {home}/.claude/rules, the links pfm install makes, so a healthy jail
+// home passes doctor's rules row; StageGlobalAgents calls it.
+func stageGlobalRules(t *testing.T, home string) {
+	t.Helper()
+	source := filepath.Join(checkoutRoot(), "templates", "global", "rules")
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		t.Fatalf("inventory global rule fixtures %s: %v", source, err)
+	}
+	registry := filepath.Join(home, ".claude", "rules")
+	if err := os.MkdirAll(registry, 0o755); err != nil {
+		t.Fatalf("create rule fixture directory %s: %v", registry, err)
+	}
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		link := filepath.Join(registry, entry.Name())
+		if err := os.Symlink(filepath.Join(source, entry.Name()), link); err != nil && !os.IsExist(err) {
+			t.Fatalf("link rule fixture %s: %v", link, err)
 		}
 	}
 }

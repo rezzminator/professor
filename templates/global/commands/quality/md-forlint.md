@@ -29,12 +29,12 @@ Two passes must produce identical bytes. Verify idempotence after any config cha
 
 ## `audit` — price the policy before adopting it
 
-Copy the tracked markdown into a scratch tree, format it there, and report the delta — never measure by formatting the live checkout:
+Copy the tracked markdown into a scratch tree, format it there, and report the delta — never measure by formatting the live checkout. `{project}` is the repository directory name, written out, since an `rm -rf` takes a literal path:
 
 ```bash
-W=$(mktemp -d); git ls-files '*.md' > /tmp/corpus.txt
-tar -cf - -T /tmp/corpus.txt | (cd "$W" && tar -xf -); cp .rumdl.toml "$W/"
-(cd "$W" && rumdl fmt . >/dev/null; git ls-files '*.md' 2>/dev/null)
+rm -rf /tmp/{project}/md-audit && mkdir -p /tmp/{project}/md-audit/tree; git ls-files '*.md' > /tmp/{project}/md-audit/corpus.txt
+tar -cf - -T /tmp/{project}/md-audit/corpus.txt | (cd /tmp/{project}/md-audit/tree && tar -xf -); cp .rumdl.toml /tmp/{project}/md-audit/tree/
+(cd /tmp/{project}/md-audit/tree && rumdl fmt . >/dev/null) || echo "FAILED: rumdl fmt in /tmp/{project}/md-audit/tree"; cat /tmp/{project}/md-audit/corpus.txt
 # per-file: bytes/lines before vs after, and the word-level digest below
 ```
 

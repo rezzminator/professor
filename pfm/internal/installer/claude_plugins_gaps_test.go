@@ -20,7 +20,7 @@ import (
 // enable a disabled listed key again — and a key from the file prints with its
 // control characters escaped.
 func TestClaudePluginGapsSparesListedKeys(t *testing.T) {
-	ours := ClaudePluginTarget{Name: "bar", ID: "bar@bar", GitHubID: "bar@bar", DevID: "bar@bar-dev", Own: true}
+	ours := ClaudePluginTarget{Name: "bar", ID: "bar@professor", Own: true}
 	theirs := ClaudePluginTarget{Name: "bar", ID: "bar@x", MarketplaceName: "x"}
 	fooA := ClaudePluginTarget{Name: "foo", ID: "foo@a", MarketplaceName: "a"}
 	fooB := ClaudePluginTarget{Name: "foo", ID: "foo@b", MarketplaceName: "b"}
@@ -32,7 +32,7 @@ func TestClaudePluginGapsSparesListedKeys(t *testing.T) {
 		want    []ClaudePluginGap
 	}{
 		{"two listed full ids", []ClaudePluginTarget{fooA, fooB}, []string{"foo@a", "foo@b"}, nil},
-		{"a bare name and a listed full id", []ClaudePluginTarget{ours, theirs}, []string{"bar@bar", "bar@x"}, nil},
+		{"a bare name and a listed full id", []ClaudePluginTarget{ours, theirs}, []string{"bar@professor", "bar@x"}, nil},
 		{"a listed id and a stranger", []ClaudePluginTarget{fooA}, []string{"foo@a", "foo@c"}, []ClaudePluginGap{{
 			"plugin foo enabled twice (foo@a and foo@c) in {file}", disable,
 		}}},
@@ -106,13 +106,13 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 		}
 		installed := false
 		for _, call := range runner.calls {
-			installed = installed || call.argv == "plugin install auto-effort-control@auto-effort-control -y"
+			installed = installed || call.argv == "plugin install auto-effort-control@professor -y"
 		}
 		if !installed {
 			t.Fatalf("the successor was not installed: %v", runner.calls)
 		}
 		if line := "disable " + retiredGitHub + ", " + retiredDev + " in " + filepath.Join(first, "settings.json") +
-			": retired, auto-effort-control@auto-effort-control replaces it"; !strings.Contains(out.String(), line) {
+			": retired, auto-effort-control@professor replaces it"; !strings.Contains(out.String(), line) {
 			t.Fatalf("no %q line:\n%s", line, out.String())
 		}
 	})
@@ -180,13 +180,14 @@ func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsReleaseRetiresTheProfessorCopy: a release install
-// ensures engine-sync@engine-sync and sets an enabled engine-sync@professor
-// false, so only one copy's hooks run.
-func TestEnsureClaudePluginsReleaseRetiresTheProfessorCopy(t *testing.T) {
+// TestEnsureClaudePluginsReleaseMovesTheLegacyCopy: a release install
+// ensures engine-sync@professor, disables an enabled legacy
+// engine-sync@engine-sync and then drops its key, so only one copy's hooks
+// run; another plugin's key is kept.
+func TestEnsureClaudePluginsReleaseMovesTheLegacyCopy(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	settings := filepath.Join(first, "settings.json")
-	writeFixture(t, settings, `{"enabledPlugins":{"engine-sync@professor":true,"other@market":true}}`)
+	writeFixture(t, settings, `{"enabledPlugins":{"engine-sync@engine-sync":true,"other@market":true}}`)
 	var out bytes.Buffer
 	if err := pluginEngine(home, binary, first, second, &pluginRunner{}, &out, true).ensureClaudePlugins(
 		context.Background(),
@@ -194,21 +195,29 @@ func TestEnsureClaudePluginsReleaseRetiresTheProfessorCopy(t *testing.T) {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 	}
 	enabled, _ := mustSettings(t, settings)["enabledPlugins"].(map[string]any)
-	if enabled["engine-sync@professor"] != false || enabled["other@market"] != true {
-		t.Fatalf("enabledPlugins=%v, want engine-sync@professor false and other@market kept\n%s", enabled, out.String())
+	if _, left := enabled["engine-sync@engine-sync"]; left || enabled["other@market"] != true {
+		t.Fatalf(
+			"enabledPlugins=%v, want engine-sync@engine-sync gone and other@market kept\n%s",
+			enabled,
+			out.String(),
+		)
 	}
-	line := "disable engine-sync@professor in " + settings + ": engine-sync@engine-sync replaces it"
-	if !strings.Contains(out.String(), line) {
-		t.Fatalf("no %q line:\n%s", line, out.String())
+	for _, line := range []string{
+		"disable engine-sync@engine-sync in " + settings + ": engine-sync@professor replaces it",
+		"drop engine-sync@engine-sync from enabledPlugins in " + settings + ": legacy ids of engine-sync@professor",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Fatalf("no %q line:\n%s", line, out.String())
+		}
 	}
 }
 
-// TestClaudePluginGapsNamesEveryCopy: on an -alpha build a plugin of ours has
-// three copies — GitHub, professor, -dev — and any two enabled is one gap; an
-// install-only plugin enabled under any copy is a gap; a local copy whose
+// TestClaudePluginGapsNamesTheBuildsID: a plugin of ours is checked under
+// its one id, {name}@professor, a legacy copy enabled in its place leaving it
+// not enabled; an install-only plugin enabled is a gap; a local copy whose
 // content is not the checkout's, or cannot be read, is a gap. A plugin left
 // right names nothing.
-func TestClaudePluginGapsNamesEveryCopy(t *testing.T) {
+func TestClaudePluginGapsNamesTheBuildsID(t *testing.T) {
 	checkout := writePluginCheckout(t, t.TempDir(), "bar")
 	marketplace := t.TempDir()
 	mirror := filepath.Join(marketplace, "plugins", "bar")
@@ -231,7 +240,7 @@ func TestClaudePluginGapsNamesEveryCopy(t *testing.T) {
 	}
 	target := func(market string, installOnly bool) ClaudePluginTarget {
 		return ClaudePluginTarget{
-			Name: "bar", ID: "bar@bar-dev", GitHubID: "bar@bar", ProfessorID: "bar@professor", DevID: "bar@bar-dev",
+			Name: "bar", ID: "bar@professor",
 			Source: market, Local: true, Marketplace: market, Checkout: checkout, Own: true, InstallOnly: installOnly,
 		}
 	}
@@ -241,32 +250,27 @@ func TestClaudePluginGapsNamesEveryCopy(t *testing.T) {
 		enabled []string
 		want    []string
 	}{
-		{"enabled from its -dev copy alone", target(marketplace, false), []string{"bar@bar-dev"}, nil},
+		{"enabled from its checkout copy", target(marketplace, false), []string{"bar@professor"}, nil},
 		{
-			"enabled under three copies", target(marketplace, false),
-			[]string{"bar@bar-dev", "bar@bar", "bar@professor"},
-			[]string{"plugin bar enabled 3 times (bar@bar and bar@professor and bar@bar-dev) in {file}"},
-		},
-		{
-			"its professor copy enabled instead", target(marketplace, false),
-			[]string{"bar@professor"},
-			[]string{"plugin bar@bar-dev not enabled in {file}"},
+			"a legacy copy enabled instead", target(marketplace, false),
+			[]string{"bar@bar-dev", "bar@bar"},
+			[]string{"plugin bar@professor not enabled in {file}"},
 		},
 		{"install-only and disabled", target(marketplace, true), nil, nil},
 		{
 			"install-only and enabled", target(marketplace, true),
-			[]string{"bar@bar-dev"},
-			[]string{"plugin bar enabled (bar@bar-dev) in {file}, but claude.plugins does not list it"},
+			[]string{"bar@professor"},
+			[]string{"plugin bar enabled (bar@professor) in {file}, but claude.plugins does not list it"},
 		},
 		{
 			"a copy that differs from its checkout", target(stale, false),
-			[]string{"bar@bar-dev"},
-			[]string{"plugin bar@bar-dev copy " + filepath.Join(stale, "plugins", "bar") + " differs from " + checkout},
+			[]string{"bar@professor"},
+			[]string{"plugin bar@professor copy " + filepath.Join(stale, "plugins", "bar") + " differs from " + checkout},
 		},
 		{
 			"a copy that cannot be read", target(dangling, false),
-			[]string{"bar@bar-dev"},
-			[]string{"plugin bar@bar-dev copy " + filepath.Join(dangling, "plugins", "bar") + " cannot be compared with " +
+			[]string{"bar@professor"},
+			[]string{"plugin bar@professor copy " + filepath.Join(dangling, "plugins", "bar") + " cannot be compared with " +
 				checkout + ": " + danglingErr.Error()},
 		},
 	} {
@@ -300,12 +304,12 @@ func TestClaudePluginGapsNamesEveryCopy(t *testing.T) {
 
 // TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs: install moves a
 // retired plugin's pluginConfigs entry to its successor and deletes every
-// retired and other-copy entry, so Claude Code's plugin finds no duplicate to
+// retired and legacy entry, so Claude Code's plugin finds no duplicate to
 // warn on; a successor's own entry is never overwritten, and a dry run writes
 // nothing.
 func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
 	const name = "auto-effort-control"
-	successor, github, professor := devID(name), name+"@"+name, name+"@professor"
+	successor, github, dev := ownID(name), name+"@"+name, name+"@"+name+"-dev"
 	retiredGitHub, retiredDev := "effort-live-control@effort-live-control", "effort-live-control@effort-live-control-dev"
 	patterns := `{"options":{"testCommandPatterns":["make test"]}}`
 	other := `{"options":{"testCommandPatterns":["go test"]}}`
@@ -339,10 +343,13 @@ func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
 			[]string{"; drop the pluginConfigs of " + retiredGitHub + " (differs)\n"},
 		},
 		{
-			"another copy's entry is dropped after it is carried", `"` + github + `":` + patterns + `,"` + professor + `":` + patterns,
+			"a legacy copy's entry is dropped after it is carried", `"` + github + `":` + patterns + `,"` + dev + `":` + patterns,
 			true,
 			map[string]string{successor: patterns},
-			[]string{"; drop the pluginConfigs of " + github + ", " + professor + "\n"},
+			[]string{
+				"copy the pluginConfigs of " + github + " to " + successor + " in ",
+				"; drop the pluginConfigs of " + github + ", " + dev + " in ",
+			},
 		},
 		{"a dry run writes nothing", `"` + retiredGitHub + `":` + patterns, false, nil, []string{
 			"; copy the pluginConfigs of " + retiredGitHub + " to " + successor + "; drop the pluginConfigs of " + retiredGitHub + "\n",
@@ -406,19 +413,17 @@ func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
 }
 
 // TestClaudePluginGapsNamesAStaleRetiredPluginConfig: doctor reports a
-// pluginConfigs entry of a retired or other copy beside its successor's.
+// pluginConfigs entry of a retired copy beside its successor's.
 func TestClaudePluginGapsNamesAStaleRetiredPluginConfig(t *testing.T) {
 	const name = "auto-effort-control"
-	target := ClaudePluginTarget{
-		Name: name, ID: devID(name), DevID: devID(name), GitHubID: name + "@" + name, Own: true,
-	}
+	target := ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}
 	file := filepath.Join(t.TempDir(), "settings.json")
 	writeFixture(t, file, `{"enabledPlugins":{"`+target.ID+`":true},"pluginConfigs":{"`+target.ID+`":{"options":{}},`+
-		`"effort-live-control@effort-live-control":{"options":{}},"`+target.GitHubID+`":{"options":{}}}}`)
+		`"effort-live-control@effort-live-control":{"options":{}},"auto-effort@auto-effort":{"options":{}}}}`)
 	gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{target})
 	want := ClaudePluginGap{
-		"pluginConfigs of " + target.GitHubID + " and effort-live-control@effort-live-control still in " + file +
-			": retired or other copies of " + target.ID,
+		"pluginConfigs of auto-effort@auto-effort and effort-live-control@effort-live-control still in " + file +
+			": retired copies of " + target.ID,
 		"pfm install copies the first to " + target.ID + " when it has none, then drops them",
 	}
 	if err != nil || len(gaps) != 1 || gaps[0] != want {

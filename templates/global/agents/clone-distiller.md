@@ -29,17 +29,22 @@ You investigate one external repository's code to answer a caller's numbered que
    base="/tmp/clone-distiller/repos/$key"
    if [ -n "$history" ]; then depth='--filter=blob:limit=1m'; tag='+history'; else depth='--depth 1'; tag=''; fi
    mkdir -p "$(dirname "$base")" || { echo "CLONE FAILED — cannot create $(dirname "$base")"; exit 1; }
-   if [ -z "$ref" ]; then
-     ls=$(timeout 60 git ls-remote "$url" HEAD 2>&1) || { echo "CLONE FAILED — $ls"; exit 1; }
-     sha=$(printf '%s\n' "$ls" | awk '$2=="HEAD"{print $1}')
-     [ -n "$sha" ] && [ -d "$base@${sha:0:12}$tag" ] && { echo "CLONE $base@${sha:0:12}$tag $sha reused"; exit 0; }
+   ls=$(timeout 60 git ls-remote "$url" "${ref:-HEAD}" "${ref:-HEAD}^{}" 2>&1) || { echo "CLONE FAILED — $ls"; exit 1; }
+   # the commit git clone --branch checks out: a branch first, then a tag peeled to its commit
+   sha=$(printf '%s\n' "$ls" | awk -v r="$ref" '
+     r=="" && $2=="HEAD" {h=$1}  $2=="refs/heads/"r {h=$1}  $2=="refs/tags/"r"^{}" {p=$1}  $2=="refs/tags/"r {t=$1}
+     END {if (h!="") print h; else if (p!="") print p; else print t}')
+   [ -n "$sha" ] || { echo "CLONE FAILED — ref not found: ${ref:-HEAD}"; exit 1; }
+   dest="$base@${sha:0:12}$tag"
+   if [ -e "$dest" ]; then
+     [ "$(git --git-dir="$dest/.git" rev-parse -q --verify HEAD 2>/dev/null)" = "$sha" ] && { echo "CLONE $dest $sha reused"; exit 0; }
+     echo "CLONE FAILED — broken clone at $dest; remove it by its literal path"; exit 1
    fi
-   tmp=$(mktemp -d "$base.tmp-XXXXXX") || { echo "CLONE FAILED — mktemp under $(dirname "$base")"; exit 1; }
-   out=$(timeout 300 git clone -q $depth --no-recurse-submodules ${ref:+--branch "$ref"} "$url" "$tmp/src" 2>&1) \
-     || { rm -rf "$tmp"; echo "CLONE FAILED — ${out:-timeout or git error}"; exit 1; }
-   sha=$(git -C "$tmp/src" rev-parse HEAD); dest="$base@${sha:0:12}$tag"
-   if [ -e "$dest" ]; then rm -rf "$tmp"; echo "CLONE $dest $sha reused"
-   else mv "$tmp/src" "$dest" && rm -rf "$tmp" && echo "CLONE $dest $sha"; fi
+   out=$(timeout 300 git clone -q $depth --no-recurse-submodules ${ref:+--branch "$ref"} "$url" "$dest" 2>&1) \
+     || { [ -e "$dest" ] && left="; partial clone left at $dest, remove it by its literal path"; echo "CLONE FAILED — ${out:-timeout or git error}$left"; exit 1; }
+   got=$(git --git-dir="$dest/.git" rev-parse -q --verify HEAD 2>/dev/null)
+   [ "$got" = "$sha" ] || { echo "CLONE FAILED — $dest holds ${got:-no commit}, not $sha: the ref moved during the clone; remove it by its literal path"; exit 1; }
+   echo "CLONE $dest $sha"
    CLONE
    ```
 

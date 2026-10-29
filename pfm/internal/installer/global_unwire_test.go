@@ -17,6 +17,7 @@ func stageGlobalSource(t *testing.T, repo string) {
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tokens.md"), "# tokens command\n")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tools", "go.md"), "# go command\n")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "skills", "pcm", "SKILL.md"), "# pcm skill\n")
+	writeFixture(t, filepath.Join(repo, "templates", "global", "rules", "careful.md"), "# careful rule\n")
 }
 
 // TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink checks store teardown, including a dead retired skill.
@@ -41,6 +42,9 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 			filepath.Join(config, "commands", "tools"),
 			filepath.Join(repo, "templates", "global", "commands", "tools"))
 		assertLink(t,
+			filepath.Join(config, "rules", "careful.md"),
+			filepath.Join(repo, "templates", "global", "rules", "careful.md"))
+		assertLink(t,
 			filepath.Join(config, "skills", "pcm"),
 			filepath.Join(repo, "templates", "global", "skills", "pcm"))
 		if err := os.Symlink(
@@ -61,6 +65,7 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 		for _, relative := range []string{
 			filepath.Join("commands", "tokens.md"),
 			filepath.Join("commands", "tools"),
+			filepath.Join("rules", "careful.md"),
 			filepath.Join("skills", "pcm"),
 			filepath.Join("skills", "deep-rr"),
 		} {
@@ -171,6 +176,13 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 	if err := os.Symlink(operator, foreign); err != nil {
 		t.Fatal(err)
 	}
+	foreignRule := filepath.Join(config, "rules", "careful.md")
+	if err := os.MkdirAll(filepath.Dir(foreignRule), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(operator, foreignRule); err != nil {
+		t.Fatal(err)
+	}
 	regular := filepath.Join(config, "skills", "mine", "SKILL.md")
 	writeFixture(t, regular, "# operator skill\n")
 
@@ -184,6 +196,12 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 	target, linked := resolvedLink(foreign)
 	if !linked || target != filepath.Clean(operator) {
 		t.Fatalf("uninstall removed a foreign global command link: target=%q linked=%v", target, linked)
+	}
+	if target, linked := resolvedLink(foreignRule); !linked || target != filepath.Clean(operator) {
+		t.Fatalf("uninstall removed a foreign global rules link: target=%q linked=%v", target, linked)
+	}
+	if !strings.Contains(transcript.String(), foreignRule) {
+		t.Fatalf("uninstall kept the foreign rules link %s without naming it:\n%s", foreignRule, transcript.String())
 	}
 	if got := readFixture(t, regular); got != "# operator skill\n" {
 		t.Fatalf("uninstall touched an operator-owned skill file: %q", got)

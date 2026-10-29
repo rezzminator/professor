@@ -55,7 +55,6 @@ var StoreEntries = []StoreEntry{
 	{Name: claudeSettingsName, Seed: "{}\n"},
 	{Name: "CLAUDE.md"},
 	{Name: "history.jsonl"},
-	{Name: "stats-cache.json"},
 	{Name: ".last-cleanup"},
 	{Name: "gh-pr-status-cache.json"},
 	// The tool-visibility-controller plugin's user scope file; a missing file is no rule, so an
@@ -67,7 +66,7 @@ var AccountEntries = []string{
 	".credentials.json", ".claude.json", ".claude.json.backup", "backups",
 	"sessions", "daemon", "daemon.log", "daemon-auth-status.json",
 	"daemon-auth-cooldown", "jobs", "cache", "state", "mcp-needs-auth-cache.json",
-	"telemetry", "feedback", ".last-update-result.json", gather.AccountLaunchClaimsName,
+	"telemetry", "feedback", ".last-update-result.json", "stats-cache.json", gather.AccountLaunchClaimsName,
 }
 
 // IgnoredEntries are neither shared nor per-account identity: IDE locks, pfm's

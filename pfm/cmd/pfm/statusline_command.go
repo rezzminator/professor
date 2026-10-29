@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -30,14 +31,20 @@ func runStatuslineWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
-	const statuslineHostEngine = pfmengine.Claude // pfm statusline is launched only by Claude Code's statusline hook; an environment that names no engine is that hook's
 	flags := cli.NewFlagSet("statusline", "usage: pfm statusline [--refresh-gpt | --subagents]", stderr)
 	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
 	subagents := flags.Bool("subagents", false, "render agent-panel row bodies from subagentStatusLine JSON")
+	pacedKey := flags.String("paced", "", "internal: run the paced render worker of one chat key")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
-	if flags.NArg() != 0 || (*refreshCodex && *subagents) {
+	modes := 0
+	for _, set := range []bool{*refreshCodex, *subagents, *pacedKey != ""} {
+		if set {
+			modes++
+		}
+	}
+	if flags.NArg() != 0 || modes > 1 {
 		flags.Usage()
 		return 2
 	}
@@ -57,23 +64,72 @@ func runStatuslineWithRuntime(
 		return 0
 	}
 
+	paced := statusline.Paced{
+		CacheDir: filepath.Dir(statusline.CodexStatuslineCachePath(env.Get(paths.EnvHome), os.Getuid())),
+		Render: func(raw []byte) (string, error) {
+			runtime, err := statuslineRuntime(machine, env, stderr)
+			if err != nil {
+				return "", err
+			}
+			return statusline.Render(ctx, raw, runtime)
+		},
+		Spawn: statuslinePacedSpawn,
+		Warn:  stderr,
+	}
+	if *pacedKey != "" {
+		return runPacedStatuslineWorker(paced, *pacedKey, machine.Config.Path, stderr)
+	}
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline: read input (fail-open): %v\n", err)
 		return 0
 	}
 	statusline.RecordSession(raw, machine.Paths.SIDDir, stderr)
+	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"))
+	paced.Front(raw, stdout)
+	return 0
+}
+
+// statuslinePacedSpawn starts a chat's paced render worker detached; tests
+// replace it, since the test binary is no pfm to start.
+var statuslinePacedSpawn = func(key string) error {
+	return statusline.SpawnDetached(statusline.RefreshKindPaced, obs.Runner(deps.RealRunner{}), key)
+}
+
+// runPacedStatuslineWorker is `pfm statusline --paced KEY`, started detached by
+// a front. It ends when its executable or the machine config is replaced, so
+// the next front starts one that renders with the new binary and config.
+func runPacedStatuslineWorker(paced statusline.Paced, key, configPath string, stderr io.Writer) int {
+	executable, err := os.Executable()
+	if err == nil {
+		executable, err = filepath.EvalSymlinks(executable)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm statusline: paced worker: resolve pfm executable: %v\n", err)
+		return 1
+	}
+	paced.Key = key
+	paced.Watch = []string{executable, configPath}
+	if err := paced.Work(); err != nil {
+		fmt.Fprintf(stderr, "pfm statusline: paced worker: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// statuslineRuntime is the render runtime of one main-statusline render, the
+// front's inline render and the paced worker's alike.
+func statuslineRuntime(machine commandRuntime, env paths.Env, stderr io.Writer) (statusline.Runtime, error) {
+	const statuslineHostEngine = pfmengine.Claude // pfm statusline is launched only by Claude Code's statusline hook; an environment that names no engine is that hook's
 	id, engineErr := statusline.EngineFromEnvironment(env.Get)
 	if errors.Is(engineErr, statusline.ErrNoEngineInEnvironment) {
 		id = statuslineHostEngine
 	} else if engineErr != nil {
-		fmt.Fprintf(stderr, "pfm statusline: resolve engine (fail-open): %v\n", engineErr)
-		return 0
+		return statusline.Runtime{}, fmt.Errorf("resolve engine: %w", engineErr)
 	}
 	runtime, err := statusline.DefaultRuntime(id)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm statusline: resolve runtime (fail-open): %v\n", err)
-		return 0
+		return statusline.Runtime{}, fmt.Errorf("resolve runtime: %w", err)
 	}
 	runtime.UseConfig(machine, stderr)
 	if runtime.Engine == pfmengine.Codex {
@@ -94,15 +150,7 @@ func runStatuslineWithRuntime(
 	runtime.Spawn = func(kind statusline.RefreshKind) error {
 		return statusline.SpawnDetached(kind, obs.Runner(deps.RealRunner{}))
 	}
-	rendered, err := statusline.Render(ctx, raw, runtime)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm statusline: render (fail-open): %v\n", err)
-		return 0
-	}
-	if _, err := io.WriteString(stdout, rendered); err != nil {
-		fmt.Fprintf(stderr, "pfm statusline: write output (fail-open): %v\n", err)
-	}
-	return 0
+	return runtime, nil
 }
 
 func canonicalAccountPath(path string) string {

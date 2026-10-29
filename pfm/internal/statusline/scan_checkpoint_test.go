@@ -569,13 +569,13 @@ func TestScanCheckpointPruneCapsTheTotalAndWaitsItsTurn(t *testing.T) {
 		}
 	}
 	var warn strings.Builder
-	pruneScanCheckpoints(dir, now, time.Hour, 150, &warn)
+	pruneStaleFiles(dir, now, time.Hour, 150, &warn)
 	for name, want := range map[string]bool{"a.json": false, "b.json": false, "c.json": true} {
 		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != want {
 			t.Fatalf("%s present %v; want %v (warnings %q)", name, err == nil, want, warn.String())
 		}
 	}
-	pruneScanCheckpoints(dir, now.Add(30*time.Minute), time.Hour, 0, &warn)
+	pruneStaleFiles(dir, now.Add(30*time.Minute), time.Hour, 0, &warn)
 	if _, err := os.Stat(filepath.Join(dir, "c.json")); err != nil || warn.Len() != 0 {
 		t.Fatalf("second prune within the hour: c.json %v, warnings %q; want it kept, none", err, warn.String())
 	}

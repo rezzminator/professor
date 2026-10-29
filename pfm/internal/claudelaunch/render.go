@@ -268,7 +268,7 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 		settings[knobHooks] = hookSettings(HookTemplates(request.Home))
 		settings[knobStatusLine] = map[string]any{
 			typeWord: commandWord, commandWord: StatusLineCommand(request.Home), "padding": 0,
-			"refreshInterval": 3, "hideVimModeIndicator": true,
+			"refreshInterval": 2, "hideVimModeIndicator": true,
 		}
 		settings[knobSubagentStatusLine] = map[string]any{
 			typeWord:    commandWord,

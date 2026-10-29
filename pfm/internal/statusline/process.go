@@ -18,11 +18,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// SpawnDetached starts one refresher as a new session and releases the child.
-// The render path never waits for credentials, networks, or App Server
-// startup. runner is the deps.Runner seam (pfm/TESTPLAN.md § Seams); nil
-// defaults to obs.Runner(deps.RealRunner{}).
-func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
+// SpawnDetached starts one refresher as a new session and releases the child,
+// args following its flag (the paced worker's chat key). The render path never
+// waits for credentials, networks, or App Server startup, and a caller killed
+// mid-render never reaches the child. runner is the deps.Runner seam
+// (pfm/TESTPLAN.md § Seams); nil defaults to obs.Runner(deps.RealRunner{}).
+func SpawnDetached(kind RefreshKind, runner deps.Runner, args ...string) (returnErr error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve pfm executable: %w", err)
@@ -31,6 +32,8 @@ func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
 	switch kind {
 	case RefreshKindCodex:
 		argument = "--refresh-gpt"
+	case RefreshKindPaced:
+		argument = "--paced"
 	default:
 		return fmt.Errorf("unknown statusline refresher %q", kind)
 	}
@@ -42,7 +45,7 @@ func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
 	// this seam.
 	process, err := runner.Start(
 		context.Background(),
-		[]string{executable, "statusline", argument},
+		append([]string{executable, "statusline", argument}, args...),
 		deps.StartOptions{Detach: true},
 	)
 	if err != nil {

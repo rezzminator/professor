@@ -146,10 +146,17 @@ if requires E2.01-open-seat; then
   # exports (CODEX_HOME / CODEX_THREAD_ID), third line = the Codex segment.
   # Exit code AND output: fail-open prints nothing on an error, and a check
   # that accepts either cannot tell a render from a swallowed failure.
+  # A chat's first tick prints the pending line while its paced worker renders
+  # (docs/design/context/statusline.md § How a render is paced): tick again
+  # until the worker's line is served, as Claude Code's own timer would.
   id="$(live_field "$CHAT" 2)"
-  render="$(printf '{"session_id":"%s","model":{"display_name":"gpt"},"workspace":{"current_dir":"%s"}}' "$id" "$CWD" |
-    CODEX_HOME="$CODEX_HOME" CODEX_THREAD_ID="$id" pfm statusline 2>&1)"
-  render_rc=$?
+  for _ in $(seq 1 30); do
+    render="$(printf '{"session_id":"%s","model":{"display_name":"gpt"},"workspace":{"current_dir":"%s"}}' "$id" "$CWD" |
+      CODEX_HOME="$CODEX_HOME" CODEX_THREAD_ID="$id" pfm statusline 2>&1)"
+    render_rc=$?
+    [ "$render_rc" -eq 0 ] && [ "$render" = 'pfm statusline: rendering…' ] || break
+    sleep 1
+  done
   [ "$render_rc" -eq 0 ] || bad="$bad pfm statusline exited $render_rc ($(one_line "$render"));"
   [ -n "$render" ] || bad="$bad pfm statusline rendered nothing;"
   grep -q '🍀' <<<"$render" || bad="$bad the render carries no Codex segment (🍀 <model>): $(one_line "$render" | cut -c1-200);"

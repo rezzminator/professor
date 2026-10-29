@@ -11,6 +11,7 @@ Decisions live in this file. A change lands here first, then in the code, then i
 - [The sub-agent row](#the-sub-agent-row)
 - [Where each field comes from](#where-each-field-comes-from)
 - [How a render reads its transcripts](#how-a-render-reads-its-transcripts)
+- [How a render is paced](#how-a-render-is-paced)
 - [Effort](#effort)
 - [The main statusline](#the-main-statusline)
   - [cacheKeepwarmShield](#cachekeepwarmshield)
@@ -35,7 +36,7 @@ The status lines are one row of the launch registry `claudelaunch.Knobs` (`pfm/i
 
 ```json
 {
-  "statusLine": { "type": "command", "command": "~/.local/bin/pfm-statusline", "padding": 0, "refreshInterval": 3, "hideVimModeIndicator": true },
+  "statusLine": { "type": "command", "command": "~/.local/bin/pfm-statusline", "padding": 0, "refreshInterval": 2, "hideVimModeIndicator": true },
   "subagentStatusLine": { "type": "command", "command": "~/.local/bin/pfm-statusline --subagents" }
 }
 ```
@@ -99,6 +100,18 @@ Every render folds whole transcripts (the session's for the main gauge, cache hi
 - Until a fold catches up, what is known renders as a floor: the main gauge keeps the harness's figures, never an older prefix's context, and the spend ends in `+?` (a row's `Σ` likewise) even before anything is priced: `💰$?/0/0/0+?`. A row behind its budget claims no idle time, context or cache hit, and counts as unread in the nested count above it.
 - A transcript that no longer opens bills nothing, whatever its checkpoint held, as a whole read of it would.
 
+## How a render is paced
+
+Read in the Claude Code 2.1.312 source: the main status line re-runs its command on a timer every `refreshInterval` seconds, counted from tick to tick, and on every input change (token usage, permission mode, model, effort, a new assistant message …), each after a 300 ms debounce; a new run aborts the run still going and discards its output, and the last output lives only in that Claude Code process. A render slower than one tick (`refreshInterval` plus the debounce) never lands, and during a streaming turn even a 1 s render is aborted again and again; whether the abort also kills the command is not relied on. So the main `pfm statusline` is a cheap front over one detached worker per chat (`statusline.Paced`, `pfm/internal/statusline/paced.go`); `--subagents` and `--refresh-gpt` are not paced.
+
+- A chat's key is the first 16 bytes, hex, of the SHA-256 of the payload's `session_id` (else its `transcript_path`) and `COLUMNS`, since the worker keeps the width of the front that started it. Claude Code sets `COLUMNS` from its own terminal's width, unset when that is no terminal, so it changes only when the terminal is resized: a resized terminal is a new key, shows the pending line until its worker's first render, and the old key's worker exits once its input goes quiet. A payload naming neither renders inline and keeps no file.
+- Its files sit in the statusline cache dir at `cc-sl-paced-{uid}/`, a directory the uid must own for real, as for the transcript checkpoints: `{key}.input` (the newest stdin, written atomically by every front; its mtime is the chat's liveness), `{key}.out.json` (`{"v":1,"output":…,"finished_at":{unix ns},"error":…}`, written atomically by whoever rendered) and `{key}.lock` (the worker's flock for its whole life, its mtime restamped every turn). Once an hour a front prunes the files nothing rewrote for 24 hours.
+- The front saves the input and, when no worker holds the lock, starts `pfm statusline --paced {key}` as a new session before it reads or prints anything, so Claude Code's abort of the front never reaches the worker and never stops one from starting. Two fronts may both start one; the worker that loses the lock exits. It then prints the cached `output` byte for byte (an `error` beside it goes to stderr as `pfm statusline: render (fail-open): …`).
+- A chat with no cached line yet (its first render, or the first after a resize) prints `pfm statusline: rendering…` (`statusline.PacedPending`) and caches nothing: the worker it just started finds no `{key}.out.json`, so it renders at once, and the next tick after that render shows the line. While the pacer works the front never renders inline, since Claude Code would abort a run slower than its tick.
+- The worker waits until 5 s (`pacedGap`) after the last render finished, renders the newest input with the runtime the front's inline render builds, and caches the line with `finished_at` the moment the render returned. A failed render keeps the previous output and records its error. Claude Code's 2 s tick shows a finished render within two seconds; a 1 s tick would double the front's three activity-log records (`cmd.start`, `hooks.run`, `cmd.exit`, about 480 bytes) per chat, and the log keeps a fixed 40 MB, so its history would shrink by half.
+- The worker exits when the input has not been rewritten for 30 s (`pacedIdle`: the chat closed, or no longer calls), and when the pfm executable or the machine config it started with is replaced or rewritten, so the next front starts a worker on the new binary and config.
+- A pacer that cannot serve (a refused directory, an input it cannot write, a worker it cannot start) renders inline as before it existed and names the failure on stderr: the line never goes blank because the pacer broke. That inline render lands only when it finishes inside one tick.
+
 ## Effort
 
 The effort shows as a bar of filled `▰` blocks, one to five by level, then the lowercase level, in the model block of both the main line and every row. The bar wears its level's own colour, cool to hot, each one a constant of `palette.go` (`effortBarColors`); the level word wears the effort colour (`cEffort`). No empty `▱` steps, no `effort` word before the bar and no effort emoji appear on either surface (`modelglyph.EffortLabel`, `pfm/internal/modelglyph/modelglyph.go`):
@@ -148,7 +161,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 - The session label sits second from the end of the first line.
 - The cache window reads `💾1h✓59m:28s 94%`: the cache window, the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry.
 - The window (`1h` or `5m`) comes first from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). When the payload carries no expiry — no cached request yet, or an older build — pfm's launch record decides, never the statusline's own environment: `fleetdb.LaunchFor(ctx, session_id)`, keyed by the `session_id` in the statusline payload, returns the `cache1h` the chat was launched with ([claude-launch.md](../engines/claude-launch.md#the-launch-record)). A session pfm never launched (`ErrNoLaunch`) falls to the transcript (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else no cache marker. A failed launch read shows `💾⚠` and writes the cause to stderr, never a silent `5m`.
-- The countdown runs to the payload's `prompt_cache.expires_at` when it carries one; otherwise from the newest request record in the transcript, a user record that is not a local command's echo, plus the window; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
+- The countdown runs to the payload's `prompt_cache.expires_at` when it carries one; otherwise from the newest request record in the transcript, a user record that is not a local command's echo, plus the window; a Codex rollout counts from its newest reply. The worker re-renders 5 s after its last render finished while the chat calls it, so the countdown advances once per paced render while the chat is idle ([How a render is paced](#how-a-render-is-paced)).
 - The cache-keepwarm plugin's shield follows the hit share inside the same segment ([cacheKeepwarmShield](#cachekeepwarmshield)); the sub-agent rows carry none.
 - The line uses the same palette as the rows (`pfm/internal/statusline/palette.go`).
 
@@ -204,12 +217,13 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 | --- | --- | --- |
 | The row renderer | `pfm/internal/statusline/subagents.go`, `subagents_nest.go`, `subagents_spend.go`, `ledger_spend.go`, `session_effort.go`, `model_segment.go`, `palette.go` | fields, order, effort, spend, colours |
 | The cost ledger | `pfm/internal/costledger/`, `pfm/internal/statusline/ledger_spend.go` | the ledger total and per-agent sums, the markers; [cost-ledger.md](../engines/cost-ledger.md) |
-| The command | `pfm/cmd/pfm/statusline_command.go` | `pfm statusline --subagents` (combining it with `--refresh-gpt` is a usage error, exit 2) |
+| The command | `pfm/cmd/pfm/statusline_command.go` | `pfm statusline --subagents`, `--refresh-gpt` and `--paced {key}` (combining two is a usage error, exit 2) |
 | The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the status-lines row: `statusLine` and `subagentStatusLine` in every launch's `--settings` payload |
 | The launch record | `fleetdb.LaunchFor` over `pfm.db` table `launch` | the cache window per `session_id` |
 | The account-file host check | `pfm/internal/hostcheck/owned.go` | `pfm-settings` BLOCK row for old pfm status lines, with the operator’s fix |
 | The Codex weekly row | `pfm/internal/statusline/codex_weekly.go` (`codexWeeklyRow`, `readCodexWeekly`), `render.go` (`claudeQuotaRows`), `full_width_row.go`, `process.go`, `runtime.go` | `codex-7d-used:` row, its `RefreshKindCodex` refresh for Claude chats, `cc-gpt-usage-{UID}.json` read |
 | The cache-keepwarm shield | `pfm/internal/statusline/cache_window.go`, `cache_keepwarm.go`, `pfm/internal/paths/keepwarm.go` | the shield states and failures; `paths.CacheKeepwarmStateFile` |
 | The transcript checkpoints | `pfm/internal/statusline/scan_checkpoint.go`, `pfm/internal/transcript/lines.go` (`ResumeLines`), `meta.go` (`MetaFold`), `pfm/internal/costledger/before.go` (`Anchors` JSON) | the checkpoint format and version, the resume rule, the budget |
+| The paced render | `pfm/internal/statusline/paced.go`, `process.go` (`RefreshKindPaced`), `pfm/cmd/pfm/statusline_command.go` (`statuslineRuntime`) | the chat key, the files and their format, the 5 s gap, the 30 s idle exit, the replaced-binary exit |
 | The goldens | `pfm/internal/statusline/testdata/render-*.golden` | the main line byte for byte |
 | The lane map | `infra/fence/lanes/` | its beat and its map row |

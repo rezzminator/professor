@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -61,6 +63,12 @@ func TestStatuslineOnABrokenConfigRendersTheConfigWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The cache segment needs the session_id, so the chat is paced; a worker
+	// that cannot start makes the front render inline, through the runtime
+	// the worker renders with, and this tick shows the warning itself.
+	original := statuslinePacedSpawn
+	t.Cleanup(func() { statuslinePacedSpawn = original })
+	statuslinePacedSpawn = func(string) error { return errors.New("no worker in this test") }
 	if _, err := writer.WriteString(`{"session_id":"broken-config","model":{"display_name":"Opus 4"}}`); err != nil {
 		t.Fatal(err)
 	}
@@ -322,5 +330,86 @@ func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
 	if code := runStatuslineWithRuntime([]string{"--subagents", "--refresh-gpt"}, strings.NewReader(""), &stdout,
 		&stderr, runtime, paths.OSEnv{}); code != 2 {
 		t.Fatalf("--subagents with --refresh-gpt: code=%d, want usage error 2", code)
+	}
+}
+
+// The main statusline is a paced front: the first tick of a chat starts the
+// chat's worker and prints the pending line, rendering nothing and caching
+// nothing; a later tick prints the worker's cached line byte for byte, renders
+// nothing, and starts no second worker while one holds the chat.
+func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
+	jailTest(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_HOME", root)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "1"))
+	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+	t.Setenv("COLUMNS", "")
+	var spawned []string
+	original := statuslinePacedSpawn
+	t.Cleanup(func() { statuslinePacedSpawn = original })
+	statuslinePacedSpawn = func(key string) error {
+		spawned = append(spawned, key)
+		return nil
+	}
+	input := `{"session_id":"paced-front","model":{"display_name":"Opus 4"}}`
+	key := statusline.PacedKey([]byte(input), "")
+	dir := filepath.Join(root, "tmp", "cc-sl-paced-"+strconv.Itoa(os.Getuid()))
+	runtime := statuslineTestRuntime(t)
+	front := func() string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		if code := runStatuslineWithRuntime(nil, strings.NewReader(input), &stdout, &stderr, runtime,
+			paths.OSEnv{}); code != 0 || stderr.Len() != 0 {
+			t.Fatalf("front code=%d stderr=%q", code, stderr.String())
+		}
+		return stdout.String()
+	}
+
+	first := front()
+	if first != statusline.PacedPending || len(spawned) != 1 || spawned[0] != key {
+		t.Fatalf("first tick stdout=%q spawned=%v; want the pending line and the chat's worker", first, spawned)
+	}
+	if _, err := os.Stat(filepath.Join(dir, key+".out.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cached line after the first tick: %v; want none, the worker renders it", err)
+	}
+	marker := "cached line \x1b[0m\n"
+	if err := os.WriteFile(filepath.Join(dir, key+".out.json"),
+		[]byte(`{"v":1,"output":"cached line \u001b[0m\n","finished_at":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, key+".lock"), os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := lock.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	if second := front(); second != marker || len(spawned) != 1 {
+		t.Fatalf("second tick stdout=%q spawned=%v; want the cached line, no second worker", second, spawned)
+	}
+}
+
+func TestStatuslinePacedWorkerFlagIsExclusiveAndRefusesABadKey(t *testing.T) {
+	jailTest(t)
+	t.Setenv("PFM_HOME", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	if code := runStatuslineWithRuntime([]string{"--paced", "0123", "--subagents"}, strings.NewReader(""),
+		&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{}); code != 2 {
+		t.Fatalf("--paced with --subagents code=%d stderr=%q; want usage 2", code, stderr.String())
+	}
+	stderr.Reset()
+	if code := runStatuslineWithRuntime([]string{"--paced", "../escape"}, strings.NewReader(""),
+		&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{}); code != 1 ||
+		!strings.Contains(stderr.String(), "32 hex digits") {
+		t.Fatalf("--paced ../escape code=%d stderr=%q; want the key refused", code, stderr.String())
 	}
 }

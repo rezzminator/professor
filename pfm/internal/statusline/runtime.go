@@ -27,6 +27,8 @@ type RefreshKind string
 
 const (
 	RefreshKindCodex RefreshKind = "gpt"
+	// RefreshKindPaced is one chat's paced render worker (Paced.Work).
+	RefreshKindPaced RefreshKind = "paced"
 )
 
 // CommandRunner is the small read-only command seam used by the git segment.

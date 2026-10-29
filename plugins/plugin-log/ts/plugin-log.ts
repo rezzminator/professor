@@ -223,6 +223,10 @@ export type PluginLogRun = (argv: string[]) => Promise<{ exitCode: number; stdou
  * `plugin-log-rows-dropped` row. `error` and `screen` come once per failing streak: the cause, and the one line the
  * caller shows on screen.
  */
+/** A `$.process.run` its abandoned hook dispatch aborted: the caller retries the work on the next dispatch, nothing failed.
+ * shortcut: Claude Code says so only in the message, "$.process.run(/bin/sh) aborted"; match a typed abort once it has one. */
+export const runAborted = (cause: string): boolean => /\$\.process\.run\([^)]*\) aborted$/.test(cause);
+
 export type FlushResult = { held: number; lost: number; error?: string; screen?: string };
 
 /**
@@ -267,13 +271,15 @@ export class PluginLogQueue {
         }
         return { held: this.rows.length, lost };
       } catch (error) {
-        const report = !this.failing;
-        this.failing = true;
         // Unwritten, the count goes back to the counter, never into the queue as a row the hold could drop.
         if (written === 0 && lost > 0) { rows.shift(); this.lost += lost; }
         this.lost += requeueRows(this.rows, rows.slice(written), PLUGIN_LOG_HOLD_ROWS);
         const cause = error instanceof Error ? error.message : String(error);
         const held = this.rows.length;
+        // An abandoned hook dispatch aborts its run: the rows wait for the next flush, which is no failure to show.
+        if (runAborted(cause)) return { held, lost: written > 0 ? lost : 0 };
+        const report = !this.failing;
+        this.failing = true;
         return { held, lost: written > 0 ? lost : 0, ...(report ? { error: cause, screen: `${this.plugin}: plugin log ${dir} failed: ${cause}; ${held} ${held === 1 ? 'row is' : 'rows are'} kept for the next write` } : {}) };
       }
     });

@@ -264,6 +264,14 @@ describe('PluginLogQueue', () => {
     assert.deepEqual(await queue.flush(async () => ok), { held: 0, lost: 0 });
   });
 
+  it('keeps an aborted run\'s rows silently, and the streak stays armed for a real failure', async () => {
+    const queue = new log.PluginLogQueue('/x/logs/demo', 'demo');
+    queue.add(row('a'));
+    assert.deepEqual(await queue.flush(async () => { throw new Error('demo: $.process.run(/bin/sh) aborted'); }), { held: 1, lost: 0 });
+    assert.equal((await queue.flush(async () => { throw new Error('permission denied'); })).screen, 'demo: plugin log /x/logs/demo failed: permission denied; 1 row is kept for the next write');
+    assert.deepEqual(await queue.flush(async () => ok), { held: 0, lost: 0 });
+  });
+
   it('serializes concurrent flushes and says one screen line per failing streak, re-armed by a success', async () => {
     const queue = new log.PluginLogQueue('/x/logs/demo', 'demo');
     const results: log.FlushResult[] = [];

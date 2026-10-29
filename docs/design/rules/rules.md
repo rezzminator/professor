@@ -2,7 +2,7 @@
 
 A rule is a Markdown instruction file under `.claude/rules/`. Claude Code reads rules natively; Codex and OpenCode have no equivalent. engine-sync (`docs/design/engine-sync/engine-sync.md`) carries every rule to both engines over two channels: an always-on rule (no `paths:`) is compiled into an instruction file the engine reads at session start, and a path-scoped rule is injected mid-session by one engine-sync matcher, run from a Codex hook entry and an OpenCode shim that engine-sync writes. This file is the design; the global always-on channel is built.
 
-**Status:** partly built. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry, refreshed at `pfm install`), and the [Checks](#checks) rows marked built. Designed, not built: [Always-on project rules](#always-on-project-rules), [Path-scoped rules](#path-scoped-rules) (the `engine-sync hook` injector, its Codex hook entries and OpenCode shim), and the launch-time and `SessionStart` [freshness](#freshness) triggers — **Build path for the rest:** engine-sync phase P3, `flights-foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, shipped; `pfm-testing-manual`, waiting on the injector ([First consumer](#first-consumer))
+**Status:** partly built. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry, refreshed at `pfm install`), and the [Checks](#checks) rows marked built. Designed, not built: [Always-on project rules](#always-on-project-rules), [Path-scoped rules](#path-scoped-rules) (the `engine-sync hook` injector, its Codex hook entries and OpenCode shim), and the launch-time and `SessionStart` [freshness](#freshness) triggers — **Build path for the rest:** engine-sync phase P3, `flights-foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, `git-writes-through-gitter` and `flights-life-cycle`, shipped; `pfm-testing-manual`, waiting on the injector ([First consumer](#first-consumer))
 
 `{codex home}` is one Codex account's home; `{claude config dir}` is one Claude account's `configDir`; `{engine-sync home}` is `~/.local/share/engine-sync`; `{engine-sync state}` is `~/.local/state/engine-sync`.
 
@@ -41,13 +41,14 @@ A rule is a Markdown instruction file under `.claude/rules/`. Claude Code reads 
 
 ## Engine facts
 
-Verified against Claude Code 2.1.295 (probe), Codex 0.161.0 (source at commit `979011409de0`), OpenCode 1.18.31 (source at commit `014614d3`).
+Verified against Claude Code 2.1.295 and 2.1.312 (probes), Codex 0.161.0 (source at commit `979011409de0`), OpenCode 1.18.31 (source at commit `014614d3`).
 
 | Fact | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Native glob-scoped rules | yes, `.claude/rules` with `paths:` | no | no |
 | Instruction discovery | launch, plus nested `CLAUDE.md` and rules on file access | once at start, git root down to the working directory | upward from the project dir at start; `read` attaches nested `AGENTS.md`/`CLAUDE.md`/`CONTEXT.md` |
 | Reads `.claude/rules` | yes | no | no |
+| Rule targeting by agent | no, `paths` only | no | no |
 | Mid-session injection point | built in (`nested_memory`) | `PreToolUse`/`PostToolUse` `additionalContext` | plugin `tool.execute.after` mutating `output.output` |
 | Injected text lands as | a system-reminder after the tool result | a `developer`-role message | part of the tool result |
 | File read tool | Read (also `cat`/`head` on one file) | none: `exec_command`, matched as `Bash` | `read` (`filePath`) |
@@ -65,6 +66,14 @@ Verified against Claude Code 2.1.295 (probe), Codex 0.161.0 (source at commit `9
 **Sub-agents:** a sub-agent's own Read loads the rule into the sub-agent only. Probe: the `InstructionsLoaded` hook logged `agent_type: general-purpose`, `load_reason: path_glob_match`, `trigger_file_path: …/x_test.go`, and the parent reported no canary.
 
 **Frontmatter:** `paths` is the only key read (a YAML list or a comma-separated string); other keys are ignored, and the frontmatter is stripped before loading. Unparseable YAML loads the rule as always-on. A rule may be a symlink; one pointing outside the project needs the external-import approval, and then only its always-on rules load.
+
+**Agent targeting:** a rule cannot target an agent or the main chat; the frontmatter has no such key. Probed on Claude Code 2.1.312 (2026-10-29, `/tmp/professor/rules-scope/probe/`, one run per agent, evidence the agents' quoted context lines):
+
+- A user rule (`~/.claude/rules/`), a project rule and `CLAUDE.md` reach the main chat, a custom sub-agent and `general-purpose` alike.
+- An agent with frontmatter `omitClaudeMd: true` receives none of the three: it drops user and project `CLAUDE.md` and every rule together. Managed policy is kept, and the key has no effect on the main session.
+- A `SessionStart` hook's `additionalContext` reaches the main chat only, never a sub-agent.
+- A `SubagentStart` hook's `additionalContext` reaches the sub-agent whose `agent_type` its matcher names: it reached the two named custom agents (`omitClaudeMd` included) and not `general-purpose`, which the matcher did not name.
+- `InstructionsLoaded` fires only at the main chat's session start (`load_reason: session_start`). A sub-agent's always-on instructions are not logged separately, so the engine log cannot prove per-agent delivery.
 
 **Debugging:** the `InstructionsLoaded` hook reports `file_path`, `memory_type`, `load_reason` (`session_start`, `path_glob_match`) and `trigger_file_path`; `/context` lists what loaded at launch.
 
@@ -156,6 +165,8 @@ Codex runs a hook only once trusted, by a `sha256` of its event, matcher and han
 | Rule | Class | Says |
 | --- | --- | --- |
 | `rm-rf-absolute-path.md` | always-on | `rm -rf` in any shell command an agent, model or main chat runs takes a literal absolute path, never a variable, glob, command substitution or relative path; `mktemp -d` scratch is no exception; code written into files is outside it |
+| `git-writes-through-gitter.md` | always-on | every git write to shared state goes to the `gitter` agent; others run reads plus the own-file operations the git-guard hook allows (`stash push -- <paths>`, `checkout -- <file>`, `restore <file>`, dry runs, `worktree.sh list`); a denied command is never re-spelled past the guard; push, tag and release only on the user's in-turn ask |
+| `flights-life-cycle.md` | always-on | binds the main chat: settle, then size — small work in place with no worktree or lander, larger work in a gitter-made `.worktrees/{flight}/`; related changes found while a flight's worktree is open join that worktree; one `flights-lander` per worktree once every foreman returned; gitter merges and tears down |
 
 ## Global always-on rules
 
@@ -251,7 +262,7 @@ Claude passed 1–5 on 2.1.295 in `/tmp/professor/rules-test/`.
 - Whether a Codex hook runs inside the sandbox, which decides whether the ledger write in `{engine-sync state}` succeeds.
 - Whether Codex hook developer messages are dropped on compaction (inferred from source, not run).
 - Whether OpenCode code-mode (`experimentalCodeMode`) skips `tool.execute.after`, and whether OpenCode compaction drops text appended to a tool result.
-- Whether Claude sub-agents load user-level rules from `~/.claude/rules/` (the docs name only `~/.claude/CLAUDE.md` and project rules).
+- Whether a `SubagentStart` hook's `additionalContext` survives a sub-agent's compaction.
 - The Go glob library: engine-sync's `go.mod` starts with none; the build picks and validates one that supports `**` and brace expansion.
 
 ## Open questions

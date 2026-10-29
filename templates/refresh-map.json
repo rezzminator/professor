@@ -85,6 +85,9 @@
     "global/commands/iterative-improvement.md": {
       "curated": true
     },
+    "global/commands/live-audit.md": {
+      "curated": true
+    },
     "global/commands/pfm.md": {
       "curated": true
     },

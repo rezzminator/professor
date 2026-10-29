@@ -66,7 +66,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 ## Fence
 
-- `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]`, `iso gate` or `iso {run|sim} {command…}` runs in the fence against a worktree under `.worktrees/{flight}/`; it needs a reachable docker daemon.
+- `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]`, `iso gate` or `iso {run|sim} {command…}` runs in the fence against the checkout it is invoked from (the main checkout or a `.worktrees/{flight}/` worktree), mounted read-only; it needs a reachable docker daemon.
 - Narrowest test: `.claude/scripts/test.sh <path>[::<selector>]…`, the affected tests and static checks of the paths named; full gate, what done requires: `.claude/scripts/test.sh --full`.
 
 ## CI
@@ -126,9 +126,9 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - When `gitter` is unavailable, only the active main Codex chat performs scoped Git writes, and only after the user's explicit authorization in the current turn; publication still needs its own request under § Publication.
 - Commit only code whose tests pass.
 - Prompt files: a task touching `.claude/**`, any `CLAUDE.md` or `templates/**` routes to the `pcm` agent; theme work, `templates/themes/` included, to `themer`.
-- Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build through `.claude/scripts/dev.sh iso`; a foreman runs only its affected tests; the full gate is the lander's.
-- Dev and test runs target fence worktrees, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
-- Template, doc, prompt and config-file changes land on `develop` directly, in the main checkout.
+- Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`: a small change built by hand in the main checkout, larger work as a flight in a git worktree under `.worktrees/{flight}/`; a foreman runs only its affected tests; the full gate is the lander's.
+- Fence runs leave the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
+- Template, doc, prompt and config-file changes and small code changes land on `develop` directly, in the main checkout.
 - A fenced flight closes in order, run by the main chat: once every foreman on the worktree returned, `flights-lander` — its own review, every finding fixed, the full gate once → the authorized Git writer commits to `develop` → the host mirror build under § Host.
 - At every milestone, checkpoint the plan to a file, then compact before the next phase; a held turn arms an idle-fired self-call instead.
 - AskUserQuestion is the user's whole screen: context travels inside the question text; each round simpler and more concrete, never a rephrase.

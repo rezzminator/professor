@@ -108,6 +108,12 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	} else {
 		err = installer.install(ctx)
 	}
+	return installer.finish(err)
+}
+
+// finish joins the run's error with every plan error and deferred step
+// failure, prints the summary line, and returns the report.
+func (installer *engine) finish(err error) (Report, error) {
 	if len(installer.planErrors) != 0 {
 		err = errors.Join(append([]error{err}, installer.planErrors...)...)
 	}
@@ -336,7 +342,7 @@ func (installer *engine) globalSourceRepoRoot() (string, error) {
 		}
 		return filepath.Clean(abs), nil
 	}
-	repo, err := GlobalSourceRepo(installer.options.Home)
+	repo, err := paths.GlobalSourceRepo(installer.options.Home)
 	if installer.options.Mode == ModeUninstall && errors.Is(err, paths.ErrSourceRepoUnusable) {
 		repos, historyErr := installer.engineSyncPolicySourceRepos()
 		if historyErr != nil {
@@ -1489,7 +1495,7 @@ func (installer *engine) wireShell(uninstall bool) error {
 		var err error
 		repo, err = paths.ReadSourceRepoMarker(installer.options.Home)
 		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
-			repo, err = GlobalSourceRepo(installer.options.Home)
+			repo, err = paths.GlobalSourceRepo(installer.options.Home)
 			if err != nil {
 				installer.skip("zshrc: " + err.Error() + " — rerun pfm install --yes from inside your Professor clone")
 				return nil

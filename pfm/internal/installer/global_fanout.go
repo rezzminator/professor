@@ -14,25 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// GlobalSourceRepo resolves the clone every global agent/command/skill link
-// is anchored on for a caller that has no installer options at all — pfm
-// doctor, checking what a PRIOR install wired. It is the marker-and-default
-// half of globalSourceRepoRoot, kept as one implementation so the checker
-// can never anchor on a different clone than the installer it checks.
-func GlobalSourceRepo(home string) (string, error) {
-	marker := paths.SourceRepoPath(home)
-	if _, err := os.Lstat(marker); errors.Is(err, fs.ErrNotExist) {
-		return filepath.Clean(filepath.Join(home, ".professor")), nil
-	} else if err != nil {
-		return "", fmt.Errorf("inspect source repository marker %s: %w", marker, err)
-	}
-	repo, err := paths.ReadSourceRepoMarker(home)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(repo), nil
-}
-
 // ReportGlobalAgents prints the machine rows `engine-sync doctor --machine`
 // classifies — the Claude store's agents registry and every Codex agents
 // registry against the recorded clone — as "doctor: {message}" lines, and
@@ -103,7 +84,7 @@ func ReportGlobalAgents(
 // no clone. A marker or path that cannot be inspected is an error, never "no
 // clone".
 func RecordedGlobalClone(home string) (string, bool, error) {
-	repo, err := GlobalSourceRepo(home)
+	repo, err := paths.GlobalSourceRepo(home)
 	if err != nil {
 		return "", false, err
 	}

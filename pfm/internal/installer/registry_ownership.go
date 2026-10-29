@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The classes the registry-ownership scan reports (spec D24-D26): ownership is
@@ -146,7 +148,7 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 // (pfm doctor, --stale): the clone is the one the install anchors on, the
 // fallback ~/.professor an owned root too, the plan computed from the clone.
 func ScanRegistryOwnership(home, store string, retired RetiredRegistryNames) (RegistryOwnership, error) {
-	clone, err := GlobalSourceRepo(home)
+	clone, err := paths.GlobalSourceRepo(home)
 	if err != nil {
 		return RegistryOwnership{}, err
 	}

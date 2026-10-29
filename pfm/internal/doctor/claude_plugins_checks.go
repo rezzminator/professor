@@ -16,7 +16,7 @@ import (
 
 // doctorClaudePluginBuild is the build doctor checks the plugins of: this
 // pfm's version, home, claude.pluginCheckoutRoot, claude.plugins and the
-// source clone a prior install anchored on (installer.GlobalSourceRepo, the
+// source clone a prior install anchored on (paths.GlobalSourceRepo, the
 // marker else the default path), whose plugins/ an -alpha build copies from
 // when the key is unset. A clone that cannot be resolved rides as
 // SourceRepoErr, named in the fallback line. pluginsDefault says claude.plugins
@@ -27,7 +27,7 @@ func doctorClaudePluginBuild(
 	claude pfmconfig.Claude,
 	pluginsDefault bool,
 ) installer.ClaudePluginBuild {
-	sourceRepo, sourceRepoErr := installer.GlobalSourceRepo(home)
+	sourceRepo, sourceRepoErr := paths.GlobalSourceRepo(home)
 	return installer.ClaudePluginBuild{
 		Version:        version,
 		Home:           home,

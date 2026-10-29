@@ -22,7 +22,7 @@ import (
 // row, which is a different failure than the one under test.
 func installedCodexConfig(t *testing.T, rest string) string {
 	t.Helper()
-	prompt, err := codexprompt.FleetPrompt()
+	prompt, err := codexprompt.FleetPrompt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

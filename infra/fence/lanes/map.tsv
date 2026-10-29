@@ -67,6 +67,7 @@ pfm config show	O1	O1.13-misc-ops
 pfm config validate	O1	O1.13-misc-ops
 pfm doctor	M	M.04-doctor-mcp
 pfm doctor	O1	O1.10-doctor-exit-contract
+pfm generate	O1	O1.01a-generate
 pfm headless	O2	O2.04-headless
 pfm headless exec	O2	O2.04-headless
 pfm heal	O1	O1.11-heal

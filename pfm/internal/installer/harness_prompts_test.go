@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -13,12 +14,13 @@ import (
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// readHarnessPromptPart reads one part of the embedded tree through the same
-// door the installer uses. There is exactly one copy of the tree — the
-// pfm/harness-prompts package — so a part is read here, never compared
+// readHarnessPromptPart reads one part of the embedded tree, the copy a host
+// with no source clone composes from. There is exactly one source of the tree
+// — the pfm/harness-prompts package — so a part is read here, never compared
 // against a second on-disk twin.
 func readHarnessPromptPart(t *testing.T, relative string) []byte {
 	t.Helper()
@@ -98,10 +100,11 @@ func TestInstallGeneratesClonePrompts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("install did not generate %s: %v", engine, err)
 		}
-		want, err := harnessprompts.Composed(engine)
-		if engine == "codex" {
-			want, err = codexHarnessPrompt()
+		id, err := pfmengine.Parse(engine)
+		if err != nil {
+			t.Fatal(err)
 		}
+		want, err := assembledHarnessPrompt(clone, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,6 +159,7 @@ func TestInstallGeneratesClonePrompts(t *testing.T) {
 // configuring consumers against a missing or empty prompt.
 func TestInstallNamesHarnessGenerationFailure(t *testing.T) {
 	home, clone := t.TempDir(), t.TempDir()
+	seedHarnessPromptTree(t, clone, nil)
 	configPath := filepath.Join(home, "pfm.config.json")
 	writeFixture(t, configPath, "{\"version\":2}\n")
 	blocked := filepath.Join(clone, "pfm", "harness-prompts", "generated")
@@ -171,5 +175,57 @@ func TestInstallNamesHarnessGenerationFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("consumer ran after generation failure: %v", err)
+	}
+}
+
+// cloneHeadLine marks a clone's head part that the embedded tree never holds.
+const cloneHeadLine = "clone-only head line: edited after this binary was built"
+
+// seedHarnessPromptTree lays the embedded harness-prompt tree into clone as
+// its source parts, each override replacing one part's content.
+func seedHarnessPromptTree(t *testing.T, clone string, overrides map[string]string) {
+	t.Helper()
+	root := filepath.Join(clone, "pfm", harnessprompts.DirName)
+	err := fs.WalkDir(harnessprompts.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		content, err := fs.ReadFile(harnessprompts.FS(), name)
+		if err != nil {
+			return err
+		}
+		if override, ok := overrides[name]; ok {
+			content = []byte(override)
+		}
+		writeFixture(t, filepath.Join(root, filepath.FromSlash(name)), string(content))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed harness prompt tree in %s: %v", clone, err)
+	}
+}
+
+// Install composes from the clone's parts: a head edited after the binary was
+// built reaches the generated prompt, where composing from the embedded parts
+// would overwrite a fresh `pfm generate` with the stale head.
+func TestInstallComposesFromTheCloneTreeNotTheEmbed(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	head, err := harnessprompts.ReadPart("share/head.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedHarnessPromptTree(t, clone, map[string]string{"share/head.md": string(head) + "\n" + cloneHeadLine + "\n"})
+	configPath := filepath.Join(home, "pfm.config.json")
+	writeFixture(t, configPath, "{\"version\":2}\n")
+	t.Setenv(paths.EnvConfig, configPath)
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, SourceRepo: clone, MCPConfigPath: configPath,
+		Runner: &fakeRunner{}, Stdout: io.Discard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	generated := readFixture(t, filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md"))
+	if !strings.Contains(generated, cloneHeadLine) {
+		t.Fatalf("install composed generated/claude.md without the clone's edited head:\n%.300s", generated)
 	}
 }

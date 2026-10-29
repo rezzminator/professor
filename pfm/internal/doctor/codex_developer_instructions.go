@@ -11,13 +11,14 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/codexprompt"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The Codex fleet prompt reaches a session through config.toml's
 // developer_instructions: it is the first developer item of every thread,
 // rebuilt verbatim after compaction, inherited by every default-role
-// sub-agent. If the key is absent, or holds anything but the prompt this
-// binary composes, every Codex seat started from that account runs without
+// sub-agent. If the key is absent, or holds anything but the prompt install
+// composes, every Codex seat started from that account runs without
 // the fleet prompt and nothing else says so. This row says so — and it keeps
 // its outcomes apart, because "the prompt is there", "something else is
 // there", "the key is absent" and "the config could not be read" are four
@@ -38,27 +39,32 @@ type codexInstructionsReport struct {
 }
 
 // PrintCodexDeveloperInstructions checks every Codex account's config.toml
-// against the prompt this binary composes and returns the failure count. An
-// account whose config carries something else is a state `pfm install --yes`
-// owns and did not produce, so it is a FAILURE, never a warning.
-func PrintCodexDeveloperInstructions(stdout io.Writer, homes []string) int {
+// against the prompt `pfm install` composes from the recorded clone's
+// harness-prompt tree (else the embedded one) and returns the failure count.
+// An account whose config carries something else is a state `pfm install
+// --yes` owns and did not produce, so it is a FAILURE, never a warning.
+func PrintCodexDeveloperInstructions(stdout io.Writer, home string, homes []string) int {
+	if len(homes) == 0 {
+		fmt.Fprint(stdout, "doctor: codex developer_instructions=no-accounts — no Codex account is configured\n")
+		return 0
+	}
 	// codexprompt is the one door that composes this prompt: it applies the Codex
 	// mappings (review.go) the shared parts do not carry on disk, so comparing
 	// a config against the raw parts would read a correctly installed account
 	// as a mismatch.
-	prompt, err := codexprompt.FleetPrompt()
+	clone, err := paths.GlobalSourceRepo(home)
+	prompt := ""
+	if err == nil {
+		prompt, err = codexprompt.FleetPrompt(clone)
+	}
 	if err != nil {
 		fmt.Fprintf(
 			stdout,
-			"doctor: codex developer_instructions=CHECK FAILED error=%v — this binary could not compose the "+
-				"Codex prompt, so whether any account carries it is UNKNOWN, not clean\n",
+			"doctor: codex developer_instructions=CHECK FAILED error=%v — the Codex prompt could not be "+
+				"composed, so whether any account carries it is UNKNOWN, not clean\n",
 			err,
 		)
 		return 1
-	}
-	if len(homes) == 0 {
-		fmt.Fprint(stdout, "doctor: codex developer_instructions=no-accounts — no Codex account is configured\n")
-		return 0
 	}
 	failures := 0
 	for _, home := range homes {
@@ -134,7 +140,7 @@ func printCodexInstructionsReport(stdout io.Writer, report codexInstructionsRepo
 		fmt.Fprintf(
 			stdout,
 			"doctor: codex developer_instructions=MISMATCH file=%s bytes=%d want=%d — the config carries a "+
-				"developer_instructions that is not this binary's composed Codex prompt; run pfm install --yes, "+
+				"developer_instructions that is not the composed Codex prompt; run pfm install --yes, "+
 				"and if the value is hand-written, pfm preserved it and installed nothing\n",
 			report.Path,
 			report.Bytes,

@@ -259,21 +259,28 @@ func (installer *engine) removeUpdateMetadata() error {
 	return nil
 }
 
+// recordSourceRepoMarker records this run's --source-repo as the clone every
+// later reader (doctor, role seats, launches) anchors on, so what install or
+// generate compiled from one clone is never read back from another.
+func (installer *engine) recordSourceRepoMarker() error {
+	content, err := paths.SourceRepoMarkerContent(installer.options.SourceRepo)
+	if err != nil {
+		return err
+	}
+	path := paths.SourceRepoPath(installer.options.Home)
+	if sameFile(path, content, 0o600) {
+		installer.ok(path)
+		return nil
+	}
+	return installer.change("write "+path, func() error {
+		return paths.WriteSourceRepoMarker(installer.options.Home, installer.options.SourceRepo)
+	})
+}
+
 func (installer *engine) writeUpdateMetadata() error {
 	if installer.options.SourceRepo != "" {
-		content, err := paths.SourceRepoMarkerContent(installer.options.SourceRepo)
-		if err != nil {
+		if err := installer.recordSourceRepoMarker(); err != nil {
 			return err
-		}
-		path := paths.SourceRepoPath(installer.options.Home)
-		if !sameFile(path, content, 0o600) {
-			if err := installer.change("write "+path, func() error {
-				return paths.WriteSourceRepoMarker(installer.options.Home, installer.options.SourceRepo)
-			}); err != nil {
-				return err
-			}
-		} else {
-			installer.ok(path)
 		}
 		abs, err := filepath.Abs(installer.options.SourceRepo)
 		if err != nil {

@@ -137,7 +137,7 @@ func (status SkillSourceStatus) Describe() string {
 // storage and the recorded link dirs, falling back to the default store's
 // skills registry and ~/.agents/skills when there is no link ledger.
 func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
-	repo, err := GlobalSourceRepo(home)
+	repo, err := paths.GlobalSourceRepo(home)
 	if err != nil {
 		return []SkillSourceStatus{{Path: home, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}

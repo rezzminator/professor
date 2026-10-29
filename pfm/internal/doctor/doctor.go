@@ -214,8 +214,7 @@ func Run(
 		verboseDir,
 		dependencies,
 	)
-	tally.warnings += printHarnessPromptEmbedDoctor(stdout, resolved.Home)
-	tally.failures += PrintCodexDeveloperInstructions(stdout, runtime.Config.CodexHomes())
+	tally.failures += PrintCodexDeveloperInstructions(stdout, resolved.Home, runtime.Config.CodexHomes())
 	primaryAccount, primaryErr := fleet.PrimaryAccount(resolved, runtime.Config)
 	if primaryErr != nil {
 		tally.fail()

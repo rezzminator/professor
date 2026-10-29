@@ -65,7 +65,7 @@ var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
-	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
+	"usage-hook", installCommand, "uninstall", "generate", updateCommand, initCommand, whoamiCommand,
 	mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
 	"model-cost", "tokens", transcriptCommand, "theme", restartCommand,
 }
@@ -188,6 +188,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runInstall(args[1:], stdout, stderr, runtime)
 	case "uninstall":
 		return runUninstall(args[1:], stdout, stderr, runtime)
+	case "generate":
+		return runGenerate(args[1:], stdout, stderr, runtime)
 	case "update":
 		return update.Run(args[1:], stdout, stderr, runtime)
 	case "restart":
@@ -225,6 +227,7 @@ func printUsage(w io.Writer) {
 		"  heal      report or repair wedged Codex history projections",
 		"  install   wire or remove the self-contained host integration",
 		"  uninstall remove the self-contained host integration",
+		"  generate  regenerate prompts, agents and the Codex fleet prompt from the source clone: --plan",
 		"  update    update the binary; check, adopt, pin, ignore, drop or accept project template baselines",
 		"  init      scaffold project templates once and pin their baselines",
 		"  restart   end every chat, restart Herdr and every pfm service that ran, each verified up: --dry-run",

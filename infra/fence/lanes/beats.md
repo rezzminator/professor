@@ -123,6 +123,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 Runs FIRST in the sequence: it asserts the machine the other lanes will live on, and every beat that mutates the install restores what it changed (a dropped seat is a spare, never the seat E1 runs on).
 
 - `O1.01-install-idempotent` · a second `pfm install --yes` is idempotent (changed=0) · spends none
+- `O1.01a-generate` · `pfm generate --plan` exits 0 in plan mode, then `pfm generate` after the idempotent install changes nothing (changed=0) · spends none
 - `O1.02-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, every bundled theme profile's Claude palette and pfm profile copy, harness baseline) · spends none
 - `O1.02a-account-links` · every account links all 23 shared entries; doctor reports `account-links: ok` without a store, account or link finding · spends none
 - `O1.03-hooks-installed` · hooks are installed correctly per engine · spends none

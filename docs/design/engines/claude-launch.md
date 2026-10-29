@@ -195,7 +195,7 @@ The trace records what the status line received and emitted; it does not by itse
 
 ## The system prompt
 
-- **The generated file is assembled at install, never at build.** `pfm install` joins `share/head.md` + `{engine}/professor.md` + `share/tail.md`, taken from the source parts embedded in the binary, and writes `{clone}/pfm/harness-prompts/generated/{claude,codex,opencode}.md` before any consumer runs. `generated/` is gitignored and not embedded. The assembly tests check the expected output of the source parts; the install lifecycle tests prove the files exist after install.
+- **The generated file is assembled at install, never at build.** `pfm install` and `pfm generate` join `share/head.md` + `{engine}/professor.md` + `share/tail.md`, taken from the recorded clone's `pfm/harness-prompts/` (the copy embedded in the binary when the clone holds no parts), and write `{clone}/pfm/harness-prompts/generated/{claude,codex,opencode}.md` before any consumer runs. `generated/` is gitignored and not embedded. The assembly tests check the expected output of the source parts; the install lifecycle tests prove the files exist after install.
 - **Launch points at the generated file.** `--system-prompt-file` is `{clone}/pfm/harness-prompts/generated/claude.md`, `{clone}` from the source-repo record (`paths.GeneratedHarnessPromptIn`). Nothing is copied to a staged location at install.
 - **Workbench launches** replace the generated file with the manifest prompt; explicit `--system-prompt-file` / `--harness-prompt` win, and a role seat composes on that base (`internal/workbench/persona.go`, `internal/agentrole/base_prompt.go`).
 - **Role seats** compose the claude prompt with the role into a seat file under the SID dir and pass that instead (`agentrole.ComposeSeatPrompt`); `pfm chat reload` refreshes it before respawning.
@@ -330,5 +330,5 @@ Values set through the `--settings` `env` block are read from argv, never from `
 - The hygiene rows ↔ the Codex launch's unset list (`pfm internal codex-launch`) ↔ the headless strip lists ↔ the doctor harness probe's capture environment — all read from the registry.
 - `outputStyle` constant ↔ the gate in `infra/check-self-hosted-manifest.sh`.
 - The cost rows (`costLedger`, the exporter variables, the `PFM_COST_LEDGER` marker) ↔ `pfm/internal/claudelaunch/cost.go` ↔ [cost-ledger.md](cost-ledger.md); `PFM_COST_LEDGER_DIR` (`pfm/internal/paths/paths.go`) names the ledger directory the sink writes and every reader opens.
-- `pfm/harness-prompts/generated/*.md` (assembled by `pfm install`, gitignored) ↔ the embedded source parts under `pfm/harness-prompts/{share,claude,codex,opencode}/`; the Codex output ↔ `codexprompt.FleetPrompt`.
+- `pfm/harness-prompts/generated/*.md` (assembled by `pfm install` and `pfm generate`, gitignored) ↔ the clone's source parts under `pfm/harness-prompts/{share,claude,codex,opencode}/`; the Codex output ↔ `codexprompt.FleetPrompt`.
 - `chat.backend` (`pfm/internal/config/chat.go`) ↔ `example.pfm.config.json` ↔ [pfm-home.md § chat](pfm-home.md#chat) ↔ `spawn.Place`.

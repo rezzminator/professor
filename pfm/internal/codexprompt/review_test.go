@@ -104,7 +104,7 @@ func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T)
 }
 
 func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {
-	prompt, err := FleetPrompt()
+	prompt, err := FleetPrompt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {
 	if strings.Contains(mapped, codeReviewCommand) || !strings.Contains(mapped, reviewWant("low")) {
 		t.Fatalf("the compose-time mapping left a fixture tail unmapped:\n%s", mapped)
 	}
-	claude, err := harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Claude).LongName)
+	claude, err := harnessprompts.Composed(t.TempDir(), pfmengine.MustLookup(pfmengine.Claude).LongName)
 	if err != nil {
 		t.Fatal(err)
 	}

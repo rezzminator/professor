@@ -26,6 +26,7 @@ Operator verbs:
 - heal: report or repair wedged Codex history projections
 - install: wire the self-contained host integration (`--yes` non-interactive)
 - uninstall: remove it
+- generate: rebuild what install compiles from the source clone — harness prompts, machine agents, the Codex fleet prompt — with no pfm rebuild; `--plan` previews
 - update: bare form updates the binary from its source clone; `adopt|pin|ignore|drop|accept` manage this project's template baseline (`pfm doctor --project-updates` reports it)
 - init: scaffold project templates once and pin their baselines (`pfm init [dir] [--force]`); `pfm init --render [dir]` fills install-time tokens once from `.professor/manifest.json`
 - restart: end every chat, then restart Herdr and every pfm service that was running before, each verified up; a unit found stopped stays stopped, named; `--dry-run` prints the ordered plan and changes nothing

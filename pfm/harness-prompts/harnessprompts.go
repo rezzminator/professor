@@ -1,17 +1,19 @@
-// Package harnessprompts owns the fleet's harness-prompt tree and embeds it
-// into the binary: the shared head and tail, one middle per engine, and
-// Claude's drift baselines. The tree lives HERE and nowhere else — the
-// installer composes from this package, and `pfm doctor` hashes
-// what a binary carries against this same directory in the blueprint clone,
-// so a binary older than the templates is NAMED rather than left quietly
-// using last month's prompt.
+// Package harnessprompts owns the fleet's harness-prompt tree: the shared
+// head and tail, one middle per engine, and Claude's drift baselines. The
+// tree lives HERE and nowhere else. A prompt is composed from the source
+// clone's copy of this directory when the clone holds one, so an edited part
+// reaches `pfm generate` and `pfm install` without a rebuild; the binary
+// embeds the tree for a binary-only install, which has no clone.
 package harnessprompts
 
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 )
 
 // DirName is this directory's own name — the tree sits at pfm/<DirName> in
@@ -24,10 +26,7 @@ const DirName = "harness-prompts"
 // named one at a time rather than swept up by a wildcard, which would also
 // match this package's own sources, and a directory pattern silently skips
 // any name beginning with "." or "_" — so a new engine directory has to be
-// added here too, and until it is, the binary neither embeds it nor compares
-// it: doctor's embed row holds every clone entry outside TopLevel out of the
-// comparison. The README is embedded like every other file, which is
-// what lets doctor compare the two trees whole.
+// added here too, or a binary-only install cannot compose its prompt.
 //
 //go:embed README.md claude codex opencode share
 var tree embed.FS
@@ -35,22 +34,6 @@ var tree embed.FS
 // FS is the embedded tree as a read-only filesystem, for callers that walk it.
 func FS() fs.FS {
 	return tree
-}
-
-// TopLevel returns the sorted names at the root of the embedded tree — the
-// entries the go:embed line above names, read from the tree itself so the list
-// can never drift from it. A root that cannot be read is a broken binary, not
-// a state any caller could act on, so it panics with the cause.
-func TopLevel() []string {
-	entries, err := tree.ReadDir(".")
-	if err != nil {
-		panic(fmt.Sprintf("read the embedded harness prompt tree's root: %v", err))
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		names = append(names, entry.Name())
-	}
-	return names
 }
 
 // ReadPart returns one part by its tree-relative slash path, e.g.
@@ -64,28 +47,69 @@ func ReadPart(name string) ([]byte, error) {
 	return content, nil
 }
 
-// composeParts names the three embedded files one engine's prompt is composed
-// from, head first and tail last. Embedded paths are always slash paths.
+// composeParts names the three files one engine's prompt is composed from,
+// head first and tail last, as slash paths relative to the tree's root.
 func composeParts(engineLongName string) [3]string {
 	return [3]string{"share/head.md", engineLongName + "/professor.md", "share/tail.md"}
 }
 
-// Composed joins the shared head, one engine's middle and the shared tail.
-// Each part's trailing newlines are trimmed and the three are joined by a
-// single blank line, so a part that gains or loses a trailing newline cannot
-// move the seams — a composed prompt is the three parts and the two seams,
-// and nothing else. Composition lives HERE because more than one caller needs
-// the same bytes: the installer generates them per engine, writes Codex's copy
-// into config.toml, and a Codex --agent-role seat carries Codex's copy ahead of its role (codexprompt).
-func Composed(engineLongName string) ([]byte, error) {
+// source resolves the tree a prompt is composed from: the clone's
+// pfm/harness-prompts directory when it holds source parts, else the embedded
+// tree. Only an entry the embedded tree also holds at its root counts as a
+// source part: a directory holding only generated/ (the outputs install writes
+// even on a host with no source clone) or stray files such as .DS_Store
+// composes from the embed. A clone tree
+// that holds parts is the source even when one is missing: falling back to the
+// embed there would compose a prompt the clone no longer holds. The label
+// names the source in every error.
+func source(clone string) (fs.FS, string, error) {
+	if clone == "" {
+		return nil, "", errors.New("resolve the harness prompt tree: no source clone path given")
+	}
+	dir := filepath.Join(clone, "pfm", DirName)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return tree, "embedded", nil
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("read harness prompt tree %s: %w", dir, err)
+	}
+	roots, err := tree.ReadDir(".")
+	if err != nil {
+		return nil, "", fmt.Errorf("read the embedded harness prompt tree's root: %w", err)
+	}
+	for _, entry := range entries {
+		for _, root := range roots {
+			if entry.Name() == root.Name() {
+				return os.DirFS(dir), dir, nil
+			}
+		}
+	}
+	return tree, "embedded", nil
+}
+
+// Composed joins the shared head, one engine's middle and the shared tail,
+// read from the clone's tree when it exists, else from the embedded one
+// (source). Each part's trailing newlines are trimmed and the three are joined
+// by a single blank line, so a part that gains or loses a trailing newline
+// cannot move the seams — a composed prompt is the three parts and the two
+// seams, and nothing else. Composition lives HERE because more than one caller
+// needs the same bytes: the installer generates them per engine, writes
+// Codex's copy into config.toml, and a Codex --agent-role seat carries Codex's
+// copy ahead of its role (codexprompt).
+func Composed(clone, engineLongName string) ([]byte, error) {
+	parts, label, err := source(clone)
+	if err != nil {
+		return nil, err
+	}
 	var sections [3][]byte
 	for index, name := range composeParts(engineLongName) {
-		raw, err := ReadPart(name)
+		raw, err := fs.ReadFile(parts, name)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read %s harness prompt %s: %w", label, name, err)
 		}
 		if len(bytes.TrimSpace(raw)) == 0 {
-			return nil, fmt.Errorf("compose %s harness prompt: empty part %s", engineLongName, name)
+			return nil, fmt.Errorf("compose %s harness prompt: empty %s part %s", engineLongName, label, name)
 		}
 		sections[index] = bytes.TrimRight(raw, "\n")
 	}

@@ -135,7 +135,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 
 - A framework file changes only on the dispatch you hold; an improvement spotted mid-task is proposed in the report, not applied.
 - Atomic changes for breaking modifications; self-contained agents without circular dependencies.
-- Never weaken a sacred-ground rule (ethics, privacy, code quality) and never remove a safety check: the leak gate, `git-guard`, the publication boundary, every QA and merge gate in the shipped templates.
+- Never weaken a sacred-ground rule (ethics, privacy, code quality) and never remove a safety check: the leak gate, `git-guard`, `pcm-guard`, the publication boundary, every QA and merge gate in the shipped templates.
 - Keep it DRY: reference `CLAUDE.md` from agents, define once, prefer deletion over addition; root's surgical-changes law governs the rest.
 - Routing-gate every fan-out: spawn for declared scope only.
 - Every pipeline artifact names its consumer; a write-only artifact is not added.

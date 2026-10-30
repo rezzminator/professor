@@ -11,7 +11,8 @@ import (
 // the picker and the runtime loader each need. They live here, beside the
 // roster itself, so no caller re-derives them.
 
-// CodexHomes lists each Codex account's home directory, in roster order.
+// CodexHomes lists each Codex account's home directory, in roster order. It is
+// never nil: an empty roster means no Codex home, to install and doctor alike.
 func (config Config) CodexHomes() []string {
 	result := make([]string, 0, len(config.CodexAccounts))
 	for _, account := range config.CodexAccounts {

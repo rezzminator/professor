@@ -298,7 +298,7 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 	t.Cleanup(func() { _ = os.Chmod(markerDir, 0o755) })
 
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil)
 	if warnings != 1 || failures != 0 {
 		t.Fatalf("warnings=%d failures=%d, want 1/0\n%s", warnings, failures, output.String())
 	}
@@ -347,6 +347,14 @@ func TestReportGlobalAgentsRendersEngineSyncRows(t *testing.T) {
 			},
 		},
 		{
+			// The empty roster install ran `global --no-codex-home` over: doctor
+			// names no Codex home, so it never checks one install skipped.
+			name: "an explicit empty roster, no Codex home", codexHomes: []string{},
+			argv: func(home string) string {
+				return "doctor --machine --home " + home + " --claude-config-dir " + ClaudeStore(home) + " --json"
+			},
+		},
+		{
 			name: "Claude absent", clone: true, claudeAbsent: true,
 			argv: func(home string) string {
 				return "doctor --machine --home " + home + " --claude-config-dir " + ClaudeStore(home) +
@@ -373,7 +381,7 @@ func TestReportGlobalAgentsRendersEngineSyncRows(t *testing.T) {
 				paths.OSEnv{},
 				testCase.capabilities,
 				nil,
-				testCase.codexHomes...)
+				testCase.codexHomes)
 			if warnings != 1 || failures != 1 {
 				t.Fatalf("warnings=%d failures=%d, want 1/1\n%s", warnings, failures, output.String())
 			}
@@ -398,7 +406,7 @@ func TestReportGlobalAgentsWithoutEngineSyncIsAFailingRow(t *testing.T) {
 	t.Setenv("ENGINE_SYNC_HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil)
 	if warnings != 0 || failures != 1 {
 		t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 	}

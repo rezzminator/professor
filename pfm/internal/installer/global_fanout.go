@@ -21,7 +21,10 @@ import (
 // installer anchors its links: no marker and no clone at the default path is
 // the no-clone state engine-sync names; a clone that cannot be resolved is an
 // UNRESOLVED warning. An engine-sync that could not run is a failing row,
-// never an absent one.
+// never an absent one. codexHomes resolves through ResolveCodexHomes, as
+// install's do, so doctor checks the Codex homes the config's roster names;
+// an install run with --skip-engine codex wrote none of them, and doctor
+// still checks the roster's.
 func ReportGlobalAgents(
 	w io.Writer,
 	home string,
@@ -29,14 +32,11 @@ func ReportGlobalAgents(
 	env paths.Env,
 	capabilities []string,
 	accountDirs []string,
-	codexHomes ...string,
+	codexHomes []string,
 ) (warnings, failures int) {
-	if len(codexHomes) == 0 {
-		codexHomes = []string{filepath.Join(home, ".codex")}
-	}
 	options := enginesync.MachineDoctorOptions{
 		ClaudeConfigDir: ClaudeStore(home),
-		CodexHomes:      codexHomes,
+		CodexHomes:      ResolveCodexHomes(home, codexHomes),
 		ClaudeAbsent:    claudeAbsent,
 	}
 	if !claudeAbsent {

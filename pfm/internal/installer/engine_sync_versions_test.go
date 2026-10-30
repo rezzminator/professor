@@ -137,7 +137,7 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 				}
 			}
 			var output bytes.Buffer
-			warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, []string{account})
+			warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, []string{account}, nil)
 			text := output.String()
 			switch name {
 			case "older required":

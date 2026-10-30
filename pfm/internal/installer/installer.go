@@ -1480,10 +1480,17 @@ func (installer *engine) writeSettingsHookOwnership(
 }
 
 func (installer *engine) codexHomes() []string {
-	if installer.options.CodexHomes == nil {
-		return []string{filepath.Join(installer.options.Home, ".codex")}
+	return ResolveCodexHomes(installer.options.Home, installer.options.CodexHomes)
+}
+
+// ResolveCodexHomes is the one rule install and doctor share for which Codex
+// homes exist: a nil roster is the legacy single ~/.codex; a non-nil one, even
+// empty (config.CodexHomes, --skip-engine codex), is exactly the homes named.
+func ResolveCodexHomes(home string, roster []string) []string {
+	if roster == nil {
+		return []string{filepath.Join(home, ".codex")}
 	}
-	return installer.options.CodexHomes
+	return roster
 }
 
 func (installer *engine) wireShell(uninstall bool) error {

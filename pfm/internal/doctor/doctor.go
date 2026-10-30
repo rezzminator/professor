@@ -317,7 +317,7 @@ func Run(
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
 		runtime.Config.ClaudeConfigDirs(),
 		update.RetiredRegistryNames(),
-		runtime.Config.CodexHomes()...,
+		runtime.Config.CodexHomes(),
 	)
 	tally.warnings += globalAgentsWarnings
 	tally.failures += globalAgentsFailures

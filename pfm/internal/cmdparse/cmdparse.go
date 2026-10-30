@@ -3,9 +3,11 @@
 // through mvdan.cc/sh/v3/syntax. It never writes a parser of its own. Its
 // owners are the git guard (internal/hookentry/git_guard.go), which reads every
 // part and denies a git command whose part did not parse or hit a parse bound,
-// and the store guard (internal/hookentry/store_guard.go), which reads each
-// part's Env.
-// Design: docs/design/hooks/git-guard.md § How it reads a command.
+// the store guard (internal/hookentry/store_guard.go), which reads each
+// part's Env, and the pcm guard (internal/hookentry/pcm_guard.go), which
+// reads each part's Redirs besides its words.
+// Design: docs/design/hooks/git-guard.md § How it reads a command,
+// docs/design/hooks/pcm-guard.md § How it reads a command.
 package cmdparse
 
 import (
@@ -67,6 +69,19 @@ type Part struct {
 	// `env`/`sudo` wrapper, less what `unset` and `env -u/-i` removed. A value
 	// the parse cannot know is its source text. nil when none is in force.
 	Env map[string]string
+	// Redirs are the redirections of the statement the part runs in, its
+	// own first, then those of each compound command around it (`{ …; } > f`
+	// gives every part inside `> f`). A statement that runs no program
+	// (`> f`, `X=1 > f`) is one part with no Program holding its Redirs.
+	Redirs []Redirect
+}
+
+// Redirect is one redirection: Op as the shell spells it (`>`, `>>`, `&>`,
+// `>&`, `<<`, `<<<`), without its fd number; Target its word, read as an
+// argument is (its source text when the parse cannot know it), which for
+// `<<` is the delimiter and for `<<<` the string; Body a heredoc's text.
+type Redirect struct {
+	Op, Target, Body string
 }
 
 // ParseBatch parses every call and returns its parts keyed by Call.ID. The
@@ -132,13 +147,27 @@ func (p *callParser) visit(node syntax.Node) bool {
 		switch cmd := x.Cmd.(type) {
 		case *syntax.CallExpr:
 			p.walkNested(cmd.Assigns, cmd.Args, x.Redirs)
+			from := len(p.parts)
 			p.callStmt(cmd)
+			p.attachRedirs(from, x.Redirs)
 			return false
 		case *syntax.DeclClause:
 			p.walkNested(cmd.Args, nil, x.Redirs)
+			from := len(p.parts)
 			p.declStmt(cmd)
+			p.attachRedirs(from, x.Redirs)
 			return false
 		}
+		if len(x.Redirs) == 0 {
+			return true
+		}
+		p.walkNested(nil, nil, x.Redirs)
+		from := len(p.parts)
+		if x.Cmd != nil {
+			syntax.Walk(x.Cmd, p.visit)
+		}
+		p.attachRedirs(from, x.Redirs)
+		return false
 	case *syntax.ForClause:
 		iter, ok := x.Loop.(*syntax.WordIter)
 		if !ok {
@@ -177,6 +206,34 @@ func (p *callParser) walkNested(assigns []*syntax.Assign, words []*syntax.Word, 
 	}
 	for _, r := range redirs {
 		syntax.Walk(r, p.visit)
+	}
+}
+
+// attachRedirs gives redirs to every part emitted from index from on, or,
+// when the statement emitted none, to one part with no program.
+func (p *callParser) attachRedirs(from int, redirs []*syntax.Redirect) {
+	if len(redirs) == 0 {
+		return
+	}
+	read := make([]Redirect, 0, len(redirs))
+	for _, r := range redirs {
+		red := Redirect{Op: r.Op.String()}
+		if r.Word != nil {
+			if words := p.args(r.Word); len(words) > 0 {
+				red.Target = words[0].text
+			}
+		}
+		if r.Hdoc != nil {
+			red.Body = p.source(r.Hdoc)
+		}
+		read = append(read, red)
+	}
+	if from == len(p.parts) {
+		p.emit(Part{Redirs: read})
+		return
+	}
+	for i := from; i < len(p.parts); i++ {
+		p.parts[i].Redirs = append(p.parts[i].Redirs, read...)
 	}
 }
 

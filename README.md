@@ -100,7 +100,7 @@ git-guard blocked `git commit -m wip`.
 Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.
 ```
 
-The refusal names the right way. That is one of the mandatory rules every install ships with: only `gitter` writes git; framework edits go through the `pcm` agent; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
+The refusal names the right way. Its twin, `pcm-guard`, refuses a write to a `CLAUDE.md`, a `.claude/` file or a template by anyone but the `pcm` agent, whether the Edit tools or a `sed -i` make it. That is one of the mandatory rules every install ships with: only `gitter` writes git; framework edits go through the `pcm` agent; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
 
 ### 4. Read what the web hides from bots
 

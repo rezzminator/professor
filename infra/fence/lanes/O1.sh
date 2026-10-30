@@ -164,7 +164,7 @@ else
     fail "$settings is not a valid settings object"
   else
     missing=""
-    for verb in launcher-repair clear-kill exit-close git-guard store-guard epic-inject reload-intercept exit-intercept; do
+    for verb in launcher-repair clear-kill exit-close git-guard store-guard pcm-guard epic-inject reload-intercept exit-intercept; do
       grep -q -- "$verb" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $verb;"
     done
     grep -q 'usage-hook' "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template usage-hook;"

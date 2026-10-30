@@ -92,6 +92,7 @@ pfm internal git-guard	O2	O2.05-internal-plumbing
 pfm internal herdr-places	O2	O2.05-internal-plumbing
 pfm internal herdr-state	O2	O2.05-internal-plumbing
 pfm internal store-guard	O2	O2.05-internal-plumbing
+pfm internal pcm-guard	O2	O2.05-internal-plumbing
 pfm internal kill-exit	O2	O2.05-internal-plumbing
 pfm internal launch	E1	E1.23-launcher
 pfm internal launcher-repair	O2	O2.05-internal-plumbing

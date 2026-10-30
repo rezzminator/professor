@@ -9,8 +9,8 @@ import (
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
 	hooks := HookTemplates(home)
-	if len(hooks) != 23 {
-		t.Fatalf("registrations=%d, want 23", len(hooks))
+	if len(hooks) != 24 {
+		t.Fatalf("registrations=%d, want 24", len(hooks))
 	}
 	for _, hook := range hooks {
 		if !strings.HasPrefix(hook.Command, home+"/.local/bin/pfm ") {
@@ -35,6 +35,25 @@ func TestStoreGuardRidesBesideGitGuardOnBash(t *testing.T) {
 		if hook.Command != want[i] {
 			t.Errorf("PreToolUse Bash hook %d command=%q, want %q", i, hook.Command, want[i])
 		}
+	}
+}
+
+// pcm-guard rides every launch on every tool that writes a file, so a
+// prompt file is guarded whether the Edit tools or Bash write it.
+func TestPcmGuardRidesEveryWritingTool(t *testing.T) {
+	home := t.TempDir()
+	var got []Hook
+	for _, hook := range HookTemplates(home) {
+		if hook.Name == "pcm-guard" {
+			got = append(got, hook)
+		}
+	}
+	want := Hook{
+		Event: hookEventPreToolUse, Matcher: "Edit|Write|MultiEdit|NotebookEdit|Bash",
+		Command: home + "/.local/bin/pfm internal pcm-guard", Name: "pcm-guard",
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("pcm-guard hooks=%+v, want exactly %+v", got, want)
 	}
 }
 

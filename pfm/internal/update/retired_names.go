@@ -266,10 +266,10 @@ var retiredNames = []retiredName{
 		name: "docs/agents", kind: retiredPath, successor: "docs/_index.md and docs/standards.md",
 		match: matchExact,
 	},
-	// The PreToolUse guard hook is removed with its stamp script: framework
-	// files are edited through /pcm, which dispatches the pcm agent, and no
-	// hook gates the edit. A settings.json hook entry or a script still
-	// naming either one is dead wiring.
+	// The stamp-gated PreToolUse guard hook is removed with its stamp script:
+	// framework files are edited by the pcm agent, which the launch hook `pfm
+	// internal pcm-guard` exempts by agent_type. A settings.json hook entry or
+	// a script still naming either one is dead wiring.
 	{name: "pfm-guard.sh", kind: retiredPath, match: matchExact},
 	{name: "guard-stamp.sh", kind: retiredPath, match: matchExact},
 	// Commit 09d16b64 "the ultimate family becomes /imagine:build, build-spec,

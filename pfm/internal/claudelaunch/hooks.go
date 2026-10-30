@@ -18,7 +18,10 @@ const (
 	HookHerdrNotificationMatcher = "permission_prompt|elicitation_dialog|idle_prompt|plugin_notification"
 	// HookResumeMatcher selects the SessionStart source Claude reports for
 	// --resume, --continue and the in-app /resume.
-	HookResumeMatcher   = "resume"
+	HookResumeMatcher = "resume"
+	// HookPcmGuardMatcher selects every tool that writes a file: the edit
+	// tools by their path, Bash by its parsed command.
+	HookPcmGuardMatcher = "Edit|Write|MultiEdit|NotebookEdit|Bash"
 	hookEventPreToolUse = "PreToolUse"
 )
 
@@ -44,6 +47,12 @@ func HookTemplates(home string) []Hook {
 		{Event: "SessionEnd", Command: binary + " internal exit-close", Name: "exit-close"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal git-guard", Name: "git-guard"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal store-guard", Name: "store-guard"},
+		{
+			Event:   hookEventPreToolUse,
+			Matcher: HookPcmGuardMatcher,
+			Command: binary + " internal pcm-guard",
+			Name:    "pcm-guard",
+		},
 		{Event: "SubagentStart", Matcher: HookRRDirMatcher, Command: binary + " internal rr-dir", Name: "rr-dir"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal epic-inject", Name: "epic-inject"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},

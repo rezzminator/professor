@@ -18,7 +18,7 @@ permissions:
 jobs:
   macos-tests:
     name: macos-tests
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +94,7 @@ jobs:
 
   fresh-install-macos:
     name: fresh-install-macos
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

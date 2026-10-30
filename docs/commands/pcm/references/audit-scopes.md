@@ -1,6 +1,6 @@
 # PCM audit — per-scope deep checks
 
-Loaded by `/pcm audit`: PCM reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in the `pcm` agent § Audit). Read-only checks — report `PASS/FAIL/WARN`, never fix.
+Loaded by the `pcm` agent's `audit`: it reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in the `pcm` agent § Audit). Read-only checks — report `PASS/FAIL/WARN`, never fix.
 
 ## `agents` — Walk every agent file
 

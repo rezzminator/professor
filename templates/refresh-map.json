@@ -118,6 +118,9 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
+    "global/commands/quality/rules.md": {
+      "curated": true
+    },
     "global/skills/ultimate/SKILL.md": {
       "curated": true
     },
@@ -168,11 +171,6 @@
     "project/commands/audit/security.md": {
       "sources": {
         ".claude/commands/audit/security.md": "9e31c001184143838657407a8ce251cd50511209e0ddc4c99c8c8a680167f877"
-      }
-    },
-    "project/commands/pcm.md": {
-      "sources": {
-        ".claude/commands/pcm.md": "80ed770caa8bfc1b798c17427148e79912880e67609ca5076cd274473f68af9c"
       }
     },
     "project/commands/per-project/testing-manual.md": {

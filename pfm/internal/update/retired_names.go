@@ -82,6 +82,9 @@ const forwardCompactionSuccessor = "mcp__forward-compaction__forward_compaction 
 // family, the wave-builder skill and /imagine:build-spec point there too.
 const flightsSuccessor = "the flights-foreman agent"
 
+// pcmSuccessor is what replaced the /pcm command: dispatching its agent.
+const pcmSuccessor = "the pcm agent"
+
 // imagineSuccessor is what replaced /imagine:build, /imagine:build-fast,
 // /imagine:callmeter, /ultimate-spec and the ultimate visualization skill.
 const imagineSuccessor = "/imagine"
@@ -137,12 +140,16 @@ var retiredNames = []retiredName{
 	// releases/v0.77.0.md "/quality:md-forlint (renamed from /quality:forlint)".
 	{name: "/quality:forlint", kind: retiredCommand, successor: "/quality:md-forlint", match: matchExact},
 	// releases/v0.78.0.md "Project: /pfm becomes /pcm": commands/pfm.md is
-	// renamed commands/pcm.md with its audit scopes inline.
-	{name: ".claude/commands/pfm.md", kind: retiredPath, successor: ".claude/commands/pcm.md", match: matchExact},
+	// renamed commands/pcm.md with its audit scopes inline; that /pcm command
+	// retired in turn (below), so both point at the agent it dispatched.
+	{name: ".claude/commands/pfm.md", kind: retiredPath, successor: pcmSuccessor, match: matchExact},
 	{
 		name: ".claude/commands/pfm/references/audit-scopes.md", kind: retiredPath,
-		successor: ".claude/commands/pcm.md", match: matchExact,
+		successor: pcmSuccessor, match: matchExact,
 	},
+	// Commit "remove the /pcm command end to end": the pcm agent is dispatched
+	// directly; a project keeping its own commands/pcm.md is not a hit.
+	{name: "/pcm", kind: retiredCommand, successor: pcmSuccessor, match: matchExact},
 	// releases/v0.78.0.md retired the former chat tool namespace.
 	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__chat-professor__*", match: matchPrefix},
 	// Standalone plugin registration replaces the server pfm installed.

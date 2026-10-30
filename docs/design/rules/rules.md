@@ -2,7 +2,7 @@
 
 A rule is a Markdown instruction file under `.claude/rules/`. Claude Code reads rules natively; Codex and OpenCode have no equivalent. engine-sync (`docs/design/engine-sync/engine-sync.md`) carries every rule to both engines over two channels: an always-on rule (no `paths:`) is compiled into an instruction file the engine reads at session start, and a path-scoped rule is injected mid-session by one engine-sync matcher, run from a Codex hook entry and an OpenCode shim that engine-sync writes. This file is the design; the global always-on channel is built.
 
-**Status:** partly built. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry, refreshed at `pfm install`), and the [Checks](#checks) rows marked built. Designed, not built: [Always-on project rules](#always-on-project-rules), [Path-scoped rules](#path-scoped-rules) (the `engine-sync hook` injector, its Codex hook entries and OpenCode shim), and the launch-time and `SessionStart` [freshness](#freshness) triggers — **Build path for the rest:** engine-sync phase P3, `flights-foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, `git-writes-through-gitter` and `flights-life-cycle`, shipped; `pfm-testing-manual`, waiting on the injector ([First consumer](#first-consumer))
+**Status:** partly built. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry, refreshed at `pfm install`), and the [Checks](#checks) rows marked built. Designed, not built: [Always-on project rules](#always-on-project-rules), [Path-scoped rules](#path-scoped-rules) (the `engine-sync hook` injector, its Codex hook entries and OpenCode shim), and the launch-time and `SessionStart` [freshness](#freshness) triggers — **Build path for the rest:** engine-sync phase P3, `flights-foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, `git-writes-through-gitter`, `flights-life-cycle` and `professor`, shipped always-on; `pfm-testing-manual`, waiting on the injector ([First consumer](#first-consumer))
 
 `{codex home}` is one Codex account's home; `{claude config dir}` is one Claude account's `configDir`; `{engine-sync home}` is `~/.local/share/engine-sync`; `{engine-sync state}` is `~/.local/state/engine-sync`.
 
@@ -61,7 +61,7 @@ Verified against Claude Code 2.1.295 and 2.1.312 (probes), Codex 0.161.0 (source
 
 **Mechanism:** a path-scoped rule is not a user hook. The session transcript records a `nested_memory` attachment, the one that also loads a subdirectory's `CLAUDE.md`, rendered as `<system-reminder>Contents of {path}:` plus the body, after the tool result that touched the file. It loads once per agent per session and loads again on demand after compaction.
 
-**Triggers:** Read, Write or Edit on a matching file, and a Bash command that counts as a read (`cat`, `head` on one file). Glob and Grep do not trigger.
+**Triggers:** Read, Write or Edit on a matching file, and a Bash command that counts as a read (`cat`, `head` on one file). Glob and Grep do not trigger, nor does a Bash write: in a live test, a chat in a plugin directory edited `CLAUDE.md` with `sed -i` and a user rule globbing `**/CLAUDE.md` never loaded. A law that must bind every write to a file is therefore always-on.
 
 **Sub-agents:** a sub-agent's own Read loads the rule into the sub-agent only. Probe: the `InstructionsLoaded` hook logged `agent_type: general-purpose`, `load_reason: path_glob_match`, `trigger_file_path: …/x_test.go`, and the parent reported no canary.
 
@@ -74,6 +74,15 @@ Verified against Claude Code 2.1.295 and 2.1.312 (probes), Codex 0.161.0 (source
 - A `SessionStart` hook's `additionalContext` reaches the main chat only, never a sub-agent.
 - A `SubagentStart` hook's `additionalContext` reaches the sub-agent whose `agent_type` its matcher names: it reached the two named custom agents (`omitClaudeMd` included) and not `general-purpose`, which the matcher did not name.
 - `InstructionsLoaded` fires only at the main chat's session start (`load_reason: session_start`). A sub-agent's always-on instructions are not logged separately, so the engine log cannot prove per-agent delivery.
+
+**User-rule globs:** a user rule's `paths:` globs match the touched file's path relative to the session's project root. Probed on Claude Code 2.1.314 (2026-10-30, a scratch project under `~/.cache/`, since the `~/` globs needed home paths, two runs plus one in this repo, evidence the transcript's `nested_memory` attachments, each after the Read that triggered it):
+
+- `**/NAME.md` matched a file in a subdirectory and at the project root; `**/.dir/**` and `**/dir/global/**` matched through dot directories (`.wt/flight/…`). The stored glob drops a trailing `/**` (`**/.pcmdot`).
+- A `~/`-prefixed glob matched nothing, for a file inside the project or outside it.
+- No user rule matched a file outside the project, `**/dir/**` included.
+- A parent directory's `.claude/rules/` rule did not fire for a file under that parent when the session ran in a child directory.
+
+So a user rule guards files only by project-relative globs, and only in sessions whose project holds the file.
 
 **Debugging:** the `InstructionsLoaded` hook reports `file_path`, `memory_type`, `load_reason` (`session_start`, `path_glob_match`) and `trigger_file_path`; `/context` lists what loaded at launch.
 
@@ -166,6 +175,7 @@ Codex runs a hook only once trusted, by a `sha256` of its event, matcher and han
 | --- | --- | --- |
 | `rm-rf-absolute-path.md` | always-on | `rm -rf` in any shell command an agent, model or main chat runs takes a literal absolute path, never a variable, glob, command substitution or relative path; `mktemp -d` scratch is no exception; code written into files is outside it |
 | `git-writes-through-gitter.md` | always-on | every git write to shared state goes to the `gitter` agent; others run reads plus the own-file operations the git-guard hook allows (`stash push -- <paths>`, `checkout -- <file>`, `restore <file>`, dry runs, `worktree.sh list`); a denied command is never re-spelled past the guard; push, tag and release only on the user's in-turn ask |
+| `professor.md` | always-on, one line | only `pcm` writes any `CLAUDE.md`, any `.claude/**` file or Professor's `templates/**` (`themer` owns `templates/themes/`), through any tool, shell writes included; others hand `pcm` the change, or ask the user where no `pcm` is registered; a dictated, one-word or mechanical change is no exception |
 | `flights-life-cycle.md` | always-on | binds the main chat: settle, then size — small work in place with no worktree or lander, larger work in a gitter-made `.worktrees/{flight}/`; related changes found while a flight's worktree is open join that worktree; one `flights-lander` per worktree once every foreman returned; gitter merges and tears down |
 
 ## Global always-on rules
@@ -273,7 +283,7 @@ Claude passed 1–5 on 2.1.295 in `/tmp/professor/rules-test/`.
 
 **Global, shipped:** `templates/global/rules/rm-rf-absolute-path.md`, an always-on rule ([Global rule source](#global-rule-source)). It reaches Claude natively, and reaches Codex and OpenCode through the built global channel.
 
-**Path-scoped, designed:** `.claude/rules/pfm-testing.md`, not yet created, waits on the injector. It is a symlink to `../commands/pfm-testing-manual.md`, whose frontmatter gains `paths:` for `pfm/**/*_test.go`. Local to this repo, no `templates/project/` twin. One file stays both the `/pfm-testing-manual` command and the rule; Claude ignores `name` and `description` on the rule, and the skill loaders ignore `paths`. The flights briefs keep naming the manual explicitly: the rule adds automatic delivery, the explicit read stays the protocol on every engine.
+**Project path-scoped, designed:** `.claude/rules/pfm-testing.md`, not yet created, waits on the injector. It is a symlink to `../commands/pfm-testing-manual.md`, whose frontmatter gains `paths:` for `pfm/**/*_test.go`. Local to this repo, no `templates/project/` twin. One file stays both the `/pfm-testing-manual` command and the rule; Claude ignores `name` and `description` on the rule, and the skill loaders ignore `paths`. The flights briefs keep naming the manual explicitly: the rule adds automatic delivery, the explicit read stays the protocol on every engine.
 
 ## Surfaces that stay in sync
 
@@ -282,12 +292,12 @@ Built channel, kept in step with this file:
 - `INSTALL.md` (the registries `pfm install` writes) and `docs/SETUP.md` (where machine-global templates are linked) name `templates/global/rules/` beside agents, commands and skills.
 - `docs/design/engines/claude-config-dir.md`: the `rules` shared entry and its `{store}/rules` registry, with consumers in Claude, Codex and OpenCode.
 - `docs/design/engine-sync/engine-sync.md`: what `engine-sync global` carries, and the `registry-ownership` registries.
-- `CLAUDE.md` § Vocabulary, the machine-global tier: `rules` beside agents, commands and skills, through `/pcm`.
+- `CLAUDE.md` § Vocabulary, the machine-global tier: `rules` beside agents, commands and skills, through the `pcm` agent.
 
 Changes that land with the designed parts:
 
 - `docs/design/hooks/hooks.md`: the Codex hook rows and the OpenCode row ("carries none") gain engine-sync's entries and shim.
-- `.claude/commands/pfm-testing-manual.md`: the `paths:` key, through `/pcm`.
+- `.claude/commands/pfm-testing-manual.md`: the `paths:` key, through the `pcm` agent.
 - `README.md`, `docs/SETUP.md`: wherever they list what the engine mirrors compile, once project rules compile into `AGENTS.md`.
 
 ## Sources

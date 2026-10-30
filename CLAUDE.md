@@ -122,14 +122,11 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 ## Process
 
-- Git writes go through registered `gitter`; every other sub-agent is read-only.
-- When `gitter` is unavailable, only the active main Codex chat performs scoped Git writes, and only after the user's explicit authorization in the current turn; publication still needs its own request under § Publication.
 - Commit only code whose tests pass.
-- Prompt files: a task touching `.claude/**`, any `CLAUDE.md` or `templates/**` routes to the `pcm` agent; theme work, `templates/themes/` included, to `themer`.
-- Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`: a small change built by hand in the main checkout, larger work as a flight in a git worktree under `.worktrees/{flight}/`; a foreman runs only its affected tests; the full gate is the lander's.
+- Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`; the full gate is the lander's.
 - Fence runs leave the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
-- Template, doc, prompt and config-file changes and small code changes land on `develop` directly, in the main checkout.
-- A fenced flight closes in order, run by the main chat: once every foreman on the worktree returned, `flights-lander` — its own review, every finding fixed, the full gate once → the authorized Git writer commits to `develop` → the host mirror build under § Host.
+- Template, doc, prompt and config-file changes are small work, made in the main checkout.
+- Once a fenced flight merges, the main chat runs the host mirror build under § Host.
 - At every milestone, checkpoint the plan to a file, then compact before the next phase; a held turn arms an idle-fired self-call instead.
 - AskUserQuestion is the user's whole screen: context travels inside the question text; each round simpler and more concrete, never a rephrase.
 

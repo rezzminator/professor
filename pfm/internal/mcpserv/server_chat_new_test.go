@@ -630,7 +630,7 @@ func TestBirthNewErrorPayload(t *testing.T) {
 		NewInput{Name: "probe-a"},
 	)
 	if output.Status != "ok" ||
-		output.Message != "caller seat not registered yet; born in a new tab of Herdr workspace wC" ||
+		output.Message != "caller seat not registered yet; born in a new tab of its place's Herdr workspace" ||
 		calls != 1 || placeErr != nil || choice.Backend != "herdr" || choice.HerdrWorkspace != "wC" || choice.InPlace {
 		t.Fatalf("new=%+v calls=%d choice=%+v err=%v", output, calls, choice, placeErr)
 	}

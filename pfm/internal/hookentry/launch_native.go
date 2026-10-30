@@ -98,7 +98,7 @@ func launchNative(
 		}
 	}
 	if !choice.InPlace {
-		_, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
+		born, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
 			Choice: choice,
 			Paths:  runtime.Paths,
 			Run: fleetdb.SeatRun{
@@ -110,6 +110,7 @@ func launchNative(
 			},
 			Seat: fleetdb.Seat{SessionID: provisional, Engine: string(pfmengine.Claude), Name: request.Name},
 		})
+		launchnotice.Print(stderr, "pfm internal launch", born.Warnings)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: birth native chat: %v\n", err)
 			return 1

@@ -7,6 +7,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // A chat's project is the repository it works in, not its cwd's basename: a
@@ -31,6 +32,19 @@ func TestProjectNameFilesAChatUnderItsRepository(t *testing.T) {
 		if got := projectName(testCase.cwd); got != testCase.want {
 			t.Errorf("%s: projectName(%q) = %q, want %q", testCase.name, testCase.cwd, got, testCase.want)
 		}
+	}
+}
+
+// A new chat files where Compose would file its row: under the workbench that
+// owns its directory, else under its repository.
+func TestProjectOfFilesThroughAnOwningWorkbench(t *testing.T) {
+	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	benches := []workbench.Bench{{Dir: fixture.Subdir, Key: "acme › bench", Project: "acme", Root: fixture.Repo}}
+	if name, root := ProjectOf(fixture.Subdir, benches); name != "acme › bench" || root != fixture.Subdir {
+		t.Errorf("ProjectOf(bench) = %q %q, want the bench", name, root)
+	}
+	if name, root := ProjectOf(fixture.Inner, benches); name != "acme" || root != fixture.Repo {
+		t.Errorf("ProjectOf(worktree) = %q %q, want the repository", name, root)
 	}
 }
 

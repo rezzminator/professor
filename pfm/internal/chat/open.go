@@ -510,6 +510,7 @@ func prepareOpen(
 		Heal: func(ctx context.Context, threadID string) string {
 			return heal.Thread(ctx, healCodexRoot, threadID)
 		},
+		HerdrPlaces: herdrPlacesFor(&effective),
 	})
 	if err != nil {
 		err = errors.Join(err, claim.Release())

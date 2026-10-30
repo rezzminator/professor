@@ -51,6 +51,9 @@ const (
 	IndicatorPluginID = "professor.indicators"
 	IndicatorSource   = "pfm-indicators"
 	IndicatorVerb     = "herdr-indicators"
+	// PlacesVerb is the internal verb the plugin's second startup hook runs:
+	// every live chat moves into its place's workspace.
+	PlacesVerb = "herdr-places"
 )
 
 // IndicatorEvents lists the Herdr events whose hooks repaint the indicators;

@@ -602,6 +602,12 @@ sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},
 [ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
 sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
 [ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
+# herdr-places: with no Herdr socket the startup placement is a silent exit-0 no-op.
+hp_out="$(env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-places 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad herdr-places outside Herdr exited $rc (want 0): $(one_line "$(cat "$int_err")");"
+[ -z "$hp_out" ] || bad="$bad herdr-places outside Herdr printed '$(one_line "$hp_out")' on stdout (want nothing);"
+[ ! -s "$int_err" ] || bad="$bad herdr-places outside Herdr wrote to stderr (want silence): $(one_line "$(cat "$int_err")");"
 # herdr-state: outside a Herdr pane valid events are silent exit-0 no-ops; malformed payloads warn without blocking.
 for hs_event in start working blocked idle end notification attach sync; do
   hs_out="$(printf '{"session_id":"lane-no-such-session","hook_event_name":"Stop","message":"x"}' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine claude "$hs_event" 2>"$int_err")"

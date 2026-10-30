@@ -31,6 +31,7 @@ func TestHerdrPluginManifestRender(t *testing.T) {
 	for _, want := range []string{
 		"id = \"professor.indicators\"\n", "min_herdr_version = \"0.9.5\"\n", "platforms = [\"macos\", \"linux\"]\n",
 		"\n[[startup]]\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-indicators\"]\n",
+		"\n[[startup]]\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-places\"]\n",
 		"\n[[events]]\non = \"pane.agent_status_changed\"\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-indicators\"]\n",
 		"\n[[events]]\non = \"workspace.created\"\n",
 		"\n[[events]]\non = \"pane.focused\"\n",
@@ -41,8 +42,8 @@ func TestHerdrPluginManifestRender(t *testing.T) {
 			t.Errorf("manifest lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "[[startup]]") != 1 || strings.Count(got, "[[events]]") != 13 {
-		t.Errorf("manifest wants one startup and 13 events:\n%s", got)
+	if strings.Count(got, "[[startup]]") != 2 || strings.Count(got, "[[events]]") != 13 {
+		t.Errorf("manifest wants two startups and 13 events:\n%s", got)
 	}
 }
 

@@ -50,3 +50,11 @@ func (names projectNames) resolve(cwd string) projectRef {
 func (names projectNames) of(cwd string) string {
 	return names.resolve(cwd).name
 }
+
+// ProjectOf is the project a chat started in cwd lists under and that
+// project's root, through the workbench that owns cwd when benches name one,
+// as Compose would file the chat's row.
+func ProjectOf(cwd string, benches []workbench.Bench) (name, root string) {
+	ref := projectNames{benches: benches}.resolve(cwd)
+	return ref.name, ref.root
+}

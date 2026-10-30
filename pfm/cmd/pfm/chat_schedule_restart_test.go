@@ -337,6 +337,11 @@ func (f *scheduleRestartHerdr) respond(method string, params map[string]json.Raw
 		}
 		f.pane = ""
 		return map[string]any{"type": "ok"}
+	case "workspace.list", "workspace.create":
+		var label string
+		_ = json.Unmarshal(params["label"], &label)
+		placed, _ := testjail.HerdrWorkspaceReply(method, label, "w6")
+		return placed
 	case "layout.apply":
 		f.layouts++
 		var root struct {

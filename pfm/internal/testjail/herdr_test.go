@@ -43,3 +43,18 @@ func TestHerdrPaneInfoIsolatesPerRequestOverrides(t *testing.T) {
 		t.Fatal("one request's terminal override leaked into another fixture")
 	}
 }
+
+func TestHerdrWorkspaceReplyCreatesTheAskedLabel(t *testing.T) {
+	listed, handled := HerdrWorkspaceReply("workspace.list", "", "w6")
+	if !handled || len(listed["workspaces"].([]any)) != 0 {
+		t.Fatalf("list = %v handled=%v, want no workspace", listed, handled)
+	}
+	created, handled := HerdrWorkspaceReply("workspace.create", "fixture", "w6")
+	workspace := created["workspace"].(map[string]any)
+	if !handled || workspace["workspace_id"] != "w6" || workspace["label"] != "fixture" {
+		t.Fatalf("create = %v handled=%v", created, handled)
+	}
+	if _, handled := HerdrWorkspaceReply("pane.get", "", "w6"); handled {
+		t.Fatal("a pane request was answered as placement")
+	}
+}

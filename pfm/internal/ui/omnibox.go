@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	fleetplace "github.com/rezzminator/professor/pfm/internal/place"
 )
 
 // The find bar is an omnibox with two modes, read off what is typed:
@@ -68,7 +70,8 @@ func (model *Model) inPlace(index int) bool {
 		return true
 	}
 	if current.adhoc {
-		return isUnder(dir, current.root) || isUnder(cleanDir(model.rows[index].CWD), current.root)
+		return fleetplace.IsUnder(dir, current.root) ||
+			fleetplace.IsUnder(fleetplace.Clean(model.rows[index].CWD), current.root)
 	}
 	return model.rowPlace[index] == current.root
 }
@@ -112,7 +115,7 @@ func (model Model) effectivePlaceRootForPaths() string {
 	if model.openPlace != allPlaceRoot && model.openPlace != "" {
 		return model.openPlace
 	}
-	return cleanDir(model.launchHome.cwd)
+	return fleetplace.Clean(model.launchHome.cwd)
 }
 
 // refreshGoPreview recomputes the `@` preview after the query changed.

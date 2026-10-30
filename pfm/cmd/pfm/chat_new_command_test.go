@@ -440,7 +440,8 @@ func TestChatNewNativeBackendBirth(t *testing.T) {
 					ID     string `json:"id"`
 					Method string `json:"method"`
 					Params struct {
-						Pane string `json:"pane_id"`
+						Pane  string `json:"pane_id"`
+						Label string `json:"label"`
 					} `json:"params"`
 				}
 				if err := json.NewDecoder(conn).Decode(&request); err != nil {
@@ -462,6 +463,18 @@ func TestChatNewNativeBackendBirth(t *testing.T) {
 				}
 				if request.Method == "layout.apply" {
 					result = `{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}`
+				}
+				if placed, handled := testjail.HerdrWorkspaceReply(
+					request.Method,
+					request.Params.Label,
+					"w6",
+				); handled {
+					placedBody, err := json.Marshal(placed)
+					if err != nil {
+						t.Errorf("encode Herdr %s fixture: %v", request.Method, err)
+						return
+					}
+					result = string(placedBody)
 				}
 				_, _ = fmt.Fprintf(conn, "{\"id\":%q,\"result\":%s}\n", request.ID, result)
 			}()
@@ -549,7 +562,8 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 							ID     string `json:"id"`
 							Method string `json:"method"`
 							Params struct {
-								Pane string `json:"pane_id"`
+								Pane  string `json:"pane_id"`
+								Label string `json:"label"`
 							} `json:"params"`
 						}
 						if json.NewDecoder(conn).Decode(&req) != nil {
@@ -571,6 +585,18 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 						if req.Method == "layout.apply" {
 							layouts <- struct{}{}
 							result = `{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}`
+						}
+						if placed, handled := testjail.HerdrWorkspaceReply(
+							req.Method,
+							req.Params.Label,
+							"w6",
+						); handled {
+							placedBody, err := json.Marshal(placed)
+							if err != nil {
+								t.Errorf("encode Herdr %s fixture: %v", req.Method, err)
+								return
+							}
+							result = string(placedBody)
 						}
 						_, _ = fmt.Fprintf(conn, "{\"id\":%q,\"result\":%s}\n", req.ID, result)
 					}()

@@ -7,6 +7,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -173,6 +174,9 @@ type Dependencies struct {
 	// repair reads Codex's own SQLite stores, and action must stay free of
 	// the store layer. A nil Heal simply skips the check.
 	Heal HealFunc
+	// HerdrPlaces scans the fleet a Herdr new tab files its chat under
+	// (chat.HerdrPlaces); spawn.SpawnHerdr refuses a birth without it.
+	HerdrPlaces func(context.Context) (*place.Fleet, error)
 }
 
 // HealFunc is the pre-resume Codex projection repair.
@@ -189,4 +193,5 @@ type Executor struct {
 	stderr    io.Writer
 	sidDir    string
 	heal      HealFunc
+	places    func(context.Context) (*place.Fleet, error)
 }

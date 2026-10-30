@@ -54,3 +54,20 @@ func HerdrPaneInfo(pane string) map[string]any {
 		},
 	}
 }
+
+// HerdrWorkspaceReply answers a birth's placement on a fake Herdr server whose
+// tabs all land in workspace: workspace.list lists no workspace, so the birth
+// creates its place's, and workspace.create answers with workspace, labelled
+// label, the label the request asked for. Any other method is not handled.
+func HerdrWorkspaceReply(method, label, workspace string) (map[string]any, bool) {
+	switch method {
+	case "workspace.list":
+		return map[string]any{"type": "workspace_list", "workspaces": []any{}}, true
+	case "workspace.create":
+		return map[string]any{
+			"type":      "workspace_created",
+			"workspace": map[string]any{"workspace_id": workspace, "label": label},
+		}, true
+	}
+	return nil, false
+}

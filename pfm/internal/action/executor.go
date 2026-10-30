@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +70,7 @@ func New(dependencies Dependencies) (*Executor, error) {
 		stderr:    stderr,
 		sidDir:    resolved.SIDDir,
 		heal:      dependencies.Heal,
+		places:    dependencies.HerdrPlaces,
 	}, nil
 }
 
@@ -195,7 +197,8 @@ func (executor *Executor) Open(
 				Name:      request.LaunchName,
 			}
 			if !choice.InPlace {
-				_, spawnErr := spawn.SpawnHerdr(
+				choice.Places = executor.places
+				born, spawnErr := spawn.SpawnHerdr(
 					ctx,
 					spawn.HerdrRequest{Choice: choice, Paths: values, Run: *plan.SeatRun, Seat: seat},
 				)
@@ -203,7 +206,7 @@ func (executor *Executor) Open(
 					return "", spawnErr
 				}
 				executor.recordLaunch(ctx, plan.Record)
-				launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
+				launchnotice.Print(executor.stderr, "pfm", slices.Concat(plan.Warnings, born.Warnings))
 				return "", nil
 			}
 			// The chat is born in the caller's own pane: the reservation names

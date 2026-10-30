@@ -64,10 +64,13 @@ func legacyDevDirOwned(home, name string) (bool, error) {
 
 // removeLegacyClaudePluginCopies moves an installed own target's legacy ids
 // to target.ID in the account dir (the steps the comment above names), each
-// one a change line. A record it cannot reach, and every command that fails,
-// is an error; the steps after it still run where they are safe: a
-// marketplace is removed only once nothing is installed from it, and the -dev
-// directory only once no marketplace points at it.
+// one a change line. Only a failed user-scope install of target.ID, which
+// leaves the user without it, is an error. A record it cannot reach, and every
+// other step that fails, leaves that legacy copy in place as one warn line,
+// doctor's legacy gap naming it until a later run moves it; the steps after it
+// still run where they are safe: a marketplace is removed only once nothing is
+// installed from it, and the -dev directory only once no marketplace points
+// at it.
 func (installer *engine) removeLegacyClaudePluginCopies(
 	ctx context.Context,
 	run *claudePluginRun,
@@ -82,31 +85,26 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 		return fmt.Errorf("legacy ids of %s unchecked: %w", target.ID, err)
 	}
 	home := installer.options.Home
-	var failures []error
+	var failures, kept []error
 	command := func(message, dir string, argv ...string) error {
 		if run.resolveErr != nil {
-			err := fmt.Errorf(
+			return fmt.Errorf(
 				"%s, and the real claude binary that runs it is not resolved: %w",
 				message,
 				run.resolveErr,
 			)
-			failures = append(failures, err)
-			return err
 		}
 		argv = append([]string{run.binary, claudePluginCommand}, argv...)
 		line := fmt.Sprintf("%s=%s %s", claudeConfigDirEnv, run.dir, shellCommandLine(argv...))
 		if dir != "" {
 			line = "cd " + shellCommandLine(dir) + " && " + line
 		}
-		err := installer.change("run "+line+": "+message, func() error {
+		return installer.change("run "+line+": "+message, func() error {
 			options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir), Dir: dir}
 			return runClaudePluginCommand(ctx, installer.processRunner(), argv, options)
 		})
-		if err != nil {
-			failures = append(failures, err)
-		}
-		return err
 	}
+	keep := func(err error) { kept = append(kept, fmt.Errorf("%w — %s to retry", err, ClaudePluginRepair)) }
 	gone := map[string]bool{}
 	for _, id := range target.LegacyIDs() {
 		gone[id] = true
@@ -115,7 +113,7 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 			dir, repair := claudePluginScopeDir(id, "uninstall", entry)
 			if repair != "" {
 				gone[id] = false
-				failures = append(failures, fmt.Errorf("legacy %s (scope %s) cannot move to %s: %s",
+				kept = append(kept, fmt.Errorf("legacy %s (scope %s) cannot move to %s: %s",
 					id, EscapeControl(entry.Scope), target.ID, repair))
 				continue
 			}
@@ -135,13 +133,21 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 			if (!userScope || !slices.Contains(run.missing, target.ID)) &&
 				!slices.ContainsFunc(records[target.ID], func(have claudePluginInstall) bool {
 					return have.Scope == entry.Scope && have.ProjectPath == entry.ProjectPath
-				}) && command(id+" is installed "+where+"; "+target.ID+" replaces it", dir,
-				"install", target.ID, "--scope", entry.Scope, "-y") != nil {
-				gone[id] = false
-				continue
+				}) {
+				if err := command(id+" is installed "+where+"; "+target.ID+" replaces it", dir,
+					"install", target.ID, "--scope", entry.Scope, "-y"); err != nil {
+					gone[id] = false
+					if userScope {
+						failures = append(failures, err)
+					} else {
+						keep(err)
+					}
+					continue
+				}
 			}
-			if command(reason, dir, "uninstall", id, "--scope", entry.Scope, "--keep-data") != nil {
+			if err := command(reason, dir, "uninstall", id, "--scope", entry.Scope, "--keep-data"); err != nil {
 				gone[id] = false
+				keep(err)
 			}
 		}
 	}
@@ -159,14 +165,16 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 		if left {
 			continue
 		}
-		if command("legacy marketplace of "+target.ID+" in "+knownPath+", nothing installed from it",
-			"", "marketplace", "remove", marketplace) == nil {
+		if err := command("legacy marketplace of "+target.ID+" in "+knownPath+", nothing installed from it",
+			"", "marketplace", "remove", marketplace); err != nil {
+			keep(err)
+		} else {
 			delete(known, marketplace)
 		}
 	}
 	owned, err := legacyDevDirOwned(home, target.Name)
 	if err != nil {
-		failures = append(failures, err)
+		keep(err)
 	}
 	devDir := legacyDevMarketplace(home, target.Name)
 	pointed := false
@@ -178,7 +186,7 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 		if err := installer.change("remove "+devDir+": the legacy -dev marketplace of "+target.ID, func() error {
 			return os.RemoveAll(devDir)
 		}); err != nil {
-			failures = append(failures, err)
+			keep(err)
 		}
 	}
 	var swept []string
@@ -189,11 +197,16 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 	}
 	message, edit, err := planLegacySettingsSweep(run.settingsPath, target, swept)
 	if err != nil {
-		failures = append(failures, err)
+		keep(err)
 	} else if message != "" {
 		if err := installer.change(message, edit); err != nil {
-			failures = append(failures, err)
+			keep(err)
 		}
+	}
+	for _, err := range kept {
+		message := fmt.Sprintf("claude plugin %s in %s: %v; left in place", target.ID, run.dir, err)
+		installer.say("  warn    %s", message)
+		installer.record("warn", message, err)
 	}
 	return errors.Join(failures...)
 }

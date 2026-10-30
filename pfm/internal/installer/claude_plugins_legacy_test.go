@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // simulateClaudeLegacy extends simulateClaude with the commands a legacy move
@@ -393,7 +396,8 @@ func TestEnsureClaudePluginsInstallsForTheUserBeforeMovingAUserLegacyID(t *testi
 
 // TestEnsureClaudePluginsKeepsALegacyIDItCannotMove: a legacy record whose
 // uninstall fails keeps its id, its options, its marketplace and its -dev
-// directory, and the run fails naming it, never reported moved.
+// directory, and the run warns naming it, never reported moved; the run
+// succeeds, {name}@professor being installed.
 func TestEnsureClaudePluginsKeepsALegacyIDItCannotMove(t *testing.T) {
 	names := []string{"cache-live-control", "auto-effort-control"}
 	inst, runner, out, home, first := alphaPluginEngine(t, "")
@@ -404,9 +408,17 @@ func TestEnsureClaudePluginsKeepsALegacyIDItCannotMove(t *testing.T) {
 	runner.fail = map[string]string{
 		first + " plugin uninstall cache-live-control@cache-live-control-dev --scope user --keep-data": "boom",
 	}
-	err := inst.ensureClaudePlugins(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "cache-live-control@cache-live-control-dev --scope user") {
-		t.Fatalf("err = %v, want the failed uninstall named\n%s", err, out.String())
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v, want the failed uninstall warned of\n%s", err, out.String())
+	}
+	warn := "  warn    claude plugin cache-live-control@professor in " + first + ": "
+	if !slices.ContainsFunc(strings.Split(out.String(), "\n"), func(line string) bool {
+		return strings.HasPrefix(line, warn) &&
+			strings.Contains(line, "uninstall cache-live-control@cache-live-control-dev --scope user --keep-data") &&
+			strings.Contains(line, "boom") &&
+			strings.HasSuffix(line, " — run pfm install --yes to retry; left in place")
+	}) {
+		t.Fatalf("no warn line naming the failed uninstall and its repair:\n%s", out.String())
 	}
 	for _, call := range pluginArgvs(runner) {
 		if call == "plugin marketplace remove cache-live-control-dev" {
@@ -423,5 +435,58 @@ func TestEnsureClaudePluginsKeepsALegacyIDItCannotMove(t *testing.T) {
 	configs, _ := document["pluginConfigs"].(map[string]any)
 	if _, kept := configs["cache-live-control@cache-live-control-dev"]; !kept {
 		t.Fatalf("pluginConfigs of the id it could not move dropped: %v", configs)
+	}
+}
+
+// TestEnsureClaudePluginsReleaseWarnsOnALegacyRecordItCannotMove: on a release
+// build, a project-scope legacy record whose project is gone cannot move to
+// {name}@professor; install still succeeds once {name}@professor is installed,
+// the legacy id stays disabled and recorded, one warn line names the id, its
+// scope and the repair, and doctor's legacy gap still names the record, so
+// pfm update never rolls back over it.
+func TestEnsureClaudePluginsReleaseWarnsOnALegacyRecordItCannotMove(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	settings := filepath.Join(first, "settings.json")
+	writeFixture(t, settings, `{"enabledPlugins":{"engine-sync@engine-sync":true}}`)
+	project := filepath.Join(t.TempDir(), "deleted")
+	installs, err := json.Marshal(map[string]any{"version": 2, "plugins": map[string]any{
+		"engine-sync@engine-sync": []any{map[string]any{
+			"scope": "project", "projectPath": project, "installPath": filepath.Join(first, "plugins", "cache", "es"),
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(first, "plugins", "installed_plugins.json"), string(installs))
+	runner := &pluginRunner{}
+	var out bytes.Buffer
+	if err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(
+		context.Background(),
+	); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v, want a legacy record it cannot move warned of\n%s", err, out.String())
+	}
+	warn := "  warn    claude plugin engine-sync@professor in " + first +
+		": legacy engine-sync@engine-sync (scope project) cannot move to engine-sync@professor: its project " +
+		project + " is not an absolute directory: recreate it and run pfm install --yes," +
+		" or remove the entry with claude plugin uninstall engine-sync@engine-sync --scope project from that project;" +
+		" left in place"
+	if !strings.Contains(out.String(), warn+"\n") {
+		t.Fatalf("no %q line:\n%s", warn, out.String())
+	}
+	for _, call := range pluginArgvs(runner) {
+		if strings.Contains(call, "engine-sync@engine-sync") {
+			t.Fatalf("ran %q on a legacy record it cannot reach\n%s", call, out.String())
+		}
+	}
+	enabled, _ := mustSettings(t, settings)["enabledPlugins"].(map[string]any)
+	if on, kept := enabled["engine-sync@engine-sync"]; !kept || on != false {
+		t.Fatalf("enabledPlugins=%v, want engine-sync@engine-sync kept disabled\n%s", enabled, out.String())
+	}
+	targets := ClaudePluginTargets(ClaudePluginBuild{Home: home, Plugins: pfmconfig.DefaultClaudePlugins()})
+	gaps, err := ClaudePluginLegacyGaps(first, home, targets)
+	if err != nil || !slices.ContainsFunc(gaps, func(gap ClaudePluginGap) bool {
+		return strings.Contains(gap.Problem, "engine-sync@engine-sync installed in")
+	}) {
+		t.Fatalf("legacy gaps = %v, %v; want the record it could not move named", gaps, err)
 	}
 }

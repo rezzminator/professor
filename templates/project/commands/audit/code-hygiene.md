@@ -38,7 +38,7 @@ A candidate that can't be proven past this bar is not dead — flag it and keep 
 2. **Prove deadness** adversarially — for each candidate, try to prove it still _alive_ against the bar above before declaring it dead.
 3. **Tier** the survivors: **TIER-1** confirmed-dead (cleared the bar) · **TIER-2** uncertain (a consumer surface unresolved — verify first) · **kept** (a real consumer found).
 4. **Approval gate** — present the full tiered kill-list and STOP. Cut only the set the user approves; never remediate piecemeal mid-scan.
-5. **Remove** the approved set in a worktree (never on `main`), run the full QA gate — green tests are the only empirical proof the cut was truly dead — and have gitter merge. Git is the undo.
+5. **Remove** the approved set in a worktree (never on `main`), run each touched project's full gate — green tests are the only empirical proof the cut was truly dead — and have gitter merge. Git is the undo.
 
 ---
 

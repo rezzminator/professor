@@ -138,7 +138,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 
 - A framework file changes only on the dispatch you hold; an improvement spotted mid-task is proposed in the report, not applied.
 - Atomic changes for breaking modifications; self-contained agents, no circular dependencies.
-- Never weaken a sacred-ground rule (ethics, privacy, code quality) and never remove a safety check: QA gates, merge guards, worktree isolation.
+- Never weaken a sacred-ground rule (ethics, privacy, code quality) and never remove a safety check: landing gates, merge guards, worktree isolation.
 - Keep it DRY: reference `CLAUDE.md` from agents, define once, prefer deletion over addition.
 - Every pipeline artifact names its consumer; a write-only artifact is not added.
 - Parallel agents get their exact slice and read list plus a thin shared header; a shared contract lives once in a file each brief names.

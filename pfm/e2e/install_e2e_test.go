@@ -69,6 +69,8 @@ type e2eHarness struct {
 	goCache    string
 	goModCache string
 	previous   *previousBuild
+	// extraEnv shapes the host every pfm command of this harness runs on.
+	extraEnv map[string]string
 }
 
 type commandResult struct {
@@ -426,6 +428,9 @@ func (h *e2eHarness) environment(home string) []string {
 		// Keep the whole-home refusal snapshot free of diagnostic log writes.
 		"PFM_LOG_LEVEL":             "off",
 		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1", "PFM_PRICES_OFFLINE": "1",
+	}
+	for name, value := range h.extraEnv {
+		values[name] = value
 	}
 	return appendCleanEnv(os.Environ(), values)
 }

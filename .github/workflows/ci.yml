@@ -1,0 +1,121 @@
+name: ci
+
+# Deterministic tests the fence cannot run: macOS, and a fresh machine that
+# follows INSTALL.md then updates and rolls back across real releases. The
+# Linux unit and e2e suites run in the fence gate, not here.
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-tests:
+    name: macos-tests
+    runs-on: macos-14
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      # The agent source inventory the installer tests read imports yaml.
+      - name: Install test tools
+        run: |
+          set -euo pipefail
+          brew install tmux jq
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
+          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
+
+      # Exercise the fixture with the system Bash 3.2.
+      - name: Verify refresh scope with system Bash
+        run: python3 scripts/test-refresh-scope.py
+
+      - name: Run pfm unit tests
+        env:
+          PFM_DEV_FENCE: "1"
+          PFM_HARVESTPY_OFFLINE: "1"
+        run: go -C pfm test -count=1 ./...
+
+      # Includes the Darwin installer and the release-upgrade e2e.
+      - name: Run serial e2e
+        env:
+          PFM_DEV_FENCE: "1"
+          PFM_HARVESTPY_OFFLINE: "1"
+        run: |
+          set -euo pipefail
+          export PFM_E2E_SOURCE_REPO="$GITHUB_WORKSPACE"
+          export PFM_DEV_REPO_WORK_TREE="$GITHUB_WORKSPACE"
+          PFM_DEV_REPO_GIT_DIR="$(git rev-parse --absolute-git-dir)"
+          export PFM_DEV_REPO_GIT_DIR
+          go -C pfm test -count=1 -tags e2e -p 1 -timeout 60m ./e2e/...
+
+  fresh-install-linux:
+    name: fresh-install-linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install the runtime prerequisites INSTALL.md lists
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tmux zsh jq python3 python3-yaml
+
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
+
+      - name: Install from INSTALL.md, then update and roll back across releases
+        run: bash scripts/fresh-install-test.sh
+
+  fresh-install-macos:
+    name: fresh-install-macos
+    runs-on: macos-14
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install the runtime prerequisites INSTALL.md lists
+        run: |
+          set -euo pipefail
+          brew install tmux jq
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
+
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
+
+      # The system Bash 3.2 runs the script, as on a user's Mac.
+      - name: Install from INSTALL.md, then update and roll back across releases
+        run: /bin/bash scripts/fresh-install-test.sh

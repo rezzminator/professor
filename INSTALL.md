@@ -179,6 +179,7 @@ On macOS, make the same filesystem moves, then log in once on account 1 with `CL
 
 ## 2. Build from source — `pfm` only
 
+<!-- fresh-install: CI runs this block as written (scripts/fresh-install-test.sh) -->
 ```bash
 REPO=rezzminator/professor
 SOURCE_DIR="$HOME/.professor"
@@ -194,6 +195,7 @@ Set `GOPROXY` to a Go module proxy reachable from your network. The source path 
 
 After the source build, run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
+<!-- fresh-install -->
 ```bash
 cd "$HOME/.professor"
 pfm install

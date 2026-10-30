@@ -12,6 +12,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - Unit: a package test beside its package, no real tmux server, no real engine process, no network: it injects its resolver and HTTP client.
 - `JAIL`, `JAIL+tmux`, `JAIL+sh`, `LIVE-READ`, `UNPLAYED`: `pfm/TESTPLAN.md` § Legend. The boundary that decides: whether the test needs a real tmux server (a scratch socket inside the jail's `TMUX_TMPDIR`); a flow the fake engine cannot play is `UNPLAYED`, named in `TESTPLAN.md` § "Flows the fake engine does not yet play".
 - e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`) and the fence lanes (hermetic: mock engine, fixture seats, `--network none`); both run only inside the fence.
+- CI: `.github/workflows/ci.yml` (`name: ci`), on every push to `develop`, every pull request into `main` and `workflow_dispatch`, runs only what the fence cannot: `macos-tests` (macos-14: `go -C pfm test ./...` plus the tagged `pfm/e2e/` suite, which holds the Darwin installer e2e and the release-upgrade e2e), `fresh-install-linux` (ubuntu-latest) and `fresh-install-macos` (macos-14, system Bash 3.2), both running `scripts/fresh-install-test.sh`. Linux unit and e2e tests are the fence gate's, never duplicated in CI. A CI job runs only after a push; nothing local proves a macOS job.
 
 ## Where a test lives
 
@@ -27,7 +28,6 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 ## Mock boundary
 
 - Always real: the filesystem under the jail, SQLite, tmux on a scratch socket. Never real in a test: a live `cc-*` / `cx-*` socket, the real `/tmp/cc-sid`, a provider account. Engine processes are played by `internal/mockengine`.
-- The release rehearsal (`/pfm:release` REHEARSE) is the one real-model run: host-side, never a suite.
 
 ## Environments and cleanup
 
@@ -46,6 +46,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - Formatting (`make -C pfm fmt`, `gofmt -w`, `golangci-lint fmt`) lands as a patch: `mkdir -p /tmp/{project}/fmt && .claude/scripts/dev.sh iso run 'D=$(mktemp -d) && cp -a pfm "$D/a" && cp -a pfm "$D/b" && make -C "$D/b" fmt >&2 && cd "$D" && { diff -ruN a b || [ $? = 1 ]; }' > /tmp/{project}/fmt/pfm.patch`, then on the host `patch -p1 -d pfm < /tmp/{project}/fmt/pfm.patch`; a patch with no `@@` line has nothing to apply.
 - The test scripts' own suites: `scripts/test-test.sh` tests `.claude/scripts/test.sh`, `scripts/test-unit-path.sh` tests `.claude/scripts/unit-path.sh`; each is the templates-gate step `templates.{test|unit-path}-tests`, which CI's `iso test templates` runs; a change to either script runs its suite through `test.sh`.
 - Full: `.claude/scripts/test.sh --full` (`dev.sh iso gate`) — pfm, templates, e2e and the lane self-tests as concurrent steps in one run, a `step · verdict · seconds` table in the run's `gate.tsv` (verdicts PASS, FAIL, NOT-RUN, TIMEOUT; rows `STEPS` and `BUDGET`), a `PROFILE` block pointing at each red step's diagnosis in the run dir, the run dir itself named by the output's last line `RUN DIR: <absolute host path>` (read it there, never the newest `run.*`), the wall judged against `infra/fence/gate-budget.yml`; one run closes the pfm and templates gates both; timeout 600 s, background past that.
+- Fresh-machine install: `.claude/scripts/dev.sh iso run 'bash scripts/fresh-install-test.sh'` runs the CI script in the fence on Linux: it snapshots the working tree into a scratch repository tagged as `VERSION` names, runs every `INSTALL.md` bash block marked `<!-- fresh-install` as written in a fresh HOME (only `https://github.com/${REPO}.git` swapped for that repository), requires `pfm doctor` to exit 0 or 1 with no FAIL row, then runs the release-upgrade e2e tests (`pfm/e2e/release_upgrade_e2e_test.go`) against the repository's real tags; it ends `fresh-install: PASS` or `fresh-install: FAIL {step}: {cause}`. Tags come from env: `PFM_E2E_PREVIOUS_TAG` (default the newest tag), `PFM_E2E_OLD_TAG` (default the fifth-newest), `PFM_E2E_CURRENT_TAG` (the candidate; default the newest tag's next minor). A change to a marked `INSTALL.md` block or to the install or update path runs it.
 - Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. `LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes <L>` writes `waits.tsv` (`lane · beat · helper · condition · elapsed_s · outcome`) and prints the top waits; a lane timing change is measured with it, before and after.
 
 ## Concurrency

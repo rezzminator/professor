@@ -630,3 +630,77 @@ func HerdrSupervisorAbsent(proc ProcFS, seat fleetdb.Seat) (bool, error) {
 func HerdrSupervisorArgv(argv []string, id string) bool {
 	return exactSeatHost(argv, id) || legacyHerdrLauncher(argv)
 }
+
+// HerdrChatSeat is the one rule every door follows to find the Herdr pane a
+// process's chat lives in: the durable native seat on socket whose saved
+// supervisor is one of chain (the process and its ancestors, nearest first).
+// A Herdr pane move gives the pane a new id and rewrites the seat, never the
+// HERDR_PANE_ID the chat's processes inherited: the seat's HerdrPane and
+// HerdrWorkspace are the chat's current address, envPane only the pane's birth
+// id. A legacy seat (no saved supervisor; pfm never moves one) is found by
+// envPane and the supervisor argv of an ancestor. An ancestor that exited is no
+// supervisor; one whose argv cannot be read is an error, never "no seat".
+func HerdrChatSeat(
+	seats []fleetdb.Seat,
+	proc ProcFS,
+	socket, envPane string,
+	chain []int,
+) (fleetdb.Seat, bool, error) {
+	for _, pid := range chain {
+		for i := range seats {
+			seat := &seats[i]
+			if seat.Backend != nativeHerdrBackend || seat.HerdrSocket != socket {
+				continue
+			}
+			if seat.SeatHostPID > 0 && seat.SeatHostPID == pid {
+				return *seat, true, nil
+			}
+			if seat.SeatHostPID != 0 || seat.HerdrPane != envPane {
+				continue
+			}
+			argv, err := proc.Cmdline(pid)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return fleetdb.Seat{}, false, fmt.Errorf("read legacy supervisor candidate %d: %w", pid, err)
+			}
+			// This only locates a legacy candidate; ProveHerdrSeat validates full argv.
+			if HerdrSupervisorArgv(argv, seat.SeatID) {
+				return *seat, true, nil
+			}
+		}
+	}
+	return fleetdb.Seat{}, false, nil
+}
+
+// HerdrChatPane is HerdrChatSeat over the seats of state, which may be nil or
+// absent (no pfm state yet: no seat): the pane to address and whether a seat
+// named it. With no seat it is envPane. A seat table that cannot be read is an
+// error, never envPane.
+func HerdrChatPane(
+	ctx context.Context,
+	state *fleetdb.Store,
+	proc ProcFS,
+	socket, envPane string,
+	chain []int,
+) (pane string, seat fleetdb.Seat, found bool, err error) {
+	if state == nil || errors.Is(state.Degraded(), fleetdb.ErrAbsent) {
+		return envPane, fleetdb.Seat{}, false, nil
+	}
+	if err := state.Degraded(); err != nil {
+		return "", fleetdb.Seat{}, false, fmt.Errorf("read the chat's Herdr seat: %w", err)
+	}
+	seats, err := state.Seats(ctx)
+	if err != nil {
+		return "", fleetdb.Seat{}, false, fmt.Errorf("read the chat's Herdr seat: %w", err)
+	}
+	seat, found, err = HerdrChatSeat(seats, proc, socket, envPane, chain)
+	if err != nil {
+		return "", fleetdb.Seat{}, false, fmt.Errorf("find the chat's Herdr seat: %w", err)
+	}
+	if !found || seat.HerdrPane == "" {
+		return envPane, seat, found, nil
+	}
+	return seat.HerdrPane, seat, true, nil
+}

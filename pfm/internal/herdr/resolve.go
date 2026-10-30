@@ -3,7 +3,10 @@ package herdr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
 )
 
 // Location is the Herdr pane a process runs in: the Herdr socket, the pane id
@@ -115,6 +118,22 @@ func (resolver Resolver) PaneRunning(
 	panes []Pane,
 	first string,
 ) (Pane, bool, error) {
+	return resolver.PaneHolding(ctx, socket, []int{pid}, panes, first)
+}
+
+// PaneHolding is PaneRunning for any of pids: a process and its ancestors,
+// whichever of them holds the pane's foreground.
+func (resolver Resolver) PaneHolding(
+	ctx context.Context,
+	socket string,
+	pids []int,
+	panes []Pane,
+	first string,
+) (Pane, bool, error) {
+	pid := 0
+	if len(pids) > 0 {
+		pid = pids[0]
+	}
 	if resolver.Foreground == nil {
 		return Pane{}, false, fmt.Errorf("find the pane of client %d: the resolver has no process-info seam", pid)
 	}
@@ -129,7 +148,7 @@ func (resolver Resolver) PaneRunning(
 	failed := 0
 	var firstFailure error
 	for _, pane := range ordered {
-		pids, err := resolver.Foreground(ctx, socket, pane.PaneID)
+		held, err := resolver.Foreground(ctx, socket, pane.PaneID)
 		if err != nil {
 			failed++
 			if firstFailure == nil {
@@ -137,8 +156,8 @@ func (resolver Resolver) PaneRunning(
 			}
 			continue
 		}
-		for _, foreground := range pids {
-			if foreground == pid {
+		for _, foreground := range held {
+			if slices.Contains(pids, foreground) {
 				return pane, true, nil
 			}
 		}
@@ -150,4 +169,74 @@ func (resolver Resolver) PaneRunning(
 		)
 	}
 	return Pane{}, false, nil
+}
+
+// paneIDKey names a pane in a request; paneNotFound is Herdr's refusal of an
+// id it does not know.
+const (
+	paneIDKey    = "pane_id"
+	paneNotFound = "pane_not_found"
+)
+
+// PaneIdentity is a pane as Herdr's pane.get names it.
+type PaneIdentity struct {
+	ID, Workspace, Terminal string
+}
+
+// LocatePane returns pane's identity by pane.get. A pane Herdr no longer knows
+// (pane_not_found: a pane move or a Herdr restart gave it a new id) is found
+// again by process: the listed pane whose foreground holds one of pids (a
+// process and its ancestors), so a stale inherited HERDR_PANE_ID never fails a
+// caller that still runs in Herdr. found is false only when Herdr answered and
+// no pane holds pids; every failed read is an error.
+func LocatePane(ctx context.Context, socket, pane string, pids []int) (PaneIdentity, bool, error) {
+	identity, err := paneIdentity(ctx, socket, pane)
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Code != paneNotFound && refusal.Code != "not_found" {
+		return identity, err == nil, err
+	}
+	body, listErr := SeatRequest(ctx, socket, "pane.list", struct{}{})
+	if listErr != nil {
+		return PaneIdentity{}, false, fmt.Errorf("pane %s is gone; list panes: %w", pane, listErr)
+	}
+	panes, listErr := ParsePanes(body)
+	if listErr != nil {
+		return PaneIdentity{}, false, fmt.Errorf("pane %s is gone; list panes: %w", pane, listErr)
+	}
+	resolver := Resolver{Foreground: func(ctx context.Context, socket, pane string) ([]int, error) {
+		body, err := SeatRequest(ctx, socket, "pane.process_info", map[string]string{paneIDKey: pane})
+		if err != nil {
+			return nil, err
+		}
+		return ParseProcessInfo(body)
+	}}
+	held, found, err := resolver.PaneHolding(ctx, socket, pids, panes, "")
+	if err != nil || !found {
+		return PaneIdentity{}, false, err
+	}
+	identity, err = paneIdentity(ctx, socket, held.PaneID)
+	return identity, err == nil, err
+}
+
+func paneIdentity(ctx context.Context, socket, pane string) (PaneIdentity, error) {
+	body, err := SeatRequest(ctx, socket, "pane.get", map[string]string{paneIDKey: pane})
+	if err != nil {
+		return PaneIdentity{}, err
+	}
+	var info struct {
+		Type string `json:"type"`
+		Pane struct {
+			ID        string `json:"pane_id"`
+			Workspace string `json:"workspace_id"`
+			Terminal  string `json:"terminal_id"`
+		} `json:"pane"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		return PaneIdentity{}, fmt.Errorf("decode pane %s identity: %w", pane, err)
+	}
+	if info.Type != "pane_info" || info.Pane.ID == "" || info.Pane.Workspace == "" || info.Pane.Terminal == "" ||
+		!strings.HasPrefix(info.Pane.ID, info.Pane.Workspace+":") {
+		return PaneIdentity{}, fmt.Errorf("pane %s has malformed identity: %s", pane, body)
+	}
+	return PaneIdentity{ID: info.Pane.ID, Workspace: info.Pane.Workspace, Terminal: info.Pane.Terminal}, nil
 }

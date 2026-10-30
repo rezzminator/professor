@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
@@ -179,49 +180,84 @@ func (reporter *herdrReporter) nativeReporterSeat(
 		return fleetdb.Seat{}, true, fmt.Errorf("enumerate native reporter seats: %w", err)
 	}
 	socket, pane := reporter.deps.getenv(herdr.EnvSocket), reporter.deps.getenv(herdr.EnvPane)
-	var candidates []*fleetdb.Seat
-	hinted := false
+	candidates, hinted := false, false
 	for i := range seats {
-		seat := &seats[i]
-		if seat.Backend == spawn.BackendHerdr && seat.HerdrSocket == socket {
-			candidates = append(candidates, seat)
-			hinted = hinted || seat.HerdrPane == pane
+		if seats[i].Backend == spawn.BackendHerdr && seats[i].HerdrSocket == socket {
+			candidates = true
+			hinted = hinted || seats[i].HerdrPane == pane
 		}
 	}
-	if len(candidates) == 0 {
+	if !candidates {
 		return fleetdb.Seat{}, false, nil
 	}
-	seen := map[int]bool{}
-	for pid, depth := reporter.deps.getpid(), 0; pid > 1 && depth < herdrMaxProcessDepth; depth++ {
-		if seen[pid] {
-			return fleetdb.Seat{}, true, fmt.Errorf("native reporter ancestry cycle at %d", pid)
-		}
-		seen[pid] = true
-		for _, seat := range candidates {
-			if seat.SeatHostPID == pid {
-				return *seat, true, nil
-			}
-			if seat.SeatHostPID == 0 && seat.HerdrPane == pane {
-				argv, err := proc.Cmdline(pid)
-				if err != nil {
-					return fleetdb.Seat{}, true, fmt.Errorf("read legacy reporter ancestor %d: %w", pid, err)
-				}
-				// This only locates a legacy candidate; shared proof validates full argv.
-				if gather.HerdrSupervisorArgv(argv, seat.SeatID) {
-					return *seat, true, nil
-				}
-			}
-		}
-		stat, err := proc.Stat(pid)
-		if err != nil {
-			return fleetdb.Seat{}, true, fmt.Errorf("read native reporter ancestor %d: %w", pid, err)
-		}
-		pid = stat.ParentPID
+	chain, err := herdrAncestry(proc, reporter.deps.getpid())
+	if err != nil {
+		return fleetdb.Seat{}, true, fmt.Errorf("native reporter %w", err)
+	}
+	seat, found, err := gather.HerdrChatSeat(seats, proc, socket, pane, chain)
+	if err != nil {
+		return fleetdb.Seat{}, true, fmt.Errorf("native reporter: %w", err)
+	}
+	if found {
+		return seat, true, nil
 	}
 	if hinted {
 		return fleetdb.Seat{}, true, fmt.Errorf("native reporter is outside its saved supervisor ancestry")
 	}
 	return fleetdb.Seat{}, false, nil
+}
+
+// herdrAncestry is pid and its ancestors, nearest first, the chain
+// gather.HerdrChatSeat looks for a chat's supervisor in. An ancestor that
+// exited ends it; one that cannot be read is an error, and so is a cycle.
+func herdrAncestry(proc gather.ProcFS, pid int) ([]int, error) {
+	var chain []int
+	seen := map[int]bool{}
+	for depth := 0; pid > 1 && depth < herdrMaxProcessDepth; depth++ {
+		if seen[pid] {
+			return nil, fmt.Errorf("ancestry cycle at %d", pid)
+		}
+		seen[pid] = true
+		chain = append(chain, pid)
+		stat, err := proc.Stat(pid)
+		if errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("ancestor %d: %w", pid, err)
+		}
+		pid = stat.ParentPID
+	}
+	return chain, nil
+}
+
+// herdrChatPane is gather.HerdrChatPane for a hook: the pane the chat of pid
+// lives in, its seat's when the seat's supervisor is an ancestor of pid, else
+// envPane. A reporter with no seat state (a test seam) keeps envPane.
+func (reporter *herdrReporter) herdrChatPane(ctx context.Context, socket, envPane string, pid int) (
+	pane string,
+	returnErr error,
+) {
+	if reporter.deps.seatPaths == nil {
+		return envPane, nil
+	}
+	values := *reporter.deps.seatPaths
+	if values.ProcRoot == "" {
+		values.ProcRoot = reporter.deps.getenv(paths.EnvProcRoot)
+	}
+	proc := gather.NewProcFS(values.ProcRoot)
+	chain, err := herdrAncestry(proc, pid)
+	if err != nil {
+		return "", fmt.Errorf("read the chat's %w", err)
+	}
+	state := fleetdb.OpenSharedStateReadOnly(ctx, values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close the chat's seat state: %w", err))
+		}
+	}()
+	pane, _, _, err = gather.HerdrChatPane(ctx, state, proc, socket, envPane, chain)
+	return pane, err
 }
 
 func (reporter *herdrReporter) resumeArgv(sessionID string) ([]string, error) {

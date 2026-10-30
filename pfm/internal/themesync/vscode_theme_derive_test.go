@@ -115,6 +115,7 @@ func scopeColour(document renderedDocument, scope string) string {
 // workbench text on its fill), and keeps the five roles a reader tells code
 // apart by distinct (CIE76 deltaE >= 12).
 func TestEveryShippedProfileRendersAReadableDistinctTheme(t *testing.T) {
+	t.Parallel() // read-only over the shipped themes; no process state
 	for stem, content := range shippedProfiles(t) {
 		t.Run(stem, func(t *testing.T) {
 			file, err := RenderVSCodeTheme(stem, content)

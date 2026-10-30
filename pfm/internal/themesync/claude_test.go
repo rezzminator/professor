@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -12,8 +13,13 @@ import (
 // shippedClaudeTheme is the Claude theme file the blueprint's theme name
 // installs: its directory under shippedThemesDir assembled by ReadProfileDir,
 // parsed and rendered by ClaudeFile, read at test time so it never drifts.
+// Memoized per name: the shipped files never change during a test run, and
+// every harness renders tokyo-night, which dominated the package's CPU time.
 func shippedClaudeTheme(t testing.TB, name string) string {
 	t.Helper()
+	if file, ok := shippedClaudeThemes.Load(name); ok {
+		return file.(string)
+	}
 	content, err := ReadProfileDir(filepath.Join(shippedThemesDir, name))
 	if err != nil {
 		t.Fatalf("read shipped theme %s: %v", name, err)
@@ -26,8 +32,12 @@ func shippedClaudeTheme(t testing.TB, name string) string {
 	if err != nil {
 		t.Fatalf("render shipped theme %s as a Claude theme file: %v", name, err)
 	}
+	shippedClaudeThemes.Store(name, string(file))
 	return string(file)
 }
+
+// shippedClaudeThemes caches shippedClaudeTheme's successful renders by name.
+var shippedClaudeThemes sync.Map
 
 // tokyoNightApplied is the shipped tokyo-night theme resolved from its Claude
 // theme file written into a temp account dir.

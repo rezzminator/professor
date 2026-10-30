@@ -40,6 +40,7 @@ func TestSyntaxFamilyTakesTheFirstSelectorsRootScope(t *testing.T) {
 // a table name, the table sorted, and every family holding a rule in some
 // shipped theme, so no file is one every theme carries empty forever.
 func TestSyntaxFamiliesClaimEachRootOnceAndEveryFamilyIsUsed(t *testing.T) {
+	t.Parallel() // read-only over the shipped themes; no process state
 	owners := map[string]string{}
 	var names []string
 	for _, family := range syntaxFamilies {

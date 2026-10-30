@@ -506,6 +506,7 @@ func TestVscodeRemoteChromeSurvivesLocalPruning(t *testing.T) {
 }
 
 func TestShippedProfileFramesUseOnlyTheirDefinedColors(t *testing.T) {
+	t.Parallel() // read-only over the shipped themes; no process state
 	entries, err := os.ReadDir(shippedThemesDir)
 	if err != nil {
 		t.Fatal(err)

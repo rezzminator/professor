@@ -94,6 +94,7 @@ func TestEveryShippedThemeFileStaysReadable(t *testing.T) {
 // templates/themes/ holds exactly ProfileFiles, each in canonical form, and
 // splitting the profile it assembles writes those files back byte for byte.
 func TestEveryShippedThemeIsACanonicalDirectory(t *testing.T) {
+	t.Parallel() // read-only over the shipped themes; no process state
 	entries, err := os.ReadDir(shippedThemesDir)
 	if err != nil {
 		t.Fatal(err)
@@ -136,6 +137,7 @@ func TestEveryShippedThemeIsACanonicalDirectory(t *testing.T) {
 // TestReadProfileDirRefusesABrokenTheme breaks one copy of a shipped theme
 // per case; each must fail naming what is wrong.
 func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
+	t.Parallel() // read-only over the shipped themes; no process state
 	write := func(t *testing.T, dir, file, content string) {
 		t.Helper()
 		path := filepath.Join(dir, filepath.FromSlash(file))
@@ -318,6 +320,7 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 // Semantic validation must retain the source file, not just the assembled
 // profile name: an author needs to know which of the forty files to fix.
 func TestReadProfileDirNamesInvalidPart(t *testing.T) {
+	t.Parallel() // read-only over the shipped themes; no process state
 	cases := []struct {
 		name, file, content string
 	}{

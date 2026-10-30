@@ -357,7 +357,8 @@ func procExecutablePath(buffer []byte) (string, error) {
 // processReadError distinguishes a vanished process using an independent probe.
 func processReadError(pid int, readErr, probeErr error) error {
 	if pid > 0 && errors.Is(probeErr, syscall.ESRCH) {
-		return fmt.Errorf("process %d disappeared: %w", pid, fs.ErrNotExist)
+		// Both sentinels: callers test fs.ErrNotExist (the Linux procfs shape) or syscall.ESRCH.
+		return fmt.Errorf("process %d disappeared after %v: %w: %w", pid, readErr, probeErr, fs.ErrNotExist)
 	}
 	if probeErr != nil && !errors.Is(probeErr, syscall.EPERM) {
 		return errors.Join(readErr, fmt.Errorf("probe process %d existence: %w", pid, probeErr))

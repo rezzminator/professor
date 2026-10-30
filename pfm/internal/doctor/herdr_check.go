@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -256,10 +255,22 @@ func herdrIntegrationStates(output []byte) map[string]string {
 // printHerdrReporterErrors prints the herdr-reporter-errors row and returns
 // its warning count: an ok row when no reporter error is logged in dir within
 // herdrReporterWindow of now, else one WARN naming the count, the newest
-// error and its session log. An unreadable log directory or log is a WARN
-// carrying the read error, never an ok row.
+// error and its retained log. An unreadable log or incomplete retention window
+// is a WARN, never an ok row; an incomplete window also lists retained errors.
 func printHerdrReporterErrors(stdout io.Writer, dir string, now time.Time) (warnings int) {
 	records, err := herdr.RecentErrors(dir, now.Add(-herdrReporterWindow))
+	var incomplete *herdr.ErrorLogIncompleteError
+	if errors.As(err, &incomplete) {
+		fmt.Fprintf(stdout,
+			"%s WARN need=complete reporter error history checked=%s retained-count=%d error=%q — "+
+				"fix: inspect retained logs; discarded errors leave the requested window after %dh\n",
+			herdrReporterRow, dir, len(records), err.Error(), herdrReporterWindowHours)
+		for _, record := range records {
+			fmt.Fprintf(stdout, "  retained error session=%s at=%s message=%q log=%s\n",
+				record.Session, record.At.UTC().Format(time.RFC3339), record.Message, record.LogPath)
+		}
+		return 1
+	}
 	switch {
 	case err != nil:
 		fmt.Fprintf(
@@ -279,7 +290,7 @@ func printHerdrReporterErrors(stdout io.Writer, dir string, now time.Time) (warn
 		"%s WARN need=no reporter errors in the last %dh checked=%s count=%d newest=%q session=%s at=%s — "+
 			"fix: read %s and repair what it reports; the row clears %dh after the last error\n",
 		herdrReporterRow, herdrReporterWindowHours, dir, len(records), newest.Message, newest.Session,
-		newest.At.UTC().Format(time.RFC3339), filepath.Join(dir, newest.Session+herdr.ErrorLogSuffix),
+		newest.At.UTC().Format(time.RFC3339), newest.LogPath,
 		herdrReporterWindowHours,
 	)
 	return 1

@@ -3,7 +3,9 @@ package themesync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // surfaces.herdr holds the custom tokens and the tabGlyphs object side by
@@ -152,5 +155,93 @@ func TestHerdrTabGlyphsRefusesANonRegularState(t *testing.T) {
 	}
 	if _, err := HerdrTabGlyphs(dir); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("a FIFO state = %v, want a not-a-regular-file error", err)
+	}
+}
+
+// Exhaust descriptors only in a child: stat still succeeds while the production
+// stateStore.load cannot open the body. Recovery must not need a file rewrite.
+func TestHerdrTabGlyphsRecoversAfterTransientBodyReadFailure(t *testing.T) {
+	if os.Getenv("PFM_GLYPH_EMFILE_CHILD") != "1" {
+		command := exec.Command(os.Args[0], "-test.run=^TestHerdrTabGlyphsRecoversAfterTransientBodyReadFailure$")
+		command.Env = append(os.Environ(), "PFM_GLYPH_EMFILE_CHILD=1")
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("glyph EMFILE child: %v\n%s", err, output)
+		}
+		return
+	}
+	testjail.PauseFlightRecorder(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, StateFileName)
+	content := `{"enabled":true,"applied":{"pins":{"herdr":{"tabGlyphs":{"blocked":["X","Y"]}}}}}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var limit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
+		t.Fatal(err)
+	}
+	limited := limit
+	limited.Cur = 128
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &limited); err != nil {
+		t.Fatal(err)
+	}
+	var files []*os.File
+	for {
+		file, err := os.Open(os.DevNull)
+		if errors.Is(err, syscall.EMFILE) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, file)
+	}
+	_, readErr := HerdrTabGlyphs(dir)
+	for _, file := range files {
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(readErr, syscall.EMFILE) {
+		t.Fatalf("body open = %v, want EMFILE", readErr)
+	}
+	after, err := os.Stat(path)
+	if err != nil || !os.SameFile(before, after) || before.Size() != after.Size() ||
+		!before.ModTime().Equal(after.ModTime()) || before.Mode() != after.Mode() {
+		t.Fatalf("state identity changed: %v", err)
+	}
+	glyphs, err := HerdrTabGlyphs(dir)
+	if err != nil || !reflect.DeepEqual(glyphs.Blocked, herdr.TabFrames{"X", "Y"}) {
+		t.Fatalf("unchanged state after descriptor recovery = %+v, %v; want X/Y", glyphs, err)
+	}
+}
+
+func TestHerdrTabGlyphsUnchangedStateAvoidsBodyWork(t *testing.T) {
+	testjail.PauseFlightRecorder(t)
+	h := newHarness(t)
+	h.writeProfile(profileJSON(`{"herdr":{"tabGlyphs":{"blocked":["X","Y"]}}}`))
+	h.on()
+	glyphs, err := HerdrTabGlyphs(h.stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	glyphs.Blocked[0] = "caller mutation"
+	if next, err := HerdrTabGlyphs(h.stateDir); err != nil || next.Blocked[0] != "X" {
+		t.Fatalf("caller corrupted cached glyphs: %+v, %v", next, err)
+	}
+	allocations := testing.AllocsPerRun(10, func() {
+		if _, err := HerdrTabGlyphs(h.stateDir); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocations > 30 {
+		t.Errorf("unchanged theme state decoded on paint: %.0f allocations; want <=30", allocations)
 	}
 }

@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -14,7 +15,10 @@ import (
 )
 
 func TestFollowerPlistHoldsTheContractedKeys(t *testing.T) {
-	plist := followerPlist("/opt/pfm", "/h", "/h/.local/state/pfm/theme")
+	plist, err := followerPlist("/opt/pfm", "/h", "/h/.local/state/pfm/theme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{
 		"<key>Label</key>\n\t<string>com.professor.pfm.theme</string>",
 		"<string>/opt/pfm</string>\n\t\t<string>theme</string>\n\t\t<string>sync</string>",
@@ -36,7 +40,10 @@ func TestFollowerPlistHoldsTheContractedKeys(t *testing.T) {
 }
 
 func TestFollowerPlistEscapesXML(t *testing.T) {
-	plist := followerPlist("/opt/p&fm<x>", "/h", "/s")
+	plist, err := followerPlist("/opt/p&fm<x>", "/h", "/s")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(plist, "/opt/p&amp;fm&lt;x&gt;") {
 		t.Fatalf("binary path not escaped:\n%s", plist)
 	}
@@ -58,7 +65,11 @@ func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantVerdict(t, report, "follower", VerdictError, "cannot reload itself from inside launchd")
-	if got, want := h.read(plist), followerPlist(agentlauncher.Program(h.home), h.home, h.stateDir); got != want {
+	want, err := followerPlist(agentlauncher.Program(h.home), h.home, h.stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.read(plist); got != want {
 		t.Errorf("plist not rewritten:\n%s", got)
 	}
 	for _, call := range h.runner.Calls()[calls:] {
@@ -184,11 +195,17 @@ func TestFollowerWatchesRealSettingsThemesDirsAndTheGlobalPreferences(t *testing
 		canonical(".claude2/settings.json"), canonical(".claude2/themes"),
 		filepath.Join(home, "Library", "Preferences", ".GlobalPreferences.plist"),
 	}
-	got := followerWatchPaths(home, true)
+	got, err := followerWatchPaths(home, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("watch paths = %v, want %v", got, want)
 	}
-	plist := followerPlist("/opt/pfm", home, "/s")
+	plist, err := followerPlist("/opt/pfm", home, "/s")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, path := range want {
 		if !strings.Contains(plist, "<string>"+path+"</string>") {
 			t.Errorf("plist does not watch %s:\n%s", path, plist)
@@ -224,4 +241,49 @@ func TestFollowerRunsThroughTheStableLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantVerdict(t, status, "follower", VerdictDrift, "launcher")
+}
+
+func TestFollowerDiscoveryFailureKeepsLastValidWatches(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			h := newHarness(t)
+			h.goos = platform
+			h.rearm()
+			h.on()
+			s := newSession(h.env, stateStore{dir: h.stateDir}, h.state())
+			path := s.followerPath()
+			if platform == "linux" {
+				path = s.systemdFollowerPath()
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings := filepath.Join(h.home, settingsRel)
+			if err := os.Remove(settings); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("settings.json", settings); err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				for _, result := range []SurfaceResult{s.applyFollower(context.Background()), s.readFollower(context.Background())} {
+					if result.Verdict != VerdictError || !strings.Contains(result.Detail, "settings.json") {
+						t.Errorf("discovery failure reported %s: %s", result.Verdict, result.Detail)
+					}
+				}
+				after, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(after, before) {
+					t.Errorf("discovery error replaced valid watches: %v", err)
+				}
+			}
+			if err := os.Remove(settings); err != nil {
+				t.Fatal(err)
+			}
+			h.write(settingsRel, `{"theme":"dark"}`)
+			if result := s.applyFollower(context.Background()); result.Verdict != VerdictApplied {
+				t.Errorf("recovery: %+v", result)
+			}
+		})
+	}
 }

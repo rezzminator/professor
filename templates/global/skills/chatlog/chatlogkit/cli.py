@@ -74,18 +74,17 @@ def prep(args):
         os.makedirs(KIT_DIR, exist_ok=True)
         dirp = tempfile.mkdtemp(prefix="run.", dir=KIT_DIR)
     os.makedirs(dirp, exist_ok=True)
-    # A --dir already holding another digest (two readers handed one Dir:) gets a fresh
-    # subdirectory, so no reader overwrites another's rows; the same target and range reuse it.
-    kj = os.path.join(dirp, "kit.json")
-    if os.path.exists(kj) or os.path.exists(os.path.join(dirp, "digest.txt")):
-        try:
-            with open(kj) as f:
-                prev = json.load(f)
-            same = isinstance(prev, dict) and prev.get("path") == path and prev.get("lines") == (lines or "all")
-        except (OSError, ValueError):
-            same = False
-        if not same:
-            dirp = tempfile.mkdtemp(prefix="reader.", dir=dirp)
+    # Claim before checking evidence: concurrent writers and later generations never
+    # replace files a reader may already be consuming. Keep the claim after completion.
+    try:
+        os.mkdir(os.path.join(dirp, ".prep"))
+        claimed = True
+    except FileExistsError:
+        claimed = False
+    if not claimed or any(os.path.exists(os.path.join(dirp, name)) for name in
+                          ("kit.json", "digest.txt", "timeline.txt", "mech.tsv", "notes.tsv")):
+        dirp = tempfile.mkdtemp(prefix="reader.", dir=dirp)
+        os.mkdir(os.path.join(dirp, ".prep"))
     try:
         raw, spans = build(p, Request(lines), os.path.expanduser("~"))
     except ValueError as e:

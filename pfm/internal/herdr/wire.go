@@ -198,6 +198,9 @@ func ParseAgentList(result json.RawMessage) ([]Agent, error) {
 	if decoded.Type != "agent_list" {
 		return nil, fmt.Errorf("herdr agent.list: result type %q, want agent_list", decoded.Type)
 	}
+	if decoded.Agents == nil {
+		return nil, fmt.Errorf("herdr agent.list: agents missing or null in result %q", result)
+	}
 	agents := make([]Agent, 0, len(decoded.Agents))
 	for _, agent := range decoded.Agents {
 		entry := Agent{
@@ -354,6 +357,9 @@ func ParsePanes(result json.RawMessage) ([]Pane, error) {
 	}
 	if decoded.Type != "pane_list" {
 		return nil, fmt.Errorf("herdr pane.list: result type %q, want pane_list", decoded.Type)
+	}
+	if decoded.Panes == nil {
+		return nil, fmt.Errorf("herdr pane.list: panes missing or null in result %q", result)
 	}
 	panes := make([]Pane, 0, len(decoded.Panes))
 	for _, pane := range decoded.Panes {

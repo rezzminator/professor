@@ -494,7 +494,14 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 }
 
 // readAck reads the extension's ack; none written yet is (zero, false, nil).
+// Per-owner publication failures override shared success at the current generation.
+// These diagnostics are not ownership records: off/uninstall retain recovery data
+// independently. JS clears its own diagnostic or a proven-dead same-scope owner;
+// Go only judges evidence and never reclaims it.
 func (s *session) readAck() (ack vscodeAck, found bool, err error) {
+	if err := s.vscodeAckPublicationError(); err != nil {
+		return ack, false, err
+	}
 	raw, readErr := os.ReadFile(filepath.Join(s.store.dir, vscodeAckFile))
 	switch {
 	case errors.Is(readErr, os.ErrNotExist):
@@ -506,6 +513,55 @@ func (s *session) readAck() (ack vscodeAck, found bool, err error) {
 		return ack, false, fmt.Errorf("themesync: parse %s: %w", vscodeAckFile, err)
 	}
 	return ack, true, nil
+}
+
+func (s *session) vscodeAckPublicationError() error {
+	dir := filepath.Join(s.store.dir, "vscode-ack-failures")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("themesync: read acknowledgement failures %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") || filepath.Ext(entry.Name()) != ".json" {
+			continue // atomic writer's temporary file is not a published diagnostic
+		}
+		path := filepath.Join(dir, entry.Name())
+		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue // owner recovered while we enumerated
+		}
+		if err != nil {
+			return fmt.Errorf("themesync: stat acknowledgement failure %s: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("themesync: acknowledgement failure %s is not a regular file", path)
+		}
+		raw, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("themesync: read acknowledgement failure %s: %w", path, err)
+		}
+		var failure struct {
+			Generation *int   `json:"generation"`
+			Target     string `json:"target"`
+			Error      string `json:"error"`
+		}
+		if err := json.Unmarshal(raw, &failure); err != nil {
+			return fmt.Errorf("themesync: parse acknowledgement failure %s: %w", path, err)
+		}
+		if failure.Error == "" {
+			return fmt.Errorf("themesync: acknowledgement failure %s has no error", path)
+		}
+		if failure.Generation == nil || *failure.Generation == s.state.Generation {
+			return fmt.Errorf("themesync: acknowledgement publication %s (%s): %s", path, failure.Target, failure.Error)
+		}
+	}
+	return nil
 }
 
 func (s *session) restoreVscode(_ context.Context) SurfaceResult {

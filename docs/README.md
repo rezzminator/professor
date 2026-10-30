@@ -96,7 +96,7 @@ See `SETUP.md` for the install interview and adaptation guidance.
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator and root identity — lives in CLAUDE.md, not a separate command.
 - **/pcm** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
-- **/flights:doctor, /dev** — pipeline mechanics with light Professor voice.
+- **/flights:doctor** — pipeline mechanics with light Professor voice.
 
 **Bundled commands (ship with the blueprint):** `/flights:doctor`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:claude-selector`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
 

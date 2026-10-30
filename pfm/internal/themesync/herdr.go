@@ -497,33 +497,3 @@ func herdrReloadAcknowledgement(stdout, stderr []byte) (string, error) {
 	}
 	return detail, nil
 }
-
-// HerdrTabGlyphs is the tab status glyphs of the theme in force, its profile's
-// surfaces.herdr.tabGlyphs as the sync last applied them, for the Herdr tab
-// painter to read on every tick, so a theme switch shows on the next paint.
-// No sync, a sync that is off or has applied nothing, or a theme with no
-// glyphs is the zero value: the default glyphs. A state file that cannot be
-// read or parsed, or a glyph herdr refuses, is an error naming the file.
-func HerdrTabGlyphs(stateDir string) (herdr.TabGlyphs, error) {
-	store := stateStore{dir: stateDir}
-	// A FIFO or device in place of state.json would block the read, and with
-	// it every tab's status, on the painter's half-second tick.
-	if info, err := os.Stat(store.statePath()); err == nil && !info.Mode().IsRegular() {
-		return herdr.TabGlyphs{}, fmt.Errorf(
-			"themesync: %s is not a regular file (%s)", store.statePath(), info.Mode().Type(),
-		)
-	}
-	state, found, err := store.load()
-	if err != nil {
-		return herdr.TabGlyphs{}, err
-	}
-	if !found || !state.Enabled || state.Applied == nil || state.Applied.Pins == nil ||
-		state.Applied.Pins.Herdr == nil {
-		return herdr.TabGlyphs{}, nil
-	}
-	glyphs, err := herdr.ParseTabGlyphs(state.Applied.Pins.Herdr.TabGlyphs)
-	if err != nil {
-		return herdr.TabGlyphs{}, fmt.Errorf("themesync: %s: %w", store.statePath(), err)
-	}
-	return glyphs, nil
-}

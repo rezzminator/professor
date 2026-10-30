@@ -16,20 +16,21 @@
 //   and chrome — exactly as the command line does. A theme outside the index is the user's own and
 //   is left alone; pfm still paints the terminal and chrome over it.
 // - pfm → native: the contract's palette changes from anywhere else (`pfm theme use`, Claude
-//   Code's /theme followed by pfm's follower); the window that first sees the new palette sets the
-//   user's Global workbench.colorTheme to the matching Professor theme. A palette with no Professor
+//   Code's /theme followed by pfm's follower); local windows set Global workbench.colorTheme;
+//   each remote workspace independently sets its Workspace layer. A palette with no Professor
 //   theme (a built-in Claude Code theme) leaves colorTheme as it is.
 //
-// The loop guard is the palette: {stateDir}/vscode-native.json — {palette, id} — records the last
-// palette followed, so a resync of the same palette (a new generation) never takes the user's own
-// pick away, and a pick whose value is already the contract's palette runs nothing; the
-// configuration event a follow's own update fires is passed over once, so a contract that moved
-// meanwhile is never undone. The first contract this extension ever sees is recorded, not
-// followed: installing it never switches a theme the user chose. A switch VS Code refuses puts
-// the prior record back, so the next sync tries again.
+// The loop guard records the last palette per setting scope in {stateDir}/vscode-native.json.
+// A resync of the same palette never takes the user's own pick away. Each new scope records its
+// first contract without switching; legacy {palette, id} history remains the baseline for every
+// scope not yet migrated. Unknown history is preserved and visibly refused, never treated as a
+// first install. Settings must succeed before their follow guard advances; failed picks restore
+// only their own unchanged guard. The shared apply lock serializes record changes across windows.
+// The configuration event a follow fires is passed over once, even if the contract moved meanwhile.
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const { chromeTarget, withLock } = require('./theme');
 
 const INDEX = path.join(__dirname, 'themes', 'index.json');
 const RECORD = 'vscode-native.json';
@@ -56,23 +57,45 @@ function loadIndex(file = INDEX) {
 
 function readRecord(dir) {
   const file = path.join(dir, RECORD);
+  const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
+  const entry = (value) => object(value) && typeof value.palette === 'string' &&
+    (value.id === undefined || value.id === null || typeof value.id === 'string');
   try {
     const record = readJSON(file);
-    return record && typeof record === 'object' && typeof record.palette === 'string' ? record : null;
+    if (object(record) && record.version === undefined && entry(record)) {
+      return { version: 2, scopes: {}, legacy: record };
+    }
+    if (!object(record) || record.version !== 2 || !object(record.scopes) ||
+        Object.entries(record.scopes).some(([scope, value]) =>
+          (scope !== 'global' && !scope.startsWith('workspace:')) || !entry(value)) ||
+        (record.legacy !== undefined && !entry(record.legacy))) {
+      throw new Error('invalid native theme history');
+    }
+    return record;
   } catch (err) {
-    if (err.code !== 'ENOENT') console.error(`Professor: ${file} unreadable, the next contract is recorded without a switch: ${err?.message ?? err}`);
-    return null;
+    if (err.code === 'ENOENT') return { version: 2, scopes: {} };
+    throw new Error(`read native theme history ${file}: ${err?.message ?? err}`);
   }
 }
 
-// writeRecord creates the state dir when pfm has not yet: a pick made before the first sync still
-// records, then runs pfm, which writes the contract there.
-function writeRecord(dir, palette, id) {
+function writeRecord(dir, record) {
   const file = path.join(dir, RECORD);
   const temp = path.join(dir, `.${RECORD}.${process.pid}.tmp`);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(temp, JSON.stringify({ palette, id }, null, 2) + '\n');
+  fs.writeFileSync(temp, JSON.stringify(record, null, 2) + '\n');
   fs.renameSync(temp, file);
+}
+
+function nativeScope() {
+  if (vscode.env.remoteName === undefined) return 'global';
+  const target = chromeTarget();
+  if (!target) throw new Error('remote window has no workspace; native theme left unchanged');
+  return `workspace:${target}`;
+}
+
+function withRecord(dir, work) {
+  // A native pick may precede pfm's first contract and state directory.
+  fs.mkdirSync(dir, { recursive: true });
+  return withLock(dir, () => work(readRecord(dir), nativeScope()));
 }
 
 function currentContract(dir) {
@@ -99,24 +122,27 @@ function startNativeThemes({ dir, runPfm, why, here, whyNot, index = loadIndex()
 
   async function follow(contract) {
     if (!here() || !byID.size || !contract || !contract.enabled || typeof contract.palette !== 'string') return;
-    const record = readRecord(dir);
-    if (record && record.palette === contract.palette) return;
-    const theme = byValue.get(contract.palette);
-    writeRecord(dir, contract.palette, theme ? theme.id : null);
-    if (!record || !theme) return;
-    const workbench = vscode.workspace.getConfiguration('workbench');
-    if (workbench.get('colorTheme') === theme.id) return;
-    echo = theme.id;
-    try {
-      const target = vscode.env.remoteName === undefined
-        ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
-      await workbench.update('colorTheme', theme.id, target);
-    } catch (err) {
-      echo = null;
-      // The palette was not followed: the prior record stands, so the next sync tries again.
-      writeRecord(dir, record.palette, record.id ?? null);
-      vscode.window.showErrorMessage(`Professor: could not switch VS Code to ${theme.label} — ${err?.message ?? err}`);
-    }
+    await withRecord(dir, async (record, scope) => {
+      const prior = record.scopes[scope] || record.legacy;
+      if (prior && prior.palette === contract.palette && record.scopes[scope]) return;
+      const theme = byValue.get(contract.palette);
+      if (prior && prior.palette !== contract.palette && theme) {
+        const workbench = vscode.workspace.getConfiguration('workbench');
+        if (workbench.get('colorTheme') !== theme.id) {
+          echo = theme.id;
+          try {
+            const target = vscode.env.remoteName === undefined
+              ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
+            await workbench.update('colorTheme', theme.id, target);
+          } catch (err) {
+            echo = null;
+            throw new Error(`could not switch VS Code to ${theme.label}: ${err?.message ?? err}`);
+          }
+        }
+      }
+      record.scopes[scope] = { palette: contract.palette, id: theme ? theme.id : null };
+      writeRecord(dir, record);
+    });
   }
 
   async function picked() {
@@ -131,14 +157,35 @@ function startNativeThemes({ dir, runPfm, why, here, whyNot, index = loadIndex()
       vscode.window.showWarningMessage(`Professor: ${theme.label} changes VS Code alone — ${whyNot()}.`);
       return;
     }
+    const next = { palette: theme.value, id: theme.id };
+    const saved = await withRecord(dir, (record, scope) => {
+      const prior = record.scopes[scope];
+      // Recorded before pfm runs, but only for this setting's scope: another remote workspace
+      // must still see the new contract as a palette transition.
+      record.scopes[scope] = next;
+      writeRecord(dir, record);
+      return { prior, scope };
+    });
     const contract = currentContract(dir);
     if (contract && contract.enabled && contract.palette === theme.value) return;
-    // Recorded before pfm runs: the contract it writes then names a palette already followed.
-    writeRecord(dir, theme.value, theme.id);
-    const result = await runPfm(['theme', 'use', theme.value], USE_TIMEOUT_MS);
+    const rollback = () => withRecord(dir, (record) => {
+      if (JSON.stringify(record.scopes[saved.scope]) !== JSON.stringify(next)) return;
+      if (saved.prior) record.scopes[saved.scope] = saved.prior;
+      else delete record.scopes[saved.scope];
+      writeRecord(dir, record);
+    });
+    let result;
+    try {
+      // Do not hold the settings lock while pfm waits for extension acknowledgements.
+      result = await runPfm(['theme', 'use', theme.value], USE_TIMEOUT_MS);
+    } catch (err) {
+      await rollback();
+      throw new Error(`run pfm for ${theme.label}: ${err?.message ?? err}`);
+    }
     if (result.ok) {
       vscode.window.setStatusBarMessage(`Professor: ${theme.label} on every surface`, STATUS_MS);
     } else {
+      await rollback();
       vscode.window.showErrorMessage(`Professor: could not switch every surface to ${theme.label} — ${why(result, USE_TIMEOUT_MS)}`);
     }
   }

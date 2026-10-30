@@ -182,9 +182,9 @@ def report(args):
     kit, dig = load(dirp)
     try:
         with open(os.path.join(dirp, "timeline.txt"), errors="replace") as f:
-            tl = f.read().rstrip("\n").split("\n")
-    except OSError:
-        tl = []
+            tl = f.read().splitlines()
+    except OSError as e:
+        die(f"KIT FAILED — cannot read required timeline {os.path.join(dirp, 'timeline.txt')}: {e}")
     out = out or os.path.join(dirp, "report.tsv")
     rows, seen, counts = [], set(), {}
     for r in read_rows(os.path.join(dirp, "mech.tsv")) + read_rows(os.path.join(dirp, "notes.tsv")):
@@ -192,9 +192,14 @@ def report(args):
         if (idx, label) in seen:
             continue
         seen.add((idx, label))
+        if not re.fullmatch(r"[DM][1-9][0-9]*", idx):
+            die(f"KIT FAILED — invalid evidence row {idx!r} in {dirp}")
         src = dig if idx[0] == "D" else tl
         n = int(idx[1:])
-        s = src[n - 1] if 1 <= n <= len(src) else ""
+        if n > len(src) or not src[n - 1].strip():
+            source = "digest.txt" if idx[0] == "D" else "timeline.txt"
+            die(f"KIT FAILED — missing evidence for {idx} in {os.path.join(dirp, source)}")
+        s = src[n - 1]
         if anchor not in ("-", "") and anchor in s:
             s = s[s.index(anchor):]
         s = s[:200].split("\t")[0]

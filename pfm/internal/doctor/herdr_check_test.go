@@ -476,6 +476,83 @@ func TestHerdrReporterErrorsDoctor(t *testing.T) {
 	}
 }
 
+func TestHerdrReporterErrorsDoctorRetainsRotatedHistory(t *testing.T) {
+	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	for _, withError := range []bool{true, false} {
+		t.Run(fmt.Sprintf("error=%t", withError), func(t *testing.T) {
+			dir := t.TempDir()
+			if withError {
+				if err := herdr.AppendError(
+					dir,
+					"cc-rotation",
+					now.Add(-time.Hour),
+					"retained reporter fault",
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(dir, "cc-rotation"+herdr.ErrorLogSuffix)
+			for rotation := 1; rotation <= 3; rotation++ {
+				for {
+					if err := herdr.AppendInfo(
+						dir,
+						"cc-rotation",
+						now,
+						strings.Repeat("i", herdr.ErrorMessageBytes),
+					); err != nil {
+						t.Fatal(err)
+					}
+					info, err := os.Stat(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if info.Size() >= herdr.ErrorLogBytes {
+						break
+					}
+				}
+				if err := herdr.AppendInfo(dir, "cc-rotation", now, "normal teardown after rotation"); err != nil {
+					t.Fatal(err)
+				}
+				var stdout bytes.Buffer
+				warnings := printHerdrReporterErrors(&stdout, dir, now)
+				row := stdout.String()
+				if !withError {
+					if warnings != 0 || strings.TrimSpace(row) != herdrReporterRow+" ok none in the last 24h" {
+						t.Fatalf("INFO-only rotation %d: warnings=%d row=%s", rotation, warnings, row)
+					}
+					continue
+				}
+				if warnings != 1 || !strings.Contains(row, " WARN ") || strings.Contains(row, " ok ") {
+					t.Fatalf("rotation %d hid recent error history: warnings=%d row=%s", rotation, warnings, row)
+				}
+				if rotation == 1 {
+					if !strings.Contains(row, `count=1 newest="retained reporter fault" session=cc-rotation`) ||
+						!strings.Contains(row, path+".1") {
+						t.Fatalf("retained error and its rotated path not visible: %s", row)
+					}
+				} else if !strings.Contains(row, "incomplete") {
+					t.Fatalf("rotation %d omitted retention incompleteness: %s", rotation, row)
+				}
+			}
+			if withError {
+				if err := herdr.AppendError(dir, "cc-new", now, "retained beside a gap"); err != nil {
+					t.Fatal(err)
+				}
+				var partial bytes.Buffer
+				if warnings := printHerdrReporterErrors(&partial, dir, now); warnings != 1 ||
+					!strings.Contains(partial.String(), "incomplete") ||
+					!strings.Contains(partial.String(), `message="retained beside a gap"`) {
+					t.Fatalf("incompleteness hid retained errors: %s", partial.String())
+				}
+			}
+			var stdout bytes.Buffer
+			if warnings := printHerdrReporterErrors(&stdout, dir, now.Add(25*time.Hour)); warnings != 0 {
+				t.Fatalf("expired retention gap still warns: %s", stdout.String())
+			}
+		})
+	}
+}
+
 // TestHerdrReporterErrorsDoctorExit runs the whole doctor over a home whose
 // log directory holds a fresh reporter error: the row prints from the home's
 // own log directory and raises doctor's warning exit.

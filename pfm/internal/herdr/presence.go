@@ -466,6 +466,9 @@ func parsePresencePanes(result json.RawMessage) ([]presencePane, error) {
 	if decoded.Type != "pane_list" {
 		return nil, fmt.Errorf("herdr pane.list: result type %q, want pane_list", decoded.Type)
 	}
+	if decoded.Panes == nil {
+		return nil, fmt.Errorf("herdr pane.list: panes missing or null in result %q", result)
+	}
 	return decoded.Panes, nil
 }
 
@@ -495,6 +498,9 @@ func ParseWorkspaceList(result json.RawMessage) (map[string]string, error) {
 	}
 	if decoded.Type != "workspace_list" {
 		return nil, fmt.Errorf("herdr workspace.list: result type %q, want workspace_list", decoded.Type)
+	}
+	if decoded.Workspaces == nil {
+		return nil, fmt.Errorf("herdr workspace.list: workspaces missing or null in result %q", result)
 	}
 	labels := make(map[string]string, len(decoded.Workspaces))
 	for _, workspace := range decoded.Workspaces {

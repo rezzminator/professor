@@ -1,6 +1,7 @@
 package herdr
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,11 +131,92 @@ func TestErrorLogStaysBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	records, err = RecentErrors(dir, at)
-	if err != nil || len(records) != 1 || records[0].Message != "fresh" {
-		t.Fatalf("records=%+v err=%v, want only the fresh line once the full log was rotated", records, err)
+	if err == nil || !strings.Contains(err.Error(), "cc-1.log.1 holds a malformed line") {
+		t.Fatalf("records=%+v err=%v, want the retained torn log reported, not silently hidden", records, err)
 	}
 	if _, err := os.Stat(path + ".1"); err != nil {
 		t.Fatalf("rotated log: %v, want the old log kept beside it", err)
+	}
+}
+
+func TestErrorLogRetentionReportsLostErrorsAndKeepsRetainedOnes(t *testing.T) {
+	dir := t.TempDir()
+	at := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	lostAt := at.Add(-time.Hour)
+	if err := AppendError(dir, "shared", lostAt, "old retained fault"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "shared"+ErrorLogSuffix)
+	for rotation := 1; rotation <= 4; rotation++ {
+		for {
+			if err := AppendInfo(dir, "shared", at, strings.Repeat("i", ErrorMessageBytes)); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Size() >= ErrorLogBytes {
+				break
+			}
+		}
+		if err := AppendInfo(dir, "shared", at, "rotation"); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendError(dir, "new-session", at, "still visible"); err != nil {
+			t.Fatal(err)
+		}
+		records, err := RecentErrors(dir, lostAt)
+		if rotation == 1 {
+			if err != nil || len(records) != 2 || records[1].Session != "shared" || records[1].LogPath != path+".1" {
+				t.Fatalf("first rotation: records=%+v err=%v", records, err)
+			}
+		} else {
+			var gap *ErrorLogIncompleteError
+			if !errors.As(err, &gap) || !gap.Through.Equal(lostAt) || len(records) != rotation {
+				t.Fatalf(
+					"rotation %d: records=%+v err=%v, want retained errors and precise loss watermark",
+					rotation,
+					records,
+					err,
+				)
+			}
+		}
+		// A gap ending before the requested window cannot taint that window.
+		if _, err := RecentErrors(dir, lostAt.Add(time.Second)); err != nil {
+			t.Fatalf("rotation %d: expired gap: %v", rotation, err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 4 { // shared.log, shared.log.1, shared.log.lost, new-session.log
+		t.Fatalf("unbounded generations: %v", entries)
+	}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Size() > ErrorLogBytes+ErrorMessageBytes+128 {
+			t.Fatalf("%s grew to %d bytes", entry.Name(), info.Size())
+		}
+	}
+}
+
+func TestErrorLogNamesBrokenRotationsAndWatermarks(t *testing.T) {
+	for _, suffix := range []string{".1", ".lost"} {
+		t.Run(suffix, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "broken.log"+suffix)
+			if err := os.WriteFile(path, []byte("bad history\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := RecentErrors(dir, time.Time{}); err == nil || !strings.Contains(err.Error(), path) {
+				t.Fatalf("broken retained history became clean: %v", err)
+			}
+		})
 	}
 }
 

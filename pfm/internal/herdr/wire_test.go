@@ -405,6 +405,41 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	}
 }
 
+func TestListParsersRequireExplicitArrays(t *testing.T) {
+	for _, parser := range []struct {
+		name  string
+		kind  string
+		parse func(json.RawMessage) (int, error)
+	}{
+		{"agents", "agent_list", func(raw json.RawMessage) (int, error) {
+			rows, err := ParseAgentList(raw)
+			return len(rows), err
+		}},
+		{"panes", "pane_list", func(raw json.RawMessage) (int, error) {
+			rows, err := ParsePanes(raw)
+			return len(rows), err
+		}},
+	} {
+		t.Run(parser.name, func(t *testing.T) {
+			for _, value := range []string{"", "null", "{}", "[]"} {
+				raw := `{"type":"` + parser.kind + `"`
+				if value != "" {
+					raw += `,"` + parser.name + `":` + value
+				}
+				raw += `}`
+				count, err := parser.parse(json.RawMessage(raw))
+				if value == "[]" {
+					if err != nil || count != 0 {
+						t.Errorf("explicit empty list: count=%d err=%v", count, err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), parser.name) {
+					t.Errorf("malformed list %s: count=%d err=%v, want a named error", raw, count, err)
+				}
+			}
+		})
+	}
+}
+
 func TestCallReturnsEachResultInRequestOrder(t *testing.T) {
 	path := serve(
 		t,

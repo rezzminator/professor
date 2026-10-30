@@ -71,11 +71,15 @@ func (s *session) systemdFollowerPath() string {
 // service sets the follower's job label in XPC_SERVICE_NAME, the variable
 // launchd sets for the macOS agent, so its sync is the quiet one; PATH is
 // paths.ServicePath, the one search path every pfm unit runs on.
-func (s *session) followerUnits() []followerUnit {
+func (s *session) followerUnits() ([]followerUnit, error) {
+	watches, err := followerWatchPaths(s.env.Home, false)
+	if err != nil {
+		return nil, err
+	}
 	logPath := systemdPath(filepath.Join(s.store.dir, "follow.log"))
 	header := "# Written by `pfm theme on` and removed by `pfm theme off`; pfm rewrites any edit.\n"
 	var watch strings.Builder
-	for _, path := range followerWatchPaths(s.env.Home, false) {
+	for _, path := range watches {
 		watch.WriteString("PathModified=" + systemdPath(path) + "\n")
 	}
 	service := header + "[Unit]\n" +
@@ -100,7 +104,7 @@ func (s *session) followerUnits() []followerUnit {
 		{filepath.Join(dir, followerService), service},
 		{filepath.Join(dir, followerPathUnit), pathUnit},
 		{filepath.Join(dir, followerTimerUnit), timer},
-	}
+	}, nil
 }
 
 // systemctl runs one `systemctl --user` verb; a run that could not start or
@@ -162,8 +166,12 @@ func (s *session) applySystemdFollower(ctx context.Context) SurfaceResult {
 	if err := s.removeStrayLaunchAgent(); err != nil {
 		return s.failed(surfaceFollower, path, err)
 	}
+	units, err := s.followerUnits()
+	if err != nil {
+		return s.failed(surfaceFollower, path, err)
+	}
 	changed := false
-	for _, unit := range s.followerUnits() {
+	for _, unit := range units {
 		current, err := os.ReadFile(unit.path)
 		if err == nil && string(current) == unit.content {
 			continue
@@ -203,7 +211,11 @@ func (s *session) applySystemdFollower(ctx context.Context) SurfaceResult {
 
 func (s *session) readSystemdFollower(ctx context.Context) SurfaceResult {
 	path := s.systemdFollowerPath()
-	for _, unit := range s.followerUnits() {
+	units, err := s.followerUnits()
+	if err != nil {
+		return s.failed(surfaceFollower, path, err)
+	}
+	for _, unit := range units {
 		current, err := os.ReadFile(unit.path)
 		name := filepath.Base(unit.path)
 		switch {
@@ -235,7 +247,11 @@ func (s *session) restoreSystemdFollower(ctx context.Context) SurfaceResult {
 	if err := s.removeStrayLaunchAgent(); err != nil {
 		return s.failed(surfaceFollower, path, err)
 	}
-	units := s.followerUnits()
+	// Removal needs only the installed names, never account discovery.
+	var units []followerUnit
+	for _, name := range []string{followerService, followerPathUnit, followerTimerUnit} {
+		units = append(units, followerUnit{path: filepath.Join(s.followerUnitDir(), name)})
+	}
 	existed := false
 	present := map[string]bool{}
 	for _, unit := range units {

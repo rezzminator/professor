@@ -409,6 +409,84 @@ class CensusCodex(World):
         self.assertEqual(r["usd"], self.timeline_total(root))
         self.assertTrue(r["usd"].startswith("$"), r)
 
+    def test_malformed_usage_fails_timeline_and_census_even_with_valid_calls(self):
+        for field in ("total_token_usage", "last_token_usage"):
+            for value in ("bad", True, 1.5, -1):
+                for position in ("only", "before", "after", "duplicate"):
+                    with self.subTest(field=field, value=value, position=position):
+                        good = x_tokens((1000, 200, 50), (1000, 200, 50), 4)
+                        bad = x_tokens((900, 300, 40), (1900, 500, 90), 5)
+                        if position == "duplicate":
+                            bad["payload"]["info"]["total_token_usage"] = dict(
+                                good["payload"]["info"]["total_token_usage"])
+                        bad["payload"]["info"][field]["input_tokens"] = value
+                        events = {"only": [bad], "before": [bad, good],
+                                  "after": [good, bad], "duplicate": [good, bad]}[position]
+                        path = self.rollout("rollout-invalid.jsonl", codex_records()[:3] + events)
+                        shutil.rmtree(self.path("run"), True)
+                        self.prep(path)
+                        with open(os.path.join(self.dir, "timeline.txt")) as f:
+                            timeline = f.read()
+                        dest = self.path("invalid.tsv")
+                        done = self.census(path, "--tree", "--out", dest, check=False)
+                        rows = self.table(done.stdout)
+                        with open(dest) as f:
+                            saved = f.read()
+                        evidence = timeline + "\n" + done.stdout
+                        self.assertEqual((timeline.startswith("UNREADABLE"), done.returncode,
+                                          rows["01aa"]["usd"], rows["TOTAL"]["usd"]),
+                                         (True, 1, "FAILED", "$0.0000 +1 FAILED"), evidence)
+                        self.assertIn("malformed token_count usage at line ", timeline)
+                        self.assertIn(field, timeline)
+                        self.assertNotIn("TOKENS input=", timeline)
+                        self.assertIn(f"FAILED {path} — ", saved)
+                        self.assertIn("FAILED (branch $0.0000 +1 FAILED)", done.stdout)
+
+    def test_malformed_usage_block_shapes_are_not_optional_absence(self):
+        for field in ("info", "total_token_usage", "last_token_usage"):
+            for value in ("bad", [], False):
+                with self.subTest(field=field, value=value):
+                    bad = x_tokens((1000, 200, 50), (1000, 200, 50), 4)
+                    if field == "info":
+                        bad["payload"][field] = value
+                    else:
+                        bad["payload"]["info"][field] = value
+                    path = self.rollout("rollout-invalid.jsonl", codex_records()[:3] + [bad])
+                    done = self.census(path, check=False)
+                    self.assertEqual(done.returncode, 1, done.stdout)
+                    self.assertEqual(self.table(done.stdout)["01aa"]["usd"], "FAILED")
+                    self.assertIn(field, done.stdout)
+
+    def test_optional_usage_absence_is_no_calls_but_last_absence_uses_deltas(self):
+        absent = [x_rec("event_msg", dict(type="token_count", **extra), 2)
+                  for extra in ({}, {"info": None}, {"info": {}},
+                                {"info": {"total_token_usage": None}})]
+        path = self.rollout("rollout-absent.jsonl", codex_records()[:3] + absent)
+        self.prep(path)
+        with open(os.path.join(self.dir, "timeline.txt")) as f:
+            self.assertTrue(f.read().startswith("NO CALLS"))
+        done = self.census(path)
+        self.assertEqual(self.table(done.stdout)["01aa"]["usd"], "$0.0000")
+
+        first = x_tokens((1000, 200, 50), (1000, 200, 50), 4)
+        delta = x_tokens((1500, 1000, 80), (2500, 1200, 130), 9)
+        del delta["payload"]["info"]["last_token_usage"]
+        compact = x_tokens((900, 300, 40), (900, 300, 40), 14)
+        compact["payload"]["info"]["last_token_usage"] = None
+        resume = x_tokens((0, 0, 0), (500, 100, 20), 18)
+        records = codex_records()[:3] + [first, first, delta,
+                  x_rec("compacted", {"message": ""}, 12), compact,
+                  x_rec("session_meta", {"id": "01aa", "cwd": "/fx"}, 16), resume]
+        path = self.rollout("rollout-valid.jsonl", records)
+        shutil.rmtree(self.path("run"), True)
+        self.prep(path)
+        with open(os.path.join(self.dir, "timeline.txt")) as f:
+            timeline = f.read()
+        self.assertIn("· 4 calls ·", timeline)
+        self.assertIn("TOKENS input=3900 cached_input=1600 uncached_input=2300 output=190", timeline)
+        self.assertIn("3 token_count events without last_token_usage", timeline)
+        self.assertEqual(self.table(self.census(path).stdout)["01aa"]["usd"], "$0.0180")
+
     def test_session_form_collects_the_spawned_rollouts_by_parent_thread(self):
         root, child = self.pair()
         out = self.census("--session", root, "--tree").stdout

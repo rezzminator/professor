@@ -22,7 +22,7 @@ import (
 // upgrade would.
 func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{
   "terminal.integrated.profiles.linux": {
@@ -124,7 +124,7 @@ func TestVSCodeDevelopEraProfileUpgrade(t *testing.T) {
 			name = "owned"
 		}
 		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
+			home := vscodeLawHome(t)
 			settings := filepath.Join(home, "settings.json")
 			writeFixture(
 				t,
@@ -170,7 +170,7 @@ func TestVSCodeDevelopEraProfileUpgrade(t *testing.T) {
 // rewritten to canonical, owned again, and CLAUDE_CONFIG_DIR written beside it.
 func TestVSCodeReclaimsARelinquishedPostM8ProfileUnderVSCode(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{
   "terminal.integrated.profiles.linux": {

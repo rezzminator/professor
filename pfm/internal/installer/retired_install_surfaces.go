@@ -19,8 +19,18 @@ func (installer *engine) retireStagedManagedSurfaces(uninstall bool) error {
 	if err := installer.retireEmptyDirTolerant(shimDir); err != nil {
 		return err
 	}
+	for _, name := range retiredVSCodeExtensionFiles {
+		target := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource), name)
+		if err := installer.retire(target, "renamed Prompt Lint asset"); err != nil {
+			return err
+		}
+	}
 	return installer.retireStagedHarnessPrompts(uninstall)
 }
+
+// retiredVSCodeExtensionFiles are the staged extension files the Prompt Lint
+// rename replaced (prompt-lint.js, prompt-lint.schema.json); frozen history.
+var retiredVSCodeExtensionFiles = []string{"lint.js", "findings.schema.json"}
 
 // stagedHarnessPromptFiles are frozen historical paths: every file a pfm that
 // staged harness prompts ever wrote under the legacy directory — the composed

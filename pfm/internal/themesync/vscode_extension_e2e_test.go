@@ -31,7 +31,7 @@ const vscodeStub = {
     workspaceFile: { scheme: 'vscode-local', fsPath: file, toString: () => 'vscode-local:' + file },
     workspaceFolders: undefined,
     onDidChangeConfiguration: () => ({ dispose() {} }),
-    // activate also starts prompt lint (lint.js); this run exercises none of it.
+    // activate also starts Prompt Lint (prompt-lint.js); this run exercises none of it.
     textDocuments: [],
     getConfiguration(section) {
       if (section !== 'workbench') return { get: () => undefined, inspect: () => undefined };

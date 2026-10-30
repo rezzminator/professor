@@ -14,7 +14,7 @@ import (
 func TestStagedManagedSurfacesRetirement(t *testing.T) {
 	for _, scenario := range []string{
 		"shim", "no live chat", "dry run", "re-pinned baseline", "operator file", "live chat", "read fails",
-		"uninstall both",
+		"uninstall both", "renamed prompt lint",
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
@@ -93,6 +93,12 @@ func TestStagedManagedSurfacesRetirement(t *testing.T) {
 						"claude",
 					) + "\n",
 				}
+			case "renamed prompt lint":
+				for _, name := range retiredVSCodeExtensionFiles {
+					old := filepath.Join(managed, "vscode", "professor", name)
+					writeFixture(t, old, "old\n")
+					wants = append(wants, "  change  retire "+old+" (renamed Prompt Lint asset)\n")
+				}
 			case "read fails":
 				writeFixture(t, filepath.Join(prompts, "claude.md"), "old prompt\n")
 				writeFixture(t, filepath.Join(account, "sessions"), "not a directory")
@@ -134,6 +140,10 @@ func TestStagedManagedSurfacesRetirement(t *testing.T) {
 				requireNoPath(t, filepath.Join(prompts, "codex.md"), "staged prompt remains")
 				if got := readFixture(t, filepath.Join(prompts, "claude", "notes.md")); got != "mine\n" {
 					t.Fatalf("operator notes=%q", got)
+				}
+			case scenario == "renamed prompt lint":
+				for _, name := range retiredVSCodeExtensionFiles {
+					requireNoPath(t, filepath.Join(managed, "vscode", "professor", name), "renamed asset remains")
 				}
 			case keep:
 				if got := readFixture(t, filepath.Join(prompts, "claude.md")); got != "old prompt\n" {

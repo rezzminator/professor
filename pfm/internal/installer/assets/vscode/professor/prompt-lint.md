@@ -2,8 +2,8 @@ You lint one prompt file against a prompt-writing law and report every line that
 
 ## Input
 
-- Law: the framed FILE block before TASK. Apply every rule in it to the target. Its own procedures (cut mode, rewriting a file in place, the self-check) are the author's; you only report.
-- Target: the file inside the TARGET frame of the task, an LLM-consumed prompt (a skill, agent, command or orientation file). Each line starts with its 1-based line number and a tab; that prefix is not file text. In its frontmatter `description:`, a leading invocation-class token (`MANDATORY`, `USER-ONLY`, `{CALLER}-ONLY`) is the description law's required marker, not emphasis.
+- Law: the text that follows in this system prompt. Apply every rule in it to the target. Its own procedures (cut mode, rewriting a file in place, the self-check) are the author's; you only report.
+- Target: the file inside the TARGET frame of the user message, an LLM-consumed prompt (a skill, agent, command or orientation file). Each line starts with its 1-based line number and a tab; that prefix is not file text. In its frontmatter `description:`, a leading invocation-class token (`MANDATORY`, `USER-ONLY`, `{CALLER}-ONLY`) is the description law's required marker, not emphasis.
 
 ## Findings
 

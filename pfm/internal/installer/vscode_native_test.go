@@ -124,7 +124,7 @@ const vscodeStub = {
     showInformationMessage: (message) => { messages.push({ kind: 'info', message }); return Promise.resolve(); },
     setStatusBarMessage: (message) => { messages.push({ kind: 'status', message }); return { dispose() {} }; },
   },
-  // activate also starts prompt lint (lint.js); this driver exercises none of it.
+  // activate also starts Prompt Lint (prompt-lint.js); this driver exercises none of it.
   languages: {
     createDiagnosticCollection: () => ({ dispose() {} }),
     registerCodeActionsProvider: () => ({ dispose() {} }),

@@ -20,13 +20,16 @@ import (
 // TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform already uses in
 // vscode_test.go: vscodeSettingsPaths is pinned to an EMPTY (non-nil) slice
 // so the terminal-profile merge never runs, keeping every test here focused
-// on the extension link and its ledger.
+// on the extension link and its ledger. SourceRepo is a clone holding the law
+// prompt-lint.system.md is built from.
 func newVSCodeExtensionEngine(t *testing.T, home string, roots []string, vscodeFlag bool) *engine {
+	clone := filepath.Join(home, "professor-clone")
+	writeVSCodeLawFixture(t, clone)
 	installer := &engine{
 		options: Options{
 			Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 			VSCode: vscodeFlag, vscodePlatform: "linux", vscodeSettingsPaths: []string{},
-			vscodeExtensionRoots: roots,
+			vscodeExtensionRoots: roots, SourceRepo: clone,
 		},
 		apply:       true,
 		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
@@ -258,7 +261,7 @@ func TestVSCodeExtensionUninstallSkipsAForeignRelinkedTargetButStillDeletesTheLe
 // any managed run — and keep the default on the PFM settings profile.
 func TestVSCodeExtensionOrdinaryInstallUpgradesPreExtensionLedgerAndLinksExtension(t *testing.T) {
 	t.Setenv("VSCODE_PORTABLE", "")
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{
   "terminal.integrated.profiles.linux": {
@@ -310,7 +313,7 @@ func TestVSCodeExtensionUninstallRestoresPreviousDefaultForBothCurrentAndLegacyV
 	for _, current := range []string{vscodeProfileName, vscodeExtensionProfileTitle} {
 		t.Run(current, func(t *testing.T) {
 			t.Setenv("VSCODE_PORTABLE", "")
-			home := t.TempDir()
+			home := vscodeLawHome(t)
 			settings := filepath.Join(home, "settings.json")
 			writeFixture(t, settings, `{"terminal.integrated.defaultProfile.linux": "bash"}`)
 			options := Options{
@@ -398,7 +401,7 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 // vscodeSettingsPaths must offer $VSCODE_PORTABLE/user-data/User/settings.json
 // — not the pre-fix "$VSCODE_PORTABLE/data/user-data/..." join.
 func TestVSCodeExtensionPortableLinksAtPortableRootAndSettingsPathUsesUserData(t *testing.T) {
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	portable := filepath.Join(t.TempDir(), "data")
 	if err := os.MkdirAll(portable, 0o755); err != nil {
 		t.Fatal(err)
@@ -602,7 +605,7 @@ func TestVSCodeExtensionContributesOneKeybindingForTheCommand(t *testing.T) {
 // touching the filesystem — no symlink, no ownership ledger.
 func TestVSCodeExtensionPreviewCreatesNoLinkAndNoLedger(t *testing.T) {
 	t.Setenv("VSCODE_PORTABLE", "")
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	root := filepath.Join(home, "product-a")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)

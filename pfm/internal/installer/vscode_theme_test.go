@@ -105,7 +105,7 @@ const vscodeStub = {
     showWarningMessage: (message) => { messages.push({ kind: 'warning', message }); return Promise.resolve(); },
   },
   languages: { createDiagnosticCollection: () => ({ dispose() {} }), registerCodeActionsProvider: () => ({ dispose() {} }), registerCodeLensProvider: () => ({ dispose() {} }), match: () => 0 },
-  Disposable: { from: () => ({ dispose() {} }) }, CodeActionKind: { QuickFix: 'quickfix' }, EventEmitter: function () { this.event = () => {}; }, // prompt lint (lint.js), unexercised here
+  Disposable: { from: () => ({ dispose() {} }) }, CodeActionKind: { QuickFix: 'quickfix' }, EventEmitter: function () { this.event = () => {}; }, // Prompt Lint (prompt-lint.js), unexercised here
   extensions: { getExtension: (id) => (id === 'johnpapa.vscode-peacock' && scenario.peacock ? { id } : undefined) },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
   ThemeIcon: function (id) { this.id = id; },

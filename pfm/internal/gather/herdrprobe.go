@@ -477,8 +477,9 @@ func belowHerdrShell(proc ProcFS, pid, shell int) (bool, error) {
 
 // ProbeHerdrSeats returns only proved pane data; unknown and dead seats remain
 // visible diagnostics, never recycled occupant metadata. One listing per socket.
-// A positively dead seat reads as lost (non-live); unknown evidence stays live
-// with its error, so callers count it as a failure.
+// A positively dead seat reads as lost (non-live), and a writable listing
+// retires it durably; unknown evidence stays live with its error, so callers
+// count it as a failure.
 func ProbeHerdrSeats(ctx context.Context, values paths.Values, seats []fleetdb.Seat, readOnly bool) []HerdrSeat {
 	open := fleetdb.OpenSharedState
 	if readOnly {
@@ -507,11 +508,18 @@ func proveHerdrSeats(ctx context.Context, db *fleetdb.Store, proc ProcFS, rows [
 			continue
 		}
 		if !owned {
-			// Positive death only: the row stays visible as a lost seat for this
-			// listing, never live and never the recycled pane's occupant. The
-			// durable row is left to the restore path; a listing never retires it.
-			row.Seat.State = "lost"
+			// Positive death only: the row stays visible as a lost seat, never
+			// live and never the recycled pane's occupant. A writable listing
+			// retires the durable row once, so later scans never probe it again.
 			row.Err = fmt.Errorf("HERDR DEAD %s: saved supervisor exited", row.Seat.SeatID)
+			if !readOnly {
+				retired, retireErr := retireDeadHerdrSeat(ctx, db, canonical)
+				row.Err = errors.Join(row.Err, retireErr)
+				if retireErr == nil {
+					row.Seat = retired
+				}
+			}
+			row.Seat.State = "lost"
 			continue
 		}
 		row.Seat = canonical

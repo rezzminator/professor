@@ -871,8 +871,12 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 			}
 			for _, want := range seats {
 				stored, found, err := db.Seat(ctx, want.SeatID)
-				if err != nil || !found || stored.State != "live" || stored.LostNote != "" {
-					t.Fatalf("listing mutated durable seat %s: %+v found=%t err=%v", want.SeatID, stored, found, err)
+				retired := want.SeatID == "dead" && !readOnly
+				if err != nil || !found || (stored.State == "lost") != retired || (stored.LostNote != "") != retired {
+					t.Fatalf(
+						"listing retire of %s (want retired=%t): %+v found=%t err=%v",
+						want.SeatID, retired, stored, found, err,
+					)
 				}
 			}
 		})

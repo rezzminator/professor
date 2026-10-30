@@ -1,8 +1,10 @@
 // Professor — the framework's assistant inside VS Code. pfm installs it (`pfm install --vscode`)
-// and links it into every VS Code extensions directory on the host. Its two surfaces: the
-// Professor terminal (below) and `pfm theme`, which paints the terminal and every window's title,
+// and links it into every VS Code extensions directory on the host. Its three surfaces: the
+// Professor terminal (below); `pfm theme`, which paints the terminal and every window's title,
 // activity and status bars and borders (theme.js, started in activate), picks that theme (choose.js), and
-// lists every pfm theme in VS Code's own Color Theme picker, kept in step with it (native.js).
+// lists every pfm theme in VS Code's own Color Theme picker, kept in step with it (native.js); and
+// prompt lint, the "Analyze" button on a prompt file, whose findings from Claude under Professor's
+// prompt law land in the Problems panel with a quick fix per rewrite (lint.js).
 //
 // Its first surface is the Professor terminal profile: a login shell that opens the pfm chat
 // fleet, whose tab carries the attached chat's live name, and which puts you in the terminal
@@ -19,6 +21,7 @@ const vscode = require('vscode');
 const { startThemeSync, stateDir } = require('./theme');
 const { chooseTheme, clientSide, notHere, pfmHere, runPfm, why } = require('./choose');
 const { startNativeThemes } = require('./native');
+const { startPromptLint } = require('./lint');
 
 // Terminals this activation handed to VS Code and has not yet seen open, keyed by the marker
 // each one carries in its env. In-memory on purpose: a terminal revived by a window reload was
@@ -127,9 +130,13 @@ function activate(context) {
   });
   const native = startNativeThemes({ dir, runPfm, why, here, whyNot });
   const theme = startThemeSync(dir, native.follow, clientSide(kind) ? whyNot() : '');
+  // Its third surface, prompt lint, runs Claude through the same pfm, so the same doors hold: the
+  // Analyze button shows on a prompt file only where pfm runs, and the command refuses elsewhere.
+  const lint = startPromptLint({ here, whyNot });
   context.subscriptions.push(
     native.disposable,
     theme.disposable,
+    lint.disposable,
     vscode.commands.registerCommand('professor.chooseTheme', () => chooseTheme(here, whyNot)),
   );
   return { syncTheme: theme.syncTheme };

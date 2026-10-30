@@ -76,6 +76,9 @@ const vscodeStub = {
   env: { remoteName: scenario.remoteName || undefined },
   ExtensionKind: { UI: 1, Workspace: 2 },
   workspace: {
+    textDocuments: [],
+    onDidOpenTextDocument: () => ({ dispose() {} }),
+    onDidCloseTextDocument: () => ({ dispose() {} }),
     workspaceFile: undefined,
     workspaceFolders: [{ uri: { toString: workspaceURI } }],
     onDidChangeConfiguration: (listener) => {
@@ -123,6 +126,14 @@ const vscodeStub = {
     showInformationMessage: (message) => { messages.push({ kind: 'info', message }); return Promise.resolve(); },
     setStatusBarMessage: (message) => { messages.push({ kind: 'status', message }); return { dispose() {} }; },
   },
+  // activate also starts prompt lint (lint.js); this driver exercises none of it.
+  languages: {
+    createDiagnosticCollection: () => ({ dispose() {} }),
+    registerCodeActionsProvider: () => ({ dispose() {} }),
+    match: () => 0,
+  },
+  Disposable: { from: () => ({ dispose() {} }) },
+  CodeActionKind: { QuickFix: 'quickfix' },
   extensions: { getExtension: () => undefined },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
   ThemeIcon: function (id) { this.id = id; },

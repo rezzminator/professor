@@ -31,6 +31,10 @@ const vscodeStub = {
     workspaceFile: { scheme: 'vscode-local', fsPath: file, toString: () => 'vscode-local:' + file },
     workspaceFolders: undefined,
     onDidChangeConfiguration: () => ({ dispose() {} }),
+    // activate also starts prompt lint (lint.js); this run exercises none of it.
+    textDocuments: [],
+    onDidOpenTextDocument: () => ({ dispose() {} }),
+    onDidCloseTextDocument: () => ({ dispose() {} }),
     getConfiguration(section) {
       if (section !== 'workbench') return { get: () => undefined, inspect: () => undefined };
       return {
@@ -51,6 +55,13 @@ const vscodeStub = {
     showErrorMessage: (message) => { process.stderr.write('error: ' + message + '\n'); return Promise.resolve(); },
     showWarningMessage: (message) => { process.stderr.write('warning: ' + message + '\n'); return Promise.resolve(); },
   },
+  languages: {
+    createDiagnosticCollection: () => ({ dispose() {} }),
+    registerCodeActionsProvider: () => ({ dispose() {} }),
+    match: () => 0,
+  },
+  Disposable: { from: () => ({ dispose() {} }) },
+  CodeActionKind: { QuickFix: 'quickfix' },
   extensions: { getExtension: () => undefined },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
   ThemeIcon: function (id) { this.id = id; },

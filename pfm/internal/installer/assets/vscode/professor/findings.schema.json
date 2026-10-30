@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["line", "endLine", "severity", "rule", "message"],
+        "properties": {
+          "line": { "type": "integer", "minimum": 1 },
+          "endLine": { "type": "integer", "minimum": 1 },
+          "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+          "rule": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "message": { "type": "string", "minLength": 1 },
+          "rewrite": { "type": "string" }
+        }
+      }
+    }
+  }
+}

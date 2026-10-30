@@ -2,7 +2,7 @@
 
 **Home:** `infra/fence/lanes/`. **Coverage index:** `infra/fence/lanes/beats.md` (per-lane beats) + `infra/fence/lanes/map.tsv` (`name · lane · beat`, one row per pfm command and MCP tool).
 
-Tier B drives the pfm binary against a mock engine that plays `claude`, `codex` and `opencode`. Every run has two invented Claude fixture seats plus Codex and OpenCode fixture homes, registered fixture credentials only, `--network none` and `GOPROXY=off`. It spends no model turn and works in Linux containers on any Docker host. A human runs it on demand, or a flight lander runs it when that flight's spec names the lanes. Neither CI nor the releaser GATE runs the lanes. The host-side release rehearsal is the one real-model run; it is outside every test suite.
+Tier B drives the pfm binary against a mock engine that plays `claude`, `codex` and `opencode`. Every run has two invented Claude fixture seats plus Codex and OpenCode fixture homes, registered fixture credentials only, `--network none` and `GOPROXY=off`. It spends no model turn and works in Linux containers on any Docker host. A human runs it on demand, or a flight lander runs it when that flight's spec names the lanes. Neither CI nor the full gate runs the lanes.
 
 ## The shape
 

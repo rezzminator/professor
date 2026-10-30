@@ -35,6 +35,17 @@ expect 'an edited copy is DRIFT and fails the check' '[ "$RC" = 1 ] && grep -q "
 run_sut --write buddy
 expect 'a write restores a drifted vendored copy' '[ "$RC" = 0 ] && grep -q "^updated buddy" "$T/out" && cmp -s "$TS" "$P/buddy/plugins/buddy/src/plugin-log.ts"'
 
+printf '// a released rewording\n' >> "$P/buddy/plugins/buddy/src/plugin-log.ts"
+accepted="buddy $(cd / && git hash-object --no-filters --stdin < "$P/buddy/plugins/buddy/src/plugin-log.ts") a released rewording"
+RC=0; PLUGIN_LOG_SYNC_ACCEPTED="$accepted" bash "$SUT" --check --plugins-dir "$P" > "$T/out" 2> "$T/err" || RC=$?
+expect 'an accepted drift pinned by its exact content is ACCEPTED and passes the check' '[ "$RC" = 0 ] && grep -q "^ACCEPTED buddy plugins/buddy/src/plugin-log.ts: a released rewording" "$T/out" && grep -q "10 checked, 0 drifted, 0 not checked, 1 accepted" "$T/out"'
+RC=0; PLUGIN_LOG_SYNC_ACCEPTED="$accepted" bash "$SUT" --write buddy --plugins-dir "$P" > "$T/out" 2> "$T/err" || RC=$?
+expect 'a write leaves an accepted copy as it is' '[ "$RC" = 0 ] && grep -q "^ACCEPTED buddy" "$T/out" && ! cmp -s "$TS" "$P/buddy/plugins/buddy/src/plugin-log.ts"'
+printf '// one more edit\n' >> "$P/buddy/plugins/buddy/src/plugin-log.ts"
+RC=0; PLUGIN_LOG_SYNC_ACCEPTED="$accepted" bash "$SUT" --check --plugins-dir "$P" > "$T/out" 2> "$T/err" || RC=$?
+expect 'any further change to an accepted copy is DRIFT again' '[ "$RC" = 1 ] && grep -q "^DRIFT buddy" "$T/out"'
+run_sut --write buddy
+
 printf 'package pluginlog // the plugin'"'"'s own\n' > "$P/harvester/internal/pluginlog/pluginlog.go"
 run_sut --write harvester
 expect 'a write refuses a file that is the plugin'"'"'s own and leaves it' '[ "$RC" = 1 ] && grep -q "^REFUSED harvester" "$T/out" && grep -q "the plugin'"'"'s own" "$P/harvester/internal/pluginlog/pluginlog.go"'

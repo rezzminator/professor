@@ -1,6 +1,6 @@
 # changelogger
 
-`changelogger` writes one release's notes for the adopter who updates onto it: `releases/v{NEW}.md`, the line prepended to `CHANGELOG.md`, and the coverage ledger that proves every commit in the range was accounted for. It writes and revises; it never judges its own note. It does run the grammar and coverage rules of `release-check notes` before it returns, so a round trip with the `releaser` is spent on judgment rather than on a malformed line; the verdict stays the `releaser`'s, which runs the full check with the version and command rules. The grammar it writes is public and lives in `docs/RELEASE.md` § Release notes; this file holds why the grammar is what it is and how the agent reaches a note that grammar accepts. Family decisions live in [release.md](release.md).
+`changelogger` writes one release's notes for the adopter who updates onto it: the draft `DIR/v{NEW}.md` that becomes `releases/v{NEW}.md`, the line `DIR/changelog.line` prepended to `CHANGELOG.md`, and the coverage ledger `DIR/coverage.tsv` that proves every commit in the range was accounted for. `/pfm:release`'s main chat spawns it at the cut. It writes into the release directory, never the release worktree, because the full gate reads that tree while the note is written. It writes and revises; it never judges its own note. It does run the grammar and coverage rules of `release-check notes` before it returns, so a round trip with the main chat is spent on judgment rather than on a malformed line; the verdict stays the main chat's, which runs the check again and, once the version is stamped, the full check with the version and command rules. The grammar it writes is public and lives in `docs/RELEASE.md` § Release notes; this file holds why the grammar is what it is and how the agent reaches a note that grammar accepts. Family decisions live in [release.md](release.md).
 
 ## Contents
 
@@ -57,7 +57,7 @@ Every bullet traces to the commits the ledger gives it. A statement no commit su
 
 ## The coverage ledger
 
-`DIR/notes/coverage.tsv`, one row per non-merge commit in the range, tab-separated:
+`DIR/coverage.tsv`, one row per non-merge commit in the range, tab-separated:
 
 ```text
 {sha7}	{section}	{Label}: {scope}
@@ -79,11 +79,11 @@ A commit reaches a bullet by naming the bullet's section and its label-and-scope
 
 ## Revise mode
 
-Spawned with the existing note and a list of items — the check's failure lines, a rehearsal friction routed `notes`, commits that landed after the first write. It changes what the items require and nothing else: a revision that rewrites unrelated bullets makes the next review of the note start over. It updates the ledger for every new commit.
+The main chat sends the check's failure lines back to the same `changelogger` by `SendMessage`, two rounds at most; a third failure stops the cut. It changes what the lines require and nothing else: a revision that rewrites unrelated bullets makes the next read of the note start over. The cut commit never moves, so no commit joins the range during a revision.
 
 ## Input and return
 
-Input: the candidate worktree, `BASE`, HEAD, `NEW`, `PREV`, `BUMP`, `SUMMARY`, the release directory, the review reports' paths; in revise mode, the items.
+Input: the release worktree `WT` at the cut commit, `BASE` (`origin/main`'s sha), the cut commit `C`, `NEW`, `PREV`, `BUMP`, `SUMMARY`, the release directory `DIR`; in revise mode, the failure lines. It runs at smart (`opus`), effort `high`, visible to the main chat alone.
 
 Return:
 

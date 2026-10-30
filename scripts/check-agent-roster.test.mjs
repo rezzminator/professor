@@ -762,7 +762,7 @@ test('only the exact gitter mirror retains Git write permissions', () => {
 });
 
 // auto-effort-control steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
-// its buttons: exactly these Claude roles hold both; every other rendered agent, pcm and releaser neither.
+// its buttons: exactly these Claude roles hold both; every other rendered agent and pcm neither.
 const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort-control__${tool}`);
 const foremanEffort = { floor: 'medium', ceiling: 'xhigh' };
 const effortSteered = new Map([
@@ -806,12 +806,12 @@ test('effort permission gate evaluates native exclusions without reducing inheri
   assert.throws(() => assertEffortPermission('reviewer', `---\nname: reviewer\neffortControl: true\ndisallowedTools: [${effortButtons[0]}]\n---\nReview.\n`));
 });
 
-test('effort buttons ride exactly the steered Claude roles, never another rendered agent, pcm or releaser', () => {
+test('effort buttons ride exactly the steered Claude roles, never another rendered agent or pcm', () => {
   const render = renderShipped([CAPABILITY]);
   const dir = join(render.home, '.claude/agents');
   const agents = [
     ...readdirSync(dir).filter((file) => file.endsWith('.md')).map((file) => [file.slice(0, -3), readFileSync(join(dir, file), 'utf8')]),
-    ...['.claude/agents/pcm.md', '.claude/agents/releaser.md', 'templates/project/agents/pcm.md']
+    ...['.claude/agents/pcm.md', 'templates/project/agents/pcm.md']
       .map((path) => [path, readFileSync(join(ROOT, path), 'utf8')]),
   ];
   const steered = [];

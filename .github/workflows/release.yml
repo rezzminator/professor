@@ -1,9 +1,9 @@
 name: release
 
-# Releasing is merging the develop -> main pull request: its PR jobs run every
-# check (`make release-check` runs the same ones locally), and the merge tags
-# v{VERSION} on the merge commit and publishes the pfm binaries. No tag is
-# pushed by hand.
+# Releasing is merging the release/v{VERSION} -> main pull request: its PR jobs
+# run every check (`make release-check` runs the same ones locally), the merge
+# tags v{VERSION} on the merge commit and publishes the pfm binaries, and
+# `verify` checks what GitHub then serves. No tag is pushed by hand.
 on:
   pull_request:
     branches: [main]
@@ -208,3 +208,44 @@ jobs:
           gh release create "$VERSION" tmp/dist/pfm_* tmp/dist/SHA256SUMS \
             --target "${{ github.event.pull_request.merge_commit_sha }}" \
             --title "$VERSION" --notes-file "releases/${VERSION}.md"
+
+  # What GitHub now serves, checked from the outside: the assets match their
+  # SHA256SUMS, the linux/amd64 binary names the release, and the release body
+  # is the authored note.
+  verify:
+    name: verify
+    needs: publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the merge commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+
+      - name: The published assets, binary and body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$(cat VERSION)"
+          dir="$RUNNER_TEMP/assets"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir"
+          (cd "$dir" && sha256sum -c SHA256SUMS)
+          bin="$dir/pfm_${tag}_linux_amd64"
+          chmod +x "$bin"
+          got="$("$bin" version)"
+          if [[ "$got" != "pfm $tag" ]]; then
+            echo "::error::$bin version printed '$got', want 'pfm $tag'"
+            exit 1
+          fi
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          # $(…) drops trailing newlines, so the two compare up to a trailing newline.
+          if [[ "$(cat "$RUNNER_TEMP/body.md")" != "$(cat "releases/${tag}.md")" ]]; then
+            diff "$RUNNER_TEMP/body.md" "releases/${tag}.md" || true
+            echo "::error::the release body differs from releases/${tag}.md"
+            exit 1
+          fi
+          echo "verified $tag: SHA256SUMS, $("$bin" version), body"

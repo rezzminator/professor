@@ -72,7 +72,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	writeProjectUpdatesFixture(
 		t, project, ".claude/codex-build.json", "{\n  \"skills\": [],\n  \"tools\": [\"mcp__chat__chat_ls\"]\n}\n",
 	)
-	writeProjectUpdatesFixture(t, project, "scripts/live.sh", "/pfm:release prepare; /pfm:workbench; /pcmx\n")
+	writeProjectUpdatesFixture(t, project, "scripts/live.sh", "/pfm:release cut; /pfm:workbench; /pcmx\n")
 
 	var stdout, stderr bytes.Buffer
 	code := runDoctor([]string{"--project-updates", "--root", project}, &stdout, &stderr, runtime)

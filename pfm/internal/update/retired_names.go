@@ -128,13 +128,13 @@ var retiredNames = []retiredName{
 	// in releases/v0.78.0.md.
 	{name: "JC-COMMIT", kind: retiredPhase, successor: "COMMIT", match: matchExact},
 	{name: "JC-UPDATE", kind: retiredPhase, match: matchExact},
-	// releases/v0.77.0.md "C: pfm — /pfm:refresh is gone as a command":
-	// /pfm:release --from is its only caller (the live form per CLAUDE.md
+	// releases/v0.77.0.md "C: pfm — /pfm:refresh is gone as a command": the
+	// refresh pass is pcm's, run on request (the live form per CLAUDE.md
 	// § Vocabulary "refresh").
 	{
 		name:      "/pfm:refresh",
 		kind:      retiredCommand,
-		successor: "/pfm:release prepare --from {live-project}",
+		successor: pcmSuccessor,
 		match:     matchExact,
 	},
 	// releases/v0.77.0.md "/quality:md-forlint (renamed from /quality:forlint)".

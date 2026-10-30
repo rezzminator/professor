@@ -86,7 +86,7 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 	t.Parallel()
 	for _, line := range []string{
-		"/pfm:release prepare --from ../live",
+		"/pfm:release cut patch \"fix\"",
 		"/pfm:workbench new",
 		"run /pcm:update or /pcmx",
 		"the /pfm CLI guide",

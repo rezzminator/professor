@@ -7,31 +7,25 @@
 //                                       --base/--head/--coverage; version V1–V3 with
 //                                       --version/--previous/--bump; P1 with --pfm-help
 //   notes --all DIR                     the grammar of every v*.md at or above v0.78.0
-//   ready DIR --worktree PATH [--stamp] R1–R6: every release verdict holds at HEAD
+//   preflight --base REF --head REF     S1 seams, D1 README commands, T1 plugin tags:
+//                                       what the cut commit must hold before it ships
 // Exit 0 ends on `release-check {mode}: clean`; exit 1 prints one
-// `FAIL {rule}: {where} — {what}` per failure (ready adds `RERUN {phase}` lines).
+// `FAIL {rule}: {where} — {what}` per failure.
 // When the check itself is broken — bad usage, a missing input file, a git
 // command that failed — it exits 2 with `ERROR {what}` naming the input, or the
 // git command and its stderr: never a FAIL, never clean.
 
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 class CheckError extends Error {}
 
 const USAGE = [
   "usage: release-check.mjs scope --base REF --head REF",
-  "       release-check.mjs notes FILE [--base REF --head REF --coverage TSV] [--version [v]X.Y.Z [--previous [v]X.Y.Z --bump patch|minor|major]] [--pfm-help FILE] [--record FILE]",
+  "       release-check.mjs notes FILE [--base REF --head REF --coverage TSV] [--version [v]X.Y.Z [--previous [v]X.Y.Z --bump patch|minor|major]] [--pfm-help FILE]",
   "       release-check.mjs notes --all DIR",
-  "       release-check.mjs ready DIR --worktree PATH [--stamp]",
+  "       release-check.mjs preflight --base REF --head REF",
 ].join("\n");
 
 const HUNK_CAP = 600; // one reviewer run's capacity: an area over it splits
@@ -97,13 +91,12 @@ const TIER1 = [
       ".github/",
       ".githooks/",
       "scripts/",
-      "infra/fence/release-rehearsal.sh",
       "infra/check-self-hosted-manifest.sh",
     ],
   },
 ];
 
-// The files a release commit itself writes; the gate's verdict carries over them.
+// The files a release commit itself writes, beside the gated commit it ships.
 const RELEASE_FILES = [
   "CHANGELOG.md",
   "VERSION",
@@ -126,9 +119,6 @@ const SECTIONS = [
 const LABELS = ["Global", "Project", "pfm", "Repo"];
 const TIMINGS = ["before update", "after update", "per project"];
 const BUMPS = ["patch", "minor", "major"];
-const PHASES = ["REVIEW", "NOTES", "GATE", "REHEARSE", "READY"];
-const LANES = ["templates", "pfm", "e2e"];
-const MACHINES = ["main", "behind"];
 
 // ---------------------------------------------------------------- plumbing
 
@@ -171,23 +161,6 @@ function resolveCommit(cwd, ref, flag) {
   return git(cwd, ["rev-parse", "--verify", `${ref}^{commit}`]).trim();
 }
 
-// A sha written into a verdict file: the commit it names, or null when the
-// worktree holds no such commit (a verdict defect, judged by the caller).
-function lookupCommit(cwd, sha) {
-  try {
-    return execFileSync(
-      "git",
-      [...gitPrefix(cwd), "rev-parse", "--verify", "--quiet", `${sha}^{commit}`],
-      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    ).trim();
-  } catch (err) {
-    if (err.status === 1 && !String(err.stderr ?? "").trim()) return null;
-    throw new CheckError(
-      `git rev-parse --verify --quiet ${sha}^{commit} (in ${cwd}) failed: ${String(err.stderr ?? "").trim() || err.message}`,
-    );
-  }
-}
-
 // A git yes/no question: exit 0 is yes, exit 1 with no stderr is no; any
 // other exit is a git failure, never a no.
 function gitYes(cwd, args) {
@@ -220,17 +193,6 @@ function readInput(path, what) {
   }
 }
 
-// A verdict file inside the release directory: absent is null (the phase has
-// not run — the rule fails), unreadable is an error.
-function readVerdict(path) {
-  if (!existsSync(path)) return null;
-  try {
-    return readFileSync(path, "utf8");
-  } catch (err) {
-    throw new CheckError(`${path} could not be read: ${err.message}`);
-  }
-}
-
 const textLines = (text) => {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
@@ -247,12 +209,6 @@ const cmpVersion = (a, b) =>
   a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
 const fail = (rule, where, what) => ({ rule, where, what });
-
-const today = () => {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
 
 // ---------------------------------------------------------------- git range
 
@@ -751,8 +707,8 @@ function coverageRules(cwd, o, note, head, notePath) {
   requireAncestor(cwd, base, head, o);
   const tsv = readInput(o.coverage, "coverage file");
   const commits = revList(cwd, base, head);
-  // A commit whose changed paths are all release files (§ ready) is the
-  // release's own; it needs no ledger row.
+  // A commit whose changed paths are all release files is the release's own;
+  // it needs no ledger row.
   const releaseOnly = new Set(
     commits.filter((c) => {
       const paths = commitPaths(cwd, c);
@@ -891,15 +847,6 @@ function commandRule(helpPath, note, notePath) {
   return fails;
 }
 
-function writeRecord(path, lines) {
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${lines.join("\n")}\n`);
-  } catch (err) {
-    throw new CheckError(`--record ${path} could not be written: ${err.message}`);
-  }
-}
-
 function groupGiven(o, names) {
   const given = names.filter((n) => o[n] !== undefined);
   if (given.length && given.length !== names.length)
@@ -939,339 +886,209 @@ function notesAll(o) {
   return report("notes", fails, [`CHECKED ${checked} notes at or above v${GRAMMAR_FIRST} in ${dir}`]);
 }
 
-// An error once --record is known still records NOTES ERROR, so no earlier
-// PASS survives it; a record that cannot be written is reported beside the
-// original error, never in its place.
-function recordError(path, head, err) {
-  const message = err instanceof CheckError ? err.message : `internal: ${err.stack ?? err}`;
-  try {
-    writeRecord(path, [`NOTES ERROR ${head ?? "unknown"}`, `ERROR ${message}`]);
-  } catch (writeErr) {
-    return new CheckError(`${message}; and ${writeErr.message}`);
-  }
-  return err;
-}
-
-// The paths --record judges as committed: the note and the version stamps.
-const RECORD_PATHS = ["VERSION", ".professor/VERSION", ".professor/manifest.json", "CHANGELOG.md"];
-
 function notes(o) {
   const cwd = process.cwd();
-  let head = null;
+  if (o.all) return notesAll(o);
+  if (o._.length !== 1) throw new CheckError("usage: notes takes one note file");
+  const file = o._[0];
+  const wantRange = groupGiven(o, ["base", "head", "coverage"]);
+  // --version alone binds N1; --previous and --bump bring V1–V3 and need all three.
+  const wantVersion =
+    o.previous !== undefined || o.bump !== undefined
+      ? groupGiven(o, ["version", "previous", "bump"])
+      : false;
+  const version = o.version === undefined ? null : semver(o.version, "--version");
+  let previous;
+  if (wantVersion) {
+    previous = semver(o.previous, "--previous");
+    if (!BUMPS.includes(o.bump))
+      throw new CheckError(`usage: --bump ${o.bump} is not one of ${BUMPS.join(", ")}`);
+  }
+  const text = readInput(file, "note");
+  const note = parseNote(text, file, version?.str ?? null);
+  const fails = [...note.fails];
+  if (wantRange)
+    fails.push(...coverageRules(cwd, o, note, resolveCommit(cwd, o.head, "--head"), file));
+  if (wantVersion) fails.push(...versionRules(cwd, note, version, previous, o.bump, file));
+  if (o["pfm-help"] !== undefined) fails.push(...commandRule(o["pfm-help"], note, file));
+  return report("notes", fails);
+}
+
+// ---------------------------------------------------------------- preflight
+
+// Where a removed name may still stand: history, and the retired-name
+// registry, which names every removed command, agent and path on purpose.
+const SEAM_EXCLUDES = [
+  "releases/",
+  "CHANGELOG.md",
+  ".professor/RR/",
+  "pfm/internal/update/retired_names.go",
+  "pfm/internal/update/retired_names_test.go",
+].map((p) => `:(top,exclude)${p}`);
+
+// The roots whose files are commands and skills a README line may name.
+const COMMAND_ROOTS = ["templates/global/commands/", "templates/project/commands/", ".claude/commands/"];
+const SKILL_ROOTS = ["templates/global/skills/", "templates/project/skills/", ".claude/skills/"];
+const ASSET_ROOT = "pfm/internal/installer/assets/";
+// shortcut: commands README.md names that no tree here holds — Claude Code's
+// own and the listed plugins' (their trees live in the submodules' own
+// repositories); a new one joins this list in the same change as its README line.
+const README_EXTERNAL = new Set(["/reload-plugins", "/buddy", "/cache", "/keepwarm"]);
+
+// `git grep` at a commit: [{path, line, text}]; exit 1 with no stderr is no hit.
+function grepAt(cwd, head, args) {
+  let out;
   try {
-    if (o.all) return notesAll(o);
-    if (o._.length !== 1) throw new CheckError("usage: notes takes one note file");
-    const file = o._[0];
-    const wantRange = groupGiven(o, ["base", "head", "coverage"]);
-    // --version alone binds N1; --previous and --bump bring V1–V3 and need all three.
-    const wantVersion =
-      o.previous !== undefined || o.bump !== undefined
-        ? groupGiven(o, ["version", "previous", "bump"])
-        : false;
-    const version = o.version === undefined ? null : semver(o.version, "--version");
-    let previous;
-    if (wantVersion) {
-      previous = semver(o.previous, "--previous");
-      if (!BUMPS.includes(o.bump))
-        throw new CheckError(`usage: --bump ${o.bump} is not one of ${BUMPS.join(", ")}`);
-    }
-    const text = readInput(file, "note");
-    if (wantRange || o.record) head = resolveCommit(cwd, o.head ?? "HEAD", "--head");
-    // The record names a commit, so the note and stamps it judged must be that
-    // commit's: a working-tree edit would pass a note HEAD does not hold.
-    if (o.record) {
-      const differs = nulSplit(
-        git(cwd, ["status", "--porcelain", "-z", "--untracked-files=all", "--", file, ...RECORD_PATHS]),
-      ).map((e) => (/^.. /.test(e) ? e.slice(3) : e));
-      if (differs.length)
-        throw new CheckError(`${differs.join(", ")} differs from HEAD — commit the note and stamps before recording`);
-    }
-    const note = parseNote(text, file, version?.str ?? null);
-    const fails = [...note.fails];
-    if (wantRange) fails.push(...coverageRules(cwd, o, note, head, file));
-    if (wantVersion) fails.push(...versionRules(cwd, note, version, previous, o.bump, file));
-    if (o["pfm-help"] !== undefined) fails.push(...commandRule(o["pfm-help"], note, file));
-    const result = report("notes", fails);
-    const groups = [
-      wantRange && "range",
-      wantVersion && "version",
-      o["pfm-help"] !== undefined && "commands",
-    ].filter(Boolean);
-    if (o.record)
-      writeRecord(o.record, [[`NOTES ${fails.length ? "FAIL" : "PASS"}`, head, ...groups].join(" "), ...result.lines]);
-    return result;
+    out = execFileSync(
+      "git",
+      [...gitPrefix(cwd), "-c", "core.quotePath=false", "grep", "-z", "-n", "-I", "--full-name", ...args, head, "--", ":(top)", ...SEAM_EXCLUDES],
+      { cwd, encoding: "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "pipe"] },
+    );
   } catch (err) {
-    if (o.record) throw recordError(o.record, head, err);
-    throw err;
+    if (err.status === 1 && !String(err.stderr ?? "").trim()) return [];
+    throw new CheckError(`git grep ${args.join(" ")} ${head} (in ${cwd}) failed: ${String(err.stderr ?? "").trim() || err.message}`);
   }
+  return out
+    .split("\n")
+    .filter(Boolean)
+    .map((row) => {
+      const [where, line, ...text] = row.split("\0");
+      return { path: where.slice(head.length + 1), line, text: text.join("\0") };
+    });
 }
 
-// ---------------------------------------------------------------- ready
-
-function reviewReports(dir) {
-  const root = join(dir, "review");
-  const found = [];
-  const walk = (rel) => {
-    let entries;
-    try {
-      entries = readdirSync(join(root, rel), { withFileTypes: true });
-    } catch (err) {
-      throw new CheckError(`${join(root, rel)} could not be listed: ${err.message}`);
-    }
-    for (const e of entries) {
-      const path = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        if (!rel && e.name.startsWith("sandbox-")) continue; // a reviewer's sandbox, not a report
-        walk(path);
-      } else if (e.name.endsWith(".md")) found.push(`review/${path}`);
-    }
-  };
-  if (existsSync(root)) walk("");
-  return found.sort();
-}
-
-function ready(o) {
-  if (o._.length !== 1) throw new CheckError("usage: ready takes one release directory");
-  if (!o.worktree) throw new CheckError("usage: ready needs --worktree PATH");
-  const dir = resolve(o._[0]);
-  const wt = resolve(o.worktree);
-  if (!existsSync(dir) || !statSync(dir).isDirectory())
-    throw new CheckError(`release directory ${dir} does not exist`);
-  if (!existsSync(wt) || !statSync(wt).isDirectory())
-    throw new CheckError(`worktree ${wt} does not exist`);
-  const head = resolveCommit(wt, "HEAD", "HEAD");
-  const version = git(wt, ["show", "HEAD:VERSION"]).trim();
-  const notePath = `releases/v${version}.md`;
+// S1 — no file outside history still names a path or role the range removed.
+function seamRule(cwd, base, head, info) {
+  const changes = nameStatus(cwd, base, head);
+  const paths = [
+    ...new Set(changes.flatMap((c) => (c.status === "D" ? [c.path] : c.status === "R" ? [c.oldPath] : []))),
+  ].sort();
+  const roles = roleChanges(cwd, base, head, changes).removed;
+  info.push(`SEAMS ${paths.length} removed paths, ${roles.length} removed roles swept`);
   const fails = [];
-  const rerun = new Set();
-  const isHead = (sha) => sha.length >= 7 && head.startsWith(sha);
-  const failR = (rule, phase, where, what) => {
-    fails.push(fail(rule, where, what));
-    rerun.add(phase);
-  };
-  const since = new Map();
-  const changedSince = (sha) => {
-    if (!since.has(sha))
-      since.set(sha, nulSplit(git(wt, ["diff", "--name-only", "-z", "--no-renames", "--no-relative", sha, head])));
-    return since.get(sha);
-  };
-
-  // R1 — a report for every AREA of the kept scope, and every report an
-  // allow-list: each finding carries a status, and every status reads
-  // `resolved @{sha}` or `waived`, markup stripped and case ignored.
-  const scopeText = readVerdict(join(dir, "scope.md"));
-  if (scopeText === null) failR("R1", "REVIEW", "scope.md", "absent — the REVIEW scope was not kept");
-  else
-    for (const line of textLines(scopeText)) {
-      const area = /^AREA (\S+) /.exec(line)?.[1];
-      if (area && !existsSync(join(dir, "review", `${area}.md`)))
-        failR("R1", "REVIEW", `review/${area}.md`, `no report for AREA ${area}`);
-    }
-  const reports = reviewReports(dir);
-  if (!reports.length) failR("R1", "REVIEW", "review/", "no review/*.md exists");
-  for (const rel of reports)
-    for (const [where, what] of judgeReport(rel, readVerdict(join(dir, rel)) ?? ""))
-      failR("R1", "REVIEW", where, what);
-
-  // R2 — no tier-1 path outside the release files changed since the review.
-  const reviewed = readVerdict(join(dir, "review/HEAD"))?.trim();
-  if (!reviewed) failR("R2", "REVIEW", "review/HEAD", "absent or empty — no REVIEW recorded");
-  else {
-    const sha = /^[0-9a-f]{7,40}$/.test(reviewed) ? lookupCommit(wt, reviewed) : null;
-    if (!sha) failR("R2", "REVIEW", "review/HEAD", `${reviewed} is not a commit of the worktree`);
-    else
-      for (const p of changedSince(sha))
-        if (tierOf(p) && !isReleaseFile(p))
-          failR("R2", "REVIEW", p, `tier-1 path changed since the review at ${sha.slice(0, 7)}`);
-  }
-
-  // R3 — every gate lane green at HEAD, or red on stable too; carried over
-  // commits that touch only the release files.
-  const lastExit = (text) => {
-    const last = textLines(text ?? "").filter((l) => l.trim()).pop() ?? "";
-    const m = /^EXIT (\d+) @([0-9a-f]{7,40})$/.exec(last.trim());
-    return m ? { code: +m[1], sha: m[2], line: last.trim() } : { line: last.trim() };
-  };
-  for (const lane of LANES) {
-    const rel = `gate/candidate-${lane}.log`;
-    const text = readVerdict(join(dir, rel));
-    if (text === null) {
-      failR("R3", "GATE", rel, "absent");
-      continue;
-    }
-    const cand = lastExit(text);
-    if (cand.sha === undefined) {
-      failR("R3", "GATE", rel, `does not end \`EXIT {code} @{sha}\`: ${JSON.stringify(cand.line)}`);
-      continue;
-    }
-    if (cand.code !== 0) {
-      const stableRel = `gate/stable-${lane}.log`;
-      const stable = lastExit(readVerdict(join(dir, stableRel)));
-      if (!(stable.code > 0)) {
-        failR("R3", "GATE", rel, `candidate red (EXIT ${cand.code}) and ${stableRel} is not red — a new red`);
-        continue;
+  const sweep = (tokens, words, what) => {
+    if (!tokens.length) return;
+    const hits = grepAt(cwd, head, [...(words ? ["-w"] : []), "-F", ...tokens.flatMap((t) => ["-e", t])]);
+    for (const hit of hits)
+      for (const t of tokens) {
+        // A hyphen joins a longer name (flights-lander-sonnet is not
+        // flights-lander); a path continues through a further segment or
+        // extension (scripts/old.sh.bak, scripts/old.shell are not scripts/old.sh).
+        const named = words
+          ? new RegExp(`(?<![A-Za-z0-9_-])${reEscape(t)}(?![A-Za-z0-9_-])`).test(hit.text)
+          : new RegExp(`(?<![A-Za-z0-9_.-])${reEscape(t)}(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`).test(hit.text);
+        if (named) fails.push(fail("S1", `${hit.path}:${hit.line}`, `names the removed ${what(t)}`));
       }
-    }
-    if (isHead(cand.sha)) continue;
-    const sha = lookupCommit(wt, cand.sha);
-    if (!sha) {
-      failR("R3", "GATE", rel, `${cand.sha} is not a commit of the worktree`);
-      continue;
-    }
-    const outside = changedSince(sha).filter((p) => !isReleaseFile(p));
-    if (outside.length)
-      failR("R3", "GATE", rel, `ran at ${sha.slice(0, 7)}, not HEAD; since then ${outside.length} path(s) outside the release files changed: ${outside.slice(0, 5).join(", ")}${outside.length > 5 ? ", …" : ""}`);
-  }
-
-  // R4 — the rehearsal CLEAN on both machines, or a recorded user ruling
-  // that ships in the note's ## Verification; at HEAD or carried over
-  // commits that touch only the note's ## Verification section.
-  const rehearsal = readVerdict(join(dir, "rehearsal.md"));
-  const lineOne = textLines(rehearsal ?? "")[0]?.trim() ?? "";
-  const ruledLine = /^REHEARSAL RULED ([0-9a-f]{7,40}) round (\d+)(?:\s+—(.*))?$/.exec(lineOne);
-  const r4 = ruledLine ?? /^REHEARSAL CLEAN ([0-9a-f]{7,40}) round (\d+)$/.exec(lineOne);
-  if (!r4)
-    failR("R4", "REHEARSE", "rehearsal.md", rehearsal === null ? "absent" : `line one is not \`${lineOne.startsWith("REHEARSAL RULED") ? "REHEARSAL RULED {sha} round {n} — {ruling}" : "REHEARSAL CLEAN {sha} round {n}"}\`: ${JSON.stringify(textLines(rehearsal)[0] ?? "")}`);
-  else {
-    if (ruledLine) {
-      if (!(ruledLine[3] ?? "").trim())
-        failR("R4", "REHEARSE", "rehearsal.md", "`REHEARSAL RULED {sha} round {n} — {ruling}` carries no ruling text");
-      if (!treeHas(wt, head, notePath))
-        failR("R4", "REHEARSE", notePath, `absent at HEAD ${head.slice(0, 7)}; the ruling ships in its \`## Verification\``);
-      else {
-        const noteText = git(wt, ["show", `HEAD:${notePath}`]);
-        const range = verificationRange(noteText);
-        const body = range ? textLines(noteText).slice(range.start, range.end) : [];
-        const round = new RegExp(`\\bREHEARSAL RULED\\b.*\\bround ${ruledLine[2]}\\b`);
-        if (!range)
-          failR("R4", "REHEARSE", notePath, "holds no `## Verification` section; the ruling ships in it");
-        else if (!body.some((l) => round.test(l)))
-          failR("R4", "REHEARSE", notePath, `\`## Verification\` holds no line with \`REHEARSAL RULED\` and round ${ruledLine[2]}; the ruling ships in the note`);
-      }
-    }
-    for (const machine of ruledLine ? [] : MACHINES) {
-      const rel = `rehearsal/${machine}-${r4[2]}/result.json`;
-      const raw = readVerdict(join(dir, rel));
-      let verdict;
-      try {
-        verdict = raw === null ? "absent" : JSON.parse(raw)?.verdict;
-      } catch (err) {
-        verdict = `invalid JSON (${err.message})`;
-      }
-      if (verdict !== "CLEAN") failR("R4", "REHEARSE", rel, `verdict is not CLEAN: ${verdict}`);
-    }
-    if (!isHead(r4[1])) {
-      const sha = lookupCommit(wt, r4[1]);
-      if (!sha) failR("R4", "REHEARSE", "rehearsal.md", `${r4[1]} is not a commit of the worktree`);
-      else carryRehearsal(wt, sha, head, notePath, changedSince(sha), failR);
-    }
-  }
-
-  // R5 — the notes check passed at HEAD with every rule group, over a
-  // committed worktree whose VERSION is X.Y.Z and whose note is at HEAD.
-  const check = readVerdict(join(dir, "notes/check.txt"));
-  const first = textLines(check ?? "")[0]?.trim() ?? "";
-  const r5 = /^NOTES PASS ([0-9a-f]{7,40}) range version commands$/.exec(first);
-  if (!r5 || !isHead(r5[1]))
-    failR("R5", "NOTES", "notes/check.txt", check === null ? "absent" : `line one is not \`NOTES PASS ${head} range version commands\`: ${JSON.stringify(first)}`);
-  const dirty = textLines(git(wt, ["status", "--porcelain", "--untracked-files=no"]))
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (dirty.length)
-    failR("R5", "NOTES", wt, `uncommitted tracked change: ${dirty.slice(0, 5).join("; ")}${dirty.length > 5 ? "; …" : ""}`);
-  if (!/^\d+\.\d+\.\d+$/.test(version))
-    failR("R5", "NOTES", "VERSION", `HEAD's VERSION ${JSON.stringify(version)} is not X.Y.Z`);
-  else if (!treeHas(wt, head, notePath))
-    failR("R5", "NOTES", notePath, `absent at HEAD ${head.slice(0, 7)}`);
-
-  // R6 — the stamp names HEAD (the form gitter Phase RELEASE runs).
-  const info = [];
-  if (!o.stamp) {
-    const stamp = readVerdict(join(dir, "READY"));
-    const m = /^([0-9a-f]{7,40}) v\S+ \d{4}-\d{2}-\d{2}$/.exec(textLines(stamp ?? "")[0]?.trim() ?? "");
-    if (stamp === null) failR("R6", "READY", "READY", "absent");
-    else if (!m) failR("R6", "READY", "READY", `is not \`{sha} v{NEW} {YYYY-MM-DD}\`: ${JSON.stringify(textLines(stamp)[0] ?? "")}`);
-    else if (!isHead(m[1])) failR("R6", "READY", "READY", `names ${m[1]}, not HEAD ${head}`);
-  } else if (!fails.length) {
-    const line = `${head} v${version} ${today()}`;
-    try {
-      writeFileSync(join(dir, "READY"), `${line}\n`);
-    } catch (err) {
-      throw new CheckError(`READY ${join(dir, "READY")} could not be written: ${err.message}`);
-    }
-    info.push(`STAMPED READY ${line}`);
-  }
-  return report("ready", fails, info, PHASES.filter((p) => rerun.has(p)).map((p) => `RERUN ${p}`));
+  };
+  sweep(paths, false, (t) => `path ${t}`);
+  const kinds = new Map(roles.map((r) => [r.name, r.kind]));
+  sweep([...kinds.keys()], true, (t) => `${kinds.get(t)} ${t}`);
+  return fails;
 }
 
-// A finding opens at its `F{n}`, `S{n}` or `P{n}` id — bare, bulleted,
-// numbered or a heading — and runs to the next finding or the end.
-const FINDING = /^\s*(?:[-+]\s+|\d+\.\s+|#{1,6}\s+)?([FSP]\d+)\s*[·:|—-]/;
-
-// One review report's R1 defects, as [where, what] pairs.
-function judgeReport(rel, text) {
-  if (!text.trim()) return [[rel, "report is empty"]];
-  const out = [];
-  let open = null; // the finding being read: {id, line, status}
-  const close = () => {
-    if (open && !open.status) out.push([`${rel}:${open.line}`, `finding ${open.id} carries no status`]);
-  };
-  textLines(text).forEach((raw, i) => {
-    const line = raw.replace(/[*`_]/g, "");
-    const id = FINDING.exec(line)?.[1];
-    if (id) {
-      close();
-      open = { id, line: i + 1, status: false };
+// D1 — every command README.md names in a code span is one this tree ships.
+function readmeRule(cwd, head, info) {
+  if (!treeHas(cwd, head, "README.md")) throw new CheckError(`README.md is absent at ${head}`);
+  const shipped = new Set(README_EXTERNAL);
+  const listed = (root) => nulSplit(git(cwd, ["ls-tree", "-r", "--name-only", "-z", head, "--", root]));
+  for (const root of COMMAND_ROOTS)
+    for (const p of listed(root)) {
+      const m = /^([^/]+)(?:\/([^/]+))?\.md$/.exec(p.slice(root.length));
+      if (m) shipped.add(m[2] ? `/${m[1]}:${m[2]}` : `/${m[1]}`);
     }
-    for (const m of line.matchAll(/status:/gi)) {
-      if (open) open.status = true;
-      const value = line.slice(m.index + m[0].length).trim();
-      if (!/^(?:resolved @[0-9a-f]{7,40}\b|waived\b)/i.test(value))
-        out.push([`${rel}:${i + 1}`, `status "${value}" is neither resolved @{sha} nor waived`]);
+  for (const root of SKILL_ROOTS)
+    for (const p of listed(root)) {
+      const m = /^([^/]+)\//.exec(p.slice(root.length));
+      if (m) shipped.add(`/${m[1]}`);
+    }
+  for (const p of listed(ASSET_ROOT)) {
+    const m = /^([^/]+)\.(?:command|skill)\.md$/.exec(p.slice(ASSET_ROOT.length));
+    if (m) shipped.add(`/${m[1]}`);
+  }
+  const fails = [];
+  let checked = 0;
+  textLines(git(cwd, ["show", `${head}:README.md`])).forEach((line, i) => {
+    for (const m of line.matchAll(/`(\/[a-z][a-z0-9-]*(?::[a-z0-9-]+)?)(?=[\s`])/g)) {
+      checked++;
+      if (!shipped.has(m[1]))
+        fails.push(fail("D1", `README.md:${i + 1}`, `\`${m[1]}\` names no command or skill this tree ships`));
     }
   });
-  close();
-  return out;
+  info.push(`README ${checked} commands checked`);
+  return fails;
 }
 
-const verificationRange = (text) =>
-  text === null ? null : parseNote(text, "", null).verification;
-
-// Every change since the rehearsed commit lies inside the note's
-// ## Verification section: old-side lines inside it at the rehearsed commit,
-// new-side lines inside it at HEAD, and no other file touched.
-function carryRehearsal(wt, sha, head, notePath, changed, failR) {
-  for (const p of changed)
-    if (p !== notePath)
-      failR("R4", "REHEARSE", p, `changed since the rehearsed ${sha.slice(0, 7)}; only ${notePath} § Verification carries the rehearsal over`);
-  if (!changed.includes(notePath)) return;
-  const show = (ref) =>
-    nulSplit(git(wt, ["ls-tree", "--name-only", "-z", ref, "--", notePath])).length
-      ? git(wt, ["show", `${ref}:${notePath}`])
-      : null;
-  const oldRange = verificationRange(show(sha));
-  const newRange = verificationRange(show(head));
-  const diff = git(wt, [
-    "diff", "-U0", "--no-color", "--no-ext-diff", "--no-relative", "--no-renames", sha, head, "--", notePath,
-  ]);
-  const inside = (range, start, count) =>
-    range && start >= range.start && start + count - 1 <= range.end;
-  for (const line of diff.split("\n")) {
-    const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
-    if (!m) continue;
-    const [a, b, c, d] = [+m[1], m[2] === undefined ? 1 : +m[2], +m[3], m[4] === undefined ? 1 : +m[4]];
-    const ok = (b === 0 || inside(oldRange, a, b)) && (d === 0 || inside(newRange, c, d));
-    if (!ok)
-      failR("R4", "REHEARSE", `${notePath}:${c}`, `${line.replace(/ @@.*$/, " @@")} changes lines outside ## Verification since the rehearsed ${sha.slice(0, 7)}`);
+// T1 — every plugin the marketplace lists is pinned at a published tag of its repository.
+function pluginRule(cwd, head, info) {
+  const file = ".claude-plugin/marketplace.json";
+  if (!treeHas(cwd, head, file)) throw new CheckError(`${file} is absent at ${head}`);
+  let plugins;
+  try {
+    plugins = JSON.parse(git(cwd, ["show", `${head}:${file}`])).plugins;
+  } catch (err) {
+    if (err instanceof CheckError) throw err;
+    throw new CheckError(`${file} at ${head} is not valid JSON: ${err.message}`);
   }
+  if (!Array.isArray(plugins)) throw new CheckError(`${file} at ${head} holds no plugins list`);
+  const fails = [];
+  const unlisted = [];
+  for (const p of plugins) {
+    const path = String(p?.source?.path ?? "").replace(/^\.\//, "").replace(/\/$/, "");
+    const url = p?.source?.url;
+    if (!path || !url) {
+      fails.push(fail("T1", file, `plugin ${p?.name} names no source.path and source.url`));
+      continue;
+    }
+    const entry = nulSplit(git(cwd, ["ls-tree", "-z", head, "--", path]))[0] ?? "";
+    const m = /^160000 commit ([0-9a-f]{40})\t/.exec(entry);
+    if (!m) {
+      fails.push(fail("T1", path, `plugin ${p.name} has no submodule gitlink at ${head.slice(0, 7)}`));
+      continue;
+    }
+    let tagged;
+    try {
+      tagged = new Set(textLines(git(cwd, ["ls-remote", "--tags", url])).map((l) => l.split("\t")[0]));
+    } catch (err) {
+      if (!(err instanceof CheckError)) throw err;
+      // One unreachable remote must not hide the other plugins' rows.
+      unlisted.push(err.message);
+      continue;
+    }
+    if (!tagged.has(m[1]))
+      fails.push(fail("T1", path, `plugin ${p.name}'s gitlink ${m[1].slice(0, 7)} is no published tag of ${url}`));
+  }
+  info.push(`PLUGINS ${plugins.length - unlisted.length} checked, ${unlisted.length} unlistable`);
+  return { fails, unlisted };
+}
+
+function preflight(o) {
+  if (o._.length) throw new CheckError(`usage: preflight takes no positional argument (${o._.join(" ")})`);
+  if (!o.base || !o.head) throw new CheckError("usage: preflight needs --base and --head");
+  const cwd = process.cwd();
+  const base = resolveCommit(cwd, o.base, "--base");
+  const head = resolveCommit(cwd, o.head, "--head");
+  requireAncestor(cwd, base, head, o);
+  const info = [];
+  const fails = [...seamRule(cwd, base, head, info), ...readmeRule(cwd, head, info)];
+  const plugins = pluginRule(cwd, head, info);
+  fails.push(...plugins.fails);
+  // A plugin whose tags cannot be listed is a check that could not run: exit 2,
+  // still naming what every check that did run found, on the one ERROR line.
+  if (plugins.unlisted.length) {
+    const found = fails.map((f) => `FAIL ${f.rule}: ${f.where} — ${f.what}`);
+    throw new CheckError(
+      `${plugins.unlisted.join("; ")} (the checks that ran: ${[...info, ...found].join("; ") || "nothing found"})`,
+    );
+  }
+  return report("preflight", fails, info);
 }
 
 // ---------------------------------------------------------------- main
 
-// Info lines first; then one FAIL line per failure and the RERUN lines, or the clean line.
-function report(mode, fails, info = [], reruns = []) {
+// Info lines first; then one FAIL line per failure, or the clean line.
+function report(mode, fails, info = []) {
   const lines = fails.length
-    ? [...info, ...fails.map((f) => `FAIL ${f.rule}: ${f.where} — ${f.what}`), ...reruns]
+    ? [...info, ...fails.map((f) => `FAIL ${f.rule}: ${f.where} — ${f.what}`)]
     : [...info, `release-check ${mode}: clean`];
   return { lines, code: fails.length ? 1 : 0 };
 }
@@ -1279,10 +1096,10 @@ function report(mode, fails, info = [], reruns = []) {
 const FLAGS = {
   scope: { values: ["base", "head"], bools: [] },
   notes: {
-    values: ["base", "head", "coverage", "version", "previous", "bump", "pfm-help", "record"],
+    values: ["base", "head", "coverage", "version", "previous", "bump", "pfm-help"],
     bools: ["all"],
   },
-  ready: { values: ["worktree"], bools: ["stamp"] },
+  preflight: { values: ["base", "head"], bools: [] },
 };
 
 function parseArgs(mode, args, o) {
@@ -1309,15 +1126,7 @@ function parseArgs(mode, args, o) {
 function main(argv) {
   const [mode, ...args] = argv;
   if (!FLAGS[mode]) throw new CheckError(`usage: unknown mode ${JSON.stringify(mode ?? "")}`);
-  const o = { _: [] };
-  try {
-    parseArgs(mode, args, o);
-  } catch (err) {
-    // notes --record: a usage error after the record path is parsed still records.
-    if (o.record) throw recordError(o.record, null, err);
-    throw err;
-  }
-  return { scope, notes, ready }[mode](o);
+  return { scope, notes, preflight }[mode](parseArgs(mode, args, { _: [] }));
 }
 
 try {

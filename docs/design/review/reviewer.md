@@ -45,7 +45,7 @@
 - The report is `SANDBOX/review.md`: Claude Code refuses a sub-agent's write to any `.md` whose name matches `^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$` and answers "Subagents should return findings as text".
 - Sections: VERDICT, FINDINGS (`F{n} · severity · path:line · IN-BODY | BETWEEN-HOPS | MISSING · source · CHECKED | UNCHECKED`, a LOW finding one line), THREADS, RULED OUT, TESTS (by reading), COVERAGE and TELEMETRY.
 - Merge-gating: the brief names REPORT_PATH; findings carry `status: open`, a re-review flips a verified fix to `status: resolved @{sha}` and appends new ones; `waived — {ruling}` is the orchestrator's mark.
-- Readers: `gitter` Phase MERGE (project tier) refuses while the file is absent or a finding is open; `releaser` Phase REVIEW dispatches one `reviewer` per area with PATHSPECS and a REPORT_PATH per area. `flights-lander` dispatches no reviewer: it reviews the worktree itself and writes its own report in the gated shape, each finding `status: open` until its fix marks it `status: resolved in {file:line}` ([flights-lander.md](../flights/flights-lander.md)).
+- Readers: `gitter` Phase MERGE (project tier) refuses while the file is absent or a finding is open; `/pfm:release` dispatches one `reviewer-pro` over the `pfm-update` area's PATHSPECS with a REPORT_PATH when the cut changes that area. `flights-lander` dispatches no reviewer: it reviews the worktree itself and writes its own report in the gated shape, each finding `status: open` until its fix marks it `status: resolved in {file:line}` ([flights-lander.md](../flights/flights-lander.md)).
 
 ## Benchmark
 

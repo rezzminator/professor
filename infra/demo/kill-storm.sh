@@ -24,7 +24,7 @@ for n in $(pfm ls --tsv 2>/dev/null | awk -F'\t' "\$1 ~ /^live-/ && $storm {prin
 done
 sleep 2
 # An ended chat lingers as a resumable ↻ row; the picker should show the
-# fleet, not the rehearsal, so the ended rows are hidden by id.
+# fleet, not the storm, so the ended rows are hidden by id.
 for id in $(pfm ls --tsv 2>/dev/null | awk -F'\t' "\$1 ~ /^resume-/ && $storm {print \$2}"); do
   if pfm chat kill "$id" >/dev/null; then echo "hid $id"; else echo "kill-storm: pfm chat kill $id failed (see above)" >&2; failed=1; fi
 done

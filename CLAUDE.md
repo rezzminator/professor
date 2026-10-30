@@ -13,7 +13,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - placeholder: the registered token for a project-specific value in a template · `docs/PLACEHOLDERS.md`
 - spec: the adopter install interview and generation law · `docs/SETUP.md`
 - design docs: one directory per family, indexed by its `_index.md` · `docs/design/{family}/`
-- refresh: the `/pfm:release prepare --from {live-project}` pass re-deriving `templates/project/**` from a live project; without it, hand-authored template edits ship as they are · `templates/refresh-map.json`, `scripts/refresh-scope.sh`, `scripts/genericize.sh`
+- refresh: `pcm`'s pass re-deriving `templates/project/**` from a live project, run on request and detached from the release; without it, hand-authored template edits ship as they are · `$CDOCS/pcm/$REFS/refresh.md`, `templates/refresh-map.json`, `scripts/refresh-scope.sh`, `scripts/genericize.sh`
 - public face: the files a visitor or adopter reads first · `README.md`, `INSTALL.md`, `CHANGELOG.md`, `VERSION`, `releases/v{X.Y.Z}.md`
 - leak gate: the identifying-content scan, run `pre-push` · `scripts/leak-check.sh`, `.githooks/pre-push`
 - pfm: the fleet engine, Go · `pfm/cmd/pfm/`, `pfm/internal/` · child `pfm/CLAUDE.md`
@@ -31,7 +31,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - plugins: the plugins professor tracks, each a git submodule of its own repo on `develop`, all but gpt-gateway listed in the marketplace; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every listed one as `{plugin}@professor` from a copy of its checkout in the pfm-owned `professor` directory marketplace `~/.local/share/professor-dev` (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
-- CI: GitHub Actions gating the `develop → main` release pull request and publishing its merge; `make release-check` runs the same checks locally · `.github/workflows/release.yml`, `Makefile`
+- CI: GitHub Actions — `ci.yml` tests every push to `develop` and every pull request into `main`; `release.yml` gates the release pull request, publishes its merge and verifies the published assets; `make release-check` runs the release checks locally · `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `Makefile`
 
 ## Path vars
 
@@ -71,7 +71,8 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 ## CI
 
-- `.github/workflows/release.yml` runs on pull requests into `main` and manually (test artifacts only), never on a push: `check` (the mirrors and the HOL plugin scan), `build` and `release` gate the release PR; its merge's `publish` job tags `v{VERSION}` and creates the GitHub release.
+- `.github/workflows/ci.yml` runs on every push to `develop` and every pull request into `main`: `macos-tests`, `fresh-install-linux` and `fresh-install-macos`.
+- `.github/workflows/release.yml` runs on pull requests into `main` and manually (test artifacts only), never on a push: `check` (the mirrors and the HOL plugin scan), `build` and `release` gate the release PR; its merge's `publish` job tags `v{VERSION}` and creates the GitHub release, and `verify` checks the published assets against `SHA256SUMS`, the binary's version and the note.
 
 ## Host
 
@@ -86,7 +87,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 ## Publication (this repo's sacred ground)
 
 - **No push, tag or release without an explicit request in the current turn.** A finished task, a green build, a "finish it" or a completed release document is NEVER permission; the authorized Git writer publishes only on the user's plain ask in that turn.
-- **`main` is release-only:** all work lands on `develop`; `main` moves only when `/pfm:release` merges the `develop → main` release PR (gitter Phase RELEASE) — GitHub's ruleset refuses every other route; the merge tags the release, and no tag is pushed by hand · guard `.githooks/pre-push`
+- **`main` is release-only:** all work lands on `develop`; `main` moves only when `/pfm:release` merges the release PR from `release/v{X.Y.Z}` into `main` (gitter Phase RELEASE) — GitHub's ruleset refuses every other route; the merge tags the release, and no tag is pushed by hand · guard `.githooks/pre-push`
 - **Nothing identifying ships:** no source-project brand, user PII, client domain content or machine-absolute path (`/home/…`, `/Users/…`) in any tracked file; write it clean the first time · guard `scripts/leak-check.sh`, run by `.githooks/pre-push`
 - **Template example values are invented placeholders**, NEVER mined from a live private repo.
 - **Version discipline:** `VERSION`, `CHANGELOG.md`, `releases/v{X.Y.Z}.md` and the tag MUST agree; between releases `develop`'s `VERSION` is the next `{X.Y.Z}-alpha`; `/pfm:release` owns the sequence.

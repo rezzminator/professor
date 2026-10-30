@@ -15,7 +15,7 @@ infra/
 
 Development must never destabilize the live box: code changes happen in a git worktree under `.worktrees/`, and every build/test runs inside the one shared `pfm-dev` container (`shared.sh`), each call a `docker exec` with that worktree read-only at `/worktree` and its own namespaces (`shared-run.sh`) — own HOME and `/tmp`, own tmux, no published ports. Files are edited on the host; the container only builds and tests. Design and law: `docs/dev/isolated-dev-foundation.md`.
 
-`docker-compose.yml` + `pfm-dev.Dockerfile` build the image (Go pinned to `pfm/go.mod`, Node to the mirror compilers' minimum); `fence-env.sh` resolves the `PFM_DEV_*` mount contract every caller sources; `tools.env` + `tools.sh` pin the dev tools `make tools` installs on the host and bakes into the image; `release-rehearsal.sh` drives the fenced adopter machine `/pfm:release` rehearses updates on.
+`docker-compose.yml` + `pfm-dev.Dockerfile` build the image (Go pinned to `pfm/go.mod`, Node to the mirror compilers' minimum); `fence-env.sh` resolves the `PFM_DEV_*` mount contract every caller sources; `tools.env` + `tools.sh` pin the dev tools `make tools` installs on the host and bakes into the image.
 
 The same Dockerfile's `pfm-sim` target is the real-simulation fence: pfm-dev plus Google Chrome, which runs headless only, and 2 GB of shared memory. `sim-entry.sh` builds and installs `pfm` from the worktree, then uses the separately mounted plugin source to build the standalone `harvester` binary and run `harvester setup` with its browser rung on. Harvester state persists per worktree in `pfm-sim-harvest-<worktree>-<cksum>`, `dev.sh iso sim-reset` drops it, and fence housekeeping (`infra/fence/housekeeping.sh`) removes it once its worktree is gone.
 

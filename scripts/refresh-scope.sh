@@ -5,11 +5,11 @@ set -euo pipefail
 # live source paths + SHA-256 as of the last sync), hashes the live sources, and
 # reports which templates need LLM re-derivation. UNCHANGED hashes are a mechanical
 # untouched-proof — skipped. UNMAPPED live files need a mapping decision. `regen`
-# rewrites the map's hashes after a release's template edits land.
+# rewrites the map's hashes after a refresh pass's template edits land.
 #
 # A MISSING-SOURCE entry (the live source a template was derived from is gone) is a
 # BLOCKING ruling, not a warning: both `scan` and `regen` exit MISSING_SOURCE_EXIT so a
-# release cannot proceed and cannot re-baseline until each one is ruled — delete the
+# refresh cannot proceed and cannot re-baseline until each one is ruled — delete the
 # template file AND its refresh-map.json entry, or remap it to the source's new path.
 # Re-baselining around a missing source is what keeps a zombie template alive forever.
 # ENUMERATION-FAILED exits 1 when a source glob cannot be read or expanded;

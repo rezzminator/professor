@@ -175,7 +175,6 @@ templates.lanes.iso-housekeeping	PASS	1.7
 templates.lanes.lib	PASS	4.0
 templates.lanes.mcp-stdio	PASS	4.4
 templates.lanes.profile-report	PASS	3.6
-templates.lanes.release-rehearsal	PASS	0.1
 templates.lanes.root	PASS	4.6
 templates.lanes.run	PASS	9.9
 templates.lanes.sampler	PASS	17.3

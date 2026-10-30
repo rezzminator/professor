@@ -167,7 +167,7 @@ The `auto-effort-control` plugin gives an agent whose frontmatter carries `effor
 | `flights-foreman`, `flights-foreman-sonnet` | `on` (floor medium, ceiling xhigh), both starting at high |
 | `reviewer`, `reviewer-pro`, `reviewer-nt`, `documenter` | `on` |
 
-A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. Neither `pcm` nor `releaser` carries it. `flights-lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
+A `from:` tier inherits its original's `effortControl` and `tools:`, and a `set` overrides only the keys it names. `pcm` does not carry it. `flights-lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort-control__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
 
 ## Decisions
 

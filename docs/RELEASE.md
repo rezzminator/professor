@@ -82,14 +82,13 @@ Notes before `v0.78.0` wrote actions as `#### → For:`, `#### → For adopters 
 
 ### Verification
 
-`## Verification` closes the note: how the release was proven — reviews, gates, the rehearsal — as facts and numbers. It holds prose only, never a bullet or an action.
+`## Verification` closes the note: how the release was proven — the gate, the CI run, the leak scan, the preflight, the review — as facts and numbers. It holds prose only, never a bullet or an action.
 
 ## Cutting a release
 
 Maintainer command, run in this repo only:
 
-- `/pfm:release prepare {patch|minor|major} "{summary}" [--from {live-root}]` — reviews the range past `main`, fixes what the review finds, writes the note, gates the candidate in the fence and rehearses the update on fenced adopter machines, until the candidate is stamped `READY`. It publishes nothing.
-- `/pfm:release publish v{X.Y.Z}` — only on the maintainer's explicit ask: lands exactly the commit `READY` names on `develop`, pushes, runs `make release-check` after `git fetch origin main`, merges the `develop → main` pull request on green `check` and `release` checks — the merge tags and publishes — and verifies what GitHub serves.
+- `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` — releases `develop`'s tip as it stands at the cut, in one pass: the full gate, the leak scan, `release-check preflight`, the `ci.yml` run on that commit, the note and, when the cut changes the update path, one review, all at once; then the release commit (the note, `CHANGELOG.md` and the version stamps, nothing else), `make release-check`, the pull request from `release/v{X.Y.Z}` into `main`, its merge — which tags and publishes — and the merge back into `develop`. Typing it is the maintainer's publish request; `--dry` stops before any push. Every check is a stop: nothing is fixed inside a release, the fix lands on `develop` and the maintainer cuts again.
 
 The procedure is `.claude/commands/pfm/release.md`; the design and the reasons are `docs/design/release/`.
 
@@ -97,7 +96,7 @@ The procedure is `.claude/commands/pfm/release.md`; the design and the reasons a
 
 The workflow is `.github/workflows/release.yml`; it runs only on a pull request into `main` (and a manual `workflow_dispatch`, which builds test artifacts and publishes nothing). `make release-check` runs every pull-request check locally first, after `git fetch origin main`, except the `check` job's Scan step: the HOL AI Plugin Scanner is a GitHub Action with no local install, and the target says so.
 
-While the `develop → main` pull request is open, its jobs gate the merge — the `main is release-only` ruleset requires `check` and `release`:
+While the release pull request from `release/v{X.Y.Z}` into `main` is open, its jobs gate the merge — the `main is release-only` ruleset requires `check` and `release`:
 
 1. **`check`** — generates the Codex and OpenCode mirrors and runs the HOL AI Plugin Scanner over the tree.
 2. **Build** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`); each platform binary uploads as its own workflow artifact.
@@ -108,6 +107,8 @@ Merging the pull request is the release. Its `publish` job:
 1. Fails when the tag `v{VERSION}` already exists.
 2. Builds the four platform binaries again from the merge commit and writes `SHA256SUMS`.
 3. Creates the GitHub Release `v{VERSION}` on the merge commit — the tag is made there, never pushed by hand — attaching the `pfm_*` binaries and `SHA256SUMS`, with `releases/v{VERSION}.md` as the release body verbatim.
+
+Its `verify` job then checks what GitHub serves: it downloads the release's assets, verifies them with `sha256sum -c SHA256SUMS`, requires the `linux/amd64` binary's `version` to print `pfm v{VERSION}`, and requires the release body to equal `releases/v{VERSION}.md` up to a trailing newline.
 
 ## Pulling an update (adopter)
 

@@ -33,8 +33,6 @@ const vscodeStub = {
     onDidChangeConfiguration: () => ({ dispose() {} }),
     // activate also starts prompt lint (lint.js); this run exercises none of it.
     textDocuments: [],
-    onDidOpenTextDocument: () => ({ dispose() {} }),
-    onDidCloseTextDocument: () => ({ dispose() {} }),
     getConfiguration(section) {
       if (section !== 'workbench') return { get: () => undefined, inspect: () => undefined };
       return {
@@ -58,10 +56,12 @@ const vscodeStub = {
   languages: {
     createDiagnosticCollection: () => ({ dispose() {} }),
     registerCodeActionsProvider: () => ({ dispose() {} }),
+    registerCodeLensProvider: () => ({ dispose() {} }),
     match: () => 0,
   },
   Disposable: { from: () => ({ dispose() {} }) },
   CodeActionKind: { QuickFix: 'quickfix' },
+  EventEmitter: function () { this.event = () => {}; },
   extensions: { getExtension: () => undefined },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
   ThemeIcon: function (id) { this.id = id; },

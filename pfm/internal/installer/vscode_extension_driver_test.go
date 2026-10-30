@@ -25,13 +25,20 @@ import (
 // are cleared before a handler runs, so "route" prints the handlers' alone.
 // "lint" opens the prompt file PROFESSOR_LINT_SCENARIO describes (its path
 // under HOME, its text, settings over package.json's defaults) in the active
-// editor (titleClick: in no active editor, the handler given its uri as the
-// title-bar button gives it), runs the professor.analyzePrompt handler (runs times; secondClick
-// clicks again while the first runs; editDuringRun edits the text then;
-// cancelAfterMs cancels the progress) and prints the messages, the
-// professor-prompt diagnostics left, every progress shown, the quick fixes
-// offered over the whole file (after editBeforeFix appends to that 1-based
-// line) and every setContext.
+// editor (lensClick: in no active editor, the command the file's CodeLens
+// carries, run with the arguments it carries), runs the professor.analyzePrompt
+// handler (runs times; secondClick clicks again while the first runs;
+// editDuringRun edits the text then; cancelAfterMs cancels the progress;
+// cancelLensAfterMs runs the command the running lens carries then) and prints
+// the messages, the professor-prompt diagnostics left, every progress shown,
+// the quick fixes offered over the whole file (after editBeforeFix appends to
+// that 1-based line), every setContext, the lenses the file had before the
+// run (lensIdle), mid-run when cancelLensAfterMs is set (lensRunning) and
+// after it (lensAfter), the selector the lens provider registered for and how
+// many times it announced a change (lensFires); globsAfter sets
+// professor.promptLint.globs before the run and announces the change, printing
+// the lens announcements it caused (globsFires) and the lenses after it
+// (lensAfterGlobs).
 const vscodeExtensionDriverJS = `
 const Module = require('module');
 const fs = require('fs');
@@ -78,6 +85,10 @@ if (scenario.file) {
 const diagnostics = new Map();
 let collectionName;
 let codeActionProvider;
+let codeLensProvider;
+let lensSelector;
+let lensFires = 0;
+const configListeners = [];
 
 const defaults = {
   shellPath: '/bin/zsh',
@@ -102,10 +113,11 @@ const vscodeStub = {
         inspect: () => undefined,
       };
     },
-    onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidChangeConfiguration: (listener) => {
+      configListeners.push(listener);
+      return { dispose() {} };
+    },
     textDocuments: document ? [document] : [],
-    onDidOpenTextDocument: () => ({ dispose() {} }),
-    onDidCloseTextDocument: () => ({ dispose() {} }),
     asRelativePath: (uri) => path.relative(process.env.HOME, uri.fsPath),
   },
   languages: {
@@ -123,9 +135,22 @@ const vscodeStub = {
       codeActionProvider = provider;
       return { dispose() {} };
     },
+    registerCodeLensProvider: (selector, lensProvider) => {
+      codeLensProvider = lensProvider;
+      lensSelector = selector;
+      lensProvider.onDidChangeCodeLenses(() => { lensFires++; });
+      return { dispose() {} };
+    },
   },
   Disposable: { from: (...items) => ({ dispose() { items.forEach((item) => item.dispose()); } }) },
   Range,
+  CodeLens: function (range, command) { Object.assign(this, { range, command }); },
+  EventEmitter: function () {
+    const listeners = [];
+    this.event = (listener) => { listeners.push(listener); return { dispose() {} }; };
+    this.fire = () => listeners.slice().forEach((listener) => listener());
+    this.dispose = () => { listeners.length = 0; };
+  },
   Diagnostic: function (range, message, severity) { Object.assign(this, { range, message, severity }); },
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
   CodeAction: function (title, kind) { Object.assign(this, { title, kind }); },
@@ -135,7 +160,7 @@ const vscodeStub = {
     this.replace = (uri, range, text) => { this.replacements.push({ uri: uri.toString(), range, text }); };
   },
   window: {
-    activeTextEditor: document && !scenario.titleClick ? { document } : undefined,
+    activeTextEditor: document && !scenario.lensClick ? { document } : undefined,
     onDidOpenTerminal: () => ({ dispose() {} }),
     registerTerminalProfileProvider: (id, terminalProvider) => {
       provider = terminalProvider;
@@ -217,10 +242,33 @@ if (mode === 'route') {
   const handler = registered['professor.analyzePrompt'];
   (async () => {
     if (!handler) throw new Error('extension.js registers no professor.analyzePrompt handler');
+    const lensView = () => (codeLensProvider.provideCodeLenses(document) || []).map((lens) => ({
+      line: lens.range.start.line, title: lens.command.title, command: lens.command.command,
+      uris: lens.command.arguments.map((uri) => uri.toString()),
+    }));
+    const lensIdle = lensView();
+    let lensRunning;
+    let globsFires;
+    let lensAfterGlobs;
+    if (scenario.globsAfter) {
+      const before = lensFires;
+      scenario.settings = { ...(scenario.settings || {}), globs: scenario.globsAfter };
+      configListeners.forEach((listener) => listener({ affectsConfiguration: (key) => key === 'professor.promptLint.globs' }));
+      globsFires = lensFires - before;
+      lensAfterGlobs = lensView();
+    }
     for (let run = 0; run < (scenario.runs || 1); run++) {
-      const runs = [scenario.titleClick ? handler(document.uri) : handler()];
+      const lens = codeLensProvider.provideCodeLenses(document)[0];
+      const runs = [scenario.lensClick ? registered[lens.command.command](...lens.command.arguments) : handler()];
       if (scenario.editDuringRun) document.version++;
       if (scenario.secondClick) runs.push(handler());
+      if (scenario.cancelLensAfterMs) {
+        runs.push(new Promise((resolve) => setTimeout(resolve, scenario.cancelLensAfterMs)).then(() => {
+          lensRunning = lensView();
+          const running = codeLensProvider.provideCodeLenses(document)[0];
+          return registered[running.command.command](...running.command.arguments);
+        }));
+      }
       await Promise.all(runs);
     }
     if (scenario.editBeforeFix) document.lines[scenario.editBeforeFix - 1] += ' edited';
@@ -231,6 +279,13 @@ if (mode === 'route') {
       messages,
       progresses,
       contexts,
+      lensIdle,
+      lensRunning,
+      lensAfter: lensView(),
+      lensFires,
+      lensSelector,
+      globsFires,
+      lensAfterGlobs,
       diagnostics: (diagnostics.get(document.uri.toString()) || []).map((d) => ({
         startLine: d.range.start.line, endLine: d.range.end.line, endCharacter: d.range.end.character,
         severity: d.severity, message: d.message, source: d.source, code: d.code,

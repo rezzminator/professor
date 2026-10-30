@@ -1,11 +1,13 @@
-// `Professor: Analyze` — prompt lint. The "Analyze" button in a prompt file's editor title bar (and the
-// palette command) sends the editor's current text, saved or not and numbered line by line, to Claude
-// through `pfm headless exec`, so the run uses the user's own Claude Code subscription. Claude applies
+// `Professor: Analyze` — prompt lint. The "Analyze" link above line 1 of a prompt file (a CodeLens
+// that reads "Analyzing… Ns · Cancel" while its run goes, and the palette command) sends the editor's
+// current text, saved or not and numbered line by line, to Claude through `pfm headless exec`, so
+// the run uses the user's own Claude Code subscription. Claude applies
 // Professor's prompt law (~/.claude/commands/quality/prompt.md, read at run time, never copied here)
 // under prompt-lint.md, answers in findings.schema.json's shape, and each finding becomes a
 // diagnostic in the Problems panel; one that carries a rewrite gets the quick fix "Apply Professor
 // rewrite". The run is click-only, sealed (no tools, settings or session persistence for the model)
-// and cancellable; every way it can fail is shown with its cause, never as an empty result.
+// and cancellable from the lens or the progress notification; every way it can fail is shown with
+// its cause, never as an empty result.
 const vscode = require('vscode');
 const fs = require('fs');
 const os = require('os');
@@ -25,12 +27,6 @@ function settings() {
 
 function isPromptFile(document) {
   return settings().globs.some((pattern) => vscode.languages.match({ pattern }, document) > 0);
-}
-
-// resourcePath is the path VS Code's resourcePath context key holds for a document: a file's fsPath,
-// any other scheme's path.
-function resourcePath(document) {
-  return document.uri.scheme === 'file' ? document.uri.fsPath : document.uri.path;
 }
 
 function lawFile() {
@@ -155,13 +151,26 @@ function summary(label, findings, invalid) {
   return `Professor: ${findings.length} findings in ${label} (${parts.join(', ')}).`;
 }
 
-// startPromptLint wires the command, the Problems-panel collection, the quick fix and the
-// professor.promptFiles context that shows the button; here and whyNot are choose.js's pfmHere and
+// startPromptLint wires the commands, the Problems-panel collection, the quick fix and the
+// CodeLens that carries the Analyze link; here and whyNot are choose.js's pfmHere and
 // notHere bound to this extension host.
 function startPromptLint({ here, whyNot }) {
   const collection = vscode.languages.createDiagnosticCollection('professor-prompt');
   const fixes = new Map();
-  const running = new Set();
+  // One AbortController per running file, keyed by uri: the lens, the progress
+  // notification and professor.cancelAnalyze all stop the same run through it.
+  const running = new Map();
+  const lensChanged = new vscode.EventEmitter();
+  let tick;
+  // Refreshes the lens now, and once a second while a run is going so its elapsed time counts.
+  const refreshLens = () => {
+    lensChanged.fire();
+    if (running.size && !tick) tick = setInterval(() => lensChanged.fire(), 1000);
+    else if (!running.size && tick) {
+      clearInterval(tick);
+      tick = undefined;
+    }
+  };
 
   const clear = (document) => {
     const had = (collection.get(document.uri) ?? []).length > 0;
@@ -170,8 +179,8 @@ function startPromptLint({ here, whyNot }) {
     return had ? ' Its earlier Professor findings were cleared.' : '';
   };
 
-  // The title-bar button passes its own editor's uri, which need not be the active editor's; the
-  // palette passes none and means the active editor.
+  // The lens passes its own document's uri, which need not be the active editor's; the palette
+  // passes none and means the active editor.
   async function analyzePrompt(uri) {
     if (!here()) {
       vscode.window.showWarningMessage(`Professor: Analyze runs no model here — ${whyNot()}.`);
@@ -209,19 +218,21 @@ function startPromptLint({ here, whyNot }) {
       vscode.window.showErrorMessage(`Professor: cannot analyze ${label} — the prompt law ${law} is unreadable (${err.code ?? err.message}); run pfm install.${clear(document)}`);
       return;
     }
-    running.add(key);
+    const abort = new AbortController();
+    running.set(key, { abort, started: Date.now() });
+    refreshLens();
     try {
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `Professor: analyzing ${label}`, cancellable: true },
         async (progress, token) => {
-          const abort = new AbortController();
           const cancel = token.onCancellationRequested(() => abort.abort());
           const result = await runPfm(pfmArgs(config, law), (config.timeout + KILL_MARGIN_S) * 1000, {
             signal: abort.signal,
             input: taskText(label, lines),
           });
           cancel.dispose();
-          if (token.isCancellationRequested) {
+          // The signal, not the token: a lens cancel aborts it too, and is never a timeout.
+          if (abort.signal.aborted) {
             vscode.window.showInformationMessage(`Professor: analysis of ${label} cancelled.${clear(document)}`);
             return;
           }
@@ -245,8 +256,25 @@ function startPromptLint({ here, whyNot }) {
       );
     } finally {
       running.delete(key);
+      refreshLens();
     }
   }
+
+  const lenses = {
+    onDidChangeCodeLenses: lensChanged.event,
+    provideCodeLenses(document) {
+      if (!here() || !isPromptFile(document)) return [];
+      const run = running.get(document.uri.toString());
+      const command = run
+        ? {
+          title: `$(sync~spin) Analyzing… ${Math.floor((Date.now() - run.started) / 1000)}s · Cancel`,
+          command: 'professor.cancelAnalyze',
+          arguments: [document.uri],
+        }
+        : { title: '$(checklist) Analyze', command: 'professor.analyzePrompt', arguments: [document.uri] };
+      return [new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), command)];
+    },
+  };
 
   // The fix is offered only while the span's whole lines still hold the text the rewrite was written for.
   const provider = {
@@ -267,29 +295,18 @@ function startPromptLint({ here, whyNot }) {
     },
   };
 
-  // when-clauses cannot glob, so professor.promptFiles lists the resourcePath of every open prompt
-  // file and each editor's title shows the button by its own resource (`resourcePath in …`), split
-  // editors included.
-  let shown = '[]';
-  const updateContext = () => {
-    const paths = vscode.workspace.textDocuments.filter(isPromptFile).map(resourcePath).sort();
-    const want = JSON.stringify(paths);
-    if (want === shown) return;
-    shown = want;
-    vscode.commands.executeCommand('setContext', 'professor.promptFiles', paths).then(undefined, (err) => {
-      console.error(`Professor: setContext professor.promptFiles failed, the Analyze button may be out of step: ${err?.message ?? err}`);
-    });
-  };
-  updateContext();
-
   const disposable = vscode.Disposable.from(
     collection,
+    lensChanged,
+    { dispose: () => clearInterval(tick) },
     vscode.commands.registerCommand('professor.analyzePrompt', analyzePrompt),
+    // Not contributed in package.json, so the palette never lists it: the running lens is its only caller.
+    vscode.commands.registerCommand('professor.cancelAnalyze', (uri) => running.get(uri?.toString())?.abort.abort()),
+    vscode.languages.registerCodeLensProvider({ scheme: 'file' }, lenses),
     vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, provider, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
-    vscode.workspace.onDidOpenTextDocument(updateContext),
-    vscode.workspace.onDidCloseTextDocument(updateContext),
+    // A globs change adds or drops the lens on files already open.
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('professor.promptLint.globs')) updateContext();
+      if (event.affectsConfiguration('professor.promptLint.globs')) lensChanged.fire();
     }),
   );
   return { disposable };

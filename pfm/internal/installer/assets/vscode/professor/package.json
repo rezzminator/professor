@@ -1,8 +1,8 @@
 {
   "name": "professor",
   "displayName": "Professor",
-  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked, paints the terminal, and every window's title, activity and status bars and borders (local and Remote-SSH), in Claude Code's theme, which `pfm theme` renders; and lists every pfm theme in VS Code's Color Theme picker as Professor · {name}, where picking one switches every surface to it; and an Analyze button on a prompt file that has Claude check it against Professor's prompt law through pfm, its errors, warnings and info in the Problems panel with a quick fix for each rewrite.",
-  "version": "0.7.0",
+  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked, paints the terminal, and every window's title, activity and status bars and borders (local and Remote-SSH), in Claude Code's theme, which `pfm theme` renders; and lists every pfm theme in VS Code's Color Theme picker as Professor · {name}, where picking one switches every surface to it; and an Analyze link above line 1 of a prompt file that has Claude check it against Professor's prompt law through pfm, its errors, warnings and info in the Problems panel with a quick fix for each rewrite.",
+  "version": "0.7.1",
   "publisher": "professor",
   "engines": { "vscode": "^1.90.0" },
   "extensionKind": ["workspace"],
@@ -23,10 +23,7 @@
     "menus": {
       "commandPalette": [
         { "command": "professor.chooseTheme", "when": "!remoteName || professor.pfmHere" },
-        { "command": "professor.analyzePrompt", "when": "resourcePath in professor.promptFiles && (!remoteName || professor.pfmHere)" }
-      ],
-      "editor/title": [
-        { "command": "professor.analyzePrompt", "when": "resourcePath in professor.promptFiles && (!remoteName || professor.pfmHere)", "group": "navigation" }
+        { "command": "professor.analyzePrompt", "when": "!remoteName || professor.pfmHere" }
       ]
     },
     "keybindings": [
@@ -53,7 +50,7 @@
           "type": "array",
           "items": { "type": "string" },
           "default": ["**/SKILL.md", "**/agents/*.md", "**/commands/**/*.md", "**/CLAUDE.md", "**/AGENTS.md", "**/*.prompt.md", "**/*.agent.md", "**/*.instructions.md"],
-          "description": "Glob patterns of the prompt files that show the Analyze button."
+          "description": "Glob patterns of the prompt files that show the Analyze link."
         },
         "professor.promptLint.model": { "type": "string", "default": "opus", "description": "Claude model the Analyze run uses (pfm headless exec --model)." },
         "professor.promptLint.effort": { "type": "string", "default": "high", "description": "Reasoning effort the Analyze run uses (pfm headless exec --effort)." },

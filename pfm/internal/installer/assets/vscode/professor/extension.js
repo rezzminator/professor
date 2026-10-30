@@ -3,7 +3,7 @@
 // Professor terminal (below); `pfm theme`, which paints the terminal and every window's title,
 // activity and status bars and borders (theme.js, started in activate), picks that theme (choose.js), and
 // lists every pfm theme in VS Code's own Color Theme picker, kept in step with it (native.js); and
-// prompt lint, the "Analyze" button on a prompt file, whose findings from Claude under Professor's
+// prompt lint, an Analyze link above line 1 of a prompt file, whose findings from Claude under Professor's
 // prompt law land in the Problems panel with a quick fix per rewrite (lint.js).
 //
 // Its first surface is the Professor terminal profile: a login shell that opens the pfm chat
@@ -131,7 +131,7 @@ function activate(context) {
   const native = startNativeThemes({ dir, runPfm, why, here, whyNot });
   const theme = startThemeSync(dir, native.follow, clientSide(kind) ? whyNot() : '');
   // Its third surface, prompt lint, runs Claude through the same pfm, so the same doors hold: the
-  // Analyze button shows on a prompt file only where pfm runs, and the command refuses elsewhere.
+  // Analyze link shows above a prompt file only where pfm runs, and the command refuses elsewhere.
   const lint = startPromptLint({ here, whyNot });
   context.subscriptions.push(
     native.disposable,

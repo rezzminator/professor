@@ -77,8 +77,6 @@ const vscodeStub = {
   ExtensionKind: { UI: 1, Workspace: 2 },
   workspace: {
     textDocuments: [],
-    onDidOpenTextDocument: () => ({ dispose() {} }),
-    onDidCloseTextDocument: () => ({ dispose() {} }),
     workspaceFile: undefined,
     workspaceFolders: [{ uri: { toString: workspaceURI } }],
     onDidChangeConfiguration: (listener) => {
@@ -130,10 +128,12 @@ const vscodeStub = {
   languages: {
     createDiagnosticCollection: () => ({ dispose() {} }),
     registerCodeActionsProvider: () => ({ dispose() {} }),
+    registerCodeLensProvider: () => ({ dispose() {} }),
     match: () => 0,
   },
   Disposable: { from: () => ({ dispose() {} }) },
   CodeActionKind: { QuickFix: 'quickfix' },
+  EventEmitter: function () { this.event = () => {}; },
   extensions: { getExtension: () => undefined },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
   ThemeIcon: function (id) { this.id = id; },

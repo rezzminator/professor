@@ -36,9 +36,10 @@ type lintScenario struct {
 	window chooseWindow
 	noPfm  bool
 	// driver knobs, passed through PROFESSOR_LINT_SCENARIO
-	runs, cancelAfterMs, editBeforeFix     int
-	secondClick, editDuringRun, titleClick bool
-	settings                               map[string]any
+	runs, cancelAfterMs, cancelLensAfterMs, editBeforeFix int
+	secondClick, editDuringRun, lensClick                 bool
+	globsAfter                                            []string
+	settings                                              map[string]any
 }
 
 type lintDiagnostic struct {
@@ -51,6 +52,13 @@ type lintDiagnostic struct {
 	Code         string `json:"code"`
 }
 
+type lintLens struct {
+	Line    int      `json:"line"`
+	Title   string   `json:"title"`
+	Command string   `json:"command"`
+	Uris    []string `json:"uris"`
+}
+
 type lintRun struct {
 	CollectionName string `json:"collectionName"`
 	Messages       []struct {
@@ -61,7 +69,16 @@ type lintRun struct {
 		Title       string `json:"title"`
 		Cancellable bool   `json:"cancellable"`
 	} `json:"progresses"`
-	Contexts    [][]any          `json:"contexts"`
+	Contexts       [][]any    `json:"contexts"`
+	LensIdle       []lintLens `json:"lensIdle"`
+	LensRunning    []lintLens `json:"lensRunning"`
+	LensAfter      []lintLens `json:"lensAfter"`
+	LensFires      int        `json:"lensFires"`
+	GlobsFires     int        `json:"globsFires"`
+	LensAfterGlobs []lintLens `json:"lensAfterGlobs"`
+	LensSelector   struct {
+		Scheme string `json:"scheme"`
+	} `json:"lensSelector"`
 	Diagnostics []lintDiagnostic `json:"diagnostics"`
 	Actions     []struct {
 		Title        string   `json:"title"`
@@ -134,7 +151,8 @@ exit "$(cat "$d/exit.$n" 2>/dev/null || echo 64)"
 		"remoteName": scenario.window.remoteName, "extensionKind": scenario.window.kind,
 		"file": scenario.file, "text": scenario.text, "settings": scenario.settings,
 		"runs": scenario.runs, "cancelAfterMs": scenario.cancelAfterMs, "editBeforeFix": scenario.editBeforeFix,
-		"secondClick": scenario.secondClick, "editDuringRun": scenario.editDuringRun, "titleClick": scenario.titleClick,
+		"secondClick": scenario.secondClick, "editDuringRun": scenario.editDuringRun, "lensClick": scenario.lensClick,
+		"cancelLensAfterMs": scenario.cancelLensAfterMs, "globsAfter": scenario.globsAfter,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -303,10 +321,7 @@ func TestVSCodeAnalyzePromptMapsFindingsOntoTheProblemsPanel(t *testing.T) {
 			)
 		}
 	}
-	if wantContexts := [][]any{
-		{"setContext", "professor.pfmHere", true},
-		{"setContext", "professor.promptFiles", []any{filepath.Join(home, "project", "skills", "demo", "SKILL.md")}},
-	}; !reflect.DeepEqual(
+	if wantContexts := [][]any{{"setContext", "professor.pfmHere", true}}; !reflect.DeepEqual(
 		run.Contexts,
 		wantContexts,
 	) {
@@ -396,11 +411,11 @@ func TestVSCodeAnalyzePromptRefusals(t *testing.T) {
 			t.Errorf("runs %d, messages %+v: want one run and the second click refused first", len(runs), run.Messages)
 		}
 	})
-	t.Run("the title-bar button analyzes its own editor, active or not", func(t *testing.T) {
+	t.Run("the lens analyzes its own editor, active or not", func(t *testing.T) {
 		t.Parallel()
 		run, runs, _ := runVSCodeAnalyzePrompt(
 			t,
-			lintScenario{file: "p/SKILL.md", text: lintSkill, calls: []lintCall{good}, titleClick: true},
+			lintScenario{file: "p/SKILL.md", text: lintSkill, calls: []lintCall{good}, lensClick: true},
 		)
 		lintMessage(t, run, "info", "1 findings in p/SKILL.md")
 		if len(runs) != 1 || len(run.Diagnostics) != 1 {
@@ -411,8 +426,8 @@ func TestVSCodeAnalyzePromptRefusals(t *testing.T) {
 		t.Parallel()
 		run, runs, _ := runVSCodeAnalyzePrompt(t, lintScenario{file: "p/README.md", text: lintSkill})
 		lintMessage(t, run, "warning", "p/README.md matches no professor.promptLint.globs pattern")
-		if len(runs) != 0 || !reflect.DeepEqual(run.Contexts, [][]any{{"setContext", "professor.pfmHere", true}}) {
-			t.Errorf("runs %d, contexts %v: want none and no promptFile context", len(runs), run.Contexts)
+		if len(runs) != 0 {
+			t.Errorf("pfm ran %d times", len(runs))
 		}
 	})
 	t.Run("a remote window without pfm is refused", func(t *testing.T) {
@@ -484,8 +499,109 @@ func TestVSCodeAnalyzePromptCancelKillsPfm(t *testing.T) {
 	lintMessage(t, run, "info", "analysis of p/SKILL.md cancelled")
 }
 
-// TestVSCodeAnalyzePromptManifestAndAssets: the button reads "Analyze" in a
-// prompt file's editor title (no icon), the settings carry the settled
+// TestVSCodeAnalyzePromptLens: a prompt file gets one lens at line 1 that runs
+// Analyze with its own uri; a file no glob matches and a remote window
+// without pfm get none.
+func TestVSCodeAnalyzePromptLens(t *testing.T) {
+	t.Parallel()
+	t.Run("a prompt file gets one idle lens", func(t *testing.T) {
+		t.Parallel()
+		run, _, home := runVSCodeAnalyzePrompt(
+			t,
+			lintScenario{file: "p/SKILL.md", text: lintSkill, calls: []lintCall{{stdout: lintEnvelope(`[]`)}}},
+		)
+		want := []lintLens{
+			{
+				0,
+				"$(checklist) Analyze",
+				"professor.analyzePrompt",
+				[]string{"file://" + filepath.Join(home, "p", "SKILL.md")},
+			},
+		}
+		if !reflect.DeepEqual(run.LensIdle, want) || !reflect.DeepEqual(run.LensAfter, want) {
+			t.Errorf("lenses before %+v, after %+v, want %+v", run.LensIdle, run.LensAfter, want)
+		}
+		if run.LensSelector.Scheme != "file" {
+			t.Errorf("lens provider selector = %+v, want scheme file", run.LensSelector)
+		}
+	})
+	t.Run("a file no glob matches gets none", func(t *testing.T) {
+		t.Parallel()
+		run, _, _ := runVSCodeAnalyzePrompt(t, lintScenario{file: "p/README.md", text: lintSkill})
+		if len(run.LensIdle) != 0 {
+			t.Errorf("lenses = %+v, want none", run.LensIdle)
+		}
+	})
+	t.Run("a globs change refreshes the lens on an open file", func(t *testing.T) {
+		t.Parallel()
+		run, _, _ := runVSCodeAnalyzePrompt(t, lintScenario{
+			file: "p/README.md", text: lintSkill, calls: []lintCall{{stdout: lintEnvelope(`[]`)}},
+			globsAfter: []string{"**/README.md"},
+		})
+		if len(run.LensIdle) != 0 || run.GlobsFires != 1 ||
+			len(run.LensAfterGlobs) != 1 || run.LensAfterGlobs[0].Command != "professor.analyzePrompt" {
+			t.Errorf(
+				"lenses before %+v, announced %d, after %+v: want none, one announcement, then the Analyze lens",
+				run.LensIdle,
+				run.GlobsFires,
+				run.LensAfterGlobs,
+			)
+		}
+	})
+	t.Run("a remote window without pfm gets none", func(t *testing.T) {
+		t.Parallel()
+		run, _, _ := runVSCodeAnalyzePrompt(
+			t,
+			lintScenario{file: "p/SKILL.md", text: lintSkill, window: chooseWindow{"ssh-remote", 2}, noPfm: true},
+		)
+		if len(run.LensIdle) != 0 {
+			t.Errorf("lenses = %+v, want none", run.LensIdle)
+		}
+	})
+}
+
+// TestVSCodeAnalyzePromptLensCancel: while a run goes the lens reads
+// Analyzing…/Cancel with the cancelAnalyze command and refreshes on a timer;
+// running that command kills the fake pfm and reports a cancel, never a
+// timeout; the lens is idle again afterwards.
+func TestVSCodeAnalyzePromptLensCancel(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	run, runs, home := runVSCodeAnalyzePrompt(t, lintScenario{
+		file: "p/SKILL.md", text: lintSkill, calls: []lintCall{{sleepSeconds: 60}}, cancelLensAfterMs: 1500,
+	})
+	if elapsed := time.Since(start); elapsed > 30*time.Second {
+		t.Errorf("cancel took %s: pfm was not killed", elapsed)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("pfm ran %d times, want 1", len(runs))
+	}
+	uri := "file://" + filepath.Join(home, "p", "SKILL.md")
+	if len(run.LensRunning) != 1 || run.LensRunning[0].Command != "professor.cancelAnalyze" ||
+		!strings.HasPrefix(run.LensRunning[0].Title, "$(sync~spin) Analyzing… ") ||
+		!strings.HasSuffix(
+			run.LensRunning[0].Title,
+			"s · Cancel",
+		) || !slices.Equal(run.LensRunning[0].Uris, []string{uri}) {
+		t.Errorf(
+			"running lens = %+v, want Analyzing… Ns · Cancel running professor.cancelAnalyze on %s",
+			run.LensRunning,
+			uri,
+		)
+	}
+	lintMessage(t, run, "info", "analysis of p/SKILL.md cancelled")
+	if len(run.LensAfter) != 1 || run.LensAfter[0].Command != "professor.analyzePrompt" {
+		t.Errorf("lens after the run = %+v, want the idle Analyze lens", run.LensAfter)
+	}
+	// run start, the one-second tick, run end.
+	if run.LensFires < 3 {
+		t.Errorf("lens announced %d changes, want at least 3 (start, tick, end)", run.LensFires)
+	}
+}
+
+// TestVSCodeAnalyzePromptManifestAndAssets: the command reads "Analyze" in the
+// palette (no icon), no editor/title entry carries it, cancelAnalyze is not
+// contributed, the settings carry the settled
 // defaults, the prompt and schema are staged beside lint.js, and the schema
 // is one pfm's validator accepts and holds a finding to.
 func TestVSCodeAnalyzePromptManifestAndAssets(t *testing.T) {
@@ -506,8 +622,8 @@ func TestVSCodeAnalyzePromptManifestAndAssets(t *testing.T) {
 		Contributes struct {
 			Commands []entry `json:"commands"`
 			Menus    struct {
-				CommandPalette []entry `json:"commandPalette"`
-				EditorTitle    []entry `json:"editor/title"`
+				CommandPalette []entry         `json:"commandPalette"`
+				EditorTitle    json.RawMessage `json:"editor/title"`
 			} `json:"menus"`
 			Configuration struct {
 				Properties map[string]struct {
@@ -519,16 +635,21 @@ func TestVSCodeAnalyzePromptManifestAndAssets(t *testing.T) {
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	const when = "resourcePath in professor.promptFiles && (!remoteName || professor.pfmHere)"
+	const when = "!remoteName || professor.pfmHere"
 	want := entry{Command: "professor.analyzePrompt", Title: "Analyze", Category: "Professor"}
 	if !slices.Contains(manifest.Contributes.Commands, want) {
-		t.Errorf("commands %+v lack %+v (no icon, so the title bar reads Analyze)", manifest.Contributes.Commands, want)
+		t.Errorf("commands %+v lack %+v", manifest.Contributes.Commands, want)
 	}
-	if !slices.Contains(
-		manifest.Contributes.Menus.EditorTitle,
-		entry{Command: "professor.analyzePrompt", When: when, Group: "navigation"},
-	) {
-		t.Errorf("editor/title %+v lacks the Analyze button", manifest.Contributes.Menus.EditorTitle)
+	if manifest.Contributes.Menus.EditorTitle != nil {
+		t.Errorf(
+			"manifest has an editor/title entry %s; the Analyze link is a CodeLens",
+			manifest.Contributes.Menus.EditorTitle,
+		)
+	}
+	for _, command := range manifest.Contributes.Commands {
+		if command.Command == "professor.cancelAnalyze" {
+			t.Errorf("professor.cancelAnalyze is contributed, so the palette lists it: %+v", command)
+		}
 	}
 	if !slices.Contains(
 		manifest.Contributes.Menus.CommandPalette,

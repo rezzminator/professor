@@ -19,7 +19,7 @@ Question: map the public websites most aggressively protected against AI crawler
 - **Akamai Bot Manager.** JA4 "is a client-focused fingerprint based on the client TLS handshake", used to "detect and mitigate bots" ([Akamai TechDocs](https://techdocs.akamai.com/application-security/reference/get-ja4-fingerprint-settings)). It splits between blocking and rate-limiting: 34.5% blocked and 19.5% rate-limited ([HasData](https://hasdata.com/blog/ai-crawler-block-index)). The JS-sensor and behaviour layers are *unquoted*.
 - **AWS WAF Bot Control.** Its Targeted level uses "browser interrogation, fingerprinting, and behavior heuristics", and high-confidence bots are blocked by default ([AWS docs](https://docs.aws.amazon.com/waf/latest/developerguide/waf-bot-control-components.html)). Named customer: Instacart ([AWS case study](https://aws.amazon.com/solutions/case-studies/instacart-edge-services-case-study/)). Separately, "CloudFront passes 78.5% of GPTBot traffic without intervention" ([HasData](https://hasdata.com/blog/ai-crawler-block-index)).
 - **DataDome.** Checks TLS/JA4, TCP/IP (p0f/JA4T) and ASN coherence, plus Picasso canvas/GPU device checks. *Unquoted*, because datadome.co returned 403 to our fetch. Customers per DataDome's own customer-story titles: Reddit and Tripadvisor/TheFork. Its stated customer list also includes the NYT. All of this is *unquoted* ([Reddit story](https://datadome.co/customers-stories/reddit-traffic-classification-accurate-billing/), [TheFork story](https://datadome.co/customers-stories/use-case-the-fork-tripadvisor/)).
-- **PerimeterX/HUMAN.** Checks TLS, IP reputation, header order, a JS fingerprint (the `_px3` token) and behaviour. Customers named by a third-party aggregator: Zillow, Booking.com, Upwork, Wayfair, Fiverr, AutoZone. All *unquoted*.
+- **PerimeterX/HUMAN.** Checks TLS, IP reputation, header order, a JS fingerprint (the `_px3` token) and behaviour. Customers named by a third-party aggregator: Zillow, a hotel-review site, Upwork, Wayfair, Fiverr, AutoZone. All *unquoted*.
 - **Kasada.** Runs a TLS check, then the kas.js collector, then a proof-of-work worker, then a token check, with no CAPTCHA. Ticketmaster, PlayStation and Sony are named as users. All *unquoted* and secondary ([Kasada case studies](https://www.kasada.io/case-studies)).
 - **Imperva ABP.** Claims "700 dimensions" and "200 device attributes". *Unquoted* ([datasheet](https://www.imperva.com/resources/datasheets/Datasheet-Advanced-Bot-Protection.pdf)). No named customer found.
 - **F5/Shape.** Uses VM-obfuscated JS telemetry. *Unquoted* ([F5 DevCentral](https://community.f5.com/kb/technicalarticles/what-is-shape-security/284359)). No named customer found.
@@ -85,7 +85,7 @@ The URLs are *candidates chosen for their shape*. None was fetched in this run, 
 | 29 | Quora | https://www.quora.com/(any question) | Cloudflare *unsourced* | thread | 4 | stated answer count |
 | 30 | Glassdoor | https://www.glassdoor.com/Reviews/ (any company) | Cloudflare (ScrapeOps, unquoted) | review | 5 | "N reviews" stated; first page shows 10 |
 | 31 | Indeed | https://www.indeed.com/viewjob?jk=(any) | Cloudflare (ScrapeOps, unquoted) | listing | 5 | job title plus full description |
-| 32 | Booking.com | https://www.booking.com/hotel/ (any) | PerimeterX (aggregator, unquoted) | listing | 5 | review score plus count |
+| 32 | Hotel-review site | hotel pages (any) | PerimeterX (aggregator, unquoted) | listing | 5 | review score plus count |
 | 33 | Wayfair | https://www.wayfair.com/ (any product) | PerimeterX (aggregator, unquoted) | product | 4 | price plus review count |
 | 34 | Nike | https://www.nike.com/t/ (any product) | Akamai *unsourced* (only press quoting an Akamai person) | product | 4 | price plus sizes |
 | 35 | Amazon | https://www.amazon.com/dp/B0(any) | vendor *unsourced*; CAPTCHA wall common | product | 4 | title, price and "N ratings" |
@@ -114,7 +114,7 @@ Gaps against the brief: Imperva, F5/Shape and Fastly have no named site, so they
 NOT ON PAGE: "Anubis uses SHA-256 PoW requiring JS" was not on LWN. The SHA-256 detail rests on Wikipedia instead, and LWN notes a non-JS metarefresh option. UNCHECKED: none.
 
 ## Open rabbit holes
-- Self-attribute vendors from response evidence, such as DataDome, `_px*`, `x-kpsdk-*` and Akamai `_abck` cookies (these are *unsourced* signatures), on Yelp, LinkedIn, Glassdoor, Indeed, WSJ, Bloomberg, Reuters, Booking and the academic publishers.
+- Self-attribute vendors from response evidence, such as DataDome, `_px*`, `x-kpsdk-*` and Akamai `_abck` cookies (these are *unsourced* signatures), on Yelp, LinkedIn, Glassdoor, Indeed, WSJ, Bloomberg, Reuters, a hotel-review site and the academic publishers.
 - Primary confirmation of Kasada at Ticketmaster and PerimeterX at Zillow.
 - Wayback snapshots of the robots.txt files at NYT, WSJ, FT, Reuters, Atlantic, Reddit, Medium, Quora and Amazon.
 - Cloudflare's full pay-per-crawl partner list.

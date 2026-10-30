@@ -22,7 +22,7 @@ const KILL_MARGIN_S = 30;
 
 function settings() {
   const cfg = vscode.workspace.getConfiguration('professor.promptLint');
-  return { globs: cfg.get('globs') ?? [], model: cfg.get('model'), effort: cfg.get('effort'), timeout: cfg.get('timeout') };
+  return { globs: cfg.get('globs') ?? [], model: cfg.get('model'), effort: cfg.get('effort'), timeout: cfg.get('timeout'), showInfo: cfg.get('showInfo') };
 }
 
 function isPromptFile(document) {
@@ -104,12 +104,14 @@ function wholeLines(document, start, end) {
 
 // toDiagnostics maps findings onto the document whose text was sent (lines): a line out of range is
 // clamped and says so; an invalid finding becomes an error diagnostic on line 1, never dropped.
-// fixes are the rewrites a quick fix may apply, each with the text it replaces.
-function toDiagnostics(document, findings, lines) {
+// fixes are the rewrites a quick fix may apply, each with the text it replaces. An info finding is
+// left out unless showInfo; hidden counts them.
+function toDiagnostics(document, findings, lines, showInfo) {
   const last = Math.max(1, Math.min(lines.length, document.lineCount));
   const diagnostics = [];
   const fixes = [];
   let invalid = 0;
+  let hidden = 0;
   for (const finding of findings) {
     const reason = invalidReason(finding);
     if (reason) {
@@ -122,6 +124,10 @@ function toDiagnostics(document, findings, lines) {
       diagnostic.source = 'Professor';
       diagnostic.code = 'invalid-finding';
       diagnostics.push(diagnostic);
+      continue;
+    }
+    if (finding.severity === 'info' && !showInfo) {
+      hidden++;
       continue;
     }
     const start = Math.min(Math.max(finding.line, 1), last);
@@ -139,14 +145,14 @@ function toDiagnostics(document, findings, lines) {
       fixes.push({ diagnostic, rewrite: finding.rewrite.replace(/\r?\n$/, ''), original: lines.slice(start - 1, end).join('\n') });
     }
   }
-  return { diagnostics, fixes, invalid };
+  return { diagnostics, fixes, invalid, hidden };
 }
 
-function summary(label, findings, invalid) {
+function summary(label, findings, invalid, hidden) {
   if (!findings.length) return `Professor: no findings in ${label}.`;
   // An invalid finding counts once, as invalid, whatever severity it claims.
   const count = (severity) => findings.filter((finding) => !invalidReason(finding) && finding.severity === severity).length;
-  const parts = [`${count('error')} errors`, `${count('warning')} warnings`, `${count('info')} info`];
+  const parts = [`${count('error')} errors`, `${count('warning')} warnings`, hidden ? `${hidden} info hidden (professor.promptLint.showInfo)` : `${count('info')} info`];
   if (invalid) parts.push(`${invalid} invalid`);
   return `Professor: ${findings.length} findings in ${label} (${parts.join(', ')}).`;
 }
@@ -243,10 +249,10 @@ function startPromptLint({ here, whyNot }) {
             vscode.window.showErrorMessage(`Professor: could not analyze ${label} — ${err.message}${clear(document)}`);
             return;
           }
-          const mapped = toDiagnostics(document, findings, lines);
+          const mapped = toDiagnostics(document, findings, lines, config.showInfo);
           collection.set(document.uri, mapped.diagnostics);
           fixes.set(key, mapped.fixes);
-          const done = summary(label, findings, mapped.invalid);
+          const done = summary(label, findings, mapped.invalid, mapped.hidden);
           if (document.version !== version) {
             vscode.window.showWarningMessage(`${done} ${label} changed during the analysis: rerun Professor: Analyze to check the current text.`);
           } else {

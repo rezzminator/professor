@@ -216,6 +216,7 @@ func TestVSCodeAnalyzePromptMapsFindingsOntoTheProblemsPanel(t *testing.T) {
 	 {"line":"2","endLine":2,"severity":"error","rule":"x","message":"string line"}]`
 	run, runs, home := runVSCodeAnalyzePrompt(t, lintScenario{
 		file: "project/skills/demo/SKILL.md", text: lintSkill, calls: []lintCall{{stdout: lintEnvelope(findings)}},
+		settings: map[string]any{"showInfo": true},
 	})
 	if len(runs) != 1 {
 		t.Fatalf("pfm ran %d times, want 1", len(runs))
@@ -326,6 +327,40 @@ func TestVSCodeAnalyzePromptMapsFindingsOntoTheProblemsPanel(t *testing.T) {
 		wantContexts,
 	) {
 		t.Errorf("activate set contexts %v, want %v", run.Contexts, wantContexts)
+	}
+}
+
+// TestVSCodeAnalyzePromptHidesInfoByDefault: with professor.promptLint.showInfo
+// off (its default) an info finding gets no diagnostic and no quick fix, and
+// the summary counts it as hidden; errors, warnings and invalid findings stay.
+func TestVSCodeAnalyzePromptHidesInfoByDefault(t *testing.T) {
+	t.Parallel()
+	findings := `[
+	 {"line":7,"endLine":7,"severity":"info","rule":"time-narration","message":"Dated narration.","rewrite":"This holds."},
+	 {"line":8,"endLine":8,"severity":"warning","rule":"aggressive-emphasis","message":"Shouting.","rewrite":"Be specific."},
+	 {"line":1,"endLine":1,"severity":"info","rule":"x","message":42}]`
+	run, _, _ := runVSCodeAnalyzePrompt(t, lintScenario{
+		file: "project/skills/demo/SKILL.md", text: lintSkill, calls: []lintCall{{stdout: lintEnvelope(findings)}},
+	})
+	lintMessage(
+		t,
+		run,
+		"info",
+		"3 findings",
+		"0 errors",
+		"1 warnings",
+		"1 info hidden (professor.promptLint.showInfo)",
+		"1 invalid",
+	)
+	codes := []string{}
+	for _, diagnostic := range run.Diagnostics {
+		codes = append(codes, diagnostic.Code)
+	}
+	if !slices.Equal(codes, []string{"aggressive-emphasis", "invalid-finding"}) {
+		t.Errorf("diagnostic codes = %v, want the warning and the invalid finding only", codes)
+	}
+	if len(run.Actions) != 1 || !slices.Equal(run.Actions[0].Codes, []string{"aggressive-emphasis"}) {
+		t.Errorf("quick fixes = %+v, want only the warning's rewrite", run.Actions)
 	}
 }
 

@@ -67,36 +67,40 @@ type ClaudePluginBuild struct {
 
 // ClaudePluginTarget is one claude.plugins entry as this build ensures it. ID
 // is the enabledPlugins key ensured and Source what `plugin marketplace add`
-// takes, empty for a full id whose entry has no source. For a bare name (Own):
-// the GitHub repository and GitHubID on a release, or on an -alpha build with
-// a checkout (Local) the pfm-owned marketplace dir Marketplace, holding a copy
-// of Checkout, and DevID. Fallback says why an -alpha build ensures the GitHub
-// copy instead; empty on a release. Undecided says why an -alpha build could
-// not tell whether a checkout exists (its source clone or checkout could not
-// be read): install and doctor then decide neither copy, never reading the
-// error as a missing checkout.
+// takes, empty for a full id whose entry has no source. A bare name (Own) is
+// {name}@professor on every build: from the GitHub professor marketplace on a
+// release, or on an -alpha build with a checkout (Local) from the pfm-owned
+// directory marketplace Marketplace, holding a copy of Checkout. Fallback says
+// why an -alpha build has no checkout to install from: it then installs
+// nothing, since one professor marketplace has one source. Undecided says why
+// an -alpha build could not tell whether a checkout exists (its source clone
+// or checkout could not be read): install and doctor then decide nothing,
+// never reading the error as a missing checkout.
 type ClaudePluginTarget struct {
 	Name        string
 	ID          string
-	GitHubID    string
-	DevID       string
 	Source      string
 	Local       bool
 	Marketplace string
 	Checkout    string
 	Fallback    string
 	Undecided   string
-	// Own marks a bare name of ours, which has a GitHub copy and a -dev copy.
+	// Own marks a bare name of ours, whose legacy ids (LegacyIDs) install moves to ID.
 	Own bool
 	// MarketplaceName is the marketplace a full id names; empty for a bare name.
 	MarketplaceName string
-	// ProfessorID is a bare name's id in the professor marketplace,
-	// {name}@professor: a third copy of ours, which every build retires like
-	// its other copies; empty when claude.plugins lists that id.
-	ProfessorID string
 	// InstallOnly marks an -alpha marketplace plugin claude.plugins does not
-	// name: installed from its checkout, every copy kept disabled.
+	// name: installed from its checkout, kept disabled.
 	InstallOnly bool
+}
+
+// LegacyIDs are the ids a plugin of ours installed as before {name}@professor,
+// which install moves to ID; none for a full id.
+func (target ClaudePluginTarget) LegacyIDs() []string {
+	if !target.Own {
+		return nil
+	}
+	return pfmconfig.LegacyClaudePluginIDs(target.Name)
 }
 
 // NeedsKnownMarketplace reports whether the target installs only from a
@@ -106,18 +110,13 @@ func (target ClaudePluginTarget) NeedsKnownMarketplace() bool {
 }
 
 // ClaudePluginTargets plans every claude.plugins entry for build. A bare name is
-// a plugin of ours: its GitHub repository rezzminator/{name} with the id
-// {name}@{name}, or on an -alpha build with a checkout its local -dev copy. A
-// full id is ensured as named, from the entry's source when it has one. An
-// -alpha build then plans each of build.Unlisted as a bare name kept disabled
-// (InstallOnly).
+// a plugin of ours, {name}@professor: from the GitHub professor marketplace, or
+// on an -alpha build its local copy. A full id is ensured as named, from the
+// entry's source when it has one. An -alpha build then plans each of
+// build.Unlisted as a bare name kept disabled (InstallOnly).
 func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 	alpha := obs.AlphaBuild(build.Version)
 	targets := make([]ClaudePluginTarget, 0, len(build.Plugins)+len(build.Unlisted))
-	listed := map[string]bool{}
-	for _, plugin := range build.Plugins {
-		listed[plugin.ID] = true
-	}
 	for _, plugin := range build.Plugins {
 		if !plugin.Bare() {
 			targets = append(targets, ClaudePluginTarget{
@@ -128,11 +127,11 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 			})
 			continue
 		}
-		targets = append(targets, ownClaudePluginTarget(plugin.ID, build, alpha, listed))
+		targets = append(targets, ownClaudePluginTarget(plugin.ID, build, alpha))
 	}
 	if alpha {
 		for _, name := range build.Unlisted {
-			target := ownClaudePluginTarget(name, build, alpha, listed)
+			target := ownClaudePluginTarget(name, build, alpha)
 			target.InstallOnly = true
 			targets = append(targets, target)
 		}
@@ -140,26 +139,13 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 	return targets
 }
 
-// ownClaudePluginTarget plans the bare name of a plugin of ours. Its
-// professor-marketplace id is a third copy, unless claude.plugins lists that
-// id itself.
-func ownClaudePluginTarget(
-	name string,
-	build ClaudePluginBuild,
-	alpha bool,
-	listed map[string]bool,
-) ClaudePluginTarget {
-	id := name + "@" + name
+// ownClaudePluginTarget plans the bare name of a plugin of ours.
+func ownClaudePluginTarget(name string, build ClaudePluginBuild, alpha bool) ClaudePluginTarget {
 	target := ClaudePluginTarget{
-		Name:     name,
-		ID:       id,
-		GitHubID: id,
-		DevID:    name + "@" + devMarketplaceName(name),
-		Source:   claudePluginRepository(name),
-		Own:      true,
-	}
-	if professor := name + "@" + professorMarketplaceName; !listed[professor] {
-		target.ProfessorID = professor
+		Name:   name,
+		ID:     name + "@" + pfmconfig.ProfessorMarketplace,
+		Source: professorMarketplaceRepository,
+		Own:    true,
 	}
 	if !alpha {
 		return target
@@ -167,53 +153,36 @@ func ownClaudePluginTarget(
 	return localClaudePluginTarget(target, build)
 }
 
-// claudePluginRepository keeps a renamed identity on its existing public
-// repository: migration exceptions until an authorized repository rename.
-func claudePluginRepository(name string) string {
-	switch name {
-	case "auto-effort-control":
-		return claudePluginOwner + "/auto-effort"
-	case "forward-compaction":
-		return claudePluginOwner + "/sub-agent-compact"
-	}
-	return claudePluginOwner + "/" + name
-}
-
 // BareClaudePluginRepair is the repair install's FAIL line (and pfm doctor)
 // names when a bare claude.plugins name could not be installed: pfm cannot know
-// offline whether the GitHub repository the name stands for exists.
+// offline whether the professor marketplace lists the name.
 func BareClaudePluginRepair(name string) string {
 	return fmt.Sprintf(
-		"claude.plugins entry %q is a bare name: pfm installs it from github.com/%s — "+
-			"fix or remove the entry in claude.plugins if that repository does not exist",
-		name, claudePluginRepository(name),
+		"claude.plugins entry %q is a bare name: pfm installs it from the professor marketplace github.com/%s — "+
+			"fix or remove the entry in claude.plugins if that marketplace does not list it",
+		name, professorMarketplaceRepository,
 	)
 }
 
-// FallbackNote is the one line install and doctor print for a Fallback. An
-// install-only plugin never falls back: with no checkout it is not installed.
+// FallbackNote is the one line install and doctor print for a Fallback: with
+// no checkout an -alpha build installs nothing.
 func (target ClaudePluginTarget) FallbackNote() string {
 	if target.InstallOnly {
 		return target.Name + ": not installed — " + pfmconfig.KeyClaudePlugins +
 			" does not list it and this alpha build has no checkout of it: " + target.Fallback
 	}
-	return target.Name + ": alpha build falls back to the GitHub copy " + target.GitHubID + " — " + target.Fallback
+	return target.Name + ": not installed — this alpha build has no checkout of it: " + target.Fallback
 }
 
 // ClaudePluginFallbackGap is a Fallback as the gap an -alpha install fails a
 // listed plugin on and doctor reports.
 func ClaudePluginFallbackGap(target ClaudePluginTarget) ClaudePluginGap {
+	reason := target.Fallback
 	if target.InstallOnly {
-		return ClaudePluginGap{
-			Problem: "plugin " + target.Name + " is not installed on this alpha build: " +
-				pfmconfig.KeyClaudePlugins + " does not list it and " + target.Fallback,
-			Fix: "check the plugin out where named, or set " + pfmconfig.KeyClaudePluginCheckoutRoot + ", then " +
-				ClaudePluginRepair,
-		}
+		reason = pfmconfig.KeyClaudePlugins + " does not list it and " + reason
 	}
 	return ClaudePluginGap{
-		Problem: "plugin " + target.Name + " falls back to the GitHub copy " + target.GitHubID +
-			" on this alpha build: " + target.Fallback,
+		Problem: "plugin " + target.Name + " is not installed on this alpha build: " + reason,
 		Fix: "check the plugin out where named, or set " + pfmconfig.KeyClaudePluginCheckoutRoot + ", then " +
 			ClaudePluginRepair,
 	}
@@ -226,9 +195,9 @@ func ClaudePluginGapNames(problem, name string) bool {
 	return ok && rest != "" && strings.ContainsRune(" @:", rune(rest[0]))
 }
 
-// UndecidedNote names an Undecided target's two copies and why neither is chosen.
+// UndecidedNote names why an Undecided target's checkout is not decided.
 func (target ClaudePluginTarget) UndecidedNote() string {
-	return "its copy is undecided (" + target.GitHubID + " or " + target.DevID + "): " + target.Undecided
+	return "its checkout is undecided: " + target.Undecided
 }
 
 func readClaudeSettingsDocument(path string) (map[string]any, error) {
@@ -280,12 +249,12 @@ func (installer *engine) claudePluginBuild() (ClaudePluginBuild, error) {
 // An -alpha build ensures each bare name with a checkout from its local copy
 // (ClaudePluginTargets), plus every other plugin the source clone's
 // marketplace lists, installed and kept disabled (WithMarketplacePlugins);
-// every build then disables the copies of ours it does not ensure. A bare name
-// whose source is undecided is a failure naming the error, its copies left as
-// they are. A listed id pfm cannot install is a failure naming it; an id the
+// every build then moves each plugin's legacy ids to {name}@professor once that
+// is installed. A bare name whose checkout is undecided, or a listed one with no
+// checkout on an -alpha build, is a failure naming why, left as it is. A listed id pfm cannot install is a failure naming it; an id the
 // list does not name is never read or written. An applied -alpha install ends
-// by reading every listed plugin of ours back: one not installed from its -dev
-// copy and enabled is a failure (checkListedClaudePlugins).
+// by reading every listed plugin of ours back: one not installed from its
+// checkout copy and enabled is a failure (checkListedClaudePlugins).
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	dir := installer.options.PrimaryConfigDir
 	if dir == "" {
@@ -310,12 +279,6 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 		run.failures = append(run.failures, installer.pluginStepFailure(dir, listErr))
 	}
 	targets := ClaudePluginTargets(build)
-	for index := range targets {
-		target := &targets[index]
-		if target.Fallback != "" {
-			installer.skip("claude plugin " + target.FallbackNote())
-		}
-	}
 	var err error
 	run.document, err = readClaudeSettingsDocument(run.settingsPath)
 	if err != nil {
@@ -377,8 +340,14 @@ func (installer *engine) ensureClaudePluginTarget(
 	if target.Undecided != "" {
 		// No copy is installed, enabled or disabled on an error.
 		run.failures = append(run.failures, installer.pluginFailure(
-			run.dir, target.Name, errors.New(target.UndecidedNote()+"; both left as they are"),
+			run.dir, target.Name, errors.New(target.UndecidedNote()+"; left as it is"),
 		))
+		return
+	}
+	if target.Fallback != "" && !target.InstallOnly {
+		// Nothing is installed, moved or disabled: its legacy copies may be all that runs.
+		gap := ClaudePluginFallbackGap(*target)
+		fail(fmt.Errorf("%s — %s", gap.Problem, gap.Fix))
 		return
 	}
 	if gap, ok := run.unresolved[target.ID]; ok {
@@ -386,6 +355,8 @@ func (installer *engine) ensureClaudePluginTarget(
 		return
 	}
 	installed := !slices.Contains(run.missing, target.ID)
+	// ready says target.ID is installed, so its legacy ids may move to it.
+	ready := installed
 	// An install-only plugin is ensured once installed: enabling it is no part of it.
 	ensured := installed && (target.InstallOnly || pluginEnabled(run.document, target.ID))
 	if run.unresolvedErr != nil && target.NeedsKnownMarketplace() && !ensured {
@@ -405,7 +376,7 @@ func (installer *engine) ensureClaudePluginTarget(
 			return
 		}
 	}
-	if target.Local && ensured {
+	if target.Own && target.Source != "" && ensured {
 		// An install below runs the same add; an installed copy needs its own.
 		if err := installer.repointClaudePluginMarketplace(ctx, run, target); err != nil {
 			fail(err)
@@ -416,7 +387,8 @@ func (installer *engine) ensureClaudePluginTarget(
 	case ensured && target.InstallOnly:
 		line := "claude plugin " + target.ID + " installed in " + run.dir
 		// A copy found enabled is disabled below: never called kept disabled.
-		if !slices.ContainsFunc(target.copyIDs(), func(id string) bool { return pluginEnabled(run.document, id) }) {
+		ids := append([]string{target.ID}, target.LegacyIDs()...)
+		if !slices.ContainsFunc(ids, func(id string) bool { return pluginEnabled(run.document, id) }) {
 			line += ", kept disabled: " + pfmconfig.KeyClaudePlugins + " does not list " + target.Name
 		}
 		installer.ok(line)
@@ -427,9 +399,10 @@ func (installer *engine) ensureClaudePluginTarget(
 			"claude plugin %s in %s: real claude binary not resolved: %v", target.ID, run.dir, run.resolveErr,
 		))
 		return
-	case target.InstallOnly && !target.Local:
-		// Unlisted with no checkout: never installed from GitHub; its skip line
-		// is printed above, and a copy found enabled is still disabled below.
+	case target.Fallback != "":
+		// Unlisted with no checkout: not installed, and a legacy copy found
+		// enabled is still disabled below.
+		installer.skip("claude plugin " + target.FallbackNote())
 	default:
 		if err := installer.installClaudePlugin(ctx, run.binary, run.dir, target); err != nil {
 			if target.Own && !target.Local {
@@ -440,6 +413,8 @@ func (installer *engine) ensureClaudePluginTarget(
 		}
 		// An applied install snapshots the user scope; another scope may still be behind.
 		installed = installed || installer.apply
+		// A preview names the legacy moves the install leads to.
+		ready = true
 		if target.InstallOnly && !installer.apply {
 			// The install enables it and the edit after it disables it; a preview
 			// reads settings from before the install, so it names that edit here.
@@ -459,26 +434,32 @@ func (installer *engine) ensureClaudePluginTarget(
 		// that is touched, and no other id is its twin to retire.
 		return
 	}
-	for _, plan := range []func(string, *ClaudePluginTarget) (string, func() error, error){
-		planOtherCopyRetirement, planRetiredPluginDisable,
+	for index, plan := range []func(string, *ClaudePluginTarget) (string, func() error, error){
+		planLegacyCopyRetirement, planRetiredPluginDisable,
 	} {
 		message, edit, err := plan(run.settingsPath, target)
 		if err != nil {
 			fail(err)
 			return
 		}
-		if message == "" {
-			continue
+		if message != "" {
+			if err := installer.change(message, edit); err != nil {
+				fail(err)
+				return
+			}
 		}
-		if err := installer.change(message, edit); err != nil {
-			fail(err)
+		if index == 0 && ready {
+			// The legacy pluginConfigs are carried: the uninstalls may delete them.
+			if err := installer.removeLegacyClaudePluginCopies(ctx, run, target); err != nil {
+				fail(err)
+			}
 		}
 	}
 }
 
-// repointClaudePluginMarketplace re-points an installed local target's
-// marketplace that Claude Code knows from another source at the target's own
-// dir: `plugin
+// repointClaudePluginMarketplace re-points the professor marketplace of an
+// installed plugin of ours that Claude Code knows from another source at the
+// target's own source, its checkout copies' dir on -alpha: `plugin
 // marketplace add` on a known name re-points it and keeps its plugins and their
 // options, which `plugin marketplace remove` would delete. An applied re-point
 // is read back, and a marketplace still pointing elsewhere is an error.
@@ -517,8 +498,8 @@ func (installer *engine) repointClaudePluginMarketplace(
 
 // checkListedClaudePlugins reads back, after an applied -alpha pass, every
 // plugin of ours claude.plugins lists that the pass did not already fail: one
-// not installed from its -dev copy and enabled is a failure naming each problem
-// pfm doctor reports for it.
+// not installed from its checkout copy and enabled is a failure naming each
+// problem pfm doctor reports for it.
 func (installer *engine) checkListedClaudePlugins(
 	run *claudePluginRun,
 	targets []ClaudePluginTarget,
@@ -536,7 +517,7 @@ func (installer *engine) checkListedClaudePlugins(
 		if len(problems) == 0 {
 			continue
 		}
-		text := "not installed from its -dev copy and enabled after this install: " + strings.Join(problems, "; ")
+		text := "not installed from its checkout copy and enabled after this install: " + strings.Join(problems, "; ")
 		run.failures = append(run.failures, installer.pluginFailure(run.dir, target.ID, errors.New(text)))
 	}
 }

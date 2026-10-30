@@ -307,3 +307,30 @@ func TestPartEnv(t *testing.T) {
 		})
 	}
 }
+
+// TestRedirectsRideTheirParts: a statement's redirections ride its part; a
+// compound command's ride every part inside it; a statement that runs no
+// program is one program-less part holding them; a heredoc keeps its body.
+func TestRedirectsRideTheirParts(t *testing.T) {
+	t.Parallel()
+	parts := parseOne(t, "F=out.md; echo a > $F; { echo b; echo c; } >> log 2>&1; > bare; tee x <<'EOF'\nbody\nEOF")
+	type seen struct {
+		Program string
+		Redirs  []Redirect
+	}
+	var got []seen
+	for _, p := range parts {
+		got = append(got, seen{p.Program, p.Redirs})
+	}
+	group := []Redirect{{Op: ">>", Target: "log"}, {Op: ">&", Target: "1"}}
+	want := []seen{
+		{"echo", []Redirect{{Op: ">", Target: "out.md"}}},
+		{"echo", group},
+		{"echo", group},
+		{"", []Redirect{{Op: ">", Target: "bare"}}},
+		{"tee", []Redirect{{Op: "<<", Target: "EOF", Body: "body\n"}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parts = %+v\nwant    %+v", got, want)
+	}
+}

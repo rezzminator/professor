@@ -2,6 +2,7 @@ package statusline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 		{"null block", `,"rate_limits":null`, "fresh", "10%", "78%", "0%"},
 		{"empty block", `,"rate_limits":{}`, "fresh", "10%", "78%", "0%"},
 		{"null windows", `,"rate_limits":{"five_hour":null,"seven_day":null}`, "fresh", "10%", "78%", "0%"},
-		{"partial zero wins", fmt.Sprintf(`,"rate_limits":{"five_hour":{"used_percentage":0,"resets_at":%d}}`, now.Add(time.Hour).Unix()), "fresh", "0%", "78%", "0%"},
+		{"partial zero wins", fmt.Sprintf(`,"rate_limits":{"five_hour":{"used_percentage":0,"resets_at":%d}}`, now.Add(2*time.Hour).Unix()), "fresh", "0%", "78%", "0%"},
 		{"explicit empty scope", `,"rate_limits":{"limits":[]}`, "fresh", "10%", "78%", "—"},
 		{"missing cache", `,"rate_limits":{"seven_day_fable":{"used_percentage":0}}`, "missing", "—", "—", "0%"},
 		{"stale cache", `,"rate_limits":{"seven_day_fable":{"used_percentage":0}}`, "stale", "—", "—", "0%"},
@@ -222,11 +223,166 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 	}
 }
 
-// mainRates retains the harness-provided main windows in the cache-state cases.
+// mainRates retains the harness-provided main windows in the cache-state cases:
+// both sit in a later window than the cache's, so the cache never outranks them.
 func mainRates(now time.Time) string {
 	return fmt.Sprintf(
 		`,"rate_limits":{"five_hour":{"used_percentage":11,"resets_at":%d},"seven_day":{"used_percentage":31,"resets_at":%d}}`,
 		now.Add(4*time.Hour).Unix(),
-		now.Add(6*24*time.Hour).Unix(),
+		now.Add(6*24*time.Hour+time.Hour).Unix(),
 	)
+}
+
+// An idle chat's payload stops at its last API reply while the account keeps
+// spending, so a reported window yields to a newer reading of it: another seat's
+// snapshot or the usage cache. Newer is the later window, or more used inside
+// the same one; the borrowed reading is never recorded as this seat's own.
+func TestAFrozenPayloadYieldsToANewerReadingOfItsWindow(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	week := now.Add(60 * time.Hour)
+	for _, tc := range []struct {
+		name, source string
+		used         float64
+		reset        time.Time
+		payloadUsed  int
+		payloadReset time.Time
+		want         string
+	}{
+		{"sibling seat newer", "sibling", 89, week, 61, week, "89%"},
+		{"usage cache newer", "cache", 89, week, 61, week, "89%"},
+		{"sibling seat behind", "sibling", 40, week, 61, week, "61%"},
+		{"usage cache behind", "cache", 40, week, 61, week, "61%"},
+		{"payload in a later window", "cache", 89, week, 3, week.Add(7 * 24 * time.Hour), "3%"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := fableRuntime(t.TempDir(), 2, now)
+			switch tc.source {
+			case "sibling":
+				body, err := json.Marshal(map[string]any{
+					"acct": 2, "config_dir": runtime.ConfigDir, "ts": now.Add(-10 * time.Minute).Unix(),
+					"windows": map[string]any{
+						"seven_day": map[string]any{"used_percentage": tc.used, "resets_at": tc.reset.Unix()},
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(runtime.RateLimitDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				live := filepath.Join(runtime.RateLimitDir, "acct-2.live.json")
+				if err := os.WriteFile(live, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "cache":
+				fetched := now.Add(-5 * time.Minute)
+				writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
+					Usage: usagehook.Usage{SevenDay: usagehook.Window{
+						Utilization: floatPtr(tc.used),
+						ResetsAt:    tc.reset.Format(time.RFC3339),
+					}},
+					ConfigDir: runtime.ConfigDir,
+					FetchedAt: &fetched,
+				})
+			}
+			raw := fmt.Sprintf(
+				`{"model":{"id":"claude-opus-4"},"session_id":"frozen","rate_limits":{`+
+					`"five_hour":{"used_percentage":0,"resets_at":%d},`+
+					`"seven_day":{"used_percentage":%d,"resets_at":%d}}}`,
+				now.Add(time.Hour).Unix(), tc.payloadUsed, tc.payloadReset.Unix(),
+			)
+			got, err := Render(context.Background(), []byte(raw), runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plain := stripANSICodes(got); !strings.Contains(plain, "7d-used:"+tc.want) {
+				t.Fatalf("want 7d-used:%s in %q", tc.want, plain)
+			}
+			body, err := os.ReadFile(filepath.Join(runtime.RateLimitDir, "acct-2.frozen.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var own struct {
+				Windows map[string]rateWindow `json:"windows"`
+			}
+			if err := json.Unmarshal(body, &own); err != nil {
+				t.Fatal(err)
+			}
+			if seven, ok := own.Windows["seven_day"]; ok && seven.UsedPercentage != float64(tc.payloadUsed) {
+				t.Fatalf("this seat's snapshot recorded a borrowed 7d reading: %+v", seven)
+			}
+		})
+	}
+}
+
+// A redraw is no provider confirmation: an idle chat redraws every few seconds
+// with the payload of its last API reply, so its snapshot keeps the time that
+// reading last changed. Otherwise the frozen reading answers the usage door
+// inside its TTL forever and the endpoint is never asked again. A reading of
+// this seat's own that the display replaced with a sibling's stays recorded, so
+// the borrowed one coming and going is no change either.
+func TestARedrawOfAnUnchangedPayloadKeepsItsConfirmationTime(t *testing.T) {
+	start := time.Now().UTC().Truncate(time.Second)
+	week := start.Add(60 * time.Hour)
+	frozen := fmt.Sprintf(
+		`{"model":{"id":"claude-opus-4"},"session_id":"frozen","rate_limits":{`+
+			`"five_hour":{"used_percentage":20,"resets_at":%d},`+
+			`"seven_day":{"used_percentage":61,"resets_at":%d}}}`,
+		start.Add(4*time.Hour).Unix(), week.Unix(),
+	)
+	root := t.TempDir()
+	draw := func(at time.Time, raw string) int64 {
+		t.Helper()
+		runtime := fableRuntime(root, 2, at)
+		if _, err := Render(context.Background(), []byte(raw), runtime); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(runtime.RateLimitDir, "acct-2.frozen.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var own struct {
+			TS      int64                 `json:"ts"`
+			Windows map[string]rateWindow `json:"windows"`
+		}
+		if err := json.Unmarshal(body, &own); err != nil {
+			t.Fatal(err)
+		}
+		if seven := own.Windows["seven_day"]; seven.UsedPercentage != 61 {
+			t.Fatalf("at %s the snapshot's own 7d reading is %+v, want this seat's 61%%", at, seven)
+		}
+		return own.TS
+	}
+	if got := draw(start, frozen); got != start.Unix() {
+		t.Fatalf("first draw ts=%d, want %d", got, start.Unix())
+	}
+	later := start.Add(10 * time.Minute)
+	if got := draw(later, frozen); got != start.Unix() {
+		t.Fatalf("an unchanged redraw re-stamped ts=%d, want the reading's %d", got, start.Unix())
+	}
+	runtime := fableRuntime(root, 2, later)
+	if _, _, found, err := usagehook.ReadStatuslineSnapshot(
+		runtime.RateLimitDir, 2, runtime.ConfigDir, later, 3*time.Minute,
+	); err != nil || found {
+		t.Fatalf("found=%v err=%v: a frozen reading answered the usage door inside its TTL", found, err)
+	}
+	sibling, err := json.Marshal(map[string]any{
+		"acct": 2, "config_dir": runtime.ConfigDir, "ts": later.Add(-time.Minute).Unix(),
+		"windows": map[string]any{
+			"seven_day": map[string]any{"used_percentage": 89, "resets_at": week.Unix()},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtime.RateLimitDir, "acct-2.live.json"), sibling, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := draw(later.Add(time.Minute), frozen); got != start.Unix() {
+		t.Fatalf("adopting a sibling's 7d re-stamped ts=%d, want %d", got, start.Unix())
+	}
+	replied := strings.Replace(frozen, `"used_percentage":20`, `"used_percentage":25`, 1)
+	if at := later.Add(2 * time.Minute); draw(at, replied) != at.Unix() {
+		t.Fatalf("a changed reading kept its old confirmation time")
+	}
 }

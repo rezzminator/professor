@@ -112,9 +112,9 @@ func TestFableWindowFallsBackToUsageCacheWhenHarnessOmitsLimits(t *testing.T) {
 }
 
 // TestFableWindowPrefersHarnessLimitsOverCache pins precedence rule #1: a
-// harness payload that DOES carry a `limits` array wins outright, even when
-// pfm's cache holds a different value for the same account — the cache is a
-// fallback for an omitted array, never a second opinion.
+// harness payload that DOES carry a `limits` array wins over a cache reading of
+// an earlier window, however much higher — the cache outranks a reported window
+// only with a newer reading of it (TestAFrozenPayloadYieldsToANewerReadingOfItsWindow).
 func TestFableWindowPrefersHarnessLimitsOverCache(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
@@ -122,7 +122,7 @@ func TestFableWindowPrefersHarnessLimitsOverCache(t *testing.T) {
 	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
 		Usage: usagehook.Usage{
 			Limits: []usagehook.ScopedLimit{
-				fableScopedLimit(90, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+				fableScopedLimit(90, now.Add(time.Hour).UTC().Format(time.RFC3339), true),
 			},
 		},
 		ConfigDir: runtime.ConfigDir,
@@ -179,7 +179,7 @@ func TestFableWindowPresentButEmptyLimitsArrayIsNotCacheFallback(t *testing.T) {
 }
 
 // TestHarnessMainWindowsTakePrecedenceOverCache pins that reported harness
-// values win even when the cache has different values and a usable Fable entry.
+// values win over a cache holding earlier windows and a usable Fable entry.
 func TestHarnessMainWindowsTakePrecedenceOverCache(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
@@ -188,11 +188,11 @@ func TestHarnessMainWindowsTakePrecedenceOverCache(t *testing.T) {
 		Usage: usagehook.Usage{
 			FiveHour: usagehook.Window{
 				Utilization: floatPtr(77),
-				ResetsAt:    now.Add(4 * time.Hour).UTC().Format(time.RFC3339),
+				ResetsAt:    now.Add(time.Hour).UTC().Format(time.RFC3339),
 			},
 			SevenDay: usagehook.Window{
 				Utilization: floatPtr(66),
-				ResetsAt:    now.Add(6 * 24 * time.Hour).UTC().Format(time.RFC3339),
+				ResetsAt:    now.Add(24 * time.Hour).UTC().Format(time.RFC3339),
 			},
 			Limits: []usagehook.ScopedLimit{
 				fableScopedLimit(38, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),

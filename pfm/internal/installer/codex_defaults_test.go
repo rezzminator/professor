@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestCodexDefaultsInstall(t *testing.T) {
@@ -127,7 +129,7 @@ func TestCodexDefaultsFreshHomes(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := codexHarnessPrompt()
+	prompt, err := assembledHarnessPrompt(t.TempDir(), pfmengine.Codex)
 	if err != nil {
 		t.Fatal(err)
 	}

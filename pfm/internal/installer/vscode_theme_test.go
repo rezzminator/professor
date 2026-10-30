@@ -56,7 +56,7 @@ const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   env: { remoteName: scenario.remoteName || undefined },
   ExtensionKind: { UI: 1, Workspace: 2 },
-  workspace: {
+  workspace: { textDocuments: [], // prompt lint
     workspaceFile: scenario.workspaceFile ? { scheme: scenario.workspaceScheme || 'file', fsPath: scenario.workspaceFile,
       toString: () => (scenario.workspaceScheme || 'file') + '://' + (scenario.remoteName ? 'ssh-remote+fixture' : '') + scenario.workspaceFile } : undefined,
     workspaceFolders: scenario.folder ? [{ uri: { toString: () => scenario.folder } }] : undefined,
@@ -104,6 +104,8 @@ const vscodeStub = {
     showErrorMessage: (message) => { messages.push({ kind: 'error', message }); return Promise.resolve(); },
     showWarningMessage: (message) => { messages.push({ kind: 'warning', message }); return Promise.resolve(); },
   },
+  languages: { createDiagnosticCollection: () => ({ dispose() {} }), registerCodeActionsProvider: () => ({ dispose() {} }), registerCodeLensProvider: () => ({ dispose() {} }), match: () => 0 },
+  Disposable: { from: () => ({ dispose() {} }) }, CodeActionKind: { QuickFix: 'quickfix' }, EventEmitter: function () { this.event = () => {}; }, // Prompt Lint (prompt-lint.js), unexercised here
   extensions: { getExtension: (id) => (id === 'johnpapa.vscode-peacock' && scenario.peacock ? { id } : undefined) },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
   ThemeIcon: function (id) { this.id = id; },

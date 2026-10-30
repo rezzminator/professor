@@ -29,7 +29,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   fi
   if [[ "$remote_ref" == refs/heads/develop ]]; then arch_tip="$local_sha"; fi
 
-  # main is release-only: it moves when the develop → main release PR merges
+  # main is release-only: it moves when a release PR into main merges
   # (gitter Phase RELEASE), never by a direct push. GitHub's ruleset refuses
   # this too; failing here is faster and names the road to take.
   if [[ "$remote_ref" == refs/heads/main ]]; then

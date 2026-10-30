@@ -82,6 +82,9 @@ const forwardCompactionSuccessor = "mcp__forward-compaction__forward_compaction 
 // family, the wave-builder skill and /imagine:build-spec point there too.
 const flightsSuccessor = "the flights-foreman agent"
 
+// pcmSuccessor is what replaced the /pcm command: dispatching its agent.
+const pcmSuccessor = "the pcm agent"
+
 // imagineSuccessor is what replaced /imagine:build, /imagine:build-fast,
 // /imagine:callmeter, /ultimate-spec and the ultimate visualization skill.
 const imagineSuccessor = "/imagine"
@@ -125,24 +128,28 @@ var retiredNames = []retiredName{
 	// in releases/v0.78.0.md.
 	{name: "JC-COMMIT", kind: retiredPhase, successor: "COMMIT", match: matchExact},
 	{name: "JC-UPDATE", kind: retiredPhase, match: matchExact},
-	// releases/v0.77.0.md "C: pfm — /pfm:refresh is gone as a command":
-	// /pfm:release --from is its only caller (the live form per CLAUDE.md
+	// releases/v0.77.0.md "C: pfm — /pfm:refresh is gone as a command": the
+	// refresh pass is pcm's, run on request (the live form per CLAUDE.md
 	// § Vocabulary "refresh").
 	{
 		name:      "/pfm:refresh",
 		kind:      retiredCommand,
-		successor: "/pfm:release prepare --from {live-project}",
+		successor: pcmSuccessor,
 		match:     matchExact,
 	},
 	// releases/v0.77.0.md "/quality:md-forlint (renamed from /quality:forlint)".
 	{name: "/quality:forlint", kind: retiredCommand, successor: "/quality:md-forlint", match: matchExact},
 	// releases/v0.78.0.md "Project: /pfm becomes /pcm": commands/pfm.md is
-	// renamed commands/pcm.md with its audit scopes inline.
-	{name: ".claude/commands/pfm.md", kind: retiredPath, successor: ".claude/commands/pcm.md", match: matchExact},
+	// renamed commands/pcm.md with its audit scopes inline; that /pcm command
+	// retired in turn (below), so both point at the agent it dispatched.
+	{name: ".claude/commands/pfm.md", kind: retiredPath, successor: pcmSuccessor, match: matchExact},
 	{
 		name: ".claude/commands/pfm/references/audit-scopes.md", kind: retiredPath,
-		successor: ".claude/commands/pcm.md", match: matchExact,
+		successor: pcmSuccessor, match: matchExact,
 	},
+	// Commit "remove the /pcm command end to end": the pcm agent is dispatched
+	// directly; a project keeping its own commands/pcm.md is not a hit.
+	{name: "/pcm", kind: retiredCommand, successor: pcmSuccessor, match: matchExact},
 	// releases/v0.78.0.md retired the former chat tool namespace.
 	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__chat-professor__*", match: matchPrefix},
 	// Standalone plugin registration replaces the server pfm installed.
@@ -259,10 +266,10 @@ var retiredNames = []retiredName{
 		name: "docs/agents", kind: retiredPath, successor: "docs/_index.md and docs/standards.md",
 		match: matchExact,
 	},
-	// The PreToolUse guard hook is removed with its stamp script: framework
-	// files are edited through /pcm, which dispatches the pcm agent, and no
-	// hook gates the edit. A settings.json hook entry or a script still
-	// naming either one is dead wiring.
+	// The stamp-gated PreToolUse guard hook is removed with its stamp script:
+	// framework files are edited by the pcm agent, which the launch hook `pfm
+	// internal pcm-guard` exempts by agent_type. A settings.json hook entry or
+	// a script still naming either one is dead wiring.
 	{name: "pfm-guard.sh", kind: retiredPath, match: matchExact},
 	{name: "guard-stamp.sh", kind: retiredPath, match: matchExact},
 	// Commit 09d16b64 "the ultimate family becomes /imagine:build, build-spec,

@@ -104,7 +104,10 @@ def find_subagents(roots, prefix):
             for sd in sessions:
                 d = os.path.join(sd, "subagents")
                 if os.path.isdir(d):
-                    found += [p for p in subagent_transcripts(d) if os.path.basename(p).startswith("agent-" + prefix)]
+                    failed = []
+                    found += [p for p in subagent_transcripts(d, failed)
+                              if os.path.basename(p).startswith("agent-" + prefix)]
+                    errs += [f"list subagents {path}: {reason}" for path, reason in failed]
     return found, errs
 
 
@@ -204,9 +207,11 @@ def searched():
 
 def pick(target, hits, unreadable=()):
     hits = unique(hits)
+    if unreadable:
+        raise NotFound(f"INCOMPLETE lookup for {target!r} — {len(unreadable)} discovery/read errors: "
+                       f"{' '.join(unreadable)}")
     if not hits:
-        tail = f"; {len(unreadable)} rollouts unreadable: {' '.join(unreadable)}" if unreadable else ""
-        raise NotFound(f"NOT FOUND {target} — searched {searched()}{tail}")
+        raise NotFound(f"NOT FOUND {target} — searched {searched()}")
     if len(hits) > 1:
         raise NotFound(f"AMBIGUOUS {target} — {len(hits)} transcripts: {' '.join(sorted(hits))}")
     return hits[0]
@@ -255,7 +260,7 @@ def read_tail(path, n):
     return data if size <= n else data[data.find(b"\n") + 1:]
 
 
-def by_name(target, id_failed):
+def by_name(target):
     unreadable, files, pending = [], [], []
     for root in claude_roots():
         if os.path.isdir(root):
@@ -307,12 +312,11 @@ def by_name(target, id_failed):
     if total == 1:
         return named[0][0] if named else hits[0][0]
     if total == 0:
-        missed = f"; {len(id_failed)} places unreadable while resolving: {' '.join(id_failed)}" if id_failed else ""
         titles = f" and {len(sess)} OpenCode session titles" if sess else ""
         raise NotFound(f"NOT FOUND {target} — searched {searched()} for an id or prefix; the name lookup over "
                        f"{len(files)} session files (the last {NAME_TAIL // 1024} KB of each){titles} found no chat "
                        f"whose last title is {target!r} (a seat name resolves to its id with "
-                       f"`pfm chat resolve {target}`, third column){missed}")
+                       f"`pfm chat resolve {target}`, third column)")
     rows = []
     for p, tail in sorted(hits):
         stamps = TAIL_STAMP.findall(tail.decode("utf-8", "replace"))
@@ -336,7 +340,9 @@ def resolve(target):
     if AGENT_PATH.match(target):
         hits, unreadable = [], []
         for home in codex_homes():
-            for r in walk_rollouts(home)[0]:
+            rollouts, failed = walk_rollouts(home)
+            unreadable += failed
+            for r in rollouts:
                 ap = rollout_agent_path(r)
                 if ap is None:
                     unreadable.append(r)
@@ -347,9 +353,9 @@ def resolve(target):
         raise NotFound(f"no such transcript file: {target}")
     ident = target[len("agent-"):] if target.startswith("agent-") else target
     hits, failed = id_hits(ident) if ID_TARGET.match(ident) else ([], [])
-    if hits:
-        return pick(target, hits)
-    return by_name(target, failed)
+    if hits or failed:
+        return pick(target, hits, failed)
+    return by_name(target)
 
 
 # --- runs ---------------------------------------------------------------------------------------------

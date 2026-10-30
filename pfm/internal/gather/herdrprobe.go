@@ -477,8 +477,9 @@ func belowHerdrShell(proc ProcFS, pid, shell int) (bool, error) {
 
 // ProbeHerdrSeats returns only proved pane data; unknown and dead seats remain
 // visible diagnostics, never recycled occupant metadata. One listing per socket.
-// A positively dead seat reads as lost (non-live); unknown evidence stays live
-// with its error, so callers count it as a failure.
+// A positively dead seat reads as lost (non-live), and a writable listing
+// retires it durably; unknown evidence stays live with its error, so callers
+// count it as a failure.
 func ProbeHerdrSeats(ctx context.Context, values paths.Values, seats []fleetdb.Seat, readOnly bool) []HerdrSeat {
 	open := fleetdb.OpenSharedState
 	if readOnly {
@@ -507,11 +508,18 @@ func proveHerdrSeats(ctx context.Context, db *fleetdb.Store, proc ProcFS, rows [
 			continue
 		}
 		if !owned {
-			// Positive death only: the row stays visible as a lost seat for this
-			// listing, never live and never the recycled pane's occupant. The
-			// durable row is left to the restore path; a listing never retires it.
-			row.Seat.State = "lost"
+			// Positive death only: the row stays visible as a lost seat, never
+			// live and never the recycled pane's occupant. A writable listing
+			// retires the durable row once, so later scans never probe it again.
 			row.Err = fmt.Errorf("HERDR DEAD %s: saved supervisor exited", row.Seat.SeatID)
+			if !readOnly {
+				retired, retireErr := retireDeadHerdrSeat(ctx, db, canonical)
+				row.Err = errors.Join(row.Err, retireErr)
+				if retireErr == nil {
+					row.Seat = retired
+				}
+			}
+			row.Seat.State = "lost"
 			continue
 		}
 		row.Seat = canonical
@@ -629,4 +637,78 @@ func HerdrSupervisorAbsent(proc ProcFS, seat fleetdb.Seat) (bool, error) {
 // HerdrSupervisorArgv locates candidates only; ProveHerdrSeat supplies the authority.
 func HerdrSupervisorArgv(argv []string, id string) bool {
 	return exactSeatHost(argv, id) || legacyHerdrLauncher(argv)
+}
+
+// HerdrChatSeat is the one rule every door follows to find the Herdr pane a
+// process's chat lives in: the durable native seat on socket whose saved
+// supervisor is one of chain (the process and its ancestors, nearest first).
+// A Herdr pane move gives the pane a new id and rewrites the seat, never the
+// HERDR_PANE_ID the chat's processes inherited: the seat's HerdrPane and
+// HerdrWorkspace are the chat's current address, envPane only the pane's birth
+// id. A legacy seat (no saved supervisor; pfm never moves one) is found by
+// envPane and the supervisor argv of an ancestor. An ancestor that exited is no
+// supervisor; one whose argv cannot be read is an error, never "no seat".
+func HerdrChatSeat(
+	seats []fleetdb.Seat,
+	proc ProcFS,
+	socket, envPane string,
+	chain []int,
+) (fleetdb.Seat, bool, error) {
+	for _, pid := range chain {
+		for i := range seats {
+			seat := &seats[i]
+			if seat.Backend != nativeHerdrBackend || seat.HerdrSocket != socket {
+				continue
+			}
+			if seat.SeatHostPID > 0 && seat.SeatHostPID == pid {
+				return *seat, true, nil
+			}
+			if seat.SeatHostPID != 0 || seat.HerdrPane != envPane {
+				continue
+			}
+			argv, err := proc.Cmdline(pid)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return fleetdb.Seat{}, false, fmt.Errorf("read legacy supervisor candidate %d: %w", pid, err)
+			}
+			// This only locates a legacy candidate; ProveHerdrSeat validates full argv.
+			if HerdrSupervisorArgv(argv, seat.SeatID) {
+				return *seat, true, nil
+			}
+		}
+	}
+	return fleetdb.Seat{}, false, nil
+}
+
+// HerdrChatPane is HerdrChatSeat over the seats of state, which may be nil or
+// absent (no pfm state yet: no seat): the pane to address and whether a seat
+// named it. With no seat it is envPane. A seat table that cannot be read is an
+// error, never envPane.
+func HerdrChatPane(
+	ctx context.Context,
+	state *fleetdb.Store,
+	proc ProcFS,
+	socket, envPane string,
+	chain []int,
+) (pane string, seat fleetdb.Seat, found bool, err error) {
+	if state == nil || errors.Is(state.Degraded(), fleetdb.ErrAbsent) {
+		return envPane, fleetdb.Seat{}, false, nil
+	}
+	if err := state.Degraded(); err != nil {
+		return "", fleetdb.Seat{}, false, fmt.Errorf("read the chat's Herdr seat: %w", err)
+	}
+	seats, err := state.Seats(ctx)
+	if err != nil {
+		return "", fleetdb.Seat{}, false, fmt.Errorf("read the chat's Herdr seat: %w", err)
+	}
+	seat, found, err = HerdrChatSeat(seats, proc, socket, envPane, chain)
+	if err != nil {
+		return "", fleetdb.Seat{}, false, fmt.Errorf("find the chat's Herdr seat: %w", err)
+	}
+	if !found || seat.HerdrPane == "" {
+		return envPane, seat, found, nil
+	}
+	return seat.HerdrPane, seat, true, nil
 }

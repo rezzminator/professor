@@ -38,11 +38,11 @@ When required but unavailable, the binary produces `engine-sync binary unavailab
 
 `pfm install` never installs engine-sync. Produce the binary before the first `pfm install --yes` or `pfm update` on a clone host:
 
-1. Install the plugin: `claude plugin marketplace add rezzminator/engine-sync`, then `claude plugin install engine-sync@engine-sync`.
+1. Install the plugin: `claude plugin marketplace add rezzminator/professor`, then `claude plugin install engine-sync@professor`.
 2. Start a new Claude session. The plugin's `SessionStart` hook runs its wrapper, which downloads the release binary for the plugin's version, checks it against the plugin's `SHA256SUMS` and links it at the stable path above. A failed download backs off for a minute and is retried by a later session start.
 3. Confirm: `test -x ~/.local/share/engine-sync/bin/engine-sync && echo ok` (use the resolved path above if you configured another engine-sync home).
 
-An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@engine-sync`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link; rebuilding pfm does not produce engine-sync.
+An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@professor`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link; rebuilding pfm does not produce engine-sync.
 
 Once the stable binary exists, `pfm install --yes` also links it onto PATH: `~/.local/bin/engine-sync` -> `~/.local/share/engine-sync/bin/engine-sync`. It writes that link only when the path is absent or already that link; any other entry there stays as it is and `pfm doctor` warns. `pfm uninstall` removes the link only when it is pfm's.
 
@@ -108,7 +108,7 @@ pfm install --yes --vscode
 `pfm install --yes` manages eight surfaces, all under `$HOME`; `--vscode` adds a ninth:
 
 1. Staged assets — `~/.local/share/pfm/install/`, including the `claude` launcher; since that launcher disables Claude Code's own version cleanup, pfm also owns retention under `~/.local/share/claude/versions/` — `pfm doctor` reports count, bytes, and prunable size, and `pfm install` previews and applies the prune (`pfm/TESTPLAN.md` § claude-versions)
-2. Command and skill registries are written once into `~/.claude/commands/`, `~/.claude/skills/` and `~/.claude/agents/`. Every account links the shared entries to that store. Each repo in `templates/global/skills/sources.json` is fetched into `~/.local/share/pfm/install/skills/{name}/` and linked into `~/.claude/skills/` and `~/.agents/skills/`; a failed fetch keeps the last copy, and a real destination is a conflict. Doctor reports one `skill-source` row per registered skill.
+2. Command, skill, agent and rule registries are written once into `~/.claude/commands/`, `~/.claude/skills/`, `~/.claude/agents/` and `~/.claude/rules/`. Every account links the shared entries to that store. Each `templates/global/rules/*.md` is one link in `~/.claude/rules/`; `engine-sync global` carries every always-on rule to Codex (an owned block in each Codex home's `AGENTS.md`) and OpenCode (an `instructions` entry), and doctor prints `doctor: rules` and `global-rules` rows. Each repo in `templates/global/skills/sources.json` is fetched into `~/.local/share/pfm/install/skills/{name}/` and linked into `~/.claude/skills/` and `~/.agents/skills/`; a failed fetch keeps the last copy, and a real destination is a conflict. Doctor reports one `skill-source` row per registered skill.
 3. The `pfm-name-sync` scheduler — three systemd user units (Linux) or one launchd agent (macOS), every launchd agent running through the stable launcher `~/.local/libexec/pfm/pfm-agent` so a pfm rebuild never re-registers it with macOS
 4. Claude launch settings — hooks, status line and MCP ride managed non-query Claude launches; query launches omit them. Host checks refuse pfm-owned leftovers in account files and print the edits through `pfm doctor`. Installation manages `cleanupPeriodDays` and an empty `prependPlugins` (so Claude Code 2.1.299+ does not seat its built-in security plugin ahead of your plugins) through Claude managed settings, using sudo when required.
 5. `~/.codex/prompts/`, `~/.codex/skills/`, and `~/.codex/agents/` — Codex mirrors generated from the installed global Claude commands and host-global agent sources; a role lands in `agents/` as a REGULAR FILE, because Codex opens a role with `O_NOFOLLOW` and rejects a symlink as "agent type is currently not available". Only marker-owned outputs are replaced or retired, while unmarked conflicts survive and stop the install by name
@@ -179,6 +179,7 @@ On macOS, make the same filesystem moves, then log in once on account 1 with `CL
 
 ## 2. Build from source — `pfm` only
 
+<!-- fresh-install: CI runs this block as written (scripts/fresh-install-test.sh) -->
 ```bash
 REPO=rezzminator/professor
 SOURCE_DIR="$HOME/.professor"
@@ -194,6 +195,7 @@ Set `GOPROXY` to a Go module proxy reachable from your network. The source path 
 
 After the source build, run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
+<!-- fresh-install -->
 ```bash
 cd "$HOME/.professor"
 pfm install

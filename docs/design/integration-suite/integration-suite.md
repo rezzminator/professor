@@ -266,7 +266,7 @@ The trade-offs belong to the owner:
 - the ratified references in `references.tsv`, and the rendered-from paths where the build has no manifest;
 - the burn-down pace of every ratchet baseline;
 - the logging framework;
-- which LLM and which reasoning setting run the release rehearsal;
+- which LLM and which reasoning setting run the LLM-driven steps at release;
 - the speed targets and which numbers get measured here;
 - which gate runs the sequence.
 
@@ -376,7 +376,7 @@ What only a reading can judge is the suite reviewer's at every landing — in a 
 - Read every policy-lint rule for a property asserted rather than a line's text pinned.
 - Read every `twin:` and `live-only` reason, every new `weak-oracle:` and `skip-because:` against its class or reason, every subject's input-class lines in `self-tests.txt` against the inputs it reads, and the `DUPLICATE-CANDIDATES` list.
 
-Four rules are prose by design and belong to no check: a lane joins the sequence the day it is written (the builder's), each lane's position carries a reason (an Open ruling until it does), every unmapped test is watched failing when written (the builder's), and the rehearsal's model and reasoning setting (the owner's).
+Four rules are prose by design and belong to no check: a lane joins the sequence the day it is written (the builder's), each lane's position carries a reason (an Open ruling until it does), every unmapped test is watched failing when written (the builder's), and the model and reasoning setting of the LLM-driven run at release (the owner's).
 
 ## Seed evidence
 

@@ -44,6 +44,7 @@ type agentTree struct {
 	warned   map[string]bool
 	session  string
 	prices   *pricing.Prices
+	scans    transcriptScans
 	ids      []string
 	live     map[string]bool
 	now      time.Time
@@ -68,10 +69,10 @@ const agentDeadAfter = 15 * time.Minute
 // transcript once per render. A directory that cannot be listed, or any meta
 // file that cannot be read, sets err: the parent of that agent is unknown, so
 // no row may claim a count it cannot vouch for.
-func scanAgentTree(sessionTranscript string, prices *pricing.Prices) *agentTree {
+func scanAgentTree(sessionTranscript string, prices *pricing.Prices, scans transcriptScans) *agentTree {
 	tree := &agentTree{
 		children: map[string][]string{}, open: map[string]turnState{}, reads: map[string]*agentActivity{},
-		warned: map[string]bool{}, session: sessionTranscript, prices: prices,
+		warned: map[string]bool{}, session: sessionTranscript, prices: prices, scans: scans,
 	}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		tree.err = errors.New("payload names no session transcript")
@@ -184,7 +185,7 @@ func (tree *agentTree) read(id string) *agentActivity {
 	if activity, ok := tree.reads[id]; ok {
 		return activity
 	}
-	activity := readAgentActivity(tree.session, id, tree.prices)
+	activity := readAgentActivity(tree.session, id, tree.prices, tree.scans)
 	tree.reads[id] = &activity
 	return &activity
 }
@@ -280,6 +281,58 @@ type agentTurn struct {
 	delegating bool
 	seen       bool
 	err        error
+}
+
+// activityFold is what readAgentActivity folds from a sub-agent transcript;
+// its exported fields are the whole fold, which a scan checkpoint keeps.
+type activityFold struct {
+	Seen        map[string]struct{} `json:"seen"`
+	Last        time.Time           `json:"last"`
+	Errors      int                 `json:"errors"`
+	Compactions int                 `json:"compactions"`
+	CacheHit    int                 `json:"cacheHit"`
+	Context     int64               `json:"context"`
+	Effort      string              `json:"effort,omitempty"`
+	Model       string              `json:"model,omitempty"`
+	Turn        turnFold            `json:"turn"`
+	Spend       *spendScan          `json:"spend"`
+	// ownSpend is the scan Spend must be: a checkpoint decodes into it, and one
+	// that dropped it is refused (loaded).
+	ownSpend *spendScan
+}
+
+// turnFold is the agent's last message entry (messageTurnOpen).
+type turnFold struct {
+	Open       bool      `json:"open"`
+	Delegating bool      `json:"delegating"`
+	Seen       bool      `json:"seen"`
+	Last       time.Time `json:"last"`
+}
+
+// newActivityFold folds a sub-agent transcript, pricing its spend at prices.
+func newActivityFold(prices *pricing.Prices) *activityFold {
+	spend := newSpendScan(prices)
+	return &activityFold{Seen: map[string]struct{}{}, CacheHit: -1, Spend: spend, ownSpend: spend}
+}
+
+func (fold *activityFold) reset() {
+	fold.ownSpend.reset()
+	*fold = activityFold{Seen: map[string]struct{}{}, CacheHit: -1, Spend: fold.ownSpend, ownSpend: fold.ownSpend}
+}
+
+func (fold *activityFold) loaded() error {
+	if fold.Seen == nil || fold.Spend != fold.ownSpend {
+		return errors.New("activity fold without its tool calls or spend")
+	}
+	return fold.Spend.loaded()
+}
+
+func (fold *activityFold) line(line []byte) {
+	recordTranscriptLine(line, fold)
+	if open, delegating, at, ok := messageTurnOpen(line); ok {
+		delegating = open && (delegating || fold.Turn.Open && fold.Turn.Delegating)
+		fold.Turn = turnFold{Open: open, Delegating: delegating, Last: at, Seen: true}
+	}
 }
 
 // stampTurn dates a last message entry that carries no timestamp by the

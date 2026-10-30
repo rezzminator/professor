@@ -9,7 +9,7 @@ This file covers Laws 1–18 of [`/quality:integration-suite`](../../../template
 - [Law 2 — one scripted mock per dependency family, and every fake passes the real contract](#law-2--one-scripted-mock-per-dependency-family-and-every-fake-passes-the-real-contract)
 - [Law 3 — each tier asserts only what the tier below cannot observe](#law-3--each-tier-asserts-only-what-the-tier-below-cannot-observe)
 - [Law 4 — the hermetic and live tiers run the product as production runs it](#law-4--the-hermetic-and-live-tiers-run-the-product-as-production-runs-it)
-- [Law 5 — the release rehearsal runs on a weaker model](#law-5--the-release-rehearsal-runs-on-a-weaker-model)
+- [Law 5 — LLM-driven steps run on a weaker model](#law-5--llm-driven-steps-run-on-a-weaker-model)
 - [Law 6 — one environment, lanes in sequence](#law-6--one-environment-lanes-in-sequence)
 - [Law 7 — every lane is proven on the sequence's state and alone](#law-7--every-lane-is-proven-on-the-sequences-state-and-alone)
 - [Law 8 — builders, readers, destroyers](#law-8--builders-readers-destroyers)
@@ -104,9 +104,9 @@ Three tensions run through the whole set:
 
 **Checked by.** `tree`: a canonical ledger with `boot: in-process` is admitted only when the single-instance and two-mode tests passed on the merge subject, and a `boot: process` ledger whose product records carry its `runner_pid` is refused; `self-tests`: both tests are lines of `self-tests.txt`.
 
-## Law 5 — the release rehearsal runs on a weaker model
+## Law 5 — LLM-driven steps run on a weaker model
 
-**Rule:** Where the product includes LLM-driven steps, the release rehearsal runs on a weaker, non-frontier LLM at its highest reasoning setting. Reaching the asserted end state there proves the instructions; a frontier pass proves less.
+**Rule:** Where the product includes LLM-driven steps, an end-to-end run of them executes at release on a weaker, non-frontier LLM at its highest reasoning setting. Reaching the asserted end state there proves the instructions; a frontier pass proves less.
 
 **Prevents.** Shipping instructions that only a frontier model can follow. A product with LLM-driven steps ships instructions (prompts, templates, generated guidance) that other people's models will execute, and those people run a range of models. A frontier model makes up for vague instructions by inferring the intent. When it passes, that shows the model is good, not that the instructions are.
 
@@ -116,7 +116,7 @@ Three tensions run through the whole set:
 - **The pass is the asserted end state, never the model's claim** (Law 11).
 - **It runs at release, not per commit,** because it spends real model turns and credentials (Law 1).
 
-**Checked by.** The rehearsal's ledger header names the model and the reasoning setting under `command:`; the owner's ruling on both sits under Open rulings until made.
+**Checked by.** That run's ledger header names the model and the reasoning setting under `command:`; the owner's ruling on both sits under Open rulings until made.
 
 ## Law 6 — one environment, lanes in sequence
 

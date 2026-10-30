@@ -13,7 +13,7 @@ A complete `.claude/` infrastructure that turns Claude Code from "an AI that wri
 - **The full cast** — The Professor (orchestrator), PFM, Audit. The harness prompt owns the Professor voice; working prompts carry their task contracts.
 - **Worktree isolation** — every feature gets its own git worktree branch + a unique port allocation. Multiple parallel pipelines on the same repo without collisions.
 - **A pipeline that refuses cowboy coding** — `planner → architect → developer → QA → merge`. QA gates block bad code from reaching `main`. Only one agent (`gitter`) touches git.
-- **Self-improvement at the source** — the change manager (`/pcm`) edits the pipeline rules where they live instead of accumulating "lessons learned" files nobody reads.
+- **Self-improvement at the source** — the change manager (the `pcm` agent) edits the pipeline rules where they live instead of accumulating "lessons learned" files nobody reads.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths. Rename a directory once, every agent follows.
 - **Documentation discipline** — pipeline docs are temporary and archived; only one agent writes to permanent project docs.
 
@@ -95,10 +95,10 @@ See `SETUP.md` for the install interview and adaptation guidance.
 **Tier A — universal archetypes (ship with character):**
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator and root identity — lives in CLAUDE.md, not a separate command.
-- **/pcm** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
-- **/flights:doctor, /dev** — pipeline mechanics with light Professor voice.
+- **the `pcm` agent** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
+- **/flights:doctor** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/flights:doctor`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:claude-selector`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
+**Bundled commands (ship with the blueprint):** `/flights:doctor`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:rules`, `/quality:claude-selector`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `legal` is bundled under `templates/project/skills/`.
 
@@ -110,7 +110,7 @@ See `SETUP.md` for the install interview and adaptation guidance.
 
 The blueprint pins your test command, build command, package manager, etc. at install time via the interview. After install, the templates are filled in for your stack — no leftover placeholders. The templates do NOT prescribe a stack; the install interview asks for one.
 
-If you find a tech-specific assumption leaking through after install (e.g., a hardcoded `pnpm` somewhere it should be your package manager), that's a bug — open an issue or invoke `/pcm` to fix it locally.
+If you find a tech-specific assumption leaking through after install (e.g., a hardcoded `pnpm` somewhere it should be your package manager), that's a bug — open an issue or dispatch the `pcm` agent to fix it locally.
 
 ---
 

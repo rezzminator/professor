@@ -13,32 +13,28 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// codexHarnessPrompt applies the same Codex mappings used by role seats and doctor.
-func codexHarnessPrompt() ([]byte, error) {
-	prompt, err := codexprompt.FleetPrompt()
-	if err != nil {
-		return nil, err
-	}
-	return []byte(prompt), nil
-}
-
-func assembledHarnessPrompt(id pfmengine.ID) ([]byte, error) {
+// assembledHarnessPrompt composes one engine's prompt from repo's harness
+// prompt tree, else the embedded one; Codex's goes through codexprompt, which
+// applies the mappings role seats and doctor read.
+func assembledHarnessPrompt(repo string, id pfmengine.ID) ([]byte, error) {
 	if id == pfmengine.Codex {
-		return codexHarnessPrompt()
+		prompt, err := codexprompt.FleetPrompt(repo)
+		return []byte(prompt), err
 	}
-	return harnessprompts.Composed(pfmengine.MustLookup(id).LongName)
+	return harnessprompts.Composed(repo, pfmengine.MustLookup(id).LongName)
 }
 
-// generateHarnessPrompts runs before any install consumer. Only the parts are
-// embedded, so a fresh clone builds without generated files. A dry run plans
-// the same bytes without writing, and unchanged files keep their timestamps.
+// generateHarnessPrompts runs before any install consumer. It composes from the
+// clone's parts, so an edited part lands with no rebuild, and a fresh clone
+// builds without generated files. A dry run plans the same bytes without
+// writing, and unchanged files keep their timestamps.
 func (installer *engine) generateHarnessPrompts() error {
 	repo, err := installer.globalSourceRepoRoot()
 	if err != nil {
 		return fmt.Errorf("resolve harness prompt source repository: %w", err)
 	}
 	for _, id := range pfmengine.All() {
-		content, err := assembledHarnessPrompt(id)
+		content, err := assembledHarnessPrompt(repo, id)
 		if err != nil {
 			return fmt.Errorf("assemble %s harness prompt: %w", id, err)
 		}
@@ -72,12 +68,12 @@ func (installer *engine) generateHarnessPrompts() error {
 // generatedHarnessPrompt reads the file generation just wrote on apply. Plans
 // use the future assembled bytes: a first install has no output to read yet.
 func (installer *engine) generatedHarnessPrompt(id pfmengine.ID) ([]byte, error) {
-	if !installer.apply {
-		return assembledHarnessPrompt(id)
-	}
 	repo, err := installer.globalSourceRepoRoot()
 	if err != nil {
 		return nil, fmt.Errorf("resolve generated harness prompt: %w", err)
+	}
+	if !installer.apply {
+		return assembledHarnessPrompt(repo, id)
 	}
 	target := paths.GeneratedHarnessPromptIn(repo, id)
 	content, err := os.ReadFile(target)

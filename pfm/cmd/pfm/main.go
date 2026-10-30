@@ -65,7 +65,7 @@ var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
-	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
+	"usage-hook", installCommand, "uninstall", "generate", updateCommand, initCommand, whoamiCommand,
 	mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
 	"model-cost", "tokens", transcriptCommand, "theme", restartCommand,
 }
@@ -74,8 +74,8 @@ var topLevelSubcommands = []string{
 var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill", "clear-name",
 	"codex-launch", "codex-transport", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
-	"exit-close", "exit-intercept", "git-guard", "herdr-indicators", "herdr-shell", "herdr-state",
-	"kill-exit", "launch", "seat-host", "restart-run",
+	"exit-close", "exit-intercept", "git-guard", "herdr-indicators", "herdr-places", "herdr-shell", "herdr-state",
+	"kill-exit", "launch", "pcm-guard", "seat-host", "restart-run",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
 	reloadRunCommand, staleCommand, statuslineCommand, "store-guard", thenAction, "tmux-title-renudge",
 	"update-check",
@@ -188,6 +188,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runInstall(args[1:], stdout, stderr, runtime)
 	case "uninstall":
 		return runUninstall(args[1:], stdout, stderr, runtime)
+	case "generate":
+		return runGenerate(args[1:], stdout, stderr, runtime)
 	case "update":
 		return update.Run(args[1:], stdout, stderr, runtime)
 	case "restart":
@@ -225,6 +227,7 @@ func printUsage(w io.Writer) {
 		"  heal      report or repair wedged Codex history projections",
 		"  install   wire or remove the self-contained host integration",
 		"  uninstall remove the self-contained host integration",
+		"  generate  regenerate prompts, agents and the Codex fleet prompt from the source clone: --plan",
 		"  update    update the binary; check, adopt, pin, ignore, drop or accept project template baselines",
 		"  init      scaffold project templates once and pin their baselines",
 		"  restart   end every chat, restart Herdr and every pfm service that ran, each verified up: --dry-run",
@@ -458,11 +461,17 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && (args[0] == "git-guard" || args[0] == "store-guard") {
 		return hookentry.BashGuard(args[0], os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "pcm-guard" {
+		return hookentry.PcmGuard(os.Stdin, stdout, stderr)
+	}
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "herdr-indicators" {
 		return herdr.IndicatorsEntry(stderr, paths.OSEnv{}, pfmchat.PaintHerdrIndicators)
+	}
+	if len(args) != 0 && args[0] == "herdr-places" {
+		return pfmchat.HerdrPlacesEntry(stderr, paths.OSEnv{}, runtime)
 	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
@@ -542,7 +551,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|clear-name|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|clear-name|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-places|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|pcm-guard|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

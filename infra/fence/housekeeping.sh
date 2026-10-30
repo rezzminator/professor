@@ -3,8 +3,8 @@
 # fence containers, images and caches never pile up. Callers:
 # .claude/scripts/dev.sh (the iso actions that build and test: install build
 # typecheck verify test e2e cover all — never status, run, shell, sim),
-# infra/fence/lanes/root.sh (before a root build, with its own hash),
-# infra/fence/release-rehearsal.sh (`up`). dev.sh and infra/demo/up.sh also
+# infra/fence/lanes/root.sh (before a root build, with its own hash).
+# dev.sh and infra/demo/up.sh also
 # call fence_volumes_ensure before every compose run.
 #
 #   fence_housekeeping [lane-hash]   # the nine steps below, in order
@@ -29,7 +29,7 @@
 #                   more than PFM_FENCE_CONTAINER_MAX_HOURS (default 6) ago: forced
 #                   out (a leaked lane or root build).
 #                   A running container also labelled pfm.fence.long-lived=1 — an
-#                   `iso shell`, the live demo, a release rehearsal mid-release —
+#                   `iso shell`, the live demo —
 #                   is never age-reaped: someone is using it, and another
 #                   checkout's gate run must not end it.
 #   images          dangling images labelled pfm.fence=1 — each rebuild's previous

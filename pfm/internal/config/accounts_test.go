@@ -99,6 +99,10 @@ func TestAccountProjectionsFollowTheRoster(t *testing.T) {
 		empty.AccountChoices(pfmengine.Claude) != 0 {
 		t.Error("an engine with no accounts must project to zero values")
 	}
+	// nil would read as "unset" to installer.ResolveCodexHomes and bring back ~/.codex.
+	if empty.CodexHomes() == nil {
+		t.Error("CodexHomes() of an empty roster is nil; it must be the explicit empty roster")
+	}
 }
 
 // A row opens on ITS engine's primary account. The Claude primary is only

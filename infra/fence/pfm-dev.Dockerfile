@@ -4,8 +4,8 @@
 # The worktree is edited on the HOST; this container only builds and tests it.
 # Two targets over one base: `pfm-sim` (the real-simulation fence: the base plus
 # a real Google Chrome and a display) and `pfm-dev` (build, test, e2e). pfm-dev
-# is the LAST stage, so an untargeted `docker build` of this file
-# (release-rehearsal.sh) still produces pfm-dev, never the Chrome image.
+# is the LAST stage, so an untargeted `docker build` of this file still
+# produces pfm-dev, never the Chrome image.
 FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS pfm-base
 # The converter sidecar's OCR stack (OpenCV) loads these system libraries on
 # import, and `pfm install` stages its models on any fence image. gcc and
@@ -77,8 +77,8 @@ ARG PFM_NPM_REGISTRY=
 RUN if [ -n "$PFM_NPM_REGISTRY" ]; then export NPM_CONFIG_REGISTRY="$PFM_NPM_REGISTRY"; fi \
  && TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
-# Every image built from this file, by any builder (compose, the rehearsals'
-# plain `docker build`, a lane root committed from a container of it), carries
+# Every image built from this file, by any builder (compose, a plain
+# `docker build`, a lane root committed from a container of it), carries
 # the fence label; fence housekeeping prunes dangling images by it
 # (infra/fence/housekeeping.sh).
 LABEL pfm.fence=1

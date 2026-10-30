@@ -13,9 +13,11 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -69,9 +71,15 @@ func TestHerdrSpawnReservesStructuredRecipeAndCleansRefusal(t *testing.T) {
 				t.Fatal(err)
 			}
 			request := HerdrRequest{
-				Paths:  values,
-				Choice: BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6"},
-				Seat:   fleetdb.Seat{SeatID: "seat1", SessionID: "sid1", Engine: "cc", Name: "REVIEW"},
+				Paths: values,
+				Choice: BackendChoice{
+					Backend:        "herdr",
+					HerdrSocket:    socket,
+					HerdrPane:      "w6:p3",
+					HerdrWorkspace: "w6",
+					Places:         birthPlaces(),
+				},
+				Seat: fleetdb.Seat{SeatID: "seat1", SessionID: "sid1", Engine: "cc", Name: "REVIEW"},
 				Run: fleetdb.SeatRun{
 					Binary: binary,
 					Args:   []string{"a b", "quoted'arg"},
@@ -238,13 +246,14 @@ func TestHerdrBirthResolvesRealEngineBeforeReservation(t *testing.T) {
 						HerdrSocket:    socket,
 						HerdrPane:      "w6:p3",
 						HerdrWorkspace: "w6",
+						Places:         birthPlaces(),
 					},
 					Seat: fleetdb.Seat{SeatID: "native-resolution", SessionID: "sid", Engine: "cc"},
 					Run: fleetdb.SeatRun{
 						Binary:     binary,
 						Args:       []string{"exact prompt"},
 						Env:        []string{"SAFE=value"},
-						CWD:        values.Home,
+						CWD:        "/fixture/work",
 						CostLedger: true,
 					},
 				}
@@ -418,19 +427,35 @@ func acceptBirthRequest(listener net.Listener) (net.Conn, map[string]any, error)
 			_ = conn.Close()
 			return nil, nil, err
 		}
-		if req["method"] != "ping" {
+		reply := `{"type":"pong","version":"0.9.5","protocol":22}`
+		switch req["method"] {
+		case "ping":
+		case "workspace.list":
+			reply = `{"type":"workspace_list","workspaces":[{"workspace_id":"w6","label":"fixture","pane_count":2}]}`
+		default:
 			return conn, req, nil
 		}
-		_, err = fmt.Fprintf(
-			conn,
-			`{"id":%q,"ok":true,"result":{"type":"pong","version":"0.9.5","protocol":22}}`+"\n",
-			req["id"],
-		)
+		_, err = fmt.Fprintf(conn, `{"id":%q,"ok":true,"result":%s}`+"\n", req["id"], reply)
 		_ = conn.Close()
 		if err != nil {
 			return nil, nil, err
 		}
 	}
+}
+
+// birthPlaces files every /fixture chat under the place /fixture, whose
+// workspace acceptBirthRequest lists as w6.
+func birthPlaces() func(context.Context) (*place.Fleet, error) {
+	return scanned(place.Fleet{
+		Rows:        []compose.Row{{Kind: compose.LiveClaude, Project: "fixture", CWD: "/fixture"}},
+		ProjectDirs: map[string]string{"fixture": "/fixture"},
+		Home:        "/jail",
+	})
+}
+
+// scanned is a birth door's fleet scan that finds fleet.
+func scanned(fleet place.Fleet) func(context.Context) (*place.Fleet, error) {
+	return func(context.Context) (*place.Fleet, error) { return &fleet, nil }
 }
 
 func birthPingSocket(t *testing.T) string {
@@ -490,7 +515,9 @@ func TestHerdrSpawnTabLabelIsNeverEmpty(t *testing.T) {
 			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			choice := BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6"}
+			choice := BackendChoice{
+				Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6", Places: birthPlaces(),
+			}
 			_, err = SpawnHerdr(context.Background(), HerdrRequest{
 				Paths:  values,
 				Choice: choice,

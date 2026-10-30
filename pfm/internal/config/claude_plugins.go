@@ -11,15 +11,28 @@ import (
 )
 
 // ClaudePlugin is one claude.plugins entry. ID is a bare plugin name of ours
-// ("auto-effort-control": its GitHub repository rezzminator/auto-effort (migration source), or its
-// checkout under claude.pluginCheckoutRoot, else under the source clone's
-// plugins/) or a full "name@marketplace" id.
+// ("auto-effort-control": {name}@professor, from the GitHub professor
+// marketplace, or on an -alpha build from its checkout under
+// claude.pluginCheckoutRoot, else under the source clone's plugins/) or a full
+// "name@marketplace" id.
 // Source is what `claude plugin marketplace add` takes (owner/repo, a git or
 // https URL, a path) for a full id whose marketplace Claude Code does not know
 // yet; empty otherwise.
 type ClaudePlugin struct {
 	ID     string
 	Source string
+}
+
+// ProfessorMarketplace is the marketplace every plugin of ours installs from:
+// a bare name's id is {name}@professor on every build.
+const ProfessorMarketplace = "professor"
+
+// LegacyClaudePluginIDs are the ids a plugin of ours installed as before
+// {name}@professor: {name}@{name}, its own GitHub marketplace, and
+// {name}@{name}-dev, the -alpha checkout copy. pfm install moves each to
+// {name}@professor.
+func LegacyClaudePluginIDs(name string) []string {
+	return []string{name + "@" + name, name + "@" + name + "-dev"}
 }
 
 // claudePluginIDPattern is a plugin id: a name, or name@marketplace, each part
@@ -107,18 +120,18 @@ func decodeClaudePlugins(entries []json.RawMessage) ([]ClaudePlugin, error) {
 	return plugins, nil
 }
 
-// claudePluginCopyClash refuses a bare name listed beside a full id of one of
-// its own copies, {name}@{name} (GitHub) or {name}@{name}-dev (the -alpha
-// checkout copy): the bare entry ensures one copy and disables the other, so
-// the full id would be enabled and disabled again on every install.
+// claudePluginCopyClash refuses a bare name listed beside a full id of its
+// own, {name}@professor or a legacy id (LegacyClaudePluginIDs): the bare entry
+// ensures {name}@professor and moves the legacy ids to it, so the full id
+// would be ensured twice or moved away again on every install.
 func claudePluginCopyClash(plugin ClaudePlugin, index int, first map[string]int) error {
 	name := plugin.Name()
-	copies := []string{name + "@" + name, name + "@" + name + "-dev"}
+	copies := append([]string{name + "@" + ProfessorMarketplace}, LegacyClaudePluginIDs(name)...)
 	if plugin.Bare() {
 		for _, id := range copies {
 			if earlier, listed := first[id]; listed {
 				return fmt.Errorf(
-					"%s[%d] %s is a bare name of %s[%d] %s, which it ensures or disables: list the plugin once",
+					"%s[%d] %s is a bare name of %s[%d] %s, which it ensures or moves: list the plugin once",
 					KeyClaudePlugins, index, plugin.ID, KeyClaudePlugins, earlier, id,
 				)
 			}
@@ -130,8 +143,8 @@ func claudePluginCopyClash(plugin ClaudePlugin, index int, first map[string]int)
 		return nil
 	}
 	return fmt.Errorf(
-		"%s[%d] %s is a copy of %s[%d] %s, which ensures one copy and disables the other: list the plugin once",
-		KeyClaudePlugins, index, plugin.ID, KeyClaudePlugins, earlier, name,
+		"%s[%d] %s is an id of %s[%d] %s, which ensures %s@%s and moves its legacy ids to it: list the plugin once",
+		KeyClaudePlugins, index, plugin.ID, KeyClaudePlugins, earlier, name, name, ProfessorMarketplace,
 	)
 }
 
@@ -168,7 +181,7 @@ func decodeClaudePlugin(entry json.RawMessage) (ClaudePlugin, error) {
 	switch {
 	case plugin.Bare():
 		return ClaudePlugin{}, fmt.Errorf(
-			"source needs a name@marketplace id: a bare name resolves to its own GitHub repository or checkout",
+			"source needs a name@marketplace id: a bare name resolves to the professor marketplace or its checkout",
 		)
 	case *source == "" || strings.HasPrefix(*source, "-") ||
 		strings.ContainsFunc(*source, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }):

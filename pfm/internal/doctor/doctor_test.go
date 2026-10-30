@@ -171,24 +171,27 @@ func TestDoctorCallmeterUsesClaudeEnvHome(t *testing.T) {
 		t,
 		filepath.Join(home, ".claude", "settings.json"),
 		fmt.Sprintf(
-			`{"enabledPlugins":{"callmeter@callmeter-dev":true},"env":{"PLUGIN_LOG_DIR":%q}}`,
+			`{"enabledPlugins":{"callmeter@professor":true},"env":{"PLUGIN_LOG_DIR":%q}}`,
 			filepath.Join(home, "shared-logs"),
 		),
 	)
-	writeDoctorInstalledPlugins(t, filepath.Join(home, ".claude"), "callmeter@callmeter-dev")
+	writeDoctorInstalledPlugins(t, filepath.Join(home, ".claude"), "callmeter@professor")
 	t.Setenv("CALLMETER_HOME", filepath.Join(home, "ambient"))
 	writePluginLogsFile(t, filepath.Join(home, "configured", "logs", "events.jsonl"), "{}\n")
 	writePluginLogsFile(t, filepath.Join(home, "ambient", "logs", "events.jsonl"), "{}\n{}\n")
+	writePluginLogsFile(t, filepath.Join(home, ".local", "state", "callmeter", "logs", "errors.jsonl"), "{}\n")
 	var stdout, stderr bytes.Buffer
 	runDoctor(nil, &stdout, &stderr, runtime)
 	want := filepath.Join(home, "configured", "bin", "0.4.0", "callmeter") + " missing"
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("doctor did not inspect claude.env home %s:\n%s", want, stdout.String())
 	}
-	wantFallback := "1 rows stranded in its fallback " + filepath.Join(home, "configured", "logs")
+	// callmeter's logs follow the shared plugin-log fallback, never its home.
+	wantFallback := "1 rows stranded in its fallback " + filepath.Join(home, ".local", "state", "callmeter", "logs")
 	if !strings.Contains(stdout.String(), wantFallback) ||
+		strings.Contains(stdout.String(), filepath.Join(home, "configured", "logs")) ||
 		strings.Contains(stdout.String(), filepath.Join(home, "ambient", "logs")) {
-		t.Fatalf("doctor fallback audit ignored effective claude.env home:\n%s", stdout.String())
+		t.Fatalf("doctor fallback audit did not read the shared fallback:\n%s", stdout.String())
 	}
 }
 

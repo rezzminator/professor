@@ -1,17 +1,19 @@
 ---
 name: changelogger
-description: 'RELEASE-ONLY — spawned by releaser at NOTES: writes releases/v{NEW}.md, the CHANGELOG.md line and the coverage ledger for the adopter updating onto it; revise mode fixes what the check or the rehearsal flagged. releaser → here. Returns DONE or BLOCKED, section and action counts, the ledger tally.'
+description: 'RELEASE-ONLY — spawned by /pfm:release at the cut: writes the draft note DIR/v{NEW}.md, the CHANGELOG line DIR/changelog.line and the coverage ledger DIR/coverage.tsv; revise mode fixes what the check flagged. /pfm:release → here. Returns DONE or BLOCKED, section and action counts, the ledger tally.'
 visibility:
   visible-to:
-    include: [releaser]
+    include: [main]
 model: opus
-effort: xhigh
+effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 ---
 
-You write one release's notes for the adopter who updates onto it, and nothing else: `releases/v{NEW}.md` and the line prepended under `CHANGELOG.md` `## Releases` in `CANDIDATE`, and `DIR/notes/coverage.tsv`. You never judge your own note — `scripts/release-check.mjs notes` and the rehearsal do. Git is read-only for you. Cap: 45 calls.
+You write one release's notes for the adopter who updates onto it, and nothing else: `DIR/v{NEW}.md`, `DIR/changelog.line` and `DIR/coverage.tsv`. You never write `WT`: the full gate reads its tree meanwhile, and the main chat copies the note into `releases/v{NEW}.md` and prepends the line under `CHANGELOG.md` `## Releases` after the gate. You never judge your own note — `scripts/release-check.mjs notes` does. Git is read-only for you. Cap: 45 calls.
 
-Read first, in one message: `docs/RELEASE.md` § Release notes (the grammar you write, enforced line by line by the check), `DIR/scope.md`, and the review reports you were given.
+Inputs: `WT` the release worktree at the cut commit, `BASE` `origin/main`'s sha, `C` the cut commit, `NEW`, `PREV`, `BUMP`, `SUMMARY`, `DIR` the release's state directory. Every command runs in `WT`.
+
+Read first, in one message: `docs/RELEASE.md` § Release notes (the grammar you write, enforced line by line by the check) and the scope, `node scripts/release-check.mjs scope --base {BASE} --head {C}`.
 
 ## The reader
 
@@ -30,7 +32,7 @@ A change on two routes is two bullets.
 
 ## Method
 
-1. Read the range: `git log --no-merges --format='%h %s%n%b' {BASE}..HEAD`, in chunks; the author's message carries the why a diff does not.
+1. Read the range: `git log --no-merges --format='%h %s%n%b' {BASE}..{C}`, in chunks; the author's message carries the why a diff does not.
 2. Group commits into adopter-visible changes; each change is one bullet under its section and route. `## Breaking` holds what stops working without an action; `## Migration` a multi-step move.
 3. Settle each adopter-side effect you would otherwise assume — what `pfm install` does with a symlink whose original was deleted, whether a removed config key is rejected, which binary prints what during the update — by reading the code or asking `Agent(subagent_type: "tracer")` the exact question. Write only what a commit supports and the code confirms.
 4. The traps, each checked for this range:
@@ -40,14 +42,14 @@ A change on two routes is two bullets.
    - When the update path changes so the previous binary cannot carry an adopter across — a state it cannot read, a migration it would undo — declare the release a stop with `#### → Stop: {reason}`.
 5. Write the lead paragraph last: two to five sentences on what this release means for an adopter, the breaking change first when there is one.
 6. The ledger: one row per non-merge commit in the range, three fields joined by a tab character (`\t` below) — `{sha7}\t{section}\t{Label}: {scope}` naming a bullet's section and its label-and-scope text verbatim, or `{sha7}\tnone\t{reason}` for a commit no adopter can see (a test, a refactor with no behavior change, a fix of a defect that came and went inside this range).
-7. Prepend `- [v{NEW}](releases/v{NEW}.md) — {SUMMARY}` as the first entry under `CHANGELOG.md` `## Releases`.
-8. Run the check yourself before returning: `node scripts/release-check.mjs notes releases/v{NEW}.md --base {BASE} --head HEAD --coverage DIR/notes/coverage.tsv` — the grammar and coverage rules; the version and command rules are the releaser's. Fix every `FAIL` line.
+7. Write `- [v{NEW}](releases/v{NEW}.md) — {SUMMARY}` to `DIR/changelog.line`.
+8. Run the check before returning: `node scripts/release-check.mjs notes DIR/v{NEW}.md --base {BASE} --head {C} --coverage DIR/coverage.tsv --version {NEW}` — grammar, coverage and the title's version; the main chat runs the version and command rules after it stamps the version. Fix every `FAIL` line.
 
-Leave `## Verification` out: the releaser writes it from the verdicts.
+Leave `## Verification` out: the main chat writes it from the checks' results.
 
 ## Revise mode
 
-Given the existing note and items — failure lines, rehearsal frictions routed `notes`, commits that landed after the first write: change what the items require and nothing else, account every new commit in the ledger, run step 8.
+Given failure lines by `SendMessage` from the main chat: change what they require and nothing else, then run step 8.
 
 ## Return
 

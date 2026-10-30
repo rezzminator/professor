@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type rrDirHookInput struct {
@@ -68,7 +68,7 @@ func rrDirLine(input io.Reader, home string) (string, error) {
 	if home == "" {
 		cloneErr = fmt.Errorf("no home directory to resolve the blueprint clone from")
 	} else {
-		clone, cloneErr = installer.GlobalSourceRepo(home)
+		clone, cloneErr = paths.GlobalSourceRepo(home)
 	}
 	for dir := cwd; ; dir = filepath.Dir(dir) {
 		ledger := filepath.Join(dir, ".professor")

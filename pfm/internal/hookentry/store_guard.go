@@ -123,6 +123,10 @@ func storeGuardDenies(parts []cmdparse.Part, store, home, cwd string, claudeWord
 			fmt.Fprintln(stderr, "pfm internal store-guard: could not parse command (fail-open)")
 			continue
 		}
+		if part.Program == "" {
+			// A redirection with no command (`> f`) runs nothing.
+			continue
+		}
 		base := filepath.Base(part.Program)
 		value, set := part.Env[storeGuardEnv]
 		switch {

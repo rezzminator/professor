@@ -12,11 +12,26 @@ source "$CATALOGUE"
 
 plugin_log_commands="$( (
   run() { shift 2; printf '%s\n' "$*"; }
+  plugin_log_copies() { echo plugin_log_copies; }
   checks_templates_plugin_logs
 ) )"
-grep -Fxq "bash $REPO_ROOT/scripts/test-plugin-logs.sh" <<< "$plugin_log_commands" || {
-  echo 'FAIL templates steps: plugin logs self-test is not invoked' >&2; exit 1;
-}
+for want in "bash $REPO_ROOT/scripts/test-plugin-logs.sh" "bash $REPO_ROOT/plugins/plugin-log/conformance_test.sh" \
+  "bash $REPO_ROOT/scripts/test-plugin-log-sync.sh" plugin_log_copies; do
+  grep -Fxq "$want" <<< "$plugin_log_commands" || { echo "FAIL templates steps: plugin logs step does not run: $want" >&2; exit 1; }
+done
+
+# The copies check: clean passes, an absent checkout warns NOT CHECKED, drift fails; none of the three reads as another.
+for case in '0 ok' '3 warn' '1 fail_step' '2 fail_step'; do
+  read -r code helper <<< "$case"
+  mkdir -p "$ROOT/sync-$code/scripts"
+  printf 'exit %s\n' "$code" > "$ROOT/sync-$code/scripts/plugin-log-sync.sh"
+  said="$( (
+    REPO_ROOT="$ROOT/sync-$code"
+    ok() { echo "ok $*"; }; warn() { echo "warn $*"; }; fail_step() { echo "fail_step $*"; }
+    plugin_log_copies
+  ) )"
+  [[ "$said" == "$helper "* ]] || { echo "FAIL templates steps: plugin-log-sync exit $code said: $said" >&2; exit 1; }
+done
 
 # The plugin lab's step lints its shell, then runs every self-test it ships.
 plugin_lab_commands="$( (

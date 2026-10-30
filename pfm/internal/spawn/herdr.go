@@ -33,11 +33,16 @@ type HerdrRequest struct {
 type HerdrResult struct {
 	Seat fleetdb.Seat
 	Eval string
+	// Warnings names each running chat a new tab's placement could not move
+	// into its place's workspace; the birth went on.
+	Warnings []string
 }
 
 var nativeSeatID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// PrepareHerdr reserves a durable seat in the current bare pane for a launcher or restoration.
+// PrepareHerdr reserves a durable seat in the current bare pane for a launcher
+// or restoration; the seat stays in the caller's pane and workspace, and
+// places nothing.
 func PrepareHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
 	return reserveHerdr(ctx, request, request.Choice.HerdrPane)
 }
@@ -130,9 +135,18 @@ func BirthTabLabel(name, cwd string) string {
 	return folder
 }
 
-// SpawnHerdr creates one unfocused tab in the requester's workspace.
+// SpawnHerdr creates one unfocused tab in the workspace of the chat's place
+// (place.Fleet.Of its cwd), creating that workspace when the place has none,
+// after moving every other misplaced running chat on the socket into its own.
 func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
-	result, err := reserveHerdr(ctx, request, "")
+	if request.Choice.Places == nil {
+		return result, errors.New("herdr birth has no fleet places to file the chat under")
+	}
+	fleet, err := request.Choice.Places(ctx)
+	if err != nil {
+		return result, fmt.Errorf("place Herdr tab: %w", err)
+	}
+	result, err = reserveHerdr(ctx, request, "")
 	if err != nil {
 		return result, err
 	}
@@ -145,8 +159,15 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 			state.DeleteSeatRun(result.Seat.SeatID),
 		)
 	}
+	workspace, unmoved, err := placeHerdrBirth(ctx, request, *fleet)
+	if err != nil {
+		return HerdrResult{}, cleanup(fmt.Errorf("place Herdr tab: %w", err))
+	}
+	if unmoved != nil {
+		result.Warnings = append(result.Warnings, "Herdr places: "+unmoved.Error())
+	}
 	params := map[string]any{
-		"workspace_id": request.Choice.HerdrWorkspace,
+		"workspace_id": workspace,
 		"tab_label":    BirthTabLabel(request.Seat.Name, request.Run.CWD),
 		"focus":        false,
 		"root": map[string]any{
@@ -175,7 +196,7 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 	if err := json.Unmarshal(body, &reply); err != nil {
 		return result, fmt.Errorf("herdr tab may exist for seat %s: decode layout: %w", result.Seat.SeatID, err)
 	}
-	if reply.Layout.Workspace != request.Choice.HerdrWorkspace || reply.Layout.Root.Type != "pane" ||
+	if reply.Layout.Workspace != workspace || reply.Layout.Root.Type != "pane" ||
 		reply.Layout.Root.Pane == "" {
 		return result, fmt.Errorf(
 			"herdr tab may exist for seat %s: unexpected layout response %s",
@@ -195,7 +216,7 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 		)
 	}
 	before := seat
-	seat.HerdrPane = reply.Layout.Root.Pane
+	seat.HerdrPane, seat.HerdrWorkspace = reply.Layout.Root.Pane, workspace
 	seat.UpdatedAt = clock.Real.Now().Unix()
 	if err := state.UpdateSeat(ctx, before, seat); err != nil {
 		return result, fmt.Errorf("herdr pane %s exists; persist address: %w", seat.HerdrPane, err)

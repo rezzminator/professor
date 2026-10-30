@@ -23,14 +23,72 @@ import (
 // prints whether the command was registered, every quick pick shown, every
 // message shown and every setContext activate ran. Activate's own commands
 // are cleared before a handler runs, so "route" prints the handlers' alone.
+// "promptLint" opens the prompt file PROFESSOR_PROMPT_LINT_SCENARIO describes (its path
+// under HOME, its text, settings over package.json's defaults) in the active
+// editor (lensClick: in no active editor, the command the file's CodeLens
+// carries, run with the arguments it carries), runs the professor.promptLint
+// handler (runs times; secondClick clicks again while the first runs;
+// editDuringRun edits the text then; cancelAfterMs cancels the progress;
+// cancelLensAfterMs runs the command the running lens carries then) and prints
+// the messages, the professor-prompt-lint diagnostics left, every progress shown,
+// the quick fixes offered over the whole file (after editBeforeFix appends to
+// that 1-based line), every setContext, the lenses the file had before the
+// run (lensIdle), mid-run when cancelLensAfterMs is set (lensRunning) and
+// after it (lensAfter), the selector the lens provider registered for and how
+// many times it announced a change (lensFires); globsAfter sets
+// professor.promptLint.globs before the run and announces the change, printing
+// the lens announcements it caused (globsFires) and the lenses after it
+// (lensAfterGlobs).
 const vscodeExtensionDriverJS = `
 const Module = require('module');
+const fs = require('fs');
+const path = require('path');
 const extensionPath = process.argv[2];
 const mode = process.argv[3];
-const scenario = mode === 'choose' ? JSON.parse(process.env.PROFESSOR_CHOOSE_SCENARIO) : {};
+const scenarioEnv = { choose: 'PROFESSOR_CHOOSE_SCENARIO', promptLint: 'PROFESSOR_PROMPT_LINT_SCENARIO' }[mode];
+const scenario = scenarioEnv ? JSON.parse(process.env[scenarioEnv]) : {};
 const messages = [];
 const quickPicks = [];
+const progresses = [];
 const shown = (kind) => (message) => { messages.push({ kind, message }); return Promise.resolve(undefined); };
+const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(extensionPath), 'package.json'), 'utf8'));
+const settingDefault = (section, key) => manifest.contributes.configuration.properties[section + '.' + key]?.default;
+
+function Range(startLine, startCharacter, endLine, endCharacter) {
+  this.start = { line: startLine, character: startCharacter };
+  this.end = { line: endLine, character: endCharacter };
+}
+const globMatch = (glob, file) => new RegExp('^' + glob.split('**/').map((part) => part.split('*')
+  .map((piece) => piece.replace(/[.+?^$()|[\]\\{}]/g, '\\$&')).join('[^/]*')).join('(?:.*/)?') + '$').test(file);
+
+let document;
+if (scenario.file) {
+  const lines = scenario.text.split('\n');
+  const fsPath = path.join(process.env.HOME, scenario.file);
+  document = {
+    lines,
+    uri: { fsPath, scheme: 'file', toString: () => 'file://' + fsPath },
+    version: 1,
+    get lineCount() { return lines.length; },
+    lineAt(index) {
+      if (index < 0 || index >= lines.length) throw new Error('lineAt(' + index + ') is out of range');
+      return { text: lines[index] };
+    },
+    getText(range) {
+      const span = lines.slice(range.start.line, range.end.line + 1);
+      span[span.length - 1] = span[span.length - 1].slice(0, range.end.character);
+      span[0] = span[0].slice(range.start.character);
+      return span.join('\n');
+    },
+  };
+}
+const diagnostics = new Map();
+let collectionName;
+let codeActionProvider;
+let codeLensProvider;
+let lensSelector;
+let lensFires = 0;
+const configListeners = [];
 
 const defaults = {
   shellPath: '/bin/zsh',
@@ -48,12 +106,61 @@ const vscodeStub = {
   ExtensionKind: { UI: 1, Workspace: 2 },
   ProgressLocation: { Notification: 15 },
   workspace: {
-    getConfiguration() {
-      return { get: (key) => defaults[key], inspect: () => undefined };
+    getConfiguration(section) {
+      const settings = scenario.settings || {};
+      return {
+        get: (key) => (key in settings ? settings[key] : key in defaults ? defaults[key] : settingDefault(section, key)),
+        inspect: () => undefined,
+      };
     },
-    onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidChangeConfiguration: (listener) => {
+      configListeners.push(listener);
+      return { dispose() {} };
+    },
+    textDocuments: document ? [document] : [],
+    asRelativePath: (uri) => path.relative(process.env.HOME, uri.fsPath),
+  },
+  languages: {
+    createDiagnosticCollection(name) {
+      collectionName = name;
+      return {
+        get: (uri) => diagnostics.get(uri.toString()),
+        set: (uri, list) => { diagnostics.set(uri.toString(), list); },
+        delete: (uri) => { diagnostics.delete(uri.toString()); },
+        dispose() {},
+      };
+    },
+    match: (selector, doc) => (globMatch(selector.pattern, doc.uri.fsPath) ? 10 : 0),
+    registerCodeActionsProvider: (selector, provider) => {
+      codeActionProvider = provider;
+      return { dispose() {} };
+    },
+    registerCodeLensProvider: (selector, lensProvider) => {
+      codeLensProvider = lensProvider;
+      lensSelector = selector;
+      lensProvider.onDidChangeCodeLenses(() => { lensFires++; });
+      return { dispose() {} };
+    },
+  },
+  Disposable: { from: (...items) => ({ dispose() { items.forEach((item) => item.dispose()); } }) },
+  Range,
+  CodeLens: function (range, command) { Object.assign(this, { range, command }); },
+  EventEmitter: function () {
+    const listeners = [];
+    this.event = (listener) => { listeners.push(listener); return { dispose() {} }; };
+    this.fire = () => listeners.slice().forEach((listener) => listener());
+    this.dispose = () => { listeners.length = 0; };
+  },
+  Diagnostic: function (range, message, severity) { Object.assign(this, { range, message, severity }); },
+  DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  CodeAction: function (title, kind) { Object.assign(this, { title, kind }); },
+  CodeActionKind: { QuickFix: 'quickfix' },
+  WorkspaceEdit: function () {
+    this.replacements = [];
+    this.replace = (uri, range, text) => { this.replacements.push({ uri: uri.toString(), range, text }); };
   },
   window: {
+    activeTextEditor: document && !scenario.lensClick ? { document } : undefined,
     onDidOpenTerminal: () => ({ dispose() {} }),
     registerTerminalProfileProvider: (id, terminalProvider) => {
       provider = terminalProvider;
@@ -67,7 +174,18 @@ const vscodeStub = {
     showInformationMessage: shown('info'),
     showWarningMessage: shown('warning'),
     showErrorMessage: shown('error'),
-    withProgress: (options, task) => task({ report() {} }),
+    withProgress: (options, task) => {
+      progresses.push(options);
+      const listeners = [];
+      const token = {
+        isCancellationRequested: false,
+        onCancellationRequested: (listener) => { listeners.push(listener); return { dispose() {} }; },
+      };
+      if (scenario.cancelAfterMs) {
+        setTimeout(() => { token.isCancellationRequested = true; listeners.forEach((listener) => listener()); }, scenario.cancelAfterMs);
+      }
+      return task({ report() {} }, token);
+    },
   },
   commands: {
     registerCommand: (id, handler) => {
@@ -120,6 +238,66 @@ if (mode === 'route') {
     if (handler) await handler();
     process.stdout.write(JSON.stringify({ registered: Boolean(handler), quickPicks, messages, contexts }));
   })().catch((err) => { process.stderr.write(String(err && err.stack || err)); process.exit(1); });
+} else if (mode === 'promptLint') {
+  const handler = registered['professor.promptLint'];
+  (async () => {
+    if (!handler) throw new Error('extension.js registers no professor.promptLint handler');
+    const lensView = () => (codeLensProvider.provideCodeLenses(document) || []).map((lens) => ({
+      line: lens.range.start.line, title: lens.command.title, command: lens.command.command,
+      uris: lens.command.arguments.map((uri) => uri.toString()),
+    }));
+    const lensIdle = lensView();
+    let lensRunning;
+    let globsFires;
+    let lensAfterGlobs;
+    if (scenario.globsAfter) {
+      const before = lensFires;
+      scenario.settings = { ...(scenario.settings || {}), globs: scenario.globsAfter };
+      configListeners.forEach((listener) => listener({ affectsConfiguration: (key) => key === 'professor.promptLint.globs' }));
+      globsFires = lensFires - before;
+      lensAfterGlobs = lensView();
+    }
+    for (let run = 0; run < (scenario.runs || 1); run++) {
+      const lens = codeLensProvider.provideCodeLenses(document)[0];
+      const runs = [scenario.lensClick ? registered[lens.command.command](...lens.command.arguments) : handler()];
+      if (scenario.editDuringRun) document.version++;
+      if (scenario.secondClick) runs.push(handler());
+      if (scenario.cancelLensAfterMs) {
+        runs.push(new Promise((resolve) => setTimeout(resolve, scenario.cancelLensAfterMs)).then(() => {
+          lensRunning = lensView();
+          const running = codeLensProvider.provideCodeLenses(document)[0];
+          return registered[running.command.command](...running.command.arguments);
+        }));
+      }
+      await Promise.all(runs);
+    }
+    if (scenario.editBeforeFix) document.lines[scenario.editBeforeFix - 1] += ' edited';
+    const whole = new Range(0, 0, document.lineCount - 1, 0);
+    const actions = codeActionProvider.provideCodeActions(document, whole) || [];
+    process.stdout.write(JSON.stringify({
+      collectionName,
+      messages,
+      progresses,
+      contexts,
+      lensIdle,
+      lensRunning,
+      lensAfter: lensView(),
+      lensFires,
+      lensSelector,
+      globsFires,
+      lensAfterGlobs,
+      diagnostics: (diagnostics.get(document.uri.toString()) || []).map((d) => ({
+        startLine: d.range.start.line, endLine: d.range.end.line, endCharacter: d.range.end.character,
+        severity: d.severity, message: d.message, source: d.source, code: d.code,
+      })),
+      actions: actions.map((action) => ({
+        title: action.title, kind: action.kind, codes: action.diagnostics.map((d) => d.code),
+        replacements: action.edit.replacements.map((r) => ({
+          startLine: r.range.start.line, endLine: r.range.end.line, endCharacter: r.range.end.character, text: r.text,
+        })),
+      })),
+    }));
+  })().catch((err) => { process.stderr.write(String(err && err.stack || err)); process.exit(1); });
 } else {
   process.stdout.write(JSON.stringify(provider.provideTerminalProfile()));
 }
@@ -137,14 +315,20 @@ func runVSCodeExtensionDriver(t *testing.T, mode string) []byte {
 // ~/.local/bin/pfm) and extra environment.
 func runVSCodeExtensionDriverAt(t *testing.T, mode, home string, env []string) []byte {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")
-	}
-
 	extensionPath, err := filepath.Abs(filepath.Join("assets", "vscode", "professor", "extension.js"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	return runVSCodeExtensionDriverFrom(t, extensionPath, mode, home, env)
+}
+
+// runVSCodeExtensionDriverFrom is runVSCodeExtensionDriverAt over the
+// extension.js at extensionPath, a staged copy beside files the embed lacks.
+func runVSCodeExtensionDriverFrom(t *testing.T, extensionPath, mode, home string, env []string) []byte {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")
 	}
 	if _, statErr := os.Stat(extensionPath); statErr != nil {
 		t.Fatalf("embedded extension asset %s: %v", extensionPath, statErr)

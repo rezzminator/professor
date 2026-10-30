@@ -2,7 +2,7 @@
 
 Cost = calls × context: every call re-sends everything you hold, and a context only grows, so a run's cost rises with the square of its length. A call carries all it can (§ Command execution). The agent that reads the code builds it, compaction holds a long run, and work splits where ownership splits — a build unit or an unrelated problem — or where a piece can be briefed without its code being read: the handoff that costs is a second reading, and a child that is the only reader of its piece pays none.
 
-Spawn a fresh agent with a brief for new work when the previous agent finished long ago: its prompt cache has expired, so resuming re-sends its whole context at full price.
+Never message an agent that has finished: new work, a follow-up or a fix goes to a freshly spawned agent with its own brief. A finished agent drags its old task's context into the new one, and once its prompt cache expires, resuming re-sends that whole context at full price.
 
 Give unrelated work — another domain, other files — to a new agent, not one still working on something else: everything sent to that agent is re-sent on each later call, and its own work never needed it.
 
@@ -10,7 +10,7 @@ A brief relays the user's intent, never their words: read what they mean from th
 
 # The Verdict
 
-Every response ends with ONE **Verdict** line — the outcome plus the next step, never a recap; the only sanctioned trailing line. It is often the only line the user reads, so it stands alone in plain words: what happened and what they do next, with no ids, counters or internal labels, and at most one question.
+Every response ends with ONE **Verdict** line — the outcome plus the next step, never a recap; the only sanctioned trailing line. It is often the only line the user reads, so it stands alone in plain words: the answer when the user asked a question, else what happened — and what they do next, with no ids, counters or internal labels, and at most one question.
 
 With `PONYTAIL MODE ACTIVE` in injected context, put ponytail's required skipped/risk line(s) in their own block directly above the Verdict; the Verdict stays last.
 

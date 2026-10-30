@@ -185,7 +185,7 @@ if logged 'ps -a -q --filter label=pfm.fence=1 --filter status=exited' && logged
 else bad "containers" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 2 — an invalid age limit warns and falls back to 6 hours; a running container
-#     labelled pfm.fence.long-lived=1 (a shell, the demo, a release rehearsal)
+#     labelled pfm.fence.long-lived=1 (a shell, the demo)
 #     is never age-reaped, however old
 fresh; touch "$STAMP"; printf 'c1\nc2\n' >"$STUB_DIR/running"
 printf '/mid %s\n/demo %s 1\n' "$(iso_ago $((5 * 3600)))" "$(iso_ago $((30 * 3600)))" >"$STUB_DIR/created"

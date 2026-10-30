@@ -602,6 +602,22 @@ sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},
 [ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
 sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
 [ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
+# X-pcm-guard: denies a main-chat write to a CLAUDE.md naming pcm, passes the same write for pcm and a read for anyone.
+pg="$(printf '{"tool_name":"Write","tool_input":{"file_path":"/tmp/pcm-guard-lane/CLAUDE.md"},"cwd":"/tmp"}' | pfm internal pcm-guard 2>&1)"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad pcm-guard exited $rc: $(one_line "$pg");"
+grep -q '"permissionDecision":"deny"' <<<"$pg" && grep -q 'subagent_type: \\"pcm\\"' <<<"$pg" ||
+  bad="$bad pcm-guard did not deny a main-chat CLAUDE.md write naming pcm: $(one_line "$pg");"
+pg="$(printf '{"tool_name":"Write","tool_input":{"file_path":"/tmp/pcm-guard-lane/CLAUDE.md"},"cwd":"/tmp","agent_type":"pcm"}' | pfm internal pcm-guard 2>&1)"
+[ -z "$pg" ] || bad="$bad pcm-guard blocked pcm: $(one_line "$pg");"
+pg="$(printf '{"tool_name":"Bash","tool_input":{"command":"cat CLAUDE.md"},"cwd":"/tmp"}' | pfm internal pcm-guard 2>&1)"
+[ -z "$pg" ] || bad="$bad pcm-guard blocked a read: $(one_line "$pg");"
+# herdr-places: with no Herdr socket the startup placement is a silent exit-0 no-op.
+hp_out="$(env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-places 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad herdr-places outside Herdr exited $rc (want 0): $(one_line "$(cat "$int_err")");"
+[ -z "$hp_out" ] || bad="$bad herdr-places outside Herdr printed '$(one_line "$hp_out")' on stdout (want nothing);"
+[ ! -s "$int_err" ] || bad="$bad herdr-places outside Herdr wrote to stderr (want silence): $(one_line "$(cat "$int_err")");"
 # herdr-state: outside a Herdr pane valid events are silent exit-0 no-ops; malformed payloads warn without blocking.
 for hs_event in start working blocked idle end notification attach sync; do
   hs_out="$(printf '{"session_id":"lane-no-such-session","hook_event_name":"Stop","message":"x"}' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine claude "$hs_event" 2>"$int_err")"
@@ -727,7 +743,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · clear-name first-prompt title once and visible malformed-payload failure · herdr-state outside Herdr exits 0 silent on valid events and visibly diagnoses garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · clear-name first-prompt title once and visible malformed-payload failure · herdr-state outside Herdr exits 0 silent on valid events and visibly diagnoses garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · pcm-guard denies a main-chat CLAUDE.md write, passes pcm and a read · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────

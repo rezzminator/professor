@@ -20,13 +20,13 @@ expect_lacks 'no token in the env' "$lines" lab-canary-7f3e
 
 # L6: settings render
 store=$T/store; mkdir -p "$store/plugins"
-printf '{"version":2,"plugins":{"forward-compaction@forward-compaction":[],"forward-compaction@forward-compaction-dev":[],"cache-live-control@cache-live-control":[]}}' > "$store/plugins/installed_plugins.json"
+printf '{"version":2,"plugins":{"forward-compaction@elsewhere":[],"forward-compaction@professor":[],"cache-live-control@professor":[]}}' > "$store/plugins/installed_plugins.json"
 mapfile -t ids < <(lab_installed_ids "$store" forward-compaction)
-expect_eq 'live ids of the plugin under test' "${ids[*]}" 'forward-compaction@forward-compaction forward-compaction@forward-compaction-dev'
+expect_eq 'live ids of the plugin under test' "${ids[*]}" 'forward-compaction@elsewhere forward-compaction@professor'
 LAB_OPTIONS='{"floor":"bogus"}'; LAB_ALLOW=(Read mcp__forward-compaction__look_back); LAB_DENY=(Bash Grep); LAB_LAB=$LAB_DIR
 lab_settings_render auto-effort-control "${ids[@]}"
 s=$LAB_RUN/settings.json
-expect_eq 'enabledPlugins off' "$(jq -c .enabledPlugins "$s")" '{"forward-compaction@forward-compaction":false,"forward-compaction@forward-compaction-dev":false}'
+expect_eq 'enabledPlugins off' "$(jq -c .enabledPlugins "$s")" '{"forward-compaction@elsewhere":false,"forward-compaction@professor":false}'
 expect_eq 'options under name@inline' "$(jq -c '.pluginConfigs["auto-effort-control@inline"].options.floor' "$s")" '"bogus"'
 expect_eq 'dontAsk' "$(jq -r .permissions.defaultMode "$s")" dontAsk
 expect_eq 'allow list exactly the scenario tools' "$(jq -c .permissions.allow "$s")" '["Read","mcp__forward-compaction__look_back"]'

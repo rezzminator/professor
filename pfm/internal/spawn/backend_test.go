@@ -3,6 +3,7 @@ package spawn
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func TestPlace(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.err) {
 					t.Fatalf("choice=%+v error=%v; want %q", got, err, tc.err)
 				}
-			} else if err != nil || got != tc.want {
+			} else if err != nil || !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("choice=%+v error=%v; want %+v", got, err, tc.want)
 			}
 			if tc.callerErr != nil && tc.err == "place chat: caller unresolved:" && !errors.Is(err, tc.callerErr) {

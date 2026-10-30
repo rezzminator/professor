@@ -27,6 +27,7 @@ const (
 	defaultEndpoint  = "https://api.anthropic.com/api/oauth/usage"
 	fiveHourKey      = "five_hour"
 	sevenDayKey      = "seven_day"
+	sevenDayOpusKey  = "seven_day_opus"
 	sevenDayFableKey = "seven_day_fable"
 )
 
@@ -682,11 +683,11 @@ func EnsurePrivateDir(path string) error {
 		return err
 	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("usage cache is not a real directory")
+		return fmt.Errorf("%s is not a real directory", path)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || int(stat.Uid) != os.Getuid() {
-		return fmt.Errorf("usage cache is not owned by this uid")
+		return fmt.Errorf("%s is not owned by uid %d", path, os.Getuid())
 	}
 	return os.Chmod(path, 0o700)
 }
@@ -701,7 +702,7 @@ func logUnknownUsageKeys(body []byte, logger io.Writer) {
 		return
 	}
 	known := map[string]bool{
-		fiveHourKey: true, sevenDayKey: true, "seven_day_opus": true, "limits": true,
+		fiveHourKey: true, sevenDayKey: true, sevenDayOpusKey: true, "limits": true,
 	}
 	unknown := make([]string, 0, len(fields))
 	for key := range fields {

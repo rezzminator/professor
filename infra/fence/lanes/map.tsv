@@ -67,6 +67,7 @@ pfm config show	O1	O1.13-misc-ops
 pfm config validate	O1	O1.13-misc-ops
 pfm doctor	M	M.04-doctor-mcp
 pfm doctor	O1	O1.10-doctor-exit-contract
+pfm generate	O1	O1.01a-generate
 pfm headless	O2	O2.04-headless
 pfm headless exec	O2	O2.04-headless
 pfm heal	O1	O1.11-heal
@@ -88,9 +89,10 @@ pfm internal epic-inject	O2	O2.05-internal-plumbing
 pfm internal exit-close	E1	E1.21-exit-close
 pfm internal exit-intercept	E1	E1.19-kill-unkill
 pfm internal git-guard	O2	O2.05-internal-plumbing
-pfm internal herdr-indicators	H	H.tab-priority
+pfm internal herdr-places	O2	O2.05-internal-plumbing
 pfm internal herdr-state	O2	O2.05-internal-plumbing
 pfm internal store-guard	O2	O2.05-internal-plumbing
+pfm internal pcm-guard	O2	O2.05-internal-plumbing
 pfm internal kill-exit	O2	O2.05-internal-plumbing
 pfm internal launch	E1	E1.23-launcher
 pfm internal launcher-repair	O2	O2.05-internal-plumbing

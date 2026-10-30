@@ -121,6 +121,15 @@ func TestResolveEnvPinsTheClockUnderTest(t *testing.T) {
 	}
 }
 
+// A placement scan composes from no directory: the working directory would
+// seed its project's root and move the fold under every place.
+func TestResolveEnvNoCurrentDirComposesFromNowhere(t *testing.T) {
+	env, err := ResolveEnv(Request{Runtime: jailRuntime(t), NoCurrentDir: true})
+	if err != nil || env.CurrentDir != "" {
+		t.Fatalf("ResolveEnv(NoCurrentDir) = %+v, %v; want no current directory", env, err)
+	}
+}
+
 // TestResolveEnvRefusesAnUnreadableClock pins the broken state: a clock the
 // test named but that does not parse is an error, never the real clock.
 func TestResolveEnvRefusesAnUnreadableClock(t *testing.T) {

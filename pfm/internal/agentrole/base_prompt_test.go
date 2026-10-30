@@ -27,6 +27,9 @@ func roleWorkbenchFixture(t *testing.T) (string, string, string) {
 		t.Fatal(err)
 	}
 	mustWrite(t, filepath.Join(root, "pfm", "harness-prompts", "generated", "claude.md"), "FLEET")
+	for _, part := range []string{"share/head.md", "codex/professor.md", "share/tail.md"} {
+		mustWrite(t, filepath.Join(root, "pfm", "harness-prompts", filepath.FromSlash(part)), "CLONE "+part)
+	}
 	return root, dir, home
 }
 
@@ -47,9 +50,12 @@ func TestBasePrompt(t *testing.T) {
 			}
 			if name == "disabled" || name == "outside Codex" {
 				var err error
-				want, err = codexprompt.FleetPrompt()
+				want, err = codexprompt.FleetPrompt(root)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if !strings.HasPrefix(want, "CLONE share/head.md") {
+					t.Fatalf("the fleet prompt %q is not composed from the recorded clone's parts", want)
 				}
 			}
 			if name == "invalid" {

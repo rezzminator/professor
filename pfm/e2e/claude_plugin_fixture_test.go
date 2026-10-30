@@ -51,10 +51,20 @@ func TestClaudePluginInstallFixture(t *testing.T) {
 		}
 		return
 	}
-	if len(args) < 3 || args[0] != "plugin" || args[1] != "install" {
+	if len(args) >= 4 && args[0] == "plugin" && args[1] == "marketplace" && args[2] == "remove" {
+		return
+	}
+	if len(args) < 3 || args[0] != "plugin" || (args[1] != "install" && args[1] != "uninstall") {
 		t.Fatalf("unexpected plugin command: %v", args)
 	}
-	id := args[2]
+	id, uninstall := args[2], args[1] == "uninstall"
+	// Claude records the scope of every install, user unless --scope names another.
+	scope := "user"
+	for index := 3; index+1 < len(args); index++ {
+		if args[index] == "--scope" {
+			scope = args[index+1]
+		}
+	}
 	settingsPath := filepath.Join(dir, "settings.json")
 	raw, err := os.ReadFile(settingsPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -70,7 +80,11 @@ func TestClaudePluginInstallFixture(t *testing.T) {
 	if enabled == nil {
 		enabled = map[string]any{}
 	}
-	enabled[id] = true
+	if uninstall {
+		delete(enabled, id)
+	} else {
+		enabled[id] = true
+	}
 	settings["enabledPlugins"] = enabled
 	updated, err := json.Marshal(settings)
 	if err != nil {
@@ -80,7 +94,12 @@ func TestClaudePluginInstallFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	installPath := filepath.Join(pluginsDir, "cache", id)
-	if err := os.MkdirAll(installPath, 0o700); err != nil {
+	if uninstall {
+		err = os.RemoveAll(installPath)
+	} else {
+		err = os.MkdirAll(installPath, 0o700)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	recordPath := filepath.Join(pluginsDir, "installed_plugins.json")
@@ -97,7 +116,11 @@ func TestClaudePluginInstallFixture(t *testing.T) {
 	if record.Plugins == nil {
 		record.Plugins = map[string][]map[string]string{}
 	}
-	record.Plugins[id] = []map[string]string{{"installPath": installPath}}
+	if uninstall {
+		delete(record.Plugins, id)
+	} else {
+		record.Plugins[id] = []map[string]string{{"installPath": installPath, "scope": scope}}
+	}
 	updated, err = json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)

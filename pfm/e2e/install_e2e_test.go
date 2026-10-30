@@ -69,6 +69,8 @@ type e2eHarness struct {
 	goCache    string
 	goModCache string
 	previous   *previousBuild
+	// extraEnv shapes the host every pfm command of this harness runs on.
+	extraEnv map[string]string
 }
 
 type commandResult struct {
@@ -146,8 +148,8 @@ func runInstallE2E(t *testing.T) {
 			output string
 			want   int
 		}{
-			{"doctor: claude_plugins plugin cache-live-control@cache-live-control not enabled in /fixture/.claude/settings.json — run pfm install --yes\n", 1},
-			{"doctor: claude_plugins plugin cache-live-control@cache-live-control not installed in /fixture/.claude — run pfm install --yes\n", 1},
+			{"doctor: claude_plugins plugin cache-live-control@professor not enabled in /fixture/.claude/settings.json — run pfm install --yes\n", 1},
+			{"doctor: claude_plugins plugin cache-live-control@professor not installed in /fixture/.claude — run pfm install --yes\n", 1},
 			{"doctor: claude_plugins ok\n", 0},
 		} {
 			if got := claudePluginRowWarnings(row.output); got != row.want {
@@ -426,6 +428,9 @@ func (h *e2eHarness) environment(home string) []string {
 		// Keep the whole-home refusal snapshot free of diagnostic log writes.
 		"PFM_LOG_LEVEL":             "off",
 		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1", "PFM_PRICES_OFFLINE": "1",
+	}
+	for name, value := range h.extraEnv {
+		values[name] = value
 	}
 	return appendCleanEnv(os.Environ(), values)
 }

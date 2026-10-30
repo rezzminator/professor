@@ -1,8 +1,8 @@
 # The Refresh Pass — Re-derive the Blueprint from Live Source
 
-Executed inside `/pfm:release prepare` (step 3). Re-derives the blueprint from the CURRENT `.claude/` and `CLAUDE.md` state. Edit files directly inside this repo's `templates/project/` tree — this repo IS the upstream clone.
+Run by `pcm` on the user's request, detached from the release. Re-derives the blueprint from the CURRENT `.claude/` and `CLAUDE.md` state. Edit files directly inside this repo's `templates/project/` tree — this repo IS the upstream clone.
 
-**Scope (incremental):** `templates/refresh-map.json` maps every template to its live source(s) + the SHA-256 of each as of the last sync. `scripts/refresh-scope.sh scan` proves unchanged sources untouched — their templates are skipped; re-derive only CHANGED templates; UNMAPPED-LIVE files get a mapping ruling. `curated` templates have no live source and are never auto-derived. `refresh-scope.sh regen` re-baselines the hashes at release end.
+**Scope (incremental):** `templates/refresh-map.json` maps every template to its live source(s) + the SHA-256 of each as of the last sync. `scripts/refresh-scope.sh scan` proves unchanged sources untouched — their templates are skipped; re-derive only CHANGED templates; UNMAPPED-LIVE files get a mapping ruling. `curated` templates have no live source and are never auto-derived. `refresh-scope.sh regen` re-baselines the hashes at the pass's end.
 
 **Update mechanism context:** Adopters install from a tagged blueprint. `pfm init` scaffolds project templates once and records per-file template pins in `.professor/baseline.json`; the local project files then own truth. `pfm doctor --project-updates` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` mappings without writing, the upstream diff printed under each `UPDATED` row. The session reads each diff for its intent, carries what applies into the local file while keeping the project's own edits, and advances accepted pins with `pfm update pin <local>`. Machine-global symlinks update through the blueprint clone, and engine mirrors rebuild from local sources.
 
@@ -196,12 +196,11 @@ Tier A: {count} | Tier C: {count}
 Sources mined: {list}
 Generalizations: identifiers→placeholders {count}, tech→placeholders {count}, domain→slots {count}
 Character preservation: Professor ✓
-Continuing release.
 ```
 
 ## The pass — how a refresh runs
 
-Driven by `/pfm:release prepare … --from {live-project-root}` (step 3); there is no standalone command. The tier table, preservation list and placeholder law above are the rules every worker applies — this section owns HOW the pass runs: cheaply, in reviewed batches.
+Run by `pcm` on the user's request, given the live project's root (`{live-project-root}`); no release step and no standalone command drives it. The tier table, preservation list and placeholder law above are the rules every worker applies — this section owns HOW the pass runs: cheaply, in reviewed batches.
 
 ### The cost law
 
@@ -267,7 +266,7 @@ Tier and effort per the fleet prompt § Model Selection: **mechanical (sonnet), 
 
 Every dispatch carries all five briefing fields (root `CLAUDE.md` § Dispatch), plus one input the 2-file cap makes it impossible for a worker to fetch:
 
-**Quote the source project's commit messages for this live file into the brief** — `git -C {live-root} log --format='%h %s%n%b' {last-sync}.. -- {source}`, where `{last-sync}` is the `Source:` trailer of the newest `release:` commit on `main`. Those messages are where that project ALREADY ruled the change framework-bound, and a worker that cannot see them will read a generic mechanism as install-specific topology and rule it LOCAL. A file with no commits since `{last-sync}` is briefed as such, so "no message quoted" means the orchestrator looked, not that it skipped.
+**Quote the source project's commit messages for this live file into the brief** — `git -C {live-root} log --format='%h %s%n%b' {last-sync}.. -- {source}`, where `{last-sync}` is the `Source:` trailer of the newest `refresh:` commit on `develop` — before the first one, of the newest commit on `develop` that carries one (`git log develop --grep='^Source: ' -1`); none at all → brief every file as never synced. Those messages are where that project ALREADY ruled the change framework-bound, and a worker that cannot see them will read a generic mechanism as install-specific topology and rule it LOCAL. A file with no commits since `{last-sync}` is briefed as such, so "no message quoted" means the orchestrator looked, not that it skipped.
 
 > Re-derive ONE blueprint template from its live source. Read at most these 2 files: the template `templates/{key}` and the live source `{live-root}/{source}`. Read nothing else.
 >
@@ -299,8 +298,8 @@ Reconcile telemetry per batch: workers dispatched vs reports received, and the c
 
 ### Step 5 — Close
 
-1. `bash scripts/refresh-scope.sh regen {live-project-root}` — fresh hashes are the next release's baseline. Only after every ruling from Step 2 has landed; regen over an unruled MISSING-SOURCE re-baselines a zombie.
-2. A SYNC set needs no ledger entry of its own: the refresh commit's message carries the note's substance, and `changelogger` writes the bullet from it.
+1. `bash scripts/refresh-scope.sh regen {live-project-root}` — fresh hashes are the next pass's baseline. Only after every ruling from Step 2 has landed; regen over an unruled MISSING-SOURCE re-baselines a zombie.
+2. `gitter` Phase COMMIT names the refreshed `templates/**` paths and `templates/refresh-map.json`: `refresh: re-derive templates from the live source @{live sha7}` with a `Source: {live sha}` trailer, the source project never named — the trailer is the next pass's `{last-sync}`. A SYNC set needs no ledger entry of its own: that commit's message carries the note's substance, and `changelogger` writes the bullet from it at the next cut.
 3. Report: templates re-derived / skipped-unchanged / ruled, the per-verdict hunk totals, every UNRULED hunk and how it was ruled, workers dispatched vs reports received, leak-check status, and what a reader must verify by hand.
 
 ### Rules

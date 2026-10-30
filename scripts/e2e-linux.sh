@@ -14,7 +14,7 @@ docker run --rm \
   -e PFM_E2E_SOURCE_REPO=/workspace \
   -v "${repo_root}:/workspace:ro" \
   -w /workspace \
-  golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac \
+  golang:1.27.1-bookworm@sha256:8d48e12ec56735e9358640898b9d9b9fcca110612ed8a5567438c0a1baa24e66 \
   bash -euo pipefail -c '
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git tmux zsh python3

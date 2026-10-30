@@ -1,8 +1,8 @@
 {
   "name": "professor",
   "displayName": "Professor",
-  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked, paints the terminal, and every window's title, activity and status bars and borders (local and Remote-SSH), in Claude Code's theme, which `pfm theme` renders; and lists every pfm theme in VS Code's Color Theme picker as Professor · {name}, where picking one switches every surface to it.",
-  "version": "0.6.0",
+  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked, paints the terminal, and every window's title, activity and status bars and borders (local and Remote-SSH), in Claude Code's theme, which `pfm theme` renders; and lists every pfm theme in VS Code's Color Theme picker as Professor · {name}, where picking one switches every surface to it; and a Prompt Lint link above line 1 of a prompt file that has Claude check it against Professor's prompt law through pfm, its errors, warnings and info in the Problems panel with a quick fix for each rewrite.",
+  "version": "0.8.0",
   "publisher": "professor",
   "engines": { "vscode": "^1.90.0" },
   "extensionKind": ["workspace"],
@@ -17,11 +17,13 @@
     },
     "commands": [
       { "command": "professor.newChatTerminal", "title": "Professor: New Chat Terminal", "icon": "$(mortar-board)" },
-      { "command": "professor.chooseTheme", "title": "Professor: Choose Theme" }
+      { "command": "professor.chooseTheme", "title": "Professor: Choose Theme" },
+      { "command": "professor.promptLint", "title": "Prompt Lint", "category": "Professor" }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "professor.chooseTheme", "when": "!remoteName || professor.pfmHere" }
+        { "command": "professor.chooseTheme", "when": "!remoteName || professor.pfmHere" },
+        { "command": "professor.promptLint", "when": "!remoteName || professor.pfmHere" }
       ]
     },
     "keybindings": [
@@ -43,7 +45,17 @@
           "default": ["terminal.ansiRed", "terminal.ansiGreen", "terminal.ansiYellow", "terminal.ansiBlue", "terminal.ansiMagenta", "terminal.ansiCyan"],
           "description": "Theme colours cycled beside the icons on the same counter, so a pair repeats only every least-common-multiple of the two list lengths."
         },
-        "professor.theme.stateDir": { "type": "string", "default": "", "scope": "machine", "description": "Directory pfm theme writes its contract (current.json) to; empty means ~/.local/state/pfm/theme. The terminal follows Claude Code's theme only after pfm theme on." }
+        "professor.theme.stateDir": { "type": "string", "default": "", "scope": "machine", "description": "Directory pfm theme writes its contract (current.json) to; empty means ~/.local/state/pfm/theme. The terminal follows Claude Code's theme only after pfm theme on." },
+        "professor.promptLint.globs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["**/SKILL.md", "**/agents/*.md", "**/commands/**/*.md", "**/CLAUDE.md", "**/AGENTS.md", "**/*.prompt.md", "**/*.agent.md", "**/*.instructions.md"],
+          "description": "Glob patterns of the prompt files that show the Prompt Lint link."
+        },
+        "professor.promptLint.model": { "type": "string", "default": "opus", "description": "Claude model the Prompt Lint run uses (pfm headless exec --model)." },
+        "professor.promptLint.effort": { "type": "string", "default": "medium", "description": "Reasoning effort the Prompt Lint run uses (pfm headless exec --effort)." },
+        "professor.promptLint.showInfo": { "type": "boolean", "default": false, "description": "Show info findings (leanness notes) in the Problems panel; off shows errors and warnings only, and the run summary counts the hidden info findings." },
+        "professor.promptLint.timeout": { "type": "number", "default": 900, "minimum": 1, "description": "Seconds a Prompt Lint run may take before pfm stops it (pfm headless exec --timeout)." }
       }
     }
   }

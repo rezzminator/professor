@@ -439,9 +439,14 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 					dead.CWD != "" {
 					t.Fatalf("dead seat presented as live or lost its diagnostic: %+v", dead)
 				}
+				// A writable listing retires the dead seat; a read-only one writes nothing.
+				want := "live"
+				if !readOnly {
+					want = "lost"
+				}
 				stored, found, err := state.Seat(ctx, "dead")
-				if err != nil || !found || stored.State != "live" || stored.HerdrPane != "w6:p4" {
-					t.Fatalf("listing mutated the dead seat: %+v found=%t err=%v", stored, found, err)
+				if err != nil || !found || stored.State != want || stored.HerdrPane != "w6:p4" {
+					t.Fatalf("dead seat stored %+v (want state %s) found=%t err=%v", stored, want, found, err)
 				}
 			})
 		}

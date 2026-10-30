@@ -137,7 +137,7 @@ func (status SkillSourceStatus) Describe() string {
 // storage and the recorded link dirs, falling back to the default store's
 // skills registry and ~/.agents/skills when there is no link ledger.
 func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
-	repo, err := GlobalSourceRepo(home)
+	repo, err := paths.GlobalSourceRepo(home)
 	if err != nil {
 		return []SkillSourceStatus{{Path: home, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}
@@ -243,12 +243,15 @@ func ReportGlobalRegistries(
 	capabilities []string,
 	accountDirs []string,
 	retired RetiredRegistryNames,
-	codexHomes ...string,
+	codexHomes []string,
 ) (warnings, failures int) {
-	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, capabilities, accountDirs, codexHomes...)
+	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, capabilities, accountDirs, codexHomes)
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures
+	ruleWarnings, ruleFailures := ReportGlobalRules(w, home)
+	warnings += ruleWarnings
+	failures += ruleFailures
 	hostWarnings, hostFailures := ReportEngineSyncHost(w, home, env)
 	warnings += hostWarnings
 	failures += hostFailures

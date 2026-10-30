@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -15,14 +16,19 @@ const (
 	BackendHerdr = "herdr"
 )
 
-// BackendChoice is the immutable birth location chosen for a chat.
+// BackendChoice is the immutable birth location chosen for a chat. A Herdr
+// choice names the caller's socket, pane and workspace: an in-place seat takes
+// over that pane, while a new tab is born in its place's workspace, which
+// SpawnHerdr finds from the fleet Places scans; only a new tab scans.
 type BackendChoice struct {
 	Backend, HerdrSocket, HerdrPane, HerdrWorkspace string
 	InPlace                                         bool
+	Places                                          func(context.Context) (*place.Fleet, error)
 }
 
 // Place chooses a birth from the caller's proven identity; it never probes or
-// turns an unresolved caller into a tmux birth.
+// turns an unresolved caller into a tmux birth. A Herdr choice leaves Places
+// for the door to fill.
 func Place(
 	ctx context.Context,
 	door, requested string,

@@ -258,10 +258,7 @@ func (service *Service) chatNew(
 	}
 	result, output, returnErr = service.cliAction(ctx, args...)
 	if returnErr == nil && output.Code == 0 && errors.Is(callerErr, resolve.ErrNotRegistered) {
-		output.Message = fmt.Sprintf(
-			"caller seat not registered yet; born in a new tab of Herdr workspace %s",
-			caller.identity.HerdrWorkspace,
-		)
+		output.Message = "caller seat not registered yet; born in a new tab of its place's Herdr workspace"
 	}
 	if nameClaim.Name != "" && returnErr == nil && output.Code == 0 {
 		if commitErr := nameClaim.Commit(); commitErr != nil {

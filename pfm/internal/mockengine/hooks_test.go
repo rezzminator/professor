@@ -107,7 +107,7 @@ printf 'SL-FIXTURE\n'
 			"type":                 "command",
 			"command":              statusScript,
 			"padding":              0,
-			"refreshInterval":      3,
+			"refreshInterval":      2,
 			"hideVimModeIndicator": true,
 		},
 	}

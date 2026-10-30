@@ -272,10 +272,7 @@ func newInstallerOptions(
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary
 		}
 		options.NameSyncInterval = runtime.Config.NameSync.Interval
-		options.CodexHomes = make([]string, 0, len(runtime.Config.CodexAccounts))
-		for _, account := range runtime.Config.CodexAccounts {
-			options.CodexHomes = append(options.CodexHomes, account.Home)
-		}
+		options.CodexHomes = runtime.Config.CodexHomes()
 		options.ClaudeRosterHost = len(runtime.Config.Accounts) > 0
 		for _, account := range runtime.Config.Accounts {
 			options.RosterConfigDirs = append(options.RosterConfigDirs, account.ConfigDir)

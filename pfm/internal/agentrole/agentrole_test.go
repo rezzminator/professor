@@ -107,7 +107,7 @@ func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	fleetPrompt, err := codexprompt.FleetPrompt()
+	fleetPrompt, err := codexprompt.FleetPrompt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestResolveCodexRewritesTheCodeReviewInvocationInTheRoleBody(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	fleetPrompt, err := codexprompt.FleetPrompt()
+	fleetPrompt, err := codexprompt.FleetPrompt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,41 +7,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
-func TestIsUnderRespectsSegmentBoundaries(t *testing.T) {
-	for _, test := range []struct {
-		path, root string
-		want       bool
-	}{
-		{"/src/app", "/src/app", true},
-		{"/src/app/plugins/gw", "/src/app", true},
-		{"/src/apple", "/src/app", false},
-		{"/src", "/src/app", false},
-		{"/anything", "/", true},
-		{"", "/src", false},
-		{"/src", "", false},
-	} {
-		if got := isUnder(test.path, test.root); got != test.want {
-			t.Errorf("isUnder(%q, %q) = %v, want %v", test.path, test.root, got, test.want)
-		}
-	}
-}
-
-func TestFoldRootsFoldsNestedProjectsButNeverIntoHome(t *testing.T) {
-	folded := foldRoots([]string{
-		"/jail/me/src/app/plugins/gw", "/jail/me/src/app", "/jail/me", "/jail/me/ops", "/jail/me/src/app/.worktrees/f",
-	}, "/jail/me")
-	want := map[string]string{
-		"/jail/me/src/app":              "/jail/me/src/app",
-		"/jail/me/src/app/plugins/gw":   "/jail/me/src/app",
-		"/jail/me/src/app/.worktrees/f": "/jail/me/src/app",
-		"/jail/me":                      "/jail/me",
-		"/jail/me/ops":                  "/jail/me/ops", // home holds it on disk, never on the rail
-	}
-	if !reflect.DeepEqual(folded, want) {
-		t.Fatalf("foldRoots = %v\nwant %v", folded, want)
-	}
-}
-
 func placeFixtureRows() ([]compose.Row, map[string]string) {
 	rows := []compose.Row{
 		{Kind: compose.NewClaude, Name: "New Claude chat", Project: "app", CWD: "/src/app"},

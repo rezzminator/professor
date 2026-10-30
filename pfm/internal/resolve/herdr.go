@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -40,27 +39,18 @@ func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrCla
 		}
 		return claim, -1, "", fmt.Errorf("look up the caller: herdr pane %s: %w", env.HerdrPane, err)
 	}
-	body, err := herdr.SeatRequest(ctx, env.HerdrSocket, "pane.get", map[string]string{"pane_id": env.HerdrPane})
+	asked, err := identifier.herdrChatPane(ctx, chain)
+	if err != nil {
+		return claim, -1, "", fmt.Errorf("look up the caller: %w", err)
+	}
+	pane, found, err := herdr.LocatePane(ctx, env.HerdrSocket, asked, chain)
 	if err != nil {
 		return failure(err)
 	}
-	var canonical struct {
-		Type string `json:"type"`
-		Pane struct {
-			ID        string `json:"pane_id"`
-			Workspace string `json:"workspace_id"`
-			Terminal  string `json:"terminal_id"`
-		} `json:"pane"`
+	if !found {
+		return claim, -1, fmt.Sprintf("herdr %s %s: no pane holds the caller", env.HerdrSocket, asked), nil
 	}
-	if err := json.Unmarshal(body, &canonical); err != nil {
-		return failure(fmt.Errorf("decode pane identity: %w", err))
-	}
-	pane := canonical.Pane
-	if canonical.Type != "pane_info" || pane.ID == "" || pane.Workspace == "" || pane.Terminal == "" ||
-		!strings.HasPrefix(pane.ID, pane.Workspace+":") {
-		return failure(fmt.Errorf("malformed pane identity: %s", body))
-	}
-	body, err = herdr.SeatRequest(ctx, env.HerdrSocket, "pane.process_info", map[string]string{"pane_id": pane.ID})
+	body, err := herdr.SeatRequest(ctx, env.HerdrSocket, "pane.process_info", map[string]string{"pane_id": pane.ID})
 	if err != nil {
 		return failure(err)
 	}
@@ -115,6 +105,35 @@ func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrCla
 	return claim, nearest, "", nil
 }
 
+// herdrChatPane is the pane the caller's Herdr claim is proved against: its
+// chat's seat pane when a seat's supervisor is in chain, else the inherited
+// HERDR_PANE_ID (gather.HerdrChatPane). A seat table it cannot read is an error.
+func (identifier *Whoami) herdrChatPane(ctx context.Context, chain []int) (pane string, returnErr error) {
+	values, err := paths.Resolve()
+	if err != nil {
+		return "", fmt.Errorf("resolve state paths: %w", err)
+	}
+	state := fleetdb.OpenSharedStateReadOnly(ctx, values)
+	var older *fleetdb.SchemaMismatchError
+	if errors.As(state.Degraded(), &older) && older.Found < older.Expected {
+		// identifyHerdr's writable open migrates an older file on this same
+		// call; the seat lookup must not refuse what that open would accept.
+		if err := state.Close(); err != nil {
+			return "", fmt.Errorf("close read-only caller seat state: %w", err)
+		}
+		state = fleetdb.OpenSharedState(ctx, values)
+	}
+	defer func() {
+		if err := state.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close caller seat state: %w", err))
+		}
+	}()
+	env := identifier.environment
+	proc := gather.NewProcFS(values.ProcRoot)
+	pane, _, _, err = gather.HerdrChatPane(ctx, state, proc, env.HerdrSocket, env.HerdrPane, chain)
+	return pane, err
+}
+
 // identifyHerdr resolves a proven pane to its one durable seat.
 func (identifier *Whoami) identifyHerdr(ctx context.Context, claim herdrClaim) (identity Identity, returnErr error) {
 	identity = claim.Identity
@@ -128,7 +147,7 @@ func (identifier *Whoami) identifyHerdr(ctx context.Context, claim herdrClaim) (
 			returnErr = errors.Join(returnErr, fmt.Errorf("close caller seat state: %w", err))
 		}
 	}()
-	seat, found, err := state.SeatByPane(ctx, identifier.environment.HerdrSocket, identifier.environment.HerdrPane)
+	seat, found, err := state.SeatByPane(ctx, identity.SocketPath, identity.Pane)
 	if err != nil {
 		return identity, fmt.Errorf("look up the caller: find Herdr seat: %w", err)
 	}
@@ -197,7 +216,8 @@ func (identifier *Whoami) identifyHerdr(ctx context.Context, claim herdrClaim) (
 	}
 	identity.SeatID, identity.Session = proved.SeatID, proved.Name
 	if identity.Session == "" {
-		identity.Session = proved.SeatID
+		// The durable handle call and status resolve; a bare seat id is no address.
+		identity.Session = SeatPrefix + proved.SeatID
 	}
 	identity.Engine, identity.ID = proved.Engine, proved.SessionID
 	return identity, nil

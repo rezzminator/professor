@@ -87,7 +87,13 @@ func (reporter *herdrReporter) runCodex(ctx context.Context, payload herdrPayloa
 		reporter.options.socket, reporter.tmuxPane = pane.TmuxSocket, pane.TmuxPane
 		return reporter.runTmux(ctx, payload)
 	case pane.HerdrPane != "":
-		return reporter.apply(ctx, payload, herdrTarget{pane: pane.HerdrPane, socket: pane.HerdrSocket})
+		// The registered pane is the TUI's inherited HERDR_PANE_ID: a moved seat's
+		// is dead, so the chat's seat names the pane to report to.
+		current, err := reporter.herdrChatPane(ctx, pane.HerdrSocket, pane.HerdrPane, pane.PID)
+		if err != nil {
+			return fmt.Errorf("find the Herdr pane of Codex pid %d: %w", pane.PID, err)
+		}
+		return reporter.apply(ctx, payload, herdrTarget{pane: current, socket: pane.HerdrSocket})
 	}
 	return nil
 }

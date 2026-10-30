@@ -34,6 +34,10 @@ type agentSpend struct {
 	tools           int
 	priced          int
 	partial         bool
+	// behind means a transcript fold stopped at the render's budget short of
+	// its end (transcriptScans): the sum is a floor, partial too, and says so
+	// even before anything was priced.
+	behind bool
 	// fromLedger means usd, in and out are the cost ledger's rows of the agent and every agent
 	// below it (ledgerSpend), not a price of its transcripts.
 	fromLedger bool
@@ -52,32 +56,48 @@ func (spend *agentSpend) add(other agentSpend) {
 	spend.tools += other.tools
 	spend.priced += other.priced
 	spend.partial = spend.partial || other.partial
+	spend.behind = spend.behind || other.behind
 }
 
 // spendScan prices one transcript's responses. Claude Code writes a response
 // as several lines while it streams, each repeating its usage, so per
 // response key (transcript.ResponseKey) the last line counts; a line with no
-// key counts on its own.
+// key counts on its own. The exported fields are its whole fold, which a scan
+// checkpoint keeps (transcriptScans); every response is priced in total, at
+// the render's table, never at the table of the render that read it.
 type spendScan struct {
 	prices    *pricing.Prices
-	responses map[string]response
-	unkeyed   agentSpend
-	tools     map[string]struct{}
-	anchors   costledger.Anchors
+	Responses map[string]response `json:"responses"`
+	Unkeyed   []response          `json:"unkeyed,omitempty"`
+	Tools     map[string]struct{} `json:"tools"`
+	Anchors   costledger.Anchors  `json:"anchors"`
 }
 
 type response struct {
-	at         string
-	model      string
-	billed     pricing.ClaudeUsage
-	requests   []pricing.ClaudeUsage
-	advisors   []pricing.AdvisorUsage
-	incomplete bool
-	unknown    bool
+	At         string                 `json:"at,omitempty"`
+	Model      string                 `json:"model,omitempty"`
+	Billed     pricing.ClaudeUsage    `json:"billed"`
+	Requests   []pricing.ClaudeUsage  `json:"requests,omitempty"`
+	Advisors   []pricing.AdvisorUsage `json:"advisors,omitempty"`
+	Incomplete bool                   `json:"incomplete,omitempty"`
+	Unknown    bool                   `json:"unknown,omitempty"`
 }
 
 func newSpendScan(prices *pricing.Prices) *spendScan {
-	return &spendScan{prices: prices, responses: map[string]response{}, tools: map[string]struct{}{}}
+	scan := &spendScan{prices: prices}
+	scan.reset()
+	return scan
+}
+
+func (scan *spendScan) reset() {
+	*scan = spendScan{prices: scan.prices, Responses: map[string]response{}, Tools: map[string]struct{}{}}
+}
+
+func (scan *spendScan) loaded() error {
+	if scan.Responses == nil || scan.Tools == nil {
+		return errors.New("spend scan without its responses or tool calls")
+	}
+	return nil
 }
 
 func (scan *spendScan) record(messageID, requestID, model string, usage *transcriptUsage, timestamp ...string) {
@@ -86,28 +106,31 @@ func (scan *spendScan) record(messageID, requestID, model string, usage *transcr
 	}
 	billed, _ := usage.Billed()
 	seen := response{
-		model: model, billed: billed, requests: usage.Requests(), advisors: usage.Advisors(),
-		incomplete: gatewayModel(model) && !usage.reportsCache,
-		unknown:    len(usage.UnknownIterations()) != 0,
+		Model: model, Billed: billed, Requests: usage.Requests(), Advisors: usage.Advisors(),
+		Incomplete: gatewayModel(model) && !usage.reportsCache,
+		Unknown:    len(usage.UnknownIterations()) != 0,
 	}
 	if len(timestamp) > 0 {
-		seen.at = timestamp[0]
+		seen.At = timestamp[0]
 	}
 	if key := transcript.ResponseKey(messageID, requestID, "", ""); key != "" {
-		scan.responses[key] = seen
+		scan.Responses[key] = seen
 		return
 	}
-	scan.unkeyed.add(scan.priceResponse(seen))
+	scan.Unkeyed = append(scan.Unkeyed, seen)
 }
 
 // total is every response the scan saw, each priced once, and its distinct
 // tool calls.
 func (scan *spendScan) total() agentSpend {
-	spend := scan.unkeyed
-	spend.tools = len(scan.tools)
-	spend.costStates = scan.anchors.States()
-	for _, seen := range scan.responses {
-		spend.add(scan.priceResponse(seen))
+	var spend agentSpend
+	for index := range scan.Unkeyed {
+		spend.add(scan.priceResponse(scan.Unkeyed[index]))
+	}
+	spend.tools = len(scan.Tools)
+	spend.costStates = scan.Anchors.States()
+	for key := range scan.Responses {
+		spend.add(scan.priceResponse(scan.Responses[key]))
 	}
 	return spend
 }
@@ -116,13 +139,13 @@ func (scan *spendScan) total() agentSpend {
 // plus each advisor consultation's, the advisor priced at the model it names.
 // An iteration of a type pfm does not know leaves the sum a floor.
 func (scan *spendScan) priceResponse(seen response) agentSpend {
-	if seen.incomplete {
+	if seen.Incomplete {
 		return agentSpend{partial: true, gateway: gatewaySpend{present: true, partial: true}}
 	}
-	spend := scan.price(seen.model, seen.billed, seen.requests)
-	spend.partial = spend.partial || seen.unknown
-	spend.gateway.partial = spend.gateway.partial || (spend.gateway.present && seen.unknown)
-	for _, advisor := range seen.advisors {
+	spend := scan.price(seen.Model, seen.Billed, seen.Requests)
+	spend.partial = spend.partial || seen.Unknown
+	spend.gateway.partial = spend.gateway.partial || (spend.gateway.present && seen.Unknown)
+	for _, advisor := range seen.Advisors {
 		consulted := scan.price(advisor.Model, advisor.Usage, []pricing.ClaudeUsage{advisor.Usage})
 		consulted.advisorUSD = consulted.usd
 		if consulted.partial {
@@ -131,7 +154,7 @@ func (scan *spendScan) priceResponse(seen response) agentSpend {
 		spend.add(consulted)
 	}
 	if spend.gateway.usd > 0 {
-		at, _ := time.Parse(time.RFC3339Nano, seen.at)
+		at, _ := time.Parse(time.RFC3339Nano, seen.At)
 		spend.gateway.calls = []gatewayCall{{at: at, usd: spend.gateway.usd}}
 	}
 	return spend
@@ -199,17 +222,17 @@ func (scan *spendScan) line(line []byte) {
 		return
 	}
 	if entry.Timestamp != "" {
-		scan.anchors.Stamp(entry.Timestamp)
+		scan.Anchors.Stamp(entry.Timestamp)
 	}
 	if entry.Type == entryCostState && entry.TotalCostUSD != nil {
-		scan.anchors.State(*entry.TotalCostUSD, entry.StartTime, entry.TotalDuration)
+		scan.Anchors.State(*entry.TotalCostUSD, entry.StartTime, entry.TotalDuration)
 	}
 	if entry.Type != entryAssistant {
 		return
 	}
 	for _, block := range entry.Message.Content {
 		if block.Type == blockToolUse && block.ID != "" {
-			scan.tools[block.ID] = struct{}{}
+			scan.Tools[block.ID] = struct{}{}
 		}
 	}
 	scan.record(entry.Message.ID, entry.RequestID, entry.Message.Model, entry.Message.Usage, entry.Timestamp)
@@ -217,20 +240,26 @@ func (scan *spendScan) line(line []byte) {
 
 // sessionSpend is what a whole chat billed: its own transcript and every
 // sub-agent's beside it, priced at prices (nil prices nothing). An unpriced
-// response, a sub-agent transcript that cannot be read, or a subagents
-// directory that cannot be listed leaves the sum partial; a session that never
-// spawned one has no directory, which is not a failure.
-func sessionSpend(sessionTranscript string, prices *pricing.Prices, scanned *agentSpend) (agentSpend, error) {
+// response, a sub-agent transcript that cannot be read or not yet folded to
+// its end within the render's budget, or a subagents directory that cannot be
+// listed leaves the sum partial; a session that never spawned one has no
+// directory, which is not a failure.
+func sessionSpend(
+	sessionTranscript string,
+	prices *pricing.Prices,
+	scanned *agentSpend,
+	scans transcriptScans,
+) (agentSpend, error) {
 	var total agentSpend
 	if scanned != nil {
 		total = *scanned
 	} else {
 		var err error
-		if total, err = readTranscriptSpend(sessionTranscript, prices); err != nil {
+		if total, err = readTranscriptSpend(sessionTranscript, prices, scans); err != nil {
 			return agentSpend{}, err
 		}
 	}
-	tree := scanAgentTree(sessionTranscript, prices)
+	tree := scanAgentTree(sessionTranscript, prices, scans)
 	if tree.err != nil {
 		if !errors.Is(tree.err, fs.ErrNotExist) {
 			total.partial = true
@@ -238,22 +267,25 @@ func sessionSpend(sessionTranscript string, prices *pricing.Prices, scanned *age
 		return total, nil
 	}
 	for _, id := range tree.ids {
-		spend, err := readTranscriptSpend(transcript.SubagentTranscript(tree.dir, id), prices)
+		spend, err := readTranscriptSpend(transcript.SubagentTranscript(tree.dir, id), prices, scans)
 		spend.partial = spend.partial || err != nil
 		total.add(spend)
 	}
 	return total, nil
 }
 
-// readTranscriptSpend prices a whole transcript; a torn final line is the
-// agent mid-write and is skipped.
-func readTranscriptSpend(path string, prices *pricing.Prices) (agentSpend, error) {
+// readTranscriptSpend prices a whole transcript, resumed from its "spend"
+// checkpoint; one the budget left unfinished is a floor, partial.
+func readTranscriptSpend(path string, prices *pricing.Prices, scans transcriptScans) (agentSpend, error) {
 	scan := newSpendScan(prices)
-	if _, _, err := transcript.ReadLines(path, 0, func(line []byte, _ bool) { scan.line(line) }); err != nil {
+	done, err := scans.fold(path, "spend", scan)
+	if err != nil {
 		_, wrapped := transcriptError(path, err)
 		return scan.total(), wrapped
 	}
-	return scan.total(), nil
+	spend := scan.total()
+	spend.partial, spend.behind = spend.partial || !done, !done
+	return spend, nil
 }
 
 // transcriptError names a sub-agent transcript that failed to open or to
@@ -331,7 +363,7 @@ func spendSegment(activity agentActivity) string {
 	case spend.advisorUSD > 0:
 		line += cMuted + " adv " + reset + cCost + "$" + strconv.FormatFloat(spend.advisorUSD, 'f', 2, 64) + reset
 	}
-	if spend.partial && spend.priced > 0 {
+	if spend.partial && (spend.priced > 0 || spend.behind) {
 		line += cWarn + "+?" + reset
 	}
 	return line + spend.gateway.note()

@@ -509,10 +509,11 @@ func detachedNativeLocked(
 			return result, fmt.Errorf("new native pane %s exists; remove old recipe: %w", born.Seat.HerdrPane, err)
 		}
 		return action.OpenResult{
-			Name:   born.Seat.Name,
-			Socket: born.Seat.HerdrSocket,
-			State:  "opened",
-			Detail: nativeLocation(born.Seat),
+			Name:     born.Seat.Name,
+			Socket:   born.Seat.HerdrSocket,
+			State:    "opened",
+			Detail:   nativeLocation(born.Seat),
+			Warnings: born.Warnings,
 		}, nil
 	}
 	row, err := nativeResumeRow(ctx, seat, runtime, stderr)

@@ -16,6 +16,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -162,7 +163,9 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				seatState = "lost"
 			}
 			if tc.name == "unnamed" {
-				name, session = "", "seat1"
+				// An unnamed seat answers to its durable handle, the address
+				// call and status resolve; a bare seat id resolves nowhere.
+				name, session = "", SeatPrefix+"seat1"
 			}
 			if tc.store {
 				terminal := "own-terminal"
@@ -391,5 +394,157 @@ func TestHerdrCallerDeadlineWrapsItsCause(t *testing.T) {
 	_, err = identifier.Identify(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrNotInChat) {
 		t.Fatalf("deadline lost: %v", err)
+	}
+}
+
+// TestWhoamiHerdrMovedPane pins the caller identity of a chat whose pane pfm
+// moved: its processes keep the birth HERDR_PANE_ID, which Herdr answers
+// pane_not_found for. A seat whose supervisor is an ancestor names the pane
+// (nothing goes to the dead id); a seatless caller is found again by process;
+// a seat table that cannot be read is an error, never "not in a chat"; a state
+// file at an older schema is migrated, as the seat lookup that follows would.
+func TestWhoamiHerdrMovedPane(t *testing.T) {
+	for _, tc := range []string{"moved-seat", "older-state", "seatless", "broken-state"} {
+		t.Run(tc, func(t *testing.T) {
+			testjail.Fleet(t)
+			proc := t.TempDir()
+			t.Setenv(paths.EnvProcRoot, proc)
+			for name, body := range map[string]string{
+				"stat":       "btime 1000000000\n",
+				"10/stat":    "10 (sh) S 1 " + strings.Repeat("0 ", 17) + "3 0\n",
+				"20/stat":    "20 (pfm) S 10 " + strings.Repeat("0 ", 17) + "9 0\n",
+				"20/cmdline": "pfm\x00internal\x00seat-host\x00seat1\x00",
+			} {
+				path := filepath.Join(proc, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			asked := make(chan string, 64)
+			go func() {
+				for {
+					conn, err := listener.Accept()
+					if err != nil {
+						return
+					}
+					func() {
+						defer func() { _ = conn.Close() }()
+						var req struct {
+							ID     string            `json:"id"`
+							Method string            `json:"method"`
+							Params map[string]string `json:"params"`
+						}
+						if json.NewDecoder(conn).Decode(&req) != nil {
+							return
+						}
+						asked <- req.Method + " " + req.Params["pane_id"]
+						info := testjail.HerdrPaneInfo("w9:p2")
+						info["pane"].(map[string]any)["terminal_id"] = "own-terminal"
+						var result any = info
+						switch {
+						case req.Params["pane_id"] == "w6:p3":
+							_ = json.NewEncoder(conn).Encode(map[string]any{
+								"id": req.ID, "error": map[string]string{"code": "pane_not_found", "message": "gone"},
+							})
+							return
+						case req.Method == "pane.list":
+							result = map[string]any{"type": "pane_list", "panes": []any{info["pane"]}}
+						case req.Method == "pane.process_info":
+							result = map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+								"pane_id": "w9:p2", "shell_pid": 10,
+								"foreground_processes": []any{map[string]any{"pid": 40, "argv0": "claude"}},
+							}}
+						}
+						_ = json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "ok": true, "result": result})
+					}()
+				}
+			}()
+			t.Setenv("TMUX", "")
+			t.Setenv("TMUX_PANE", "")
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w6:p3")
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc == "broken-state" {
+				if err := os.MkdirAll(filepath.Dir(values.StateDB), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(values.StateDB, []byte("not a database"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc == "moved-seat" || tc == "older-state" {
+				state := fleetdb.OpenSharedState(context.Background(), values)
+				err := state.PutSeat(context.Background(), fleetdb.Seat{
+					State: "live", SeatID: "seat1", SessionID: "sid1", Engine: "cc", Backend: "herdr",
+					HerdrSocket: socket, HerdrPane: "w9:p2", HerdrWorkspace: "w9", HerdrTerminalID: "own-terminal",
+					SeatHostPID: 20, SeatHostStart: 9, Name: "moved",
+				})
+				if err = errors.Join(err, state.Close()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc == "older-state" {
+				db, err := sqlitedb.OpenReadWrite(values.StateDB, time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = db.Exec(fmt.Sprintf("PRAGMA user_version=%d", fleetdb.SchemaVersion-1))
+				if err = errors.Join(err, db.Close()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			identifier, err := NewWhoami(WhoamiDependencies{
+				Processes: fakeProcTree{parents: map[int]int{99: 40, 40: 20, 20: 10, 10: 1}},
+				SelfPID:   99,
+				TmuxDir:   t.TempDir(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := identifier.Identify(context.Background())
+			close(asked)
+			var requests []string
+			for request := range asked {
+				requests = append(requests, request)
+			}
+			switch tc {
+			case "moved-seat", "older-state":
+				if err != nil || identity.SeatID != "seat1" || identity.Pane != "w9:p2" ||
+					identity.HerdrWorkspace != "w9" {
+					t.Fatalf("moved chat identity=%+v err=%v requests=%v", identity, err, requests)
+				}
+				for _, request := range requests {
+					if strings.HasSuffix(request, " w6:p3") {
+						t.Fatalf("moved chat asked its dead birth pane: %v", requests)
+					}
+				}
+			case "seatless":
+				if !errors.Is(err, ErrNotRegistered) || identity.Pane != "w9:p2" || identity.HerdrWorkspace != "w9" {
+					t.Fatalf(
+						"seatless caller not found by process: identity=%+v err=%v requests=%v",
+						identity,
+						err,
+						requests,
+					)
+				}
+			case "broken-state":
+				if err == nil || errors.Is(err, ErrNotInChat) || !strings.Contains(err.Error(), "Herdr seat") {
+					t.Fatalf("unreadable seat table rendered as %+v / %v", identity, err)
+				}
+			}
+		})
 	}
 }

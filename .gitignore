@@ -15,14 +15,7 @@ node_modules/
 .worktrees/
 # Retired build tree created in the clone by an older SETUP.
 /engines/
-# Source-fetched skills are cloned at install from their own public repos
-# (templates/skills/sources.json) and are NEVER vendored here: a
-# tracked copy is exactly the silent drift the sources.json law exists to
-# prevent — and each carries its own upstream LICENSE with its author's name,
-# which the leak gate correctly refuses for this repo.
-.claude/skills/
 # Codex command wrappers are tracked so clean checkouts pass mirror checks.
-# OpenCode mirror (`engine-sync opencode build`): skill symlinks stay untracked like
 # Generated mirrors are never tracked beside their source: their compiler
 # (`engine-sync codex build` for Codex, `engine-sync opencode build` for OpenCode)
 # writes them at install/init time and the Stop hook keeps them current on
@@ -43,6 +36,7 @@ node_modules/
 .opencode/LICENSE
 .opencode/SECURITY.md
 .opencode/opencode.jsonc
+pfm/.opencode/opencode.jsonc
 templates/global/agents/*.toml
 # OpenCode mirror (`engine-sync opencode build`): skill symlinks stay untracked like
 # .codex/skills/; the goals/ tree is the goal plugin's live session state.

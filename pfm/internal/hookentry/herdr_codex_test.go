@@ -659,3 +659,54 @@ func TestHerdrCodexUnknownLineagePreservesReportingAndLogsFailures(t *testing.T)
 		})
 	}
 }
+
+// A native Codex seat pfm moved keeps its birth HERDR_PANE_ID in the TUI's
+// environment, the pane its record names: every report goes to the seat's
+// pane, found by the seat's supervisor above the TUI, and none to the dead id.
+func TestHerdrCodexMovedSeatReportsToItsSeatPane(t *testing.T) {
+	server := newNativeReporterHerdr(t, "native-seat", "w8:p7", "native-terminal")
+	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")}
+	seat := fleetdb.Seat{
+		SeatID: "native-seat", SessionID: "x1", Engine: "cx", Backend: "herdr", State: "live",
+		HerdrSocket: server.path,
+	}
+	stampNativeReporterSeat(t, &seat)
+	seat.HerdrPane, seat.HerdrWorkspace = "w8:p7", "w8"
+	seatStateSQL(t, values, seat)
+	jail := newHerdrJail(t)
+	jail.onPath = true
+	tui := os.Getpid()
+	jail.hookPID = 100
+	jail.procs = map[int]fakeProc{100: {tui, "sh"}, tui: {900001, "codex"}, 900001: {1, "pfm"}}
+	jail.argv = map[int][]string{tui: {"codex", "-a", "on-request"}}
+	jail.paneEnv = map[int]map[string]string{tui: herdrPaneEnv(server, "w6:p3")}
+	deps := jail.deps(map[string]string{}, new(int64))
+	deps.seatPaths = &values
+	deps.getenv = func(key string) string {
+		if key == paths.EnvProcRoot {
+			return os.Getenv(key)
+		}
+		return ""
+	}
+	for _, event := range []string{"start", "working"} {
+		var stderr bytes.Buffer
+		reportToHerdr(
+			[]string{"--engine", "codex", event},
+			strings.NewReader(codexHookPayload(t, "x1", "", `,"source":"startup"`)),
+			&stderr,
+			deps,
+		)
+		if stderr.Len() != 0 {
+			t.Fatalf("%s: %s", event, &stderr)
+		}
+	}
+	lines := server.requests()
+	if len(lines) == 0 {
+		t.Fatal("the moved seat's events reported nothing")
+	}
+	for _, line := range lines {
+		if !strings.Contains(line, `"pane_id":"w8:p7"`) || strings.Contains(line, "w6:p3") {
+			t.Fatalf("moved Codex seat request %s, want its seat pane w8:p7 only; all: %v", line, lines)
+		}
+	}
+}

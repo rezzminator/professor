@@ -1,5 +1,5 @@
 # Release checks. `make release-check` runs, locally, exactly the checks the
-# develop -> main pull request's jobs in .github/workflows/release.yml run, and
+# release pull request's jobs in .github/workflows/release.yml run, and
 # those jobs call these same targets, so a release never fails on a check
 # nobody ran. Run `git fetch origin main` first: `release` reads origin/main.
 # pfm's own build and gate targets live in pfm/Makefile (`make -C pfm help`).

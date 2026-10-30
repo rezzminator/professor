@@ -71,7 +71,7 @@ TEST_P = $(word 1,$(FENCE_TEST_CONFIG))
 TESTFLAGS ?= $(if $(findstring CONFIG-INVALID,$(FENCE_TEST_CONFIG)),$(error invalid fence test configuration; see named error above),-p $(TEST_P) -parallel $(word 2,$(FENCE_TEST_CONFIG)))
 
 .PHONY: help build tools fmt fmt-check lint lint-new vet arch cover testflags timing sweep install host-install rollback \
-        agents-plan agents-install mcp-restart mcp-status stale sweep-stale clean
+        mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
 	@echo "pfm targets — run as: make <target>"
@@ -174,12 +174,6 @@ sweep: ## Measure the fenced concurrency sweep and publish its report
 	bash scripts/test-sweep.sh --report "$(FENCE_TIMING)/sweep-fence.tsv"
 
 # -------------------------------------------------------------- install ----
-
-agents-plan: ## Preview machine agent generation and registry links without rebuilding binaries or restarting services
-	engine-sync global --source-repo "$(REPO)" --plan
-
-agents-install: ## Generate and link machine agents without rebuilding binaries or restarting services; preview with agents-plan first
-	engine-sync global --source-repo "$(REPO)"
 
 install: ## Swap in a new build, restart the daemon, sweep obsolete processes, and keep compatible stdio proxies
 	@$(MAKE) --no-print-directory host-install

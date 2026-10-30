@@ -13,8 +13,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/index"
 )
 
-// ClearKill is the fail-open /clear hook for Claude's SessionEnd event.
-// Named conversations remain resumable; only unnamed sessions are retired.
+// ClearKill is the fail-open /clear hook for Claude's SessionEnd event: it
+// hides the fleet session a /clear ends behind a prompt baseline, named or not.
+// The successor carries its own `{base} #N` name (clear-name), so the hidden
+// conversation keeps its name to itself; a resume or a later prompt brings it
+// back (resume-unkill, the baseline).
 func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...config.Runtime) (exitCode int) {
 	flags := cli.NewFlagSet("internal clear-kill", "usage: pfm internal clear-kill < hook-payload.json", stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
@@ -80,22 +83,8 @@ func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...con
 		fmt.Fprintf(stderr, "pfm internal clear-kill: refresh transcript baseline (fail-open): %v\n", err)
 		return 0
 	}
-	// Read the refreshed title, not the cached one: /rename may have landed
-	// since the last fleet scan. Claude carries that title into /clear's new
-	// session; hiding this one would leave only the empty successor findable
-	// under the conversation's name (#37). Engine-owned titles stay untouched.
-	transcript, found, err = database.Transcript(ctx, hook.SessionID)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal clear-kill: resolve refreshed fleet session (fail-open): %v\n", err)
-		return 0
-	}
-	if !found || transcript.CustomTitle != "" {
-		return 0
-	}
-	if _, found, err := manager.KillCleared(ctx, hook.SessionID); err != nil {
+	if _, _, err := manager.KillCleared(ctx, hook.SessionID); err != nil {
 		fmt.Fprintf(stderr, "pfm internal clear-kill: record kill (fail-open): %v\n", err)
-	} else if !found {
-		return 0
 	}
 	return 0
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -20,7 +21,11 @@ func BasePrompt(engine pfmengine.ID, cwd, home string) (string, error) {
 		return persona.Body, nil
 	}
 	if engine != pfmengine.Claude {
-		return codexprompt.FleetPrompt()
+		clone, err := paths.GlobalSourceRepo(home)
+		if err != nil {
+			return "", fmt.Errorf("agent role: resolve the fleet prompt's source clone: %w", err)
+		}
+		return codexprompt.FleetPrompt(clone)
 	}
 	path, err := action.ProfessorPromptPath(home)
 	if err != nil {

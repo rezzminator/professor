@@ -29,7 +29,7 @@ The harvester gets every target — page, document, paper, file — by every tec
 - Remote callers: when the MCP server is exposed remotely, only MCP is exposed — never server files, never an HTTP file URL. `download_file` returns an MCP-native reference the client reads through the protocol; binary is never pushed into the model.
 - `include_content: false` stays on `read` (deep-rr budgets with it).
 - Removed, with every reference: `archive` (a zip is a download), `searchCache`, `fetchImage` (folded into `download_file`).
-- Every caller changes in the same pass: `rr` and `sub-rr` (and their `templates/global/` originals, through `/pcm`), deep-rr (workflow, prompts, config, snapshots), `templates/global/commands/pfm.md`, `docs/dev/pfm-surface.md`, the testing landscape rows, the server instructions, and the `pfm harvest` CLI verbs.
+- Every caller changes in the same pass: `rr` and `sub-rr` (and their `templates/global/` originals, through the `pcm` agent), deep-rr (workflow, prompts, config, snapshots), `templates/global/commands/pfm.md`, `docs/dev/pfm-surface.md`, the testing landscape rows, the server instructions, and the `pfm harvest` CLI verbs.
 - Results are typed and declared with an output schema; today every tool returns plain text and discards its structured output.
 
 ## Formats

@@ -10,12 +10,12 @@
       "name": "forward-compaction",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/rezzminator/sub-agent-compact.git",
+        "url": "https://github.com/rezzminator/forward-compaction.git",
         "path": "./plugins/forward-compaction",
         "ref": "main"
       },
       "description": "The model writes its own handoff through one tool and the plugin installs it at Claude Code's compaction, with facts recorded from typed events and every later message kept verbatim.",
-      "homepage": "https://github.com/rezzminator/sub-agent-compact",
+      "homepage": "https://github.com/rezzminator/forward-compaction",
       "license": "MIT",
       "keywords": ["claude-code", "compaction", "context-window", "handoff", "function-hooks", "professor"]
     },

@@ -495,7 +495,7 @@ func TestReloadTargetAcceptsRecoveredCodexSeatWithoutAmbientTmux(t *testing.T) {
 // carries ahead of its compiled role body.
 func mustCodexFleetPrompt(t *testing.T) string {
 	t.Helper()
-	prompt, err := codexprompt.FleetPrompt()
+	prompt, err := codexprompt.FleetPrompt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

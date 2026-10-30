@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -163,11 +164,21 @@ func TestLaunchNativeNewTabPreservesContinuationsAndLaunchMetadata(t *testing.T)
 						var request struct {
 							ID     string
 							Method string
+							Params struct {
+								Label string `json:"label"`
+							}
 						}
 						if json.NewDecoder(conn).Decode(&request) != nil {
 							return
 						}
 						var result any = map[string]any{"type": "pong", "version": "fixture", "protocol": herdr.SupportedProtocol}
+						if placed, handled := testjail.HerdrWorkspaceReply(
+							request.Method,
+							request.Params.Label,
+							"w1",
+						); handled {
+							result = placed
+						}
 						if request.Method == "layout.apply" {
 							result = map[string]any{
 								"layout": map[string]any{
@@ -183,7 +194,10 @@ func TestLaunchNativeNewTabPreservesContinuationsAndLaunchMetadata(t *testing.T)
 			cache := true
 			var stderr bytes.Buffer
 			code := launchNative(
-				spawn.BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w1:p1", HerdrWorkspace: "w1"},
+				spawn.BackendChoice{
+					Backend: "herdr", HerdrSocket: socket, HerdrPane: "w1:p1", HerdrWorkspace: "w1",
+					Places: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
+				},
 				claudelaunch.Request{
 					Binary:  "/bin/echo",
 					Home:    values.Home,

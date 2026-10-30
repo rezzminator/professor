@@ -18,7 +18,10 @@ import (
 // The Herdr plugin that paints the sidebar indicators: a manifest pfm writes
 // next to Herdr's config and links into Herdr's plugin registry. Its hooks run
 // `pfm internal herdr-indicators`, which reports one custom token per pane and
-// workspace; herdr_rows.go styles the sidebar rows that name those tokens.
+// workspace; herdr_rows.go styles the sidebar rows that name those tokens. A
+// second startup hook runs `pfm internal herdr-places`, which moves every live
+// chat into its place's workspace when the server starts; it rides this plugin,
+// so it runs only while the Herdr theme is applied.
 const (
 	herdrPluginDirName   = "pfm-indicators"
 	herdrPluginManifest  = "herdr-plugin.toml"
@@ -41,13 +44,15 @@ func (s *session) herdrPluginPath() string {
 
 // herdrPluginRender is the manifest: the plugin's identity, one startup hook
 // and one event hook per Herdr event that repaints the indicators, each running
-// `pfm internal herdr-indicators`.
+// `pfm internal herdr-indicators`, and a startup hook running `pfm internal
+// herdr-places`, which moves every live chat into its place's workspace.
 func herdrPluginRender(pfmBinary string) string {
 	command := fmt.Sprintf("command = [%q, \"internal\", %q]\n", pfmBinary, herdr.IndicatorVerb)
 	var out strings.Builder
 	fmt.Fprintf(&out, "id = %q\nname = %q\nversion = %q\nmin_herdr_version = %q\nplatforms = [\"macos\", \"linux\"]\n",
 		herdr.IndicatorPluginID, herdrPluginName, herdrPluginVersion, herdrPluginMinHerdr)
 	out.WriteString("\n[[startup]]\n" + command)
+	fmt.Fprintf(&out, "\n[[startup]]\ncommand = [%q, \"internal\", %q]\n", pfmBinary, herdr.PlacesVerb)
 	for _, event := range herdr.IndicatorEvents() {
 		fmt.Fprintf(&out, "\n[[events]]\non = %q\n%s", event, command)
 	}

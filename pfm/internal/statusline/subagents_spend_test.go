@@ -31,7 +31,7 @@ func TestReadTranscriptSpendBillsAResponseOncePerRequestID(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line+"\n"+line+"\n"), 0o600); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
-	spend, err := readTranscriptSpend(path, nil)
+	spend, err := readTranscriptSpend(path, nil, transcriptScans{})
 	if err != nil {
 		t.Fatalf("readTranscriptSpend: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	spend, err := readTranscriptSpend(path, prices)
+	spend, err := readTranscriptSpend(path, prices, transcriptScans{})
 	if err != nil || spend.partial || spend.priced != 6 || spend.advisorUSD == 0 {
 		t.Fatalf("statusline spend = %+v, %v; want five priced responses and one priced advisor", spend, err)
 	}
@@ -237,7 +237,7 @@ func TestReadTranscriptSpendPricesTheAdvisorAtItsOwnModel(t *testing.T) {
 	if err := os.WriteFile(path, []byte(advisorResponse("claude-opus-5-5")+"\n"), 0o600); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
-	spend, err := readTranscriptSpend(path, testPrices(t))
+	spend, err := readTranscriptSpend(path, testPrices(t), transcriptScans{})
 	if err != nil {
 		t.Fatalf("readTranscriptSpend: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestReadTranscriptSpendMarksAnUnpricedAdvisorAsAFloor(t *testing.T) {
 		if err := os.WriteFile(path, []byte(advisorResponse(model)+"\n"), 0o600); err != nil {
 			t.Fatalf("write transcript: %v", err)
 		}
-		spend, err := readTranscriptSpend(path, testPrices(t))
+		spend, err := readTranscriptSpend(path, testPrices(t), transcriptScans{})
 		if err != nil {
 			t.Fatalf("readTranscriptSpend: %v", err)
 		}
@@ -309,7 +309,7 @@ func TestReadTranscriptSpendMarksAnUnknownIterationAsAFloor(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
-	spend, err := readTranscriptSpend(path, testPrices(t))
+	spend, err := readTranscriptSpend(path, testPrices(t), transcriptScans{})
 	if err != nil {
 		t.Fatalf("readTranscriptSpend: %v", err)
 	}

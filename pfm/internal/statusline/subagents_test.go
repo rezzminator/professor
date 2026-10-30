@@ -648,14 +648,13 @@ func TestServeSubagentsNamesAnUnusableClonePricesFile(t *testing.T) {
 // transcript.DecodeContent, so one odd element never hides an errored result
 // beside it (INTENDED: the list used to fail whole and count nothing).
 func TestRecordTranscriptLineReadsEachBlockOnItsOwn(t *testing.T) {
-	var activity agentActivity
-	seen := map[string]struct{}{}
+	fold := newActivityFold(nil)
 	recordTranscriptLine([]byte(`{"type":"user","message":{"content":["x",{"type":"tool_result","is_error":true}]}}`),
-		seen, &activity, nil)
+		fold)
 	recordTranscriptLine([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t9"},7]}}`),
-		seen, &activity, newSpendScan(nil))
-	if _, used := seen["t9"]; activity.errors != 1 || !used {
-		t.Fatalf("errors = %d, seen = %v; want the one errored result and the t9 call", activity.errors, seen)
+		fold)
+	if _, used := fold.Seen["t9"]; fold.Errors != 1 || !used {
+		t.Fatalf("errors = %d, seen = %v; want the one errored result and the t9 call", fold.Errors, fold.Seen)
 	}
 }
 

@@ -448,6 +448,57 @@ func TestRenderContextLineReadsEachTranscriptOnce(t *testing.T) {
 	}
 }
 
+// TestRenderContextLineResumesFromItsCheckpoint pins the incremental read: a
+// render after the session and a sub-agent grew by appending reads neither
+// transcript whole again, and still renders the line a render with no
+// checkpoint renders.
+func TestRenderContextLineResumesFromItsCheckpoint(t *testing.T) {
+	data := input{SessionID: spendSession}
+	data.TranscriptPath = spendTranscript(t, spendChildResponse)
+	child := transcript.SubagentTranscript(strings.TrimSuffix(data.TranscriptPath, ".jsonl")+"/subagents", "c1")
+	render := func(cacheDir string) string {
+		runtime := Runtime{
+			Home: t.TempDir(), Engine: pfmengine.Claude, Prices: testPrices(t), CacheDir: cacheDir,
+			Env: map[string]string{paths.EnvCostLedgerDir: t.TempDir()},
+		}.normalized()
+		_, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
+		return stripANSICodes(line)
+	}
+	cacheDir := t.TempDir()
+	counts := readCounter(t)
+	render(cacheDir)
+	appendLine := func(path, line string) {
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.WriteString(line + "\n"); err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendLine(data.TranscriptPath, strings.ReplaceAll(spendMainResponse, `"m-1"`, `"m-2"`))
+	appendLine(child, strings.NewReplacer(`"t1"`, `"t2"`, `"c-1"`, `"c-2"`).Replace(spendChildResponse))
+	resumed := render(cacheDir)
+	for _, path := range []string{data.TranscriptPath, child} {
+		if got := counts()[path]; got != 1 {
+			t.Errorf(
+				"%s read whole %d times over two renders, want 1: the second must resume",
+				filepath.Base(path),
+				got,
+			)
+		}
+	}
+	if fresh := render(t.TempDir()); resumed != fresh {
+		t.Errorf("resumed line %q, want the fresh read's %q", resumed, fresh)
+	}
+	if !strings.Contains(resumed, "💰$16.01/2.0M/") {
+		t.Errorf("resumed line %q, want both main responses and both child calls billed", resumed)
+	}
+}
+
 // A subscription-backed gateway response has no provider dollar charge in the native
 // ledger. Its published API-equivalent price must survive that ledger.
 func TestGatewaySpendSurvivesNativeLedger(t *testing.T) {
@@ -457,7 +508,7 @@ func TestGatewaySpendSurvivesNativeLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	prices := testPrices(t)
-	scanned, err := readTranscriptSpend(path, prices)
+	scanned, err := readTranscriptSpend(path, prices, transcriptScans{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +525,7 @@ func TestGatewaySpendSurvivesNativeLedger(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			books := ledgerBooks{ledger: costledger.Ledger{Present: tc.rows != nil, Rows: tc.rows}}
 			got := styleANSI.ReplaceAllString(
-				sessionSpendSegment(input{TranscriptPath: path}, prices, books, &scanned),
+				sessionSpendSegment(input{TranscriptPath: path}, prices, books, &scanned, transcriptScans{}),
 				"",
 			)
 			if got != tc.want {
@@ -524,7 +575,7 @@ func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
 	if err := os.WriteFile(path, []byte(final+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	spend, err := readTranscriptSpend(path, testPrices(t))
+	spend, err := readTranscriptSpend(path, testPrices(t), transcriptScans{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +587,7 @@ func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
 		},
 	}
 	got := styleANSI.ReplaceAllString(
-		sessionSpendSegment(input{TranscriptPath: path}, testPrices(t), books, &spend),
+		sessionSpendSegment(input{TranscriptPath: path}, testPrices(t), books, &spend, transcriptScans{}),
 		"",
 	)
 	if !strings.HasPrefix(got, "💰$1.31/") || !strings.Contains(got, "+?") {
@@ -546,7 +597,10 @@ func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
 	data.TranscriptPath = path
 	data.Cost.TotalCostUSD = 0.01
 	spend.costStates = nil
-	got = styleANSI.ReplaceAllString(sessionSpendSegment(data, testPrices(t), ledgerBooks{}, &spend), "")
+	got = styleANSI.ReplaceAllString(
+		sessionSpendSegment(data, testPrices(t), ledgerBooks{}, &spend, transcriptScans{}),
+		"",
+	)
 	if !strings.HasPrefix(got, "💰$0.31/") {
 		t.Fatalf("harness side-call erased gateway price: %q", got)
 	}
@@ -558,7 +612,7 @@ func TestGatewayPostSnapshotSpendKeepsNativePreLedger(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	spend, err := readTranscriptSpend(path, testPrices(t))
+	spend, err := readTranscriptSpend(path, testPrices(t), transcriptScans{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +625,7 @@ func TestGatewayPostSnapshotSpendKeepsNativePreLedger(t *testing.T) {
 	var data input
 	data.TranscriptPath = path
 	data.Cost.TotalCostUSD = 6
-	got := styleANSI.ReplaceAllString(sessionSpendSegment(data, testPrices(t), books, &spend), "")
+	got := styleANSI.ReplaceAllString(sessionSpendSegment(data, testPrices(t), books, &spend, transcriptScans{}), "")
 	if !strings.HasPrefix(got, "💰$6.31/") || strings.Contains(got, "+?") ||
 		!strings.Contains(got, "pre-ledger API-eq") {
 		t.Fatalf("new gateway call must add to known native history: %q", got)

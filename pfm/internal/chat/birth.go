@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -33,7 +34,9 @@ func WithCaller(ctx context.Context, door string, identity resolve.Identity, err
 	return context.WithValue(ctx, callerKey{}, birthCaller{door: door, identity: identity, err: err})
 }
 
-// BirthBackend obtains the request caller or identifies the local process, then places once.
+// BirthBackend obtains the request caller or identifies the local process, then
+// places once; a Herdr choice carries the scan of the fleet a new tab is filed
+// under, run only when one is born.
 func BirthBackend(ctx context.Context, door, requested string) (spawn.BackendChoice, error) {
 	caller, carried := ctx.Value(callerKey{}).(birthCaller)
 	if !carried {
@@ -46,7 +49,11 @@ func BirthBackend(ctx context.Context, door, requested string) (spawn.BackendCho
 	} else if caller.door != "" {
 		door = caller.door
 	}
-	return spawn.Place(ctx, door, requested, caller.identity, caller.err)
+	choice, err := spawn.Place(ctx, door, requested, caller.identity, caller.err)
+	if choice.Backend == spawn.BackendHerdr {
+		choice.Places = herdrPlacesFor(nil)
+	}
+	return choice, err
 }
 
 // BirthHerdr creates and reports a native seat without fabricating a tmux handle.
@@ -99,6 +106,7 @@ func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.Hea
 		Seat: fleetdb.Seat{SessionID: id, Engine: string(engineID), Name: name},
 	})
 	born := result.Seat.SeatID != ""
+	launchnotice.Print(stderr, "pfm chat new", result.Warnings)
 	if err = CommitWorkbenchLaunch(ctx, born, name, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return born, 1

@@ -19,7 +19,7 @@ import (
 )
 
 func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
-	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list"} {
+	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list"} {
 		t.Run(mode, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			proc := filepath.Join(root, "proc")
@@ -76,14 +76,24 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 					func() {
 						defer func() { _ = conn.Close() }()
 						var req struct {
-							ID     string `json:"id"`
-							Method string `json:"method"`
+							ID     string            `json:"id"`
+							Method string            `json:"method"`
+							Params map[string]string `json:"params"`
 						}
 						if err := json.NewDecoder(conn).Decode(&req); err != nil {
 							t.Error(err)
 							return
 						}
 						var result any
+						if req.Params["pane_id"] == "w9:p9" {
+							// The caller's inherited pane id, which a move retired.
+							if err := json.NewEncoder(conn).Encode(map[string]any{
+								"id": req.ID, "error": map[string]string{"code": "pane_not_found", "message": "gone"},
+							}); err != nil {
+								t.Error(err)
+							}
+							return
+						}
 						switch req.Method {
 						case "pane.get":
 							info := testjail.HerdrPaneInfo(pane)
@@ -113,8 +123,11 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 								shell = 1
 							}
 							result = map[string]any{
-								"type":         "pane_process_info",
-								"process_info": map[string]any{"pane_id": pane, "shell_pid": shell},
+								"type": "pane_process_info",
+								"process_info": map[string]any{
+									"pane_id": pane, "shell_pid": shell,
+									"foreground_processes": []any{map[string]any{"pid": os.Getpid(), "argv0": "pfm"}},
+								},
 							}
 						default:
 							t.Errorf("unexpected bind mutation %s", req.Method)
@@ -146,15 +159,18 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 				caller = "w1:p1"
 			case "recycled":
 				seat.HerdrTerminalID = "old-terminal"
-			case "old-live", "old-dead-live", "cold-lost", "unknown-old":
+			case "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old":
 				seat.SeatHostPID = 900001
 				seat.SeatHostStart = 100
 				seat.HerdrTerminalID = "old-terminal"
 				if mode == "old-live" {
 					writeProc(900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00host-seat\x00")
 				}
-				if mode == "cold-lost" {
+				if mode == "cold-lost" || mode == "cold-moved-caller" {
 					seat.State = "lost"
+				}
+				if mode == "cold-moved-caller" {
+					caller = "w9:p9"
 				}
 				if mode == "unknown-old" {
 					writeProc(900001, 1, argv)
@@ -177,7 +193,7 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			t.Setenv(herdr.EnvSocket, socket)
 			t.Setenv(herdr.EnvPane, caller)
 			got, bindErr := bindNativeHost(context.Background(), db, before, values)
-			allowed := mode == "legacy" || mode == "moved" || mode == "cold-lost"
+			allowed := mode == "legacy" || mode == "moved" || mode == "cold-lost" || mode == "cold-moved-caller"
 			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
 			if allowed {
 				if bindErr != nil || !found || readErr != nil || got.SeatHostPID != os.Getpid() ||

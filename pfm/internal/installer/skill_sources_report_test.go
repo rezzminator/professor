@@ -176,7 +176,7 @@ func TestReportGlobalRegistriesReadsOfflineFromTheInjectedEnv(t *testing.T) {
 		SkillSourceOffline:    {Values: map[string]string{paths.EnvSkillSourcesOffline: "1"}},
 	} {
 		var report bytes.Buffer
-		ReportGlobalRegistries(&report, home, false, env, nil, nil, RetiredRegistryNames{})
+		ReportGlobalRegistries(&report, home, false, env, nil, nil, RetiredRegistryNames{}, nil)
 		if row := skillSourceRow(t, report.String(), "god-speed"); !strings.Contains(row, "state="+string(want)+" ") &&
 			!strings.HasSuffix(row, "state="+string(want)) {
 			t.Fatalf("env %v: row %q, want state=%s", env.Values, row, want)
@@ -197,7 +197,7 @@ func TestReportGlobalRegistriesChecksStoreLinksWithoutClaude(t *testing.T) {
 	}
 
 	var report bytes.Buffer
-	ReportGlobalRegistries(&report, home, true, &paths.MapEnv{}, nil, nil, RetiredRegistryNames{})
+	ReportGlobalRegistries(&report, home, true, &paths.MapEnv{}, nil, nil, RetiredRegistryNames{}, nil)
 	if row := skillSourceRow(t, report.String(), "god-speed"); !strings.Contains(row, "state=MISSING missing="+link) {
 		t.Fatalf("a missing account link was not checked with Claude absent: %q", row)
 	}

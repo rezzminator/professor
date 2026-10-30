@@ -8,7 +8,7 @@ import (
 // The composed prompt carries each of its three parts — shared head, Codex
 // middle, shared tail — so a prompt missing one is as loud as one missing all.
 func TestFleetPromptCarriesEveryPart(t *testing.T) {
-	prompt, err := FleetPrompt()
+	prompt, err := FleetPrompt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

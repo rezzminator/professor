@@ -86,9 +86,9 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 	t.Parallel()
 	for _, line := range []string{
-		"/pfm:release prepare --from ../live",
+		"/pfm:release cut patch \"fix\"",
 		"/pfm:workbench new",
-		"run /pcm then /pcm:update",
+		"run /pcm:update or /pcmx",
 		"the /pfm CLI guide",
 		"see ~/.claude/commands/pfm.md and $HOME/.claude/commands/pfm.md",
 		".claude/commands/pcm.md",
@@ -131,6 +131,8 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"skills/wave-builder/SKILL.md":     "wave-builder",
 		"/qa:live":                         "/qa:live",
 		"run /rnd new chain slug goal":     "/rnd",
+		"dispatch it with /pcm audit all":  "/pcm",
+		"(the user's `/pcm`)":              "/pcm",
 		"(/rnd:hammer)":                    "/rnd",
 		"x .claude/commands/pfm/references/audit-scopes.md": ".claude/commands/pfm/references/audit-scopes.md",
 	} {
@@ -930,7 +932,7 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	if len(scan.Failures) != 0 || len(scan.Incomplete) != 0 || !reflect.DeepEqual(scan.Hits, want) {
 		t.Errorf("large tracked scan = %+v, want complete hits %+v", scan, want)
 	}
-	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/pcm", "/quality:forlint", "/quality:md-forlint").
+	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/quality:prompt", "/quality:forlint", "/quality:md-forlint").
 		Replace(content)
 	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
 	scan = ScanRetiredNames(root, nil)

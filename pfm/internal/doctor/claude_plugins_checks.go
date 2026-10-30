@@ -16,7 +16,7 @@ import (
 
 // doctorClaudePluginBuild is the build doctor checks the plugins of: this
 // pfm's version, home, claude.pluginCheckoutRoot, claude.plugins and the
-// source clone a prior install anchored on (installer.GlobalSourceRepo, the
+// source clone a prior install anchored on (paths.GlobalSourceRepo, the
 // marker else the default path), whose plugins/ an -alpha build copies from
 // when the key is unset. A clone that cannot be resolved rides as
 // SourceRepoErr, named in the fallback line. pluginsDefault says claude.plugins
@@ -27,7 +27,7 @@ func doctorClaudePluginBuild(
 	claude pfmconfig.Claude,
 	pluginsDefault bool,
 ) installer.ClaudePluginBuild {
-	sourceRepo, sourceRepoErr := installer.GlobalSourceRepo(home)
+	sourceRepo, sourceRepoErr := paths.GlobalSourceRepo(home)
 	return installer.ClaudePluginBuild{
 		Version:        version,
 		Home:           home,
@@ -66,8 +66,10 @@ func printEngineSyncHookDoctor(
 }
 
 // printClaudePluginsDoctor checks the shared store once for the plugins build
-// ensures: the -dev ids and their copies on an -alpha build with checkouts, the
-// GitHub ids otherwise, each -alpha fallback a gap. An -alpha build also checks
+// ensures: each {name}@professor id, from its checkout copy on an -alpha build
+// with checkouts and from the professor marketplace otherwise, each -alpha
+// plugin with no checkout a gap, and each legacy copy of one a gap
+// (installer.ClaudePluginLegacyGaps). An -alpha build also checks
 // every plugin the source clone's marketplace lists that claude.plugins does
 // not, installed with no copy enabled; a marketplace list it cannot read is a
 // failure. On an -alpha build each gap of a plugin of ours claude.plugins
@@ -84,7 +86,7 @@ func printEngineSyncHookDoctor(
 // marketplace pfm install adds that is registered from another source, are one
 // warning each with its repair. An unreadable marketplace record is a failure
 // for the ids that need it; every other listed plugin is still checked. An
-// enabled Go binary plugin -dev copy whose matching executable is gone
+// enabled Go binary plugin checkout copy whose matching executable is gone
 // is a gap (installer.GoPluginBinaryGap).
 func printClaudePluginsDoctor(
 	stdout io.Writer,
@@ -173,7 +175,7 @@ func printClaudePluginsDoctor(
 			Problem: "plugin " + id + " not installed in " + store, Fix: installer.ClaudePluginRepair,
 		})
 	}
-	// Claude records each installed -dev copy's version, which a refreshed copy does not move;
+	// Claude records each installed checkout copy's version, which a refreshed copy does not move;
 	// a target not installed is named above, its install the one repair.
 	installedTargets := slices.DeleteFunc(slices.Clone(targets), func(target installer.ClaudePluginTarget) bool {
 		return slices.Contains(missing, target.ID)
@@ -186,20 +188,28 @@ func printClaudePluginsDoctor(
 	gaps = append(gaps, cacheGaps...)
 	gaps = bareNameInstallFixes(gaps, targets)
 	marketplaceGaps, marketplaceErr := installer.ClaudePluginMarketplaceGaps(store, targets)
-	// An unreadable known_marketplaces.json recordErr already named is one failure, reported once.
+	// An unreadable known_marketplaces.json is one failure, reported once: by recordErr, else here,
+	// never again by the legacy check below.
 	knownMarketplaces := filepath.Join(store, "plugins", "known_marketplaces.json")
 	if marketplaceErr != nil && (recordErr == nil || !strings.Contains(recordErr.Error(), knownMarketplaces)) {
 		tally.fail()
 		fmt.Fprintf(stdout, "doctor: claude_plugins could not read %s: %v\n", knownMarketplaces, marketplaceErr)
 	}
 	gaps = append(gaps, marketplaceGaps...)
+	legacyGaps, legacyErr := installer.ClaudePluginLegacyGaps(store, build.Home, targets)
+	if legacyErr != nil && (marketplaceErr == nil || !strings.Contains(legacyErr.Error(), knownMarketplaces)) {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: claude_plugins could not look for legacy plugin copies: %v\n", legacyErr)
+	}
+	gaps = append(gaps, legacyGaps...)
 	for index := range targets {
 		if gap, found := installer.GoPluginBinaryGap(env, build.Home, targets[index]); found {
 			gaps = append(gaps, gap)
 		}
 	}
 	gaps = append(gaps, cannotInstall...)
-	if len(gaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil && cacheErr == nil {
+	if len(gaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil && cacheErr == nil &&
+		legacyErr == nil {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return
 	}
@@ -256,7 +266,7 @@ func bareNameInstallFixes(
 }
 
 // listedPluginGaps is the gaps an -alpha build fails on: each naming a plugin
-// of ours claude.plugins lists, which must run from its -dev copy, enabled. On
+// of ours claude.plugins lists, which must run from its checkout copy, enabled. On
 // a release no gap fails.
 func listedPluginGaps(version string, targets []installer.ClaudePluginTarget) func(installer.ClaudePluginGap) bool {
 	var listed []string

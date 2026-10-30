@@ -51,6 +51,9 @@ const (
 	IndicatorPluginID = "professor.indicators"
 	IndicatorSource   = "pfm-indicators"
 	IndicatorVerb     = "herdr-indicators"
+	// PlacesVerb is the internal verb the plugin's second startup hook runs:
+	// every live chat moves into its place's workspace.
+	PlacesVerb = "herdr-places"
 )
 
 // IndicatorEvents lists the Herdr events whose hooks repaint the indicators;
@@ -132,9 +135,7 @@ type indicatorPainter struct {
 	unproved map[string]unprovedPane
 	// classified caches successful ownership only for no-op paints. Every write
 	// still obtains fresh proof; the cache never authorizes a mutation.
-	classified    map[string]unprovedPane
-	priority      func() (bool, error)
-	priorityState *priorityMemo
+	classified map[string]unprovedPane
 	// serverStart reads the Herdr server's start identity (its socket file's
 	// mtime), the key of the unproved-pane memo; nil reads the socket file.
 	serverStart func() (int64, error)
@@ -373,7 +374,6 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		}
 		wrote = wrote || accepted
 	}
-	painter.prioritize(ctx)
 	if painter.tabs != nil {
 		observations, err := painter.tabs(ctx, painter.socket)
 		if err != nil {

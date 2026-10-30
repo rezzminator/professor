@@ -193,7 +193,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
       "FILE D 1 tier1 templates templates/global/agents/old-agent.md",
       "FILE A 1 tier2 - side.txt",
       "AREA templates 5 5 templates/ pfm/harness-prompts/",
-      "AREA gates 1 1 .github/ .githooks/ scripts/ infra/fence/release-rehearsal.sh infra/check-self-hosted-manifest.sh",
+      "AREA gates 1 1 .github/ .githooks/ scripts/ infra/check-self-hosted-manifest.sh",
       "TIER2 4 5",
       "REMOVED docs/BLUEPRINT.md",
       "REMOVED docs/moved.md",
@@ -289,7 +289,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     await commit(r0, {
       ".claude/agents/x.md": null,
       ".claude/commands/pfm.md": null,
-      ".claude/commands/pcm.md": "the pcm command, another text\n",
+      ".claude/commands/other.md": "another command\n",
       "templates/global/commands/pfm.md": "the global pfm command, rewritten\n",
       "templates/project/agents/gone.md": null,
     });
@@ -493,7 +493,7 @@ describe("notes coverage C1–C5", { concurrency: availableParallelism() }, () =
       c4: `${c4.slice(0, 7)}\tBreaking\tGlobal: agents/old-agent.md`,
     };
     // committed: the note is committed as the release's own commit (a
-    // release-only commit, so it needs no row) — the form --record judges.
+    // release-only commit, so it needs no row).
     const check = async ({ note = NOTE, rowsOver = {}, extra = [], committed = false } = {}) => {
       const all = { ...rows, ...rowsOver };
       write(d, { "coverage.tsv": `${Object.values(all).filter((x) => x !== null).join("\n")}\n` });
@@ -507,12 +507,8 @@ describe("notes coverage C1–C5", { concurrency: availableParallelism() }, () =
     return { r0, d, c1, c3, check };
   };
 
-  test("a ledger naming every commit once is clean, and --record writes NOTES PASS with its groups", async () => {
-    const { r0, d, check } = await fixture();
-    assertClean(await check({ committed: true, extra: ["--record", join(d, "notes/check.txt")] }), "notes");
-    const record = readFileSync(join(d, "notes/check.txt"), "utf8").split("\n");
-    assert.equal(record[0], `NOTES PASS ${await git(r0, "rev-parse", "HEAD")} range`);
-    assert.equal(record[1], "release-check notes: clean");
+  test("a ledger naming every commit once is clean", async () => {
+    assertClean(await (await fixture()).check({ committed: true }), "notes");
   });
   test("C1 missing commit", async () => assertFail(await (await fixture()).check({ rowsOver: { c3: null } }), "C1"));
   test("C1 commit twice", async () => {
@@ -535,11 +531,9 @@ describe("notes coverage C1–C5", { concurrency: availableParallelism() }, () =
     const f = await fixture();
     assertFail(await f.check({ rowsOver: { c1: `${f.c1.slice(0, 7)}\tAdded\tProject: agents/nope.md` } }), "C2");
   });
-  test("C3 none without a reason, and --record writes NOTES FAIL", async () => {
+  test("C3 none without a reason", async () => {
     const f = await fixture();
-    const r = await f.check({ committed: true, rowsOver: { c3: `${f.c3.slice(0, 7)}\tnone\t` }, extra: ["--record", join(f.d, "check.txt")] });
-    assertFail(r, "C3");
-    assert.match(readFileSync(join(f.d, "check.txt"), "utf8"), /^NOTES FAIL [0-9a-f]{40} range\nFAIL C3: /);
+    assertFail(await f.check({ rowsOver: { c3: `${f.c3.slice(0, 7)}\tnone\t` } }), "C3");
   });
   test("C4 changed templates/project path named nowhere", async () => {
     const f = await fixture();
@@ -699,15 +693,14 @@ describe("notes version V1–V3 and commands P1", { concurrency: availableParall
   });
 });
 
-// ---------------------------------------------------------------- notes: --record
+// ---------------------------------------------------------------- notes: every group
 
-describe("notes --record", { concurrency: availableParallelism() }, () => {
-  // A release commit whose note and stamps pass every rule group.
-  const fixture = async (committedNote = NOTE) => {
+describe("notes, every rule group", () => {
+  test("a release commit whose note and stamps pass every group is clean", async () => {
     const r0 = await repo();
     const base = await commit(r0, { "README.md": "r\n" });
-    const head = await commit(r0, {
-      "releases/v0.78.0.md": committedNote,
+    await commit(r0, {
+      "releases/v0.78.0.md": NOTE,
       VERSION: "0.78.0\n",
       ".professor/VERSION": "0.78.0\n",
       ".professor/manifest.json": JSON.stringify({ installed_from: { version: "0.78.0" } }),
@@ -715,344 +708,122 @@ describe("notes --record", { concurrency: availableParallelism() }, () => {
     }, "release v0.78.0");
     const d = tmp();
     write(d, { "empty.tsv": "", "help.txt": "commands:\n  install   wire the host\n" });
-    const rec = join(d, "notes/check.txt");
-    const every = [
+    assertClean(await run(
+      r0, "notes", "releases/v0.78.0.md",
       "--base", base, "--head", "HEAD", "--coverage", join(d, "empty.tsv"),
       "--version", "0.78.0", "--previous", "0.77.2", "--bump", "minor", "--pfm-help", join(d, "help.txt"),
-    ];
-    const notes = async (...extra) => await run(r0, "notes", "releases/v0.78.0.md", "--record", rec, ...extra);
-    const line1 = () => readFileSync(rec, "utf8").split("\n")[0];
-    return { r0, head, d, rec, every, notes, line1 };
-  };
-
-  test("records NOTES PASS {head} and the rule groups that ran", async () => {
-    const f = await fixture();
-    assertClean(await f.notes(...f.every), "notes");
-    assert.equal(f.line1(), `NOTES PASS ${f.head} range version commands`);
-    assertClean(await f.notes(), "notes");
-    assert.equal(f.line1(), `NOTES PASS ${f.head}`);
+    ), "notes");
   });
-  test("ERROR, recorded NOTES ERROR, when the note differs from HEAD", async () => {
-    const f = await fixture("# broken title\n");
-    write(f.r0, { "releases/v0.78.0.md": NOTE });
-    assertError(await f.notes(...f.every), /releases\/v0\.78\.0\.md differs from HEAD — commit the note and stamps before recording/);
-    assert.equal(f.line1(), `NOTES ERROR ${f.head}`);
-  });
-  test("ERROR when a stamp differs from HEAD", async () => {
-    const f = await fixture();
-    write(f.r0, { VERSION: "0.79.0\n" });
-    assertError(await f.notes(), /VERSION differs from HEAD/);
-    assert.equal(f.line1(), `NOTES ERROR ${f.head}`);
-  });
-  test("a usage error once --record is known still records NOTES ERROR", async () => {
-    const f = await fixture();
-    write(f.d, { "notes/check.txt": `NOTES PASS ${f.head} range version commands\n` });
-    assertError(await f.notes("--previous", "0.77.2"), /go together/);
-    assert.match(f.line1(), /^NOTES ERROR /);
-    write(f.d, { "notes/check.txt": `NOTES PASS ${f.head} range version commands\n` });
-    assertError(await run(f.r0, "notes", "releases/v0.78.0.md", "--record", f.rec, "--bogus"), /has no flag --bogus/);
-    assert.match(f.line1(), /^NOTES ERROR /);
-  });
-  test("a record that cannot be written is reported beside the original error", async () => {
-    const f = await fixture();
-    write(f.d, { blocker: "a file, not a directory\n" });
-    const r = await run(f.r0, "notes", "missing.md", "--record", join(f.d, "blocker/check.txt"));
-    assertError(r, /note missing\.md does not exist/);
-    assert.match(r.err, /--record .*blocker\/check\.txt could not be written/, r.all);
+  test("ready and --record are gone: usage errors", async () => {
+    const r0 = await repo();
+    assertError(await run(r0, "ready", "dir", "--worktree", r0), /unknown mode "ready"/);
+    assertError(await run(r0, "notes", "note.md", "--record", "x.txt"), /has no flag --record/);
   });
 });
 
-// ---------------------------------------------------------------- ready
+// ---------------------------------------------------------------- preflight
 
-describe("ready R1–R6", { concurrency: availableParallelism() }, () => {
-  const fixture = async () => {
-    const wt = await repo();
-    const head = await commit(wt, {
-      VERSION: "0.78.0\n",
-      "CHANGELOG.md": "# Changelog\n",
-      "templates/global/agents/a.md": "a\n",
-      "docs/x.md": "x\n",
-      "releases/v0.78.0.md": NOTE,
-    });
-    const dir = tmp();
-    write(dir, {
-      "scope.md": `RANGE 0000000..${head.slice(0, 7)} COMMITS 1 FILES 1 HUNKS 1\nAREA templates 1 1 templates/ pfm/harness-prompts/\nTIER2 0 0\n`,
-      "review/templates.md": "### F1 — a finding\nstatus: resolved @abc1234\n",
-      "review/sandbox-templates/fixture.md": "status: open — a sandbox file, not a report\n",
-      "review/HEAD": `${head}\n`,
-      "gate/candidate-templates.log": `ok\nEXIT 0 @${head}\n`,
-      "gate/candidate-pfm.log": `ok\nEXIT 0 @${head}\n`,
-      "gate/candidate-e2e.log": `ok\nEXIT 0 @${head}\n`,
-      "rehearsal.md": `REHEARSAL CLEAN ${head} round 1\n`,
-      "rehearsal/main-1/result.json": JSON.stringify({ verdict: "CLEAN" }),
-      "rehearsal/behind-1/result.json": JSON.stringify({ verdict: "CLEAN" }),
-      "notes/check.txt": `NOTES PASS ${head} range version commands\n`,
-    });
-    const ready = async (...flags) => await run(wt, "ready", dir, "--worktree", wt, ...flags);
-    // A later commit; the phases whose verdicts the caller names move to it.
-    const advance = async (files, phases = []) => {
-      const next = await commit(wt, files, "later");
-      if (phases.includes("notes")) write(dir, { "notes/check.txt": `NOTES PASS ${next} range version commands\n` });
-      if (phases.includes("rehearse")) write(dir, { "rehearsal.md": `REHEARSAL CLEAN ${next} round 2\n`, "rehearsal/main-2/result.json": '{"verdict":"CLEAN"}', "rehearsal/behind-2/result.json": '{"verdict":"CLEAN"}' });
-      return next;
+describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => {
+  // A repository whose base holds a listed plugin submodule, a README naming
+  // shipped commands, and a script and an agent the head commit removes.
+  const fixture = async ({ tagged = true, url } = {}) => {
+    const r0 = await repo();
+    const plugin = join(r0, "plugins/p");
+    mkdirSync(plugin, { recursive: true });
+    await git(plugin, "init", "-q", "-b", "main");
+    await commit(plugin, { "README.md": "p\n" }, "plugin");
+    if (tagged) await git(plugin, "tag", "-a", "v1.0.0", "-m", "v1.0.0");
+    const market = {
+      name: "professor",
+      plugins: [{ name: "p", source: { source: "git-subdir", url: url ?? plugin, path: "./plugins/p", ref: "main" } }],
     };
-    return { wt, dir, head, ready, advance };
+    const base = await commit(r0, {
+      "README.md": "Run `/quality:prompt check`, `/handy` or `/reload --account 2`; see `/dev/null`.\n",
+      ".claude-plugin/marketplace.json": JSON.stringify(market, null, 2),
+      "templates/global/commands/quality/prompt.md": "q\n",
+      "templates/global/skills/handy/SKILL.md": "h\n",
+      "pfm/internal/installer/assets/reload.command.md": "r\n",
+      "templates/global/agents/old-agent.md": "a\n",
+      "scripts/old.sh": "echo old\n",
+    });
+    // The removal, and every place a removed name may stand: history and the
+    // retired-name registry; plus a longer word that only starts with one.
+    await commit(r0, {
+      "scripts/old.sh": null,
+      "templates/global/agents/old-agent.md": null,
+      "releases/v0.1.0.md": "scripts/old.sh and old-agent are gone\n",
+      "CHANGELOG.md": "- dropped scripts/old.sh\n",
+      ".professor/RR/notes.md": "old-agent\n",
+      "pfm/internal/update/retired_names.go": "// old-agent retired\n",
+      "docs/live.md": "the old-agentx tool, the old-agent-sonnet role, scripts/old.sh.bak and scripts/old.shell\n",
+    }, "remove old.sh and old-agent");
+    const check = async (files) => {
+      if (files) await commit(r0, files, "more");
+      return await run(r0, "preflight", "--base", base, "--head", "HEAD");
+    };
+    return { r0, base, plugin, check };
   };
-  const assertRerun = (r, phase) => assert.match(r.out, new RegExp(`^RERUN ${phase}$`, "m"), r.all);
 
-  test("every verdict at HEAD: --stamp writes READY, then the unstamped form is clean", async () => {
-    const f = await fixture();
-    const r = await f.ready("--stamp");
-    assertClean(r, "ready");
-    assert.match(readFileSync(join(f.dir, "READY"), "utf8"), new RegExp(`^${f.head} v0\\.78\\.0 \\d{4}-\\d{2}-\\d{2}\\n$`));
-    assertClean(await f.ready(), "ready");
+  test("a range whose removals no live file names, a README naming shipped commands and tagged plugins is clean", async () => {
+    const r = await (await fixture()).check();
+    assertClean(r, "preflight");
+    for (const line of [
+      "SEAMS 2 removed paths, 1 removed roles swept",
+      "README 3 commands checked",
+      "PLUGINS 1 checked, 0 unlistable",
+    ])
+      assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
   });
-  const neither = (line, value) =>
-    new RegExp(`^FAIL R1: review/seams\\.md:${line} — status "${value}" is neither resolved @\\{sha\\} nor waived$`, "m");
-  for (const [name, report, expected] of [
-    ["status: open", "S1 · a seam\nstatus: open\n", neither(2, "open")],
-    ["Status: Open", "S1 · a seam\nStatus: Open\n", neither(2, "Open")],
-    ["status: **open**", "S1 · a seam\nstatus: **open**\n", neither(2, "open")],
-    ["a finding with no status line", "F1 · a finding\nstatus: resolved @abc1234\n\nF2: a second finding\nevidence only\n", /^FAIL R1: review\/seams\.md:4 — finding F2 carries no status$/m],
-    ["an empty report", "  \n\n", /^FAIL R1: review\/seams\.md — report is empty$/m],
-  ])
-    test(`R1 ${name}`, async () => {
-      const f = await fixture();
-      write(f.dir, { "review/seams.md": report });
-      const r = await f.ready("--stamp");
-      assertFail(r, "R1");
-      assert.match(r.out, expected, r.out);
-      assertRerun(r, "REVIEW");
-    });
-  test("R1 resolved and waived findings, in markup, pass", async () => {
-    const f = await fixture();
-    write(f.dir, {
-      "review/seams.md": "- **S1** · a seam\n  `status: resolved @abc1234`\n\n## P2 | a slow path\n_Status: Waived — accepted for this release_\n",
-    });
-    assertClean(await f.ready("--stamp"), "ready");
+  test("S1 a live file still names a removed path", async () => {
+    const r = await (await fixture()).check({ "docs/run.md": "intro\nrun scripts/old.sh first\n" });
+    assertFail(r, "S1");
+    assert.match(r.out, /^FAIL S1: docs\/run\.md:2 — names the removed path scripts\/old\.sh$/m, r.out);
   });
-  test("R1 no report", async () => {
-    const f = await fixture();
-    write(f.dir, { "review/templates.md": null });
-    assertFail(await f.ready("--stamp"), "R1");
+  test("S1 a design doc's history section is no exemption", async () => {
+    const r = await (await fixture()).check({ "docs/design/x/x.md": "## History\n\nold-agent was retired\n" });
+    assertFail(r, "S1");
+    assert.match(r.out, /^FAIL S1: docs\/design\/x\/x\.md:3 — names the removed agent old-agent$/m, r.out);
   });
-  test("R1 scope.md absent", async () => {
-    const f = await fixture();
-    write(f.dir, { "scope.md": null });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R1");
-    assert.match(r.out, /^FAIL R1: scope\.md — absent/m, r.out);
+  test("D1 the README names a command no tree ships", async () => {
+    const r = await (await fixture()).check({ "README.md": "Run `/quality:prompt`.\n\nThen `/quality:gone fix`.\n" });
+    assertFail(r, "D1");
+    assert.match(r.out, /^FAIL D1: README\.md:3 — `\/quality:gone` names no command or skill this tree ships$/m, r.out);
   });
-  test("R1 an AREA of scope.md without its report", async () => {
-    const f = await fixture();
-    write(f.dir, { "scope.md": "AREA templates 1 1 templates/\nAREA gates 1 1 scripts/\n" });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R1");
-    assert.match(r.out, /^FAIL R1: review\/gates\.md — no report for AREA gates$/m, r.out);
-    assertRerun(r, "REVIEW");
+  test("T1 a listed plugin's gitlink is no published tag", async () => {
+    const r = await (await fixture({ tagged: false })).check();
+    assertFail(r, "T1");
+    assert.match(r.out, /^FAIL T1: plugins\/p — plugin p's gitlink [0-9a-f]{7} is no published tag of /m, r.out);
   });
-  test("R2 tier-1 change since the review", async () => {
+  test("T1 a listed plugin with no gitlink at head", async () => {
     const f = await fixture();
-    await f.advance({ "templates/global/agents/a.md": "a2\n" }, ["notes", "rehearse"]);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R2");
-    assertRerun(r, "REVIEW");
+    const market = { plugins: [{ name: "q", source: { url: f.plugin, path: "plugins/q" } }] };
+    const r = await f.check({ ".claude-plugin/marketplace.json": JSON.stringify(market) });
+    assertFail(r, "T1");
+    assert.match(r.out, /^FAIL T1: plugins\/q — plugin q has no submodule gitlink at /m, r.out);
   });
-  test("R2 review/HEAD does not name a commit", async () => {
-    const f = await fixture();
-    write(f.dir, { "review/HEAD": "not-a-commit\n" });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R2");
-    assert.match(r.out, /^FAIL R2: review\/HEAD — not-a-commit is not a commit of the worktree$/m, r.out);
-    assertRerun(r, "REVIEW");
+  test("ERROR, not FAIL, when a plugin's tags cannot be listed", async () => {
+    const f = await fixture({ url: "/nonexistent/plugin-repo" });
+    assertError(await f.check(), /ls-remote/);
   });
-  test("R3 new red lane", async () => {
+  test("an unlistable plugin's ERROR still names every other plugin's and S1's result", async () => {
     const f = await fixture();
-    write(f.dir, { "gate/candidate-e2e.log": `boom\nEXIT 1 @${f.head}\n` });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R3");
-    assertRerun(r, "GATE");
+    const market = {
+      plugins: [
+        { name: "gone", source: { url: "/nonexistent/plugin-repo", path: "plugins/p" } },
+        { name: "q", source: { url: f.plugin, path: "plugins/q" } },
+      ],
+    };
+    const r = await f.check({ ".claude-plugin/marketplace.json": JSON.stringify(market), "docs/run.md": "run scripts/old.sh\n" });
+    assertError(r, /ls-remote/);
+    assert.match(r.err, /plugin q has no submodule gitlink/, r.err);
+    assert.match(r.err, /FAIL S1: docs\/run\.md:1 — names the removed path scripts\/old\.sh/, r.err);
   });
-  test("R3 a lane with no candidate log at all", async () => {
+  test("ERROR, not FAIL, when the marketplace is absent at head", async () => {
     const f = await fixture();
-    write(f.dir, { "gate/candidate-pfm.log": null });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R3");
-    assert.match(r.out, /^FAIL R3: gate\/candidate-pfm\.log — absent$/m, r.out);
-    assertRerun(r, "GATE");
+    assertError(await f.check({ ".claude-plugin/marketplace.json": null }), /marketplace\.json/);
   });
-  test("R3 red on stable too is inherited", async () => {
+  test("ERROR, not FAIL, when --base is not an ancestor of --head", async () => {
     const f = await fixture();
-    write(f.dir, { "gate/candidate-e2e.log": `boom\nEXIT 1 @${f.head}\n`, "gate/stable-e2e.log": "boom\nEXIT 1 @0000000\n" });
-    assertClean(await f.ready("--stamp"), "ready");
-  });
-  test("R3 carries over a commit touching only release files", async () => {
-    const f = await fixture();
-    await f.advance({ "CHANGELOG.md": "# Changelog\n\n## Releases\n" }, ["notes", "rehearse"]);
-    assertClean(await f.ready("--stamp"), "ready");
-  });
-  test("R3 does not carry over a commit outside the release files", async () => {
-    const f = await fixture();
-    await f.advance({ "docs/x.md": "x2\n" }, ["notes", "rehearse"]);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R3");
-    assert.doesNotMatch(r.out, /^FAIL R[1245]/m, r.out);
-  });
-  test("R4 a machine not CLEAN", async () => {
-    const f = await fixture();
-    write(f.dir, { "rehearsal/behind-1/result.json": JSON.stringify({ verdict: "FRICTION" }) });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assertRerun(r, "REHEARSE");
-  });
-  test("R4 carries over a change inside ## Verification", async () => {
-    const f = await fixture();
-    await f.advance({ "releases/v0.78.0.md": NOTE.replace("The gate green on three lanes.\n", "The gate green on three lanes at the release commit.\nRehearsal: two machines, one round.\n") }, ["notes"]);
-    assertClean(await f.ready("--stamp"), "ready");
-  });
-  test("R4 does not carry over a deletion outside ## Verification", async () => {
-    const f = await fixture();
-    await f.advance({ "releases/v0.78.0.md": NOTE.replace("- Global: skills/qux — a new qux skill\n", "") }, ["notes"]);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.match(r.out, /^FAIL R4: releases\/v0\.78\.0\.md:\d+ — @@ /m, r.out);
-  });
-  test("R4 a non-note path changes since the rehearsed commit", async () => {
-    const f = await fixture();
-    const next = await f.advance({ "docs/x.md": "x2\n" }, ["notes"]);
-    write(f.dir, {
-      "gate/candidate-templates.log": `ok\nEXIT 0 @${next}\n`,
-      "gate/candidate-pfm.log": `ok\nEXIT 0 @${next}\n`,
-      "gate/candidate-e2e.log": `ok\nEXIT 0 @${next}\n`,
-    });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.doesNotMatch(r.out, /^FAIL R[123]/m, r.out);
-    assert.match(r.out, /^FAIL R4: docs\/x\.md — changed since the rehearsed [0-9a-f]{7}; only releases\/v0\.78\.0\.md § Verification carries the rehearsal over$/m, r.out);
-    assertRerun(r, "REHEARSE");
-  });
-  test("R4 rehearsal.md line one is malformed", async () => {
-    const f = await fixture();
-    write(f.dir, { "rehearsal.md": "not the right format\n" });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.match(r.out, /^FAIL R4: rehearsal\.md — line one is not `REHEARSAL CLEAN \{sha\} round \{n\}`: "not the right format"$/m, r.out);
-    assertRerun(r, "REHEARSE");
-  });
-  const RULED_NOTE = NOTE.replace("The gate green on three lanes.\n", "The gate green on three lanes.\nREHEARSAL RULED round 7 — the owner ruled to ship without a CLEAN rehearsal.\n");
-  const ruled = (f, sha, ruling = " — the owner ruled to ship without a CLEAN rehearsal") =>
-    write(f.dir, {
-      "rehearsal.md": `REHEARSAL RULED ${sha} round 7${ruling}\n`,
-      "rehearsal/main-7/result.json": JSON.stringify({ verdict: "FRICTION" }),
-      "rehearsal/behind-7/result.json": JSON.stringify({ verdict: "FRICTION" }),
-    });
-  test("R4 RULED with the ruling in ## Verification passes without CLEAN verdicts", async () => {
-    const f = await fixture();
-    await f.advance({ "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
-    ruled(f, f.head);
-    assertClean(await f.ready("--stamp"), "ready");
-  });
-  test("R4 RULED without the ruling in ## Verification", async () => {
-    const f = await fixture();
-    ruled(f, f.head);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.match(r.out, /^FAIL R4: releases\/v0\.78\.0\.md — `## Verification` holds no line with `REHEARSAL RULED` and round 7; the ruling ships in the note$/m, r.out);
-    assertRerun(r, "REHEARSE");
-  });
-  test("R4 RULED against a note with no ## Verification section", async () => {
-    const f = await fixture();
-    await f.advance({ "releases/v0.78.0.md": NOTE.replace(/\n## Verification\n[\s\S]*$/, "\n") }, ["notes"]);
-    ruled(f, f.head);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.match(r.out, /^FAIL R4: releases\/v0\.78\.0\.md — holds no `## Verification` section; the ruling ships in it$/m, r.out);
-  });
-  test("R4 RULED line with a hyphen instead of an em dash", async () => {
-    const f = await fixture();
-    await f.advance({ "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
-    ruled(f, f.head, " - the owner ruled to ship");
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.match(r.out, /^FAIL R4: rehearsal\.md — line one is not `REHEARSAL RULED \{sha\} round \{n\} — \{ruling\}`: "REHEARSAL RULED [0-9a-f]+ round 7 - the owner ruled to ship"$/m, r.out);
-  });
-  test("R4 RULED with empty ruling text", async () => {
-    const f = await fixture();
-    await f.advance({ "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
-    ruled(f, f.head, " — ");
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.match(r.out, /^FAIL R4: rehearsal\.md — `REHEARSAL RULED \{sha\} round \{n\} — \{ruling\}` carries no ruling text$/m, r.out);
-  });
-  test("R4 RULED at a stale sha with a change outside ## Verification", async () => {
-    const f = await fixture();
-    const next = await f.advance({ "docs/x.md": "x2\n", "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
-    write(f.dir, {
-      "gate/candidate-templates.log": `ok\nEXIT 0 @${next}\n`,
-      "gate/candidate-pfm.log": `ok\nEXIT 0 @${next}\n`,
-      "gate/candidate-e2e.log": `ok\nEXIT 0 @${next}\n`,
-    });
-    ruled(f, f.head);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R4");
-    assert.doesNotMatch(r.out, /^FAIL R[123]/m, r.out);
-    assert.doesNotMatch(r.out, /^FAIL R4: (rehearsal\.md|releases\/)/m, r.out);
-    assert.match(r.out, /^FAIL R4: docs\/x\.md — changed since the rehearsed [0-9a-f]{7}; only releases\/v0\.78\.0\.md § Verification carries the rehearsal over$/m, r.out);
-  });
-  test("R5 notes check not PASS at HEAD", async () => {
-    const f = await fixture();
-    write(f.dir, { "notes/check.txt": `NOTES FAIL ${f.head}\n` });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R5");
-    assertRerun(r, "NOTES");
-  });
-  test("R5 a record that ran without every rule group", async () => {
-    const f = await fixture();
-    write(f.dir, { "notes/check.txt": `NOTES PASS ${f.head}\n` });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R5");
-    assertRerun(r, "NOTES");
-  });
-  test("R5 an uncommitted change to a tracked file", async () => {
-    const f = await fixture();
-    write(f.wt, { "docs/x.md": "edited, not committed\n" });
-    const r = await f.ready("--stamp");
-    assertFail(r, "R5");
-    assert.match(r.out, /^FAIL R5: .* — uncommitted tracked change: M docs\/x\.md$/m, r.out);
-    assert.doesNotMatch(r.out, /^FAIL R[12346]/m, r.out);
-  });
-  test("R5 HEAD's VERSION is not X.Y.Z, and nothing is stamped", async () => {
-    const f = await fixture();
-    await f.advance({ VERSION: "0.79.0-alpha\n" }, ["notes", "rehearse"]);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R5");
-    assert.match(r.out, /^FAIL R5: VERSION — HEAD's VERSION "0\.79\.0-alpha" is not X\.Y\.Z$/m, r.out);
-    assert.doesNotMatch(r.out, /STAMPED READY/, r.out);
-  });
-  test("R5 the note HEAD's VERSION names is absent at HEAD", async () => {
-    const f = await fixture();
-    await f.advance({ VERSION: "0.79.0\n" }, ["notes", "rehearse"]);
-    const r = await f.ready("--stamp");
-    assertFail(r, "R5");
-    assert.match(r.out, /^FAIL R5: releases\/v0\.79\.0\.md — absent at HEAD/m, r.out);
-  });
-  test("R6 READY absent without --stamp", async () => {
-    const f = await fixture();
-    const r = await f.ready();
-    assertFail(r, "R6");
-    assertRerun(r, "READY");
-  });
-  test("R6 READY names a commit other than HEAD", async () => {
-    const f = await fixture();
-    write(f.dir, { READY: "0000000 v0.78.0 2026-01-01\n" });
-    const r = await f.ready();
-    assertFail(r, "R6");
-    assert.match(r.out, /^FAIL R6: READY — names 0000000, not HEAD [0-9a-f]{40}$/m, r.out);
-    assertRerun(r, "READY");
-  });
-  test("ERROR, not FAIL, when the release directory does not exist", async () => {
-    const f = await fixture();
-    assertError(await run(f.wt, "ready", join(f.dir, "absent"), "--worktree", f.wt), /release directory .*absent does not exist/);
-    assertError(await run(f.wt, "ready", f.dir), /usage: ready needs --worktree/);
+    assertError(await run(f.r0, "preflight", "--base", "HEAD", "--head", f.base), /is not an ancestor/);
   });
 });

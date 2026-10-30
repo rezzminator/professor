@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	fleetplace "github.com/rezzminator/professor/pfm/internal/place"
 )
 
 // A place is a directory the fleet lives under. The picker opens on the place
@@ -36,108 +37,18 @@ const allPlaceRoot = "*"
 
 const allPlaceLabel = "✱ all"
 
-// isUnder reports whether path is root or sits beneath it, on a path-segment
-// boundary: /a/bc is not under /a/b.
-func isUnder(path, root string) bool {
-	if path == "" || root == "" {
-		return false
-	}
-	if root == string(filepath.Separator) {
-		return filepath.IsAbs(path)
-	}
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
-}
-
-// cleanDir is filepath.Clean that keeps "" as "" instead of ".".
-func cleanDir(path string) string {
-	if strings.TrimSpace(path) == "" {
-		return ""
-	}
-	return filepath.Clean(path)
-}
-
-// isGlobalRow reports whether a row belongs to every place: the fleet-wide
-// launch row (it retargets to whichever place is on screen) and the notices.
-func isGlobalRow(row compose.Row) bool {
-	return isFleetNewChatRow(row) || isNoticeKind(row.Kind)
-}
-
-// rowRoot is the directory a row is filed under: its project's root, which
-// compose already resolved through the repository (a worktree files under its
-// main checkout) and through any workbench; the literal cwd when the project
-// has no recorded root.
-func rowRoot(row compose.Row, projectDirs map[string]string) string {
-	if isGlobalRow(row) {
-		return ""
-	}
-	if row.Workbench != "" {
-		return cleanDir(row.Workbench)
-	}
-	if dir := cleanDir(projectDirs[row.Project]); dir != "" {
-		return dir
-	}
-	return cleanDir(row.CWD)
-}
-
-// foldRoots maps every root to its place: the outermost other root that
-// contains it, or itself. home and the filesystem root never absorb anything —
-// a chat run in ~ must not swallow every project on the machine.
-func foldRoots(roots []string, home string) map[string]string {
-	unique := make([]string, 0, len(roots))
-	seen := make(map[string]bool, len(roots))
-	for _, root := range roots {
-		if root != "" && !seen[root] {
-			seen[root] = true
-			unique = append(unique, root)
-		}
-	}
-	sort.Slice(unique, func(left, right int) bool {
-		if len(unique[left]) != len(unique[right]) {
-			return len(unique[left]) < len(unique[right])
-		}
-		return unique[left] < unique[right]
-	})
-	home = cleanDir(home)
-	folded := make(map[string]string, len(unique))
-	accepted := make([]string, 0, len(unique))
-	for _, root := range unique {
-		owner := root
-		for _, candidate := range accepted {
-			if candidate == home || candidate == string(filepath.Separator) {
-				continue
-			}
-			if candidate != root && isUnder(root, candidate) {
-				owner = candidate
-				break
-			}
-		}
-		if owner == root {
-			accepted = append(accepted, root)
-		}
-		folded[root] = owner
-	}
-	return folded
-}
-
 // placeLabel names a root for the rail: its base name, ~ for home.
 func placeLabel(root, home string) string {
 	if root == allPlaceRoot {
 		return allPlaceLabel
 	}
-	if home != "" && root == cleanDir(home) {
-		return "~"
-	}
-	base := filepath.Base(root)
-	if base == "." || base == string(filepath.Separator) || base == "" {
-		return root
-	}
-	return base
+	return fleetplace.RootLabel(root, home)
 }
 
 // tildePath writes path as ~/… under home.
 func tildePath(path, home string) string {
-	home = cleanDir(home)
-	if home != "" && isUnder(path, home) {
+	home = fleetplace.Clean(home)
+	if home != "" && fleetplace.IsUnder(path, home) {
 		return "~" + strings.TrimPrefix(path, home)
 	}
 	return path
@@ -146,7 +57,7 @@ func tildePath(path, home string) string {
 // placeIndex is the derived place state for one row set.
 type placeIndex struct {
 	places   []place  // rail order: the opening place first, then by activity, then ✱ all
-	rowDir   []string // per row: rowRoot ("" = global row)
+	rowDir   []string // per row: the root it is filed under, place.Root ("" = global row)
 	rowPlace []string // per row: the folded place root ("" = global row)
 	open     string   // the opening place's root (allPlaceRoot when none)
 }
@@ -161,25 +72,19 @@ func buildPlaces(
 	adhoc []place,
 	visible func(compose.Row) bool,
 ) placeIndex {
-	home = cleanDir(home)
-	openRoot = cleanDir(openRoot)
-	index := placeIndex{
-		rowDir:   make([]string, len(rows)),
-		rowPlace: make([]string, len(rows)),
-		open:     allPlaceRoot,
-	}
-	roots := make([]string, 0, len(rows)+1)
-	for position := range rows {
-		index.rowDir[position] = rowRoot(rows[position], projectDirs)
-		roots = append(roots, index.rowDir[position])
-	}
+	home = fleetplace.Clean(home)
+	openRoot = fleetplace.Clean(openRoot)
+	index := placeIndex{open: allPlaceRoot}
 	openable := openRoot != "" && openRoot != home && openRoot != string(filepath.Separator)
+	var opening []string
 	if openable {
-		roots = append(roots, openRoot)
+		opening = append(opening, openRoot)
 	}
-	folded := foldRoots(roots, home)
+	filed := fleetplace.Build(rows, projectDirs, home, opening...)
+	index.rowDir, index.rowPlace = filed.RowRoot, filed.RowPlace
+	folded := filed.Folded
 	byRoot := make(map[string]*place)
-	order := make([]string, 0)
+	order := make([]string, 0, len(filed.Places))
 	ensure := func(root string) *place {
 		if existing, found := byRoot[root]; found {
 			return existing
@@ -188,31 +93,18 @@ func buildPlaces(
 		order = append(order, root)
 		return byRoot[root]
 	}
+	for _, entry := range filed.Places {
+		ensure(entry.Root).label = entry.Label
+	}
 	all := place{root: allPlaceRoot, label: allPlaceLabel}
 	for position := range rows {
-		dir := index.rowDir[position]
-		if dir == "" {
-			continue
-		}
-		owner := folded[dir]
-		index.rowPlace[position] = owner
-		target := ensure(owner)
+		owner := index.rowPlace[position]
 		row := rows[position]
-		if visible != nil && !visible(row) || isNewChatActionKind(row.Kind) {
+		if owner == "" || visible != nil && !visible(row) || isNewChatActionKind(row.Kind) {
 			continue
 		}
-		tally(target, row)
+		tally(byRoot[owner], row)
 		tally(&all, row)
-	}
-	// A place wears the label compose gave the rows filed at its root, so a
-	// rail chip and its group header read the same; the opening place wears
-	// the launch row's. Home stays ~.
-	for position := range rows {
-		if root := index.rowDir[position]; root != "" && root != home && folded[root] == root {
-			if entry := byRoot[root]; entry.label == placeLabel(root, home) && rows[position].Project != "" {
-				entry.label = rows[position].Project
-			}
-		}
 	}
 	// The opening project is a place even before any chat ran in it. When it
 	// folded into an outer place, the outer place leads and the project
@@ -271,7 +163,8 @@ func buildPlaces(
 			if index.rowDir[position] == "" || visible != nil && !visible(row) || isNewChatActionKind(row.Kind) {
 				continue
 			}
-			if isUnder(index.rowDir[position], extra.root) || isUnder(cleanDir(row.CWD), extra.root) {
+			if fleetplace.IsUnder(index.rowDir[position], extra.root) ||
+				fleetplace.IsUnder(fleetplace.Clean(row.CWD), extra.root) {
 				tally(&extra, row)
 			}
 		}
@@ -301,7 +194,7 @@ func adhocLabel(root string, places []place, home string) string {
 		if owner.adhoc || owner.root == allPlaceRoot || owner.root == root {
 			continue
 		}
-		if owner.root != cleanDir(home) && isUnder(root, owner.root) {
+		if owner.root != fleetplace.Clean(home) && fleetplace.IsUnder(root, owner.root) {
 			return owner.label + " › " + strings.TrimPrefix(root, owner.root+string(filepath.Separator))
 		}
 	}
@@ -312,7 +205,7 @@ func adhocLabel(root string, places []place, home string) string {
 func insertAfterOwner(places []place, extra place) []place {
 	at := len(places)
 	for position, owner := range places {
-		if !owner.adhoc && owner.root != allPlaceRoot && isUnder(extra.root, owner.root) {
+		if !owner.adhoc && owner.root != allPlaceRoot && fleetplace.IsUnder(extra.root, owner.root) {
 			at = position + 1
 			break
 		}
@@ -323,19 +216,18 @@ func insertAfterOwner(places []place, extra place) []place {
 	return places
 }
 
-// disambiguateLabels gives two places sharing a base name their parent too.
+// disambiguateLabels gives two places sharing a base name their parent too;
+// an ad-hoc place keeps its label but still counts.
 func disambiguateLabels(places []place) {
-	counts := make(map[string]int, len(places))
-	for _, entry := range places {
-		counts[entry.label]++
+	roots := make([]string, len(places))
+	labels := make([]string, len(places))
+	fixed := make([]bool, len(places))
+	for position, entry := range places {
+		roots[position], labels[position], fixed[position] = entry.root, entry.label, entry.adhoc
 	}
+	fleetplace.Disambiguate(roots, labels, fixed)
 	for position := range places {
-		entry := &places[position]
-		if counts[entry.label] < 2 || entry.adhoc {
-			continue
-		}
-		parent := filepath.Base(filepath.Dir(entry.root))
-		entry.label = parent + "/" + entry.label
+		places[position].label = labels[position]
 	}
 }
 

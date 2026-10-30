@@ -310,7 +310,7 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 		return reporter.toolBlock(payload, report(herdr.StateBlocked, blockedMessage(payload)))
 	case herdr.EventNotification:
 		switch payload.NotificationType {
-		case "permission_prompt", "elicitation_dialog":
+		case "permission_prompt", "elicitation_dialog", "plugin_notification":
 			return report(herdr.StateBlocked, blockedMessage(payload))
 		case "idle_prompt":
 			return report(herdr.StateIdle, "")

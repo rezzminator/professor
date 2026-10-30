@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -82,32 +83,12 @@ func TestReadPartNamesTheMissingPart(t *testing.T) {
 	}
 }
 
-// TopLevel names the root of the embedded tree — the first element of every
-// expected part, each once — so doctor can hold a clone entry the binary
-// never embeds outside its comparison.
-func TestTopLevelNamesTheEmbeddedRoot(t *testing.T) {
-	seen := map[string]bool{}
-	var want []string
-	for _, name := range expectedParts {
-		first, _, _ := strings.Cut(name, "/")
-		if !seen[first] {
-			seen[first] = true
-			want = append(want, first)
-		}
-	}
-	sort.Strings(want)
-	got := TopLevel()
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("TopLevel() = %v, want %v", got, want)
-	}
-}
-
 // The prompt-byte contract is exactly the source parts in order, with one
 // blank line at each seam and one final newline. No tracked output is needed.
 func TestComposeMatchesSourceParts(t *testing.T) {
 	for _, engine := range []string{"claude", "codex", "opencode"} {
 		t.Run(engine, func(t *testing.T) {
-			got, err := Composed(engine)
+			got, err := Composed(t.TempDir(), engine)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -133,9 +114,101 @@ func TestComposeMatchesSourceParts(t *testing.T) {
 		})
 	}
 	if _, err := Composed(
-		"no-such-engine",
+		t.TempDir(), "no-such-engine",
 	); err == nil ||
 		!strings.Contains(err.Error(), "no-such-engine/professor.md") {
 		t.Fatalf("assembly did not name missing engine part: %v", err)
+	}
+}
+
+// writeCloneTree lays out a clone whose harness-prompt tree holds the given
+// parts, and returns the clone root.
+func writeCloneTree(t *testing.T, parts map[string]string) string {
+	t.Helper()
+	clone := t.TempDir()
+	for name, content := range parts {
+		path := filepath.Join(clone, "pfm", DirName, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return clone
+}
+
+// A clone's tree is the source: its edited head reaches the composed prompt
+// with no rebuild, where the embed would still carry the old one.
+func TestComposedReadsTheCloneTree(t *testing.T) {
+	clone := writeCloneTree(t, map[string]string{
+		"share/head.md":       "clone head\n",
+		"claude/professor.md": "clone middle\n",
+		"share/tail.md":       "clone tail\n",
+	})
+	got, err := Composed(clone, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "clone head\n\nclone middle\n\nclone tail\n"; string(got) != want {
+		t.Fatalf("Composed = %q, want %q", got, want)
+	}
+}
+
+// A clone tree that exists but lacks a part is an error naming the part and
+// the tree, never a quiet fallback to the embedded copy.
+func TestComposedNamesAPartMissingFromTheCloneTree(t *testing.T) {
+	clone := writeCloneTree(t, map[string]string{
+		"share/head.md":       "clone head\n",
+		"claude/professor.md": "clone middle\n",
+	})
+	_, err := Composed(clone, "claude")
+	dir := filepath.Join(clone, "pfm", DirName)
+	if err == nil || !strings.Contains(err.Error(), "share/tail.md") || !strings.Contains(err.Error(), dir) {
+		t.Fatalf("Composed with a missing tail = %v, want an error naming share/tail.md in %s", err, dir)
+	}
+}
+
+// No clone tree at all is a binary-only install: the embedded tree composes.
+func TestComposedFallsBackToTheEmbedWithoutACloneTree(t *testing.T) {
+	got, err := Composed(t.TempDir(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := ReadPart("share/head.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(got, bytes.TrimRight(head, "\n")) {
+		t.Fatal("Composed without a clone tree does not start with the embedded head")
+	}
+	generatedOnly := writeCloneTree(t, map[string]string{"generated/claude.md": "an earlier install's output\n"})
+	fromGenerated, err := Composed(generatedOnly, "claude")
+	if err != nil || !bytes.Equal(fromGenerated, got) {
+		t.Fatalf("a tree holding only generated/ did not compose from the embed: %v", err)
+	}
+	if _, err := Composed("", "claude"); err == nil {
+		t.Fatal("Composed with no clone path composed instead of refusing")
+	}
+}
+
+// A binary-only host's tree holding generated/ beside a stray file (an editor
+// swap file, .DS_Store) is no source tree: the embed composes, never an error
+// for a part the host was never meant to hold.
+func TestComposedIgnoresStrayFilesBesideGenerated(t *testing.T) {
+	clone := writeCloneTree(t, map[string]string{
+		"generated/claude.md": "an earlier install's output\n",
+		".DS_Store":           "finder metadata\n",
+	})
+	got, err := Composed(clone, "claude")
+	if err != nil {
+		t.Fatalf("Composed with only generated/ and a stray file: %v", err)
+	}
+	want, err := Composed(t.TempDir(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("Composed with only generated/ and a stray file does not equal the embedded composition")
 	}
 }

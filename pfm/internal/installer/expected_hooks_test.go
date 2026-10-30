@@ -132,6 +132,26 @@ func TestClaudeHookTemplatesIncludesGitGuard(t *testing.T) {
 	}
 }
 
+func TestClaudeHookTemplatesIncludesPcmGuard(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join("neutral", "home")
+	found := 0
+	for _, template := range claudeHookTemplates(home) {
+		if template.Name != "pcm-guard" {
+			continue
+		}
+		found++
+		if template.Event != "PreToolUse" || template.Matcher != "Edit|Write|MultiEdit|NotebookEdit|Bash" ||
+			template.Async || template.Command != home+"/.local/bin/pfm internal pcm-guard" {
+			t.Fatalf("pcm-guard template=%#v, want PreToolUse, matcher Edit|Write|MultiEdit|NotebookEdit|Bash,"+
+				" not async, pfm internal pcm-guard", template)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("pcm-guard templates=%d, want exactly 1 among the expected hooks", found)
+	}
+}
+
 func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 	t.Parallel()
 	home := filepath.Join("neutral", "home")

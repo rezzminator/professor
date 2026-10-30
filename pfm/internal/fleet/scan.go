@@ -40,6 +40,10 @@ type Request struct {
 	// Runtime is the process's loaded machine policy. Nil resolves paths and
 	// runs on the default config.
 	Runtime *pfmconfig.Runtime
+	// NoCurrentDir composes as if from no directory: the working directory
+	// neither seeds its project's root nor leads the order, so every row files
+	// under the same place wherever the scanning command runs.
+	NoCurrentDir bool
 }
 
 // Env is the machine state one scan composes against.
@@ -272,9 +276,12 @@ func ResolveEnv(request Request) (Env, error) {
 			resolved.FirstRoot(pfmengine.Codex),
 		)
 	}
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return Env{}, fmt.Errorf("read current directory: %w", err)
+	currentDir := ""
+	if !request.NoCurrentDir {
+		var err error
+		if currentDir, err = os.Getwd(); err != nil {
+			return Env{}, fmt.Errorf("read current directory: %w", err)
+		}
 	}
 	nowNS := clock.Real.Now().UnixNano()
 	if value := (paths.OSEnv{}).Get(TestNowNSEnv); value != "" {

@@ -1,33 +1,31 @@
 # Release
 
-A release takes `develop`'s range past `main` to a published tag that an adopter can update onto without guessing. `/pfm:release` runs it in two verbs: `prepare` reviews, fixes, writes the notes, gates and rehearses the candidate until it is `READY`, with no publish authority; `publish`, on the user's explicit in-turn ask, lands the exact commit that was rehearsed and verifies what GitHub serves. This file holds the family's decisions; each member's own live in its file.
+A release ships `develop`'s tip as it stands at the cut to a published tag that an adopter can update onto without guessing. `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` runs it in one pass of about an hour: it gates the cut commit, writes the note, and publishes, with no code written inside the release. This file holds the family's decisions; each member's own live in its file.
 
-A change lands in this design doc first, then in the agent, command or script, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
+A change lands in this design doc first, then in the command, agent or script, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
 ## Contents
 
-- [Why it exists](#why-it-exists)
+- [Why it is one pass](#why-it-is-one-pass)
 - [The reader](#the-reader)
 - [The family](#the-family)
-- [The lifecycle](#the-lifecycle)
-- [The phases](#the-phases)
+- [The cut](#the-cut)
+- [The checks](#the-checks)
 - [The release directory](#the-release-directory)
-- [Verdict tokens](#verdict-tokens)
 - [The invariants](#the-invariants)
 - [Versioning](#versioning)
 - [Where each rule lives](#where-each-rule-lives)
 - [Names](#names)
-- [What the family replaced](#what-the-family-replaced)
 - [Accepted risk](#accepted-risk)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 - [Open items](#open-items)
 - [Evidence](#evidence)
 
-## Why it exists
+## Why it is one pass
 
-Every adopter updates through the release notes, and the most common measured failure of release notes is omission, most of all of breaking changes (Evidence). The single-command flow this family replaces had reviewers at the mechanical tier write the notes as a side product of reviewing, one main chat carry a 14-step procedure end to end, four spellings of the bullet prefix and three of the action marker across published notes, a review report that no gate read, and a gate lane (`walker`) that no longer existed. Nothing proved that every change in the range reached the notes, and nothing proved that the commit rehearsed was the commit tagged.
+Every commit reaches `develop` through a flight that already reviewed and gated it. A release adds only what no single flight can see: the whole range's seams, the README against what ships, the plugins pinned at published tags, the note, and the published assets. Everything a release checks is therefore a STOP, never a fix: a defect found at the cut is fixed on `develop` through a normal flight, and the user cuts again. The cut takes `develop`'s tip at that moment, with no soak window, so the release can never chase a candidate that moves under it.
 
-The family splits the work by who is allowed to judge what: an agent that only writes the notes, an agent that only runs and judges phases, a script that decides everything that can be computed, a rehearsal that tests the notes by following them, and the user who reads the result before anything is published.
+Typing `/pfm:release cut` is the user's explicit publish request for that version (project contract § Publication). `--dry` runs every check and the release commit, then stops before any push.
 
 ## The reader
 
@@ -45,92 +43,67 @@ The note grammar that serves this reader is public, because adopters read it: `d
 
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
-| `/pfm:release` | command | The human front and the loop: `prepare` and `publish`, one phase at a time, the fixes, the run ledger | the main chat |
-| `releaser` | agent | Runs one phase per spawn and judges it: scope and review, the notes gate, the fenced gate, the rehearsal, the ready stamp, the published-release check | smart (`opus`), effort `high` |
-| `changelogger` | agent | Writes `releases/v{NEW}.md`, the `CHANGELOG.md` line and the coverage ledger for the updating adopter; revises on the gate's findings | smart (`opus`), effort `xhigh` |
-| `reviewer` | agent (existing) | One per review area, pre-merge mode, its report at a path in the release directory | its own pin |
-| `gitter` | agent (existing) | Every git write: worktrees, commits on `release/v{NEW}`, the merge, the push, Phase RELEASE | its own pin |
-| `scripts/release-check.mjs` | script | Everything computable: the scope and its tiers, the note grammar and coverage, the ready verdict | — |
-| `infra/fence/release-rehearsal.sh` | script (existing) | The fenced adopter machine the rehearsal drives | — |
+| `/pfm:release` | command | The one pass: pull, cut, checks, the release commit, publication, close; the run ledger | the main chat |
+| `changelogger` | agent | Writes the draft note, the `CHANGELOG.md` line and the coverage ledger into the release directory; revises on the check's failure lines | smart (`opus`), effort `high` |
+| `reviewer-pro` | agent (existing) | One round over the `pfm-update` area, only when the cut changes it | its own pin |
+| `gitter` | agent (existing) | Every git write: the pull, the push, the release worktree, the release commit, Phase RELEASE, the close | its own pin |
+| `scripts/release-check.mjs` | script | Everything computable: the scope and its tiers, the note grammar and coverage, the version floor, the preflight | — |
+| `.github/workflows/ci.yml` | workflow | Tests every push to `develop`; its run on the cut commit is a check | GitHub Actions |
+| `.github/workflows/release.yml` | workflow | Gates the release PR, publishes its merge, verifies what GitHub serves | GitHub Actions |
 
-`releaser` runs at smart because every phase ends in a judgment with liability: which finding blocks, whether a friction is the notes' or the code's, whether a gate red is new. `changelogger` runs at smart and `xhigh` because a document an adopter acts on is never mechanical work, and the range of a release is the largest body of reasoning any single agent in the fleet writes from.
+`changelogger` runs at smart because a document an adopter acts on is never mechanical work, and the range of a release is the largest body of reasoning any single agent in the fleet writes from.
 
-## The lifecycle
+## The cut
 
-1. `prepare` opens the release: pulls `develop`, fetches tags, sets up the two worktrees and the release directory, runs the refresh pass when `--from` names a live project. Each SETUP brief carries `KEEP: release v{NEW} in progress`; gitter locks both worktrees before returning, and verifies or restores those locks on resume.
-2. Phases run in order; each is a fresh `releaser` spawn. A phase that finds something to fix returns it; the main chat fixes it on the candidate and re-runs the phase over the delta.
-3. `READY`: `release-check ready --stamp` writes the commit that passed every verdict. The main chat reports the note, the waivers and the verdicts to the user and stops.
-4. The user reads the note. Publication is a separate decision, made in the user's own turn.
-5. `publish` lands exactly the stamped commit, pushes, runs `gitter` Phase RELEASE, spawns the `releaser` for VERIFY, and closes the development line. MERGE carries the same KEEP line: the candidate remains locked through VERIFY, even after its tip lands on `develop`. Close tears down the rehearsal machines, then gitter unlocks both release worktrees before normal guarded removal, deletes the merged branch with `-d`, and verifies both registrations absent. Until removal, the main chat carries `worktree kept (locked): {path} — release v{NEW} in progress` in its Verdict; a failed close names what stayed.
+1. `gitter` Phase PULL fast-forwards `develop` and fetches tags. `origin/main` must be an ancestor of `develop`; the cut commit `C` is `develop`'s HEAD; `PREV` is the newest suffix-free `v*` tag and `NEW` is `PREV` bumped. An empty `origin/main..C` is a STOP.
+2. `gitter` Phase PUSH sends `develop` when `origin/develop` lags `C`, so `ci.yml` runs on `C` (skipped under `--dry`).
+3. `gitter` Phase SETUP makes `.worktrees/release/` on a new branch `release/v{NEW}` at `C`.
+4. The checks of [§ The checks](#the-checks) run in parallel; each failure is a STOP.
+5. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION`, `.professor/VERSION` and the manifest to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the five release files is a STOP.
+6. `gitter` Phase RELEASE runs `make release-check`, pushes `release/v{NEW}`, opens the PR into `main`, waits for the required checks, merges with a merge commit, and watches `release.yml`'s `publish` job tag `v{NEW}` and its `verify` job check the assets.
+7. One `gitter` close merges `origin/main` back into `develop`, opens `{NEXT}-alpha`, pushes `develop`, deletes `release/v{NEW}` and removes the worktree.
 
-`prepare` is safe to run days before a release: it writes only the candidate branch, the worktrees and the release directory. It resumes from `run.md` when run again for the same version.
+A STOP before step 6 removes the release worktree and its unpushed branch and keeps the release directory; a STOP at step 6 or later removes nothing and reports every ref that stands. A failure after the tag exists is reported as it is: the tag is public, and the fix is a patch release, never a moved tag.
 
-## The phases
+## The checks
 
-| # | Phase | Run by | Output | A red goes to |
-| --- | --- | --- | --- | --- |
-| 0 | OPEN | main chat | worktrees, release directory, `run.md`, refresh pass | stop |
-| 1 | REVIEW | `releaser` → one `reviewer` per area, plus the seams sweep | `review/*.md` | the main chat fixes; REVIEW re-runs over the delta |
-| 2 | NOTES | `releaser` → `changelogger`, then `release-check notes` | the note, the index line, `notes/coverage.tsv`, the version stamps, the release commit | `changelogger` revises, twice at most |
-| 3 | GATE | `releaser` | `gate.md` | the main chat fixes; GATE re-runs |
-| 4 | REHEARSE | `releaser` | `rehearsal.md`, `rehearsal/{machine}-{n}/` | notes frictions → NOTES revise; code and doc frictions → the main chat |
-| 5 | READY | `releaser` | the `## Verification` section, `READY` | the phase whose verdict is not at HEAD |
-| 6 | PUBLISH | main chat → `gitter` | the ruleset probe, the merge, the leak check, the standalone skill repos, the push, `make release-check`, the PR and its merge, whose `publish` job makes the tag | stop |
-| 7 | VERIFY | `releaser` | `published.md` | stop and report |
-| 8 | CLOSE | main chat → `gitter` | the next `-alpha` line, cleanup | stop |
+| Check | Runs | Passes when |
+| --- | --- | --- |
+| Gate | `.claude/scripts/test.sh --full` in the release worktree, over the clean tree at `C` | `gate.log` ends `EXIT 0 @{C}` |
+| Leak | `scripts/leak-check.sh --range origin/main {C}` | exit 0 |
+| Preflight | `release-check preflight --base origin/main --head {C}` | exit 0: no removed name still live (S1), every README command shipped (D1), every listed plugin at a published tag (T1) |
+| CI | `gh run list --workflow ci.yml --commit {C}`, then `gh run watch` | conclusion `success`; under `--dry` with `C` unpushed it is a named gap |
+| Notes | `changelogger`, then `release-check notes` with coverage, the title's version and `--pfm-help` | exit 0, within two `SendMessage` revision rounds |
+| Review | one `reviewer-pro`, only when `release-check scope` prints a `pfm-update` area | no CRITICAL or HIGH finding on the update, install or doctor path; every other finding is listed in `## Verification` as not fixed in this release |
 
-The phase protocols live in [releaser.md](releaser.md); the loop around them lives in the command.
+The review's premise is the reader's first fact: an adopter reaches this release by running the previous release's binary. It runs once, with no delta round, because nothing is fixed inside the release. No pre-release update run is made: the update path is proven by the gate's tests, `ci.yml`'s fresh installs and the review, never by a model following the note.
 
 ## The release directory
 
 ```text
 $HOME/.local/state/pfm/releases/{project}/v{NEW}/
-  run.md            the ledger: one line per phase return and per fix commit   written by /pfm:release
-  scope.md          range, counts, the tier and area table                      written by releaser (REVIEW)
-  review/{area}.md  one merge-gating report per area                            written by reviewer
-  review/seams.md   deleted and renamed names still referenced                  written by releaser (REVIEW)
-  review/reconcile.md  README lists reconciled against templates/           written by releaser (REVIEW)
-  review/sandbox-{area}/  a reviewer's scratch                                  written by reviewer
-  review/scope-delta-{sha7}.md  the scope of one delta pass                     written by releaser (REVIEW)
-  review/HEAD       the commit the last REVIEW covered                          written by releaser (REVIEW)
-  notes/coverage.tsv  one row per commit in the range                           written by changelogger
-  notes/pfm-help.txt  the candidate's `pfm help`, for rule P1                   written by releaser (NOTES)
-  notes/check.txt   the last release-check notes output                         written by releaser (NOTES)
-  gate/{candidate|stable}-{lane}.log  one fenced lane, closed `EXIT {code} @{sha}`  written by releaser (GATE)
-  gate.md           the fenced gate's verdict lines                             written by releaser (GATE)
-  rehearsal.md      the rehearsal verdict                                       written by releaser (REHEARSE)
-  rehearsal/{machine}-{n}/  one Stage B driver run: brief, schema, result; Stage A in its stage-a/  written by releaser (REHEARSE)
-  READY             the stamped commit, version and date                        written by release-check ready --stamp
-  verify/           the downloaded binary, SHA256SUMS, the update-check cache   written by releaser (VERIFY)
-  published.md      what GitHub serves, checked                                 written by releaser (VERIFY)
+  run.md          one line per step, `{time} {step} {PASS|STOP|SKIP} @{C7} — {one line}`   written by /pfm:release
+  gate.log        the full gate's output, closed `EXIT {code} @{sha}`                       written by /pfm:release
+  leak.txt        the leak scan's output                                                    written by /pfm:release
+  preflight.txt   release-check preflight's output                                          written by /pfm:release
+  scope.txt       release-check scope's output                                              written by /pfm:release
+  pfm-help.txt    the cut's `pfm help`, for rule P1                                         written by /pfm:release
+  v{NEW}.md       the draft note                                                            written by changelogger
+  changelog.line  the `CHANGELOG.md` index line                                             written by changelogger
+  coverage.tsv    one row per commit in the range                                           written by changelogger
+  review.md       the pfm-update review, when one ran                                       written by reviewer-pro
 ```
 
-- `{project}` is the repo directory's basename with any leading dot stripped. The directory is kept across reboots and outlives the release branch: `prepare` resumes from it, and an audit reads it after the tag.
-- One writer per file; nobody edits another writer's file. The single exception is the reviewer contract's own: the main chat marks a finding `waived` in its report, with the reason, which is the orchestrator's mark by that contract.
-- The note and the index line live in the candidate worktree, because they ship; everything else lives here, because it does not.
-
-## Verdict tokens
-
-`releaser` opens every return with one token on the first line; the main chat matches the token, never the prose.
-
-| Token | Means | The main chat |
-| --- | --- | --- |
-| `DONE {phase}` | The phase passed at the commit it names | records it, runs the next phase |
-| `FIX {phase}: {n}` | `n` items the main chat must fix, each with its path and its route (`code`, `docs`, `notes`) | fixes `code` and `docs`; sends `notes` items to NOTES in revise mode; re-runs the phase |
-| `FAILED {phase}: {why}` | The phase could not reach a verdict: a tool that would not run, the cap, five rehearsal rounds without CLEAN | reads the cause; one re-run with a changed brief; a second is a stop |
-| `BLOCKED {phase}: {question}` | A ruling only the user can make | asks the user; under full autonomy rules it and records the ruling in `run.md` |
-
-`changelogger` returns `DONE notes` or `BLOCKED notes: {question}`. Every `run.md` line is `{time} {phase} {token} @{sha7} — {one line}`.
+- `{project}` is the repo directory's basename with any leading dot stripped. The directory outlives the release branch, so an audit reads it after the tag; each cut opens `run.md` with a `CUT @{C7}` line.
+- The changelogger writes here, never into the release worktree, because the full gate reads that tree while the note is being written. The note and the index line move into the worktree at step 5, because they ship.
 
 ## The invariants
 
-1. The rehearsed commit is the published commit. Each verdict file names the commit it ran at; `release-check ready` stamps `READY` only when every verdict holds at HEAD; `gitter` Phase RELEASE re-runs the check and refuses a HEAD that differs from the stamp.
+1. The gated commit is the published commit. The gate, the leak scan, the preflight, `ci.yml` and the review all run at `C`; the release commit may touch only `releases/v{NEW}.md`, `CHANGELOG.md`, `VERSION`, `.professor/VERSION` and `.professor/manifest.json`, which the main chat checks after the commit and `gitter` Phase RELEASE checks again before the push.
 2. Every commit in the range is accounted for. The coverage ledger names, for each commit, the bullet it reached or why it reaches no adopter; the check fails on a missing or extra commit.
-3. The judge is never the judged. `changelogger` writes the note; the script, the `releaser` and the rehearsal judge it; the user reads it before publishing.
-4. `prepare` never publishes. Push, tag, PR and release run only inside `publish`, on the user's explicit request in that turn (project contract § Publication).
-5. A verdict holds for the commit it ran at. A later commit re-opens the phases it touches; `release-check ready` computes which, so no one has to remember.
-
-A verdict carries over a later commit in exactly two cases, both computed by the script: the gate's, when the later commits touch only `releases/`, `CHANGELOG.md` and the version stamps; the rehearsal's, when they touch only the note's `## Verification` section.
+3. The judge is never the judged. `changelogger` writes the note; the script judges it; `## Verification` is written from the checks' own output.
+4. Nothing is fixed inside a release. A check that fails stops the cut; the fix lands on `develop` through a flight.
+5. An empty check is never a pass. Each preflight rule prints what it swept, and a check that could not run exits 2, never clean.
 
 ## Versioning
 
@@ -150,66 +123,51 @@ The bump has a floor computed from the note's sections, following the left-most 
 
 | Layer | Reader | Holds |
 | --- | --- | --- |
-| `docs/RELEASE.md` | adopters, `changelogger`, the rehearsal's adopter | Versioning, the note grammar, what the tag triggers, how to update |
-| `.claude/commands/pfm/release.md` | the main chat | The verbs, the loop, the reactions to each token, the fixes, publication |
-| `.claude/agents/releaser.md` | `releaser` | The phase protocols |
+| `docs/RELEASE.md` | adopters, `changelogger` | Versioning, the note grammar, what the release PR triggers, how to update |
+| `.claude/commands/pfm/release.md` | the main chat | The cut, the checks, the release commit, publication, the close |
 | `.claude/agents/changelogger.md` | `changelogger` | How to write for the updating adopter: grounding, routes, traps, coverage |
-| `scripts/release-check.mjs` | everyone, by running it | The tier and area table, the grammar, coverage, the floors, the ready verdict |
-| `docs/commands/pfm/references/release-rehearsal.md` | `releaser` at REHEARSE | The fenced machine, the driver, the briefs |
+| `.claude/agents/gitter.md` Phase RELEASE | `gitter` | The release PR, the release commit's file check, the merge back into `develop` |
+| `scripts/release-check.mjs` | everyone, by running it | The tier and area table, the grammar, coverage, the floors, the preflight |
+| `.github/workflows/release.yml` | GitHub Actions | The PR gate, the tag, the published-asset check |
 | `pfm/internal/picker/update_row.go` | the adopter's update chat | The update prompt |
 
 A rule the script enforces is never restated as a prompt rule; the prompt names the check to run.
 
 ## Names
 
-- The unit is a release; the family is `release`; a directory is `$HOME/.local/state/pfm/releases/{project}/v{NEW}/`.
-- The agents are `releaser` and `changelogger`, role nouns like `reviewer` and `gitter`. `gitter` Phase RELEASE keeps its name: it is the git mechanics of publishing, one step inside `publish`.
-- The candidate branch is `release/v{NEW}`; the worktrees are `.worktrees/release/develop` (the candidate) and `.worktrees/release/main` (detached on `origin/main`, the stable side).
-- Both agents are project-local (`.claude/agents/`): they write for pfm's own update path, which no adopter has.
-
-## What the family replaced
-
-| Before | Now |
-| --- | --- |
-| One command of 14 steps carried end to end by one main chat | Two verbs; each phase a fresh `releaser` spawn under the 45-call law |
-| Sonnet reviewers wrote the notes while reviewing | Reviewers review; `changelogger` writes; the script and the rehearsal judge |
-| One review over the whole range, by area, with no coverage count | Reviewer runs sized to the reviewer's capacity over the adopter contract; the rest by the gate and the seams sweep (§ Accepted risk) |
-| Four bullet-prefix schemes, three action-marker spellings | One grammar in `docs/RELEASE.md`, enforced by `release-check notes` |
-| No check that every change reached the notes | The coverage ledger |
-| The rehearsal drove the candidate's update prompt | The prompt of the version installed on the fenced machine, the one a real adopter sees |
-| Nothing tied the tag to what was rehearsed | `READY` and `gitter`'s re-check |
-| The tag reported as the end | VERIFY: the workflow, the assets, the body, the checksum, the update banner's source |
+- The unit is a release; the family is `release`; the verb is `cut`; a directory is `$HOME/.local/state/pfm/releases/{project}/v{NEW}/`.
+- The release branch is `release/v{NEW}`; its worktree is `.worktrees/release/`. `gitter` Phase RELEASE keeps its name: it is the git mechanics of publishing, one step inside the cut.
+- `changelogger` is project-local (`.claude/agents/`): it writes for pfm's own update path, which no adopter has.
 
 ## Accepted risk
 
-A range of hundreds of commits cannot be reviewed hunk by hunk at release time: review effectiveness collapses past about 300 lines an hour (Evidence), and one `reviewer` run holds about 600 hunks. The release review therefore covers in full only the adopter contract, the tier-1 paths `release-check scope` names: `templates/**`, the fleet prompt, pfm's update, install, init, doctor and config paths, the public docs and the release gates. Everything else relies on the review it had when it landed on `develop`, on the full fenced gate at the candidate, and on the seams sweep, which finds every deleted or renamed name still referenced anywhere in the tree. A defect inside an internal package that its own tests do not catch and its landing review missed can ship; the rehearsal catches the part of it an adopter's update touches.
+The release reviews in full only the `pfm-update` area, and only when the cut changes it: the update, install, init, doctor and config paths an adopter's update runs through. Everything else relies on the review it had when it landed on `develop`, on the full fenced gate and `ci.yml` at the cut, and on the preflight's seams sweep, which finds every removed path or role still named anywhere outside history. A defect inside an internal package that its own tests do not catch and its landing review missed can ship; a MEDIUM or LOW finding on the update path ships named in `## Verification`. No model follows the note before it ships, so a note that misleads the update chat is found by an adopter, and its fix is the next patch release.
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The command | `.claude/commands/pfm/release.md` | The loop and publication |
-| The agents | `.claude/agents/releaser.md`, `.claude/agents/changelogger.md` | The executable wording |
+| The command | `.claude/commands/pfm/release.md` | The cut and publication |
+| The agent | `.claude/agents/changelogger.md` | The executable wording |
+| The publish gate | `.claude/agents/gitter.md` Phase RELEASE and its machine-global twin `templates/global/agents/gitter.md` | The release PR, the file check, the merge back |
 | The script | `scripts/release-check.mjs` and its tests | The mechanisms |
 | The public spec | `docs/RELEASE.md`, `CHANGELOG.md` (index and a pointer), `INSTALL.md` § Updating, `docs/SETUP.md` § Staying current | What adopters read |
 | The reader's prompt | `pfm/internal/picker/update_row.go` `professorUpdatePrompt` and its test | Timing, surfaces, stops |
-| The rehearsal | `docs/commands/pfm/references/release-rehearsal.md`, `infra/fence/release-rehearsal.sh` | The fenced adopter |
-| The publish gate | `.claude/agents/gitter.md` Phase RELEASE | The ready re-check |
-| The CI backstop | `.github/workflows/release.yml` | The release PR's `release` job: the version past `main`'s, the grammar check on its note |
-| The mirrors and manifest | `.codex/`, `.opencode/`, `.professor/manifest.json` | The two agents registered |
+| The workflows | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | The cut's CI run; the PR gate, `publish` and `verify` |
+| The mirrors and manifest | `.codex/`, `.opencode/`, `.professor/manifest.json` | The agent registered |
 
 ## Open items
 
 - Change-time adopter fragments. The strongest measured defense against omission is a note fragment written with each change and checked in CI (Go, Kubernetes, towncrier, changesets). This family keeps release-time derivation, grounded in commit messages and closed by the coverage ledger; a commit-message trailer carrying the adopter action (`Adopter: {when} · {surface} — {action}`) would move the knowledge to the moment the author holds it.
 - A deterministic range merge. `pfm update plan --to vX` could parse the action grammar across the skipped range and print the ordered checklist, replacing the update chat's hand merge (Renovate, the Angular update guide). It helps only adopters whose installed binary already carries it.
-- Provenance. `release.yml` could attest the binaries (`actions/attest-build-provenance`) and VERIFY check them with `gh attestation verify`; the build-from-source update path gains nothing from it, which is why it waits.
+- Provenance. `release.yml` could attest the binaries (`actions/attest-build-provenance`) and `verify` check them with `gh attestation verify`; the build-from-source update path gains nothing from it, which is why it waits.
 
 ## Evidence
 
 The research behind these rulings is `.professor/RR/release-notes-for-upgrading-adopters-2026-09-25.md`. The facts the design rests on:
 
 - Omission is the measured failure of release notes, most of all for breaking changes (Wu et al., ICPC 2022); most notes list 6–26 % of the issues a release addressed (Abebe et al., EMSE 2016).
-- LLM-written notes capture the what better than the why (arXiv 2404.14824); no study measures how often they invent entries. Grounding in authored commit messages, a coverage count, and a human read before publishing answer both.
+- LLM-written notes capture the what better than the why (arXiv 2404.14824); no study measures how often they invent entries. Grounding in authored commit messages and a coverage count answer both.
 - Mature projects tie each upgrade action to a surface and to before or after the upgrade (Kubernetes Urgent Upgrade Notes, OpenStack reno's upgrade section, Mattermost, Elastic) and declare required stops (GitLab).
 - Release-time review is weighted by risk, never one pass over the whole range (Linux linux-next, Mozilla uplift rules, Chromium merge review); inspection past about 300 LOC an hour or 90 minutes loses its defect yield (SmartBear/Cisco).
 - Verify the published artifact before announcing it (GoReleaser `verify`, PEP 101); the update banner reads `/releases/latest`, which is the newest non-draft, non-prerelease release.

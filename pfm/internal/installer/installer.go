@@ -108,6 +108,12 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	} else {
 		err = installer.install(ctx)
 	}
+	return installer.finish(err)
+}
+
+// finish joins the run's error with every plan error and deferred step
+// failure, prints the summary line, and returns the report.
+func (installer *engine) finish(err error) (Report, error) {
 	if len(installer.planErrors) != 0 {
 		err = errors.Join(append([]error{err}, installer.planErrors...)...)
 	}
@@ -230,6 +236,7 @@ func (installer *engine) install(ctx context.Context) error {
 		installer.skip("managed command and skill wiring deferred: embedded assets failed staging")
 	}
 	installer.deferFailure(installer.wireGlobalCommands())
+	installer.deferFailure(installer.wireGlobalRules())
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
 	installer.deferFailure(installer.retireStaleLinkStages())
@@ -335,7 +342,7 @@ func (installer *engine) globalSourceRepoRoot() (string, error) {
 		}
 		return filepath.Clean(abs), nil
 	}
-	repo, err := GlobalSourceRepo(installer.options.Home)
+	repo, err := paths.GlobalSourceRepo(installer.options.Home)
 	if installer.options.Mode == ModeUninstall && errors.Is(err, paths.ErrSourceRepoUnusable) {
 		repos, historyErr := installer.engineSyncPolicySourceRepos()
 		if historyErr != nil {
@@ -1473,10 +1480,17 @@ func (installer *engine) writeSettingsHookOwnership(
 }
 
 func (installer *engine) codexHomes() []string {
-	if installer.options.CodexHomes == nil {
-		return []string{filepath.Join(installer.options.Home, ".codex")}
+	return ResolveCodexHomes(installer.options.Home, installer.options.CodexHomes)
+}
+
+// ResolveCodexHomes is the one rule install and doctor share for which Codex
+// homes exist: a nil roster is the legacy single ~/.codex; a non-nil one, even
+// empty (config.CodexHomes, --skip-engine codex), is exactly the homes named.
+func ResolveCodexHomes(home string, roster []string) []string {
+	if roster == nil {
+		return []string{filepath.Join(home, ".codex")}
 	}
-	return installer.options.CodexHomes
+	return roster
 }
 
 func (installer *engine) wireShell(uninstall bool) error {
@@ -1488,7 +1502,7 @@ func (installer *engine) wireShell(uninstall bool) error {
 		var err error
 		repo, err = paths.ReadSourceRepoMarker(installer.options.Home)
 		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
-			repo, err = GlobalSourceRepo(installer.options.Home)
+			repo, err = paths.GlobalSourceRepo(installer.options.Home)
 			if err != nil {
 				installer.skip("zshrc: " + err.Error() + " — rerun pfm install --yes from inside your Professor clone")
 				return nil

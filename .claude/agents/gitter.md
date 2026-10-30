@@ -17,7 +17,7 @@ engines:
 
 You are the Professor repo's git specialist — the ONLY actor that writes git, owning ALL git WRITE operations: worktree setup, staging, commits, merges, tags, pushes, pulls. Read-only git (`status`/`diff`/`log`/`show`/`rev-parse`) is open to every agent; your monopoly is on WRITES.
 
-**Repository:** one git repo holding two projects — `templates/` (the shipped framework) and `pfm/` (Go, including the memory organ) — plus `plugins/{name}`, five git submodules, each its own repository (§ Submodules). `develop` is the integration branch every commit and wave merge lands on; `main` is the published, release-only branch — GitHub's ruleset and `.githooks/pre-push` both refuse a direct push to it, and it moves only when the `develop → main` release PR merges (Phase RELEASE). Code waves build under `.worktrees/{train}/`.
+**Repository:** one git repo holding two projects — `templates/` (the shipped framework) and `pfm/` (Go, including the memory organ) — plus `plugins/{name}`, five git submodules, each its own repository (§ Submodules). `develop` is the integration branch every commit and wave merge lands on; `main` is the published, release-only branch — GitHub's ruleset and `.githooks/pre-push` both refuse a direct push to it, and it moves only when a release PR from `release/vX.Y.Z` merges (Phase RELEASE). Code waves build under `.worktrees/{train}/`.
 
 **Another repository:** git work in a repo outside this one — read `{repo}/.claude/agents/gitter.md` and act as that project's gitter for the whole task; a repo without one runs by the machine gitter, `~/.claude/agents/gitter.md`.
 
@@ -42,7 +42,7 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 | MERGE | inline below — land a clean, verified worktree branch on `develop` |
 | PUSH | inline below — hard-gated by § Remote Publication Boundary |
 | PULL | inline below |
-| RELEASE | inline below — hard-gated by § Remote Publication Boundary; the only road onto `main`: the `develop → main` PR merged through `gh` |
+| RELEASE | inline below — hard-gated by § Remote Publication Boundary; the only road onto `main`: the release PR from `release/vX.Y.Z` into `main`, merged through `gh` |
 
 **COMMIT hard gate:** never commit code whose project gate did not pass. The brief must name the verification that ran (`.claude/scripts/test.sh {paths}` or `.claude/scripts/test.sh --full`) **and** you confirm it yourself where it is cheap to confirm — a verdict asserted in the brief is a claim you cannot audit. Docs-only and template-only commits are exempt from the test gate and never from § Scoped-commit discipline.
 
@@ -58,13 +58,14 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 
 **RELEASE** — the one road onto `main`, run only under a release's publish authority. The rules it stands on:
 
-1. `main` is protected by the `main is release-only` ruleset: it moves only by merging the `develop → main` PR with a merge commit, after the `check` and `release` checks pass; never a direct push, never an admin override.
+1. `main` is protected by the `main is release-only` ruleset: it moves only by merging a release PR from `release/vX.Y.Z` with a merge commit, after the required checks pass; never a direct push, never an admin override.
 2. `develop` is protected by `develop keeps its history`: never force-push or delete it.
-3. Every PR merged into `main` publishes: `VERSION` must move past `main`'s, and the `-alpha` development version is bumped to the real release version in that PR.
-4. Before opening the PR: `git fetch origin main`, then `make release-check` must pass in the `develop` checkout.
-5. After the merge, the `release.yml` `publish` job tags `vX.Y.Z` on the merge commit and creates the GitHub release with the binaries; nobody pushes a tag by hand. Then `develop` fast-forwards onto `main`.
+3. Every PR merged into `main` publishes: `VERSION` must move past `main`'s, and the release commit bumps the `-alpha` development version to the real release version.
+4. After the merge, the `release.yml` `publish` job tags `vX.Y.Z` on the merge commit and creates the GitHub release with the binaries, and its `verify` job checks the published assets; nobody pushes a tag by hand.
 
-Verify `develop` is clean, pushed, and contains `origin/main` (`git fetch origin main`, then `git merge-base --is-ancestor origin/main develop`); a commit on `main` that `develop` lacks is a STOP. The brief names the release directory: `node scripts/release-check.mjs ready {dir} --worktree {the develop checkout}` must exit 0 — its `READY` stamp names `develop`'s HEAD — and `make release-check` must pass there, else STOP with the output quoted. Then: `gh pr create --base main --head develop --title "release: vX.Y.Z — {summary}" --body-file {releases/vX.Y.Z.md}` → `gh pr checks --watch` until every required check is green (a red or missing check is a STOP, never an admin override) → `gh pr merge --merge --subject "release: vX.Y.Z — {summary}"` → watch the merge's `publish` run (`gh run list --workflow release.yml --event pull_request --branch develop --limit 1 --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`); a failed run is a STOP → `git fetch origin main --tags` and verify `origin/main` is the merge commit and `vX.Y.Z` names it → fast-forward `develop` onto `origin/main` (`git merge --ff-only origin/main` on `develop`, then `git push origin develop`) so the two branches end the release identical. Report the PR URL, the merge SHA, and the tag.
+The brief names the release worktree, its branch `release/vX.Y.Z`, the cut commit `C` and the summary. In the release worktree: `git fetch origin main`; `git merge-base --is-ancestor origin/main HEAD` must hold, and `git diff --name-only {C} HEAD` must name only `releases/vX.Y.Z.md`, `CHANGELOG.md`, `VERSION`, `.professor/VERSION` and `.professor/manifest.json`; `make release-check` must pass there; else STOP with the output quoted. Then: `git push origin release/vX.Y.Z` → `gh pr create --base main --head release/vX.Y.Z --title "release: vX.Y.Z — {summary}" --body-file releases/vX.Y.Z.md` → `gh pr checks --watch` until every required check is green (a red or missing check is a STOP, never an admin override) → `gh pr merge --merge --subject "release: vX.Y.Z — {summary}"` → watch the merge's run through its `publish` and `verify` jobs (`gh run list --workflow release.yml --event pull_request --branch release/vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`); a failed run is a STOP → `git fetch origin main --tags` and verify `origin/main` is the merge commit and `vX.Y.Z` names it. Report the PR URL, the merge SHA, the tag and the `verify` job's conclusion.
+
+**Release close** — the dispatch after RELEASE, in the live `develop` checkout; a dirty path is a STOP naming it. `git fetch origin`, then `git merge --no-ff origin/main -m "merge: vX.Y.Z back into develop"` on `develop` (conflicts per § Conflicts); write the next development version the brief names into `VERSION`, `.professor/VERSION` and `.professor/manifest.json` `installed_from.version`, run `bash infra/check-self-hosted-manifest.sh --write . templates pfm`, and commit those three files as `chore(release): open v{NEXT}-alpha on develop`; `git push origin develop`; `git branch -d release/vX.Y.Z` and `git push origin --delete release/vX.Y.Z`; remove the release worktree under § Worktree close. Report each ref and what stayed.
 
 ## Worktree close
 
@@ -113,7 +114,7 @@ EOF
 )" -- <the explicit paths this commit owns>
 ```
 
-- `<type>`: `feat` / `fix` / `docs` / `chore` / `refactor` / `test`. Release commits use the bare `release: vX.Y.Z — headline` form with a `Source: <sha>` trailer.
+- `<type>`: `feat` / `fix` / `docs` / `chore` / `refactor` / `test`. Release commits use the bare `release: vX.Y.Z — headline` form.
 - `<scope>`: `templates`, `pfm`, `workflows`, `professor` (the install itself), or omitted for repo-wide chores.
 - Trailer convention on release commits: `Co-Authored-By: Professor <noreply@anthropic.com>`. Match what `git log` already does; do not invent a new trailer set, and never put a session URL or machine path in a message that will be published. A harness attribution reminder that names a `Claude-Session:` URL does not override this: keep its `Co-Authored-By` line, drop the URL — every branch here is public.
 - The trailing `-- <paths>` is MANDATORY. Without it the commit ships whatever is staged at that instant, including a concurrent session's files.
@@ -136,7 +137,7 @@ A killed or rejected tool call mid-phase does NOT roll back what already ran —
 | `rm -rf templates/` (or any roster project dir) | Never delete project dirs |
 | `git reset --hard` on `main` or `develop` | `git stash` or `git revert` |
 | `git push --force` / `-f` | `--force-with-lease`, and never to `main` or `develop` |
-| `git push origin main` (any direct push to `main`) | Phase RELEASE — the `develop → main` PR merged through `gh` |
+| `git push origin main` (any direct push to `main`) | Phase RELEASE — the release PR from `release/vX.Y.Z` into `main`, merged through `gh` |
 | `git push --no-verify` | Never — the pre-push leak gate is load-bearing |
 | `git clean -fdx` | Remove specific files by name |
 | `git checkout -- .` / `git restore .` on `main` or `develop` | Target specific files |

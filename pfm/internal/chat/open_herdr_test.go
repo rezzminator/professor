@@ -59,6 +59,14 @@ func nativeChatSocket(t *testing.T, handle func(nativeChatRequest) (any, string)
 					t.Errorf("decode native request: %v", err)
 					return
 				}
+				// Every fixture's tabs land in w6: a birth creates its place's
+				// workspace there.
+				var label string
+				_ = json.Unmarshal(req.Params["label"], &label)
+				if placed, handled := testjail.HerdrWorkspaceReply(req.Method, label, "w6"); handled {
+					_ = json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "ok": true, "result": placed})
+					return
+				}
 				result, code := handle(req)
 				if code != "" {
 					_, _ = fmt.Fprintf(

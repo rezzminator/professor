@@ -41,7 +41,6 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"settings.json",
 		"CLAUDE.md",
 		"history.jsonl",
-		"stats-cache.json",
 		".last-cleanup",
 		"gh-pr-status-cache.json",
 		"tool-visibility-controller.json",
@@ -76,12 +75,13 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"mcp-needs-auth-cache.json",
 		"telemetry",
 		"feedback",
-		".last-update-result.json", ".pfm-launches",
+		".last-update-result.json", "stats-cache.json", ".pfm-launches",
 	}
 	if !reflect.DeepEqual(AccountEntries, accounts) {
 		t.Fatalf("accounts=%v", AccountEntries)
 	}
-	if retired := []string{".last-update-result.json"}; !reflect.DeepEqual(RetiredStoreEntries, retired) {
+	retired := []string{".last-update-result.json", "stats-cache.json"}
+	if !reflect.DeepEqual(RetiredStoreEntries, retired) {
 		t.Fatalf("retired=%v, want %v", RetiredStoreEntries, retired)
 	}
 	ignored := []string{

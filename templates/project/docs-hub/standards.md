@@ -2,7 +2,7 @@
 
 Source of truth for cross-project architecture decisions. These rules **override** other docs. A design that conflicts with one of them is wrong — flag it back, do not design around it. Distilled from the root `CLAUDE.md` Non-Negotiable Rules and the child project `CLAUDE.md` placement conventions; this file is what those rules mean for _architecture_.
 
-> **Ownership:** owned by the `pcm` agent. New standards land here through the `pcm` agent, never through a pipeline. A pipeline that discovers a missing standard reports it; the user invokes `/pcm` to add it. The main-loop session reads this in full before designing architecture.
+> **Ownership:** owned by the `pcm` agent. New standards land here through the `pcm` agent, never through a pipeline. A pipeline that discovers a missing standard reports it; the user dispatches the `pcm` agent to add it. The main-loop session reads this in full before designing architecture.
 
 <!-- INSTALL: replace the example sections below with this project's real invariants.
      Each section is one standard: a declarative heading + the rules that make it

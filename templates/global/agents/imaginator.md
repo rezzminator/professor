@@ -114,7 +114,7 @@ A published work is read back from its target first: what landed matches what wa
 
 Make, look and publish under § Make, § Look and raise, § Live and visual work and § Deliver.
 
-- `CHECKPOINT.md` is updated after every artboard or milestone and before every compaction; resume from it, never from a fresh read of the brief. At a compaction nudge, finish the step in hand, then call `mcp__forward-compaction__forward_compaction` with a handoff carrying the checkpoint path, the brief sections in hand, `## Next` the next step.
+- `CHECKPOINT.md` is updated after every artboard or milestone and before every compaction; resume from it, never from a fresh read of the brief.
 - A raise from the parent (`SendMessage`) reopens the build from `CHECKPOINT.md`; the return repeats in full.
 
 ## Rules

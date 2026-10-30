@@ -98,7 +98,6 @@ func TestPluginLogsDoctor(t *testing.T) {
 	for _, test := range []struct {
 		name               string
 		version            string
-		env                func(fixture pluginLogsFixture) map[string]string
 		mutate             func(t *testing.T, fixture pluginLogsFixture)
 		want               func(fixture pluginLogsFixture) string
 		warnings, failures int
@@ -253,48 +252,33 @@ func TestPluginLogsDoctor(t *testing.T) {
 				writePluginLogsFile(t, filepath.Join(logs, "errors.jsonl"), "{\"a\":1}\n\n{\"a\":2}\n")
 				writePluginLogsFile(t, filepath.Join(logs, "info.jsonl"), "{\"a\":3}")
 				writePluginLogsFile(t, filepath.Join(logs, "errors.jsonl.1"), "{\"a\":0}\n")
+				writePluginLogsFile(t, filepath.Join(logs, "warnings.jsonl.5"), "{\"a\":5}\n")
+				writePluginLogsFile(t, filepath.Join(logs, "debug.jsonl"), "{\"a\":6}\n")
+				writePluginLogsFile(t, filepath.Join(logs, "info.jsonl.tmp"), "not a generation\n")
 				writePluginLogsFile(t, filepath.Join(logs, "notes.txt"), "not a row\n")
 			},
 			want: func(fixture pluginLogsFixture) string {
-				return "doctor: plugin_logs plugin alpha-plug: 4 rows stranded in its fallback " +
+				return "doctor: plugin_logs plugin alpha-plug: 6 rows stranded in its fallback " +
 					filepath.Join(fixture.home, ".local", "state", "alpha-plug", "logs") +
 					" while PLUGIN_LOG_DIR is set — move them to the log folder\n"
 			},
 			warnings: 1,
 		},
 		{
-			name: "callmeter's fallback follows XDG_STATE_HOME",
+			name: "callmeter's fallback is the shared one, whatever CALLMETER_HOME and XDG_STATE_HOME say",
 			mutate: func(t *testing.T, fixture pluginLogsFixture) {
 				t.Helper()
 				pluginLogsMarketplace(t, fixture, "alpha-plug", "callmeter")
-				writePluginLogsFile(t, filepath.Join(fixture.home, "xdg", "callmeter", "logs", "errors.jsonl"), "{}\n")
-			},
-			env: func(fixture pluginLogsFixture) map[string]string {
-				return map[string]string{"XDG_STATE_HOME": filepath.Join(fixture.home, "xdg")}
-			},
-			want: func(fixture pluginLogsFixture) string {
-				return "doctor: plugin_logs plugin callmeter: 1 rows stranded in its fallback " +
-					filepath.Join(fixture.home, "xdg", "callmeter", "logs") +
-					" while PLUGIN_LOG_DIR is set — move them to the log folder\n"
-			},
-			warnings: 1,
-		},
-		{
-			name: "callmeter's fallback follows CALLMETER_HOME",
-			mutate: func(t *testing.T, fixture pluginLogsFixture) {
-				t.Helper()
-				pluginLogsMarketplace(t, fixture, "alpha-plug", "callmeter")
+				t.Setenv("CALLMETER_HOME", filepath.Join(fixture.home, "meter"))
+				t.Setenv("XDG_STATE_HOME", filepath.Join(fixture.home, "xdg"))
 				writePluginLogsFile(t, filepath.Join(fixture.home, "meter", "logs", "info.jsonl"), "{}\n")
-			},
-			env: func(fixture pluginLogsFixture) map[string]string {
-				return map[string]string{
-					"CALLMETER_HOME": filepath.Join(fixture.home, "meter"),
-					"XDG_STATE_HOME": filepath.Join(fixture.home, "xdg"),
-				}
+				writePluginLogsFile(t, filepath.Join(fixture.home, "xdg", "callmeter", "logs", "info.jsonl"), "{}\n")
+				writePluginLogsFile(t,
+					filepath.Join(fixture.home, ".local", "state", "callmeter", "logs", "errors.jsonl"), "{}\n")
 			},
 			want: func(fixture pluginLogsFixture) string {
 				return "doctor: plugin_logs plugin callmeter: 1 rows stranded in its fallback " +
-					filepath.Join(fixture.home, "meter", "logs") +
+					filepath.Join(fixture.home, ".local", "state", "callmeter", "logs") +
 					" while PLUGIN_LOG_DIR is set — move them to the log folder\n"
 			},
 			warnings: 1,
@@ -368,12 +352,8 @@ func TestPluginLogsDoctor(t *testing.T) {
 			}
 			var stdout bytes.Buffer
 			tally := &doctorTally{}
-			env := &paths.MapEnv{}
-			if test.env != nil {
-				env.Values = test.env(fixture)
-			}
 			printPluginLogsDoctor(&stdout, []string{fixture.store, fixture.linked, fixture.own}, build,
-				env, unix.Access, tally)
+				unix.Access, tally)
 			if got, want := stdout.String(), test.want(fixture); got != want {
 				t.Fatalf("output:\n%s\nwant:\n%s", got, want)
 			}
@@ -446,7 +426,6 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 		&out,
 		[]string{fixture.store, fixture.linked, fixture.own},
 		installer.ClaudePluginBuild{Home: fixture.home, Version: "0.82.0-alpha", SourceRepo: fixture.clone},
-		&paths.MapEnv{},
 		unix.Access,
 		tally,
 	)

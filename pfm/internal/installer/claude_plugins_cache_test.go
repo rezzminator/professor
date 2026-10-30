@@ -87,7 +87,7 @@ func simulateClaudeUpdate(t *testing.T, runner *pluginRunner, home string) {
 			scope = fields[4]
 		}
 		name, marketplace, _ := strings.Cut(id, "@")
-		copyDir := filepath.Join(home, ".local", "share", marketplace, "plugins", name)
+		copyDir := filepath.Join(home, ".local", "share", marketplace+"-dev", "plugins", name)
 		path := filepath.Join(configDir, "plugins", "installed_plugins.json")
 		var record struct {
 			Version int                         `json:"version"`
@@ -156,7 +156,7 @@ func cacheRecordVersions(t *testing.T, configDir, id string) []string {
 }
 
 // TestEnsureClaudePluginsBringsTheCacheToTheCheckout: Claude runs an installed
-// -dev plugin from the snapshot it records per scope in installed_plugins.json,
+// checkout copy from the snapshot it records per scope in installed_plugins.json,
 // so an -alpha install runs `claude plugin update {id} --scope {scope} -y` for
 // every entry whose version is not the checkout's — a project scope's from its
 // project dir — and reads the record back: an entry still behind is a failure
@@ -166,7 +166,7 @@ func cacheRecordVersions(t *testing.T, configDir, id string) []string {
 // runs none.
 func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 	const name = "forward-compaction"
-	id := devID(name)
+	id := ownID(name)
 	hook := "export const hook = '" + name + "'\n"
 	for _, test := range []struct {
 		name      string
@@ -331,7 +331,7 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 			apply: true, simulate: true,
 			wantCalls: func(project string) []string {
 				return []string{
-					"plugin marketplace add " + filepath.Join(filepath.Dir(project), ".local", "share", name+"-dev"),
+					"plugin marketplace add " + filepath.Join(filepath.Dir(project), ".local", "share", "professor-dev"),
 					"plugin install " + id + " -y", "plugin update " + id + " --scope project -y",
 				}
 			},
@@ -382,8 +382,8 @@ func TestEnsureClaudePluginsBringsTheCacheToTheCheckout(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{"`+id+`":true}}`)
-			known, err := json.Marshal(map[string]any{name + "-dev": map[string]any{"source": map[string]any{
-				"source": "directory", "path": filepath.Join(home, ".local", "share", name+"-dev"),
+			known, err := json.Marshal(map[string]any{"professor": map[string]any{"source": map[string]any{
+				"source": "directory", "path": filepath.Join(home, ".local", "share", "professor-dev"),
 			}}})
 			if err != nil {
 				t.Fatal(err)
@@ -456,10 +456,10 @@ func TestEnsureClaudePluginsUpdatesCallmetersCacheAfterItsBinary(t *testing.T) {
 	inst.options.Version = alphaVersion
 	inst.options.ClaudePluginCheckoutRoot = root
 	inst.options.ClaudePlugins = bareList(callmeterPlugin)
-	id := devID(callmeterPlugin)
+	id := ownID(callmeterPlugin)
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{"`+id+`":true}}`)
-	known, err := json.Marshal(map[string]any{callmeterPlugin + "-dev": map[string]any{"source": map[string]any{
-		"source": "directory", "path": filepath.Join(home, ".local", "share", callmeterPlugin+"-dev"),
+	known, err := json.Marshal(map[string]any{"professor": map[string]any{"source": map[string]any{
+		"source": "directory", "path": filepath.Join(home, ".local", "share", "professor-dev"),
 	}}})
 	if err != nil {
 		t.Fatal(err)

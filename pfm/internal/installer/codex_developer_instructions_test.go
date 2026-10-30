@@ -148,7 +148,7 @@ func TestInstallWritesTheComposedPromptIntoEveryCodexHome(t *testing.T) {
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := codexHarnessPrompt()
+	prompt, err := assembledHarnessPrompt(clone, pfmengine.Codex)
 	if err != nil {
 		t.Fatal(err)
 	}

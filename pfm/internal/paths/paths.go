@@ -226,6 +226,26 @@ func ReadSourceRepoMarker(home string) (string, error) {
 	return repo, nil
 }
 
+// GlobalSourceRepo resolves the clone every global agent/command/skill link
+// is anchored on for a caller that has no installer options at all — pfm
+// doctor, a Codex role seat composing its fleet prompt, checking or reading
+// what a PRIOR install wired. It is the marker-and-default half of the
+// installer's globalSourceRepoRoot, kept as one implementation so no reader
+// can anchor on a different clone than the installer it follows.
+func GlobalSourceRepo(home string) (string, error) {
+	marker := SourceRepoPath(home)
+	if _, err := os.Lstat(marker); errors.Is(err, fs.ErrNotExist) {
+		return filepath.Clean(filepath.Join(home, ".professor")), nil
+	} else if err != nil {
+		return "", fmt.Errorf("inspect source repository marker %s: %w", marker, err)
+	}
+	repo, err := ReadSourceRepoMarker(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(repo), nil
+}
+
 // GeneratedHarnessPrompt locates the installed engine prompt in the recorded clone.
 func GeneratedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
 	repo, err := ReadSourceRepoMarker(home)
@@ -553,7 +573,7 @@ func ClaudeMCPConfigDir(home string) string {
 
 // CostLedgerDir is the directory of the per-call cost ledger: EnvCostLedgerDir
 // when set, else cost-ledger under the pfm state directory. The cost sink
-// creates it 0700; callmeter reads the same path as optional data.
+// creates it 0700; pfm install hands it to callmeter as CALLMETER_COST_LEDGER_DIR.
 func CostLedgerDir(env Env, home string) string {
 	return EnvOrFrom(env, EnvCostLedgerDir, filepath.Join(home, ".local", "state", "pfm", "cost-ledger"))
 }

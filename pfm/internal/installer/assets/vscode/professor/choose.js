@@ -56,11 +56,11 @@ function pfmHere(extensionKind) {
 }
 
 // runPfm resolves, never rejects: {ok, exited, code, stdout, stderr, cause}. `exited` tells a pfm that
-// ran and exited non-zero (a verdict, with its stderr) from one that could not run or was killed at
-// the timeout (the cause).
-function runPfm(args, timeoutMs) {
+// ran and exited non-zero (a verdict, with its stderr) from one that could not run, was killed at
+// the timeout or aborted through `signal` (the cause). `input`, when given, is pfm's whole stdin.
+function runPfm(args, timeoutMs, { signal, input } = {}) {
   return new Promise((resolve) => {
-    execFile(pfmBinary(), args, { timeout: timeoutMs, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, (err, stdout, stderr) => {
+    const child = execFile(pfmBinary(), args, { timeout: timeoutMs, maxBuffer: MAX_BUFFER, encoding: 'utf8', signal }, (err, stdout, stderr) => {
       if (!err) {
         resolve({ ok: true, exited: true, code: 0, stdout, stderr, cause: null });
         return;
@@ -68,6 +68,10 @@ function runPfm(args, timeoutMs) {
       const exited = typeof err.code === 'number';
       resolve({ ok: false, exited, code: err.code, stdout: stdout ?? '', stderr: stderr ?? '', cause: err });
     });
+    if (input === undefined) return;
+    // A pfm that exits before reading its stdin breaks the pipe; its exit is the result the callback reports.
+    child.stdin.on('error', (err) => console.error(`Professor: writing pfm's stdin failed: ${err?.message ?? err}`));
+    child.stdin.end(input);
   });
 }
 

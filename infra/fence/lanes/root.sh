@@ -91,7 +91,7 @@ hash_tree() { # hash_tree <dir> <label prefix> <git ls-files pathspec…>
 }
 
 # Every plugin checkout an -alpha pfm install copies into the image's
-# ~/.local/share/{name}-dev, hashed as pfm's copy digest compares it: every
+# ~/.local/share/professor-dev, hashed as pfm's copy digest compares it: every
 # directory and file reached through symlinks, each file's content and every
 # permission bit of both, node_modules and .DS_Store left out at any depth,
 # ignored and untracked files counted. A copy baked from other content is

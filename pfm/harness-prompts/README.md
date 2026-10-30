@@ -6,9 +6,11 @@ One prompt per engine, assembled at install from three source parts, plus the Cl
 
 Every engine reads the same Professor: a shared head (identity, voice, stance, work rhythm),
 an engine middle (the mechanics only that harness has), and a shared tail (orchestration and
-the standing laws). `pfm install` joins the three from the parts embedded in the binary and
-writes one file per engine, so what an engine reads is one file on disk, not an assembly the
-launcher has to get right. Nothing is assembled at build time and no output is tracked.
+the standing laws). `pfm install` and `pfm generate` join the three from the parts in the
+recorded clone's `pfm/harness-prompts/` and write one file per engine, so what an engine reads is
+one file on disk, not an assembly the launcher has to get right. A host with no such tree (a
+binary-only install, whose tree holds only `generated/`) joins the copy embedded in the binary;
+a tree missing a part is an error naming it, never a fallback. Nothing is assembled at build time and no output is tracked.
 
 | part | file |
 | --- | --- |
@@ -24,7 +26,7 @@ assembly and mapping from the same source parts.
 
 ## The three generated files
 
-`pfm install` writes the files below under `{clone}/pfm/harness-prompts/generated/` before any
+`pfm install` and `pfm generate` write the files below under `{clone}/pfm/harness-prompts/generated/` before any
 consumer runs; the directory is gitignored and never embedded. The assembly tests compare each
 output with the expected join of the source parts, and the install lifecycle tests prove the files
 exist after install.
@@ -48,20 +50,17 @@ exist after install.
   parent turn. The Codex appendix keeps the parent turn active and calls `wait_agent` with its configured
   default timeout while delegated work remains, waiting again after progress or a timeout and reporting
   timeouts in commentary. The shared tail defers waiting to each engine; Claude and OpenCode keep
-  their engine-specific end-turn behavior. Rebuild pfm and run `pfm install` to regenerate and deploy prompt
-  changes; already-running chats need to reload their instructions.
+  their engine-specific end-turn behavior. Run `pfm generate` to regenerate and deploy prompt changes, no
+  rebuild needed (`pfm generate --plan` previews); already-running chats need to reload their
+  instructions.
 - `generated/opencode.md` — head + `opencode/professor.md` + tail. OpenCode has no
   system-prompt replacement flag; its machine-scope `opencode.jsonc` carries an `instructions`
   array of files whose content it appends to the system prompt, and `pfm install` names the clone's
   `generated/opencode.md` there, preserving every other key and every entry the operator wrote.
 
 The clone holds the source parts, the generated prompts and the Claude baselines; install stages
-no copy of them. `harnessprompts.go` embeds the source parts and baselines into the binary for
-assembly and the doctor's `harness-prompts embed=` comparison. That row compares the source tree
-and excludes the `generated/` outputs;
-it reports `MISMATCH` when an embedded source differs from the clone. The row states both
-directions and prescribes neither: a hash difference says the two disagree, not which one is
-newer — a clone checked out to an older revision than the binary is the binary being ahead.
+no copy of them. `harnessprompts.go` embeds the source parts and baselines into the binary, the
+source a host without a clone composes from.
 
 ## The Claude drift baseline
 

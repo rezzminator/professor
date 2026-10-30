@@ -27,19 +27,9 @@ import (
 // be read or parsed returns its error, never an answer. A string read from the
 // file prints with its control characters escaped.
 func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
-	path := filepath.Join(store, "plugins", "known_marketplaces.json")
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
+	path, known, err := readKnownMarketplaces(store)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var known map[string]struct {
-		Source claudeMarketplaceRecord `json:"source"`
-	}
-	if err := json.Unmarshal(raw, &known); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, err
 	}
 	var gaps []ClaudePluginGap
 	for index := range targets {
@@ -76,11 +66,36 @@ func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]
 	return gaps, nil
 }
 
+// knownMarketplace is one known_marketplaces.json entry.
+type knownMarketplace struct {
+	Source claudeMarketplaceRecord `json:"source"`
+}
+
+// readKnownMarketplaces reads store's plugins/known_marketplaces.json, keyed by
+// marketplace name, and returns its path beside them. A missing file means
+// none is known; a file that cannot be read or parsed returns its error, never
+// an answer.
+func readKnownMarketplaces(store string) (string, map[string]knownMarketplace, error) {
+	path := filepath.Join(store, "plugins", "known_marketplaces.json")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return path, nil, nil
+	}
+	if err != nil {
+		return path, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var known map[string]knownMarketplace
+	if err := json.Unmarshal(raw, &known); err != nil {
+		return path, nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return path, known, nil
+}
+
 // claudeMarketplaceGapFix repairs a marketplace registered from another
-// source: pfm install re-points a local target's own -dev marketplace; any
-// other is removed by hand first.
+// source: pfm install re-points the professor marketplace of a plugin of
+// ours; any other is removed by hand first.
 func claudeMarketplaceGapFix(target *ClaudePluginTarget, marketplace string) string {
-	if target.Local {
+	if target.Own {
 		return ClaudePluginRepair
 	}
 	return "claude plugin marketplace remove " + marketplace + ", then " + ClaudePluginRepair
@@ -93,10 +108,10 @@ func claudeMarketplaceRemoveFix(marketplace string) string {
 		" deletes the saved options and data of its plugins; run it only if they may go, then " + ClaudePluginRepair
 }
 
-// professorMarketplaceName is the marketplace the source clone's own
-// .claude-plugin/marketplace.json registers: {name}@professor is a copy of a
-// plugin of ours.
-const professorMarketplaceName = "professor"
+// professorMarketplaceRepository is the GitHub repository whose
+// .claude-plugin/marketplace.json is the professor marketplace a release
+// installs every plugin of ours from.
+const professorMarketplaceRepository = claudePluginOwner + "/" + pfmconfig.ProfessorMarketplace
 
 // marketplacePluginName is a plugin name the source clone's marketplace may
 // list: one safe path element, as a bare claude.plugins entry is.

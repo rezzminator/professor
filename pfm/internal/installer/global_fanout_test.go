@@ -298,7 +298,7 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 	t.Cleanup(func() { _ = os.Chmod(markerDir, 0o755) })
 
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil)
 	if warnings != 1 || failures != 0 {
 		t.Fatalf("warnings=%d failures=%d, want 1/0\n%s", warnings, failures, output.String())
 	}
@@ -347,6 +347,14 @@ func TestReportGlobalAgentsRendersEngineSyncRows(t *testing.T) {
 			},
 		},
 		{
+			// The empty roster install ran `global --no-codex-home` over: doctor
+			// names no Codex home, so it never checks one install skipped.
+			name: "an explicit empty roster, no Codex home", codexHomes: []string{},
+			argv: func(home string) string {
+				return "doctor --machine --home " + home + " --claude-config-dir " + ClaudeStore(home) + " --json"
+			},
+		},
+		{
 			name: "Claude absent", clone: true, claudeAbsent: true,
 			argv: func(home string) string {
 				return "doctor --machine --home " + home + " --claude-config-dir " + ClaudeStore(home) +
@@ -373,7 +381,7 @@ func TestReportGlobalAgentsRendersEngineSyncRows(t *testing.T) {
 				paths.OSEnv{},
 				testCase.capabilities,
 				nil,
-				testCase.codexHomes...)
+				testCase.codexHomes)
 			if warnings != 1 || failures != 1 {
 				t.Fatalf("warnings=%d failures=%d, want 1/1\n%s", warnings, failures, output.String())
 			}
@@ -398,7 +406,7 @@ func TestReportGlobalAgentsWithoutEngineSyncIsAFailingRow(t *testing.T) {
 	t.Setenv("ENGINE_SYNC_HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil)
 	if warnings != 0 || failures != 1 {
 		t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 	}
@@ -462,4 +470,55 @@ func TestGlobalWiringPreservesEntriesThatAreNotProvenCopies(t *testing.T) {
 		filepath.Join(repo, "templates", "global", "commands", "copied.md"))
 	assertFanoutLink(t, filepath.Join(first, "skills", "copied"),
 		filepath.Join(repo, "templates", "global", "skills", "copied"))
+}
+
+// TestGlobalRulesLinkIntoTheStore: install links each top-level .md rule, skips
+// and names every other entry, preserves a real file that is not a byte copy
+// as a conflict, and relinks a byte copy; an absent source is a skip line.
+func TestGlobalRulesLinkIntoTheStore(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	var output bytes.Buffer
+	installer, first, _ := globalFanoutEngine(t, home, true, &output)
+	repo := filepath.Join(home, "blueprint")
+
+	if err := installer.wireGlobalRules(); err != nil {
+		t.Fatalf("wireGlobalRules without a source: %v", err)
+	}
+	absent := "global rules source absent at " + filepath.Join(repo, "templates", "global", "rules")
+	if !strings.Contains(output.String(), absent) {
+		t.Fatalf("an absent rules source is not a skip line:\n%s", output.String())
+	}
+
+	rules := filepath.Join(repo, "templates", "global", "rules")
+	writeFixture(t, filepath.Join(rules, "linked.md"), "a rule\n")
+	writeFixture(t, filepath.Join(rules, "edited.md"), "shipped\n")
+	writeFixture(t, filepath.Join(rules, "copied.md"), "shipped copy\n")
+	writeFixture(t, filepath.Join(rules, "notes.txt"), "not a rule\n")
+	writeFixture(t, filepath.Join(rules, "nested", "deep.md"), "not top level\n")
+	writeFixture(t, filepath.Join(first, "rules", "edited.md"), "my edited rule\n")
+	writeFixture(t, filepath.Join(first, "rules", "copied.md"), "shipped copy\n")
+
+	if err := installer.wireGlobalRules(); err != nil {
+		t.Fatalf("wireGlobalRules: %v", err)
+	}
+	assertFanoutLink(t, filepath.Join(first, "rules", "linked.md"), filepath.Join(rules, "linked.md"))
+	assertFanoutLink(t, filepath.Join(first, "rules", "copied.md"), filepath.Join(rules, "copied.md"))
+	if got := readFixture(t, filepath.Join(first, "rules", "edited.md")); got != "my edited rule\n" {
+		t.Fatalf("the edited rule was overwritten: %q", got)
+	}
+	for _, want := range []string{
+		"CONFLICT " + filepath.Join(first, "rules", "edited.md"),
+		filepath.Join(rules, "notes.txt") + " is not a regular .md file",
+		filepath.Join(rules, "nested") + " is not a regular .md file",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("install output lacks %q:\n%s", want, output.String())
+		}
+	}
+	for _, name := range []string{"notes.txt", "nested"} {
+		if _, err := os.Lstat(filepath.Join(first, "rules", name)); err == nil {
+			t.Fatalf("install linked the non-rule entry %s", name)
+		}
+	}
 }

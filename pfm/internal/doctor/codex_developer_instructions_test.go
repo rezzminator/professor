@@ -15,7 +15,7 @@ import (
 // different lines, and only the installed prompt earns "ok". A check that
 // answered the same way for all of them would be a coincidence detector.
 func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
-	prompt, err := codexprompt.FleetPrompt()
+	prompt, err := codexprompt.FleetPrompt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,11 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 				}
 			}
 			var out bytes.Buffer
-			if failures := PrintCodexDeveloperInstructions(&out, []string{home}); failures != testCase.failures {
+			if failures := PrintCodexDeveloperInstructions(
+				&out,
+				t.TempDir(),
+				[]string{home},
+			); failures != testCase.failures {
 				t.Fatalf("failures=%d want=%d: %s", failures, testCase.failures, out.String())
 			}
 			for _, want := range []string{testCase.want, testCase.wantAlso} {
@@ -107,7 +111,7 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 // pass and never a failure.
 func TestCodexDeveloperInstructionsNameAHostWithNoCodexAccount(t *testing.T) {
 	var out bytes.Buffer
-	if failures := PrintCodexDeveloperInstructions(&out, nil); failures != 0 {
+	if failures := PrintCodexDeveloperInstructions(&out, t.TempDir(), nil); failures != 0 {
 		t.Fatalf("failures=%d: %s", failures, out.String())
 	}
 	if !strings.Contains(out.String(), "no-accounts") {

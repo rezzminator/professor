@@ -39,15 +39,45 @@ func schedulerRowWarnings(output string) int {
 }
 
 // The target-shape home has no legitimate host-check WARN rows: its store
-// and account entries are classified, and no legacy files are staged.
-func (h *e2eHarness) hostCheckRowWarnings(output string) int {
+// and account entries are classified, and no legacy files are staged. A row
+// a test planted is counted by plantedRowWarnings instead.
+func (h *e2eHarness) hostCheckRowWarnings(output string, planted []string) int {
 	h.t.Helper()
 	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(line, "host-check: WARN ") {
+		if strings.HasPrefix(line, "host-check: WARN ") && !hasAnyPrefix(line, planted) {
 			h.t.Fatalf("unexpected host-check warning on fresh home: %s", line)
 		}
 	}
 	return 0
+}
+
+// plantedRowWarnings counts the rows starting with a planted prefix; a prefix
+// no row starts with is a fatal error, so a planted warning cannot vanish.
+func (h *e2eHarness) plantedRowWarnings(output string, planted []string) int {
+	h.t.Helper()
+	count := 0
+	for _, prefix := range planted {
+		matched := 0
+		for _, line := range strings.Split(output, "\n") {
+			if strings.HasPrefix(line, prefix) {
+				matched++
+			}
+		}
+		if matched == 0 {
+			h.t.Fatalf("doctor omitted the planted warning %q: %s", prefix, output)
+		}
+		count += matched
+	}
+	return count
+}
+
+func hasAnyPrefix(line string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // claudePluginRowWarnings counts doctor's store-wide plugin gap rows.
@@ -63,6 +93,14 @@ func claudePluginRowWarnings(output string) int {
 }
 
 func (h *e2eHarness) requireInstalledDoctor(result commandResult) {
+	h.t.Helper()
+	h.requireInstalledDoctorWarnings(result)
+}
+
+// requireInstalledDoctorWarnings is requireInstalledDoctor on a host that
+// carries standing warnings of its own: each planted prefix starts at least
+// one row, and every such row counts in the tally.
+func (h *e2eHarness) requireInstalledDoctorWarnings(result commandResult, planted ...string) {
 	h.t.Helper()
 	output := result.stdout + result.stderr
 	if result.err == nil {
@@ -82,7 +120,10 @@ func (h *e2eHarness) requireInstalledDoctor(result commandResult) {
 			)
 		}
 	}
-	wantWarnings := fmt.Sprintf("doctor: warnings=%d", schedulerRowWarnings(output)+h.hostCheckRowWarnings(output))
+	wantWarnings := fmt.Sprintf(
+		"doctor: warnings=%d",
+		schedulerRowWarnings(output)+h.hostCheckRowWarnings(output, planted)+h.plantedRowWarnings(output, planted),
+	)
 	if !strings.Contains("\n"+output, "\n"+wantWarnings+"\n") {
 		h.t.Fatalf("doctor omitted exact tally %q: %s", wantWarnings, output)
 	}

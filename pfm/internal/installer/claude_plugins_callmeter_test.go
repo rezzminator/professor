@@ -309,7 +309,7 @@ func TestEnsureClaudePluginsBuildsCallmeterBeforeItsCopy(t *testing.T) {
 			t.Setenv("XDG_STATE_HOME", "")
 			root := t.TempDir()
 			writeCallmeterCheckout(t, root, "0.4.0")
-			mirror := filepath.Join(home, ".local", "share", "callmeter-dev", "plugins", "callmeter")
+			mirror := filepath.Join(home, ".local", "share", "professor-dev", "plugins", "callmeter")
 			runner := &goRunner{output: "new"}
 			if failed {
 				runner.failure = "boom"
@@ -368,7 +368,7 @@ func TestEnsureClaudePluginsSkipsDisabledCallmeterBuild(t *testing.T) {
 			home,
 			".local",
 			"share",
-			"callmeter-dev",
+			"professor-dev",
 			"plugins",
 			"callmeter",
 			".claude-plugin",

@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -280,6 +281,7 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 			var stderr strings.Builder
 			executor, err := New(Dependencies{
 				Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr,
+				HerdrPlaces: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
 				Identify: func(context.Context) (resolve.Identity, error) {
 					return resolve.Identity{
 						Backend:        "herdr",
@@ -463,6 +465,8 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 					}}
 				case "ping":
 					result = map[string]any{"type": "pong", "version": "0.9.5", "protocol": 22}
+				case "workspace.list", "workspace.create":
+					result, _ = testjail.HerdrWorkspaceReply(req.Method, req.Params.Label, "w6")
 				case "layout.apply":
 					result = map[string]any{"layout": map[string]any{
 						"workspace_id": "w6", "root": map[string]any{"type": "pane", "pane_id": "w6:p9"},

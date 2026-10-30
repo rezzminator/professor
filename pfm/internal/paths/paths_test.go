@@ -463,7 +463,7 @@ func TestOpenCodeWorkbenchPlugin(t *testing.T) {
 	}
 }
 
-// The cost ledger directory is the same one the sink writes and callmeter reads:
+// The cost ledger directory is the one the sink writes and pfm install hands callmeter:
 // PFM_COST_LEDGER_DIR wins, else the pfm state directory of the home.
 func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testing.T) {
 	home := "/jail/home"

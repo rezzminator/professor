@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -56,29 +55,25 @@ func bindNativeHost(
 	if socket != seat.HerdrSocket && !cold {
 		return seat, errors.New("caller socket differs from durable owner")
 	}
-	body, err := herdr.SeatRequest(ctx, socket, "pane.get", map[string]string{"pane_id": pane})
+	chain, err := herdrAncestry(proc, os.Getpid())
+	if err != nil {
+		return seat, fmt.Errorf("read supervisor %w", err)
+	}
+	asked, _, _, err := gather.HerdrChatPane(ctx, db, proc, socket, pane, chain)
+	if err != nil {
+		return seat, err
+	}
+	info, found, err := herdr.LocatePane(ctx, socket, asked, chain)
+	if err == nil && !found {
+		err = fmt.Errorf("no pane of %s holds the supervisor", socket)
+	}
 	if err != nil {
 		return seat, fmt.Errorf("resolve caller alias: %w", err)
 	}
-	var info struct {
-		Type string `json:"type"`
-		Pane struct {
-			ID        string `json:"pane_id"`
-			Workspace string `json:"workspace_id"`
-			Terminal  string `json:"terminal_id"`
-		} `json:"pane"`
-	}
-	if err := json.Unmarshal(body, &info); err != nil {
-		return seat, fmt.Errorf("decode caller pane: %w", err)
-	}
-	if info.Type != "pane_info" || info.Pane.ID == "" || info.Pane.Workspace == "" || info.Pane.Terminal == "" ||
-		!strings.HasPrefix(info.Pane.ID, info.Pane.Workspace+":") {
-		return seat, errors.New("caller pane has malformed identity")
-	}
-	if !cold && seat.HerdrTerminalID != "" && seat.HerdrTerminalID != info.Pane.Terminal {
+	if !cold && seat.HerdrTerminalID != "" && seat.HerdrTerminalID != info.Terminal {
 		return seat, errors.New("caller terminal differs from durable owner")
 	}
-	if !cold && seat.HerdrTerminalID == "" && seat.HerdrPane != pane && seat.HerdrPane != info.Pane.ID {
+	if !cold && seat.HerdrTerminalID == "" && seat.HerdrPane != pane && seat.HerdrPane != info.ID {
 		return seat, errors.New("unbound caller differs from reserved pane")
 	}
 	// Validate our exact process role before a tentative binding can be observed.
@@ -98,7 +93,7 @@ func bindNativeHost(
 		args[2] != seat.SeatID {
 		return seat, errors.New("supervisor must exec exact seat-host role")
 	}
-	body, err = herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{"pane_id": info.Pane.ID})
+	body, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{"pane_id": info.ID})
 	if err != nil {
 		return seat, fmt.Errorf("read caller shell: %w", err)
 	}
@@ -112,7 +107,7 @@ func bindNativeHost(
 	if err := json.Unmarshal(body, &process); err != nil {
 		return seat, fmt.Errorf("decode caller shell: %w", err)
 	}
-	if process.Type != "pane_process_info" || process.Info.Pane != info.Pane.ID || process.Info.Shell <= 1 {
+	if process.Type != "pane_process_info" || process.Info.Pane != info.ID || process.Info.Shell <= 1 {
 		return seat, errors.New("caller shell identity unavailable")
 	}
 	member := false
@@ -134,9 +129,9 @@ func bindNativeHost(
 	}
 	next := seat
 	next.HerdrSocket = socket
-	next.HerdrPane = info.Pane.ID
-	next.HerdrWorkspace = info.Pane.Workspace
-	next.HerdrTerminalID = info.Pane.Terminal
+	next.HerdrPane = info.ID
+	next.HerdrWorkspace = info.Workspace
+	next.HerdrTerminalID = info.Terminal
 	if err := gather.StampHerdrHost(proc, &next, os.Getpid()); err != nil {
 		return seat, err
 	}

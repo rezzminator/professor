@@ -9,8 +9,8 @@ import (
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
 	hooks := HookTemplates(home)
-	if len(hooks) != 23 {
-		t.Fatalf("registrations=%d, want 23", len(hooks))
+	if len(hooks) != 24 {
+		t.Fatalf("registrations=%d, want 24", len(hooks))
 	}
 	for _, hook := range hooks {
 		if !strings.HasPrefix(hook.Command, home+"/.local/bin/pfm ") {
@@ -38,6 +38,25 @@ func TestStoreGuardRidesBesideGitGuardOnBash(t *testing.T) {
 	}
 }
 
+// pcm-guard rides every launch on every tool that writes a file, so a
+// prompt file is guarded whether the Edit tools or Bash write it.
+func TestPcmGuardRidesEveryWritingTool(t *testing.T) {
+	home := t.TempDir()
+	var got []Hook
+	for _, hook := range HookTemplates(home) {
+		if hook.Name == "pcm-guard" {
+			got = append(got, hook)
+		}
+	}
+	want := Hook{
+		Event: hookEventPreToolUse, Matcher: "Edit|Write|MultiEdit|NotebookEdit|Bash",
+		Command: home + "/.local/bin/pfm internal pcm-guard", Name: "pcm-guard",
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("pcm-guard hooks=%+v, want exactly %+v", got, want)
+	}
+}
+
 // The Herdr reporter rides every Claude launch: one row per lifecycle event,
 // the per-turn and per-tool state flips async so a turn never waits on Herdr,
 // PermissionRequest reports blocked with the tool it names, and the
@@ -52,7 +71,7 @@ func TestHerdrReporterRowsCoverTheClaudeLifecycle(t *testing.T) {
 		{Event: "PostToolUseFailure", Command: binary + "working", Name: "herdr-working-tool-failure", Async: true},
 		{Event: "PermissionRequest", Command: binary + "blocked", Name: "herdr-blocked", Async: true},
 		{
-			Event: "Notification", Matcher: "permission_prompt|elicitation_dialog|idle_prompt",
+			Event: "Notification", Matcher: "permission_prompt|elicitation_dialog|idle_prompt|plugin_notification",
 			Command: binary + "notification", Name: "herdr-notification", Async: true,
 		},
 		{Event: "Stop", Command: binary + "idle", Name: "herdr-idle"},

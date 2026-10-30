@@ -52,7 +52,8 @@ func printSelectedHerdrBackendDoctor(
 		if backend == spawn.BackendHerdr {
 			fmt.Fprintf(
 				stdout,
-				"doctor: herdr backend CHECKING — chat.backend=auto (%s) resolved to Herdr from the proven caller\n",
+				"doctor: herdr backend CHECKING — chat.backend=auto (%s) resolved to Herdr from the proven caller; "+
+					"a new chat is born in its place's workspace\n",
 				cfg.Source("chat.backend"),
 			)
 		}

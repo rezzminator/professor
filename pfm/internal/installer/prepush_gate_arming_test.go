@@ -49,7 +49,7 @@ func gitConfigValue(t *testing.T, repo, key string) string {
 }
 
 // TestInstallArmsThePrePushGateInTheSourceClone is a REGRESSION test for the
-// v0.77.1 rehearsal finding: `pfm install` records/keeps the source-repo
+// v0.77.1 release finding: `pfm install` records/keeps the source-repo
 // marker but never arms the pre-push leak gate in the clone it manages, so
 // `pfm doctor` run from that clone exits 1 with UNWIRED. An apply run against
 // a clone that ships .githooks/pre-push but has core.hooksPath unset must

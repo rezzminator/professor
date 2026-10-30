@@ -168,15 +168,20 @@ func (installer *engine) wireVSCode() error {
 			return err
 		}
 	}
+	// A failed build still lets the links and ledger land; the run fails on it.
+	promptErr := installer.writeVSCodeSystemPrompt()
 	extensions, err = installer.linkVSCodeExtension(extensions)
 	if err != nil {
-		return err
+		return errors.Join(promptErr, err)
 	}
 	indexRegistrations = make([]string, 0, len(extensions))
 	for _, target := range extensions {
 		indexRegistrations = append(indexRegistrations, filepath.Join(filepath.Dir(target), vscodeExtensionIndexName))
 	}
-	return installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions, indexRegistrations)
+	return errors.Join(
+		promptErr,
+		installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions, indexRegistrations),
+	)
 }
 
 // vscodeExtensionLinks enumerates the extension-link targets pfm can wire on
@@ -639,6 +644,9 @@ func (installer *engine) unwireVSCode(
 		}
 	}
 
+	if err := installer.removeVSCodeSystemPrompt(); err != nil {
+		return err
+	}
 	return installer.writeVSCodeOwnership(path, existing, ownership, nil, nil)
 }
 

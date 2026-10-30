@@ -26,6 +26,7 @@ Operator verbs:
 - heal: report or repair wedged Codex history projections
 - install: wire the self-contained host integration (`--yes` non-interactive)
 - uninstall: remove it
+- generate: rebuild what install compiles from the source clone — harness prompts, machine agents, the Codex fleet prompt — with no pfm rebuild; `--plan` previews
 - update: bare form updates the binary from its source clone; `adopt|pin|ignore|drop|accept` manage this project's template baseline (`pfm doctor --project-updates` reports it)
 - init: scaffold project templates once and pin their baselines (`pfm init [dir] [--force]`); `pfm init --render [dir]` fills install-time tokens once from `.professor/manifest.json`
 - restart: end every chat, then restart Herdr and every pfm service that was running before, each verified up; a unit found stopped stays stopped, named; `--dry-run` prints the ordered plan and changes nothing
@@ -53,7 +54,7 @@ engine-sync, the `engine-sync` plugin's binary (on PATH after `pfm install`), is
 
 ## Host integration
 
-`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands and skills from `{BLUEPRINT_CLONE_PATH}`; saving a global template IS the deploy. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
+`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands, rules and skills from `{BLUEPRINT_CLONE_PATH}`, one link per rule file in `~/.claude/rules/`; `engine-sync global` carries the always-on rules to Codex (an owned block in each Codex home's `AGENTS.md`) and OpenCode (an `instructions` entry); saving a global template IS the deploy. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
 
 ## Chat: MCP first, shell for the rest
 

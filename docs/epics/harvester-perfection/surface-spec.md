@@ -84,7 +84,7 @@ The tools, their inputs and their output fields are named by `naming-spec.md` (t
 
 | Where | Change |
 | --- | --- |
-| `templates/global/agents/rr.md`, `sub-rr.md` (through `/pcm`) | tools lists and steps name `read`, `search_literature`, `search_web`, `download_file`; `searchCache` gone |
+| `templates/global/agents/rr.md`, `sub-rr.md` (through the `pcm` agent) | tools lists and steps name `read`, `search_literature`, `search_web`, `download_file`; `searchCache` gone |
 | `templates/global/commands/pfm.md` | the four tools and the CLI verbs |
 | `workflows/deep-rr/engine/src/**` | `fetch` → `read` with `urls` or `publications` by what the step reads; `search` → `search_web`; then `npm run build` regenerates `workflow.js` and the snapshots are updated; `SKILL.md` preflight uses `read` |
 | `docs/dev/pfm-surface.md` | the tool table and CLI rows |
@@ -109,7 +109,7 @@ Releases and demo inventories are history and stay as written. The `pfm archive`
 2. **R2 tools**: the four tools, typed output, the misplaced-field errors, the removals in Go, the string rewrites, the service split, the remote resource template and its cap. Proof: SDK round-trip tests per tool; the remote gateway serves `resources/read` for a downloaded file and refuses an unknown id; a local `stdio` session lists exactly the four (three without search).
 3. **R3 docs, lanes, CLI**: everything in the callers table outside `templates/` and `workflows/`, plus the CLI. Proof: the M lane passes in the fence; `grep` over the tree finds no old tool name outside releases and demo inventories.
 4. **R4 deep-rr**: engine sources, build, snapshots, `SKILL.md`. Proof: the engine's test suite passes.
-5. **R5 templates** (main loop, through `/pcm`): `rr.md`, `sub-rr.md`, `pfm.md`.
+5. **R5 templates** (main loop, through the `pcm` agent): `rr.md`, `sub-rr.md`, `pfm.md`.
 
 ## Open risks, named
 

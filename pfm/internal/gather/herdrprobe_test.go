@@ -871,10 +871,59 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 			}
 			for _, want := range seats {
 				stored, found, err := db.Seat(ctx, want.SeatID)
-				if err != nil || !found || stored.State != "live" || stored.LostNote != "" {
-					t.Fatalf("listing mutated durable seat %s: %+v found=%t err=%v", want.SeatID, stored, found, err)
+				retired := want.SeatID == "dead" && !readOnly
+				if err != nil || !found || (stored.State == "lost") != retired || (stored.LostNote != "") != retired {
+					t.Fatalf(
+						"listing retire of %s (want retired=%t): %+v found=%t err=%v",
+						want.SeatID, retired, stored, found, err,
+					)
 				}
 			}
 		})
+	}
+}
+
+// HerdrChatSeat finds the chat's seat by its supervisor in the caller's
+// ancestry, whatever the inherited pane says; a legacy seat by the inherited
+// pane and an ancestor's supervisor argv; an unreadable ancestor is an error.
+func TestHerdrChatSeat(t *testing.T) {
+	proc := t.TempDir()
+	for pid, argv := range map[string]string{"20": "pfm\x00internal\x00seat-host\x00legacy\x00", "30": "zsh\x00"} {
+		if err := os.MkdirAll(filepath.Join(proc, pid), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(proc, pid, "cmdline"), []byte(argv), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(proc, "50", "cmdline"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	moved := fleetdb.Seat{SeatID: "moved", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w9:p2", SeatHostPID: 20}
+	legacy := fleetdb.Seat{SeatID: "legacy", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w6:p3"}
+	for _, tc := range []struct {
+		name, socket, env string
+		seats             []fleetdb.Seat
+		chain             []int
+		want              string
+		fails             bool
+	}{
+		{name: "supervisor ancestor", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{moved}, chain: []int{40, 20}, want: "moved"},
+		{name: "other socket", socket: "/t", env: "w6:p3", seats: []fleetdb.Seat{moved}, chain: []int{40, 20}},
+		{name: "no ancestor", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{moved}, chain: []int{40, 30}},
+		{name: "legacy by env pane", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{legacy}, chain: []int{40, 20}, want: "legacy"},
+		{name: "legacy other pane", socket: "/s", env: "w1:p1", seats: []fleetdb.Seat{legacy}, chain: []int{40, 20}},
+		{name: "legacy unreadable", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{legacy}, chain: []int{50, 20}, fails: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seat, found, err := HerdrChatSeat(tc.seats, NewProcFS(proc), tc.socket, tc.env, tc.chain)
+			if tc.fails != (err != nil) || found != (tc.want != "") || seat.SeatID != tc.want {
+				t.Fatalf("seat=%q found=%v err=%v, want %q fails=%v", seat.SeatID, found, err, tc.want, tc.fails)
+			}
+		})
+	}
+	pane, _, found, err := HerdrChatPane(context.Background(), nil, NewProcFS(proc), "/s", "w6:p3", []int{40})
+	if err != nil || found || pane != "w6:p3" {
+		t.Fatalf("no state: pane=%q found=%v err=%v, want the inherited pane", pane, found, err)
 	}
 }

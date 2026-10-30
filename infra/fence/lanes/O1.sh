@@ -57,6 +57,27 @@ else
   pass "$(one_line "$summary")"
 fi
 
+# ─── O1.01a — generate after an install previews, then changes nothing ──────
+
+beat O1.01a-generate
+spends none
+plan_out="$(cd "$BLUEPRINT" && pfm generate --plan 2>&1)"
+plan_rc=$?
+gen_out="$(cd "$BLUEPRINT" && pfm generate 2>&1)"
+gen_rc=$?
+summary="$(grep -E '^.*summary changed=' <<<"$gen_out" | tail -1)"
+if [ "$plan_rc" -ne 0 ]; then
+  fail "pfm generate --plan exited $plan_rc: $(one_line "$(printf '%s\n' "$plan_out" | tail -5)")"
+elif ! grep -qF 'MODE: plan' <<<"$plan_out"; then
+  fail "pfm generate --plan did not name its plan mode: $(one_line "$(printf '%s\n' "$plan_out" | tail -5)")"
+elif [ "$gen_rc" -ne 0 ]; then
+  fail "pfm generate exited $gen_rc: $(one_line "$(printf '%s\n' "$gen_out" | tail -5)")"
+elif ! grep -q 'changed=0' <<<"$summary"; then
+  fail "pfm generate after an idempotent install still changed something: $(one_line "${summary:-no summary line}")"
+else
+  pass "$(one_line "$summary")"
+fi
+
 # ─── O1.02 — every staged host asset is present ─────────────────────────────
 
 beat O1.02-host-assets
@@ -143,7 +164,7 @@ else
     fail "$settings is not a valid settings object"
   else
     missing=""
-    for verb in launcher-repair clear-kill exit-close git-guard store-guard epic-inject reload-intercept exit-intercept; do
+    for verb in launcher-repair clear-kill exit-close git-guard store-guard pcm-guard epic-inject reload-intercept exit-intercept; do
       grep -q -- "$verb" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $verb;"
     done
     grep -q 'usage-hook' "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template usage-hook;"
@@ -232,8 +253,9 @@ link="$HOME/.cc/lane-linked-seat"
 bad=""
 [ -L "$BLUEPRINT" ] || bad="$bad $BLUEPRINT is not a symlink — the linked-blueprint half cannot be asserted here;"
 blue_doctor="$(pfm doctor 2>&1)"
-grep -qF 'harness-prompts embed=ok tree=' <<<"$blue_doctor" ||
-  bad="$bad pfm doctor did not resolve the linked blueprint's harness prompts;"
+{ grep -qF 'doctor: harness-prompt requested=' <<<"$blue_doctor" &&
+  ! grep -qF 'BASELINE UNAVAILABLE' <<<"$blue_doctor"; } ||
+  bad="$bad pfm doctor did not resolve the linked blueprint's harness prompt baselines;"
 rm -rf "$link"
 ln -s "$SEAT_DIR" "$link"
 if ! with_restored "$CONFIG"; then

@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -188,7 +189,10 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 			}
 			born, code := BirthHerdr(
 				ctx,
-				spawn.BackendChoice{Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6"},
+				spawn.BackendChoice{
+					Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6",
+					Places: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
+				},
 				plan,
 				&config.Runtime{Paths: values},
 				"INTEGRATION",

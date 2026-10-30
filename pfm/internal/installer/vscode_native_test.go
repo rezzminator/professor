@@ -34,12 +34,25 @@ const path = require('path');
 const childProcess = require('child_process');
 const [extensionPath, stateDir] = process.argv.slice(2);
 const scenario = JSON.parse(process.env.PFM_NATIVE_SCENARIO);
+const readFileSync = fs.readFileSync;
+let historyUnreadable = false;
+fs.readFileSync = (file, ...args) => {
+  if (historyUnreadable && file === path.join(stateDir, 'vscode-native.json')) {
+    const err = new Error('injected native history I/O failure');
+    err.code = 'EIO';
+    throw err;
+  }
+  return readFileSync(file, ...args);
+};
 
 let colorTheme = scenario.colorTheme;
 let colors = {};
 const updates = [];
 const messages = [];
-const listeners = [];
+let listeners = [];
+const windows = new Map();
+let activeWindow = 'default';
+const workspaceURI = () => 'vscode-remote://ssh-remote+fixture/' + activeWindow;
 let inFlight = 0;
 let moveContractTo = scenario.moveContractTo;
 const fire = () => {
@@ -63,7 +76,9 @@ const vscodeStub = {
   env: { remoteName: scenario.remoteName || undefined },
   ExtensionKind: { UI: 1, Workspace: 2 },
   workspace: {
+    textDocuments: [],
     workspaceFile: undefined,
+    workspaceFolders: [{ uri: { toString: workspaceURI } }],
     onDidChangeConfiguration: (listener) => {
       listeners.push(listener);
       return { dispose() {} };
@@ -109,6 +124,16 @@ const vscodeStub = {
     showInformationMessage: (message) => { messages.push({ kind: 'info', message }); return Promise.resolve(); },
     setStatusBarMessage: (message) => { messages.push({ kind: 'status', message }); return { dispose() {} }; },
   },
+  // activate also starts Prompt Lint (prompt-lint.js); this driver exercises none of it.
+  languages: {
+    createDiagnosticCollection: () => ({ dispose() {} }),
+    registerCodeActionsProvider: () => ({ dispose() {} }),
+    registerCodeLensProvider: () => ({ dispose() {} }),
+    match: () => 0,
+  },
+  Disposable: { from: () => ({ dispose() {} }) },
+  CodeActionKind: { QuickFix: 'quickfix' },
+  EventEmitter: function () { this.event = () => {}; },
   extensions: { getExtension: () => undefined },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
   ThemeIcon: function (id) { this.id = id; },
@@ -126,7 +151,21 @@ const context = {
   subscriptions: [],
   globalState: { get: (key, def) => def, update() {} },
 };
-const api = require(extensionPath).activate(context);
+let api = require(extensionPath).activate(context);
+const switchWindow = (name) => {
+  windows.set(activeWindow, { api, colorTheme, listeners });
+  activeWindow = name;
+  const prior = windows.get(name);
+  colorTheme = prior ? prior.colorTheme : scenario.colorTheme;
+  listeners = prior ? prior.listeners : [];
+  if (prior) api = prior.api;
+  else {
+    for (const file of Object.keys(require.cache)) {
+      if (file.startsWith(path.dirname(extensionPath) + path.sep)) delete require.cache[file];
+    }
+    api = require(extensionPath).activate(context);
+  }
+};
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 // A fired change reaches the extension's own listener, which queues its pick; the pick is idle
 // once no pfm run is in flight for a few ticks in a row.
@@ -144,6 +183,10 @@ const calls = () => (fs.readFileSync(path.join(process.env.HOME, 'fake-pfm', 'ca
 (async () => {
   const out = [];
   for (const step of scenario.steps) {
+    historyUnreadable = !!step.historyUnreadable;
+    if (step.window) switchWindow(step.window);
+    if (step.recordBody !== undefined) fs.writeFileSync(path.join(stateDir, 'vscode-native.json'), step.recordBody);
+    if (step.allowUpdate) scenario.refuseUpdate = false;
     if (step.contract) fs.writeFileSync(path.join(stateDir, 'current.json'), JSON.stringify(step.contract));
     if (step.pick !== undefined) {
       colorTheme = step.pick;
@@ -153,9 +196,18 @@ const calls = () => (fs.readFileSync(path.join(process.env.HOME, 'fake-pfm', 'ca
       await api.syncTheme();
       if (scenario.fireOnUpdate) await idle();
     }
+    let record = null, recordRaw = '';
+    try {
+      recordRaw = readFileSync(path.join(stateDir, 'vscode-native.json'), 'utf8');
+      try { record = JSON.parse(recordRaw); } catch (_) { /* retain malformed evidence below */ }
+    } catch (err) { if (err.code !== 'ENOENT') throw err; }
+    const scope = scenario.remoteName ? 'workspace:' + workspaceURI() : 'global';
+    const scoped = record?.scopes?.[scope] || record;
+    const valid = scoped && typeof scoped.palette === 'string' &&
+      (scoped.id === undefined || scoped.id === null || typeof scoped.id === 'string');
     out.push({
       step: step.name, colorTheme, updates: JSON.parse(JSON.stringify(updates)), calls: calls(),
-      messages: [...messages], record: readJSON(path.join(stateDir, 'vscode-native.json')),
+      messages: [...messages], record: valid ? scoped : null, recordRaw,
     });
   }
   process.stdout.write(JSON.stringify(out));
@@ -165,9 +217,13 @@ const calls = () => (fs.readFileSync(path.join(process.env.HOME, 'fake-pfm', 'ca
 // nativeStep is one step of the walk: a contract to write and sync, a Color
 // Theme the user accepts, or (neither) a sync of the contract on disk.
 type nativeStep struct {
-	Name     string         `json:"name"`
-	Contract map[string]any `json:"contract,omitempty"`
-	Pick     *string        `json:"pick,omitempty"`
+	Name              string         `json:"name"`
+	Contract          map[string]any `json:"contract,omitempty"`
+	Pick              *string        `json:"pick,omitempty"`
+	Window            string         `json:"window,omitempty"`
+	RecordBody        *string        `json:"recordBody,omitempty"`
+	AllowUpdate       bool           `json:"allowUpdate,omitempty"`
+	HistoryUnreadable bool           `json:"historyUnreadable,omitempty"`
 }
 
 type nativeScenario struct {
@@ -187,6 +243,7 @@ type nativeScenario struct {
 
 type nativeSnapshot struct {
 	Step       string `json:"step"`
+	RecordRaw  string `json:"recordRaw"`
 	ColorTheme string `json:"colorTheme"`
 	Updates    []struct {
 		Key    string `json:"key"`
@@ -296,6 +353,99 @@ printf '{"enabled": true, "generation": %%d, "palette": "%%s", "colors": {}, "ch
 		t.Fatalf("native driver walked %d of %d steps: %s", len(steps), len(scenario.Steps), output)
 	}
 	return steps
+}
+
+func TestNativeHistoryFailurePreservesEvidenceAndRecovers(t *testing.T) {
+	t.Parallel()
+	legacy := `{"palette":"custom:lagoon","id":"professor-lagoon"}`
+	for _, body := range []string{legacy, "{broken", "null", "[]", `{}`, `{"palette":42}`, `{"palette":"custom:lagoon","id":42}`, `{"version":2,"scopes":{"global":null}}`} {
+		for _, picked := range []bool{false, true} {
+			bad := nativeStep{
+				Name:              "bad-history",
+				RecordBody:        pick(body),
+				Contract:          nativeContract(2, "custom:ultrafunk"),
+				HistoryUnreadable: body == legacy,
+			}
+			if picked {
+				bad.Pick = pick("professor-lagoon")
+			}
+			steps := runVSCodeNative(t, nativeScenario{ColorTheme: "Sonar", Steps: []nativeStep{
+				bad,
+				{Name: "repaired", RecordBody: pick(legacy)},
+			}}, 0, "")
+			if steps[0].RecordRaw != body || len(steps[0].Updates) != 0 || len(steps[0].Calls) != 0 ||
+				len(steps[0].Messages) == 0 || steps[0].Messages[0].Kind != "error" ||
+				!strings.Contains(steps[0].Messages[0].Message, "vscode-native.json") {
+				t.Errorf("history %q, pick=%t: must preserve and visibly refuse: %+v", body, picked, steps[0])
+			}
+			if steps[1].ColorTheme != "professor-ultrafunk" || recordPalette(steps[1]) != "custom:ultrafunk" {
+				t.Errorf("history %q, pick=%t: repaired history must retry same contract: %+v", body, picked, steps[1])
+			}
+		}
+	}
+}
+
+func TestNativeRemoteWorkspacesFollowIndependently(t *testing.T) {
+	t.Parallel()
+	for _, order := range [][]string{{"A", "B"}, {"B", "A"}} {
+		a, b := order[0], order[1]
+		steps := runVSCodeNative(t, nativeScenario{
+			ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 2,
+			FireOnUpdate: true, Steps: []nativeStep{
+				{Name: "seed-first", Window: a, Contract: nativeContract(1, "custom:lagoon")},
+				{Name: "seed-second", Window: b},
+				{Name: "follow-first", Window: a, Contract: nativeContract(2, "custom:ultrafunk")},
+				{Name: "follow-second", Window: b},
+				{Name: "override", Pick: pick("Sonar")},
+				{Name: "resync", Contract: nativeContract(3, "custom:ultrafunk")},
+				{Name: "pick-first", Window: a, Pick: pick("professor-lagoon")},
+				{Name: "pick-follow-second", Window: b},
+			},
+		}, 0, "")
+		if len(steps[0].Updates) != 0 || len(steps[1].Updates) != 0 {
+			t.Fatalf("first install switches a workspace: %+v", steps[:2])
+		}
+		for _, i := range []int{2, 3} {
+			if steps[i].ColorTheme != "professor-ultrafunk" || len(steps[i].Updates) != i-1 {
+				t.Errorf("order %v: each workspace must follow independently: %+v", order, steps[i])
+			}
+		}
+		if steps[5].ColorTheme != "Sonar" || len(steps[5].Updates) != 2 {
+			t.Errorf("same-palette resync overwrote deliberate override: %+v", steps[5])
+		}
+		last := steps[7]
+		if last.ColorTheme != "professor-lagoon" || len(last.Updates) != 3 ||
+			!slices.Equal(last.Calls, []string{"theme use custom:lagoon"}) {
+			t.Errorf("a pick must not certify another workspace or feed back: %+v", last)
+		}
+		for _, update := range last.Updates {
+			if update.Target != 2 {
+				t.Errorf("remote native write used non-Workspace target: %+v", update)
+			}
+		}
+	}
+}
+
+func TestNativeLegacyHistorySeedsEachWorkspaceAndFailedSettingsRetry(t *testing.T) {
+	t.Parallel()
+	legacy := `{"palette":"custom:lagoon","id":"professor-lagoon"}`
+	steps := runVSCodeNative(t, nativeScenario{
+		ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 2,
+		RefuseUpdate: true, FireOnUpdate: true, Steps: []nativeStep{
+			{Name: "refused", Window: "A", RecordBody: pick(legacy), Contract: nativeContract(2, "custom:ultrafunk")},
+			{Name: "retry", AllowUpdate: true},
+			{Name: "second-migration", Window: "B"},
+		},
+	}, 0, "")
+	if steps[0].RecordRaw != legacy || steps[0].ColorTheme != "Sonar" || len(steps[0].Messages) == 0 {
+		t.Errorf("failed settings must leave legacy history intact: %+v", steps[0])
+	}
+	for _, step := range steps[1:] {
+		if step.ColorTheme != "professor-ultrafunk" || recordPalette(step) != "custom:ultrafunk" ||
+			len(step.Calls) != 0 {
+			t.Errorf("retry/migration must follow independently without feedback: %+v", step)
+		}
+	}
 }
 
 func recordPalette(step nativeSnapshot) string {
@@ -417,11 +567,18 @@ func TestNativeColorThemeShowsAFailedRunAndARefusedSwitch(t *testing.T) {
 	failed := runVSCodeNative(t, nativeScenario{ColorTheme: "Sonar", Steps: []nativeStep{
 		{Name: "seed", Contract: nativeContract(1, "custom:ultrafunk")},
 		{Name: "native-pick", Pick: pick("professor-lagoon")},
+		{Name: "retry-pick", Pick: pick("professor-lagoon")},
+		{Name: "follow-after-failure", Contract: nativeContract(2, "custom:lagoon")},
 	}}, 3, "theme custom:lagoon not installed")
 	pickStep := failed[1]
 	if len(pickStep.Messages) != 1 || pickStep.Messages[0].Kind != "error" ||
 		!strings.Contains(pickStep.Messages[0].Message, "theme custom:lagoon not installed") {
 		t.Fatalf("a failed pfm run must be shown in pfm's own words: %+v", pickStep.Messages)
+	}
+	if recordPalette(pickStep) != "custom:ultrafunk" || recordPalette(failed[2]) != "custom:ultrafunk" ||
+		!slices.Equal(failed[2].Calls, []string{"theme use custom:lagoon", "theme use custom:lagoon"}) ||
+		len(failed[3].Updates) != 0 || recordPalette(failed[3]) != "custom:lagoon" {
+		t.Fatalf("a failed pick must restore its guard and allow retry/follow: %+v", failed)
 	}
 	refused := runVSCodeNative(t, nativeScenario{ColorTheme: "Sonar", RefuseUpdate: true, Steps: []nativeStep{
 		{Name: "seed", Contract: nativeContract(1, "custom:lagoon")},

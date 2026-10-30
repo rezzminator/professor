@@ -224,10 +224,11 @@ func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	writeFixture(t, settings, `{}`)
+	clone := writeVSCodeLawFixture(t, t.TempDir())
 	var output bytes.Buffer
 	options := Options{
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &output, MCPConfigPath: testConfigPath(t),
-		SourceRepo: t.TempDir(), VSCode: true, vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
+		SourceRepo: clone, VSCode: true, vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)

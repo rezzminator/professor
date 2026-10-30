@@ -23,14 +23,14 @@ import (
 // prints whether the command was registered, every quick pick shown, every
 // message shown and every setContext activate ran. Activate's own commands
 // are cleared before a handler runs, so "route" prints the handlers' alone.
-// "lint" opens the prompt file PROFESSOR_LINT_SCENARIO describes (its path
+// "promptLint" opens the prompt file PROFESSOR_PROMPT_LINT_SCENARIO describes (its path
 // under HOME, its text, settings over package.json's defaults) in the active
 // editor (lensClick: in no active editor, the command the file's CodeLens
-// carries, run with the arguments it carries), runs the professor.analyzePrompt
+// carries, run with the arguments it carries), runs the professor.promptLint
 // handler (runs times; secondClick clicks again while the first runs;
 // editDuringRun edits the text then; cancelAfterMs cancels the progress;
 // cancelLensAfterMs runs the command the running lens carries then) and prints
-// the messages, the professor-prompt diagnostics left, every progress shown,
+// the messages, the professor-prompt-lint diagnostics left, every progress shown,
 // the quick fixes offered over the whole file (after editBeforeFix appends to
 // that 1-based line), every setContext, the lenses the file had before the
 // run (lensIdle), mid-run when cancelLensAfterMs is set (lensRunning) and
@@ -45,7 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const extensionPath = process.argv[2];
 const mode = process.argv[3];
-const scenarioEnv = { choose: 'PROFESSOR_CHOOSE_SCENARIO', lint: 'PROFESSOR_LINT_SCENARIO' }[mode];
+const scenarioEnv = { choose: 'PROFESSOR_CHOOSE_SCENARIO', promptLint: 'PROFESSOR_PROMPT_LINT_SCENARIO' }[mode];
 const scenario = scenarioEnv ? JSON.parse(process.env[scenarioEnv]) : {};
 const messages = [];
 const quickPicks = [];
@@ -238,10 +238,10 @@ if (mode === 'route') {
     if (handler) await handler();
     process.stdout.write(JSON.stringify({ registered: Boolean(handler), quickPicks, messages, contexts }));
   })().catch((err) => { process.stderr.write(String(err && err.stack || err)); process.exit(1); });
-} else if (mode === 'lint') {
-  const handler = registered['professor.analyzePrompt'];
+} else if (mode === 'promptLint') {
+  const handler = registered['professor.promptLint'];
   (async () => {
-    if (!handler) throw new Error('extension.js registers no professor.analyzePrompt handler');
+    if (!handler) throw new Error('extension.js registers no professor.promptLint handler');
     const lensView = () => (codeLensProvider.provideCodeLenses(document) || []).map((lens) => ({
       line: lens.range.start.line, title: lens.command.title, command: lens.command.command,
       uris: lens.command.arguments.map((uri) => uri.toString()),
@@ -315,14 +315,20 @@ func runVSCodeExtensionDriver(t *testing.T, mode string) []byte {
 // ~/.local/bin/pfm) and extra environment.
 func runVSCodeExtensionDriverAt(t *testing.T, mode, home string, env []string) []byte {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")
-	}
-
 	extensionPath, err := filepath.Abs(filepath.Join("assets", "vscode", "professor", "extension.js"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	return runVSCodeExtensionDriverFrom(t, extensionPath, mode, home, env)
+}
+
+// runVSCodeExtensionDriverFrom is runVSCodeExtensionDriverAt over the
+// extension.js at extensionPath, a staged copy beside files the embed lacks.
+func runVSCodeExtensionDriverFrom(t *testing.T, extensionPath, mode, home string, env []string) []byte {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")
 	}
 	if _, statErr := os.Stat(extensionPath); statErr != nil {
 		t.Fatalf("embedded extension asset %s: %v", extensionPath, statErr)

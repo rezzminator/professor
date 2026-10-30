@@ -12,7 +12,7 @@ import (
 
 func TestVSCodeOwnedLegacyAutoOpenProfileUpgradesToPFM(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{
   "terminal.integrated.profiles.linux": {
@@ -47,7 +47,7 @@ func TestVSCodeOwnedLegacyAutoOpenProfileUpgradesToPFM(t *testing.T) {
 
 func TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"operator-choice"}}}}`
 	writeFixture(t, settings, original)
@@ -180,7 +180,7 @@ func TestVSCodeCanonicalProfileNullsEveryChatIdentityVariable(t *testing.T) {
 // operator edit.
 func TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{
   "terminal.integrated.profiles.linux": {
@@ -215,7 +215,7 @@ func TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical(t *testin
 // already pins for the CC_AUTO_OPEN spelling.
 func TestVSCodeHandEditedPreviousCanonicalProfileIsPreserved(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"operator-choice"}}}}`
 	writeFixture(t, settings, original)

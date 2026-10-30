@@ -13,7 +13,7 @@ import (
 
 func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	original := `{
   // operator comment must survive PFM's merge
@@ -169,7 +169,7 @@ func TestVSCodeProfileConflictRefusesApplyBeforeInstallerWrites(t *testing.T) {
 
 func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
@@ -207,7 +207,7 @@ func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
 // restoring pfm's own remembered prior state.
 func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
@@ -243,7 +243,7 @@ func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
 
 func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	options := Options{
 		MCPConfigPath: testConfigPath(t),
@@ -287,7 +287,7 @@ func TestVSCodeProfileUsesTheShimPickerValueExplicitly(t *testing.T) {
 
 func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
 	paths := (&engine{options: Options{Home: home, vscodePlatform: "darwin"}}).vscodeSettingsPaths()
 	if len(paths) != 1 || paths[0] != settings {
@@ -316,7 +316,7 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 
 func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	oldPath := filepath.Join(home, "a-old-settings.json")
 	newPath := filepath.Join(home, "z-new-settings.json")
@@ -359,7 +359,7 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 
 func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
@@ -402,7 +402,7 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 func TestMalformedVSCodeSettingsSkipsVisiblyWithoutBlockingInstall(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	recordFixtureSourceRepo(t, home, t.TempDir())
+	recordFixtureSourceRepo(t, home, writeVSCodeLawFixture(t, t.TempDir()))
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, "{broken\n")
 	var output bytes.Buffer
@@ -532,7 +532,7 @@ const realMalformedVSCodeSettings = `{
 // title — read back correctly.
 func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, realMalformedVSCodeSettings)
 
@@ -583,7 +583,7 @@ func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 // changed. The result must still be valid strict JSON at that object.
 func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	withoutPFM := strings.Replace(realMalformedVSCodeSettings, `    "PFM": {
       "args": [
@@ -631,7 +631,7 @@ func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T)
 
 func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	if err := os.Chmod(settings, 0o644); err != nil {

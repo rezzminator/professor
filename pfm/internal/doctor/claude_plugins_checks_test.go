@@ -20,7 +20,7 @@ import (
 var doctorPluginIDs = []string{
 	"cache-live-control@professor",
 	"forward-compaction@professor",
-	"auto-effort-control@professor",
+	"auto-effort@professor",
 	"tool-visibility-controller@professor",
 	"engine-sync@professor",
 }
@@ -135,13 +135,13 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 		}, 2, 0},
 		{
 			"an unreadable marketplace record",
-			pfmconfig.ClaudePlugin{ID: "auto-effort-control"},
+			pfmconfig.ClaudePlugin{ID: "auto-effort"},
 			false, `{`,
 			func(path, store string) string {
 				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
 					filepath.Join(store, "plugins", "known_marketplaces.json") + ": unexpected end of JSON input\n" +
-					"doctor: claude_plugins plugin auto-effort-control@professor not enabled in " + path + " — " + bareNameFix("auto-effort-control") + "\n" +
-					"doctor: claude_plugins plugin auto-effort-control@professor not installed in " + store + " — " + bareNameFix("auto-effort-control") + "\n" +
+					"doctor: claude_plugins plugin auto-effort@professor not enabled in " + path + " — " + bareNameFix("auto-effort") + "\n" +
+					"doctor: claude_plugins plugin auto-effort@professor not installed in " + store + " — " + bareNameFix("auto-effort") + "\n" +
 					"doctor: claude_plugins plugin typesafe@typesafe-ai cannot be checked: marketplace typesafe-ai cannot be looked up" +
 					" while the plugin records are unreadable, and its claude.plugins entry has no source — " +
 					"repair the unreadable file named above, then run pfm doctor again\n"
@@ -486,7 +486,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	names := []string{
 		"cache-live-control",
 		"forward-compaction",
-		"auto-effort-control",
+		"auto-effort",
 		"tool-visibility-controller",
 		"engine-sync",
 	}
@@ -926,5 +926,27 @@ func TestEngineSyncHookDoctor(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+// TestClaudePluginsDoctorNamesAFormerPluginName: a bare former name in
+// claude.plugins, read as the current name, is one warning naming both, in
+// place of the ok line its otherwise clean store would print.
+func TestClaudePluginsDoctorNamesAFormerPluginName(t *testing.T) {
+	store := t.TempDir()
+	id := "auto-effort@professor"
+	raw, _ := json.Marshal(map[string]any{"enabledPlugins": map[string]bool{id: true}})
+	if err := os.WriteFile(filepath.Join(store, "settings.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeDoctorInstalledPlugins(t, store, id)
+	var out bytes.Buffer
+	tally := &doctorTally{}
+	plugins := []pfmconfig.ClaudePlugin{{ID: "auto-effort", Former: "auto-effort-control"}}
+	printClaudePluginsDoctor(&out, store, &paths.MapEnv{}, installer.ClaudePluginBuild{Plugins: plugins}, tally)
+	want := "doctor: claude_plugins claude.plugins[0] auto-effort-control is the former name of auto-effort, " +
+		"read as it — write auto-effort there\n"
+	if out.String() != want || tally.warnings != 1 || tally.failures != 0 {
+		t.Fatalf("got %q tally=%+v\nwant %q, one warning", out.String(), tally, want)
 	}
 }

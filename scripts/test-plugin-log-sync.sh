@@ -14,7 +14,7 @@ expect() { if eval "$2"; then ok "$1"; else bad "$1" "rc=$RC" "$(cat "$T/out" "$
 checkout() { mkdir -p "$P/$1"; : > "$P/$1/.git"; }
 
 mkdir -p "$P"
-for p in auto-effort-control buddy cache-keepwarm cache-live-control forward-compaction tool-visibility-controller callmeter engine-sync harvester gpt-gateway; do checkout "$p"; done
+for p in auto-effort buddy cache-keepwarm cache-live-control forward-compaction tool-visibility-controller callmeter engine-sync harvester gpt-gateway; do checkout "$p"; done
 
 run_sut --check
 expect 'a check of checkouts with no copy reports each MISSING and fails' '[ "$RC" = 1 ] && [ "$(grep -c "^MISSING " "$T/out")" = 10 ]'

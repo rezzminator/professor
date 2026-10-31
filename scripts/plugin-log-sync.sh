@@ -19,7 +19,7 @@ MARKER='vendored copy of the plugin-log canonical source'
 usage() { echo "plugin-log-sync: $*; usage: plugin-log-sync.sh --write|--check [--adopt] [--plugins-dir D] [plugin...]" >&2; exit 2; }
 
 # plugin, canonical file, copy path inside the plugin's checkout
-ROSTER='auto-effort-control ts/plugin-log.ts plugins/auto-effort-control/src/plugin-log.ts
+ROSTER='auto-effort ts/plugin-log.ts plugins/auto-effort/src/plugin-log.ts
 buddy ts/plugin-log.ts plugins/buddy/src/plugin-log.ts
 cache-keepwarm ts/plugin-log.ts plugins/cache-keepwarm/src/plugin-log.ts
 cache-live-control ts/plugin-log.ts plugins/cache-live-control/src/plugin-log.ts

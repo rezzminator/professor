@@ -128,17 +128,17 @@ func writeLegacyHost(t *testing.T, home, first string) string {
 	project := t.TempDir()
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{`+
 		`"cache-live-control@cache-live-control-dev":true,"cache-live-control@cache-live-control":false,`+
-		`"auto-effort-control@auto-effort-control-dev":true,"effort-live-control@effort-live-control":true},`+
+		`"auto-effort@auto-effort-dev":true,"effort-live-control@effort-live-control":true},`+
 		`"pluginConfigs":{"cache-live-control@cache-live-control-dev":{"options":{"ttl":"1h"}},`+
 		`"cache-live-control@cache-live-control":{"options":{"ttl":"5m"}},`+
-		`"auto-effort-control@auto-effort-control":{"options":{"floor":"medium"}}}}`)
+		`"auto-effort@auto-effort":{"options":{"floor":"medium"}}}}`)
 	cache := filepath.Join(first, "plugins", "cache")
 	installs, err := json.Marshal(map[string]any{"version": 2, "plugins": map[string]any{
 		"cache-live-control@cache-live-control-dev": []any{
 			map[string]any{"scope": "user", "installPath": filepath.Join(cache, "clc")},
 			map[string]any{"scope": "project", "projectPath": project, "installPath": filepath.Join(cache, "clc")},
 		},
-		"auto-effort-control@auto-effort-control-dev": []any{
+		"auto-effort@auto-effort-dev": []any{
 			map[string]any{"scope": "user", "installPath": filepath.Join(cache, "aec")},
 		},
 		"effort-live-control@effort-live-control": []any{
@@ -156,14 +156,14 @@ func writeLegacyHost(t *testing.T, home, first string) string {
 		"effort-live-control": map[string]any{
 			"source": map[string]any{"source": "github", "repo": "rezzminator/effort-live-control"},
 		},
-		"auto-effort-control": map[string]any{
+		"auto-effort": map[string]any{
 			"source": map[string]any{"source": "github", "repo": "rezzminator/auto-effort"},
 		},
 		"cache-live-control": map[string]any{
 			"source": map[string]any{"source": "github", "repo": "rezzminator/cache-live-control"},
 		},
 	}
-	for _, name := range []string{"cache-live-control", "auto-effort-control"} {
+	for _, name := range []string{"cache-live-control", "auto-effort"} {
 		dir := filepath.Join(home, ".local", "share", name+"-dev")
 		writeFixture(t, filepath.Join(dir, ".claude-plugin", "marketplace.json"),
 			`{"name":"`+name+`-dev","plugins":[{"name":"`+name+`","source":"./plugins/`+name+`"}]}`)
@@ -187,7 +187,7 @@ func writeLegacyHost(t *testing.T, home, first string) string {
 // stays installed and is disabled. A second run changes nothing, and doctor's
 // legacy gaps go from named to none. A preview runs and writes nothing.
 func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
-	names := []string{"cache-live-control", "auto-effort-control"}
+	names := []string{"cache-live-control", "auto-effort"}
 	for _, preview := range []bool{false, true} {
 		t.Run(map[bool]string{false: "applied", true: "preview"}[preview], func(t *testing.T) {
 			inst, runner, out, home, first := alphaPluginEngine(t, "")
@@ -215,7 +215,7 @@ func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
 				}
 				for _, line := range []string{
 					"uninstall cache-live-control@cache-live-control-dev --scope user --keep-data: legacy id of cache-live-control@professor",
-					"plugin marketplace remove auto-effort-control-dev: legacy marketplace of auto-effort-control@professor",
+					"plugin marketplace remove auto-effort-dev: legacy marketplace of auto-effort@professor",
 					"remove " + filepath.Join(home, ".local", "share", "cache-live-control-dev") + ": the legacy -dev marketplace",
 				} {
 					if !strings.Contains(out.String(), line) {
@@ -236,10 +236,10 @@ func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
 				"plugin marketplace remove cache-live-control",
 				"plugin marketplace remove cache-live-control-dev",
 				"plugin marketplace add " + marketplace,
-				"plugin install auto-effort-control@professor -y",
-				"plugin uninstall auto-effort-control@auto-effort-control-dev --scope user --keep-data",
-				"plugin marketplace remove auto-effort-control",
-				"plugin marketplace remove auto-effort-control-dev",
+				"plugin install auto-effort@professor -y",
+				"plugin uninstall auto-effort@auto-effort-dev --scope user --keep-data",
+				"plugin marketplace remove auto-effort",
+				"plugin marketplace remove auto-effort-dev",
 			}
 			if got := pluginArgvs(runner); !reflect.DeepEqual(got, want) {
 				t.Fatalf("calls\n got %q\nwant %q\n%s", got, want, out.String())
@@ -259,12 +259,12 @@ func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
 			}
 			wantEnabled := map[string]any{
 				"cache-live-control@professor":            true,
-				"auto-effort-control@professor":           true,
+				"auto-effort@professor":                   true,
 				"effort-live-control@effort-live-control": false,
 			}
 			wantConfigs := map[string]any{
-				"cache-live-control@professor":  map[string]any{"options": map[string]any{"ttl": "1h"}},
-				"auto-effort-control@professor": map[string]any{"options": map[string]any{"floor": "medium"}},
+				"cache-live-control@professor": map[string]any{"options": map[string]any{"ttl": "1h"}},
+				"auto-effort@professor":        map[string]any{"options": map[string]any{"floor": "medium"}},
 			}
 			if !reflect.DeepEqual(document["enabledPlugins"], wantEnabled) ||
 				!reflect.DeepEqual(document["pluginConfigs"], wantConfigs) {
@@ -276,11 +276,11 @@ func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
 					": cache-live-control@professor replaces it; copy its pluginConfigs to cache-live-control@professor\n",
 				"  change  drop cache-live-control@cache-live-control from enabledPlugins; drop the pluginConfigs of " +
 					"cache-live-control@cache-live-control (differs) in " + settings + ": legacy ids of cache-live-control@professor\n",
-				"  change  disable auto-effort-control@auto-effort-control-dev in " + settings +
-					": auto-effort-control@professor replaces it; copy the pluginConfigs of " +
-					"auto-effort-control@auto-effort-control to auto-effort-control@professor\n",
+				"  change  disable auto-effort@auto-effort-dev in " + settings +
+					": auto-effort@professor replaces it; copy the pluginConfigs of " +
+					"auto-effort@auto-effort to auto-effort@professor\n",
 				"  change  disable effort-live-control@effort-live-control in " + settings +
-					": retired, auto-effort-control@professor replaces it\n",
+					": retired, auto-effort@professor replaces it\n",
 			} {
 				if !strings.Contains(out.String(), line) {
 					t.Fatalf("missing %q:\n%s", line, out.String())
@@ -291,10 +291,10 @@ func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(records) != 3 || len(records["cache-live-control@professor"]) != 2 ||
-				len(records["auto-effort-control@professor"]) != 1 ||
+				len(records["auto-effort@professor"]) != 1 ||
 				len(records["effort-live-control@effort-live-control"]) != 1 {
 				t.Fatalf("install records = %v, want cache-live-control@professor at two scopes, "+
-					"auto-effort-control@professor and the retired effort-live-control", records)
+					"auto-effort@professor and the retired effort-live-control", records)
 			}
 			_, known, err := readKnownMarketplaces(first)
 			if err != nil {
@@ -334,7 +334,7 @@ func TestEnsureClaudePluginsMovesLegacyIDs(t *testing.T) {
 // uninstalled only after {name}@professor is installed at user scope: the
 // user never loses the plugin outside that project.
 func TestEnsureClaudePluginsInstallsForTheUserBeforeMovingAUserLegacyID(t *testing.T) {
-	names := []string{"cache-live-control", "auto-effort-control"}
+	names := []string{"cache-live-control", "auto-effort"}
 	inst, runner, out, home, first := alphaPluginEngine(t, "")
 	inst.options.SourceRepo = writeMarketplaceClone(t, names, names)
 	inst.options.ClaudePlugins = bareList(names...)
@@ -399,7 +399,7 @@ func TestEnsureClaudePluginsInstallsForTheUserBeforeMovingAUserLegacyID(t *testi
 // directory, and the run warns naming it, never reported moved; the run
 // succeeds, {name}@professor being installed.
 func TestEnsureClaudePluginsKeepsALegacyIDItCannotMove(t *testing.T) {
-	names := []string{"cache-live-control", "auto-effort-control"}
+	names := []string{"cache-live-control", "auto-effort"}
 	inst, runner, out, home, first := alphaPluginEngine(t, "")
 	inst.options.SourceRepo = writeMarketplaceClone(t, names, names)
 	inst.options.ClaudePlugins = bareList(names...)
@@ -488,5 +488,204 @@ func TestEnsureClaudePluginsReleaseWarnsOnALegacyRecordItCannotMove(t *testing.T
 		return strings.Contains(gap.Problem, "engine-sync@engine-sync installed in")
 	}) {
 		t.Fatalf("legacy gaps = %v, %v; want the record it could not move named", gaps, err)
+	}
+}
+
+// TestEnsureClaudePluginsMovesAFormerName: a plugin of ours installed under a
+// former name, auto-effort-control@professor from the local professor
+// marketplace, moves to auto-effort@professor: its options carried, its record
+// uninstalled with its data kept, its keys dropped, and its manifest entry and
+// copy in the local marketplace removed. Doctor's legacy gap goes from naming
+// them to none, and a second run changes nothing.
+func TestEnsureClaudePluginsMovesAFormerName(t *testing.T) {
+	const name, former = "auto-effort", "auto-effort-control"
+	id, formerID := ownID(name), former+"@"+pfmconfig.ProfessorMarketplace
+	inst, runner, out, home, first := alphaPluginEngine(t, "")
+	inst.options.SourceRepo = writeMarketplaceClone(t, []string{name}, []string{name})
+	inst.options.ClaudePlugins = bareList(name)
+	simulateClaudeLegacy(t, runner)
+	settings := filepath.Join(first, "settings.json")
+	writeFixture(t, settings, `{"enabledPlugins":{"`+formerID+`":true},`+
+		`"pluginConfigs":{"`+formerID+`":{"options":{"floor":"medium"}}}}`)
+	installs, err := json.Marshal(map[string]any{"version": 2, "plugins": map[string]any{
+		formerID: []any{
+			map[string]any{"scope": "user", "installPath": filepath.Join(first, "plugins", "cache", "aec")},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(first, "plugins", "installed_plugins.json"), string(installs))
+	marketplace := filepath.Join(home, ".local", "share", "professor-dev")
+	manifest := filepath.Join(marketplace, ".claude-plugin", "marketplace.json")
+	writeFixture(t, manifest, `{"name":"professor","plugins":[{"name":"`+former+`","source":"./plugins/`+former+`"}]}`)
+	formerCopy := filepath.Join(marketplace, "plugins", former)
+	writePluginFiles(t, formerCopy, former)
+	targets := ClaudePluginTargets(ClaudePluginBuild{
+		Version: alphaVersion, Home: home, SourceRepo: inst.options.SourceRepo, Plugins: bareList(name),
+	})
+	gaps, err := ClaudePluginLegacyGaps(first, home, targets)
+	if err != nil || len(gaps) != 1 || !strings.Contains(gaps[0].Problem, formerID+" installed in ") ||
+		!strings.Contains(gaps[0].Problem, former+" in "+manifest) || !strings.Contains(gaps[0].Problem, formerCopy) {
+		t.Fatalf("legacy gaps before = %v, %v; want one naming the record, the manifest entry and the copy", gaps, err)
+	}
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	calls := pluginArgvs(runner)
+	uninstall := "plugin uninstall " + formerID + " --scope user --keep-data"
+	if !slices.Contains(calls, uninstall) || slices.Contains(calls, "plugin marketplace remove professor") {
+		t.Fatalf("calls %q: want the former id uninstalled with its data kept, the professor marketplace kept\n%s",
+			calls, out.String())
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(readFixture(t, settings)), &document); err != nil {
+		t.Fatal(err)
+	}
+	wantEnabled := map[string]any{id: true}
+	wantConfigs := map[string]any{id: map[string]any{"options": map[string]any{"floor": "medium"}}}
+	if !reflect.DeepEqual(document["enabledPlugins"], wantEnabled) ||
+		!reflect.DeepEqual(document["pluginConfigs"], wantConfigs) {
+		t.Fatalf("settings = %v, want enabledPlugins %v and pluginConfigs %v\n%s",
+			document, wantEnabled, wantConfigs, out.String())
+	}
+	var listed devMarketplaceManifest
+	if err := json.Unmarshal([]byte(readFixture(t, manifest)), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Plugins) != 1 || listed.Plugins[0].Name != name {
+		t.Fatalf("manifest plugins = %v, want %s alone", listed.Plugins, name)
+	}
+	if _, err := os.Lstat(formerCopy); !os.IsNotExist(err) {
+		t.Fatalf("the former name's copy %s is left: %v", formerCopy, err)
+	}
+	for _, line := range []string{
+		"  change  drop " + former + " from " + manifest + ": the former name of " + id + "\n",
+		"  change  remove " + formerCopy + ": the former name of " + id + "\n",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Fatalf("missing %q:\n%s", line, out.String())
+		}
+	}
+	if gaps, err := ClaudePluginLegacyGaps(first, home, targets); err != nil || len(gaps) != 0 {
+		t.Fatalf("legacy gaps after = %v, %v; want none", gaps, err)
+	}
+	runner.calls, runner.dirs = nil, nil
+	out.Reset()
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("second ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	if len(runner.calls) != 0 || strings.Contains(out.String(), "  change  ") {
+		t.Fatalf("a second run ran %q or changed something:\n%s", pluginArgvs(runner), out.String())
+	}
+}
+
+// TestEnsureClaudePluginsFormerNameCopiesWaitForLiveChats: an open chat runs
+// its hooks from the former name's copy, so while any account has a live chat
+// its copy, manifest entry and -dev directory stay, the live-chat deferral
+// naming why and doctor naming the leftover; the former id is still
+// uninstalled. A later run with no live chat removes them.
+func TestEnsureClaudePluginsFormerNameCopiesWaitForLiveChats(t *testing.T) {
+	const name, former = "auto-effort", "auto-effort-control"
+	id, formerID := ownID(name), former+"@"+pfmconfig.ProfessorMarketplace
+	inst, runner, out, home, first := alphaPluginEngine(t, "")
+	second := inst.options.ClaudeAccounts[1].ConfigDir
+	inst.options.SourceRepo = writeMarketplaceClone(t, []string{name}, []string{name})
+	inst.options.ClaudePlugins = bareList(name)
+	inst.options.ProcRoot = emptyProcRoot(t, home)
+	simulateClaudeLegacy(t, runner)
+	settings := filepath.Join(first, "settings.json")
+	writeFixture(t, settings, `{"enabledPlugins":{"`+formerID+`":true}}`)
+	writeFixture(t, filepath.Join(first, "plugins", "installed_plugins.json"),
+		`{"version":2,"plugins":{"`+formerID+`":[{"scope":"user"}]}}`)
+	marketplace := filepath.Join(home, ".local", "share", "professor-dev")
+	manifest := filepath.Join(marketplace, ".claude-plugin", "marketplace.json")
+	writeFixture(t, manifest, `{"name":"professor","plugins":[{"name":"`+former+`","source":"./plugins/`+former+`"}]}`)
+	formerCopy := filepath.Join(marketplace, "plugins", former)
+	writePluginFiles(t, formerCopy, former)
+	devDir := filepath.Join(home, ".local", "share", former+"-dev")
+	writeFixture(t, filepath.Join(devDir, ".claude-plugin", "marketplace.json"), `{"name":"`+former+`-dev"}`)
+	session := filepath.Join(second, "sessions", "4242.json")
+	writeFixture(t, session, "{}")
+	if err := os.MkdirAll(filepath.Join(inst.options.ProcRoot, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	targets := ClaudePluginTargets(ClaudePluginBuild{
+		Version: alphaVersion, Home: home, SourceRepo: inst.options.SourceRepo, Plugins: bareList(name),
+	})
+	// The plan previews the apply: the same rows for the copies a live chat holds.
+	copyRows := func() []string {
+		var rows []string
+		for _, line := range strings.Split(out.String(), "\n") {
+			if strings.Contains(line, formerCopy) || strings.Contains(line, devDir) ||
+				strings.Contains(line, "live chats") {
+				rows = append(rows, line)
+			}
+		}
+		return rows
+	}
+	inst.apply = false
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("plan ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	plan := copyRows()
+	out.Reset()
+	runner.calls, runner.dirs = nil, nil
+	inst.apply = true
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	if applied := copyRows(); !slices.Equal(plan, applied) {
+		t.Fatalf("plan rows %q, apply rows %q: the plan is not the apply's preview", plan, applied)
+	}
+	if !slices.Contains(pluginArgvs(runner), "plugin uninstall "+formerID+" --scope user --keep-data") ||
+		strings.Contains(readFixture(t, settings), formerID) {
+		t.Fatalf("calls %q, settings %s: want the former id uninstalled and its key dropped\n%s",
+			pluginArgvs(runner), readFixture(t, settings), out.String())
+	}
+	for _, path := range []string{formerCopy, devDir} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("%s removed under a live chat: %v\n%s", path, err, out.String())
+		}
+	}
+	var listed devMarketplaceManifest
+	if err := json.Unmarshal([]byte(readFixture(t, manifest)), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(listed.Plugins, func(entry devMarketplaceEntry) bool { return entry.Name == former }) {
+		t.Fatalf("manifest plugins = %v: %s dropped under a live chat", listed.Plugins, former)
+	}
+	for _, line := range []string{
+		"  skip    account " + second + " has live chats; close them and rerun pfm install --yes\n",
+		"  skip    keep " + formerCopy + ": account " + second + " has live chats",
+		"  skip    keep " + devDir + ": account " + second + " has live chats",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Fatalf("missing %q:\n%s", line, out.String())
+		}
+	}
+	gaps, err := ClaudePluginLegacyGaps(first, home, targets)
+	if err != nil || len(gaps) != 1 || !strings.Contains(gaps[0].Problem, formerCopy) ||
+		!strings.Contains(gaps[0].Problem, devDir) {
+		t.Fatalf("legacy gaps while live = %v, %v; want one naming the copy and the -dev dir", gaps, err)
+	}
+	if err := os.Remove(session); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("second ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	for _, line := range []string{
+		"  change  drop " + former + " from " + manifest + ": the former name of " + id + "\n",
+		"  change  remove " + formerCopy + ": the former name of " + id + "\n",
+		"  change  remove " + devDir + ": the legacy -dev marketplace of " + id + "\n",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Fatalf("missing %q:\n%s", line, out.String())
+		}
+	}
+	if gaps, err := ClaudePluginLegacyGaps(first, home, targets); err != nil || len(gaps) != 0 {
+		t.Fatalf("legacy gaps after = %v, %v; want none", gaps, err)
 	}
 }

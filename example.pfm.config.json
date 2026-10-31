@@ -29,7 +29,7 @@
     "plugins": [
       "cache-live-control",
       "forward-compaction",
-      "auto-effort-control",
+      "auto-effort",
       "tool-visibility-controller",
       "engine-sync"
     ],

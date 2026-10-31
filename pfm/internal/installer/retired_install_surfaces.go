@@ -57,7 +57,7 @@ func stagedHarnessPromptDirs() []string {
 	}
 }
 
-func (installer *engine) retireStagedHarnessPrompts(uninstall bool) error {
+func (installer *engine) retireStagedHarnessPrompts(uninstall bool) (returnErr error) {
 	prompts := paths.LegacyHarnessPromptsDir(installer.options.Home)
 	if _, err := os.Lstat(prompts); errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -70,16 +70,27 @@ func (installer *engine) retireStagedHarnessPrompts(uninstall bool) error {
 			directories = []string{installer.options.ConfigDir}
 		}
 		keep := false
+		// Guards stay held until the prompts are gone, so no chat starts mid-retirement.
+		var releases []func() error
+		defer func() {
+			for _, release := range releases {
+				returnErr = errors.Join(returnErr, release())
+			}
+		}()
 		for _, directory := range directories {
-			pids, err := liveChatPIDs(installer.options.ProcRoot, directory)
+			// A missing account has no chats to read the prompts.
+			if _, err := os.Stat(directory); directory == "" || errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			wait, release, err := installer.liveChatDeferral(directory)
+			releases = append(releases, release)
 			if err != nil {
-				installer.skip("keep " + prompts + ": " + err.Error())
+				installer.skip("keep " + prompts + ": read live chats in " + directory + ": " + err.Error())
 				keep = true
 				continue
 			}
-			if len(pids) != 0 {
-				installer.skip("keep " + prompts + ": live Claude chats " + strings.Join(pids, ",") +
-					" in " + directory + " may still read it — rerun pfm install --yes once they close")
+			if wait != "" {
+				installer.skip("keep " + prompts + ": " + wait)
 				keep = true
 			}
 		}

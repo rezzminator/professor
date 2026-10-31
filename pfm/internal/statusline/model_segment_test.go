@@ -16,7 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
-// While auto-effort-control's live keeper holds a level, the line shows that
+// While auto-effort's live keeper holds a level, the line shows that
 // level marked "requested", the same in every mode: the plugin rewrites each
 // request's effort, so the payload's session level is not what is sent. Off, no
 // level, no file or no live keeper reads exactly as without the plugin; only a
@@ -44,11 +44,11 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		if keeper != "" {
 			keeperField = `,"keeper":` + keeper
 		}
-		return `{"version":2,"mode":"` + mode + `","level":` + level + `,"reason":"a lookup over logs"` +
+		return `{"version":3,"mode":"` + mode + `","level":` + level + `,"reason":"a lookup over logs"` +
 			keeperField + `,"updatedAt":"2026-10-17T09:30:00.000Z"}` + "\n"
 	}
 	state := func(mode, level string) string { return line(mode, level, live) }
-	const sess1 = ".local/state/auto-effort-control/state.sess-1.json"
+	const sess1 = ".local/state/auto-effort/state.sess-1.json"
 	for _, testcase := range []struct {
 		name, payload, file, content, want, colour string
 		// barColour is the level's own colour on the bar of a segment in the
@@ -70,13 +70,13 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		{name: "auto's level replaces the session's", payload: withSession, file: sess1, content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰ medium · requested │ ", colour: cEffort, barColour: cGood},
 		{name: "the pin's level replaces the session's", payload: withSession, file: sess1, content: state("pin", `"xhigh"`), want: "◆ Opus 4·▰▰▰▰ xhigh · requested │ ", colour: cEffort, barColour: cElapsed},
 		{name: "the model's level shows without a session level", payload: withoutEffort, file: sess1, content: state("model", `"high"`), want: "◆ Opus 4·▰▰▰ high · requested │ ", colour: cEffort, barColour: cWarn},
-		{name: "session from the transcript name", payload: byTranscript, file: ".local/state/auto-effort-control/state.sess-2.json", content: state("auto", `"high"`), want: "◆ Opus 4·▰▰▰ high · requested │ ", colour: cEffort, barColour: cWarn},
+		{name: "session from the transcript name", payload: byTranscript, file: ".local/state/auto-effort/state.sess-2.json", content: state("auto", `"high"`), want: "◆ Opus 4·▰▰▰ high · requested │ ", colour: cEffort, barColour: cWarn},
 		{name: "unreadable", payload: withSession, file: sess1, directory: true, want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "a pipe, never waited on", payload: withSession, file: sess1, fifo: true, want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "garbage", payload: withSession, file: sess1, content: "not json\n", want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "empty file", payload: withSession, file: sess1, content: "", want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
-		{name: "unknown version", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":3`, 1), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
-		{name: "version 1", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":2`, `"version":1`, 1), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "unknown version", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":3`, `"version":4`, 1), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "version 2", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":3`, `"version":2`, 1), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, ""), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "keeper not an integer", payload: withSession, file: sess1, content: line("auto", `"medium"`, "1.5"), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "keeper a string", payload: withSession, file: sess1, content: line("auto", `"medium"`, `"`+live+`"`), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
@@ -93,7 +93,7 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		{name: "the pin's level missing", payload: withSession, file: sess1, content: state("pin", "null"), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "error without a payload level", payload: withoutEffort, file: sess1, content: "{", want: "◆ Opus 4·effort unknown · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "no state file", payload: withSession, want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
-		{name: "no session to name a file", payload: styledPayload, file: ".local/state/auto-effort-control/state.json", content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
+		{name: "no session to name a file", payload: styledPayload, file: ".local/state/auto-effort/state.json", content: state("auto", `"medium"`), want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
 		{name: "thinking off keeps the requested level", payload: thinkingOff, file: sess1, content: state("auto", `"high"`), want: "◆ Opus 4·▰▰▰ high · requested │ ", colour: cEffort, barColour: cWarn},
 		{name: "thinking absent keeps effort", payload: strings.Replace(withSession, `"thinking":{"enabled":true},`, "", 1), want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
 		{name: "thinking off still reports state errors", payload: thinkingOff, file: sess1, content: "{", want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
@@ -154,8 +154,8 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 			if testcase.wantWarn {
 				lines := strings.Split(strings.TrimSuffix(warn, "\n"), "\n")
 				if len(lines) != 1 || !strings.Contains(lines[0], path) ||
-					!strings.Contains(lines[0], "auto-effort-control state") {
-					t.Fatalf("warn = %q, want one auto-effort-control state line naming %s", warn, path)
+					!strings.Contains(lines[0], "auto-effort state") {
+					t.Fatalf("warn = %q, want one auto-effort state line naming %s", warn, path)
 				}
 			}
 		})
@@ -212,7 +212,7 @@ func TestEffortBarWearsItsLevelsColourAndOnlyItsFilledBlocks(t *testing.T) {
 // reader reads once more before it calls the file broken.
 func TestAutoEffortStateReadsATornWriteOnceMore(t *testing.T) {
 	good := []byte(
-		`{"version":2,"mode":"auto","level":"medium","reason":"r","keeper":42,"updatedAt":"2026-10-17T09:30:00.000Z"}` + "\n",
+		`{"version":3,"mode":"auto","level":"medium","reason":"r","keeper":42,"updatedAt":"2026-10-17T09:30:00.000Z"}` + "\n",
 	)
 	for _, testcase := range []struct {
 		name      string
@@ -221,8 +221,8 @@ func TestAutoEffortStateReadsATornWriteOnceMore(t *testing.T) {
 		wantLevel string
 		wantErr   string
 	}{
-		{name: "torn then whole", reads: [][]byte{[]byte(`{"version":2,"mo`), good}, wantMode: "auto", wantLevel: "medium"},
-		{name: "torn twice", reads: [][]byte{[]byte(`{"version":2,"mo`), []byte(`{"vers`)}, wantErr: "parse"},
+		{name: "torn then whole", reads: [][]byte{[]byte(`{"version":3,"mo`), good}, wantMode: "auto", wantLevel: "medium"},
+		{name: "torn twice", reads: [][]byte{[]byte(`{"version":3,"mo`), []byte(`{"vers`)}, wantErr: "parse"},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			calls := 0
@@ -277,12 +277,12 @@ func TestKeeperProbeCallsAnotherUsersProcessNoKeeper(t *testing.T) {
 	}
 }
 
-// startKeeper starts a process with auto-effort-control's keeper argv (its src/state.ts
+// startKeeper starts a process with auto-effort's keeper argv (its src/state.ts
 // KEEPER_ARGV, last element KEEPER_MARK) for the test's life and returns its pid.
 func startKeeper(t *testing.T) int {
 	t.Helper()
 	keeper := exec.Command(
-		"/bin/sh", "-c", `echo $$; while kill -0 "$PPID" 2>/dev/null; do sleep 2; done`, "auto-effort-control-keeper",
+		"/bin/sh", "-c", `echo $$; while kill -0 "$PPID" 2>/dev/null; do sleep 2; done`, "auto-effort-keeper",
 	)
 	// Stdout stays /dev/null: a pipe would hold Wait until the loop's orphaned
 	// sleep exits.
@@ -352,7 +352,7 @@ func renderEffort(t *testing.T, home, payload string) (string, string) {
 func TestAutoEffortStateQuotesTheKeeperItRefuses(t *testing.T) {
 	keeper := "\"" + strings.Repeat("x", 200) + "\u009b[2J\""
 	got := parseAutoEffortState("/state/state.s.json", func(string) ([]byte, error) {
-		return []byte(`{"version":2,"mode":"auto","level":"medium","reason":"r","keeper":` + keeper + `}`), nil
+		return []byte(`{"version":3,"mode":"auto","level":"medium","reason":"r","keeper":` + keeper + `}`), nil
 	}, func(int) (bool, error) { return true, nil })
 	if got.err == nil {
 		t.Fatalf("state = %+v, want an error", got)
@@ -374,7 +374,7 @@ func TestAutoEffortWarnNamesAStateFileWithNoHome(t *testing.T) {
 	if got.err == nil {
 		t.Fatalf("state = %+v, want an error for the unknown home", got)
 	}
-	if line := warn.String(); !strings.HasPrefix(line, "statusline: auto-effort-control state file") ||
+	if line := warn.String(); !strings.HasPrefix(line, "statusline: auto-effort state file") ||
 		strings.Contains(line, "  ") || !strings.Contains(line, "the home directory is unknown") {
 		t.Fatalf("warn = %q, want one line naming the state file by its cause", line)
 	}

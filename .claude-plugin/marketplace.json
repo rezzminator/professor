@@ -33,11 +33,11 @@
       "keywords": ["claude-code", "prompt-cache", "cache-ttl", "function-hooks", "professor"]
     },
     {
-      "name": "auto-effort-control",
+      "name": "auto-effort",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/auto-effort.git",
-        "path": "./plugins/auto-effort-control",
+        "path": "./plugins/auto-effort",
         "ref": "main"
       },
       "description": "Tune reasoning levels — automatic main-chat tuning; set_effort, effort_up, effort_down and effort_auto choices; /effort pins; [effort: low|medium|high|xhigh|max] sub-agent launches with bounded failure escalation.",

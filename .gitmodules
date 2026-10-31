@@ -28,8 +28,8 @@
 	url = https://github.com/rezzminator/forward-compaction.git
 	branch = develop
 	ignore = dirty
-[submodule "auto-effort-control"]
-	path = plugins/auto-effort-control
+[submodule "auto-effort"]
+	path = plugins/auto-effort
 	url = https://github.com/rezzminator/auto-effort.git
 	branch = develop
 	ignore = dirty

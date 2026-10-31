@@ -27,7 +27,7 @@ func modelSegment(data input, state autoEffortState) string {
 	)
 }
 
-// effortSuffix shows the level the request goes at. auto-effort-control
+// effortSuffix shows the level the request goes at. auto-effort
 // rewrites each request's effort, so while its live keeper holds a level, that
 // level shows, marked "requested" whatever the mode. Off, no level, no file or
 // no live keeper reads as if the plugin were not installed: the payload's level
@@ -71,18 +71,18 @@ var effortWords = map[string]bool{
 	"low": true, "medium": true, "high": true, "xhigh": true, "max": true,
 }
 
-// autoEffortModes lists the state file's schema-2 modes.
+// autoEffortModes lists the state file's modes.
 var autoEffortModes = map[string]bool{
 	"auto": true, "model": true, "pin": true, "off": true,
 }
 
 // autoEffortStateVersion is the state file's `version` this reader knows.
-const autoEffortStateVersion = 2
+const autoEffortStateVersion = 3
 
 // autoEffortStateMaxBytes caps a read: the file is one short JSON line.
 const autoEffortStateMaxBytes = 64 << 10
 
-// autoEffortState is what the session's auto-effort-control state file says: found
+// autoEffortState is what the session's auto-effort state file says: found
 // with a valid mode and level ("" for null), or err for a file that exists or
 // could not be looked for and cannot be read or says nothing valid. No file and
 // a valid line no live keeper vouches for are both the zero state: no plugin.
@@ -92,7 +92,7 @@ type autoEffortState struct {
 	err         error
 }
 
-// sessionAutoEffort reads the auto-effort-control state file of the payload's session.
+// sessionAutoEffort reads the auto-effort state file of the payload's session.
 // No session id names no file: the absent state. Every failure goes to warn,
 // one line naming the path and the cause.
 func sessionAutoEffort(runtime Runtime, data input) autoEffortState {
@@ -111,7 +111,7 @@ func sessionAutoEffort(runtime Runtime, data input) autoEffortState {
 		// No path was found: the cause names the state file itself.
 		fmt.Fprintf(runtime.Warn, "statusline: %v (effort shows ERR)\n", state.err)
 	default:
-		fmt.Fprintf(runtime.Warn, "statusline: auto-effort-control state %s (effort shows ERR): %v\n", path, state.err)
+		fmt.Fprintf(runtime.Warn, "statusline: auto-effort state %s (effort shows ERR): %v\n", path, state.err)
 	}
 	return state
 }
@@ -191,15 +191,15 @@ func parseAutoEffortState(
 	return autoEffortState{found: true, mode: record.Mode, level: level}
 }
 
-// keeperMark is the last argv element of auto-effort-control's keeper process (the
+// keeperMark is the last argv element of auto-effort's keeper process (the
 // plugin's src/state.ts KEEPER_MARK).
-const keeperMark = "auto-effort-control-keeper"
+const keeperMark = "auto-effort-keeper"
 
 // signalZero sends pid the null signal: kill(2)'s existence and permission
 // check, nothing delivered.
 func signalZero(pid int) error { return syscall.Kill(pid, 0) }
 
-// keeperProbe answers whether pid is a live auto-effort-control keeper: no such
+// keeperProbe answers whether pid is a live auto-effort keeper: no such
 // process, a zombie, another user's process (the keeper runs as the status
 // line's own user, so the null signal reaches it) or a process without
 // keeperMark in its argv is not one; a probe or argv read that fails any other

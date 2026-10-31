@@ -87,7 +87,8 @@ func printEngineSyncHookDoctor(
 // warning each with its repair. An unreadable marketplace record is a failure
 // for the ids that need it; every other listed plugin is still checked. An
 // enabled Go binary plugin checkout copy whose matching executable is gone
-// is a gap (installer.GoPluginBinaryGap).
+// is a gap (installer.GoPluginBinaryGap). A bare former name in claude.plugins
+// (pfmconfig.FormerClaudePluginNames) is one warning naming its current name.
 func printClaudePluginsDoctor(
 	stdout io.Writer,
 	store string,
@@ -99,6 +100,18 @@ func printClaudePluginsDoctor(
 	if listErr != nil {
 		tally.fail()
 		fmt.Fprintf(stdout, "doctor: claude_plugins %v — repair it, then run pfm install --yes\n", listErr)
+	}
+	renamed := 0
+	for index, plugin := range build.Plugins {
+		if plugin.Former != "" {
+			renamed++
+			tally.warn()
+			fmt.Fprintf(
+				stdout,
+				"doctor: claude_plugins %s[%d] %s is the former name of %s, read as it — write %s there\n",
+				pfmconfig.KeyClaudePlugins, index, plugin.Former, plugin.ID, plugin.ID,
+			)
+		}
 	}
 	targets := installer.ClaudePluginTargets(build)
 	failing := listedPluginGaps(build.Version, targets)
@@ -209,7 +222,7 @@ func printClaudePluginsDoctor(
 	}
 	gaps = append(gaps, cannotInstall...)
 	if len(gaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil && cacheErr == nil &&
-		legacyErr == nil {
+		legacyErr == nil && renamed == 0 {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return
 	}

@@ -108,12 +108,14 @@
   },
   "mcp": {
     "globalServers": [
-      "auto-effort-control",
+      "auto-effort",
       "chat-professor",
       "forward-compaction",
       "harvester"
     ],
-    "renamed": {}
+    "renamed": {
+      "auto-effort-control": "auto-effort"
+    }
   },
   "workbenchMarker": ".professor/workbench.json",
   "commandDirs": [

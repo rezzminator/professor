@@ -103,6 +103,15 @@ func (target ClaudePluginTarget) LegacyIDs() []string {
 	return pfmconfig.LegacyClaudePluginIDs(target.Name)
 }
 
+// FormerNames are the names a plugin of ours had before its current one
+// (pfmconfig.FormerClaudePluginNames); none for a full id.
+func (target ClaudePluginTarget) FormerNames() []string {
+	if !target.Own {
+		return nil
+	}
+	return pfmconfig.FormerClaudePluginNames[target.Name]
+}
+
 // NeedsKnownMarketplace reports whether the target installs only from a
 // marketplace Claude Code already knows: a full id whose entry has no source.
 func (target ClaudePluginTarget) NeedsKnownMarketplace() bool {

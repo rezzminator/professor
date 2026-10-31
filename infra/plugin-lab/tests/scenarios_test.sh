@@ -54,11 +54,11 @@ logger_checks=$( (
   lab_lib observe
   lab_options() { :; }
   # shellcheck source=/dev/null
-  source "$LAB_DIR/scenarios/auto-effort-control/logger-ready.sh"
+  source "$LAB_DIR/scenarios/auto-effort/logger-ready.sh"
   LAB_RUN=$T/logger-ready; LAB_SCENARIO='logger-ready'
   LAB_STARTED=2026-01-01T00:00:00Z; LAB_EXPECT_ERRORS=()
   mkdir -p "$LAB_RUN/logs/$LAB_PLUGIN"
-  printf '%s\n' '{"ts":"2026-01-01T00:00:01Z","plugin":"auto-effort-control","level":"error","event":"option-error","msg":"floor is invalid","where":"hooks/auto-effort-control.ts#start"}' > "$LAB_RUN/logs/$LAB_PLUGIN/errors.jsonl"
+  printf '%s\n' '{"ts":"2026-01-01T00:00:01Z","plugin":"auto-effort","level":"error","event":"option-error","msg":"floor is invalid","where":"hooks/auto-effort.ts#start"}' > "$LAB_RUN/logs/$LAB_PLUGIN/errors.jsonl"
   : > "$LAB_RUN/logs/$LAB_PLUGIN/warnings.jsonl"
   turn() { return 0; }
   pane_lacks() { return 0; }

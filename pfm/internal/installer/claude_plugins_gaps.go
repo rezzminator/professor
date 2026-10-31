@@ -118,7 +118,8 @@ func (target ClaudePluginTarget) retiredSuccessor() string {
 	}
 	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
 		for _, id := range retiredClaudePlugins[successor] {
-			if name, _, _ := strings.Cut(id, "@"); name == target.Name {
+			// A successor's own name under a retired marketplace (auto-effort@rezzminator) retires that id alone.
+			if name, _, _ := strings.Cut(id, "@"); name == target.Name && successor != target.Name {
 				return successor
 			}
 		}

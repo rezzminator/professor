@@ -193,7 +193,7 @@ func bareList(names ...string) []pfmconfig.ClaudePlugin {
 // build with no clone are untouched; a list that cannot be read is an error
 // beside the unchanged build, never an empty list.
 func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
-	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort-control", "example-plugin"}
+	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort", "example-plugin"}
 	clone := writeMarketplaceClone(t, names, nil)
 	manifest := func(t *testing.T, content string) string {
 		dir := t.TempDir()
@@ -218,7 +218,7 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 			}}
 		}, []pfmconfig.ClaudePlugin{
 			{ID: "forward-compaction"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
-		}, []string{"buddy", "auto-effort-control", "example-plugin"}, ""},
+		}, []string{"buddy", "auto-effort", "example-plugin"}, ""},
 		{"a release reads nothing", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{Version: "0.80.0", SourceRepo: clone, Plugins: defaults, PluginsDefault: true}
 		}, defaults, nil, ""},
@@ -359,7 +359,7 @@ func simulateClaude(t *testing.T, runner *pluginRunner) {
 // professor marketplace registered from GitHub is re-pointed at the copies,
 // never removed, and every option value stays.
 func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
-	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort-control"}
+	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort"}
 	for _, test := range []struct {
 		name        string
 		list        []pfmconfig.ClaudePlugin
@@ -374,14 +374,14 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				return []string{
 					"plugin marketplace add " + marketplace,
 					"plugin marketplace add " + marketplace, "plugin install engine-sync@professor -y",
-					"plugin marketplace add " + marketplace, "plugin install auto-effort-control@professor -y",
+					"plugin marketplace add " + marketplace, "plugin install auto-effort@professor -y",
 				}
 			},
 			map[string]any{
-				"forward-compaction@professor":  true,
-				"engine-sync@professor":         true,
-				"buddy@professor":               false,
-				"auto-effort-control@professor": false,
+				"forward-compaction@professor": true,
+				"engine-sync@professor":        true,
+				"buddy@professor":              false,
+				"auto-effort@professor":        false,
 			},
 		},
 		{
@@ -391,14 +391,14 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 					"plugin marketplace add " + marketplace,
 					"plugin marketplace add " + marketplace, "plugin install engine-sync@professor -y",
 					"plugin marketplace add " + marketplace, "plugin install buddy@professor -y",
-					"plugin marketplace add " + marketplace, "plugin install auto-effort-control@professor -y",
+					"plugin marketplace add " + marketplace, "plugin install auto-effort@professor -y",
 				}
 			},
 			map[string]any{
-				"forward-compaction@professor":  true,
-				"engine-sync@professor":         true,
-				"buddy@professor":               true,
-				"auto-effort-control@professor": true,
+				"forward-compaction@professor": true,
+				"engine-sync@professor":        true,
+				"buddy@professor":              true,
+				"auto-effort@professor":        true,
 			},
 		},
 		// The install enables an install-only plugin and the edit after it disables
@@ -428,7 +428,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 			}
 			if test.preview {
-				for _, name := range []string{"engine-sync", "auto-effort-control"} {
+				for _, name := range []string{"engine-sync", "auto-effort"} {
 					want := "  change  disable " + name + "@professor in "
 					if !strings.Contains(out.String(), want) {
 						t.Fatalf("preview lacks %q:\n%s", want, out.String())
@@ -475,8 +475,8 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			if !test.listDefault {
 				for _, line := range []string{
 					"  ok      claude plugin buddy@professor installed in " + first + ", kept disabled: claude.plugins does not list buddy\n",
-					"  change  disable auto-effort-control@professor in " + filepath.Join(first, "settings.json") +
-						": claude.plugins does not list auto-effort-control\n",
+					"  change  disable auto-effort@professor in " + filepath.Join(first, "settings.json") +
+						": claude.plugins does not list auto-effort\n",
 				} {
 					if !strings.Contains(out.String(), line) {
 						t.Fatalf("missing %q:\n%s", line, out.String())

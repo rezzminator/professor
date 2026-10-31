@@ -761,9 +761,9 @@ test('only the exact gitter mirror retains Git write permissions', () => {
   }
 });
 
-// auto-effort-control steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
+// auto-effort steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
 // its buttons: exactly these Claude roles hold both; every other rendered agent and pcm neither.
-const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort-control__${tool}`);
+const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort__${tool}`);
 const foremanEffort = { floor: 'medium', ceiling: 'xhigh' };
 const effortSteered = new Map([
   ['flights-foreman', foremanEffort], ['flights-foreman-sonnet', foremanEffort],

@@ -29,7 +29,7 @@ type testPlugin struct{ Name, Source, ID string }
 var testPlugins = []testPlugin{
 	{Name: "cache-live-control", Source: "rezzminator/professor", ID: "cache-live-control@professor"},
 	{Name: "forward-compaction", Source: "rezzminator/professor", ID: "forward-compaction@professor"},
-	{Name: "auto-effort-control", Source: "rezzminator/professor", ID: "auto-effort-control@professor"},
+	{Name: "auto-effort", Source: "rezzminator/professor", ID: "auto-effort@professor"},
 	{Name: "tool-visibility-controller", Source: "rezzminator/professor", ID: "tool-visibility-controller@professor"},
 	{Name: "engine-sync", Source: "rezzminator/professor", ID: "engine-sync@professor"},
 }
@@ -236,7 +236,7 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
-		`"forward-compaction@professor":true,"auto-effort-control@professor":true,"tool-visibility-controller@professor":true,` +
+		`"forward-compaction@professor":true,"auto-effort@professor":true,"tool-visibility-controller@professor":true,` +
 		`"engine-sync@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeInstalledPlugins(
@@ -334,7 +334,7 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{
-		{ID: "auto-effort-control"},
+		{ID: "auto-effort"},
 		{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"},
 		{ID: "clangd-lsp@claude-plugins-official"},
 		{ID: "odd@odd-market", Source: "o/r;x"},
@@ -344,7 +344,7 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 	}
 	want := []string{
 		"plugin marketplace add rezzminator/professor",
-		"plugin install auto-effort-control@professor -y",
+		"plugin install auto-effort@professor -y",
 		"plugin marketplace add typesafe-ai/skills",
 		"plugin install typesafe@typesafe-ai -y",
 		"plugin install clangd-lsp@claude-plugins-official -y",
@@ -376,18 +376,18 @@ func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *te
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
-	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort-control"}}
+	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort"}}
 	err := inst.ensureClaudePlugins(context.Background())
 	want := "claude plugin typesafe@typesafe-ai in " + first + ": marketplace record unreadable, state unknown: parse " +
 		known + ": unexpected end of JSON input\n" +
-		"claude plugin auto-effort-control@professor in " + first +
-		": legacy ids of auto-effort-control@professor unchecked: parse " + known + ": unexpected end of JSON input"
+		"claude plugin auto-effort@professor in " + first +
+		": legacy ids of auto-effort@professor unchecked: parse " + known + ": unexpected end of JSON input"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
 	wantCommands := []string{
 		"plugin marketplace add rezzminator/professor",
-		"plugin install auto-effort-control@professor -y",
+		"plugin install auto-effort@professor -y",
 	}
 	if got := pluginArgvs(runner); !reflect.DeepEqual(got, wantCommands) {
 		t.Fatalf("commands\n got %q\nwant %q\n%s", got, wantCommands, out.String())
@@ -407,7 +407,7 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{
-		{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort-control"}, {ID: "installed@gone-market"},
+		{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort"}, {ID: "installed@gone-market"},
 	}
 	err := inst.ensureClaudePlugins(context.Background())
 	want := "claude plugin typesafe@typesafe-ai in " + first + ": marketplace typesafe-ai is not known to Claude Code" +
@@ -417,7 +417,7 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 	}
 	wantCommands := []string{
 		"plugin marketplace add rezzminator/professor",
-		"plugin install auto-effort-control@professor -y",
+		"plugin install auto-effort@professor -y",
 	}
 	if got := pluginArgvs(runner); !reflect.DeepEqual(got, wantCommands) {
 		t.Fatalf("commands\n got %q\nwant %q\n%s", got, wantCommands, out.String())
@@ -436,11 +436,11 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	for _, p := range testPlugins {
 		writePluginCheckout(t, root, p.Name)
 	}
-	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "auto-effort-control"}}
+	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "auto-effort"}}
 	simulateClaude(t, runner)
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{`+
 		`"cache-live-control@cache-live-control":true,"cache-live-control@cache-live-control-dev":true,`+
-		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false,"auto-effort-control@auto-effort-control":true},`+
+		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false,"auto-effort@auto-effort":true},`+
 		`"pluginConfigs":{"cache-live-control@cache-live-control":{"options":{"keep":1}}}}`)
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
@@ -457,7 +457,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		"cache-live-control@cache-live-control-dev": true,
 		"swift-lsp@claude-plugins-official":         true,
 		"buddy@buddy":                               false,
-		"auto-effort-control@professor":             true,
+		"auto-effort@professor":                     true,
 	}
 	wantConfigs := map[string]any{
 		"cache-live-control@cache-live-control": map[string]any{"options": map[string]any{"keep": float64(1)}},
@@ -472,7 +472,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		)
 	}
 	for _, argv := range pluginArgvs(runner) {
-		if !strings.Contains(argv, "auto-effort-control") &&
+		if !strings.Contains(argv, "auto-effort") &&
 			argv != "plugin marketplace add "+professorDevMarketplace(home) {
 			t.Fatalf("a command touched an unlisted plugin: %q", argv)
 		}
@@ -482,7 +482,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
-		`"forward-compaction@professor":true,"auto-effort-control@professor":true,"tool-visibility-controller@professor":true,` +
+		`"forward-compaction@professor":true,"auto-effort@professor":true,"tool-visibility-controller@professor":true,` +
 		`"engine-sync@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
@@ -855,20 +855,18 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 		warning   bool
 		successor string
 	}{
-		{"agent-effort@agent-effort", true, true, "auto-effort-control"},
-		{"agent-effort@agent-effort-dev", true, true, "auto-effort-control"},
-		{"agent-effort@agent-effort", false, false, "auto-effort-control"},
-		{"agent-effort@professor", true, true, "auto-effort-control"},
-		{"agent-effort@rezzminator", true, true, "auto-effort-control"},
-		{"auto-effort@auto-effort", true, true, "auto-effort-control"},
-		{"auto-effort@auto-effort-dev", true, true, "auto-effort-control"},
-		{"auto-effort@professor", true, true, "auto-effort-control"},
-		{"auto-effort@rezzminator", true, true, "auto-effort-control"},
-		{"effort-live-control@effort-live-control", true, true, "auto-effort-control"},
-		{"effort-live-control@effort-live-control-dev", true, true, "auto-effort-control"},
-		{"effort-live-control@professor", true, true, "auto-effort-control"},
-		{"effort-live-control@rezzminator", true, true, "auto-effort-control"},
-		{"auto-effort-control@professor", true, false, "auto-effort-control"},
+		{"agent-effort@agent-effort", true, true, "auto-effort"},
+		{"agent-effort@agent-effort-dev", true, true, "auto-effort"},
+		{"agent-effort@agent-effort", false, false, "auto-effort"},
+		{"agent-effort@professor", true, true, "auto-effort"},
+		{"agent-effort@rezzminator", true, true, "auto-effort"},
+		{"auto-effort-control@rezzminator", true, true, "auto-effort"},
+		{"auto-effort@rezzminator", true, true, "auto-effort"},
+		{"effort-live-control@effort-live-control", true, true, "auto-effort"},
+		{"effort-live-control@effort-live-control-dev", true, true, "auto-effort"},
+		{"effort-live-control@professor", true, true, "auto-effort"},
+		{"effort-live-control@rezzminator", true, true, "auto-effort"},
+		{"auto-effort@professor", true, false, "auto-effort"},
 		{"sub-agent-compact@sub-agent-compact", true, true, "forward-compaction"},
 		{"sub-agent-compact@sub-agent-compact-dev", true, true, "forward-compaction"},
 		{"sub-agent-compact@sub-agent-compact-dev", false, false, "forward-compaction"},

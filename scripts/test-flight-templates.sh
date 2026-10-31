@@ -51,7 +51,7 @@ class FlightContracts(unittest.TestCase):
         self.assertEqual(body('flights-foreman-sonnet'), body('flights-foreman'), 'the Sonnet foreman carries the foreman manual whole')
         for name in ('flights-foreman', 'flights-foreman-sonnet'):
             head = text(name).split('---\n', 2)[1]
-            self.assertIn('effortControl:', head, f'{name}: steered by auto-effort-control')
+            self.assertIn('effortControl:', head, f'{name}: steered by auto-effort')
             self.assertNotRegex(head, r'(?m)^tools:', f'{name}: no tools line, so it inherits every tool and the effort buttons')
 
     def test_one_blocking_wait_past_ten_minutes(self):

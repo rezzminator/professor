@@ -134,11 +134,12 @@ const (
 	EnvLogLevel      = "PFM_LOG_LEVEL"
 	EnvLogComponents = "PFM_LOG_COMPONENTS"
 	EnvLogMirror     = "PFM_LOG"
-	// EnvAutoEffortStateFile is the auto-effort-control plugin's own variable naming
+	// EnvAutoEffortStateFile is the auto-effort plugin's own variable naming
 	// its per-session state file (AutoEffortStateFile); pfm only reads it.
-	EnvAutoEffortStateFile = "AUTO_EFFORT_CONTROL_STATE_FILE"
-	// EnvLegacyAutoEffortStateFile remains an explicit migration alias.
-	EnvLegacyAutoEffortStateFile = "AUTO_EFFORT_STATE_FILE"
+	EnvAutoEffortStateFile = "AUTO_EFFORT_STATE_FILE"
+	// EnvFormerAutoEffortStateFile is the variable under the plugin's former
+	// name, which the plugin reads in place of an unset EnvAutoEffortStateFile.
+	EnvFormerAutoEffortStateFile = "AUTO_EFFORT_CONTROL_STATE_FILE"
 	defaultTmpDir                = "/tmp"
 )
 
@@ -581,46 +582,41 @@ func CostLedgerDir(env Env, home string) string {
 	return EnvOrFrom(env, EnvCostLedgerDir, filepath.Join(home, ".local", "state", "pfm", "cost-ledger"))
 }
 
-// AutoEffortStateFile is the auto-effort-control plugin's state file for one session,
-// by the plugin's own rule: EnvAutoEffortStateFile (trimmed, blank is unset; a leading
-// `~/` is home), else state.json under the home's auto-effort-control state directory;
-// the session id, every character outside [A-Za-z0-9_-] made `_` (one per
-// UTF-16 unit, as the plugin's JavaScript counts), goes before the file name's
-// last extension, or after a name without one (sessionLogPath in the plugin's
-// src/log.ts). A path set only through the plugin's own options is not seen.
+// AutoEffortStateFile is the auto-effort plugin's state file for one session,
+// by the plugin's own rule: EnvAutoEffortStateFile, else
+// EnvFormerAutoEffortStateFile (trimmed, blank is unset; a leading `~/` is
+// home), else state.json under the home's auto-effort state directory; a
+// path inside a retired state tree (the former name's or effort-live-control's)
+// is that default too. The session id, every character outside [A-Za-z0-9_-]
+// made `_` (one per UTF-16 unit, as the plugin's JavaScript counts), goes
+// before the file name's last extension, or after a name without one
+// (sessionLogPath in the plugin's src/log.ts). A path set only through the
+// plugin's own options is not seen.
 func AutoEffortStateFile(env Env, home, sessionID string) (string, error) {
 	if sessionID == "" {
-		return "", errors.New("auto-effort-control state file: empty session id")
+		return "", errors.New("auto-effort state file: empty session id")
 	}
 	file := strings.TrimSpace(env.Get(EnvAutoEffortStateFile))
-	legacy := strings.TrimSpace(env.Get(EnvLegacyAutoEffortStateFile))
-	if file != "" && legacy != "" && file != legacy {
-		return "", fmt.Errorf(
-			"%s conflicts with %s: migrate the legacy state-file override",
-			EnvLegacyAutoEffortStateFile,
-			EnvAutoEffortStateFile,
-		)
+	if file == "" {
+		file = strings.TrimSpace(env.Get(EnvFormerAutoEffortStateFile))
 	}
 	if file == "" {
-		file = legacy
-	}
-	if file == "" {
-		file = "~/.local/state/auto-effort-control/state.json"
+		file = "~/.local/state/auto-effort/state.json"
 	}
 	if file == "~" || strings.HasPrefix(file, "~/") {
 		if home == "" {
-			return "", fmt.Errorf("auto-effort-control state file %s: the home directory is unknown", file)
+			return "", fmt.Errorf("auto-effort state file %s: the home directory is unknown", file)
 		}
 		file = strings.TrimRight(home, "/") + file[1:]
 	}
 	// The producer diagnoses and rejects destinations in the read-only retired trees.
 	clean := filepath.ToSlash(filepath.Clean(file)) + "/"
-	if strings.Contains(clean, "/.local/state/auto-effort/") ||
+	if strings.Contains(clean, "/.local/state/auto-effort-control/") ||
 		strings.Contains(clean, "/.local/state/effort-live-control/") {
 		if home == "" {
-			return "", errors.New("auto-effort-control state file: the home directory is unknown")
+			return "", errors.New("auto-effort state file: the home directory is unknown")
 		}
-		file = filepath.Join(home, ".local", "state", "auto-effort-control", "state.json")
+		file = filepath.Join(home, ".local", "state", "auto-effort", "state.json")
 	}
 	var safe strings.Builder
 	for _, char := range sessionID {

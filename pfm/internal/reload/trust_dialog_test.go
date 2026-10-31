@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -22,11 +23,11 @@ type trustDialogTmux struct {
 	keys []string
 }
 
-func (*trustDialogTmux) Capture(context.Context, string, string) (string, error) {
+func (*trustDialogTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return trustDialogScreen, nil
 }
 
-func (tmux *trustDialogTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *trustDialogTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	tmux.keys = append(tmux.keys, key)
 	return nil
 }

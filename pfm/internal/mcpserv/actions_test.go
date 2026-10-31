@@ -714,7 +714,7 @@ func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
 }
 
 // TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess pins open's
-// failure shape now that it opens through action.OpenDetached instead of the
+// failure shape now that it opens through action.Executor.Open's detached mode instead of the
 // argv Dispatch seam: a target that is not indexed comes back as a tool
 // error naming the target, never an "ok" ActionOutput with nothing behind
 // it.

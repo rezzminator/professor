@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -155,11 +156,10 @@ func (finder *discoverer) chatUnit(chat headless.Chat) Unit {
 		name = "(unnamed)"
 	}
 	found := "fleet scan: tmux socket " + chat.Socket + " pane " + chat.Pane
-	stop := "tmux kill-server on " + chat.Socket + "; verified: the socket no longer answers"
 	if chat.Backend == spawn.BackendHerdr {
 		found = "fleet scan: Herdr seat " + chat.SeatID
-		stop = "Herdr pane.close of the proved seat; verified: the seat is retired"
 	}
+	stop := pfmchat.EndHow(chat)
 	if finder.deps.LaunchedFrom.holds(chat) {
 		found += " (the chat that typed pfm restart)"
 	}

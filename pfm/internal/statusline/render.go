@@ -19,6 +19,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
@@ -587,7 +588,8 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	if !ok {
 		return
 	}
-	pane := runtime.getenv("TMUX_PANE")
+	identity := runtime.identity()
+	pane := identity.TMUXPane
 	if pane == "" {
 		return
 	}
@@ -599,7 +601,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	// The cache holds the server ($TMUX: socket, server pid, session) beside
 	// the name: a resumed chat keeps its session id and name on a NEW server,
 	// which lacks the window name and @pfm_chat_name until this render sets them.
-	stamp := runtime.getenv("TMUX") + "\n" + data.SessionName
+	stamp := identity.TMUX + "\n" + data.SessionName
 	if cached, err := os.ReadFile(cachePath); err == nil && string(cached) == stamp {
 		return
 	}
@@ -609,10 +611,10 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	// window_panes gates the rename the same way gather's claude half does: a
 	// window hosting two /chat:branch siblings cannot carry both labels, so it
 	// keeps the name it has rather than take whichever sibling rendered last.
-	read, err := runtime.Command.Output(
-		commandContext, "tmux", "-S", socketPath,
+	read, err := pfmtmux.Exec(
+		commandContext, "", socketPath,
 		"display-message", "-t", pane, "-p", "#{window_panes} #{window_name}",
-	)
+	).Output()
 	if err != nil {
 		return
 	}
@@ -640,15 +642,20 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	_ = atomicfile.Write(cachePath, []byte(stamp), 0o600)
 }
 
+// identity is the render's own identity snapshot: Claude Code runs the status
+// line inside the chat it renders, so this process's environment is the chat's.
+func (runtime Runtime) identity() resolve.WhoamiEnvironment {
+	return resolve.EnvironmentOf(runtime.getenv)
+}
+
 // pfmSocket resolves the fleet socket this render is running inside, or
 // reports that it is not in one. It applies the same probe-socket allowance
 // fleetCountsWithError does so a jailed fixture can exercise the path.
 func pfmSocket(runtime Runtime) (string, bool) {
-	tmux := runtime.getenv("TMUX")
-	if tmux == "" {
+	socketPath := runtime.identity().TmuxSocket()
+	if socketPath == "" {
 		return "", false
 	}
-	socketPath := pfmtmux.SocketPath(tmux)
 	if filepath.Clean(filepath.Dir(socketPath)) != filepath.Clean(runtime.TmuxDir) {
 		return "", false
 	}
@@ -665,12 +672,11 @@ func pfmSocket(runtime Runtime) (string, bool) {
 }
 
 func writeBreadcrumb(runtime Runtime, transcriptPath string) {
-	tmux := runtime.getenv("TMUX")
-	if tmux == "" || transcriptPath == "" {
+	identity := runtime.identity()
+	if identity.TMUX == "" || transcriptPath == "" {
 		return
 	}
-	socket := pfmtmux.SocketPath(tmux)
-	socket = filepath.Base(socket)
+	socket := filepath.Base(identity.TmuxSocket())
 	if socket == "." || socket == "" {
 		return
 	}
@@ -679,7 +685,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	}
 	_ = os.Chmod(runtime.SIDDir, 0o700)
 	_ = atomicfile.Write(filepath.Join(runtime.SIDDir, socket), []byte(transcriptPath), 0o600)
-	if pane := runtime.getenv("TMUX_PANE"); pane != "" {
+	if pane := identity.TMUXPane; pane != "" {
 		_ = atomicfile.Write(filepath.Join(runtime.SIDDir, socket+"."+pane), []byte(transcriptPath), 0o600)
 	}
 }

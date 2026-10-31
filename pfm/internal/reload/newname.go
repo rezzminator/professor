@@ -78,7 +78,7 @@ func followName(ctx context.Context, request Request, options Options, tmux Tmux
 	if request.Then != "" {
 		settled := pfmcall.SettledTurn{
 			Capture: func(ctx context.Context) (string, error) {
-				return tmux.Capture(ctx, request.SocketPath, request.Pane)
+				return tmux.CaptureScreen(ctx, request.target())
 			},
 			Sleep:      func(ctx context.Context, duration time.Duration) { _ = options.Clock.Sleep(ctx, duration) },
 			Pane:       request.Pane,

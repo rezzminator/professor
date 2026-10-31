@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -22,24 +23,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
-	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// noopCodexRenamer satisfies spawn.Tmux for a rebind that never clears a
-// prior thread — ReconcileCodexPanesWith only reaches the renamer on
-// action.ClearKill, which a pane's FIRST binding never sets, so none of these
-// are ever called.
-type noopCodexRenamer struct{}
-
-func (noopCodexRenamer) NewSession(context.Context, spawn.SessionSpec) error { return nil }
-func (noopCodexRenamer) Capture(context.Context, string, string) (string, error) {
-	return "", nil
-}
-func (noopCodexRenamer) SendLiteral(context.Context, string, string, string) error { return nil }
-func (noopCodexRenamer) SendPaste(context.Context, string, string, string) error   { return nil }
-func (noopCodexRenamer) SendKey(context.Context, string, string, string) error     { return nil }
+// noopCodexRenamer is the pane door for a rebind that never clears a prior
+// thread — ReconcileCodexPanesWith only reaches the door on
+// action.ClearKill, which a pane's FIRST binding never sets, so any call
+// panics on the nil Screen it embeds.
+type noopCodexRenamer struct{ pfmcall.Screen }
 
 // TestReconcileCodexPanesRecordsARebind: ReconcileCodexPanesWith walks the
 // state door (spec § Middleware, `state`) — bound to rebound, comp=state,
@@ -134,17 +126,16 @@ func TestReconcileCodexPanesRecordsARebind(t *testing.T) {
 }
 
 type recordingCodexRenamer struct {
-	stage      int
-	captures   int
-	literals   []string
-	keys       []string
-	busy       bool
-	captureErr error
+	pfmcall.Screen // CaptureStyled: never read on the rename path
+	stage          int
+	captures       int
+	literals       []string
+	keys           []string
+	busy           bool
+	captureErr     error
 }
 
-func (*recordingCodexRenamer) NewSession(context.Context, spawn.SessionSpec) error { return nil }
-
-func (renamer *recordingCodexRenamer) Capture(context.Context, string, string) (string, error) {
+func (renamer *recordingCodexRenamer) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	renamer.captures++
 	if renamer.captureErr != nil {
 		return "", renamer.captureErr
@@ -164,7 +155,7 @@ func (renamer *recordingCodexRenamer) Capture(context.Context, string, string) (
 	}
 }
 
-func (renamer *recordingCodexRenamer) SendLiteral(_ context.Context, _, _, value string) error {
+func (renamer *recordingCodexRenamer) SendLiteral(_ context.Context, _ pfmcall.Target, value string) error {
 	renamer.literals = append(renamer.literals, value)
 	if value == "/rename" {
 		renamer.stage = 1
@@ -174,12 +165,12 @@ func (renamer *recordingCodexRenamer) SendLiteral(_ context.Context, _, _, value
 	return nil
 }
 
-func (renamer *recordingCodexRenamer) SendPaste(_ context.Context, _, _, value string) error {
+func (renamer *recordingCodexRenamer) SendPaste(_ context.Context, _ pfmcall.Target, value string) error {
 	renamer.literals = append(renamer.literals, value)
 	return nil
 }
 
-func (renamer *recordingCodexRenamer) SendKey(_ context.Context, _, _, key string) error {
+func (renamer *recordingCodexRenamer) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	renamer.keys = append(renamer.keys, key)
 	if key == "Enter" {
 		switch renamer.stage {

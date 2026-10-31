@@ -72,7 +72,11 @@ func TmuxServerGone(err error) bool {
 	if !errors.As(err, &exit) {
 		return false
 	}
-	stderr := string(exit.Stderr)
+	return ServerGoneText(string(exit.Stderr))
+}
+
+// ServerGoneText is TmuxServerGone over the stderr text a caller already holds.
+func ServerGoneText(stderr string) bool {
 	return strings.Contains(stderr, "no server running") ||
 		strings.Contains(stderr, "error connecting to") &&
 			(strings.Contains(stderr, "No such file or directory") || strings.Contains(stderr, "Connection refused"))
@@ -160,32 +164,14 @@ func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments
 
 // ListPanes performs one list-panes -a call for socket.
 func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane, error) {
-	// pane_current_path is asked for WHOLE, never through tmux's b: basename
-	// modifier. Pane.CurrentPath is a directory: it becomes a row's CWD, and it
-	// is the directory the Codex thread resolver matches against the state
-	// store's absolute threads.cwd. A basename matched nothing there, so every
-	// live Codex session that holds no rollout descriptor — the normal shape
-	// since Codex 0.146.1 — silently lost its live row. The project name is
-	// derived in Go (compose.projectName), where the full path is still there
-	// to derive it from.
-	format := strings.Join([]string{
-		"#{session_name}",
-		"#{window_id}",
-		"#{window_name}",
-		"#{pane_title}",
-		"#{pane_tty}",
-		"#{pane_pid}",
-		"#{pane_id}",
-		"#{?session_attached,1,0}",
-		"#{pane_current_path}",
-		"#{pane_current_command}",
-	}, "\x1f")
 	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 	defer cancel()
-	command := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", format)
+	command := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", paneFormat)
 	output, err := command.Output()
-	if err != nil && ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+	if err != nil {
+		if state, unresponsive := classifyProbe(ctx, probeCtx, err, socket); state == ServerUnresponsive {
+			return nil, unresponsive
+		}
 	}
 	if err != nil {
 		// Match the legacy probe's older field set as a compatibility fallback.
@@ -205,8 +191,10 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 		}, "\t")
 		legacyCommand := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", legacyFormat)
 		legacyOutput, legacyErr := legacyCommand.Output()
-		if legacyErr != nil && ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+		if legacyErr != nil {
+			if state, unresponsive := classifyProbe(ctx, probeCtx, legacyErr, socket); state == ServerUnresponsive {
+				return nil, unresponsive
+			}
 		}
 		if legacyErr != nil {
 			// Both probes agree there is nothing behind the socket: say so in a
@@ -223,6 +211,37 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 		return parseLegacyPaneOutput(socket, legacyOutput)
 	}
 
+	return parseTmuxPanes(socket, output)
+}
+
+// paneFormat is the one list-panes format of a pane read — the scan's and
+// ProbeServer's: what a pane is, where it runs, and whether its process exited.
+//
+// pane_current_path is asked for WHOLE, never through tmux's b: basename
+// modifier. Pane.CurrentPath is a directory: it becomes a row's CWD, and it
+// is the directory the Codex thread resolver matches against the state
+// store's absolute threads.cwd. A basename matched nothing there, so every
+// live Codex session that holds no rollout descriptor — the normal shape
+// since Codex 0.146.1 — silently lost its live row. The project name is
+// derived in Go (compose.projectName), where the full path is still there
+// to derive it from.
+var paneFormat = strings.Join([]string{
+	"#{session_name}",
+	"#{window_id}",
+	"#{window_name}",
+	"#{pane_title}",
+	"#{pane_tty}",
+	"#{pane_pid}",
+	"#{pane_id}",
+	"#{?session_attached,1,0}",
+	"#{pane_current_path}",
+	"#{pane_current_command}",
+	"#{pane_dead}",
+	"#{window_index}",
+}, "\x1f")
+
+// parseTmuxPanes reads the server's answer to paneFormat, one pane per line.
+func parseTmuxPanes(socket string, output []byte) ([]ProbePane, error) {
 	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
 	panes := make([]ProbePane, 0, len(lines))
 	for _, line := range lines {
@@ -233,8 +252,8 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 		// BACK is tmux-version dependent — older builds render it as the
 		// printable escape \037, tmux 3.6 emits the byte. FormatSplit accepts
 		// both; assuming one silently reads a whole record as a single field.
-		fields := pfmtmux.FormatSplit(line, 10)
-		if len(fields) != 10 {
+		fields := pfmtmux.FormatSplit(line, 12)
+		if len(fields) != 12 {
 			return nil, fmt.Errorf(
 				"tmux %s returned %d pane fields in %q",
 				socket,
@@ -255,11 +274,16 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 				err,
 			)
 		}
+		windowIndex, err := strconv.Atoi(fields[11])
+		if err != nil {
+			return nil, fmt.Errorf("tmux %s window index %q: %w", socket, fields[11], err)
+		}
 		panes = append(panes, ProbePane{
 			Socket:         socket,
 			SessionName:    fields[0],
 			WindowID:       fields[1],
 			WindowName:     fields[2],
+			WindowIndex:    windowIndex,
 			PaneTitle:      fields[3],
 			CurrentPath:    fields[8],
 			CurrentCommand: fields[9],
@@ -267,6 +291,7 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 			PID:            pid,
 			PaneID:         fields[6],
 			Attached:       attached,
+			Dead:           fields[10] == "1",
 		})
 	}
 	return panes, nil

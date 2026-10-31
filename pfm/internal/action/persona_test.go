@@ -252,9 +252,9 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				}
 				var line string
 				if detached {
-					_, err = executor.OpenDetached(context.Background(), request)
+					_, err = executor.Open(context.Background(), detachedRequest(request))
 				} else {
-					line, err = executor.Open(context.Background(), request)
+					line, err = openLine(executor, context.Background(), request)
 				}
 				if wantError != "" {
 					if err == nil || !strings.Contains(err.Error(), wantError) || len(tmux.created) != 0 ||
@@ -349,7 +349,7 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 					t.Fatal(err)
 				}
 				if detached {
-					_, err = executor.OpenDetached(context.Background(), request)
+					_, err = executor.Open(context.Background(), detachedRequest(request))
 				} else {
 					_, err = executor.Open(context.Background(), request)
 				}

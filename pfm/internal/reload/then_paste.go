@@ -46,8 +46,8 @@ var (
 )
 
 // deliverCodexThen pastes request.Then into a Codex composer and proves it
-// left as one submitted message. A nil options.Paste pastes through tmux's
-// own buffer (pfmcall.TmuxCaller.SendPaste) on request.SocketPath.
+// left as one submitted message. The paste is call's Screen door's one
+// bracketed paste (SendPaste) into the pane.
 func deliverCodexThen(
 	ctx context.Context,
 	request Request,
@@ -55,11 +55,7 @@ func deliverCodexThen(
 	tmux Tmux,
 	stderr io.Writer,
 ) error {
-	paste := options.Paste
-	if paste == nil {
-		paste = pfmcall.TmuxCaller{}.SendPaste
-	}
-	if err := paste(ctx, request.SocketPath, request.Pane, request.Then); err != nil {
+	if err := tmux.SendPaste(ctx, request.target(), request.Then); err != nil {
 		return fmt.Errorf("reload --then: paste prompt into %q: %w", request.Pane, err)
 	}
 	needle := thenPasteNeedle(request.Then)
@@ -79,7 +75,7 @@ func deliverCodexThen(
 		if err := options.Clock.Sleep(ctx, thenSubmitPause); err != nil {
 			return err
 		}
-		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
+		if err := tmux.SendKey(ctx, request.target(), "Enter"); err != nil {
 			return fmt.Errorf("reload --then: submit prompt (press %d): %w", press, err)
 		}
 		released, err := pollThenComposer(ctx, request, options, tmux, stderr, thenReleaseReads, "verify prompt submit",
@@ -123,7 +119,7 @@ func pollThenComposer(
 	want func(string) bool,
 ) (bool, error) {
 	for read := 1; read <= reads; read++ {
-		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+		capture, err := tmux.CaptureScreen(ctx, request.target())
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload --then: %s (read %d): %v\n", stage, read, err)
 		} else if want(capture) {

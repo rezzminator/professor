@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // uuidPattern matches a session id wherever one appears — an argv, a
@@ -67,7 +68,7 @@ func LiveSessions(
 			continue
 		}
 		if environment, err := proc.Environ(pid); err == nil {
-			if id := environment["CODEX_THREAD_ID"]; id != "" {
+			if id := resolve.ProcessEnvironment(environment).CodexThreadID; id != "" {
 				live[strings.ToLower(id)] = struct{}{}
 			}
 		}

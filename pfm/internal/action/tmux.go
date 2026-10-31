@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -17,66 +20,64 @@ import (
 type TmuxExecutor struct {
 	Binary  string
 	TmuxDir string
+	// Screen is the pane door LaunchPane reads a screen through; nil is the
+	// call engine over Binary (spawn.TmuxSpawner.Pane). A test injects a recorder.
+	Screen pfmcall.Screen
 }
 
+// ListPanes is the one bounded pane read (gather.ProbePanes): a dead server is
+// an error, and a hung one ErrServerUnresponsive, never an empty list.
 func (tmux TmuxExecutor) ListPanes(
 	ctx context.Context,
 	socket string,
 ) ([]ActionPane, error) {
-	format := strings.Join([]string{
-		"#{pane_id}",
-		"#{pane_tty}",
-		"#{session_name}",
-		"#{window_name}",
-		"#{window_index}",
-		"#{pane_current_command}",
-	}, "\x1f")
-	output, err := tmux.command(
-		ctx,
-		socket,
-		"list-panes",
-		"-a",
-		"-F",
-		format,
-	).Output()
+	listed, err := gather.ProbePanes(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket))
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
-	panes := make([]ActionPane, 0, len(lines))
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		fields := pfmtmux.FormatSplit(line, 6)
-		if len(fields) != 6 {
-			return nil, fmt.Errorf(
-				"tmux socket %q returned %d action fields",
-				socket,
-				len(fields),
-			)
-		}
-		windowIndex, err := strconv.Atoi(fields[4])
-		if err != nil {
-			return nil, fmt.Errorf("parse tmux window index %q: %w", fields[2], err)
-		}
+	panes := make([]ActionPane, 0, len(listed))
+	for index := range listed {
+		pane := &listed[index]
 		panes = append(panes, ActionPane{
-			PaneID:         fields[0],
-			TTY:            strings.TrimPrefix(fields[1], "/dev/"),
-			SessionName:    fields[2],
-			WindowName:     fields[3],
-			WindowIndex:    windowIndex,
-			CurrentCommand: fields[5],
+			PaneID:         pane.PaneID,
+			TTY:            strings.TrimPrefix(pane.TTY, "/dev/"),
+			SessionName:    pane.SessionName,
+			WindowName:     pane.WindowName,
+			WindowIndex:    pane.WindowIndex,
+			CurrentCommand: pane.CurrentCommand,
 		})
 	}
 	return panes, nil
 }
 
-func (tmux TmuxExecutor) SocketAlive(
-	ctx context.Context,
-	socket string,
-) bool {
-	return tmux.command(ctx, socket, "list-panes", "-a").Run() == nil
+// ServerState asks the one tmux-server probe (gather.ProbeServer) about socket.
+func (tmux TmuxExecutor) ServerState(ctx context.Context, socket string) (gather.ServerState, error) {
+	state, _, err := gather.ProbeServer(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket))
+	return state, err
+}
+
+// liveSocketGone is the revive doors' one reading of a live row's server: only
+// tmux's word that it is dead resumes the chat fresh; a server that did not
+// answer may still hold the chat, so it refuses rather than start a second copy.
+func liveSocketGone(ctx context.Context, tmux TmuxClient, socket string) (bool, error) {
+	state, err := tmux.ServerState(ctx, socket)
+	switch state {
+	case gather.ServerDead:
+		return true, nil
+	case gather.ServerAlive:
+		return false, nil
+	case gather.ServerUnresponsive:
+		return false, fmt.Errorf(
+			"live socket %q is unresponsive and may still hold the chat; not resumed: %w",
+			socket,
+			err,
+		)
+	default:
+		if err == nil {
+			err = fmt.Errorf("server state %v with no cause", state)
+		}
+		return false, fmt.Errorf("probe live socket %q: %w", socket, err)
+	}
 }
 
 func (tmux TmuxExecutor) KillPane(
@@ -162,17 +163,27 @@ func (tmux TmuxExecutor) LaunchPane(
 		TTY:     strings.TrimPrefix(fields[2], "/dev/"),
 		Dead:    fields[0] == "1",
 	}
-	capture := []string{"capture-pane", "-p", "-J", "-t", target}
+	door, paneTarget, err := spawn.TmuxSpawner{
+		Binary:  tmux.Binary,
+		TmuxDir: tmux.TmuxDir,
+		Screen:  tmux.Screen,
+	}.Pane(
+		socket,
+		target,
+	)
+	if err != nil {
+		return LaunchPaneState{}, err
+	}
+	history := 0
 	if pane.Dead {
 		// tmux's own "Pane is dead" line can push a dying process's last words
 		// off a short pane into its history; they are read from there too.
-		capture = append(capture, "-S", "-200")
+		history = 200
 	}
-	captured, err := tmux.command(ctx, socket, capture...).Output()
+	pane.Screen, err = door.CaptureTarget(ctx, paneTarget, history)
 	if err != nil {
 		return LaunchPaneState{}, fmt.Errorf("capture the launch pane on socket %q: %w", socket, err)
 	}
-	pane.Screen = string(captured)
 	return pane, nil
 }
 

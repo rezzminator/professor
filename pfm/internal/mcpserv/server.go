@@ -13,7 +13,6 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -34,7 +33,7 @@ const (
 	statusAmbiguous     = "ambiguous"
 	statusNotRegistered = "not_registered"
 	// statusDead is the answer for a target that RESOLVED and then could not
-	// be driven or read — pfmcall.CodeDead. It is deliberately not
+	// be driven or read — chat.CodeDead. It is deliberately not
 	// statusNotFound: a chat that exists and whose pane vanished mid-call is
 	// not a chat nobody has ever heard of.
 	statusDead = "dead"
@@ -89,7 +88,7 @@ type Runtime struct {
 	Chat ChatVerbs
 	// Names is call's fleet roster rung (production: chat.NameResolver over
 	// the command's runtime). Nil leaves call to its raw pane fallbacks.
-	Names    pfmcall.NameResolver
+	Names    chat.CallNameResolver
 	Dispatch Dispatch
 	// AllowAmbientIdentity is reserved for the stdio server, whose process is
 	// launched by the calling chat. A shared HTTP daemon must leave it false:
@@ -237,7 +236,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 }
 
 type requestScopedCallEngine interface {
-	WithIdentity(resolve.Identity, string) *pfmcall.Engine
+	WithIdentity(resolve.Identity, string) *chat.CallEngine
 }
 
 func requestMeta(request *mcp.CallToolRequest) mcp.Meta {
@@ -324,26 +323,18 @@ func (service *Service) chatKeys(
 	if strings.TrimSpace(input.Target) == "" {
 		return nil, KeysOutput{}, fmt.Errorf("target is required")
 	}
-	if len(input.Keys) == 0 {
-		return nil, KeysOutput{}, fmt.Errorf("keys must contain at least one key")
+	keys := chat.KeysRequest{
+		Keys: input.Keys, Literal: input.Literal, Delay: chat.KeysDefaultDelay,
+		Capture: input.Capture, Clock: service.backend.clock,
 	}
-	if !input.Literal {
-		for _, key := range input.Keys {
-			if !chat.KeyValid(key) {
-				return nil, KeysOutput{}, fmt.Errorf(
-					"%q is not a tmux key; set literal=true to type it as text, or use one of: %s",
-					key,
-					chat.KeyNames(),
-				)
-			}
-		}
+	if err := keys.Validate(); err != nil {
+		return nil, KeysOutput{}, err
 	}
-	delay := 120 * time.Millisecond
 	if input.DelayMS != 0 {
 		if input.DelayMS < 0 {
 			return nil, KeysOutput{}, fmt.Errorf("delay_ms must not be negative")
 		}
-		delay = time.Duration(input.DelayMS) * time.Millisecond
+		keys.Delay = time.Duration(input.DelayMS) * time.Millisecond
 	}
 	callEngine, caller, err := service.callEngineForRequest(ctx, request)
 	if err != nil {
@@ -353,7 +344,7 @@ func (service *Service) chatKeys(
 		return nil, KeysOutput{
 			Status:  refusal,
 			Message: detail,
-			Code:    pfmcall.CodeUnknown,
+			Code:    chat.CodeUnknown,
 			Keys:    append([]string(nil), input.Keys...),
 		}, nil
 	}
@@ -369,56 +360,29 @@ func (service *Service) chatKeys(
 		}
 		return nil, output, fmt.Errorf("resolve %q: %s", input.Target, detail)
 	}
-	if !input.Literal {
-		if err := pfmcall.ValidateKeyCapabilities(target, input.Keys); err != nil {
-			return nil, KeysOutput{
-				Status: statusError, Code: codeCapability, SocketPath: target.SocketPath,
-				Pane: target.Pane, Keys: append([]string(nil), input.Keys...),
-			}, fmt.Errorf("keys: %w", err)
-		}
-	}
-	transport, err := pfmcall.New(pfmcall.Dependencies{})
+	door, err := chat.NewCallEngineWith(chat.CallDependencies{})
 	if err != nil {
 		return nil, KeysOutput{}, fmt.Errorf("keys transport: %w", err)
 	}
-	for index, key := range input.Keys {
-		if index > 0 && delay > 0 {
-			timer := service.backend.clock.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return nil, KeysOutput{}, ctx.Err()
-			case <-timer.C():
-			}
-		}
-		var sendErr error
-		if input.Literal {
-			sendErr = transport.SendLiteral(ctx, target, key)
-		} else {
-			sendErr = transport.SendKey(ctx, target, key)
-		}
-		if sendErr != nil {
-			return nil, KeysOutput{
-				Status: statusDead, Code: pfmcall.CodeDead, SocketPath: target.SocketPath,
-				Pane: target.Pane, Count: index, Keys: append([]string(nil), input.Keys...),
-			}, fmt.Errorf("send %q: %w", key, sendErr)
-		}
-	}
+	sent, err := chat.SendKeys(ctx, door, target, keys)
 	output := KeysOutput{
 		Status: "ok", Code: 0, SocketPath: target.SocketPath, Pane: target.Pane,
-		Count: len(input.Keys), Keys: append([]string(nil), input.Keys...),
+		Count: sent.Count, Keys: append([]string(nil), input.Keys...), Text: sent.Screen,
 	}
-	if input.Capture {
-		_, text, captureCode, detail, captureErr := callEngine.Capture(ctx, input.Target, 0)
-		if captureErr != nil {
-			return nil, output, fmt.Errorf("capture: %w", captureErr)
-		}
-		if captureCode != 0 {
-			return nil, output, fmt.Errorf("capture: %s", detail)
-		}
-		output.Text = text
+	switch {
+	case err == nil:
+		return nil, output, nil
+	case errors.Is(err, chat.ErrKeyCapability):
+		output.Status, output.Code = statusError, codeCapability
+		return nil, output, fmt.Errorf("keys: %w", err)
+	case errors.Is(err, chat.ErrKeySend):
+		output.Status, output.Code = statusDead, chat.CodeDead
+		return nil, output, fmt.Errorf("send %q: %w", input.Keys[sent.Count], err)
+	case errors.Is(err, chat.ErrKeyCapture):
+		return nil, output, fmt.Errorf("capture: %w", err)
+	default:
+		return nil, KeysOutput{}, err
 	}
-	return nil, output, nil
 }
 
 func (service *Service) chatLS(
@@ -463,9 +427,9 @@ func (service *Service) chatResolve(
 		return nil, ResolveOutput{Status: refusal, Code: 1, Candidates: detail}, nil
 	}
 	type kindResolver interface {
-		ResolveKind(context.Context, string, resolve.Kind, string) (pfmcall.Target, int, string, error)
+		ResolveKind(context.Context, string, resolve.Kind, string) (chat.CallTarget, int, string, error)
 	}
-	var target pfmcall.Target
+	var target chat.CallTarget
 	var code int
 	var detail string
 	if resolver, ok := callEngine.(kindResolver); ok {
@@ -481,9 +445,9 @@ func (service *Service) chatResolve(
 	status := "ok"
 	switch code {
 	case 0:
-	case pfmcall.CodeUnknown:
+	case chat.CodeUnknown:
 		status, code = statusNotFound, 1
-	case pfmcall.CodeAmbiguous:
+	case chat.CodeAmbiguous:
 		status, code = statusAmbiguous, 2
 	default:
 		return nil, ResolveOutput{}, fmt.Errorf(
@@ -581,14 +545,14 @@ func (service *Service) chatCapture(
 		return nil, CaptureOutput{}, err
 	}
 	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
-		return nil, CaptureOutput{Status: refusal, Code: pfmcall.CodeUnknown, Message: detail}, nil
+		return nil, CaptureOutput{Status: refusal, Code: chat.CodeUnknown, Message: detail}, nil
 	}
 	target, text, code, detail, err := callEngine.Capture(
 		ctx,
 		input.Target,
 		lines,
 	)
-	// One status per engine code, never a catch-all: pfmcall.Engine.Capture
+	// One status per engine code, never a catch-all: chat.CallEngine.Capture
 	// answers CodeDead for a pane it resolved and could not read, and folding
 	// that into not_found reported a live chat as one that does not exist.
 	// An unregistered code is a capture that FAILED for a reason this surface
@@ -596,13 +560,13 @@ func (service *Service) chatCapture(
 	status := "ok"
 	switch code {
 	case 0:
-	case pfmcall.CodeAmbiguous:
+	case chat.CodeAmbiguous:
 		status = statusAmbiguous
-	case pfmcall.CodeUnknown:
+	case chat.CodeUnknown:
 		status = statusNotFound
-	case pfmcall.CodeDead:
+	case chat.CodeDead:
 		status = statusDead
-	case pfmcall.CodeCaptureFailed:
+	case chat.CodeCaptureFailed:
 		// Every other case above describes the TARGET pane and stays a
 		// legitimate soft answer (err untouched, nil). CodeCaptureFailed
 		// means Engine.Capture's tmux call never ran at all

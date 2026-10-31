@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
@@ -13,8 +14,9 @@ type Launcher interface {
 	ComposerReady(capture string) bool
 	Rename(
 		ctx context.Context,
-		tmux Tmux,
-		socket, target, name string,
+		door pfmcall.Screen,
+		target pfmcall.Target,
+		name string,
 		timings Timings,
 		trace Trace,
 	) (warning string, err error)
@@ -50,15 +52,16 @@ func CodexComposerReady(capture string) bool { return composerReady(capture) }
 
 func RenameCodex(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target, name string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
+	name string,
 	timings Timings,
 	trace Trace,
 ) (string, error) {
 	if err := naming.ValidateLabel(name); err != nil {
 		return "", err
 	}
-	named, warning, blocked := nameCodexThread(ctx, tmux, socket, target, name, timings, trace, codexRenameProof())
+	named, warning, blocked := nameCodexThread(ctx, door, target, name, timings, trace, codexRenameProof())
 	if blocked && warning == "" {
 		warning = "composer unavailable; thread was not renamed"
 	}

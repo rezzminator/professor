@@ -20,7 +20,8 @@ import (
 
 // PaneCapture reads one live chat's pane. It is the seam InspectSeat crosses to
 // answer working-vs-idle for a chat whose transcript cannot answer it, and
-// blocked for a silent pending tool call; nil selects the real tmux capture.
+// blocked for a silent pending tool call; nil selects the one pane door's
+// visible-screen read (call.Engine.CaptureScreen).
 type PaneCapture func(ctx context.Context, socketPath, target string) (string, error)
 
 // PaneTarget is the ONE ladder from a resolved chat to the tmux target its
@@ -113,10 +114,10 @@ func heldByDialog(screen string) bool {
 	return pfmcall.SelectorLine(screen) != "" || pfmengine.ClaudeTrustDialog(screen)
 }
 
-// readPane captures one live chat's screen through the capture seam (nil is
-// the real tmux read). A capture that could not RUN comes back as an ERROR and
-// never as a state: "we failed to look" rendered as "the chat is idle" is the
-// exact confusion headless refuses everywhere else.
+// readPane captures one live tmux chat's visible screen through the capture
+// seam (nil is the one pane door). A capture that could not RUN comes back as
+// an ERROR and never as a state: "we failed to look" rendered as "the chat is
+// idle" is the exact confusion headless refuses everywhere else.
 func readPane(
 	ctx context.Context,
 	chat headless.Chat,
@@ -124,8 +125,14 @@ func readPane(
 	runtime *pfmconfig.Runtime,
 ) (string, error) {
 	if capture == nil {
+		engine, err := NewCallEngine(false, runtime)
+		if err != nil {
+			return "", fmt.Errorf("read %s pane for status: %w", chat.Name, err)
+		}
 		capture = func(ctx context.Context, socketPath, target string) (string, error) {
-			return (pfmcall.TmuxCaller{}).Capture(ctx, socketPath, target, false, pfmcall.FullScrollback)
+			return engine.CaptureScreen(ctx, pfmcall.Target{
+				SocketPath: socketPath, Pane: target, Engine: string(chat.Engine),
+			})
 		}
 	}
 	values, err := NameResolver{Runtime: runtime}.paths()
@@ -143,8 +150,9 @@ func readPane(
 	return screen, nil
 }
 
-// statusFromPane replaces a transcript-less live chat's state with what its
-// own screen says.
+// statusFromPane replaces a transcript-less live tmux chat's state with what
+// its own screen says; inspectTarget sends a live Herdr seat to
+// statusFromHerdr instead, so the host is decided once, there.
 func statusFromPane(
 	ctx context.Context,
 	chat headless.Chat,
@@ -152,9 +160,6 @@ func statusFromPane(
 	capture PaneCapture,
 	runtime *pfmconfig.Runtime,
 ) (headless.Status, error) {
-	if chat.Backend == spawn.BackendHerdr {
-		return statusFromHerdr(ctx, chat, status)
-	}
 	screen, err := readPane(ctx, chat, capture, runtime)
 	if err != nil {
 		return status, err
@@ -176,13 +181,6 @@ func blockedFromPane(
 	capture PaneCapture,
 	runtime *pfmconfig.Runtime,
 ) (headless.Status, error) {
-	if chat.Backend == spawn.BackendHerdr {
-		native, err := statusFromHerdr(ctx, chat, status)
-		if err != nil || native.State == headless.StateBlocked {
-			return native, err
-		}
-		return status, nil
-	}
 	screen, err := readPane(ctx, chat, capture, runtime)
 	if err != nil {
 		return status, err
@@ -293,14 +291,9 @@ func CheckAwait(ctx context.Context, chat headless.Chat, runtime *pfmconfig.Runt
 		Backend: chat.Backend, SeatID: chat.SeatID, SocketPath: socket,
 		Pane: PaneTarget(chat), Engine: string(chat.Engine),
 	}
-	var screen string
-	if chat.Backend == spawn.BackendHerdr {
-		// Recent output can retain a dismissed trust selector while Claude is
-		// already answering. Only the visible screen describes a live dialog.
-		screen, err = pfmcall.CaptureHerdrVisible(ctx, target)
-	} else {
-		screen, err = engine.CaptureTarget(ctx, target, 1000)
-	}
+	// Recent output can retain a dismissed trust selector while Claude is
+	// already answering: only the visible screen describes a live dialog.
+	screen, err := engine.CaptureScreen(ctx, target)
 	if err != nil {
 		return fmt.Errorf("read %s pane %s before waiting: %w", chat.Name, PaneTarget(chat), err)
 	}

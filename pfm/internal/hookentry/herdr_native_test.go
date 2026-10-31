@@ -254,7 +254,7 @@ func TestNativeRetirementFencesBaselineWorkerAndPreservesTmux(t *testing.T) {
 	rig.wantQuiet(rig.engine("agent-start", `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStart"}`))
 	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
 	deps := rig.jail.deps(herdrPaneEnv(rig.herdr, "w2:p2"), &rig.clock)
-	deps.tmux = rig.tmux.run
+	deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes
 	reporter := &herdrReporter{deps: deps, options: herdrOptions{engine: pfmengine.Claude, event: herdr.EventIdle}}
 	state, err := reporter.readActivity("s1")
 	if err != nil {

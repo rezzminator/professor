@@ -26,7 +26,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // KillServer ends one chat's tmux server and removes its socket, crumbs, and
@@ -39,8 +38,15 @@ func KillServer(ctx context.Context, resolved paths.Values, socket string) (err 
 	defer func() { end(err) }()
 	tmux := action.TmuxExecutor{TmuxDir: resolved.TmuxDir}
 	if err := tmux.KillServer(ctx, socket); err != nil {
-		if tmux.SocketAlive(ctx, socket) {
-			return err
+		// A failed kill-server ended the server only on tmux's word that it
+		// is dead: an unresponsive or unprobed server may still hold the chat.
+		if state, probeErr := tmux.ServerState(ctx, socket); state != gather.ServerDead {
+			return fmt.Errorf(
+				"kill-server on %s failed and the server is %s: %w",
+				socket,
+				state,
+				errors.Join(err, probeErr),
+			)
 		}
 	}
 	_ = os.Remove(filepath.Join(resolved.TmuxDir, socket))
@@ -59,27 +65,57 @@ func KillServer(ctx context.Context, resolved paths.Values, socket string) (err 
 	return nil
 }
 
+// endsNatively is the one end decision every end door asks: a Herdr seat ends
+// by the proved pane close, every other chat by ending its tmux server.
+func endsNatively(chat headless.Chat) bool {
+	return chat.Backend == spawn.BackendHerdr
+}
+
+// EndHow names how the end doors end chat and what they verify, for a plan
+// printed before the end (pfm restart).
+func EndHow(chat headless.Chat) string {
+	if endsNatively(chat) {
+		return "Herdr pane.close of the proved seat; verified: the seat is retired"
+	}
+	return "tmux kill-server on " + chat.Socket + "; verified: tmux says the server is dead"
+}
+
 // EndNow ends one live chat in this process and confirms it is gone: a Herdr
 // seat through the same proved pane close the native end worker runs, a tmux
-// chat by ending its server, removing its role prompt and confirming the socket
-// no longer answers. Its caller already runs outside every chat (pfm restart's
-// detached worker), so nothing here waits for a turn to end.
-// A host restart uses EndForRestart to retain the native resume recipe.
+// chat through endTmux, then its role prompt removed. Its caller already runs
+// outside every chat (pfm restart's detached worker), so nothing here waits for
+// a turn to end. A host restart uses EndForRestart to retain the native resume
+// recipe.
 func EndNow(ctx context.Context, chat headless.Chat, values paths.Values) error {
-	if chat.Backend == spawn.BackendHerdr {
+	if endsNatively(chat) {
 		return endHerdr(ctx, chat, values)
 	}
+	if err := endTmux(ctx, chat, values); err != nil {
+		return err
+	}
+	if err := agentrole.RemoveSeatPrompt(values.SIDDir, chat.Socket, chat.Pane); err != nil {
+		return fmt.Errorf("chat %s ended, but its role prompt stays: %w", chat.ID, err)
+	}
+	return nil
+}
+
+// endTmux is the one tmux end: KillServer, then the one server probe must say
+// dead. An unresponsive server is not proof of an end.
+func endTmux(ctx context.Context, chat headless.Chat, values paths.Values) error {
 	if chat.Socket == "" {
 		return fmt.Errorf("chat %s has neither a Herdr seat nor a tmux socket to end", chat.ID)
 	}
 	if err := KillServer(ctx, values, chat.Socket); err != nil {
 		return fmt.Errorf("end tmux server %s: %w", chat.Socket, err)
 	}
-	if (action.TmuxExecutor{TmuxDir: values.TmuxDir}).SocketAlive(ctx, chat.Socket) {
-		return fmt.Errorf("tmux server %s still answers after kill-server", chat.Socket)
-	}
-	if err := agentrole.RemoveSeatPrompt(values.SIDDir, chat.Socket, chat.Pane); err != nil {
-		return fmt.Errorf("chat %s ended, but its role prompt stays: %w", chat.ID, err)
+	state, err := (action.TmuxExecutor{TmuxDir: values.TmuxDir}).ServerState(ctx, chat.Socket)
+	if state != gather.ServerDead {
+		return fmt.Errorf(
+			"tmux server %s is %s after kill-server: %w",
+			chat.Socket,
+			state,
+			errors.Join(err, errors.New("end unconfirmed")),
+		)
 	}
 	return nil
 }
@@ -88,7 +124,7 @@ func EndNow(ctx context.Context, chat headless.Chat, values paths.Values) error 
 // identity and account. The same ownership lock covers closing and retirement:
 // a concurrent schedule may resume only after the old supervisor is proved gone.
 func EndForRestart(ctx context.Context, chat headless.Chat, values paths.Values) error {
-	if chat.Backend == spawn.BackendHerdr {
+	if endsNatively(chat) {
 		return endHerdrSteps(ctx, chat, values, io.Discard, true)
 	}
 	return EndNow(ctx, chat, values)
@@ -134,38 +170,27 @@ func EndTarget(
 
 // EndResolved ends a resolved live chat without re-resolving its identity.
 func EndResolved(ctx context.Context, chat headless.Chat, stdout, stderr io.Writer, runtime *pfmconfig.Runtime) int {
-	if chat.Backend == spawn.BackendHerdr {
-		effective, err := pfmconfig.RuntimeOrDefault(runtime)
-		if err == nil {
-			err = ScheduleHerdrEnd(ctx, chat, effective)
-		}
-		if err != nil {
+	effective, err := pfmconfig.RuntimeOrDefault(runtime)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
+		return 1
+	}
+	if endsNatively(chat) {
+		if err := ScheduleHerdrEnd(ctx, chat, effective); err != nil {
 			fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
 			return 1
 		}
 		fmt.Fprintf(stdout, "end scheduled %s\n", chat.ID)
 		return 0
 	}
-	var runtimes []pfmconfig.Runtime
-	if runtime != nil {
-		runtimes = append(runtimes, *runtime)
-	}
-	socketPath, err := paths.SocketPath(chat.Socket)
-	if err != nil {
+	if err := endTmux(ctx, chat, effective.Paths); err != nil {
 		fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
-		return 1
-	}
-	command := pfmtmux.Exec(ctx, "", socketPath, "kill-server")
-	if output, err := command.CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1
 	}
 	// The seat is dead, so its prompt file is litter. Cleanup is best-effort:
 	// the end itself succeeded and a prompt-file failure must remain visible
 	// without changing that result.
-	if endRuntime, err := pfmconfig.OptionalRuntime(runtimes); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not resolve paths to remove its role prompt: %v\n", err)
-	} else if err := agentrole.RemoveSeatPrompt(endRuntime.Paths.SIDDir, chat.Socket, chat.Pane); err != nil {
+	if err := agentrole.RemoveSeatPrompt(effective.Paths.SIDDir, chat.Socket, chat.Pane); err != nil {
 		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not remove role prompt: %v\n", err)
 	}
 	fmt.Fprintf(stdout, "ended %s\n", chat.ID)
@@ -429,38 +454,11 @@ func endedTerminalAbsent(ctx context.Context, seat fleetdb.Seat, values paths.Va
 		}
 		return false, errors.New("pending seat has no terminal identity")
 	}
-	body, err := herdr.SeatRequest(ctx, seat.HerdrSocket, "pane.list", struct{}{})
+	listed, err := gather.HerdrTerminalListed(ctx, seat.HerdrSocket, seat.HerdrTerminalID)
 	if err != nil {
 		return false, fmt.Errorf("confirm ended terminal: %w", err)
 	}
-	var list struct {
-		Type  string `json:"type"`
-		Panes []struct {
-			Pane      string `json:"pane_id"`
-			Workspace string `json:"workspace_id"`
-			Terminal  string `json:"terminal_id"`
-		} `json:"panes"`
-	}
-	if err := json.Unmarshal(body, &list); err != nil {
-		return false, fmt.Errorf("decode ended terminal list: %w", err)
-	}
-	if list.Type != "pane_list" || list.Panes == nil {
-		return false, fmt.Errorf("invalid ended terminal list: %s", body)
-	}
-	seen := map[string]bool{}
-	present := false
-	for _, pane := range list.Panes {
-		if pane.Pane == "" || pane.Terminal == "" || pane.Workspace == "" ||
-			!strings.HasPrefix(pane.Pane, pane.Workspace+":") ||
-			seen[pane.Pane] {
-			return false, errors.New("malformed ended terminal identity")
-		}
-		seen[pane.Pane] = true
-		if pane.Terminal == seat.HerdrTerminalID {
-			present = true
-		}
-	}
-	return !present, nil
+	return !listed, nil
 }
 
 // PendingNativeEnd finds durable intent without a live roster, so a retry still

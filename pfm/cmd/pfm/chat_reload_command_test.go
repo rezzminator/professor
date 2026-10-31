@@ -17,6 +17,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -256,29 +257,14 @@ func mustReloadSeatPromptPath(t *testing.T, sidDir, socket, pane string) string 
 }
 
 type reloadTargetTmux struct {
-	panes []reload.Pane
+	pfmcall.Screen // reloadTarget lists panes only; it never types or reads.
+	panes          []reload.Pane
 }
 
 func (tmux reloadTargetTmux) ListPanes(context.Context, string) ([]reload.Pane, error) {
 	return tmux.panes, nil
 }
 func (reloadTargetTmux) SetRemain(context.Context, string, string, bool) error { return nil }
-func (reloadTargetTmux) PaneInMode(context.Context, string, string) (bool, error) {
-	return false, nil
-}
-func (reloadTargetTmux) CancelMode(context.Context, string, string) error { return nil }
-func (reloadTargetTmux) Capture(context.Context, string, string) (string, error) {
-	return "", nil
-}
-
-func (reloadTargetTmux) CaptureStyled(context.Context, string, string) (string, error) {
-	return "", nil
-}
-func (reloadTargetTmux) SendKey(context.Context, string, string, string) error { return nil }
-func (reloadTargetTmux) SendLiteral(context.Context, string, string, string) error {
-	return nil
-}
-
 func (reloadTargetTmux) Respawn(context.Context, string, string, string, string) error {
 	return nil
 }
@@ -322,7 +308,7 @@ func TestReloadTargetWarnsAndPreservesTmuxWhenNativeSeatsUnreadable(t *testing.T
 			}
 			want := reload.Pane{ID: "%1", PID: 11, CurrentPath: "/worktree"}
 			var stderr bytes.Buffer
-			socket, pane, state, code := reloadTarget(
+			socket, pane, state, _, code := reloadTarget(
 				context.Background(), "/jail/tmux/cc-test", "%1",
 				paths.Values{StateDB: statePath}, commandRuntime{},
 				reloadTargetTmux{panes: []reload.Pane{want}}, &stderr, nil,
@@ -400,7 +386,7 @@ func TestReloadTargetWithPaneSelectsItAmongSeveralWithoutWhoami(t *testing.T) {
 		{ID: "%3", PID: 33, CurrentPath: "/three"},
 	}
 	var stderr bytes.Buffer
-	socket, pane, state, code := reloadTarget(
+	socket, pane, state, _, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-multi", "%2",
 		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
@@ -419,7 +405,7 @@ func TestReloadTargetWithPaneSelectsItAmongSeveralWithoutWhoami(t *testing.T) {
 func TestReloadTargetWithPaneRejectsAPaneThatIsNotLive(t *testing.T) {
 	panes := []reload.Pane{{ID: "%1", PID: 11, CurrentPath: "/one"}}
 	var stderr bytes.Buffer
-	_, _, _, code := reloadTarget(
+	_, _, _, _, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-gone", "%9",
 		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
@@ -439,7 +425,7 @@ func TestReloadTargetWithSockOnlyKeepsTheSinglePaneRule(t *testing.T) {
 		{ID: "%2", PID: 22, CurrentPath: "/two"},
 	}
 	var stderr bytes.Buffer
-	_, _, _, code := reloadTarget(
+	_, _, _, _, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-multi", "",
 		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
@@ -453,7 +439,7 @@ func TestReloadTargetWithSockOnlyKeepsTheSinglePaneRule(t *testing.T) {
 
 	single := []reload.Pane{{ID: "%7", PID: 77, CurrentPath: "/solo"}}
 	stderr.Reset()
-	socket, pane, state, code := reloadTarget(
+	socket, pane, state, _, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-solo", "",
 		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: single}, &stderr, nil,
 	)
@@ -480,8 +466,8 @@ func TestReloadTargetAcceptsRecoveredCodexSeatWithoutAmbientTmux(t *testing.T) {
 	panes := []reload.Pane{{ID: "%0", PID: 42, CurrentPath: "/worktree"}}
 	var stderr bytes.Buffer
 
-	socket, pane, state, code := reloadTargetFromIdentity(
-		context.Background(), identity, reloadTargetTmux{panes: panes}, &stderr, nil,
+	socket, pane, state, _, code := reloadTargetFromIdentity(
+		context.Background(), identity, paths.Values{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
 	if code != 0 || socket != identity.SocketPath || pane != "%0" || state.PID != 42 {
 		t.Fatalf(
@@ -632,13 +618,19 @@ func TestNativeChatReloadSchedulesResolvedPane(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			var code int
 			if mode == "identity" {
-				_, _, _, code = reloadTargetFromIdentity(
+				var seat *fleetdb.Seat
+				// No tmux pane is listed: a Herdr identity resolves through its seat alone.
+				_, _, _, seat, code = reloadTargetFromIdentity(
 					context.Background(),
 					resolve.Identity{Backend: "herdr", SocketPath: socket, Pane: "w6:p3"},
-					reloadTargetTmux{panes: []reload.Pane{{ID: "w6:p3", PID: 1}}},
+					runtime.Paths,
+					reloadTargetTmux{},
 					&stderr,
 					paths.OSEnv{},
 				)
+				if seat == nil || seat.SeatID != "native" {
+					t.Fatalf("identity target seat = %+v, want the native seat decided once", seat)
+				}
 			} else {
 				code = runChatReloadWithRuntime(t.Context(), args, &stdout, &stderr, runtime, paths.OSEnv{})
 			}

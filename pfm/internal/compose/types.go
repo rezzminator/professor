@@ -102,8 +102,8 @@ func (kind Kind) IsLiveSeat() bool {
 }
 
 // ResumeKindFor is the ONE demotion a live seat takes when it stops being
-// live — its tmux server died under it (action.Executor.Open,
-// action.OpenDetached) or the picker deliberately killed it to reboot it
+// live — its tmux server died under it (action.Executor.Open), its native
+// seat is no longer live (SeatKindFor) or the picker deliberately killed it to reboot it
 // (picker.rebootRow). The answer is the resumable kind of the seat's OWN
 // engine: the if/else these three call sites each used to spell mapped
 // everything that was not Codex onto ResumeClaude, so an OpenCode seat came
@@ -120,6 +120,16 @@ func ResumeKindFor(kind Kind) Kind {
 	default:
 		return kind
 	}
+}
+
+// SeatKindFor is the ONE classification of a native seat's row by its state:
+// kind while the seat is live, its resumable kind once it is not (lost,
+// failed, ended), so no reader attaches a seat nothing runs in.
+func SeatKindFor(kind Kind, state string) Kind {
+	if state != "live" {
+		return ResumeKindFor(kind)
+	}
+	return kind
 }
 
 // IsAddressable reports whether kind has a live process or pane that chat

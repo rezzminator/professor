@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -64,10 +65,7 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 		},
 		// A Codex follow-up is pasted (then_paste.go); the fake draws the
 		// pasted text as its draft the same way it draws typed text.
-		Options{ThenTries: 2, Paste: func(_ context.Context, _, _, text string) error {
-			tmux.literal = text
-			return nil
-		}},
+		Options{ThenTries: 2},
 		tmux,
 		proc,
 		io.Discard,
@@ -170,19 +168,19 @@ type busyThenIdleTmux struct {
 	typedAfter   int
 }
 
-func (tmux *busyThenIdleTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *busyThenIdleTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	tmux.captures++
 	if tmux.captures <= tmux.busyCaptures {
 		return "Claude\n✻ Thinking… (12s · ↓ 1.2k tokens · esc to interrupt)\n❯ ", nil
 	}
-	return tmux.fakeReloadTmux.Capture(context.Background(), "", "")
+	return tmux.fakeReloadTmux.CaptureScreen(context.Background(), pfmcall.Target{})
 }
 
-func (tmux *busyThenIdleTmux) SendLiteral(ctx context.Context, socket, pane, value string) error {
+func (tmux *busyThenIdleTmux) SendLiteral(ctx context.Context, target pfmcall.Target, value string) error {
 	if value == "/exit" {
 		tmux.typedAfter = tmux.captures
 	}
-	return tmux.fakeReloadTmux.SendLiteral(ctx, socket, pane, value)
+	return tmux.fakeReloadTmux.SendLiteral(ctx, target, value)
 }
 
 // stuckExitTmux renders the typed /exit in the composer and never dies on
@@ -193,11 +191,11 @@ type stuckExitTmux struct {
 	keys []string
 }
 
-func (tmux *stuckExitTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *stuckExitTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return "Claude\n❯ " + tmux.literal, nil
 }
 
-func (tmux *stuckExitTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *stuckExitTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	tmux.keys = append(tmux.keys, key)
 	if key == "BSpace" && tmux.literal != "" {
 		tmux.literal = tmux.literal[:len(tmux.literal)-1]
@@ -220,14 +218,14 @@ type guardedThenTmux struct {
 	styleErr error
 }
 
-func (tmux *guardedThenTmux) Capture(ctx context.Context, socket, pane string) (string, error) {
+func (tmux *guardedThenTmux) CaptureScreen(ctx context.Context, target pfmcall.Target) (string, error) {
 	if tmux.literal == "" {
 		return tmux.before, nil
 	}
-	return tmux.delayedThenTmux.Capture(ctx, socket, pane)
+	return tmux.delayedThenTmux.CaptureScreen(ctx, target)
 }
 
-func (tmux *guardedThenTmux) CaptureStyled(context.Context, string, string) (string, error) {
+func (tmux *guardedThenTmux) CaptureStyled(context.Context, pfmcall.Target) (string, error) {
 	return tmux.styled, tmux.styleErr
 }
 
@@ -270,10 +268,7 @@ func TestDeliverThenPreservesResumedDraft(t *testing.T) {
 				driveFakeClock(t, clk, func() {
 					err = deliverThen(context.Background(), Request{
 						Engine: engine, SocketPath: "/tmp/probe-draft", Pane: "%7", Then: "wake up",
-					}, Options{ThenTries: 2, Clock: clk, Paste: func(_ context.Context, _, _, text string) error {
-						tmux.literal = text
-						return nil
-					}}, tmux, proc, io.Discard)
+					}, Options{ThenTries: 2, Clock: clk}, tmux, proc, io.Discard)
 				})
 				if tc.want == "" {
 					if err != nil || !tmux.submitted {

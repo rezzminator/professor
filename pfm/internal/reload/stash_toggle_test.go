@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
@@ -36,11 +37,11 @@ func (tmux *stashToggleTmux) Display(ctx context.Context, socket, pane, message 
 	return tmux.displayErr
 }
 
-func (tmux *stashToggleTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *stashToggleTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return tmux.screen(tmux.suggestion), nil
 }
 
-func (tmux *stashToggleTmux) CaptureStyled(context.Context, string, string) (string, error) {
+func (tmux *stashToggleTmux) CaptureStyled(context.Context, pfmcall.Target) (string, error) {
 	return tmux.screen("\x1b[2m" + tmux.suggestion + "\x1b[0m"), nil
 }
 
@@ -56,7 +57,7 @@ func (tmux *stashToggleTmux) screen(hint string) string {
 	return "Claude\n" + line + "\n────\n" + status
 }
 
-func (tmux *stashToggleTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *stashToggleTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	switch key {
 	case "C-s":
 		tmux.stashKeys++
@@ -81,7 +82,7 @@ func (tmux *stashToggleTmux) SendKey(_ context.Context, _, _, key string) error 
 	return nil
 }
 
-func (tmux *stashToggleTmux) SendLiteral(_ context.Context, _, _, value string) error {
+func (tmux *stashToggleTmux) SendLiteral(_ context.Context, _ pfmcall.Target, value string) error {
 	tmux.literal = value
 	tmux.composer += value
 	return nil

@@ -87,3 +87,19 @@ func HoldCancellable(out io.Writer, who string, warnings []string) (cancelled bo
 		return true
 	}
 }
+
+// Relocate is the one missing-directory rule of every door that brings a chat
+// back: the recorded directory when it still is one, otherwise the fleet home
+// and the notice that says so. No directory recorded counts as missing.
+func Relocate(recorded, home string) (dir, notice string) {
+	if recorded != "" {
+		if info, err := os.Stat(recorded); err == nil && info.IsDir() {
+			return recorded, ""
+		}
+	}
+	why := "no directory of its own was recorded"
+	if recorded != "" {
+		why = "its own directory " + recorded + " is gone"
+	}
+	return home, fmt.Sprintf("opened in %s: %s", home, why)
+}

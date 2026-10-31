@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -87,18 +86,6 @@ func probeHerdrPanes(ctx context.Context, socket string) (map[string]string, jso
 	if err != nil {
 		return nil, nil, err
 	}
-	var result struct {
-		Panes []struct {
-			CWD           string `json:"cwd"`
-			ForegroundCWD string `json:"foreground_cwd"`
-		} `json:"panes"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, nil, fmt.Errorf("decode pane.list CWDs: %w", err)
-	}
-	if result.Panes == nil {
-		return nil, nil, fmt.Errorf("pane.list: missing or null panes array")
-	}
 	cwd := make(map[string]string, len(panes))
 	for i, pane := range panes {
 		if pane.PaneID == "" {
@@ -107,9 +94,9 @@ func probeHerdrPanes(ctx context.Context, socket string) (map[string]string, jso
 		if _, duplicate := cwd[pane.PaneID]; duplicate {
 			return nil, nil, fmt.Errorf("pane.list: duplicate pane_id %q", pane.PaneID)
 		}
-		directory := result.Panes[i].ForegroundCWD
+		directory := pane.ForegroundCWD
 		if directory == "" {
-			directory = result.Panes[i].CWD
+			directory = pane.CWD
 		}
 		cwd[pane.PaneID] = directory
 	}
@@ -172,29 +159,16 @@ func proveHerdrSeatSnapshot(
 			return seat, false, fmt.Errorf("prove seat %s pane.list: %w", seat.SeatID, err)
 		}
 	}
-	var list struct {
-		Type  string            `json:"type"`
-		Panes []nativeProofPane `json:"panes"`
+	panes, err := decodeHerdrPanes(body)
+	if err != nil {
+		return seat, false, fmt.Errorf("prove seat %s ownership: %w", seat.SeatID, err)
 	}
-	if err := json.Unmarshal(body, &list); err != nil {
-		return seat, false, fmt.Errorf("decode ownership panes: %w", err)
-	}
-	if list.Type != "pane_list" || list.Panes == nil {
-		return seat, false, fmt.Errorf("ownership pane.list: invalid envelope %s", body)
-	}
-	var candidate *nativeProofPane
-	seen := map[string]bool{}
-	for i := range list.Panes {
-		pane := &list.Panes[i]
-		if pane.Pane == "" || pane.Terminal == "" || pane.Workspace == "" ||
-			!strings.HasPrefix(pane.Pane, pane.Workspace+":") ||
-			seen[pane.Pane] {
-			return seat, false, fmt.Errorf("ownership pane.list: malformed or duplicate identity")
-		}
-		seen[pane.Pane] = true
-		matches := pane.Pane == seat.HerdrPane
+	var candidate *herdr.Pane
+	for i := range panes {
+		pane := &panes[i]
+		matches := pane.PaneID == seat.HerdrPane
 		if seat.HerdrTerminalID != "" {
-			matches = pane.Terminal == seat.HerdrTerminalID
+			matches = pane.TerminalID == seat.HerdrTerminalID
 		}
 		if matches {
 			if candidate != nil {
@@ -215,11 +189,11 @@ func proveHerdrSeatSnapshot(
 		}
 		return seat, false, fmt.Errorf("seat %s ownership unproved: terminal not present in pane.list", seat.SeatID)
 	}
-	body, err := herdr.SeatRequest(
+	body, err = herdr.SeatRequest(
 		ctx,
 		seat.HerdrSocket,
 		"pane.process_info",
-		map[string]string{"pane_id": candidate.Pane},
+		map[string]string{"pane_id": candidate.PaneID},
 	)
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s shell: %w", seat.SeatID, err)
@@ -234,7 +208,7 @@ func proveHerdrSeatSnapshot(
 	if err := json.Unmarshal(body, &info); err != nil {
 		return seat, false, fmt.Errorf("decode ownership shell: %w", err)
 	}
-	if info.Type != "pane_process_info" || info.Info.Pane != candidate.Pane || info.Info.Shell <= 1 {
+	if info.Type != "pane_process_info" || info.Info.Pane != candidate.PaneID || info.Info.Shell <= 1 {
 		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable", seat.SeatID)
 	}
 	pid := seat.SeatHostPID
@@ -283,7 +257,7 @@ func proveHerdrSeatSnapshot(
 			other := &seats[index]
 			if other.SeatID != seat.SeatID && other.Backend == nativeHerdrBackend &&
 				other.HerdrSocket == seat.HerdrSocket &&
-				(other.HerdrPane == candidate.Pane || (other.HerdrTerminalID != "" && other.HerdrTerminalID == candidate.Terminal)) {
+				(other.HerdrPane == candidate.PaneID || (other.HerdrTerminalID != "" && other.HerdrTerminalID == candidate.TerminalID)) {
 				if other.State != "live" {
 					if other.SeatHostPID == 0 {
 						continue
@@ -329,9 +303,9 @@ func proveHerdrSeatSnapshot(
 		(seat.SeatHostBirth > 0 && next.SeatHostBirth != seat.SeatHostBirth)) {
 		return seat, false, fmt.Errorf("seat %s saved supervisor birth changed during proof", seat.SeatID)
 	}
-	next.HerdrTerminalID = candidate.Terminal
-	next.HerdrPane = candidate.Pane
-	next.HerdrWorkspace = candidate.Workspace
+	next.HerdrTerminalID = candidate.TerminalID
+	next.HerdrPane = candidate.PaneID
+	next.HerdrWorkspace = candidate.WorkspaceID
 	if next != seat && !observe {
 		if err := db.UpdateSeat(ctx, seat, next); err != nil {
 			return seat, false, fmt.Errorf("persist proved seat %s: %w", seat.SeatID,
@@ -370,12 +344,6 @@ func proveHerdrSeatSnapshot(
 		latest.SeatHostBirth = next.SeatHostBirth
 	}
 	return latest, true, nil
-}
-
-type nativeProofPane struct {
-	Pane      string `json:"pane_id"`
-	Terminal  string `json:"terminal_id"`
-	Workspace string `json:"workspace_id"`
 }
 
 // ResolveHerdrSeat proves and persists the current address using the jail-aware
@@ -563,25 +531,13 @@ func HerdrSeatRetired(ctx context.Context, proc ProcFS, seat fleetdb.Seat) (bool
 	if err != nil {
 		return fail(err)
 	}
-	var list struct {
-		Type  string            `json:"type"`
-		Panes []nativeProofPane `json:"panes"`
-	}
-	if err := json.Unmarshal(body, &list); err != nil {
+	panes, err := decodeHerdrPanes(body)
+	if err != nil {
 		return fail(err)
 	}
-	if list.Type != "pane_list" || list.Panes == nil {
-		return fail(errors.New("invalid pane list"))
-	}
-	seen := map[string]bool{}
-	for _, pane := range list.Panes {
-		if pane.Pane == "" || pane.Terminal == "" || pane.Workspace == "" ||
-			!strings.HasPrefix(pane.Pane, pane.Workspace+":") ||
-			seen[pane.Pane] {
-			return fail(errors.New("malformed pane identity"))
-		}
-		seen[pane.Pane] = true
-		if pane.Pane == seat.HerdrPane || (seat.HerdrTerminalID != "" && pane.Terminal == seat.HerdrTerminalID) {
+	for index := range panes {
+		pane := &panes[index]
+		if pane.PaneID == seat.HerdrPane || (seat.HerdrTerminalID != "" && pane.TerminalID == seat.HerdrTerminalID) {
 			return false, nil
 		}
 	}

@@ -15,17 +15,23 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
+
+// identity is the hook's own identity snapshot: a hook runs in its chat's
+// process tree, so the chat it reports for is this process's subject.
+func (deps herdrDeps) identity() resolve.WhoamiEnvironment {
+	return resolve.EnvironmentOf(deps.getenv)
+}
 
 // nativeSeat routes a proved durable native seat. Unproved native launchers
 // must use the explicit restored repair route; tmux-in-Herdr retains its bridge.
 func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayload) (handled bool, returnErr error) {
-	env := reporter.deps.getenv
-	if reporter.deps.seatPaths == nil || env("TMUX") != "" || env(herdr.EnvMarker) != "1" ||
-		env(herdr.EnvSocket) == "" ||
-		env(herdr.EnvPane) == "" {
+	identity := reporter.deps.identity()
+	if reporter.deps.seatPaths == nil || identity.TMUX != "" || reporter.deps.getenv(herdr.EnvMarker) != "1" ||
+		identity.HerdrSocket == "" ||
+		identity.HerdrPane == "" {
 		return false, nil
 	}
 	db := fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
@@ -47,7 +53,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	}
 	values := *reporter.deps.seatPaths
 	if values.ProcRoot == "" {
-		values.ProcRoot = env(paths.EnvProcRoot)
+		values.ProcRoot = reporter.deps.getenv(paths.EnvProcRoot)
 	}
 	proc := gather.NewProcFS(values.ProcRoot)
 	seat, found, err := reporter.nativeReporterSeat(ctx, db, proc)
@@ -179,7 +185,8 @@ func (reporter *herdrReporter) nativeReporterSeat(
 	if err != nil {
 		return fleetdb.Seat{}, true, fmt.Errorf("enumerate native reporter seats: %w", err)
 	}
-	socket, pane := reporter.deps.getenv(herdr.EnvSocket), reporter.deps.getenv(herdr.EnvPane)
+	identity := reporter.deps.identity()
+	socket, pane := identity.HerdrSocket, identity.HerdrPane
 	candidates, hinted := false, false
 	for i := range seats {
 		if seats[i].Backend == spawn.BackendHerdr && seats[i].HerdrSocket == socket {
@@ -296,7 +303,7 @@ func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload he
 		(reporter.options.event != herdr.EventStart && reporter.options.event != herdr.EventEnd) {
 		return nil
 	}
-	socket := tmux.SocketPath(reporter.deps.getenv("TMUX"))
+	socket := reporter.deps.identity().TmuxSocket()
 	db := fleetdb.OpenSharedState(ctx, *reporter.deps.seatPaths)
 	defer func() {
 		if err := db.Close(); err != nil {

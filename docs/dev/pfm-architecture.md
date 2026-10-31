@@ -169,12 +169,12 @@ Each derived artifact names its source and the command that regenerates or verif
 | C1 / C2 | no source file over 800 lines and no test file over 1,000 beyond `.arch/ceiling-{src,test}.txt` | `FAIL new: <file>` |
 | C3 | `cmd/pfm` non-test lines ≤ `CMD_BUDGET` (lowered as each extraction lands) | `FAIL cmd/pfm = N > budget B`; `ERROR` when no `cmd/pfm` source is listed |
 | C4 | no `exec.Command`, `sql.Open`, `os.WriteFile` or `os.Rename` in `cmd/pfm` beyond baseline | `FAIL new: <file> xN`; `ERROR` when no `cmd/pfm` source is listed |
-| C5 | no file outside `internal/tmux` resolves the tmux binary (`deps.Executable("tmux")`) or assembles the `-S` socket argv itself | `FAIL new: <file>` |
+| C5 | no file outside `internal/tmux` and `internal/herdr` builds its own tmux or herdr invocation: resolves the binary (`deps.Executable`, `LookPath` of `"tmux"`, `"herdr"` or `pfmtmux.Binary`), spells it as the head of an argv slice or hands it to a runner beside a flag (`"tmux", "-S"`), or assembles the `-S` socket argv itself | `FAIL new: <file>` |
 | C6 | no named atomic-write helper, and no inline `os.CreateTemp` + `os.Rename`, outside `internal/atomicfile` | `FAIL new: <file>` |
 | C7 | no `sql.Open` outside `internal/sqlitedb` | `FAIL new: <file>` |
 | C8 | no negation-named directory (`*util*`, `helpers`, `common`, `misc`, `shared`) | `FAIL new: <dir>` |
 | C9 | every package has a `// Package` doc comment | `FAIL new: <dir>` |
-| C10 | `internal/mcpserv` never calls `backend.dispatch(` (argv into main) | `FAIL new: <file:line>` |
+| C10 | `internal/mcpserv` never calls `backend.dispatch(` or `cliAction(` (argv into main), counted under `<file>`, nor a `pfmcall` function (`pfmcall.New`, a key check: send and capture go through `internal/chat`), counted under `pfmcall:<file>` | `FAIL <key> (new N)` or `<key> (B->N)` |
 | C11 | `"fleet.db"` is spelled at most once in Go source | `FAIL "fleet.db" spelled N times` |
 | C12 | every package, `*.md` and `PFM_*` name that `pfm/CLAUDE.md` cites exists — a `PFM_*` name only when production code uses it beyond declaring it | `FAIL new: <names>` |
 | C13 | every source file has a same-stem `_test.go`, beyond `.arch/untested-sources.txt` | `FAIL new: <file>` |
@@ -188,6 +188,7 @@ Each derived artifact names its source and the command that regenerates or verif
 | C19 | one env namespace — `CHAT_*` and `CC_*` reads counted per file; a `grep PFM_` must find every knob | `FAIL <file> (new N)` |
 | C20 | one name for `~/.codex` — `codexRoot`/`CodexRoot`/`AccountHome` counted per file; `CodexHome` is canonical | `FAIL <file> (new N)` |
 | C21 | one test jail — `os.MkdirTemp("/tmp", …)` in tests outside `internal/testjail` counted per file; `testjail.ShortRoot` is the jail | `FAIL <file> (new N)` |
+| C27 | identity is read in one place — a getter (`Get`, `getenv`, `env`, `environ[…]`) handed `TMUX`, `TMUX_PANE`, `HERDR_SOCKET_PATH`, `HERDR_PANE_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` or a `CHAT_SENDER_*` name, as a literal or through a constant holding one, outside `internal/resolve` and `internal/paths`, counted per file; reads go through `resolve.EnvironmentOf`, `CallerEnvironment` or `ProcessEnvironment`, whose snapshot names its subject; a write (`EnvironmentWith`, a `"TMUX="` pair) is no read; `.arch/exceptions.md` gives each baselined file its reason | `FAIL <file> (new N)` |
 
 C6 was widened in the same pass: any `os.CreateTemp` outside `internal/atomicfile` is a hand-rolled writer, rename or not — the both-patterns rule had hidden three scratch-file copies in `headless/run`. Beyond the ratchet, `pfm/.golangci.yml` (dupl, goconst, gocritic, revive, staticcheck; gofumpt + gci + golines formatting) is the lint law and `scripts/clone-check.sh` (jscpd) ratchets the shell/JS/Python assets the Go tools cannot see.
 

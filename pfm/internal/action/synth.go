@@ -311,15 +311,13 @@ func Synthesize(request Request) (Plan, error) {
 			return Plan{}, errors.New("new Codex action requires a project directory")
 		}
 		account, _ := machine.CodexAccountByID(request.PrimaryAccount)
-		args, err := codexModelArgs(request.Persona.Model, request.Home)
+		var instructions *string
+		if request.Persona.Applies() {
+			instructions = &request.Persona.Body
+		}
+		args, err := CodexArgs(request.Persona.Model, request.Home, request.Persona.Effort, instructions, "", "")
 		if err != nil {
 			return Plan{}, err
-		}
-		if request.Persona.Effort != "" {
-			args = append(args, CodexEffortArg(request.Persona.Effort)...)
-		}
-		if request.Persona.Applies() {
-			args = append(args, CodexDeveloperInstructionsArg(request.Persona.Body)...)
 		}
 		if request.Prompt != "" {
 			args = append(args, request.Prompt)
@@ -502,17 +500,11 @@ func Synthesize(request Request) (Plan, error) {
 				"resuming Codex requires id, cwd, and fresh socket",
 			)
 		}
-		arguments, err := codexModelArgs(request.Persona.Model, request.Home)
+		arguments, err := CodexArgs(request.Persona.Model, request.Home,
+			request.Persona.Effort, CodexInstructions(request.Persona.Body), CodexResume, request.Row.ID)
 		if err != nil {
 			return Plan{}, err
 		}
-		if request.Persona.Effort != "" {
-			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
-		}
-		if request.Persona.Body != "" {
-			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
-		}
-		arguments = append(arguments, "resume", request.Row.ID)
 		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, arguments...)
 		plan.Run = continuityBanner(request.Row) + codexCommandFor(machine, request.PrimaryAccount, arguments...)
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)

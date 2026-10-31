@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -72,21 +73,10 @@ type ExitArgs struct {
 
 // TmuxClient abstracts all tmux mutation behind a jailed implementation.
 type TmuxClient interface {
-	PanePID(ctx context.Context, socketPath, paneID string) (int, error)
 	// PaneExists distinguishes "could not ask" from "gone": a transient tmux
 	// failure returns a non-nil error and an unspecified bool, never a bare
 	// false a caller could mistake for a confirmed exit.
 	PaneExists(ctx context.Context, socketPath, paneID string) (bool, error)
-	// PaneIDs lists every pane on the server, including panes without a tty.
-	PaneIDs(ctx context.Context, socketPath string) ([]string, error)
-	SendLine(ctx context.Context, socketPath, paneID, line string) error
-	// Capture reads the pane's visible screen, CaptureStyled the same with
-	// its styling; SendKey presses one named tmux key there. The finisher
-	// reads the footer and proves the composer empty before it types the
-	// exit command, and answers the exit confirmation with them.
-	Capture(ctx context.Context, socketPath, paneID string) (string, error)
-	CaptureStyled(ctx context.Context, socketPath, paneID string) (string, error)
-	SendKey(ctx context.Context, socketPath, paneID, key string) error
 	KillPane(ctx context.Context, socketPath, paneID string) error
 	KillServer(ctx context.Context, socketPath string) error
 	// KillServerIfSolePane checks exclusivity and kills in one server-side operation.
@@ -119,12 +109,16 @@ type Dependencies struct {
 	ConfigPath    string
 	ProcFS        gather.ProcFS
 	Tmux          TmuxClient
-	Spawner       ExitSpawner
-	Now           func() time.Time
-	Executable    string
-	Delay         time.Duration
-	PollEvery     time.Duration
-	PollAttempts  int
+	// Screen is the one pane door (call.Engine) the finisher reads the footer
+	// and composer through, types the exit command into and answers the exit
+	// confirmation with, on whichever host the target lives; nil is the real one.
+	Screen       pfmcall.Screen
+	Spawner      ExitSpawner
+	Now          func() time.Time
+	Executable   string
+	Delay        time.Duration
+	PollEvery    time.Duration
+	PollAttempts int
 	// IdleAttempts bounds the finisher's wait, PollEvery apart, for the
 	// chat's running turn to end before it types the exit command.
 	IdleAttempts int
@@ -158,8 +152,13 @@ type Manager struct {
 
 // Finisher performs the detached graceful-exit phase.
 type Finisher struct {
-	database     *store.Store
-	tmux         TmuxClient
+	database *store.Store
+	tmux     TmuxClient
+	screen   pfmcall.Screen
+	// address is one run's pane for the screen door, set on the run's copy
+	// once targetClient has picked the host; input asks for the stricter
+	// proof keys and text need.
+	address      func(ctx context.Context, input bool) (pfmcall.Target, error)
 	refresher    Refresher
 	now          func() time.Time
 	delay        time.Duration

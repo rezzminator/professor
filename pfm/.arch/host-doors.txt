@@ -1,4 +1,4 @@
-cmd/pfm/mcp_serve_command.go 2
+cmd/pfm/mcp_serve_command.go 1
 internal/agentopen/agentopen.go 2
 internal/binwatch/binwatch.go 3
 internal/call/then.go 1

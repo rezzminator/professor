@@ -12,11 +12,13 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// countingRunner is the real command runner with a call counter around it, so
-// a fixture can assert the render forked NOTHING once the window is converged.
+// countingRunner is the real command runner with a call counter around it: the
+// statusline's own runner must never be handed tmux, since every tmux call goes
+// through internal/tmux, whose tmux.exec records tmuxExecs counts.
 type countingRunner struct {
 	inner commandRunner
 	tmux  int
@@ -27,6 +29,22 @@ func (runner *countingRunner) Output(ctx context.Context, name string, args ...s
 		runner.tmux++
 	}
 	return runner.inner.Output(ctx, name, args...)
+}
+
+// tmuxExecs counts the internal/tmux invocations a render recorded, keyed by
+// subcommand and "" for the total, so a fixture can assert the render forked
+// NOTHING once the window is converged, and reached tmux only through the façade.
+func tmuxExecs(recorder *obs.Recorder) map[string]int {
+	counts := map[string]int{}
+	for _, record := range recorder.Records() {
+		if record.Message == "tmux.exec" {
+			subcmd, _ := record.Field("subcmd")
+			name, _ := subcmd.(string)
+			counts[name]++
+			counts[""]++
+		}
+	}
+	return counts
 }
 
 // A claude /rename reaches the window name on the next render, not on the next
@@ -78,24 +96,29 @@ func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
 		},
 	}
 	payload := `{"session_id":"probe-session","session_name":"RENAMED-BY-STATUSLINE"}`
+	ctx, recorder := obs.Test(t)
 
-	if _, err := Render(context.Background(), []byte(payload), runtime); err != nil {
+	if _, err := Render(ctx, []byte(payload), runtime); err != nil {
 		t.Fatal(err)
 	}
 	if got := probeWindowField(t, socketPath, "#{window_name}"); got != "RENAMED-BY-STATUSLINE" {
 		t.Fatalf("window name = %q, want the rendered 🔖 label", got)
 	}
-	firstPass := runner.tmux
-	if firstPass == 0 {
-		t.Fatal("the convergence never asked tmux anything")
+	firstPass := tmuxExecs(recorder)
+	if firstPass["display-message"] == 0 || runner.tmux != 0 {
+		t.Fatalf(
+			"the window read made %d internal/tmux display-message calls and %d raw tmux runs, "+
+				"want it through internal/tmux only",
+			firstPass["display-message"], runner.tmux,
+		)
 	}
 
 	// Second render, same label: already converged, so it must not fork tmux.
-	if _, err := Render(context.Background(), []byte(payload), runtime); err != nil {
+	if _, err := Render(ctx, []byte(payload), runtime); err != nil {
 		t.Fatal(err)
 	}
-	if runner.tmux != firstPass {
-		t.Fatalf("a converged render made %d more tmux calls, want none", runner.tmux-firstPass)
+	if got := tmuxExecs(recorder)[""]; got != firstPass[""] || runner.tmux != 0 {
+		t.Fatalf("a converged render made %d more tmux calls, want none", got-firstPass[""]+runner.tmux)
 	}
 
 	// A resume starts the chat on a new tmux server ($TMUX names a new server
@@ -107,7 +130,7 @@ func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
 		t.Fatalf("unset @pfm_chat_name: %v: %s", err, output)
 	}
 	runtime.Env["TMUX"] = socketPath + ",2,0"
-	if _, err := Render(context.Background(), []byte(payload), runtime); err != nil {
+	if _, err := Render(ctx, []byte(payload), runtime); err != nil {
 		t.Fatal(err)
 	}
 	if got := probeWindowField(t, socketPath, "#{@pfm_chat_name}"); got != "RENAMED-BY-STATUSLINE" {
@@ -115,7 +138,7 @@ func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
 	}
 
 	// A new label converges again on the very next render.
-	if _, err := Render(context.Background(), []byte(
+	if _, err := Render(ctx, []byte(
 		`{"session_id":"probe-session","session_name":"RENAMED-AGAIN"}`,
 	), runtime); err != nil {
 		t.Fatal(err)
@@ -189,6 +212,7 @@ func TestRenderOutsideAFleetSocketNeverForksTmux(t *testing.T) {
 		{"TMUX": filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()), "cx-1800000004-1-1") + ",1,0", "TMUX_PANE": "%0"},
 	} {
 		runner := &countingRunner{}
+		ctx, recorder := obs.Test(t)
 		runtime := Runtime{
 			Now: time.Now, Home: root, ConfigDir: filepath.Join(root, ".claude"),
 			CacheDir: filepath.Join(root, "cache"), RateLimitDir: filepath.Join(root, "rates"),
@@ -196,13 +220,13 @@ func TestRenderOutsideAFleetSocketNeverForksTmux(t *testing.T) {
 			ProcRoot: filepath.Join(root, "proc"), Engine: pfmengine.Claude,
 			Command: runner, Env: environment,
 		}
-		if _, err := Render(context.Background(), []byte(
+		if _, err := Render(ctx, []byte(
 			`{"session_id":"probe-none","session_name":"NO-WINDOW-HERE"}`,
 		), runtime); err != nil {
 			t.Fatal(err)
 		}
-		if runner.tmux != 0 {
-			t.Fatalf("environment %v made %d tmux calls, want none", environment, runner.tmux)
+		if got := tmuxExecs(recorder)[""]; runner.tmux != 0 || got != 0 {
+			t.Fatalf("environment %v made %d raw and %d internal/tmux calls, want none", environment, runner.tmux, got)
 		}
 	}
 }
@@ -309,13 +333,13 @@ func TestRenderRenamesWhenOnlyTheExactNameChangesPastTheClip(t *testing.T) {
 	}
 	pane := probeWindowField(t, socketPath, "#{pane_id}")
 
-	runner := &countingRunner{}
+	ctx, recorder := obs.Test(t)
 	runtime := Runtime{
 		Now: time.Now, Home: root, ConfigDir: filepath.Join(root, ".claude"),
 		CacheDir: filepath.Join(root, "cache"), RateLimitDir: filepath.Join(root, "rates"),
 		SIDDir: filepath.Join(root, "sid"), TmuxDir: tmuxDir,
 		ProcRoot: filepath.Join(root, "proc"), Engine: pfmengine.Claude,
-		Command: runner,
+		Command: commandRunner{},
 		Env: map[string]string{
 			"TMUX": socketPath + ",1,0", "TMUX_PANE": pane, "PFM_TEST_PROBE_SOCKETS": "1",
 		},
@@ -330,7 +354,7 @@ func TestRenderRenamesWhenOnlyTheExactNameChangesPastTheClip(t *testing.T) {
 	}
 	render := func(name string) {
 		t.Helper()
-		if _, err := Render(context.Background(), []byte(
+		if _, err := Render(ctx, []byte(
 			`{"session_id":"probe-exact","session_name":"`+name+`"}`,
 		), runtime); err != nil {
 			t.Fatal(err)
@@ -366,9 +390,9 @@ func TestRenderRenamesWhenOnlyTheExactNameChangesPastTheClip(t *testing.T) {
 	}
 	hookRuns([]string{first, second})
 
-	converged := runner.tmux
+	converged := tmuxExecs(recorder)[""]
 	render(second)
-	if runner.tmux != converged {
-		t.Fatalf("a converged render made %d more tmux calls, want none", runner.tmux-converged)
+	if got := tmuxExecs(recorder)[""]; got != converged {
+		t.Fatalf("a converged render made %d more tmux calls, want none", got-converged)
 	}
 }

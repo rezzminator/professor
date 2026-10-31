@@ -57,8 +57,8 @@ An omitted engine in `chat new` / MCP `new` keeps the current engine when enable
 
 | door | mode | source and route |
 | --- | --- | --- |
-| Picker ✦ new Claude | `New` | `pfm/internal/action/persona.go`, `pfm/internal/action/synth.go`: `Executor.Open` / `OpenDetached` → `Synthesize(NewClaude)`. |
-| Picker resume/agent, `chat open`, MCP `open`, schedule | `Resume` | `pfm/internal/chat/open.go`, `pfm/internal/action/executor.go`, `pfm/internal/action/open_detached.go`, `pfm/internal/action/synth.go`: `Synthesize(ResumeClaude, Agent, ResumeCodex, ResumeOpenCode)`. |
+| Picker ✦ new Claude | `New` | `pfm/internal/action/persona.go`, `pfm/internal/action/synth.go`: `Executor.Open` (interactive, or `Request.Detached`) → `Synthesize(NewClaude)`. |
+| Picker resume/agent, `chat open`, MCP `open`, schedule | `Resume` | `pfm/internal/chat/open.go`, `pfm/internal/action/executor.go`, `pfm/internal/action/synth.go`: `Synthesize(ResumeClaude, Agent, ResumeCodex, ResumeOpenCode)`. |
 | Picker ✦ new OpenCode | `New` | `pfm/internal/action/persona.go`, `pfm/internal/action/synth.go`: mirror/plugin preparation → `Synthesize(NewOpenCode)`. |
 | Picker ✦ new Codex, bare `cx` | `New` or `Resume` for resume/continue/fork | `pfm/internal/action/persona.go` checks the picker request; `pfm/internal/hookentry/codex_launch.go`: `CodexLaunch` builds the mirror and inserts persona flags. |
 | Bare `claude`, `internal launch`, `internal claude-launch` | `New` or `Resume` for resume/continue/fork | `pfm/internal/hookentry/launch.go`, `pfm/internal/hookentry/claude_launch.go`, `pfm/internal/action/synth.go`, `pfm/internal/claudelaunch/render.go`: `Launch` → `LauncherRunAs`. |

@@ -735,11 +735,13 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 						t.Error(err)
 					}
 				}
-				if req.Method == "pane.get" {
+				switch req.Method {
+				case "ping":
+					result = map[string]any{"type": "pong", "version": "fixture", "protocol": 22}
+				case "pane.get":
 					result = testjail.HerdrPaneInfo(pane)
 					result["pane"].(map[string]any)["terminal_id"] = "stable-terminal"
-				}
-				if req.Method == "pane.list" {
+				case "pane.list":
 					proofReads++
 					if len(roots) > 0 {
 						if _, err := os.Stat(filepath.Join(roots[0], "move-on-proof")); err == nil && proofReads >= 2 {
@@ -749,8 +751,7 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 					pane := testjail.HerdrPaneInfo(currentPane)["pane"].(map[string]any)
 					pane["terminal_id"] = "stable-terminal"
 					result = map[string]any{"type": "pane_list", "panes": []any{pane}}
-				}
-				if req.Method == "pane.process_info" {
+				case "pane.process_info":
 					shell := 0
 					proc := gather.NewProcFS("/proc")
 					pids, err := proc.PIDs()
@@ -785,7 +786,6 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 						},
 					}
 				}
-
 				if len(roots) > 1 && roots[1] == "reload-failure-locked" {
 					switch req.Method {
 					case "pane.process_info":

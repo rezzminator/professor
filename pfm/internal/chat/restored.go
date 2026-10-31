@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -56,13 +57,14 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 		fmt.Fprintf(stderr, "pfm chat open: restored seat: %v\n", err)
 		return 1
 	}
-	choice, err := BirthBackend(ctx, "restored", spawn.BackendAuto)
+	choice, err := placeChat(ctx, "restored", spawn.BackendAuto, "", false, &effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored backend: %v\n", err)
 		return 1
 	}
 	if choice.Backend != spawn.BackendHerdr {
-		return OpenID(ctx, id, stdout, stderr, &effective)
+		// The open births where this placement said, without asking again.
+		return OpenID(WithPlacement(ctx, choice), id, stdout, stderr, &effective)
 	}
 	lockID := id
 	if initialFound {
@@ -323,7 +325,6 @@ func resumeNativeRun(
 		}
 	}
 	remove := make(map[string]bool)
-	resume := ""
 	arity := map[string]bool{claudelaunch.SettingsFlag: true}
 	for _, knob := range claudelaunch.Knobs {
 		if knob.Wire == claudelaunch.WireFlag {
@@ -336,13 +337,7 @@ func resumeNativeRun(
 		switch knob.Name {
 		case "sessionID", "resume", restoredKnobName, restoredKnobFork:
 			remove[knob.Target] = knob.Name != restoredKnobFork
-			if knob.Name == "resume" {
-				resume = knob.Target
-			}
 		}
-	}
-	if resume == "" {
-		return run, errors.New("launch registry has no resume flag")
 	}
 	if engineID != pfmengine.Claude {
 		remove = map[string]bool{"--prompt": true, "--session": true, "--continue": false}
@@ -399,9 +394,13 @@ func resumeNativeRun(
 		if err != nil {
 			return run, fmt.Errorf("refresh restored theme: %w", err)
 		}
-		args = append(args, resume, seat.SessionID)
+		args = append(args, claudelaunch.SessionArgs("", seat.SessionID, false)...)
 	case pfmengine.Codex:
-		args = append(args, "resume", seat.SessionID)
+		tail, err := action.CodexArgs("", "", "", nil, action.CodexResume, seat.SessionID)
+		if err != nil {
+			return run, err
+		}
+		args = append(args, tail...)
 	case pfmengine.OpenCode:
 		args = append(args, "--session", seat.SessionID, run.CWD)
 	}
@@ -448,8 +447,9 @@ func prepareRestoredSeat(
 			"chat %s is carried by native seat %s; open it with pfm chat open %s instead", id, row.SeatID, id,
 		)
 	}
-	if info, err := os.Stat(row.CWD); err != nil || !info.IsDir() {
-		row.CWD = runtime.Paths.Home
+	var relocated string
+	if row.CWD, relocated = launchnotice.Relocate(row.CWD, runtime.Paths.Home); relocated != "" {
+		fmt.Fprintf(stderr, "pfm chat open: %s\n", relocated)
 	}
 	// A lost display name must not prevent restoring the indexed identity.
 	if row.Name == "" {
@@ -493,7 +493,7 @@ func prepareRestoredSeat(
 		}
 		recipe = plan.SeatRun
 	case pfmengine.OpenCode:
-		row.Kind = compose.ResumeOpenCode
+		row.Kind = compose.ResumeKindFor(row.Kind)
 		plan, err := action.Synthesize(
 			action.Request{
 				Row:            row,
@@ -559,6 +559,9 @@ func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, p
 	return fmt.Errorf("process %d is outside restored caller pane %s", os.Getpid(), pane)
 }
 
+// nativeResumeRow is the resumable row a dead native seat revives from in its
+// engine's own tmux server: the fleet's row for its newest segment, with no
+// seat, socket or pane of its own yet.
 func nativeResumeRow(
 	ctx context.Context,
 	seat fleetdb.Seat,
@@ -592,6 +595,8 @@ func nativeResumeRow(
 	if row.Account == 0 {
 		row.Account = runtime.Config.PrimaryAccountFor(pfmengine.ID(seat.Engine), runtime.Config.ImplicitAccount())
 	}
+	row.Backend, row.Socket, row.PaneID, row.SeatID = "", "", "", ""
+	row.Kind = compose.ResumeKindFor(row.Kind)
 	return row, nil
 }
 

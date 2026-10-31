@@ -59,12 +59,15 @@ func (engine *Engine) awaitHerdrPane(ctx context.Context, target Target) (result
 
 // awaitHerdrNative waits before any input for the native agent and composer.
 // Only positive startup observations are retried; failed reads and ownership
-// proofs return their cause, while blocked UIs and drafts remain refusals.
+// proofs return their cause, while blocked UIs and drafts remain refusals. A
+// composer counts as live on ComposerHoldReads consecutive reads, the tmux
+// door's hold (AwaitComposerRow): a splash frame can paint the glyph once.
 func (engine *Engine) awaitHerdrNative(
 	ctx context.Context, target Target, base *Result, lock *targetLock,
 ) (Target, herdrAgentResult, string, error) {
 	bound := engine.herdrStartupBound()
 	deadline := engine.options.Clock.Now().Add(bound)
+	streak := 0
 	for {
 		proved, err := ProveHerdrTarget(ctx, target)
 		if err != nil {
@@ -100,9 +103,19 @@ func (engine *Engine) awaitHerdrNative(
 				*base = refused
 				return target, agent, screen, nil
 			}
-			if ComposerRowShown(screen) || SelectorLine(screen) != "" {
+			if SelectorLine(screen) != "" {
 				return target, agent, screen, nil
 			}
+			if ComposerRowShown(screen) {
+				streak++
+				if streak >= ComposerHoldReads {
+					return target, agent, screen, nil
+				}
+			} else {
+				streak = 0
+			}
+		} else {
+			streak = 0
 		}
 		if !engine.options.Clock.Now().Before(deadline) {
 			return target, agent, screen, fmt.Errorf(

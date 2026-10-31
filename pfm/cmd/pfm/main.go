@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -519,7 +520,10 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 0
 	}
 	if len(args) != 0 && args[0] == "chat-server" {
-		return hookentry.ChatServer(args[1:], stderr, runtime)
+		newChat := func(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
+			return runChatWithRuntime(argv, strings.NewReader(""), stdout, stderr, runtime, ctx)
+		}
+		return hookentry.ChatServer(args[1:], stdout, stderr, runtime, newChat)
 	}
 	if len(args) != 0 && args[0] == "stale" {
 		return stale.Run(args[1:], stdout, stderr)

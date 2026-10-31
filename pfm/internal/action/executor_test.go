@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -50,13 +51,16 @@ func (tmux *fakeActionTmux) ListPanes(
 	return append([]ActionPane(nil), tmux.panes[socket]...), nil
 }
 
-func (tmux *fakeActionTmux) SocketAlive(
+func (tmux *fakeActionTmux) ServerState(
 	_ context.Context,
 	socket string,
-) bool {
+) (gather.ServerState, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
-	return tmux.alive[socket] && !tmux.launches[socket].gone
+	if tmux.alive[socket] && !tmux.launches[socket].gone {
+		return gather.ServerAlive, nil
+	}
+	return gather.ServerDead, nil
 }
 
 func (tmux *fakeActionTmux) KillPane(
@@ -966,7 +970,7 @@ func TestOpenCodexRequiresLogin(t *testing.T) {
 				request.Row = compose.Row{Kind: compose.LiveCodex, Socket: "cx-live", Account: 1}
 				request.CurrentTMUX = filepath.Join(home, "cx-live") + ",1,0"
 			}
-			line, err := executor.Open(context.Background(), request)
+			line, err := openLine(executor, context.Background(), request)
 			if name == "live self-switch" {
 				if err != nil || line != "" || len(tmux.selected) != 1 {
 					t.Fatalf("live self-switch line=%q error=%v selected=%v", line, err, tmux.selected)

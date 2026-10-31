@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // bindNativeHost validates the caller's canonical producer identity and kernel
@@ -51,7 +52,8 @@ func bindNativeHost(
 			cold = true
 		}
 	}
-	socket, pane := (paths.OSEnv{}).Get(herdr.EnvSocket), (paths.OSEnv{}).Get(herdr.EnvPane)
+	identity := resolve.CallerEnvironment()
+	socket, pane := identity.HerdrSocket, identity.HerdrPane
 	if socket != seat.HerdrSocket && !cold {
 		return seat, errors.New("caller socket differs from durable owner")
 	}

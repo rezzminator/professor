@@ -876,3 +876,25 @@ func TestPromptWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionArgs(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		sessionID, resume string
+		fork              bool
+		want              []string
+	}{
+		{"nothing", "", "", false, nil},
+		{"session id", "S", "", false, []string{"--session-id", "S"}},
+		{"resume", "", "R", false, []string{"--resume", "R"}},
+		{"fork alone", "", "", true, []string{"--fork-session"}},
+		{"resume fork", "", "R", true, []string{"--resume", "R", "--fork-session"}},
+		{"all three in order", "S", "R", true, []string{"--session-id", "S", "--resume", "R", "--fork-session"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SessionArgs(test.sessionID, test.resume, test.fork); !slices.Equal(got, test.want) {
+				t.Fatalf("SessionArgs = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

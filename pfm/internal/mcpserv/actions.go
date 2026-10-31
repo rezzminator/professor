@@ -273,9 +273,10 @@ func (service *Service) chatNew(
 // action.Dispatch, whose K1 non-terminal branch only ever prints the eval
 // line for a shell wrapper to `eval` — the MCP daemon has no shell reading
 // its stdout, so the line went nowhere and nothing opened. open instead
-// takes chat.OpenDetachedID, the verb layer's own door for a caller with no
+// takes chat.OpenDetachedTarget, the verb layer's own door for a caller with no
 // terminal to attach: the same resolution and the same preparation `pfm chat
-// open` runs, ending in action.Executor.OpenDetached instead of an eval line.
+// open` runs, ending in action.Executor.Open's detached mode instead of an eval
+// line. No caller is carried: the chat is placed by its own recorded host.
 func (service *Service) chatOpen(
 	ctx context.Context,
 	request *mcp.CallToolRequest,

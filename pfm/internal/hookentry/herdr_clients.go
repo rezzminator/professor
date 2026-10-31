@@ -630,12 +630,12 @@ func (reporter *herdrReporter) blankTitle(ctx context.Context, action *herdrActi
 	if inFlight {
 		return nil
 	}
-	panes, err := reporter.deps.tmux(ctx, reporter.options.socket, "list-panes", "-a", "-F", "#{pane_id}")
+	panes, err := reporter.deps.listPanes(ctx, reporter.options.socket)
 	if err != nil {
 		return fmt.Errorf("outer terminal title left as is at session end: list the panes of %s: %w", socketName, err)
 	}
-	for _, other := range strings.Fields(panes) {
-		if other != pane {
+	for index := range panes {
+		if panes[index].PaneID != pane {
 			return nil
 		}
 	}

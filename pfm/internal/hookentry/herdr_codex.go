@@ -16,8 +16,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/costledger"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // A Codex hook never names its pane through its own environment: a bare
@@ -198,15 +198,15 @@ func (reporter *herdrReporter) registerCodexPane(session, path string) (codexPan
 // setTarget names the pane a TUI's environment was started in: a tmux pane
 // when both TMUX and TMUX_PANE are set, else a Herdr pane, else none.
 func (pane *codexPane) setTarget(environment map[string]string) {
-	socket := pfmtmux.SocketPath(environment["TMUX"])
-	if socket != "" && environment["TMUX_PANE"] != "" {
-		pane.TmuxSocket, pane.TmuxPane = socket, environment["TMUX_PANE"]
+	target := resolve.ProcessEnvironment(environment)
+	if socket := target.TmuxSocket(); socket != "" && target.TMUXPane != "" {
+		pane.TmuxSocket, pane.TmuxPane = socket, target.TMUXPane
 		return
 	}
-	if environment[herdr.EnvMarker] != "1" || environment[herdr.EnvSocket] == "" || environment[herdr.EnvPane] == "" {
+	if environment[herdr.EnvMarker] != "1" || target.HerdrSocket == "" || target.HerdrPane == "" {
 		return
 	}
-	pane.HerdrSocket, pane.HerdrPane = environment[herdr.EnvSocket], environment[herdr.EnvPane]
+	pane.HerdrSocket, pane.HerdrPane = target.HerdrSocket, target.HerdrPane
 }
 
 // codexProcess is the Codex process a hook runs under: the first process
@@ -261,14 +261,25 @@ func (reporter *herdrReporter) lookupCodexPane(session, path string) (codexPane,
 
 // codexProcessAlive reports whether a record's process still runs its
 // recorded command; without a process table it is believed. A process table
-// entry that cannot be read for any reason but the process being gone is an
-// error: the process may well be running.
+// with no entry is gone only once the one pid probe (deps.processAlive) agrees:
+// a table that cannot show a running process proves nothing. Any other
+// unreadable entry is an error: the process may well be running.
 func (reporter *herdrReporter) codexProcessAlive(pane codexPane) (bool, error) {
 	if reporter.deps.procInfo == nil {
 		return true, nil
 	}
 	_, command, err := reporter.deps.procInfo(pane.PID)
 	if errors.Is(err, fs.ErrNotExist) {
+		if reporter.deps.processAlive == nil {
+			return false, nil
+		}
+		alive, probeErr := reporter.deps.processAlive(pane.PID)
+		if probeErr != nil {
+			return false, errors.Join(err, probeErr)
+		}
+		if alive {
+			return false, fmt.Errorf("process %d runs but the process table cannot show its command: %w", pane.PID, err)
+		}
 		return false, nil
 	}
 	if err != nil {

@@ -109,27 +109,26 @@ func ReconcileCodexPanes(
 	runtime pfmconfig.Runtime,
 	warn Warn,
 ) bool {
-	return ReconcileCodexPanesWith(
-		ctx,
-		database,
-		live,
-		runtime,
-		spawn.TmuxSpawner{TmuxDir: runtime.Paths.TmuxDir},
-		warn,
-	)
+	screen, err := pfmcall.New(pfmcall.Dependencies{})
+	if err != nil {
+		warn(fmt.Sprintf("Codex pane reconcile: open the pane door: %v", err))
+		return false
+	}
+	return ReconcileCodexPanesWith(ctx, database, live, runtime, screen, warn)
 }
 
-// ReconcileCodexPanesWith is ReconcileCodexPanes re-applying names through
-// renamer. Renaming is the one step of the pass that has to talk to a live
-// Codex composer, so a test hands its own driver here: before this seam the
-// step had NO automated coverage — and neither did anything sequenced after
-// it. That is exactly where the missing cx_names record hid.
+// ReconcileCodexPanesWith is ReconcileCodexPanes reading panes and
+// re-applying names through screen. Renaming is the one step of the pass
+// that has to talk to a live Codex composer, so a test hands its own driver
+// here: before this seam the step had NO automated coverage — and neither did
+// anything sequenced after it. That is exactly where the missing cx_names
+// record hid.
 func ReconcileCodexPanesWith(
 	ctx context.Context,
 	database *store.Store,
 	live gather.Snapshot,
 	runtime pfmconfig.Runtime,
-	renamer spawn.Tmux,
+	screen pfmcall.Screen,
 	warn Warn,
 ) bool {
 	changed := false
@@ -196,7 +195,7 @@ func ReconcileCodexPanesWith(
 			if inFlight {
 				continue
 			}
-			capture, captureErr := renamer.Capture(ctx, action.Socket, action.PaneID)
+			capture, captureErr := screen.CaptureScreen(ctx, codexPaneTarget(runtime, action.Socket, action.PaneID))
 			if captureErr != nil {
 				warn(fmt.Sprintf(
 					"codex pane %s %s: capture pane before re-applying the chat name (binding retained for retry): %v",
@@ -276,7 +275,7 @@ func ReconcileCodexPanesWith(
 			continue
 		}
 		warning, renameErr := spawn.RenameCodex(
-			ctx, renamer, action.Socket, action.PaneID, name, spawn.Defaults(), spawn.Trace{},
+			ctx, screen, codexPaneTarget(runtime, action.Socket, action.PaneID), name, spawn.Defaults(), spawn.Trace{},
 		)
 		if renameErr != nil {
 			warn(
@@ -570,4 +569,10 @@ func codexLineageRoots(ctx context.Context, database *store.Store) func(string) 
 		}
 		return id
 	}
+}
+
+// codexPaneTarget addresses a reconciled pane on the pane door: its tmux
+// socket's path under the runtime's socket directory.
+func codexPaneTarget(runtime pfmconfig.Runtime, socket, pane string) pfmcall.Target {
+	return pfmcall.Target{SocketPath: filepath.Join(runtime.Paths.TmuxDir, socket), Pane: pane}
 }

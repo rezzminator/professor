@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -95,12 +96,12 @@ func startupOverlayKey(capture string) string {
 // that did not open, instead of waiting out the step budget.
 func awaitRenameModal(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
 	timings Timings,
 ) bool {
 	opened := false
-	pollCapture(ctx, tmux, socket, target, timings, func(capture string) bool {
+	pollCapture(ctx, door, target, timings, func(capture string) bool {
 		opened = renameModalOpen(capture)
 		return opened || codexFolderUntrusted(capture)
 	})
@@ -113,14 +114,14 @@ func awaitRenameModal(
 // an error, never "it has a thread".
 func untrustedFolderGuard(
 	ctx context.Context,
-	tmux Tmux,
+	door pfmcall.Screen,
 	request Request,
-	target string,
+	target pfmcall.Target,
 ) error {
 	if request.Engine != pfmengine.Codex {
 		return nil
 	}
-	capture, err := tmux.Capture(ctx, request.Socket, target)
+	capture, err := door.CaptureScreen(ctx, target)
 	if err != nil {
 		return fmt.Errorf(
 			"could not read the Codex chat on socket %s to confirm it started a thread: %w",
@@ -139,6 +140,6 @@ func untrustedFolderGuard(
 		request.CWD,
 		codexNoThread,
 		request.Socket,
-		target,
+		target.Pane,
 	)
 }

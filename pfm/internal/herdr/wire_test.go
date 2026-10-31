@@ -333,11 +333,17 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 		}) {
 		t.Errorf("ParseAgentList = %+v, %v, want an unnamed and a named agent", agents, err)
 	}
-	panes, err := ParsePanes(
-		json.RawMessage(`{"type":"pane_list","panes":[{"pane_id":"w6:p3","terminal_id":"term_1","focused":true}]}`),
-	)
-	if err != nil || len(panes) != 1 || panes[0] != (Pane{PaneID: "w6:p3", TerminalID: "term_1"}) {
-		t.Errorf("ParsePanes = %+v, %v", panes, err)
+	panes, err := ParsePanes(json.RawMessage(`{"type":"pane_list","panes":[{"pane_id":"w6:p3","terminal_id":"term_1",` +
+		`"workspace_id":"w6","tab_id":"w6:t1","focused":true,"revision":9,"agent_session":{"id":"s"},` +
+		`"agent_status":"working","tokens":{"t":"1"},"cwd":"/a","foreground_cwd":"/b"}]}`))
+	if err != nil || len(panes) != 1 {
+		t.Fatalf("ParsePanes = %+v, %v", panes, err)
+	}
+	pane := panes[0]
+	if pane.PaneID != "w6:p3" || pane.TerminalID != "term_1" || pane.WorkspaceID != "w6" || pane.TabID != "w6:t1" ||
+		pane.Focused == nil || !*pane.Focused || pane.Revision != 9 || string(pane.AgentSession) != `{"id":"s"}` ||
+		pane.AgentStatus != "working" || pane.Tokens["t"] != "1" || pane.CWD != "/a" || pane.ForegroundCWD != "/b" {
+		t.Errorf("ParsePanes = %+v, want every PaneInfo field a caller reads", pane)
 	}
 	pids, err := ParseProcessInfo(
 		json.RawMessage(

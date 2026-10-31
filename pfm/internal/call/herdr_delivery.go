@@ -175,12 +175,6 @@ func (engine *Engine) callHerdr(
 	return base, nil
 }
 
-// CaptureHerdrVisible reads a proved pane's current frame, not its recent
-// output history. Dialog checks must not judge an already dismissed selector.
-func CaptureHerdrVisible(ctx context.Context, target Target) (string, error) {
-	return herdrRawCapture(ctx, target, "")
-}
-
 // confirmHerdrTurn observes the acknowledged agent without submitting again.
 // Hook publication can lag agent.prompt's snapshot; idle sequence changes alone
 // still cannot prove a turn. The existing proof-settle budget bounds all reads.

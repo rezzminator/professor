@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
@@ -73,14 +75,22 @@ func (executor *Executor) watchLaunch(
 			// because the server is gone.
 			return executor.keepLaunch(ctx, socket, []string{unwatched(name, socket, ctx.Err())}), nil
 		}
-		if err != nil && executor.tmux.SocketAlive(context.WithoutCancel(ctx), socket) {
-			// The server runs; only its pane would not read. Dead or up is
-			// unknown, and a live server is never reported dead.
-			warning := fmt.Sprintf(
-				"pfm could not read %s's launch pane (%v): whether it is up is unknown — tmux -L %s attach -t %s",
-				name, err, socket, socket,
-			)
-			return executor.keepLaunch(ctx, socket, []string{warning}), nil
+		if err != nil {
+			// Only tmux's word that the server is dead reports the launch
+			// dead: a running, unresponsive or unprobed server leaves dead or
+			// up unknown, and a live server is never reported dead.
+			state, probeErr := executor.tmux.ServerState(context.WithoutCancel(ctx), socket)
+			if state != gather.ServerDead {
+				warning := fmt.Sprintf(
+					"pfm could not read %s's launch pane (%v); its server is %s: whether it is up is unknown — tmux -L %s attach -t %s",
+					name,
+					errors.Join(err, probeErr),
+					state,
+					socket,
+					socket,
+				)
+				return executor.keepLaunch(ctx, socket, []string{warning}), nil
+			}
 		}
 		if err != nil {
 			return nil, fmt.Errorf(

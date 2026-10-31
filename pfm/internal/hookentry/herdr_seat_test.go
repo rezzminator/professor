@@ -256,7 +256,7 @@ func TestHerdrTmuxSeatFailurePreservesBridge(t *testing.T) {
 				}
 			}
 			deps := rig.jail.deps(rig.env, &rig.clock)
-			deps.tmux, deps.seatPaths = rig.tmux.run, &values
+			deps.tmux, deps.listPanes, deps.seatPaths = rig.tmux.run, rig.tmux.listPanes, &values
 			var stderr bytes.Buffer
 			rc := reportToHerdr([]string{test.event}, strings.NewReader(`{"session_id":"s1"}`), &stderr, deps)
 			if rc != 0 || !strings.Contains(stderr.String(), "seat") ||

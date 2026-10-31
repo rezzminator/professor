@@ -59,7 +59,19 @@ func openWithTestConfig(executor *Executor, ctx context.Context, request Request
 	if len(request.Config.Accounts) == 0 {
 		request.Config = testMachineConfig(request.Home)
 	}
-	return executor.Open(ctx, request)
+	return openLine(executor, ctx, request)
+}
+
+// openLine is Executor.Open's eval line, the interactive answer.
+func openLine(executor *Executor, ctx context.Context, request Request) (string, error) {
+	result, err := executor.Open(ctx, request)
+	return result.Line, err
+}
+
+// detachedRequest is request opened for a caller with no terminal.
+func detachedRequest(request Request) Request {
+	request.Detached = true
+	return request
 }
 
 func TestMachineConfigCreatesAccountDirs(t *testing.T) {

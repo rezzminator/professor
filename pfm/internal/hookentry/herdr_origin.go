@@ -13,7 +13,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrDeps) int {
@@ -63,9 +63,10 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 // ("socket,server pid,session") and $TMUX_PANE. Codex never comes here: its
 // hooks can run in the shared daemon's environment (runCodex).
 func (reporter *herdrReporter) tmuxOrigin() {
-	reporter.tmuxPane = reporter.deps.getenv("TMUX_PANE")
+	environment := resolve.EnvironmentOf(reporter.deps.getenv)
+	reporter.tmuxPane = environment.TMUXPane
 	if reporter.options.socket == "" {
-		reporter.options.socket = tmux.SocketPath(reporter.deps.getenv("TMUX"))
+		reporter.options.socket = environment.TmuxSocket()
 	}
 }
 

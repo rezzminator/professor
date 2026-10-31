@@ -73,6 +73,15 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 			listed = append(listed, map[string]any{"pane_id": id, "workspace_id": workspace, "terminal_id": terminal})
 		}
 		return map[string]any{"type": "pane_list", "panes": listed}, ""
+	case "pane.get":
+		terminal, found := fake.panes[pane]
+		if !found {
+			return nil, "pane_not_found"
+		}
+		return map[string]any{"type": "pane_info", "pane": map[string]any{"pane_id": pane, "terminal_id": terminal}}, ""
+	case "pane.close":
+		delete(fake.panes, pane)
+		return map[string]any{"type": "ok"}, ""
 	case "pane.process_info":
 		return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
 			"pane_id": pane, "shell_pid": 41,

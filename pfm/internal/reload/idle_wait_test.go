@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 // proseTokensTmux is the 2026-09-25 self-reload incident: the caller's turn
@@ -16,7 +18,7 @@ type proseTokensTmux struct {
 	fakeReloadTmux
 }
 
-func (tmux *proseTokensTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *proseTokensTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if tmux.literal == "/exit" {
 		return tmux.screen("❯ /exit"), nil
 	}

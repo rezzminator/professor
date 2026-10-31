@@ -315,7 +315,9 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		var text string
 		_ = json.Unmarshal(p["text"], &text)
 		f.typed = append(f.typed, text)
-		f.text = f.composer() + text
+		if f.mode != "exit-unrendered" {
+			f.text = f.composer() + text
+		}
 		return map[string]string{"type": "ok"}, ""
 	case "pane.send_keys":
 		var keys []string
@@ -327,9 +329,8 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 				if f.mode != "stash-refused" {
 					f.text = f.composer()
 				}
-			case "BSpace":
-				f.text = strings.TrimSuffix(f.text, "t")
-				if len(f.text) > len("❯ ") {
+			case "backspace":
+				if len(f.text) > len(f.composer()) {
 					f.text = f.text[:len(f.text)-1]
 				}
 			case "Enter":

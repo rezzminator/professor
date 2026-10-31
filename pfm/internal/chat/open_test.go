@@ -19,6 +19,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -40,8 +41,11 @@ func (fake *fakeOpenTmux) ListPanes(context.Context, string) ([]action.ActionPan
 	return nil, nil
 }
 
-func (fake *fakeOpenTmux) SocketAlive(_ context.Context, socket string) bool {
-	return fake.alive[socket]
+func (fake *fakeOpenTmux) ServerState(_ context.Context, socket string) (gather.ServerState, error) {
+	if fake.alive[socket] {
+		return gather.ServerAlive, nil
+	}
+	return gather.ServerDead, nil
 }
 
 func (fake *fakeOpenTmux) KillPane(context.Context, string, string) error { return nil }
@@ -644,12 +648,12 @@ func TestOpenGoneWorkbench(t *testing.T) {
 // directory is unusable — gone, or never recorded: the chat opens in the
 // directory the opener stands in, and stderr says so, since an open in an
 // unexpected place reads as an empty chat otherwise.
+// A terminal open whose chat's directory is gone opens it in the fleet home,
+// the one missing-directory rule every door shares, never in whatever
+// directory the opener happens to stand in.
 func TestOpenPlainGoneDirectory(t *testing.T) {
 	root := testjail.Fleet(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	cwd := filepath.Join(root, "home")
 	gone := filepath.Join(root, "gone")
 	for _, test := range []struct {
 		name      string

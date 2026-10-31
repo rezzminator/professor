@@ -16,7 +16,7 @@ import (
 )
 
 func (reporter *herdrReporter) nativeClaude() bool {
-	return reporter.options.engine == pfmengine.Claude && reporter.deps.getenv("TMUX") == "" &&
+	return reporter.options.engine == pfmengine.Claude && reporter.deps.identity().TMUX == "" &&
 		reporter.options.socket == "" && reporter.processTarget().ok()
 }
 

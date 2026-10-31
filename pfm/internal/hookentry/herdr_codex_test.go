@@ -202,6 +202,18 @@ func TestHerdrCodexReportsOnlyToTheRegisteredPane(t *testing.T) {
 			logs:  []string{"the TUI process 90 of Codex session x1 is gone"},
 		},
 		{
+			name: "a registration whose table entry is gone while its TUI still answers is kept",
+			run: func(rig *chatRig) []herdrRun {
+				started := rig.codex("start", "x1", `,"source":"startup"`)
+				delete(rig.jail.procs, codexTUI)
+				rig.jail.answers = map[int]bool{codexTUI: true}
+				return []herdrRun{started, rig.codex("idle", "x1")}
+			},
+			calls:   []string{codexReportCall("w1:p1", "idle", "x1", "")},
+			logs:    []string{"process 90 runs but the process table cannot show its command"},
+			records: []string{"x1"},
+		},
+		{
 			name: "a registration whose TUI now runs another command is removed",
 			run: func(rig *chatRig) []herdrRun {
 				started := rig.codex("start", "x1", `,"source":"startup"`)

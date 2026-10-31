@@ -194,7 +194,7 @@ func TestOpenLiveOpenCodeAttachesAndDemotesToItsOwnResume(t *testing.T) {
 			OpenCode:         pfmconfig.OpenCode{Binary: "opencode"},
 		},
 	}
-	line, err := executor.Open(context.Background(), request)
+	line, err := openLine(executor, context.Background(), request)
 	if err != nil {
 		t.Fatalf("open live OpenCode: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestOpenLiveOpenCodeAttachesAndDemotesToItsOwnResume(t *testing.T) {
 	}
 
 	request.Row.Socket = "ox-404-1-1"
-	line, err = executor.Open(context.Background(), request)
+	line, err = openLine(executor, context.Background(), request)
 	if err != nil {
 		t.Fatalf("open dead OpenCode socket: %v", err)
 	}

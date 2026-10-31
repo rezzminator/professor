@@ -103,7 +103,11 @@ func sessionAutoEffort(runtime Runtime, data input) autoEffortState {
 	path, err := paths.AutoEffortStateFile(runtime.pathsEnv(), runtime.Home, sessionID)
 	state := autoEffortState{err: err}
 	if err == nil {
-		state = parseAutoEffortState(path, readCapped, keeperProbe(gather.NewProcFS(runtime.ProcRoot), signalZero))
+		state = parseAutoEffortState(
+			path,
+			readCapped,
+			keeperProbe(gather.NewProcFS(runtime.ProcRoot), gather.ProcessAlive),
+		)
 	}
 	switch {
 	case state.err == nil:
@@ -195,38 +199,62 @@ func parseAutoEffortState(
 // plugin's src/state.ts KEEPER_MARK).
 const keeperMark = "auto-effort-keeper"
 
-// signalZero sends pid the null signal: kill(2)'s existence and permission
-// check, nothing delivered.
-func signalZero(pid int) error { return syscall.Kill(pid, 0) }
-
 // keeperProbe answers whether pid is a live auto-effort keeper: no such
 // process, a zombie, another user's process (the keeper runs as the status
-// line's own user, so the null signal reaches it) or a process without
-// keeperMark in its argv is not one; a probe or argv read that fails any other
-// way is an error, never an answer. signal is signalZero outside the tests.
-func keeperProbe(proc gather.ProcFS, signal func(pid int) error) func(int) (bool, error) {
+// line's own user) or a process without keeperMark in its argv is not one; a
+// probe or read that fails any other way is an error, never an answer. alive is
+// gather.ProcessAlive outside the tests.
+func keeperProbe(proc gather.ProcFS, alive func(pid int) (bool, error)) func(int) (bool, error) {
 	return func(pid int) (bool, error) {
-		err := signal(pid)
-		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
-			return false, nil
-		}
+		live, err := alive(pid)
 		if err != nil {
 			return false, fmt.Errorf("probe keeper %d: %w", pid, err)
+		}
+		if !live {
+			return false, nil
+		}
+		ours, err := processOurs(proc, alive, pid)
+		if err != nil {
+			return false, fmt.Errorf("inspect keeper %d: %w", pid, err)
+		}
+		if !ours {
+			return false, nil
 		}
 		argv, err := proc.Cmdline(pid)
 		if err == nil {
 			return slices.Contains(argv, keeperMark), nil
 		}
-		if errors.Is(signal(pid), syscall.ESRCH) {
+		if processGone(alive, pid) {
 			return false, nil // it ended between the probe and the read
-		}
-		if identity, ok := proc.(gather.ProcIdentity); ok {
-			if who, identityErr := identity.ProcessIdentity(pid); identityErr == nil && who.Zombie {
-				return false, nil
-			}
 		}
 		return false, fmt.Errorf("read keeper %d argv: %w", pid, err)
 	}
+}
+
+// processOurs answers whether the live pid is a running process of the status
+// line's own user, as the keeper and Claude both are: a zombie or another
+// user's process is not. A failed identity read is an error unless the process
+// ended meanwhile; a ProcFS without identity metadata answers yes.
+func processOurs(proc gather.ProcFS, alive func(int) (bool, error), pid int) (bool, error) {
+	identities, ok := proc.(gather.ProcIdentity)
+	if !ok {
+		return true, nil
+	}
+	who, err := identities.ProcessIdentity(pid)
+	if err != nil {
+		if processGone(alive, pid) {
+			return false, nil
+		}
+		return false, err
+	}
+	return !who.Zombie && who.EffectiveUID == uint32(os.Geteuid()), nil
+}
+
+// processGone re-probes pid after a failed read: true only when alive proves it
+// ended, so a probe that cannot tell keeps the read's error.
+func processGone(alive func(int) (bool, error), pid int) bool {
+	live, err := alive(pid)
+	return err == nil && !live
 }
 
 // readCapped reads a regular file of at most autoEffortStateMaxBytes. It opens

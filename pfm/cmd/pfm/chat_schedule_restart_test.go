@@ -332,6 +332,12 @@ func (f *scheduleRestartHerdr) respond(method string, params map[string]json.Raw
 			},
 		}
 	case "pane.close":
+		var pane string
+		_ = json.Unmarshal(params["pane_id"], &pane)
+		if pane != f.pane {
+			// The revive retires the restart's old pane; the live one stays.
+			return map[string]any{"type": "ok"}
+		}
 		if err := os.RemoveAll(filepath.Join(f.proc, "42")); err != nil {
 			f.t.Error(err)
 		}

@@ -68,6 +68,7 @@ type fakeTmux struct {
 	submitted          bool
 	postCaptures       int
 	inMode             bool
+	modeErr            error
 	modeAfterEsc       bool
 	cancelModes        int
 	killLiteral        bool
@@ -231,7 +232,7 @@ func (fake *fakeTmux) PaneInMode(
 ) (bool, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
-	return fake.inMode, nil
+	return fake.inMode, fake.modeErr
 }
 
 func (fake *fakeTmux) PaneCommand(

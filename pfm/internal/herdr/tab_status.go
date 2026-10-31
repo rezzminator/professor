@@ -16,8 +16,6 @@ import (
 // TabStatusOff disables tab decorations without changing sidebar indicators.
 const TabStatusOff = "off"
 
-const tabPaneListResult = "pane_list"
-
 // errTabOwnership marks a tab whose owner could not be proved, and
 // errTabLabelForeign a retained tab whose label pfm cannot show is its own:
 // either leaves that tab untouched while every other tab keeps painting.
@@ -140,28 +138,26 @@ func (pane TabPane) valid() bool {
 	return pane.Pane != "" && pane.Terminal != "" && pane.Workspace != "" && pane.Tab != "" && pane.Focused != nil
 }
 
-// ReadTabPanes validates pane.list's identity fields at data entry.
+// ReadTabPanes reads pane.list (ListPanes) and validates its identity fields
+// at data entry.
 func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
-	body, err := SeatRequest(ctx, socket, "pane.list", struct{}{})
+	listed, err := ListPanes(ctx, socket)
 	if err != nil {
 		return nil, fmt.Errorf("list tab panes: %w", err)
 	}
-	var result struct {
-		Type  string    `json:"type"`
-		Panes []TabPane `json:"panes"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("decode tab panes: %w", err)
-	}
-	if result.Type != tabPaneListResult {
-		return nil, fmt.Errorf("tab panes: unexpected result %s", body)
-	}
-	for _, pane := range result.Panes {
-		if !pane.valid() {
-			return nil, fmt.Errorf("tab panes: incomplete PaneInfo for %q", pane.Pane)
+	panes := make([]TabPane, 0, len(listed))
+	for index := range listed {
+		pane := &listed[index]
+		tab := TabPane{
+			Pane: pane.PaneID, Terminal: pane.TerminalID, Workspace: pane.WorkspaceID, Tab: pane.TabID,
+			Focused: pane.Focused, Revision: pane.Revision, Session: pane.AgentSession, State: pane.AgentStatus,
 		}
+		if !tab.valid() {
+			return nil, fmt.Errorf("tab panes: incomplete PaneInfo for %q", tab.Pane)
+		}
+		panes = append(panes, tab)
 	}
-	return result.Panes, nil
+	return panes, nil
 }
 
 func readTabPane(

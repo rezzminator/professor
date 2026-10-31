@@ -51,17 +51,13 @@ type Pane struct {
 	PID         int
 }
 
+// Tmux is the tmux worker's pane: tmux's own server and pane-option verbs,
+// and call's one Screen door for every key, type and read of the chat — the
+// worker never picks a host's capture or send-keys for itself.
 type Tmux interface {
+	pfmcall.Screen
 	ListPanes(context.Context, string) ([]Pane, error)
 	SetRemain(context.Context, string, string, bool) error
-	PaneInMode(context.Context, string, string) (bool, error)
-	CancelMode(context.Context, string, string) error
-	Capture(context.Context, string, string) (string, error)
-	// CaptureStyled is Capture with SGR attributes kept, so dim hint text in
-	// the composer can be told from a draft.
-	CaptureStyled(context.Context, string, string) (string, error)
-	SendKey(context.Context, string, string, string) error
-	SendLiteral(context.Context, string, string, string) error
 	Respawn(context.Context, string, string, string, string) error
 	Display(context.Context, string, string, string) error
 }
@@ -117,6 +113,8 @@ type Request struct {
 	Home    string
 	Machine pfmconfig.Config
 	fresh   bool
+	// cwdNotice says why CWD fell back to the fleet home; the handoff prints it.
+	cwdNotice string
 }
 
 type Options struct {
@@ -136,8 +134,6 @@ type Options struct {
 	ThenTries      int
 	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
 	Clock clock.Clock
-	// Paste delivers a Codex --then as one bracketed paste (then_paste.go).
-	Paste func(ctx context.Context, socket, pane, text string) error
 }
 
 type Result struct {
@@ -147,6 +143,12 @@ type Result struct {
 	// New reports whether the reborn seat started a brand-new session id
 	// (--new was requested, or no transcript existed yet to resume).
 	New bool
+}
+
+// target is the tmux pane this request reboots, as call's Screen door
+// addresses it.
+func (request Request) target() pfmcall.Target {
+	return pfmcall.Target{SocketPath: request.SocketPath, Pane: request.Pane, Engine: string(request.Engine)}
 }
 
 func (o *Options) defaults() {
@@ -297,39 +299,23 @@ func Run(
 			}
 		}
 	}()
-	mode, err := tmux.PaneInMode(ctx, request.SocketPath, request.Pane)
-	if err != nil {
-		return Result{}, fmt.Errorf("read pane mode: %w", err)
-	}
-	if mode {
-		if err := tmux.CancelMode(ctx, request.SocketPath, request.Pane); err != nil {
-			return Result{}, fmt.Errorf("cancel pane mode: %w", err)
-		}
+	if _, err := tmux.LeaveCopyMode(ctx, request.target()); err != nil {
+		return Result{}, err
 	}
 	capture, err := waitCallerIdle(ctx, request, options, tmux, stderr)
 	if err != nil {
 		return Result{}, err
 	}
 	trail.Reach("idle", "caller turn ended")
-	if selectorOpen(capture) {
-		cause := errors.New("open selector menu on the pane — refusing to /exit")
-		abort := "reload ABORTED — answer the open menu first, then reload again"
-		if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, abort); displayErr != nil {
-			return Result{}, errors.Join(cause, fmt.Errorf("display selector refusal: %w", displayErr))
-		}
-		return Result{}, paneToldError{cause}
-	}
-	if err := stashDraft(ctx, request, options.Clock, tmux, capture, stderr); err != nil {
+	pane := tmuxPane(request, tmux)
+	if err := refuseSelector(ctx, pane, capture); err != nil {
 		return Result{}, err
 	}
-	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, "/exit"); err != nil {
-		return Result{}, fmt.Errorf("send /exit: %w", err)
-	}
-	if err := waitExitRendered(ctx, request, options.Clock, tmux, stderr); err != nil {
+	if err := stashDraft(ctx, pane, options.Clock, capture, stderr); err != nil {
 		return Result{}, err
 	}
-	if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
-		return Result{}, fmt.Errorf("submit /exit: %w", err)
+	if _, err := typeExit(ctx, pane, options.Clock, stderr); err != nil {
+		return Result{}, err
 	}
 	trail.Reach("exit-typed", "/exit submitted")
 
@@ -354,7 +340,7 @@ func Run(
 		if dead {
 			break
 		}
-		capture, captureErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
+		capture, captureErr := tmux.CaptureScreen(ctx, request.target())
 		inFlight := false
 		switch {
 		case captureErr != nil:
@@ -373,11 +359,11 @@ func Run(
 					"pfm chat reload: confirming the exit dialog — background work stops with the chat",
 				)
 			}
-			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
+			if err := tmux.SendKey(ctx, request.target(), "Enter"); err != nil {
 				return Result{}, fmt.Errorf("confirm exit dialog: %w", err)
 			}
 		case composerShowsExit(capture):
-			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
+			if err := tmux.SendKey(ctx, request.target(), "Enter"); err != nil {
 				return Result{}, fmt.Errorf("retry /exit submission: %w", err)
 			}
 		case pfmcall.LastComposerLine(capture) != "":
@@ -396,7 +382,7 @@ func Run(
 		}
 	}
 	if !dead {
-		return Result{}, exitIncomplete(ctx, request, tmux, tries+grace)
+		return Result{}, exitIncomplete(ctx, pane, tries+grace)
 	}
 	trail.Reach("dead", "pane exited")
 	if request.Engine == pfmengine.Claude && request.SessionID != "" {
@@ -471,7 +457,7 @@ func waitCallerIdle(
 	announced := false
 	sawComposer := false
 	for attempt := 0; attempt < options.IdleTries; attempt++ {
-		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+		capture, err := tmux.CaptureScreen(ctx, request.target())
 		if err != nil {
 			return "", fmt.Errorf("capture pane before /exit: %w", err)
 		}
@@ -595,23 +581,16 @@ func codexRun(request Request) (string, error) {
 	} else {
 		parts = append(parts, "--sandbox", "workspace-write")
 	}
-	model, err := pfmengine.CodexModel(request.Model, request.Home)
+	words, err := action.CodexArgs(request.Model, request.Home, effort,
+		action.CodexInstructions(request.PromptChannel), action.CodexResume, request.SessionID)
 	if err != nil {
-		return "", fmt.Errorf("resolve codex respawn model: %w", err)
+		return "", fmt.Errorf("resolve codex respawn arguments: %w", err)
 	}
-	if model != "" {
-		parts = append(parts, "--model", action.Quote(model))
-	}
-	if effort != "" {
-		flag := action.CodexEffortArg(effort)
-		parts = append(parts, flag[0], action.Quote(flag[1]))
-	}
-	if request.PromptChannel != "" {
-		flag := action.CodexDeveloperInstructionsArg(request.PromptChannel)
-		parts = append(parts, flag[0], action.Quote(flag[1]))
-	}
-	if request.SessionID != "" {
-		parts = append(parts, "resume", action.Quote(request.SessionID))
+	for _, word := range words {
+		if word != "-c" && word != "--model" && word != "resume" {
+			word = action.Quote(word)
+		}
+		parts = append(parts, word)
 	}
 	return strings.Join(parts, " "), nil
 }
@@ -627,7 +606,7 @@ func deliverThen(
 	// Idempotent: a direct-call test never routes through Run's defaults().
 	options.defaults()
 	for i := 0; i < options.ThenTries; i++ {
-		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+		capture, err := tmux.CaptureScreen(ctx, request.target())
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload --then: capture input box (try %d): %v\n", i+1, err)
 		} else if pfmengine.ClaudeTrustDialog(capture) {
@@ -636,7 +615,7 @@ func deliverThen(
 			trustPrompt := false
 			for _, needle := range []string{"Trust this directory?", "trust these settings"} {
 				if strings.Contains(capture, needle) {
-					if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
+					if err := tmux.SendKey(ctx, request.target(), "Enter"); err != nil {
 						return fmt.Errorf("reload --then: accept trust prompt: %w", err)
 					}
 					trustPrompt = true
@@ -671,7 +650,7 @@ ready:
 	}
 	// Prove the reborn composer empty immediately before either engine's
 	// send. A resumed draft must never become part of the wake prompt.
-	baseline, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+	baseline, err := tmux.CaptureScreen(ctx, request.target())
 	if err != nil {
 		return fmt.Errorf("reload --then: read composer before delivery: %w", err)
 	}
@@ -679,7 +658,7 @@ ready:
 		pfmcall.IsFooterBusy(request.Engine, baseline) {
 		return errors.New("reload --then: composer changed before delivery; nothing was typed")
 	}
-	empty, draft, err := reloadComposerEmpty(baseline, styledCapture(ctx, request, tmux))
+	empty, draft, err := reloadComposerEmpty(baseline, tmuxPane(request, tmux).styled(ctx))
 	if err != nil {
 		return fmt.Errorf("reload --then: %w", err)
 	}
@@ -689,7 +668,7 @@ ready:
 	if request.Engine == pfmengine.Codex {
 		return deliverCodexThen(ctx, request, options, tmux, stderr)
 	}
-	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, request.Then); err != nil {
+	if err := tmux.SendLiteral(ctx, request.target(), request.Then); err != nil {
 		return fmt.Errorf("reload --then: type prompt: %w", err)
 	}
 	flat := strings.Join(strings.Fields(request.Then), " ")
@@ -699,7 +678,7 @@ ready:
 	}
 	typed := false
 	for i := 0; i < 40; i++ {
-		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+		capture, err := tmux.CaptureScreen(ctx, request.target())
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload --then: confirm typed text (try %d): %v\n", i+1, err)
 			continue
@@ -743,19 +722,19 @@ ready:
 	// would report a submission that never happened. The tail stays visible:
 	// the cursor sits at the end of what was just typed.
 	for i := 0; i < 12; i++ {
-		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
+		if err := tmux.SendKey(ctx, request.target(), "Enter"); err != nil {
 			return fmt.Errorf("reload --then: submit prompt: %w", err)
 		}
 		if err := options.Clock.Sleep(ctx, 150*time.Millisecond); err != nil {
 			return err
 		}
-		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
+		if err := tmux.SendKey(ctx, request.target(), "Enter"); err != nil {
 			return fmt.Errorf("reload --then: confirm prompt submit: %w", err)
 		}
 		if err := options.Clock.Sleep(ctx, 400*time.Millisecond); err != nil {
 			return err
 		}
-		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+		capture, err := tmux.CaptureScreen(ctx, request.target())
 		if err != nil {
 			return fmt.Errorf("reload --then: verify prompt submit: %w", err)
 		}

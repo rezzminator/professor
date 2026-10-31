@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type targetLock struct {
@@ -161,12 +161,12 @@ func readLockOwner(path string) (pid int, epoch int64, ok bool) {
 	return pid, epoch, err == nil
 }
 
-// processDead mirrors chat.sh's `! kill -0 "$opid"` test: any failure of the
-// zero signal — the pid is gone (ESRCH) or belongs to another user (EPERM) —
-// counts as a dead owner whose lock may be stolen.
+// processDead is a lock owner the one pid probe (gather.ProcessAlive) proves
+// gone; another user's process (EPERM) or a probe that could not tell keeps
+// the lock its owner may still hold.
 func processDead(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err != nil
+	alive, err := gather.ProcessAlive(pid)
+	return err == nil && !alive
 }
 
 func minDuration(left, right time.Duration) time.Duration {

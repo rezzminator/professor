@@ -31,6 +31,7 @@ func exitFinisher(t *testing.T, jail killJail, tmux *fakeTmux) (*Finisher, *stor
 	}
 	finisher, err := NewFinisher(database, Dependencies{
 		Tmux:         tmux,
+		Screen:       tmux,
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),
 		Delay:        time.Millisecond,
 		PollEvery:    time.Millisecond,

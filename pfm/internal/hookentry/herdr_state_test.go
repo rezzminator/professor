@@ -763,7 +763,7 @@ func TestHerdrStateWatcherSurvivesBridgeReconciliation(t *testing.T) {
 			rig.tmux.clients = []string{"4242"}
 			rig.clientEnv(4242, "w1:p1")
 			deps := rig.jail.deps(rig.env, &rig.clock)
-			deps.tmux = rig.tmux.run
+			deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes
 			pane := "w1:p1"
 			switch operation {
 			case "reannounce":
@@ -957,9 +957,10 @@ func TestHerdrStateEndAfterTmuxServerGone(t *testing.T) {
 				getenv: func(k string) string {
 					return map[string]string{"TMUX": socket + ",1,0", "TMUX_PANE": "%0", "HERDR_BIN_PATH": "herdr"}[k]
 				},
-				tmux:     runTmuxForHerdr,
-				now:      time.Now,
-				logError: func(_ string, _ time.Time, message string) error { logged = append(logged, message); return nil },
+				tmux:      runTmuxForHerdr,
+				listPanes: listTmuxPanesForHerdr,
+				now:       time.Now,
+				logError:  func(_ string, _ time.Time, message string) error { logged = append(logged, message); return nil },
 			}
 			rc := reportToHerdr([]string{event}, strings.NewReader(`{"session_id":"s1"}`), &stderr, deps)
 			if event == "end" {

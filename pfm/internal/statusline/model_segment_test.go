@@ -12,8 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // While auto-effort's live keeper holds a level, the line shows that
@@ -261,19 +259,44 @@ func TestAutoEffortStateReadsATornWriteOnceMore(t *testing.T) {
 	}
 }
 
-// The keeper runs as the status line's own user, so a pid the null signal may
-// not reach belongs to another user: a stale line whose pid was reused, never
-// the keeper — even where that process's argv cannot be read (macOS refuses
-// another user's argv; Linux shows it).
+// The keeper runs as the status line's own user, so a live pid owned by another
+// user is a stale line whose pid was reused, never the keeper — whether that
+// process's argv cannot be read (macOS refuses another user's argv) or shows
+// the keeper mark (Linux shows it).
 func TestKeeperProbeCallsAnotherUsersProcessNoKeeper(t *testing.T) {
-	root := t.TempDir()
 	const pid = 4242
-	if err := os.MkdirAll(filepath.Join(root, strconv.Itoa(pid), "cmdline"), 0o700); err != nil {
-		t.Fatal(err)
+	for name, proc := range map[string]keepwarmProcFixture{
+		"argv refused": {argvErr: syscall.EPERM, foreign: true},
+		"argv shown":   {argv: []string{"/bin/sh", keeperMark}, foreign: true},
+	} {
+		probe := keeperProbe(proc, func(int) (bool, error) { return true, nil })
+		if live, err := probe(pid); live || err != nil {
+			t.Fatalf(
+				"%s: probe(%d) = %v, %v; want false, nil: another user's process is no keeper",
+				name,
+				pid,
+				live,
+				err,
+			)
+		}
 	}
-	probe := keeperProbe(gather.NewProcFS(root), func(int) error { return syscall.EPERM })
-	if live, err := probe(pid); live || err != nil {
-		t.Fatalf("probe(%d) = %v, %v; want false, nil: another user's process is no keeper", pid, live, err)
+}
+
+// A keeper probe that cannot tell whether the pid lives is an error, never "no
+// keeper", and a zombie is no keeper.
+func TestKeeperProbeSeparatesFailureFromAbsence(t *testing.T) {
+	const pid = 4242
+	failing := keeperProbe(keepwarmProcFixture{argv: []string{keeperMark}}, func(int) (bool, error) {
+		return false, syscall.EIO
+	})
+	if live, err := failing(pid); live || err == nil || !strings.Contains(err.Error(), "4242") {
+		t.Fatalf("failed probe = %v, %v; want an error naming pid %d", live, err, pid)
+	}
+	zombie := keeperProbe(keepwarmProcFixture{argv: []string{keeperMark}, zombie: true}, func(int) (bool, error) {
+		return true, nil
+	})
+	if live, err := zombie(pid); live || err != nil {
+		t.Fatalf("zombie probe = %v, %v; want false, nil", live, err)
 	}
 }
 

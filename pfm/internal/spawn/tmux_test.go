@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -87,55 +89,66 @@ exit 0
 	return binary
 }
 
-// requireTmuxRecord asserts the one comp=tmux record a façade call writes:
-// subcmd, target when given, exit 0 and dur_ms.
-func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, target string) {
-	t.Helper()
-	records := recorder.Records()
-	if len(records) <= index {
-		t.Fatalf("records = %d, want at least %d: %s", len(records), index+1, recorder.Raw())
-	}
-	record := records[index]
-	if record.Message != "tmux.exec" {
-		t.Fatalf("record %d = %s, want tmux.exec", index, record.Message)
-	}
-	if comp, _ := record.Field(obs.FieldComp); comp != "tmux" {
-		t.Fatalf("comp = %v, want tmux", comp)
-	}
-	if got, _ := record.Field("subcmd"); got != subcmd {
-		t.Fatalf("subcmd = %v, want %s", got, subcmd)
-	}
-	if got, _ := record.Field("target"); target != "" && got != target {
-		t.Fatalf("target = %v, want %s", got, target)
-	}
-	if exit, _ := record.Field(obs.FieldExit); exit != float64(0) {
-		t.Fatalf("exit = %v, want 0", exit)
-	}
-	if _, found := record.Field(obs.FieldDur); !found {
-		t.Fatalf("no dur_ms: %v", record.Fields)
-	}
+// recordingScreen is the pane door a TmuxSpawner hands out: a fakeCodex
+// screen recording the Target of every read and keystroke it receives.
+type recordingScreen struct {
+	*fakeCodex
+	targets []pfmcall.Target
 }
 
-// TestTmuxSpawnerRecordsEveryInvocation: the spawn façade terminates
-// through the observed tmux command — SendKey and Capture each one record,
-// SendPaste two (its buffer load, then the paste into the pane).
-func TestTmuxSpawnerRecordsEveryInvocation(t *testing.T) {
-	ctx, recorder := obs.Test(t)
-	tmux := TmuxSpawner{Binary: fakeTmuxBinary(t), TmuxDir: t.TempDir()}
-	if err := tmux.SendKey(ctx, "cc-1-2-3", "%1", "Enter"); err != nil {
-		t.Fatal(err)
+func (door *recordingScreen) CaptureScreen(ctx context.Context, target pfmcall.Target) (string, error) {
+	door.targets = append(door.targets, target)
+	return door.fakeCodex.CaptureScreen(ctx, target)
+}
+
+func (door *recordingScreen) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
+	door.targets = append(door.targets, target)
+	return door.fakeCodex.SendKey(ctx, target, key)
+}
+
+func (door *recordingScreen) SendLiteral(ctx context.Context, target pfmcall.Target, text string) error {
+	door.targets = append(door.targets, target)
+	return door.fakeCodex.SendLiteral(ctx, target, text)
+}
+
+func (door *recordingScreen) SendPaste(ctx context.Context, target pfmcall.Target, text string) error {
+	door.targets = append(door.targets, target)
+	return door.fakeCodex.SendPaste(ctx, target, text)
+}
+
+// TestRunReadsAndTypesThroughTheScreenDoor: a TmuxSpawner births the server
+// itself, then every boot read, rename keystroke and prompt paste goes through
+// its pane door, addressed at the socket's path under TmuxDir and the session's
+// pane — spawn keeps no capture, key or paste of its own. With no Screen set,
+// the door is the call engine at that same address.
+func TestRunReadsAndTypesThroughTheScreenDoor(t *testing.T) {
+	dir := t.TempDir()
+	door := &recordingScreen{fakeCodex: newFakeCodex()}
+	tmux := TmuxSpawner{
+		Binary: fakeTmuxBinary(t), TmuxDir: dir, Screen: door,
+		Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: t.TempDir()}},
 	}
-	if _, err := tmux.Capture(ctx, "cc-1-2-3", "%1"); err != nil {
-		t.Fatal(err)
+	request := codexRequest()
+	result, err := Run(context.Background(), tmux, request)
+	if err != nil || !result.Named || !result.Prompted {
+		t.Fatalf("Run() = %#v, %v; want named and prompted", result, err)
 	}
-	if err := tmux.SendPaste(ctx, "cc-1-2-3", "%1", "line one\nline two"); err != nil {
-		t.Fatal(err)
+	want := pfmcall.Target{SocketPath: filepath.Join(dir, request.Socket), Pane: request.Socket}
+	for index, got := range door.targets {
+		if got != want {
+			t.Fatalf("door call %d target = %#v, want %#v", index, got, want)
+		}
 	}
-	requireTmuxRecord(t, recorder, 0, "send-keys", "%1")
-	requireTmuxRecord(t, recorder, 1, "capture-pane", "%1")
-	requireTmuxRecord(t, recorder, 2, "load-buffer", "")
-	requireTmuxRecord(t, recorder, 3, "paste-buffer", "%1")
-	_ = context.Background
+	if !slices.Contains(door.keys, "literal:"+codexRenameCommand) ||
+		!slices.Contains(door.keys, "paste:"+request.Prompt) {
+		t.Fatalf("keys through the door = %v, want the rename and the prompt paste", door.keys)
+	}
+
+	engine, target, err := (TmuxSpawner{TmuxDir: dir}).Pane(request.Socket, "%1")
+	if _, isEngine := engine.(*pfmcall.Engine); err != nil || !isEngine ||
+		target != (pfmcall.Target{SocketPath: filepath.Join(dir, request.Socket), Pane: "%1"}) {
+		t.Fatalf("default Pane() = %T, %#v, %v; want the call engine at the socket path", engine, target, err)
+	}
 }
 
 // TestNewSessionConfigureErrorOmitsTheCommandLine: a "configure chat server"

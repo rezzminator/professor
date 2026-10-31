@@ -195,11 +195,7 @@ func LocatePane(ctx context.Context, socket, pane string, pids []int) (PaneIdent
 	if !errors.As(err, &refusal) || refusal.Code != paneNotFound && refusal.Code != "not_found" {
 		return identity, err == nil, err
 	}
-	body, listErr := SeatRequest(ctx, socket, "pane.list", struct{}{})
-	if listErr != nil {
-		return PaneIdentity{}, false, fmt.Errorf("pane %s is gone; list panes: %w", pane, listErr)
-	}
-	panes, listErr := ParsePanes(body)
+	panes, listErr := ListPanes(ctx, socket)
 	if listErr != nil {
 		return PaneIdentity{}, false, fmt.Errorf("pane %s is gone; list panes: %w", pane, listErr)
 	}

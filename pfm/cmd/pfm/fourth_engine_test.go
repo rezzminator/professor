@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -121,9 +122,8 @@ func (fourthLauncher) ComposerReady(string) bool { return true }
 
 func (fourthLauncher) Rename(
 	context.Context,
-	spawn.Tmux,
-	string,
-	string,
+	pfmcall.Screen,
+	pfmcall.Target,
 	string,
 	spawn.Timings,
 	spawn.Trace,

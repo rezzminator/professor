@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -72,6 +73,14 @@ func NewFinisher(
 	if tmux == nil {
 		tmux = TmuxKiller{}
 	}
+	screen := dependencies.Screen
+	if screen == nil {
+		engine, err := pfmcall.New(pfmcall.Dependencies{})
+		if err != nil {
+			return nil, fmt.Errorf("kill finisher pane door: %w", err)
+		}
+		screen = engine
+	}
 	now := dependencies.Now
 	if now == nil {
 		now = clock.Real.Now
@@ -119,6 +128,7 @@ func NewFinisher(
 		log:          log,
 		database:     database,
 		tmux:         tmux,
+		screen:       screen,
 		refresher:    refresher,
 		now:          now,
 		delay:        delay,
@@ -171,10 +181,17 @@ func (finisher *Finisher) Run(
 	if err != nil {
 		return err
 	}
-	// A per-run copy changes only the ratchet's transport, never the shared
-	// finisher or its tmux-only teammate cleanup.
+	// A per-run copy changes only the ratchet's pane and its address, never
+	// the shared finisher or its tmux-only teammate cleanup. The screen verbs
+	// themselves are the one door's: it reads the address's host.
 	ratchet := *finisher
 	ratchet.tmux = client
+	ratchet.address = func(context.Context, bool) (pfmcall.Target, error) {
+		return pfmcall.Target{SocketPath: args.SocketPath, Pane: args.PaneID, Engine: string(args.Engine)}, nil
+	}
+	if native {
+		ratchet.address = client.(herdrKiller).screenTarget
+	}
 	if err := waitContext(ctx, finisher.delay); err != nil {
 		return err
 	}
@@ -208,7 +225,7 @@ func (finisher *Finisher) Run(
 	if !landed {
 		probeErr = ratchet.exitRefusal(ctx, args, command, frame, turn)
 		if probeErr == nil {
-			sendErr := client.SendLine(ctx, args.SocketPath, args.PaneID, command)
+			sendErr := ratchet.screenTypeLine(ctx, command)
 			landed, probeErr, err = pollPaneGone(
 				ctx, client, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
 				ratchet.answerExitDialog(args),
@@ -299,7 +316,7 @@ const (
 func (finisher *Finisher) turnEnded(ctx context.Context, args ExitArgs) (string, turnState, error) {
 	quiet := 0
 	for attempt := 0; attempt < finisher.idleAttempts; attempt++ {
-		capture, err := finisher.tmux.Capture(ctx, args.SocketPath, args.PaneID)
+		capture, err := finisher.screenRead(ctx, false)
 		switch {
 		case err == nil && !pfmcall.IsFooterBusy(args.Engine, capture):
 			quiet++
@@ -351,7 +368,11 @@ func (finisher *Finisher) exitRefusal(
 		return fmt.Errorf("pane %s shows the open selector %q", args.PaneID, pfmcall.SelectorLine(frame))
 	}
 	empty, draft, err := pfmcall.ComposerEmpty(frame, func() (string, error) {
-		return finisher.tmux.CaptureStyled(ctx, args.SocketPath, args.PaneID)
+		styled, err := finisher.screenRead(ctx, true)
+		if err == nil && composerMoved(args.Engine, frame, styled) {
+			return "", errors.New("the composer changed while its styling was read")
+		}
+		return styled, err
 	})
 	switch {
 	case err != nil:
@@ -367,6 +388,50 @@ func (finisher *Finisher) exitRefusal(
 	return nil
 }
 
+// composerMoved reads the styled frame a composer-empty proof takes second,
+// on every host: a frame no longer the idle, dialog-free composer the plain
+// frame showed, or whose box below the marker row reads differently, means
+// the screen changed between the two reads, and proves nothing.
+func composerMoved(engine pfmengine.ID, frame, styled string) bool {
+	return !pfmcall.ComposerRowShown(styled) || pfmcall.SelectorLine(styled) != "" ||
+		pfmengine.ClaudeTrustDialog(styled) || pfmcall.IsFooterBusy(engine, styled) ||
+		pfmcall.ComposerBoxEmpty(styled) != pfmcall.ComposerBoxEmpty(frame)
+}
+
+// screenRead reads the run's pane through the one door, styled or plain.
+func (finisher *Finisher) screenRead(ctx context.Context, styled bool) (string, error) {
+	target, err := finisher.address(ctx, false)
+	if err != nil {
+		return "", err
+	}
+	if styled {
+		return finisher.screen.CaptureStyled(ctx, target)
+	}
+	return finisher.screen.CaptureScreen(ctx, target)
+}
+
+// screenPress presses one named key in the run's pane through the one door.
+func (finisher *Finisher) screenPress(ctx context.Context, key string) error {
+	target, err := finisher.address(ctx, true)
+	if err != nil {
+		return err
+	}
+	return finisher.screen.SendKey(ctx, target, key)
+}
+
+// screenTypeLine types line and presses Enter, each re-addressed: a Herdr
+// seat proves its owner and foreground engine again before every input.
+func (finisher *Finisher) screenTypeLine(ctx context.Context, line string) error {
+	target, err := finisher.address(ctx, true)
+	if err != nil {
+		return err
+	}
+	if err := finisher.screen.SendLiteral(ctx, target, line); err != nil {
+		return fmt.Errorf("type %q into pane %s: %w", line, target.Pane, err)
+	}
+	return finisher.screenPress(ctx, "Enter")
+}
+
 // answerExitDialog is the grace window's per-poll step while the pane lives:
 // /exit over background work (a background shell, a scheduled task, a
 // sub-agent) opens Claude Code's confirmation with "Exit and stop tasks"
@@ -375,14 +440,14 @@ func (finisher *Finisher) exitRefusal(
 // with the chat either way.
 func (finisher *Finisher) answerExitDialog(args ExitArgs) func(context.Context) error {
 	return func(ctx context.Context) error {
-		capture, err := finisher.tmux.Capture(ctx, args.SocketPath, args.PaneID)
+		capture, err := finisher.screenRead(ctx, false)
 		if err != nil {
 			return fmt.Errorf("read pane %s for an exit dialog: %w", args.PaneID, err)
 		}
 		if !pfmcall.ExitDialogOpen(capture) {
 			return nil
 		}
-		if err := finisher.tmux.SendKey(ctx, args.SocketPath, args.PaneID, "Enter"); err != nil {
+		if err := finisher.screenPress(ctx, "Enter"); err != nil {
 			return fmt.Errorf("confirm the exit dialog in pane %s: %w", args.PaneID, err)
 		}
 		return nil
@@ -516,7 +581,8 @@ func (finisher *Finisher) reapChild(ctx context.Context, kind, value string) err
 		if message == "" {
 			message = err.Error()
 		}
-		gone := tmuxServerGone(message) || kind == fleetdb.KindPane && strings.HasPrefix(message, "can't find pane:")
+		gone := gather.ServerGoneText(message) ||
+			kind == fleetdb.KindPane && strings.HasPrefix(message, "can't find pane:")
 		if !gone {
 			return err
 		}

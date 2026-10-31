@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const internalCommand = "internal"
@@ -116,7 +117,7 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, bo
 				painter.PID,
 			)
 		}
-		socket := env["HERDR_SOCKET_PATH"]
+		socket := resolve.ProcessEnvironment(env).HerdrSocket
 		if !filepath.IsAbs(socket) {
 			return "", false, fmt.Errorf(
 				"herdr indicator pid %d: missing or nonabsolute HERDR_SOCKET_PATH %q",

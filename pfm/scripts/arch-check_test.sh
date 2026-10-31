@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C9, C12, C23, C25 and C26 ratchets and for
+# Self-test for scripts/arch-check.sh's C1, C5, C9, C10, C12, C23, C25, C26 and C27 ratchets and for
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -474,9 +474,140 @@ func writeLauncher(path string) error {
 }
 GO
 
+# ---- C27: identity variables are read only through internal/resolve ---------
+
+REPO_C27="$T/identity-env"
+if fixture "$REPO_C27"; then
+  : > "$REPO_C27/.arch/identity-env.txt"
+  mkdir -p "$REPO_C27/internal/resolve" "$REPO_C27/internal/glance" "$REPO_C27/internal/launch"
+  # The home reads the names; a write (an exec env stripping TMUX, a "TMUX=" pair) is no read.
+  printf 'package resolve\n\nconst ClaudeSessionEnv = "CLAUDE_CODE_SESSION_ID"\n\nfunc of(get func(string) string) string { return get("TMUX") + get(ClaudeSessionEnv) }\n' > "$REPO_C27/internal/resolve/resolve.go"
+  printf 'package launch\n\nfunc env(with func(string, string) []string, pane string) []string {\n\treturn append(with("TMUX", ""), "TMUX_PANE="+pane)\n}\n' > "$REPO_C27/internal/launch/launch.go"
+  git -C "$REPO_C27" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  line=$(check_line "$REPO_C27" C27-identity-env)
+  if [[ "$line" == *PASS* && "$line" == *"0 in 0 keys"* ]]; then
+    ok "C27: identity reads inside internal/resolve and identity writes elsewhere pass"
+  else
+    bad "C27: expected PASS for reads inside resolve and writes outside it" "$line"
+  fi
+
+  # Three planted reads outside resolve: a literal through a getter, a map index
+  # of another process's environ, and a constant that holds a name.
+  printf 'package glance\n\nimport "os"\n\nconst socketEnv = "HERDR_SOCKET_PATH"\n\nfunc pane(env func(string) string) string { return env("TMUX_PANE") }\n\nfunc sender(environ map[string]string) string { return environ["CHAT_SENDER_LABEL"] }\n\nfunc socket() string { return os.Getenv(socketEnv) }\n' > "$REPO_C27/internal/glance/glance.go"
+  git -C "$REPO_C27" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  line=$(check_line "$REPO_C27" C27-identity-env)
+  if [[ "$line" == *FAIL* && "$line" == *"internal/glance/glance.go (new 3)"* && "$line" != *internal/resolve* && "$line" != *internal/launch* ]]; then
+    ok "C27: a literal, an environ index and a name constant read outside resolve FAIL, counted per file"
+  else
+    bad "C27: expected FAIL counting the three planted reads" "$line"
+  fi
+
+  printf 'internal/glance/glance.go 3\n' > "$REPO_C27/.arch/identity-env.txt"
+  line=$(check_line "$REPO_C27" C27-identity-env)
+  if [[ "$line" == *PASS* && "$line" == *"3 in 1 keys"* ]]; then
+    ok "C27: baselined identity reads pass"
+  else
+    bad "C27: expected PASS once the reads are baselined" "$line"
+  fi
+else
+  bad "C27: could not build the git fixture"
+fi
+
+# ---- C5: tmux and herdr run only through their façades ---------------------
+
+REPO_C5="$T/tmux-runner"
+if fixture "$REPO_C5"; then
+  : > "$REPO_C5/.arch/tmux-runners.txt"
+  mkdir -p "$REPO_C5/internal/tmux" "$REPO_C5/internal/herdr" "$REPO_C5/internal/attach" "$REPO_C5/internal/glance" "$REPO_C5/internal/admin"
+  # The façades themselves may spell their binaries.
+  printf 'package tmux\n\nfunc run() []string { return []string{"tmux", "-S", "x"} }\n' > "$REPO_C5/internal/tmux/tmux.go"
+  printf 'package herdr\n\nfunc run() []string { return []string{"herdr", "agent", "attach"} }\n' > "$REPO_C5/internal/herdr/herdr.go"
+  line=$(check_line "$REPO_C5" C5-tmux-runner)
+  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+    ok "C5: tmux and herdr argv inside internal/tmux and internal/herdr pass"
+  else
+    bad "C5: expected PASS for argv inside the façades" "$line"
+  fi
+
+  # Three planted runners outside the façades, one per door shape the ratchet
+  # missed before it was widened: a herdr argv slice, a runner handed "tmux"
+  # and its -S flag, a herdr binary resolved by hand.
+  printf 'package attach\n\nfunc argv(pane string) []string { return []string{"herdr", "agent", "attach", pane} }\n' > "$REPO_C5/internal/attach/attach.go"
+  printf 'package glance\n\nfunc read(run func(string, ...string) error, path string) error {\n\treturn run("tmux", "-S", path, "display-message")\n}\n' > "$REPO_C5/internal/glance/glance.go"
+  printf 'package admin\n\nfunc find(lookPath func(string) (string, error)) (string, error) { return lookPath("herdr") }\n' > "$REPO_C5/internal/admin/admin.go"
+  line=$(check_line "$REPO_C5" C5-tmux-runner)
+  if [[ "$line" == *FAIL* && "$line" == *internal/attach/attach.go* && "$line" == *internal/glance/glance.go* && "$line" == *internal/admin/admin.go* ]]; then
+    ok "C5: a herdr argv, a raw tmux -S run and a hand-resolved herdr binary outside the façades FAIL, each named"
+  else
+    bad "C5: expected FAIL naming every planted runner" "$line"
+  fi
+
+  printf 'internal/admin/admin.go\ninternal/attach/attach.go\ninternal/glance/glance.go\n' > "$REPO_C5/.arch/tmux-runners.txt"
+  line=$(check_line "$REPO_C5" C5-tmux-runner)
+  if [[ "$line" == *PASS* && "$line" == *"3 baselined, 0 new"* ]]; then
+    ok "C5: baselined runners pass"
+  else
+    bad "C5: expected PASS once the runners are baselined" "$line"
+  fi
+else
+  bad "C5: could not build the git fixture"
+fi
+
+# ---- C10: MCP reaches chat verbs through internal/chat, never pfmcall --------
+
+REPO_C10="$T/mcp-pfmcall"
+if fixture "$REPO_C10"; then
+  mkdir -p "$REPO_C10/internal/mcpserv"
+  printf 'package mcpserv\n\nfunc keys() { _ = 0 }\n' > "$REPO_C10/internal/mcpserv/keys.go"
+  : > "$REPO_C10/.arch/mcp-argv-calls.txt"
+  line=$(check_line "$REPO_C10" C10-mcp-argv)
+  if [[ "$line" == *PASS* ]]; then
+    ok "C10: an mcpserv with no argv dispatch and no pfmcall use passes"
+  else
+    bad "C10: expected PASS for a clean mcpserv" "$line"
+  fi
+
+  cat > "$REPO_C10/internal/mcpserv/keys.go" <<'GO'
+package mcpserv
+
+func keys() error {
+	transport, err := pfmcall.New(pfmcall.Dependencies{})
+	if err != nil {
+		return err
+	}
+	return transport.SendKey(nil, target, "Enter")
+}
+GO
+  line=$(check_line "$REPO_C10" C10-mcp-argv)
+  if [[ "$line" == *FAIL* && "$line" == *"pfmcall:internal/mcpserv/keys.go (new 1)"* ]]; then
+    ok "C10: a direct pfmcall engine built inside mcpserv FAILs, counted under pfmcall:"
+  else
+    bad "C10: expected FAIL counting the planted pfmcall use" "$line"
+  fi
+
+  printf 'internal/mcpserv/keys.go 1\n' > "$REPO_C10/.arch/mcp-argv-calls.txt"
+  printf 'func run() { backend.dispatch(nil) }\n' >> "$REPO_C10/internal/mcpserv/keys.go"
+  line=$(check_line "$REPO_C10" C10-mcp-argv)
+  if [[ "$line" == *FAIL* && "$line" == *"pfmcall:internal/mcpserv/keys.go (new 1)"* && "$line" != *" internal/mcpserv/keys.go ("* ]]; then
+    ok "C10: an argv count and a pfmcall count of one file are separate keys"
+  else
+    bad "C10: expected the argv key to pass and the pfmcall key to FAIL" "$line"
+  fi
+
+  printf 'internal/mcpserv/keys.go 1\npfmcall:internal/mcpserv/keys.go 1\n' > "$REPO_C10/.arch/mcp-argv-calls.txt"
+  line=$(check_line "$REPO_C10" C10-mcp-argv)
+  if [[ "$line" == *PASS* ]]; then
+    ok "C10: baselined argv and pfmcall counts pass"
+  else
+    bad "C10: expected PASS once both counts are baselined" "$line"
+  fi
+else
+  bad "C10: could not build the git fixture"
+fi
+
 # ---- the concurrent checks: order, exit status, a job that dies ------------
 
-# green_fixture <dir>: a tree on which all 26 checks PASS — the fixture plus what
+# green_fixture <dir>: a tree on which all 27 checks PASS — the fixture plus what
 # C12, C14 and C15 parse, an internal/mcpserv package for C10, a jailed test file
 # for C21 and C25, and the C24 script arch-check.sh runs from $PFM/scripts, with
 # every baseline the --measure of that tree writes.
@@ -525,18 +656,18 @@ run_all() {
   out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
 }
 
-# Today's order: C1 … C23, then C25, C26, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C24-unwrapped-door"
+# Today's order: C1 … C23, then C25, C26, C27, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C24-unwrapped-door"
 
 REPO_GREEN="$T/green"
 if green_fixture "$REPO_GREEN"; then
   run_all "$REPO_GREEN"
   order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
-  if [ "$rc" -eq 0 ] && [ "$passes" -eq 26 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
-    ok "exit: a tree where all 26 checks PASS exits 0, one line per check in today's order"
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 27 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 27 checks PASS exits 0, one line per check in today's order"
   else
-    bad "exit: expected rc 0, 26 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+    bad "exit: expected rc 0, 27 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
 else
   bad "exit: could not build the green fixture"
@@ -547,7 +678,7 @@ if green_fixture "$REPO_FAIL"; then
   printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
   run_all "$REPO_FAIL"
   others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
-  if [ "$rc" -eq 1 ] && [ "$others" -eq 25 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 26 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
     ok "exit: one FAIL and no ERROR exits 1"
   else
     bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
@@ -580,8 +711,8 @@ if green_fixture "$REPO_KILL"; then
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
   lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
   line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
-  if [ "$rc" -eq 2 ] && [ "$lines" -eq 26 ] && [ "$passes" -eq 25 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
-    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 24 checks PASS"
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 27 ] && [ "$passes" -eq 26 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 26 checks PASS"
   else
     bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"
   fi

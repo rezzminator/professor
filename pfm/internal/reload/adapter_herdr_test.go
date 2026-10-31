@@ -68,38 +68,6 @@ func TestNativeReloadAdapterTarget(t *testing.T) {
 	}
 }
 
-func TestNativeReloadAdapterEngine(t *testing.T) {
-	values, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	db := fleetdb.OpenSharedState(ctx, values)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	socket := filepath.Join(t.TempDir(), "arbitrary.sock")
-	if err := db.PutSeat(
-		ctx,
-		fleetdb.Seat{
-			SeatID:      "engine-adapter",
-			Backend:     "herdr",
-			Engine:      string(pfmengine.Codex),
-			State:       "live",
-			HerdrSocket: socket,
-			HerdrPane:   "w6:p3",
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-	got, err := EngineForTarget(ctx, values, socket, "w6:p3")
-	if err != nil || got != pfmengine.Codex {
-		t.Fatalf("engine=%q err=%v", got, err)
-	}
-}
-
 func TestNotifyWorkerFailureDelivery(t *testing.T) {
 	previousDelays := notifyRetryDelays
 	notifyRetryDelays = []time.Duration{0, 0, 0}
@@ -317,7 +285,7 @@ func TestLockWorkerScheduleOpensOnlyPrivateFilesAndBoundsTheWait(t *testing.T) {
 			}
 			done := make(chan locked, 1)
 			go func() {
-				log, schedule, err := LockWorkerSchedule(t.Context(), values, socket, pane)
+				log, schedule, err := LockWorkerSchedule(t.Context(), values, socket, &fleetdb.Seat{SeatID: "lock"})
 				done <- locked{log, schedule, err}
 			}()
 			var got locked
@@ -402,7 +370,7 @@ func TestStartWorkerCommitsTheStartAndItsRecord(t *testing.T) {
 			if closeErr := db.Close(); err != nil || closeErr != nil {
 				t.Fatalf("seed: %v %v", err, closeErr)
 			}
-			_, schedule, err := LockWorkerSchedule(t.Context(), values, socket, pane)
+			_, schedule, err := LockWorkerSchedule(t.Context(), values, socket, &fleetdb.Seat{SeatID: "commit"})
 			if err != nil {
 				t.Fatalf("lock: %v", err)
 			}

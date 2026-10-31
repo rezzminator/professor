@@ -300,10 +300,11 @@ func childExited(pid int) (bool, error) {
 	var status syscall.WaitStatus
 	reaped, err := syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
 	if errors.Is(err, syscall.ECHILD) {
-		if killErr := syscall.Kill(pid, 0); errors.Is(killErr, syscall.ESRCH) {
-			return true, nil
+		alive, probeErr := gather.ProcessAlive(pid)
+		if probeErr != nil {
+			return false, fmt.Errorf("probe released worker: %w", probeErr)
 		}
-		return false, nil
+		return !alive, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("wait4: %w", err)
@@ -325,7 +326,8 @@ func (fleet liveFleet) Live(ctx context.Context) ([]headless.Chat, map[string]st
 	var chats []headless.Chat
 	for index := range scan.Rows {
 		row := scan.Rows[index]
-		if row.Kind.IsLiveSeat() || row.Kind == compose.Booting {
+		// The shared addressable set, minus an agent row: restart ends chats, never an agent it did not start.
+		if row.Kind.IsAddressable() && row.Kind != compose.Agent {
 			chats = append(chats, pfmchat.FromRow(row))
 		}
 	}

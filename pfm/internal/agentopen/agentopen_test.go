@@ -236,7 +236,9 @@ func TestSocketForPIDSuppressesPerSocketProbeFailures(t *testing.T) {
 		}
 	}
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+	// tmux's own word for a socket nothing listens on.
+	script := "#!/bin/sh\necho 'no server running on /tmp/cc-dead' >&2\nexit 1\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer

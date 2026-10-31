@@ -45,6 +45,8 @@ func ExitClose(stdin io.Reader, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal exit-close: left open — %v\n", err)
 		return 0
 	}
+	// A Herdr seat's pane is its seat host's to close once the engine ends;
+	// this hook closes only a tmux viewport.
 	if identity.Backend != spawn.BackendTmux {
 		return 0
 	}

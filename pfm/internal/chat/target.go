@@ -430,7 +430,7 @@ func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 			Name: row.Name, ID: row.ID, Socket: row.Socket,
 			Session: row.SessionName, Pane: row.PaneID,
 			Engine: string(compose.EngineForKind(row.Kind)),
-			Live:   row.Kind.IsAddressable() && !row.Killed, ActivityNS: row.ActivityNS,
+			Live:   rowLive(row), ActivityNS: row.ActivityNS,
 		})
 	}
 	return candidates
@@ -517,9 +517,15 @@ func FromRow(row compose.Row) headless.Chat {
 		Socket:  row.Socket,
 		Session: row.SessionName,
 		Pane:    row.PaneID,
-		Live:    row.Kind.IsAddressable(),
+		Live:    rowLive(row),
 		PanePID: panePID(row.PanePIDs),
 	}
+}
+
+// rowLive is the one liveness of a composed row to the verbs and the roster:
+// an addressable kind the user has not killed.
+func rowLive(row compose.Row) bool {
+	return row.Kind.IsAddressable() && !row.Killed
 }
 
 // panePID is a row's one pane root, or 0 when it has none or several.

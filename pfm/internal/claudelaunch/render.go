@@ -78,6 +78,23 @@ func CheckConfigDir(account int, dir string) error {
 	return nil
 }
 
+// SessionArgs is the one spelling of Claude's session words: `--session-id S`,
+// `--resume R`, `--fork-session`, each only when set, in that order. Render and
+// the restored-seat recipe both call it.
+func SessionArgs(sessionID, resume string, fork bool) []string {
+	var words []string
+	if sessionID != "" {
+		words = append(words, flagSessionID, sessionID)
+	}
+	if resume != "" {
+		words = append(words, flagResume, resume)
+	}
+	if fork {
+		words = append(words, flagForkSession)
+	}
+	return words
+}
+
 func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	prefs := machine.EffectiveClaude(request.Account)
 	result := Launch{Unset: Hygiene(), Binary: prefs.Binary, Cache1H: prefs.Cache1H, SessionID: request.SessionID}
@@ -121,15 +138,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
 	result.Env = append(result.Env, ShellEnv(paths.OSEnv{}.Lookup)...)
 	costLedgerPlan(request, prefs.CostLedger, &result)
-	if request.SessionID != "" {
-		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
-	}
-	if request.Resume != "" {
-		result.Argv = append(result.Argv, flagResume, request.Resume)
-	}
-	if request.Fork {
-		result.Argv = append(result.Argv, flagForkSession)
-	}
+	result.Argv = append(result.Argv, SessionArgs(request.SessionID, request.Resume, request.Fork)...)
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}

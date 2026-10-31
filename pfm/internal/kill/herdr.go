@@ -385,64 +385,34 @@ func herdrPaneMatches(target, pane, workspace string) bool {
 	return pane != "" && (pane == target || (workspace != "" && workspace+":"+pane == target))
 }
 
-func (client herdrKiller) Capture(ctx context.Context, socket, pane string) (string, error) {
-	return client.captureFormat(ctx, socket, pane, "text")
-}
-
-func (client herdrKiller) captureFormat(ctx context.Context, _, _, format string) (string, error) {
+// screenTarget is the seat's address for the screen door (call.Screen),
+// re-proved by stable seat identity first: a dead supervisor or a changed
+// owner is an error, never a pane to read or type into. Input (keys, text)
+// also needs the engine itself in the pane's foreground, so a retry prompt
+// or a shell left behind never receives an exit command.
+func (client herdrKiller) screenTarget(ctx context.Context, input bool) (pfmcall.Target, error) {
 	owner, owned, err := client.prove(ctx)
 	if err != nil {
-		return "", fmt.Errorf("prove native capture target: %w", err)
+		return pfmcall.Target{}, fmt.Errorf("prove native screen target: %w", err)
 	}
 	if !owned {
-		return "", fmt.Errorf("native capture supervisor is dead")
+		return pfmcall.Target{}, errors.New("native screen target: saved supervisor is dead")
 	}
-	socket, pane := owner.HerdrSocket, owner.HerdrPane
-	result, err := herdr.SeatRequest(
-		ctx,
-		socket,
-		"pane.read",
-		map[string]any{herdrPaneKey: pane, "source": "visible", "lines": 1000, "format": format, "strip_ansi": false},
-	)
-	if err != nil {
-		return "", fmt.Errorf("read Herdr pane %s: %w", pane, err)
+	if input {
+		evidence, err := herdr.SeatRequest(
+			ctx, owner.HerdrSocket, "pane.process_info", map[string]string{herdrPaneKey: owner.HerdrPane},
+		)
+		if err != nil {
+			return pfmcall.Target{}, fmt.Errorf("verify foreground before input: %w", err)
+		}
+		if _, err := client.enginePresent(evidence, owner.HerdrPane); err != nil {
+			return pfmcall.Target{}, fmt.Errorf("verify foreground before input: %w", err)
+		}
 	}
-	var response struct {
-		Type string `json:"type"`
-		Read *struct {
-			Pane      string  `json:"pane_id"`
-			Workspace string  `json:"workspace_id"`
-			Text      *string `json:"text"`
-			Truncated *bool   `json:"truncated"`
-			Format    string  `json:"format"`
-		} `json:"read"`
-	}
-	if err := json.Unmarshal(result, &response); err != nil {
-		return "", fmt.Errorf("decode Herdr pane %s: %w", pane, err)
-	}
-	if response.Type != "pane_read" || response.Read == nil || response.Read.Text == nil ||
-		response.Read.Truncated == nil ||
-		!herdrPaneMatches(
-			pane,
-			response.Read.Pane,
-			response.Read.Workspace,
-		) || (format == "ansi" && response.Read.Format != "ansi") {
-		return "", fmt.Errorf("read Herdr pane %s: malformed pane_read result", pane)
-	}
-	return *response.Read.Text, nil
-}
-
-func (client herdrKiller) CaptureStyled(ctx context.Context, socket, pane string) (string, error) {
-	frame, err := client.captureFormat(ctx, socket, pane, "ansi")
-	if err != nil {
-		return "", err
-	}
-	if !pfmcall.ComposerRowShown(frame) || pfmcall.SelectorLine(frame) != "" ||
-		pfmengine.ClaudeTrustDialog(frame) || pfmcall.IsFooterBusy(pfmengine.ID(client.seat.Engine), frame) ||
-		!pfmcall.ComposerBoxEmpty(frame) {
-		return "", fmt.Errorf("herdr pane %s: composer changed while checking styling", pane)
-	}
-	return frame, nil
+	return pfmcall.Target{
+		Backend: herdrBackend, SeatID: owner.SeatID, SocketPath: owner.HerdrSocket, Pane: owner.HerdrPane,
+		HerdrWorkspace: owner.HerdrWorkspace, Engine: owner.Engine, ID: owner.SessionID,
+	}, nil
 }
 
 func (client herdrKiller) ack(ctx context.Context, _, _, method string, params any) error {
@@ -454,16 +424,6 @@ func (client herdrKiller) ack(ctx context.Context, _, _, method string, params a
 		return fmt.Errorf("herdr %s: saved supervisor is dead", method)
 	}
 	socket, pane := owner.HerdrSocket, owner.HerdrPane
-	if method != "pane.close" {
-		evidence, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{herdrPaneKey: pane})
-		if err != nil {
-			return fmt.Errorf("verify foreground before Herdr %s: %w", method, err)
-		}
-		if _, err := client.enginePresent(evidence, pane); err != nil {
-			return fmt.Errorf("verify foreground before Herdr %s: %w", method, err)
-		}
-	}
-
 	switch values := params.(type) {
 	case map[string]string:
 		values[herdrPaneKey] = pane
@@ -486,23 +446,6 @@ func (client herdrKiller) ack(ctx context.Context, _, _, method string, params a
 		return fmt.Errorf("herdr %s pane %s: unexpected result type %q", method, pane, response.Type)
 	}
 	return nil
-}
-
-func (client herdrKiller) SendLine(ctx context.Context, socket, pane, line string) error {
-	if err := client.ack(
-		ctx,
-		socket,
-		pane,
-		"pane.send_text",
-		map[string]string{herdrPaneKey: pane, "text": line},
-	); err != nil {
-		return err
-	}
-	return client.SendKey(ctx, socket, pane, "Enter")
-}
-
-func (client herdrKiller) SendKey(ctx context.Context, socket, pane, key string) error {
-	return client.ack(ctx, socket, pane, "pane.send_keys", map[string]any{herdrPaneKey: pane, "keys": []string{key}})
 }
 
 func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) error {

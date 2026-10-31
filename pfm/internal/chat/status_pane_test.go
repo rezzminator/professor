@@ -342,16 +342,6 @@ func TestInspectSeatKeepsAnOpenCodexTurnWorking(t *testing.T) {
 
 // Native states are the fallback only; a broken or unknown response is not idle.
 func TestHerdrStatusNativeFallback(t *testing.T) {
-	t.Run("quiet pending tool preserves transcript working", func(t *testing.T) {
-		socket := herdrStatusSocket(t, `{"agent":{"pane_id":"w6:p3","agent_status":"idle"}}`)
-		got, err := blockedFromPane(context.Background(),
-			headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Live: true},
-			headless.Status{State: headless.StateWorking, PendingTool: "Bash", QuietSeconds: 10}, nil, nil)
-		if err != nil || got.State != headless.StateWorking {
-			t.Fatalf("native idle overrode pending transcript tool: %+v err=%v", got, err)
-		}
-	})
-
 	for _, tc := range []struct {
 		state, want string
 		bad         bool

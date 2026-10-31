@@ -11,6 +11,7 @@ type ProbePane struct {
 	SessionName    string
 	WindowID       string
 	WindowName     string
+	WindowIndex    int
 	PaneTitle      string
 	CurrentPath    string
 	CurrentCommand string
@@ -18,6 +19,8 @@ type ProbePane struct {
 	PID            int
 	PaneID         string
 	Attached       bool
+	// Dead is a pane whose process exited and that tmux keeps (remain-on-exit).
+	Dead bool
 }
 
 // TmuxSnapshot is the live pane result plus recoverable sweep diagnostics.

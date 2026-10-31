@@ -24,6 +24,8 @@ import (
 
 func TestLaunchNativeBackendRefusal(t *testing.T) {
 	root := t.TempDir()
+	// The caller lookup scans an empty tmux dir of its own, never the fence's shared one.
+	t.Setenv(paths.EnvTmuxDir, t.TempDir())
 	var stdout, stderr bytes.Buffer
 	env := &paths.MapEnv{
 		Values: map[string]string{
@@ -56,7 +58,7 @@ func TestLaunchNativeRefusesOccupiedPane(t *testing.T) {
 		SeatID:      "parent",
 		Backend:     "herdr",
 		State:       "live",
-		HerdrSocket: "/test.sock",
+		HerdrSocket: newFakeHerdr(t).path,
 		HerdrPane:   "w1:p1",
 	}
 	if err := db.PutSeat(context.Background(), seat); err != nil {
@@ -64,7 +66,13 @@ func TestLaunchNativeRefusesOccupiedPane(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	rc := launchNative(
-		spawn.BackendChoice{Backend: "herdr", InPlace: true, HerdrSocket: seat.HerdrSocket, HerdrPane: seat.HerdrPane},
+		spawn.BackendChoice{
+			Backend:        "herdr",
+			InPlace:        true,
+			HerdrSocket:    seat.HerdrSocket,
+			HerdrPane:      seat.HerdrPane,
+			HerdrWorkspace: "w1",
+		},
 		claudelaunch.Request{
 			Binary: "/bin/echo",
 			Home:   root,
@@ -102,7 +110,13 @@ func TestLaunchNativeReexecsExactSupervisorRole(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	rc := launchNative(
-		spawn.BackendChoice{Backend: "herdr", InPlace: true, HerdrSocket: "/fixture.sock", HerdrPane: "w1:p1"},
+		spawn.BackendChoice{
+			Backend:        "herdr",
+			InPlace:        true,
+			HerdrSocket:    newFakeHerdr(t).path,
+			HerdrPane:      "w1:p1",
+			HerdrWorkspace: "w1",
+		},
 		claudelaunch.Request{Binary: "/bin/echo", Home: root},
 		root,
 		&bytes.Buffer{},

@@ -416,12 +416,14 @@ func TestHerdrAllCallDirections(t *testing.T) {
 				if err != nil || result.Code != 0 || !result.Typed {
 					t.Fatalf("reverse call=%+v err=%v", result, err)
 				}
+				// Each native call: the composer hold's agent.get + pane.read
+				// pairs, then the prompt.
 				wantNative := 0
 				if targetBackend == "herdr" {
-					wantNative += 3
+					wantNative += 2*ComposerHoldReads + 1
 				}
 				if senderBackend == "herdr" {
-					wantNative += 3
+					wantNative += 2*ComposerHoldReads + 1
 				}
 				if len(socket.calls()) != wantNative {
 					t.Fatalf("backend directions made %d native requests, want %d", len(socket.calls()), wantNative)

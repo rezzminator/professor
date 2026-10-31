@@ -214,19 +214,15 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 				request.PrimaryAccount,
 			)
 		}
-		arguments := make([]string, 0, 3)
-		modelArgs, err := codexModelArgs(request.Persona.ModelOr(request.Model), request.Home)
+		var instructions *string
+		if request.Persona.Applies() {
+			instructions = &request.Persona.Body
+		}
+		arguments, err := CodexArgs(request.Persona.ModelOr(request.Model), request.Home,
+			request.Persona.Effort, instructions, CodexFork, request.SessionID)
 		if err != nil {
 			return HeadlessPlan{}, err
 		}
-		arguments = append(arguments, modelArgs...)
-		if request.Persona.Effort != "" {
-			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
-		}
-		if request.Persona.Applies() {
-			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
-		}
-		arguments = append(arguments, "fork", request.SessionID)
 		return HeadlessPlan{
 			Engine: pfmengine.Codex, SeatRun: codexSeatRun(machine, request.PrimaryAccount, request.CWD, arguments...),
 			Run: codexCommandWithAccount(
@@ -341,22 +337,10 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
-	modelArgs, err := codexModelArgs(request.Model, request.Home)
+	arguments, err := CodexArgs(request.Model, request.Home, effort,
+		CodexInstructions(request.PromptChannel), CodexResume, request.ResumeSessionID)
 	if err != nil {
 		return HeadlessPlan{}, err
-	}
-	arguments := append(make([]string, 0, 6), modelArgs...)
-	if effort != "" {
-		arguments = append(arguments, CodexEffortArg(effort)...)
-	}
-	if request.PromptChannel != "" {
-		arguments = append(arguments, CodexDeveloperInstructionsArg(request.PromptChannel)...)
-	}
-	if request.ResumeSessionID != "" {
-		if strings.ContainsAny(request.ResumeSessionID, "\r\n\x00") {
-			return HeadlessPlan{}, errors.New("codex resume requires one safe session id")
-		}
-		arguments = append(arguments, "resume", request.ResumeSessionID)
 	}
 	return HeadlessPlan{
 		Engine: pfmengine.Codex, SeatRun: codexSeatRun(machine, request.PrimaryAccount, request.CWD, arguments...),

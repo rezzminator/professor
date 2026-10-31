@@ -28,6 +28,8 @@ func TestPlace(t *testing.T) {
 	failure := errors.New("caller pane read failed")
 	for _, tc := range []struct {
 		name, requested string
+		recorded        string
+		revive          bool
 		caller          resolve.Identity
 		callerErr       error
 		want            BackendChoice
@@ -47,10 +49,22 @@ func TestPlace(t *testing.T) {
 		{name: "empty", callerErr: resolve.ErrNotInChat, want: BackendChoice{Backend: "tmux"}},
 		{name: "explicit tmux despite failure", requested: "tmux", callerErr: failure, want: BackendChoice{Backend: "tmux"}},
 		{name: "incomplete native", requested: "auto", caller: resolve.Identity{Backend: "herdr"}, err: "incomplete Herdr location"},
+		// No caller: the subject decides — its recorded Herdr host, then the
+		// configured backend, then tmux — whatever process runs the door.
+		{name: "no caller, recorded Herdr host", requested: "tmux", recorded: "/h/herdr.sock", revive: true, callerErr: ErrNoCaller, want: BackendChoice{Backend: "herdr", HerdrSocket: "/h/herdr.sock"}},
+		{name: "no caller, configured Herdr, a chat that is no Herdr seat", requested: "herdr", revive: true, callerErr: ErrNoCaller, want: BackendChoice{Backend: "tmux"}},
+		{name: "no caller, configured Herdr, a new chat", requested: "herdr", callerErr: ErrNoCaller, err: "herdr backend needs a caller in a Herdr pane or a recorded Herdr host:"},
+		{name: "no caller, auto", requested: "auto", callerErr: ErrNoCaller, want: BackendChoice{Backend: "tmux"}},
+		{name: "no caller ignores a Herdr process", requested: "auto", caller: herdrSeat, callerErr: ErrNoCaller, want: BackendChoice{Backend: "tmux"}},
+		{name: "a caller ignores the recorded host", requested: "auto", recorded: "/h/other.sock", callerErr: resolve.ErrNotInChat, want: BackendChoice{Backend: "tmux"}},
+		// Configured Herdr from a terminal outside Herdr: a chat with a
+		// recorded Herdr host revives as a new tab there, never an error.
+		{name: "explicit Herdr outside, recorded Herdr host", requested: "herdr", recorded: "/h/herdr.sock", callerErr: resolve.ErrNotInChat, want: BackendChoice{Backend: "herdr", HerdrSocket: "/h/herdr.sock"}},
+		{name: "explicit Herdr from tmux, recorded Herdr host", requested: "herdr", recorded: "/h/herdr.sock", caller: resolve.Identity{Backend: "tmux"}, want: BackendChoice{Backend: "herdr", HerdrSocket: "/h/herdr.sock"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, recorder := obs.Test(t)
-			got, err := Place(ctx, "picker", tc.requested, tc.caller, tc.callerErr)
+			got, err := Place(ctx, "picker", tc.requested, tc.recorded, tc.revive, tc.caller, tc.callerErr)
 			if tc.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.err) {
 					t.Fatalf("choice=%+v error=%v; want %q", got, err, tc.err)
@@ -73,7 +87,7 @@ func TestPlace(t *testing.T) {
 			if tc.callerErr != nil {
 				callerError = tc.callerErr.Error()
 			}
-			for key, want := range map[string]any{"door": "picker", "requested": requested, "caller_backend": tc.caller.Backend, "caller_socket": tc.caller.SocketPath, "caller_pane": tc.caller.Pane, "caller_workspace": tc.caller.HerdrWorkspace, "caller_fronted": tc.caller.Fronted, "caller_source": tc.caller.Source, "caller_err": callerError, "chosen": got.Backend, "in_place": got.InPlace} {
+			for key, want := range map[string]any{"door": "picker", "requested": requested, "caller_backend": tc.caller.Backend, "caller_socket": tc.caller.SocketPath, "caller_pane": tc.caller.Pane, "caller_workspace": tc.caller.HerdrWorkspace, "caller_fronted": tc.caller.Fronted, "caller_source": tc.caller.Source, "caller_err": callerError, "recorded_socket": tc.recorded, "chosen": got.Backend, "in_place": got.InPlace} {
 				if value, ok := records[0].Field(key); !ok || value != want {
 					t.Errorf("field %s=%v (%v), want %v", key, value, ok, want)
 				}
@@ -89,7 +103,7 @@ func TestPlace(t *testing.T) {
 
 func TestPlacementRejectsCallerReadFailure(t *testing.T) {
 	failure := errors.New("caller pane read failed")
-	choice, err := Place(context.Background(), "picker", "auto", resolve.Identity{}, failure)
+	choice, err := Place(context.Background(), "picker", "auto", "", false, resolve.Identity{}, failure)
 	if !errors.Is(err, failure) || choice.Backend != "" {
 		t.Fatalf("choice=%+v err=%v; want caller error, never tmux", choice, err)
 	}

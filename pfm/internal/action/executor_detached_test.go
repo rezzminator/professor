@@ -44,7 +44,7 @@ func TestOpenDetachedResumableSpawnsThroughTheSpawnDoor(t *testing.T) {
 		FreshSocket:    "cc-905-1-1",
 		Config:         testMachineConfig(home),
 	}
-	result, err := executor.OpenDetached(context.Background(), request)
+	result, err := executor.Open(context.Background(), detachedRequest(request))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestOpenDetachedLiveSpawnsNothing(t *testing.T) {
 		FreshSocket:    "cc-900-1-1",
 		Config:         testMachineConfig(home),
 	}
-	result, err := executor.OpenDetached(context.Background(), request)
+	result, err := executor.Open(context.Background(), detachedRequest(request))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,8 @@ func TestOpenDetachedRecordsItsTrail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executor.OpenDetached(ctx, Request{
+	if _, err := executor.Open(ctx, Request{
+		Detached: true,
 		Row: compose.Row{
 			Kind: compose.ResumeClaude,
 			ID:   "55555555-5555-4555-8555-555555555555",
@@ -143,13 +144,13 @@ func TestOpenDetachedRecordsItsTrail(t *testing.T) {
 		}
 	}
 	if !opened {
-		t.Fatalf("OpenDetached() reached no opened state: %s", recorder.Raw())
+		t.Fatalf("detached Open reached no opened state: %s", recorder.Raw())
 	}
 }
 
 func TestOpenDetachedNilExecutor(t *testing.T) {
 	var executor *Executor
-	if _, err := executor.OpenDetached(context.Background(), Request{}); err == nil {
+	if _, err := executor.Open(context.Background(), Request{Detached: true}); err == nil {
 		t.Fatal("want an error for a nil executor, got nil")
 	}
 }
@@ -167,13 +168,14 @@ func TestOpenDetachedCodexRequiresLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = executor.OpenDetached(context.Background(), Request{
-		Row:    compose.Row{Kind: compose.ResumeCodex, ID: "t1", CWD: "/work"},
-		Config: machine, Home: home, PrimaryAccount: 1, FreshSocket: "cx-fresh",
+	_, err = executor.Open(context.Background(), Request{
+		Detached: true,
+		Row:      compose.Row{Kind: compose.ResumeCodex, ID: "t1", CWD: "/work"},
+		Config:   machine, Home: home, PrimaryAccount: 1, FreshSocket: "cx-fresh",
 	})
 	want := "open detached: Codex account 1: " + authPath + " "
 	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) || len(tmux.created) != 0 {
-		t.Fatalf("OpenDetached error=%v created=%d; want %q", err, len(tmux.created), want)
+		t.Fatalf("detached Open error=%v created=%d; want %q", err, len(tmux.created), want)
 	}
 }
 
@@ -231,7 +233,7 @@ func TestOpenWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 					told = strings.Split(strings.TrimSpace(stderr.String()), "\n")
 				} else {
 					var result OpenResult
-					result, err = executor.OpenDetached(context.Background(), request)
+					result, err = executor.Open(context.Background(), detachedRequest(request))
 					told = result.Warnings
 					if stderr.Len() != 0 {
 						t.Fatalf(
@@ -304,7 +306,7 @@ func TestOpenHoldsForEnterOnlyWhenAWarningIsAboutToBeCovered(t *testing.T) {
 				PrimaryAccount: 1, Home: home, FreshSocket: "cc-906-1-1", Config: machine,
 			}
 			if test.detached {
-				_, err = executor.OpenDetached(context.Background(), request)
+				_, err = executor.Open(context.Background(), detachedRequest(request))
 			} else {
 				_, err = executor.Open(context.Background(), request)
 			}
@@ -459,10 +461,10 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 				var line string
 				if detached {
 					var result OpenResult
-					result, err = executor.OpenDetached(ctx, request)
+					result, err = executor.Open(ctx, detachedRequest(request))
 					warnings = result.Warnings
 				} else {
-					line, err = executor.Open(ctx, request)
+					line, err = openLine(executor, ctx, request)
 					if stderr.Len() > 0 {
 						warnings = []string{stderr.String()}
 					}

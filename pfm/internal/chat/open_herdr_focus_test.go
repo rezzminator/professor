@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -353,10 +354,11 @@ func TestOpenNativeMoveHereOffersAccountChange(t *testing.T) {
 	}
 }
 
-// A dead native chat opened from a Herdr pane resumes in that pane: the seat is
-// rebound to the caller's pane and the line its shell runs execs the seat host,
-// with no new tab laid out. A caller pane hosting another live chat (an
-// agent's own pfm call) is refused with nothing rebound.
+// A dead native chat opened from a bare Herdr pane resumes in that pane: the
+// seat is rebound to the caller's pane and the line its shell runs execs the
+// seat host, with no new tab laid out. A caller pane hosting another live chat
+// (an agent's own pfm call) is never rebound: the one placement rule the
+// picker follows revives the chat in a new tab on the caller's Herdr host.
 func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -411,6 +413,12 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 					}, ""
 				case "notification.show":
 					return map[string]any{"type": "ok"}, ""
+				case "layout.apply":
+					if tc.callerHostsChat {
+						return map[string]any{"layout": map[string]any{
+							"workspace_id": "w6", "root": map[string]any{"type": "pane", "pane_id": "w6:p10"},
+						}}, ""
+					}
 				}
 				unexpected = append(unexpected, req.Method)
 				return nil, "unexpected_method"
@@ -420,6 +428,18 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 			seedClaudeChat(t, root, seat.SessionID)
 			if tc.callerHostsChat {
 				nativeChatCallerHostsChat(t, db, socket, "w6:p9")
+				binary := filepath.Join(runtime.Paths.Home, "native-engine")
+				if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				run := fleetdb.SeatRun{
+					Binary: binary,
+					CWD:    runtime.Paths.Home,
+					Args:   []string{"--resume", seat.SessionID},
+				}
+				if err := db.WriteSeatRun(seat.SeatID, run); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if tc.callerHostsChat {
 				nativeChatRestoredCaller(t, true, 41)
@@ -436,6 +456,18 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 				compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
 				0, false, &stdout, &stderr, runtime,
 			)
+			if tc.callerHostsChat {
+				revived, found, err := db.SeatBySession(context.Background(), seat.SessionID)
+				if !handled || code != 0 || err != nil || !found || revived.HerdrPane != "w6:p10" ||
+					len(unexpected) != 0 || strings.Contains(strings.Join(methods, " "), "rename") {
+					t.Fatalf("handled=%v code=%d stderr=%q revived=%+v found=%t err=%v methods=%q unexpected=%q",
+						handled, code, stderr.String(), revived, found, err, methods, unexpected)
+				}
+				if _, kept, err := db.Seat(context.Background(), seat.SeatID); err != nil || kept {
+					t.Fatalf("the replaced seat stays: kept=%t err=%v", kept, err)
+				}
+				return
+			}
 			current, found, err := db.Seat(context.Background(), seat.SeatID)
 			if err != nil || !found {
 				t.Fatalf("seat found=%t err=%v", found, err)
@@ -443,15 +475,6 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 			if len(unexpected) != 0 {
 				t.Fatalf("unexpected Herdr methods %q (no new tab is laid out); stderr=%q",
 					unexpected, stderr.String())
-			}
-			if tc.callerHostsChat {
-				if !handled || code != 1 || stdout.Len() != 0 || current.HerdrPane != "w6:p3" ||
-					!strings.Contains(stderr.String(), "hosts chat") ||
-					strings.Contains(strings.Join(methods, " "), "rename") {
-					t.Fatalf("handled=%v code=%d stdout=%q stderr=%q seat=%+v methods=%q",
-						handled, code, stdout.String(), stderr.String(), current, methods)
-				}
-				return
 			}
 			if !handled || code != 0 || stdout.String() != "exec pfm internal seat-host "+seat.SeatID+"\n" ||
 				current.HerdrPane != "w6:p9" || current.HerdrTerminalID != "fixture-w6:p9" {

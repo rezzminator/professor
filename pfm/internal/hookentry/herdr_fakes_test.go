@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -210,6 +211,8 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 		}
 	}
 	switch method {
+	case "ping":
+		return "", `{"type":"pong","version":"fixture","protocol":22}`
 	case "pane.list":
 		type listed struct {
 			PaneID     string `json:"pane_id"`
@@ -340,6 +343,9 @@ type fakeTmux struct {
 	panes  []string
 	calls  []string
 	failOn string
+	// probeErr is what the pane-list door (deps.listPanes) answers instead of
+	// the panes: a dead or unresponsive server.
+	probeErr error
 	// beforeWrite runs before a write of @pfm_herdr, outside the fake's lock.
 	beforeWrite func(value string)
 }
@@ -423,6 +429,26 @@ func (tmux *fakeTmux) command(args []string) (string, error) {
 	return "", fmt.Errorf("fake tmux: unexpected %v", args)
 }
 
+// listPanes plays gather.ProbePanes on the one chat server: the pane ids of
+// list-panes, probeErr in their place, recorded as a list-panes call.
+func (tmux *fakeTmux) listPanes(ctx context.Context, socket string) ([]gather.ProbePane, error) {
+	tmux.mu.Lock()
+	probeErr := tmux.probeErr
+	tmux.mu.Unlock()
+	if probeErr != nil {
+		return nil, probeErr
+	}
+	listed, err := tmux.run(ctx, socket, "list-panes", "-a", "-F", "#{pane_id}")
+	if err != nil {
+		return nil, err
+	}
+	var panes []gather.ProbePane
+	for _, id := range strings.Fields(listed) {
+		panes = append(panes, gather.ProbePane{Socket: filepath.Base(socket), PaneID: id})
+	}
+	return panes, nil
+}
+
 func (tmux *fakeTmux) setOptionCalls() []string {
 	tmux.mu.Lock()
 	defer tmux.mu.Unlock()
@@ -485,6 +511,8 @@ type herdrJail struct {
 	// procFails is each live process whose table entry cannot be read; a pid
 	// procs lacks is a process that is gone.
 	procFails map[int]error
+	// answers is each process the pid probe still finds; a pid it lacks is gone.
+	answers map[int]bool
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -548,6 +576,9 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 			return proc.parent, proc.command, nil
 		},
 		getpid: func() int { return jail.hookPID },
+		processAlive: func(pid int) (bool, error) {
+			return jail.answers[pid], nil
+		},
 		cmdline: func(pid int) ([]string, error) {
 			argv, ok := jail.argv[pid]
 			if !ok {
@@ -565,6 +596,7 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 	}
 	if jail.activityTmux != nil {
 		deps.tmux = jail.activityTmux.run
+		deps.listPanes = jail.activityTmux.listPanes
 	}
 	return deps
 }
@@ -593,6 +625,7 @@ func runHerdrIn(
 	deps := jail.deps(env, clock)
 	if tmux != nil {
 		deps.tmux = tmux.run
+		deps.listPanes = tmux.listPanes
 	}
 	rc := reportToHerdr(args, strings.NewReader(stdin), &stderr, deps)
 	return herdrRun{rc: rc, stderr: stderr.String()}

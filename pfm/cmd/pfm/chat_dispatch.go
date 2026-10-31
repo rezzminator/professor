@@ -135,7 +135,7 @@ func runChatWithRuntime(
 		}
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, paths.OSEnv{}, clock.Real, runtime)
 	case "modal":
-		return runChatModal(rest, stdout, stderr, clock.Real)
+		return runChatModal(rest, stdout, stderr, clock.Real, runtime)
 	case "resolve":
 		return runChatResolve(rest, stdout, stderr, runtime)
 	case helpCommand, "-h", helpFlag:

@@ -140,6 +140,8 @@ func TestLaunchWorkbench(t *testing.T) {
 			}
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
 			t.Setenv("TMUX", "")
+			// The caller lookup scans an empty tmux dir of its own, never the fence's shared one.
+			t.Setenv(paths.EnvTmuxDir, t.TempDir())
 			t.Setenv(paths.EnvHome, root)
 			t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
 			runtime := config.Runtime{
@@ -276,6 +278,8 @@ func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 			}
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
 			t.Setenv("TMUX", "")
+			// The caller lookup scans an empty tmux dir of its own, never the fence's shared one.
+			t.Setenv(paths.EnvTmuxDir, t.TempDir())
 			t.Setenv(paths.EnvHome, root)
 			t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
 			runtime := config.Runtime{
@@ -495,6 +499,8 @@ func TestLaunchReadsCompletedStatusAfterServerExit(t *testing.T) {
 			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
 			t.Setenv("TMUX", "")
+			// The caller lookup scans an empty tmux dir of its own, never the fence's shared one.
+			t.Setenv(paths.EnvTmuxDir, t.TempDir())
 			t.Setenv(paths.EnvHome, root)
 			t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
 			machine := config.Runtime{

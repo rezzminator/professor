@@ -147,7 +147,8 @@ func logHerdrShell(stderr io.Writer, deps herdrDeps, message string) {
 
 // reportShell runs one verb; warn takes a failure the run reports past.
 func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions, warn func(error)) error {
-	socket := deps.getenv(herdr.EnvSocket)
+	identity := deps.identity()
+	socket := identity.HerdrSocket
 	if socket == "" {
 		return fmt.Errorf("no %s in the shell's environment", herdr.EnvSocket)
 	}
@@ -170,7 +171,7 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions,
 		return seq
 	}
 	record := filepath.Join(deps.lockDir, fmt.Sprintf("%s-%d.pane", herdrShellSource, options.pid))
-	pane, nested, err := shellPane(ctx, socket, options.pid, deps.getenv(herdr.EnvPane), next)
+	pane, nested, err := shellPane(ctx, socket, options.pid, identity.HerdrPane, next)
 	if options.verb == herdrShellRelease {
 		var missing errNoShellPane
 		if errors.As(err, &missing) {

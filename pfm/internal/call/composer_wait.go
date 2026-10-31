@@ -18,9 +18,12 @@ import (
 
 const (
 	// ComposerHoldReads is how many consecutive captures must show a composer
-	// row before the input counts as live: one read can catch a splash frame
-	// that paints the glyph before the TUI takes keys.
-	ComposerHoldReads = 3
+	// row before the input counts as live, on every host and at every door
+	// (call, spawn's birth, reload): one read can catch a splash frame that
+	// paints the glyph before the TUI takes keys, and Codex paints its composer
+	// FIRST and its startup overlays a beat later — the flash that once sent a
+	// "/rename" into a hooks modal.
+	ComposerHoldReads = 4
 	// CodexComposerWait bounds the wait for a Codex composer when the caller
 	// names none: a cold launch with MCP servers booting is seconds, not
 	// tens of seconds, so a pane still bare at the bound is stuck, not slow.

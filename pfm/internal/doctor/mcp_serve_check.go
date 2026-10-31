@@ -14,7 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/stale"
-	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // printMCPServeProcessesDoctor reports chat stdio servers still executing a
@@ -265,13 +264,11 @@ func mcpServeChat(table gather.ProcFS, pid int) string {
 	if err != nil {
 		return "UNRESOLVED"
 	}
-	for _, name := range []string{resolve.ClaudeSessionEnv, resolve.CodexThreadEnv} {
-		if value := environment[name]; value != "" {
-			return value
-		}
+	identity := resolve.ProcessEnvironment(environment)
+	if _, session := identity.EngineSession(); session != "" {
+		return session
 	}
-	socket := pfmtmux.SocketPath(environment["TMUX"])
-	pane := environment["TMUX_PANE"]
+	socket, pane := identity.TmuxSocket(), identity.TMUXPane
 	if socket != "" && pane != "" {
 		return socket + ":" + pane
 	}

@@ -41,8 +41,8 @@ type renameTmux struct {
 
 // Capture renders the steer's turn as a RUNNING turn for busyLeft polls after
 // its submit — the state deliverThen leaves behind and never waits out.
-func (tmux *renameTmux) Capture(ctx context.Context, socket, pane string) (string, error) {
-	capture, err := tmux.delayedThenTmux.Capture(ctx, socket, pane)
+func (tmux *renameTmux) CaptureScreen(ctx context.Context, target pfmcall.Target) (string, error) {
+	capture, err := tmux.delayedThenTmux.CaptureScreen(ctx, target)
 	if err != nil || tmux.busyLeft <= 0 || !tmux.submitted {
 		return capture, err
 	}
@@ -50,8 +50,8 @@ func (tmux *renameTmux) Capture(ctx context.Context, socket, pane string) (strin
 	return capture + "\nWorking on it\n  esc to interrupt\n", nil
 }
 
-func (tmux *renameTmux) SendLiteral(ctx context.Context, socket, pane, value string) error {
-	if capture, err := tmux.Capture(ctx, socket, pane); err == nil && pfmcall.IsBusy(capture) {
+func (tmux *renameTmux) SendLiteral(ctx context.Context, target pfmcall.Target, value string) error {
+	if capture, err := tmux.CaptureScreen(ctx, target); err == nil && pfmcall.IsBusy(capture) {
 		tmux.typedWhileBusy = append(tmux.typedWhileBusy, value)
 	}
 	tmux.literals = append(tmux.literals, value)
@@ -59,7 +59,7 @@ func (tmux *renameTmux) SendLiteral(ctx context.Context, socket, pane, value str
 	if name, ok := strings.CutPrefix(value, "/rename "); ok && tmux.claudeRoot != "" {
 		writeRebornTranscript(tmux.claudeRoot, name)
 	}
-	return tmux.delayedThenTmux.SendLiteral(ctx, socket, pane, value)
+	return tmux.delayedThenTmux.SendLiteral(ctx, target, value)
 }
 
 // rebornSID is the session the --new reboot started; its transcript is where

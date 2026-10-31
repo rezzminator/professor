@@ -518,6 +518,13 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 	if err != nil || !found || seat.HerdrPane != "w9:p2" {
 		t.Fatalf("missing-seat recovery seat=%+v found=%t err=%v", seat, found, err)
 	}
+	// The chat's recorded directory is gone: it restores in the fleet home
+	// and says so, the one missing-directory rule every door shares.
+	run, err := db.ReadSeatRun(seat.SeatID)
+	want := "opened in " + runtime.Paths.Home + ": its own directory /work/project is gone"
+	if err != nil || run.CWD != runtime.Paths.Home || !strings.Contains(stderr.String(), want) {
+		t.Fatalf("restored cwd=%q err=%v stderr=%q, want the fleet home and %q", run.CWD, err, stderr.String(), want)
+	}
 }
 
 func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
@@ -723,5 +730,31 @@ func TestResumeTailRefusesAChatAnotherLiveProcessHolds(t *testing.T) {
 				t.Fatalf("resumeTail() = %q, %v; want %q", got, err, test.want)
 			}
 		})
+	}
+}
+
+// The restored Claude tail is the launch door's own session wording, not a
+// second spelling: birth identity words are stripped, then SessionArgs names the id.
+func TestRestoredClaudeTailIsTheLaunchSessionWording(t *testing.T) {
+	run, err := resumeNativeRun(
+		fleetdb.SeatRun{Binary: "fixture", Args: []string{
+			"--model", "opus", "--session-id", "birth-id", "--resume", "old-id", "--fork-session",
+		}},
+		fleetdb.Seat{Engine: string(pfmengine.Claude), SessionID: "same-session"}, config.Config{}, io.Discard,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := claudelaunch.SessionArgs("", "same-session", false)
+	if len(run.Args) < len(want) || !slices.Equal(run.Args[len(run.Args)-len(want):], want) {
+		t.Fatalf("restored tail = %q, want suffix %q", run.Args, want)
+	}
+	for _, gone := range []string{"birth-id", "old-id", "--fork-session"} {
+		if slices.Contains(run.Args, gone) {
+			t.Fatalf("birth identity %q survived: %q", gone, run.Args)
+		}
+	}
+	if !slices.Contains(run.Args, "opus") {
+		t.Fatalf("birth setting lost: %q", run.Args)
 	}
 }

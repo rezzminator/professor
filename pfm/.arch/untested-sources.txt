@@ -10,7 +10,6 @@ cmd/pfm/mcp_serve_command.go
 cmd/pfm/namesync_command.go
 cmd/pfm/reap_command.go
 cmd/pfm/runtime_config.go
-cmd/pfm/uninstall_command.go
 cmd/pfm/whoami_command.go
 e2e/doc.go
 internal/action/doc.go
@@ -59,7 +58,6 @@ internal/installer/assets.go
 internal/installer/codex_hooks.go
 internal/installer/files.go
 internal/installer/mcp.go
-internal/installer/mcp_files.go
 internal/installer/scheduler_darwin.go
 internal/installer/scheduler_other.go
 internal/installer/settings.go
@@ -74,7 +72,6 @@ internal/naming/doc.go
 internal/reap/runner.go
 internal/resolve/doc.go
 internal/resolve/procfs_darwin.go
-internal/resolve/procfs_linux.go
 internal/resolve/procfs_other.go
 internal/sky/palette.go
 internal/spawn/service_scope_darwin.go

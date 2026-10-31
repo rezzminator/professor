@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -36,17 +37,13 @@ type SessionSpec struct {
 	Height int
 }
 
-// Tmux is the whole effect surface of a spawn: create the session, read the
-// pane, type into it.
+// Tmux is the whole effect surface of a spawn: create the session, then
+// reach its pane through the one pane door, pfmcall.Screen.
 type Tmux interface {
 	NewSession(ctx context.Context, spec SessionSpec) error
-	Capture(ctx context.Context, socket, target string) (string, error)
-	SendLiteral(ctx context.Context, socket, target, text string) error
-	// SendPaste delivers text as one bracketed paste (tmux paste-buffer -p),
-	// the transport for a launch prompt: byte-safe at any size and length,
-	// and never read by the engine as a burst of typed keys.
-	SendPaste(ctx context.Context, socket, target, text string) error
-	SendKey(ctx context.Context, socket, target, key string) error
+	// Pane is the door that reads and types into pane on socket, and the
+	// pane's address on it. An error means no door: nothing can be read.
+	Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error)
 }
 
 // Request is one headless chat to start. Run comes from action.HeadlessRun,

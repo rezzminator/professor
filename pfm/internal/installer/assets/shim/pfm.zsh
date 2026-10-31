@@ -49,7 +49,10 @@ cx() {
   # array into ONE word FIRST and quotes that, so `cx --resume abc123` arrives as a single
   # escaped argv element ("--resume\ abc123") and codex rejects it as one unknown flag.
   local run="\"$HOME/.local/bin/pfm\" internal codex-launch ${(j: :)${(@q)@}}"
-  _cx_server "$sock" "$PWD" "$run" || return
+  _cx_server "$sock" "$PWD" "$run" "$@"
+  local rc=$?
+  (( rc == 3 )) && return 0   # born as a native Herdr seat in its own tab: nothing to attach
+  (( rc == 0 )) || return $rc
   if _pfm_selfswitch "$sock"; then :                          # already inside it → switch, never nest
   elif _pfm_in_bunker; then TMUX= exec tmux -L "$sock" attach # viewport dies with the tab
   elif _pfm_owns_terminal; then TMUX= exec tmux -L "$sock" attach # bare terminal dies with the harness
@@ -59,11 +62,14 @@ cx() {
   fi
 }
 
-# _cx_server <sock> <cwd> <run> — create the chat's tmux server DETACHED through pfm's one
-# chat-server creator, the same one every other door calls: it is born with the tmux.titles
-# policy (so the VS Code tab follows the window name name-sync converges onto the codex
-# thread_name), automatic-rename off, and its engine's window name. A failure is pfm's own
-# stderr line and a nonzero return, so `cx` never attaches to a server that does not exist.
+# _cx_server <sock> <cwd> <run> [codex-arg…] — create the chat's tmux server DETACHED through
+# pfm's one chat-server creator, the same one every other door calls: it is born with the
+# tmux.titles policy (so the VS Code tab follows the window name name-sync converges onto the
+# codex thread_name), automatic-rename off, and its engine's window name. Where pfm's one
+# placement picks Herdr, pfm instead births the chat natively through `pfm chat new --engine
+# codex` (the typed prompt its only argument) and returns 3: nothing to attach. Any other
+# failure is pfm's own stderr line and a nonzero return, so `cx` never attaches to a server
+# that does not exist.
 _cx_server() { "$HOME/.local/bin/pfm" internal chat-server "$@"; }
 
 # _pfm_in_bunker — true when this shell IS a vsct bunker pane. Chat opens from a bunker exec

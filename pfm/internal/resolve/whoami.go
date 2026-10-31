@@ -168,14 +168,56 @@ func CallerEnvironment() WhoamiEnvironment {
 
 // CallerEnvironmentFrom snapshots identity variables over an injected environment.
 func CallerEnvironmentFrom(env paths.Env) WhoamiEnvironment {
+	return EnvironmentOf(env.Get)
+}
+
+// ProcessEnvironment snapshots the identity variables of ANOTHER process's
+// environ (read from /proc): its subject is that process, never this one.
+func ProcessEnvironment(environ map[string]string) WhoamiEnvironment {
+	return EnvironmentOf(func(name string) string { return environ[name] })
+}
+
+// EnvironmentOf is the one place pfm spells the identity variable names: every
+// snapshot, of this process or another, reads them through get.
+func EnvironmentOf(get func(string) string) WhoamiEnvironment {
 	return WhoamiEnvironment{
-		TMUX:            env.Get("TMUX"),
-		HerdrSocket:     env.Get("HERDR_SOCKET_PATH"),
-		HerdrPane:       env.Get("HERDR_PANE_ID"),
-		TMUXPane:        env.Get("TMUX_PANE"),
-		ClaudeSessionID: env.Get(ClaudeSessionEnv),
-		CodexThreadID:   env.Get(CodexThreadEnv),
+		TMUX:            get("TMUX"),
+		HerdrSocket:     get("HERDR_SOCKET_PATH"),
+		HerdrPane:       get("HERDR_PANE_ID"),
+		TMUXPane:        get("TMUX_PANE"),
+		ClaudeSessionID: get(ClaudeSessionEnv),
+		CodexThreadID:   get(CodexThreadEnv),
 	}
+}
+
+// TmuxSocket is the server socket path the environment's $TMUX names, or "".
+func (environment WhoamiEnvironment) TmuxSocket() string {
+	return pfmtmux.SocketPath(environment.TMUX)
+}
+
+// SessionOf is the session id the environment carries for engine: the Claude
+// session or the Codex thread; "" for any other engine or when unset.
+func (environment WhoamiEnvironment) SessionOf(engine pfmengine.ID) string {
+	switch engine {
+	case pfmengine.Claude:
+		return environment.ClaudeSessionID
+	case pfmengine.Codex:
+		return environment.CodexThreadID
+	default:
+		return ""
+	}
+}
+
+// EngineSession is the environment's own engine and session id. The Claude
+// session wins: CODEX_THREAD_ID is inherited into shells that are not
+// themselves a Codex chat (a Claude Code chat can carry both).
+func (environment WhoamiEnvironment) EngineSession() (pfmengine.ID, string) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		if id := environment.SessionOf(engine); id != "" {
+			return engine, id
+		}
+	}
+	return "", ""
 }
 
 // Identify reads engine/transcript identity first, then proves the environment's
@@ -188,20 +230,14 @@ func CallerEnvironmentFrom(env paths.Env) WhoamiEnvironment {
 // after those rungs fail; failed reads never become absence.
 func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 	identity := Identity{Source: tmuxName}
-	if identifier.environment.ClaudeSessionID != "" {
-		identity.Engine, identity.ID, identity.Source = string(
-			pfmengine.Claude,
-		), identifier.environment.ClaudeSessionID, "env-claude"
-	} else if identifier.environment.CodexThreadID != "" {
-		identity.Engine, identity.ID, identity.Source = string(
-			pfmengine.Codex,
-		), identifier.environment.CodexThreadID, "env-codex"
+	if engine, id := identifier.environment.EngineSession(); id != "" {
+		identity.Engine, identity.ID, identity.Source = string(engine), id, "env-"+pfmengine.MustLookup(engine).LongName
 	}
 	chain, ancestryErr := identifier.ancestors()
 	tmuxIdentity, tmuxIndex, tmuxStale, err := identifier.proveTmux(
 		ctx,
 		identity,
-		pfmtmux.SocketPath(identifier.environment.TMUX),
+		identifier.environment.TmuxSocket(),
 		identifier.environment.TMUXPane,
 		chain,
 	)
@@ -312,13 +348,8 @@ func (identifier *Whoami) recoverFromAncestry(
 			}
 			continue
 		}
-		found, index, _, err := identifier.proveTmux(
-			ctx,
-			identity,
-			pfmtmux.SocketPath(environment["TMUX"]),
-			environment["TMUX_PANE"],
-			chain,
-		)
+		claim := ProcessEnvironment(environment)
+		found, index, _, err := identifier.proveTmux(ctx, identity, claim.TmuxSocket(), claim.TMUXPane, chain)
 		if err != nil {
 			return identity, false, err
 		}

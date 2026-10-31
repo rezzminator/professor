@@ -11,24 +11,50 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
-// Capture, CaptureStyled and SendKey complete fakeTmux as a TmuxClient for the
-// tests that never read the screen: an idle, empty composer, and no key.
-func (tmux *fakeTmux) Capture(context.Context, string, string) (string, error) { return idleFrame, nil }
-
-func (tmux *fakeTmux) CaptureStyled(context.Context, string, string) (string, error) {
+// CaptureScreen, CaptureStyled, CaptureTarget, SendKey, SendLiteral,
+// SendPaste and LeaveCopyMode make fakeTmux the finisher's pane door (call.Screen) for the tests that never
+// read the screen: an idle, empty composer, and every typed text kept in sent.
+func (tmux *fakeTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return idleFrame, nil
 }
 
-func (tmux *fakeTmux) SendKey(context.Context, string, string, string) error { return nil }
+func (tmux *fakeTmux) CaptureStyled(context.Context, pfmcall.Target) (string, error) {
+	return idleFrame, nil
+}
 
-// screenTmux is fakeTmux with a screen: the pane frames Capture answers in
+func (tmux *fakeTmux) SendKey(context.Context, pfmcall.Target, string) error { return nil }
+
+func (tmux *fakeTmux) SendLiteral(_ context.Context, _ pfmcall.Target, text string) error {
+	tmux.mutex.Lock()
+	defer tmux.mutex.Unlock()
+	tmux.sent = append(tmux.sent, text)
+	return nil
+}
+
+func (tmux *fakeTmux) SendPaste(context.Context, pfmcall.Target, string) error {
+	return errors.New("the finisher never pastes")
+}
+
+func (tmux *fakeTmux) CaptureTarget(context.Context, pfmcall.Target, int) (string, error) {
+	return "", errors.New("the finisher never reads history")
+}
+
+func (tmux *fakeTmux) LeaveCopyMode(context.Context, pfmcall.Target) (bool, error) {
+	return false, errors.New("the finisher never leaves copy mode")
+}
+
+// screenTmux is fakeTmux with a screen: the pane frames a capture answers in
 // order, the last one repeating, and a key whose press ends the pane (the
-// exit dialog's Enter). styled answers the styled capture; a captureErr or
-// styledErr fails that read. events is every pane-facing call in order.
+// exit dialog's Enter). styled answers the styled capture ("" is the current
+// frame, unstyled); a captureErr or
+// styledErr fails that read. events is every pane-facing call in order — a
+// typed line and the Enter that submits it are one "line" event — and
+// targets every address the door was handed.
 type screenTmux struct {
 	*fakeTmux
 	screen                []string
@@ -36,13 +62,16 @@ type screenTmux struct {
 	captureErr, styledErr error
 	keyGone               string
 	gone                  bool
+	typing                string
 	events                []string
+	targets               []pfmcall.Target
 }
 
-func (tmux *screenTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *screenTmux) CaptureScreen(_ context.Context, target pfmcall.Target) (string, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	tmux.events = append(tmux.events, "capture")
+	tmux.targets = append(tmux.targets, target)
 	if tmux.captureErr != nil {
 		return "", tmux.captureErr
 	}
@@ -53,26 +82,37 @@ func (tmux *screenTmux) Capture(context.Context, string, string) (string, error)
 	return frame, nil
 }
 
-func (tmux *screenTmux) CaptureStyled(context.Context, string, string) (string, error) {
+func (tmux *screenTmux) CaptureStyled(_ context.Context, target pfmcall.Target) (string, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	tmux.events = append(tmux.events, "styled")
+	tmux.targets = append(tmux.targets, target)
+	if tmux.styled == "" && tmux.styledErr == nil {
+		return tmux.screen[0], nil
+	}
 	return tmux.styled, tmux.styledErr
 }
 
-func (tmux *screenTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *screenTmux) SendKey(_ context.Context, target pfmcall.Target, key string) error {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
+	tmux.targets = append(tmux.targets, target)
+	if tmux.typing != "" && key == "Enter" {
+		tmux.events = append(tmux.events, "line "+tmux.typing)
+		tmux.typing = ""
+		return nil
+	}
 	tmux.events = append(tmux.events, "key "+key)
 	tmux.gone = tmux.gone || key == tmux.keyGone
 	return nil
 }
 
-func (tmux *screenTmux) SendLine(ctx context.Context, socketPath, paneID, line string) error {
+func (tmux *screenTmux) SendLiteral(ctx context.Context, target pfmcall.Target, text string) error {
 	tmux.mutex.Lock()
-	tmux.events = append(tmux.events, "line "+line)
+	tmux.typing = text
+	tmux.targets = append(tmux.targets, target)
 	tmux.mutex.Unlock()
-	return tmux.fakeTmux.SendLine(ctx, socketPath, paneID, line)
+	return tmux.fakeTmux.SendLiteral(ctx, target, text)
 }
 
 func (tmux *screenTmux) PaneExists(ctx context.Context, socketPath, paneID string) (bool, error) {
@@ -115,7 +155,7 @@ func TestReapTeammatesRetainsFailedChildren(t *testing.T) {
 				serverErr, paneErr = errors.New("no server running on /x"), errors.New("can't find pane: %7")
 			}
 			tmux := &reapTmux{fakeTmux: &fakeTmux{killPaneErr: paneErr}, serverErr: serverErr}
-			finisher, err := NewFinisher(database, Dependencies{Tmux: tmux})
+			finisher, err := NewFinisher(database, Dependencies{Tmux: tmux, Screen: tmux})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -379,6 +419,7 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 			finisher, err := NewFinisher(database, Dependencies{
 				Log:          &log,
 				Tmux:         test.tmux,
+				Screen:       test.tmux,
 				Refresher:    refreshFunc(func(context.Context) error { return nil }),
 				Delay:        time.Millisecond,
 				PollEvery:    time.Millisecond,
@@ -392,15 +433,27 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 			if engine == "" {
 				engine = pfmengine.Claude
 			}
+			socketPath := filepath.Join(jail.tmuxDir, "cc-700-1-1")
 			runErr := finisher.Run(context.Background(), ExitArgs{
 				Engine:     engine,
 				ID:         "77777777-7777-4777-8777-777777777777",
-				SocketPath: filepath.Join(jail.tmuxDir, "cc-700-1-1"),
+				SocketPath: socketPath,
 				SocketName: "cc-700-1-1",
 				PaneID:     "%4",
 			})
 			if runErr != nil {
 				t.Fatalf("Run: %v", runErr)
+			}
+			// Every read and keystroke went through the one pane door, addressed
+			// to this chat's own tmux pane.
+			want := pfmcall.Target{SocketPath: socketPath, Pane: "%4", Engine: string(engine)}
+			if len(test.tmux.targets) == 0 {
+				t.Fatal("the finisher never reached the pane door")
+			}
+			for _, target := range test.tmux.targets {
+				if target != want {
+					t.Fatalf("pane door addressed %+v, want %+v", target, want)
+				}
 			}
 			if !reflect.DeepEqual(test.tmux.events, test.wantEvents) {
 				t.Fatalf("pane events = %q, want %q", test.tmux.events, test.wantEvents)

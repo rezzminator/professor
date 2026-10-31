@@ -42,7 +42,7 @@ func printSelectedHerdrBackendDoctor(
 		if err == nil {
 			caller, err = identifier.Identify(ctx)
 		}
-		choice, placeErr := spawn.Place(ctx, "doctor", spawn.BackendAuto, caller, err)
+		choice, placeErr := spawn.Place(ctx, "doctor", spawn.BackendAuto, "", false, caller, err)
 		if placeErr != nil {
 			fmt.Fprintf(stdout, "doctor: herdr backend UNRESOLVED — %v\n", placeErr)
 			return 0, 1
@@ -126,7 +126,7 @@ func printHerdrBackendDoctor(
 }
 
 func herdrDoctorSocket(ctx context.Context, dependencies Dependencies) (string, error) {
-	if socket := dependencies.Env.Get(herdr.EnvSocket); socket != "" {
+	if socket := resolve.CallerEnvironmentFrom(dependencies.Env).HerdrSocket; socket != "" {
 		return socket, nil
 	}
 	var lookupError error

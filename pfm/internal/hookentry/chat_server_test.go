@@ -2,15 +2,20 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -22,17 +27,26 @@ func chatServerRuntime(t *testing.T, enabled bool) (config.Runtime, string) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
+	// The placement's caller lookup scans the tmux directory: only the jail's,
+	// never the host's default one, and never an ambient tmux or Herdr pane.
+	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
+	t.Setenv(paths.EnvTmuxDir, tmuxDir)
+	for _, name := range []string{"TMUX", "TMUX_PANE", "HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"} {
+		t.Setenv(name, "")
+	}
 	machine := config.Defaults(root, nil)
 	machine.Tmux.Titles.Enabled = enabled
-	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	return config.Runtime{Config: machine, Paths: paths.Values{Home: root, TmuxDir: tmuxDir}}, tmuxDir
 }
 
 func runChatServer(t *testing.T, runtime config.Runtime, args ...string) (string, int) {
 	t.Helper()
 	var stderr bytes.Buffer
-	code := ChatServer(args, &stderr, runtime)
-	if code == 0 && len(args) == 3 {
+	code := ChatServer(args, io.Discard, &stderr, runtime, func(context.Context, []string, io.Writer, io.Writer) int {
+		t.Fatal("a tmux placement reached the native birth door")
+		return 1
+	})
+	if code == 0 && len(args) >= 3 {
 		socketPath := filepath.Join(runtime.Paths.TmuxDir, args[0])
 		t.Cleanup(func() {
 			kill := exec.Command("tmux", "-S", socketPath, "kill-server")
@@ -109,5 +123,46 @@ func TestChatServerDoorRefusesWhatItCannotPlace(t *testing.T) {
 		if stderr, code := runChatServer(t, runtime, args...); code != 2 || stderr == "" {
 			t.Fatalf("args %q: code=%d stderr=%q", args, code, stderr)
 		}
+	}
+}
+
+// The cx door asks the one placement once, as "shim.cx": the default births
+// its tmux server, and a configured Herdr backend with no Herdr caller is
+// refused before any server exists.
+func TestChatServerDoorPlacesOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name, backend string
+		code          int
+		want          string
+	}{
+		{name: "default", code: 0, want: "shim.cx=tmux"},
+		{name: "configured Herdr outside Herdr", backend: "herdr", code: 1, want: "shim.cx="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := exec.LookPath("tmux"); err != nil && tc.code == 0 {
+				t.Skip("tmux is not installed")
+			}
+			for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX"} {
+				t.Setenv(name, "")
+			}
+			runtime, tmuxDir := chatServerRuntime(t, true)
+			runtime.Config.Chat.Backend = tc.backend
+			_, recorder := obs.Test(t)
+			socket := "cx-1800000054-1-1"
+			stderr, code := runChatServer(t, runtime, socket, "/tmp", "sleep 120")
+			var placed []string
+			for _, record := range recorder.Records() {
+				if record.Message == "chat.placement" {
+					door, _ := record.Field("door")
+					chosen, _ := record.Field("chosen")
+					placed = append(placed, fmt.Sprint(door, "=", chosen))
+				}
+			}
+			_, statErr := os.Stat(filepath.Join(tmuxDir, socket))
+			if code != tc.code || !slices.Equal(placed, []string{tc.want}) || (statErr == nil) != (tc.code == 0) {
+				t.Fatalf("code=%d placements=%v server=%v stderr=%q; want code %d and [%s]",
+					code, placed, statErr, stderr, tc.code, tc.want)
+			}
+		})
 	}
 }

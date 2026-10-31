@@ -35,7 +35,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 					}
 					panes := []any{pane}
 					if phase > 0 && outcome == "closed" {
-						panes = nil
+						panes = []any{} // Herdr lists no pane as [], never null
 					}
 					return map[string]any{"type": "pane_list", "panes": panes}, ""
 				case "pane.process_info":

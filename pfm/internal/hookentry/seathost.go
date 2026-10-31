@@ -30,6 +30,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -57,9 +58,9 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		fmt.Fprintf(stderr, "pfm internal seat-host: native seat %q unavailable: %v\n", args[0], err)
 		return 1
 	}
-	if (paths.OSEnv{}).Get("TMUX") != "" || (paths.OSEnv{}).Get(herdr.EnvMarker) != "1" ||
-		(paths.OSEnv{}).Get(herdr.EnvSocket) == "" ||
-		(paths.OSEnv{}).Get(herdr.EnvPane) == "" {
+	if identity := resolve.CallerEnvironment(); identity.TMUX != "" || (paths.OSEnv{}).Get(herdr.EnvMarker) != "1" ||
+		identity.HerdrSocket == "" ||
+		identity.HerdrPane == "" {
 		fmt.Fprintln(stderr, "pfm internal seat-host: current Herdr pane identity is required")
 		return 1
 	}

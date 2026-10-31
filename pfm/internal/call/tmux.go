@@ -71,7 +71,7 @@ func (tmux TmuxCaller) SendPaste(
 	load := tmux.command(ctx, socketPath, "load-buffer", "-b", buffer, "-")
 	load.Stdin = strings.NewReader(text)
 	if err := load.Run(); err != nil {
-		return err
+		return fmt.Errorf("load the text into tmux buffer %s: %w", buffer, err)
 	}
 	paste := tmux.command(
 		ctx,
@@ -85,8 +85,10 @@ func (tmux TmuxCaller) SendPaste(
 		target,
 	)
 	if err := paste.Run(); err != nil {
-		_ = tmux.command(ctx, socketPath, "delete-buffer", "-b", buffer).Run()
-		return err
+		if deleteErr := tmux.command(ctx, socketPath, "delete-buffer", "-b", buffer).Run(); deleteErr != nil {
+			return fmt.Errorf("paste tmux buffer %s: %w (delete it: %v)", buffer, err, deleteErr)
+		}
+		return fmt.Errorf("paste tmux buffer %s: %w", buffer, err)
 	}
 	return nil
 }

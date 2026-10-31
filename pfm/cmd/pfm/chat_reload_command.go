@@ -19,7 +19,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -76,17 +78,17 @@ func runChatReloadWithRuntime(
 	callerSock := reloadSocketArgument(args)
 	callerPane := reloadPaneArgument(args)
 	// Resolve before detaching; the worker has no tmux ancestry to recover.
-	socketPath, pane, _, code := reloadTarget(
+	socketPath, pane, _, native, code := reloadTarget(
 		context.Background(), callerSock, callerPane, resolved, runtime, tmux, stderr, env,
 	)
 	if code != 0 {
 		return code
 	}
-	// Refuse unsupported engines before scheduling a detached worker.
-	engine, err := reload.EngineForTarget(context.Background(), resolved, socketPath, pane)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
-		return 1
+	// Refuse unsupported engines before scheduling a detached worker. A native
+	// seat's engine is its durable row's, never its socket's name.
+	engine := reload.EngineOf(socketPath)
+	if native != nil {
+		engine = pfmengine.ID(native.Engine)
 	}
 	if engine == pfmengine.OpenCode {
 		fmt.Fprintf(stderr, "pfm chat reload: OpenCode chats cannot be reloaded yet (%s)\n", filepath.Base(socketPath))
@@ -104,7 +106,7 @@ func runChatReloadWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: create worker log directory: %v\n", err)
 		return 1
 	}
-	logPath, schedule, err := reload.LockWorkerSchedule(ctx, resolved, socketPath, pane)
+	logPath, schedule, err := reload.LockWorkerSchedule(ctx, resolved, socketPath, native)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		if errors.As(err, new(*reload.ScheduledError)) {
@@ -233,8 +235,13 @@ func runChatReloadWorkerWithRuntime(
 	then, model, effort := flattenThenLine(parsed.Then), parsed.Model, parsed.Effort
 	newSeat, hide := parsed.New, parsed.Hide
 	resolved := runtime.Paths
-	tmux := reload.CommandTmux{LaunchDir: resolved.TmuxDir}
-	socketPath, pane, paneState, code := reloadTarget(
+	tmux, err := reload.NewCommandTmux(resolved.TmuxDir, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
+		return 1
+	}
+	// The one host decision: the target names its native seat, or it is tmux.
+	socketPath, pane, paneState, native, code := reloadTarget(
 		context.Background(),
 		sock,
 		requestedPane,
@@ -248,11 +255,6 @@ func runChatReloadWorkerWithRuntime(
 		return code
 	}
 	options := reload.OptionsForWorker(resolved, env, reloadDurationEnv)
-	native, err := reload.SeatForReload(context.Background(), resolved, socketPath, pane)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
-		return 1
-	}
 	if native != nil {
 		nativeWorker = true
 		request, err := reload.NativeRequest(runtime, *native, parsed)
@@ -324,11 +326,9 @@ func runChatReloadWorkerWithRuntime(
 	if cwd == "" {
 		cwd = paneState.CurrentPath
 	}
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	if info, statErr := os.Stat(cwd); statErr != nil || !info.IsDir() {
-		cwd, _ = os.Getwd()
+	cwd, cwdNotice := launchnotice.Relocate(cwd, resolved.Home)
+	if cwdNotice != "" {
+		fmt.Fprintf(stderr, "pfm chat reload: %s\n", cwdNotice)
 	}
 	promptChannel := ""
 	promptChannel, err = agentrole.RefreshSeatPrompt(
@@ -502,7 +502,9 @@ func reloadDurationEnv(name string, fallbackMS int, env paths.Env) time.Duration
 	return time.Duration(fallbackMS) * time.Millisecond
 }
 
-// reloadTarget preserves the exact durable native address or explicit tmux pane.
+// reloadTarget preserves the exact durable native address or explicit tmux
+// pane, and decides the host once: a native target comes back with its seat,
+// a tmux one with none.
 func reloadTarget(
 	ctx context.Context,
 	sock, pane string,
@@ -511,17 +513,17 @@ func reloadTarget(
 	tmux reload.Tmux,
 	stderr io.Writer,
 	env paths.Env,
-) (string, string, reload.Pane, int) {
+) (string, string, reload.Pane, *fleetdb.Seat, int) {
 	env = defaultEnv(env)
 	native, handled, err := reload.NativeTarget(ctx, resolved, sock, pane, env)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: WARNING: read native seats: %v\n", err)
 		if handled {
-			return "", "", reload.Pane{}, 1
+			return "", "", reload.Pane{}, nil, 1
 		}
 	}
 	if native != nil {
-		return native.HerdrSocket, native.HerdrPane, reload.Pane{ID: native.HerdrPane}, 0
+		return native.HerdrSocket, native.HerdrPane, reload.Pane{ID: native.HerdrPane}, native, 0
 	}
 	if sock != "" {
 		path := sock
@@ -531,26 +533,26 @@ func reloadTarget(
 		panes, err := tmux.ListPanes(ctx, path)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload: no live server on %s: %v\n", sock, err)
-			return "", "", reload.Pane{}, 1
+			return "", "", reload.Pane{}, nil, 1
 		}
 		if len(panes) == 0 {
 			fmt.Fprintf(stderr, "pfm chat reload: no live panes on %s\n", sock)
-			return "", "", reload.Pane{}, 1
+			return "", "", reload.Pane{}, nil, 1
 		}
 		if pane != "" {
 			for _, item := range panes {
 				if item.ID == pane {
-					return path, pane, item, 0
+					return path, pane, item, nil, 0
 				}
 			}
 			fmt.Fprintf(stderr, "pfm chat reload: pane %s is not live on %s\n", pane, sock)
-			return "", "", reload.Pane{}, 1
+			return "", "", reload.Pane{}, nil, 1
 		}
 		if len(panes) != 1 {
 			fmt.Fprintf(stderr, "pfm chat reload: %s has multiple panes — run reload inside the chat instead\n", sock)
-			return "", "", reload.Pane{}, 1
+			return "", "", reload.Pane{}, nil, 1
 		}
-		return path, panes[0].ID, panes[0], 0
+		return path, panes[0].ID, panes[0], nil, 0
 	}
 	environment := resolve.CallerEnvironmentFrom(defaultEnv(env))
 	identifier, err := resolve.NewWhoami(
@@ -558,25 +560,37 @@ func reloadTarget(
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
-		return "", "", reload.Pane{}, 1
+		return "", "", reload.Pane{}, nil, 1
 	}
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: couldn't identify this chat: %v\n", err)
-		return "", "", reload.Pane{}, 1
+		return "", "", reload.Pane{}, nil, 1
 	}
-	return reloadTargetFromIdentity(ctx, identity, tmux, stderr, env)
+	return reloadTargetFromIdentity(ctx, identity, resolved, tmux, stderr, env)
 }
 
 func reloadTargetFromIdentity(
 	ctx context.Context,
 	identity resolve.Identity,
+	resolved paths.Values,
 	tmux reload.Tmux,
 	stderr io.Writer,
 	env paths.Env,
-) (string, string, reload.Pane, int) {
+) (string, string, reload.Pane, *fleetdb.Seat, int) {
 	if identity.Backend == spawn.BackendHerdr {
-		return identity.SocketPath, identity.Pane, reload.Pane{ID: identity.Pane}, 0
+		seat, err := reload.SeatForReload(ctx, resolved, identity.SocketPath, identity.Pane)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat reload: look up the native seat of %s %s: %v\n",
+				identity.SocketPath, identity.Pane, err)
+			return "", "", reload.Pane{}, nil, 1
+		}
+		if seat == nil {
+			fmt.Fprintf(stderr, "pfm chat reload: no native seat is recorded for %s %s\n",
+				identity.SocketPath, identity.Pane)
+			return "", "", reload.Pane{}, nil, 1
+		}
+		return identity.SocketPath, identity.Pane, reload.Pane{ID: identity.Pane}, seat, 0
 	}
 	env = defaultEnv(env)
 	path := identity.SocketPath
@@ -584,11 +598,11 @@ func reloadTargetFromIdentity(
 	panes, err := tmux.ListPanes(ctx, path)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: list panes: %v\n", err)
-		return "", "", reload.Pane{}, 1
+		return "", "", reload.Pane{}, nil, 1
 	}
 	if pane == "" {
 		if len(panes) == 1 {
-			return path, panes[0].ID, panes[0], 0
+			return path, panes[0].ID, panes[0], nil, 0
 		}
 		fmt.Fprintf(
 			stderr,
@@ -596,15 +610,15 @@ func reloadTargetFromIdentity(
 			identity.Session,
 			len(panes),
 		)
-		return "", "", reload.Pane{}, 1
+		return "", "", reload.Pane{}, nil, 1
 	}
 	for _, item := range panes {
 		if item.ID == pane {
-			return path, pane, item, 0
+			return path, pane, item, nil, 0
 		}
 	}
 	fmt.Fprintf(stderr, "pfm chat reload: pane %s is not live\n", pane)
-	return "", "", reload.Pane{}, 1
+	return "", "", reload.Pane{}, nil, 1
 }
 
 func resolveReloadSession(
@@ -640,10 +654,7 @@ func resolveReloadSession(
 	}
 	engine := reload.EngineOf(socketPath)
 	if id == "" && allowAmbient {
-		ambient := env.Get("CLAUDE_CODE_SESSION_ID")
-		if engine == pfmengine.Codex {
-			ambient = env.Get("CODEX_THREAD_ID")
-		}
+		ambient := resolve.CallerEnvironmentFrom(env).SessionOf(engine)
 		if fleet.ChatIDPattern.MatchString(ambient) {
 			path, err := reload.SessionTranscript(resolved, machine, engine, ambient)
 			if err != nil {

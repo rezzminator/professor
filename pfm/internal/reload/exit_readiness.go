@@ -15,9 +15,9 @@ import (
 // injected steers — behind it until a human clears it. Whatever this worker
 // put on the screen, it takes back off, and the error says whether that was
 // seen to succeed.
-func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) error {
+func exitIncomplete(ctx context.Context, pane seatScreen, polls int) error {
 	cause := fmt.Errorf("/exit did not complete after %d polls; chat left running", polls)
-	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+	capture, err := pane.capture(ctx)
 	if err != nil {
 		return errors.Join(
 			cause,
@@ -29,7 +29,7 @@ func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) 
 	}
 	switch {
 	case pfmcall.ExitDialogOpen(capture):
-		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Escape"); err != nil {
+		if err := pane.key(ctx, "Escape"); err != nil {
 			return errors.Join(
 				cause,
 				fmt.Errorf(
@@ -38,7 +38,7 @@ func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) 
 				),
 			)
 		}
-		if capture, err = tmux.Capture(ctx, request.SocketPath, request.Pane); err != nil {
+		if capture, err = pane.capture(ctx); err != nil {
 			return errors.Join(
 				cause,
 				fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err),
@@ -53,7 +53,7 @@ func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) 
 		}
 		return errors.Join(cause, errors.New("the exit dialog would not confirm; dismissed it (Esc)"))
 	case composerShowsExit(capture):
-		if err := clearTypedExit(ctx, request, tmux); err != nil {
+		if err := clearTypedExit(ctx, pane); err != nil {
 			return errors.Join(cause, err)
 		}
 		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))

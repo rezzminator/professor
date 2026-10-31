@@ -30,8 +30,9 @@ func TestChatKeysRefusesATokenTmuxWouldType(t *testing.T) {
 			t.Fatalf("%q exit=%d, want 2 (stdout=%q stderr=%q)",
 				token, code, stdout.String(), stderr.String())
 		}
+		// The chat keys verb's one sentence, the same the MCP keys tool returns.
 		if !strings.Contains(stderr.String(), "is not a tmux key") ||
-			!strings.Contains(stderr.String(), "--literal") {
+			!strings.Contains(stderr.String(), "(--literal, MCP literal=true)") {
 			t.Fatalf("%q refusal = %q, want the reason and the way to mean it",
 				token, stderr.String())
 		}
@@ -89,6 +90,47 @@ func TestChatKeysDrivesALiveChat(t *testing.T) {
 			t.Fatalf("the keys never reached the engine: %q", transcript.String())
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// TestChatModalDeniesOnTheResolvedTmuxPane routes a tmux modal deny through
+// the resolved seat and call's key door, as on Herdr: the keys reach the
+// chat's own pane, never whatever pane a target-less tmux command lands on
+// (here a newer session on the chat's server).
+func TestChatModalDeniesOnTheResolvedTmuxPane(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{
+		"chat", "new", "--name", "modal worker", "--cwd", jail.root + "/work", "first orders",
+	}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	socket := socketFromRun(t, stdout.String())
+	server := filepath.Join(jail.tmuxDir, socket)
+	if output, err := exec.Command("tmux", "-S", server, "new-session", "-d", "-s", "decoy", "cat").
+		CombinedOutput(); err != nil {
+		t.Fatalf("start the decoy session: %v: %s", err, output)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"chat", "modal", socket, "deny", "1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("modal exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		decoy, err := exec.Command("tmux", "-S", server, "capture-pane", "-p", "-t", "decoy").Output()
+		if err != nil {
+			t.Fatalf("capture the decoy session: %v", err)
+		}
+		if text := strings.TrimSpace(string(decoy)); text != "" {
+			t.Fatalf("the deny keys landed in another session's pane: %q", text)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

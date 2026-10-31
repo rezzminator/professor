@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"strings"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -57,7 +56,7 @@ func cacheKeepwarmShield(runtime Runtime, sessionID string) string {
 			path,
 			sessionID,
 			readCapped,
-			keepwarmProbe(gather.NewProcFS(runtime.ProcRoot), signalZero),
+			keepwarmProbe(gather.NewProcFS(runtime.ProcRoot), gather.ProcessAlive),
 		)
 	}
 	if state.err != nil {
@@ -158,35 +157,30 @@ func (record keepwarmRecord) validate(sessionID string) error {
 }
 
 // keepwarmProbe uses the shared process classifier. A reused PID is not a live
-// Claude: a process that is not Claude, a zombie, or one born after the record's
-// last write (so it cannot be the writer, even when it is another Claude) is
-// stale. A failed inspection is an error, not an absent plugin. signalZero
-// checks ownership/existence without sending a signal to the chat.
-func keepwarmProbe(proc gather.ProcFS, signal func(int) error) func(int, int64) (bool, error) {
+// Claude: a process that is not Claude, a zombie, another user's process, or one
+// born after the record's last write (so it cannot be the writer, even when it
+// is another Claude) is stale. A failed inspection is an error, not an absent
+// plugin. alive is gather.ProcessAlive outside the tests.
+func keepwarmProbe(proc gather.ProcFS, alive func(int) (bool, error)) func(int, int64) (bool, error) {
 	return func(pid int, updatedAt int64) (bool, error) {
-		err := signal(pid)
-		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
-			return false, nil
-		}
+		live, err := alive(pid)
 		if err != nil {
 			return false, fmt.Errorf("probe Claude pid %d: %w", pid, err)
 		}
-		if identity, ok := proc.(gather.ProcIdentity); ok {
-			who, identityErr := identity.ProcessIdentity(pid)
-			if identityErr != nil {
-				if errors.Is(signal(pid), syscall.ESRCH) {
-					return false, nil
-				}
-				return false, fmt.Errorf("inspect Claude pid %d: %w", pid, identityErr)
-			}
-			if who.Zombie {
-				return false, nil
-			}
+		if !live {
+			return false, nil
+		}
+		ours, err := processOurs(proc, alive, pid)
+		if err != nil {
+			return false, fmt.Errorf("inspect Claude pid %d: %w", pid, err)
+		}
+		if !ours {
+			return false, nil
 		}
 		if births, ok := proc.(gather.ProcBirth); ok {
 			born, birthErr := births.Birth(pid)
 			if birthErr != nil {
-				if errors.Is(signal(pid), syscall.ESRCH) {
+				if processGone(alive, pid) {
 					return false, nil
 				}
 				return false, fmt.Errorf("read Claude pid %d start time: %w", pid, birthErr)
@@ -198,7 +192,7 @@ func keepwarmProbe(proc gather.ProcFS, signal func(int) error) func(int, int64) 
 		}
 		argv, err := proc.Cmdline(pid)
 		if err != nil {
-			if errors.Is(signal(pid), syscall.ESRCH) {
+			if processGone(alive, pid) {
 				return false, nil
 			}
 			return false, fmt.Errorf("read Claude pid %d argv: %w", pid, err)

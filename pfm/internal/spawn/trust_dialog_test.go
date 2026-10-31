@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 // trustDialogScreen is Claude Code's folder-trust dialog as it draws on a
@@ -20,7 +22,11 @@ type trustPane struct {
 	screen string
 }
 
-func (pane trustPane) Capture(context.Context, string, string) (string, error) {
+func (pane trustPane) Pane(socket, target string) (pfmcall.Screen, pfmcall.Target, error) {
+	return pane, fakeTarget(socket, target), nil
+}
+
+func (pane trustPane) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if pane.screen != "" {
 		return pane.screen, nil
 	}
@@ -82,7 +88,7 @@ func TestWaitForComposerNeverAnswersTheClaudeFolderTrustDialog(t *testing.T) {
 		for _, readyValue := range []bool{false, true} {
 			pane := trustPane{fakeCodex: newFakeCodex(), screen: screen}
 			ready := waitForComposer(
-				context.Background(), pane, "cc-1-2-3", "cc-1-2-3", testTimings(), tracer{},
+				context.Background(), pane, fakeTarget("cc-1-2-3", "cc-1-2-3"), testTimings(), tracer{},
 				func(string) bool { return readyValue },
 			)
 			if ready {

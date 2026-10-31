@@ -24,11 +24,8 @@ type launchLiteralAllowance struct {
 }
 
 var launchLiteralReaders = map[string]launchLiteralAllowance{
-	"cmd/pfm/chat_call_resume.go":    {"reads process identity", []string{"CLAUDE_CODE_SESSION_ID="}},
-	"cmd/pfm/chat_new_command.go":    {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
-	"cmd/pfm/chat_reload_command.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
-	"cmd/pfm/chat_satellite_command.go": {"reads parent identity and parses branch input", []string{
-		"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SESSION_ID is not set and no transcript path was given",
+	"cmd/pfm/chat_call_resume.go": {"reads process identity", []string{"CLAUDE_CODE_SESSION_ID="}},
+	"cmd/pfm/chat_satellite_command.go": {"parses branch input", []string{
 		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] ",
 		"pfm chat branch: no ambient session id; pass --engine and --session-id",
 		"pfm chat branch: --session-id is required and must be one safe line",
@@ -36,7 +33,6 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	"internal/action/synth.go": {"parses launcher argv and strips OpenCode port", []string{
 		"--session-id", "--session-id=", "--fork-session", "--resume", "CLAUDE_CODE_SSE_PORT",
 	}},
-	"internal/chat/find.go": {"reads session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/installer/vscode_profile.go": {"pins every terminal-profile env shape pfm wrote", []string{
 		"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
 	}},

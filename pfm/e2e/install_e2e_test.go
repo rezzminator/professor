@@ -118,8 +118,7 @@ func TestE2EFenceIsRequiredEvenWithoutHome(t *testing.T) {
 		if result := run(
 			home,
 			false,
-		); result.err == nil ||
-			!strings.Contains(result.stdout+result.stderr, "e2e harness refuses") {
+		); result.err == nil || !unfencedRefusal(result.stdout+result.stderr) {
 			t.Fatalf("unfenced HOME=%q helper result=%+v, want refusal", home, result)
 		}
 	}
@@ -404,11 +403,14 @@ func (h *e2eHarness) environment(home string) []string {
 		filepath.Join(home, ".cc", "2", "projects"),
 		filepath.Join(home, ".cc", "3", "projects"),
 	}
+	// PFM_DEV_FENCE: a fixture re-exec of this test binary (the Claude stub's
+	// plugin commands) passes testjail's fence gate only with the fence marker.
 	values := map[string]string{
 		"GOCACHE":          h.goCache,
 		"GOMODCACHE":       h.goModCache,
 		"HOME":             home,
 		"PFM_HOME":         home,
+		"PFM_DEV_FENCE":    "1",
 		"PFM_CONFIG":       filepath.Join(home, "pfm.config.json"),
 		"PFM_CACHE_DB":     filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db"),
 		"PFM_STATE_DB":     filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
@@ -433,6 +435,14 @@ func (h *e2eHarness) environment(home string) []string {
 		values[name] = value
 	}
 	return appendCleanEnv(os.Environ(), values)
+}
+
+// unfencedRefusal reports an unfenced helper that ran no test: testjail's
+// gate sends it back to the fence (which a fence cannot reach) before the
+// e2e harness's own refusal can speak.
+func unfencedRefusal(output string) bool {
+	return strings.Contains(output, "e2e harness refuses") ||
+		strings.Contains(output, "testjail: no test runs on this machine")
 }
 
 func appendCleanEnv(base []string, values map[string]string) []string {

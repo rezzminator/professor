@@ -1,12 +1,13 @@
 package testjail
 
 import (
-	"errors"
-	"fmt"
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // pfm's suites run only in the fence, or on a GitHub-hosted CI runner. On a real machine a test
@@ -14,18 +15,18 @@ import (
 // operator's live pfm.db. A test binary started anywhere else re-runs its package in the fence
 // and never runs a test where it was started.
 const (
-	fenceEnv      = "PFM_DEV_FENCE" // set by infra/fence for every fence exec
-	fenceMarker   = "/.dockerenv"   // exists only inside a container: an exported variable alone never passes
+	fenceMarker   = "/.dockerenv" // exists only inside a container: an exported variable alone never passes
 	fenceLauncher = ".claude/scripts/dev.sh"
 )
 
 func inFence() bool {
 	_, err := os.Stat(fenceMarker)
-	return err == nil && os.Getenv(fenceEnv) == "1"
+	return err == nil && paths.OSEnv{}.Get(paths.EnvDevFence) == "1"
 }
 
 func onHostedRunner() bool {
-	return os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("RUNNER_ENVIRONMENT") == "github-hosted"
+	env := paths.OSEnv{}
+	return env.Get("GITHUB_ACTIONS") == "true" && env.Get("RUNNER_ENVIRONMENT") == "github-hosted"
 }
 
 // hostPathFlags name files on the starting machine, which the fence cannot see.
@@ -83,13 +84,18 @@ func runInFence() int {
 	for _, arg := range fenceArgs(os.Args[1:]) {
 		inner += " " + shellQuote(arg)
 	}
-	fmt.Fprintf(os.Stderr, "testjail: no test runs on this machine — running %s in the fence\n", rel)
-	cmd := exec.Command("bash", filepath.Join(root, fenceLauncher), "iso", "run", inner)
-	cmd.Dir, cmd.Stdout, cmd.Stderr = root, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() > 0 {
-			return exit.ExitCode()
+	warnSetup("no test runs on this machine — running %s in the fence", rel)
+	process, err := deps.RealRunner{}.Start(
+		context.Background(),
+		[]string{"bash", filepath.Join(root, fenceLauncher), "iso", "run", inner},
+		deps.StartOptions{Dir: root, Stdout: os.Stdout, Stderr: os.Stderr},
+	)
+	if err != nil {
+		return refuseHost("could not start the fence: %v", err)
+	}
+	if err := process.Wait(); err != nil {
+		if code := deps.ExitCode(err); code > 0 {
+			return code
 		}
 		return refuseHost("could not run the fence: %v", err)
 	}
@@ -97,6 +103,6 @@ func runInFence() int {
 }
 
 func refuseHost(format string, args ...any) int {
-	fmt.Fprintf(os.Stderr, "testjail: REFUSED — pfm tests run only in the fence (dev.sh iso test pfm); "+format+"\n", args...)
+	warnSetup("REFUSED — pfm tests run only in the fence (dev.sh iso test pfm); "+format, args...)
 	return 1
 }

@@ -77,6 +77,9 @@ const (
 	// profiles; the profiles in the source clone still install.
 	// The test harness sets it so no test fetches themes from a public repository.
 	EnvThemesOffline = "PFM_THEMES_OFFLINE"
+	// EnvDevFence=1 marks a process the fence (infra/fence) started; with
+	// /.dockerenv it is how testjail admits a test run.
+	EnvDevFence = "PFM_DEV_FENCE"
 	// EnvPricesOffline=1 stops every price refresh — pfm model-cost, pfm
 	// install, pfm doctor — from fetching the publishers' pricing pages; the
 	// served table stays the clone file or the embedded copy. The test harness

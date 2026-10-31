@@ -42,7 +42,7 @@ The payload's `agent_type`, compared exactly, decides; the guard keeps no file, 
 | `themer` | `templates/themes/**` only |
 | anyone else: the main chat (no `agent_type`), `general-purpose` told to act as pcm, `PCM`, `pcm2`, every other agent | none |
 
-Any agent registered as `pcm` qualifies: a project's own `.claude/agents/pcm.md`, scaffolded from `templates/project/agents/pcm.md`. A project with no pcm cannot write its prompt files from a chat; the deny sends the user to the project that owns them.
+Any agent registered as `pcm` qualifies. pcm is machine-global: `templates/global/agents/pcm.md`, linked into `~/.claude/agents/` by `pfm install`; a project's own `.claude/agents/pcm.md` overrides it (Claude Code: a project agent wins over a user agent). The guard never reads either file, only the payload's `agent_type`.
 
 ## What it protects
 
@@ -89,9 +89,9 @@ Known costs, each a deliberate deny:
 
 One message, one line per writer (`pcmGuardJudge.reason`):
 
-`pcm-guard: Only pcm writes {paths}: spawn Agent(subagent_type: "pcm") with the exact change; a sub-agent returns the change as a proposal; no pcm registered here → ask the user to dispatch pcm from the project that owns the file.`
+`pcm-guard: Only pcm writes {paths}: spawn Agent(subagent_type: "pcm") with the exact change; a sub-agent returns the change as a proposal; pcm is machine-global: no pcm registered means this host's install is stale → run pfm install --yes.`
 
-A theme path gives the same line naming `themer`. An unreadable command adds `pcm-guard could not read this command, and it names a prompt file (CLAUDE.md, .claude, templates): split it into simple commands with literal paths; a prompt-file write goes to pcm: spawn Agent(subagent_type: "pcm") with the exact change.` Each path is named as the call wrote it, made absolute; a glob is named by each file it matched.
+A theme path gives the same line naming `themer`, with its own tail (themer stays Professor's project agent): `no themer registered here → ask the user to dispatch themer from the project that owns the file.` An unreadable command adds `pcm-guard could not read this command, and it names a prompt file (CLAUDE.md, .claude, templates): split it into simple commands with literal paths; a prompt-file write goes to pcm: spawn Agent(subagent_type: "pcm") with the exact change.` Each path is named as the call wrote it, made absolute; a glob is named by each file it matched.
 
 ## How it fails
 
@@ -106,7 +106,7 @@ git-guard's fail mode ([git-guard.md](git-guard.md#how-it-fails)), with prompt-f
 
 ## Named gaps
 
-- **Codex and OpenCode.** No pcm-guard hook rides either engine; there the guard is prose alone, an always-on one-line rule (`professor.md`, which pcm owns and has not yet written).
+- **Codex and OpenCode.** No pcm-guard hook rides either engine; there the guard is prose alone, an always-on one-line rule (`templates/global/rules/professor.md`).
 - **git writes.** git arguments are git-guard's, and git-guard allows working-tree restores and `git apply` to the working tree, so `git checkout -- CLAUDE.md` and `git apply x.patch` touching a prompt file pass both guards.
 - **Directory copies.** `cp -r dir/ dest` or `rsync -a dir/ dest/` is judged by the destination and the source's own name; a `CLAUDE.md` or `.claude/` inside the copied tree is not seen. Archive extraction (`tar x`, `unzip`) is not read at all.
 - **Recursive removal of an ancestor.** `rm -rf {project}` deletes the project's `CLAUDE.md` but names no protected path; only the paths written are judged.
@@ -123,12 +123,12 @@ git-guard's fail mode ([git-guard.md](git-guard.md#how-it-fails)), with prompt-f
 - Unit: `pfm/internal/hookentry/pcm_guard_test.go` — every edit tool denied to the main chat, `general-purpose`, `flights-foreman`, `PCM`, `pcm2` and `themer` on each protected path (project `CLAUDE.md` and `.claude/`, the clone's and a flight worktree's `templates/`, the store's and the seat's prompt directories); every Bash write form above denied to the main chat and `general-purpose`; `pcm` allowed every one of them; a theme denied to `pcm` and everyone but `themer`, directly and through a link, and `themer` denied every other prompt file; `~/.claude/rules/x.md`, the seat's `rules/x.md` and a project link resolving into the clone denied, and a recorded clone elsewhere moving the guard with it; reads, git commands, unrelated paths, `~/.claude/settings.json`, `user-info.md`, auto-memory and the clone's `docs/` allowed in silence; an unreadable command, an unresolvable target and a parse bound denied when they name a prompt file and allowed when not; a malformed payload failing open loudly; an empty `HOME` still judging by name and saying so.
 - Parser: `pfm/internal/cmdparse/cmdparse_test.go` `TestRedirectsRideTheirParts` — a statement's, a compound command's and a bare redirection's `Redirs`, and a heredoc body.
 - Registration: `pfm/internal/claudelaunch/hooks_test.go` `TestPcmGuardRidesEveryWritingTool` and `pfm/internal/installer/expected_hooks_test.go` `TestClaudeHookTemplatesIncludesPcmGuard` pin exactly one `PreToolUse` template running `pfm internal pcm-guard` on `Edit|Write|MultiEdit|NotebookEdit|Bash`; `pfm/testdata/golden/cmdlines.txt` carries it in every launch line.
-- Fence: lane `O2`, beat `O2.05-internal-plumbing` (`infra/fence/lanes/O2.sh`) — a main-chat `CLAUDE.md` write denied naming pcm, the same write passed for pcm, a `cat CLAUDE.md` passed; `O1.sh` checks the verb is in the launch templates.
+- Fence: lane `O2`, beat `O2.05-internal-plumbing` (`infra/fence/lanes/O2.sh`) — a main-chat `CLAUDE.md` write denied naming pcm and `pfm install`, the same write passed for pcm, a `cat CLAUDE.md` passed; `O1.sh` checks the verb is in the launch templates.
 
 ## Surfaces that stay in sync
 
 - [hooks.md](hooks.md) — the inventory row, the count and the fail-open decision.
 - `docs/dev/pfm-surface.md` — the `internal` row.
 - `README.md` — the rules-that-bite paragraph.
-- `.claude/agents/pcm.md` and its twin `templates/project/agents/pcm.md`, `.claude/agents/themer.md` — the writers the deny sends every caller to.
+- `templates/global/agents/pcm.md`, this repo's override `.claude/agents/pcm.md`, `.claude/agents/themer.md` — the writers the deny sends every caller to.
 - `pfm/internal/update/retired_names.go` — the retired stamp-gated guard the comment there contrasts with this one.

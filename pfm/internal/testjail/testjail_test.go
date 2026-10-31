@@ -69,36 +69,29 @@ func TestRunScrubsTheOperatorLocalBinFromPATH(t *testing.T) {
 	}
 }
 
-func TestScrubOperatorPATH(t *testing.T) {
-	root := t.TempDir()
-	home := filepath.Join(root, "home")
-	otherInstall := filepath.Join(root, "other", ".local", "share", "pfm", "install", "bin")
-	if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
-		t.Fatal(err)
+// A chat's exported store paths never reach a jailed test, but a jailed test
+// that re-execs its own binary as a helper hands it the jail's store paths
+// (hookentry's TestSeatHostPTY launch modes): Run keeps those, and only those.
+func TestRunKeepsTheStorePathsAJailedTestHandsItsHelper(t *testing.T) {
+	const marker = "PFM_TEST_STORE_PATHS_CHILD"
+	if want, child := os.LookupEnv(marker); child {
+		if got := os.Getenv("PFM_STATE_DB"); got != want {
+			t.Fatalf("PFM_STATE_DB=%q after Run, want %q", got, want)
+		}
+		return
 	}
-	if err := os.MkdirAll(otherInstall, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(root, "link")
-	if err := os.Symlink(home, link); err != nil {
-		t.Fatal(err)
-	}
-	join := func(entries ...string) string { return strings.Join(entries, string(os.PathListSeparator)) }
-	homeBin := filepath.Join(home, ".local", "bin")
-	for _, test := range []struct {
-		name, pathEnv, home, want string
+	for _, tc := range []struct {
+		name string
+		env  []string
 	}{
-		{"home bin removed", join("/usr/bin", homeBin, "/bin"), home, join("/usr/bin", "/bin")},
-		{"unclean spelling removed", join(home+"/.local/./bin/", "/usr/bin"), home, "/usr/bin"},
-		{"symlinked spelling removed", join(filepath.Join(link, ".local", "bin"), "/usr/bin"), home, "/usr/bin"},
-		{"install bin under another home removed", join("/usr/bin", otherInstall), home, "/usr/bin"},
-		{"empty entries and order kept", join("/b", "", homeBin, "/a", ""), home, join("/b", "", "/a", "")},
-		{"no home still strips install bin", join(homeBin, otherInstall, "/usr/bin"), "", join(homeBin, "/usr/bin")},
-		{"empty PATH stays empty", "", home, ""},
+		{"helper of a jailed test", append(os.Environ(), "PFM_STATE_DB=/jail/pfm.db", marker+"=/jail/pfm.db")},
+		{"started by a chat", envWithout(jailMarkerEnv, "PFM_STATE_DB=/jail/pfm.db", marker+"=")},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := scrubOperatorPATH(test.pathEnv, test.home); got != test.want {
-				t.Fatalf("scrubOperatorPATH(%q, %q)=%q, want %q", test.pathEnv, test.home, got, test.want)
+		t.Run(tc.name, func(t *testing.T) {
+			command := exec.Command(os.Args[0], "-test.run=^TestRunKeepsTheStorePathsAJailedTestHandsItsHelper$")
+			command.Env = tc.env
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("child test (%s): %v: %s", tc.name, err, output)
 			}
 		})
 	}

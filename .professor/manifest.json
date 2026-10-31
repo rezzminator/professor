@@ -92,7 +92,7 @@
   "file_hashes": {
     ".claude/agents/changelogger.md": "03ac716c2ad5a8fdbef859e41a688d5a5a58e16436392e94f80f8138a9e2266a",
     ".claude/agents/gitter.md": "3f1fa8e1d7608d49d02696a1cc65d2744acd5986c64bfb5bfc759fc8cdcfcc72",
-    ".claude/agents/pcm.md": "c42b32305594fdf216f17d1d6424bf3d7edba38d9d0a186aeb50b3b41b83bf2b",
+    ".claude/agents/pcm.md": "492daf3bc48a2c303b934d666890982e1cc803b345d1d04311d0c6541122b9ab",
     ".claude/agents/themer.md": "3cb0875f9026f92505fb8826f253a21f6b0ba8368c364d6744cd39123b1d5b41",
     ".claude/commands/github-marketing.md": "41f371d469b0c59609d0fa97c3bb1fc3c7bf39ee6fcaedb3f0bfe00c3336721a",
     ".claude/commands/pfm-testing-manual.md": "5763edb109f9dc831432596d097aa8d76515da9ed32a7fda2ecdb90252104a95",
@@ -106,7 +106,7 @@
     ".claude/settings.json": "b6e55fe038648276e021fdbe1928a1a80831cf794276ae28d7f2f9a0063fb505",
     ".codex/config.toml": "8732c6ca8b84645e162ffaa33d910c5be538fc9d09da7988d2907a6b24a31e53",
     ".gitignore": "04294c4020f8468b6d547505736d11a226eb4f73fccbf987a90eb28a51888590",
-    "CLAUDE.md": "f26510f27fc55ff39229cb4b35591208ae00177383a7e0200f82c20b5bd3fce9",
+    "CLAUDE.md": "dce354140493a0f44cbb3e603e4640f0da9ca31eb1af50973c9c014d3ecb91c2",
     "docs/commands/pcm/references/audit-scopes.md": "16e78ab093e6b15015a5ec12784d9ea0ac211f21ea5e76ef8dac400ba0ee7f49",
     "docs/commands/pcm/references/refresh.md": "21e1f11c880501c92ea1c9301b87dd5288db5d2308d089a13f1ccfa06a0b15ba",
     "pfm/CLAUDE.md": "c6f95032f472716813d4c6453ff11fc2db18af0b06903c0abced4dc314e78cd8"

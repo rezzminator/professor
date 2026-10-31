@@ -138,5 +138,5 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 - Routing-gate every fan-out: spawn for declared scope only.
 - Every pipeline artifact names its consumer; a write-only artifact is not added.
 - Parallel agents get their exact slice and exact read list plus a thin shared header; a shared contract lives once in a file each brief names; rules shared across spawn blocks are hoisted into one contract.
-- Every check names what its own broken state reports (root `CLAUDE.md`): build the signal telling broken from clean into the instrument (probe, gate, audit, lint).
+- Every check names what its own broken state reports (the `writing-code` rule): build the signal telling broken from clean into the instrument (probe, gate, audit, lint).
 - After each run, confirm this file's wiring and invariants still match the pipeline; if stale, update it before reporting.

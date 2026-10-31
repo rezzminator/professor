@@ -48,3 +48,8 @@
 	url = https://github.com/rezzminator/harvester.git
 	branch = develop
 	ignore = dirty
+[submodule "rule-control"]
+	path = plugins/rule-control
+	url = https://github.com/rezzminator/rule-control.git
+	branch = develop
+	ignore = dirty

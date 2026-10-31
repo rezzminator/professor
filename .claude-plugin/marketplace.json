@@ -59,6 +59,19 @@
       "keywords": ["claude-code", "subagents", "mcp", "claude-skills", "tool-permissions", "function-hooks", "professor"]
     },
     {
+      "name": "rule-control",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/rule-control.git",
+        "path": "./plugins/rule-control",
+        "ref": "main"
+      },
+      "description": "Claude Code plugin for per-loop rule delivery — a rule file names the loops that receive it: the main chat, chosen agent types, or all",
+      "homepage": "https://github.com/rezzminator/rule-control",
+      "license": "MIT",
+      "keywords": ["claude-code", "claude-code-rules", "subagents", "context-engineering", "function-hooks", "professor"]
+    },
+    {
       "name": "buddy",
       "source": {
         "source": "git-subdir",

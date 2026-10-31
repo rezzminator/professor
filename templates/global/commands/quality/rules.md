@@ -6,7 +6,7 @@ argument-hint: "[check [path…] | write <path>]"
 
 # Rule File Law
 
-A rule file is a prompt the harness injects unasked. Always-on (no frontmatter) reaches every agent, sub-agents included, every turn, so the whole fleet pays each word; path-scoped (`paths:`) loads once per agent on a Read, Write or Edit of a matching file. `paths` is the only frontmatter key read, and YAML that does not parse loads the rule always-on, silently. `/quality:prompt` governs each line; this law governs the file's concern, class and shape. Engine delivery and probe evidence: `docs/design/rules/rules.md` in the Professor clone (`readlink -f ~/.claude/commands/quality/rules.md`, four directories up).
+A rule file is a prompt the harness injects unasked. Always-on (no `paths:`) reaches every agent, sub-agents included, every turn, so the whole fleet pays each word; path-scoped (`paths:`) loads once per agent on a Read, Write or Edit of a matching file. `visible-to:`, read by the rule-control plugin, narrows either class to the loops it names: `main` = the main chat, any other name an agent type, `*` globs; `include` keeps, `exclude` drops; with `paths:`, a loop gets the rule only when both admit it. Without rule-control installed the key is inert and the rule reaches every loop; Codex and OpenCode ignore it. `paths` and `visible-to` are the only frontmatter keys read, and YAML that does not parse loads the rule always-on, silently. `/quality:prompt` governs each line; this law governs the file's concern, class and shape. Engine delivery and probe evidence: `docs/design/rules/rules.md` in the Professor clone (`readlink -f ~/.claude/commands/quality/rules.md`, four directories up).
 
 ## The spine
 
@@ -14,6 +14,8 @@ A rule file is a prompt the harness injects unasked. Always-on (no frontmatter) 
 ---
 paths:
   - "{glob}"
+visible-to:
+  include: ["{loop}"]
 ---
 
 # {the law, stated as a claim}
@@ -24,10 +26,10 @@ paths:
 2. …
 ```
 
-- Frontmatter only on a path-scoped rule: `paths:` alone, a YAML list, every glob double-quoted (an unquoted `*` opens a YAML alias, the parse fails, the rule goes always-on).
+- Frontmatter holds `paths:` (a path-scoped rule), `visible-to:` (a rule binding only certain loops), both or neither: `paths:` a YAML list, `visible-to:` a map of `include` and `exclude` lists, every glob and loop name double-quoted (an unquoted `*` opens a YAML alias, the parse fails, the rule goes always-on).
 - A glob matches the path relative to the session's project root: `**/` matches zero or more directories, dot directories included. A `~/` glob never matches, and a user rule never fires on a file outside the project.
 - H1 states the law (`Only gitter writes git`), never a topic (`Git`).
-- The binding sentence names whom the rule binds and what everyone else does: a rule cannot target an agent, so every agent its class reaches reads it.
+- The binding sentence names whom the rule binds and what everyone else does: wherever `visible-to` is inert, every loop its class reaches reads it.
 - The core is one list: numbered when its items run in order, bulleted otherwise. No `##`, nothing after the list.
 - A rule holding a single law is that one item alone: no H1, no binding sentence; the item names whom it binds.
 
@@ -37,7 +39,7 @@ paths:
 - Rules sharing a trigger or an owner merge into one file.
 - A path-scoped rule is its own file: its `paths:` is its scope.
 - A Bash write (`sed -i`, a redirect) never loads a path-scoped rule, so a law that must bind every write to certain files is always-on.
-- Class by reach: binds every agent in every session → always-on; binds work on certain files → path-scoped; one task's procedure → a command or skill; one project's convention → its `CLAUDE.md`.
+- Class by reach: binds every agent in every session → always-on; binds work on certain files → path-scoped; binds only certain loops → either class plus `visible-to`; one task's procedure → a command or skill; one project's convention → its `CLAUDE.md`.
 - A hook-enforced invariant keeps one item naming the route the hook permits, and the rule says it is the guard where the hook is absent.
 
 ## Words
@@ -55,9 +57,9 @@ paths:
 
 Checks:
 
-1. Frontmatter: frontmatter on an always-on rule; a key other than `paths`; an unquoted glob; a `~/` glob; YAML that does not parse (`python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]).read().split("---")[1])' {path}`).
+1. Frontmatter: a key other than `paths` and `visible-to`; a `visible-to` key other than `include` and `exclude`; an unquoted glob or loop name; a `~/` glob; YAML that does not parse (`python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]).read().split("---")[1])' {path}`).
 2. Concern: two concerns in one file; a law of its concern held in another rule file, a `CLAUDE.md` or a co-loaded prompt (grep the concern's key nouns across both rule directories and every `CLAUDE.md` on the path).
-3. Class: always-on while it binds only work on certain files and need not bind every write there, or path-scoped while it binds regardless of files or must bind every write; a one-task procedure or a one-project convention.
+3. Class: always-on while it binds only work on certain files and need not bind every write there, or path-scoped while it binds regardless of files or must bind every write; a rule binding only certain loops without `visible-to`; a one-task procedure or a one-project convention.
 4. Spine: an H1 naming a topic; a multi-law rule missing its H1 or binding sentence, or a single-law rule carrying either; a core not one list; ordered items bulleted or unordered items numbered; a `##` or text after the list.
 5. Words: a bullet holding two laws or a numbered item two steps; a phrase where one word carries it; rationale past one cost clause; a directive naming no tool, path, command or threshold; a date, an incident, "now / no longer".
 6. Truth: an agent, command, hook or path it names that does not exist where it binds.

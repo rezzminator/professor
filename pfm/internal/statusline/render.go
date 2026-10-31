@@ -416,13 +416,12 @@ func appendRateSegments(line string, now time.Time, data input) string {
 	return line
 }
 
-// claudeQuotaRows is the Claude quota block, every row the same width: 5h and
-// 7d-fable share the top row at half width each, the 7d under it and the Codex
-// weekly last at full width. That width is 115% of the widest sibling row
-// (rowColumns; the compact forms count as siblings), capped by the terminal; a
-// terminal with no content column drops the Codex row and leaves the quotas at
-// their compact width. A hidden row (a zero label) takes no place: a lone top
-// reading spans the full width, and an empty row is not drawn.
+// claudeQuotaRows is the Claude quota block: one row with 5h, 7d-fable and 7d side
+// by side (splitQuotaRow), the Codex weekly row under it at the same width. That
+// width is 86% of the widest sibling row (rowColumns), never below the compact
+// Claude line, capped by the terminal; a terminal with no content column drops
+// the Codex row and leaves the quotas as that compact line. A hidden reading (a
+// zero label) takes no place, and an empty block is not drawn.
 func claudeQuotaRows(runtime Runtime, now time.Time, data input, l1, l2 string) string {
 	reading := map[string]quotaRow{}
 	if reportsKnownWindow(data) {
@@ -430,33 +429,22 @@ func claudeQuotaRows(runtime Runtime, now time.Time, data input, l1, l2 string) 
 			reading[descriptor.Key] = rateWindowRow(now, descriptor, data)
 		}
 	}
-	var top []quotaRow
-	compactTop := ""
-	for _, row := range []quotaRow{reading[fiveHourCacheKey], reading[fableCacheKey]} {
+	five, fable, week := reading[fiveHourCacheKey], reading[fableCacheKey], reading[sevenDayCacheKey]
+	compact := ""
+	for _, row := range []quotaRow{five, fable, week} {
 		if row.label != "" {
-			top, compactTop = append(top, row), appendSegment(compactTop, compactRow(row))
+			compact = appendSegment(compact, compactRow(row))
 		}
 	}
-	week, codex := reading[sevenDayCacheKey], codexWeeklyRow(runtime, now)
-	widths := []int{ansi.StringWidth(codex.label), ansi.StringWidth(compactTop)}
-	if week.label != "" {
-		widths = append(widths, ansi.StringWidth(compactRow(week)))
-	}
-	columns, ok := rowColumns(runtime, widths, l1, l2)
+	codex := codexWeeklyRow(runtime, now)
+	columns, ok := rowColumns(runtime, ansi.StringWidth(compact), []int{ansi.StringWidth(codex.label)}, l1, l2)
 	var rows []string
 	switch {
-	case len(top) == 2 && ok:
-		rows = append(rows, halfRows(top[0], top[1], columns))
-	case len(top) == 1 && ok:
-		rows = append(rows, barRow(top[0], columns))
-	case len(top) > 0:
-		rows = append(rows, compactTop)
-	}
-	switch {
-	case week.label != "" && ok:
-		rows = append(rows, barRow(week, columns))
-	case week.label != "":
-		rows = append(rows, compactRow(week))
+	case compact == "":
+	case ok:
+		rows = append(rows, splitQuotaRow(five, fable, week, columns))
+	default:
+		rows = append(rows, compact)
 	}
 	if ok && codex.label != "" {
 		rows = append(rows, barRow(codex, columns))

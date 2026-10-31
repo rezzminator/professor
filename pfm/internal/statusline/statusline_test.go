@@ -426,7 +426,7 @@ func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "▰▰▱▱▱▱▱▱▱▱ ~20%") || strings.Contains(plain, "77%") {
+	if !strings.Contains(plain, "▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ ~20%") || strings.Contains(plain, "77%") {
 		t.Fatalf(
 			"post-compact gauge did not use floor + postTokens estimate, or retained stale self-report:\n%q",
 			plain,

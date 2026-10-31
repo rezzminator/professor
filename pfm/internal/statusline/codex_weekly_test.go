@@ -51,18 +51,19 @@ func weeklyLines(t *testing.T, runtime Runtime, payload string) []string {
 
 func assertWeeklySiblingWidth(t *testing.T, lines []string, columns int) {
 	t.Helper()
-	widest := 0
-	for _, line := range lines[:len(lines)-1] {
-		widest = max(widest, ansi.StringWidth(line))
-	}
-	if len(lines) == 3 { // no Claude quota rows above: the weekly row grows past the widest sibling itself
-		widest = (widest*quotaRowPercent + 99) / 100
-	}
+	want := max(ansi.StringWidth(lines[0]), ansi.StringWidth(lines[1])) * quotaRowPercent / 100
 	if columns > 0 {
-		widest = min(widest, max(0, columns-4))
+		want = min(want, max(0, columns-4))
 	}
-	if got := ansi.StringWidth(lines[len(lines)-1]); got != widest {
-		t.Fatalf("weekly width %d != bounded sibling width %d: %q", got, widest, lines)
+	got := ansi.StringWidth(lines[len(lines)-1])
+	if len(lines) == 4 { // the Claude row above shares the width and may widen it to its compact line
+		if above := ansi.StringWidth(lines[2]); above != got || got < want || columns > 0 && got > max(0, columns-4) {
+			t.Fatalf("weekly width %d, Claude row %d, floor %d: %q", got, above, want, lines)
+		}
+		return
+	}
+	if got != want {
+		t.Fatalf("weekly width %d != bounded sibling width %d: %q", got, want, lines)
 	}
 }
 
@@ -85,18 +86,18 @@ func TestClaudeCodexWeeklyMatchesRenderedRows(t *testing.T) {
 			widest := 0
 			for i, line := range lines[:len(lines)-1] {
 				width := ansi.StringWidth(line)
-				widest = max(widest, width)
+				if i < 2 {
+					widest = max(widest, width)
+				}
 				t.Logf("sibling %d: width=%d %s", i+1, width, ansi.Strip(line))
 			}
-			if len(lines) == 3 { // no quota rows above: the weekly row grows past the widest sibling itself
-				widest = (widest*quotaRowPercent + 99) / 100
-			}
+			widest = widest * quotaRowPercent / 100
 			weekly := ansi.Strip(lines[len(lines)-1])
 			t.Logf("weekly: width=%d %s", ansi.StringWidth(weekly), weekly)
 			if !strings.HasSuffix(weekly, "codex-7d-used:52% ↻3d7h") {
 				t.Errorf("weekly row lost complete reset suffix: %q", weekly)
 			}
-			if got := ansi.StringWidth(weekly); got != widest {
+			if got := ansi.StringWidth(weekly); got != widest && (len(lines) != 4 || got < widest) {
 				t.Errorf(
 					"weekly content width = %d, want widest sibling %d (terminal %d)",
 					got,
@@ -128,14 +129,14 @@ func TestClaudeCodexWeeklyFitsSiblingWidth(t *testing.T) {
 				time.Minute,
 			)
 			lines := weeklyLines(t, runtime, `{"rate_limits":{`+test.windows+`}}`)
-			if len(lines) != 5 {
+			if len(lines) != 4 {
 				t.Fatalf(
-					"want Codex weekly row directly under the two Claude quota rows (5 lines), got %d: %q",
+					"want Codex weekly row directly under the one Claude quota row (4 lines), got %d: %q",
 					len(lines),
 					lines,
 				)
 			}
-			claude, codex := styleANSI.ReplaceAllString(lines[2], ""), styleANSI.ReplaceAllString(lines[4], "")
+			claude, codex := styleANSI.ReplaceAllString(lines[2], ""), styleANSI.ReplaceAllString(lines[3], "")
 			if !strings.Contains(claude, "5h-used:") || !strings.Contains(codex, "codex-7d-used:63% ↻3d7h") {
 				t.Fatalf("quota row order/value/reset mismatch: %q then %q", claude, codex)
 			}
@@ -244,7 +245,7 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 			)
 			last := styleANSI.ReplaceAllString(lines[len(lines)-1], "")
 			if test.want == "" { // an answer without a weekly window draws no row
-				if len(lines) != 4 || strings.Contains(strings.Join(lines, "\n"), "codex-7d") {
+				if len(lines) != 3 || strings.Contains(strings.Join(lines, "\n"), "codex-7d") {
 					t.Fatalf("an answer without a weekly window must draw no Codex row: %q", lines)
 				}
 				return
@@ -252,7 +253,7 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 			if !strings.Contains(last, test.want) {
 				t.Fatalf("weekly row must expose %q, got %q", test.want, last)
 			}
-			if len(lines) != 5 {
+			if len(lines) != 4 {
 				t.Fatalf("unavailable/stale weekly row must follow Claude quotas: %q", lines)
 			}
 			assertWeeklySiblingWidth(t, lines, runtime.Columns)
@@ -334,7 +335,7 @@ func TestClaudeCodexWeeklyNoContentDoesNotAddBlankRow(t *testing.T) {
 				lines := weeklyLines(t, runtime, payload)
 				want := 2
 				if payload != `{}` {
-					want = 4 // the 5h|fable and 7d rows stay at their compact width; the Codex row has no cell
+					want = 3 // the one Claude row stays at its compact width; the Codex row has no cell
 				}
 				if len(lines) != want || ansi.StringWidth(lines[len(lines)-1]) == 0 {
 					t.Fatalf("no weekly content must not add a blank row: %q", lines)
@@ -356,7 +357,7 @@ func TestClaudeCodexWeeklyUnknownWidth(t *testing.T) {
 			if !strings.HasSuffix(ansi.Strip(line), "codex-7d-used:52% ↻3d7h") {
 				t.Fatalf("unknown width lost reset: %q", line)
 			}
-			if want := (ansi.StringWidth(claudeLine)*quotaRowPercent + 99) / 100; claudeLine != "" &&
+			if want := ansi.StringWidth(claudeLine) * quotaRowPercent / 100; claudeLine != "" &&
 				ansi.StringWidth(line) != want {
 				t.Fatalf("unknown width must grow Claude content width without subtracting padding: %q", line)
 			}
@@ -419,7 +420,7 @@ func TestClaudeCodexWeeklyFailedRefreshIsThrottled(t *testing.T) {
 // set, as claudeQuotaRows does; "" when no content column exists.
 func weeklyRowAt(runtime Runtime, siblingLines ...string) string {
 	row := codexWeeklyRow(runtime, runtime.now())
-	columns, ok := rowColumns(runtime, []int{ansi.StringWidth(row.label)}, siblingLines...)
+	columns, ok := rowColumns(runtime, 0, []int{ansi.StringWidth(row.label)}, siblingLines...)
 	if !ok {
 		return ""
 	}

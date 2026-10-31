@@ -135,7 +135,7 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 			}
 			judge.path(filepath.Clean(target))
 		}
-	} else if err := judge.bash(hook.ToolInput.Command, cwd); err != nil {
+	} else if err := judge.bash(hook.ToolInput.Command, cwd, 0); err != nil {
 		fmt.Fprintf(stderr, "pfm internal pcm-guard: parse command (fail-open): %v\n", err)
 		return 0
 	}
@@ -301,8 +301,9 @@ func (judge *pcmGuardJudge) resolve(word, dir string) (string, bool) {
 // bash judges every part of a Bash command in order. The flat part list
 // does not say where a cd stops applying (a subshell, an inner shell, popd),
 // so a relative word is judged in every directory the call may stand in: the
-// cwd and each directory a cd, pushd or popd may have moved it to.
-func (judge *pcmGuardJudge) bash(command, cwd string) error {
+// cwd and each directory a cd, pushd or popd may have moved it to. depth
+// counts the shell programs the command is read inside (pcmGuardJudge.shell).
+func (judge *pcmGuardJudge) bash(command, cwd string, depth int) error {
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
 		ID: "pcm-guard", Command: command, Cwd: cmp.Or(cwd, string(filepath.Separator)),
 		Vars: map[string]string{"HOME": judge.scope.home},
@@ -316,16 +317,15 @@ func (judge *pcmGuardJudge) bash(command, cwd string) error {
 			judge.unreadable = true
 			continue
 		}
+		judge.unreadable = judge.unreadable || part.Unread
 		base := filepath.Base(part.Program)
-		words, codes := pcmGuardWords(&part, base), pcmGuardCode(&part, base)
+		words := pcmGuardWords(&part, base)
 		_, copying := pcmGuardCopyValued[base]
 		for _, dir := range dirs {
 			for _, word := range words {
 				judge.word(word, dir)
 			}
-			for _, code := range codes {
-				judge.code(code, dir)
-			}
+			judge.program(&part, base, dir, depth)
 			if copying {
 				judge.copies(base, part.Args, dir)
 			}
@@ -379,7 +379,7 @@ func pcmGuardWords(part *cmdparse.Part, base string) []string {
 	}
 	var operands []string
 	switch base {
-	case "tee", "rm", "unlink":
+	case "tee", "rm", pcmGuardUnlink:
 		operands, _ = pcmGuardSplit(part.Args)
 	case "touch":
 		operands, _ = pcmGuardSplit(part.Args, "-r", "--reference", "-d", "--date", "-t")
@@ -470,34 +470,28 @@ func (judge *pcmGuardJudge) copies(base string, args []string, dir string) {
 // pcmGuardCodeFlags are the short flags whose value is inline code, per
 // interpreter; python names every python* program.
 // dash and ksh are here because cmdparse parses only a bash, sh or zsh -c
-// string (cmdparse.shellScript), so theirs is read as code.
+// string (cmdparse.shellScript), so pcmGuardJudge.program parses theirs.
 var pcmGuardCodeFlags = map[string]string{
-	"python": "c", "node": "ep", "nodejs": "ep", "perl": "eE", "ruby": "e", pcmGuardDash: "c", "ksh": "c",
+	pcmGuardPython: "c", pcmGuardNode: "ep", "nodejs": "ep", pcmGuardPerl: "eE", pcmGuardRuby: "e",
+	pcmGuardDash: "c", "ksh": "c",
 }
 
-// pcmGuardCode returns the inline code an interpreter runs: a heredoc or
-// here-string body fed to python, node, perl, ruby or a shell, and the value
-// of a code flag (alone or in a short cluster: -c, -e, -pe, the code the next
+// pcmGuardCode returns the inline code an interpreter runs: the value of a
+// code flag (alone or in a short cluster: -c, -e, -pe, the code the next
 // word or joined to it: -c'code'), --eval and --print. A bash, sh or zsh -c
-// string is no code here: cmdparse parses it into parts of its own.
+// string is no code here: cmdparse parses it into parts of its own, or marks
+// its part Unread when it cannot know the string (PcmGuard's bash). Its
+// heredocs and here-strings are pcmGuardStdin's.
 func pcmGuardCode(part *cmdparse.Part, base string) []string {
 	shell := slices.Contains(pcmGuardShells, base)
-	if strings.HasPrefix(base, "python") {
-		base = "python"
+	if strings.HasPrefix(base, pcmGuardPython) {
+		base = pcmGuardPython
 	}
 	flags, interpreter := pcmGuardCodeFlags[base]
 	if !shell && !interpreter {
 		return nil
 	}
 	var code []string
-	for _, r := range part.Redirs {
-		switch r.Op {
-		case "<<", "<<-":
-			code = append(code, r.Body)
-		case "<<<":
-			code = append(code, r.Target)
-		}
-	}
 	for i, a := range part.Args {
 		if name, value, ok := strings.Cut(a, "="); ok && !shell && slices.Contains(pcmGuardLongCode, name) {
 			code = append(code, value)
@@ -520,10 +514,9 @@ func pcmGuardCode(part *cmdparse.Part, base string) []string {
 	return code
 }
 
-// code judges inline code by the paths it names: every path-shaped token
-// (holding a /, named CLAUDE.md, or naming an existing file) is judged as a
-// write. shortcut: a read-only script naming a prompt file is denied too;
-// reading what the code does would need its language's parser.
+// code judges code by the paths it names: every path-shaped token (holding
+// a /, named CLAUDE.md, or naming an existing file) is judged as a write. It
+// is the reading of code whose writes pcmGuardJudge.interpret cannot read.
 func (judge *pcmGuardJudge) code(code, dir string) {
 	tokens := strings.FieldsFunc(code, func(r rune) bool {
 		return unicode.IsSpace(r) || strings.ContainsRune("'\"`()[]{};,=<>|&$!#*?\\", r)
@@ -586,14 +579,20 @@ func pcmGuardSplit(args []string, valued ...string) ([]string, map[string]string
 
 // pcmGuardMentions reports whether a command the guard could not read in
 // full names a file the caller may not write: for pcm only a theme, for
-// everyone else CLAUDE.md, .claude or templates.
+// everyone else CLAUDE.md, .claude or templates. Each counts as a whole path
+// element or word, letter case folded, a trailing dot dropped, so
+// .claude-plugin, .claude.json and my_templates_x name none.
 func pcmGuardMentions(command, agent string) bool {
-	lower := strings.ToLower(command)
+	names := []string{"claude.md", ".claude", "templates"}
 	if agent == pcmGuardWriter {
-		return strings.Contains(lower, "themes")
+		names = []string{"themes"}
 	}
-	return strings.Contains(lower, "claude.md") || strings.Contains(lower, ".claude") ||
-		strings.Contains(lower, "templates")
+	elements := strings.FieldsFunc(strings.ToLower(command), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("._-", r)
+	})
+	return slices.ContainsFunc(elements, func(element string) bool {
+		return slices.Contains(names, strings.TrimRight(element, "."))
+	})
 }
 
 // reason is the one deny message: the paths only pcm writes and the route to

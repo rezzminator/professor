@@ -129,6 +129,7 @@ func storeGuardDenies(parts []cmdparse.Part, store, home, cwd string, claudeWord
 		}
 		base := filepath.Base(part.Program)
 		value, set := part.Env[storeGuardEnv]
+		walked := storeGuardRunsString(base, part.Args) && !part.Unread
 		switch {
 		case base == claude:
 			if !set {
@@ -148,9 +149,9 @@ func storeGuardDenies(parts []cmdparse.Part, store, home, cwd string, claudeWord
 			}
 		case base == "cd" || base == "pushd" || base == "popd":
 			moved = true
-		case storeGuardOpaque[base] && claudeWord && !storeGuardRunsString(base, part.Args):
+		case storeGuardOpaque[base] && claudeWord && !walked:
 			storeGuardFailOpen(stderr, "cannot read the command %s runs", base)
-		case set && !storeGuardInert[base] && !storeGuardRunsString(base, part.Args):
+		case set && !storeGuardInert[base] && !walked:
 			if dir, ok := storeGuardResolve(value, home, cwd); ok && storeGuardInStore(store, dir) {
 				storeGuardFailOpen(stderr, "%s runs on the store and may run claude unseen", base)
 			}
@@ -166,7 +167,7 @@ func storeGuardFailOpen(stderr io.Writer, format string, args ...any) {
 }
 
 // storeGuardRunsString reports a shell given a -c string, whose parts the
-// parse already walked.
+// parse already walked unless it marked the shell's part Unread.
 func storeGuardRunsString(base string, args []string) bool {
 	if !storeGuardOpaque[base] || base == "eval" || base == "source" || base == "." || base == "env" {
 		return false

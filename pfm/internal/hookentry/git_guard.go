@@ -147,6 +147,8 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 			unreadable = unreadable || gitGuardMentionsGit(command)
 			continue
 		}
+		// An unread -c string runs commands no part shows.
+		unreadable = unreadable || (part.Unread && gitGuardMentionsGit(command))
 		if block, ok := gitGuardPart(part, cwd); ok {
 			blocks = append(blocks, block)
 		}

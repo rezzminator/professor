@@ -294,6 +294,22 @@ func TestGitGuardDeniesAGitCommandItCannotRead(t *testing.T) {
 	gitGuardRequireUnreadable(t, `bash -c "git commit -m 'x"`, t.TempDir())
 }
 
+// A -c string holding an expansion the parse cannot know runs commands no
+// part shows, so one in a command naming git is denied as unreadable.
+func TestGitGuardDeniesAnUnreadShellStringInACommandNamingGit(t *testing.T) {
+	for _, command := range []string{`bash -c "git push $X"`, `sh -c "git commit -m x $Y"`} {
+		gitGuardRequireUnreadable(t, command, t.TempDir())
+	}
+}
+
+// An unread -c string in a command that never names git is not the git
+// guard's to refuse.
+func TestGitGuardAllowsAnUnreadShellStringWithoutGit(t *testing.T) {
+	for _, command := range []string{`bash -c "echo $X"`, `bash -c "echo $X legit"`} {
+		gitGuardRequireAllowed(t, command, t.TempDir())
+	}
+}
+
 func TestGitGuardFailsOpenLoudlyOnAMalformedPayload(t *testing.T) {
 	code, stdout, stderr := runGitGuard(t, "not-json")
 	if code != 0 || stdout != "" {

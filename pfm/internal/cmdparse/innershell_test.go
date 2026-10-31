@@ -99,6 +99,25 @@ func TestInnerShellParseErrorIsOneErrorPart(t *testing.T) {
 	}
 }
 
+// A -c string the parse cannot know marks its shell part Unread; a literal
+// one, parsed in place, does not.
+func TestInnerShellUnknownStringIsUnread(t *testing.T) {
+	t.Parallel()
+	for _, command := range []string{`bash -c "rm x $X"`, `sh -lc "$CMD"`, `zsh -c "echo $Z"`} {
+		parts := parseOne(t, command)
+		if len(parts) != 1 || !parts[0].Unread || parts[0].Status != StatusOK {
+			t.Errorf("%s: parts = %+v, want one ok part marked Unread", command, parts)
+		}
+	}
+	for _, command := range []string{`bash -c 'rm x'`, `X=a; bash -c "rm x $X"`, `echo "$X"`} {
+		for _, part := range parseOne(t, command) {
+			if part.Unread {
+				t.Errorf("%s: part %+v is marked Unread", command, part)
+			}
+		}
+	}
+}
+
 func TestDoubleQuotedEscapes(t *testing.T) {
 	t.Parallel()
 	assertSteps(

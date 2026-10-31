@@ -380,10 +380,14 @@ func TestPcmGuardDeniesWhatItCannotReadWhenItNamesAPromptFile(t *testing.T) {
 		`cp /tmp/x "$(dirname CLAUDE.md)"`,
 		gitGuardNestShell("echo x > notes.md # .claude", 9),
 		`echo x > notes.md # CLAUDE.md ` + strings.Repeat("x", 65536),
+		`bash -c "rm CLAUDE.md $X"`,
+		`sh -c "echo x > .claude/agents/a.md $Y"`,
+		`zsh -c "touch CLAUDE.md $Z"`,
+		`bash -c 'sh -lc "rm CLAUDE.md $X"'`,
 	} {
 		pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), "could not read this command")
 	}
-	for _, command := range []string{`echo "unterminated > notes.md`, `echo x > "$F"`} {
+	for _, command := range []string{`echo "unterminated > notes.md`, `echo x > "$F"`, `bash -c "rm notes.md $X"`} {
 		pcmGuardRequireAllow(t, pcmGuardBash(t, command, f.project, ""))
 	}
 	// pcm is refused only an unreadable command naming a theme.

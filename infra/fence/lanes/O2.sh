@@ -646,7 +646,7 @@ rc=$?
 [ -z "$backend_out" ] || bad="$bad invalid backend printed success: $(one_line "$backend_out");"
 backend_out="$(env -u TMUX HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH="$LANE_OUT_DIR/absent-herdr.sock" pfm chat new --backend herdr --name LANE_BACKEND_DEAD --engine cc --cwd "$CWD" 2>"$int_err")"
 rc=$?
-[ "$rc" -eq 1 ] && grep -qF 'pane w1:p1 unreachable' "$int_err" ||
+[ "$rc" -eq 1 ] && grep -qF 'herdr backend needs a caller in a Herdr pane' "$int_err" ||
   bad="$bad chat new forced dead Herdr rc=$rc: $(one_line "$(cat "$int_err")");"
 [ -z "$backend_out" ] || bad="$bad forced dead Herdr printed success: $(one_line "$backend_out");"
 # X30 kill-exit: the pane-death finisher refuses to run without its full address.

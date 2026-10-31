@@ -49,10 +49,11 @@ func shellScript(base string, rest []arg) (arg, bool) {
 // parse sees only the call's seeded variables. Its Part.Env is every
 // assignment in force at the outer command, exported or not, since one to an
 // already-exported name (CLAUDE_CONFIG_DIR) reaches the child. A STRING the parse cannot
-// know stays an ordinary part; one that does not parse is one error part,
-// and one nested deeper than maxShellDepth is one unparsed, Bounded part.
+// know stays an ordinary part marked Unread; one that does not parse is one
+// error part, and one nested deeper than maxShellDepth is one unparsed,
+// Bounded part.
 func (p *callParser) innerShell(program string, rest []arg, script arg, env map[string]string) {
-	p.emit(Part{Program: program, Args: argTexts(rest), Env: env})
+	p.emit(Part{Program: program, Args: argTexts(rest), Env: env, Unread: !script.resolved})
 	if !script.resolved {
 		return
 	}

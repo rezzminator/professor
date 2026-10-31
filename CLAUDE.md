@@ -104,6 +104,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 ## Prompt & template code
 
+- Only `pcm` writes `templates/**`; `templates/themes/` goes to `themer`.
 - A template is the live source file, verbatim — same structure, mechanics, character and logic; only project-specific values swap for placeholder tokens; the prose is never abstracted, skeletonized or genericized.
 - One canonical token per concept — never a synonym for a registered placeholder.
 - No dangling pointers: grep before you cite; a pointer to a file, agent or command the install does not produce is deleted, or its target ships.

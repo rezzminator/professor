@@ -1,1 +1,7 @@
-- Only `pcm` writes any `CLAUDE.md`, any `.claude/**` file or Professor's `templates/**` (`templates/themes/` → `themer`), through any tool, `sed -i` and shell redirects included; everyone else hands `pcm` the change; a dictated, one-word or mechanical change is no exception.
+---
+paths:
+  - "**/CLAUDE.md"
+  - "**/.claude/**"
+---
+
+- Only the `pcm` agent writes a `CLAUDE.md` or a `.claude/**` file, through any tool, `sed -i` and shell redirects included; everyone else hands `pcm` the change, however small.

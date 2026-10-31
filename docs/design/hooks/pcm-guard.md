@@ -113,7 +113,7 @@ git-guard's fail mode ([git-guard.md](git-guard.md#how-it-fails)), with prompt-f
 
 ## Named gaps
 
-- **Codex and OpenCode.** No pcm-guard hook rides either engine; there the guard is prose alone, an always-on one-line rule (`templates/global/rules/professor.md`).
+- **Codex and OpenCode.** No pcm-guard hook rides either engine; the prose guard, `templates/global/rules/professor.md`, is path-scoped, and engine-sync does not yet deliver path-scoped global rules there, so neither engine carries the law.
 - **git writes.** git arguments are git-guard's, and git-guard allows working-tree restores and `git apply` to the working tree, so `git checkout -- CLAUDE.md` and `git apply x.patch` touching a prompt file pass both guards.
 - **Directory copies.** `cp -r dir/ dest` or `rsync -a dir/ dest/` is judged by the destination and the source's own name; a `CLAUDE.md` or `.claude/` inside the copied tree is not seen. Archive extraction (`tar x`, `unzip`) is not read at all.
 - **Recursive removal of an ancestor.** `rm -rf {project}` deletes the project's `CLAUDE.md` but names no protected path; only the paths written are judged.

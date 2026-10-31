@@ -23,7 +23,8 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - `CLAUDE.md`: the orientation file (Vocabulary, Runtime, Rules)
 - `.claude/commands/**/*.md`: slash commands (`/quality:*`, `/pfm`, `/pfm:workbench` are global)
 - `templates/global/rules/*.md`: machine-global rules, linked into `~/.claude/rules/` by `pfm install`; a project rule lives in `.claude/rules/`
-- `.claude/agents/*.md`: registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
+- `.claude/agents/*.md`: this repo's agents (`ls`), `gitter` the Git writer; machine-global ones in `~/.claude/agents/`
+- `templates/global/agents/pcm.md`, `templates/global/pcm/audit-scopes.md`: the global pcm adopters run; this file overrides it here; an adopter-usable change here lands there too
 - `.claude/skills/*/SKILL.md`: reusable skills, source-fetched per `templates/project/skills/sources.json`, never vendored
 - `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh
 - the engine-sync plugin's hooks (`hook claude mark|stop|start`, mirror auto-compile; the compiler itself is `engine-sync codex build`): registered by the plugin's own `hooks.json`, no file under `.claude/scripts/`
@@ -33,7 +34,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ### Critical invariants
 
 - Path variables: files use `$CDOCS`, `$REFS`, `$RESEARCH`, never hardcoded doc paths (root `CLAUDE.md` § Path vars).
-- Two audiences, one law: a rule in `.claude/**` binds this repo, the same rule in `templates/**` binds every adopter. A fix that belongs upstream lands in the template in the same pass, and the commit message names the adopter-facing change.
+- Two audiences, one law: a rule in `.claude/**` binds this repo, the same rule in `templates/**` binds every adopter.
 - Agent frontmatter matches behavior: `name`, `description`, `tools`.
 - Registry over tables: a command's or skill's `description:` is its routing, written to `/quality:description`; `disable-model-invocation: true` hides a command from the model and goes only on user-triggered-by-design commands.
 - No command over 35KB, no agent over 15KB. Every `general-purpose` spawn carries the full root `CLAUDE.md`, so a root line is the most expensive line in the framework; `@path` imports expand at launch, so splitting saves nothing: cut content.
@@ -119,7 +120,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 ## Special operations
 
 - Full rename: grep all occurrences (`templates/**`, `README.md`, `docs/SETUP.md`, `refresh-map.json` included), update agents, then `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
-- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back` unless its `model:` is haiku), compile with `engine-sync codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
+- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back` unless its `model:` is haiku), compile with `engine-sync codex build .`, decide whether it ships as `templates/global/agents/{name}.md` (machine-global) or `templates/project/agents/{name}.md` (scaffolded).
 - New skill: create `.claude/skills/{name}/SKILL.md`; a skill for adopters is registered in `templates/project/skills/sources.json` and lives in its own public repo.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` only as a non-obvious routing decision.
 

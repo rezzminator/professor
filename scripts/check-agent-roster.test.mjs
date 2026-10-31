@@ -811,7 +811,7 @@ test('effort buttons ride exactly the steered Claude roles, never another render
   const dir = join(render.home, '.claude/agents');
   const agents = [
     ...readdirSync(dir).filter((file) => file.endsWith('.md')).map((file) => [file.slice(0, -3), readFileSync(join(dir, file), 'utf8')]),
-    ...['.claude/agents/pcm.md', 'templates/project/agents/pcm.md']
+    ...['.claude/agents/pcm.md']
       .map((path) => [path, readFileSync(join(ROOT, path), 'utf8')]),
   ];
   const steered = [];

@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHeadlessCompatibilityAliasExposesPublicHelp(t *testing.T) {
@@ -52,6 +53,9 @@ func TestChatArgumentMatrix(t *testing.T) {
 }
 
 func TestCLIEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
+	// Its own fleet: caller placement reads the tmux sockets under TMUX_TMPDIR,
+	// and a sibling test's probe server dying there must not answer for it.
+	testjail.Fleet(t)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "new", "--name", "x", "--engine", "bogus"}, &stdout, &stderr)
 	if code != 2 ||

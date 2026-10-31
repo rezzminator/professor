@@ -6,7 +6,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 # Vocabulary
 
-- machine-global tier: agents, commands, rules and skills symlinked into `~/.claude/{agents,commands,rules,skills}` by `pfm install`, except `templates/global/codex/config.toml` (Codex defaults merged into each Codex home, existing settings winning) and `templates/global/engine-sync.json` (engine-sync's policy, rendered with this host's targets into `~/.claude/engine-sync.json`); a `from:` declaration renders into `templates/generated/agents/`, the fence gate holding it equal to a fresh render · `templates/global/`, `templates/generated/README.md`
+- machine-global tier: agents, commands, rules and skills symlinked into `~/.claude/{agents,commands,rules,skills}` by `pfm install`, except `templates/global/codex/config.toml` (Codex defaults merged into each Codex home, existing settings winning), `templates/global/engine-sync.json` (engine-sync's policy, rendered with this host's targets into `~/.claude/engine-sync.json`) and `templates/global/pcm/` (the global `pcm` agent's references, read through its link); a `from:` declaration renders into `templates/generated/agents/`, the fence gate holding it equal to a fresh render · `templates/global/`, `templates/generated/README.md`
 - project tier: templates `pfm init` scaffolds into an adopter once and pins in `{adopter}/.professor/baseline.json`; the adopter's local file is the truth, and pfm never rewrites it after init · `templates/project/`
 - project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for retired references in project files, including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, and closes every row with `pfm update {adopt|pin|ignore|drop|accept}` (`pin --keep` records a deliberate non-port, `accept` a retired-name hit that stays) until the report ends `clean` · `pfm/internal/professor/`, `pfm/internal/update/`
 - host update: this host's pfm build, `pfm install` and plugin repoint, never the project-tier update · `.claude/commands/pfm/update.md`
@@ -60,7 +60,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 ## Local
 
-- On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` only; `verify`, `test`, `cover`, `all` and `gate` refuse outside the fence.
+- On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` run in place; `verify`, `test`, `cover`, `all` and `gate` re-run as `dev.sh iso …`, and a host `go test` of a pfm package re-runs it in the fence or, with no fence reachable, refuses · `pfm/internal/testjail/fence.go`
 - Scratch lives in `/tmp/{project}/{purpose}/`: `{project}` is this repo's directory name minus any leading dot (`.professor` → `professor`), derived, never hardcoded.
 - One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{test|fence|lanes}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
 
@@ -112,7 +112,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - The judge is never the thing being judged: read the artifact from disk, never a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran, and the parent reports which.
 - Surgical changes: every changed line traces to the task; fix broken things you hit; remove dead code, references and deps end to end, including `README.md`, `docs/SETUP.md` and `templates/refresh-map.json`.
 - No duplication: grep for the existing rule, section or script and reference it; a near-copy drifts.
-- Twins move together: a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass, the commit message carrying the adopter-facing change; a customization only this repo wants stays local; unsure → ask.
+- Twins move together: a `.claude/**` change any adopter could use lands in its `templates/{project|global}/**` twin in the same pass, the commit message carrying the adopter-facing change; a customization only this repo wants stays local; unsure → ask.
 - Right-size and finish: the simplest thing that works, no speculative abstractions, no stubs or deferred TODOs; where correct and convenient diverge, take correct, even at re-architecting cost.
 
 ## Engine code (Go / TS / JS / Python)

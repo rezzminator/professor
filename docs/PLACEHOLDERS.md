@@ -141,11 +141,11 @@ This makes the codex-touched files a 3-way merge — read all three:
 2. **Current blueprint template** (re-inject the Codex sections/lines/refs that live deleted).
 3. **This map** (apply placeholders).
 
-Codex-touched shipped templates: `agents/pcm.md` (keep ALL Codex-management: every Critical invariant, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` OUT of the allow-list — generated mirrors are rebuilt by their compiler, never formatted; a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
+Codex-touched shipped templates: `scripts/format-md.sh` (keep `AGENTS.md` OUT of the allow-list — generated mirrors are rebuilt by their compiler, never formatted; a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
 
 ## Ignored artifacts (do NOT ship, drop references)
 
-A live-source command, script or rule the blueprint does not ship (`ignore_sources` in `templates/refresh-map.json`) is **out of scope**. When a shipped template (`pcm`, `settings.json`) references one, drop that row/rule/line so the blueprint has no dangling pointers.
+A live-source command, script or rule the blueprint does not ship (`ignore_sources` in `templates/refresh-map.json`) is **out of scope**. When a shipped template (`settings.json`, `gitter`) references one, drop that row/rule/line so the blueprint has no dangling pointers.
 
 ## Tokens (additional canonical entries)
 
@@ -177,7 +177,7 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `{SHA}` | `epics/TEMPLATE.md` | a commit sha |
 | `{MB}` | `docs-commands/git/references/gitter-history.md` | a file size in megabytes |
-| `{SCOPE}` | `agents/pcm.md` | the audit scope being run |
+| `{SCOPE}` | `global/agents/pcm.md` | the audit scope being run |
 | `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md`, `global/agents/reviewer-pro.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |

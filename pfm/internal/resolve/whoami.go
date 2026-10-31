@@ -33,6 +33,10 @@ var (
 	)
 	ErrNotRegistered = errors.New("resolve: caller not registered")
 	ErrAmbiguous     = errors.New("resolve: caller ambiguous")
+	// ErrForeignProcess marks a process whose environment another uid owns: a different user's
+	// process, or one that made itself non-dumpable (sshd's session, the systemd user manager).
+	// It can never be a pane the caller owns, so ancestry recovery passes over it.
+	ErrForeignProcess = errors.New("resolve: process environment owned by another uid")
 )
 
 // Identity is who the CALLING process is: the tmux handle another chat calls
@@ -302,7 +306,8 @@ func (identifier *Whoami) recoverFromAncestry(
 	for _, pid := range chain {
 		environment, err := identifier.processes.Environ(pid)
 		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ESRCH) && readErr == nil {
+			if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ESRCH) &&
+				!errors.Is(err, ErrForeignProcess) && readErr == nil {
 				readErr = fmt.Errorf("look up the caller: read environment of pid %d: %w", pid, err)
 			}
 			continue

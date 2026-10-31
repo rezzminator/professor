@@ -602,12 +602,12 @@ sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},
 [ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
 sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
 [ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
-# X-pcm-guard: denies a main-chat write to a CLAUDE.md naming pcm, passes the same write for pcm and a read for anyone.
+# X-pcm-guard: denies a main-chat write to a CLAUDE.md naming pcm and its machine-global way out (pfm install), passes the same write for pcm and a read for anyone.
 pg="$(printf '{"tool_name":"Write","tool_input":{"file_path":"/tmp/pcm-guard-lane/CLAUDE.md"},"cwd":"/tmp"}' | pfm internal pcm-guard 2>&1)"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad pcm-guard exited $rc: $(one_line "$pg");"
-grep -q '"permissionDecision":"deny"' <<<"$pg" && grep -q 'subagent_type: \\"pcm\\"' <<<"$pg" ||
-  bad="$bad pcm-guard did not deny a main-chat CLAUDE.md write naming pcm: $(one_line "$pg");"
+grep -q '"permissionDecision":"deny"' <<<"$pg" && grep -q 'subagent_type: \\"pcm\\"' <<<"$pg" && grep -q 'pfm install' <<<"$pg" ||
+  bad="$bad pcm-guard did not deny a main-chat CLAUDE.md write naming pcm and pfm install:$(one_line "$pg");"
 pg="$(printf '{"tool_name":"Write","tool_input":{"file_path":"/tmp/pcm-guard-lane/CLAUDE.md"},"cwd":"/tmp","agent_type":"pcm"}' | pfm internal pcm-guard 2>&1)"
 [ -z "$pg" ] || bad="$bad pcm-guard blocked pcm: $(one_line "$pg");"
 pg="$(printf '{"tool_name":"Bash","tool_input":{"command":"cat CLAUDE.md"},"cwd":"/tmp"}' | pfm internal pcm-guard 2>&1)"

@@ -33,8 +33,13 @@ const (
 	pcmGuardWriter = "pcm"
 	pcmGuardThemer = "themer"
 	pcmGuardRoute  = "pcm-guard: Only %[1]s writes %[2]s: spawn Agent(subagent_type: %[1]q) with the exact change;" +
-		" a sub-agent returns the change as a proposal; no %[1]s registered here → ask the user to dispatch" +
-		" %[1]s from the project that owns the file."
+		" a sub-agent returns the change as a proposal; %[3]s"
+	// pcm ships machine-global, so a missing one is a stale install; themer is
+	// Professor's project agent, so a missing one is another project's file.
+	pcmGuardPcmTail = "pcm is machine-global: no pcm registered means this host's install is stale" +
+		" → run pfm install --yes."
+	pcmGuardThemerTail = "no themer registered here → ask the user to dispatch themer from the project that owns" +
+		" the file."
 	pcmGuardUnreadable = "pcm-guard could not read this command, and it names a prompt file (CLAUDE.md, .claude," +
 		" templates): split it into simple commands with literal paths; a prompt-file write goes to pcm:" +
 		` spawn Agent(subagent_type: "pcm") with the exact change.`
@@ -599,13 +604,13 @@ func (judge *pcmGuardJudge) reason() string {
 	if len(judge.pcmOnly) > 0 {
 		lines = append(
 			lines,
-			fmt.Sprintf(pcmGuardRoute, pcmGuardWriter, strings.Join(judge.pcmOnly, ", ")),
+			fmt.Sprintf(pcmGuardRoute, pcmGuardWriter, strings.Join(judge.pcmOnly, ", "), pcmGuardPcmTail),
 		)
 	}
 	if len(judge.themeOnly) > 0 {
 		lines = append(
 			lines,
-			fmt.Sprintf(pcmGuardRoute, pcmGuardThemer, strings.Join(judge.themeOnly, ", ")),
+			fmt.Sprintf(pcmGuardRoute, pcmGuardThemer, strings.Join(judge.themeOnly, ", "), pcmGuardThemerTail),
 		)
 	}
 	if judge.unreadable {

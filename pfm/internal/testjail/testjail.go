@@ -33,10 +33,32 @@ import (
 // prove that real-tmux behavior.
 var KeepAmbientIdentity bool
 
+// jailMarkerEnv marks every process a jailed test process starts, so a helper
+// re-exec of a test binary knows its store paths came from a jailed test.
+const jailMarkerEnv = "PFM_TESTJAIL"
+
 // Run places every test under a short, canonical scratch root. Unix socket paths
 // include t.TempDir's test name, so macOS's long TMPDIR can exceed its 104-byte
 // limit. Resolving /tmp once also collapses macOS's /private alias.
 func Run(m *testing.M) int {
+	if !inFence() && !onHostedRunner() {
+		return runInFence() // fence.go: no test ever runs on the machine that started it
+	}
+	// A chat exports its live state store's paths; a jailed test must open the jail's own.
+	// A test binary a jailed test re-execs as its own helper inherits jailMarkerEnv
+	// and keeps the store paths that test handed it.
+	if _, child := (paths.OSEnv{}).Lookup(jailMarkerEnv); !child {
+		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB"} {
+			if err := os.Unsetenv(name); err != nil {
+				warnSetup("clear %s: %v", name, err)
+				return 1
+			}
+		}
+		if err := os.Setenv(jailMarkerEnv, "1"); err != nil {
+			warnSetup("set %s: %v", jailMarkerEnv, err)
+			return 1
+		}
+	}
 	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
 	// `claude` launcher shim; a jailed test resolving a binary through PATH must
 	// never reach it. Scrub before anything below resolves a binary.
@@ -170,49 +192,6 @@ func runProfiled(m *testing.M) int {
 		warnSetup("profile off — %s; no diagnosis bundle for this red run", off)
 	}
 	return code
-}
-
-// pfmInstallBinSuffix is the tail of pfm's managed install bin dir, whichever
-// home owns it.
-var pfmInstallBinSuffix = filepath.Join(".local", "share", "pfm", "install", "bin")
-
-// scrubOperatorPATH drops every PATH entry that is <home>/.local/bin or a pfm
-// install bin dir (a path ending .local/share/pfm/install/bin, any home),
-// comparing after filepath.Clean and, where it resolves, EvalSymlinks. Order
-// and every other entry — empty ones included — are kept. An empty home matches
-// no ~/.local/bin, so only install bin dirs go.
-func scrubOperatorPATH(pathEnv, home string) string {
-	var homeBins []string
-	if home != "" {
-		bin := filepath.Join(home, ".local", "bin")
-		homeBins = append(homeBins, bin)
-		if resolved, err := filepath.EvalSymlinks(bin); err == nil {
-			homeBins = append(homeBins, filepath.Clean(resolved))
-		}
-	}
-	isOperatorBin := func(candidate string) bool {
-		candidate = filepath.Clean(candidate)
-		for _, bin := range homeBins {
-			if candidate == bin {
-				return true
-			}
-		}
-		return candidate == pfmInstallBinSuffix ||
-			strings.HasSuffix(candidate, string(filepath.Separator)+pfmInstallBinSuffix)
-	}
-	var kept []string
-	for _, entry := range filepath.SplitList(pathEnv) {
-		if entry != "" {
-			if isOperatorBin(entry) {
-				continue
-			}
-			if resolved, err := filepath.EvalSymlinks(entry); err == nil && isOperatorBin(resolved) {
-				continue
-			}
-		}
-		kept = append(kept, entry)
-	}
-	return strings.Join(kept, string(os.PathListSeparator))
 }
 
 // warnSetup reports a testjail setup failure on stderr, in the "testjail:

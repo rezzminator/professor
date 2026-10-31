@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.85.0](releases/v0.85.0.md) — pcm is a global agent
 - [v0.84.0](releases/v0.84.0.md) — One-command release; CI tests macOS and fresh machines; every plugin released
 - [v0.83.0](releases/v0.83.0.md) — native Herdr seats, pfm theme sync across Claude Code, Herdr, VS Code and Ghostty, `pfm restart`, sub-agent-compact renamed forward-compaction, no GPT agents shipped, pruned project templates
 - [v0.82.0](releases/v0.82.0.md) — engine-sync becomes the single writer of every Codex and OpenCode mirror; /pfm:update owns the host install with alpha plugins and a verified Claude plugin cache; GPT twins for the research leads; harvester hardening (bounded reads, distrusted cached Jina snapshots)

@@ -512,3 +512,25 @@ func TestIdentifyPreservesAncestryEnvironmentReadFailure(t *testing.T) {
 		t.Fatalf("unreadable environment became absence: %v", err)
 	}
 }
+
+type environmentForeignTree struct{ fakeProcTree }
+
+func (environmentForeignTree) Environ(int) (map[string]string, error) {
+	return nil, fmt.Errorf("%w: %w", ErrForeignProcess, os.ErrPermission)
+}
+
+// An ssh login's ancestry crosses sshd's non-dumpable session; that ancestor is no pane of the caller's.
+func TestIdentifyPassesOverForeignAncestor(t *testing.T) {
+	identifier, err := NewWhoami(WhoamiDependencies{
+		Environment: &WhoamiEnvironment{},
+		Processes:   environmentForeignTree{fakeProcTree{parents: map[int]int{4300: 1}}},
+		SelfPID:     4300, TmuxDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = identifier.Identify(context.Background())
+	if !errors.Is(err, ErrNotInChat) {
+		t.Fatalf("a foreign ancestor blocked identification: %v", err)
+	}
+}

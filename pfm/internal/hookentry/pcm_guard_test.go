@@ -253,6 +253,17 @@ func TestPcmGuardAllowsPcmEveryPromptFile(t *testing.T) {
 	}
 }
 
+// pcm is machine-global, themer is Professor's project agent: each deny line
+// carries its own way out.
+func TestPcmGuardRoutesEachWriterItsOwnWayOut(t *testing.T) {
+	f := pcmGuardHome(t)
+	payload := pcmGuardEdit(t, "Write", filepath.Join(f.project, "CLAUDE.md"), "")
+	pcmGuardRequireDeny(t, payload, "pcm is machine-global")
+	pcmGuardRequireDeny(t, payload, "pfm install --yes")
+	theme := filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json")
+	pcmGuardRequireDeny(t, pcmGuardEdit(t, "Write", theme, ""), "from the project that owns the file")
+}
+
 // A theme is themer's alone: pcm and everyone else are denied it, by path or
 // through a link resolving into it, and themer is denied every other prompt file.
 func TestPcmGuardKeepsThemesForThemerAlone(t *testing.T) {

@@ -41,7 +41,7 @@ Files: `~/.claude/agents/flights-*.md` and `~/.claude/commands/flights/doctor.md
 - **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, or `~/.claude/agents/`
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
 - **Return tokens ↔ their writers:** every token a `flights-*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes
-- **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
+- **Script references:** every script a `flights-*` agent or the project's gitter names (`worktree.sh`, `alloc-ports.sh` where the project has them) → file exists and is executable
 - **Flow integrity:** main chat → a `flights-foreman` tier → main chat → `flights-lander` → gitter; no step references an agent from a later phase
 
 ## `scripts` — Walk each script
@@ -60,11 +60,11 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 - **Project dirs:** every roster project exists (`{project}/`, repeated per entry)
 - **Child CLAUDE.md:** each project dir has a `CLAUDE.md`
 - **Child agents:** each project dir has `.claude/agents/`; rosters match a live `ls`
-- **Permanent docs:** the hub `docs/_index.md` and `docs/commands/` exist, with expected subdirs
+- **Permanent docs:** every docs path `CLAUDE.md` names (the hub `docs/_index.md`, `docs/commands/`, where the project keeps them) exists, with expected subdirs
 - **Stale names:** grep all CLAUDE.md files and agents for old/renamed project names or typos
-- **Package managers:** each roster project's lock file (`{PROJECT_PKG_MGR}` per project) present
+- **Package managers:** each roster project's lock file (its package manager's, named in its `CLAUDE.md`) present
 - **Codex mirror:** `engine-sync codex check` exits 0 — report its output verbatim; a non-zero exit names each generated Codex artifact (AGENTS.md, `.codex/`, `$HOME/.codex/`) that is MISSING, STALE, ORPHANed, or CONFLICTing with an unmarked file
-- **Baseline:** `pfm doctor --project-updates` runs (a `.professor/baseline.json` exists) — report its counts verbatim; FAILED output (exit 3) is a finding, never "current"
+- **Baseline:** where `.professor/baseline.json` exists, `pfm doctor --project-updates` runs — report its counts verbatim; FAILED output (exit 3) is a finding, never "current"
 
 ## `cross-refs` — The glue between domains
 
